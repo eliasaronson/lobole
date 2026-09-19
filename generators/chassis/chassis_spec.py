@@ -74,15 +74,50 @@ BRACE_CLEARANCE = 15.0
 Z_MH_BRACE = Z_MAIN_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
 Z_FH_BRACE = Z_FRONT_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
 
+# WHERE A BEND MAY BE: nowhere a joint lands.
+#
+# The rails and the side members have to change direction — a car is narrow
+# at the nose and wide at the hips — and the obvious place to change it is at
+# a station, because that is where the width is decided. It is also the worst
+# place: a station is where five or six members converge, and a bend is the
+# one stretch of a tube with no straight to fit them against, made of a torus
+# and thinned by the bending. check_frame found nineteen joints sitting on
+# one.
+#
+# So the taper happens BETWEEN the stations, and the members run straight
+# through every station where something is welded. These two are the only
+# places the rails turn, and nothing is welded at either.
+X_TAPER_FRONT = 700.0
+X_TAPER_REAR = 2100.0
+X_SIDE_KNEE = 800.0     # where the upper side member stops climbing
+
+
+def _through(x, x0, y0, x1, y1):
+    """y on the line through two stations, extended past both."""
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+
+# The cockpit line: straight through BOTH hoop stations, so their feet and
+# everything else at them land on a straight. The taper points are on it.
+W_TAPER_FRONT = _through(X_TAPER_FRONT, X_FRONT_HOOP, W_FRONT_HOOP,
+                         X_MAIN_HOOP, W_MAIN_HOOP)
+W_TAPER_REAR = _through(X_TAPER_REAR, X_FRONT_HOOP, W_FRONT_HOOP,
+                        X_MAIN_HOOP, W_MAIN_HOOP)
+# The upper side member climbs from the bulkhead to the knee and is level
+# from there back, so the front hoop meets it on the level.
+W_SIDE_KNEE = _through(X_SIDE_KNEE, X_FRONT_HOOP, W_FRONT_HOOP,
+                       X_MAIN_HOOP, W_MAIN_HOOP)
+
 # The nose ring sits ON the rails rather than kinking them. A joint does not
 # belong on a BEND: the tube is a torus there, it is thinned by the bending,
 # and there is no straight to fit a cope against — so the rails run straight
 # from the bulkhead to the front hoop and the ring's width and height are
 # INTERPOLATED to meet them. Both derived, so moving the station moves the
 # ring with it.
-_t = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_FRONT_HOOP - X_BULKHEAD)
-W_SUPPORT = W_BULKHEAD + _t * (W_FRONT_HOOP - W_BULKHEAD)
-Z_SUPPORT_TOP = Z_BULKHEAD_TOP + _t * (Z_SIDE_UPPER - Z_BULKHEAD_TOP)
+_t = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_TAPER_FRONT - X_BULKHEAD)
+W_SUPPORT = W_BULKHEAD + _t * (W_TAPER_FRONT - W_BULKHEAD)
+_u = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_SIDE_KNEE - X_BULKHEAD)
+Z_SUPPORT_TOP = Z_BULKHEAD_TOP + _u * (Z_SIDE_UPPER - Z_BULKHEAD_TOP)
 
 # --- the panels -----------------------------------------------------------
 PANEL_MATERIAL = "steel"

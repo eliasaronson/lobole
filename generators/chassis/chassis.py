@@ -37,10 +37,13 @@ def members(f):
     # everything else lands on them — including the hoops, whose feet are
     # welded to these. Rank is the order a frame is tacked up in: what runs
     # through is primary, what stops against it is coped.
+    # It turns at the TAPER stations, not at the hoops: a station is where
+    # five or six members converge, and a bend is the one stretch of a tube
+    # with no straight to fit them against.
     f.pair("Lower rail", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
+        (S.X_TAPER_FRONT, S.W_TAPER_FRONT, S.Z_FLOOR),
+        (S.X_TAPER_REAR, S.W_TAPER_REAR, S.Z_FLOOR),
         (S.X_REAR, S.W_REAR, S.Z_FLOOR),
     ], S.STRUCT, rank=0)
 
@@ -65,9 +68,11 @@ def members(f):
     # --- rank 2: the rings, and the rails that run between them ----------
     # The upper side member runs at the driver's elbow, bulkhead to main
     # hoop, over the nose ring and the front hoop on its way.
+    # It climbs to the KNEE and runs level from there, so the front hoop and
+    # everything else at that station meets it on a straight.
     f.pair("Side upper", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_SIDE_UPPER),
+        (S.X_SIDE_KNEE, S.W_SIDE_KNEE, S.Z_SIDE_UPPER),
         (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
     ], S.STRUCT, rank=2)
 

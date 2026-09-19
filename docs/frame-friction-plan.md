@@ -172,14 +172,25 @@ one.
 
 ## What it found that is still open
 
-`check_frame` on the CURRENT chassis reports 19 joints landing on a bend: the
-lower rails kink exactly at the hoop stations, which are the busiest nodes in
-the frame. The copes all cut — the bends reach only 2.3 to 3.7 mm either side
-— so nothing failed, and it is still poor practice: a node is where several
-members converge and a bend is the one place along a tube with no straight to
-fit them against. The fix is a design change (mitre two straight rails at the
-node, or move the bend between nodes), not a code change, and it belongs to
-the chassis rather than to this round.
+`check_frame` on the chassis reported **19 joints landing on a bend**: the
+lower rails and the upper side members kinked exactly at the hoop stations,
+which are the busiest nodes in the frame. The copes all cut — the bends reach
+only 2.3 to 3.7 mm either side — and it was still the wrong place for them: a
+node is where five or six members converge, and a bend is the one stretch of
+a tube with no straight to fit them against, made of a torus and thinned by
+the bending.
+
+**Fixed in the chassis, and it is a rule worth carrying: a bend belongs where
+nothing is welded.** The taper now happens BETWEEN stations — two points on
+the rails, one on the side members, chosen because nothing lands at them —
+and every member runs straight through every station where something does.
+The hoop stations' widths are what the taper line is drawn through, so the
+line and the stations cannot disagree.
+
+**19 joints on a bend became 0**, and the untriangulated bays fell from 16 to
+9 with it, because moving the taper changed which faces close. The nine that
+remain are mostly floor and side faces that a panel would close, which the
+check says outright it cannot see.
 
 The 16 remaining bays are mostly faces a floor or a firewall would close, and
 the check says outright that it cannot see a panel.
