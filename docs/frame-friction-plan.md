@@ -128,3 +128,58 @@ F1 first: it is mechanical, it is the one that cost the most time, and every
 row the later stages add should carry `returns` from birth rather than be
 retrofitted. Then F2 (small, and it makes F4's third violation kind
 meaningful), F3, F4.
+
+## As built
+
+All four shipped. Headless suite green; the round's own numbers:
+
+**F1** — `MethodDoc` gained a `returns` column, required and gated for 40
+methods: every `list_*`, `get_*` and `check_*`, plus the three readers named
+for their noun instead of a verb (`mass_properties`, `contact_report`,
+`tube_schedule`). `tests/rpc_returns_gate.py` keeps it honest in one
+direction — a key the row names must appear in the handler — because a
+response nests and a scanner reading `{"name",` cannot tell a top-level key
+from a leaf. It earned its keep while being written, catching prose I had put
+in three key fields ("or null", "on a PART tab a row is..."), which would
+have shipped as promised keys that do not exist.
+
+Still to do, deliberately not guessed at: `interference`, `measure`,
+`query_geometry`, `stack_up` and `compare_geometry` are reads too. Their
+shapes want reading from the handler; a contract written from the prose is
+the thing this is against.
+
+**F2** — the cope's refusal tells the two failures apart. Reproduced on the
+rail that caused it: on the kink it refuses by name, 30 mm past the kink the
+same joint cuts, and on a straight it cuts. All three are in the test,
+because the first version of that test used a sharper bend and cut cleanly —
+a diagnosis that cannot reproduce the case it explains is a guess.
+
+**F3** — `curve_points` returns the polyline the feature built, sampled to a
+deflection, with the arc length of each point. On a 152.4 mm former it shows
+the metal missing the corner by 63.1 mm, which is `R*(sqrt(2)-1)` and the
+distance a brace was once attached across.
+
+**F4** — `check_frame`, measured against the chassis before and after it was
+triangulated: **21 untriangulated bays and 6 joints on bends before, 16 and
+19 after**, the bays falling while the member count rose from 32 to 47.
+
+Two decisions inside it. A bay is a FACE, flat to 5% of its own diagonal: a
+skew four-cycle is a mechanism too in pin-jointed theory, but as a finding it
+is noise, and the first version reported forty of them on a frame somebody
+had just triangulated. And a bay is remembered by its four corners, because
+the search reaches each one from either diagonal and double-counted every
+one.
+
+## What it found that is still open
+
+`check_frame` on the CURRENT chassis reports 19 joints landing on a bend: the
+lower rails kink exactly at the hoop stations, which are the busiest nodes in
+the frame. The copes all cut — the bends reach only 2.3 to 3.7 mm either side
+— so nothing failed, and it is still poor practice: a node is where several
+members converge and a bend is the one place along a tube with no straight to
+fit them against. The fix is a design change (mitre two straight rails at the
+node, or move the bend between nodes), not a code change, and it belongs to
+the chassis rather than to this round.
+
+The 16 remaining bays are mostly faces a floor or a firewall would close, and
+the check says outright that it cannot see a panel.

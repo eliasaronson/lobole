@@ -275,6 +275,20 @@ def main():
               "cope REFUSES unless it actually cut metal, so a member that "
               "reaches nothing cannot build at all.")
 
+    print("\n-- is it a truss --")
+    fr = d.request("check_frame", {}, timeout=600.0)
+    kinds = {}
+    for v in fr["violations"]:
+        kinds[v["kind"]] = kinds.get(v["kind"], 0) + 1
+    print(f"check_frame: {fr['members_checked']} members, "
+          f"{len(fr['violations'])} violations "
+          + (", ".join(f"{k} {n}" for k, n in sorted(kinds.items()))
+             if kinds else "(none)"))
+    for v in fr["violations"][:3]:
+        print(f"  [{v['kind']}] {v['message'][:110]}")
+    for n in fr["not_checked"]:
+        print(f"  not checked: {n[:100]}")
+
     print("\n-- can it be bent --")
     chk = d.call("check_tube")
     print(f"check_tube: {chk['members_checked']} members, "
