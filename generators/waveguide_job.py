@@ -86,8 +86,12 @@ def build_job(d):
              if p.get("type") == "part"]
     if not parts:
         d.call("add_part")
-    else:
-        d.call("set_active_part", part=parts[0]["id"])
+        parts = [p for p in d.call("list_parts")["parts"]
+                 if p.get("type") == "part"]
+    d.call("set_active_part", part=parts[0]["id"])
+    # Named, because this project is meant to be OPENED. "Part 1" and
+    # "Part 1 Job" tell a reader nothing about what they are looking at.
+    d.call("rename_part", part=parts[0]["id"], new_name="Waveguide")
     waveguide.build(d)
     body = d.call("list_elements")["bodies"][0]
     fid = body["created_by"]
@@ -106,7 +110,9 @@ def build_job(d):
         raise SystemExit(f"expected {waveguide.BOLT_N} bolt holes, found "
                          f"{len(bolts)}")
 
-    d.call("machine_part")
+    job = d.call("machine_part")
+    if isinstance(job, dict) and "id" in job:
+        d.call("rename_part", part=job["id"], new_name="Waveguide job")
     sid = d.call("add_cam_setup", name="Waveguide - one side", post="mach3")["id"]
     # By NAME, from ~/.config/designer/machines/. Headless sessions used to
     # have no machine store at all -- RunHeadless builds its own AppState and
@@ -188,10 +194,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--post", default="/tmp/waveguide.nc")
+    ap.add_argument("--save", default=None,
+                    help="also save the PROJECT here, so the part, the job "
+                         "and its five operations can be opened and looked at "
+                         "rather than only the program read")
     a = ap.parse_args()
     d = connect(a.port)
     sid = build_job(d)
     report(d, sid, a.post)
+    if a.save:
+        # The program alone is a dead end for a person: it says what the
+        # machine will do and nothing about why. Save the project too.
+        r = d.call("save_project", path=a.save, message="waveguide dogfood")
+        print(f"  project      {a.save}")
+        if isinstance(r, dict) and r.get("warnings"):
+            for w in r["warnings"]:
+                print(f"  ! {w}")
 
 
 if __name__ == "__main__":
