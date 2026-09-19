@@ -167,7 +167,9 @@ Then `export_dxf` (`src/core/io/ExportDxf.cpp`), which writes the flat body's
 largest planar face — its outer wire and every hole — as R12 LINE / ARC /
 CIRCLE, arcs kept as arcs, plus each flat crease, on layers `CUT`, `BEND_UP`,
 `BEND_DOWN` with a dashed linetype on the bend layers, `$INSUNITS = 4`. UP is
-as seen from the side the first flange was picked on. This is the first file
+as seen from the side the first flange was picked on. An optional `mark` is
+written as a `TEXT` entity on a `MARK` layer, centred in the blank, so a
+laser can label the part as it cuts it. This is the first file
 this project produces that a shop can cut.
 
 ## Tier 2 — the rest of a working sheet-metal tool

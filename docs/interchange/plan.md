@@ -88,8 +88,10 @@ planned: `src/MeshExport.{h,cpp}` builds one shape→XCAF bridge
   until a real need appears.
 - **DXF** (2D sketch interchange) — not in OCC. A writer now exists for
   sheet-metal FLAT PATTERNS (`src/core/io/ExportDxf.cpp`, `export_dxf`): R12
-  ASCII, millimetres, LINE/ARC/CIRCLE on CUT / BEND_UP / BEND_DOWN, arcs kept
-  as arcs. A general drawing DXF over `ProjectedCurve` is still open and would
+  ASCII, millimetres, LINE/ARC/CIRCLE on CUT / BEND_UP / BEND_DOWN plus an
+  optional TEXT mark on MARK, arcs kept as arcs. R12 has no ELLIPSE (R14
+  added it), so a cut that leaves one — a tube through a plate at an angle —
+  tessellates to line segments. A general drawing DXF over `ProjectedCurve` is still open and would
   reuse that writer's entity half.
 
 ## Explicitly deferred

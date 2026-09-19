@@ -172,9 +172,12 @@ an invalid body poisons everything asked of it — the assembly sweep reported
 for that phantom cost more than the rear triangle did to build.
 
 `chassis/` is a Formula Student space frame, and the first generator whose
-point is the ORDER rather than the model: 32 members, 19 of them coped to
-their neighbours, and out of it a cut list, a bend schedule and the number of
-six-metre sticks to buy. Each member is its own body — a member is what gets
+point is the ORDER rather than the model: 52 members, 49 of them coped or
+mitred to their neighbours, and out of it a cut list, a bend schedule and the
+number of six-metre sticks to buy. `--shop <dir>` writes the whole order —
+a STEP per member, a DXF per flat blank (floor, firewall, suspension tabs,
+and a notched plate for every jig station) and a manifest naming each file,
+what it is and what it is made of; `--save` keeps the project to look at. Each member is its own body — a member is what gets
 cut, bent, labelled and welded — and nothing is unioned, which is the
 opposite of `bike_shop.Weldment` below and possible because `Cope` cuts a
 member and leaves its neighbour standing. See [the tube system](../docs/tube/plan.md)
@@ -195,6 +198,14 @@ centreline the metal follows, not the one that was typed.
 **An equal-diameter joint drawn to its node is TANGENT**, and a boolean
 answers a tangent cut by handing back what it was given. A cope wants a root
 gap for the weld anyway, and 0.05 mm is enough to make the surfaces cross.
+
+**A weld jig plate is LOW.** Cut to the full height of the tubes it crosses,
+a station plate is a sheet with full-length slots and the tubes thread
+through fingers instead of dropping into seats; holding only the members
+within a band of the lowest took one station from 645 x 1053 mm to
+645 x 143. And a member lying IN the station's plane is not crossing it —
+without a transversality test its whole length is cut out and the plate is
+sawn in half.
 
 `toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
 on an author's published plan, with screw-driven closed assembly loops, exact

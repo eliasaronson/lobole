@@ -20,7 +20,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 
@@ -1379,6 +1379,87 @@ def main():
         import math as _m
         expect(abs(st["bodies"][0]["volume"] - _m.pi * 2 * 13) < 1.0,
                "loft frustum volume")
+
+        phase("What the shop gets")
+        # A DXF can carry a MARK — what the machine etches rather than cuts —
+        # because thirty flat blanks arrive at a welding table looking alike.
+        d.call("new_project")
+        d.call("set_sheet_metal_rules", material="steel", gauge="3mm")
+        plate_sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Plate",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [
+                {"type": "line", "a": [0, 0], "b": [200, 0]},
+                {"type": "line", "a": [200, 0], "b": [200, 120]},
+                {"type": "line", "a": [200, 120], "b": [0, 120]},
+                {"type": "line", "a": [0, 120], "b": [0, 0]}]})
+        d.call("add_feature", feature={
+            "type": "BaseFlange", "name": "Plate",
+            "sketch_id": plate_sk["id"]})
+        marked = os.path.join(tmp, "marked.dxf")
+        res = d.call("export_dxf", path=marked, mark="MH-L")
+        with open(marked) as fh:
+            dxf = fh.read()
+        expect(res["mark"] == "MH-L" and "MARK" in dxf and "MH-L" in dxf,
+               "the blank's DXF carries its mark on a MARK layer")
+        expect(dxf.count("TEXT") >= 1,
+               "as a TEXT entity, which every nesting package reads and no "
+               "font is needed for")
+
+        # A blank that does not lie square to the axes is still a blank. The
+        # flatness test used to project the AXIS-ALIGNED box onto the face
+        # normal, so a plate at an angle measured as thick as it was wide —
+        # and a suspension tab welded to an angled tube was refused while the
+        # identical tab on a straight tube went out fine.
+        d.call("new_project")
+        d.call("set_sheet_metal_rules", material="steel", gauge="3mm")
+        tilted = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Tilted",
+            "plane": {"origin": [0, 0, 0], "normal": [0.6, 0.8, 0.0],
+                      "uAxis": [0.8, -0.6, 0.0]},
+            "entities": [
+                {"type": "line", "a": [0, 0], "b": [200, 0]},
+                {"type": "line", "a": [200, 0], "b": [200, 120]},
+                {"type": "line", "a": [200, 120], "b": [0, 120]},
+                {"type": "line", "a": [0, 120], "b": [0, 0]}]})
+        d.call("add_feature", feature={
+            "type": "BaseFlange", "name": "Tilted",
+            "sketch_id": tilted["id"]})
+        slanted = os.path.join(tmp, "tilted.dxf")
+        d.call("export_dxf", path=slanted, mark="TILT")
+        with open(slanted) as fh:
+            tdxf = fh.read()
+        expect(tdxf.count("LINE") >= 4 and "TILT" in tdxf,
+               "a blank at an angle to the axes exports like any other")
+
+        # One STEP per member, named for it — a STEP carries no name inside,
+        # so the file name is the part's only identity.
+        d.call("new_project")
+        for i, y in enumerate((0.0, 200.0)):
+            cl = d.call("add_feature", feature={
+                "type": "Curve3D", "name": f"M{i} CL", "kind": "bent_path",
+                "radius": 60.0,
+                "points": [[0, y, 0], [400, y, 0]]})
+            d.call("add_feature", feature={
+                "type": "Pipe", "name": f"Member {i}", "path_id": cl["id"],
+                "outer_diameter": 25.4, "wall_thickness": 1.65})
+        members_dir = os.path.join(tmp, "members")
+        res = d.call("export_members", dir=members_dir)
+        names = sorted(f["file"] for f in res["files"])
+        expect(res["count"] == 2 and names == ["Member_0.step",
+                                               "Member_1.step"],
+               "export_members writes one file per member, named for it")
+        expect(all(os.path.getsize(os.path.join(members_dir, n)) > 0
+                   for n in names),
+               "and they are real files")
+        try:
+            d.call("export_members", dir=members_dir)
+            expect(False, "a second export into the same directory refuses")
+        except RemoteError as e:
+            expect("overwrite" in str(e),
+                   "a second export refuses rather than half-replacing an "
+                   "order nobody could then check")
 
         phase("Curve points")
         # A bent path's `points` are the CORNERS and the metal turns SHORT of
