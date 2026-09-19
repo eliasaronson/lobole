@@ -195,3 +195,65 @@ cut list's correctness is only visible once copes are real), and T4 on T3.
 And the whole of it is verified by the thing it exists for: a Formula Student
 chassis that produces an order a shop could work from
 (`docs/chassis-round-plan.md`).
+
+## As built
+
+T1–T4 shipped, format **v118**, and the chassis that accepted them is
+`generators/chassis/` ([the round](../chassis-round-plan.md)).
+
+**T1 landed differently in one place, and the chassis is why.** `TubeRules`
+was written as sheet metal's counterpart field for field, including a SIZE —
+and that is the one rule that does not carry over. A sheet part is cut from
+one blank, so a per-feature gauge would let a body be two thicknesses at
+once. A tube frame is several sizes at once *by design*: the chassis is
+25.4 x 2.4 in its hoops, 25.4 x 1.65 in its side impact structure and 19.05
+in its tertiary members, and a rulebook is what says so. The rules carry the
+MATERIAL and the BENDER; each member's Pipe carries its own stock; and
+`check_tube` judges each member against its own, which is also where
+`size_not_stocked` comes from. Before that, 22 of the chassis's 32 members
+were being ordered in the wrong tube and nothing said so.
+
+**The cut length is measured, and measuring is where the bugs were.** Three,
+each found by a number that did not add up:
+
+* A bent path is a WIRE of five edges. Measuring along the first answered
+  15 mm for a 481 mm handle.
+* `GeomAPI_ProjectPointOnCurve` returns only points where the distance is
+  STATIONARY, and a tube's end face has none on the leg it sits at the end
+  of. A two-bend hoop measured 1511 mm of its 2335 mm path — one whole leg.
+* The far point of a coped end is the heel of the fishmouth, which lies ALONG
+  the cut curve; where its vertices fall is a matter of how the boolean split
+  it. Two mirrored braces came out 0.77 mm apart. Sampling edges by
+  deflection brings them to 0.007.
+
+The lesson is the round's: **a measured quantity needs a tolerance and a
+noise floor, stated.** Identical pieces group within 0.1 mm — finer than a
+saw, coarser than a boolean's residue — and report the longest of the group,
+so cutting to a row can only leave a member long. A cope smaller than a
+micron is arithmetic, not a cope.
+
+**T2's refusal had to learn to tell two failures apart.** A cope that removes
+nothing is either two members that do not reach each other or a TANGENT cut —
+two tubes of one diameter whose axes meet exactly, which a boolean answers by
+handing back what it was given. The second is not a corner case in a frame:
+it is what every equal-diameter joint drawn to its node looks like. A root
+gap of 0.05 mm makes the surfaces cross, and a real cope is cut a little open
+for the weld anyway.
+
+## Not this, and why
+
+**A weld is still not a thing.** A cope says two members MEET, which is the
+hook a weld record would hang on — a length, a size, a symbol, a table — and
+`docs/manufacturing-gaps.md` keeps the argument. What exists today is the
+dock round's convention: an overlap between two members IS the weld, and the
+chassis reports 63 of them.
+
+**Members are not exported one STEP file per member yet.** `export_step`
+takes a `body`, so a generator loops; the batch a forty-member frame wants is
+a convenience, not a capability.
+
+**`contact_report` is still slow on a frame.** An oriented-box prefilter took
+the chassis from 84.5 s to 68.7 s, and what is left is 100 pairs of fuzzy
+booleans at about 0.7 s each. That is a performance round of its own, and it
+is why the generator asks for a longer timeout rather than pretending the
+question is quick.

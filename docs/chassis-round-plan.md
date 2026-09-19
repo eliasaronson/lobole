@@ -72,3 +72,62 @@ Verified by: the frame builds clean (`check_geometry`, one connected
 component, no clashes at body scope beyond the welds), and the order it
 produces is complete — every member in the cut list exactly once, with a
 length that matches the metal, and a bend schedule a bender could run.
+
+## As built
+
+All four stages landed; the commits are on `wtchassis`.
+
+**1. W6, re-decided** in `docs/peer-survey-plan.md`. It stays closed, on
+different grounds: two of its four reasons are now false (the grill DID
+produce DFM-shaped defects, and sheet metal does measure what matters in its
+place), but they were found BY a check of that kind rather than missed for
+want of one. What replaces it is the rule the tube system was then built on —
+a manufacturability check belongs to a declared process, beside the feature
+that declares it, and a check that has to GUESS the process is the one not
+worth building.
+
+**2. The bore with no name** did not reproduce: the handle's centreline was a
+29-point spline when finding 15 was written and is a `bent_path` now, and the
+part reports `unnamed_faces: 0`. The defect CLASS was alive and larger — a
+probe found that every patterned or mirrored body was entirely unnamed, 105
+faces on the grill alone, recorded in the toponaming memo as deliberate
+scope. Pattern instances now carry the seed's names with an instance suffix,
+the convention patterned CUTS had used since R14. The grill audits clean: 80
+bodies, 1145 named faces, none unnamed.
+
+**3. The tube system** — [tube/plan.md](tube/plan.md), format v118 — and its
+own "as built" section, which is where the measurement bugs are recorded.
+
+**4. The chassis** — `generators/chassis/`. 32 members, 19 coped, built in
+2.1 s; one connected component of all 32, no invalid bodies, `check_tube`
+clean against a bender with three formers; 18 cut-list rows for 32 members,
+10 bends, seven six-metre sticks, 27.4 kg.
+
+### What the chassis found that the tests could not
+
+Every one of these needed a real frame rather than a four-member fixture, and
+each is fixed:
+
+* The stock is per MEMBER. Copying sheet metal's per-document size meant 22 of
+  32 members were ordered in the wrong tube.
+* Stock was packed across sizes, buying a 19.05 member off a 25.4 stick.
+* A cut list grouped by exact equality, so a mirrored pair that differed by
+  microns was two rows of one instead of one row of two.
+* The cut list named the CENTRELINE ("Lower rail L CL"), not the member.
+* A cope that cut nothing blamed the wrong cause: at an equal-diameter joint
+  drawn to its node the surfaces are tangent, and the members do meet.
+* `contact_report` took 84.5 s on 32 bodies, over the client's default
+  patience. An oriented-box prefilter makes it 68.7 s; the rest is a
+  performance round of its own.
+
+### Still open
+
+* A weld is not a thing in the model. A cope now says two members MEET, which
+  is what a weld record would hang on ([manufacturing-gaps.md](manufacturing-gaps.md)).
+* No sheet panels on this chassis yet — the floor and firewall of the real
+  car are the obvious next piece, and they would put the sheet system and the
+  tube system in one part.
+* No suspension brackets, and no tabs: the laser-cut plates welded to the
+  tubes in every photograph of a real frame.
+* Nothing has been cut. The order this produces has never met a saw
+  ([roadmap.md](roadmap.md): "Nothing has cut a real part yet").
