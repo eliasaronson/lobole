@@ -1,3 +1,4 @@
+#include "cad/CADKernel.h"
 #ifdef HAVE_CAM
 
 // The machine profile and the posted file: travel limits, dialects,
@@ -218,7 +219,83 @@ cam::Setup GoldenJob() {
   return setup;
 }
 
+// A CURVED part, and the reason there are two golden jobs rather than one.
+//
+// The block above freezes arcs, but they are the app's OWN geometry -- offset
+// corners and a facing spiral. Nothing in it derives from a curved edge of the
+// MODEL, so the whole path from a B-Rep curve through
+// `GCPnts_QuasiUniformDeflection` to the arc fitter is unfrozen. That is
+// exactly the path that drifted: a real job posted on 2026-09-06 and reposted
+// twelve days later differed in 30 coordinates by up to 1.8 um, and one G1
+// became a G3 because the shifted points let one more run qualify as an arc.
+// Geometrically nothing; invisible to every gate, which is the problem.
+std::vector<Body> CurvedBodies() {
+  std::vector<Body> bodies;
+  Body body;
+  body.name = "Disc";
+  body.shape = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 20.0, 12.0);
+  bodies.push_back(std::move(body));
+  return bodies;
+}
+
+cam::Setup CurvedGoldenJob() {
+  cam::Setup setup = BasicSetup();
+  setup.name = "Curved";
+  setup.safeZ = 20.0;
+  cam::Operation profile;
+  profile.id = 1;
+  profile.name = "Round the disc";
+  profile.type = cam::OpType::Profile;
+  profile.toolNumber = 1;
+  profile.topZ = 12.0;
+  profile.bottomZ = 0.0;
+  profile.stepdown = 4.0;
+  profile.side = cam::Side::Outside;
+  setup.operations.push_back(profile);
+  return setup;
+}
+
+void FreezeProgram(const cam::Setup& setup, const std::vector<Body>& bodies,
+                   const std::string& stem) {
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  for (const std::string& post : cam::PostIds()) {
+    std::string gcode, error;
+    INFO(error);
+    REQUIRE(cam::PostProcess(post, setup, paths, {}, gcode, &error));
+    const std::filesystem::path golden =
+        std::filesystem::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+        (stem + "-" + post + ".nc");
+
+    if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {
+      std::ofstream(golden) << gcode;
+      continue;
+    }
+    INFO("golden: " << golden.string());
+    REQUIRE(std::filesystem::exists(golden));
+    std::ifstream in(golden);
+    const std::string want((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    size_t line = 1, at = 0;
+    while (at < want.size() && at < gcode.size() && want[at] == gcode[at]) {
+      if (want[at] == '\n')
+        line++;
+      at++;
+    }
+    INFO("first difference at line " << line);
+    CHECK(gcode == want);
+  }
+}
+
 } // namespace
+
+TEST_CASE("cam: a curved model's program is frozen too", "[cam][golden]") {
+  // Same contract as the block below, over the path the block cannot reach:
+  // a B-Rep circle, flattened to a polyline and re-fitted to arcs. A change
+  // in tessellation, in the flattening tolerance, or in the arc fitter moves
+  // this file and nothing else.
+  FreezeProgram(CurvedGoldenJob(), CurvedBodies(), "cam-curved");
+}
 
 TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
   // Substring checks prove the pieces are present; only a byte-for-byte
