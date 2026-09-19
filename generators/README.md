@@ -15,7 +15,7 @@ branch in a real language with no sandbox.
 **Layout.** A generator that is one file sits here; one that spans several
 sits in its own directory beside them — `om615/`, `fpv_drone/`,
 `cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/`, `bike/`,
-`grill/` — with the same file names inside. Every
+`grill/`, `chassis/` — with the same file names inside. Every
 file adds BOTH its own directory and this one to `sys.path`, so a group's
 modules import each other by bare name and still reach `_lib` and `gear`.
 
@@ -170,6 +170,31 @@ errored" and "one solid" carrying a body OpenCASCADE calls badly nested, and
 an invalid body poisons everything asked of it — the assembly sweep reported
 17 cm3 of the rear cog buried in a frame that does not reach it, and the hunt
 for that phantom cost more than the rear triangle did to build.
+
+`chassis/` is a Formula Student space frame, and the first generator whose
+point is the ORDER rather than the model: 32 members, 19 of them coped to
+their neighbours, and out of it a cut list, a bend schedule and the number of
+six-metre sticks to buy. Each member is its own body — a member is what gets
+cut, bent, labelled and welded — and nothing is unioned, which is the
+opposite of `bike_shop.Weldment` below and possible because `Cope` cuts a
+member and leaves its neighbour standing. See [the tube system](../docs/tube/plan.md)
+and [the round](../docs/chassis-round-plan.md).
+
+Three things it found are worth carrying to the next frame:
+
+**Rank the members by what runs THROUGH.** A lower rail is continuous from
+bulkhead to engine bay and the hoops land on it; the hoops carry the bracing;
+the bracing carries the rest. Coping in that order is how a frame is tacked
+up, and it is what stops two members eating each other.
+
+**A joint is not where the lines cross.** A hoop turns SHORT of its corner —
+with a 152 mm former the metal is 63 mm away from it — so a brace attached to
+the corner it was drawn from is attached to air. Test joints against the
+centreline the metal follows, not the one that was typed.
+
+**An equal-diameter joint drawn to its node is TANGENT**, and a boolean
+answers a tangent cut by handing back what it was given. A cope wants a root
+gap for the weld anyway, and 0.05 mm is enough to make the surfaces cross.
 
 `toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
 on an author's published plan, with screw-driven closed assembly loops, exact
