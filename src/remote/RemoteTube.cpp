@@ -1,5 +1,6 @@
 #include "remote/RemoteTube.h"
 
+#include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/PipeFeature.h"
@@ -10,10 +11,12 @@
 #include "ui/AppState.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -66,6 +69,16 @@ static constexpr MethodDoc TubeMethods[] = {
      "part", remote::Deferrable,
      "violations[]{kind,message,member,bend,actual,required}, "
      "members_checked, bends_checked, not_checked"},
+    {"export_members",
+     "Write one STEP per tube MEMBER into {dir}, each file named for its "
+     "member — which is the part's only identity, because a STEP carries no "
+     "name inside it. That is what a tube laser takes: a solid with its ends "
+     "already coped and mitred, one file per tube. Returns a row per file so "
+     "a manifest can be built from the same call that wrote them. "
+     "`overwrite` (default false) refuses rather than replacing a file that "
+     "is already there, because a directory half from one run and half from "
+     "another is an order nobody can check.",
+     "dir, overwrite, part", NotInBatch},
     {"export_cut_list",
      "Write the cut list to a CSV {path}: one row per distinct member with "
      "the quantity, the material and size the part declares, the CUT length "
@@ -339,6 +352,62 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
            {"members_checked", res.membersChecked},
            {"bends_checked", res.bendsChecked},
            {"not_checked", res.notChecked}};
+    return true;
+  }
+
+  if (m == "export_members") {
+    // rpc-params: part
+    const Document& subject = SubjectPart(state, doc, p);
+    const std::string dir = p.at("dir").get<std::string>();
+    const bool overwrite = p.value("overwrite", false);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+
+    json files = json::array();
+    std::set<std::string> used;
+    for (size_t i = 0; i < subject.GetBodies().size(); i++) {
+      const Body& body = subject.GetBodies()[i];
+      // A member is a body swept by a Pipe: the same rule the cut list uses,
+      // so the files and the list cannot disagree about what a member is.
+      bool isMember = false;
+      for (const tube::MemberRow& row : tube::Members(subject)) {
+        if (std::find(row.bodies.begin(), row.bodies.end(), body.name) !=
+            row.bodies.end())
+          isMember = true;
+      }
+      if (!isMember)
+        continue;
+
+      std::string safe;
+      for (const char c : body.name)
+        safe += (c == '/' || c == '\\' || c == ' ') ? '_' : c;
+      if (!used.insert(safe).second) {
+        throw std::runtime_error(
+            "two members are both called '" + body.name +
+            "', and a file name is a member's only identity - a STEP carries "
+            "no name inside it, so they would overwrite each other");
+      }
+      const std::string path = dir + "/" + safe + ".step";
+      if (!overwrite && std::filesystem::exists(path)) {
+        throw std::runtime_error(
+            "'" + path +
+            "' is already there. Pass overwrite: true to replace it - a "
+            "directory half from one run and half from another is an order "
+            "nobody can check");
+      }
+      if (!CADKernel::Instance().SaveSTEP(path, {body.shape}))
+        throw std::runtime_error("could not write '" + path + "'");
+      files.push_back({{"member", body.name},
+                       {"file", safe + ".step"},
+                       {"volume_mm3", body.shape.Volume()}});
+    }
+    if (files.empty()) {
+      throw std::runtime_error(
+          "this part has no tube members to export - a member is a Pipe "
+          "swept along a Curve3D of kind bent_path");
+    }
+    const int count = static_cast<int>(files.size());
+    out = {{"dir", dir}, {"files", std::move(files)}, {"count", count}};
     return true;
   }
 

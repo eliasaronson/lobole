@@ -4,9 +4,11 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
@@ -16,6 +18,7 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <numbers>
@@ -87,6 +90,20 @@ void WriteLine(Out& o, const Frame& f, const char* layer, const gp_Pnt& a,
   o.P(11, bx);
   o.P(21, by);
   o.P(31, 0.0);
+}
+
+// TEXT: what the machine etches. R12 has had it since 1988 and every nesting
+// package reads it, so a mark needs no glyph outlines and no font — the
+// machine draws the string itself.
+void WriteText(Out& o, const char* layer, double x, double y, double height,
+               const std::string& text) {
+  o.P(0, std::string("TEXT"));
+  o.P(8, std::string(layer));
+  o.P(10, x);
+  o.P(20, y);
+  o.P(30, 0.0);
+  o.P(40, height);
+  o.P(1, text);
 }
 
 // An ARC is written CCW from start to end angle, which is what the format
@@ -196,7 +213,7 @@ void WriteTables(Out& o) {
 
   o.P(0, std::string("TABLE"));
   o.P(2, std::string("LAYER"));
-  o.P(70, 3);
+  o.P(70, 4);
   const auto layer = [&](const char* name, int colour, const char* ltype) {
     o.P(0, std::string("LAYER"));
     o.P(2, std::string(name));
@@ -210,6 +227,7 @@ void WriteTables(Out& o) {
   layer("CUT", 7, "CONTINUOUS");
   layer("BEND_UP", 1, "DASHED");
   layer("BEND_DOWN", 5, "DASHED");
+  layer("MARK", 3, "CONTINUOUS");
   o.P(0, std::string("ENDTAB"));
   o.P(0, std::string("ENDSEC"));
 }
@@ -285,6 +303,30 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
       WriteLine(o, frame, sheet::FoldsToward(b, side) ? "BEND_UP" : "BEND_DOWN",
                 gp_Pnt(b.flatA.x, b.flatA.y, b.flatA.z),
                 gp_Pnt(b.flatB.x, b.flatB.y, b.flatB.z));
+    }
+
+    // The mark, inside the blank rather than beside it: a laser etches what
+    // is on the part, and a string floating off the edge would be cut on
+    // thin air. Placed at the blank's own centre, sized to a tenth of its
+    // shorter side so it fits whatever the blank is, and clamped to
+    // something a machine can actually draw.
+    if (!drawing.mark.empty()) {
+      Bnd_Box box;
+      BRepBndLib::Add(face, box);
+      if (!box.IsVoid()) {
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        const auto [ax, ay] = frame.To2D(gp_Pnt(x0, y0, z0));
+        const auto [bx, by] = frame.To2D(gp_Pnt(x1, y1, z1));
+        const double w = std::abs(bx - ax), h = std::abs(by - ay);
+        const double height = std::clamp(std::min(w, h) * 0.1, 3.0, 12.0);
+        // Left of centre by half the string's width, so it reads centred:
+        // R12 TEXT has an alignment field, and the simplest thing every
+        // reader agrees on is a left-justified string placed where it goes.
+        const double wide = 0.6 * height * drawing.mark.size();
+        WriteText(o, "MARK", (ax + bx) * 0.5 - wide * 0.5,
+                  (ay + by) * 0.5 - height * 0.5, height, drawing.mark);
+      }
     }
 
     o.P(0, std::string("ENDSEC"));

@@ -79,8 +79,12 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "expects — UP as seen from the side the first flange was picked on. "
      "Arcs stay arcs. The body must BE flat - activate the "
      "configuration that unsuppresses its FlatPattern first - because a "
-     "folded part's silhouette is a picture of a part that cuts to nothing.",
-     "path, body, part", NotInBatch},
+     "folded part's silhouette is a picture of a part that cuts to nothing. "
+     "`mark` is a string the machine ETCHES rather than cuts, written as a "
+     "TEXT entity on a MARK layer and placed inside the blank: thirty flat "
+     "blanks arrive at a welding table looking alike, and the one thing that "
+     "tells them apart is the name the laser wrote while cutting them.",
+     "body, mark, part, path", NotInBatch},
 };
 
 std::span<const MethodDoc> SheetMetalMethodDocs() { return SheetMetalMethods; }
@@ -213,13 +217,15 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
           "it against (set_sheet_metal_rules)");
 
     if (m == "export_dxf") {
-      dxf::FlatDrawing drawing{target.shape, target.bends};
+      dxf::FlatDrawing drawing{target.shape, target.bends,
+                               p.value("mark", std::string{})};
       const std::string why =
           dxf::WriteFlatPattern(drawing, p.at("path").get<std::string>());
       if (!why.empty())
         throw std::runtime_error(why);
       out = {{"path", p.at("path")},
-             {"bend_lines", static_cast<int>(target.bends.size())}};
+             {"bend_lines", static_cast<int>(target.bends.size())},
+             {"mark", drawing.mark}};
       return true;
     }
 

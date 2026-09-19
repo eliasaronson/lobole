@@ -22,6 +22,7 @@
 //   CUT       - the outline and every hole (continuous)
 //   BEND_UP   - bend lines that fold toward the viewer (dashed)
 //   BEND_DOWN - bend lines that fold away (dashed)
+//   MARK      - what the machine ETCHES rather than cuts
 // and the viewer looks at the blank from the side its first flange was picked
 // on, so a part whose flanges were all picked on one face is all UP. A bend
 // TABLE on a drawing answers the same question from its own view's side
@@ -37,6 +38,11 @@ struct FlatDrawing {
   // The bends, with their crease centrelines in flat coordinates (what
   // sheet::Unfold leaves on the body).
   std::vector<BendRegion> creases;
+  // What the machine ETCHES on the blank, on its own layer so it is not
+  // mistaken for a cut. Thirty flat blanks arrive at a welding table looking
+  // alike, and the one thing that tells them apart is a name the laser wrote
+  // while it cut them. Empty = nothing marked.
+  std::string mark;
 };
 
 // Writes `drawing` to `path`. Returns the reason on failure (empty = written).
