@@ -625,4 +625,70 @@ TEST_CASE("surfacing closes the loop: generate, post, verify a dome",
   CHECK(v.maxLeftover > 1.0); // the bulk nobody roughed away
 }
 
+TEST_CASE("surfacing: a finer stepover leaves a smaller scallop",
+          "[cam][surface][slow]") {
+  // The one property of a finishing pass no other test pins. A ball of
+  // radius r stepping over by s leaves a ridge of about s^2/(8r) BETWEEN the
+  // passes, so a finer step must leave less of it -- and a pass that merely
+  // drew more lines without following the surface any closer would sail
+  // through every other check in this file.
+  //
+  // Measured through the real verifier, because the scallop is not in the
+  // cutter-location surface: that surface is smooth, and the ridge is
+  // material standing between two positions of a round tool. Only carving
+  // the stock shows it. The grid is 0.05 mm, fine enough to see a cusp that
+  // the 0.25 mm default would round away entirely.
+  const double R = 30.0;
+  Body body;
+  body.name = "Dome";
+  body.shape = CADKernel::Instance().CreateSphere(glm::vec3(0.0f), R);
+  REQUIRE(body.shape.IsValid());
+  const CADShape below = CADKernel::Instance().CreateBox(
+      glm::vec3(-R - 1.0f, -R - 1.0f, -R - 1.0f),
+      glm::vec3(R + 1.0f, R + 1.0f, 0.0f));
+  body.shape = body.shape.Difference(below);
+  REQUIRE(body.shape.IsValid());
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+
+  const auto scallopFor = [&](double stepoverFrac) {
+    cam::Setup setup = BasicSetup();
+    setup.safeZ = R + 6.0;
+    setup.tools[0] = BallNose(6.0);
+    setup.tools[0].number = 1;
+    setup.tools[0].feedCut = 600.0;
+    setup.tools[0].feedPlunge = 200.0;
+    setup.stock.margin = {0.0, 0.0, 0.0};
+    setup.stock.bottomMargin = 0.0;
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::SurfaceParallel;
+    op.toolNumber = 1;
+    op.topZ = R;
+    op.bottomZ = 0.0;
+    op.stepover = stepoverFrac;
+    op.sampleStep = 0.2;
+    setup.operations.push_back(op);
+
+    const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+    REQUIRE(paths.size() == 1);
+    INFO(paths[0].error);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+    const cam::Verdict v = cam::VerifyGcode(gcode, setup, bodies, /*res=*/0.05);
+    REQUIRE(v.cells > 0);
+    return v.maxLeftover;
+  };
+
+  const double coarse = scallopFor(0.40); // 2.4 mm step
+  const double fine = scallopFor(0.10);   // 0.6 mm step
+  INFO("scallop at a 2.4 mm step: " << coarse << " mm,  at 0.6 mm: " << fine);
+  // s^2/(8r) on a 6 mm ball: 2.4 -> 0.24 mm, 0.6 -> 0.015 mm. The RATIO is
+  // the assertion -- the absolute figures carry the grid's own 0.05 mm and
+  // the dome's curvature on top of the cusp.
+  CHECK(coarse > fine);
+  CHECK(coarse - fine > 0.05);
+}
+
 #endif // HAVE_CAM

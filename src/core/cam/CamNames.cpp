@@ -34,17 +34,18 @@ constexpr OpTypeRow kRows[] = {
     {OpType::Pocket, "pocket", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Stepover | OpField::UseOutline |
-         OpField::CornerRelief | OpField::Finish | OpField::ClearsInside},
+         OpField::CornerRelief | OpField::Finish | OpField::ClearsInside |
+         OpField::NeedsFlatFloor},
     {OpType::Face, "face", false,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
-         OpField::Stepover | OpField::Finish},
+         OpField::Stepover | OpField::Finish | OpField::NeedsFlatFloor},
     {OpType::Drill, "drill", false,
      OpField::StockToLeave | OpField::Stepover | OpField::Peck |
          OpField::Finish | OpField::FullWidth},
     {OpType::Adaptive, "adaptive", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Side |
          OpField::Stepover | OpField::UseOutline | OpField::Finish |
-         OpField::ClearsInside},
+         OpField::ClearsInside | OpField::NeedsFlatFloor},
     {OpType::EdgeRound, "edge_round", true,
      OpField::Climb | OpField::Side | OpField::Stepover | OpField::EdgeSize |
          OpField::Finish},

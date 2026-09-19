@@ -75,6 +75,11 @@ enum class OpField : uint32_t {
   CutAngle = 1u << 15,
   SampleStep = 1u << 16,
   ZStep = 1u << 17,
+  // Not a field either: this op puts the END of the cutter on a FLOOR, so a
+  // cone ploughs a groove the depth of the pass instead of clearing flat.
+  // The derivation refused a V-bit and a drill by naming three op types;
+  // this is that list, in the one place op types are described.
+  NeedsFlatFloor = 1u << 18,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

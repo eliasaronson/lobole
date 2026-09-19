@@ -725,9 +725,14 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // baffle clamped face-up 391 mm outside its own machine.
   glm::dvec3 bedLo(0.0), bedHi(0.0);
   if (MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
-    const char axes[2] = {'X', 'Y'};
+    const char axes[3] = {'X', 'Y', 'Z'};
     for (const GMove& mv : program.moves) {
-      for (int a = 0; a < 2; a++) {
+      // Three axes, not two. This checked X and Y only, and Z is the axis a
+      // router has least of -- 150 mm on the 6090 against 600 and 900 -- so the
+      // one most likely to be run out of was the one nothing looked at. A safe
+      // Z above the machine's reach is a crash into the gantry, and it posted
+      // silently.
+      for (int a = 0; a < 3; a++) {
         const double over = std::max(bedLo[a] - mv.to[a], mv.to[a] - bedHi[a]);
         if (over <= 1e-6)
           continue;

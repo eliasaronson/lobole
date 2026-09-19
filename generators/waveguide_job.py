@@ -117,6 +117,10 @@ def build_job(d):
         raise SystemExit(f"expected {waveguide.BOLT_N} bolt holes, found "
                          f"{len(bolts)}")
 
+    # MDF, before the job exists. Without it `FeedsFor` reports "nobody
+    # looked" and the chip-load half of the check never runs -- which is how
+    # this job ran for a whole round with its feeds unexamined.
+    d.call("set_material", body=0, material="mdf")
     job = d.call("machine_part")
     if isinstance(job, dict) and "id" in job:
         d.call("rename_part", part=job["id"], new_name="Waveguide job")

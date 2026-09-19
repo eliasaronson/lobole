@@ -1,6 +1,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamDropCutter.h"
+#include "core/cam/CamNames.h"
 
 #include "core/cam/CamToolpathInternal.h"
 
@@ -125,8 +126,7 @@ DerivedOp DeriveOperation(const Setup& setup,
   // and `DerivedStepover` sizes the step so that cusp is a fifth of a percent
   // of the cutter. A cone has no such number, so this refuses instead of
   // cutting something plausible and wrong.
-  if ((type == OpType::Pocket || type == OpType::Face ||
-       type == OpType::Adaptive) &&
+  if (OpTypeHas(type, OpField::NeedsFlatFloor) &&
       (tool.type == ToolType::VBit || tool.type == ToolType::Drill)) {
     out.why = "tool " + std::to_string(tool.number) + " is a " +
               (tool.type == ToolType::VBit ? "V-bit" : "drill") +
