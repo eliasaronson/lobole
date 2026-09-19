@@ -33,7 +33,7 @@ REAR_OVERHANG = 500.0
 
 # Longitudinal stations, from the front bulkhead at x = 0.
 X_BULKHEAD = 0.0
-X_BULKHEAD_SUPPORT = 380.0      # where the bulkhead support ties back
+X_BULKHEAD_SUPPORT = 380.0      # the intermediate ring the nose braces to
 X_FRONT_HOOP = 950.0            # over the driver's knees
 X_MAIN_HOOP = 1720.0            # behind the driver's shoulders
 X_MH_BRACE_FOOT = 2320.0        # where the main hoop bracing lands
@@ -48,7 +48,11 @@ W_REAR = 230.0
 # Heights above the jig plate.
 Z_FLOOR = 60.0                  # the lower rails
 Z_BULKHEAD_TOP = 330.0
-Z_FRONT_HOOP_TOP = 620.0
+# A front hoop has to clear the driver's knees and carry the dash and the
+# steering, and it has to be tall enough that the top of it is a small part
+# of it: the crown above the highest brace is unbraced tube in any car, so a
+# SHORT hoop is mostly crown. At 620 it was 31% crown and read as a stub.
+Z_FRONT_HOOP_TOP = 760.0
 Z_MAIN_HOOP_TOP = 1180.0        # a rulebook: above the tall driver's helmet
 Z_SIDE_UPPER = 520.0            # the upper side impact member
 Z_SIDE_MID = 290.0              # the middle one
@@ -63,9 +67,22 @@ BRACE_FORMER = 101.6
 # 152 mm former on a right angle the tube leaves the straight 152 mm below
 # the corner, so an attachment has to be below that and not at the corner it
 # was drawn from. Derived, so a change of former moves it.
-BRACE_CLEARANCE = 40.0
+#
+# Every millimetre of it is CROWN — unbraced tube above the highest weld —
+# so it is as small as a welder can work with, not a round number.
+BRACE_CLEARANCE = 15.0
 Z_MH_BRACE = Z_MAIN_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
 Z_FH_BRACE = Z_FRONT_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
+
+# The nose ring sits ON the rails rather than kinking them. A joint does not
+# belong on a BEND: the tube is a torus there, it is thinned by the bending,
+# and there is no straight to fit a cope against — so the rails run straight
+# from the bulkhead to the front hoop and the ring's width and height are
+# INTERPOLATED to meet them. Both derived, so moving the station moves the
+# ring with it.
+_t = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_FRONT_HOOP - X_BULKHEAD)
+W_SUPPORT = W_BULKHEAD + _t * (W_FRONT_HOOP - W_BULKHEAD)
+Z_SUPPORT_TOP = Z_BULKHEAD_TOP + _t * (Z_SIDE_UPPER - Z_BULKHEAD_TOP)
 
 # --- the panels -----------------------------------------------------------
 PANEL_MATERIAL = "steel"
