@@ -1,0 +1,73 @@
+{
+  "format": "designer-document",
+  "version": 120,
+  "features": [
+    {
+      "id": 1,
+      "type": "Curve3D",
+      "kind": "bent_path",
+      "name": "A CL",
+      "radius": 60.0,
+      "points": [
+        [
+          425.4,
+          0.0,
+          0.0
+        ],
+        [
+          -25.4,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Pipe",
+      "name": "A",
+      "path_id": 1,
+      "mode": "new_body",
+      "outer_diameter": 25.4,
+      "wall_thickness": 1.65
+    },
+    {
+      "id": 3,
+      "type": "Curve3D",
+      "kind": "bent_path",
+      "name": "B CL",
+      "radius": 60.0,
+      "points": [
+        [
+          0.0,
+          0.0,
+          -25.4
+        ],
+        [
+          0.0,
+          0.0,
+          425.4
+        ]
+      ]
+    },
+    {
+      "id": 4,
+      "type": "Pipe",
+      "name": "B",
+      "path_id": 3,
+      "mode": "new_body",
+      "outer_diameter": 25.4,
+      "wall_thickness": 1.65
+    },
+    {
+      "id": 5,
+      "type": "Cope",
+      "name": "Fit",
+      "member_id": 2,
+      "against": [],
+      "mitre": [
+        4
+      ],
+      "gap": 0.0
+    }
+  ]
+}

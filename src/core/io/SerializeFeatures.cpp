@@ -1238,6 +1238,8 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* cope = dynamic_cast<const CopeFeature*>(&feature)) {
     j["member_id"] = cope->memberId;
     j["against"] = cope->against;
+    if (!cope->mitre.empty())
+      j["mitre"] = cope->mitre;
     if (cope->gap > 0.0)
       j["gap"] = cope->gap;
     if (!cope->gapExpr.empty())
@@ -1440,10 +1442,15 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
     {"Cope", 119,
-     "member_id (the member being cut), against: [feature ids it MEETS - each "
-     "cuts with its OUTER solid and SURVIVES, so a node is one cope per "
-     "member and not a throwaway copy per pair), gap (+_expr, mm on the "
-     "radius, for the weld root; a tube neighbour only)"},
+     "member_id (the member being cut); against: [ids whose SIDE it lands "
+     "on] cut with their OUTER solid, a fishmouth; mitre: [ids it meets END "
+     "TO END] cut on the plane bisecting the two, which is what a corner "
+     "wants - there is no round side to fishmouth against. Which a joint "
+     "wants is TOPOLOGY the caller holds: members are drawn LONG past their "
+     "nodes (a plane through the very end of a tube shaves a wedge instead "
+     "of mitring it), and once they are, a corner and a tee look alike. "
+     "Every neighbour SURVIVES either cut. gap (+_expr): a cope opens on the "
+     "radius, a mitre moves its plane back along the member"},
     {"Pattern", 1,
      "kind: linear|circular, source_id (feature to repeat), count (+_expr), "
      "linear: base_plane/axis + spacing (+_expr); circular: axis + angle_deg "
@@ -2262,11 +2269,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     dr->angleExpr = j.value("angle_expr", std::string{});
     out = std::move(dr);
   } else if (type == "Cope") {
-    std::vector<uint64_t> against;
+    std::vector<uint64_t> against, mitre;
     for (const auto& a : j.at("against"))
       against.push_back(a.get<uint64_t>());
-    auto cope = std::make_unique<CopeFeature>(
-        name, j.at("member_id").get<uint64_t>(), std::move(against));
+    if (j.contains("mitre")) {
+      for (const auto& a : j.at("mitre"))
+        mitre.push_back(a.get<uint64_t>());
+    }
+    auto cope =
+        std::make_unique<CopeFeature>(name, j.at("member_id").get<uint64_t>(),
+                                      std::move(against), std::move(mitre));
     cope->gap = j.value("gap", 0.0);
     cope->gapExpr = j.value("gap_expr", std::string{});
     return cope;

@@ -186,8 +186,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "wall_thickness_expr"?: str, "mode": "new_body"|"add"|"cut"}}
 - Cope (cut a frame member to fit what it MEETS, leaving those standing):
   {{"type": "Cope", "name": str, "member_id": <the member's Pipe id>,
-  "against": [<feature ids it meets>], "gap"?: num (+"gap_expr", mm on the
-  radius, for the weld root; a tube neighbour only)}}. Each neighbour cuts
+  "against": [<ids whose SIDE it lands on — a fishmouth>], "mitre":
+  [<ids it meets END TO END — cut on the plane bisecting the two, which is
+  what a corner wants: there is no round side to fishmouth against>],
+  "gap"?: num (+"gap_expr", mm; a cope opens on the radius, a mitre moves
+  its plane back along the member)}}. Which cut a joint wants is TOPOLOGY
+  the caller holds: members are drawn LONG past their nodes (a plane through
+  the very end of a tube shaves a wedge off it instead of mitring it), and
+  once they are, a corner and a tee look alike. Each neighbour cuts
   with its OUTER solid and SURVIVES — a Boolean consumes both operands, so
   coping with one needs a throwaway copy of the neighbour per joint, and
   every throwaway is a tube in the cut list nobody ordered. One Cope per

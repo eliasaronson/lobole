@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    119; // v119: a `Cope` feature, which cuts a frame member to the members
+    120; // v120: a `Cope`'s `mitre` list — the members it meets END TO END,
+         //      cut on the plane that bisects them, which is the cut a
+         //      corner wants and a fishmouth cannot make. A v119 build
+         //      reads the key as absent and leaves every corner in the
+         //      frame square-cut, which is a tube that does not sit down
+         //      on its neighbour (docs/mitre-plan.md).
+         // v119: a `Cope` feature, which cuts a frame member to the members
          //      it MEETS and leaves those standing; and `tube`, the SHOP a
          //      part is bent in — the material, and the bender's die set,
          //      clamp straight, grip length and thinning limit. No size:

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 
+using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 namespace {
@@ -203,4 +204,100 @@ TEST_CASE("A cope onto a BEND says so, not 'tangent'", "[tube][cope]") {
     auto doc = frame(410.0, 197.0);
     CHECK(doc->GetFeature(doc->FeatureCount() - 1)->GetError().empty());
   }
+}
+
+// ---- mitres: the cut a CORNER needs ---------------------------------------
+
+namespace {
+
+// A member drawn LONG: its metal reaches a diameter past each node, as a
+// frame's does, so a plane through the node has material to cut.
+uint64_t AddLongTube(Document& doc, const std::string& name, glm::vec3 a,
+                     glm::vec3 b, double od, double wall) {
+  const glm::vec3 u = glm::normalize(b - a);
+  auto path =
+      std::make_unique<CurveFeature>(name + " CL", Curve3DKind::BentPath);
+  path->points = {a - u * static_cast<float>(od),
+                  b + u * static_cast<float>(od)};
+  path->radius = 60.0;
+  doc.AddFeature(std::move(path));
+  const uint64_t pathId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<PipeFeature>(name, pathId, od, wall));
+  return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+}
+
+} // namespace
+
+TEST_CASE("A corner is MITRED, and the member stops at its node",
+          "[tube][cope]") {
+  // Two tubes meeting end to end have no round side to fishmouth against.
+  // Both are cut on the plane that bisects them — and the member has to be
+  // drawn PAST the node for that plane to have anything to cut: through the
+  // very end of a tube it only shaves a wedge off it.
+  Document doc;
+  const uint64_t a = AddLongTube(doc, "A", {400, 0, 0}, {0, 0, 0}, 25.4, 1.65);
+  const uint64_t b = AddLongTube(doc, "B", {0, 0, 0}, {0, 0, 400}, 25.4, 1.65);
+  REQUIRE(doc.Regenerate());
+  const double before = VolumeOf(doc, a);
+  const double bNeighbour = VolumeOf(doc, b);
+
+  auto cope = std::make_unique<CopeFeature>("Fit", a, std::vector<uint64_t>{},
+                                            std::vector<uint64_t>{b});
+  doc.AddFeature(std::move(cope));
+  REQUIRE(doc.Regenerate());
+
+  CHECK(VolumeOf(doc, a) < before);
+  CHECK_THAT(VolumeOf(doc, b), WithinRel(bNeighbour, 1e-12)); // B survives
+
+  // A ran to x = -25.4 before the cut. The mitre at 45 degrees through the
+  // origin leaves nothing at negative x on the far side of the plane, so the
+  // metal stops at the node.
+  const Body* body = nullptr;
+  for (const Body& x : doc.GetBodies()) {
+    if (x.createdBy == a)
+      body = &x;
+  }
+  REQUIRE(body != nullptr);
+  glm::vec3 lo{0.0f}, hi{0.0f};
+  body->shape.GetBoundingBox(lo, hi, /*tight=*/true);
+  CHECK(lo.x > -13.0f); // was -25.4 drawn long; the wall half-width is 12.7
+}
+
+TEST_CASE("A mitre's angle follows the corner", "[tube][cope]") {
+  // The cut is the plane that BISECTS the two members, so the sharper the
+  // corner the further the heel of the cut reaches past the node. Two tubes
+  // in line are cut square and stop exactly at it.
+  //
+  // (Volume is the wrong measure here and the first version of this test
+  // used it: a straight butt cuts square through the whole overhang and so
+  // removes MORE than a 45-degree mitre takes as a wedge. That says
+  // something about how long the tube was drawn, not about the cut. And
+  // EXACTLY collinear is refused, not measured: drawn long the two overlap,
+  // and every point of the overlap is equally the joint.)
+  const auto heel = [](glm::vec3 other) {
+    Document doc;
+    const uint64_t a =
+        AddLongTube(doc, "A", {400, 0, 0}, {0, 0, 0}, 25.4, 1.65);
+    const uint64_t b = AddLongTube(doc, "B", {0, 0, 0}, other, 25.4, 1.65);
+    REQUIRE(doc.Regenerate());
+    doc.AddFeature(std::make_unique<CopeFeature>(
+        "Fit", a, std::vector<uint64_t>{}, std::vector<uint64_t>{b}));
+    REQUIRE(doc.Regenerate());
+    const Body* body = nullptr;
+    for (const Body& x : doc.GetBodies()) {
+      if (x.createdBy == a)
+        body = &x;
+    }
+    REQUIRE(body != nullptr);
+    glm::vec3 lo{0.0f}, hi{0.0f};
+    body->shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    return static_cast<double>(lo.x); // how far past the node it still runs
+  };
+  const double shallow = heel({-394, 0, 69}); // 170 degrees: nearly in line
+  const double right = heel({0, 0, 400});
+  const double sharp = heel({346, 0, 200}); // 30 degrees apart
+
+  CHECK(shallow > -3.0);        // nearly square, stopping about at the node
+  CHECK(right < shallow - 1.0); // a right angle reaches past it
+  CHECK(sharp < right - 1.0);   // a sharp corner reaches further
 }

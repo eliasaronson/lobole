@@ -86,6 +86,12 @@ def members(f):
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
         (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
     ], S.STRUCT, rank=3)
+    # The bottom of the square. Without it the bulkhead is a U and the
+    # attenuator plate has nothing to bolt to along its lower edge.
+    f.add("Bulkhead bottom", [
+        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
+        (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_FLOOR),
+    ], S.STRUCT, rank=3)
     f.add("Bulkhead diagonal", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
         (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
@@ -207,6 +213,20 @@ def members(f):
     ], S.SMALL, rank=4)
     f.pair("Engine bay diagonal", [
         (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
+        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
+    ], S.SMALL, rank=5)
+    # The bay's ROOF was a plain quadrilateral, and its sides carried one
+    # diagonal apiece. It holds the engine and the rear suspension.
+    f.add("Engine bay roof diagonal", [
+        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
+        (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
+    ], S.SMALL, rank=5)
+    f.add("Engine mount cross", [
+        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_SIDE_MID),
+        (S.X_MH_BRACE_FOOT, -S.W_REAR, S.Z_SIDE_MID),
+    ], S.SMALL, rank=4)
+    f.pair("Engine mount stay", [
+        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_SIDE_MID),
         (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
     ], S.SMALL, rank=5)
     f.add("Engine bay floor diagonal", [

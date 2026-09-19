@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -247,9 +248,46 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
       tube::FrameMember fm;
       fm.name = pipe->GetName();
       fm.outerDiameter = pipe->outerDiameter;
-      // The metal, not the corners it was drawn from.
-      for (const auto& [pt, at] : tube::SampleCurve(curve->EdgeShape(), 1.0))
-        fm.centreline.push_back(pt);
+      // The METAL: the path clipped to what the member still occupies after
+      // its joints were cut. Members are swept LONG — past their nodes, so a
+      // mitre has material to cut — so the raw path runs a diameter beyond
+      // the frame at each end, and reading it would report every one of them
+      // as a member welded to nothing.
+      double from = 0.0, to = std::numeric_limits<double>::max();
+      for (const Body& body : subject.GetBodies()) {
+        if (body.createdBy != pipe->GetId())
+          continue;
+        if (const auto span = tube::MetalAlongPath(body, curve->EdgeShape())) {
+          from = span->first;
+          to = span->second;
+        }
+      }
+      // CLIPPED, not filtered: a straight edge samples to its two endpoints
+      // and nothing between, and both of those are in the overrun — filtering
+      // would drop the member entirely rather than shorten it.
+      const auto samples = tube::SampleCurve(curve->EdgeShape(), 1.0);
+      for (size_t k = 0; k < samples.size(); k++) {
+        const auto& [pt, at] = samples[k];
+        if (k + 1 < samples.size()) {
+          const auto& [nextPt, nextAt] = samples[k + 1];
+          // Where the metal STARTS, between this sample and the next.
+          if (at < from && nextAt > from && nextAt > at) {
+            const double t = (from - at) / (nextAt - at);
+            fm.centreline.push_back(pt + (nextPt - pt) * t);
+          }
+        }
+        if (at + 1e-9 >= from && at <= to + 1e-9)
+          fm.centreline.push_back(pt);
+        if (k + 1 < samples.size()) {
+          const auto& [nextPt, nextAt] = samples[k + 1];
+          if (at < to && nextAt > to && nextAt > at) {
+            const double t = (to - at) / (nextAt - at);
+            fm.centreline.push_back(pt + (nextPt - pt) * t);
+          }
+        }
+      }
+      if (fm.centreline.size() < 2)
+        continue;
       for (const CurveFeature::Bend& b : curve->Bends()) {
         fm.bends.push_back({b.angleDeg, b.radius, b.straightBefore, b.rollDeg});
         fm.corners.push_back(glm::dvec3(b.corner));

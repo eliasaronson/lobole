@@ -69,8 +69,11 @@ BRACE_FORMER = 101.6
 # was drawn from. Derived, so a change of former moves it.
 #
 # Every millimetre of it is CROWN — unbraced tube above the highest weld —
-# so it is as small as a welder can work with, not a round number.
-BRACE_CLEARANCE = 15.0
+# so it wants to be small. It cannot be as small as the tangent point,
+# though: a weld is a tube's RADIUS wide, so a joint pressed right up to the
+# tangent puts half its bead on the bend. Clear of the bend means clear by a
+# radius, plus a little for the welder.
+BRACE_CLEARANCE = 30.0
 Z_MH_BRACE = Z_MAIN_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
 Z_FH_BRACE = Z_FRONT_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
 

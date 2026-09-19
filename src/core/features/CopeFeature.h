@@ -20,11 +20,19 @@
 // cuts as though it were solid — subtract the tube itself and the member
 // fills its bore.
 //
-// `gap` opens the cut by that much on the radius, for the weld's root.
+// `mitre` is the OTHER cut a frame needs. Where two members meet END TO END
+// there is no round side to fishmouth against, and both tubes are cut on the
+// plane that bisects them. Which of the two a joint wants is TOPOLOGY, not
+// geometry — once members overrun their nodes (which a mitre requires, since
+// a plane through the very end of a tube only shaves a wedge off it) a
+// corner and a tee look alike — so the caller says, and the feature cuts.
+//
+// `gap` opens either cut by that much: a cope on the radius, a mitre by
+// moving the plane back along the member.
 class CopeFeature : public Feature {
 public:
   CopeFeature(const std::string& name, uint64_t memberId,
-              std::vector<uint64_t> against);
+              std::vector<uint64_t> against, std::vector<uint64_t> mitre = {});
 
   std::string TypeName() const override { return "Cope"; }
 
@@ -38,6 +46,8 @@ public:
     visit(memberId);
     for (const uint64_t id : against)
       visit(id);
+    for (const uint64_t id : mitre)
+      visit(id);
   }
 
   void VisitExprs(const ExprVisitor& visit) override { visit(gapExpr, gap); }
@@ -45,13 +55,14 @@ public:
   [[nodiscard]] std::string WhyIncomplete() const override {
     if (memberId == 0)
       return "pick the member to cope";
-    if (against.empty())
+    if (against.empty() && mitre.empty())
       return "pick what it meets";
     return "";
   }
 
   uint64_t memberId = 0;         // producing-feature id of the member cut
-  std::vector<uint64_t> against; // the members it meets; they survive
+  std::vector<uint64_t> against; // lands on their SIDE: a fishmouth
+  std::vector<uint64_t> mitre;   // meets them END TO END: a mitre
   double gap = 0.0;              // mm on the radius, for the weld root
   std::string gapExpr;
 };

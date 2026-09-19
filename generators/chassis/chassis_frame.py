@@ -156,39 +156,93 @@ class Frame:
             run += seg
         return best, at, run
 
-    def meets(self, m, other):
-        """Is there a COPE here — does `other` pass through `m`'s end?
+    def fit(self, m, other):
+        """How does `m` meet `other` — "against", "mitre", or None?
 
-        A cope is the cut that lets a member's END sit against a neighbour's
-        SIDE. Two members that merely share an endpoint and carry on in much
-        the same direction are a BUTT joint, and asking for a cope there cuts
-        nothing: the kernel hands the member back, which is a refusal the
-        frame has to not provoke in the first place.
-
-        So the test is not "do they touch" but "does the neighbour run PAST
-        this end" — its closest approach must be in its own middle, not at
-        one of its own ends.
+        A member whose end lands on a neighbour's SIDE wants a fishmouth; one
+        that meets a neighbour END TO END wants a mitre, because there is no
+        round side to cut into. Which it is is a question about the NODES,
+        and it has to be asked here: the tubes are drawn past their nodes, so
+        in the geometry a corner and a tee look alike.
         """
         rm = S.OD[m["size"]] / 2.0
         rn = S.OD[other["size"]] / 2.0
+        theirs = self._metal(other)
         for e in (m["points"][0], m["points"][-1]):
-            dist, at, total = self._closest_on(self._metal(other), e)
+            dist, at, total = self._closest_on(theirs, e)
             if dist is None or dist > rm + rn:
                 continue
-            # Far enough from the neighbour's own ends that it really does
-            # run past: a radius clear at each end.
-            if at > rn and at < total - rn:
-                return True
-        return False
+            # Clear of the neighbour's own ends means it runs PAST: a side to
+            # land on. At one of its ends, the two stop together: a corner.
+            return "against" if (rn < at < total - rn) else "mitre"
+        return None
+
+    def meets(self, m, other):
+        return self.fit(m, other) is not None
 
     # -- building ----------------------------------------------------------
+    def _mitred_ends(self, m):
+        """Which of `m`'s ENDS are MITRED, as (first, last).
+
+        Only a mitred end may be drawn long, and the reason is worth keeping:
+        a mitre is a PLANE, and it takes everything past itself, overrun and
+        all. A cope is a SADDLE cut from the node outward — on two tubes of
+        one diameter its horns reach only to the node — so an overrun on a
+        coped end is not removed by anything and stands proud of the frame.
+        That is exactly what four hoop feet did.
+        """
+        rm = S.OD[m["size"]] / 2.0
+        first = last = False
+        for o in self.members:
+            if o is m or o["rank"] >= m["rank"]:
+                continue
+            if self.fit(m, o) != "mitre":
+                continue
+            theirs = self._metal(o)
+            rn = S.OD[o["size"]] / 2.0
+            for idx, e in ((0, m["points"][0]), (-1, m["points"][-1])):
+                dist, at, total = self._closest_on(theirs, e)
+                if dist is not None and dist < rm + rn:
+                    if idx == 0:
+                        first = True
+                    else:
+                        last = True
+        return first, last
+
+    @staticmethod
+    def _drawn_long(points, od, ends):
+        """The path the tube is SWEPT along: a diameter past each END THAT
+        WILL BE CUT.
+
+        A mitre is a plane through the node, and a plane through the very end
+        of a tube shaves a wedge off it instead of cutting it — so the metal
+        has to reach past the node and be trimmed back, which is how a frame
+        is built. The NODES stay as they are: they are the topology.
+        """
+        def step(a, b, by):
+            import math
+            d = [b[i] - a[i] for i in range(3)]
+            n = math.sqrt(sum(c * c for c in d))
+            if n < 1e-9:
+                return list(a)
+            return [a[i] - d[i] / n * by for i in range(3)]
+
+        out = list(points)
+        if ends[0]:
+            out[0] = step(points[0], points[1], od)
+        if ends[1]:
+            out[-1] = step(points[-1], points[-2], od)
+        return out
+
     def build(self, log=None):
         d = self.d
         for m in self.members:
             path = d.call("add_feature", feature={
                 "type": "Curve3D", "name": f"{m['name']} CL",
                 "kind": "bent_path", "radius": m["former"],
-                "points": [list(p) for p in m["points"]]})
+                "points": [list(p) for p in
+                           self._drawn_long(m["points"], S.OD[m["size"]],
+                                            self._mitred_ends(m))]})
             self._check(path, m["name"] + " centreline")
             pipe = d.call("add_feature", feature={
                 "type": "Pipe", "name": m["name"], "path_id": path["id"],
@@ -203,18 +257,26 @@ class Frame:
             # A member copes to everything of LOWER rank it meets: the order
             # a frame is tacked up in, and what stops two members eating each
             # other.
-            against = [o["pipe_id"] for o in self.members
-                       if o["rank"] < m["rank"] and self.meets(m, o)]
-            if not against:
+            against, mitre = [], []
+            for o in self.members:
+                if o["rank"] >= m["rank"]:
+                    continue
+                kind = self.fit(m, o)
+                if kind == "against":
+                    against.append(o["pipe_id"])
+                elif kind == "mitre":
+                    mitre.append(o["pipe_id"])
+            if not against and not mitre:
                 continue
             r = d.call("add_feature", feature={
-                "type": "Cope", "name": f"Cope {m['name']}",
+                "type": "Cope", "name": f"Fit {m['name']}",
                 "member_id": m["pipe_id"], "against": against,
-                "gap": S.WELD_GAP})
-            self._check(r, f"cope {m['name']}")
+                "mitre": mitre, "gap": S.WELD_GAP})
+            self._check(r, f"fit {m['name']}")
             copes += 1
             if log:
-                log(f"    {m['name']}: coped to {len(against)}")
+                log(f"    {m['name']}: {len(against)} coped, "
+                    f"{len(mitre)} mitred")
         return copes
 
     @staticmethod
