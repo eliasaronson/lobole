@@ -90,6 +90,24 @@ core that the capability table does not answer.
 
 **Fix.** A `NeedsFlatFloor` column, and the predicate asks it.
 
+## 6. A headless session has no machines at all
+
+`list_machines` returns an empty list over a directory it names correctly and
+which plainly contains `6090.json`. `set_cam_setup {machine: "6090"}` is
+refused. Every job reports `machine_match: missing` against a machine on disk.
+
+`main()` loads the store with `ui::ReloadMachines(g_App)` — but `RunHeadless`
+builds its OWN `ui::AppState`, so the copy the remote server serves was never
+loaded. The GUI is fine and `--offscreen` is fine (it drives `g_App`); only
+`--headless` is affected, which is the mode an agent and CI actually use.
+
+What it costs: no travel limits, no rapid-feed ceiling, and no post selected
+by machine on exactly the surface that cannot see the panel. The waveguide job
+could not be told it was running on a 6090 until this was fixed.
+
+**Fix.** `ReloadMachines(state)` in `RunHeadless`, beside the `EnsureParts`
+that is already there for the same reason.
+
 ## Two that are NOT defects
 
 - **Roughing a dish works.** The finishing verbs say to rough first, and it
@@ -106,6 +124,7 @@ core that the capability table does not answer.
 ## Verification
 
 - A refused tool with no number, and an accepted one with it (`headless_smoke`).
+- A headless instance lists the machines on disk, and a setup can name one.
 - `list_cam_setups` round-trips what `set_cam_setup` took, box included.
 - The warning does not fire when `top_z` equals the stock top, and when it does
   fire it prints the difference rather than two numbers that look equal.

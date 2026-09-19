@@ -11,6 +11,7 @@
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h"
+#include "ui/MachineActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
 
@@ -45,6 +46,14 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   state.commands = std::make_unique<CommandStack>();
   state.camera = &camera;
   ui::EnsureParts(state); // one part to start (assemblies A1)
+  // The machine store. main() loads it into the GUI's AppState, and this mode
+  // builds its OWN -- so a headless session had no machines at all: an agent
+  // could not name one, `list_machines` came back empty over a directory with
+  // files in it, and every job reported `machine_match: missing` against a
+  // machine plainly on disk. Which meant no travel limits and no rapid-feed
+  // ceiling on exactly the surface an agent drives
+  // (docs/cam/dogfood-waveguide.md).
+  ui::ReloadMachines(state);
   // All renderer/selector pointers stay null: SyncDocumentRenderers no-ops,
   // and RemoteServer degrades the GUI-dependent methods with specific errors.
 
