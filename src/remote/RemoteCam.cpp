@@ -288,7 +288,9 @@ constexpr MethodDoc kCamMethods[] = {
      "Simulate the POSTED G-code for a setup {setup, resolution?: the height "
      "map's cell size in mm, echoed as resolution_mm} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
-     "leftover_area_mm2, leftover_regions, rapids_through_stock, "
+     "leftover_area_mm2, leftover_regions, rapids_through_stock "
+     "(with worst_rapid_depth_mm/_at/_line: a graze and a crash are the "
+     "same COUNT and different numbers), "
      "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
      "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
@@ -1520,6 +1522,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"leftover_regions", v.leftoverRegions},
              {"leftover_biggest", biggest},
              {"rapids_through_stock", v.rapidsThroughStock},
+             {"worst_rapid_depth_mm", v.worstRapidDepth},
+             {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
+             {"worst_rapid_line", v.worstRapidLine},
              // Moves the machine cannot reach. A verdict field nothing
              // reports is the same silence this check exists to end.
              {"outside_travel", v.outsideTravel},

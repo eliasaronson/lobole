@@ -141,6 +141,14 @@ struct Verdict {
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
+  // How FAR into the material the worst of them reaches, and where. A count
+  // alone cannot be acted on: a ball retracting from a groove of its own
+  // shape grazes a scallop's worth, and a rapid across a rib buries the
+  // cutter -- the same number of findings, and only one of them stops the
+  // machine. Zero when there are none.
+  double worstRapidDepth = 0.0; // mm of stock standing above the tool
+  glm::dvec2 worstRapidAt{0.0};
+  int worstRapidLine = 0;
   // Moves in the POSTED FILE that ask for somewhere the machine cannot go.
   // Checked on the artifact rather than on the generator that made it: the
   // generator's own idea of reach was wrong once already (it nailed the

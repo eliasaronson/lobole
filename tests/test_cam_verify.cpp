@@ -161,6 +161,35 @@ TEST_CASE("cam verify: the verdict is reported in words", "[cam]") {
   REQUIRE_FALSE(hit.empty());
   CHECK(hit[0].text.find("line 42") != std::string::npos);
   CHECK(hit[0].text.find("Safe Z") != std::string::npos);
+
+  // HOW DEEP, because a count cannot be acted on. A ball lifting out of a
+  // groove of its own shape grazes a few hundredths; a rapid across a rib
+  // buries the cutter. Both were one sentence until the depth was reported.
+  cam::Verdict rub;
+  rub.cells = 100;
+  rub.rapidsThroughStock = 121;
+  rub.firstBadLine = 7;
+  rub.worstRapidDepth = 0.04;
+  rub.worstRapidLine = 9;
+  const std::vector<cam::VerdictLine> soft = cam::Explain(rub, 0.1, 0.0);
+  REQUIRE_FALSE(soft.empty());
+  INFO(soft[0].text);
+  CHECK(soft[0].text.find("0.04 mm") != std::string::npos);
+  CHECK(soft[0].text.find("line 9") !=
+        std::string::npos); // the WORST, not the first
+  CHECK(soft[0].text.find("a rub") != std::string::npos);
+  CHECK(soft[0].level == cam::VerdictLine::Level::Warn); // not Bad
+
+  rub.worstRapidDepth = 0.79;
+  const std::vector<cam::VerdictLine> hard = cam::Explain(rub, 0.1, 0.0);
+  REQUIRE_FALSE(hard.empty());
+  INFO(hard[0].text);
+  CHECK(hard[0].text.find("0.79 mm") != std::string::npos);
+  CHECK(hard[0].level == cam::VerdictLine::Level::Bad);
+  // And the advice names BOTH causes, because raising Safe Z does nothing
+  // for a retract whose rim is in the strip beside it -- measured on the
+  // waveguide, where safe Z of 28.7, 35 and 45 all gave the same count.
+  CHECK(hard[0].text.find("RETRACT") != std::string::npos);
 }
 
 TEST_CASE("cam verify: leftover means unreachable, not unprogrammed", "[cam]") {

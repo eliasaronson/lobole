@@ -605,6 +605,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // rapid is only safe over air. This is the check a shape comparison cannot
   // make — the part can come out perfect and the tool still be broken.
   int rapidsThroughStock = 0;
+  double worstRapidDepth = 0.0;
+  glm::dvec2 worstRapidAt(0.0);
+  int worstRapidLine = 0;
   int firstBadLine = 0;
   std::vector<uint8_t> touched(machined.z.size(), 0);
   {
@@ -644,8 +647,12 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
                                       probe.res) +
                          1);
         bool hit = false;
-        for (int j = j0; j <= j1 && !hit; j++) {
-          for (int i = i0; i <= i1 && !hit; i++) {
+        double deepest = 0.0;
+        glm::dvec2 deepestAt(0.0);
+        // No early-out now: the DEPTH is what makes the finding actionable,
+        // and the deepest cell may not be the first one found.
+        for (int j = j0; j <= j1; j++) {
+          for (int i = i0; i <= i1; i++) {
             double t = 0.0;
             const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
             const double d = DistToSegment(c, a, b, t);
@@ -660,14 +667,29 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
             // teaches an operator to ignore the real one.
             const double surface =
                 zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-            if (probe.At(i, j) > surface + kGrazeTolerance)
+            if (const double into = probe.At(i, j) - surface;
+                into > kGrazeTolerance) {
               hit = true;
+              if (into > deepest) {
+                deepest = into;
+                deepestAt = c;
+              }
+            }
           }
         }
         if (hit) {
           rapidsThroughStock++;
           if (firstBadLine == 0)
             firstBadLine = m.line;
+          // Locals, like the count beside them: `out.verdict` is REPLACED by
+          // Compare() after this loop, so anything written into it here is
+          // thrown away -- which is exactly why the count is re-applied
+          // below rather than accumulated in place.
+          if (deepest > worstRapidDepth) {
+            worstRapidDepth = deepest;
+            worstRapidAt = deepestAt;
+            worstRapidLine = m.line;
+          }
         }
       }
       // Apply every move (cuts remove material; rapids over air do nothing).
@@ -687,6 +709,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.tabs = static_cast<int>(tabs.size());
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
+  out.verdict.worstRapidDepth = worstRapidDepth;
+  out.verdict.worstRapidAt = worstRapidAt;
+  out.verdict.worstRapidLine = worstRapidLine;
 
   // Can the machine actually GO where the file asks? Checked on the posted
   // file, not on the toolpath that produced it -- the generator's own idea of
@@ -818,11 +843,32 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                      "Fillet or Chamfer on that edge) and this line goes."});
   }
   if (v.rapidsThroughStock > 0) {
+    // HOW DEEP, not just how many. A count on its own cannot be acted on:
+    // a ball lifting out of a groove of its own shape grazes a few hundredths
+    // and a rapid across a rib buries the cutter, and both used to read as
+    // the same sentence. Below a tenth of a millimetre it is a rub, and the
+    // line says so rather than sounding like a crash.
+    // A depth of zero means NOT MEASURED, not "barely touched": a Verdict
+    // assembled by hand (or by an older run) has no depth, and calling that
+    // a graze would be reassurance nobody earned. Only a positive depth
+    // below the threshold is a rub.
+    const bool graze = v.worstRapidDepth > 0.0 && v.worstRapidDepth < 0.1;
+    const int atLine =
+        v.worstRapidLine != 0 ? v.worstRapidLine : v.firstBadLine;
     std::snprintf(buf, sizeof(buf),
-                  "Rapid through material at line %d — raise Safe Z, or start "
-                  "the job higher.",
-                  v.firstBadLine);
-    out.push_back({VerdictLine::Level::Bad, buf});
+                  "%d rapid%s through material, worst %.2f mm deep at "
+                  "X%.1f Y%.1f (line %d)%s",
+                  v.rapidsThroughStock, v.rapidsThroughStock == 1 ? "" : "s",
+                  v.worstRapidDepth, v.worstRapidAt.x, v.worstRapidAt.y, atLine,
+                  graze ? " — a rub, not a crash: the cutter brushes stock it "
+                          "has already shaped."
+                        : ". If it is a TRAVERSE, raise Safe Z. If it is a "
+                          "RETRACT, Safe Z will not help: the cutter is "
+                          "climbing out of its own cut and its rim is in the "
+                          "strip beside it that has not been cut yet, which is "
+                          "worst where the surface is steep.");
+    out.push_back(
+        {graze ? VerdictLine::Level::Warn : VerdictLine::Level::Bad, buf});
   }
   if (v.outsideTravel > 0) {
     std::snprintf(buf, sizeof(buf),
