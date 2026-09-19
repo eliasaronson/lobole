@@ -295,6 +295,44 @@ bool CamPlaybackDrawsPath(const AppState& state) {
   return state.camPlaybackOpen && !state.camTimeline.Empty();
 }
 
+namespace {
+
+// The played path's vertices, cached — and RECOLOURED rather than rebuilt as
+// the cursor moves.
+//
+// This ran in full every frame while a simulation was open, and a 3-axis job
+// is a big program: six PrimVertex per segment over tens of thousands of
+// segments, rebuilt for a picture whose GEOMETRY never changes. Only the
+// colour does, and only at one place — `done` is the prefix k < at — so a
+// cursor step needs the vertices between the old split and the new one
+// touched and nothing else. Playing forward that is a handful per frame.
+std::vector<PrimVertex> g_played;
+size_t g_playedAt = 0;    // the split the cache currently holds
+uint64_t g_playedKey = 0; // which program it was built from
+
+constexpr size_t kVertsPerSeg = 6; // AppendPrimLine's two triangles
+
+uint64_t PlayedKey(const cam::Timeline& tl) {
+  uint64_t k = 1469598103934665603ull;
+  const auto mix = [&k](uint64_t v) { k = (k ^ v) * 1099511628211ull; };
+  mix(tl.program.moves.size());
+  mix(static_cast<uint64_t>(tl.totalDistance * 1000.0));
+  mix(tl.opStarts.size());
+  mix(tl.toolChanges.size());
+  return k;
+}
+
+// Colour and width for one segment, at a given split.
+void SegmentStyle(const cam::GMove& m, bool done, glm::vec4& color,
+                  float& halfPx) {
+  color = done ? kDoneColor : m.rapid ? kAheadRapid : kAheadCut;
+  // The cut ahead is the line the eye is following; give it the width as
+  // well as the colour.
+  halfPx = done ? 1.4f : (m.rapid ? 1.0f : 2.4f);
+}
+
+} // namespace
+
 void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
   if (!CamPlaybackDrawsPath(state) || !state.camShowToolpath)
     return;
@@ -302,17 +340,39 @@ void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
   const auto shown = [&](const glm::dvec3& p) { return glm::vec3(p); };
   const cam::Timeline& tl = state.camTimeline;
   const size_t at = state.camCursor.seg;
-  for (size_t k = 0; k < tl.Segments(); k++) {
-    const cam::GMove& m = tl.program.moves[k + 1];
-    const bool done = k < at;
-    const glm::vec4 color = done      ? kDoneColor
-                            : m.rapid ? kAheadRapid
-                                      : kAheadCut;
-    // The cut ahead is the line the eye is following; give it the width as
-    // well as the colour.
-    AppendPrimLine(shown(tl.program.moves[k].to), shown(m.to),
-                   done ? 1.4f : (m.rapid ? 1.0f : 2.4f), color, out);
+  const size_t segs = tl.Segments();
+
+  if (const uint64_t key = PlayedKey(tl);
+      key != g_playedKey || g_played.size() != segs * kVertsPerSeg) {
+    g_played.clear();
+    g_played.reserve(segs * kVertsPerSeg);
+    for (size_t k = 0; k < segs; k++) {
+      const cam::GMove& m = tl.program.moves[k + 1];
+      glm::vec4 color;
+      float halfPx = 1.0f;
+      SegmentStyle(m, k < at, color, halfPx);
+      AppendPrimLine(shown(tl.program.moves[k].to), shown(m.to), halfPx, color,
+                     g_played);
+    }
+    g_playedKey = key;
+    g_playedAt = at;
+  } else if (at != g_playedAt) {
+    // Only the segments the cursor crossed change side.
+    const size_t lo = std::min(at, g_playedAt);
+    const size_t hi = std::min(std::max(at, g_playedAt), segs);
+    for (size_t k = lo; k < hi; k++) {
+      glm::vec4 color;
+      float halfPx = 1.0f;
+      SegmentStyle(tl.program.moves[k + 1], k < at, color, halfPx);
+      for (size_t v = 0; v < kVertsPerSeg; v++) {
+        PrimVertex& pv = g_played[k * kVertsPerSeg + v];
+        pv.color = color;
+        pv.params.x = halfPx;
+      }
+    }
+    g_playedAt = at;
   }
+  out.insert(out.end(), g_played.begin(), g_played.end());
 }
 
 void DrawCamTransportWindow(AppState& state) {
