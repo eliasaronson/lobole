@@ -63,6 +63,34 @@ std::vector<Segment> SegmentsOf(const TopoDS_Shape& path) {
 
 } // namespace
 
+std::vector<std::pair<glm::dvec3, double>> SampleCurve(const CADShape& pathEdge,
+                                                       double deflection) {
+  std::vector<std::pair<glm::dvec3, double>> out;
+  if (!pathEdge.IsValid() || deflection <= 0.0)
+    return out;
+  try {
+    for (const Segment& seg : SegmentsOf(pathEdge.GetShape())) {
+      BRepAdaptor_Curve curve(seg.edge);
+      GCPnts_QuasiUniformDeflection sampler(curve, deflection);
+      if (!sampler.IsDone())
+        continue;
+      for (int k = 1; k <= sampler.NbPoints(); k++) {
+        const gp_Pnt p = sampler.Value(k);
+        const double at = seg.startsAt + GCPnts_AbscissaPoint::Length(
+                                             curve, curve.FirstParameter(),
+                                             sampler.Parameter(k));
+        // Segments meet at a shared point; keep one of each.
+        if (!out.empty() && std::abs(out.back().second - at) < 1e-9)
+          continue;
+        out.push_back({glm::dvec3(p.X(), p.Y(), p.Z()), at});
+      }
+    }
+  } catch (const Standard_Failure&) {
+    out.clear();
+  }
+  return out;
+}
+
 std::optional<std::pair<double, double>>
 MetalAlongPath(const Body& body, const CADShape& pathEdge) {
   if (!pathEdge.IsValid() || !body.shape.IsValid())

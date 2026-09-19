@@ -605,6 +605,17 @@ static constexpr MethodDoc InspectionMethods[] = {
      "there is no such count for them.",
      "body, max_faces, part", remote::NoFlags,
      "bodies[]{body,name,created_by,job_part,faces,edges,unnamed_faces}"},
+    {"curve_points",
+     "The polyline a Curve3D actually BUILT, sampled to `deflection_mm` "
+     "(default 0.1) with the arc length of each point from the start. A bent "
+     "path's `points` are the CORNERS and the metal turns SHORT of them — "
+     "with a 152 mm former on a right angle, 63 mm short — so anything asking "
+     "where a member really runs has to reconstruct the arcs, and a caller "
+     "that reconstructs them owns a second copy of the geometry that can "
+     "drift from this one. `curve` names the Curve3D; omit it on a part with "
+     "exactly one and it is taken.",
+     "curve, deflection_mm, part", Deferrable,
+     "curve, name, kind, length_mm, points, at_mm"},
     {"tube_schedule",
      "The cut list and the bend schedule for every tube MEMBER of the part. "
      "It walks the BODIES: a member is a length of tube that EXISTS, so a "
@@ -3250,6 +3261,54 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"space", "part"},
                 {"elements", std::move(elements)}};
   }
+  if (m == "curve_points") {
+    // rpc-params: part
+    const Document& src = SubjectPart(state, doc, p);
+    const uint64_t want = p.value("curve", uint64_t{0});
+    const CurveFeature* curve = nullptr;
+    int found = 0;
+    for (size_t i = 0; i < src.FeatureCount(); i++) {
+      const auto* c = dynamic_cast<const CurveFeature*>(src.GetFeature(i));
+      if (c == nullptr)
+        continue;
+      found++;
+      if (want == 0 || c->GetId() == want)
+        curve = c;
+    }
+    if (curve == nullptr) {
+      throw std::runtime_error(
+          want == 0
+              ? "this part has no Curve3D to sample"
+              : "no Curve3D with id " + std::to_string(want) + " in this part");
+    }
+    if (want == 0 && found > 1) {
+      throw std::runtime_error(
+          "this part has " + std::to_string(found) +
+          " curves, so name the one you mean with `curve` — get_state lists "
+          "them with their ids");
+    }
+    const double deflection = p.value("deflection_mm", 0.1);
+    if (deflection <= 0.0)
+      throw std::runtime_error("`deflection_mm` must be positive");
+
+    json points = json::array(), at = json::array();
+    double length = 0.0;
+    for (const auto& [pt, s_mm] :
+         tube::SampleCurve(curve->EdgeShape(), deflection)) {
+      points.push_back({pt.x, pt.y, pt.z});
+      at.push_back(s_mm);
+      length = s_mm;
+    }
+    json out = json::object();
+    out["curve"] = curve->GetId();
+    out["name"] = curve->GetName();
+    out["kind"] = Curve3DKindName(curve->kind);
+    out["length_mm"] = length;
+    out["points"] = std::move(points);
+    out["at_mm"] = std::move(at);
+    return out;
+  }
+
   if (m == "tube_schedule") {
     // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);

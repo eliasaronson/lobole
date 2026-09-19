@@ -551,17 +551,7 @@ DatumAxisKind DatumAxisKindFromString(const std::string& s) {
 }
 
 const char* Curve3DKindToString(Curve3DKind kind) {
-  switch (kind) {
-  case Curve3DKind::FitSpline:
-    return "fit_spline";
-  case Curve3DKind::Helix:
-    return "helix";
-  case Curve3DKind::ControlPoly:
-    return "control_poly";
-  case Curve3DKind::BentPath:
-    return "bent_path";
-  }
-  return "fit_spline";
+  return Curve3DKindName(kind); // core/features/CurveFeature.h
 }
 
 Curve3DKind Curve3DKindFromString(const std::string& s) {

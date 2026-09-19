@@ -1380,6 +1380,40 @@ def main():
         expect(abs(st["bodies"][0]["volume"] - _m.pi * 2 * 13) < 1.0,
                "loft frustum volume")
 
+        phase("Curve points")
+        # A bent path's `points` are the CORNERS and the metal turns SHORT of
+        # them, so a caller asking where a member really runs must not have to
+        # reconstruct the arcs. On a right angle the metal misses the corner
+        # by R*(sqrt(2)-1), which is 63 mm on a 152.4 former — the distance a
+        # brace was once attached into thin air across.
+        d.call("new_project")
+        former = 152.4
+        cl = d.call("add_feature", feature={
+            "type": "Curve3D", "name": "Hoop CL", "kind": "bent_path",
+            "radius": former,
+            "points": [[0, 0, 0], [0, 0, 900], [600, 0, 900], [600, 0, 0]]})
+        cp = d.call("curve_points", curve=cl["id"])
+        pts, at = cp["points"], cp["at_mm"]
+        expect(cp["kind"] == "bent_path" and len(pts) == len(at) > 8,
+               "curve_points samples the curve the feature built")
+        expect(abs(at[0]) < 1e-9 and abs(at[-1] - cp["length_mm"]) < 1e-9,
+               "and carries the arc length of each point from the start")
+        legs = (900 - former) + (600 - 2 * former) + (900 - former)
+        want_len = legs + 2 * (math.pi / 2.0) * former
+        # A micron, not an epsilon: this is an arc length INTEGRATED along a
+        # sampled wire, so it lands a few ten-thousandths off the closed form
+        # over two metres, and a tolerance tighter than the measurement is a
+        # test that fails for being right.
+        expect(abs(cp["length_mm"] - want_len) < 1e-3,
+               f"length {cp['length_mm']:.4f} is three legs and two arcs "
+               f"({want_len:.4f})")
+        corner = [0.0, 0.0, 900.0]
+        near = min(math.dist(p, corner) for p in pts)
+        want_gap = former * (math.sqrt(2.0) - 1.0)
+        expect(abs(near - want_gap) < 1.0,
+               f"the metal misses the corner by {near:.1f} mm, not 0 — which "
+               f"is R*(sqrt(2)-1) = {want_gap:.1f}")
+
         phase("Shell")
         # Shell (M8): hollow a box into a bin via list_elements face name
         d.call("new_project")

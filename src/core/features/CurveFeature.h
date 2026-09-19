@@ -31,6 +31,24 @@ enum class Curve3DKind {
 // Reuses the 2D-spline geometry machinery conceptually: FitSpline/ControlPoly
 // end in a Geom_BSplineCurve, Helix in a curve-on-surface edge. All three
 // tessellate through the same GCPnts sampler into `m_polyline`.
+// The name a kind is written and refused by. One spelling: the serializer
+// and the RPC surface both read this, so a new kind cannot be spelled two
+// ways (the `bent_path` round shipped a kind the format history did not
+// know, and that is the family of mistake).
+[[nodiscard]] inline const char* Curve3DKindName(Curve3DKind kind) {
+  switch (kind) {
+  case Curve3DKind::FitSpline:
+    return "fit_spline";
+  case Curve3DKind::Helix:
+    return "helix";
+  case Curve3DKind::ControlPoly:
+    return "control_poly";
+  case Curve3DKind::BentPath:
+    return "bent_path";
+  }
+  return "fit_spline";
+}
+
 class CurveFeature : public Feature {
 public:
   CurveFeature(const std::string& name,

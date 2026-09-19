@@ -4,6 +4,8 @@
 #include "core/Feature.h" // Body
 #include "core/tube/Check.h" // Bend
 
+#include <glm/glm.hpp>
+
 #include <optional>
 #include <string>
 #include <utility>
@@ -65,6 +67,14 @@ struct MemberRow {
 // `onlyCurve` (0 = all) narrows it to one path.
 [[nodiscard]] std::vector<MemberRow> Members(const Document& doc,
                                              uint64_t onlyCurve = 0);
+
+// A curve's polyline as the metal follows it: every point sampled to
+// `deflection`, with its arc length from the start. A bent path's `points`
+// are the CORNERS and the tube turns short of them, so a caller asking where
+// a member really runs would otherwise reconstruct the arcs and own a second
+// copy of the geometry.
+[[nodiscard]] std::vector<std::pair<glm::dvec3, double>>
+SampleCurve(const CADShape& pathEdge, double deflection);
 
 // One stick of stock and what was cut from it.
 struct Stick {
