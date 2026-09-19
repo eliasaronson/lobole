@@ -154,3 +154,53 @@ TEST_CASE("A gap is a tube's, and is refused on anything else",
   // A gap opens the cut, so it takes MORE metal away.
   CHECK(withGap < VolumeOf(tight, brace2));
 }
+
+TEST_CASE("A cope onto a BEND says so, not 'tangent'", "[tube][cope]") {
+  // The chassis put a nose ring exactly where the lower rail kinks. The cope
+  // refused, which was right, and blamed tangency, which was not: the reader
+  // then opens a `gap` that cannot help. A joint does not belong on a bend —
+  // the tube is a torus there, thinned by the bending, with no straight to
+  // fit a cope against. This is that rail and that ring.
+  const auto frame = [](double footX, double footY) {
+    auto doc = std::make_unique<Document>();
+    auto rail =
+        std::make_unique<CurveFeature>("Rail CL", Curve3DKind::BentPath);
+    rail->points = {{0, 150, 60},
+                    {380, 195, 60},
+                    {950, 230, 60},
+                    {1720, 260, 60},
+                    {2620, 230, 60}};
+    rail->radius = 101.6;
+    doc->AddFeature(std::move(rail));
+    const uint64_t path = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    doc->AddFeature(
+        std::make_unique<PipeFeature>("Lower rail", path, 25.4, 1.65));
+    const uint64_t run = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    const uint64_t post =
+        AddTube(*doc, "Post",
+                {static_cast<float>(footX), static_cast<float>(footY), 60.0f},
+                {static_cast<float>(footX), static_cast<float>(footY), 420.0f},
+                19.05, 1.65);
+    REQUIRE(doc->Regenerate());
+    doc->AddFeature(std::make_unique<CopeFeature>("Cope", post,
+                                                  std::vector<uint64_t>{run}));
+    doc->Regenerate();
+    return doc;
+  };
+
+  SECTION("on the kink") {
+    auto doc = frame(380.0, 195.0);
+    const std::string why =
+        doc->GetFeature(doc->FeatureCount() - 1)->GetError();
+    INFO(why);
+    CHECK(why.find("lands on a BEND") != std::string::npos);
+    // And it says how far clear is clear, which is the number to act on.
+    CHECK(why.find("either side of that corner") != std::string::npos);
+    CHECK(why.find("TANGENT") == std::string::npos);
+  }
+
+  SECTION("clear of it, the same joint cuts") {
+    auto doc = frame(410.0, 197.0);
+    CHECK(doc->GetFeature(doc->FeatureCount() - 1)->GetError().empty());
+  }
+}
