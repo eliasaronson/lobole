@@ -1,3 +1,4 @@
+#include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamToolpathInternal.h"
@@ -565,7 +566,15 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
                                        const std::vector<Body>& framed,
                                        GenerateContext* ctx) {
   std::vector<Toolpath> out;
-  if (op.finishTool == 0) {
+  // The table decides, not the field. A surfacing op's row claims no Finish --
+  // the RPC refuses `finish_tool` on one by name, and the panel never offers
+  // it -- but this function only ever asked whether the number was non-zero,
+  // so an op carrying one from any other route (a loaded file, a test, the
+  // in-process API) quietly grew a second full-depth pass of a strategy that
+  // has no wall to finish. Found by the capability gate on its first run
+  // (docs/cam/operation-shape-plan.md), which is the whole argument for
+  // having one.
+  if (op.finishTool == 0 || !OpTypeHas(op.type, OpField::Finish)) {
     out.push_back(GenerateFramed(setup, op, framed, ctx));
     return out;
   }

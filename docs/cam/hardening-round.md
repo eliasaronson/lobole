@@ -103,7 +103,7 @@ holder disables the check while looking like it enabled it. The glyph draws
 the stated collar, so it is watchable and not only a line number. See
 [simulation.md](simulation.md) S6.
 
-## 9. `Operation` is a union with no discriminant
+## 9. `Operation` is a union with no discriminant — ANSWERED, differently
 
 ~10 of its 25 fields exist for one op type each. The capability table added in
 phase 0 answers "does this type have this field" in one place, but the FIELDS
@@ -112,7 +112,26 @@ are still all there, on every op, and a surfacing op carries tabs it refuses.
 FreeCAD's answer is the cleanest idea in that workbench: tabs, dogbones,
 boundaries and lead-ins are separate wrapper objects an operation is decorated
 with, so an op that cannot take tabs is simply never wrapped and there is
-nothing to gate. That is the shape to move toward, and it is a format change.
+nothing to gate.
+
+That shape does not survive contact with this code, and
+[operation-shape-plan.md](operation-shape-plan.md) is the argument. A FreeCAD
+dressup REWRITES a finished path; two of the four candidates here are inputs
+to the OFFSET, before a move exists. Corner relief needs the material's sharp
+inside corners, which the emitted moves cannot say — by then the corner is a
+fillet of the cutter's radius and indistinguishable from one the designer
+drew. Lead arcs choose the entry while the loop is emitted with its ramp.
+Boundaries are not a field here at all. One of the four is a dressup, and a
+wrapper model around one thing is not a model.
+
+So the defect was re-stated: it is not that the fields share a struct, it is
+that nothing stopped a strategy reading a field that is not its own, and the
+document saying which are its own was prose maintained by hand. The capability
+table is now ENFORCED — set every field a type does not declare, regenerate,
+and the moves must be identical. It found a real under-claim on its first run
+(the rough/finish split asked `finishTool != 0` instead of asking the table,
+so a surfacing op could grow a second full-depth pass). No format change, no
+RPC change, and the verb every existing job is written against is untouched.
 
 ## Order and cost
 
@@ -121,5 +140,7 @@ nothing to gate. That is the shape to move toward, and it is a format change.
 new pass over the height map, 9 wants a format change and touches every op
 type. They are last because the rest should not have to argue with them.
 
-1-8 are done. 9 is the only one left, and it is the one that is genuinely a
-workstream rather than a task with a workstream's shape.
+All nine are closed. 9 is closed by answering it rather than by building what
+it proposed, and the reasoning is in
+[operation-shape-plan.md](operation-shape-plan.md) — the union was not the
+problem; the unenforced claim was.
