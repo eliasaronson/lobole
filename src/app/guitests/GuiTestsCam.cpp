@@ -6,6 +6,7 @@
 
 #include "cad/FaceSelector.h" // Ray
 #include "core/cam/CamMachine.h"
+#include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 #include "ui/AssemblyActions.h" // the placement gizmo
 #include "ui/BackgroundJobs.h"

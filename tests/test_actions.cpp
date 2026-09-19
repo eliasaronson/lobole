@@ -29,6 +29,7 @@
 //
 // See docs/architecture-review-2026-08-24.md.
 
+#include "core/cam/CamToolpath.h"
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"

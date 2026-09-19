@@ -5,9 +5,12 @@
 #include "core/Measure.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
+#include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
 #include "core/cam/CamJob.h"
-#include "core/cam/CamSim.h"      // the cutting simulation cursor + stock
-#include "core/cam/CamToolpath.h" // cam::FaceRegion (the ghost/hover cache)
+#include "core/cam/CamPicks.h" // FaceRegion -- the only thing this header
+#include "core/cam/CamSim.h"   // the cutting simulation cursor + stock
+                               // needs from CAM, and CamToolpath.h is five
+// subjects reached by 28 files // cam::FaceRegion (the ghost/hover cache)
 #include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
 #include "core/cam/JobDocument.h" // the job tab: parts placed + setups
 #include "core/drawing/DrawingDocument.h"

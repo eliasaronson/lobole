@@ -1,4 +1,5 @@
 #include "ui/CamJobs.h"
+#include "core/cam/CamToolpath.h"
 
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
