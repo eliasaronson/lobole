@@ -32,6 +32,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <Bnd_OBB.hxx>
 #include <ElCLib.hxx>
 #include <Extrema_ExtAlgo.hxx>
 #include <Extrema_ExtFlag.hxx>
@@ -430,6 +431,44 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
     return true;
   } catch (const Standard_Failure&) {
     return false;
+  }
+}
+
+namespace {
+
+// The oriented box of a placed body set, or a void box when it has no shape.
+Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::mat4& xf) {
+  const TopLoc_Location loc(ToTrsf(xf));
+  Bnd_OBB obb;
+  for (const Body& b : bodies) {
+    if (b.shape.GetShape().IsNull())
+      continue;
+    Bnd_OBB one;
+    BRepBndLib::AddOBB(b.shape.GetShape().Moved(loc), one);
+    if (!one.IsVoid())
+      obb.Add(one);
+  }
+  return obb;
+}
+
+} // namespace
+
+bool SeparatedByOBB(const std::vector<Body>& a, const glm::mat4& xfA,
+                    const std::vector<Body>& b, const glm::mat4& xfB,
+                    double gap) {
+  try {
+    Bnd_OBB ba = PlacedOBB(a, xfA);
+    Bnd_OBB bb = PlacedOBB(b, xfB);
+    if (ba.IsVoid() || bb.IsVoid())
+      return false; // nothing to judge by: let the exact check decide
+    // Half the gap on each box, so two boxes exactly `gap` apart still meet.
+    if (gap > 0.0) {
+      ba.Enlarge(gap * 0.5);
+      bb.Enlarge(gap * 0.5);
+    }
+    return ba.IsOut(bb);
+  } catch (const Standard_Failure&) {
+    return false; // never reject a pair because the prefilter failed
   }
 }
 

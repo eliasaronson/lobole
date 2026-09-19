@@ -29,6 +29,12 @@ struct Size {
   double wallThickness = 0.0;
 };
 
+// The designation a shop orders this stock by: "25.4x2.4", trailing zeros
+// off, which is how round tube is quoted everywhere that is not a pipe
+// schedule.
+[[nodiscard]] std::string Designation(double outerDiameter,
+                                      double wallThickness);
+
 // Everything stocked, in material then descending-OD order.
 [[nodiscard]] const std::vector<Size>& SizeTable();
 // The materials tube data is carried for, in table order. The list IS the
@@ -83,16 +89,22 @@ struct Size {
 // uses. A literal millimetre default for any of them would be correct in the
 // abstract and wrong against the tube actually loaded.
 struct TubeRules {
-  std::string material;       // a CADMaterials slug; required
-  std::string size;           // a designation from SizesFor(material)
-  double outerDiameter = 0.0; // mm, resolved from the size at set time
-  double wallThickness = 0.0; // mm, resolved from the size at set time
+  std::string material; // a CADMaterials slug; required
+  // There is deliberately NO size here, and that is the one place this
+  // parts company with sheet::SheetMetalRules. A sheet part is cut from ONE
+  // blank, so a per-feature gauge would let a body be two thicknesses at
+  // once. A tube FRAME is not: a Formula Student chassis is 25.4 x 2.4 in
+  // its hoops, 25.4 x 1.65 in its side impact structure and 19.05 in its
+  // tertiary members, and a rulebook is what says so. Each member carries
+  // its own diameter and wall on its Pipe; what is shared is the MATERIAL
+  // and the BENDER, which is what this holds.
+  //
   // The die set: the centreline radii this bender owns. EMPTY means any
   // radius is available, which is the honest reading of "no bender declared"
   // — not a guess at a common set.
   std::vector<double> formerRadii;
-  double minStraight = 0.0; // between bends; 0 = 2 x OD, what a clamp needs
-  double tailLength = 0.0;  // past the last bend; 0 = 1.5 x OD, to grip
+  double minStraight = 0.0; // between bends; 0 = 2 x the member's OD
+  double tailLength = 0.0;  // past the last bend; 0 = 1.5 x it, to grip
   // How much of the wall the outside of a bend may give up, as a fraction.
   // 0 = 0.25, roughly what draw bending is accepted at — which is deliberately
   // slack, because at the tightest former this stock legally takes it thins
@@ -103,8 +115,10 @@ struct TubeRules {
   double maxThinning = 0.0;
 
   // The resolved values, each applying the rule in its field comment above.
-  [[nodiscard]] double EffectiveMinStraight() const;
-  [[nodiscard]] double EffectiveTailLength() const;
+  // The straight a clamp needs and the tail a bender grips are multiples of
+  // the MEMBER's diameter, so they are asked per member.
+  [[nodiscard]] double EffectiveMinStraight(double outerDiameter) const;
+  [[nodiscard]] double EffectiveTailLength(double outerDiameter) const;
   [[nodiscard]] double EffectiveMaxThinning() const;
   // The former to use for `wanted`: itself when the die set is empty, else
   // the smallest owned radius that is not under it — nullopt when every die

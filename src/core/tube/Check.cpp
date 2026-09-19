@@ -38,11 +38,6 @@ double Tail(const Member& m) {
 
 CheckResult Check(const std::vector<Member>& members, const TubeRules& rules) {
   CheckResult out;
-  const double od = rules.outerDiameter;
-  const double wall = rules.wallThickness;
-  const double minR = MinBendRadius(rules.material, od, wall);
-  const double minStraight = rules.EffectiveMinStraight();
-  const double tail = rules.EffectiveTailLength();
   const double maxThin = rules.EffectiveMaxThinning();
 
   // Ovality is the other thing a bent tube is judged on, and it is not
@@ -58,6 +53,24 @@ CheckResult Check(const std::vector<Member>& members, const TubeRules& rules) {
 
   for (const Member& m : members) {
     out.membersChecked++;
+    // Every limit is this member's, because the stock is this member's.
+    const double od = m.outerDiameter;
+    const double wall = m.wallThickness;
+    const double minR = MinBendRadius(rules.material, od, wall);
+    const double minStraight = rules.EffectiveMinStraight(od);
+    const double tail = rules.EffectiveTailLength(od);
+    const std::string size = Designation(od, wall);
+
+    // A member of a size nobody stocks cannot be ORDERED, whatever its bends
+    // do — and that is a question only the table can answer.
+    std::string why;
+    if (od > 0.0 && !LookupSize(rules.material, size, &why).has_value()) {
+      out.violations.push_back({"size_not_stocked",
+                                m.name + " is " + size + " " + rules.material +
+                                    ", which is not a stocked size: " + why,
+                                m.name, 0, od, 0.0});
+    }
+
     for (size_t i = 0; i < m.bends.size(); i++) {
       const Bend& b = m.bends[i];
       out.bendsChecked++;
@@ -67,8 +80,8 @@ CheckResult Check(const std::vector<Member>& members, const TubeRules& rules) {
         out.violations.push_back(
             {"bend_below_minimum_radius",
              "bend " + std::to_string(n) + " of " + m.name + " is on a " +
-                 Mm(b.radius) + " mm former; " + rules.size + " " +
-                 rules.material + " takes " + Mm(minR) + " mm (" +
+                 Mm(b.radius) + " mm former; " + size + " " + rules.material +
+                 " takes " + Mm(minR) + " mm (" +
                  MinBendRadiusSource(rules.material, od, wall) + ")",
              m.name, n, b.radius, minR});
       } else if (!rules.formerRadii.empty()) {

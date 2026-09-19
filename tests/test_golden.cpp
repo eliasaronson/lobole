@@ -595,16 +595,15 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     const tube::TubeRules& r = *doc.Tube();
     const nlohmann::json& want = expect.at("tube");
     CHECK(r.material == want.at("material").get<std::string>());
-    CHECK(r.size == want.at("size").get<std::string>());
-    CHECK_THAT(r.outerDiameter,
-               WithinRel(want.at("outer_diameter_mm").get<double>(), 1e-9));
-    CHECK_THAT(r.wallThickness,
-               WithinRel(want.at("wall_mm").get<double>(), 1e-9));
     CHECK(r.formerRadii ==
           want.at("former_radii_mm").get<std::vector<double>>());
-    CHECK_THAT(r.EffectiveMinStraight(),
+    // The straight a clamp needs and the tail a bender grips are multiples
+    // of the MEMBER's diameter, so the golden states them against one — and
+    // that is the point: a tube part carries no size of its own.
+    const double od = want.at("member_od_mm").get<double>();
+    CHECK_THAT(r.EffectiveMinStraight(od),
                WithinRel(want.at("min_straight_mm").get<double>(), 1e-9));
-    CHECK_THAT(r.EffectiveTailLength(),
+    CHECK_THAT(r.EffectiveTailLength(od),
                WithinRel(want.at("tail_length_mm").get<double>(), 1e-9));
     CHECK_THAT(r.EffectiveMaxThinning(),
                WithinRel(want.at("max_thinning").get<double>(), 1e-9));

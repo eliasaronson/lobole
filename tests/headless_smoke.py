@@ -1287,7 +1287,7 @@ def main():
             "type": "Cope", "name": "Cope", "member_id": brace["id"],
             "against": [run["id"]]})
         rows = {t["name"]: t for t in d.request("tube_schedule", {})["tubes"]}
-        cut = rows["Brace CL"]
+        cut = rows["Brace"]
         expect(abs(cut["path_length_mm"] - 400.0) < 1e-6,
                "the path is still the node-to-node 400 mm")
         expect(8.0 < cut["coped_off_mm"] < 9.0 and
@@ -1327,7 +1327,7 @@ def main():
         phase("The order")
         # The files a shop is actually sent, read back to the same numbers.
         out = os.path.join(tmp, "cut_list.csv")
-        d.call("set_tube_rules", material="steel", size="25.4x2.4")
+        d.call("set_tube_rules", material="steel")
         res = d.call("export_cut_list", path=out, stock_length_mm=6000.0,
                      kerf_mm=2.0)
         with open(out) as f:
@@ -1338,8 +1338,12 @@ def main():
                "the cut list's columns follow the BOM's where they carry over")
         expect(abs(float(first[4]) - row["cut_length_mm"]) < 0.01,
                "the CSV carries the same cut length the schedule reports")
-        expect(res["sticks"] and res["sticks"][0]["offcut_mm"] > 0.0,
+        expect(res["sticks"] and res["sticks"][0]["offcut_mm"] > 0.0 and
+               res["sticks_needed"] >= 1,
                "and it says how many lengths of stock to buy")
+        expect(all("size" in s for s in res["sticks"]),
+               "packed per SIZE — a 19 mm member cannot come off a 25 mm "
+               "stick")
 
         bends_csv = os.path.join(tmp, "bends.csv")
         res = d.call("export_bend_schedule", path=bends_csv)

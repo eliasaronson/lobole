@@ -8,6 +8,7 @@
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -72,15 +73,34 @@ MetalAlongPath(const Body& body, const CADShape& pathEdge) {
     if (segs.empty())
       return std::nullopt;
 
-    TopTools_IndexedMapOfShape verts;
+    // Sample the body's EDGES, not just its vertices. The far point of a
+    // coped end is the heel of the fishmouth, which lies ALONG the cut curve
+    // — where its vertices happen to fall is a matter of how the boolean
+    // split it, and on a symmetric frame the two sides do not split alike.
+    // Measuring vertices alone made a mirrored pair of braces differ by
+    // 0.77 mm, which is a real tube cut to the wrong length.
+    std::vector<gp_Pnt> probes;
+    TopTools_IndexedMapOfShape verts, edges;
     TopExp::MapShapes(body.shape.GetShape(), TopAbs_VERTEX, verts);
-    if (verts.IsEmpty())
+    TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= verts.Extent(); i++)
+      probes.push_back(BRep_Tool::Pnt(TopoDS::Vertex(verts(i))));
+    for (int i = 1; i <= edges.Extent(); i++) {
+      BRepAdaptor_Curve curve(TopoDS::Edge(edges(i)));
+      // Deflection-based, so a long straight costs two points and a tight
+      // cope curve costs as many as its curvature needs.
+      GCPnts_QuasiUniformDeflection sampler(curve, 0.05);
+      if (!sampler.IsDone())
+        continue;
+      for (int k = 1; k <= sampler.NbPoints(); k++)
+        probes.push_back(sampler.Value(k));
+    }
+    if (probes.empty())
       return std::nullopt;
 
     double lo = 0.0, hi = 0.0;
     bool any = false;
-    for (int i = 1; i <= verts.Extent(); i++) {
-      const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(verts(i)));
+    for (const gp_Pnt& p : probes) {
       // Which point of the WHOLE path this vertex is nearest, in arc length
       // from its start — the parameter would be an angle on an arc and
       // nothing in particular on a spline.
@@ -164,7 +184,10 @@ std::vector<MemberRow> Members(const Document& doc, uint64_t onlyCurve) {
       continue;
 
     MemberRow row;
-    row.name = curve->GetName();
+    // The MEMBER's name, not its centreline's. A shop reading "Lower rail L
+    // CL" on a cut list has to work out that the tube is called something
+    // else.
+    row.name = pipe->GetName();
     row.curveId = curve->GetId();
     row.bodies = {body.name};
     row.outerDiameter = pipe->outerDiameter;
@@ -189,17 +212,20 @@ std::vector<MemberRow> Members(const Document& doc, uint64_t onlyCurve) {
     const auto same = [&](const MemberRow& a) {
       if (a.quantity == 0 || a.bends.size() != row.bends.size())
         return false;
-      if (std::abs(a.cutLength - row.cutLength) > 1e-9 ||
+      if (std::abs(a.cutLength - row.cutLength) > kSameLength ||
           std::abs(a.outerDiameter - row.outerDiameter) > 1e-9 ||
           std::abs(a.wallThickness - row.wallThickness) > 1e-9)
         return false;
       for (size_t i = 0; i < a.bends.size(); i++) {
         const Bend& x = a.bends[i];
         const Bend& y = row.bends[i];
-        if (std::abs(x.angleDeg - y.angleDeg) > 1e-9 ||
+        // A bend's ANGLE and FORMER must match exactly — they are what the
+        // machine is set to — but where it falls along the tube is measured,
+        // so it gets the same slack as the length.
+        if (std::abs(x.angleDeg - y.angleDeg) > 1e-6 ||
             std::abs(x.radius - y.radius) > 1e-9 ||
-            std::abs(x.straightBefore - y.straightBefore) > 1e-9 ||
-            std::abs(x.rollDeg - y.rollDeg) > 1e-9)
+            std::abs(x.straightBefore - y.straightBefore) > kSameLength ||
+            std::abs(x.rollDeg - y.rollDeg) > 1e-6)
           return false;
       }
       return true;
@@ -208,6 +234,8 @@ std::vector<MemberRow> Members(const Document& doc, uint64_t onlyCurve) {
     if (it != rows.end()) {
       it->quantity++;
       it->bodies.push_back(body.name);
+      // The LONGEST of the group: cut to it and a member can only be long.
+      it->cutLength = std::max(it->cutLength, row.cutLength);
     } else {
       rows.push_back(std::move(row));
     }

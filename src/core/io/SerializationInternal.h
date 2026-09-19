@@ -18,10 +18,11 @@
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
     118; // v118: a `Cope` feature, which cuts a frame member to the members
-         //      it MEETS and leaves those standing; and `tube`, the stock a
-         //      part is BENT from — material, size (OD x wall), the bender's
-         //      die set, the straight it needs to clamp and grip, and a
-         //      thinning limit. An unknown feature type is refused by name;
+         //      it MEETS and leaves those standing; and `tube`, the SHOP a
+         //      part is bent in — the material, and the bender's die set,
+         //      clamp straight, grip length and thinning limit. No size:
+         //      each member's Pipe carries its own, because a frame is
+         //      several at once. An unknown feature type is refused by name;
          //      a build without the rules reads the key as nothing and
          //      checks a frame against nothing (docs/tube/plan.md).
          // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS

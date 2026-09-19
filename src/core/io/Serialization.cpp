@@ -158,19 +158,19 @@ void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
   j["sheet_metal"] = std::move(m);
 }
 
-// The tube stock, v118. Absent means the part is not bent from tube, which is
-// what every document written before v118 means. An unstocked size is REFUSED
-// rather than read as the nearest one: a wall 0.2 mm off the one asked for is
-// a different tube, and the document would load looking perfect.
+// The tube shop, v118. Absent means the part is not bent from tube, which is
+// what every document written before v118 means.
+//
+// It carries the MATERIAL and the BENDER, and deliberately no size: unlike a
+// sheet part, which is cut from one blank, a tube frame is several sizes at
+// once and each member's Pipe carries its own. That is the one place this
+// parts company with `sheet_metal`.
 std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
   if (!j.contains("tube"))
     return std::nullopt;
   const json m = j.at("tube");
   tube::TubeRules r;
   r.material = m.value("material", std::string{});
-  r.size = m.value("size", std::string{});
-  r.outerDiameter = m.value("outer_diameter", 0.0);
-  r.wallThickness = m.value("wall_thickness", 0.0);
   if (m.contains("former_radii")) {
     for (const auto& v : m.at("former_radii"))
       r.formerRadii.push_back(v.get<double>());
@@ -190,10 +190,7 @@ std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
 void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
   if (!rules)
     return;
-  json m = {{"material", rules->material},
-            {"size", rules->size},
-            {"outer_diameter", rules->outerDiameter},
-            {"wall_thickness", rules->wallThickness}};
+  json m = {{"material", rules->material}};
   if (!rules->formerRadii.empty())
     m["former_radii"] = rules->formerRadii;
   if (rules->minStraight > 0.0)

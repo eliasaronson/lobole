@@ -32,6 +32,11 @@ struct Member {
   std::string name;
   std::vector<Bend> bends;
   double length = 0.0; // the developed length of the whole centreline
+  // The stock THIS member is made of. A frame is not one size: a Formula
+  // Student chassis is 25.4 x 2.4 in its hoops and 19.05 in its tertiary
+  // members, and what may be bent on a given former depends on which.
+  double outerDiameter = 0.0;
+  double wallThickness = 0.0;
 };
 
 struct Violation {

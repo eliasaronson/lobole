@@ -49,10 +49,6 @@ std::string Trim(double mm) {
   return s;
 }
 
-std::string Designation(double od, double wall) {
-  return Trim(od) + "x" + Trim(wall);
-}
-
 // The inverse, for refusals only: "25.4x2.45" -> 25.4, 2.45. False when it is
 // not of that shape at all, and then the refusal cannot say which sizes are
 // near and lists the table's own order instead.
@@ -106,6 +102,10 @@ double DiameterBand(double od, double wall, std::string* label) {
 }
 
 } // namespace
+
+std::string Designation(double od, double wall) {
+  return Trim(od) + "x" + Trim(wall);
+}
 
 const std::vector<Size>& SizeTable() {
   static const std::vector<Size> table = [] {
@@ -215,11 +215,11 @@ double BendArcLength(double angleRad, double radius) {
   return std::abs(angleRad) * radius;
 }
 
-double TubeRules::EffectiveMinStraight() const {
+double TubeRules::EffectiveMinStraight(double outerDiameter) const {
   return minStraight > 0.0 ? minStraight : 2.0 * outerDiameter;
 }
 
-double TubeRules::EffectiveTailLength() const {
+double TubeRules::EffectiveTailLength(double outerDiameter) const {
   return tailLength > 0.0 ? tailLength : 1.5 * outerDiameter;
 }
 
@@ -239,31 +239,24 @@ std::optional<double> TubeRules::FormerFor(double wanted) const {
 }
 
 std::string Validate(const TubeRules& rules) {
-  if (rules.material.empty() && rules.size.empty())
-    return {};
-  std::string err;
-  const auto found = LookupSize(rules.material, rules.size, &err);
-  if (!found.has_value())
-    return err;
-  if (std::abs(found->outerDiameter - rules.outerDiameter) > 1e-6 ||
-      std::abs(found->wallThickness - rules.wallThickness) > 1e-6) {
-    return "size '" + rules.size + "' in " + rules.material + " is " +
-           Designation(found->outerDiameter, found->wallThickness) +
-           ", but the rules carry " +
-           Designation(rules.outerDiameter, rules.wallThickness);
+  if (rules.material.empty())
+    return {}; // not a tube part
+  const auto& materials = TubeMaterials();
+  if (std::find(materials.begin(), materials.end(), rules.material) ==
+      materials.end()) {
+    std::string names;
+    for (const std::string& m : materials)
+      names += names.empty() ? m : ", " + m;
+    return "no tube data for material '" + rules.material +
+           "'; carried: " + names;
   }
-  const double minR =
-      MinBendRadius(rules.material, rules.outerDiameter, rules.wallThickness);
+  // A former is checked against the MEMBER that will be bent on it, not
+  // against the rules, because the rules no longer name a size: the same
+  // die bends a 25.4 hoop and a 19.05 brace, and only one of those may be
+  // too tight. check_tube is where that lands.
   for (double r : rules.formerRadii) {
     if (r <= 0.0)
       return "a former radius must be positive";
-    if (r + 1e-9 < minR) {
-      return "former radius " + Trim(r) + " mm is under what " + rules.size +
-             " " + rules.material + " takes (" + Trim(minR) + " mm, " +
-             MinBendRadiusSource(rules.material, rules.outerDiameter,
-                                 rules.wallThickness) +
-             ")";
-    }
   }
   if (rules.minStraight < 0.0 || rules.tailLength < 0.0)
     return "a minimum straight and a tail length cannot be negative";

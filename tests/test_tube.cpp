@@ -13,18 +13,17 @@ using Catch::Matchers::WithinRel;
 
 namespace {
 
-// 25.4 x 2.4 steel: the size a Formula Student rulebook names for a main
-// hoop, and the one the chassis generator builds with.
-tube::TubeRules HoopStock() {
+// The shop: steel, and a bender. The SIZE is deliberately not here — a tube
+// frame is several at once, and each member's Pipe carries its own.
+tube::TubeRules Shop() {
   tube::TubeRules r;
   r.material = "steel";
-  r.size = "25.4x2.4";
-  const auto s = tube::LookupSize(r.material, r.size, nullptr);
-  REQUIRE(s.has_value());
-  r.outerDiameter = s->outerDiameter;
-  r.wallThickness = s->wallThickness;
   return r;
 }
+
+// 25.4 x 2.4, the size a Formula Student rulebook names for a main hoop.
+constexpr double kHoopOD = 25.4;
+constexpr double kHoopWall = 2.4;
 
 bool Has(const tube::CheckResult& r, const std::string& kind) {
   return std::any_of(r.violations.begin(), r.violations.end(),
@@ -33,9 +32,12 @@ bool Has(const tube::CheckResult& r, const std::string& kind) {
 
 // A member whose every straight is comfortably long, so a test can plant one
 // fault at a time.
-tube::Member Easy(double radius, double angle = 90.0) {
+tube::Member Easy(double radius, double angle = 90.0, double od = kHoopOD,
+                  double wall = kHoopWall) {
   tube::Member m;
   m.name = "Member";
+  m.outerDiameter = od;
+  m.wallThickness = wall;
   m.bends = {{angle, radius, 300.0, 0.0}, {angle, radius, 300.0, 90.0}};
   double used = 0.0;
   for (const tube::Bend& b : m.bends)
@@ -99,19 +101,23 @@ TEST_CASE("Wall thinning is the outer fibre's extra travel", "[tube]") {
   CHECK_THAT(tube::WallThinning(od, wall, 1e9), WithinAbs(0.0, 1e-6));
 }
 
-TEST_CASE("Unset rules derive from the stock, never from a literal", "[tube]") {
-  const tube::TubeRules r = HoopStock();
-  CHECK_THAT(r.EffectiveMinStraight(), WithinRel(2.0 * 25.4, 1e-9));
-  CHECK_THAT(r.EffectiveTailLength(), WithinRel(1.5 * 25.4, 1e-9));
+TEST_CASE("Unset rules derive from the MEMBER's stock, never from a literal",
+          "[tube]") {
+  const tube::TubeRules r = Shop();
+  // The same shop, two members: a limit that came from the document rather
+  // than from the tube would be wrong for one of them.
+  CHECK_THAT(r.EffectiveMinStraight(25.4), WithinRel(2.0 * 25.4, 1e-9));
+  CHECK_THAT(r.EffectiveMinStraight(19.05), WithinRel(2.0 * 19.05, 1e-9));
+  CHECK_THAT(r.EffectiveTailLength(25.4), WithinRel(1.5 * 25.4, 1e-9));
   CHECK_THAT(r.EffectiveMaxThinning(), WithinAbs(0.25, 1e-9));
 
   tube::TubeRules set = r;
   set.minStraight = 40.0;
-  CHECK_THAT(set.EffectiveMinStraight(), WithinAbs(40.0, 1e-9));
+  CHECK_THAT(set.EffectiveMinStraight(25.4), WithinAbs(40.0, 1e-9));
 }
 
 TEST_CASE("An empty die set means any former; a real one refuses", "[tube]") {
-  tube::TubeRules r = HoopStock();
+  tube::TubeRules r = Shop();
   CHECK_THAT(*r.FormerFor(63.5), WithinAbs(63.5, 1e-9)); // nobody declared
 
   r.formerRadii = {76.2, 101.6};
@@ -123,14 +129,15 @@ TEST_CASE("An empty die set means any former; a real one refuses", "[tube]") {
 TEST_CASE("Rules that cannot be stored say why", "[tube]") {
   CHECK(tube::Validate(tube::TubeRules{}).empty()); // not a tube part: fine
 
-  tube::TubeRules r = HoopStock();
+  tube::TubeRules r = Shop();
   CHECK(tube::Validate(r).empty());
 
-  // A die under what the stock takes is the one that scraps a bend.
-  r.formerRadii = {20.0};
-  const std::string err = tube::Validate(r);
-  CHECK(err.find("under what") != std::string::npos);
-  CHECK(err.find("table:steel") != std::string::npos);
+  r.material = "unobtainium";
+  CHECK(tube::Validate(r).find("no tube data") != std::string::npos);
+
+  r = Shop();
+  r.formerRadii = {-5.0};
+  CHECK(tube::Validate(r).find("positive") != std::string::npos);
 
   r.formerRadii.clear();
   r.maxThinning = 1.5;
@@ -139,7 +146,7 @@ TEST_CASE("Rules that cannot be stored say why", "[tube]") {
 
 TEST_CASE("check_tube finds each fault, and says what it did not look at",
           "[tube]") {
-  const tube::TubeRules r = HoopStock();
+  const tube::TubeRules r = Shop();
 
   SECTION("a clean member is clean, and still says what was checked") {
     const auto res = tube::Check({Easy(76.2)}, r);
@@ -181,6 +188,26 @@ TEST_CASE("check_tube finds each fault, and says what it did not look at",
     CHECK(Has(res, "tail_below_gripper_minimum"));
   }
 
+  SECTION("a member of a size nobody stocks cannot be ordered") {
+    // A frame is several sizes at once, so the size is the MEMBER's — and a
+    // member drawn at a wall nobody rolls is a member nobody can buy,
+    // whatever its bends do.
+    tube::Member odd = Easy(76.2, 90.0, 25.4, 2.05);
+    const auto res = tube::Check({odd}, r);
+    CHECK(Has(res, "size_not_stocked"));
+    CHECK(res.violations.front().message.find("25.4x2.4") !=
+          std::string::npos); // names the nearest that IS stocked
+  }
+
+  SECTION("each member is judged on ITS OWN stock, not the document's") {
+    // The same former, two members: legal under the thick one and not under
+    // the thin one. A limit read off the document would have missed it.
+    const auto thick = tube::Check({Easy(60.0, 90.0, 25.4, 2.4)}, r);
+    const auto thin = tube::Check({Easy(60.0, 90.0, 25.4, 1.2)}, r);
+    CHECK_FALSE(Has(thick, "bend_below_minimum_radius"));
+    CHECK(Has(thin, "bend_below_minimum_radius"));
+  }
+
   SECTION("an outer wall pulled thinner than the rulebook allows") {
     // The radius rule and the wall rule are not the same rule. At the
     // tightest former this stock legally takes, the bend PASSES on radius and
@@ -188,8 +215,7 @@ TEST_CASE("check_tube finds each fault, and says what it did not look at",
     // to show 12%. That declared limit is what this check is for.
     tube::TubeRules strict = r;
     strict.maxThinning = 0.12;
-    const double minR =
-        tube::MinBendRadius(r.material, r.outerDiameter, r.wallThickness);
+    const double minR = tube::MinBendRadius(r.material, kHoopOD, kHoopWall);
     const auto res = tube::Check({Easy(minR)}, strict);
     CHECK_FALSE(Has(res, "bend_below_minimum_radius"));
     CHECK(Has(res, "wall_thinning_over_limit"));

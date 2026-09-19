@@ -4,6 +4,8 @@
 #include "core/features/BooleanFeature.h"
 #include "core/features/PipeFeature.h"
 
+#include <glm/glm.hpp>
+
 #include <algorithm>
 
 CopeFeature::CopeFeature(const std::string& name, uint64_t memberId,
@@ -85,10 +87,34 @@ bool CopeFeature::Execute(RegenContext& ctx) {
     // A cope that removed NOTHING is a joint that does not exist. Reporting
     // it as done puts an uncoped tube in the order and a gap in the frame,
     // and both are found at the welding table.
+    //
+    // There are two ways to remove nothing and they want different answers,
+    // so the boxes are asked which one this is: members that do not reach
+    // each other, and members that overlap while the KERNEL declines. The
+    // second is the tangency case — two tubes of the same diameter whose
+    // axes meet exactly have surfaces that touch along a curve rather than
+    // crossing it, and a boolean asked to cut one with the other hands back
+    // the argument. It is not rare in a frame: it is what every equal
+    // diameter joint drawn to its node looks like.
     if (next.Volume() > was - 1e-9) {
-      SetError("cope to '" + f->GetName() +
-               "' removed nothing — the two do not meet, so there is no "
-               "joint here to cut");
+      glm::vec3 lo{0.0f}, hi{0.0f}, clo{0.0f}, chi{0.0f};
+      shape.GetBoundingBox(lo, hi);
+      cutter.GetBoundingBox(clo, chi);
+      const bool apart = hi.x < clo.x || chi.x < lo.x || hi.y < clo.y ||
+                         chi.y < lo.y || hi.z < clo.z || chi.z < lo.z;
+      if (apart) {
+        SetError("cope to '" + f->GetName() +
+                 "' removed nothing — the two do not reach each other, so "
+                 "there is no joint here to cut");
+      } else {
+        SetError(
+            "cope to '" + f->GetName() +
+            "' removed nothing, although they overlap: the cut is TANGENT, "
+            "which a boolean answers by handing back what it was given. Two "
+            "tubes of one diameter whose axes meet exactly do this. Give the "
+            "cope a `gap` — 0.05 mm is enough to make the surfaces cross, "
+            "and a real cope is cut a little open for the weld root anyway");
+      }
       return false;
     }
     shape = std::move(next);

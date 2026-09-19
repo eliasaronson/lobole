@@ -1796,6 +1796,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         for (size_t j = i + 1; j < ents.size(); ++j) {
           if (boxGap(ents[i], ents[j]) > nearTol)
             continue;
+          // The second prefilter, for what the first cannot reject: a long
+          // slanted member's axis-aligned box is mostly air, so on a space
+          // frame nearly every pair survives it and pays for an exact
+          // boolean. An oriented box follows the member.
+          if (Measure::SeparatedByOBB(ents[i].single, glm::mat4(1.0f),
+                                      ents[j].single, glm::mat4(1.0f), nearTol))
+            continue;
           const auto c = Measure::ContactBetween(
               ents[i].single, glm::mat4(1.0f), ents[j].single, glm::mat4(1.0f));
           if (!c)

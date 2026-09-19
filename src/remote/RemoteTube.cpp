@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -20,18 +21,21 @@ namespace remote {
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc TubeMethods[] = {
     {"set_tube_rules",
-     "Declare the stock this part is BENT from: material + size (OD x wall in "
-     "mm, '25.4x2.4'), which fix the diameter and the wall. Everything else "
-     "is derived from those unless given: the minimum straight between bends "
-     "= 2 x OD (what a clamp die needs), the tail past the last bend = 1.5 x "
-     "OD (what the bender grips), the thinning limit = 25% (what draw bending "
-     "is accepted at). `former_radii_mm` is the die set — the CENTRELINE radii "
-     "this bender owns, in mm; omit it and any radius is allowed, which is "
-     "the honest reading of 'no bender declared'. `max_thinning` is a "
-     "FRACTION of the wall, for a rulebook that demands better than the "
-     "default. `clear: true` makes it not a tube part. Unlike the sheet's "
-     "rules this drives no geometry, so setting it rebuilds nothing.",
-     "clear, former_radii_mm, material, max_thinning, min_straight_mm, size, "
+     "Declare the SHOP this part is bent in: the `material` every member is "
+     "made of, and the bender. There is deliberately no SIZE here — unlike a "
+     "sheet part, which is cut from one blank, a tube frame is several sizes "
+     "at once (a Formula Student chassis is 25.4x2.4 in its hoops and 19.05 "
+     "in its tertiary members), and each member's Pipe carries its own. "
+     "`former_radii_mm` is the die set, the CENTRELINE radii this bender "
+     "owns; omit it and any radius is allowed, which is the honest reading "
+     "of 'no bender declared'. `min_straight_mm` (what a clamp die needs "
+     "between bends) and `tail_length_mm` (what the bender grips past the "
+     "last one) default to 2x and 1.5x THAT MEMBER's outer diameter. "
+     "`max_thinning` is a FRACTION of the wall, for a rulebook that demands "
+     "better than the 25% draw bending is accepted at. `clear: true` makes "
+     "it not a tube part. It drives no geometry, so setting it rebuilds "
+     "nothing.",
+     "clear, former_radii_mm, material, max_thinning, min_straight_mm, "
      "tail_length_mm",
      remote::NeedsPart},
     {"get_tube_rules",
@@ -61,14 +65,15 @@ static constexpr MethodDoc TubeMethods[] = {
      "is not the cut list's shape, which is why it is a second file.",
      "part, path", NotInBatch},
     {"check_tube",
-     "Manufacturability of every bent path in the part against its tube "
-     "rules: a former tighter than the wall can take (the limit is set by "
-     "D/t, not D), a radius no declared die matches, two bends too close "
-     "together to clamp between, nothing left to grip past the last one, an "
-     "outer wall pulled thinner than `max_thinning`. Each violation names the "
-     "member, the bend and the required-versus-actual number. `not_checked` "
-     "says what this build cannot answer — ovality and springback belong to "
-     "the tooling and the machine, which it has no model of — so an empty "
+     "Manufacturability of every tube member in the part, each against ITS "
+     "OWN stock: a size nobody rolls (so nobody can order it), a former "
+     "tighter than that member's wall can take (the limit is set by D/t, not "
+     "D), a radius no declared die matches, two bends too close together to "
+     "clamp between, nothing left to grip past the last one, an outer wall "
+     "pulled thinner than `max_thinning`. Each violation names the member, "
+     "the bend and the required-versus-actual number. `not_checked` says "
+     "what this build cannot answer — ovality and springback belong to the "
+     "tooling and the machine, which it has no model of — so an empty "
      "`violations` cannot be read as 'all clear' on those.",
      "part", remote::Deferrable},
 };
@@ -79,23 +84,27 @@ namespace {
 // records. A curve that is not a bent path is not a bendable member: a spline
 // has no former to check.
 std::vector<tube::Member> MembersOf(const Document& doc) {
+  // The cut list's own derivation, so the check and the order agree about
+  // what the members are and what each one is made of.
   std::vector<tube::Member> members;
-  for (size_t i = 0; i < doc.FeatureCount(); i++) {
-    const auto* curve = dynamic_cast<const CurveFeature*>(doc.GetFeature(i));
-    if (curve == nullptr || curve->kind != Curve3DKind::BentPath)
-      continue;
+  for (const tube::MemberRow& row : tube::Members(doc)) {
     tube::Member m;
-    m.name = curve->GetName();
-    m.length = curve->Length();
-    for (const CurveFeature::Bend& b : curve->Bends())
-      m.bends.push_back({b.angleDeg, b.radius, b.straightBefore, b.rollDeg});
-    members.push_back(std::move(m));
+    m.name = row.name;
+    m.length = row.pathLength;
+    m.outerDiameter = row.outerDiameter;
+    m.wallThickness = row.wallThickness;
+    m.bends = row.bends;
+    // A row stands for `quantity` identical members, and each of them is
+    // bent: a check that looked at one of four would report a quarter of the
+    // trouble.
+    for (int i = 0; i < row.quantity; i++)
+      members.push_back(m);
   }
   return members;
 }
 
-// A CSV field, quoted only where it has to be — the same rule export_bom's
-// writer uses, so two files from one project do not disagree about quoting.
+// A CSV field, quoted only where it has to be — the rule export_bom's writer
+// uses, so two files from one project do not disagree about quoting.
 std::string Field(const std::string& v) {
   if (v.find_first_of(",\"\n") == std::string::npos)
     return v;
@@ -130,18 +139,17 @@ json SizesJson(const std::string& material) {
 
 json RulesJson(const tube::TubeRules& r) {
   json j = {{"material", r.material},
-            {"size", r.size},
-            {"outer_diameter_mm", r.outerDiameter},
-            {"wall_mm", r.wallThickness},
-            {"min_straight_mm", r.EffectiveMinStraight()},
-            {"tail_length_mm", r.EffectiveTailLength()},
-            {"max_thinning", r.EffectiveMaxThinning()},
-            {"min_former_radius_mm",
-             tube::MinBendRadius(r.material, r.outerDiameter, r.wallThickness)},
-            {"min_former_source",
-             tube::MinBendRadiusSource(r.material, r.outerDiameter,
-                                       r.wallThickness)}};
+            {"max_thinning", r.EffectiveMaxThinning()}};
   j["former_radii_mm"] = r.formerRadii; // empty = any radius
+  // The straight a clamp needs and the tail a bender grips are multiples of
+  // the MEMBER's diameter, so they are reported as the rule rather than as a
+  // number that would be wrong for every member but one.
+  j["min_straight"] = r.minStraight > 0.0
+                          ? json(r.minStraight)
+                          : json("2 x the member's outer diameter");
+  j["tail_length"] = r.tailLength > 0.0
+                         ? json(r.tailLength)
+                         : json("1.5 x the member's outer diameter");
   return j;
 }
 
@@ -163,23 +171,13 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
       r = *active.Tube();
     if (p.contains("material"))
       r.material = p.at("material").get<std::string>();
-    if (p.contains("size"))
-      r.size = p.at("size").get<std::string>();
-    if (r.material.empty() || r.size.empty()) {
+    if (r.material.empty()) {
       throw std::runtime_error(
-          "set_tube_rules needs a material and a size - a bend cannot guess "
-          "the stock it is pulling. get_tube_rules lists what is stocked.");
+          "set_tube_rules needs a material - a bend cannot guess what it is "
+          "pulling. There is deliberately no SIZE here: unlike a sheet part, "
+          "a tube frame is several sizes at once and each member's Pipe "
+          "carries its own.");
     }
-    // The size IS the diameter and the wall: resolving here rather than
-    // storing numbers the caller supplies is what stops a document claiming
-    // 25.4x2.4 at a 1.6 mm wall.
-    std::string why;
-    const std::optional<tube::Size> s =
-        tube::LookupSize(r.material, r.size, &why);
-    if (!s)
-      throw std::runtime_error(why);
-    r.outerDiameter = s->outerDiameter;
-    r.wallThickness = s->wallThickness;
     if (p.contains("former_radii_mm")) {
       r.formerRadii.clear();
       for (const auto& v : p.at("former_radii_mm"))
@@ -251,24 +249,30 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
     }
     const std::string material =
         subject.Tube() ? subject.Tube()->material : std::string{};
-    const std::string size =
-        subject.Tube() ? subject.Tube()->size : std::string{};
-
     std::string csv;
     json out_extra = json::object();
     if (m == "export_cut_list") {
       csv = "member,quantity,material,size,cut_length_mm,bends,bodies\n";
       for (const tube::MemberRow& r : rows) {
+        // The size is the MEMBER's, off its own Pipe: a frame is several
+        // sizes at once, and a cut list that gave them all one would order
+        // the wrong tube for most of it.
         csv += Field(r.name) + "," + std::to_string(r.quantity) + "," +
-               Field(material) + "," + Field(size) + "," + Num(r.cutLength) +
-               "," + std::to_string(r.bends.size()) + "," +
-               Field(Join(r.bodies)) + "\n";
+               Field(material) + "," +
+               Field(tube::Designation(r.outerDiameter, r.wallThickness)) +
+               "," + Num(r.cutLength) + "," + std::to_string(r.bends.size()) +
+               "," + Field(Join(r.bodies)) + "\n";
       }
       if (p.contains("stock_length_mm")) {
         const double stock = p.at("stock_length_mm").get<double>();
         const double kerf = p.value("kerf_mm", 0.0);
-        std::vector<double> pieces;
+        // Packed PER SIZE. A 19.05 member cannot be cut from a 25.4 stick,
+        // so one pile of pieces across every size answers a question nobody
+        // asked and buys the wrong tube.
+        std::map<std::string, std::vector<double>> bySize;
         for (const tube::MemberRow& r : rows) {
+          const std::string size =
+              tube::Designation(r.outerDiameter, r.wallThickness);
           for (int i = 0; i < r.quantity; i++) {
             if (r.cutLength > stock + 1e-9) {
               throw std::runtime_error(
@@ -277,26 +281,34 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
                   " mm - it cannot be cut from one length, and joining it is "
                   "a decision this cannot make for you");
             }
-            pieces.push_back(r.cutLength);
+            bySize[size].push_back(r.cutLength);
           }
         }
-        const std::vector<tube::Stick> sticks =
-            tube::PackIntoStock(pieces, stock, kerf);
         csv += "\n";
-        csv += "stick,pieces,used_mm,offcut_mm\n";
-        int n = 0;
+        csv += "size,stick,pieces,used_mm,offcut_mm\n";
         json sticksJson = json::array();
         double offcut = 0.0;
-        for (const tube::Stick& s : sticks) {
-          csv += std::to_string(++n) + "," + std::to_string(s.pieces.size()) +
-                 "," + Num(s.used) + "," + Num(s.offcut) + "\n";
-          sticksJson.push_back({{"pieces", s.pieces},
-                                {"used_mm", s.used},
-                                {"offcut_mm", s.offcut}});
-          offcut += s.offcut;
+        int total = 0;
+        for (auto& [size, pieces] : bySize) {
+          const std::vector<tube::Stick> sticks =
+              tube::PackIntoStock(pieces, stock, kerf);
+          int n = 0;
+          for (const tube::Stick& s : sticks) {
+            csv += Field(size) + "," + std::to_string(++n) + "," +
+                   std::to_string(s.pieces.size()) + "," + Num(s.used) + "," +
+                   Num(s.offcut) + "\n";
+            sticksJson.push_back({{"size", size},
+                                  {"stick", n},
+                                  {"pieces", s.pieces},
+                                  {"used_mm", s.used},
+                                  {"offcut_mm", s.offcut}});
+            offcut += s.offcut;
+            total++;
+          }
         }
         out_extra["sticks"] = std::move(sticksJson);
         out_extra["stock_length_mm"] = stock;
+        out_extra["sticks_needed"] = total;
         out_extra["offcut_mm"] = offcut;
       }
     } else {

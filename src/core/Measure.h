@@ -151,6 +151,23 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
 bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
                  glm::vec3& min, glm::vec3& max);
 
+// True when the two placed body sets are further apart than `gap`, judged by
+// their ORIENTED boxes — the second prefilter, for the case an axis-aligned
+// one cannot help with.
+//
+// A long slanted member's axis-aligned box is mostly air: a space frame's
+// diagonals each box half the car, so almost every pair survives the cheap
+// test and pays for an exact boolean. A 32-member chassis took 84 s that way,
+// over the default RPC timeout, and the answer was 63 touching pairs out of
+// 496. An oriented box follows the member.
+//
+// Conservative in the only direction that matters: it returns true only when
+// the boxes are provably apart, so a pair it rejects cannot be touching.
+[[nodiscard]] bool SeparatedByOBB(const std::vector<Body>& a,
+                                  const glm::mat4& xfA,
+                                  const std::vector<Body>& b,
+                                  const glm::mat4& xfB, double gap);
+
 // V4 compare_geometry: boolean diff between two placed body sets. missing =
 // vol(A − B) (reference not covered), extra = vol(B − A) (beyond the
 // reference); the derived similarity metrics (IoU, precision/recall, ...) are

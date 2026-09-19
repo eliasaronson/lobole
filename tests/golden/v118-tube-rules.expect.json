@@ -15,13 +15,11 @@
   },
   "tube": {
     "material": "steel",
-    "size": "25.4x2.4",
-    "outer_diameter_mm": 25.4,
-    "wall_mm": 2.4,
     "former_radii_mm": [
       76.2,
       101.6
     ],
+    "member_od_mm": 25.4,
     "min_straight_mm": 50.8,
     "tail_length_mm": 38.1,
     "max_thinning": 0.2

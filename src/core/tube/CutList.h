@@ -31,6 +31,10 @@ namespace tube {
 [[nodiscard]] std::optional<std::pair<double, double>>
 MetalAlongPath(const Body& body, const CADShape& pathEdge);
 
+// How close two cut lengths have to be to be the same piece: finer than any
+// saw is set, and coarser than the noise a boolean leaves behind.
+inline constexpr double kSameLength = 0.1; // mm
+
 // One row of the cut list: a member, and the identical ones it stands for.
 struct MemberRow {
   std::string name;                // the centreline's name
@@ -52,7 +56,12 @@ struct MemberRow {
 // each one's path by provenance (back through whatever made it — a Cope
 // leaves the member's own Pipe in place, a Pattern names its source), so a
 // curve whose tube was consumed is not a member and one a mirror made is.
-// Identical members collapse into a single row carrying the quantity.
+// Members that are the same PIECE collapse into a single row carrying the
+// quantity — same stock, same bends, and a cut length within kSameLength.
+// Not exact equality: two mirrored members of a symmetric frame come off a
+// boolean microns apart, and four rows of "one each" where a shop wants "four
+// of these" is a cut list nobody can work from. The row reports the LONGEST
+// of its group, so cutting to it can only leave a member long, never short.
 // `onlyCurve` (0 = all) narrows it to one path.
 [[nodiscard]] std::vector<MemberRow> Members(const Document& doc,
                                              uint64_t onlyCurve = 0);
