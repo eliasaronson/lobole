@@ -1,0 +1,61 @@
+{
+  "format": "designer-document",
+  "version": 121,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Bracket"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Measured cutters",
+      "safe_z": 21.0,
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat, short stickout",
+          "diameter": 6.0,
+          "flute_length": 20.0,
+          "overall_length": 28.0,
+          "collar_diameter": 30.0
+        },
+        {
+          "number": 2,
+          "name": "3 mm flat",
+          "diameter": 3.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Pocket beside the boss",
+          "type": "pocket",
+          "tool": 1,
+          "top_z": 16.0,
+          "bottom_z": 6.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 1,
+              "element": "1/face0"
+            }
+          ]
+        }
+      ],
+      "machine": {
+        "name": "Shop router",
+        "post": "mach3"
+      }
+    }
+  ]
+}

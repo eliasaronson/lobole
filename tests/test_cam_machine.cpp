@@ -1009,6 +1009,47 @@ TEST_CASE("cam verify: the POSTED FILE is checked against the travel",
       said = true;
   CHECK(said);
 
+  // Z is a SPAN and not a position, which is the one axis where that is
+  // true. The bed's near corner is assumed to sit on the stock's near corner
+  // in X and Y -- a stated assumption `reach_offset` lets a person correct --
+  // and there is no equivalent in Z, because where the machine's zero sits
+  // relative to the workpiece is what the operator sets when they touch off,
+  // after the file is written.
+  //
+  // So: a through cut is NOT outside the travel. This one goes to Z-1, a
+  // millimetre into the spoilboard, which is the most ordinary thing a router
+  // does; anchoring the travel box's floor to the stock's underside reported
+  // it, and a check that fires on every through cut gets scrolled past.
+  cam::Setup roomy = setup;
+  roomy.machine.name = "Roomy";
+  roomy.machine.travelMin = {0.0, 0.0, 0.0};
+  roomy.machine.travelMax = {600.0, 900.0, 150.0};
+  // The bed starts 5 mm BEFORE the sheet. It has to: an outside profile puts
+  // the tool centre a radius beyond the part, which on this 2 mm margin is a
+  // millimetre off the stock, and the bed box is anchored to the stock's
+  // corner. That is the X/Y assumption `reach_offset` exists to correct, and
+  // correcting it here is what leaves Z as the only thing this case measures.
+  roomy.reachOffset = {-5.0, -5.0};
+  const cam::Verdict rv =
+      cam::VerifyGcode(gcode, roomy, doc->GetBodies(), 0.25);
+  INFO("roomy outside " << rv.outsideTravel << " axis " << rv.outsideAxis
+                        << " worst " << rv.worstOvershoot);
+  CHECK(rv.outsideTravel == 0);
+
+  // What IS a fact about the machine, needing nothing typed: this program's
+  // deepest point and its highest retract are about 27 mm apart, and a
+  // spindle with 5 mm of Z cannot run it at any touch-off height at all.
+  cam::Setup squat = roomy;
+  squat.machine.name = "Squat";
+  squat.machine.travelMax = {600.0, 900.0, 5.0};
+  const cam::Verdict sv =
+      cam::VerifyGcode(gcode, squat, doc->GetBodies(), 0.25);
+  INFO("squat outside " << sv.outsideTravel << " worst " << sv.worstOvershoot
+                        << " axis " << sv.outsideAxis);
+  CHECK(sv.outsideTravel > 0);
+  CHECK(sv.outsideAxis == 'Z');
+  CHECK(sv.worstOvershoot > 15.0);
+
   // ...and on a part that is CLAMPED, not modelled flat. `Inspect` frames the
   // bodies before this check, so framing them again inside it applied the
   // setup rotation twice -- which an identity frame cannot show. A baffle

@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    120; // v120: a `Cope`'s `mitre` list — the members it meets END TO END,
+    121; // v121: a `Tool`'s `overall_length` and `collar_diameter` — how far
+         //      the cutter sticks out of the collet and how wide the nut is.
+         //      Together they turn on the holder check in the verifier, which
+         //      finds the collar driven into material the cutter never went
+         //      near. Written only when stated, so a v120 build reads a job
+         //      of undimensioned tools byte-identically and one WITH them
+         //      simply stops checking the holder (docs/cam/simulation.md S6).
+         // v120: a `Cope`'s `mitre` list — the members it meets END TO END,
          //      cut on the plane that bisects them, which is the cut a
          //      corner wants and a fishmouth cannot make. A v119 build
          //      reads the key as absent and leaves every corner in the

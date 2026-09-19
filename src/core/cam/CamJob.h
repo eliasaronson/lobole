@@ -68,6 +68,19 @@ struct Tool {
   // tool library carries them into every new setup for free.
   double chiploadMin = 0.0;
   double chiploadMax = 0.0;
+  // The rest of the assembly, above the flutes: how far the cutter sticks out
+  // of the collet in total, and how wide the thing it sticks out of is. Both
+  // zero (the default) means nobody said, and nothing is checked -- the same
+  // rule as `Machine::travel`, because a limit nobody typed is not a limit.
+  //
+  // Two numbers and not a holder model. This is what a person can read off
+  // the machine with a rule: the tip-to-collet-face length they set when they
+  // tightened the nut, and the widest part of the nut. A real ER32 nut is a
+  // stepped cone and an ISO30 holder is a taper, and modelling either would
+  // ask the operator for a drawing they do not have in order to answer a
+  // question a cylinder already answers conservatively.
+  double overallLength = 0.0;  // mm, tip to the collar's underside
+  double collarDiameter = 0.0; // mm, the collet nut / holder, at its widest
   bool operator==(const Tool&) const = default;
 };
 
@@ -126,6 +139,26 @@ struct Machine {
   default:
     return 0.0;
   }
+}
+
+// Does this tool state a holder at all? Both numbers, and a collar wider than
+// the cutter -- a collar no wider than the flutes can foul nothing the flutes
+// did not already reach, and the reach check (CamFeeds.h) owns that question.
+[[nodiscard]] inline bool HasHolder(const Tool& t) {
+  return t.overallLength > 0.0 && t.collarDiameter > t.diameter;
+}
+
+// Would material at radial distance `d` from the axis, standing `h` mm above
+// the tool's tip, hit the collar?
+//
+// Deliberately blind inside the cutter's own radius. There the tool is the
+// tool: material in that column is either cut (and the height map records
+// that it was) or it is a plunge deeper than the cutter is long, which
+// `CamFeeds` already states at the SETUP, before a file exists. Reporting it
+// twice, in two different vocabularies, is how a check stops being read.
+[[nodiscard]] inline bool FoulsHolder(const Tool& t, double d, double h) {
+  return HasHolder(t) && d > t.diameter * 0.5 && d <= t.collarDiameter * 0.5 &&
+         h > t.overallLength;
 }
 
 // What an operation MACHINES: an element, and which part of the job it is on.

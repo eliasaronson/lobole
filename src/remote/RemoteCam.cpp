@@ -143,7 +143,8 @@ constexpr MethodDoc kCamMethods[] = {
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
-     "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?}} "
+     "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?, "
+     "overall_length?, collar_diameter?}} "
      "— `id` and `tool` are SIBLING parameters, not a nested object, and "
      "`number` is required because it says WHICH tool. The tool is "
      "added when the number is new. chipload_min/max are mm per tooth THIS "
@@ -161,7 +162,13 @@ constexpr MethodDoc kCamMethods[] = {
      "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
      "the whole tool): an operation cutting deeper than that is cutting with "
      "the shank and driving the holder into the work, and the reach finding "
-     "says so. diameter, tip_angle and the feeds are mm, degrees and mm/min. "
+     "says so. overall_length is mm from the TIP to the underside of the "
+     "collet nut and collar_diameter is that nut's width in mm; given as a "
+     "pair, they turn on the holder check in cam_verify, which finds the "
+     "collar driven into material the cutter never went near -- a clamp, a "
+     "boss beside a pocket, a tall neighbour on the same sheet. Without them "
+     "no holder is checked, because a limit nobody typed is not a limit. "
+     "diameter, tip_angle and the feeds are mm, degrees and mm/min. "
      "tool_type is the shape of the end: it decides what the verifier thinks "
      "was removed, and an edge_round op reads it to know whether it is "
      "cutting a bevel (vbit, tip_angle is the INCLUDED angle) or an arc "
@@ -291,12 +298,16 @@ constexpr MethodDoc kCamMethods[] = {
      "leftover_area_mm2, leftover_regions, rapids_through_stock "
      "(with worst_rapid_depth_mm/_at/_line: a graze and a crash are the "
      "same COUNT and different numbers), "
+     "holder_collisions (with worst_holder_depth_mm/_at/_line: the collet "
+     "nut driven into material the cutter never touched -- silent unless the "
+     "tool states overall_length and collar_diameter), "
      "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
      "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
      "`ok` = nothing scraps the part or breaks the tool (no "
-     "gouge, no rapid through material) and is the one to gate on; `complete` "
+     "gouge, no rapid through material, no holder collision) and is the one "
+     "to gate on; `complete` "
      "= nothing left standing. A TAB is not left standing by accident -- the "
      "toolpath says where it put each one and they are excused, up to their "
      "own height, so a tabbed job can now be complete. A dropping "
@@ -577,6 +588,8 @@ json ToolJson(const cam::Tool& t) {
               {"tip_angle", t.tipAngleDeg},
               {"flutes", t.flutes},
               {"flute_length", t.fluteLength},
+              {"overall_length", t.overallLength},
+              {"collar_diameter", t.collarDiameter},
               {"feed_cut", t.feedCut},
               {"feed_plunge", t.feedPlunge},
               {"spindle_rpm", t.spindleRpm},
@@ -1305,6 +1318,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       tool->spindleRpm = tj.value("spindle_rpm", tool->spindleRpm);
       tool->chiploadMin = tj.value("chipload_min", tool->chiploadMin);
       tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax);
+      tool->overallLength = tj.value("overall_length", tool->overallLength);
+      tool->collarDiameter = tj.value("collar_diameter", tool->collarDiameter);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
       if (tool->fluteLength <= 0.0)
@@ -1320,6 +1335,19 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "neither and the check falls back to a rule off the diameter");
       if (tool->chiploadMin > 0.0 && tool->chiploadMax <= tool->chiploadMin)
         throw std::runtime_error("chipload_max must be above chipload_min");
+      // The holder is a pair too, and for a sharper reason than the chip
+      // load: one of the two alone silently disables the check, so a person
+      // who typed a number would believe their holder was being looked at
+      // while nothing was looking. Refuse, and name the other half.
+      if ((tool->overallLength > 0.0) != (tool->collarDiameter > 0.0))
+        throw std::runtime_error(
+            "overall_length and collar_diameter come as a pair: the holder "
+            "check needs how far the tool sticks out AND how wide the collet "
+            "nut is. Give both, or neither and no holder is checked");
+      if (tool->overallLength > 0.0 && tool->overallLength < tool->fluteLength)
+        throw std::runtime_error(
+            "overall_length is measured from the TIP and includes the "
+            "flutes, so it cannot be shorter than flute_length");
     }
     return json{{"id", setup.id}};
   }
@@ -1525,6 +1553,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"worst_rapid_depth_mm", v.worstRapidDepth},
              {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
              {"worst_rapid_line", v.worstRapidLine},
+             {"holder_collisions", v.holderCollisions},
+             {"worst_holder_depth_mm", v.worstHolderDepth},
+             {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
+             {"worst_holder_line", v.worstHolderLine},
              // Moves the machine cannot reach. A verdict field nothing
              // reports is the same silence this check exists to end.
              {"outside_travel", v.outsideTravel},

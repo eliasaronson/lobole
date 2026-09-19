@@ -435,6 +435,25 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_tool_holders")) {
+    // v121: the stickout and the collet nut. A tool that loses either stops
+    // being checked against holder collisions ENTIRELY and silently -- the
+    // check reads "nobody stated a holder", which is indistinguishable from
+    // a job that never had one.
+    const auto& want = expect.at("cam_tool_holders");
+    std::vector<std::pair<double, double>> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Tool& t : s.tools)
+        got.emplace_back(t.overallLength, t.collarDiameter);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("tool " << i << " holder");
+      CHECK_THAT(got[i].first,
+                 Catch::Matchers::WithinAbs(want[i][0].get<double>(), 1e-12));
+      CHECK_THAT(got[i].second,
+                 Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("cam_reach_offsets")) {
     const auto& want = expect.at("cam_reach_offsets");
     REQUIRE(want.size() == setups.size());

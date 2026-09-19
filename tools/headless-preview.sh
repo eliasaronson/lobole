@@ -73,9 +73,20 @@ wait_ready() {
 if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   DESIGNER_PREVIEW_CONFIG="${TMPDIR:-/tmp}/designer-preview-config-$$"
   mkdir -p "$DESIGNER_PREVIEW_CONFIG/designer"
-  REAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/designer/settings.json"
-  [ -f "$REAL_CONFIG" ] &&
-    cp "$REAL_CONFIG" "$DESIGNER_PREVIEW_CONFIG/designer/settings.json"
+  REAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/designer"
+  [ -f "$REAL_DIR/settings.json" ] &&
+    cp "$REAL_DIR/settings.json" "$DESIGNER_PREVIEW_CONFIG/designer/settings.json"
+  # ...and the MACHINE store. A setup names its machine by name, so a preview
+  # without one refuses every CAM job with "no machine called '6090'" against
+  # a machine plainly on disk -- the same trap the headless RPC path fell into
+  # (docs/cam/dogfood-waveguide.md), arriving from the other side. Copied, so
+  # an agent editing a machine here cannot touch the shop's.
+  #
+  # settings.json and machines/ only, explicitly. `cp -r` of the whole
+  # directory would take onshape.env with it, and a scratch dir under /tmp is
+  # not where API credentials belong.
+  [ -d "$REAL_DIR/machines" ] &&
+    cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/designer/"
 fi
 export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
 

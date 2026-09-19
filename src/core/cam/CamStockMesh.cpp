@@ -287,8 +287,21 @@ StockMesh BuildToolMesh(const Tool& tool) {
   // perspective FOV that swings its apparent axis far more than it turns —
   // which is what made the glyph read as a shape lying on its side that
   // half-followed the camera.
-  const double holderR = std::max(r * 1.6, r + 2.0);
-  const double holderZ = flutes + std::max(4.0, r * 1.5);
+  //
+  // ...unless the tool STATES one, in which case the glyph draws the collar
+  // the verifier is checking against. A holder collision reported on line
+  // 4102 is a number; the same collar visibly buried in a clamp while the
+  // simulation plays is the answer. One source for both, as with everything
+  // else here.
+  const bool stated = HasHolder(tool);
+  const double holderR =
+      stated ? tool.collarDiameter * 0.5 : std::max(r * 1.6, r + 2.0);
+  // Where the collar's underside sits. Unstated, it sits straight on top of
+  // the flutes as it always has; stated, the SHANK runs between them, which
+  // is the gap the whole check is about -- a stickout is only worth typing
+  // because it can be longer than the cutting part.
+  const double collarZ = stated ? std::max(flutes, tool.overallLength) : flutes;
+  const double holderZ = collarZ + std::max(4.0, r * 1.5);
 
   std::vector<glm::dvec2> profile;
   profile.push_back({0.0, 0.0});
@@ -306,7 +319,9 @@ StockMesh BuildToolMesh(const Tool& tool) {
     profile.push_back({d, TipHeight(tool, d)});
   }
   profile.push_back({r, flutes});
-  profile.push_back({holderR, flutes});
+  if (collarZ > flutes)
+    profile.push_back({r, collarZ});
+  profile.push_back({holderR, collarZ});
   profile.push_back({holderR, holderZ});
   profile.push_back({0.0, holderZ}); // cap, so the holder is closed
 

@@ -94,7 +94,7 @@ whole mitigation, and a GUI test asserts visibility is restored.
 | **S3** | `StockRenderer` — a dynamic-buffer mesh path that does not stall | ~350 lines + 2 shaders, ½ session |
 | **S4** | The tool, to scale, moving; ghosted bodies; past/future path | ~150 lines, ¼ session |
 | **S5** | Transport UI, frame pacing, refusals, RPC | ~250 lines, ½ session |
-| **S6** | What it can then answer for free — colour by op, holder collision, deviation map | ~200 lines each, on demand |
+| **S6** | What it can then answer for free — colour by op, holder collision (BUILT v121), deviation map | ~200 lines each, on demand |
 
 S1–S5 is the deliverable: **about one and a half sessions.**
 
@@ -196,18 +196,38 @@ almost answer:
 - **Colour by operation.** A parallel `vector<uint16_t>` of "which op last cut
   this cell", written in the same loop. Answers *which operation left that?*
   and makes a redundant op visible as an area nothing else touched.
-- **Holder and shank collision.** `TipHeight` generalises to a radius-above-tip
-  profile for the whole assembly; a cell whose stock stands above the shank
-  envelope is a collision, reported with its G-code line — the same shape as
-  the existing `rapidsThroughStock` check, which is already trusted.
+- **Holder and shank collision.** BUILT (v121). Two numbers on the `Tool` —
+  `overall_length`, tip to the underside of the collet nut, and
+  `collar_diameter`, that nut at its widest — and every move in the posted
+  file is checked against the height map: a cell standing above
+  `tip + overall_length`, further out than the cutter's own radius and no
+  further than the collar's, is the nut in the work. Reported as
+  `holder_collisions` with a depth, a place and a G-code line, exactly like
+  `rapidsThroughStock`, and it counts against `ok`.
 
-  Still the real version, but no longer the only line of defence: `CamFeeds`
-  now compares the deepest enabled operation on each tool against that tool's
-  `flute_length` and says so (docs/cam/reach-and-fidelity-plan.md). That
-  catches the case this bullet exists for — a cut deeper than the cutter is
-  long — without a swept envelope, and it catches it at the SETUP rather than
-  on the posted file. What it cannot do is notice a holder fouling something
-  the tool never cut into, which is what the envelope is for.
+  Deliberately blind INSIDE the cutter's radius. There the tool is the tool:
+  material in that column is either cut (and the map records it) or it is a
+  plunge deeper than the cutter is long, which `CamFeeds` already states at
+  the SETUP, before a file exists (docs/cam/reach-and-fidelity-plan.md). Two
+  checks for one fault, in two vocabularies, is how a check stops being read.
+  What the reach finding cannot see is a holder fouling something the tool
+  never cut into — a clamp, a boss beside a pocket, a tall neighbour on the
+  same sheet — and that is exactly and only what this one adds.
+
+  Silent unless both numbers are stated, on the `Machine::HasWorkArea` rule:
+  a limit nobody typed is not a limit. They come as a PAIR and the RPC refuses
+  one alone, because half a holder disables the check while looking like it
+  enabled it. The tool GLYPH draws the stated collar too, so the collision is
+  something you watch happen and not only a line number.
+
+  On cost, measured rather than assumed: the collar's swept box is five times
+  wider than the cutter's, and walking it per move took the waveguide job
+  (5 ops, 33 803 lines) from 1.5 s to 4.4 s. One comparison fixes that —
+  nothing can ever stand taller than the UNCUT block, and a height map only
+  comes down, so a collar riding above the stock's own top is skipped whole.
+  That is the common case (a 60 mm stickout over a 25 mm blank), and with it
+  the same job verifies in 1.4 s, which is what it cost before the check
+  existed.
 - **Deviation map.** `machined - designed` on the same grid, painted on the
   stock. `Compare` computes it now and throws away everything but the extremes.
 
@@ -491,9 +511,9 @@ gone. This is correct, and it is why a screenshot taken down the tool axis at
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and
   scales with the grid; a part four times the area at 0.1 mm would be worth a
   dirty-rect rebuild. Measure before building it.
-- S6 is untouched: colour by operation, holder collision, deviation map. All
-  three are now cheap — the height map, the op id per move and the tool
-  profile are all in place.
+- S6 is half done: HOLDER COLLISION shipped at v121 (above). Colour by
+  operation and the deviation map are untouched, and both are still cheap —
+  the height map and the op id per move are in place.
 
 ### The transport is a floating window (2026-09-02)
 

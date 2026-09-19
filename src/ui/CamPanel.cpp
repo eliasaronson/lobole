@@ -992,6 +992,31 @@ void DrawCamPanel(AppState& state) {
         ImGui::SetItemTooltip("INCLUDED angle at the point: 90 for the "
                               "common chamfer bit, 118 for a twist drill.");
       }
+      // The holder, on its own row: the two numbers that turn the collar
+      // check on. Both zero means nobody said, and the check stays quiet --
+      // so this row is empty on every tool until somebody measures theirs,
+      // which is exactly the right default for a limit nobody typed.
+      ImGui::SetNextItemWidth(70.0f);
+      float stickout = static_cast<float>(t.overallLength);
+      if (ExprDragFloat(state, "out###overall", &stickout, 0.5f, 0.0f, 400.0f,
+                        "%.1f")) {
+        t.overallLength = stickout;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Stickout, mm: tip to the underside of the collet "
+                            "nut. With the collar width, cam_verify checks "
+                            "the nut against material the cutter never "
+                            "touches. 0 = not stated, nothing checked.");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(70.0f);
+      float collar = static_cast<float>(t.collarDiameter);
+      if (ExprDragFloat(state, "collar###collardia", &collar, 0.5f, 0.0f,
+                        120.0f, "%.1f")) {
+        t.collarDiameter = collar;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("The collet nut at its widest, mm. Needs the "
+                            "stickout beside it to mean anything.");
       ImGui::PopID();
     }
     ImGui::PopID(); // "tools"

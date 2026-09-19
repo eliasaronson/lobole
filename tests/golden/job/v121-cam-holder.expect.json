@@ -1,0 +1,22 @@
+{
+  "job_parts": [
+    "Bracket"
+  ],
+  "cam_op_types": [
+    "pocket"
+  ],
+  "cam_tool_types": [
+    "flat",
+    "flat"
+  ],
+  "cam_tool_holders": [
+    [
+      28.0,
+      30.0
+    ],
+    [
+      0.0,
+      0.0
+    ]
+  ]
+}

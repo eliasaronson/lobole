@@ -147,6 +147,12 @@ json ToolToJson(const cam::Tool& t) {
     tj["chipload_min"] = t.chiploadMin;
     tj["chipload_max"] = t.chiploadMax;
   }
+  // Same rule again (v121): a job whose tools carry no holder dimensions
+  // re-saves byte-identically, and the holder check stays silent on it.
+  if (t.overallLength > 0.0 || t.collarDiameter > 0.0) {
+    tj["overall_length"] = t.overallLength;
+    tj["collar_diameter"] = t.collarDiameter;
+  }
   return tj;
 }
 
@@ -164,6 +170,8 @@ cam::Tool ToolFromJson(const json& tj) {
   t.tipAngleDeg = tj.value("tip_angle", 90.0);
   t.chiploadMin = tj.value("chipload_min", 0.0);
   t.chiploadMax = tj.value("chipload_max", 0.0);
+  t.overallLength = tj.value("overall_length", 0.0);
+  t.collarDiameter = tj.value("collar_diameter", 0.0);
   return t;
 }
 

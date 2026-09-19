@@ -149,6 +149,20 @@ struct Verdict {
   double worstRapidDepth = 0.0; // mm of stock standing above the tool
   glm::dvec2 worstRapidAt{0.0};
   int worstRapidLine = 0;
+  // Moves whose HOLDER -- the collet nut above the flutes -- passes through
+  // material the cutter never reached: a boss beside a pocket, a clamp, a
+  // tall neighbour on the same sheet. A different failure from every other
+  // one here, and the only one the shape of the finished part cannot show,
+  // because the part can come out perfect and the nut still smash a fixture
+  // on the way past.
+  //
+  // Silent unless the tool states a holder (`HasHolder`). Every job in the
+  // corpus predates the two fields, so this counts zero for all of them --
+  // which is the honest answer: nobody said how big the nut was.
+  int holderCollisions = 0;
+  double worstHolderDepth = 0.0; // mm the stock stands above the collar
+  glm::dvec2 worstHolderAt{0.0};
+  int worstHolderLine = 0;
   // Moves in the POSTED FILE that ask for somewhere the machine cannot go.
   // Checked on the artifact rather than on the generator that made it: the
   // generator's own idea of reach was wrong once already (it nailed the
@@ -208,7 +222,7 @@ struct Verdict {
   // through material are unambiguous — no job wants either, ever.
   [[nodiscard]] bool Safe(double tolerance) const {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
-           outsideTravel == 0;
+           outsideTravel == 0 && holderCollisions == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of

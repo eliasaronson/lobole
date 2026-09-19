@@ -712,6 +712,99 @@ TEST_CASE("cam mesh: every triangle faces the way its normals do", "[cam]") {
   CHECK(sDisagree == 0);
 }
 
+TEST_CASE("cam verify: the holder fouls what the cutter never touched",
+          "[cam]") {
+  // The one failure the finished part cannot show you. Every other check in
+  // this file reads the SHAPE that came out; here the shape is perfect and
+  // the collet nut has hit the tower beside the pocket on the way past.
+  //
+  // The part: a 10 mm base with a 40 mm tower standing at one end of it.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 60, 30, 10));
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Tower", glm::vec3(44, 0, 0), 16, 30, 40));
+
+  cam::Setup setup = BasicSetup();
+  setup.origin = glm::dvec3(0.0); // the file is written in setup space here
+  // T1 roughs and states no holder, so nothing is checked on it -- which is
+  // what lets the clearing passes below set the map up without reporting
+  // themselves. T2 is the short one that gets into trouble.
+  cam::Tool t2 = setup.tools[0];
+  t2.number = 2;
+  t2.name = "6mm flat, short";
+  t2.fluteLength = 20.0;
+  t2.overallLength = 25.0;  // tip to the underside of the nut
+  t2.collarDiameter = 30.0; // an ER32 nut, near enough
+  setup.tools.push_back(t2);
+
+  // Clear the base end down to its top face with T1 (to X41, so the 6 mm
+  // cutter reaches the tower's face at X44 and no uncut sliver is left to
+  // stand in for it), then take one pass with
+  // T2 alongside the tower. Written by hand rather than generated: the point
+  // is a tool change between two identical cuts, which no strategy emits.
+  std::string g = "T1 M6\n";
+  for (int k = 0; k <= 9; k++) {
+    const double y = -2.0 + 4.0 * k;
+    g += "G1 X-2 Y" + std::to_string(y) + " Z10\n";
+    g += "G1 X41 Y" + std::to_string(y) + " Z10\n";
+  }
+  // Park over cleared ground and lift BEFORE the tool change. A diagonal
+  // retract straight from the last pass to the new start passes within four
+  // millimetres of the tower at Z10, which the fat collar rightly reports and
+  // the slim one below does too -- a real finding, and not the one this case
+  // is about.
+  g += "G1 X-2 Y-2 Z10\nG0 Z50\n";
+  g += "T2 M6\nG0 X38 Y0\nG1 Z10\nG1 Y30\n";
+
+  const cam::Inspection insp = cam::Inspect(g, setup, doc->GetBodies(), 0.5);
+  REQUIRE(insp.ok);
+  INFO("collisions " << insp.verdict.holderCollisions << " worst "
+                     << insp.verdict.worstHolderDepth << " at line "
+                     << insp.verdict.worstHolderLine);
+  CHECK(insp.verdict.holderCollisions > 0);
+  // The tower's uncut stock stands at Z41 (the 1 mm top margin) and the
+  // collar's underside rides at 10 + 25 = 35. Six millimetres of nut in the
+  // work, which is a number, not a feeling.
+  CHECK_THAT(insp.verdict.worstHolderDepth, WithinAbs(6.0, 0.05));
+  CHECK(insp.verdict.worstHolderAt.x >= 44.0); // on the tower, not the base
+  CHECK(!insp.verdict.Safe(0.01));
+
+  // ...and it says so in words, with the advice that actually helps: the
+  // cutter is nowhere near, so grinding the depths will not fix it.
+  const std::vector<cam::VerdictLine> says =
+      cam::Explain(insp.verdict, 0.01, 0.0);
+  bool said = false;
+  for (const cam::VerdictLine& l : says)
+    said = said || l.text.find("HOLDER") != std::string::npos;
+  CHECK(said);
+
+  // TWO controls, because a check that fires on everything is not a check.
+  //
+  // A slim collar passes where the fat one does not: the band it sweeps
+  // (3 to 4 mm out) lies entirely over material T1 already cleared.
+  cam::Setup slim = setup;
+  slim.tools[1].collarDiameter = 8.0;
+  const cam::Verdict sv = cam::Inspect(g, slim, doc->GetBodies(), 0.5).verdict;
+  INFO("slim at " << sv.worstHolderAt.x << "," << sv.worstHolderAt.y
+                  << " depth " << sv.worstHolderDepth << " line "
+                  << sv.worstHolderLine);
+  CHECK(sv.holderCollisions == 0);
+  // And so does the same nut held higher up: stick the tool out 45 mm and
+  // the collar rides at 55, clear over a 41 mm block.
+  cam::Setup high = setup;
+  high.tools[1].overallLength = 45.0;
+  CHECK(cam::Inspect(g, high, doc->GetBodies(), 0.5).verdict.holderCollisions ==
+        0);
+  // And a tool that states NOTHING is checked against nothing -- every job in
+  // the corpus predates these two fields and must stay quiet.
+  cam::Setup mute = setup;
+  mute.tools[1].overallLength = 0.0;
+  mute.tools[1].collarDiameter = 0.0;
+  CHECK(cam::Inspect(g, mute, doc->GetBodies(), 0.5).verdict.holderCollisions ==
+        0);
+}
+
 TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
   // The tool glyph is a revolved profile with three hard corners: flute to
   // shoulder, shoulder to holder, holder to cap. `Revolve` used to take a

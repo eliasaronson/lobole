@@ -609,6 +609,10 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   glm::dvec2 worstRapidAt(0.0);
   int worstRapidLine = 0;
   int firstBadLine = 0;
+  int holderCollisions = 0;
+  double worstHolderDepth = 0.0;
+  glm::dvec2 worstHolderAt(0.0);
+  int worstHolderLine = 0;
   std::vector<uint8_t> touched(machined.z.size(), 0);
   {
     HeightMap probe = machined;
@@ -692,6 +696,78 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
           }
         }
       }
+      // The holder, on EVERY move. Unlike the rapid check this is not about
+      // how the tool is travelling -- a collet nut buried in a clamp is a
+      // crash at 300 mm/min just as surely as at rapid, and the feed only
+      // decides how much of the machine goes with it.
+      //
+      // A lambda, and not the `continue` this shape invites: every move below
+      // still has to be CARVED, and an early-out at this level would quietly
+      // stop simulating the job it is checking.
+      if (const Tool* tool = setup.FindTool(m.tool);
+          tool != nullptr && HasHolder(*tool))
+        [&] {
+          const double rc = tool->collarDiameter * 0.5;
+          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+          // The collar's underside over the whole move: the tip is lowest at
+          // zLow, so that is where the collar hangs lowest too.
+          const double zLow = std::min(from.z, m.to.z);
+          const double under = zLow + tool->overallLength;
+          // Nothing in this job can ever be taller than the uncut block, and a
+          // height map only ever comes DOWN -- so a collar riding above the
+          // stock's own top cannot hit anything, and the whole scan is skipped
+          // on one comparison. That is the common case and it matters: the
+          // collar's swept box is five times wider than the cutter's, which
+          // took the waveguide's verify from 1.5 s to 4.4 s before this line.
+          if (under >= hi.z - kGrazeTolerance)
+            return;
+          const int i0 = std::max(
+              0, static_cast<int>((std::min(a.x, b.x) - rc - probe.x0) /
+                                  probe.res));
+          const int i1 =
+              std::min(probe.nx - 1,
+                       static_cast<int>((std::max(a.x, b.x) + rc - probe.x0) /
+                                        probe.res) +
+                           1);
+          const int j0 = std::max(
+              0, static_cast<int>((std::min(a.y, b.y) - rc - probe.y0) /
+                                  probe.res));
+          const int j1 =
+              std::min(probe.ny - 1,
+                       static_cast<int>((std::max(a.y, b.y) + rc - probe.y0) /
+                                        probe.res) +
+                           1);
+          bool hit = false;
+          double deepest = 0.0;
+          glm::dvec2 deepestAt(0.0);
+          for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+              double t = 0.0;
+              const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
+              const double d = DistToSegment(c, a, b, t);
+              const double top = probe.At(i, j);
+              // The same graze tolerance the rapid check uses, for the same
+              // reason: a cell standing a nanometre proud of the collar is
+              // quantisation, not a crash.
+              if (!FoulsHolder(*tool, d, top - zLow - kGrazeTolerance))
+                continue;
+              const double into = top - under;
+              hit = true;
+              if (into > deepest) {
+                deepest = into;
+                deepestAt = c;
+              }
+            }
+          }
+          if (hit) {
+            holderCollisions++;
+            if (deepest > worstHolderDepth) {
+              worstHolderDepth = deepest;
+              worstHolderAt = deepestAt;
+              worstHolderLine = m.line;
+            }
+          }
+        }();
       // Apply every move (cuts remove material; rapids over air do nothing).
       if (!m.rapid) {
         CarveSweep(from, m.to, setup.FindTool(m.tool), probe);
@@ -712,6 +788,10 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.worstRapidDepth = worstRapidDepth;
   out.verdict.worstRapidAt = worstRapidAt;
   out.verdict.worstRapidLine = worstRapidLine;
+  out.verdict.holderCollisions = holderCollisions;
+  out.verdict.worstHolderDepth = worstHolderDepth;
+  out.verdict.worstHolderAt = worstHolderAt;
+  out.verdict.worstHolderLine = worstHolderLine;
 
   // Can the machine actually GO where the file asks? Checked on the posted
   // file, not on the toolpath that produced it -- the generator's own idea of
@@ -725,14 +805,11 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // baffle clamped face-up 391 mm outside its own machine.
   glm::dvec3 bedLo(0.0), bedHi(0.0);
   if (MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
-    const char axes[3] = {'X', 'Y', 'Z'};
+    const char axes[2] = {'X', 'Y'};
+    double zLo = 0.0, zHi = 0.0;
+    bool haveZ = false;
     for (const GMove& mv : program.moves) {
-      // Three axes, not two. This checked X and Y only, and Z is the axis a
-      // router has least of -- 150 mm on the 6090 against 600 and 900 -- so the
-      // one most likely to be run out of was the one nothing looked at. A safe
-      // Z above the machine's reach is a crash into the gantry, and it posted
-      // silently.
-      for (int a = 0; a < 3; a++) {
+      for (int a = 0; a < 2; a++) {
         const double over = std::max(bedLo[a] - mv.to[a], mv.to[a] - bedHi[a]);
         if (over <= 1e-6)
           continue;
@@ -743,6 +820,35 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
         }
         if (out.verdict.firstOutsideLine == 0)
           out.verdict.firstOutsideLine = mv.line;
+      }
+      zLo = haveZ ? std::min(zLo, mv.to.z) : mv.to.z;
+      zHi = haveZ ? std::max(zHi, mv.to.z) : mv.to.z;
+      haveZ = true;
+    }
+    // Z is a SPAN, not a position, and that distinction is the whole of this
+    // paragraph. In X and Y the bed's near corner is assumed to sit on the
+    // stock's near corner plus `reach_offset` -- a stated assumption a person
+    // can correct. There is no equivalent in Z: nothing says where the
+    // machine's Z zero sits relative to the workpiece, because that is what
+    // the operator sets when they touch off, AFTER the file is written.
+    //
+    // Anchoring it anyway is what this check did when it grew its third axis,
+    // and it read `lo.z = the stock's underside` -- so the waveguide's five
+    // profile moves at Z-0.5, which is a through cut into the spoilboard and
+    // the most ordinary thing a router does, came back as "1.0 mm past its Z
+    // travel". A check that fires on every through cut is a check that gets
+    // scrolled past, which is the failure this whole file exists to avoid.
+    //
+    // What IS a fact about the machine, needing nothing typed: a program
+    // whose deepest point and highest retract are further apart than the
+    // Z travel cannot run at any touch-off height at all.
+    const double zTravel = bedHi.z - bedLo.z;
+    if (haveZ && zHi - zLo > zTravel + 1e-6) {
+      out.verdict.outsideTravel++;
+      const double over = (zHi - zLo) - zTravel;
+      if (over > out.verdict.worstOvershoot) {
+        out.verdict.worstOvershoot = over;
+        out.verdict.outsideAxis = 'Z';
       }
     }
   }
@@ -874,6 +980,21 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                           "worst where the surface is steep.");
     out.push_back(
         {graze ? VerdictLine::Level::Warn : VerdictLine::Level::Bad, buf});
+  }
+  if (v.holderCollisions > 0) {
+    // No graze band here. A rapid brushing a scallop it cut itself is a rub;
+    // the collet nut touching anything at all is not, because nothing above
+    // the flutes is supposed to reach the work under any circumstances.
+    std::snprintf(buf, sizeof(buf),
+                  "%d move%s drive the HOLDER into material, worst %.2f mm "
+                  "past the collar at X%.1f Y%.1f (line %d). The cutter never "
+                  "goes near it, so the part still measures right — stick the "
+                  "tool out further, use a shorter-nosed holder, or clear that "
+                  "material with a longer tool first.",
+                  v.holderCollisions, v.holderCollisions == 1 ? "" : "s",
+                  v.worstHolderDepth, v.worstHolderAt.x, v.worstHolderAt.y,
+                  v.worstHolderLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
   }
   if (v.outsideTravel > 0) {
     std::snprintf(buf, sizeof(buf),

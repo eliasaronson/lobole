@@ -549,11 +549,21 @@ def _autostart():
     # preferences. Seed from them so it still looks like their app.
     cfg = pathlib.Path(scratch, "config", "designer")
     cfg.mkdir(parents=True)
-    real = pathlib.Path(env.get("XDG_CONFIG_HOME",
-                                os.path.expanduser("~/.config")),
-                        "designer", "settings.json")
-    if real.is_file():
-        shutil.copy(real, cfg / "settings.json")
+    real_dir = pathlib.Path(env.get("XDG_CONFIG_HOME",
+                                    os.path.expanduser("~/.config")),
+                            "designer")
+    if (real_dir / "settings.json").is_file():
+        shutil.copy(real_dir / "settings.json", cfg / "settings.json")
+    # ...and the MACHINE store. A CAM setup names its machine BY NAME, so a
+    # scratch instance without one refuses every job with "no machine called
+    # '6090'" against a machine plainly on disk. Copied, so editing one here
+    # cannot touch the shop's.
+    #
+    # settings.json and machines/ by name, never the whole directory: that
+    # would take onshape.env with it, and a scratch dir under /tmp is not
+    # where API credentials belong.
+    if (real_dir / "machines").is_dir():
+        shutil.copytree(real_dir / "machines", cfg / "machines")
     env["XDG_CONFIG_HOME"] = str(pathlib.Path(scratch, "config"))
     log_path = os.path.join(scratch, "app.log")
     with open(log_path, "w") as log:

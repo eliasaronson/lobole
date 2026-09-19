@@ -80,8 +80,10 @@ The MCP server resolves what to talk to in that order:
    binary is probed — dev-tree `build/designer` beside the server, `designer`
    on PATH, then the flatpak), attach to the port the child announces, and
    kill it when the server exits. The child gets a scratch
-   `XDG_CONFIG_HOME` seeded from the real one, so `set_settings` can never
-   rewrite the human's preferences. Disable with `--no-autostart` /
+   `XDG_CONFIG_HOME` seeded from the real one — settings and the MACHINE
+   store, by name, never the whole directory (which holds `onshape.env`) — so
+   `set_settings` can never rewrite the human's preferences and a CAM setup
+   can still find the machine it names. Disable with `--no-autostart` /
    `DESIGNER_AUTOSTART=0`; with autostart off or no binary found, the error
    names the exact start command (or what was probed).
 
