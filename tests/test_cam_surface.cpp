@@ -691,4 +691,51 @@ TEST_CASE("surfacing: a finer stepover leaves a smaller scallop",
   CHECK(coarse - fine > 0.05);
 }
 
+TEST_CASE("surfacing: neighbouring passes are linked, not lifted over",
+          "[cam][surface]") {
+  // A zigzag raster turns at the end of a pass and comes back along the
+  // next; it does not climb to safe Z between them. Lifting every time costs
+  // a retract and a plunge each, and on a steep surface it puts the ball's
+  // rim in the strip beside it that has not been cut yet -- 121 rapids
+  // through material on the waveguide, worst 0.787 mm.
+  //
+  // The passes have to be ORDERED first. Raster order stops being tour order
+  // the moment the region has a hole: every row crosses an annulus twice, so
+  // the passes arrive left, right, left, right and consecutive entries lie
+  // across the hole from one another. Linking them in raster order took 121
+  // lifts to 120; ordering them nearest-end-first took it to 16.
+  auto doc = BlockDoc(60, 60, 10);
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = 20.0;
+  setup.tools[0] = BallNose(6.0);
+  setup.tools[0].number = 1;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceParallel;
+  op.toolNumber = 1;
+  op.topZ = 11.0;
+  op.bottomZ = 0.0;
+  op.stepover = 0.3;
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  size_t lifts = 0, cuts = 0;
+  for (const cam::Move& m : paths[0].moves) {
+    if (m.kind == cam::Move::Kind::Rapid && m.to.z >= setup.safeZ - 1e-6)
+      lifts++;
+    if (m.kind == cam::Move::Kind::Cut)
+      cuts++;
+  }
+  INFO("lifts " << lifts << " over " << cuts << " cut moves");
+  REQUIRE(cuts > 100);
+  // A flat top is one connected region, so the whole raster is ONE tour: in
+  // and out, and nothing in between. Lifting per pass would be dozens.
+  CHECK(lifts <= 2);
+}
+
 #endif // HAVE_CAM

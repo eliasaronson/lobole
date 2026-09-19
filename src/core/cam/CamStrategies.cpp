@@ -1083,16 +1083,87 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
 // The entry is a rapid to safe Z over the first point, then a plunge to it.
 // There is no ramp: a finishing pass starts on a surface the roughing already
 // cleared, so the descent is through air.
-void EmitSurfacePath(Toolpath& tp, const Setup& setup, const Tool& tool,
-                     const SurfacePath& path) {
-  if (path.size() < 2)
-    return;
-  Emit(tp, Move::Kind::Rapid, {path.front().x, path.front().y, setup.safeZ},
-       0.0);
-  Emit(tp, Move::Kind::Plunge, path.front(), tool.feedPlunge);
-  for (size_t i = 1; i < path.size(); i++)
-    Emit(tp, Move::Kind::Cut, path[i], tool.feedCut);
-  Emit(tp, Move::Kind::Rapid, {path.back().x, path.back().y, setup.safeZ}, 0.0);
+// Emit a run of passes, LINKING the ones that are neighbours.
+//
+// A zigzag raster does not lift between adjacent passes -- it turns at the
+// end of one and comes back along the next. Lifting to safe Z after every
+// pass costs a retract and a plunge each time, and it is also what put the
+// ball's rim in the strip beside it: climbing vertically out of a groove on
+// a steep surface, the uncut neighbour stands above the tool's own profile.
+// On the waveguide that was 121 rapids through material, worst 0.787 mm, all
+// of them at the steep throat end (docs/cam/hardening-round.md).
+//
+// The link is a CUT move straight across. Over one stepover that is safe on
+// either curvature: concave, the chord runs above the surface; convex, it
+// runs below by the sagitta, which for a 0.9 mm step on a 30 mm crown is
+// 3 microns. Anything further apart than a couple of stepovers is a real gap
+// -- a hole in the region, or the far side of it -- and gets the lift.
+void EmitSurfacePasses(Toolpath& tp, const Setup& setup, const Tool& tool,
+                       const std::vector<SurfacePath>& passes,
+                       double linkWithin) {
+  // ORDER them first, nearest end to nearest end, reversing a pass when its
+  // far end is the closer one.
+  //
+  // Raster order is not tour order the moment the region has a hole in it.
+  // The waveguide's flare is an annulus, so every row crosses it TWICE and
+  // the passes arrive left, right, left, right -- consecutive entries lying
+  // across the hole from each other rather than side by side. Linking them
+  // in that order links almost nothing: it took 121 lifts to 120.
+  std::vector<SurfacePath> tour;
+  tour.reserve(passes.size());
+  std::vector<bool> used(passes.size(), false);
+  glm::dvec3 cursor(0.0);
+  bool have = false;
+  for (size_t n = 0; n < passes.size(); n++) {
+    size_t best = passes.size();
+    bool bestFlip = false;
+    double bestD = 0.0;
+    for (size_t k = 0; k < passes.size(); k++) {
+      if (used[k] || passes[k].size() < 2)
+        continue;
+      const double dHead = have ? glm::length(passes[k].front() - cursor) : 0.0;
+      const double dTail = have ? glm::length(passes[k].back() - cursor) : 1.0;
+      const bool flip = dTail < dHead;
+      const double d = std::min(dHead, dTail);
+      if (best == passes.size() || d < bestD) {
+        best = k;
+        bestFlip = flip;
+        bestD = d;
+      }
+    }
+    if (best == passes.size())
+      break;
+    used[best] = true;
+    SurfacePath path = passes[best];
+    if (bestFlip)
+      std::reverse(path.begin(), path.end());
+    cursor = path.back();
+    have = true;
+    tour.push_back(std::move(path));
+  }
+
+  bool down = false;
+  glm::dvec3 at(0.0);
+  for (const SurfacePath& path : tour) {
+    if (path.size() < 2)
+      continue;
+    const bool linkable = down && glm::length(path.front() - at) <= linkWithin;
+    if (linkable) {
+      Emit(tp, Move::Kind::Cut, path.front(), tool.feedCut);
+    } else {
+      if (down)
+        Emit(tp, Move::Kind::Rapid, {at.x, at.y, setup.safeZ}, 0.0);
+      Emit(tp, Move::Kind::Rapid, {path.front().x, path.front().y, setup.safeZ},
+           0.0);
+      Emit(tp, Move::Kind::Plunge, path.front(), tool.feedPlunge);
+    }
+    for (size_t i = 1; i < path.size(); i++)
+      Emit(tp, Move::Kind::Cut, path[i], tool.feedCut);
+    at = path.back();
+    down = true;
+  }
+  if (down)
+    Emit(tp, Move::Kind::Rapid, {at.x, at.y, setup.safeZ}, 0.0);
 }
 
 void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
@@ -1178,8 +1249,14 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
       // surface says -- the same rule DepthPasses follows for a level.
       p.z = std::max(p.z, op.bottomZ);
     }
-    EmitSurfacePath(tp, setup, tool, path);
   }
+  // Two stepovers: a neighbouring pass is one away, and a zigzag's turn puts
+  // its start at the same end of it. Anything beyond that is a gap the tool
+  // has to lift over.
+  const double step = op.type == OpType::SurfaceParallel
+                          ? std::clamp(op.stepover, 0.02, 0.95) * tool.diameter
+                          : (op.zStep > 0.0 ? op.zStep : tool.diameter * 0.1);
+  EmitSurfacePasses(tp, setup, tool, passes, step * 2.0);
 }
 
 void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
