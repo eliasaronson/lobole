@@ -12,7 +12,9 @@
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
@@ -249,13 +251,38 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
     // rest are a thickness wide. A folded part's biggest face is just one of
     // its panels, and its outline would be a picture of a part that cuts to
     // nothing — so refuse rather than write it.
+    //
+    // Measured ALONG THE FACE'S NORMAL, over the body's own vertices. The
+    // first version projected the axis-aligned bounding box onto that normal
+    // instead, which is right only for a blank lying square to the axes: a
+    // plate at 45 degrees has a box mostly full of air, and the sum said it
+    // was as thick as it was wide. A suspension tab welded to an angled tube
+    // was refused for not being flat while the identical tab on a
+    // straight-ahead tube went out fine.
     glm::vec3 lo, hi;
     drawing.body.GetBoundingBox(lo, hi);
     const gp_Dir n = plane.Axis().Direction();
     const glm::vec3 size = hi - lo;
-    const double across = std::abs(n.X()) * size.x + std::abs(n.Y()) * size.y +
-                          std::abs(n.Z()) * size.z;
     const double longest = std::max({size.x, size.y, size.z});
+    double nearest = 0.0, furthest = 0.0;
+    {
+      TopTools_IndexedMapOfShape verts;
+      TopExp::MapShapes(drawing.body.GetShape(), TopAbs_VERTEX, verts);
+      const gp_Vec normal(n);
+      for (int i = 1; i <= verts.Extent(); i++) {
+        const gp_Pnt v = BRep_Tool::Pnt(TopoDS::Vertex(verts(i)));
+        // Signed, as a dot product: a vertex ON the plane gives a zero
+        // vector, and asking gp_Dir to normalise one of those throws.
+        const double d = gp_Vec(plane.Location(), v).Dot(normal);
+        if (i == 1) {
+          nearest = furthest = d;
+        } else {
+          nearest = std::min(nearest, d);
+          furthest = std::max(furthest, d);
+        }
+      }
+    }
+    const double across = furthest - nearest;
     if (across > longest * 0.2)
       return "this body is not flat - export the flat pattern (a FlatPattern "
              "feature, shown by its configuration), not the folded part";

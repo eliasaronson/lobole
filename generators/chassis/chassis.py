@@ -17,6 +17,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 
 import chassis_spec as S          # noqa: E402
+import chassis_jig                # noqa: E402
+import chassis_panels             # noqa: E402
 from chassis_frame import Frame   # noqa: E402
 from designer_remote import Designer  # noqa: E402
 
@@ -249,6 +251,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--out", default=None, help="where the order is written")
+    ap.add_argument("--shop", metavar="DIR",
+                    help="write the whole order: a STEP per member, the cut "
+                         "list, the bend schedule, a DXF for every flat "
+                         "blank, and a manifest")
+    ap.add_argument("--save", metavar="PROJECT",
+                    help="save the project, so the frame, the panels, the "
+                         "tabs and the jig can be opened and looked at")
     ap.add_argument("--contact", action="store_true",
                     help="run the exact contact sweep — it answers whether "
                          "the frame is ONE connected thing, and on 47 members "
@@ -274,6 +283,15 @@ def main():
 
     bodies = d.call("get_state")["bodies"]
     print(f"{len(bodies)} bodies")
+
+    if args.shop:
+        # The rest of the car, and the fixture it is welded in.
+        chassis_panels.floor(d)
+        chassis_panels.firewall(d)
+        tabs = chassis_panels.tabs(d, f)
+        plates = chassis_jig.build(d, f)
+        print(f"{len(tabs)} tabs, {len(plates)} jig plates")
+        d.call("set_active_part", part="Chassis")
     for i in range(len(bodies)):
         d.call("set_material", body=i, material=S.MATERIAL)
 
@@ -344,7 +362,75 @@ def main():
                    path=os.path.join(out, "chassis_bends.csv"))
     print(f"bend schedule: {bends['bends']} bends over {bends['rows']} rows")
     print(f"written to {out}")
+
+    if args.shop:
+        shop(d, f, args.shop)
+    if args.save:
+        d.call("save_project", path=args.save)
+        print(f"project saved to {args.save}")
     return d, f, args
+
+
+def shop(d, frame, root):
+    """Everything a shop needs, in one directory, with a manifest.
+
+    The manifest is what makes the rest usable: a row per file, what it is,
+    what it is made of, and how many — so nobody has to infer from a folder
+    listing which DXF is a jig plate and which is a floor.
+    """
+    import csv
+    os.makedirs(root, exist_ok=True)
+    rows = []
+
+    # 1. The tubes: one solid each, ends already coped and mitred.
+    members = d.call("export_members", dir=os.path.join(root, "members"),
+                     overwrite=True)
+    sizes = {}
+    for t in d.request("tube_schedule", {})["tubes"]:
+        for b in t["bodies"]:
+            sizes[b] = (t.get("outer_diameter_mm"), t.get("wall_mm"))
+    for f in members["files"]:
+        od, wall = sizes.get(f["member"], (None, None))
+        rows.append(["members/" + f["file"], "tube member", f["member"],
+                     S.MATERIAL,
+                     f"{od:g}x{wall:g}" if od else "", 1])
+    print(f"\n-- the order --\n{members['count']} member solids")
+
+    # 2. What to buy, and what to set the bender to.
+    for name, call in (("cut_list.csv", "export_cut_list"),
+                       ("bend_schedule.csv", "export_bend_schedule")):
+        kw = {"path": os.path.join(root, name)}
+        if call == "export_cut_list":
+            kw.update(stock_length_mm=S.STOCK_LENGTH, kerf_mm=S.KERF)
+        d.call(call, **kw)
+        rows.append([name, "list", name[:-4].replace("_", " "), "", "", 1])
+
+    # 3. Every flat blank, cut and marked.
+    flats = [("Floor", "panels", "FLOOR"), ("Firewall", "panels", "FIREWALL")]
+    for p in d.call("list_parts")["parts"]:
+        if p.get("type") != "part":
+            continue
+        if p["name"].startswith("Pickup"):
+            flats.append((p["name"], "tabs", p["name"].replace(" ", "-")))
+        elif p["name"].startswith("Jig "):
+            flats.append((p["name"], "jig", p["name"][4:].upper()))
+    for part, where, mark in flats:
+        os.makedirs(os.path.join(root, where), exist_ok=True)
+        d.call("set_active_part", part=part)
+        gauge = d.call("get_sheet_metal_rules")["rules"]
+        out = os.path.join(root, where, part.replace(" ", "_") + ".dxf")
+        d.call("export_dxf", path=out, mark=mark)
+        rows.append([f"{where}/{os.path.basename(out)}", where[:-1]
+                     if where.endswith("s") else where, part,
+                     gauge["material"], gauge["gauge"], 1])
+    print(f"{len(flats)} flat blanks (panels, tabs, jig plates)")
+
+    with open(os.path.join(root, "manifest.csv"), "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["file", "kind", "part", "material", "size", "quantity"])
+        w.writerows(rows)
+    print(f"manifest: {len(rows)} rows -> {root}")
+    return rows
 
 
 if __name__ == "__main__":

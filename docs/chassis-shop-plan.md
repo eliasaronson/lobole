@@ -71,7 +71,8 @@ Files: `src/remote/RemoteTube.cpp`.
   SADDLED to its tube: the same boolean the jig plate uses, with the tube as
   the cutter, so the tab sits down on the tube instead of bridging it.
 
-Files: `generators/chassis/chassis_panels.py`, `chassis_tabs.py`.
+Files: `generators/chassis/chassis_panels.py` (a tab is a panel that is
+saddled, so they share the blank).
 
 ## S4 — the jig
 
@@ -80,9 +81,9 @@ nose ring, front hoop, main hoop, and the rear. Each plate is notched where
 a tube crosses it, from its top edge so the tube drops IN rather than
 threading through, and each carries its own mark.
 
-It is checked the way the frame is: every plate must actually touch the
-members it holds (`contact_report`), and no plate may foul a member it does
-not hold.
+Which members a plate holds is derived, not listed: a plate seats the tubes
+that actually CROSS its station plane, and only those within a band of the
+lowest, so the plate is low and the seats are shallow.
 
 Files: `generators/chassis/chassis_jig.py`.
 
@@ -96,8 +97,52 @@ row per file, what it is, the material and size, and how many.
 
 * Every member exports, and every file name is unique.
 * Every flat blank's DXF carries its mark, and re-reading the DXF finds it.
-* The jig: each plate touches the members it is there for, and contacts
-  nothing else.
+* The jig: each plate is notched only where a member actually CROSSES it —
+  the seats are computed from the member's own metal polyline, and a member
+  running along the plate is refused rather than cut out of it. The exact
+  contact sweep is not run: it is 60+ bodies and minutes of fuzzy booleans,
+  and it would answer a question the construction already answers.
 * The chassis still passes what it passed before — `check_geometry`,
   `check_tube`, and `check_frame` with no unattached end and no joint on a
   bend.
+
+## As built — the three things the geometry decided
+
+**A jig plate is LOW, and its notches are shallow.** The first plates were
+cut to the full height of the tubes that crossed them, so a station plate
+stood 1053 mm tall with 1053 mm slots in it and the tubes threaded through
+fingers of plate rather than dropping into seats. A plate holds only the
+members within 220 mm of the lowest one it crosses, which takes the main
+hoop station from 645 x 1053 to 645 x 143 — a plate you can bolt to a table
+and lift a tube out of. It also has to REFUSE a member that runs along it:
+a tube lying in the station's plane is not crossing it, and cutting its full
+length out sawed the main hoop plate nearly in half. The test is
+transversality — at least a quarter of the member's direction must be across
+the plate — and the two hoop stations are offset 60 mm off the hoop so the
+hoop itself is not the thing being notched.
+
+**A tab's seat does not appear in its flat pattern, and that is correct.** A
+suspension pickup stands in a plane THROUGH its tube's axis, so its seat is a
+cylinder cut across the 4 mm thickness rather than a scallop in the outline.
+The blank is cut to the far side of the seat — 12.264 mm off the axis of a
+25.4 mm tube rather than 12.9 — so it never fouls the tube, and the 0.64 mm
+crescent at the near face is the weld's root gap. A plate ACROSS a tube is
+the other case and does scallop.
+
+**R12 has no ELLIPSE, so an angled seat tessellates.** A tube crossing a jig
+plate square leaves a true `CIRCLE`; a tube crossing at an angle leaves an
+ellipse, which R12 (1987) cannot name — DXF gained `ELLIPSE` in R14. The
+seats are built from `Cylinder` primitives and the solid IS analytic (26
+planes and 14 cylinders on one plate); it is the WRITER's dialect that
+cannot say so, and the flat pattern comes out as line segments. A laser cuts
+them fine. It is a limit of the format the exporter targets, not of the
+model.
+
+### What it produced
+
+66 files, 8.9 MB: 52 member STEPs, 11 DXFs (2 panels, 4 tabs, 5 jig plates),
+the cut list, the bend schedule and a 65-row manifest. The frame is
+unchanged — 52 members, 0 invalid bodies, 35.7 kg, no unattached end and no
+joint on a bend, 12 untriangulated bays, most of them faces a panel closes.
+`--save` writes the project so the frame, the panels, the tabs and the jig
+can be opened and looked at.

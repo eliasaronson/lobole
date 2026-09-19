@@ -1407,6 +1407,32 @@ def main():
                "as a TEXT entity, which every nesting package reads and no "
                "font is needed for")
 
+        # A blank that does not lie square to the axes is still a blank. The
+        # flatness test used to project the AXIS-ALIGNED box onto the face
+        # normal, so a plate at an angle measured as thick as it was wide —
+        # and a suspension tab welded to an angled tube was refused while the
+        # identical tab on a straight tube went out fine.
+        d.call("new_project")
+        d.call("set_sheet_metal_rules", material="steel", gauge="3mm")
+        tilted = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Tilted",
+            "plane": {"origin": [0, 0, 0], "normal": [0.6, 0.8, 0.0],
+                      "uAxis": [0.8, -0.6, 0.0]},
+            "entities": [
+                {"type": "line", "a": [0, 0], "b": [200, 0]},
+                {"type": "line", "a": [200, 0], "b": [200, 120]},
+                {"type": "line", "a": [200, 120], "b": [0, 120]},
+                {"type": "line", "a": [0, 120], "b": [0, 0]}]})
+        d.call("add_feature", feature={
+            "type": "BaseFlange", "name": "Tilted",
+            "sketch_id": tilted["id"]})
+        slanted = os.path.join(tmp, "tilted.dxf")
+        d.call("export_dxf", path=slanted, mark="TILT")
+        with open(slanted) as fh:
+            tdxf = fh.read()
+        expect(tdxf.count("LINE") >= 4 and "TILT" in tdxf,
+               "a blank at an angle to the axes exports like any other")
+
         # One STEP per member, named for it — a STEP carries no name inside,
         # so the file name is the part's only identity.
         d.call("new_project")
