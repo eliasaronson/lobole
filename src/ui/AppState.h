@@ -1653,6 +1653,14 @@ struct AppState {
   // The StockSim revision the drawn mesh was built from, so a frame that
   // changed nothing re-meshes nothing.
   uint64_t camStockDrawnRevision = 0;
+  // ...and when it was last rebuilt, so a frame that changed a LITTLE does
+  // not re-mesh either. While playback runs the stock changes every frame, so
+  // the revision gate above correctly never fires and BuildStockMesh walks a
+  // ~700,000-cell height map at frame rate -- 95.8 ms of a 126 ms frame on
+  // the waveguide. The eye cannot use 60 surfaces a second; a capped rate
+  // gives back the frame and loses nothing a person can see. Paused, the
+  // next frame rebuilds immediately, so what you stop on is always exact.
+  double camStockDrawnAt = 0.0;
   // Why playback will not start, in words, where the button is.
   std::string camPlaybackRefusal;
   // The cutter, drawn as a real solid through the mesh renderer (it is static

@@ -236,8 +236,19 @@ void SyncCamPlayback(AppState& state) {
   // A function whose whole job is to undo what the viewport does is an
   // invitation to put it back, so there is none to call.
 
-  // The stock, re-meshed only when the simulation actually moved.
-  if (state.camStockSim.Revision() != state.camStockDrawnRevision) {
+  // The stock, re-meshed when the simulation moved -- but no faster than
+  // this while it is PLAYING. See camStockDrawnAt: the gate below is correct
+  // and never fires during playback, because the stock really does change
+  // every frame, so the cap is what keeps a 700,000-cell remesh off the
+  // frame. Paused or stepped, it rebuilds at once and the picture is exact.
+  constexpr double kStockRedrawSeconds = 1.0 / 12.0;
+  const double now = ImGui::GetTime();
+  const bool stale =
+      state.camStockSim.Revision() != state.camStockDrawnRevision;
+  const bool allowed =
+      !state.camPlaying || now - state.camStockDrawnAt >= kStockRedrawSeconds;
+  if (stale && allowed) {
+    state.camStockDrawnAt = now;
     state.camStockDrawnRevision = state.camStockSim.Revision();
     glm::dvec3 lo(0.0), hi(0.0);
     const double floorZ =
