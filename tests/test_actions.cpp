@@ -2255,13 +2255,13 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
   REQUIRE(ref[0].error.empty());
 
   // The panel's path defers: pending at once, a "cam" job running.
-  REQUIRE(state.camDeferAdaptive);
+  REQUIRE(state.camDeferPasses);
   ui::RefreshCamToolpaths(state);
   REQUIRE(state.camToolpaths.size() == 1);
   CHECK(state.camToolpaths[0].pending);
   CHECK(state.camToolpaths[0].moves.empty()); // nothing previous to keep
   CHECK(ui::BackgroundJobRunning(state, "cam"));
-  CHECK(state.camAdaptiveBatchTotal == passes);
+  CHECK(state.camPassBatchTotal == passes);
   CHECK_FALSE(ui::CamToolpathsPendingWhy(state).empty());
   {
     const std::vector<ui::BackgroundJobInfo> jobs =
@@ -2281,7 +2281,7 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
 
   // Refreshing again while it runs queues nothing twice.
   ui::RefreshCamToolpaths(state);
-  CHECK(state.camAdaptiveBatchTotal == passes);
+  CHECK(state.camPassBatchTotal == passes);
 
   // The loop reaps each pass; the last one regenerates and verifies.
   PumpUntil(state, [&] { return !AnyPending(state); });
@@ -2294,7 +2294,7 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
   CHECK_FALSE(state.camVerifyWhenSettled);
   CHECK_FALSE(state.camVerdict.empty());
   CHECK(state.camVerdict[0].text.find("Not verified") == std::string::npos);
-  CHECK(state.camAdaptiveBatchTotal == 0); // the batch is over
+  CHECK(state.camPassBatchTotal == 0); // the batch is over
 
   // An unrelated regenerate (an undo would do this) is a cache hit: no job.
   const size_t hits = state.camAdaptiveCache.hits;
@@ -2321,7 +2321,7 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
   ui::RefreshCamToolpaths(state);
   REQUIRE(AnyPending(state));
   REQUIRE(ui::BackgroundJobRunning(state, "cam"));
-  ui::CancelAdaptivePasses(state);
+  ui::CancelCamPasses(state);
   CHECK_FALSE(AnyPending(state));
   CHECK(state.camToolpaths[0].error.find("cancelled") != std::string::npos);
   CHECK(state.camAdaptiveQueue.empty());

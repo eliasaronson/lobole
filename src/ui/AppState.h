@@ -7,9 +7,10 @@
 #include "core/Occurrence.h"
 #include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
 #include "core/cam/CamJob.h"
-#include "core/cam/CamPicks.h" // FaceRegion -- the only thing this header
-#include "core/cam/CamSim.h"   // the cutting simulation cursor + stock
-                               // needs from CAM, and CamToolpath.h is five
+#include "core/cam/CamPicks.h"   // FaceRegion -- the only thing this header
+#include "core/cam/CamSim.h"     // the cutting simulation cursor + stock
+#include "core/cam/CamSurface.h" // SurfaceCache, SurfaceRequest
+                                 // needs from CAM, and CamToolpath.h is five
 // subjects reached by 28 files // cam::FaceRegion (the ghost/hover cache)
 #include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
 #include "core/cam/JobDocument.h" // the job tab: parts placed + setups
@@ -1531,16 +1532,22 @@ struct AppState {
   // Results by content key, so a re-open, an undo and a switch of tab all
   // find what was already paid for; the queue is what a deferred generate
   // still owes, one pass per entry, consumed one at a time by a "cam"
-  // BackgroundJob. `camDeferAdaptive` is the panel's default and what a
+  // BackgroundJob. `camDeferPasses` is the panel's default and what a
   // synchronous RPC turns off for the length of its answer.
   cam::AdaptiveCache camAdaptiveCache;
   std::deque<cam::AdaptiveRequest> camAdaptiveQueue;
   uint64_t camAdaptiveInFlight = 0; // key of the pass now cutting, or 0
-  bool camDeferAdaptive = true;
+  // The other expensive step, deferred the same way and onto the same
+  // worker (docs/ui/long-operations.md, phase 5). A whole OPERATION per
+  // entry, not a Z level: a finishing pass has no interior seam.
+  cam::SurfaceCache camSurfaceCache;
+  std::deque<cam::SurfaceRequest> camSurfaceQueue;
+  uint64_t camSurfaceInFlight = 0;
+  bool camDeferPasses = true;
   // Progress for the row and the label: passes done / passes in this batch.
   // A batch is everything queued since the queue was last empty.
-  size_t camAdaptiveBatchDone = 0;
-  size_t camAdaptiveBatchTotal = 0;
+  size_t camPassBatchDone = 0;
+  size_t camPassBatchTotal = 0;
   // Generate was pressed while passes were pending: verify once they land.
   bool camVerifyWhenSettled = false;
   // Every long-running operation the registry knows about

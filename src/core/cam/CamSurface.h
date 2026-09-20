@@ -1,12 +1,15 @@
 #pragma once
 
+#include "core/Feature.h"           // Body
 #include "core/cam/CamDropCutter.h" // CLSurface
 #include "core/cam/CamJob.h"        // Loop
 #include "core/cam/CamRotary.h"     // RadiusMap
 
 #include <glm/glm.hpp>
 
+#include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // The PATTERN half of a finishing pass (docs/cam/surfacing.md).
@@ -144,5 +147,69 @@ struct RotaryParallelRequest {
 // the same rule the planar raster follows for its floor.
 [[nodiscard]] std::vector<RotaryPass>
 RotaryParallelPasses(const RadiusMap& cl, const RotaryParallelRequest& req);
+
+// --- surfacing off the frame (docs/ui/long-operations.md, phase 5) --------
+//
+// A finishing pass is minutes of work and it ran INLINE, on the frame: the
+// rotary rolling pin takes seventeen of them, and the frame HUD shows single
+// `ui` frames of 10 s and 72 s. The app is not slow there, it is stopped.
+//
+// The unit is the whole OPERATION, where adaptive clearing's is one pass:
+// a finishing pass is one computation from the cutter-location surface
+// outward and has no natural interior seam. Both are "a keyed computation
+// whose result a later regenerate reads out of a cache", which is all the
+// queue needs of either.
+//
+// Safe to move because it was written that way before the move was taken:
+// the patterns take plain values, and every model sample goes through
+// `GenerateMeshDetached`, which deep-copies before meshing precisely because
+// a triangulation rides on the shared `TShape`.
+struct SurfaceRequest {
+  uint64_t key = 0;
+  Setup setup;
+  Operation op;
+  Tool tool;
+  std::vector<Body> bodies; // already framed, as the strategy wants them
+};
+
+struct SurfaceResult {
+  std::vector<Move> moves;
+  std::string error;
+  std::string strategy;
+};
+
+// The key for one surfacing operation.
+//
+// `bodiesKey` is the caller's fingerprint of the geometry -- the core cannot
+// take one cheaply, and the UI already keeps exactly this in
+// `JobRenderVersion`. Everything else is the `setup.`/`op.`/`tool.` fields
+// the surfacing strategies read, and the same gate the adaptive key has
+// applies: a field read but not hashed is a stale result nobody can see.
+[[nodiscard]] uint64_t SurfaceKey(const Setup& setup, const Operation& op,
+                                  const Tool& tool, uint64_t bodiesKey);
+
+// The same pass, from a request -- the form a worker thread calls.
+[[nodiscard]] SurfaceResult SurfacePass(const SurfaceRequest& request);
+
+// Results by key. Same shape and same reasoning as `AdaptiveCache`, with a
+// smaller entry count because a surfacing result is much larger: the pin's
+// finishing pass alone is 531,432 moves.
+class SurfaceCache {
+public:
+  [[nodiscard]] const SurfaceResult* Find(uint64_t key);
+  void Put(uint64_t key, SurfaceResult result);
+  [[nodiscard]] bool Contains(uint64_t key) const;
+  [[nodiscard]] size_t Size() const { return m_entries.size(); }
+  void Clear();
+  size_t hits = 0;
+  size_t misses = 0;
+
+private:
+  static constexpr size_t kMaxEntries = 16;
+  static constexpr size_t kMaxMoves = 4'000'000;
+  std::unordered_map<uint64_t, SurfaceResult> m_entries;
+  std::deque<uint64_t> m_order;
+  size_t m_moves = 0;
+};
 
 } // namespace cam

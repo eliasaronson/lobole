@@ -82,7 +82,12 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
 cam::GenerateContext ContextOf(AppState& state) {
   cam::GenerateContext ctx;
   ctx.cache = &state.camAdaptiveCache;
-  ctx.defer = state.camDeferAdaptive;
+  ctx.surfaceCache = &state.camSurfaceCache;
+  // The fingerprint the surfacing key needs of the geometry. `JobRenderVersion`
+  // is already the mix of the job, its sources, the active setup, the
+  // fixturing and every placement -- which is exactly "which bodies, where".
+  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.defer = state.camDeferPasses;
   return ctx;
 }
 } // namespace
@@ -100,6 +105,7 @@ void RefreshCamToolpaths(AppState& state) {
       if (old.operationId == fresh.operationId && old.finish == fresh.finish)
         KeepPreviousMoves(old, fresh);
   QueueAdaptivePasses(state, std::move(ctx.pending));
+  QueueSurfacePasses(state, std::move(ctx.pendingSurface));
 }
 
 void RefreshCamToolpath(AppState& state, uint64_t opId) {
@@ -146,6 +152,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
       KeepPreviousMoves(existing, fresh);
       existing = std::move(fresh);
       QueueAdaptivePasses(state, std::move(ctx.pending));
+      QueueSurfacePasses(state, std::move(ctx.pendingSurface));
       return;
     }
   // New: insert where a full pass would have put it — operations order, so
@@ -168,6 +175,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
           static_cast<ptrdiff_t>(std::min(at, state.camToolpaths.size())),
       std::move(fresh));
   QueueAdaptivePasses(state, std::move(ctx.pending));
+  QueueSurfacePasses(state, std::move(ctx.pendingSurface));
 }
 
 void DropCamToolpath(AppState& state, uint64_t opId) {
@@ -1119,12 +1127,12 @@ void DrawCamPanel(AppState& state) {
   ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
   // Adaptive passes in flight: the row owns the progress, not a modal — the
   // rest of the job stays editable (docs/ui/long-operations.md, phase 1).
-  if (const AdaptiveProgress progress = AdaptiveProgressOf(state);
+  if (const CamPassProgress progress = CamPassProgressOf(state);
       progress.running) {
     ImGui::TextDisabled("%s", progress.label.c_str());
     ImGui::SameLine();
     if (ImGui::SmallButton("Cancel###cam_cancel_clearing"))
-      CancelAdaptivePasses(state);
+      CancelCamPasses(state);
     ImGui::SetItemTooltip("Stops after the pass now cutting -- the clearing "
                           "library cannot be interrupted mid-pass. What was "
                           "waiting is queued again by the next edit or "

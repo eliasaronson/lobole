@@ -480,4 +480,101 @@ std::vector<RotaryPass> RotaryParallelPasses(const RadiusMap& cl,
   return out;
 }
 
+namespace {
+
+struct Hasher {
+  uint64_t h = 1469598103934665603ULL;
+  void Bytes(const void* p, size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; i++) {
+      h ^= c[i];
+      h *= 1099511628211ULL;
+    }
+  }
+  void D(double v) { Bytes(&v, sizeof v); }
+  void I(int64_t v) { Bytes(&v, sizeof v); }
+};
+
+} // namespace
+
+uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
+                    uint64_t bodiesKey) {
+  // Every field the surfacing strategies read, and the caller's fingerprint
+  // of the geometry. A read added to GenerateSurface or GenerateRotarySurface
+  // that is not added here fails `test_conventions` ("the surface key covers
+  // every field the pass reads") -- the same gate the adaptive key has, and
+  // for the same reason: the drift is invisible in review and shows up as a
+  // stale toolpath nobody can explain.
+  Hasher hash;
+  hash.I(static_cast<int64_t>(bodiesKey));
+  hash.I(static_cast<int64_t>(op.type));
+  hash.I(static_cast<int64_t>(op.id));
+  hash.D(op.topZ);
+  hash.D(op.bottomZ);
+  hash.D(op.stockToLeave);
+  hash.D(op.stepover);
+  hash.D(op.sampleStep);
+  hash.D(op.zStep);
+  hash.D(op.cutAngleDeg);
+  hash.I(static_cast<int64_t>(op.targets.size()));
+  for (const Target& t : op.targets) {
+    hash.I(static_cast<int64_t>(t.jobPartId));
+    hash.I(static_cast<int64_t>(t.ref.featureId));
+    for (char c : t.ref.name)
+      hash.I(c);
+  }
+  hash.D(setup.safeZ);
+  hash.D(setup.rotationA);
+  hash.I(setup.machine.hasRotaryAxis ? 1 : 0);
+  hash.D(tool.diameter);
+  hash.I(static_cast<int64_t>(tool.type));
+  hash.D(tool.tipAngleDeg);
+  hash.D(tool.feedCut);
+  hash.D(tool.feedPlunge);
+  return hash.h;
+}
+
+const SurfaceResult* SurfaceCache::Find(uint64_t key) {
+  const auto it = m_entries.find(key);
+  if (it == m_entries.end()) {
+    misses++;
+    return nullptr;
+  }
+  hits++;
+  return &it->second;
+}
+
+bool SurfaceCache::Contains(uint64_t key) const {
+  return m_entries.find(key) != m_entries.end();
+}
+
+void SurfaceCache::Put(uint64_t key, SurfaceResult result) {
+  if (const auto it = m_entries.find(key); it != m_entries.end()) {
+    m_moves -= it->second.moves.size();
+    it->second = std::move(result);
+    m_moves += it->second.moves.size();
+    return;
+  }
+  m_moves += result.moves.size();
+  m_entries.emplace(key, std::move(result));
+  m_order.push_back(key);
+  while (m_entries.size() > kMaxEntries ||
+         (m_moves > kMaxMoves && m_entries.size() > 1)) {
+    const uint64_t oldest = m_order.front();
+    m_order.pop_front();
+    if (const auto it = m_entries.find(oldest); it != m_entries.end()) {
+      m_moves -= it->second.moves.size();
+      m_entries.erase(it);
+    }
+  }
+}
+
+void SurfaceCache::Clear() {
+  m_entries.clear();
+  m_order.clear();
+  m_moves = 0;
+  hits = 0;
+  misses = 0;
+}
+
 } // namespace cam

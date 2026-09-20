@@ -311,6 +311,72 @@ TEST_CASE("the adaptive key covers every field the pass reads",
   CHECK(missing.empty());
 }
 
+TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
+  // The twin of the adaptive gate above, for phase 5. A surfacing operation
+  // now runs on a worker from a COPY of its inputs and its result is cached
+  // by a hash of them, so the same drift applies: a `setup.`/`op.`/`tool.`
+  // read inside the surfacing strategies that `SurfaceKey` does not know
+  // about means the cache answers a changed operation with the old moves.
+  //
+  // Read against CamStrategies.cpp's SURFACING FUNCTIONS only -- the file
+  // holds every generator, and hashing the fields a profile reads would be
+  // a key that invalidates on things surfacing never looks at.
+  const fs::path strategies =
+      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamStrategies.cpp";
+  const fs::path surface =
+      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamSurface.cpp";
+  const auto slurp = [](const fs::path& p) {
+    std::ifstream f(p);
+    REQUIRE(f.good());
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  const std::string text = slurp(strategies);
+  const std::string keyText = slurp(surface);
+
+  const size_t keyAt = keyText.find("uint64_t SurfaceKey(");
+  REQUIRE(keyAt != std::string::npos);
+  const size_t keyEnd = keyText.find("\n}\n", keyAt);
+  REQUIRE(keyEnd != std::string::npos);
+  const std::string key = keyText.substr(keyAt, keyEnd - keyAt);
+
+  // The two generators, from their signatures to the next one.
+  std::string bodies;
+  for (const char* fn : {"void GenerateSurface(const Setup& setup",
+                         "void GenerateRotarySurface("}) {
+    const size_t at = text.find(fn);
+    REQUIRE(at != std::string::npos);
+    const size_t end = text.find("\n}\n", at);
+    REQUIRE(end != std::string::npos);
+    bodies += text.substr(at, end - at);
+  }
+
+  const std::regex read(R"(\b(setup|op|tool)\.([A-Za-z_][A-Za-z0-9_]*)\b)");
+  std::set<std::string> everywhere, inKey;
+  for (auto it = std::sregex_iterator(bodies.begin(), bodies.end(), read);
+       it != std::sregex_iterator(); ++it)
+    everywhere.insert((*it)[1].str() + "." + (*it)[2].str());
+  for (auto it = std::sregex_iterator(key.begin(), key.end(), read);
+       it != std::sregex_iterator(); ++it)
+    inKey.insert((*it)[1].str() + "." + (*it)[2].str());
+  REQUIRE(inKey.size() >= 10);
+
+  std::vector<std::string> missing;
+  for (const std::string& field : everywhere)
+    if (!inKey.count(field))
+      missing.push_back(field);
+  INFO("the surfacing generators read these and SurfaceKey does not hash "
+       "them:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& m : missing)
+              s += "  " + m + "\n";
+            return s;
+          }());
+  CHECK(missing.empty());
+}
+
 TEST_CASE("a background job is polled by the loop, never by a panel",
           "[convention]") {
   // Whether a long-running operation can FINISH must not depend on which

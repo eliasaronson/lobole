@@ -1354,6 +1354,49 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   EmitSurfacePasses(tp, setup, tool, passes, step * 2.0);
 }
 
+// A surfacing operation, from the cache, from a worker later, or right here
+// -- the same three-way the adaptive pass has, one level up
+// (docs/ui/long-operations.md, phase 5). The unit is the whole OPERATION
+// because a finishing pass is one computation from the cutter-location
+// surface outward, with no interior seam to stop at.
+void SurfaceThroughCache(const Setup& setup, const Operation& op,
+                         const Tool& tool, const std::vector<Body>& bodies,
+                         Toolpath& tp, GenerateContext* ctx) {
+  const bool cached =
+      ctx != nullptr && ctx->surfaceCache != nullptr && ctx->bodiesKey != 0;
+  const uint64_t key = cached ? SurfaceKey(setup, op, tool, ctx->bodiesKey) : 0;
+  if (cached) {
+    if (const SurfaceResult* hit = ctx->surfaceCache->Find(key)) {
+      tp.moves = hit->moves;
+      tp.error = hit->error;
+      tp.strategy = hit->strategy;
+      return;
+    }
+    if (ctx->defer) {
+      SurfaceRequest req;
+      req.key = key;
+      req.setup = setup;
+      req.op = op;
+      req.tool = tool;
+      req.bodies = bodies;
+      ctx->pendingSurface.push_back(std::move(req));
+      tp.pending = true;
+      return;
+    }
+  }
+  if (op.type == OpType::SurfaceRotary)
+    GenerateRotarySurface(setup, op, tool, bodies, tp);
+  else
+    GenerateSurface(setup, op, tool, bodies, tp);
+  if (cached) {
+    SurfaceResult r;
+    r.moves = tp.moves;
+    r.error = tp.error;
+    r.strategy = tp.strategy;
+    ctx->surfaceCache->Put(key, std::move(r));
+  }
+}
+
 void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
                  const std::vector<Body>& bodies, Toolpath& tp,
                  GenerateContext* ctx) {
@@ -1378,10 +1421,8 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
     break;
   case OpType::SurfaceParallel:
   case OpType::SurfaceWaterline:
-    GenerateSurface(setup, op, tool, bodies, tp);
-    break;
   case OpType::SurfaceRotary:
-    GenerateRotarySurface(setup, op, tool, bodies, tp);
+    SurfaceThroughCache(setup, op, tool, bodies, tp, ctx);
     break;
   case OpType::Count:
     // Not a type. Named so the switch stays exhaustive and a REAL new type
@@ -1392,6 +1433,22 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
 }
 
 } // namespace
+
+SurfaceResult SurfacePass(const SurfaceRequest& request) {
+  // The form a worker thread calls. It takes the strategy's own path with no
+  // context at all, so nothing here touches a cache another thread owns.
+  Toolpath tp;
+  const Tool& tool = request.tool;
+  if (request.op.type == OpType::SurfaceRotary)
+    GenerateRotarySurface(request.setup, request.op, tool, request.bodies, tp);
+  else
+    GenerateSurface(request.setup, request.op, tool, request.bodies, tp);
+  SurfaceResult out;
+  out.moves = std::move(tp.moves);
+  out.error = std::move(tp.error);
+  out.strategy = std::move(tp.strategy);
+  return out;
+}
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
                         const std::vector<Body>& bodies, GenerateContext* ctx) {

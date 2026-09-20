@@ -1048,7 +1048,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     MakeJob();
     ctx->Yield(2);
-    s_App->camDeferAdaptive = true; // the real default, off for the suite
+    s_App->camDeferPasses = true; // the real default, off for the suite
     ToolbarClick(ctx, "###tb_job_pocket");
     ctx->Yield(2);
     ui::SelectionItem floor;
@@ -1098,6 +1098,95 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::BackgroundJobRunning(*s_App, "cam"));
 
     // What landed is what a synchronous generate says.
+    ctx->Yield(2);
+    IM_CHECK(!ui::CamToolpathsPending(*s_App));
+    const cam::Setup* live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK(live != nullptr);
+    const std::vector<cam::Toolpath> sync =
+        cam::GenerateAll(*live, ui::JobBodies(*s_App));
+    IM_CHECK_EQ(sync.size(), s_App->camToolpaths.size());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK_EQ(sync[0].moves.size(), s_App->camToolpaths[0].moves.size());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+    s_App->camToolOpen = false;
+  };
+
+  t = IM_REGISTER_TEST(engine, "cam", "surfacing_runs_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/ui/long-operations.md, phase 5. `GenerateContext`'s comment called
+    // adaptive clearing "the one expensive step"; that stopped being true at
+    // v118, and a finishing pass ran INLINE until this. The rotary rolling
+    // pin took seventeen minutes with the app stopped -- single `ui` frames
+    // of 10 s and 72 s on the frame HUD.
+    //
+    // The twin of adaptive_clears_off_the_frame, and deliberately so: the
+    // properties that matter are the same three, and a second mechanism that
+    // had to be watched a different way would be a second mechanism.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 60, 60, 20));
+    const uint64_t block = CamPart()->GetFeature(0)->GetId();
+    CamPart()->AddFeature(
+        std::make_unique<SphereFeature>("Dome", glm::vec3(30, 30, 20), 18.0));
+    const uint64_t dome = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>("Domed", block, dome,
+                                                           BooleanOp::Union));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    cam::Setup* live0 = Job()->FindSetup(setup.id);
+    IM_CHECK(live0 != nullptr);
+    live0->tools[0].type = cam::ToolType::Ball; // a cone cannot finish
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.type = cam::OpType::SurfaceParallel;
+    op.toolNumber = live0->tools[0].number;
+    op.topZ = 38.0;
+    op.bottomZ = 0.0;
+    op.stepover = 0.6; // coarse: this case is about the frame, not the finish
+    live0->operations.push_back(op);
+
+    s_App->camDeferPasses = true; // the real default, off for the suite
+    const auto asked = std::chrono::steady_clock::now();
+    ui::RefreshCamToolpaths(*s_App);
+    const double askMs = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - asked)
+                             .count();
+    ctx->LogInfo("generate returned in %.1f ms", askMs);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].pending);
+    IM_CHECK(ui::CamToolpathsPending(*s_App));
+    IM_CHECK(ui::BackgroundJobRunning(*s_App, "cam"));
+    // ...and it says which pass, so the row can be read rather than watched.
+    const ui::CamPassProgress progress = ui::CamPassProgressOf(*s_App);
+    IM_CHECK(progress.running);
+    IM_CHECK(progress.total >= 1);
+    IM_CHECK(progress.label.find("Finishing") != std::string::npos);
+
+    int frames = 0;
+    double worstMs = 0.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ui::BackgroundJobRunning(*s_App, "cam")) {
+      const auto f0 = std::chrono::steady_clock::now();
+      ctx->Yield();
+      worstMs = std::max(worstMs, std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - f0)
+                                      .count());
+      frames++;
+      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(90))
+        break;
+    }
+    ctx->LogInfo("%d frames while surfacing, worst %.1f ms", frames, worstMs);
+    IM_CHECK(frames >= 2);
+    // The same bound the clearing twin uses: generous against the idle pacer
+    // (a resting loop is ~10 Hz), tight enough to exclude a frame that ran
+    // the pass.
+    IM_CHECK(worstMs < 250.0);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "cam"));
+
+    // What landed is what a synchronous generate says -- the cache is not
+    // allowed to be a different answer, only a faster one.
     ctx->Yield(2);
     IM_CHECK(!ui::CamToolpathsPending(*s_App));
     const cam::Setup* live = ui::ActiveCamSetup(*s_App);

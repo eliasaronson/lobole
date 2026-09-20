@@ -99,15 +99,15 @@ void ResetAppForTest() {
   // `camToolpaths` right after a pick, and the real (deferred) path is the
   // subject of exactly one of them, `cam/adaptive_clears_off_the_frame`,
   // which turns it back on for itself (docs/ui/long-operations.md).
-  s_App->camDeferAdaptive = false;
+  s_App->camDeferPasses = false;
   s_App->backgroundJobs.clear(); // joins whatever a previous test left
   s_App->camAdaptiveQueue.clear();
 #ifdef HAVE_CAM
   s_App->camAdaptiveCache.Clear();
 #endif
   s_App->camAdaptiveInFlight = 0;
-  s_App->camAdaptiveBatchDone = 0;
-  s_App->camAdaptiveBatchTotal = 0;
+  s_App->camPassBatchDone = 0;
+  s_App->camPassBatchTotal = 0;
   s_App->camVerifyWhenSettled = false;
   s_App->handleDrag = {};
   s_App->hoveredHandle = 0;

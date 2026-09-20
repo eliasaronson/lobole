@@ -1,9 +1,10 @@
 #pragma once
 
-#include "core/Feature.h"         // Body
-#include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
+#include "core/Feature.h" // Body
+#include "core/cam/CamAdaptive.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamPicks.h" // FaceRegion, WallContour, SurfaceRegion — kept
+#include "core/cam/CamSurface.h" // SurfaceCache, SurfaceRequest
 // visible here: 28 files include this one      // Loop, Toolpath
 
 #include <glm/glm.hpp>
@@ -49,6 +50,19 @@ struct GenerateContext {
   AdaptiveCache* cache = nullptr;
   bool defer = false;
   std::vector<AdaptiveRequest> pending; // out
+  // ...and the other expensive step, which the comment above used to call
+  // "the one". A finishing pass is MINUTES, not seconds, and it ran on the
+  // frame until phase 5 (docs/ui/long-operations.md). Deferred whole, per
+  // OPERATION, because a finishing pass has no interior seam the way a
+  // stack of adaptive levels does.
+  SurfaceCache* surfaceCache = nullptr;
+  // The caller's fingerprint of the geometry these toolpaths are cut from.
+  // The core cannot take one cheaply; the UI already keeps exactly this in
+  // `JobRenderVersion`. Zero means "do not cache surfacing" -- an honest
+  // answer for a caller that has no such key, and the default, so nothing
+  // silently reads a result cut from other geometry.
+  uint64_t bodiesKey = 0;
+  std::vector<SurfaceRequest> pendingSurface; // out
 };
 
 // One operation's toolpath. Never throws: a failure comes back as

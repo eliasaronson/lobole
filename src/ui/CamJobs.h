@@ -1,6 +1,7 @@
 #pragma once
 
-// Adaptive clearing off the frame (docs/ui/long-operations.md, phase 1).
+// The expensive steps of a generate, off the frame
+// (docs/ui/long-operations.md, phases 1 and 5).
 //
 // A generate on a job tab DEFERS its adaptive passes: `cam::Generate` hands
 // back the requests it did not run and marks those toolpaths pending; this
@@ -13,6 +14,7 @@
 
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamSurface.h"
 
 #include <string>
 #include <vector>
@@ -26,6 +28,13 @@ struct AppState;
 // what keeps a slider drag to one pass per value that survived to a frame.
 void QueueAdaptivePasses(AppState& state,
                          std::vector<cam::AdaptiveRequest> pending);
+
+// The same, for the surfacing operations a deferred generate skipped. One
+// entry per OPERATION rather than per Z level, onto the same worker and the
+// same batch counters, so the progress row and every `pending` refusal work
+// unchanged (docs/ui/long-operations.md, phase 5).
+void QueueSurfacePasses(AppState& state,
+                        std::vector<cam::SurfaceRequest> pending);
 
 // Whether any toolpath in `state.camToolpaths` is still pending, and why in
 // words — post, verify and simulate refuse on this rather than acting on a
@@ -48,15 +57,15 @@ GenerateCamToolpathsNow(AppState& state, const cam::Setup& setup);
 // points; its result is cached, it was paid for) and the toolpaths that were
 // waiting stop being pending and say they were cancelled — the next edit or
 // Generate queues them again.
-void CancelAdaptivePasses(AppState& state);
+void CancelCamPasses(AppState& state);
 
 // The row's and the label's numbers: passes landed / passes in this batch.
-struct AdaptiveProgress {
+struct CamPassProgress {
   bool running = false;
   size_t done = 0;
   size_t total = 0;
   std::string label; // the job's label, or empty
 };
-[[nodiscard]] AdaptiveProgress AdaptiveProgressOf(const AppState& state);
+[[nodiscard]] CamPassProgress CamPassProgressOf(const AppState& state);
 
 } // namespace ui

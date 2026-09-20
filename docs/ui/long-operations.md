@@ -497,3 +497,87 @@ rest on. That is A2's neighbourhood, not this one.
   it already asserts frame behaviour in `shell/idle_throttle_rests_and_input_wakes`.
   **Done**: `cam/adaptive_clears_off_the_frame` (pick 0.5 ms, worst frame
   31 ms while the passes cut).
+
+## Phase 5 — surfacing off the frame (2026-09-20)
+
+`GenerateContext`'s own comment says it decides "how a generate treats **the
+one expensive step**, adaptive clearing". That stopped being true at v118 and
+is now emphatically false: a 3-axis finishing pass and a continuous 4-axis one
+both run INLINE, on the frame, and the rotary rolling pin takes **seventeen
+minutes**. The frame HUD on that job shows single `ui` frames of 10 s and
+72 s — the app is not slow, it is stopped.
+
+Everything phase 1 built is reusable and none of it is adaptive-specific in
+principle: one `BackgroundJob` of kind `cam`, a queue with in-flight
+deduplication, `Toolpath::pending` so post/verify/simulate refuse rather than
+act on a list that is not yet the job, a done/total for the progress row, and
+cancel. What is adaptive-specific is only the *payload*.
+
+**The unit differs and that is fine.** Adaptive defers a PASS — one Z level of
+one operation, because that is what costs seconds. Surfacing defers the whole
+OPERATION, because a finishing pass is one computation from the cutter-location
+surface outward and has no natural interior seam. Both are "a keyed
+computation whose result a later regenerate reads out of a cache", which is
+the only shape the queue actually needs.
+
+So the queue becomes generic over that shape rather than gaining a second
+copy of itself — two queues drift, and this one already has the subtle parts
+(deduplicate against cached AND in-flight, land on whichever tab regenerates
+next, keep a cancelled pass's result because it was paid for).
+
+### What makes surfacing safe to move
+
+It was written for this without the move being taken. The patterns are "plain
+values in, polylines out" with no `Setup`, no `Document` and no OpenCASCADE
+(`CamSurface.h` says so and gives the rotary reason), and every model sample
+goes through `GenerateMeshDetached`, which deep-copies before meshing
+precisely because a triangulation rides on the shared `TShape`. A request can
+therefore carry the bodies it needs.
+
+### The key
+
+Content, as everywhere here. The core cannot fingerprint geometry cheaply, so
+the CALLER supplies one: `GenerateContext::bodiesKey`, which the UI fills from
+`JobRenderVersion` — the mix it already keeps of the job, its sources, the
+active setup, the fixturing and every placement. The core hashes that with
+exactly the `setup.`/`op.`/`tool.` fields the surfacing strategies read, and
+the same gate the adaptive key has applies: a field read but not hashed is a
+stale result nobody can see.
+
+### Not in scope
+
+Cancel mid-pass. The drop cutter has no interruption points either, so
+cancelling abandons the *queue* and lets the pass in flight finish, exactly as
+adaptive does today.
+
+### As built (phase 5, 2026-09-20)
+
+Measured by `cam/surfacing_runs_off_the_frame`, the twin of phase 1's own
+case and deliberately so — the properties that matter are the same three, and
+a second mechanism watched a different way would be a second mechanism:
+
+```
+generate returned in 0.1 ms
+7 frames while surfacing, worst 18.2 ms
+```
+
+**One worker, two payloads.** `StartNextCamPass` drains the clearing queue
+first and then the surfacing one. Not arbitrary: a finishing pass is planned
+against the PART, not against what roughing left, so neither waits on the
+other — but clearing is seconds and surfacing is minutes, and filling the
+cheap ones first means the backplot grows steadily instead of sitting empty
+through the long one.
+
+**The names stopped lying.** `camDeferAdaptive` → `camDeferPasses`,
+`camAdaptiveBatch*` → `camPassBatch*`, `AdaptiveProgressOf` →
+`CamPassProgressOf`, `CancelAdaptivePasses` → `CancelCamPasses`. The queue
+was never adaptive-specific in anything but its payload, and a name that
+describes one of two kinds is the kind of thing that grows a second copy of
+the machinery beside it.
+
+**The key gate has a twin too** (`test_conventions.cpp`, "the surface key
+covers every field the pass reads"), read against the two surfacing
+generators rather than the whole of `CamStrategies.cpp` — hashing the fields
+a profile reads would be a key that invalidates on things surfacing never
+looks at. Checked by deleting `hash.D(op.stepover)`: it names the field.
+

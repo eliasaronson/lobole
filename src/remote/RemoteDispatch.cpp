@@ -1041,7 +1041,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // The domain gets to say what cancelling means for what was queued
     // behind the running piece.
     if (kind == "cam")
-      ui::CancelAdaptivePasses(state);
+      ui::CancelCamPasses(state);
     const size_t asked = ui::CancelBackgroundJobs(state, kind);
     bool cancellable = false;
     for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
