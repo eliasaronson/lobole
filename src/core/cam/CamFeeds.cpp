@@ -174,9 +174,25 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
     // pocket or an adaptive pass buries a short cutter exactly as well as a
     // slot does, and it is the deepest one that decides.
     double reach = 0.0;
-    for (const Operation& op : setup.operations)
-      if (op.enabled && op.toolNumber == t.number)
-        reach = std::max(reach, op.topZ - op.bottomZ);
+    for (const Operation& op : setup.operations) {
+      if (!op.enabled || op.toolNumber != t.number)
+        continue;
+      // ...except a ROTARY pass, whose top and bottom Z are not a depth. It
+      // cuts radially while the part turns, so its Z range is the blank's
+      // DIAMETER -- and reading that as a plunge told the handle job that a
+      // 6 mm ball was cutting 38.3 mm deep with 25 mm of flute, on a pass
+      // whose deepest radial cut is about four millimetres. A check that
+      // wrong on a correct job is worse than no check.
+      //
+      // Skipped rather than approximated: what a rotary pass actually asks
+      // of a cutter's length is how far the tool must reach PAST the chuck
+      // to the far end of the part, which is a fixturing question this does
+      // not have the fixture to answer. Saying nothing is honest; saying
+      // 38.3 mm is not.
+      if (op.type == OpType::SurfaceRotary)
+        continue;
+      reach = std::max(reach, op.topZ - op.bottomZ);
+    }
     // A MICRON of overrun, not a nanometre. `reach` comes from typed depths
     // against a float-derived stock top, so a cut that is exactly the flute
     // length arrives as 25.00000025 and took the overrun branch -- which then

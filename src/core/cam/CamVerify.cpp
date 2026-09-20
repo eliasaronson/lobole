@@ -833,12 +833,18 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     // cannot reach are four regions of about a square millimetre, and a
     // forgotten operation is one region of hundreds. Both used to print the
     // same sentence.
+    // The AREA is what makes this readable, and the PLACES are a separate
+    // claim: the rotary compare measures area and does not group it into
+    // regions, and printing "in 0 places" beside a millimetre of leftover
+    // reads as a contradiction rather than as a gap. Say what was counted.
+    char where[128] = "";
+    if (v.leftoverRegions > 0)
+      std::snprintf(where, sizeof(where), " in %d place%s", v.leftoverRegions,
+                    v.leftoverRegions == 1 ? "" : "s");
     std::snprintf(buf, sizeof(buf),
-                  "Leaves %.2f mm of material at X%.1f %s%.1f — %.1f mm2 in %d "
-                  "place%s. %s",
+                  "Leaves %.2f mm of material at X%.1f %s%.1f — %.1f mm2%s. %s",
                   v.maxLeftover, v.leftoverAt.x, second, v.leftoverAt.y,
-                  v.leftoverArea, v.leftoverRegions,
-                  v.leftoverRegions == 1 ? "" : "s",
+                  v.leftoverArea, where,
                   v.leftoverRegions >= 3 && v.leftoverArea < 25.0
                       ? "Small and scattered, which is what inside corners "
                         "the cutter cannot reach look like — a smaller tool "

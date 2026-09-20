@@ -77,7 +77,15 @@ bool PlacedPartsBounds(const Setup& setup, const std::vector<Body>& bodies,
   bool any = false;
   for (const Body& b : BodiesInSetupFrame(setup, bodies)) {
     glm::vec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
+    // TIGHT, like the stock. OCC bounds a B-spline by its CONTROL POINTS,
+    // which lie outside the surface -- so this asked the same part for its
+    // size and got a different answer from `StockBoundsFramed`, which was
+    // switched to the tight bound when a 200 mm waveguide asked for a 216 mm
+    // blank. The rotary handle is what made the gap impossible to miss: a
+    // part 38 mm across reported as needing 310 mm of Z travel, and this is
+    // the check that tells an operator their job does not fit the machine.
+    // A warning that wrong is a warning nobody reads.
+    b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
     lo = glm::min(lo, glm::dvec3(bmin));
     hi = glm::max(hi, glm::dvec3(bmax));
     any = true;

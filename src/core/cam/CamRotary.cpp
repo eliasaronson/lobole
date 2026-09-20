@@ -16,6 +16,11 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 // a cell standing a micron proud of the tool is quantisation, not a crash.
 constexpr double kRotaryGrazeTolerance = 1e-3;
 
+// Leftover shallower than this is the grid's own quantisation, not material.
+// A tenth of a millimetre is below anything a finishing pass is asked for and
+// above what a half-millimetre grid can resolve.
+constexpr double kLeftoverFloor = 0.1;
+
 // Is the part-frame point at (x, theta, rad) inside the tool, with the tool's
 // tip at `tip` and the part turned to `aRad`?
 //
@@ -335,6 +340,11 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
         v.maxLeftover = left;
         v.leftoverAt = {x, theta};
       }
+      // How MUCH, as well as how deep. A cell's area here is its axial size
+      // by its ARC at the radius it sits at, which is why the sum is taken
+      // cell by cell rather than as a count times a constant.
+      if (got - hi > kLeftoverFloor)
+        v.leftoverArea += machined.res * machined.ArcAt(got);
     }
   v.cells = compared;
   const size_t total = compared + missed;
