@@ -134,6 +134,15 @@ bool BeginCamPlayback(AppState& state) {
   state.camPlaybackGcode = gcode;
   state.camTimeline = cam::BuildTimeline(
       cam::ProgramInSetupSpace(gcode, *setup), setup->rapidFeed);
+  if (!state.camTimeline.unsupported.empty()) {
+    // Refused VISIBLY, where the buttons are, rather than played wrong. The
+    // transport's own rule (docs/cam/simulation.md S5) and the one the
+    // rotary survey exists to keep us on the right side of.
+    state.camPlaybackRefusal =
+        "This job cannot be simulated: " + state.camTimeline.unsupported;
+    state.camPlaybackGcode.clear();
+    return false;
+  }
   if (state.camTimeline.Empty()) {
     state.camPlaybackRefusal = "The posted file contains no moves to simulate.";
     state.camPlaybackGcode.clear();

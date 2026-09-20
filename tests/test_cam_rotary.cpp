@@ -512,4 +512,44 @@ TEST_CASE("cam rotary: generate, post and verify a turned part", "[cam]") {
   CHECK(v.maxLeftover < 3.5);
 }
 
+TEST_CASE("cam rotary: the simulation refuses a part that turns", "[cam]") {
+  // The simulation's stock is a HEIGHT MAP. Pointed at a rotary program it
+  // would carve the block as though the part stood still and report the
+  // result with a straight face: the first handle job came back "5,004 mm3
+  // removed" against about 77,000 actually cut, and the picture would have
+  // been just as confident.
+  //
+  // That is the one outright bug the rotary survey found in another project
+  // -- blendercam leaves its 2-D map reachable from a 4-axis path with no
+  // guard -- so this is the case that keeps us on the other side of it.
+  // `BuildTimeline` is the funnel every caller goes through, which is why
+  // the refusal lives there and not in each of them.
+  const cam::Timeline turning =
+      cam::BuildTimeline(cam::ParseGcode("(op 1)\nG0 Z25 A0\nG1 Z15 F300\n"
+                                         "G1 X10 A90\nG1 X20 A180\n"),
+                         0.0);
+  INFO(turning.unsupported);
+  CHECK_FALSE(turning.unsupported.empty());
+  CHECK(turning.unsupported.find("height map") != std::string::npos);
+  CHECK(turning.Empty()); // and nothing to scrub, so nothing can be drawn
+
+  // An INDEXED file is not that: one constant A before the first cut, the
+  // part standing still while the tool moves, which is exactly what a height
+  // map represents. It must still simulate.
+  const cam::Timeline indexed =
+      cam::BuildTimeline(cam::ParseGcode("(op 1)\nG0 Z25\nG0 A90\nG0 X0 Y0\n"
+                                         "G1 Z15 F300\nG1 X10\nG1 X20\n"),
+                         0.0);
+  INFO(indexed.unsupported);
+  CHECK(indexed.unsupported.empty());
+  CHECK(indexed.Segments() > 0);
+
+  // ...and so must a plain 3-axis one, which is the control: a refusal that
+  // fires on everything is not a refusal.
+  const cam::Timeline flat = cam::BuildTimeline(
+      cam::ParseGcode("(op 1)\nG0 Z25\nG0 X0 Y0\nG1 Z15 F300\nG1 X10\n"), 0.0);
+  CHECK(flat.unsupported.empty());
+  CHECK(flat.Segments() > 0);
+}
+
 #endif // HAVE_CAM

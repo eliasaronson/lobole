@@ -209,4 +209,7 @@ test caught it in one run, which is the argument for that test existing.
   both cutting and asking, so the two cannot come to disagree about what the
   tool removes -- a rapid is tested against the stock and never carves it.
 - **No picture.** `CamPlayback` draws a height map. A radius map has no
-  renderer, so a rotary file verifies but cannot be watched.
+  renderer, so a rotary file verifies but cannot be watched — and it is
+  REFUSED rather than drawn wrong (`Timeline::unsupported`), because the
+  first thing the dogfood asked of it was to simulate the handle and it did,
+  reporting 5,004 mm³ removed against about 77,000 actually cut.

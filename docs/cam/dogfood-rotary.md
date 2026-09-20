@@ -101,6 +101,17 @@ finishing pass in wood.
 3. **There is no picture.** Playback draws a height map, so this job can be
    verified and not watched. Of everything on this list that is the one a
    person notices first.
+
+   Asked directly, and the answer was worse than "no": the simulation ran it.
+   It carved the block as though the part stood still and reported **5,004
+   mm³ removed** against about 77,000 actually cut — a precise, confident,
+   wrong number, and a picture to match. That is the one outright bug this
+   round's survey found in another project (blendercam leaves its 2-D map
+   reachable from a 4-axis path with no guard), arrived at from the inside.
+   It refuses now, in `BuildTimeline` because that is the funnel every caller
+   goes through, so the panel and the RPC inherit it rather than each
+   remembering. An INDEXED file still simulates: one constant A is a part
+   standing still, which is exactly what a height map represents.
 4. **No origin mode means "the rotary centreline".** `stock_centre` happens to
    give it, because the blank is symmetric about the axis in Y and Z — true
    rather than designed, and it would not be true of a part held off-centre.

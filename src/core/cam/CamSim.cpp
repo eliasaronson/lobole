@@ -21,6 +21,16 @@ double SegmentLength(const GProgram& p, size_t seg) {
 } // namespace
 
 Timeline BuildTimeline(GProgram program, double rapidFeed) {
+  if (RotatesWhileCutting(program)) {
+    Timeline out;
+    out.unsupported =
+        "the A axis moves in this program and the simulation's stock is a "
+        "height map, which cannot represent a part that turns — it would "
+        "carve the block as though it stood still. `cam_verify` checks a "
+        "rotary file properly (docs/cam/rotary-plan.md); there is no picture "
+        "for one yet.";
+    return out;
+  }
   Timeline tl;
   tl.program = std::move(program);
   const size_t segs = tl.Segments();

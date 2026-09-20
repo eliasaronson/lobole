@@ -61,6 +61,22 @@ struct Timeline {
   std::vector<size_t> opStarts;
   std::vector<size_t> toolChanges;
 
+  // Why this program cannot be simulated, when it cannot. Empty means it
+  // can.
+  //
+  // The stock here is a HEIGHT MAP, z(x, y), and a height map cannot
+  // represent a part that turns -- so a file whose A moves would be carved
+  // as though it stood still and the picture, the removed volume and the
+  // clock would all be confident and wrong. Measured on the first rotary
+  // job: 5,004 mm3 reported against about 77,000 actually cut.
+  //
+  // That is the one outright bug the rotary survey found in another project
+  // (blendercam leaves its 2-D map reachable from a 4-axis path with no
+  // guard), and the reason it is caught HERE is that `BuildTimeline` is the
+  // funnel every caller goes through -- the panel, the RPC and any future
+  // one inherit the refusal instead of each remembering it.
+  std::string unsupported;
+
   [[nodiscard]] size_t Segments() const {
     return program.moves.size() < 2 ? 0 : program.moves.size() - 1;
   }
