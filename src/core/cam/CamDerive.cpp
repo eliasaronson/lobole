@@ -459,6 +459,41 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.cutAngleDeg = 0.0;
     break;
   }
+  case OpType::SurfaceRotary: {
+    // The same refusal as the two above, for the same reason: a cone cannot
+    // finish a surface whichever axis it is presented on.
+    if (tool.type == ToolType::VBit || tool.type == ToolType::Drill) {
+      out.why = "tool " + std::to_string(tool.number) + " is a " +
+                (tool.type == ToolType::VBit ? "V-bit" : "drill") +
+                " — a cone cannot finish a surface, it ploughs a groove. Use "
+                "a ball nose.";
+      return out;
+    }
+    if (!setup.machine.hasRotaryAxis) {
+      out.why = "a rotary finishing pass needs a machine with a 4th axis — "
+                "say so on the machine, or pick a 3-axis finish instead";
+      return out;
+    }
+    op.name = "Finish on the rotary";
+    // No target: a rotary pass turns the WHOLE part under the cutter. A face
+    // pick would name one patch of a surface that the part rotates out from
+    // under, which is a statement about a 3-axis fixture, not this one. Said
+    // by refusing rather than by ignoring what was picked.
+    if (target.ref.IsSet()) {
+      out.why = "a rotary finishing pass turns the whole part under the "
+                "cutter, so it takes no face pick — clear the selection and "
+                "add it to the setup";
+      return out;
+    }
+    // Depths are not what a rotary pass is bounded by: it runs the length of
+    // the part on the axis and all the way round. They are filled in so the
+    // panel and the post have something honest to show, and neither is read
+    // by the strategy.
+    op.topZ = hi.z;
+    op.bottomZ = lo.z;
+    op.stepover = DerivedStepover(tool);
+    break;
+  }
   case OpType::Count:
     // Not a type. This switch used to have no case for an unhandled value at
     // all, so it fell through to `ok = true` with a DEFAULT Operation -- top

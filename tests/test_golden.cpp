@@ -435,6 +435,24 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_op_sample_steps")) {
+    // v122: a rotary pass's spacing ALONG the axis. Checked because the
+    // surfacing round shipped a bug of exactly this shape -- an adaptive
+    // op's `stepover` was written only for some op types, so it reloaded as
+    // the default, in a golden that carried the real value and compared only
+    // op type NAMES.
+    const auto& want = expect.at("cam_op_sample_steps");
+    std::vector<double> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Operation& o : s.operations)
+        got.push_back(o.sampleStep);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("op " << i << " sample_step_mm");
+      CHECK_THAT(got[i],
+                 Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("cam_tool_holders")) {
     // v121: the stickout and the collet nut. A tool that loses either stops
     // being checked against holder collisions ENTIRELY and silently -- the

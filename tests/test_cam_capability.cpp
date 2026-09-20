@@ -164,18 +164,43 @@ std::unique_ptr<Document> PartDoc() {
   return doc;
 }
 
+// A bar ON the rotary axis (setup-space +X) with a turned-down waist: what a
+// continuous 4-axis pass is for, and the only fixture here that is not
+// machined from above.
+std::unique_ptr<Document> BarDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Waist", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 20.0, 20.0));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Journal", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 15.0, 20.0));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
+      BooleanOp::Union));
+  return doc;
+}
+
 TypedJob JobFor(cam::OpType type) {
   TypedJob j;
+  const bool rotary = type == cam::OpType::SurfaceRotary;
   const bool surfacing = type == cam::OpType::SurfaceParallel ||
                          type == cam::OpType::SurfaceWaterline;
-  j.doc = surfacing ? DomedDoc() : PartDoc();
+  j.doc = rotary ? BarDoc() : surfacing ? DomedDoc() : PartDoc();
   j.setup = BasicSetup();
   // A 10 mm cutter, not the fixture's 6. Nothing here is about the tool, and
   // the clearing strategies cost passes: at 6 mm the adaptive cases alone put
   // this case past seven minutes.
   j.setup.tools[0].diameter = 10.0;
-  if (surfacing)
+  if (surfacing || rotary)
     j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 10.0);
+  if (rotary) {
+    j.setup.machine.hasRotaryAxis = true;
+    j.setup.safeZ = 40.0;
+  }
   if (type == cam::OpType::EdgeRound)
     j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
   ElementRef target;
@@ -198,6 +223,8 @@ TypedJob JobFor(cam::OpType type) {
   case cam::OpType::Adaptive:
     target = PocketFloorRef(*j.doc);
     break;
+  case cam::OpType::SurfaceRotary:
+    break; // it takes NO pick: the whole part turns under the cutter
   case cam::OpType::Count:
     break;
   }

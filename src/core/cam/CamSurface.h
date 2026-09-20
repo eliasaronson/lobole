@@ -2,6 +2,7 @@
 
 #include "core/cam/CamDropCutter.h" // CLSurface
 #include "core/cam/CamJob.h"        // Loop
+#include "core/cam/CamRotary.h"     // RadiusMap
 
 #include <glm/glm.hpp>
 
@@ -107,5 +108,41 @@ struct WaterlineRequest {
 // caller needs to check one pass against the surface it was planned on, and
 // what a test asserts with.
 [[nodiscard]] double SampleCL(const CLSurface& cl, double x, double y);
+
+// --- the rotary pattern ---------------------------------------------------
+
+// One pass of a continuous 4-axis finishing raster: a run ALONG the rotary
+// axis at a constant part angle. `pts` are (x mm, radius mm) -- where the
+// tool's TIP goes -- and the whole pass is cut with the part turned so that
+// `thetaDeg` faces the spindle.
+//
+// Constant A per pass, changing between them, and that is the design rather
+// than a simplification. It keeps arcs fittable (the post refuses to fit an
+// arc across a CHANGING A, because an arc word carries no A), it keeps the
+// feed question honest (a pass cuts at its own radius, so one scaling serves
+// it), and it is what makes the rotary strategy a PATTERN over a surface
+// like every other one here instead of a second kinematics.
+struct RotaryPass {
+  double thetaDeg = 0.0;
+  std::vector<glm::dvec2> pts; // (x, radius)
+};
+
+struct RotaryParallelRequest {
+  // Spacing ACROSS the passes, in mm of ARC at the part's widest point. The
+  // angular step is derived from it, for the reason the grid's own step is:
+  // an angle is not a spacing until you say at what radius.
+  double stepover_mm = 1.0;
+  // Spacing ALONG a pass, in mm. Zero takes the CL grid's own resolution.
+  double sampleStep_mm = 0.0;
+  // Alternate direction pass to pass, as a planar raster does.
+  bool zigzag = true;
+};
+
+// Rasters `cl` into passes. Cells where the tool reaches nothing hold a
+// radius of zero and BREAK a pass rather than being cut to: a pass that ran
+// through a gap would drag the cutter across whatever lies between, which is
+// the same rule the planar raster follows for its floor.
+[[nodiscard]] std::vector<RotaryPass>
+RotaryParallelPasses(const RadiusMap& cl, const RotaryParallelRequest& req);
 
 } // namespace cam

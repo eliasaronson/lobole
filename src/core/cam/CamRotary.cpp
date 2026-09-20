@@ -233,6 +233,48 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
   WalkSweepRotary(from, to, aFrom, aTo, tool, stock, /*apply=*/true);
 }
 
+RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
+  RadiusMap out = model;
+  if (model.nx <= 0 || model.nTheta <= 0 || tool.diameter <= 0.0)
+    return out;
+  const double R = tool.diameter * 0.5;
+  const int di = static_cast<int>(std::ceil(R / model.res)) + 1;
+
+  for (int j = 0; j < model.nTheta; j++)
+    for (int i = 0; i < model.nx; i++) {
+      // The arc a theta step spans depends on the radius, so it is measured
+      // at the cell's OWN. A kernel in cells would be a different physical
+      // size at every radius, which is the conflation the whole `ArcAt`
+      // derivation exists to avoid.
+      const double here = model.At(i, j);
+      const double arc = model.ArcAt(std::max(here, 0.01));
+      const int dj = static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1;
+      double best = 0.0;
+      bool touched = false;
+      for (int a = -di; a <= di; a++) {
+        const int ni = i + a;
+        if (ni < 0 || ni >= model.nx)
+          continue;
+        for (int b = -dj; b <= dj; b++) {
+          const double d = std::hypot(a * model.res, b * arc);
+          if (d > R)
+            continue;
+          const int nj = (j + b % model.nTheta + model.nTheta) % model.nTheta;
+          const double s = model.At(ni, nj);
+          if (s <= 0.0)
+            continue; // off the part: nothing there to rest on
+          const double tip = s - TipHeight(tool, d);
+          if (!touched || tip > best) {
+            best = tip;
+            touched = true;
+          }
+        }
+      }
+      out.Set(i, j, static_cast<float>(touched ? best : 0.0));
+    }
+  return out;
+}
+
 Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
   Verdict v;
   v.rotary = true;

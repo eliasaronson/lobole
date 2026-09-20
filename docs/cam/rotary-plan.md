@@ -29,6 +29,13 @@ Both then spent 700–2,300 lines on the strategies. We are already on the
 right side of this: `Move::hasA`/`Move::a` exist and the post writes them,
 and `DropRequest::frame` is the parameter a rotary drop cutter needs.
 
+> As built it took a different door, and `DropRequest::frame` is still
+> unused. A rotary drop is the dilation of the radius field the verifier
+> already samples (`RotaryCL`), so it costs one mesh instead of one per
+> angular step, and it shares the grid with the thing that checks it. The
+> point the survey was making held — the seam was in the right place — but
+> the cheaper seam was the MAP, not the frame.
+
 **2. Only FreeCAD compensates the feed, and not the way a controller would.**
 `_FeedClamp` scales `F = f · 360 / (2πr)` for constant surface speed, floors
 the radius at `r_safe = max(r, 1e-9)`, clamps at a user `MaxFeed` and reports
@@ -71,9 +78,8 @@ Three honest answers, and only three:
   exactly this reason, and refusing the same way is defensible.
 
 **Recommendation: the cylindrical map, with the refusal above it as the
-gate.** BUILT — see [As built](#as-built).
-
-**Recommendation, in full:** It keeps the one-engine rule, it reuses `CarveSweep`/`SampleModel`/
+gate** (BUILT — see [As built](#as-built)). It keeps the one-engine rule, it
+reuses `CarveSweep`/`SampleModel`/
 `Compare` almost verbatim, and its limit — round stock, one rotary axis — is
 the same limit every surveyed project imposed on its rotary ops anyway. This
 is the decision to take first because it decides whether continuous 4-axis is
@@ -109,20 +115,19 @@ auditing this road rather than by anything failing.
 2. ~~`rotation_a` accepted without a 4th axis~~ — refused (`3e3bc097`).
 3. ~~The parser drops an A word~~ — named, and the parser's findings now reach
    the verdict at all (`8efffb81`).
-4. **`ClipToMachine` has no test.** It rewrites every move against the work
-   area and it is what would have to interpolate A across a split. 617 lines
-   of `CamTravel.cpp` have no test file of their own.
+4. ~~`ClipToMachine` has no test~~ — `tests/test_cam_travel.cpp` (`7bbbb80c`),
+   and it found one: an inserted retract or re-entry lost the A of the path
+   it was inserted into.
 
 And two structural ones, in the order the code asks for them:
 
-- **`CamVerify.cpp` is two subjects** (1,066 lines): the G-code parser, and
-  the height-map carve/compare. The parser is precisely what a 4th axis
-  touches, and it is the half that has nothing to do with the stock model.
-  Split it out before adding a second stock model behind it.
+- ~~**`CamVerify.cpp` is two subjects**~~ — split at `8286171a`. The parser is
+  `CamGcode.{h,cpp}` (278 lines) and depends on nothing but `Setup`; 860
+  lines of map, carve, compare and verdict are left, which is one subject.
 - **`CamStrategies.cpp` grew 31% in two weeks** (1,068 → 1,399) and is the
   largest file in the subsystem. It holds every generator plus the clip
-  epilogue plus the rotary stamp. A rotary strategy lands here; give it a
-  seam first.
+  epilogue plus the rotary stamp. Still true, and the rotary strategy has now
+  landed in it — so the seam is owed rather than optional.
 
 ## What is NOT in the way
 
@@ -187,7 +192,9 @@ test caught it in one run, which is the argument for that test existing.
   understated silently. The GENERATOR's half is the real question and waits
   for a strategy: scaling `F` for constant surface speed with a radius floor
   and a stated clamp, which is FreeCAD's answer and the only complete one in
-  the survey.
+  the survey. Now that `surface_rotary` exists it is the next thing to
+  build — and it is cheap, because a pass cuts at ONE radius, so it is one
+  number per pass rather than one per move.
 - **D3, round stock.** The blank is DERIVED from the part (its extent along
   the axis, its furthest point from it, plus the setup's margins — the radial
   one taken as the larger of Y and Z, because a box's margins are all a

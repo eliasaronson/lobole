@@ -10,6 +10,7 @@
 
 #include "cam_fixtures.h"
 #include "core/cam/CamRotary.h"
+#include "core/cam/CamSurface.h"
 
 namespace {
 
@@ -336,6 +337,179 @@ TEST_CASE("cam rotary: turning the part takes time", "[cam]") {
   cam::Toolpath plain = tp;
   plain.moves[1].a = 0.0;
   CHECK_THAT(cam::CuttingMinutes(setup, {plain}), WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("cam rotary: the CL surface is the part plus the cutter", "[cam]") {
+  // The drop cutter's arithmetic, in the rotary frame. A BALL nose resting
+  // on a plain cylinder sits one tool radius shallower than the surface: its
+  // tip is at r_model - 0, and its widest point touches nothing, so the tip
+  // radius equals the part's. That is the boring case and it is the control.
+  //
+  // The case that measures something is a STEP: a ball cannot reach into a
+  // corner, so the CL surface rounds it off by the tool's own radius, which
+  // is the scallop a finish pass is allowed to leave and the reason the
+  // generator plans against this surface instead of the part.
+  cam::RadiusMap model = cam::MakeRotaryStock(0.0, 40.0, 20.0, 0.5);
+  // Turn the second half down to 15: a 5 mm step at x = 20.
+  for (int i = 0; i < model.nx; i++)
+    if (model.CellX(i) > 20.0)
+      for (int j = 0; j < model.nTheta; j++)
+        model.Set(i, j, 15.0f);
+
+  cam::Tool ball;
+  ball.number = 1;
+  ball.diameter = 6.0;
+  ball.type = cam::ToolType::Ball;
+  const cam::RadiusMap cl = cam::RotaryCL(model, ball);
+
+  // Far from the step the tip sits on the surface itself.
+  const int big = static_cast<int>((5.0 - cl.x0) / cl.res);
+  const int small = static_cast<int>((35.0 - cl.x0) / cl.res);
+  CHECK_THAT(cl.At(big, 0), WithinAbs(20.0, 0.05));
+  CHECK_THAT(cl.At(small, 0), WithinAbs(15.0, 0.05));
+
+  // Approaching the step from the SMALL side the tool is held out by the
+  // shoulder: within one radius of x = 20 the tip cannot come down to 15.
+  const int near = static_cast<int>((21.5 - cl.x0) / cl.res);
+  INFO("near the step: " << cl.At(near, 0));
+  CHECK(cl.At(near, 0) > 15.5);
+  CHECK(cl.At(near, 0) < 20.0);
+  // ...and three millimetres past it, the ball has cleared the corner.
+  const int clear = static_cast<int>((24.0 - cl.x0) / cl.res);
+  CHECK_THAT(cl.At(clear, 0), WithinAbs(15.0, 0.05));
+
+  // A FLAT mill of the same size is held out further at the same place: its
+  // corner reaches the shoulder a whole radius away, where the ball's does
+  // not. The two tools disagreeing here is the whole reason `TipHeight` is
+  // one function rather than an assumption per call site.
+  cam::Tool flat = ball;
+  flat.type = cam::ToolType::Flat;
+  const cam::RadiusMap flatCL = cam::RotaryCL(model, flat);
+  INFO("flat " << flatCL.At(near, 0) << " ball " << cl.At(near, 0));
+  CHECK(flatCL.At(near, 0) > cl.At(near, 0));
+  CHECK_THAT(flatCL.At(near, 0), WithinAbs(20.0, 0.05));
+}
+
+TEST_CASE("cam rotary: the raster steps by the arc it was asked for", "[cam]") {
+  cam::RadiusMap cl = cam::MakeRotaryStock(0.0, 60.0, 20.0, 0.5);
+  cam::RotaryParallelRequest req;
+  req.stepover_mm = 2.0;
+  const std::vector<cam::RotaryPass> passes =
+      cam::RotaryParallelPasses(cl, req);
+  REQUIRE(passes.size() > 4);
+
+  // 2 mm of arc round a Ø40 bar is 2 / (pi * 40) of a turn: about 57 passes.
+  const double want = 2.0 * glm::pi<double>() * 20.0 / 2.0;
+  INFO("passes " << passes.size() << " want about " << want);
+  CHECK(std::abs(static_cast<double>(passes.size()) - want) < want * 0.1);
+
+  // Each pass runs the length of the bar, and they alternate direction --
+  // a finishing raster is a zigzag, which is why `climb` means nothing on
+  // one and is refused rather than offered.
+  CHECK(passes[0].pts.front().x < passes[0].pts.back().x);
+  CHECK(passes[1].pts.front().x > passes[1].pts.back().x);
+  for (const cam::RotaryPass& p : passes)
+    CHECK(p.pts.size() > 100);
+
+  // Halving the stepover doubles the passes. The one property of a finishing
+  // pattern that has to hold, and the one a fixed angular step would break.
+  req.stepover_mm = 1.0;
+  const size_t finer = cam::RotaryParallelPasses(cl, req).size();
+  INFO("finer " << finer << " vs " << passes.size());
+  CHECK(finer > 1.8 * passes.size());
+
+  // A gap in the surface BREAKS a pass rather than being cut across. Zero
+  // the middle third of the bar and every pass comes back as two.
+  for (int i = 0; i < cl.nx; i++)
+    if (cl.CellX(i) > 20.0 && cl.CellX(i) < 40.0)
+      for (int j = 0; j < cl.nTheta; j++)
+        cl.Set(i, j, 0.0f);
+  req.stepover_mm = 2.0;
+  const std::vector<cam::RotaryPass> broken =
+      cam::RotaryParallelPasses(cl, req);
+  INFO("broken " << broken.size() << " from " << passes.size());
+  CHECK(broken.size() == 2 * passes.size());
+  for (const cam::RotaryPass& p : broken)
+    for (const glm::dvec2& q : p.pts)
+      CHECK((q.x < 20.5 || q.x > 39.5));
+}
+
+TEST_CASE("cam rotary: generate, post and verify a turned part", "[cam]") {
+  // The closed loop, and the only thing that makes a strategy worth having:
+  // the generator plans against a cutter-location surface, the post writes a
+  // file, and the VERIFIER -- which shares nothing with the generator but
+  // `TipHeight` -- reads that file back and measures what it removed against
+  // the model it was supposed to make.
+  //
+  // The part is a bar with a Phi 30 journal turned into a Phi 40 blank: two
+  // diameters and two shoulders, which is the smallest shape with a corner a
+  // ball cannot reach, so the leftover it reports is a real number rather
+  // than zero by construction.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Waist", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 20.0, 20.0));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Journal", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 15.0, 20.0));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
+      BooleanOp::Union));
+  REQUIRE(doc->GetBodies().size() == 1);
+
+  cam::Setup setup = BasicSetup();
+  setup.machine.name = "trunnion";
+  setup.machine.hasRotaryAxis = true;
+  setup.stock.margin = {0.0, 0.0, 0.0};
+  setup.safeZ = 40.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+
+  // Derived, not typed -- the same route a click takes.
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::SurfaceRotary, cam::Target{});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.stepover = 0.25; // 1.5 mm of arc: coarse, so the case stays quick
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  REQUIRE(paths[0].moves.size() > 500);
+  // Every move states an A, and consecutive passes state different ones --
+  // which is what makes this a 4-axis program rather than an indexed one.
+  std::set<double> angles;
+  for (const cam::Move& m : paths[0].moves) {
+    REQUIRE(m.hasA);
+    angles.insert(std::round(m.a * 100.0) / 100.0);
+  }
+  INFO("distinct A values " << angles.size());
+  CHECK(angles.size() > 30);
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+  CHECK(gcode.find(" A") != std::string::npos);
+
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.5);
+  INFO("rotary " << v.rotary << " gouge " << v.maxGouge << " leftover "
+                 << v.maxLeftover << " rapids " << v.rapidsThroughStock
+                 << " cells " << v.cells);
+  REQUIRE(v.rotary); // it routed itself, because the file's A moves
+  REQUIRE(v.cells > 1000);
+  // The generator plans against the CL surface, so it must not cut into the
+  // part. This is the assertion the whole file exists for.
+  CHECK(v.maxGouge < 0.1);
+  // ...and it leaves the inside corners a 6 mm ball cannot reach, which is
+  // the right answer and not zero: 3 mm of radius in each of two shoulders.
+  CHECK(v.maxLeftover > 0.5);
+  CHECK(v.maxLeftover < 3.5);
 }
 
 #endif // HAVE_CAM

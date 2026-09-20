@@ -426,4 +426,58 @@ SurfacePaths WaterlinePasses(const CLSurface& cl,
   return out;
 }
 
+std::vector<RotaryPass> RotaryParallelPasses(const RadiusMap& cl,
+                                             const RotaryParallelRequest& req) {
+  std::vector<RotaryPass> out;
+  if (cl.nx <= 0 || cl.nTheta <= 0)
+    return out;
+
+  double rMax = 0.0;
+  for (float v : cl.r)
+    rMax = std::max(rMax, static_cast<double>(v));
+  if (rMax <= 0.0)
+    return out;
+
+  // The angular step, from the stepover the caller asked for in millimetres
+  // of arc AT THE WIDEST POINT. Anywhere narrower the passes are closer
+  // together than asked, which is the safe direction -- the scallop only
+  // gets smaller. Taking it at the mean radius instead would leave the rim,
+  // where the surface speed is highest and the finish matters most, cut
+  // coarser than the number the user typed.
+  const double stepCells =
+      std::max(1.0, req.stepover_mm / std::max(1e-6, cl.ArcAt(rMax)));
+  const int stride = std::max(1, static_cast<int>(std::round(stepCells)));
+  const double along = req.sampleStep_mm > 0.0 ? req.sampleStep_mm : cl.res;
+  const int xStride = std::max(1, static_cast<int>(std::round(along / cl.res)));
+
+  bool forward = true;
+  for (int j = 0; j < cl.nTheta; j += stride) {
+    RotaryPass pass;
+    pass.thetaDeg = glm::degrees(cl.CellTheta(j));
+    std::vector<glm::dvec2> run;
+    const auto flush = [&]() {
+      // Two points is a move; one is a plunge to nowhere.
+      if (run.size() >= 2) {
+        RotaryPass p = pass;
+        p.pts = run;
+        out.push_back(std::move(p));
+      }
+      run.clear();
+    };
+    for (int n = 0; n < cl.nx; n += xStride) {
+      const int i = forward ? n : cl.nx - 1 - n;
+      const double r = cl.At(i, j);
+      if (r <= 0.0) {
+        flush(); // a gap ENDS a pass: the tool lifts rather than dragging
+        continue;
+      }
+      run.push_back({cl.CellX(i), r});
+    }
+    flush();
+    if (req.zigzag)
+      forward = !forward;
+  }
+  return out;
+}
+
 } // namespace cam

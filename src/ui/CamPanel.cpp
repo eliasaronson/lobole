@@ -56,9 +56,9 @@ constexpr glm::vec4 kRapidColor(0.50f, 0.52f, 0.60f, 0.55f);
 // and indexes it by that enum at three more places, so a row out of step is
 // an out-of-bounds read and a row missing is the wrong label on every type
 // after it. Asserted rather than trusted.
-const char* kOpTypes[] = {"Profile",        "Pocket",      "Face",
-                          "Drill",          "Adaptive",    "Edge break",
-                          "Finish surface", "Finish walls"};
+const char* kOpTypes[] = {"Profile",        "Pocket",       "Face",
+                          "Drill",          "Adaptive",     "Edge break",
+                          "Finish surface", "Finish walls", "Finish rotary"};
 static_assert(IM_ARRAYSIZE(kOpTypes) == static_cast<int>(cam::OpType::Count),
               "kOpTypes must have one label per OpType, in enum order");
 

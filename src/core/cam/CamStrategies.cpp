@@ -6,6 +6,7 @@
 #include "core/Measure.h"
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamDropCutter.h"
+#include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
 
 #include <clipper2/clipper.h>
@@ -1166,6 +1167,100 @@ void EmitSurfacePasses(Toolpath& tp, const Setup& setup, const Tool& tool,
     Emit(tp, Move::Kind::Rapid, {at.x, at.y, setup.safeZ}, 0.0);
 }
 
+// Continuous 4-axis finishing (docs/cam/rotary-plan.md). The part turns to
+// present each pass to the spindle, so every move of a pass carries the same
+// A and consecutive passes carry different ones.
+//
+// The same shape as `GenerateSurface` and deliberately so: a contact surface,
+// a pattern over it, and a link between the passes. What changes is the
+// SPACE -- r(x, theta) about the rotary axis instead of z(x, y) over the bed
+// -- and it changes in exactly one place, which is the argument the plan made
+// for keeping the generators free of world assumptions.
+void GenerateRotarySurface(const Setup& setup, const Operation& op,
+                           const Tool& tool, const std::vector<Body>& bodies,
+                           Toolpath& tp) {
+  if (!setup.machine.hasRotaryAxis) {
+    tp.error = "this setup's machine has no 4th axis, so a rotary pass "
+               "cannot be posted for it";
+    return;
+  }
+  // The grid: fine enough for the cusp this cutter is allowed to leave, the
+  // same derivation the planar drop cutter uses.
+  const double cusp = DerivedCusp(tool, 0.0);
+  const double res = DerivedDropRes(tool, 0.0, cusp);
+
+  double x0 = 1e18, x1 = -1e18, rad = 0.0;
+  for (const Body& b : bodies) {
+    if (!b.shape.IsValid())
+      continue;
+    const CADShape::Mesh mesh = b.shape.GenerateMeshDetached(res * 0.25);
+    for (const auto& v : mesh.vertices) {
+      x0 = std::min(x0, static_cast<double>(v.position.x));
+      x1 = std::max(x1, static_cast<double>(v.position.x));
+      rad = std::max(rad, std::hypot(static_cast<double>(v.position.y),
+                                     static_cast<double>(v.position.z)));
+    }
+  }
+  if (x1 <= x0 || rad <= 0.0) {
+    tp.error = "there is no part on the rotary axis to finish";
+    return;
+  }
+
+  const RadiusMap grid = MakeRotaryStock(x0, x1, rad, res);
+  RadiusMap model = SampleModelRotary(bodies, grid);
+  // Stock to leave on a rotary pass holds the tool OUT, radially -- the same
+  // field that shifts bottomZ on a 2.5D op and raises the tool on a planar
+  // finish. Same name, three mechanics, because one cuts to a depth, one to
+  // a surface and one to a radius.
+  if (op.stockToLeave > 0.0)
+    for (int j = 0; j < model.nTheta; j++)
+      for (int i = 0; i < model.nx; i++)
+        if (const double r = model.At(i, j); r > 0.0)
+          model.Set(i, j, static_cast<float>(r + op.stockToLeave));
+
+  const RadiusMap cl = RotaryCL(model, tool);
+  RotaryParallelRequest req;
+  req.stepover_mm = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+  req.sampleStep_mm = op.sampleStep;
+  const std::vector<RotaryPass> passes = RotaryParallelPasses(cl, req);
+  if (passes.empty()) {
+    tp.error = "this part gives no rotary passes — check the cutter against "
+               "the part's size on the axis";
+    return;
+  }
+
+  // Setup space: the tool stands on +Z over the axis, at y = 0, and the PART
+  // turns. A pass at part angle theta is cut with A = 90 - theta, which is
+  // the angle that brings theta to the top (a part angle appears in setup
+  // space at theta + A).
+  const auto go = [&](Move::Kind kind, double x, double r, double aDeg,
+                      double feed) {
+    Move m;
+    m.kind = kind;
+    m.to = {x, 0.0, r};
+    m.feed = feed;
+    m.hasA = true;
+    m.a = aDeg;
+    tp.moves.push_back(m);
+  };
+  for (const RotaryPass& pass : passes) {
+    if (pass.pts.size() < 2)
+      continue;
+    const double a = 90.0 - pass.thetaDeg;
+    // Clear of the work before the trunnion turns, every time. The post
+    // enforces safe Z before an index too, but a toolpath that arrives
+    // already retracted is one the post never has to correct -- and here
+    // the retract is RADIAL, so "safe" is a radius outside the blank.
+    const double safeR = rad + std::max(2.0, tool.diameter);
+    go(Move::Kind::Rapid, pass.pts.front().x, safeR, a, 0.0);
+    go(Move::Kind::Plunge, pass.pts.front().x, pass.pts.front().y, a,
+       tool.feedPlunge);
+    for (size_t k = 1; k < pass.pts.size(); k++)
+      go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
+    go(Move::Kind::Rapid, pass.pts.back().x, safeR, a, 0.0);
+  }
+}
+
 void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
                      const std::vector<Body>& bodies, Toolpath& tp) {
   // The region to stay inside: the picked face's SILHOUETTE, or the whole
@@ -1284,6 +1379,9 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
   case OpType::SurfaceParallel:
   case OpType::SurfaceWaterline:
     GenerateSurface(setup, op, tool, bodies, tp);
+    break;
+  case OpType::SurfaceRotary:
+    GenerateRotarySurface(setup, op, tool, bodies, tp);
     break;
   case OpType::Count:
     // Not a type. Named so the switch stays exhaustive and a REAL new type

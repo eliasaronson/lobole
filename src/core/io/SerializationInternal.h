@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    121; // v121: a `Tool`'s `overall_length` and `collar_diameter` — how far
+    122; // v122: an `OpType` of `surface_rotary` — continuous 4-axis
+         //      finishing, passes ALONG the rotary axis stepping round it,
+         //      the part turning to present each one to the spindle. An
+         //      unknown op type already refuses the file by name, so a v121
+         //      build refuses this one, which is what the bump is for
+         //      (docs/cam/rotary-plan.md).
+         // v121: a `Tool`'s `overall_length` and `collar_diameter` — how far
          //      the cutter sticks out of the collet and how wide the nut is.
          //      Together they turn on the holder check in the verifier, which
          //      finds the collar driven into material the cutter never went

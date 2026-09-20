@@ -209,6 +209,10 @@ enum class OpType {
   // a Z step under one name.
   SurfaceParallel,
   SurfaceWaterline,
+  // Continuous 4-axis: passes ALONG the rotary axis, stepping round it. The
+  // part turns to present each pass to the spindle, so the A word changes
+  // between passes and holds within one (docs/cam/rotary-plan.md).
+  SurfaceRotary,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
   // reloaded as a full-depth contour round the part -- the silent

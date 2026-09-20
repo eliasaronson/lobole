@@ -102,6 +102,26 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
                       double aFrom, double aTo, const Tool* tool,
                       RadiusMap& stock);
 
+// The cutter-location RADIUS surface: for each (x, theta), the radius at
+// which this tool's TIP must sit for the cutter to touch the part without
+// cutting into it. The rotary twin of `DropCut`, and the same arithmetic --
+//
+//   r_CL(x, th) = max over cells p within the tool's radius of
+//                   ( r_model(p) - TipHeight(tool, |p - (x, th)|) )
+//
+// -- with the lateral distance measured as an ARC, hypot(dx, r*dtheta),
+// because that is the distance on the surface being cut. `TipHeight` is the
+// same function the rotary carve verifies with, so the surface a pass is
+// planned against and the shape the check removes cannot disagree about the
+// cutter, exactly as in three axes.
+//
+// It assumes the tool contacts the part at the TOP, where the spindle's axis
+// is radial. Every surveyed rotary drop cutter assumes it (FreeCAD rotates
+// the STL by -theta and drops along Z, which is the same statement), and a
+// 4-axis machine cutting anywhere else is a machine whose A is not being used
+// to present the work.
+[[nodiscard]] RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool);
+
 // The verdict, from the rotary pair. Same `Verdict` the height map fills, so
 // the panel, the RPC and `Explain` need no second vocabulary -- with
 // `rotary` set, which is what makes an angle print as an angle.

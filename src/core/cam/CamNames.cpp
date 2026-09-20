@@ -64,6 +64,14 @@ constexpr OpTypeRow kRows[] = {
          OpField::CutAngle},
     {OpType::SurfaceWaterline, "surface_waterline", true,
      OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
+    // Continuous 4-axis. Shorter still than the two above, and the absences
+    // are again the design: no side (there is no contour to be beside), no
+    // stepdown, no tabs, no relief, no lead arcs, no finish tool -- and no
+    // CUT ANGLE, because a rotary raster's direction is the axis. Its
+    // `stepover` is a fraction of the cutter like every other, converted to
+    // millimetres of ARC at the part's widest point where the tool is known.
+    {OpType::SurfaceRotary, "surface_rotary", true,
+     OpField::StockToLeave | OpField::Stepover | OpField::SampleStep},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a
