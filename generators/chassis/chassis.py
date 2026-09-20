@@ -267,7 +267,10 @@ def main():
     t0 = time.time()
 
     d.call("new_project")
-    d.call("add_part", name="Chassis")
+    # A new project comes with an empty default part. Rename it rather than
+    # adding a second one, or every saved project ships an empty tab.
+    d.call("rename_part", part=d.call("list_parts")["parts"][0]["name"],
+           new_name="Chassis")
     d.call("set_active_part", part="Chassis")
     # Declare the stock and the bender BEFORE building, so every question
     # asked afterwards is asked against a real shop.
