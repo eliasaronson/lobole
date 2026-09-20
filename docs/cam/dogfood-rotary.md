@@ -115,3 +115,61 @@ finishing pass in wood.
 4. **No origin mode means "the rotary centreline".** `stock_centre` happens to
    give it, because the blank is symmetric about the axis in Y and Z — true
    rather than designed, and it would not be true of a part held off-centre.
+
+## Round two: a barley-twist rolling pin
+
+`generators/rotary/rolling_pin.py` — six helical flutes down a Ø50 × 300 pin,
+one 45° turn every 157 mm, from a Ø54 dowel. Chosen for the same reason the
+handle was and more sharply: **a lathe spins the work against a still tool,
+so every shape it can cut is a body of revolution, and a twist is precisely
+not one.**
+
+```
+  cutting      113.9 m, 76 min at feed
+  program      172807 lines, 3628 kB
+  checked as   ROTARY r(x, theta)
+  max gouge    33 um
+  max leftover 2.45 mm over 350.2 mm2   (the end faces again)
+  rapids in    0        holder 0        ok True
+```
+
+Two passes, not the handle's four: a Ø54 dowel is two millimetres of radius
+above the pin's surface and the flutes are four more, so nothing asks a
+finishing pass to take a big bite. That is what makes this the better first
+thing to actually cut.
+
+### What the MODELLING found
+
+The CAM side behaved. The kernel and the feature set did not, and all three
+are worth knowing before anyone models a twist.
+
+**A cut that consumes every body said nothing.** `BodyMode.cpp` drops bodies
+a cut fully consumes — right for one body of several — and then reports
+nothing when there is nothing left. Twice the twelve-groove chain came back
+with a part of 1 cm³, or none, and the next thing anyone sees is "no bodies"
+from `mass_properties` with no clue which feature did it. Both times it cost
+a hand bisection. It warns now: *"this cut consumed EVERY body — nothing is
+left of the part."* Gated in `remote_smoke.py`, next to the no-op cut warning
+that was already there — the two are the same question from opposite ends.
+
+**A diamond lattice is not buildable here, and the reason is geometric.** Six
+right-handed flutes and six left is prettier, and it asks the kernel for
+thirty-six crossings where two B-spline pipes meet the cylinder
+*tangentially* — a pipe whose centreline lies on the surface has its equator
+IN that surface. It came back `self-intersecting wire, unorientable shape`.
+Lifting the grooves clear to make the crossings transversal traded that for a
+part with 0.2 cm³ left in it. A single hand has no crossings, is valid first
+time, and is the shape everybody recognises as turned-and-twisted anyway.
+
+**`Pattern` cannot repeat a `Pipe` that cuts**, and the refusal names why: a
+cut consumes its tool body, so there is nothing left to repeat. Extrude is
+special-cased for this (`an Extrude that cuts or adds patterns its tool
+instead`); Pipe is not. So the six flutes are written out, each phased by
+starting its helix a sixth of a pitch further back — a helix takes an origin
+and no phase, so an axial shift is the only lever there is.
+
+One more, unfixed and recorded rather than guessed at: **intersecting the
+latticed cylinder with a domed revolve returned BOTH bodies with their
+volumes added** — a boolean that did nothing and said nothing. It has not
+been chased down; the part is shaped around it (cylinder, then flutes, then
+the ends revolved away as waste).

@@ -155,7 +155,19 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       if (!body.reference)
         volAfter += body.shape.Volume();
     }
-    if (warning && VolumeUnchanged(volBefore, volAfter)) {
+    if (warning && volBefore > 1e-9 && volAfter < 1e-9) {
+      // EVERYTHING went. A cut may legitimately consume one body of several
+      // -- that is what the erase above is for -- but a cut that leaves the
+      // part with nothing is either a tool the wrong way round or a kernel
+      // boolean that failed and returned an empty solid, and neither said a
+      // word before this. Downstream you get "no bodies" from
+      // mass_properties with no clue which feature did it, which cost two
+      // rounds of bisecting a twelve-groove helix chain by hand
+      // (docs/cam/dogfood-rotary.md).
+      *warning = "this cut consumed EVERY body — nothing is left of the "
+                 "part. A tool that swallows the whole model is usually one "
+                 "the wrong way round, or a boolean the kernel could not do";
+    } else if (warning && VolumeUnchanged(volBefore, volAfter)) {
       *warning = "cut removed no material — the tool profile does not "
                  "intersect any body (check the sketch plane orientation and "
                  "position)";

@@ -975,6 +975,28 @@ def main():
                f"no-op cut warning rides the summary: {r['regen']}")
         d.call("delete_feature", index=2)
         d.call("delete_feature", index=1)
+
+        # ...and the other end of the same question: a cut that consumes
+        # EVERY body. One body of several may legitimately go, but a part
+        # with nothing left is a tool the wrong way round or a boolean the
+        # kernel could not do -- and it used to say nothing at all, so the
+        # next thing you saw was "no bodies" from mass_properties with no
+        # clue which feature did it (docs/cam/dogfood-rotary.md, where it
+        # cost two rounds of bisecting a helix chain by hand).
+        ska = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Swallow",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0],
+                          "radius": 500.0}]})
+        r = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Swallow", "sketch_id": ska["id"],
+            "distance": 500.0, "mode": "cut"})
+        expect(any("consumed EVERY body" in w["warning"]
+                   for w in r["regen"]["warnings"]),
+               f"a cut that eats the part says so: {r['regen']}")
+        d.call("delete_feature", index=2)
+        d.call("delete_feature", index=1)
         r = d.call("add_feature", feature={
             "type": "Extrude", "name": "Bad", "sketch_id": 9999,
             "distance": 1.0, "mode": "new_body"})
