@@ -181,9 +181,13 @@ test caught it in one run, which is the argument for that test existing.
 
 ### Still open
 
-- **D2, the feed model.** Untouched. `CuttingMinutes` still measures
-  Cartesian length, so a pure-A move is free and a rotary program's cycle
-  time is understated silently.
+- **D2, the feed model.** HALF done. The verifier's half is closed: a
+  rotary move has length now -- the arc the tool tip travels, combined with
+  the linear part -- so a rotary program's cycle time is no longer
+  understated silently. The GENERATOR's half is the real question and waits
+  for a strategy: scaling `F` for constant surface speed with a radius floor
+  and a stated clamp, which is FreeCAD's answer and the only complete one in
+  the survey.
 - **D3, round stock.** The blank is DERIVED from the part (its extent along
   the axis, its furthest point from it, plus the setup's margins — the radial
   one taken as the larger of Y and Z, because a box's margins are all a
@@ -194,8 +198,8 @@ test caught it in one run, which is the argument for that test existing.
   the generator is trustworthy from its first line — but it means the only
   rotary programs it can be pointed at today are hand-written or from another
   CAM.
-- **Rapids are not checked against the rotary stock.** The planar check asks
-  whether a rapid passes through material; the rotary one does not yet, and
-  says so rather than implying it does.
+- ~~Rapids are not checked against the rotary stock.~~ Done. One walk serves
+  both cutting and asking, so the two cannot come to disagree about what the
+  tool removes -- a rapid is tested against the stock and never carves it.
 - **No picture.** `CamPlayback` draws a height map. A radius map has no
   renderer, so a rotary file verifies but cannot be watched.

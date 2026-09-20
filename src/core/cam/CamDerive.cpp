@@ -570,7 +570,28 @@ double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
   double minutes = 0.0;
   for (const Toolpath& tp : paths) {
     for (size_t i = 1; i < tp.moves.size(); i++) {
-      const double len = glm::length(tp.moves[i].to - tp.moves[i - 1].to);
+      const Move& a = tp.moves[i - 1];
+      const Move& b = tp.moves[i];
+      double len = glm::length(b.to - a.to);
+      // A ROTARY move has length too, and it used to have none. A pure A
+      // move is zero millimetres in XYZ, so it fell out of this loop
+      // entirely and a rotary program's cycle time came back understated --
+      // silently, which is the part that matters, because a wrong number
+      // with no warning beside it is worse than no number.
+      //
+      // The length added is the arc the TOOL TIP travels: the part turns
+      // under a cutter standing at radius hypot(y, z), so that is the metal
+      // going past it. Combined with the linear part as one path length,
+      // which is what a controller feeding along the programmed path does
+      // (FreeCAD's rotary addon is the only surveyed CAM that compensates at
+      // all, and it scales F for exactly this arc -- docs/cam/rotary-plan.md
+      // D2, where the GENERATOR's half of the question still sits).
+      if (a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9) {
+        const double radius = std::hypot(b.to.y, b.to.z);
+        const double arc =
+            std::abs(b.a - a.a) / 360.0 * 2.0 * glm::pi<double>() * radius;
+        len = std::hypot(len, arc);
+      }
       if (len < 1e-12)
         continue;
       double feed = tp.moves[i].feed;

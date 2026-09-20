@@ -12,6 +12,10 @@ namespace {
 
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
 
+// The same tolerance the height map's rapid check uses, for the same reason:
+// a cell standing a micron proud of the tool is quantisation, not a crash.
+constexpr double kRotaryGrazeTolerance = 1e-3;
+
 // Is the part-frame point at (x, theta, rad) inside the tool, with the tool's
 // tip at `tip` and the part turned to `aRad`?
 //
@@ -142,17 +146,30 @@ RadiusMap SampleModelRotary(const std::vector<Body>& bodies,
   return out;
 }
 
-void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
-                      double aFrom, double aTo, const Tool* tool,
-                      RadiusMap& stock) {
+namespace {
+
+// The one walk, used to CUT and to ASK. A rapid must be tested against the
+// stock without changing it -- the planar check keeps a separate probe map
+// for exactly this -- and doing it with a second copy of the stepping and
+// the ray solve is how the two would come to disagree about what the tool
+// removes, which is the failure this whole module is arranged to prevent.
+struct SweepHit {
+  double depth = 0.0; // mm of material the tool is buried in
+  glm::dvec2 at{0.0}; // (x mm, theta degrees)
+};
+
+SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
+                         double aFrom, double aTo, const Tool* tool,
+                         RadiusMap& stock, bool apply) {
+  SweepHit hit;
   if (stock.nx <= 0 || stock.nTheta <= 0)
-    return;
+    return hit;
   const double toolR = tool != nullptr ? tool->diameter * 0.5 : 1.0;
   double rMax = 0.0;
   for (float v : stock.r)
     rMax = std::max(rMax, static_cast<double>(v));
   if (rMax <= 0.0)
-    return;
+    return hit;
 
   // A rotary move is a HELIX at the surface, not a straight line, so it is
   // walked in steps small enough that neither the tip nor the material under
@@ -194,11 +211,26 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
         if (r0 <= 0.0)
           continue;
         const double cut = CarveRay(x, theta, r0, aRad, tip, tool, toolR);
-        if (cut < r0)
+        if (cut >= r0)
+          continue;
+        if (apply) {
           stock.Set(i, j, static_cast<float>(cut));
+        } else if (const double into = r0 - cut; into > hit.depth) {
+          hit.depth = into;
+          hit.at = {x, glm::degrees(theta)};
+        }
       }
     }
   }
+  return hit;
+}
+
+} // namespace
+
+void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
+                      double aFrom, double aTo, const Tool* tool,
+                      RadiusMap& stock) {
+  WalkSweepRotary(from, to, aFrom, aTo, tool, stock, /*apply=*/true);
 }
 
 Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
@@ -312,6 +344,9 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   bool have = false;
   glm::dvec3 from(0.0);
   double aFrom = 0.0;
+  int rapids = 0, firstBadLine = 0, worstLine = 0;
+  double worstDepth = 0.0;
+  glm::dvec2 worstAt(0.0);
   for (const GMove& m : program.moves) {
     const double aTo = m.hasA ? m.a : aFrom;
     if (!have) {
@@ -320,18 +355,41 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
       have = true;
       continue;
     }
-    // Rapids remove nothing here for the same reason they remove nothing
-    // there: a rapid over air is a rapid over air. Whether one passes THROUGH
-    // material is a check this does not make yet, and saying so is better
-    // than implying it does.
-    if (!m.rapid)
+    // A rapid is checked against the stock and removes nothing from it; a
+    // cut removes and is not checked. Same rule as the height map, and the
+    // same reason: a rapid is only safe over air, and it is the one failure
+    // a shape comparison cannot make -- the part can come out perfect and
+    // the tool still be broken. The waveguide round is why this is not
+    // optional: the check found 121 rapids through material on a job whose
+    // gouge was zero, and the fix took them to 16.
+    if (m.rapid) {
+      const SweepHit hit =
+          WalkSweepRotary(from, m.to, aFrom, aTo, setup.FindTool(m.tool),
+                          out.machined, /*apply=*/false);
+      if (hit.depth > kRotaryGrazeTolerance) {
+        rapids++;
+        if (firstBadLine == 0)
+          firstBadLine = m.line;
+        if (hit.depth > worstDepth) {
+          worstDepth = hit.depth;
+          worstAt = hit.at;
+          worstLine = m.line;
+        }
+      }
+    } else {
       CarveSweepRotary(from, m.to, aFrom, aTo, setup.FindTool(m.tool),
                        out.machined);
+    }
     from = m.to;
     aFrom = aTo;
   }
 
   out.verdict = CompareRotary(out.machined, out.designed);
+  out.verdict.rapidsThroughStock = rapids;
+  out.verdict.firstBadLine = firstBadLine;
+  out.verdict.worstRapidDepth = worstDepth;
+  out.verdict.worstRapidAt = worstAt;
+  out.verdict.worstRapidLine = worstLine;
   out.verdict.fileErrors = static_cast<int>(program.errors.size());
   if (!program.errors.empty())
     out.verdict.firstFileError = program.errors.front();

@@ -262,4 +262,80 @@ TEST_CASE("cam rotary: a turned-down bar verifies clean, an overcut does not",
   CHECK(labelled);
 }
 
+TEST_CASE("cam rotary: a rapid through the bar is found", "[cam]") {
+  // The one failure a shape comparison cannot make: the part comes out
+  // perfect and the tool is broken. It is also the check that earned its
+  // keep on the planar side -- 121 rapids through material on a waveguide
+  // whose gouge was zero, and 16 after the fix -- so a rotary check without
+  // it would be the weaker half of the pair.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin = {0.0, 0.0, 0.0};
+  setup.tools[0].diameter = 6.0;
+
+  // Clear of the bar all the way across, then turned so the file is rotary:
+  // nothing to hit at Z25 over a Ø40 blank.
+  const cam::Verdict clear =
+      cam::VerifyGcode("(op 1)\nG0 Z25 A0\nG0 X5 Y0\nG0 X55 A90\nG0 Z25 A180\n",
+                       setup, doc->GetBodies(), 0.5);
+  REQUIRE(clear.rotary);
+  CHECK(clear.rapidsThroughStock == 0);
+
+  // The same traverse five millimetres INTO the blank. A rapid at Z15 over a
+  // 20 mm radius buries the cutter by five, and the depth is what makes the
+  // finding actionable -- a count alone reads the same for a graze and a
+  // crash.
+  const cam::Verdict crash =
+      cam::VerifyGcode("(op 1)\nG0 Z15 A0\nG0 X5 Y0\nG0 X55 A90\nG0 Z25 A180\n",
+                       setup, doc->GetBodies(), 0.5);
+  INFO("rapids " << crash.rapidsThroughStock << " worst "
+                 << crash.worstRapidDepth << " at x" << crash.worstRapidAt.x
+                 << " A" << crash.worstRapidAt.y << " line "
+                 << crash.worstRapidLine);
+  CHECK(crash.rapidsThroughStock > 0);
+  CHECK_THAT(crash.worstRapidDepth, WithinAbs(5.0, 0.2));
+  CHECK(crash.worstRapidLine > 0);
+  CHECK_FALSE(crash.Safe(0.05));
+  // ...and it removed NOTHING doing so. A rapid is checked against the stock
+  // and never carves it -- which is what lets the check run at all, since
+  // the material has to still be there to be asked about. The blank comes
+  // out exactly the bar it started as.
+  CHECK_THAT(crash.maxLeftover, WithinAbs(0.0, 0.1));
+  CHECK_THAT(crash.maxGouge, WithinAbs(0.0, 0.1));
+}
+
+TEST_CASE("cam rotary: turning the part takes time", "[cam]") {
+  // A pure A move is zero millimetres in XYZ, so it fell out of
+  // `CuttingMinutes` entirely and a rotary program's cycle time came back
+  // understated -- silently, which is the part that matters.
+  //
+  // Half a turn of a bar under a cutter standing 20 mm off the axis is
+  // pi * 20 = 62.8 mm of metal past the edge. At 600 mm/min that is 6.3
+  // seconds, and it used to be none.
+  cam::Setup setup = BasicSetup();
+  cam::Toolpath tp;
+  tp.toolNumber = 1;
+  cam::Move start;
+  start.kind = cam::Move::Kind::Cut;
+  start.to = {10.0, 0.0, 20.0};
+  start.feed = 600.0;
+  start.hasA = true;
+  start.a = 0.0;
+  cam::Move turn = start;
+  turn.a = 180.0; // same point, half a turn of the part
+  tp.moves = {start, turn};
+
+  const double minutes = cam::CuttingMinutes(setup, {tp});
+  INFO("minutes " << minutes);
+  CHECK_THAT(minutes, WithinRel(glm::pi<double>() * 20.0 / 600.0, 0.01));
+
+  // A 3-axis toolpath is unchanged -- the rotary term only exists when two
+  // moves state DIFFERENT angles.
+  cam::Toolpath plain = tp;
+  plain.moves[1].a = 0.0;
+  CHECK_THAT(cam::CuttingMinutes(setup, {plain}), WithinAbs(0.0, 1e-12));
+}
+
 #endif // HAVE_CAM
