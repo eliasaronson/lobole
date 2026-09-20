@@ -466,6 +466,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
                              src/core/cam/CamSurface.cpp
                              src/core/cam/CamSurfacePick.cpp
                              src/core/cam/CamStrategies.cpp
+                             src/core/cam/CamGcode.cpp
                              src/core/cam/CamVerify.cpp
                              src/core/cam/CamFeeds.cpp
                              src/core/cam/CamSim.cpp
