@@ -8,6 +8,7 @@
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
+#include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "ui/CamJobs.h"
@@ -1194,19 +1195,48 @@ void RunCamVerification(AppState& state) {
     reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
     tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
   }
-  const cam::Inspection insp =
-      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs, tabs);
-  if (!insp.ok)
-    return;
-  // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
-  // reporting it would teach the user to ignore the verdict.
-  const double tolerance = kRes * 1.5;
+  // The STOCK MODEL follows the file, exactly as `VerifyGcode` routes it: a
+  // program whose A moves is cut from a cylinder that turns, and measuring it
+  // against a height map produces a verdict about a program that does not
+  // exist. This panel did precisely that -- it called the planar `Inspect`
+  // directly, because it also wants the Inspection for the leftover overlay
+  // -- and showed the rolling pin "Cuts 3.98 mm INTO the part, that is scrap"
+  // and "20 rapids through material" beside one quiet line admitting the
+  // check could not read the file. Three confident wrong numbers and one
+  // true one is worse than no verdict.
+  cam::Verdict verdict;
+  double tolerance = kRes * 1.5;
+  if (cam::RotatesWhileCutting(cam::ParseGcode(gcode))) {
+    // Half a millimetre: the rotary map's own default, and the grid is the
+    // tolerance here too.
+    constexpr double kRotaryRes = 0.5;
+    const cam::RotaryInspection ri =
+        cam::InspectRotary(gcode, *setup, ui::JobBodies(state), kRotaryRes);
+    if (!ri.ok) {
+      state.camVerdict.push_back({cam::VerdictLine::Level::Bad, ri.why});
+      return;
+    }
+    verdict = ri.verdict;
+    tolerance = kRotaryRes * 1.5;
+    // No overlay: the leftover is painted from a HEIGHT MAP and a radius
+    // field has no renderer yet (docs/cam/rotary-plan.md). Cleared rather
+    // than left standing from a previous job, which would draw one part's
+    // leftover on another.
+    state.camLeftover.clear();
+  } else {
+    const cam::Inspection insp =
+        cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs, tabs);
+    if (!insp.ok)
+      return;
+    verdict = insp.verdict;
+    state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
+  }
   bool breaksAnEdge = false;
   for (const cam::Operation& op : setup->operations)
     breaksAnEdge |=
         op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
   state.camVerdict = cam::Explain(
-      insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
+      verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
   // A target one operation could not follow while its others cut. It is not
   // an `error` -- that would drop the good targets with the bad one -- so
@@ -1234,7 +1264,6 @@ void RunCamVerification(AppState& state) {
   for (const cam::VerdictLine& line :
        cam::MachineLines(*setup, ui::JobBodies(state), &state.camToolpaths))
     state.camVerdict.push_back(line);
-  state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
 }
 
 } // namespace ui

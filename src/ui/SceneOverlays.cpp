@@ -384,9 +384,29 @@ void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines) {
   if (!state.document)
     return;
   const glm::vec3 kCurveTint(0.45f, 0.85f, 1.0f); // cyan, distinct from datums
+  // A curve another feature is BUILT FROM is construction, not result. Drawn
+  // regardless, six helices swept into a barley twist stayed on screen over
+  // the part they had already become -- and ran far past it, because each
+  // one starts a fraction of a pitch early to phase the flute it cuts. The
+  // same auto-hide a plane gets once the part has geometry, for the same
+  // reason: the thing you are looking at is the part.
+  //
+  // `VisitFeatureRefs` IS the dependency graph (it is pure virtual, and
+  // test_conventions fails a feature that does not implement it), so this
+  // cannot drift out of step with what actually consumes a curve.
+  std::set<uint64_t> consumed;
+  for (size_t i = 0; i < state.document->FeatureCount(); i++)
+    state.document->GetFeature(i)->VisitFeatureRefs(
+        [&consumed](uint64_t id) { consumed.insert(id); });
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     auto* cv = dynamic_cast<CurveFeature*>(state.document->GetFeature(i));
     if (!cv)
+      continue;
+    // ...unless it is the one being worked on, which is the whole reason to
+    // be able to see a curve at all.
+    if (consumed.count(cv->GetId()) != 0 &&
+        cv->GetId() != state.pendingFeatureId &&
+        cv->GetId() != SelectedFeatureId(state))
       continue;
     const auto& poly = cv->Polyline();
     if (poly.size() < 2)

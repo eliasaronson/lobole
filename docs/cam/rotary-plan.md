@@ -213,3 +213,18 @@ test caught it in one run, which is the argument for that test existing.
   REFUSED rather than drawn wrong (`Timeline::unsupported`), because the
   first thing the dogfood asked of it was to simulate the handle and it did,
   reporting 5,004 mm³ removed against about 77,000 actually cut.
+
+  The BACKPLOT is drawn, and had the same fault in a quieter form: setup
+  space is the MACHINE's frame, where a rotary job's tool never leaves the
+  plane y = 0, so the pin's passes were drawn lying on top of each other in
+  one flat fan along the top of the blank. True about the machine, useless
+  about the part. A move carrying an A is now drawn where it lands on the
+  WORK — rotated back by its own angle — so the passes wrap the part as the
+  flutes they cut.
+
+  And the PANEL's verdict was routed the way `VerifyGcode` routes: it called
+  the planar `Inspect` directly (it also wants the Inspection for the
+  leftover overlay) and so read the pin off a height map — "Cuts 3.98 mm
+  INTO the part, that is scrap", "20 rapids through material", beside one
+  quiet line admitting the file could not be read. Three confident wrong
+  numbers and one true one is worse than no verdict.

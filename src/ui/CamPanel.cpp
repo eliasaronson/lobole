@@ -262,13 +262,33 @@ uint64_t g_backplotKey = 0;
 // Is `mid` on the segment a->b, to within a fraction of a millimetre? The
 // tolerance is a picture's, not a toolpath's: 10 um is far below one pixel at
 // any zoom a person works at, and the G-code is untouched either way.
-bool Collinear(const glm::dvec3& a, const glm::dvec3& mid,
-               const glm::dvec3& b) {
-  const glm::dvec3 ab = b - a;
+bool Collinear(const glm::vec3& a, const glm::vec3& mid, const glm::vec3& b) {
+  const glm::dvec3 ab = glm::dvec3(b) - glm::dvec3(a);
   const double len = glm::length(ab);
   if (len < 1e-9)
     return true;
-  return glm::length(glm::cross(ab, mid - a)) / len < 0.01;
+  return glm::length(glm::cross(ab, glm::dvec3(mid) - glm::dvec3(a))) / len <
+         0.01;
+}
+
+// Where a move is, ON THE PART.
+//
+// Setup space is the MACHINE's frame, and in it a rotary job's tool never
+// leaves the plane y = 0: it stands over the axis while the part turns
+// underneath. Drawn there, the pin's three hundred and fifty passes lie on
+// top of each other in one flat fan along the top of the blank -- which is
+// what the machine does and is not what anyone is asking to see.
+//
+// A move carrying an A is drawn where it lands on the WORK: rotate it back
+// by that angle and the passes wrap the part as the flutes they cut. It is
+// the same relationship the verifier uses (a part angle appears in setup
+// space at theta + A), read the other way.
+glm::vec3 OnPart(const cam::Move& m) {
+  if (!m.hasA)
+    return glm::vec3(m.to);
+  const double a = glm::radians(-m.a);
+  const double c = std::cos(a), s = std::sin(a);
+  return glm::vec3(m.to.x, m.to.y * c - m.to.z * s, m.to.y * s + m.to.z * c);
 }
 
 uint64_t BackplotKey(const std::vector<cam::Toolpath>& paths) {
@@ -324,15 +344,15 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
         // 34,000 lines this way; drawing all 380,000 conveys nothing and
         // costs everything.
         size_t j = i;
-        while (
-            j + 1 < tp.moves.size() && tp.moves[j + 1].kind == m.kind &&
-            Collinear(tp.moves[i - 1].to, tp.moves[j].to, tp.moves[j + 1].to))
+        while (j + 1 < tp.moves.size() && tp.moves[j + 1].kind == m.kind &&
+               Collinear(OnPart(tp.moves[i - 1]), OnPart(tp.moves[j]),
+                         OnPart(tp.moves[j + 1])))
           j++;
         const glm::vec4 color = m.kind == cam::Move::Kind::Rapid ? kRapidColor
                                 : m.kind == cam::Move::Kind::Plunge
                                     ? kPlungeColor
                                     : kCutColor;
-        AppendPrimLine(glm::vec3(tp.moves[i - 1].to), glm::vec3(tp.moves[j].to),
+        AppendPrimLine(OnPart(tp.moves[i - 1]), OnPart(tp.moves[j]),
                        m.kind == cam::Move::Kind::Rapid ? 1.0f : 2.4f, color,
                        g_backplot);
         i = j;
@@ -340,6 +360,11 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
     }
     g_backplotKey = key;
   }
+  // Reserved, not grown: this is the largest single thing the overlay
+  // appends -- a rotary finishing pass is hundreds of thousands of segments
+  // at six 56-byte vertices each -- and letting the vector find that out by
+  // reallocating copies it more than once.
+  out.reserve(out.size() + g_backplot.size());
   out.insert(out.end(), g_backplot.begin(), g_backplot.end());
 
   // The tool glyph stays OUT of the cache: it is a handful of vertices and it
