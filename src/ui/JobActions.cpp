@@ -43,6 +43,30 @@ uint64_t JobBodiesKey(AppState& state, const cam::JobDocument& job) {
   return key;
 }
 
+// Ask each body for its TIGHT bounding box once, here, where the answer
+// survives.
+//
+// `CADShape` memoizes that box -- it is expensive, `BRepBndLib::AddOptimal`
+// evaluates the surfaces -- but the memo is a member of the SHAPE, and
+// `cam::BodiesInSetupFrame` returns its bodies BY VALUE. So every caller that
+// frames bodies on its way to a bound warmed the memo on a temporary and then
+// destroyed it, leaving the originals here cold; the next frame did it all
+// again. On a plain part nobody noticed. On a six-flute B-spline twist it was
+// 514 ms of a 520 ms frame, every frame, with the app otherwise IDLE --
+// `AddOptimal` at 28% of the profile, reached from `StockBoundsFramed`,
+// `ModelBoundsFramed` and the panel's machine lines.
+//
+// Warming once when the bodies are built costs what one frame used to and
+// then costs nothing, because a copy of a shape carries the memo with it.
+void WarmTightBounds(const std::vector<Body>& bodies) {
+  for (const Body& b : bodies) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 lo(0.0f), hi(0.0f);
+    b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
+  }
+}
+
 const cam::Setup* ActiveJobSetup(AppState& state) {
   const cam::JobDocument* job = ActiveJob(state);
   if (job == nullptr || job->GetSetups().empty())
@@ -68,6 +92,9 @@ const std::vector<Body>& JobPlacedBodies(AppState& state) {
   state.jobPlacedBodies =
       setup != nullptr ? cam::BodiesInSetupFrame(*setup, bodies) : bodies;
   state.jobPlacedKey = key;
+  // Framed bodies are NEW shapes when the setup is not square, so their memo
+  // is cold even though the ones they came from are warm.
+  WarmTightBounds(state.jobPlacedBodies);
   return state.jobPlacedBodies;
 }
 
@@ -132,6 +159,7 @@ const std::vector<Body>& JobBodies(AppState& state) {
     }
   }
   state.jobBodiesKey = key;
+  WarmTightBounds(state.jobBodies);
   return state.jobBodies;
 }
 

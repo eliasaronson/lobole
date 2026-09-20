@@ -173,3 +173,35 @@ latticed cylinder with a domed revolve returned BOTH bodies with their
 volumes added** — a boolean that did nothing and said nothing. It has not
 been chased down; the part is shaped around it (cylinder, then flutes, then
 the ends revolved away as waste).
+
+### And the one that only a real part could show: 1.9 fps
+
+Opening the pin's job tab ran at **1.9 fps — `ui` 514 ms of a 520 ms frame**,
+with the GPU at 13.5 ms and 118 of 120 frames flagged IDLE. The app was
+burning half a second per frame doing nothing.
+
+`frame_stats` said `ui`, and a `perf` attach to the running process named it
+without ambiguity: `BRepBndLib::AddOptimal` at 28% inclusive, reached from
+`cam::StockBoundsFramed`, `cam::ModelBoundsFramed` and the panel's machine
+lines. That is the TIGHT bounding box — the one that evaluates the surfaces
+instead of bounding a B-spline by its control points.
+
+`CADShape` memoizes it. The memo never paid back, and the reason is worth
+keeping: **`cam::BodiesInSetupFrame` returns its bodies BY VALUE.** Every
+caller that framed bodies on the way to a bound warmed the memo on a
+temporary and then destroyed it, leaving the originals cold, and the next
+frame did it all again. On a plain part nobody noticed — an analytic cylinder
+is bounded exactly and cheaply. On a six-flute B-spline twist it is half a
+second, every frame.
+
+Warming the memo once where it survives, in `JobBodies` and
+`JobPlacedBodies`, costs what one frame used to and then costs nothing,
+because a copy of a shape carries the memo with it. Measured on the pin
+through `list_cam_setups`, which reports the derived stock box:
+
+| | call 1 | calls 2-6 |
+|---|---|---|
+| before | 596 ms | 527-578 ms each |
+| after | 278 ms | **2 ms each** |
+
+A memo is only a memo if it outlives the call that filled it.
