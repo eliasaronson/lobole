@@ -75,6 +75,11 @@ GProgram ParseGcode(std::string_view text) {
   // by the next move emitted — a tool change is a line of its own, so the
   // boundary belongs to the first move that cuts with the new tool.
   bool toolChange = false;
+  // The rotary word, remembered only to tell an INDEX from a ROTATION: the
+  // first A seen, and whether we have already said that it moves.
+  double firstA = 0.0;
+  bool haveA = false;
+  bool saidRotary = false;
 
   size_t i = 0;
   while (i <= text.size()) {
@@ -152,7 +157,7 @@ GProgram ParseGcode(std::string_view text) {
           k = numEnd - 1;
           continue;
         }
-      } else if (word == 'X' || word == 'Y' || word == 'Z') {
+      } else if (word == 'X' || word == 'Y' || word == 'Z' || word == 'A') {
         // "Xnan" lands here: the axis word exists with no parseable number.
         out.errors.push_back("line " + std::to_string(lineNo) +
                              ": axis word with no number");
@@ -204,6 +209,32 @@ GProgram ParseGcode(std::string_view text) {
       case 'M':
         if (static_cast<int>(value) == 6)
           toolChange = true;
+        break;
+      case 'A':
+        // The rotary word. A CONSTANT A is the indexed case and needs nothing
+        // done: the part is already framed and the file's coordinates are in
+        // setup space, so the whole 3-axis check applies unchanged. That is
+        // every rotary file this app posts today.
+        //
+        // A CHANGING A is not that, and it used to fall into `default:` and
+        // vanish. A continuous 4-axis file -- hand-edited, or from another
+        // CAM -- then verified as though the part stood still, which is a
+        // clean verdict on a program nothing has checked. The height map
+        // cannot represent a part that turns (docs/cam/simulation.md), so the
+        // honest answer is to say so rather than to answer the wrong
+        // question convincingly.
+        if (!haveA) {
+          firstA = value;
+          haveA = true;
+        } else if (std::abs(value - firstA) > 1e-6 && !saidRotary) {
+          saidRotary = true;
+          out.errors.push_back(
+              "line " + std::to_string(lineNo) +
+              ": the A axis MOVES in this file, and this verifier is 3-axis "
+              "-- its stock is a height map, which cannot represent a part "
+              "that turns. Nothing below has been checked against the "
+              "rotation");
+        }
         break;
       default:
         break;
@@ -788,6 +819,12 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.worstRapidDepth = worstRapidDepth;
   out.verdict.worstRapidAt = worstRapidAt;
   out.verdict.worstRapidLine = worstRapidLine;
+  out.verdict.fileErrors = static_cast<int>(program.errors.size());
+  if (!program.errors.empty())
+    out.verdict.firstFileError = program.errors.front();
+  out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
+  if (!program.warnings.empty())
+    out.verdict.firstFileWarning = program.warnings.front();
   out.verdict.holderCollisions = holderCollisions;
   out.verdict.worstHolderDepth = worstHolderDepth;
   out.verdict.worstHolderAt = worstHolderAt;
@@ -980,6 +1017,26 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                           "worst where the surface is steep.");
     out.push_back(
         {graze ? VerdictLine::Level::Warn : VerdictLine::Level::Bad, buf});
+  }
+  if (v.fileErrors > 0) {
+    // FIRST, above the gouge. Everything below this line was measured by
+    // simulating a file the parser could not read straight, so it is an
+    // answer about a different program.
+    std::snprintf(buf, sizeof(buf),
+                  "%d line%s of this file could not be read: %s. Everything "
+                  "else here was measured by simulating what WAS readable, so "
+                  "read it as a report on a different program.",
+                  v.fileErrors, v.fileErrors == 1 ? "" : "s",
+                  v.firstFileError.c_str());
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.fileWarnings > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d thing%s in this file a CONTROLLER may refuse though the "
+                  "parser here survived it: %s",
+                  v.fileWarnings, v.fileWarnings == 1 ? "" : "s",
+                  v.firstFileWarning.c_str());
+    out.push_back({VerdictLine::Level::Warn, buf});
   }
   if (v.holderCollisions > 0) {
     // No graze band here. A rapid brushing a scallop it cut itself is a rub;

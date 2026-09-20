@@ -9,6 +9,91 @@
 
 // --- C5: verifying the posted file ---------------------------------------
 
+TEST_CASE("cam verify: a MOVING A axis is refused, a constant one is not",
+          "[cam]") {
+  // The verifier is 3-axis and its stock is a height map, which cannot
+  // represent a part that turns. An A word used to fall into the parser's
+  // `default:` and vanish, so a continuous 4-axis file -- hand-edited, or
+  // from another CAM -- verified as though the part stood still and came back
+  // with a clean verdict on a program nothing had checked.
+  //
+  // An INDEX is not that. Every rotary file this app posts states one
+  // constant A before the first cut and the coordinates are already in setup
+  // space, so the whole 3-axis check applies unchanged and must stay silent.
+  const cam::GProgram indexed = cam::ParseGcode("G0 Z25\n"
+                                                "G0 A90\n"
+                                                "G0 X0 Y0\n"
+                                                "G1 Z-1 F300\n"
+                                                "G1 X10 A90\n");
+  for (const std::string& e : indexed.errors)
+    INFO(e);
+  CHECK(indexed.errors.empty());
+
+  const cam::GProgram turning = cam::ParseGcode("G0 Z25\n"
+                                                "G0 A0\n"
+                                                "G1 Z-1 F300\n"
+                                                "G1 X10 A45\n"
+                                                "G1 X20 A90\n");
+  REQUIRE(turning.errors.size() >= 1);
+  INFO(turning.errors[0]);
+  CHECK(turning.errors[0].find("A axis MOVES") != std::string::npos);
+  // Said ONCE, not once per move: a thousand-line rotary program would
+  // otherwise report a thousand copies of the same sentence.
+  CHECK(turning.errors.size() == 1);
+}
+
+TEST_CASE("cam verify: what the parser found reaches the verdict", "[cam]") {
+  // The parser's errors and warnings were computed and DROPPED. `Inspect`
+  // parsed the program, built its findings and returned none of them --
+  // tested at the parser (test_cam_machine.cpp's nested comment) and
+  // consumed by nobody, so a NaN coordinate, a feed of zero and a file Mach3
+  // will not load all verified clean. That is the exact failure this
+  // module's own header says it exists to catch.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+
+  // A readable file first, so the case is not passing on an empty verdict.
+  const std::string clean = "(op 1)\nG0 Z25\nG0 X0 Y0\nG1 Z19 F300\n"
+                            "G1 X40\nG0 Z25\n";
+  const cam::Verdict ok = cam::VerifyGcode(clean, setup, doc->GetBodies(), 0.5);
+  CHECK(ok.fileErrors == 0);
+  CHECK(ok.fileWarnings == 0);
+
+  // A NaN coordinate: the bug the header says had already shipped once.
+  const cam::Verdict nan =
+      cam::VerifyGcode("(op 1)\nG0 Z25\nG1 Xnan Ynan Z19 F300\nG0 Z25\n", setup,
+                       doc->GetBodies(), 0.5);
+  INFO(nan.firstFileError);
+  CHECK(nan.fileErrors > 0);
+  CHECK(nan.firstFileError.find("axis word with no number") !=
+        std::string::npos);
+  // ...and it makes the file unsafe, because everything else in the verdict
+  // was measured by simulating the part of the program that WAS readable.
+  CHECK_FALSE(nan.Safe(0.01));
+  bool said = false;
+  for (const cam::VerdictLine& l : cam::Explain(nan, 0.01, 1.0))
+    said = said || l.text.find("could not be read") != std::string::npos;
+  CHECK(said);
+
+  // A nested comment: the parser survives it and Mach3 does not, so it is a
+  // WARNING -- said out loud, and not counted against the file.
+  const cam::Verdict nested = cam::VerifyGcode(
+      "(tool 1: 6 mm flat (through cuts) D6)\nG0 Z25\nG0 X0 Y0\n"
+      "G1 Z19 F300\nG1 X40\nG0 Z25\n",
+      setup, doc->GetBodies(), 0.5);
+  INFO(nested.firstFileWarning);
+  CHECK(nested.fileWarnings > 0);
+  // Not counted: a warning is a file that loads HERE and may not load THERE.
+  // (This fixture cuts into the block on purpose, so its Safe() is about the
+  // gouge and says nothing either way -- `fileErrors` is the assertion.)
+  CHECK(nested.fileErrors == 0);
+  bool warned = false;
+  for (const cam::VerdictLine& l : cam::Explain(nested, 0.01, 1.0))
+    warned =
+        warned || l.text.find("a CONTROLLER may refuse") != std::string::npos;
+  CHECK(warned);
+}
+
 TEST_CASE("cam verify: the parser reads back what the post wrote", "[cam]") {
   const cam::GProgram p = cam::ParseGcode("(a comment with G1 X99 inside)\n"
                                           "G90 G21\n"

@@ -301,6 +301,13 @@ constexpr MethodDoc kCamMethods[] = {
      "leftover_area_mm2, leftover_regions, rapids_through_stock "
      "(with worst_rapid_depth_mm/_at/_line: a graze and a crash are the "
      "same COUNT and different numbers), "
+     "file_errors (with first_file_error: lines the PARSER could not read -- "
+     "a NaN coordinate, a feed of zero, an A axis that MOVES, which this "
+     "3-axis height map cannot represent; anything else in the answer was "
+     "measured on a different program, so this counts against ok), "
+     "file_warnings (with first_file_warning: what a CONTROLLER may refuse "
+     "though the parser survived it, such as a nested comment Mach3 will not "
+     "load), "
      "holder_collisions (with worst_holder_depth_mm/_at/_line: the collet "
      "nut driven into material the cutter never touched -- silent unless the "
      "tool states overall_length and collar_diameter), "
@@ -309,8 +316,8 @@ constexpr MethodDoc kCamMethods[] = {
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
      "`ok` = nothing scraps the part or breaks the tool (no "
-     "gouge, no rapid through material, no holder collision) and is the one "
-     "to gate on; `complete` "
+     "gouge, no rapid through material, no holder collision, and a file that "
+     "read straight) and is the one to gate on; `complete` "
      "= nothing left standing. A TAB is not left standing by accident -- the "
      "toolpath says where it put each one and they are excused, up to their "
      "own height, so a tabbed job can now be complete. A dropping "
@@ -1575,6 +1582,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"worst_rapid_depth_mm", v.worstRapidDepth},
              {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
              {"worst_rapid_line", v.worstRapidLine},
+             {"file_errors", v.fileErrors},
+             {"first_file_error", v.firstFileError},
+             {"file_warnings", v.fileWarnings},
+             {"first_file_warning", v.firstFileWarning},
              {"holder_collisions", v.holderCollisions},
              {"worst_holder_depth_mm", v.worstHolderDepth},
              {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},

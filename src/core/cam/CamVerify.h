@@ -175,6 +175,22 @@ struct Verdict {
   // Not a gouge and not scrap: the controller alarms or hits a stop, so the
   // job simply cannot run. That is still Safe() = false, because "safe" here
   // means the file is fit to send.
+  // What the PARSER made of the file, carried into the verdict because it
+  // was being thrown away. `Inspect` parsed the program, collected the
+  // errors and warnings the parser exists to produce, and returned none of
+  // them: a NaN coordinate ("axis word with no number" -- the very bug this
+  // module's header says had already shipped), a nested comment Mach3 will
+  // not load, a feed of zero, all computed and then dropped on the floor.
+  // Tested at the parser and consumed by nobody.
+  //
+  // An error means the simulation did not see the program the machine will,
+  // so the verdict below is an answer to a different question -- which is
+  // why it counts against Safe(). A warning is a file that loads here and
+  // may not load there, so it is said and not counted.
+  int fileErrors = 0;
+  std::string firstFileError;
+  int fileWarnings = 0;
+  std::string firstFileWarning;
   int outsideTravel = 0;
   int firstOutsideLine = 0;
   double worstOvershoot = 0.0; // mm past the limit, on `outsideAxis`
@@ -222,7 +238,7 @@ struct Verdict {
   // through material are unambiguous — no job wants either, ever.
   [[nodiscard]] bool Safe(double tolerance) const {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
-           outsideTravel == 0 && holderCollisions == 0;
+           outsideTravel == 0 && holderCollisions == 0 && fileErrors == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of
