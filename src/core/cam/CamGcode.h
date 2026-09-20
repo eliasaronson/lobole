@@ -45,6 +45,14 @@ struct GMove {
   // First move under a new tool (an M6, or a T that differs from the last
   // one). What "skip to the next tool" steps between.
   bool toolChange = false;
+  // The rotary word, modal like everything else. `hasA` false means the file
+  // has not stated one yet -- which is a fact about the file and not a zero.
+  //
+  // Read rather than judged. The parser's job is to say what the file says;
+  // whether a moving A can be simulated is a question about the STOCK MODEL,
+  // and it is answered where the stock is chosen (`Inspect`), not here.
+  bool hasA = false;
+  double a = 0.0;
 };
 
 struct GProgram {
@@ -63,6 +71,11 @@ struct GProgram {
 // parenthesised comments. Anything it does not understand is reported rather
 // than skipped silently.
 [[nodiscard]] GProgram ParseGcode(std::string_view text);
+// Does the A axis MOVE in this program? False for a 3-axis file and for an
+// indexed one, which states one constant A before the first cut -- and those
+// two are the same question for every check downstream, because in both the
+// part stands still while the tool moves.
+[[nodiscard]] bool RotatesWhileCutting(const GProgram& p);
 
 // The posted file, back in SETUP space. A file's coordinates are relative to
 // the work origin (the operator's zero); everything that compares a file to

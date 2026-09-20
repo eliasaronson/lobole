@@ -236,6 +236,16 @@ almost answer:
 - **Undercuts, 5-axis, continuous 4-axis.** A height map cannot represent them
   and this CAM cannot cut them. When the A axis moves, this needs revisiting
   with the rest of C9's deferred half.
+
+  > Revisited 2026-09-20. Continuous 4-axis has its own stock model now --
+  > `r(x, theta)` about the rotary axis, `core/cam/CamRotary.h` -- and
+  > `VerifyGcode` routes to it when the FILE's A moves. The height map's
+  > limit is unchanged and this path is deliberately separate from it: the
+  > 3-axis check refuses a turning part by name rather than answering as
+  > though it stood still (docs/cam/rotary-plan.md). Undercuts and 5-axis
+  > remain excluded. There is still no PICTURE for a rotary job -- playback
+  > draws a height map -- so this is a verdict without a simulation, which is
+  > the one place the "one engine, one answer" rule is not yet honoured.
 - **Machine/fixture collision, work-envelope checks.** A different model (the
   machine, which the app does not have) rather than a harder version of this
   one.

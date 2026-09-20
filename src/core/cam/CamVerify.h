@@ -137,6 +137,12 @@ struct Verdict {
   // so the verdict below is an answer to a different question -- which is
   // why it counts against Safe(). A warning is a file that loads here and
   // may not load there, so it is said and not counted.
+  // This verdict was read from a ROTARY stock model, r(x, theta), not from a
+  // height map -- so `gougeAt`, `leftoverAt` and their neighbours are
+  // (x mm, theta DEGREES) rather than (x, y). Said in the struct because a
+  // pair of doubles cannot say it, and printed by `Explain`, which would
+  // otherwise label an angle "Y".
+  bool rotary = false;
   int fileErrors = 0;
   std::string firstFileError;
   int fileWarnings = 0;

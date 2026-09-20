@@ -1,10 +1,13 @@
 #pragma once
 
 #include "core/Feature.h" // Body
+#include "core/cam/CamGcode.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamVerify.h" // Verdict
 
 #include <glm/glm.hpp>
 
+#include <string>
 #include <vector>
 
 // The stock for a job whose A axis MOVES (docs/cam/rotary-plan.md, D1).
@@ -98,5 +101,37 @@ struct RadiusMap {
 void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
                       double aFrom, double aTo, const Tool* tool,
                       RadiusMap& stock);
+
+// The verdict, from the rotary pair. Same `Verdict` the height map fills, so
+// the panel, the RPC and `Explain` need no second vocabulary -- with
+// `rotary` set, which is what makes an angle print as an angle.
+//
+// Compared only where the part IS: a cell whose designed radius is zero is a
+// ray that misses the model, which is the blank beyond the part's ends and
+// not leftover anybody asked about. Their share is `untouchedFraction`.
+[[nodiscard]] Verdict CompareRotary(const RadiusMap& machined,
+                                    const RadiusMap& designed);
+
+// Everything the rotary check produced, for a caller that wants to show it.
+struct RotaryInspection {
+  Verdict verdict;
+  RadiusMap machined;
+  RadiusMap designed;
+  bool ok = false; // false = nothing to check (no bodies, no rotary blank)
+  std::string why; // why not, when ok is false
+};
+
+// The whole loop for a file whose A MOVES: parse, turn the blank, compare.
+//
+// The blank is DERIVED, not typed: the part's own extent along the axis and
+// its furthest point from it, plus the setup's stock margins -- the radial
+// one taken as the larger of the Y and Z margins, because a box's margins
+// are the only ones a `Stock` can state and a cylinder has one radius. A
+// round stock MODE is the honest fix and is a format change
+// (docs/cam/rotary-plan.md, D3).
+[[nodiscard]] RotaryInspection InspectRotary(const std::string& gcode,
+                                             const Setup& setup,
+                                             const std::vector<Body>& bodies,
+                                             double res = 0.5);
 
 } // namespace cam

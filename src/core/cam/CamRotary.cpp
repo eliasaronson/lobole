@@ -1,5 +1,7 @@
 #include "core/cam/CamRotary.h"
 
+#include "core/cam/CamToolpath.h" // BodiesInSetupFrame
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -197,6 +199,147 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
       }
     }
   }
+}
+
+Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
+  Verdict v;
+  v.rotary = true;
+  if (machined.nx != designed.nx || machined.nTheta != designed.nTheta ||
+      machined.nx <= 0)
+    return v;
+  // A cell that STRADDLES a step is measured against its neighbours, not
+  // against itself.
+  //
+  // The sampler takes the furthest point of the part in each cell, exactly as
+  // the height map takes the highest. At a shoulder -- a 5 mm step on a
+  // half-millimetre grid -- the boundary cell therefore reads as the BIG
+  // diameter while the cutter, which is 6 mm across and does not stop at a
+  // cell edge, legitimately turns it down to the small one. Compared cell to
+  // cell that is 5 mm of "gouge" on a correct program, and a verifier that
+  // cries wolf at every shoulder is one nobody reads.
+  //
+  // So gouge is measured against the SMALLEST designed radius among a cell
+  // and its immediate neighbours, and leftover against the largest. It costs
+  // one cell of resolution at a vertical face, which is precisely what the
+  // grid cannot resolve there anyway: nothing in the map says which side of
+  // the step the cell centre fell on.
+  const auto neighbourhood = [&](int i, int j, double& lo, double& hi) {
+    lo = 1e18;
+    hi = -1e18;
+    for (int di = -1; di <= 1; di++)
+      for (int dj = -1; dj <= 1; dj++) {
+        const int ni = i + di;
+        if (ni < 0 || ni >= designed.nx)
+          continue;
+        const int nj = (j + dj + designed.nTheta) % designed.nTheta;
+        const double r = designed.At(ni, nj);
+        if (r <= 0.0)
+          continue;
+        lo = std::min(lo, r);
+        hi = std::max(hi, r);
+      }
+  };
+  size_t compared = 0, missed = 0;
+  for (int j = 0; j < machined.nTheta; j++)
+    for (int i = 0; i < machined.nx; i++) {
+      const double want = designed.At(i, j);
+      if (want <= 0.0) {
+        missed++;
+        continue; // the ray misses the part: blank, not leftover
+      }
+      compared++;
+      const double got = machined.At(i, j);
+      const double x = machined.CellX(i);
+      const double theta = glm::degrees(machined.CellTheta(j));
+      double lo = want, hi = want;
+      neighbourhood(i, j, lo, hi);
+      if (const double gouge = lo - got; gouge > v.maxGouge) {
+        v.maxGouge = gouge;
+        v.gougeAt = {x, theta};
+      }
+      if (const double left = got - hi; left > v.maxLeftover) {
+        v.maxLeftover = left;
+        v.leftoverAt = {x, theta};
+      }
+    }
+  v.cells = compared;
+  const size_t total = compared + missed;
+  v.untouchedFraction =
+      total > 0 ? static_cast<double>(missed) / static_cast<double>(total)
+                : 0.0;
+  return v;
+}
+
+RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
+                               const std::vector<Body>& rawBodies, double res) {
+  RotaryInspection out;
+  // Framed, exactly as the planar check frames: the file is in setup space,
+  // so the part must be too. For a continuous job `rotationA` is 0 -- the
+  // angle lives in the FILE, per move, not in the setup -- and the frame is
+  // whatever fixture put the part on the trunnion.
+  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
+
+  // The blank, derived from the part it is cut from. The axis is setup-space
+  // +X through the origin, so "furthest from the axis" is hypot(y, z).
+  double x0 = 1e18, x1 = -1e18, rad = 0.0;
+  for (const Body& b : bodies) {
+    if (!b.shape.IsValid())
+      continue;
+    const CADShape::Mesh mesh = b.shape.GenerateMeshDetached(0.0);
+    for (const auto& vert : mesh.vertices) {
+      x0 = std::min(x0, static_cast<double>(vert.position.x));
+      x1 = std::max(x1, static_cast<double>(vert.position.x));
+      rad = std::max(rad, std::hypot(static_cast<double>(vert.position.y),
+                                     static_cast<double>(vert.position.z)));
+    }
+  }
+  if (x1 <= x0 || rad <= 0.0) {
+    out.why = "this job has no part on the rotary axis to cut from";
+    return out;
+  }
+  // A box's margins are the only ones a `Stock` can state and a cylinder has
+  // one radius, so the radial margin is the larger of the two across the
+  // axis. Named here rather than silently chosen: a round stock MODE is the
+  // honest fix (docs/cam/rotary-plan.md, D3).
+  const double radialMargin =
+      std::max(setup.stock.margin.y, setup.stock.margin.z);
+  out.machined =
+      MakeRotaryStock(x0 - setup.stock.margin.x, x1 + setup.stock.margin.x,
+                      rad + radialMargin, res);
+  out.designed = SampleModelRotary(bodies, out.machined);
+
+  const GProgram program = ProgramInSetupSpace(gcode, setup);
+  bool have = false;
+  glm::dvec3 from(0.0);
+  double aFrom = 0.0;
+  for (const GMove& m : program.moves) {
+    const double aTo = m.hasA ? m.a : aFrom;
+    if (!have) {
+      from = m.to;
+      aFrom = aTo;
+      have = true;
+      continue;
+    }
+    // Rapids remove nothing here for the same reason they remove nothing
+    // there: a rapid over air is a rapid over air. Whether one passes THROUGH
+    // material is a check this does not make yet, and saying so is better
+    // than implying it does.
+    if (!m.rapid)
+      CarveSweepRotary(from, m.to, aFrom, aTo, setup.FindTool(m.tool),
+                       out.machined);
+    from = m.to;
+    aFrom = aTo;
+  }
+
+  out.verdict = CompareRotary(out.machined, out.designed);
+  out.verdict.fileErrors = static_cast<int>(program.errors.size());
+  if (!program.errors.empty())
+    out.verdict.firstFileError = program.errors.front();
+  out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
+  if (!program.warnings.empty())
+    out.verdict.firstFileWarning = program.warnings.front();
+  out.ok = true;
+  return out;
 }
 
 } // namespace cam

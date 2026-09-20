@@ -181,4 +181,85 @@ TEST_CASE("cam rotary: material only ever comes off", "[cam]") {
   CHECK_THAT(MaxRadius(stock), WithinAbs(20.0, 1e-6));
 }
 
+TEST_CASE("cam rotary: a turned-down bar verifies clean, an overcut does not",
+          "[cam]") {
+  // The closed loop, which is the only thing that makes any of the above
+  // worth having: a G-code file in, a verdict out, measured against the model
+  // the part was designed as. The program turns a Phi 40 bar down to Phi 30
+  // over its middle, which is what the MODEL is, so the gouge is zero -- and
+  // the same program cutting one millimetre deeper is scrap, by one
+  // millimetre, which is the number the check has to produce rather than a
+  // flag.
+  //
+  // `VerifyGcode` routes it: the file's A moves, so the rotary stock model
+  // answers. Nothing here asks for that, which is the point -- a caller
+  // cannot verify a rotary program against a height map by forgetting.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
+  const uint64_t blank = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Journal", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 20.0, 20.0));
+  const uint64_t big = doc->GetFeature(1)->GetId();
+  doc->AddFeature(
+      std::make_unique<BooleanFeature>("Cut", blank, big, BooleanOp::Subtract));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Small", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 15.0, 20.0));
+  const uint64_t small = doc->GetFeature(3)->GetId();
+  const uint64_t cut = doc->GetFeature(2)->GetId();
+  doc->AddFeature(
+      std::make_unique<BooleanFeature>("Shaft", cut, small, BooleanOp::Union));
+  REQUIRE(doc->GetBodies().size() == 1);
+
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin = {0.0, 0.0, 0.0};
+  setup.stock.bottomMargin = 0.0;
+  setup.tools[0].diameter = 6.0;
+
+  // A cutter walking the journal at a fixed height while the bar turns: the
+  // classic rotary roughing pass, written by hand because nothing generates
+  // one yet.
+  const auto program = [](double z) {
+    // Approach at X23 too, not X20: the plunge is a cut like any
+    // other, and a 6 mm cutter entering at the journal's edge takes 3 mm
+    // out of the shoulder beside it. The check said so.
+    std::string g = "(op 1)\nG0 Z40\nG0 X23 Y0 A0\n";
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "G1 Z%.3f F300\n", z);
+    g += buf;
+    // The cutter's CENTRE runs 23 to 37, not 20 to 40: it is 6 mm across, so
+    // that is exactly what covers the journal and nothing either side. The
+    // first version swept the centre to the shoulders and cut 3 mm into
+    // them -- 5 mm of gouge on a program that looked right, which is the
+    // check doing its job on the test rather than the other way round.
+    for (int k = 1; k <= 72; k++) {
+      std::snprintf(buf, sizeof(buf), "G1 X%.3f A%.3f\n", 23.0 + 14.0 * (k % 2),
+                    5.0 * k);
+      g += buf;
+    }
+    return g + "G0 Z40\n";
+  };
+
+  const cam::Verdict good =
+      cam::VerifyGcode(program(15.0), setup, doc->GetBodies(), 0.5);
+  INFO("rotary? " << good.rotary << " gouge " << good.maxGouge << " leftover "
+                  << good.maxLeftover << " cells " << good.cells);
+  REQUIRE(good.rotary); // it routed itself
+  REQUIRE(good.cells > 1000);
+  CHECK(good.maxGouge < 0.2);
+
+  const cam::Verdict deep =
+      cam::VerifyGcode(program(14.0), setup, doc->GetBodies(), 0.5);
+  INFO("deep gouge " << deep.maxGouge);
+  CHECK_THAT(deep.maxGouge, WithinAbs(1.0, 0.1));
+  CHECK_FALSE(deep.Safe(0.05));
+
+  // ...and the words say A, not Y. An angle printed under a "Y" is the kind
+  // of wrong that reads as right.
+  bool labelled = false;
+  for (const cam::VerdictLine& l : cam::Explain(deep, 0.05, 1.0))
+    labelled = labelled || l.text.find(" A") != std::string::npos;
+  CHECK(labelled);
+}
+
 #endif // HAVE_CAM

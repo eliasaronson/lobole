@@ -1,5 +1,6 @@
 #include "core/cam/CamVerify.h"
 
+#include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
 
 #include <algorithm>
@@ -559,6 +560,20 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.fileErrors = static_cast<int>(program.errors.size());
   if (!program.errors.empty())
     out.verdict.firstFileError = program.errors.front();
+  // A file whose part TURNS was not checked by anything above. The stock
+  // here is a height map, z(x, y), and a height map cannot represent a part
+  // that rotates -- every cut was applied as though it stood still, so the
+  // gouge and the leftover below are measurements of a program that does not
+  // exist. `InspectRotary` is the model that can (docs/cam/rotary-plan.md)
+  // and `VerifyGcode` routes to it; this path is reached by a caller that
+  // wants the height map specifically, and it gets told.
+  if (RotatesWhileCutting(program)) {
+    out.verdict.fileErrors++;
+    if (out.verdict.firstFileError.empty())
+      out.verdict.firstFileError =
+          "the A axis MOVES in this file and this is the 3-axis check: its "
+          "stock is a height map, which cannot represent a part that turns";
+  }
   out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
   if (!program.warnings.empty())
     out.verdict.firstFileWarning = program.warnings.front();
@@ -677,6 +692,15 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Body>& bodies, double res,
                     const std::vector<Toolpath::Relief>& reliefs,
                     const std::vector<Toolpath::Tab>& tabs) {
+  // The STOCK MODEL follows the file, not the setup. A program whose A moves
+  // is cut from a cylinder that turns and one whose A does not is cut from a
+  // block that does not, and asking the setup would get the answer wrong in
+  // the case that matters: a rotary-capable machine posting a 3-axis job.
+  // Reliefs and tabs are 2.5D statements about a contour and mean nothing to
+  // a rotary pass, so they are not carried into one rather than being
+  // silently ignored inside it.
+  if (RotatesWhileCutting(ParseGcode(gcode)))
+    return InspectRotary(gcode, setup, bodies, res).verdict;
   return Inspect(gcode, setup, bodies, res, reliefs, tabs).verdict;
 }
 
@@ -684,6 +708,10 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                                  double minutes, bool breaksAnEdge) {
   std::vector<VerdictLine> out;
   char buf[256];
+  // (x, y) in three axes and (x, theta) in four. `Verdict::rotary` says
+  // which, because a pair of doubles cannot, and printing an angle under a
+  // "Y" is the kind of wrong that reads as right.
+  const char* second = v.rotary ? "A" : "Y";
 
   if (v.cells == 0) {
     out.push_back(
@@ -712,9 +740,9 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
   // backplot genuinely cannot show you.
   if (v.maxGouge > tolerance) {
     std::snprintf(buf, sizeof(buf),
-                  "Cuts %.2f mm INTO the part at X%.1f Y%.1f — that is scrap. "
+                  "Cuts %.2f mm INTO the part at X%.1f %s%.1f — that is scrap. "
                   "Check the depths and the tool diameter.",
-                  v.maxGouge, v.gougeAt.x, v.gougeAt.y);
+                  v.maxGouge, v.gougeAt.x, second, v.gougeAt.y);
     out.push_back({VerdictLine::Level::Bad, buf});
     // An edge break removes material the model still has, unless the round
     // or the chamfer is modelled too — so this job gouges BY CONSTRUCTION
@@ -806,10 +834,11 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     // forgotten operation is one region of hundreds. Both used to print the
     // same sentence.
     std::snprintf(buf, sizeof(buf),
-                  "Leaves %.2f mm of material at X%.1f Y%.1f — %.1f mm2 in %d "
+                  "Leaves %.2f mm of material at X%.1f %s%.1f — %.1f mm2 in %d "
                   "place%s. %s",
-                  v.maxLeftover, v.leftoverAt.x, v.leftoverAt.y, v.leftoverArea,
-                  v.leftoverRegions, v.leftoverRegions == 1 ? "" : "s",
+                  v.maxLeftover, v.leftoverAt.x, second, v.leftoverAt.y,
+                  v.leftoverArea, v.leftoverRegions,
+                  v.leftoverRegions == 1 ? "" : "s",
                   v.leftoverRegions >= 3 && v.leftoverArea < 25.0
                       ? "Small and scattered, which is what inside corners "
                         "the cutter cannot reach look like — a smaller tool "

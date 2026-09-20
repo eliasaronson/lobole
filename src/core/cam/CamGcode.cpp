@@ -33,11 +33,8 @@ GProgram ParseGcode(std::string_view text) {
   // by the next move emitted — a tool change is a line of its own, so the
   // boundary belongs to the first move that cuts with the new tool.
   bool toolChange = false;
-  // The rotary word, remembered only to tell an INDEX from a ROTATION: the
-  // first A seen, and whether we have already said that it moves.
-  double firstA = 0.0;
+  double a = 0.0;
   bool haveA = false;
-  bool saidRotary = false;
 
   size_t i = 0;
   while (i <= text.size()) {
@@ -169,30 +166,12 @@ GProgram ParseGcode(std::string_view text) {
           toolChange = true;
         break;
       case 'A':
-        // The rotary word. A CONSTANT A is the indexed case and needs nothing
-        // done: the part is already framed and the file's coordinates are in
-        // setup space, so the whole 3-axis check applies unchanged. That is
-        // every rotary file this app posts today.
-        //
-        // A CHANGING A is not that, and it used to fall into `default:` and
-        // vanish. A continuous 4-axis file -- hand-edited, or from another
-        // CAM -- then verified as though the part stood still, which is a
-        // clean verdict on a program nothing has checked. The height map
-        // cannot represent a part that turns (docs/cam/simulation.md), so the
-        // honest answer is to say so rather than to answer the wrong
-        // question convincingly.
-        if (!haveA) {
-          firstA = value;
-          haveA = true;
-        } else if (std::abs(value - firstA) > 1e-6 && !saidRotary) {
-          saidRotary = true;
-          out.errors.push_back(
-              "line " + std::to_string(lineNo) +
-              ": the A axis MOVES in this file, and this verifier is 3-axis "
-              "-- its stock is a height map, which cannot represent a part "
-              "that turns. Nothing below has been checked against the "
-              "rotation");
-        }
+        // Modal, and RECORDED. It used to fall into `default:` and vanish,
+        // so a file whose part turns was simulated as though it stood still.
+        // What to do about that is decided where the stock model is chosen;
+        // here it is simply read, like every other word.
+        a = value;
+        haveA = true;
         break;
       default:
         break;
@@ -227,11 +206,18 @@ GProgram ParseGcode(std::string_view text) {
           const double a0 = std::atan2(u.y, u.x);
           for (int k = 1; k <= steps; k++) {
             const double t = static_cast<double>(k) / steps;
-            const double a = a0 + sweep * t;
+            // `ang`, not `a`: the modal A WORD is called `a` in this
+            // function, and an arc's own angle shadowing it wrote the arc
+            // parameter into every move's rotary axis. An indexed job then
+            // read as one whose trunnion swept from -pi to pi, which routed
+            // its verification to the rotary stock model and reported 36 mm
+            // of gouge on a correct program. Caught by the indexed-frame
+            // test in one run.
+            const double ang = a0 + sweep * t;
             GMove m;
             m.rapid = false;
-            m.to = {centre.x + radius * std::cos(a),
-                    centre.y + radius * std::sin(a),
+            m.to = {centre.x + radius * std::cos(ang),
+                    centre.y + radius * std::sin(ang),
                     pos.z + (to.z - pos.z) * t};
             m.tool = tool;
             m.line = lineNo;
@@ -240,6 +226,8 @@ GProgram ParseGcode(std::string_view text) {
             // The boundary is the first chord, not every chord of the arc.
             m.toolChange = toolChange;
             toolChange = false;
+            m.hasA = haveA;
+            m.a = a;
             out.moves.push_back(m);
           }
           pos = to;
@@ -258,6 +246,8 @@ GProgram ParseGcode(std::string_view text) {
       m.op = op;
       m.toolChange = toolChange;
       toolChange = false;
+      m.hasA = haveA;
+      m.a = a;
       out.moves.push_back(m);
       pos = to;
       havePos = true;
@@ -273,6 +263,22 @@ GProgram ProgramInSetupSpace(std::string_view text, const Setup& setup) {
   for (GMove& m : p.moves)
     m.to += setup.origin;
   return p;
+}
+
+bool RotatesWhileCutting(const GProgram& p) {
+  bool have = false;
+  double first = 0.0;
+  for (const GMove& m : p.moves) {
+    if (!m.hasA)
+      continue;
+    if (!have) {
+      first = m.a;
+      have = true;
+    } else if (std::abs(m.a - first) > 1e-6) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace cam

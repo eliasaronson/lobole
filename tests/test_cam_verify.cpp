@@ -9,37 +9,70 @@
 
 // --- C5: verifying the posted file ---------------------------------------
 
-TEST_CASE("cam verify: a MOVING A axis is refused, a constant one is not",
+TEST_CASE("cam verify: the parser READS the A word rather than judging it",
           "[cam]") {
-  // The verifier is 3-axis and its stock is a height map, which cannot
-  // represent a part that turns. An A word used to fall into the parser's
-  // `default:` and vanish, so a continuous 4-axis file -- hand-edited, or
-  // from another CAM -- verified as though the part stood still and came back
-  // with a clean verdict on a program nothing had checked.
-  //
-  // An INDEX is not that. Every rotary file this app posts states one
-  // constant A before the first cut and the coordinates are already in setup
-  // space, so the whole 3-axis check applies unchanged and must stay silent.
+  // An A word used to fall into the parser's `default:` and vanish, so a
+  // file whose part turns was simulated as though it stood still. It is
+  // recorded now -- modal, like every other word -- and what to DO about a
+  // moving A is decided where the stock model is chosen, not here. A parser
+  // that refused would also have to know what it was being parsed for.
   const cam::GProgram indexed = cam::ParseGcode("G0 Z25\n"
                                                 "G0 A90\n"
                                                 "G0 X0 Y0\n"
                                                 "G1 Z-1 F300\n"
-                                                "G1 X10 A90\n");
-  for (const std::string& e : indexed.errors)
-    INFO(e);
-  CHECK(indexed.errors.empty());
+                                                "G1 X10\n");
+  REQUIRE(indexed.errors.empty());
+  REQUIRE(indexed.moves.size() >= 3);
+  // Modal: the A stated once before the cut is carried by every move after
+  // it, and the moves before it state none -- which is a fact about the
+  // file, not a zero.
+  CHECK_FALSE(indexed.moves.front().hasA);
+  CHECK(indexed.moves.back().hasA);
+  CHECK_THAT(indexed.moves.back().a, WithinAbs(90.0, 1e-9));
+  // One constant A is an INDEX: the part stands still while the tool moves,
+  // which is the same question a 3-axis check answers.
+  CHECK_FALSE(cam::RotatesWhileCutting(indexed));
 
   const cam::GProgram turning = cam::ParseGcode("G0 Z25\n"
                                                 "G0 A0\n"
                                                 "G1 Z-1 F300\n"
                                                 "G1 X10 A45\n"
                                                 "G1 X20 A90\n");
-  REQUIRE(turning.errors.size() >= 1);
-  INFO(turning.errors[0]);
-  CHECK(turning.errors[0].find("A axis MOVES") != std::string::npos);
-  // Said ONCE, not once per move: a thousand-line rotary program would
-  // otherwise report a thousand copies of the same sentence.
-  CHECK(turning.errors.size() == 1);
+  REQUIRE(turning.errors.empty());
+  CHECK(cam::RotatesWhileCutting(turning));
+
+  // An ARC does not fill the A word with its own parameter. The re-expansion
+  // walks an angle it also called `a`, which shadowed the modal one and
+  // wrote the arc parameter into every move's rotary axis -- so an ordinary
+  // indexed job read as a trunnion sweeping from -pi to pi.
+  const cam::GProgram arc = cam::ParseGcode("G0 Z25\n"
+                                            "G0 A90\n"
+                                            "G0 X0 Y0\n"
+                                            "G1 Z-1 F300\n"
+                                            "G2 X10 Y10 I10 J0\n");
+  REQUIRE(arc.moves.size() > 4);
+  for (const cam::GMove& m : arc.moves)
+    if (m.hasA)
+      CHECK_THAT(m.a, WithinAbs(90.0, 1e-9));
+  CHECK_FALSE(cam::RotatesWhileCutting(arc));
+}
+
+TEST_CASE("cam verify: the 3-axis check refuses a part that turns", "[cam]") {
+  // The height map is z(x, y) and cannot represent a part that rotates, so
+  // every cut would be applied as though it stood still and the gouge and
+  // leftover would be measurements of a program that does not exist. The
+  // planar path says so instead (`InspectRotary` is the model that can).
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  const std::string turning = "(op 1)\nG0 Z25\nG0 X0 Y0 A0\nG1 Z19 F300\n"
+                              "G1 X40 A180\nG0 Z25\n";
+  const cam::Inspection flat =
+      cam::Inspect(turning, setup, doc->GetBodies(), 0.5);
+  REQUIRE(flat.ok);
+  INFO(flat.verdict.firstFileError);
+  CHECK(flat.verdict.fileErrors > 0);
+  CHECK(flat.verdict.firstFileError.find("A axis MOVES") != std::string::npos);
+  CHECK_FALSE(flat.verdict.Safe(0.01));
 }
 
 TEST_CASE("cam verify: what the parser found reaches the verdict", "[cam]") {

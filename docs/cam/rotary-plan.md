@@ -71,7 +71,9 @@ Three honest answers, and only three:
   exactly this reason, and refusing the same way is defensible.
 
 **Recommendation: the cylindrical map, with the refusal above it as the
-gate.** It keeps the one-engine rule, it reuses `CarveSweep`/`SampleModel`/
+gate.** BUILT — see [As built](#as-built).
+
+**Recommendation, in full:** It keeps the one-engine rule, it reuses `CarveSweep`/`SampleModel`/
 `Compare` almost verbatim, and its limit — round stock, one rotary axis — is
 the same limit every surveyed project imposed on its rotary ops anyway. This
 is the decision to take first because it decides whether continuous 4-axis is
@@ -130,3 +132,70 @@ one by name rather than silently dropping along the wrong axis; the surfacing
 patterns take plain values and return polylines; toolpaths are generated in
 setup space and have been since C1. That is the structure FreeCAD credits for
 its rotary work costing 42% of its 3-axis surfacing, and we have it already.
+
+## As built
+
+D1 shipped: `CamRotary.{h,cpp}`, `RadiusMap`, and `VerifyGcode` routing
+itself. What is worth recording.
+
+**The router reads the FILE, not the setup.** A program whose A moves is cut
+from a cylinder that turns; one whose A does not is cut from a block that
+does not. Asking the setup would get the case that matters wrong — a
+rotary-capable machine posting a 3-axis job — and the user's own 6090 profile
+declares `has_rotary_axis: true`, so that case is not hypothetical. Reliefs
+and tabs are 2.5D statements about a contour and are not carried into a
+rotary check rather than being silently ignored inside it.
+
+**The angular grid is derived from the arc, not typed as an angle.** Enough
+cells that one cell's arc *at the blank's own surface* is about `res`. A
+typed step is right at one diameter and wrong at every other: it would
+measure a 200 mm blank four times more coarsely than a 50 mm one and say
+nothing about it.
+
+**A cell that straddles a step is measured against its neighbours.** The
+sampler takes the furthest point of the part in each cell, exactly as the
+height map takes the highest. At a shoulder — a 5 mm step on a
+half-millimetre grid — the boundary cell reads as the big diameter while a
+6 mm cutter, which does not stop at a cell edge, legitimately turns it down
+to the small one. Cell to cell that is **5 mm of "gouge" on a correct
+program**, and a verifier that cries wolf at every shoulder is one nobody
+reads. Gouge is measured against the smallest designed radius in a cell's
+neighbourhood and leftover against the largest, which costs one cell of
+resolution at a vertical face — precisely what the grid cannot resolve there
+anyway.
+
+**One count per triangle EDGE, not one per triangle.** A cylinder's side
+meshes as 60 mm by a fraction of one. A single sample count from the longest
+edge either samples the short direction absurdly finely or, once clamped,
+leaves whole cells between samples along the long one — a plain bar sampled
+as a radius of **zero** in places, which the control case caught on the first
+run.
+
+**And the bug the split created.** Recording the A word meant writing it onto
+every emitted move, and the arc re-expansion walks a local angle it also
+called `a`. It shadowed the modal A word, so every chord of every arc carried
+the arc's own parameter as its rotary axis — an ordinary indexed job then
+read as a trunnion sweeping from −π to π, which routed it to the rotary stock
+model and reported 36 mm of gouge on a correct program. The C9 indexed-frame
+test caught it in one run, which is the argument for that test existing.
+
+### Still open
+
+- **D2, the feed model.** Untouched. `CuttingMinutes` still measures
+  Cartesian length, so a pure-A move is free and a rotary program's cycle
+  time is understated silently.
+- **D3, round stock.** The blank is DERIVED from the part (its extent along
+  the axis, its furthest point from it, plus the setup's margins — the radial
+  one taken as the larger of Y and Z, because a box's margins are all a
+  `Stock` can state). A round stock mode is the honest fix and is a format
+  change.
+- **Nothing generates a rotary toolpath.** This verifies files, which is the
+  right order for this subsystem — the check exists before the generator, so
+  the generator is trustworthy from its first line — but it means the only
+  rotary programs it can be pointed at today are hand-written or from another
+  CAM.
+- **Rapids are not checked against the rotary stock.** The planar check asks
+  whether a rapid passes through material; the rotary one does not yet, and
+  says so rather than implying it does.
+- **No picture.** `CamPlayback` draws a height map. A radius map has no
+  renderer, so a rotary file verifies but cannot be watched.

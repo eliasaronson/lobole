@@ -301,9 +301,11 @@ constexpr MethodDoc kCamMethods[] = {
      "leftover_area_mm2, leftover_regions, rapids_through_stock "
      "(with worst_rapid_depth_mm/_at/_line: a graze and a crash are the "
      "same COUNT and different numbers), "
+     "rotary (the file's A MOVES, so it was checked against a cylindrical "
+     "blank r(x, theta) instead of a height map -- and the second number of "
+     "every _at pair is then an ANGLE IN DEGREES, not a Y), "
      "file_errors (with first_file_error: lines the PARSER could not read -- "
-     "a NaN coordinate, a feed of zero, an A axis that MOVES, which this "
-     "3-axis height map cannot represent; anything else in the answer was "
+     "a NaN coordinate, a feed of zero; anything else in the answer was "
      "measured on a different program, so this counts against ok), "
      "file_warnings (with first_file_warning: what a CONTROLLER may refuse "
      "though the parser survived it, such as a nested comment Mach3 will not "
@@ -1582,6 +1584,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"worst_rapid_depth_mm", v.worstRapidDepth},
              {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
              {"worst_rapid_line", v.worstRapidLine},
+             // Which STOCK MODEL answered. True means the file's A moved, so
+             // it was checked against a rotary blank r(x, theta) and the
+             // second number in every `*_at` pair is an ANGLE IN DEGREES,
+             // not a Y. A pair of doubles cannot say that and a caller
+             // reading an angle as a coordinate would be quietly wrong.
+             {"rotary", v.rotary},
              {"file_errors", v.fileErrors},
              {"first_file_error", v.firstFileError},
              {"file_warnings", v.fileWarnings},
