@@ -383,26 +383,41 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
   out.reserve(tp.moves.size() + 16);
   double clipped = 0.0;
   bool outside = false; // the tool is off the bed, parked at safeZ
-  const auto retract = [&](const glm::dvec3& at) {
+  // An inserted move INHERITS the rotary index of the move it came from. It
+  // used to be built from scratch, so a retract or a re-entry arrived with
+  // `hasA = false` in the middle of an indexed path where every other move
+  // carried one. Harmless in the FILE -- A is modal and the machine holds the
+  // last one -- and not harmless in the toolpath: `LastCollinear` breaks a
+  // run wherever `hasA` differs, so a clipped indexed path decimated worse
+  // than the same path unclipped, and anything reading A off a move saw it
+  // blink. Inherit rather than assert: a 3-axis path must stay free of A.
+  const auto like = [](Move& m, const Move& from) {
+    m.hasA = from.hasA;
+    m.a = from.a;
+  };
+  const auto retract = [&](const glm::dvec3& at, const Move& from) {
     if (at.z < safeZ - kEps) {
       Move up;
       up.kind = Move::Kind::Rapid;
       up.to = {at.x, at.y, safeZ};
+      like(up, from);
       out.push_back(up);
     }
     outside = true;
   };
-  const auto reenter = [&](const glm::dvec3& at, const Move& like) {
+  const auto reenter = [&](const glm::dvec3& at, const Move& from) {
     Move over;
     over.kind = Move::Kind::Rapid;
     over.to = {at.x, at.y, safeZ};
+    like(over, from);
     out.push_back(over);
     if (at.z < safeZ - kEps) {
       Move down;
-      down.kind = like.kind == Move::Kind::Rapid ? Move::Kind::Rapid
+      down.kind = from.kind == Move::Kind::Rapid ? Move::Kind::Rapid
                                                  : Move::Kind::Plunge;
       down.to = at;
-      down.feed = like.kind == Move::Kind::Rapid ? 0.0 : plungeFeed;
+      down.feed = from.kind == Move::Kind::Rapid ? 0.0 : plungeFeed;
+      like(down, from);
       out.push_back(down);
     }
     outside = false;
@@ -424,7 +439,7 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
     double t0, t1;
     if (!clip(prev, m.to, t0, t1)) {
       if (!outside)
-        retract(prev);
+        retract(prev, m);
       if (cutting(m))
         clipped += length;
       prev = m.to;
@@ -435,7 +450,7 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
       if (cutting(m))
         clipped += length * t0;
       if (!outside)
-        retract(prev);
+        retract(prev, m);
       reenter(lerp(prev, m.to, t0), m);
     } else if (outside) {
       // Starts on the boundary or inside while parked: come back in here.
@@ -447,7 +462,7 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
       out.push_back(part);
       if (cutting(m))
         clipped += length * (1.0 - t1);
-      retract(part.to);
+      retract(part.to, m);
     } else {
       out.push_back(m);
     }
