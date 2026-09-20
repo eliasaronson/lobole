@@ -1,98 +1,54 @@
-"""The numbers a Formula Student chassis is built from.
+"""The numbers the LFS19 chassis is built from.
 
-Every one of them is a decision, and the ones a rulebook makes are marked as
-such. The frame is a steel space frame in the shape the 2019 car had: front
-bulkhead, front hoop, main hoop, the side impact structure between them, and
-a triangulated rear bay carrying the engine.
+This is a RECREATION of the car Lund Formula Student built in 2019, not a
+generic Formula Student frame. The shape comes from a photograph of the car
+on its weld jig; the sizes come from the rulebook; the lengths are the part
+nobody has yet, because the team's CAD is SolidWorks and nothing in this
+toolchain can read it (see docs/chassis-lfs-plan.md).
+
+So every number below carries where it came from:
+
+    # READ    — measured off the photograph, and against what
+    # RULE    — fixed by the FS rules, with the rule's own number
+    # ASSUMED — nobody has it yet. This is the list to walk the day
+                19031101_Frame_19_SES.SLDPRT is exported as STEP.
 
 Axes are the app's: X runs REARWARD from the front bulkhead, Y is to the
-LEFT, Z is up from the ground plane the frame sits on in its jig.
+LEFT, Z is up from the table the jig sits on.
 """
 
 # --- the stock ------------------------------------------------------------
-# A rulebook sets these two: the main hoop and the front hoop are 25.4 x 2.4
-# steel, and the bracing and the side impact structure may drop to 1.65.
+# RULE: the main hoop and the front hoop are 25.4 x 2.4 steel; the bracing,
+# the side impact structure and the bulkhead support may drop to 1.65.
 MATERIAL = "steel"
 HOOP = "25.4x2.4"       # main hoop, front hoop
 STRUCT = "25.4x1.65"    # side impact, bracing, bulkhead support
-SMALL = "19.05x1.65"    # tertiary members: floor, engine bay, tabs
+SMALL = "19.05x1.65"    # tertiary: floor, engine bay, tab backing
 
 OD = {HOOP: 25.4, STRUCT: 25.4, SMALL: 19.05}
 WALL = {HOOP: 2.4, STRUCT: 1.65, SMALL: 1.65}
 
-# The bender's dies. A shop owns a handful of formers, not a continuum, and
-# asking for a radius nobody owns is the refusal check_tube exists to make.
+# The bender's dies. A shop owns a handful of formers, not a continuum.
 FORMERS = [76.2, 101.6, 152.4]
 STOCK_LENGTH = 6000.0   # a six-metre stick, which is how tube is sold
 KERF = 2.0              # the saw
 
 # --- the envelope ---------------------------------------------------------
+# ASSUMED, all four. A Formula Student car of this class sits here, and the
+# photograph agrees with the PROPORTIONS, but a photograph taken down the
+# length of a car cannot give a length.
 WHEELBASE = 1550.0
-FRONT_OVERHANG = 700.0          # bulkhead ahead of the front axle
+FRONT_OVERHANG = 700.0
 REAR_OVERHANG = 500.0
 
 # Longitudinal stations, from the front bulkhead at x = 0.
-X_BULKHEAD = 0.0
-X_BULKHEAD_SUPPORT = 380.0      # the intermediate ring the nose braces to
-X_FRONT_HOOP = 950.0            # over the driver's knees
-X_MAIN_HOOP = 1720.0            # behind the driver's shoulders
-X_MH_BRACE_FOOT = 2320.0        # where the main hoop bracing lands
-X_REAR = 2620.0                 # the back of the engine bay
-
-# Half-widths. A frame is narrow at the nose and wide at the hips.
-W_BULKHEAD = 150.0
-W_FRONT_HOOP = 230.0
-W_MAIN_HOOP = 260.0
-W_REAR = 230.0
-
-# Heights above the jig plate.
-Z_FLOOR = 60.0                  # the lower rails
-Z_BULKHEAD_TOP = 330.0
-# A front hoop has to clear the driver's knees and carry the dash and the
-# steering, and it has to be tall enough that the top of it is a small part
-# of it: the crown above the highest brace is unbraced tube in any car, so a
-# SHORT hoop is mostly crown. At 620 it was 31% crown and read as a stub.
-Z_FRONT_HOOP_TOP = 760.0
-Z_MAIN_HOOP_TOP = 1180.0        # a rulebook: above the tall driver's helmet
-Z_SIDE_UPPER = 520.0            # the upper side impact member
-Z_SIDE_MID = 290.0              # the middle one
-Z_REAR_TOP = 640.0
-
-# The hoops are bent from ONE length of tube, on a former the shop owns.
-HOOP_FORMER = 152.4             # the big radius at a hoop's top corners
-BRACE_FORMER = 101.6
-
-# Where a brace may land on a hoop: clear of the bend, because a hoop turns
-# SHORT of its corner and there is no metal at the corner to weld to. With a
-# 152 mm former on a right angle the tube leaves the straight 152 mm below
-# the corner, so an attachment has to be below that and not at the corner it
-# was drawn from. Derived, so a change of former moves it.
-#
-# Every millimetre of it is CROWN — unbraced tube above the highest weld —
-# so it wants to be small. It cannot be as small as the tangent point,
-# though: a weld is a tube's RADIUS wide, so a joint pressed right up to the
-# tangent puts half its bead on the bend. Clear of the bend means clear by a
-# radius, plus a little for the welder.
-BRACE_CLEARANCE = 30.0
-Z_MH_BRACE = Z_MAIN_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
-Z_FH_BRACE = Z_FRONT_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
-
-# WHERE A BEND MAY BE: nowhere a joint lands.
-#
-# The rails and the side members have to change direction — a car is narrow
-# at the nose and wide at the hips — and the obvious place to change it is at
-# a station, because that is where the width is decided. It is also the worst
-# place: a station is where five or six members converge, and a bend is the
-# one stretch of a tube with no straight to fit them against, made of a torus
-# and thinned by the bending. check_frame found nineteen joints sitting on
-# one.
-#
-# So the taper happens BETWEEN the stations, and the members run straight
-# through every station where something is welded. These two are the only
-# places the rails turn, and nothing is welded at either.
-X_TAPER_FRONT = 700.0
-X_TAPER_REAR = 2100.0
-X_SIDE_KNEE = 800.0     # where the upper side member stops climbing
+X_BULKHEAD = 0.0                # ASSUMED (datum)
+X_BULKHEAD_SUPPORT = 350.0      # READ: the ring the nose braces land on
+X_TAPER_FRONT = 700.0           # where the rails stop spreading
+X_FRONT_HOOP = 1000.0           # READ: over the driver's knees
+X_MAIN_HOOP = 1750.0            # READ: behind the driver's shoulders
+X_ENGINE_FRONT = 2050.0         # READ: the first rear-truss station
+X_REAR = 2400.0                 # READ: the rear node cluster
 
 
 def _through(x, x0, y0, x1, y1):
@@ -100,37 +56,154 @@ def _through(x, x0, y0, x1, y1):
     return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 
 
-# The cockpit line: straight through BOTH hoop stations, so their feet and
-# everything else at them land on a straight. The taper points are on it.
-W_TAPER_FRONT = _through(X_TAPER_FRONT, X_FRONT_HOOP, W_FRONT_HOOP,
-                         X_MAIN_HOOP, W_MAIN_HOOP)
-W_TAPER_REAR = _through(X_TAPER_REAR, X_FRONT_HOOP, W_FRONT_HOOP,
-                        X_MAIN_HOOP, W_MAIN_HOOP)
-# The upper side member climbs from the bulkhead to the knee and is level
-# from there back, so the front hoop meets it on the level.
+# Half-widths. READ off the photograph as RATIOS between stations; the
+# absolute values are ASSUMED with the envelope.
+#
+# Only THREE of them are free. The lower rails run straight from the front
+# taper all the way to the engine bay, so both hoops' feet sit ON that
+# straight — which is the whole reason nothing in this frame is welded to a
+# bend. Derive them, and moving a station moves its hoop with it.
+W_BULKHEAD = 170.0              # READ: the bulkhead is narrow
+W_TAPER_FRONT = 230.0           # READ: where the rails stop spreading
+W_ENGINE = 250.0                # READ: the hips, at the engine bay's front
+W_REAR = 175.0                  # READ: the rear truss CONVERGES
+
+W_FRONT_HOOP = _through(X_FRONT_HOOP, X_TAPER_FRONT, W_TAPER_FRONT,
+                        X_ENGINE_FRONT, W_ENGINE)
+W_MAIN_HOOP = _through(X_MAIN_HOOP, X_TAPER_FRONT, W_TAPER_FRONT,
+                       X_ENGINE_FRONT, W_ENGINE)
+
+# Heights above the table.
+Z_FLOOR = 60.0                  # the lower rails, on the jig plates
+Z_BULKHEAD_TOP = 360.0          # READ: the bulkhead is very nearly square
+Z_FRONT_HOOP_TOP = 780.0        # READ against the main hoop; ASSUMED value
+Z_MAIN_HOOP_TOP = 1180.0        # RULE: above the tall driver's helmet
+Z_SIDE_UPPER = 540.0            # READ: the upper side impact member
+Z_SIDE_MID = 300.0              # READ: the middle one
+Z_REAR_TOP = 700.0              # READ: the rear upper node cluster
+Z_HARNESS = 620.0               # ASSUMED: the shoulder belts' own member
+
+# --- the hoops --------------------------------------------------------
+#
+# THE THING THE PHOTOGRAPH IS MOST EMPHATIC ABOUT. Neither hoop is a
+# rectangle with its corners bent. Each one rises vertically off its feet,
+# then LEANS INWARD to a narrow crown: the main hoop is markedly narrower
+# across the top than across its feet, which is what makes it look like an
+# arch rather than a roll bar. A hoop is still ONE length of tube — it is
+# the node list that changes, not the code.
+#
+# Four bends per hoop: a knee on each side where the leg stops being
+# vertical, and a crown corner on each side where the lean becomes the top.
+# The knee is LOW: the photograph's main hoop starts leaning not far above
+# the driver's shoulders, and a high knee also puts the bend exactly where
+# the rear rails want to land on the hoop.
+Z_HOOP_KNEE = 0.45              # READ: fraction of the hoop's height
+W_MAIN_HOOP_CROWN = 130.0       # READ: half width across the top
+W_FRONT_HOOP_CROWN = 150.0      # READ: the front hoop leans less
+# 101.6, not the biggest former the shop owns: a crown 260 mm across cannot
+# absorb two 152.4 mm bends. At 152.4 the top straight came out 17 mm long
+# and the bender's clamp die needs 50.8 mm to hold the tube at all.
+HOOP_FORMER = 101.6             # the radius at knee and crown
+BRACE_FORMER = 101.6
+
+# Where a brace may land on a hoop: clear of the bend, because a hoop turns
+# SHORT of its corner and there is no metal at the corner to weld to. A weld
+# is a tube's radius wide, so a joint pressed up to the tangent puts half its
+# bead on the bend — clear by a radius, plus a little for the welder.
+BRACE_CLEARANCE = 30.0
+
+
+def hoop(x, w_foot, w_crown, z_top):
+    """The node list of one hoop, foot to foot, as the tube is bent.
+
+    Vertical off the feet to the knee, leaning in to the crown, across the
+    top, and back down the mirror of itself.
+    """
+    z_knee = Z_FLOOR + (z_top - Z_FLOOR) * Z_HOOP_KNEE
+    return [
+        (x, w_foot, Z_FLOOR),
+        (x, w_foot, z_knee),
+        (x, w_crown, z_top),
+        (x, -w_crown, z_top),
+        (x, -w_foot, z_knee),
+        (x, -w_foot, Z_FLOOR),
+    ]
+
+
+MAIN_HOOP = hoop(X_MAIN_HOOP, W_MAIN_HOOP, W_MAIN_HOOP_CROWN, Z_MAIN_HOOP_TOP)
+FRONT_HOOP = hoop(X_FRONT_HOOP, W_FRONT_HOOP, W_FRONT_HOOP_CROWN,
+                  Z_FRONT_HOOP_TOP)
+
+# A brace lands on the LEANING stretch, below the crown bend and above the
+# knee bend. Derived, so changing a former moves every brace with it.
+Z_MH_BRACE = Z_MAIN_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
+Z_FH_BRACE = Z_FRONT_HOOP_TOP - HOOP_FORMER - BRACE_CLEARANCE
+
+
+def lean(nodes, z):
+    """Half width of a hoop at height z.
+
+    Below the knee a hoop's leg is vertical; above it the leg leans in to
+    the crown. Anything that lands on a hoop has to ask, because a hoop that
+    leans is the whole difference between this frame and a roll bar.
+    """
+    (_, w_foot, z_knee) = nodes[1]
+    if z <= z_knee:
+        return w_foot
+    (_, w_crown, z_crown) = nodes[2]
+    t = (z - z_knee) / (z_crown - z_knee)
+    return w_foot + (w_crown - w_foot) * t
+
+
+W_MH_BRACE = lean(MAIN_HOOP, Z_MH_BRACE)
+W_FH_BRACE = lean(FRONT_HOOP, Z_FH_BRACE)
+
+
+# WHERE A BEND MAY BE: nowhere a joint lands. A station is where five or six
+# members converge, and a bend is the one stretch of a tube with no straight
+# to fit them against. So the rails taper BETWEEN stations and run straight
+# through every station where something is welded.
+X_SIDE_KNEE = 800.0             # READ: where the upper side member levels
 W_SIDE_KNEE = _through(X_SIDE_KNEE, X_FRONT_HOOP, W_FRONT_HOOP,
                        X_MAIN_HOOP, W_MAIN_HOOP)
 
-# The nose ring sits ON the rails rather than kinking them. A joint does not
-# belong on a BEND: the tube is a torus there, it is thinned by the bending,
-# and there is no straight to fit a cope against — so the rails run straight
-# from the bulkhead to the front hoop and the ring's width and height are
-# INTERPOLATED to meet them. Both derived, so moving the station moves the
-# ring with it.
-_t = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_TAPER_FRONT - X_BULKHEAD)
-W_SUPPORT = W_BULKHEAD + _t * (W_TAPER_FRONT - W_BULKHEAD)
-_u = (X_BULKHEAD_SUPPORT - X_BULKHEAD) / (X_SIDE_KNEE - X_BULKHEAD)
-Z_SUPPORT_TOP = Z_BULKHEAD_TOP + _u * (Z_SIDE_UPPER - Z_BULKHEAD_TOP)
+# Where the front upper rail meets the front hoop. The hoop is LEANING by
+# then, so the rail's far end is asked of the hoop, not assumed.
+W_FH_UPPER = lean(FRONT_HOOP, Z_SIDE_UPPER)
+
+# The bulkhead support ring sits ON the rails rather than kinking them —
+# both rails. The lower rail and the upper rail are spreading at different
+# rates, so the ring's uprights LEAN: its top is 19 mm narrower than its
+# foot. Derived, because a ring that misses a rail by 20 mm is a cope that
+# cuts nothing and a member welded to air.
+W_SUPPORT = _through(X_BULKHEAD_SUPPORT, X_BULKHEAD, W_BULKHEAD,
+                     X_TAPER_FRONT, W_TAPER_FRONT)
+W_SUPPORT_TOP = _through(X_BULKHEAD_SUPPORT, X_BULKHEAD, W_BULKHEAD,
+                         X_FRONT_HOOP, W_FH_UPPER)
+Z_SUPPORT_TOP = _through(X_BULKHEAD_SUPPORT, X_BULKHEAD, Z_BULKHEAD_TOP,
+                         X_FRONT_HOOP, Z_SIDE_UPPER)
 
 # --- the panels -----------------------------------------------------------
+# READ off the CAD's FILE NAMES, which is all the CAD would give up: the
+# floor is `FloorPanelTrimmedWithHoles` plus a separate `RearFloor`, the
+# firewall is four pieces (`Upperfirewall`, `Firewall_seat`,
+# `FirewallShoulder`, `Firewall_frame`), and the side panels are LOFTED and
+# bent, cut as left/right front and rear `PreCut` blanks.
 PANEL_MATERIAL = "steel"
-PANEL_GAUGE = "1.5mm"           # the floor and the firewall
+PANEL_GAUGE = "1.5mm"
+
+# --- the tabs -------------------------------------------------------------
+# READ: every suspension pickup in the photograph is a PAIR of plates in
+# double shear, straddling the rod end. The CAD names agree — the front
+# lower A-arm has a `...MountFront` and a `...MountRear`, not one mount.
+TAB_GAUGE = "4mm"
+TAB_GAP = 16.0                  # ASSUMED: the rod end that goes between them
+TAB_BOLT = 8.0                  # ASSUMED: M8 through the pair
 
 # --- what it is welded with ----------------------------------------------
 # A cope is cut a little open: a root gap is what lets the weld reach the
-# bottom of the joint. It is also what keeps the cut off a TANGENCY — two
-# tubes of one diameter whose axes meet exactly have surfaces that touch
-# along a curve rather than crossing it, and a boolean asked to cut one with
-# the other hands back the argument unchanged. Every equal-diameter joint in
-# this frame is drawn to its node, so every one of them would be that case.
+# bottom of the joint. It also keeps the cut off a TANGENCY — two tubes of
+# one diameter whose axes meet exactly touch along a curve rather than
+# crossing it, and a boolean asked to cut one with the other hands back the
+# argument unchanged.
 WELD_GAP = 0.25

@@ -24,227 +24,195 @@ from designer_remote import Designer  # noqa: E402
 
 
 def members(f):
-    """Every member of the frame, by name, in the order a frame is built.
+    """Every member of the LFS19 frame, by name, in the order it is tacked.
 
     Rank 0 is primary (coped to nothing), rank 1 lands on rank 0, and so on.
 
-    The governing idea is that every BAY is a triangle. A quadrilateral bay
-    carries its load by bending its welds, which is the one thing a space
-    frame exists not to do — so each station (bulkhead, nose ring, front
-    hoop, main hoop, rear) is a ring, and every face between two rings gets
-    a diagonal: the two sides, the floor and the roof.
+    The shape is READ off a photograph of the car on its weld jig; the sizes
+    are the rulebook's; the lengths are in chassis_spec.py with their
+    provenance beside them. What makes this the LFS car rather than a
+    textbook one is in three places: the hoops LEAN IN to a narrow crown,
+    the rear is a truss that CONVERGES on a pair of node clusters rather
+    than a box, and the main hoop is braced both forward and rearward with
+    the braces triangulated to each other.
     """
+    fh = lambda z: S.lean(S.FRONT_HOOP, z)   # noqa: E731 - half width at z
+    mh = lambda z: S.lean(S.MAIN_HOOP, z)    # noqa: E731
+
     # --- rank 0: the lower rails, the spine of the car -------------------
-    # They run unbroken from the bulkhead to the back of the engine bay, and
-    # everything else lands on them — including the hoops, whose feet are
-    # welded to these. Rank is the order a frame is tacked up in: what runs
-    # through is primary, what stops against it is coped.
-    # It turns at the TAPER stations, not at the hoops: a station is where
-    # five or six members converge, and a bend is the one stretch of a tube
-    # with no straight to fit them against.
+    # Unbroken from the bulkhead to the front of the engine bay, with ONE
+    # bend, at the front taper. Everything else lands on them, and both
+    # hoops' feet sit on the straight stretch — which is why no joint in
+    # this frame is on a bend.
     f.pair("Lower rail", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
         (S.X_TAPER_FRONT, S.W_TAPER_FRONT, S.Z_FLOOR),
-        (S.X_TAPER_REAR, S.W_TAPER_REAR, S.Z_FLOOR),
-        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
+        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
     ], S.STRUCT, rank=0)
 
     # --- rank 1: the hoops, each bent from ONE length of tube -------------
-    # A main hoop is one tube: up one side, over the top on two big-radius
-    # bends, and down the other. That is what makes it a hoop and not three
-    # tubes welded into the shape of one.
-    f.add("Main hoop", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_MAIN_HOOP_TOP),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_MAIN_HOOP_TOP),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
-    ], S.HOOP, rank=1, former=S.HOOP_FORMER)
+    # Vertical off the feet, then leaning inward to a crown half as wide.
+    f.add("Main hoop", S.MAIN_HOOP, S.HOOP, rank=1, former=S.HOOP_FORMER)
+    f.add("Front hoop", S.FRONT_HOOP, S.HOOP, rank=1, former=S.HOOP_FORMER)
 
-    f.add("Front hoop", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FRONT_HOOP_TOP),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FRONT_HOOP_TOP),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
-    ], S.HOOP, rank=1, former=S.HOOP_FORMER)
-
-    # --- rank 2: the rings, and the rails that run between them ----------
-    # The upper side member runs at the driver's elbow, bulkhead to main
-    # hoop, over the nose ring and the front hoop on its way.
-    # It climbs to the KNEE and runs level from there, so the front hoop and
-    # everything else at that station meets it on a straight.
-    f.pair("Side upper", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_SIDE_KNEE, S.W_SIDE_KNEE, S.Z_SIDE_UPPER),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=2)
-
-    # The front bulkhead: a square of tube, and the plate the impact
-    # attenuator bolts to.
+    # --- rank 2: the front bulkhead --------------------------------------
+    # Nearly square, and braced across its own opening: the photograph shows
+    # a single diagonal inside the bulkhead frame.
     f.pair("Bulkhead upright", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.STRUCT, rank=2)
+    ], S.HOOP, rank=2)
     f.add("Bulkhead top", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
         (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.STRUCT, rank=3)
-    # The bottom of the square. Without it the bulkhead is a U and the
-    # attenuator plate has nothing to bolt to along its lower edge.
+    ], S.HOOP, rank=2)
     f.add("Bulkhead bottom", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
         (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_FLOOR),
-    ], S.STRUCT, rank=3)
+    ], S.HOOP, rank=2)
     f.add("Bulkhead diagonal", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
         (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.SMALL, rank=4)
-
-    # The nose RING, which is what the nose has to be triangulated against:
-    # without a station here the bulkhead-to-front-hoop bay is one long
-    # unbraced box, which is exactly what it was.
-    f.pair("Nose ring upright", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_SUPPORT_TOP),
     ], S.SMALL, rank=3)
-    f.add("Nose ring top", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_SUPPORT_TOP),
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT, S.Z_SUPPORT_TOP),
-    ], S.SMALL, rank=4)
 
-    # --- the nose bay: bulkhead to nose ring, triangulated on every face --
-    f.pair("Nose side diagonal", [
+    # --- rank 2: the upper rails of the front box ------------------------
+    # From the bulkhead's top corners back to the front hoop. They land ON
+    # the hoop, which by then is leaning, so the width is asked of the hoop
+    # rather than assumed.
+    f.pair("Front upper rail", [
+        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
+        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
+    ], S.STRUCT, rank=2)
+
+    # --- rank 3: the bulkhead support ------------------------------------
+    # A ring on the rails a little behind the bulkhead, and the triangles
+    # that tie the bulkhead to it. The rules ask for this to be a truss,
+    # and the photograph shows it as one.
+    f.pair("Support upright", [
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
+    ], S.STRUCT, rank=3)
+    f.add("Support top", [
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
+        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
+    ], S.STRUCT, rank=3)
+    f.pair("Support side diagonal", [
+        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
+    ], S.STRUCT, rank=4)
+    f.add("Nose floor diagonal", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_SUPPORT_TOP),
+        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT, S.Z_FLOOR),
     ], S.SMALL, rank=4)
     f.add("Nose roof diagonal", [
         (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT, S.Z_SUPPORT_TOP),
-    ], S.SMALL, rank=5)
-    f.add("Nose floor diagonal", [
-        (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-    ], S.SMALL, rank=5)
-
-    # --- the front bay: nose ring to front hoop, the one that had NOTHING -
-    f.pair("Front bay side diagonal", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_SIDE_UPPER),
+        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
     ], S.SMALL, rank=4)
-    f.add("Front bay roof diagonal", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_SUPPORT_TOP),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_SIDE_UPPER),
-    ], S.SMALL, rank=5)
-    f.add("Front bay floor diagonal", [
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-    ], S.SMALL, rank=5)
 
-    # The front hoop is braced FORWARD and down, onto the nose ring — which
-    # is what a rulebook asks for and what ties its top to the rest of the
-    # car instead of leaving it standing there.
+    # --- rank 4: the footwell, support ring to front hoop -----------------
+    f.pair("Footwell side diagonal", [
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
+        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
+    ], S.STRUCT, rank=4)
+    f.add("Footwell floor diagonal", [
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
+        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
+    ], S.SMALL, rank=4)
+    f.add("Footwell roof diagonal", [
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
+        (S.X_FRONT_HOOP, -fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
+    ], S.SMALL, rank=4)
+    f.add("Front hoop bottom", [
+        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
+        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
+    ], S.STRUCT, rank=3)
+
+    # --- rank 4: the front hoop's bracing --------------------------------
+    # Forward and down onto the support ring, which is where the photograph
+    # puts it and what the rules allow. It lands BELOW the crown bend.
     f.pair("Front hoop brace", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FH_BRACE),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_SUPPORT_TOP),
+        (S.X_FRONT_HOOP, S.W_FH_BRACE, S.Z_FH_BRACE),
+        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
     ], S.STRUCT, rank=4)
 
-    # --- the cockpit: front hoop to main hoop ----------------------------
-    # The side impact structure: an upper member (above), a middle one at
-    # the driver's hip, and the diagonals that make the side a truss rather
-    # than a parallelogram.
-    f.pair("Side middle", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_SIDE_MID),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_MID),
+    # --- rank 3: the side impact structure -------------------------------
+    # The rules want three members a side between the hoops. The lower one
+    # IS the lower rail; the upper one and the diagonal are these.
+    f.pair("Side impact upper", [
+        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
+        (S.X_MAIN_HOOP, mh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
     ], S.STRUCT, rank=3)
-    f.pair("Side diagonal front", [
+    f.pair("Side impact diagonal", [
         (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_MID),
-    ], S.SMALL, rank=4)
-    f.pair("Side diagonal rear", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_SIDE_MID),
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-    ], S.SMALL, rank=4)
-    # And the floor, which is a face like any other.
+        (S.X_MAIN_HOOP, mh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
+    ], S.STRUCT, rank=4)
     f.add("Cockpit floor diagonal", [
         (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
         (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
     ], S.SMALL, rank=4)
+    f.add("Main hoop bottom", [
+        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
+        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
+    ], S.STRUCT, rank=3)
+    # The shoulder harness bar: the CAD has a `shoulder harness mount`, and
+    # the rules want the belts on a member of their own.
+    f.add("Shoulder harness bar", [
+        (S.X_MAIN_HOOP, mh(S.Z_HARNESS), S.Z_HARNESS),
+        (S.X_MAIN_HOOP, -mh(S.Z_HARNESS), S.Z_HARNESS),
+    ], S.STRUCT, rank=3)
 
-    # --- the main hoop and its bracing -----------------------------------
-    # The braces attach as high as the bend allows and run back to the rear
-    # of the car: the rulebook's reason the hoop stays up in a roll.
+    # --- rank 4: the rear truss ------------------------------------------
+    # It CONVERGES: everything behind the main hoop runs in toward a pair of
+    # node clusters at the back, which is where the rear suspension and the
+    # top of the main hoop bracing all land. That convergence is the single
+    # biggest difference from a boxed rear bay.
+    f.pair("Rear upper rail", [
+        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
+        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
+    ], S.STRUCT, rank=4)
     f.pair("Main hoop brace", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_MH_BRACE),
-        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_FLOOR),
-    ], S.STRUCT, rank=3)
-    f.add("Main hoop diagonal", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_MH_BRACE),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-    ], S.SMALL, rank=3)
-    # The harness bar: what the belts pull against, and a second tie across
-    # the hoop's braced height.
-    f.add("Harness bar", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=3)
-    # The brace pair is a triangle of its own, not two struts side by side.
-    f.add("Brace cross", [
-        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_FLOOR),
-        (S.X_MH_BRACE_FOOT, -S.W_REAR, S.Z_FLOOR),
-    ], S.SMALL, rank=4)
-
-    # --- the rear bay, which carries the engine --------------------------
+        (S.X_MAIN_HOOP, S.W_MH_BRACE, S.Z_MH_BRACE),
+        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
+    ], S.HOOP, rank=4)
+    f.pair("Rear lower rail", [
+        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
+        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
+    ], S.STRUCT, rank=4)
     f.pair("Rear upright", [
         (S.X_REAR, S.W_REAR, S.Z_FLOOR),
         (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=3)
+    ], S.STRUCT, rank=5)
     f.add("Rear top cross", [
         (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
         (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=4)
+    ], S.STRUCT, rank=5)
     f.add("Rear bottom cross", [
         (S.X_REAR, S.W_REAR, S.Z_FLOOR),
         (S.X_REAR, -S.W_REAR, S.Z_FLOOR),
-    ], S.SMALL, rank=4)
-    f.add("Rear bulkhead diagonal", [
-        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
+    ], S.STRUCT, rank=5)
+    f.pair("Rear side diagonal", [
+        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
+        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
+    ], S.SMALL, rank=5)
+    f.add("Rear roof diagonal", [
+        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
         (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
-    f.pair("Engine bay upper", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=4)
-    f.pair("Engine bay diagonal", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
-    # The bay's ROOF was a plain quadrilateral, and its sides carried one
-    # diagonal apiece. It holds the engine and the rear suspension.
-    f.add("Engine bay roof diagonal", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_SIDE_UPPER),
-        (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
-    f.add("Engine mount cross", [
-        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_SIDE_MID),
-        (S.X_MH_BRACE_FOOT, -S.W_REAR, S.Z_SIDE_MID),
-    ], S.SMALL, rank=4)
-    f.pair("Engine mount stay", [
-        (S.X_MH_BRACE_FOOT, S.W_REAR, S.Z_SIDE_MID),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
     ], S.SMALL, rank=5)
     f.add("Engine bay floor diagonal", [
         (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
         (S.X_REAR, -S.W_REAR, S.Z_FLOOR),
     ], S.SMALL, rank=5)
-
-    # --- the cross members that keep the stations square -----------------
-    f.add("Front cross", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
-    ], S.SMALL, rank=3)
-    f.add("Seat back cross", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
-    ], S.SMALL, rank=3)
+    # The two main hoop braces are triangulated to EACH OTHER. Without this
+    # they are two long struts that can only fold sideways together.
+    _bx = (S.X_MAIN_HOOP + S.X_REAR) / 2.0
+    _by = (S.W_MH_BRACE + S.W_REAR) / 2.0
+    _bz = (S.Z_MH_BRACE + S.Z_REAR_TOP) / 2.0
+    f.add("Brace cross", [(_bx, _by, _bz), (_bx, -_by, _bz)],
+          S.SMALL, rank=5)
+    f.pair("Brace stay", [
+        (_bx, _by, _bz),
+        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
+    ], S.SMALL, rank=5)
 
 
 def main():
