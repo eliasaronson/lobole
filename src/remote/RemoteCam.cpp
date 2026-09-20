@@ -21,6 +21,7 @@
 #include "ui/MachineActions.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -179,7 +180,9 @@ constexpr MethodDoc kCamMethods[] = {
      "speaker baffle) be cut without a rotated copy of it, and repeating the "
      "call is idempotent. flip turns the fixture over for the second side. "
      "rotation_a is the MACHINE's rotary index and needs has_rotary_axis: "
-     "without it no file can carry an A word. "
+     "an index without it is REFUSED, because the part would be machined as "
+     "if turned while the file never turns it. Without it no file can carry "
+     "an A word. "
      "`reach_offset` is WHERE THE BED IS ON THE SHEET, from the stock's "
      "near corner: a sheet longer than the machine is slid through and "
      "clamped where the work is, and without this the reach window is nailed "
@@ -1165,10 +1168,29 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     }
     if (p.contains("safe_z"))
       setup.safeZ = p.at("safe_z").get<double>();
-    if (p.contains("rotation_a"))
-      setup.rotationA = p.at("rotation_a").get<double>();
+    // The axis before the angle, so a call that states both is judged on
+    // what it asked for rather than on what the setup used to be.
     if (p.contains("has_rotary_axis"))
       setup.machine.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
+    if (p.contains("rotation_a")) {
+      const double a = p.at("rotation_a").get<double>();
+      // REFUSED, not quietly honoured. `SetupToModel` applies rotationA
+      // whatever the machine says, while `EmitsRotary` needs the flag before
+      // it will post an A word -- so an index on a machine with no 4th axis
+      // generated a toolpath for a part turned 90 degrees and a FILE that
+      // never turns it. The part is cut on a face the machine cannot present:
+      // plausible G-code, wrong part, no message. The GUI cannot reach this
+      // (the A drag lives inside the flag) and neither can a loaded file
+      // (`has_rotary_axis` defaults to `rotation_a != 0` on pre-v77 jobs);
+      // this door was the one left open, and the row above has been claiming
+      // the invariant it did not enforce.
+      if (std::abs(a) > 1e-9 && !setup.machine.hasRotaryAxis)
+        throw std::runtime_error(
+            "rotation_a needs a machine with a 4th axis: set has_rotary_axis "
+            "as well, or name a machine that has one. Without it the part "
+            "would be MACHINED as if turned and the file would never turn it");
+      setup.rotationA = a;
+    }
     if (p.contains("origin_at")) {
       const std::string at = p.at("origin_at").get<std::string>();
       if (at == "stock_min")

@@ -1796,6 +1796,29 @@ def main():
                   if s_["id"] == on["id"]][0]
             expect(st["machine_match"] == "global" and st["fit_arcs"],
                    "re-picking the machine restores the copy")
+            # A rotary index needs a machine with the axis. `SetupToModel`
+            # applies rotationA whatever the machine says while `EmitsRotary`
+            # needs the flag before it posts an A word -- so an index accepted
+            # here would machine the part AS IF turned and write a file that
+            # never turns it: plausible G-code, wrong part, no message. The
+            # GUI cannot reach that state and a loaded job cannot either; this
+            # door was the one left open.
+            expect_error(d, "set_cam_setup", "needs a machine with a 4th axis",
+                         id=on["id"], rotation_a=90.0)
+            st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+                  if s_["id"] == on["id"]][0]
+            expect(abs(st["rotation_a"]) < 1e-9,
+                   "a refused index leaves the setup unturned")
+            # ...and with the axis it goes in.
+            d.call("set_cam_setup", id=on["id"], has_rotary_axis=True,
+                   rotation_a=90.0)
+            st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+                  if s_["id"] == on["id"]][0]
+            expect(abs(st["rotation_a"] - 90.0) < 1e-9 and
+                   st["has_rotary_axis"],
+                   "an index on a 4th-axis machine is accepted")
+            d.call("set_cam_setup", id=on["id"], rotation_a=0.0,
+                   has_rotary_axis=False)
             d.call("delete_machine", name="Smoke router")
             st = [s_ for s_ in d.call("list_cam_setups")["setups"]
                   if s_["id"] == on["id"]][0]

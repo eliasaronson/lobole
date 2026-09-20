@@ -330,9 +330,28 @@ size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
   const glm::dvec3 start = moves[first - 1].to;
   const double z = start.z;
   const double feed = moves[first].feed;
+  // The A the run starts at. An arc across a CHANGING A is what is unsafe --
+  // `Emitter::Arc` writes no A word and does not touch the modal one, so a
+  // fitted arc would swallow the rotation and desync the file from the
+  // machine. A CONSTANT A is not that, and refusing it cost every indexed job
+  // its arcs: a round part that posted ten G2s at A=0 posted zero the moment
+  // the trunnion was turned, with the panel still showing "Arcs (G2/G3)"
+  // ticked. `LastCollinear`, five lines up, already compared A rather than
+  // requiring its absence.
+  const bool hasA = moves[first].hasA;
+  const double a = moves[first].a;
+  // ...including against the move the arc STARTS from. If the run's A differs
+  // from the one already emitted, the rotation happens on the arc's first
+  // move and the arc would swallow it. Unreachable today -- the generator
+  // stamps one constant A on a whole indexed toolpath -- and checked anyway,
+  // because the day a strategy emits two is not the day to discover this.
+  if (hasA != moves[first - 1].hasA ||
+      (hasA && Emitter::Differs(a, moves[first - 1].a)))
+    return first - 1;
 
   const auto usable = [&](const Move& m) {
-    return m.kind == Move::Kind::Cut && !m.hasA &&
+    return m.kind == Move::Kind::Cut && m.hasA == hasA &&
+           (!hasA || !Emitter::Differs(m.a, a)) &&
            std::abs(m.to.z - z) < 1e-9 && std::abs(m.feed - feed) < 1e-9;
   };
   for (size_t k = first; k < first + kMinArcSegments; k++)
@@ -577,6 +596,15 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       // is supposed to arrive already retracted, but "supposed to" is how a
       // cutter ends up sweeping an arc through the part while the trunnion
       // turns — so the post enforces it rather than trusting its caller.
+      //
+      // UNREACHABLE today, and kept deliberately. `PostProcess` takes ONE
+      // setup and the generator stamps ONE constant A on every move of it,
+      // so `Differs` cannot be true here; what enforces the rule for an
+      // indexed job is the one-shot retract-and-index above, which is what
+      // the C9 test asserts. This branch is for the file that arrives with a
+      // SECOND A — and when one does, this stops being an invariant and
+      // becomes a policy choice, because a continuous rotary move is by
+      // definition A moving with the tool down.
       if (m.hasA && e.haveA && Emitter::Differs(m.a, e.a))
         e.Retract(setup.safeZ);
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";

@@ -73,6 +73,12 @@ struct Setup {
 };
 ```
 
+> `hasRotaryAxis` moved to `Machine` at v77, when the machine became one
+> object a setup embeds a copy of (`job-document.md` M4). It is a claim about
+> the shop's machine, not about this setup, so that is where it belongs —
+> and naming a machine now brings it, which is the point of the move. Read
+> every `Setup::hasRotaryAxis` below as `Setup::machine.hasRotaryAxis`.
+
 `SetupFrame(setup)` composes the two into one transform; `BodiesInSetupFrame`
 applies its inverse. Because every consumer already goes through those, the
 change is one function deep and the 2.5D pipeline is untouched.
@@ -212,6 +218,11 @@ two funnels would mean a consumer that skipped them, and there was one:
 `CamPlayback.cpp` built its own `SetupToModel` mat4 from `rotationA` for the
 renderers. It now converts `cam::SetupToModel`, and the three hand-rolled
 X-rotation matrices are one function.
+
+> Superseded at v73/J6: a job tab draws in SETUP space, so `CamPlayback.cpp`
+> converts nothing at all now and `FromSetupSpace` was deleted outright
+> (`CamToolpath.h`). `SetupToModel` survives in `CamSetup.cpp` and is reached
+> only from `BodiesInSetupFrame`. The lesson held; the file named did not.
 
 **The composition order was right, and is now pinned.** `frame · R_x(A)`:
 `cam: a fixture frame cuts what a rotary index would` generates the same

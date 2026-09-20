@@ -199,8 +199,9 @@ The user plans a rotary axis. Two very different things wear that name:
   3-axis surfacing.
 
 The one thing v1 must not do is assume three axes in the *post interface* or
-in the toolpath representation — a move carries an optional A, even if
-nothing emits one yet.
+in the toolpath representation — a move carries an optional A. *(Since C9 one
+IS emitted: an indexed setup stamps its constant A on every move and the post
+writes it.)*
 
 ## Post-processors: one interface, Mach3 first, LinuxCNC next
 
@@ -503,7 +504,10 @@ frame, the pick, and the safety rule.
    useful than rotating to the nearest wrong thing.
 3. **Posting several setups into one file.** `PostProcess` takes one setup
    today; it takes a list, with a retract, the `A` move, and an optional
-   `M0` between them. **The safety rule: a rotation is only ever emitted with
+   `M0` between them. *(Reversed and NOT built: `setup-frame.md` argues one
+   file per setup, because a flip job means unclamping the part and a file
+   boundary is the honest place for that break. `PostProcess` still takes one
+   setup.)* **The safety rule: a rotation is only ever emitted with
    the tool at safe Z, and the post asserts that rather than trusting its
    caller.** A rotary move with the tool down is the 4th-axis equivalent of
    the rapid-through-stock bug, and it deserves the same treatment.
@@ -551,7 +555,11 @@ since C1: at `rotationA = 0` setup space and model space are identical, so
 nothing had ever depended on the distinction. Indexed, the verifier, the
 backplot, the ghost, the depth label, the stock box and the derived depths
 were each in the wrong frame. Fixed by moving the framing INSIDE the engine
-entry points that take a `Setup`, so a caller cannot forget. The safe-Z rule for the index is enforced in the post.
+entry points that take a `Setup`, so a caller cannot forget. The safe-Z rule
+for the index is enforced in the post — by the one-shot retract-and-index
+before the first operation, which is what the C9 test asserts. (The
+per-move guard beside it cannot fire while a file holds one setup and one
+constant A; it is commented as the case that arrives with a second.)
 
 **But only half the shape landed, and the half that did not took nine months
 to surface.** "Toolpaths in setup space" shipped; the *frame* did not. C9

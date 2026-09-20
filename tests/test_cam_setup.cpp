@@ -117,6 +117,76 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
 
 // --- C9: the indexed 4th axis ---------------------------------------------
 
+TEST_CASE("cam: an indexed job still fits arcs", "[cam]") {
+  // A round part, posted to a controller that takes G2/G3, has to come back
+  // with arcs whether or not the trunnion is turned. It did not: every move
+  // of an indexed setup carries an A (CamStrategies.cpp stamps it), and
+  // `FitArc`'s usability test required `!m.hasA` -- so arc fitting was off
+  // for EVERY indexed job, silently, while the panel still showed "Arcs
+  // (G2/G3)" ticked. Nothing caught it because the C9 test below cuts a
+  // rectangular block, which has no arc to fit, and no golden .nc carries an
+  // A word.
+  //
+  // The A is not what makes an arc unsafe. A CHANGE in A across the run is,
+  // and `LastCollinear` five lines away already compared them that way.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Puck", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 20.0, 20.0));
+
+  const auto arcs = [](const std::string& g) {
+    int n = 0;
+    for (size_t at = 0; at < g.size();) {
+      const size_t end = std::min(g.find('\n', at), g.size());
+      const std::string line = g.substr(at, end - at);
+      at = end + 1;
+      if (line.rfind("G2 ", 0) == 0 || line.rfind("G3 ", 0) == 0)
+        n++;
+    }
+    return n;
+  };
+  const auto post = [&](double a) {
+    cam::Setup s = BasicSetup();
+    s.machine.fitArcs = true;
+    if (a != 0.0) {
+      // Half a turn about X: the puck is still a puck, so the toolpath is the
+      // same circle and only the A word differs. That is what makes the two
+      // posts comparable.
+      s.machine.hasRotaryAxis = true;
+      s.rotationA = a;
+    }
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+    s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Profile;
+    op.toolNumber = 1;
+    op.topZ = hi.z;
+    op.bottomZ = lo.z;
+    op.stepdown = 5.0;
+    op.side = cam::Side::Outside;
+    s.operations.push_back(op);
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    INFO(paths[0].error);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+    return gcode;
+  };
+
+  const std::string flat = post(0.0);
+  const int flatArcs = arcs(flat);
+  INFO("3-axis arcs: " << flatArcs);
+  REQUIRE(flatArcs > 0); // or this case is measuring nothing
+
+  const std::string turned = post(180.0);
+  REQUIRE(turned.find("A180") != std::string::npos); // it IS indexed
+  INFO("indexed arcs: " << arcs(turned));
+  CHECK(arcs(turned) == flatArcs);
+}
+
 TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   // The strongest test available for a rotary index: a part rotated in the
   // MODEL and machined at A=0 must produce the same toolpath as the

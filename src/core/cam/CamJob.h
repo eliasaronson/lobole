@@ -535,9 +535,14 @@ struct Setup {
 
 // --- toolpaths ------------------------------------------------------------
 
-// One machine move. Deliberately carries an optional A even though nothing
-// emits one yet: the plan's rule is that v1 must not assume three axes in
-// the toolpath representation or the post interface.
+// One machine move. Carries an optional A: the plan's rule is that v1 must
+// not assume three axes in the toolpath representation or the post interface.
+//
+// Since C9 something DOES emit one -- an indexed setup stamps its constant
+// `rotationA` on every move of every toolpath (CamStrategies.cpp) and the
+// post writes the A word. Everything downstream of the post is still three
+// axes: the G-code parser drops an A word, and the height map the verifier
+// and the simulation share cannot represent a part that turns.
 struct Move {
   enum class Kind { Rapid, Cut, Plunge };
   Kind kind = Kind::Cut;
