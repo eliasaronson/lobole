@@ -24,7 +24,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
     ctx->Yield();
     IM_CHECK(s_App->simulation.active);
-    ctx->ItemClick("//###Model/###study_gravity");
+    ctx->ItemClick("//###ToolWindow/###study_gravity");
     ctx->Yield();
     const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
@@ -46,7 +46,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
     const std::string materialRef =
-        "//###Model/###material_" + std::to_string(createdBy);
+        "//###ToolWindow/###material_" + std::to_string(createdBy);
     IM_CHECK(ctx->ItemExists(materialRef.c_str()));
     // Two steps, and the popup addressed by its own window name: a combo
     // popup does not take focus, and ComboClick wants one that does. Same
@@ -319,7 +319,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t studyId = s_App->simulation.activeStudyId;
-    ctx->ItemClick("//###Model/###study_run");
+    ctx->ItemClick("//###ToolWindow/###study_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
 
@@ -343,7 +343,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // Topology is reachable ONLY through this combo, which had no ### id and
     // so could not be clicked by a test at all — which is why the whole
     // workstream had no clicked coverage.
-    ctx->ItemClick("//###Model/###study_analysis");
+    ctx->ItemClick("//###ToolWindow/###study_analysis");
     ctx->Yield();
     IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
     ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
@@ -357,12 +357,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // The auto mesh is sized for a stress field; a shape needs one that can
     // hold a shape. Four iterations is enough for this gate: the volume
     // constraint is enforced by the OC bisection on every one of them.
-    ctx->ItemInputValue("//###Model/###study_mesh_size", "10");
+    ctx->ItemInputValue("//###ToolWindow/###study_mesh_size", "10");
     ctx->Yield(2);
-    ctx->ItemInputValue("//###Model/###topo_max_iterations", "4");
+    ctx->ItemInputValue("//###ToolWindow/###topo_max_iterations", "4");
     ctx->Yield(2);
 
-    ctx->ItemClick("//###Model/###topo_run");
+    ctx->ItemClick("//###ToolWindow/###topo_run");
     IM_CHECK(WaitForStudyResult(ctx, studyId));
     const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
     // The OC bisection enforces the volume every iteration, so this holds
@@ -751,6 +751,42 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->simulation.active);
     ctx->SetRef("//##DockHost");
     IM_CHECK(ctx->ItemExists("**/###tb_box")); // the model toolbar is back
+    ctx->SetRef("//##MainMenuBar");
+  };
+
+  // A study is a row in the part's dock (ui::ListRow): click selects it, its
+  // editor is the Simulation window, and Delete is in its menu -- where the
+  // whole editor, and a Delete button at its foot, used to be inline under
+  // the list (docs/ui/consistency-round-plan.md).
+  t = IM_REGISTER_TEST(engine, "sim", "a_study_is_a_row_edited_in_the_window");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 60.0);
+    const uint64_t first = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###Model/**/###study_add");
+    ctx->Yield(2);
+    const uint64_t second = s_App->simulation.activeStudyId;
+    IM_CHECK(second != first);
+    IM_CHECK_EQ(Doc()->GetStudies().size(), (size_t)2);
+
+    ctx->ItemClick(
+        ("//###Model/**/###study_sel_" + std::to_string(first)).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->simulation.activeStudyId, first);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###study_name"));
+    IM_CHECK(!ctx->ItemExists("//###Model/**/###study_name"));
+
+    ctx->ItemClick(
+        ("//###Model/**/###study_sel_" + std::to_string(second)).c_str(),
+        ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###study_delete");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetStudies().size(), (size_t)1);
+    IM_CHECK_EQ(Doc()->GetStudies()[0].id, first);
+
+    ctx->ItemClick("//###ToolWindow/###simulation_close");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->simulation.active);
     ctx->SetRef("//##MainMenuBar");
   };
 }

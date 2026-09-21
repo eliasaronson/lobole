@@ -262,7 +262,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->Yield(2);
   const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
   ctx->ItemClick(
-      ("//###Model/###material_" + std::to_string(createdBy)).c_str());
+      ("//###ToolWindow/###material_" + std::to_string(createdBy)).c_str());
   ctx->Yield();
   IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
   ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
@@ -280,7 +280,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   // Fixed on the x=0 end face, looking straight at it.
   s_App->camera->SetPosition(mid - glm::vec3(400.0f, 0.0f, 0.0f));
   ctx->Yield(3);
-  ctx->ItemClick("//###Model/###sim_bc_fixed");
+  ctx->ItemClick("//###ToolWindow/###sim_bc_fixed");
   ctx->Yield();
   ctx->MouseMoveToPos(WorldToWindow(glm::vec3(lo.x, mid.y, mid.z)));
   ctx->Yield();
@@ -288,9 +288,9 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->Yield(2);
 
   // 100 N spread over the top face, from above.
-  ctx->ItemClick("//###Model/###sim_bc_force");
+  ctx->ItemClick("//###ToolWindow/###sim_bc_force");
   ctx->Yield();
-  ctx->ItemInputValue("//###Model/###sim_magnitude", "100");
+  ctx->ItemInputValue("//###ToolWindow/###sim_magnitude", "100");
   ctx->Yield();
   s_App->camera->SetUp(glm::vec3(0, 0, -1));
   s_App->camera->SetPosition(mid + glm::vec3(0.0f, 400.0f, 0.0f));

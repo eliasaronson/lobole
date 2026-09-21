@@ -377,6 +377,68 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
       AppendToolGlyph(state, *setup, tp, out);
 }
 
+namespace {
+
+// A glyph per end shape, so a list of tools reads at a glance.
+const char* CamToolGlyph(cam::ToolType type) {
+  switch (type) {
+  case cam::ToolType::Flat:
+    return ICON_FA_SQUARE_FULL;
+  case cam::ToolType::Ball:
+    return ICON_FA_CIRCLE_DOT;
+  case cam::ToolType::VBit:
+    return ICON_FA_CARET_DOWN;
+  case cam::ToolType::Drill:
+    return ICON_FA_ARROW_DOWN_LONG;
+  }
+  return ICON_FA_SQUARE_FULL;
+}
+
+const char* CamToolShapeName(cam::ToolType type) {
+  switch (type) {
+  case cam::ToolType::Flat:
+    return "flat";
+  case cam::ToolType::Ball:
+    return "ball";
+  case cam::ToolType::VBit:
+    return "V-bit";
+  case cam::ToolType::Drill:
+    return "drill";
+  }
+  return "flat";
+}
+
+// "6 mm ball", the row's tail.
+std::string CamToolTail(const cam::Tool& t) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.3g mm %s", t.diameter,
+                CamToolShapeName(t.type));
+  return buf;
+}
+
+// Everything else about it, for the row's tooltip.
+std::string CamToolSummary(const cam::Tool& t) {
+  char buf[160];
+  std::snprintf(buf, sizeof(buf), "%s, %.1f mm of flute, F%.0f mm/min",
+                CamToolTail(t).c_str(), t.fluteLength, t.feedCut);
+  std::string out = buf;
+  if (t.overallLength > 0.0 && t.collarDiameter > 0.0) {
+    std::snprintf(buf, sizeof(buf), "; %.1f mm out of a %.1f mm collar",
+                  t.overallLength, t.collarDiameter);
+    out += buf;
+  }
+  return out;
+}
+
+std::string JoinNames(const std::vector<std::string>& names) {
+  std::string out;
+  for (size_t i = 0; i < names.size(); i++)
+    out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+  return out;
+}
+
+} // namespace
+
 void DrawCamPanel(AppState& state) {
   // NoFocusOnAppearing, like every other panel tabbed into the left node: a
   // window that appears in a shared dock node becomes the SELECTED tab, and
@@ -969,93 +1031,47 @@ void DrawCamPanel(AppState& state) {
     // Namespaced: a tool number and an operation id are both small ints, and
     // PushID(int) hashes them into the same id space — two rows then share an
     // id and ImGui says so in a modal.
+    // One row each, in the feature list's style (ui::ListRow): the fields
+    // are edited in the tool window (double-click, or Edit), the way an
+    // operation's are, and Delete is in the row's menu -- refused while an
+    // operation cuts with the tool (docs/ui/consistency-round-plan.md).
     ImGui::PushID("tools");
-    for (cam::Tool& t : setup->tools) {
-      ImGui::PushID(t.number);
-      ImGui::Text("T%d", t.number);
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(70.0f);
-      float dia = static_cast<float>(t.diameter);
-      if (ExprDragFloat(state, "mm###dia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
-        t.diameter = dia;
-        dirty = true;
-      }
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(70.0f);
-      // How deep this cutter can actually cut. It was drawn on the tool in
-      // the simulation and settable nowhere, so every tool in every job
-      // carried the 20 mm default whatever was in the spindle -- and the
-      // reach finding compares against it.
-      float flute = static_cast<float>(t.fluteLength);
-      if (ExprDragFloat(state, "flute###flutelen", &flute, 0.5f, 0.5f, 300.0f,
-                        "%.1f")) {
-        t.fluteLength = flute;
-        dirty = true;
-      }
-      ImGui::SetItemTooltip("Usable depth, mm: the fluted part, not the whole "
-                            "tool. Cut deeper than this and the shank rubs "
-                            "and the holder goes into the work.");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(70.0f);
-      float feed = static_cast<float>(t.feedCut);
-      if (ExprDragFloat(state, "F###feed", &feed, 10.0f, 1.0f, 10000.0f,
-                        "%.0f")) {
-        t.feedCut = feed;
-        dirty = true;
-      }
-      ImGui::SetItemTooltip("Cutting feed, mm/min — what YOU run. The app "
-                            "does not guess feeds and speeds.");
-      // The shape of the end. It is not decoration: the verifier simulates
-      // it, and "Break an edge" reads it to know whether it is cutting a
-      // bevel or an arc.
-      ImGui::SetNextItemWidth(90.0f);
-      int shape = static_cast<int>(t.type);
-      if (ImGui::Combo("###tooltype", &shape, "flat\0ball\0V-bit\0drill\0")) {
-        t.type = static_cast<cam::ToolType>(shape);
-        dirty = true;
-      }
-      ImGui::SetItemTooltip("End shape. A ball rounds an edge, a V-bit "
-                            "chamfers it; a flat mill does neither.");
-      if (t.type == cam::ToolType::VBit || t.type == cam::ToolType::Drill) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70.0f);
-        float angle = static_cast<float>(t.tipAngleDeg);
-        if (ExprDragFloat(state, "deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
-                          "%.0f")) {
-          t.tipAngleDeg = angle;
-          dirty = true;
-        }
-        ImGui::SetItemTooltip("INCLUDED angle at the point: 90 for the "
-                              "common chamfer bit, 118 for a twist drill.");
-      }
-      // The holder, on its own row: the two numbers that turn the collar
-      // check on. Both zero means nobody said, and the check stays quiet --
-      // so this row is empty on every tool until somebody measures theirs,
-      // which is exactly the right default for a limit nobody typed.
-      ImGui::SetNextItemWidth(70.0f);
-      float stickout = static_cast<float>(t.overallLength);
-      if (ExprDragFloat(state, "out###overall", &stickout, 0.5f, 0.0f, 400.0f,
-                        "%.1f")) {
-        t.overallLength = stickout;
-        dirty = true;
-      }
-      ImGui::SetItemTooltip("Stickout, mm: tip to the underside of the collet "
-                            "nut. With the collar width, cam_verify checks "
-                            "the nut against material the cutter never "
-                            "touches. 0 = not stated, nothing checked.");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(70.0f);
-      float collar = static_cast<float>(t.collarDiameter);
-      if (ExprDragFloat(state, "collar###collardia", &collar, 0.5f, 0.0f,
-                        120.0f, "%.1f")) {
-        t.collarDiameter = collar;
-        dirty = true;
-      }
-      ImGui::SetItemTooltip("The collet nut at its widest, mm. Needs the "
-                            "stickout beside it to mean anything.");
-      ImGui::PopID();
+    int deleteTool = 0;
+    for (const cam::Tool& t : setup->tools) {
+      const std::vector<std::string> users = CamOpsUsingTool(*setup, t.number);
+      ListRowSpec row;
+      row.glyph = CamToolGlyph(t.type);
+      row.label = "T" + std::to_string(t.number) + "  " + t.name +
+                  "###cam_tool_" + std::to_string(t.number);
+      row.selected = state.camEditTool == t.number;
+      row.tail = CamToolTail(t);
+      row.tooltip = CamToolSummary(t) +
+                    (users.empty() ? std::string("\nNo operation uses it.")
+                                   : "\nUsed by " + JoinNames(users) + ".");
+      row.menuId = "###cam_tool_ctx_" + std::to_string(t.number);
+      row.menu = [&state, &t, &users, &deleteTool] {
+        if (ImGui::MenuItem("Edit###cam_tool_edit"))
+          EditCamTool(state, t.number);
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###cam_tool_delete",
+                            nullptr, false, users.empty()))
+          deleteTool = t.number;
+        if (!users.empty() &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("Used by %s. Give those operations another tool "
+                            "first.",
+                            JoinNames(users).c_str());
+      };
+      const ListRowResult res = ListRow(row);
+      if (res.doubleClicked)
+        EditCamTool(state, t.number);
     }
     ImGui::PopID(); // "tools"
+    if (deleteTool != 0) {
+      std::string why;
+      if (!RemoveCamTool(state, deleteTool, &why))
+        state.camRefusal = why; // cannot happen from the menu; the RPC's rule
+    }
     // The machine's library first (M4): the tools the shop owns, minus the
     // ones this setup already has; then a blank one. Copied in, never
     // linked, so a library edit later changes nothing already cut with.
@@ -1576,6 +1592,147 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   return changed;
 }
 
+bool DrawCamToolFields(AppState& state, cam::Tool& t) {
+  bool changed = false;
+  char name[96];
+  std::snprintf(name, sizeof(name), "%s", t.name.c_str());
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+  if (ImGui::InputText("Name###tool_name", name, sizeof(name))) {
+    t.name = name;
+    changed = true;
+  }
+  ImGui::SetNextItemWidth(70.0f);
+  float dia = static_cast<float>(t.diameter);
+  if (ExprDragFloat(state, "mm###dia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
+    t.diameter = dia;
+    changed = true;
+  }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(70.0f);
+  // How deep this cutter can actually cut. It was drawn on the tool in
+  // the simulation and settable nowhere, so every tool in every job
+  // carried the 20 mm default whatever was in the spindle -- and the
+  // reach finding compares against it.
+  float flute = static_cast<float>(t.fluteLength);
+  if (ExprDragFloat(state, "flute###flutelen", &flute, 0.5f, 0.5f, 300.0f,
+                    "%.1f")) {
+    t.fluteLength = flute;
+    changed = true;
+  }
+  ImGui::SetItemTooltip("Usable depth, mm: the fluted part, not the whole "
+                        "tool. Cut deeper than this and the shank rubs "
+                        "and the holder goes into the work.");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(70.0f);
+  float feed = static_cast<float>(t.feedCut);
+  if (ExprDragFloat(state, "F###feed", &feed, 10.0f, 1.0f, 10000.0f, "%.0f")) {
+    t.feedCut = feed;
+    changed = true;
+  }
+  ImGui::SetItemTooltip("Cutting feed, mm/min — what YOU run. The app "
+                        "does not guess feeds and speeds.");
+  // The shape of the end. It is not decoration: the verifier simulates
+  // it, and "Break an edge" reads it to know whether it is cutting a
+  // bevel or an arc.
+  ImGui::SetNextItemWidth(90.0f);
+  int shape = static_cast<int>(t.type);
+  if (ImGui::Combo("###tooltype", &shape, "flat\0ball\0V-bit\0drill\0")) {
+    t.type = static_cast<cam::ToolType>(shape);
+    changed = true;
+  }
+  ImGui::SetItemTooltip("End shape. A ball rounds an edge, a V-bit "
+                        "chamfers it; a flat mill does neither.");
+  if (t.type == cam::ToolType::VBit || t.type == cam::ToolType::Drill) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    float angle = static_cast<float>(t.tipAngleDeg);
+    if (ExprDragFloat(state, "deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
+                      "%.0f")) {
+      t.tipAngleDeg = angle;
+      changed = true;
+    }
+    ImGui::SetItemTooltip("INCLUDED angle at the point: 90 for the "
+                          "common chamfer bit, 118 for a twist drill.");
+  }
+  // The holder, on its own row: the two numbers that turn the collar
+  // check on. Both zero means nobody said, and the check stays quiet --
+  // so this row is empty on every tool until somebody measures theirs,
+  // which is exactly the right default for a limit nobody typed.
+  ImGui::SetNextItemWidth(70.0f);
+  float stickout = static_cast<float>(t.overallLength);
+  if (ExprDragFloat(state, "out###overall", &stickout, 0.5f, 0.0f, 400.0f,
+                    "%.1f")) {
+    t.overallLength = stickout;
+    changed = true;
+  }
+  ImGui::SetItemTooltip("Stickout, mm: tip to the underside of the collet "
+                        "nut. With the collar width, cam_verify checks "
+                        "the nut against material the cutter never "
+                        "touches. 0 = not stated, nothing checked.");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(70.0f);
+  float collar = static_cast<float>(t.collarDiameter);
+  if (ExprDragFloat(state, "collar###collardia", &collar, 0.5f, 0.0f, 120.0f,
+                    "%.1f")) {
+    t.collarDiameter = collar;
+    changed = true;
+  }
+  ImGui::SetItemTooltip("The collet nut at its widest, mm. Needs the "
+                        "stickout beside it to mean anything.");
+  return changed;
+}
+
+void ApplyCamToolEdit(AppState& state) {
+  // A tool is shared by every operation that names it, so all of them are
+  // re-cut, as the panel's inline fields always did.
+  state.projectMetaDirty = true;
+  RefreshCamToolpaths(state);
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+}
+
+std::vector<std::string> CamOpsUsingTool(const cam::Setup& setup, int number) {
+  std::vector<std::string> names;
+  for (const cam::Operation& op : setup.operations)
+    if (op.toolNumber == number)
+      names.push_back(op.name.empty() ? "an unnamed operation" : op.name);
+  return names;
+}
+
+bool RemoveCamTool(AppState& state, int number, std::string* why) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  if (setup == nullptr) {
+    if (why)
+      *why = "no setup is active";
+    return false;
+  }
+  const std::vector<std::string> users = CamOpsUsingTool(*setup, number);
+  if (!users.empty()) {
+    // Refused, not cascaded: deleting the operations with it would lose
+    // work, and leaving them pointing at a missing number is the silent
+    // substitution the app refuses everywhere else.
+    if (why)
+      *why = "T" + std::to_string(number) + " is used by " + JoinNames(users) +
+             ". Give those operations another tool first.";
+    return false;
+  }
+  auto& tools = setup->tools;
+  const auto it =
+      std::find_if(tools.begin(), tools.end(),
+                   [&](const cam::Tool& t) { return t.number == number; });
+  if (it == tools.end()) {
+    if (why)
+      *why = "no tool T" + std::to_string(number) + " in this setup";
+    return false;
+  }
+  SnapshotJob(state);
+  tools.erase(it);
+  if (state.camEditTool == number)
+    state.camEditTool = 0;
+  state.projectMetaDirty = true;
+  return true;
+}
+
 void ApplyCamOpEdit(AppState& state, uint64_t opId) {
   // One operation changed: re-cut it alone, as the panel's edits always did
   // (`test_cam` pins one-at-a-time against all-at-once), and drop a verdict
@@ -1873,6 +2030,10 @@ bool DrawCamOpSettings(AppState&, cam::Setup&, cam::Operation&) {
   return false;
 }
 void ApplyCamOpEdit(AppState&, uint64_t) {}
+bool DrawCamToolFields(AppState&, cam::Tool&) { return false; }
+void ApplyCamToolEdit(AppState&) {}
+std::vector<std::string> CamOpsUsingTool(const cam::Setup&, int) { return {}; }
+bool RemoveCamTool(AppState&, int, std::string*) { return false; }
 } // namespace ui
 
 #endif

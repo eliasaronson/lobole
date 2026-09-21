@@ -359,6 +359,7 @@ const Binding kDefaults[] = {
      "H"},
     {"drawing.dim_pattern_callout", Context::Drawing, "Pattern callout",
      "Dimensions", "P"},
+    {"drawing.dim_part_note", Context::Drawing, "Part note", "Dimensions", "L"},
 
     // ------------------------------------------------------------------- Job
     // A CAM job tab. The verbs are the toolbar (docs/cam/gui.md): each is one

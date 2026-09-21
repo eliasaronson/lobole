@@ -679,6 +679,7 @@ set(app_sources
     src/ui/BackgroundJobs.cpp
     src/ui/ImportJob.cpp
     src/ui/OpenJob.cpp
+    src/ui/FloatingWindow.cpp
     src/ui/SyncJob.cpp
     src/ui/SettingsWindow.cpp
     src/ui/CamJobs.cpp

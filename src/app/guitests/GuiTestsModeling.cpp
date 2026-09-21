@@ -1825,7 +1825,11 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
     ctx->Yield(3);
     IM_CHECK_SILENT(s_App->drawing != nullptr);
-    ctx->SetRef("//###Model");
+    // Add view is a tool window, opened from the toolbar
+    // (docs/ui/consistency-round-plan.md).
+    ToolbarClick(ctx, "###tb_dwg_add_view");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
     ctx->ItemInputValue("###dwg_scale", 0.0f);
     ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
     ctx->ComboClick(
@@ -1833,6 +1837,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ctx->ItemClick("###dwg_add_view");
     ctx->Yield(3);
+    ctx->ItemClick(
+        "###dwg_add_view_close"); // a floating window a test opens, it closes
+    ctx->Yield();
 
     const auto& views = s_App->drawing->GetViews();
     IM_CHECK_EQ_NO_RET(views.size(), (size_t)1);
@@ -1849,7 +1856,13 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     // The part's own tab never left its authored configuration.
     IM_CHECK_EQ(part->ActiveConfiguration(), (uint64_t)0);
 
-    ctx->ItemClick(("**/###dwg_bend_table_" + std::to_string(viewId)).c_str());
+    // A bend table is in the view row's menu
+    // (docs/ui/consistency-round-plan.md).
+    ctx->ItemClick(
+        ("//###Model/**/###dwg_view_" + std::to_string(viewId)).c_str(),
+        ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###dwg_bend_table");
     ctx->Yield(2);
     const auto& notes = s_App->drawing->GetNotes();
     IM_CHECK_EQ_NO_RET(notes.size(), (size_t)1);

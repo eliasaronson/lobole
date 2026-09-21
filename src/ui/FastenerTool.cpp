@@ -206,7 +206,7 @@ void DrawFastenerToolWindow(AppState& state) {
     ImGui::TextWrapped(
         "A fastener is a bought part placed in an ASSEMBLY. Switch to an "
         "assembly tab and pick the rim of the hole it passes through.");
-    if (ImGui::Button("Done###fastener_done_notab"))
+    if (ImGui::Button("Close###fastener_done_notab"))
       CloseFastenerTool(state);
     ImGui::End();
     return;
@@ -355,7 +355,7 @@ void DrawFastenerToolWindow(AppState& state) {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Done###fastener_done"))
+  if (ImGui::Button("Close###fastener_done"))
     CloseFastenerTool(state);
   if (tool.placed > 0) {
     ImGui::SameLine();

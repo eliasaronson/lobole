@@ -33,9 +33,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -924,4 +926,133 @@ TEST_CASE("nothing in src/ is named `near` or `far`", "[convention]") {
     return s;
   }());
   CHECK(offenders.empty());
+}
+
+TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
+          "[convention]") {
+  // docs/ui/consistency-round-plan.md. The toolbars had grown five glyphs
+  // that meant two different things each (Unfold and Fit, Loft and the arcs,
+  // Thread and the sketch Circle, Derive and Offset, "more constraints" and
+  // "pattern callout") and more beside, and the feature tree drew some
+  // features with a different glyph from the button that creates them
+  // (Revolve, Hole, Draft, Split). A glyph is how a person finds a tool
+  // without reading, so neither kind of drift is cosmetic.
+  auto read = [](const char* rel) {
+    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  const std::string toolbar = read("src/ui/Toolbar.cpp");
+  const std::string tree = read("src/ui/FeatureTreePanel.cpp");
+  REQUIRE(!toolbar.empty());
+  REQUIRE(!tree.empty());
+
+  // Every button: `ICON "###tb_id"`, or a sketch tool's `ICON, "sketch.x"`
+  // (answering to ###tb_sk_x).
+  std::map<std::string, std::set<std::string>> idsByGlyph;
+  std::map<std::string, std::string> glyphById;
+  const std::regex tagged(R"re((ICON_FA_[A-Z0-9_]+)\s*"###(tb_[a-z0-9_]+)")re");
+  const std::regex sketch(
+      R"re((ICON_FA_[A-Z0-9_]+)\s*,\s*"sketch\.([a-z0-9_]+)")re");
+  for (std::sregex_iterator it(toolbar.begin(), toolbar.end(), tagged), end;
+       it != end; ++it) {
+    idsByGlyph[(*it)[1]].insert((*it)[2]);
+    glyphById[(*it)[2]] = (*it)[1];
+  }
+  for (std::sregex_iterator it(toolbar.begin(), toolbar.end(), sketch), end;
+       it != end; ++it) {
+    const std::string id = "tb_sk_" + std::string((*it)[2]);
+    idsByGlyph[(*it)[1]].insert(id);
+    glyphById[id] = (*it)[1];
+  }
+  REQUIRE(glyphById.size() > 80); // the parse found the bars, not a handful
+
+  // Buttons that share a glyph because they are the SAME idea on different
+  // bars. Anything else sharing one is a clash.
+  const std::vector<std::set<std::string>> sameIdea = {
+      {"tb_fit", "tb_sk_fit", "tb_asm_fit", "tb_dwg_fit", "tb_job_fit"},
+      {"tb_measure", "tb_asm_measure", "tb_job_measure"},
+      {"tb_render", "tb_asm_render"},
+      {"tb_simulation", "tb_asm_simulation"},
+      {"tb_extrude", "tb_sk_extrude"},
+      {"tb_revolve", "tb_sk_revolve"},
+      {"tb_hole", "tb_sk_hole", "tb_dwg_hole_callout", "tb_job_drill"},
+      {"tb_mirror", "tb_sk_mirror"},
+      {"tb_pattern", "tb_sk_pattern", "tb_dwg_pattern_callout"},
+      {"tb_fillet", "tb_sk_fillet", "tb_job_edge"},
+      {"tb_planes", "tb_sk_glyphs"},        // show or hide
+      {"tb_insert", "tb_dwg_add_view"},     // put a thing in
+      {"tb_mate_fastened", "tb_sim_fixed"}, // held rigid
+      {"tb_sim_run", "tb_job_simulate"},    // run it
+      {"tb_datum_plane", "tb_mate_planar"}, // a plane
+      {"tb_sk_arc_3point", "tb_sk_arc_center", "tb_sk_ellipse_arc"}, // arcs
+  };
+  const auto groupOf = [&](const std::string& id) -> int {
+    for (size_t g = 0; g < sameIdea.size(); g++)
+      if (sameIdea[g].count(id))
+        return static_cast<int>(g);
+    return -1;
+  };
+  std::vector<std::string> clashes;
+  for (const auto& [glyph, ids] : idsByGlyph) {
+    std::set<std::string> ideas; // a group index, or the id itself
+    for (const std::string& id : ids) {
+      const int g = groupOf(id);
+      ideas.insert(g >= 0 ? "group" + std::to_string(g) : id);
+    }
+    if (ideas.size() > 1) {
+      std::string line = glyph + ":";
+      for (const std::string& id : ids)
+        line += " " + id;
+      clashes.push_back(line);
+    }
+  }
+  INFO("One glyph, different tools. Pick a distinct glyph, or -- if they "
+       "really are one idea on two bars -- add them to a group above:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& c : clashes)
+              s += "  " + c + "\n";
+            return s;
+          }());
+  CHECK(clashes.empty());
+
+  // The tree's glyph for a feature is the glyph of the button that makes it.
+  const std::regex icon(
+      R"re(type == "([A-Za-z0-9]+)"\)\s*return (ICON_FA_[A-Z0-9_]+);)re");
+  const std::map<std::string, std::string> alias = {{"Derived", "tb_derive"}};
+  std::vector<std::string> drift;
+  int compared = 0;
+  for (std::sregex_iterator it(tree.begin(), tree.end(), icon), end; it != end;
+       ++it) {
+    const std::string type = (*it)[1];
+    std::string id = "tb_";
+    if (auto a = alias.find(type); a != alias.end()) {
+      id = a->second;
+    } else {
+      for (size_t i = 0; i < type.size(); i++) { // CamelCase -> snake_case
+        const char c = type[i];
+        if (std::isupper(static_cast<unsigned char>(c)) && i > 0)
+          id += '_';
+        id += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+    }
+    const auto b = glyphById.find(id);
+    if (b == glyphById.end())
+      continue; // no button makes it (Sketch, Import, FlatPattern...)
+    compared++;
+    if (b->second != std::string((*it)[2]))
+      drift.push_back(type + ": tree " + std::string((*it)[2]) + ", toolbar " +
+                      b->second);
+  }
+  CHECK(compared > 20);
+  INFO("The feature tree and the toolbar disagree:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& d : drift)
+              s += "  " + d + "\n";
+            return s;
+          }());
+  CHECK(drift.empty());
 }

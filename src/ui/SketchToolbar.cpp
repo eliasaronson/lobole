@@ -298,7 +298,7 @@ void DrawImageSession(AppState& state, SketchFeature& sketch) {
     return;
   }
   ImGui::SameLine();
-  if (ImGui::Button("Done")) {
+  if (ImGui::Button("Close###image_close")) {
     edit.selectedImageId = 0;
     edit.tool = SketchTool::Select;
   }

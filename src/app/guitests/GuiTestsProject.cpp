@@ -959,7 +959,11 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     };
 
     buildPart();
-    ctx->SetRef("//###Model");
+    // Add view is a tool window, opened from the toolbar
+    // (docs/ui/consistency-round-plan.md).
+    ToolbarClick(ctx, "###tb_dwg_add_view");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
     ctx->ItemInputValue("###dwg_scale", 0.0f); // 0 = choose one for me
     for (const char* orient : {"front", "top", "right"}) {
       ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
@@ -967,6 +971,9 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick("###dwg_add_view");
       ctx->Yield(3);
     }
+    ctx->ItemClick(
+        "###dwg_add_view_close"); // a floating window a test opens, it closes
+    ctx->Yield();
     const std::vector<std::string> clicked = sheetState();
     IM_CHECK_EQ(clicked.size(), (size_t)3);
 

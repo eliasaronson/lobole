@@ -16,6 +16,10 @@ namespace ui {
 // list and dimension tools arrive in later drawings milestones.
 void DrawSheetPanel(AppState& state);
 
+// The Add view tool window (the toolbar's Add view): source, configuration,
+// orientation and scale.
+void DrawAddViewToolWindow(AppState& state);
+
 // Renders the active drawing's sheet (border, title block, and later views/
 // dims) into the viewport through the 2D sheet camera. Defined in
 // DrawingPanel.cpp; called from the frame loop when a drawing tab is active.

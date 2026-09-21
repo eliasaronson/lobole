@@ -330,6 +330,13 @@ add-load flows through face picking exactly like the mate tool — Run button,
 results summary (max σᵥₘ / max |u| / vs. material yield → factor of safety),
 field selector + deform slider, stale badge.
 
+> As it stands (docs/ui/consistency-round-plan.md): the Model dock holds
+> only the study LIST, one row per study with its state (solved, stale,
+> failed, not run) and Delete in the row's menu. The selected study is edited,
+> run and read in the floating Simulation window, the one an assembly's
+> studies already used. Loads and kept faces are rows with Remove in their
+> menus, and a solve shows the shared progress bar.
+
 **RPCs** (snake_case branch in `RemoteServer.cpp` + `@mcp.tool` mirrors,
 per convention):
 

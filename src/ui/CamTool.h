@@ -66,5 +66,7 @@ void RunCamVerification(AppState& state);
 // its row, or Edit in its menu. The settings used to be an "Advanced" tree in
 // every row of the docked panel (docs/ui/cam-panel-tidy-plan.md).
 void EditCamOperation(AppState& state, uint64_t opId);
+// The same for one of the active setup's tools, by number.
+void EditCamTool(AppState& state, int number);
 
 } // namespace ui

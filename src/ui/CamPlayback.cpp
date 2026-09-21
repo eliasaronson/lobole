@@ -1,4 +1,5 @@
 #include "ui/CamPlayback.h"
+#include "ui/FloatingWindow.h"
 
 #ifdef HAVE_CAM
 
@@ -505,22 +506,15 @@ void DrawCamTransportWindow(AppState& state) {
   // viewport, centred, and only while something is playing. Not the tool
   // window slot (BeginToolWindowFrame): that is one-at-a-time by design and
   // a verb window may be open beside this. Anchored when it appears and
-  // draggable after; NoSavedSettings so a stale imgui.ini cannot park it.
-  const ImVec2 anchor(state.viewportPos.x + state.viewportSize.x * 0.5f,
-                      state.viewportPos.y + state.viewportSize.y - 12.0f);
-  ImGui::SetNextWindowPos(anchor, ImGuiCond_Appearing, ImVec2(0.5f, 1.0f));
-  ImGui::SetNextWindowBgAlpha(0.96f);
-  const ImGuiWindowFlags flags =
-      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
-      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
-      ImGuiWindowFlags_NoSavedSettings;
-  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
-  if (!ImGui::Begin("Simulate the cut###CamTransport", nullptr, flags)) {
+  // draggable after (ui/FloatingWindow.h).
+  static FloatingPlacement placement;
+  if (!BeginFloatingWindow(state, "Simulate the cut###CamTransport", nullptr,
+                           placement, FloatAnchor::BottomCenter,
+                           ImGuiWindowFlags_NoResize |
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
-    ImGui::PopStyleColor();
     return;
   }
-  ImGui::PopStyleColor();
 
   const cam::Timeline& tl = state.camTimeline;
   // ONE row now. This was two, sized to a 217 px panel; a floating window is

@@ -10,7 +10,8 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppState.h"
-#include "ui/AssemblyActions.h" // OccurrenceSubtreeBodies, PartDocById
+#include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h" // FindBackgroundJob // OccurrenceSubtreeBodies, PartDocById
 #include "ui/DockLayout.h"      // PanelHeading
 #include "ui/ExprInput.h"       // expression-capable numeric fields
 #include "ui/Overlays.h"        // ViewportDrawList
@@ -58,6 +59,49 @@ const char* LoadLabel(fem::LoadType t) {
   return "?";
 }
 
+// Deletes a study from its host, as one undo step, and moves the selection
+// to the first that is left.
+void DeleteStudy(AppState& state, uint64_t id) {
+  const StudyHost host = StudyHostOf(state);
+  if (host.part) {
+    state.commands->Execute(std::make_unique<RemoveStudyCommand>(id),
+                            *host.part);
+  } else {
+    SnapshotAssembly(state);
+    host.asmDoc->RemoveStudy(id);
+  }
+  state.simulation.activeStudyId =
+      host.Studies().empty() ? 0 : host.Studies().front().id;
+}
+
+const char* StudyGlyph(fem::AnalysisType type) {
+  switch (type) {
+  case fem::AnalysisType::Static:
+    return ICON_FA_WEIGHT_HANGING;
+  case fem::AnalysisType::Modal:
+    return ICON_FA_WAVE_SQUARE;
+  case fem::AnalysisType::Topology:
+    return ICON_FA_CIRCLE_NODES;
+  }
+  return ICON_FA_WEIGHT_HANGING;
+}
+
+// Where a study stands, in a word, for its row's tail.
+std::string StudyStateWord(AppState& state, const fem::Study& s) {
+  if (GetStudyRunStatus(state, s.id).running)
+    return "solving";
+  if (!s.error.empty())
+    return "failed";
+  if (StudyHostOf(state).Results(s.id) == nullptr)
+    return "not run";
+  return StudyStale(state, s.id) ? "stale" : "solved";
+}
+
+// The studies as rows in the feature list's style (ui::ListRow,
+// docs/ui/consistency-round-plan.md): a glyph for the analysis, the name, and
+// where it stands as the tail. Click selects -- its editor is the Simulation
+// window -- and Delete is in the row's menu, where a big button at the bottom
+// of the editor used to be.
 void DrawStudyList(AppState& state) {
   const StudyHost host = StudyHostOf(state);
   SimulationState& sim = state.simulation;
@@ -66,14 +110,31 @@ void DrawStudyList(AppState& state) {
   if (ImGui::Button(ICON_FA_PLUS " Add study###study_add"))
     sim.activeStudyId = AddStudyOn(state, "");
 
+  uint64_t toDelete = 0;
   for (const fem::Study& s : host.Studies()) {
-    // PushID(int) leaves a row addressable only by the numeric id ui_items
-    // prints, which is why nothing had ever clicked this panel. The id goes
-    // in the label instead (docs/ui/gui-coverage.md).
-    const std::string id = s.name + "###study_sel_" + std::to_string(s.id);
-    if (ImGui::Selectable(id.c_str(), sim.activeStudyId == s.id))
+    // The id goes in the label, not a PushID(int): a PushID scope is not
+    // addressable from a test path (docs/ui/gui-coverage.md).
+    ListRowSpec row;
+    row.glyph = StudyGlyph(s.type);
+    row.label = s.name + "###study_sel_" + std::to_string(s.id);
+    row.selected = sim.activeStudyId == s.id;
+    row.tail = StudyStateWord(state, s);
+    if (!s.error.empty()) {
+      row.glyphColor = kError;
+      row.tooltip = s.error;
+    }
+    row.menuId = "###study_ctx_" + std::to_string(s.id);
+    const uint64_t id = s.id;
+    row.menu = [&toDelete, id] {
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###study_delete"))
+        toDelete = id;
+    };
+    const ListRowResult res = ListRow(row);
+    if (res.clicked || res.doubleClicked)
       sim.activeStudyId = s.id;
   }
+  if (toDelete != 0)
+    DeleteStudy(state, toDelete);
 }
 
 // Every new body starts with the DEFAULT material, which deliberately carries
@@ -183,44 +244,54 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   if (!sim.placeRefusal.empty())
     ImGui::TextColored(kError, "%s", sim.placeRefusal.c_str());
   const StudyHost host = StudyHostOf(state);
+  // Rows, as every list (ui::ListRow): the face as the label, the magnitude
+  // as the tail, and Remove in the row's menu instead of a trash button.
+  uint64_t removeLoad = 0;
   for (const fem::Load& l : s.loads) {
-    std::string line = std::string(LoadLabel(l.type)) + "  ";
+    std::string where;
     // An assembly study's anchor says whose face, or whose contact (S1).
     if (l.contactWith != 0)
-      line += "contact with " + host.OccurrenceName(l.contactWith);
+      where = "contact with " + host.OccurrenceName(l.contactWith);
     else if (l.occurrenceId != 0)
-      line += host.OccurrenceName(l.occurrenceId) + " " + l.face.name;
+      where = host.OccurrenceName(l.occurrenceId) + " " + l.face.name;
     else
-      line += l.face.name;
+      where = l.face.name;
+    ListRowSpec row;
+    row.glyph = l.type == fem::LoadType::Fixed   ? ICON_FA_LOCK
+                : l.type == fem::LoadType::Force ? ICON_FA_BOLT
+                                                 : ICON_FA_DOWN_LONG;
+    row.label = std::string(LoadLabel(l.type)) + "  " + where + "###load_row_" +
+                std::to_string(l.id);
     if (l.type != fem::LoadType::Fixed) {
       char buf[64];
-      std::snprintf(buf, sizeof(buf), "  (%.1f%s)", l.magnitude,
+      std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
                     l.type == fem::LoadType::Force ? " N" : " MPa");
-      line += buf;
+      row.tail = buf;
     }
     if (l.type == fem::LoadType::Force) {
       // A force's direction decides the answer; showing only its magnitude
       // hid the one number most likely to be wrong.
-      char dir[64];
-      std::snprintf(dir, sizeof(dir), "  [%.2g, %.2g, %.2g]", l.direction.x,
-                    l.direction.y, l.direction.z);
-      line += dir;
+      char dir[80];
+      std::snprintf(dir, sizeof(dir), "Direction [%.2g, %.2g, %.2g]",
+                    l.direction.x, l.direction.y, l.direction.z);
+      row.tooltip = dir;
     }
-    ImGui::TextUnformatted(line.c_str());
-    ImGui::SameLine();
-    const std::string del =
-        std::string(ICON_FA_TRASH "###load_del_") + std::to_string(l.id);
-    if (ImGui::SmallButton(del.c_str())) {
-      const uint64_t loadId = l.id;
-      ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
-        cs.loads.erase(
-            std::remove_if(cs.loads.begin(), cs.loads.end(),
-                           [&](const fem::Load& x) { return x.id == loadId; }),
-            cs.loads.end());
-      });
-      break; // list mutated; rebuild next frame
-    }
+    row.menuId = "###load_ctx_" + std::to_string(l.id);
+    const uint64_t loadId = l.id;
+    row.menu = [&removeLoad, loadId] {
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###load_del"))
+        removeLoad = loadId;
+    };
+    ListRow(row);
   }
+  if (removeLoad != 0)
+    ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
+      cs.loads.erase(std::remove_if(cs.loads.begin(), cs.loads.end(),
+                                    [&](const fem::Load& x) {
+                                      return x.id == removeLoad;
+                                    }),
+                     cs.loads.end());
+    });
 }
 
 // Topology results: an async Run (worker thread) with a live progress bar +
@@ -248,14 +319,18 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     JobProgress bar; // the same widget the import modal draws (ui/Widgets.h)
     bar.fraction = st.maxIterations > 0 ? frac : -1.0;
     bar.overlay = ov;
-    bar.cancellable = false; // this panel has its own Cancel, below
-    DrawJobProgress(bar);
+    // The widget's own Cancel, as every job's: this one drew a second button
+    // of its own under the bar.
+    const BackgroundJob* bg = FindBackgroundJob(state, "topo");
+    bar.cancelAsked = bg != nullptr && bg->cancel.load();
+    bar.cancelId = "###topo_cancel";
+    bar.cancelTip = "Stop after this iteration, keeping the best so far.";
+    if (DrawJobProgress(bar))
+      CancelTopologyRun(state, s.id);
     ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance,
                 st.volumeFraction);
     ImGui::TextColored(kMuted, "%s   %.0fs", st.solver.c_str(),
                        st.elapsedSeconds);
-    if (ImGui::Button(ICON_FA_STOP " Cancel###topo_cancel"))
-      CancelTopologyRun(state, s.id);
     return;
   }
 
@@ -367,8 +442,13 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // not here, where it only ran while this panel was on screen.)
   const StudyRunStatus run = GetStudyRunStatus(state, s.id);
   if (run.running) {
-    ImGui::TextColored(kMuted, ICON_FA_HOURGLASS_HALF " Solving... %.0fs",
-                       run.elapsedSeconds);
+    // The shared bar (ui/Widgets.h), indeterminate: the linear solver has no
+    // progress to report and no point to stop at, so no Cancel either.
+    JobProgress bar;
+    bar.status = "Solving";
+    bar.overlay = std::to_string(static_cast<int>(run.elapsedSeconds)) + " s";
+    bar.cancellable = false;
+    DrawJobProgress(bar);
   } else if (ImGui::Button(ICON_FA_PLAY " Run###study_run")) {
     std::string err;
     const bool started =
@@ -476,7 +556,10 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
                       "it. Rigid: a support, clamped where it touches. "
                       "Ignored: absent.");
   ImGui::PopTextWrapPos();
-  const char* kRoles[] = {"Ignored", "Rigid", "Meshed"};
+  // All four roles. Bonded (S2) was missing: the GUI could not bond a
+  // participant, and one bonded over the RPC read here as "Ignored", because
+  // the index below fell through to 0.
+  const char* kRoles[] = {"Ignored", "Rigid", "Meshed", "Bonded"};
   // No PushID(int) around the rows: every widget carries its occurrence id
   // in its own ###label, which is what a test path can address (a PushID
   // scope is not — docs/ui/u13-chrome-and-units.md).
@@ -485,15 +568,17 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
     int role = !pt                                        ? 0
                : pt->role == fem::ParticipantRole::Meshed ? 2
                : pt->role == fem::ParticipantRole::Rigid  ? 1
+               : pt->role == fem::ParticipantRole::Bonded ? 3
                                                           : 0;
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
     const std::string comboId = "###role_" + std::to_string(occ.id);
-    if (ImGui::Combo(comboId.c_str(), &role, kRoles, 3)) {
+    if (ImGui::Combo(comboId.c_str(), &role, kRoles, 4)) {
       const uint64_t id = occ.id;
-      const fem::ParticipantRole want = role == 2 ? fem::ParticipantRole::Meshed
-                                        : role == 1
-                                            ? fem::ParticipantRole::Rigid
-                                            : fem::ParticipantRole::Ignored;
+      const fem::ParticipantRole want =
+          role == 3   ? fem::ParticipantRole::Bonded
+          : role == 2 ? fem::ParticipantRole::Meshed
+          : role == 1 ? fem::ParticipantRole::Rigid
+                      : fem::ParticipantRole::Ignored;
       ModifyStudy(state, s.id, "Set participant role", [&](fem::Study& cs) {
         auto it = std::find_if(
             cs.participants.begin(), cs.participants.end(),
@@ -704,26 +789,32 @@ void DrawStudyBody(AppState& state, fem::Study* s) {
       ImGui::PopStyleColor();
     ImGui::SameLine();
     ImGui::TextColored(kMuted, "%zu kept", s->keepFaces.size());
+    std::string removeKeep;
+    uint64_t removeKeepFeature = 0;
     for (size_t i = 0; i < s->keepFaces.size(); ++i) {
-      ImGui::PushID(static_cast<int>(i));
-      ImGui::TextColored(kMuted, "%s", s->keepFaces[i].name.c_str());
-      ImGui::SameLine();
-      if (ImGui::SmallButton(ICON_FA_TRASH)) {
-        const ElementRef f = s->keepFaces[i];
-        ModifyStudy(state, s->id, "Remove keep face", [&](fem::Study& cs) {
-          cs.keepFaces.erase(
-              std::remove_if(cs.keepFaces.begin(), cs.keepFaces.end(),
-                             [&](const ElementRef& k) {
-                               return k.featureId == f.featureId &&
-                                      k.name == f.name;
-                             }),
-              cs.keepFaces.end());
-        });
-        ImGui::PopID();
-        break;
-      }
-      ImGui::PopID();
+      const ElementRef& f = s->keepFaces[i];
+      ListRowSpec row;
+      row.glyph = ICON_FA_LOCK;
+      row.label = f.name + "###keep_row_" + std::to_string(i);
+      row.menuId = "###keep_ctx_" + std::to_string(i);
+      row.menu = [&, f] {
+        if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keep_del")) {
+          removeKeep = f.name;
+          removeKeepFeature = f.featureId;
+        }
+      };
+      ListRow(row);
     }
+    if (!removeKeep.empty())
+      ModifyStudy(state, s->id, "Remove keep face", [&](fem::Study& cs) {
+        cs.keepFaces.erase(
+            std::remove_if(cs.keepFaces.begin(), cs.keepFaces.end(),
+                           [&](const ElementRef& k) {
+                             return k.featureId == removeKeepFeature &&
+                                    k.name == removeKeep;
+                           }),
+            cs.keepFaces.end());
+      });
   } else {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
@@ -755,20 +846,6 @@ void DrawStudyBody(AppState& state, fem::Study* s) {
   DrawParticipants(state, *s);
   DrawLoads(state, *s);
   DrawResults(state, *s);
-
-  if (ImGui::Button(ICON_FA_TRASH " Delete study###study_delete")) {
-    const StudyHost host = StudyHostOf(state);
-    const uint64_t id = s->id;
-    if (host.part) {
-      state.commands->Execute(std::make_unique<RemoveStudyCommand>(id),
-                              *host.part);
-    } else {
-      SnapshotAssembly(state);
-      host.asmDoc->RemoveStudy(id);
-    }
-    state.simulation.activeStudyId =
-        host.Studies().empty() ? 0 : host.Studies().front().id;
-  }
 }
 } // namespace
 
@@ -780,30 +857,30 @@ void DrawStudyPanel(AppState& state) {
     ImGui::End();
     return;
   }
+  // The list only. The selected study is edited, run and read in the
+  // Simulation window, as an assembly's studies already were: one home for
+  // the editor, and a panel that does not change length under the cursor
+  // (docs/ui/consistency-round-plan.md).
   DrawStudyList(state);
-  fem::Study* s = host.Find(state.simulation.activeStudyId);
-  if (!s) {
+  if (host.Find(state.simulation.activeStudyId) == nullptr)
     ImGui::TextColored(kMuted, "Select or add a study.");
-    ImGui::End();
-    return;
-  }
-  DrawStudyBody(state, s);
   ImGui::End();
 }
 
 void DrawSimulationToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Simulation");
   const StudyHost host = StudyHostOf(state);
-  if (host.IsAssembly()) {
+  // An assembly's studies are listed here (its dock is the occurrence
+  // panel); a part's are listed in its dock, and edited here.
+  if (host.IsAssembly())
     DrawStudyList(state);
-    if (fem::Study* s = host.Find(state.simulation.activeStudyId))
-      DrawStudyBody(state, s);
-    else
-      ImGui::TextColored(kMuted, "Select or add a study.");
-  }
+  if (fem::Study* s = host.Find(state.simulation.activeStudyId))
+    DrawStudyBody(state, s);
+  else
+    ImGui::TextColored(kMuted, "Select or add a study.");
   ImGui::Separator();
-  // Close, not Esc — the Section tool's rule: the window is a way in to a
-  // display state (the field overlay) that outlives it.
+  // Close, not Esc: the window is a way in to a display state (the field
+  // overlay) that outlives it, and it applies as you go.
   if (ImGui::Button("Close###simulation_close"))
     ExitSimulation(state);
   ImGui::End();

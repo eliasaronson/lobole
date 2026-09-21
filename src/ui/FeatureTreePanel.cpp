@@ -95,7 +95,7 @@ const char* FeatureIcon(const std::string& type) {
   if (type == "Extrude")
     return ICON_FA_UP_LONG;
   if (type == "Revolve")
-    return ICON_FA_ARROWS_SPIN;
+    return ICON_FA_ROTATE;
   if (type == "Box")
     return ICON_FA_CUBE;
   if (type == "Sphere")
@@ -123,15 +123,15 @@ const char* FeatureIcon(const std::string& type) {
   if (type == "Rib")
     return ICON_FA_BARS_STAGGERED;
   if (type == "Thread")
-    return ICON_FA_CIRCLE_NOTCH;
+    return ICON_FA_LINES_LEANING;
   if (type == "Hole")
-    return ICON_FA_CIRCLE_DOT;
+    return ICON_FA_BULLSEYE;
   if (type == "Shell")
     return ICON_FA_BOX_OPEN;
   if (type == "Draft")
-    return ICON_FA_ANGLES_RIGHT;
+    return ICON_FA_MOUNTAIN;
   if (type == "Split")
-    return ICON_FA_SCISSORS;
+    return ICON_FA_TABLE_COLUMNS;
   if (type == "Refine")
     return ICON_FA_BROOM;
   if (type == "BaseFlange")
@@ -143,23 +143,23 @@ const char* FeatureIcon(const std::string& type) {
   if (type == "NormalCut")
     return ICON_FA_CIRCLE_MINUS;
   if (type == "CornerRelief")
-    return ICON_FA_CIRCLE_HALF_STROKE;
+    return ICON_FA_OBJECT_UNGROUP;
   if (type == "Hem")
     return ICON_FA_ROTATE_LEFT;
   if (type == "Jog")
     return ICON_FA_STAIRS;
   if (type == "Unfold")
-    return ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER;
+    return ICON_FA_MAP;
   if (type == "Refold")
     return ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER;
   if (type == "Loft")
-    return ICON_FA_BEZIER_CURVE;
+    return ICON_FA_CUBES_STACKED;
   if (type == "Sweep")
     return ICON_FA_ROUTE;
   if (type == "Import")
     return ICON_FA_FILE_IMPORT;
   if (type == "Derived")
-    return ICON_FA_CLONE;
+    return ICON_FA_LINK;
   return ICON_FA_SHAPES;
 }
 

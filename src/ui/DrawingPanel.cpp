@@ -7,6 +7,10 @@
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
+#include "ui/PreviewFeature.h" // BeginToolWindowFrame
+#include "ui/Widgets.h"        // ListRow
+
+#include "IconsFontAwesome6.h"
 
 #include "imgui.h"
 
@@ -24,6 +28,18 @@
 namespace ui {
 
 namespace {
+
+// Drafting convention: reductions read 1:n, enlargements n:1. (An old label
+// divided unconditionally, so a 20x view read "1:0.05".)
+std::string ScaleText(double scale) {
+  const double sc = scale > 0 ? scale : 1.0;
+  char ratio[32];
+  if (sc >= 1.0)
+    std::snprintf(ratio, sizeof(ratio), "%g:1", sc);
+  else
+    std::snprintf(ratio, sizeof(ratio), "1:%g", 1.0 / sc);
+  return ratio;
+}
 
 // Sheet extent in millimetres for the current orientation (shared chrome).
 glm::dvec2 SheetExtent(const Sheet& sheet) { return ChromeOf(sheet).extent; }
@@ -397,15 +413,11 @@ void DrawViews(ImDrawList* dl, AppState& state) {
       if (fontPx >= 4.0f) {
         // Drafting convention: reductions read 1:n, enlargements n:1. The
         // old label divided unconditionally, so a 20x view read "1:0.05".
-        const double sc = view.scale > 0 ? view.scale : 1.0;
-        char ratio[32];
-        if (sc >= 1.0)
-          std::snprintf(ratio, sizeof(ratio), "%g:1", sc);
-        else
-          std::snprintf(ratio, sizeof(ratio), "1:%g", 1.0 / sc);
+        const std::string ratio = ScaleText(view.scale);
         char label[128];
         std::snprintf(label, sizeof(label), "%s  %s",
-                      view.name.empty() ? "view" : view.name.c_str(), ratio);
+                      view.name.empty() ? "view" : view.name.c_str(),
+                      ratio.c_str());
         dl->AddText(font, fontPx,
                     SheetToScreen(state, {sv.bboxMin.x, sv.bboxMax.y + 6.0}),
                     frame, label);
@@ -569,15 +581,61 @@ bool TitleField(AppState& state, const char* label, std::string& value) {
 const char* kOrientLabels[] = {"front", "back",   "left", "right",
                                "top",   "bottom", "iso"};
 
-// The view list + an "add view" control (source part + orientation + scale)
-// and the explicit Update button. Split out to keep DrawSheetPanel legible.
+// A bend table for `view`, placed beside it: a line's height clear of the
+// view, on the side that has room, and inside the border either way -- a table
+// placed off the sheet is a table nobody can read.
+void AddBendTable(AppState& state, const DrawingView& view,
+                  const drawing::SheetView& render) {
+  DrawingNote n;
+  n.table = NoteTable::Bends;
+  n.viewId = view.id;
+  // Sized by its own text: a line's height clear of the view, on the
+  // side of it that has room, and inside the border either way — a
+  // table placed off the sheet is a table nobody can read.
+  const drawing::ResolvedNote rn = ResolveDrawingNote(state, n);
+  glm::dvec2 mn, mx;
+  drawing::LabelBox(n.pos, rn.text, mn, mx);
+  const glm::dvec2 size = mx - mn;
+  const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+  const double gap = drawing::kLabelLineMM;
+  double left = render.bboxMax.x + gap;
+  if (left + size.x > chrome.borderMax.x)
+    left = render.bboxMin.x - gap - size.x; // the other side
+  left = std::clamp(left, chrome.borderMin.x,
+                    std::max(chrome.borderMin.x, chrome.borderMax.x - size.x));
+  double top = render.bboxMax.y;
+  top = std::clamp(top, chrome.borderMin.y + size.y, chrome.borderMax.y);
+  // ...and not on top of the title block, which owns its corner.
+  if (left + size.x > chrome.titleBlockMin.x &&
+      top - size.y < chrome.titleBlockMax.y)
+    top = std::min(chrome.borderMax.y, chrome.titleBlockMax.y + size.y + gap);
+  n.pos += glm::dvec2(left, top) - glm::dvec2(mn.x, mx.y);
+  SnapshotDrawing(state);
+  state.drawing->AddNote(std::move(n));
+}
+
+// Does `view` show a part with bends, so a bend table means something?
+bool ViewHasBends(AppState& state, const DrawingView& view) {
+  const Document* viewDoc = DrawingViewDocument(state, view);
+  if (viewDoc == nullptr)
+    return false;
+  for (const Body& b : viewDoc->GetBodies())
+    if (!b.reference && !b.bends.empty())
+      return true;
+  return false;
+}
+
+// The views, as rows in the feature list's style (ui::ListRow,
+// docs/ui/consistency-round-plan.md): a glyph, the name, the orientation and
+// scale as the tail, red when it failed to project. The row's menu sets the
+// scale, adds a bend table and deletes it. Adding a view is the toolbar's
+// (the Add view tool window), and so is Update views; this says whether one
+// is needed.
 void DrawViewsSection(AppState& state) {
-  ImGui::Spacing();
-  ImGui::TextUnformatted("Views");
-  ImGui::Separator();
+  ImGui::SeparatorText("Views");
 
   // Count views whose source changed since their last projection, or that
-  // failed to project — the "needs update" signal.
+  // failed to project -- the "needs update" signal.
   int stale = 0, errored = 0;
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
@@ -588,22 +646,174 @@ void DrawViewsSection(AppState& state) {
     if (it != state.drawingRenders.end() && !it->second.error.empty())
       ++errored;
   }
-  const bool needsUpdate = stale > 0;
-  if (needsUpdate) // amber Update button when anything is out of date
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.42f, 0.12f, 1.0f));
-  if (ImGui::Button("Update views"))
-    UpdateDrawingRenders(state);
-  if (needsUpdate)
-    ImGui::PopStyleColor();
-  ImGui::SameLine();
-  if (needsUpdate)
-    ImGui::TextColored(ImVec4(0.85f, 0.62f, 0.25f, 1.0f), "%d stale", stale);
+  if (state.drawing->GetViews().empty())
+    ImGui::TextDisabled("No views. Add one with the toolbar's Add view.");
+  else if (stale > 0)
+    ImGui::TextColored(ImVec4(0.85f, 0.62f, 0.25f, 1.0f),
+                       "%d stale: Update views on the toolbar", stale);
   else if (errored)
-    ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f), "%d error", errored);
-  else
-    ImGui::TextDisabled("up to date");
+    ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f), "%d failed", errored);
 
-  // Add a view: pick a source part, orientation, scale.
+  static const double kScales[] = {10.0, 5.0, 2.0,  1.0,  0.5,
+                                   0.2,  0.1, 0.05, 0.02, 0.01};
+  uint64_t removeView = 0;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(view.id);
+    const bool rendered = it != state.drawingRenders.end();
+    const bool failed = rendered && !it->second.error.empty();
+    ListRowSpec row;
+    row.glyph = ICON_FA_IMAGE;
+    if (failed)
+      row.glyphColor = ImVec4(0.82f, 0.31f, 0.27f, 1.0f);
+    row.label = (view.name.empty() ? std::string("view") : view.name) +
+                "###dwg_view_" + std::to_string(view.id);
+    char tail[64];
+    std::snprintf(tail, sizeof(tail), "%s  %s",
+                  ViewOrientationToString(view.orientation),
+                  ScaleText(view.scale).c_str());
+    row.tail = tail;
+    row.tooltip = !rendered ? std::string("Needs an update.")
+                  : failed
+                      ? it->second.error
+                      : std::to_string(it->second.curves.size()) + " curves" +
+                            (it->second.hasGeometry ? "" : ", empty");
+    row.menuId = "###dwg_view_ctx_" + std::to_string(view.id);
+    const uint64_t viewId = view.id;
+    const bool canBendTable =
+        rendered && it->second.hasGeometry && ViewHasBends(state, view);
+    row.menu = [&state, &removeView, viewId, canBendTable] {
+      if (ImGui::BeginMenu("Scale###dwg_view_scale")) {
+        DrawingView* v = state.drawing->FindView(viewId);
+        for (const double scale : kScales) {
+          const std::string label =
+              ScaleText(scale) + "###dwg_scale_" + std::to_string(scale);
+          if (ImGui::MenuItem(label.c_str(), nullptr,
+                              v && std::abs(v->scale - scale) < 1e-12) &&
+              v) {
+            SnapshotDrawing(state);
+            v->scale = scale;
+            state.drawing->BumpVersion();
+            UpdateDrawingRenders(state);
+          }
+        }
+        ImGui::EndMenu();
+      }
+      if (canBendTable && ImGui::MenuItem("Add bend table###dwg_bend_table")) {
+        const DrawingView* v = state.drawing->FindView(viewId);
+        const auto r = state.drawingRenders.find(viewId);
+        if (v && r != state.drawingRenders.end())
+          AddBendTable(state, *v, r->second);
+      }
+      ImGui::Separator();
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###dwg_view_delete"))
+        removeView = viewId;
+    };
+    ListRow(row);
+  }
+  if (removeView != 0) {
+    SnapshotDrawing(state);
+    state.drawing->RemoveView(removeView);
+    UpdateDrawingRenders(state);
+  }
+}
+
+// The dimensions, as rows: the kind and its value, red when a reference no
+// longer resolves, and Delete in the row's menu. The dimension tools are the
+// toolbar's (they were here as well, with Part note only here).
+void DrawDimsSection(AppState& state) {
+  ImGui::SeparatorText("Dimensions");
+  if (state.dimTool.active)
+    ImGui::TextDisabled("Picking dimension refs…"); // the session: Tool window
+  else if (state.drawing->GetDims().empty())
+    ImGui::TextDisabled("No dimensions. The toolbar's dimension tools add "
+                        "them.");
+
+  uint64_t removeDim = 0;
+  for (const DrawingDim& dim : state.drawing->GetDims()) {
+    const drawing::ResolvedDim rd = ResolveDrawingDim(state, dim);
+    ListRowSpec row;
+    row.glyph = ICON_FA_RULER_COMBINED;
+    row.label = std::string(DrawingDimKindToString(dim.kind)) + "###dwg_dim_" +
+                std::to_string(dim.id);
+    if (rd.resolved) {
+      row.tail = rd.text;
+    } else {
+      row.glyphColor = ImVec4(0.82f, 0.31f, 0.27f, 1.0f);
+      row.tail = "dangling";
+      row.tooltip = "A reference no longer resolves: the edge or face it "
+                    "measured is gone from the view.";
+    }
+    row.menuId = "###dwg_dim_ctx_" + std::to_string(dim.id);
+    const uint64_t dimId = dim.id;
+    row.menu = [&removeDim, dimId] {
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###dwg_dim_delete"))
+        removeDim = dimId;
+    };
+    ListRow(row);
+  }
+  if (removeDim != 0) {
+    SnapshotDrawing(state);
+    state.drawing->RemoveDim(removeDim);
+  }
+}
+
+} // namespace
+
+void DrawSheetPanel(AppState& state) {
+  if (!state.drawing)
+    return;
+  // Docks into the left "Model" node (the DockLayout slot the feature tree and
+  // occurrence panel also use), so a drawing tab reserves the same panel space
+  // instead of floating over the sheet.
+  ImGui::Begin(kPanelModel);
+  PanelHeading(kPanelModel);
+
+  Sheet& sheet = state.drawing->GetSheet();
+
+  ImGui::SeparatorText("Sheet");
+
+  int sizeIdx = static_cast<int>(sheet.size);
+  LeftLabel("Sheet size");
+  if (ImGui::Combo("###dwg_sheet_size", &sizeIdx, kSizeLabels,
+                   IM_ARRAYSIZE(kSizeLabels))) {
+    SnapshotDrawing(state);
+    sheet.size = static_cast<SheetSize>(sizeIdx);
+    state.drawing->BumpVersion();
+    state.sheetView.scale = 0.0; // refit for the new paper size
+  }
+  bool landscape = sheet.landscape;
+  if (ImGui::Checkbox("Landscape", &landscape)) {
+    SnapshotDrawing(state);
+    sheet.landscape = landscape;
+    state.drawing->BumpVersion();
+    state.sheetView.scale = 0.0;
+  }
+
+  ImGui::SeparatorText("Title block");
+  bool edited = false;
+  edited |= TitleField(state, "Project", sheet.titleBlock.project);
+  edited |= TitleField(state, "Document", sheet.titleBlock.document);
+  edited |= TitleField(state, "Author", sheet.titleBlock.author);
+  edited |= TitleField(state, "Date", sheet.titleBlock.date);
+  if (edited)
+    state.drawing->BumpVersion();
+
+  DrawViewsSection(state);
+  DrawDimsSection(state);
+
+  ImGui::End();
+}
+
+void DrawAddViewToolWindow(AppState& state) {
+  if (!state.drawing) {
+    state.drawingAddViewOpen = false;
+    return;
+  }
+  // The one way to add a view by hand (docs/ui/consistency-round-plan.md):
+  // what the toolbar's popup offered (a source and four orientations) and
+  // what the panel's form offered (all seven, a configuration and a scale),
+  // in the tool window the toolbar's Add view opens.
+  BeginToolWindowFrame(state, "Add view");
   static int srcIdx = 0, orientIdx = 0;
   static float addScale = 1.0f;
   static uint64_t addConfig = 0; // 0 = the part's active configuration
@@ -676,191 +886,10 @@ void DrawViewsSection(AppState& state) {
     }
   }
 
-  // The view list: name, orientation, curve count / status, delete.
-  for (const DrawingView& view : state.drawing->GetViews()) {
-    ImGui::PushID(static_cast<int>(view.id));
-    const auto it = state.drawingRenders.find(view.id);
-    const char* status = "needs update";
-    if (it != state.drawingRenders.end()) {
-      if (!it->second.error.empty())
-        status = it->second.error.c_str();
-      else
-        status = it->second.hasGeometry ? "ok" : "empty";
-    }
-    ImGui::BulletText(
-        "%s [%s]  %zu curves - %s",
-        view.name.empty() ? "view" : view.name.c_str(),
-        ViewOrientationToString(view.orientation),
-        it != state.drawingRenders.end() ? it->second.curves.size() : size_t{0},
-        status);
-    // A bend table for a view of a part that has bends, placed beside the
-    // view's top-right corner.
-    const Document* viewDoc = DrawingViewDocument(state, view);
-    bool hasBends = false;
-    if (viewDoc)
-      for (const Body& b : viewDoc->GetBodies())
-        hasBends = hasBends || (!b.reference && !b.bends.empty());
-    if (hasBends && it != state.drawingRenders.end() &&
-        it->second.hasGeometry) {
-      ImGui::SameLine();
-      const std::string label =
-          "Bend table###dwg_bend_table_" + std::to_string(view.id);
-      if (ImGui::SmallButton(label.c_str())) {
-        DrawingNote n;
-        n.table = NoteTable::Bends;
-        n.viewId = view.id;
-        // Sized by its own text: a line's height clear of the view, on the
-        // side of it that has room, and inside the border either way — a
-        // table placed off the sheet is a table nobody can read.
-        const drawing::ResolvedNote rn = ResolveDrawingNote(state, n);
-        glm::dvec2 mn, mx;
-        drawing::LabelBox(n.pos, rn.text, mn, mx);
-        const glm::dvec2 size = mx - mn;
-        const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
-        const double gap = drawing::kLabelLineMM;
-        double left = it->second.bboxMax.x + gap;
-        if (left + size.x > chrome.borderMax.x)
-          left = it->second.bboxMin.x - gap - size.x; // the other side
-        left = std::clamp(
-            left, chrome.borderMin.x,
-            std::max(chrome.borderMin.x, chrome.borderMax.x - size.x));
-        double top = it->second.bboxMax.y;
-        top = std::clamp(top, chrome.borderMin.y + size.y, chrome.borderMax.y);
-        // ...and not on top of the title block, which owns its corner.
-        if (left + size.x > chrome.titleBlockMin.x &&
-            top - size.y < chrome.titleBlockMax.y)
-          top = std::min(chrome.borderMax.y,
-                         chrome.titleBlockMax.y + size.y + gap);
-        n.pos += glm::dvec2(left, top) - glm::dvec2(mn.x, mx.y);
-        SnapshotDrawing(state);
-        state.drawing->AddNote(std::move(n));
-      }
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("x")) {
-      SnapshotDrawing(state);
-      state.drawing->RemoveView(view.id);
-      UpdateDrawingRenders(state);
-      ImGui::PopID();
-      break; // container mutated; redraw next frame
-    }
-    ImGui::PopID();
-  }
-}
-
-// The dimension tools + dimension list. Arming a kind puts the sheet into
-// pick mode (HandleDimTool); the created dims are re-measured on every update.
-void DrawDimsSection(AppState& state) {
-  ImGui::Spacing();
-  ImGui::TextUnformatted("Dimensions");
   ImGui::Separator();
-
-  if (state.dimTool.active) {
-    // The in-progress session (refs list, cancel) lives in the Tool window.
-    ImGui::TextDisabled("Picking dimension refs…");
-  } else {
-    struct Tool {
-      const char* label;
-      DrawingDimKind kind;
-    };
-    static const Tool tools[] = {
-        {"Distance", DrawingDimKind::Distance},
-        {"Dist X", DrawingDimKind::DistanceX},
-        {"Dist Y", DrawingDimKind::DistanceY},
-        {"Radius", DrawingDimKind::Radius},
-        {"Diameter", DrawingDimKind::Diameter},
-        {"Angle", DrawingDimKind::Angle},
-        {"Hole note", DrawingDimKind::HoleCallout},
-        {"Pattern", DrawingDimKind::PatternCallout},
-        {"Part note", DrawingDimKind::FastenerCallout}};
-    for (size_t i = 0; i < std::size(tools); ++i) {
-      if (i % 3 != 0)
-        ImGui::SameLine();
-      if (ImGui::Button(tools[i].label)) {
-        state.dimTool = AppState::DimTool{};
-        state.dimTool.active = true;
-        state.dimTool.kind = tools[i].kind;
-      }
-    }
-  }
-
-  for (const DrawingDim& dim : state.drawing->GetDims()) {
-    ImGui::PushID(static_cast<int>(dim.id) + 100000);
-    const drawing::ResolvedDim rd = ResolveDrawingDim(state, dim);
-    if (rd.resolved)
-      ImGui::BulletText("%s = %s", DrawingDimKindToString(dim.kind),
-                        rd.text.c_str());
-    else
-      ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f), "  %s (dangling)",
-                         DrawingDimKindToString(dim.kind));
-    ImGui::SameLine();
-    if (ImGui::SmallButton("x")) {
-      SnapshotDrawing(state);
-      state.drawing->RemoveDim(dim.id);
-      ImGui::PopID();
-      break;
-    }
-    ImGui::PopID();
-  }
-}
-
-} // namespace
-
-void DrawSheetPanel(AppState& state) {
-  if (!state.drawing)
-    return;
-  // Docks into the left "Model" node (the DockLayout slot the feature tree and
-  // occurrence panel also use), so a drawing tab reserves the same panel space
-  // instead of floating over the sheet.
-  ImGui::Begin(kPanelModel);
-  PanelHeading(kPanelModel);
-
-  Sheet& sheet = state.drawing->GetSheet();
-
-  ImGui::TextUnformatted("Sheet");
-  ImGui::Separator();
-
-  int sizeIdx = static_cast<int>(sheet.size);
-  LeftLabel("Sheet size");
-  if (ImGui::Combo("###dwg_sheet_size", &sizeIdx, kSizeLabels,
-                   IM_ARRAYSIZE(kSizeLabels))) {
-    SnapshotDrawing(state);
-    sheet.size = static_cast<SheetSize>(sizeIdx);
-    state.drawing->BumpVersion();
-    state.sheetView.scale = 0.0; // refit for the new paper size
-  }
-  bool landscape = sheet.landscape;
-  if (ImGui::Checkbox("Landscape", &landscape)) {
-    SnapshotDrawing(state);
-    sheet.landscape = landscape;
-    state.drawing->BumpVersion();
-    state.sheetView.scale = 0.0;
-  }
-
-  ImGui::Spacing();
-  ImGui::TextUnformatted("Title block");
-  ImGui::Separator();
-  bool edited = false;
-  edited |= TitleField(state, "Project", sheet.titleBlock.project);
-  edited |= TitleField(state, "Document", sheet.titleBlock.document);
-  edited |= TitleField(state, "Author", sheet.titleBlock.author);
-  edited |= TitleField(state, "Date", sheet.titleBlock.date);
-  if (edited)
-    state.drawing->BumpVersion();
-
-  ImGui::Spacing();
-  if (ImGui::Button("Fit"))
-    state.sheetView.scale = 0.0;
-  ImGui::SameLine();
-  if (ImGui::Button("Undo"))
-    UndoDrawing(state);
-  ImGui::SameLine();
-  if (ImGui::Button("Redo"))
-    RedoDrawing(state);
-
-  DrawViewsSection(state);
-  DrawDimsSection(state);
-
+  // Close: each Add view is applied as it is pressed.
+  if (ImGui::Button("Close###dwg_add_view_close"))
+    state.drawingAddViewOpen = false;
   ImGui::End();
 }
 

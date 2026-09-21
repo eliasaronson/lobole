@@ -757,6 +757,10 @@ void StartCamVerb(AppState& state, AppState::CamVerb verb) {
   state.camVerbOp = 0;
   state.camRefusal.clear();
   state.camNote.clear();
+  // A verb takes the window from an op or tool being edited: the editors are
+  // drawn first, so leaving either set would keep the window on it.
+  state.camEditOp = 0;
+  state.camEditTool = 0;
   if (v->picks) {
     // Any pick button switches to itself: greying the others out while one
     // was armed meant Escape between every change of verb.
@@ -938,8 +942,61 @@ bool DrawOperationEditor(AppState& state) {
 
   ImGui::PopTextWrapPos();
   ImGui::Separator();
-  if (ImGui::Button("Done###cam_edit_done")) {
+  // Close: the edits are already applied (docs/ui/consistency-round-plan.md).
+  if (ImGui::Button("Close###cam_edit_done")) {
     state.camEditOp = 0;
+    state.camToolOpen = false;
+    state.camRefusal.clear();
+  }
+  ImGui::End();
+  return true;
+}
+
+// One setup tool's fields, when it is being edited (a double-click on its
+// row). False when there is nothing to edit.
+bool DrawToolEditor(AppState& state) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  cam::Tool* tool = nullptr;
+  if (setup != nullptr)
+    for (cam::Tool& t : setup->tools)
+      if (t.number == state.camEditTool)
+        tool = &t;
+  if (tool == nullptr) {
+    state.camEditTool = 0; // deleted, or its setup is no longer active
+    return false;
+  }
+  BeginToolWindowFrame(state, "Edit tool T" + std::to_string(tool->number));
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+  if (DrawCamToolFields(state, *tool))
+    ApplyCamToolEdit(state);
+  const std::vector<std::string> users = CamOpsUsingTool(*setup, tool->number);
+  ImGui::Spacing();
+  if (users.empty()) {
+    ImGui::TextDisabled("No operation uses it.");
+  } else {
+    std::string list;
+    for (size_t i = 0; i < users.size(); i++)
+      list += (i == 0 ? "" : ", ") + users[i];
+    ImGui::TextDisabled("Used by %s.", list.c_str());
+  }
+  if (!state.camRefusal.empty())
+    RefusalText(state.camRefusal);
+  ImGui::PopTextWrapPos();
+  ImGui::Separator();
+  ImGui::BeginDisabled(!users.empty());
+  if (ImGui::Button(ICON_FA_TRASH_CAN " Delete###cam_tool_editor_delete")) {
+    std::string why;
+    if (!RemoveCamTool(state, tool->number, &why))
+      state.camRefusal = why;
+    else
+      state.camToolOpen = false;
+  }
+  ImGui::EndDisabled();
+  if (!users.empty())
+    ImGui::SetItemTooltip("Used by an operation. Give it another tool first.");
+  ImGui::SameLine();
+  if (ImGui::Button("Close###cam_tool_editor_close")) {
+    state.camEditTool = 0;
     state.camToolOpen = false;
     state.camRefusal.clear();
   }
@@ -965,6 +1022,8 @@ void DrawCamToolWindow(AppState& state) {
     return;
   }
   if (state.camEditOp != 0 && DrawOperationEditor(state))
+    return;
+  if (state.camEditTool != 0 && DrawToolEditor(state))
     return;
   const Verb* verb = FindVerb(state.camVerb);
   BeginToolWindowFrame(state, verb != nullptr ? verb->label : "CAM");
@@ -1064,7 +1123,7 @@ void DrawCamToolWindow(AppState& state) {
   }
 
   ImGui::Separator();
-  if (ImGui::Button("Done###cam_tool_done")) {
+  if (ImGui::Button("Close###cam_tool_done")) {
     // The session closes; the job stays, and so does the backplot. Only the
     // decision-time drawings go away.
     state.camToolOpen = false;
@@ -1088,7 +1147,21 @@ void EditCamOperation(AppState& state, uint64_t opId) {
   state.camVerb = CamVerb::None;
   state.camVerbOp = 0;
   state.camRefusal.clear();
+  state.camEditTool = 0;
   state.camEditOp = opId;
+  state.camToolOpen = true;
+}
+
+void EditCamTool(AppState& state, int number) {
+  if (!state.job)
+    return;
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.camVerb = CamVerb::None;
+  state.camVerbOp = 0;
+  state.camRefusal.clear();
+  state.camEditOp = 0;
+  state.camEditTool = number;
   state.camToolOpen = true;
 }
 
@@ -1396,6 +1469,7 @@ void RunCamVerification(AppState& state) {
 namespace ui {
 void DrawCamToolWindow(AppState&) {}
 void EditCamOperation(AppState&, uint64_t) {}
+void EditCamTool(AppState&, int) {}
 void StartCamVerb(AppState&, AppState::CamVerb) {}
 int VerbTool(const AppState&, const cam::Setup&) { return 0; }
 void LookDownTheSpindle(AppState&) {}

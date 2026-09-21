@@ -1400,6 +1400,12 @@ struct AppState {
     uint64_t viewId = 0;       // the view the first pick fixed
     std::vector<ProjRef> refs; // picked so far
   } dimTool;
+  // The Add view tool window on a drawing tab: source, configuration,
+  // orientation and scale, opened by the toolbar's Add view. It was a form
+  // inline in the docked panel AND a thinner popup on the toolbar (four of
+  // the seven orientations, no configuration, no scale) -- two paths that
+  // disagreed (docs/ui/consistency-round-plan.md).
+  bool drawingAddViewOpen = false;
 
   // The fastener session (F1 p6, docs/parts/gui-plan.md). One pick and one
   // choice: the rim says which hole and which way round, the standard says
@@ -1641,6 +1647,11 @@ struct AppState {
   // "Advanced" tree inline in every row of the docked panel
   // (docs/ui/cam-panel-tidy-plan.md).
   uint64_t camEditOp = 0;
+  // The setup tool (by number) whose fields the CAM tool window is editing,
+  // the same way; 0 = none. The fields used to sit inline in every tool row
+  // of the docked panel, with no way to delete a tool at all
+  // (docs/ui/consistency-round-plan.md).
+  int camEditTool = 0;
   // The Generate window is open: the run -- generate, verify, the verdict,
   // the output options and Save G-code -- as a floating tool, like Simulate,
   // instead of a block in the docked panel.

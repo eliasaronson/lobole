@@ -729,7 +729,7 @@ const std::vector<Command>& Table() {
 
     // ----------------------------------------------------------- Drawing
     add("drawing.add_view", nullptr,
-        [](AppState& s) { RequestPopup(s, "add_view"); });
+        [](AppState& s) { s.drawingAddViewOpen = !s.drawingAddViewOpen; });
     add("drawing.update", nullptr,
         [](AppState& s) { UpdateDrawingRenders(s); });
     add(
@@ -752,6 +752,7 @@ const std::vector<Command>& Table() {
     dim("drawing.dim_angle", DrawingDimKind::Angle);
     dim("drawing.dim_hole_callout", DrawingDimKind::HoleCallout);
     dim("drawing.dim_pattern_callout", DrawingDimKind::PatternCallout);
+    dim("drawing.dim_part_note", DrawingDimKind::FastenerCallout);
 
     // -------------------------------------------------------- Simulation
     const auto bc = [&add](const char* id, SimulationState::Tool t) {

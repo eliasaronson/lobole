@@ -89,4 +89,20 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setup, cam::Operation& op);
 // drop a verdict about the previous toolpath.
 void ApplyCamOpEdit(AppState& state, uint64_t opId);
 
+// One setup tool's fields (name, diameter, flute, feed, end shape, tip angle,
+// holder), drawn by the CAM tool window's tool editor. True when one changed;
+// the caller then calls ApplyCamToolEdit, which re-cuts every operation,
+// since any of them may name the tool.
+bool DrawCamToolFields(AppState& state, cam::Tool& tool);
+void ApplyCamToolEdit(AppState& state);
+
+// The operations of `setup` that cut with tool `number`, by name.
+[[nodiscard]] std::vector<std::string> CamOpsUsingTool(const cam::Setup& setup,
+                                                       int number);
+// Removes tool `number` from the active setup, as one undo step. REFUSED,
+// false with the reason in `why`, while an operation cuts with it: deleting
+// those too would lose work, and leaving them naming a missing number is a
+// silent substitution.
+bool RemoveCamTool(AppState& state, int number, std::string* why = nullptr);
+
 } // namespace ui

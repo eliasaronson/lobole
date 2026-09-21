@@ -1,4 +1,5 @@
 #ifdef HAVE_CAM
+#include "ui/FloatingWindow.h"
 
 #include "ui/CamGenerate.h"
 
@@ -52,29 +53,21 @@ void DrawCamGenerateWindow(AppState& state) {
     state.camGenerateOpen = false;
     return;
   }
-  // Where a result goes: the top right of the viewport, clear of the verb
-  // window's slot and of Simulate's transport along the bottom. Anchored when
-  // it appears and draggable after; NoSavedSettings so a stale imgui.ini
-  // cannot park it off screen.
-  const ImVec2 anchor(state.viewportPos.x + state.viewportSize.x - 12.0f,
-                      state.viewportPos.y + 12.0f);
-  ImGui::SetNextWindowPos(anchor, ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
-  ImGui::SetNextWindowBgAlpha(0.96f);
+  // Where a result goes: the top right of the viewport, UNDER the tool window
+  // when an op is being edited there (it used to open exactly on top of it),
+  // and clear of Simulate's transport along the bottom (ui/FloatingWindow.h).
+  static FloatingPlacement placement;
   const float wrap = ImGui::GetFontSize() * 26.0f;
   ImGui::SetNextWindowSizeConstraints(ImVec2(wrap * 0.6f, 0.0f),
                                       ImVec2(wrap + 24.0f, FLT_MAX));
-  const ImGuiWindowFlags flags =
-      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse |
-      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
-  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
   bool open = true;
-  if (!ImGui::Begin("Generate###CamGenerate", &open, flags)) {
+  if (!BeginFloatingWindow(state, "Generate###CamGenerate", &open, placement,
+                           FloatAnchor::BelowToolWindow,
+                           ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
-    ImGui::PopStyleColor();
     state.camGenerateOpen = open;
     return;
   }
-  ImGui::PopStyleColor();
   ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
 
   bool optionsChanged = false;

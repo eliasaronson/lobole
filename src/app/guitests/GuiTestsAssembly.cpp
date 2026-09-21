@@ -1085,7 +1085,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->mateTool.active);
     IM_CHECK_EQ(s_App->mateTool.editMateId, mateId);
     IM_CHECK(ctx->ItemExists("//###ToolWindow/###mate_name"));
-    ctx->ItemClick("//###ToolWindow/Done");
+    ctx->ItemClick("//###ToolWindow/###mate_close");
     ctx->Yield(2);
     IM_CHECK(!s_App->mateTool.active);
     s_App->selection.items.clear(); // the double-click left it selected
@@ -1403,7 +1403,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(m->a.anchor.face.name != oldFaceA);
     IM_CHECK(!s_App->slotPick.Active()); // one re-pick per row click
 
-    ctx->ItemClick("//Edit Mate###ToolWindow/Done");
+    ctx->ItemClick("//Edit Mate###ToolWindow/###mate_close");
     ctx->Yield();
     IM_CHECK(!s_App->mateTool.active);
   };

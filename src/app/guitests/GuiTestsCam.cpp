@@ -2509,16 +2509,106 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemOpen("###cam_tools");
     ctx->Yield(2);
+    // A tool's fields are edited in the tool window, from its row
+    // (docs/ui/consistency-round-plan.md).
+    ctx->ItemDoubleClick("tools/###cam_tool_1");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditTool, 1);
     // ItemInputValue IS the gesture: Ctrl+click the drag, type, Enter.
-    ctx->ItemInputValue("tools/$$1/###dia", "8");
+    ctx->ItemInputValue("//###ToolWindow/###dia", "8");
     ctx->Yield(3);
     IM_CHECK(std::abs(Job()->FindSetup(setup.id)->tools[0].diameter - 8.0) <
              1e-6);
     // ...and an expression, which is what the field is for.
-    ctx->ItemInputValue("tools/$$1/###dia", "5*2");
+    ctx->ItemInputValue("//###ToolWindow/###dia", "5*2");
     ctx->Yield(3);
     IM_CHECK(std::abs(Job()->FindSetup(setup.id)->tools[0].diameter - 10.0) <
              1e-6);
+    ctx->ItemClick("//###ToolWindow/###cam_tool_editor_close");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditTool, 0);
+    IM_CHECK(!s_App->camToolOpen);
+  };
+
+  // Floating windows share one placement (ui/FloatingWindow.h). Generate used
+  // to anchor at exactly the tool window's corner, so opening it while an op
+  // or a tool was being edited put it on top of that editor.
+  t = IM_REGISTER_TEST(engine, "cam", "generate_opens_below_the_tool_window");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    ui::EditCamTool(*s_App, setup.tools[0].number);
+    s_App->camGenerateOpen = true;
+    ctx->Yield(4);
+    ImGuiWindow* tool = ImGui::FindWindowByName("###ToolWindow");
+    ImGuiWindow* gen = ImGui::FindWindowByName("###CamGenerate");
+    IM_CHECK(tool != nullptr && tool->WasActive);
+    IM_CHECK(gen != nullptr && gen->WasActive);
+    // Below it, with no overlap.
+    IM_CHECK_GE(gen->Pos.y, tool->Pos.y + tool->Size.y);
+    // And with the tool window gone, it moves back up to the corner.
+    ctx->ItemClick("//###ToolWindow/###cam_tool_editor_close");
+    ctx->Yield(4);
+    IM_CHECK_LT(gen->Pos.y, tool->Pos.y + tool->Size.y);
+    s_App->camGenerateOpen = false;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // A tool is a row: Delete is in its menu, and REFUSED while an operation
+  // cuts with it. There was no way to delete a tool from a setup at all.
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "a_tool_deletes_from_its_row_unless_in_use");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    cam::Tool spare = setup.tools[0];
+    spare.number = 2;
+    spare.name = "spare";
+    setup.tools.push_back(spare);
+    cam::Operation op;
+    op.id = 77;
+    op.name = "Pocket A";
+    op.toolNumber = 1;
+    setup.operations.push_back(op);
+    ctx->Yield(4);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+
+    // T1 is in use: the refusal names the operation, and nothing goes.
+    std::string why;
+    IM_CHECK(!ui::RemoveCamTool(*s_App, 1, &why));
+    IM_CHECK(why.find("Pocket A") != std::string::npos);
+    IM_CHECK_EQ(Job()->FindSetup(setup.id)->tools.size(), (size_t)2);
+
+    // T2 is not: its row's menu deletes it.
+    ctx->ItemClick("tools/###cam_tool_2", ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_tool_delete");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(setup.id)->tools.size(), (size_t)1);
+    IM_CHECK_EQ(Job()->FindSetup(setup.id)->tools[0].number, 1);
+
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
   };
 
   // Measure works on a job tab. The button was greyed out there: the gate

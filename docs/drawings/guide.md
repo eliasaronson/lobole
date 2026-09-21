@@ -61,8 +61,10 @@ dimension list).
 ## In the GUI
 
 1. **`+Dwg`** on the tab bar adds a drawing tab. The Model panel becomes the
-   drawing panel; the viewport becomes a 2D sheet (scroll to zoom about the
-   cursor, middle-drag to pan, **Fit** to recentre).
+   drawing panel, listing the sheet, the views and the dimensions; the
+   viewport becomes a 2D sheet (scroll to zoom about the cursor, middle-drag
+   to pan, the toolbar's **Fit** to recentre). The drawing toolbar holds the
+   verbs: Add view, Update views, the dimension tools, Fit and Export.
 2. **Sheet** — pick the paper size (A4–A0 / Letter), orientation, and fill the
    **Title block** fields (project / document / author / date). A fifth row,
    UNITS, is filled in for you and cannot be typed: it states what the sheet's
@@ -73,21 +75,26 @@ dimension list).
    carry no suffix, as drafting practice wants, which is exactly why the UNITS
    row exists; angles keep their `°` (or three decimals and `rad` on a
    document that asked for radians).
-3. **Views** — choose a source (part or assembly) + orientation + scale — and,
-   for a part with configurations, which **Configuration** to draw — then
-   **Add view**. A view of a part with bends gets a **Bend table** button in
-   the view list, which places the table beside that view. Set a view's `base_view` to fold it from another. Click
-   **Update views** to (re)project; the button turns amber and shows a count
-   when any view is stale.
-4. **Dimensions** — click a kind (Distance, Dist X/Y, Radius, Diameter, Angle),
-   then click the projected edges/circles on the sheet; the dimension appears
-   once enough are picked. It **places itself** clear of the views, the title
-   block and the labels already on the sheet; drag its value label to move it.
+3. **Views** — the toolbar's **Add view** opens a tool window: choose a
+   source (part or assembly), the orientation (any of the seven), a scale (0
+   picks a standard one that fits), and, for a part with configurations,
+   which **Configuration** to draw, then **Add view**. Each view is a row in
+   the panel, with its orientation and scale; right-click it to change the
+   **Scale**, add a **Bend table** beside a view of a part with bends, or
+   **Delete** it. Set a view's `base_view` to fold it from another. The
+   toolbar's **Update views** (re)projects; the panel says when views are
+   stale.
+4. **Dimensions** — click a dimension tool on the toolbar (Distance, Dist X/Y,
+   Radius, Diameter, Angle, Hole callout, Pattern callout, Part note), then
+   click the projected edges/circles on the sheet; the dimension appears once
+   enough are picked. It **places itself** clear of the views, the title block
+   and the labels already on the sheet; drag its value label to move it. Each
+   dimension is a row in the panel, with its value; right-click to delete it.
 5. **File → Export…** writes the sheet as **SVG** or **PDF**.
 
 Notes are drawn on the sheet (and exported) but are **added over the RPC**
-today — `add_drawing_note` below; the bend table's button is the only note
-the GUI adds.
+today — `add_drawing_note` below; a view row's Add bend table is the only
+note the GUI adds.
 
 ## Over RPC / MCP
 

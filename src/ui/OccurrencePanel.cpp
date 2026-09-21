@@ -9,6 +9,7 @@
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/FloatingWindow.h"
 #include "ui/ListSelection.h"
 #include "ui/MotionActions.h"
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
@@ -328,22 +329,16 @@ void DrawMotionProgress(BackgroundJob& job, int samples) {
     std::snprintf(overlay, sizeof(overlay), "starting   %.0fs", elapsed);
   }
   bar.overlay = overlay;
-  bar.cancellable = false; // this panel has its own Cancel, below
-  DrawJobProgress(bar);
-
+  // The widget's own Cancel, as every job's (ui/Widgets.h): a request the
+  // worker reads between samples, disabled once asked, since a second
+  // request means nothing.
   const bool asked = job.cancel.load();
-  ImGui::BeginDisabled(asked);
-  if (ImGui::SmallButton("Cancel###motion_cancel"))
+  bar.cancelAsked = asked;
+  bar.cancelId = "###motion_cancel";
+  bar.cancelTip = "Stops after the current sample and keeps the ones already "
+                  "checked: the result comes back marked incomplete.";
+  if (DrawJobProgress(bar))
     job.cancel.store(true);
-  ImGui::EndDisabled();
-  // The consequence goes in a tooltip, not on the row: a SameLine string is
-  // clipped by the dock edge at any normal panel width (U4's rule), and
-  // "keeps the samples alrea" is not a sentence.
-  if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(asked ? "Stopping after the sample in progress."
-                            : "Stops after the current sample and keeps the "
-                              "ones already checked — the result comes back "
-                              "marked incomplete.");
   if (asked)
     TextDisabledWrapped("finishing the current sample");
 }
@@ -635,8 +630,8 @@ void DrawExplodeToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Exploded view");
   DrawExplodeBody(state);
   ImGui::Separator();
-  // Close, not Esc — the Section tool's rule, and for its reason: the window
-  // is a way in to a display state that outlives it.
+  // Close, not Esc: the window is a way in to a display state that outlives
+  // it, and it applies as you go (docs/ui/consistency-round-plan.md).
   if (ImGui::Button("Close###explode_close"))
     state.explodeToolOpen = false;
   ImGui::End();
@@ -711,20 +706,15 @@ void DrawBomWindow(AppState& state) {
                                  ? " — " + MassText(state, cache.totalMassG)
                                  : std::string()) +
                             "###BomWindow";
-  const ImVec2 anchor(state.viewportPos.x + state.viewportSize.x - 12.0f,
-                      state.viewportPos.y + 12.0f);
-  ImGui::SetNextWindowPos(anchor, ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+  // Under the tool window when a mate or an occurrence is being edited there,
+  // instead of on top of it (ui/FloatingWindow.h).
+  static FloatingPlacement placement;
   ImGui::SetNextWindowSize(
       ImVec2(ImGui::GetFontSize() * 36.0f, ImGui::GetFontSize() * 28.0f),
       ImGuiCond_Appearing);
-  ImGui::SetNextWindowBgAlpha(0.97f);
   bool open = true;
-  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
-  const bool visible =
-      ImGui::Begin(title.c_str(), &open,
-                   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse |
-                       ImGuiWindowFlags_NoSavedSettings);
-  ImGui::PopStyleColor();
+  const bool visible = BeginFloatingWindow(
+      state, title, &open, placement, FloatAnchor::BelowToolWindow, 0, 0.97f);
   if (!open)
     state.bomWindowOpen = false;
   if (!visible) {
@@ -1208,16 +1198,22 @@ void DrawMateToolWindow(AppState& state) {
 
   ImGui::Separator();
   bool accept = false, cancel = false;
+  // The feature tool window's buttons (docs/ui/consistency-round-plan.md):
+  // Accept and Cancel where a mate is being made, Close where one is being
+  // edited, since those edits are applied as they are made.
   if (editM != nullptr) {
-    if (ImGui::Button("Done"))
+    if (ImGui::Button("Close###mate_close"))
       accept = true; // edits were applied live (each re-pick = one undo step)
   } else {
     ImGui::BeginDisabled(pm == nullptr);
-    if (ImGui::Button("Accept"))
+    ImGui::PushStyleColor(ImGuiCol_Button, AccentColor());
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, AccentColorHovered());
+    if (ImGui::Button(ICON_FA_CHECK " Accept###tw_accept"))
       accept = true;
+    ImGui::PopStyleColor(2);
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
+    if (ImGui::Button(ICON_FA_XMARK " Cancel###tw_cancel"))
       cancel = true;
   }
   // Enter accepts / Escape flows through ViewportInput's cascade (slot
@@ -1331,7 +1327,7 @@ void DrawAssemblyEditWindow(AppState& state) {
     if (ImGui::Button("Delete###occ_edit_delete"))
       remove = true;
     ImGui::SameLine();
-    if (ImGui::Button("Done###occ_edit_done"))
+    if (ImGui::Button("Close###occ_edit_done"))
       state.asmEditOccurrence = 0;
     const uint64_t id = sel->id;
     ImGui::End();
@@ -1393,7 +1389,7 @@ void DrawAssemblyEditWindow(AppState& state) {
     if (ImGui::Button("Delete###rel_edit_delete"))
       remove = true;
     ImGui::SameLine();
-    if (ImGui::Button("Done###rel_edit_done"))
+    if (ImGui::Button("Close###rel_edit_done"))
       state.asmEditRelation = 0;
     const uint64_t id = r->id;
     ImGui::End();

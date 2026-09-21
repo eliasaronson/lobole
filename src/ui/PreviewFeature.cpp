@@ -1,8 +1,10 @@
 #include "ui/PreviewFeature.h"
+#include "ui/FloatingWindow.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
 
-#include "ui/ExprInput.h" // expression-capable numeric fields
+#include "ui/DrawingPanel.h" // DrawAddViewToolWindow
+#include "ui/ExprInput.h"    // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
 
 #include "cad/SketchPlane.h"
@@ -119,71 +121,28 @@ void CancelPendingFeature(AppState& state) {
 
 void BeginToolWindowFrame(AppState& state, const std::string& title) {
   // The floating tool-session window (U7): anchored top-right of the 3D
-  // viewport when it (re)opens — NEVER bottom-center, which occluded the
-  // viewport clicks GUI tests make — and draggable for the session. One
+  // viewport when it (re)opens -- NEVER bottom-center, which occluded the
+  // viewport clicks GUI tests make -- and draggable for the session. One
   // stable id: only one session exists at a time, and tests address rows
-  // as //<Title>###ToolWindow/###slotN.
-  const glm::vec2 tr = state.viewportPos +
-                       glm::vec2(state.viewportSize.x, 0.0f) +
-                       glm::vec2(-12.0f, 12.0f);
-  // Re-anchor when the VIEWPORT moves or resizes. Placing it once, on the
-  // appearing frame, had two costs: the pivot was applied against a size
-  // AlwaysAutoResize had not computed yet (hence the clamp below), and any
-  // later layout change — docking a panel, closing the terminal — left the
-  // window stranded over the middle of the model it is asking you to click
-  // (docs/cam/dogfood-round.md, round 2). Two frames: one to learn the size,
-  // one to place it against the real size. Dragging it still sticks, until
-  // the viewport changes again.
-  // A window that has just (re)appeared is anchored afresh, whatever it was
-  // doing before: it may have been dragged, or closed in one layout and
-  // reopened in another, and "the viewport has not moved since" is then the
-  // wrong question.
-  if (state.toolWindowLastFrame + 1 != ImGui::GetFrameCount())
-    state.toolWindowAnchor = glm::vec2(-1.0f, -1.0f);
-  state.toolWindowLastFrame = ImGui::GetFrameCount();
-  if (glm::distance(state.toolWindowAnchor, tr) > 1.0f) {
-    state.toolWindowAnchor = tr;
-    state.toolWindowAnchorFrames = 2;
-  }
-  const ImGuiCond anchorCond =
-      state.toolWindowAnchorFrames > 0 ? ImGuiCond_Always : ImGuiCond_Appearing;
-  if (state.toolWindowAnchorFrames > 0)
-    state.toolWindowAnchorFrames--;
-  ImGui::SetNextWindowPos(ImVec2(tr.x, tr.y), anchorCond, ImVec2(1.0f, 0.0f));
-  ImGui::SetNextWindowBgAlpha(0.96f);
-  ImGuiWindowFlags flags =
-      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
-      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
-      ImGuiWindowFlags_NoSavedSettings;
-  // This window floats over the 3D scene, and at panel-background over a
-  // dark viewport, with a 6%-white hairline and nothing under it, it read as
-  // painted ONTO the model rather than above it. A stronger edge and a soft
-  // shadow (below, once the rect is final) is what says "above" here.
-  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
-  ImGui::Begin((title + "###ToolWindow").c_str(), nullptr, flags);
-  ImGui::PopStyleColor();
-  // Keep the window inside the app window. The pivot anchoring above uses
-  // the window's size, which is UNKNOWN on the appearing frame with
-  // AlwaysAutoResize — the window landed hanging off the right edge and
-  // stayed there. Clamp every frame (dragging just stops at the edges).
-  const ImGuiViewport* mainVp = ImGui::GetMainViewport();
-  const ImVec2 wpos = ImGui::GetWindowPos();
-  const ImVec2 wsize = ImGui::GetWindowSize();
-  ImVec2 clamped = wpos;
-  clamped.x = std::min(clamped.x,
-                       mainVp->WorkPos.x + mainVp->WorkSize.x - wsize.x - 4.0f);
-  clamped.y = std::min(clamped.y,
-                       mainVp->WorkPos.y + mainVp->WorkSize.y - wsize.y - 4.0f);
-  clamped.x = std::max(clamped.x, mainVp->WorkPos.x + 4.0f);
-  clamped.y = std::max(clamped.y, mainVp->WorkPos.y + 4.0f);
-  if (clamped.x != wpos.x || clamped.y != wpos.y)
-    ImGui::SetWindowPos(clamped);
-  // Publish the rect so the camera fit can keep the model out from under it.
-  const ImVec2 finalPos = ImGui::GetWindowPos();
-  state.toolWindowRect = glm::vec4(finalPos.x, finalPos.y, finalPos.x + wsize.x,
-                                   finalPos.y + wsize.y);
-  DrawWindowShadow(finalPos,
-                   ImVec2(finalPos.x + wsize.x, finalPos.y + wsize.y));
+  // as //<Title>###ToolWindow/###slotN. The placement (re-anchor when the
+  // viewport moves, clamp inside the app, border and shadow) is the one every
+  // floating window shares (ui/FloatingWindow.h); this window was where it
+  // was worked out.
+  FloatingPlacement placement{state.toolWindowAnchor,
+                              state.toolWindowAnchorFrames,
+                              state.toolWindowLastFrame};
+  BeginFloatingWindow(
+      state, title + "###ToolWindow", nullptr, placement, FloatAnchor::TopRight,
+      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize);
+  state.toolWindowAnchor = placement.anchor;
+  state.toolWindowAnchorFrames = placement.anchorFrames;
+  state.toolWindowLastFrame = placement.lastFrame;
+  // Publish the rect so the camera fit can keep the model out from under it,
+  // and so a window anchored BelowToolWindow stacks under it.
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const ImVec2 size = ImGui::GetWindowSize();
+  state.toolWindowRect =
+      glm::vec4(pos.x, pos.y, pos.x + size.x, pos.y + size.y);
 }
 
 namespace {
@@ -305,7 +264,10 @@ void DrawMeasureToolWindow(AppState& state) {
   }
 
   ImGui::Separator();
-  if (ImGui::Button("Done"))
+  // Close, as every window that applies as you go says
+  // (docs/ui/consistency-round-plan.md); Accept/Cancel are for one that makes
+  // something.
+  if (ImGui::Button("Close###measure_close"))
     state.measure = MeasureState{};
   ImGui::End();
 }
@@ -485,7 +447,7 @@ void DrawSectionToolWindow(AppState& state) {
   if (ImGui::Button("Clear all###clear"))
     ClearSections(state);
   ImGui::SameLine();
-  if (ImGui::Button("Done###done"))
+  if (ImGui::Button("Close###done"))
     state.sectionToolOpen = false; // the cuts stay; only the window closes
   ImGui::End();
 }
@@ -542,6 +504,10 @@ void DrawToolWindow(AppState& state) {
     DrawDimToolWindow(state);
     return;
   }
+  if (state.drawing && state.drawingAddViewOpen) {
+    DrawAddViewToolWindow(state);
+    return;
+  }
   size_t idx = 0;
   Feature* feature = ResolvePendingFeature(state, &idx);
   if (!feature) {
@@ -582,6 +548,8 @@ void DrawToolWindow(AppState& state) {
       DrawMotionToolWindow(state);
     else if (state.assembly && state.simulationToolOpen)
       DrawSimulationToolWindow(state); // S1: the assembly's studies
+    else if (state.document && state.simulation.active)
+      DrawSimulationToolWindow(state); // a part's study, listed in its dock
     return;
   }
 

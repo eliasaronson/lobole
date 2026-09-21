@@ -31,7 +31,11 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
 
     // Two views, by clicking: the orientation combo then Add view.
     // ComboClick wants a ref RELATIVE to the window (docs/ui/gui-coverage.md).
-    ctx->SetRef("//###Model");
+    // Add view is a tool window, opened from the toolbar
+    // (docs/ui/consistency-round-plan.md).
+    ToolbarClick(ctx, "###tb_dwg_add_view");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
     ctx->ItemInputValue("###dwg_scale", 0.0f); // 0 = choose a scale for me
     for (const char* orient : {"front", "top"}) {
       ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
@@ -39,6 +43,9 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick("###dwg_add_view");
       ctx->Yield(3);
     }
+    ctx->ItemClick(
+        "###dwg_add_view_close"); // a floating window a test opens, it closes
+    ctx->Yield();
     const auto& views = s_App->drawing->GetViews();
     IM_CHECK_EQ(views.size(), (size_t)2);
 
@@ -75,6 +82,26 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     for (const drawing::DrawingIssue& issue : issues)
       ctx->LogWarning("%s", issue.detail.c_str());
     IM_CHECK(issues.empty());
+
+    // A view is a row (docs/ui/consistency-round-plan.md): its menu sets the
+    // scale, which only the add form could before, and deletes it -- where a
+    // bare "x" button was.
+    const uint64_t firstId = views[0].id;
+    const std::string row =
+        "//###Model/**/###dwg_view_" + std::to_string(firstId);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->SetRef("//$FOCUSED");
+    ctx->MenuClick(
+        ("###dwg_view_scale/###dwg_scale_" + std::to_string(0.5)).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->drawing->FindView(firstId)->scale, 0.5);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###dwg_view_delete");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->drawing->GetViews().size(), (size_t)1);
+    IM_CHECK(s_App->drawing->FindView(firstId) == nullptr);
   };
 
   // F11 layer 3: what the GEOMETRY did between a version and now. The
