@@ -8,10 +8,12 @@
 
 Two passes and not four, unlike the handle job: a Phi 54 dowel is only two
 millimetres of radius above the pin's own surface, and the flutes are four
-more. Nothing here asks a finishing pass to take a big bite, which is what
-makes this the better first thing to actually cut -- `surface_rotary` is a
-finishing strategy and there is no rotary roughing one yet
-(docs/cam/dogfood-rotary.md).
+more. Nothing here asks a finishing pass to take a big bite.
+
+That is the parallel job, the default. `--spiral` and `--helical` cut the same
+pin continuously -- one helix per layer, or passes that follow the flutes --
+roughing in 2 mm layers first (docs/cam/rotary-continuous-plan.md,
+docs/cam/rotary-helical-plan.md, docs/cam/dogfood-rotary.md).
 """
 import argparse
 import os
@@ -51,7 +53,7 @@ def tools(d, sid):
         "feed_cut": 1500.0, "feed_plunge": 400.0, "spindle_rpm": 12000.0})
 
 
-def build_job(d, spiral=False):
+def build_job(d, spiral=False, helical=False):
     # Refuse a second run rather than half-building one. The waveguide job
     # claimed a guard here and did not have one: it picked the first PART tab
     # and rebuilt the model into it, which left the first job's targets
@@ -97,6 +99,21 @@ def build_job(d, spiral=False):
     # to say it some other way.
     d.call("set_cam_setup", id=sid, origin_at="stock_centre")
 
+    if helical:
+        # Passes that FOLLOW the flutes (docs/cam/rotary-helical-plan.md):
+        # helices at the twist's own lead -- measured from the surface, so
+        # lead_mm stays 0 -- stepped round the pin. EXACTLY the parallel
+        # job's operations with only the pattern changed, so the two compare
+        # like for like.
+        for i, leave in enumerate(ROUGH):
+            d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
+                   name=f"Rough {i + 1} (helical, leave {leave})",
+                   rotary_pattern="helical", stock_to_leave=leave,
+                   stepover=0.5)
+        d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
+               name="Finish (helical)", rotary_pattern="helical",
+               stepover=0.10)
+        return sid
     if spiral:
         # Continuous 4-axis (docs/cam/rotary-continuous-plan.md): one helix
         # per layer, the part turning while it cuts. The rough comes down in
@@ -134,6 +151,8 @@ def report(d, sid, path):
         secs += o["cut_length_mm"] / max(1.0, feed.get(o["tool"], 1000.0)) * 60.0
         if o.get("error"):
             print(f"  ! {o['error']}")
+        if o.get("strategy"):
+            print(f"  ~ op {o.get('id', '?')}: cut as {o['strategy']}")
     print(f"  cutting      {r['cut_length_mm'] / 1000.0:.1f} m, "
           f"{secs / 60.0:.0f} min at feed, "
           f"{r.get('cutting_minutes', 0.0):.0f} min as the controller runs it")
@@ -142,6 +161,9 @@ def report(d, sid, path):
     print(f"  checked as   {'ROTARY r(x, theta)' if v.get('rotary') else '3-AXIS height map'}")
     print(f"  max gouge    {v['max_gouge_mm'] * 1000:.0f} um")
     print(f"  max leftover {v['max_leftover_mm']:.2f} mm")
+    if "leftover_p95_mm" in v:
+        print(f"  p95 leftover {v['leftover_p95_mm'] * 1000:.0f} um "
+              f"(the typical scallop)")
     print(f"  rapids in    {v['rapids_through_stock']} "
           f"(worst {v['worst_rapid_depth_mm']:.2f} mm)")
     print(f"  holder       {v['holder_collisions']} collisions")
@@ -160,9 +182,12 @@ def main():
     ap.add_argument("--spiral", action="store_true",
                     help="continuous 4-axis: spiral rough in layers + spiral "
                          "finish, instead of parallel passes")
+    ap.add_argument("--helical", action="store_true",
+                    help="continuous 4-axis that FOLLOWS the twist: helical "
+                         "rough in layers + helical finish")
     a = ap.parse_args()
     d = connect(a.port)
-    sid = build_job(d, spiral=a.spiral)
+    sid = build_job(d, spiral=a.spiral, helical=a.helical)
     report(d, sid, a.post)
     if a.save:
         d.call("save_project", path=a.save, message="barley-twist rolling pin")

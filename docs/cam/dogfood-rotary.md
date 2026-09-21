@@ -272,3 +272,37 @@ What this says about the pattern, as findings:
 4. **The file is five times the size of the parallel one**, mostly F words:
    a scaled F differs by a tenth from line to line. Quantizing the scaled F
    to a percent would drop most of them.
+
+## Helical on the pin (v124)
+
+`rolling_pin_job.py --helical`: the parallel job's operations with only the
+pattern changed, passes that follow the flutes at the lead the app measured
+from the surface (157.3 mm, true 157.1). The same build throughout; files and
+pictures in `scratch/rolling_pin_helical/`.
+
+| | parallel | spiral | helical |
+|---|---|---|---|
+| cycle time, as the controller runs it | **87 min** | 580 min | **118 min** |
+| finish op alone | 69 min | 362 min | 94 min |
+| program | 172,807 lines, 3.6 MB | 837,546 lines, 35 MB | 133,936 lines, 5.1 MB |
+| max gouge | 33 µm | 26 µm | 30 µm |
+| leftover p95, whole pin (`leftover_p95_mm`) | 20 µm | 11 µm | 20 µm |
+| leftover on the twist (x 15–285): p99 / worst | 27 / 40 µm | 16 / 25 µm | 27 / 61 µm |
+
+1. **The finding the new measure exists for.** Every job's worst cell (2.45
+   mm) is on the end dome, so `max_leftover_mm` could not separate them. The
+   95th percentile could not either, because it sits on the lands. Only the
+   tail over the twist did, and it caught a real defect: the first helical
+   build left 0.69 mm ridges where a pass on a land stepped the full width
+   onto a flute wall. Fixed before these numbers (docs/cam/rotary-helical-plan.md).
+2. **Helical is not a win on this pin.** It gives the same finish as
+   parallel, 36% slower, because the Phi 8 flutes are gentle next to a 6 mm
+   ball. It would win on flutes steep enough that passes crossing them leave
+   visible scallops, and in what no verifier here measures: tool marks along
+   the flutes, and Z holding still instead of riding up and down 4 mm across
+   every one.
+3. **A rotary verdict's leftover needs a place.** The p99 over the twist came
+   from a throwaway diagnostic that reloaded the saved jobs. The verdict has
+   no notion of "the surface the pattern is for" as against "the end faces no
+   pass can reach", and that is worth building before the next comparison.
+

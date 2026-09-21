@@ -507,6 +507,45 @@ double SpiralRadiusAt(const RadiusMap& cl, double x, double theta) {
          u * v * r11;
 }
 
+// Drop what lies on the line between its neighbours, measured in (x, r, arc
+// at the widest radius): the controller interpolates X, Z and A linearly
+// between the points it is given, so that is the space the programmed path
+// is straight in. Runs are bounded, as the post bounds its own merge, so a
+// turned stretch costs O(n) and not O(n^2). Shared by the spiral and the
+// helical passes.
+std::vector<RotaryPathPoint>
+DecimatePath(const std::vector<RotaryPathPoint>& raw, double rMax,
+             double tolerance) {
+  if (tolerance <= 0.0 || raw.size() < 3)
+    return raw;
+  const double arcPerDeg = rMax * std::numbers::pi / 180.0;
+  const auto p3 = [&](const RotaryPathPoint& q) {
+    return glm::dvec3(q.x, q.r, q.thetaDeg * arcPerDeg);
+  };
+  constexpr size_t kMaxRun = 256;
+  std::vector<RotaryPathPoint> out;
+  out.push_back(raw.front());
+  size_t from = 0;
+  while (from + 1 < raw.size()) {
+    size_t best = from + 1;
+    for (size_t j = from + 2; j < raw.size() && j - from <= kMaxRun; j++) {
+      const glm::dvec3 a = p3(raw[from]);
+      const glm::dvec3 dir = p3(raw[j]) - a;
+      const double len = glm::length(dir);
+      bool straight = len > 1e-12;
+      for (size_t k = from + 1; k < j && straight; k++)
+        straight =
+            glm::length(glm::cross(p3(raw[k]) - a, dir)) / len <= tolerance;
+      if (!straight)
+        break;
+      best = j;
+    }
+    out.push_back(raw[best]);
+    from = best;
+  }
+  return out;
+}
+
 } // namespace
 
 std::vector<RotaryPathPoint> RotarySpiralPath(const RadiusMap& cl,
@@ -597,38 +636,142 @@ std::vector<RotaryPathPoint> RotarySpiralPath(const RadiusMap& cl,
   for (int k = 1; k <= perTurn; k++)
     sample(xHi, theta + k * dTheta);
 
-  if (req.tolerance_mm <= 0.0)
-    return raw;
-  // Drop what lies on the line between its neighbours, measured in (x, r,
-  // arc at the widest radius): the controller interpolates X, Z and A
-  // linearly between the points it is given, so that is the space the
-  // programmed path is straight in. Runs are bounded, as the post bounds
-  // its own merge, so a turned stretch costs O(n) and not O(n^2).
-  const double arcPerDeg = rMax * std::numbers::pi / 180.0;
-  const auto p3 = [&](const RotaryPathPoint& q) {
-    return glm::dvec3(q.x, q.r, q.thetaDeg * arcPerDeg);
-  };
-  constexpr size_t kMaxRun = 256;
-  out.push_back(raw.front());
-  size_t from = 0;
-  while (from + 1 < raw.size()) {
-    size_t best = from + 1;
-    for (size_t j = from + 2; j < raw.size() && j - from <= kMaxRun; j++) {
-      const glm::dvec3 a = p3(raw[from]);
-      const glm::dvec3 dir = p3(raw[j]) - a;
-      const double len = glm::length(dir);
-      bool straight = len > 1e-12;
-      for (size_t k = from + 1; k < j && straight; k++)
-        straight = glm::length(glm::cross(p3(raw[k]) - a, dir)) / len <=
-                   req.tolerance_mm;
-      if (!straight)
-        break;
-      best = j;
+  return DecimatePath(raw, rMax, req.tolerance_mm);
+}
+
+std::vector<std::vector<RotaryPathPoint>>
+RotaryHelicalPasses(const RadiusMap& cl, const RotaryHelicalRequest& req) {
+  std::vector<std::vector<RotaryPathPoint>> out;
+  if (cl.nx <= 0 || cl.nTheta <= 0 || req.lead_mm == 0.0 ||
+      req.stepover_mm <= 0.0)
+    return out;
+  double rMax = 0.0;
+  for (float v : cl.r)
+    rMax = std::max(rMax, static_cast<double>(v));
+  if (rMax <= 0.0)
+    return out;
+
+  // Degrees of theta per mm of x along a pass, and the helix's slope at the
+  // widest radius in arc per axial mm: tan of the helix angle.
+  const double rate = 360.0 / req.lead_mm;
+  const double arcRate = rMax * 2.0 * std::numbers::pi / std::abs(req.lead_mm);
+  const double cosPhi = 1.0 / std::sqrt(1.0 + arcRate * arcRate);
+  // The stepover is measured PERPENDICULAR to the passes: measured along
+  // theta alone, a 45-degree pass would sit 30% closer than asked.
+  const double baseStep = glm::degrees(req.stepover_mm / (rMax * cosPhi));
+  const double minStep = baseStep / 6.0;
+
+  // Samples along a pass: `along` mm of PATH at the widest radius, never
+  // coarser than a cell along the axis.
+  const double along = req.sampleStep_mm > 0.0 ? req.sampleStep_mm : cl.res;
+  const double dx = std::min(cl.res, along * cosPhi);
+  const double xLo = cl.CellX(0), xHi = cl.CellX(cl.nx - 1);
+  const int n = std::max(1, static_cast<int>(std::ceil((xHi - xLo) / dx)));
+  const double cellRad = 2.0 * std::numbers::pi / cl.nTheta;
+
+  double theta0 = 0.0;
+  bool forward = true;
+  while (theta0 < 360.0 - 1e-9) {
+    std::vector<RotaryPathPoint> run;
+    double cross = 0.0; // steepest slope ACROSS the pass, dr / d(arc)
+    const auto flush = [&]() {
+      if (run.size() >= 2)
+        out.push_back(DecimatePath(run, rMax, req.tolerance_mm));
+      run.clear();
+    };
+    for (int k = 0; k <= n; k++) {
+      const int kk = forward ? k : n - k;
+      const double x = xLo + (xHi - xLo) * kk / n;
+      const double thetaDeg = theta0 + rate * (x - xLo);
+      const double th = glm::radians(thetaDeg);
+      const double r = SpiralRadiusAt(cl, x, th);
+      if (r <= 0.0) {
+        flush(); // a gap ENDS a pass: the tool lifts rather than dragging
+        continue;
+      }
+      // The slope across the WHOLE band the next step can cover, not just
+      // under this pass: a pass along a flat land took a full step and put
+      // the next one partway down a flute wall, leaving a ridge between
+      // them -- 0.69 mm on the rolling pin, where the parallel passes left
+      // 0.04 (docs/cam/rotary-helical-plan.md). The spiral's window made the
+      // same mistake the same way, looking only one way.
+      for (int f = 0; f <= 4; f++) {
+        const double tb = th + glm::radians(baseStep) * f / 4.0;
+        const double rp = SpiralRadiusAt(cl, x, tb + cellRad);
+        const double rm = SpiralRadiusAt(cl, x, tb - cellRad);
+        if (rp > 0.0 && rm > 0.0)
+          cross = std::max(cross, std::abs(rp - rm) / (2.0 * cellRad * r));
+      }
+      run.push_back({x, std::max(r, req.floorRadius), thetaDeg});
     }
-    out.push_back(raw[best]);
-    from = best;
+    flush();
+    // Surface-true across the passes: closer where the pass runs along a
+    // wall. A pass that follows a flute has the same cross-slope all along
+    // it, so this lands on the walls and nowhere else -- the thing the
+    // spiral could not do.
+    theta0 += std::max(minStep, baseStep / std::sqrt(1.0 + cross * cross));
+    if (req.zigzag)
+      forward = !forward;
   }
   return out;
+}
+
+double DeriveRotaryTwist(const RadiusMap& cl) {
+  if (cl.nx < 2 || cl.nTheta < 8)
+    return 0.0;
+  constexpr int kSearch = 16;
+  const int n = cl.nTheta;
+  const double cellDeg = 360.0 / n;
+  std::vector<double> rates;
+  std::vector<double> ssd(2 * kSearch + 1);
+  for (int i = 0; i + 1 < cl.nx; i++) {
+    // Only a column that VARIES round the part says anything about a twist:
+    // a round one lines up with its neighbour at every shift.
+    double sum = 0.0, sum2 = 0.0;
+    bool empty = false;
+    for (int j = 0; j < n && !empty; j++) {
+      const double a = cl.At(i, j), b = cl.At(i + 1, j);
+      empty = a <= 0.0 || b <= 0.0;
+      sum += a;
+      sum2 += a * a;
+    }
+    if (empty)
+      continue;
+    const double mean = sum / n;
+    if (sum2 / n - mean * mean < 0.02 * 0.02)
+      continue;
+    // B(theta + s) against A(theta): the shift that carries this column's
+    // pattern onto the next one's.
+    for (int s = -kSearch; s <= kSearch; s++) {
+      double e = 0.0;
+      for (int j = 0; j < n; j++) {
+        const double d = cl.At(i, j) - cl.At(i + 1, ((j + s) % n + n) % n);
+        e += d * d;
+      }
+      ssd[static_cast<size_t>(s + kSearch)] = e;
+    }
+    size_t best = 0;
+    for (size_t k = 1; k < ssd.size(); k++)
+      if (ssd[k] < ssd[best])
+        best = k;
+    if (best == 0 || best + 1 == ssd.size())
+      continue; // at the edge of the search: steeper than it can see
+    // A sub-cell answer from the parabola through the minimum and its two
+    // neighbours.
+    const double l = ssd[best - 1], c = ssd[best], r = ssd[best + 1];
+    const double den = l - 2.0 * c + r;
+    const double sub = den > 1e-12 ? 0.5 * (l - r) / den : 0.0;
+    const double shift = static_cast<double>(best) - kSearch + sub;
+    rates.push_back(shift * cellDeg / cl.res);
+  }
+  // Too few columns that are not round: a part of revolution, or a twist
+  // over too little of it to be the thing to follow.
+  if (rates.size() < std::max<size_t>(8, static_cast<size_t>(cl.nx - 1) / 10))
+    return 0.0;
+  std::nth_element(rates.begin(),
+                   rates.begin() + static_cast<long>(rates.size() / 2),
+                   rates.end());
+  return rates[rates.size() / 2];
 }
 
 namespace {

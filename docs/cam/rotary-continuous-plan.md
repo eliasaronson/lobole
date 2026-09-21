@@ -180,6 +180,11 @@ uniform spiral. That is a different generator: it needs the part's geometry
 in `(x, θ)`, not only its radius. It comes after this round, and this round's
 post, feed and winding work is what it will sit on.
 
+> Following a TWIST turned out to need only the radius after all: the twist
+> is measured from the cutter-location map, and passes at its lead are a
+> third pattern (docs/cam/rotary-helical-plan.md, v124). Wrapped text still
+> needs the geometry.
+
 ## Files
 
 - `src/core/cam/CamSurface.{h,cpp}`: `RotarySpiralPath`, the lookup, the

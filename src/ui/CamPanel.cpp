@@ -1588,6 +1588,21 @@ void DrawCamPanel(AppState& state) {
         }
         ImGui::NewLine();
       }
+      if (cam::OpTypeHas(op.type, cam::OpField::Lead) &&
+          op.rotaryPattern == cam::RotaryPattern::Helical) {
+        ImGui::SetNextItemWidth(80.0f);
+        float lead = static_cast<float>(op.leadMm);
+        if (ExprDragFloat(state, "lead mm###lead", &lead, 1.0f, -10000.0f,
+                          10000.0f, "%.1f")) {
+          op.leadMm = lead;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip(
+            "How far along the axis a pass advances per turn, signed for the "
+            "hand. 0 follows the part's own twist, measured from its surface. "
+            "A part with no twist is cut as parallel passes, and says so.");
+        ImGui::SameLine();
+      }
       if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
         ImGui::SetNextItemWidth(70.0f);
         float angle = static_cast<float>(op.cutAngleDeg);

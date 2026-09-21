@@ -467,6 +467,22 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
       CHECK(got[i] == want[i].get<std::string>());
     }
   }
+  if (expect.contains("cam_op_leads")) {
+    // v124: a helical pass's lead, signed for the hand. A lead that reloads
+    // as 0 follows the part's own twist instead -- a different cut, and on a
+    // part with no twist, a different PATTERN.
+    const auto& want = expect.at("cam_op_leads");
+    std::vector<double> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Operation& o : s.operations)
+        got.push_back(o.leadMm);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("op " << i << " lead_mm");
+      CHECK_THAT(got[i],
+                 Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("cam_op_stepdowns")) {
     // v123: a rotary op reads its stepdown, as the depth between layers.
     const auto& want = expect.at("cam_op_stepdowns");

@@ -169,8 +169,13 @@ constexpr MethodDoc kCamMethods[] = {
      "round it, the part turning BETWEEN passes, and stepover is a fraction "
      "of the cutter converted to millimetres of ARC at the part's widest "
      "point; spiral is CONTINUOUS 4-axis, one helix end to end with A "
-     "turning while the tool cuts, and stepover is the axial advance per "
-     "turn. A stepdown (mm, radial) cuts it in layers from the blank inward, "
+     "turning while the tool cuts, and stepover is the spacing between "
+     "turns along the surface; helical is continuous too, passes that "
+     "FOLLOW a twist -- helices at lead_mm per turn (signed for the hand; "
+     "0 derives the part's own twist), stepped round by stepover measured "
+     "across them -- and a part with no twist is cut as parallel passes, "
+     "said in the toolpath's strategy. A stepdown (mm, radial) cuts it in "
+     "layers from the blank inward, "
      "the last one the finish. A turning cut's F is scaled in the post for "
      "how the controller reads a mixed mm/degree move, held to the "
      "machine's axis speeds (rapid_feed for X/Y/Z, a_max_deg_min for A), and "
@@ -265,7 +270,8 @@ constexpr MethodDoc kCamMethods[] = {
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, lead_arcs, name, peck, rotary_pattern, "
+     "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
+     "rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -279,7 +285,8 @@ constexpr MethodDoc kCamMethods[] = {
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, id, lead_arcs, name, peck, rotary_pattern, "
+     "finish_stock, finish_tool, id, lead_arcs, lead_mm, name, peck, "
+     "rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -298,7 +305,8 @@ constexpr MethodDoc kCamMethods[] = {
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, lead_arcs, name, peck, rotary_pattern, "
+     "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
+     "rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -325,7 +333,10 @@ constexpr MethodDoc kCamMethods[] = {
      "same COUNT and different numbers), "
      "rotary (the file's A MOVES, so it was checked against a cylindrical "
      "blank r(x, theta) instead of a height map -- and the second number of "
-     "every _at pair is then an ANGLE IN DEGREES, not a Y), "
+     "every _at pair is then an ANGLE IN DEGREES, not a Y; a rotary answer "
+     "also carries leftover_p95_mm, the 95th-percentile leftover -- the "
+     "typical scallop, which the end faces no rotary pass can reach do not "
+     "move the way they set max_leftover_mm), "
      "file_errors (with first_file_error: lines the PARSER could not read -- "
      "a NaN coordinate, a feed of zero; anything else in the answer was "
      "measured on a different program, so this counts against ok), "
@@ -1552,6 +1563,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              // left over. Tabs no longer count against it.
              {"ok", v.Safe(tol)},
              {"complete", v.Complete(tol)}};
+    // The typical scallop, where the worst cell is an end face no rotary
+    // pass can reach. Rotary only: the height map does not compute it, and
+    // a zero here would read as a measurement.
+    if (v.rotary)
+      out["leftover_p95_mm"] = v.leftoverP95;
     {
       // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
       // so PREDICTED (core/Receipt.h). Anything narrower than a cell is

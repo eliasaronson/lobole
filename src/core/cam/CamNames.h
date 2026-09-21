@@ -82,6 +82,8 @@ enum class OpField : uint32_t {
   NeedsFlatFloor = 1u << 18,
   // SurfaceRotary's pattern (v123): parallel passes, or one spiral.
   RotaryPattern = 1u << 19,
+  // A helical rotary pass's lead (v124).
+  Lead = 1u << 20,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

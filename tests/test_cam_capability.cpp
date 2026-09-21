@@ -80,6 +80,14 @@ constexpr FieldPoke kPokes[] = {
      [](cam::Operation& o) { o.zStep = 3.5; }},
     {cam::OpField::RotaryPattern, "rotary_pattern",
      [](cam::Operation& o) { o.rotaryPattern = cam::RotaryPattern::Spiral; }},
+    // Helical AND a lead together: a lead read only by the helical pattern
+    // would not move a parallel op's path, and the bulk poke for "declared"
+    // must bite.
+    {cam::OpField::Lead, "lead_mm",
+     [](cam::Operation& o) {
+       o.rotaryPattern = cam::RotaryPattern::Helical;
+       o.leadMm = 80.0;
+     }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.

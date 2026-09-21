@@ -381,6 +381,8 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
       }
   };
   size_t compared = 0, missed = 0;
+  std::vector<float> lefts; // every compared cell's leftover, for the P95
+  lefts.reserve(machined.r.size());
   for (int j = 0; j < machined.nTheta; j++)
     for (int i = 0; i < machined.nx; i++) {
       const double want = designed.At(i, j);
@@ -398,6 +400,7 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
         v.maxGouge = gouge;
         v.gougeAt = {x, theta};
       }
+      lefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
       if (const double left = got - hi; left > v.maxLeftover) {
         v.maxLeftover = left;
         v.leftoverAt = {x, theta};
@@ -409,6 +412,14 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
         v.leftoverArea += machined.res * machined.ArcAt(got);
     }
   v.cells = compared;
+  // The typical scallop: the few cells on an end face no rotary pass can
+  // reach set `maxLeftover` for every pattern, and cannot move this.
+  if (!lefts.empty()) {
+    const size_t k = (lefts.size() - 1) * 95 / 100;
+    std::nth_element(lefts.begin(), lefts.begin() + static_cast<long>(k),
+                     lefts.end());
+    v.leftoverP95 = lefts[k];
+  }
   const size_t total = compared + missed;
   v.untouchedFraction =
       total > 0 ? static_cast<double>(missed) / static_cast<double>(total)

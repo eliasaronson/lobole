@@ -173,6 +173,27 @@ struct RotarySpiralRequest {
   double floorRadius = 0.0;
 };
 
+// Passes that FOLLOW a twist (docs/cam/rotary-helical-plan.md): helices at
+// `lead_mm` per turn, each running the length of the map, stepped round one
+// from the next. In the unrolled (x, arc) plane they are parallel lines at the
+// twist's angle, and an infinite lead is the parallel pattern.
+struct RotaryHelicalRequest {
+  // Axial advance per turn of a pass, signed for the hand. Must be non-zero:
+  // no twist is the parallel pattern, and the caller says so.
+  double lead_mm = 0.0;
+  // Spacing between passes in mm, measured PERPENDICULAR to them at the
+  // widest radius, and closer where the surface is steep across them.
+  double stepover_mm = 1.0;
+  // Spacing ALONG a pass, in mm of path at the widest radius; 0 = the cell.
+  double sampleStep_mm = 0.0;
+  // Decimation tolerance in (x, r, arc); 0 keeps every sample.
+  double tolerance_mm = 0.0;
+  // A radius floor for a roughing layer; 0 follows the surface.
+  double floorRadius = 0.0;
+  // Alternate passes run back, so each starts where the last one ended.
+  bool zigzag = true;
+};
+
 // A point on the helix. `thetaDeg` is UNWOUND: it grows monotonically through
 // every revolution, because the axis turns that way and a value wrapped at
 // 360 would read as the part spinning back a full turn.
@@ -188,6 +209,19 @@ struct RotaryPathPoint {
 // Kiri's rings pattern gets right. Empty when the map is.
 [[nodiscard]] std::vector<RotaryPathPoint>
 RotarySpiralPath(const RadiusMap& cl, const RotarySpiralRequest& req);
+
+// The helical passes over `cl`, in cutting order. A cell the tool reaches
+// nothing in ENDS a pass, as it does a parallel one.
+[[nodiscard]] std::vector<std::vector<RotaryPathPoint>>
+RotaryHelicalPasses(const RadiusMap& cl, const RotaryHelicalRequest& req);
+
+// The part's dominant twist, in degrees of theta per mm of x, signed for the
+// hand; 0 when the part has none to find (too few columns that are not
+// round). For each pair of neighbouring columns that vary round the part, the
+// theta shift that best lines one up with the other, to a sub-cell fit,
+// searched +-16 cells; the median of those. A 45-degree twist at radius 25 is
+// 360 / (2 pi 25) = 2.29.
+[[nodiscard]] double DeriveRotaryTwist(const RadiusMap& cl);
 
 // --- surfacing off the frame (docs/ui/long-operations.md, phase 5) --------
 //

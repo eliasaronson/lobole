@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    123; // v123: a `surface_rotary` op's `rotary_pattern` — `parallel`
+    124; // v124: a third `rotary_pattern`, `helical` -- passes that follow
+         //      a twist, helices stepped round the part -- and `lead_mm`,
+         //      their advance per turn (0 = the part's own twist). A v123
+         //      build refuses the pattern name, which is what the bump is for
+         //      (docs/cam/rotary-helical-plan.md).
+         // v123: a `surface_rotary` op's `rotary_pattern` — `parallel`
          //      (the v122 raster, and the default) or `spiral`, one helix
          //      with A turning while the tool cuts: continuous 4-axis. And
          //      the op reads `stepdown` now, cutting in layers from the

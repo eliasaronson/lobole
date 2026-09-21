@@ -245,8 +245,10 @@ enum class CornerRelief { None, Dogbone, TBone };
 // How a rotary finish covers the part (docs/cam/rotary-continuous-plan.md).
 // Parallel: passes ALONG the axis, each at one A, the part turning between
 // them -- a rotary raster. Spiral: one helix from end to end, A turning WHILE
-// the tool cuts, one revolution per stepover -- continuous 4-axis.
-enum class RotaryPattern { Parallel, Spiral };
+// the tool cuts, one revolution per stepover -- continuous 4-axis. Helical:
+// passes that FOLLOW a twist, helices at the part's own lead stepped round
+// one from the next (docs/cam/rotary-helical-plan.md) -- continuous too.
+enum class RotaryPattern { Parallel, Spiral, Helical };
 
 struct Operation {
   uint64_t id = 0;
@@ -371,6 +373,10 @@ struct Operation {
   // the spiral. `stepdown`, when set, cuts the rotary pass in LAYERS from the
   // blank inward, each held off the part by the next ring of stock.
   RotaryPattern rotaryPattern = RotaryPattern::Parallel;
+  // SurfaceRotary, helical only (v124): the axial advance per turn of a
+  // pass, in mm, signed for the hand (positive: theta grows with x). 0 =
+  // derive it from the part's own twist (DeriveRotaryTwist).
+  double leadMm = 0.0;
 
   bool enabled = true;
 

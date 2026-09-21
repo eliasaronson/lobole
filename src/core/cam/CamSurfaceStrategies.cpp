@@ -216,6 +216,25 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
   // winds the axis hundreds of turns, and restarting at theta = 0 would ask
   // for all of them back on the rapid between two layers.
   double thetaCarry = 0.0;
+
+  // The helical pattern's lead: stated, or the part's own twist. Derived ONCE
+  // from the surface itself, not per layer, so every layer follows the same
+  // flutes. A part with nothing to follow is cut as parallel passes -- and
+  // says so, rather than quietly doing something other than it was asked.
+  double lead = 0.0;
+  if (op.rotaryPattern == RotaryPattern::Helical) {
+    lead = op.leadMm;
+    if (lead == 0.0) {
+      const double twist = DeriveRotaryTwist(cl);
+      if (std::abs(twist) > 1e-3)
+        lead = 360.0 / twist;
+    }
+    if (lead == 0.0)
+      tp.strategy = "parallel passes -- a helical pass follows a twist, and "
+                    "this part has none to follow (set lead_mm to cut one "
+                    "anyway)";
+  }
+
   for (const double floorR : floors) {
     RadiusMap layer = cl;
     if (floorR > 0.0)
@@ -245,6 +264,38 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
            tool.feedCut);
       go(Move::Kind::Rapid, path.back().x, safeR, 90.0 - path.back().thetaDeg,
          0.0);
+      continue;
+    }
+
+    if (lead != 0.0) {
+      RotaryHelicalRequest req;
+      req.lead_mm = lead;
+      req.stepover_mm = pitch;
+      req.sampleStep_mm = op.sampleStep;
+      req.tolerance_mm = cusp * 0.25;
+      std::vector<std::vector<RotaryPathPoint>> passes =
+          RotaryHelicalPasses(layer, req);
+      if (passes.empty())
+        continue;
+      // Each layer starts on the turn the last one ended on: a pass winds A
+      // by the twist's turns and zigzag unwinds it, but an odd number of
+      // passes leaves the axis a turn or two round.
+      const double shift =
+          360.0 *
+          std::round((thetaCarry - passes.front().front().thetaDeg) / 360.0);
+      for (std::vector<RotaryPathPoint>& pass : passes) {
+        for (RotaryPathPoint& q : pass)
+          q.thetaDeg += shift;
+        const RotaryPathPoint& p0 = pass.front();
+        go(Move::Kind::Rapid, p0.x, safeR, 90.0 - p0.thetaDeg, 0.0);
+        go(Move::Kind::Plunge, p0.x, p0.r, 90.0 - p0.thetaDeg, tool.feedPlunge);
+        for (size_t k = 1; k < pass.size(); k++)
+          go(Move::Kind::Cut, pass[k].x, pass[k].r, 90.0 - pass[k].thetaDeg,
+             tool.feedCut);
+        go(Move::Kind::Rapid, pass.back().x, safeR, 90.0 - pass.back().thetaDeg,
+           0.0);
+        thetaCarry = pass.back().thetaDeg;
+      }
       continue;
     }
 

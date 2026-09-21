@@ -64,18 +64,19 @@ constexpr OpTypeRow kRows[] = {
          OpField::CutAngle},
     {OpType::SurfaceWaterline, "surface_waterline", true,
      OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
-    // 4-axis finishing: parallel passes (a rotary raster) or one spiral
-    // (continuous 4-axis), by `rotaryPattern`. The absences are again the
-    // design: no side (there is no contour to be beside), no tabs, no relief,
-    // no lead arcs, no finish tool -- and no CUT ANGLE, because a rotary
-    // raster's direction is the axis. Its `stepover` is a fraction of the
-    // cutter like every other: millimetres of ARC at the part's widest point
-    // across parallel passes, the axial advance per turn on a spiral. It
+    // 4-axis finishing: parallel passes (a rotary raster), one spiral, or
+    // helical passes that follow a twist (both continuous 4-axis), by
+    // `rotaryPattern`; `leadMm` is the helical pattern's. The absences are
+    // again the design: no side (there is no contour to be beside), no tabs, no
+    // relief, no lead arcs, no finish tool -- and no CUT ANGLE, because a
+    // rotary raster's direction is the axis. Its `stepover` is a fraction of
+    // the cutter like every other: millimetres of ARC at the part's widest
+    // point across parallel passes, the axial advance per turn on a spiral. It
     // takes a `stepdown` because it is the only rotary op there is: with
     // one, it cuts in layers from the blank inward, the last one the finish.
     {OpType::SurfaceRotary, "surface_rotary", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
-         OpField::SampleStep | OpField::RotaryPattern},
+         OpField::SampleStep | OpField::RotaryPattern | OpField::Lead},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a
@@ -170,6 +171,7 @@ constexpr CornerReliefRow kCornerReliefRows[] = {
 constexpr RotaryPatternRow kRotaryPatternRows[] = {
     {RotaryPattern::Parallel, "parallel"},
     {RotaryPattern::Spiral, "spiral"},
+    {RotaryPattern::Helical, "helical"},
 };
 } // namespace
 

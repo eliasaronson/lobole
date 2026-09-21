@@ -1282,6 +1282,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->LogInfo("%zu cuts turn the part", turningCuts);
     IM_CHECK(turningCuts > 10);
 
+    // Helical is the third radio, and only it shows the lead: a number the
+    // other two patterns do not read is not offered for them.
+    IM_CHECK(!ctx->ItemExists("**/lead mm###lead"));
+    ctx->ItemClick("**/helical###pattern_helical");
+    ctx->Yield(3);
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup->operations[0].rotaryPattern == cam::RotaryPattern::Helical);
+    IM_CHECK(ctx->ItemExists("**/lead mm###lead"));
+
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
     if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))

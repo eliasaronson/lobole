@@ -88,6 +88,11 @@ struct Verdict {
   double belowStock = 0.0;
   glm::dvec2 belowStockAt{0.0};
   double maxLeftover = 0.0; // mm of stock still above it (unfinished)
+  // Rotary only: the 95th percentile of leftover over the compared cells --
+  // the TYPICAL scallop. The worst cell of a rotary job sits on an end face
+  // no rotary pass can reach, whatever the pattern, so `maxLeftover` alone
+  // cannot tell two finishes apart (docs/cam/rotary-helical-plan.md).
+  double leftoverP95 = 0.0;
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
