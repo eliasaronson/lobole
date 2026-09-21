@@ -18,6 +18,7 @@
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
+#include "ui/CamGenerate.h"
 #include "ui/CamJobs.h" // adaptive passes off the frame
 #include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
@@ -1097,214 +1098,57 @@ void DrawCamPanel(AppState& state) {
     }
   }
 
-  // --- generate / post ---------------------------------------------------
-  // ABOVE the operations list, not below it. This panel is 217 px wide and
-  // the window is 720 px tall in the default layout, and the list grows with
-  // the job: put the verdict and Save G-code after it and they are the first
-  // things to fall off the bottom, exactly as the job gets big enough to want
-  // checking (docs/cam/dogfood-round.md, round 2). The list is the part that
-  // may scroll; what the job SAYS is not.
+  // --- the run, in one line ----------------------------------------------
+  // Generate, the verdict, the output options and Save G-code are the
+  // Generate window's now (CamGenerate.cpp), opened by the toolbar's gears
+  // like Simulate: a verb with a result, not a block of this panel that the
+  // operations list pushed off the bottom (docs/ui/cam-panel-tidy-plan.md).
+  // What stays is one line saying how the run stands, which opens it.
   ImGui::Separator();
-  // In what order the job cuts, and whether it is one file or one per tool
-  // (J5, R2). The order was RPC-only until R2 -- half-built by this
-  // project's own rule -- and a file per tool is what most hobby
-  // controllers need, since they cannot take a tool change mid-file.
   {
-    const char* orderLabel =
-        setup->splitOutput                         ? "by tool (file per tool)"
-        : setup->order == cam::OrderOutputBy::Tool ? "by tool"
-        : setup->order == cam::OrderOutputBy::Part ? "by part"
-                                                   : "as listed";
-    ImGui::SetNextItemWidth(160.0f);
-    ImGui::BeginDisabled(setup->splitOutput);
-    if (ImGui::BeginCombo("Cut###cam_order", orderLabel)) {
-      const std::pair<const char*, cam::OrderOutputBy> choices[] = {
-          {"as listed", cam::OrderOutputBy::Authored},
-          {"by tool", cam::OrderOutputBy::Tool},
-          {"by part", cam::OrderOutputBy::Part}};
-      for (const auto& [label, value] : choices)
-        if (ImGui::Selectable(label, setup->order == value)) {
-          setup->order = value;
-          dirty = true;
-          changed = kAllOps;
-        }
-      ImGui::EndCombo();
+    int warns = 0, bads = 0;
+    std::string minutes;
+    for (const cam::VerdictLine& line : state.camVerdict) {
+      if (line.level == cam::VerdictLine::Level::Bad)
+        bads++;
+      else if (line.level == cam::VerdictLine::Level::Warn)
+        warns++;
+      else if (line.text.find("min of cutting") != std::string::npos)
+        minutes = line.text.substr(0, line.text.find(" of cutting"));
     }
-    ImGui::EndDisabled();
-    ImGui::SetItemTooltip("The order the operations are cut in. By tool "
-                          "groups the tool changes; by part finishes each "
-                          "part before the next.");
-    if (ImGui::Checkbox("One file per tool###cam_split", &setup->splitOutput)) {
-      dirty = true;
-      changed = kAllOps;
+    const bool busy = CamPassProgressOf(state).running ||
+                      BackgroundJobRunning(state, "cam-verify");
+    std::string status;
+    if (busy)
+      status = "Generating...";
+    else if (state.camToolpaths.empty())
+      status = "Not generated";
+    else if (state.camVerdict.empty())
+      status = "Generated, not verified";
+    else {
+      status = "Generated";
+      if (!minutes.empty())
+        status += " · " + minutes;
+      if (bads > 0)
+        status +=
+            " · " + std::to_string(bads) + " problem" + (bads == 1 ? "" : "s");
+      if (warns > 0)
+        status += " · " + std::to_string(warns) + " warning" +
+                  (warns == 1 ? "" : "s");
     }
-    ImGui::SetItemTooltip("Write T1's program, T2's program... each complete "
-                          "and starting by loading its tool. Forces tool "
-                          "order. For a controller that cannot take a tool "
-                          "change mid-file.");
-  }
-  if (ImGui::Button("Generate###cam_generate")) {
-    // A playback is a picture of a FILE, and this button replaces the file.
-    // Leaving it running would scrub through G-code the job no longer posts.
-    EndCamPlayback(state);
-    RefreshCamToolpaths(state);
-    RunCamVerification(state);
-  }
-  ImGui::SameLine();
-  ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
-  // Adaptive passes in flight: the row owns the progress, not a modal — the
-  // rest of the job stays editable (docs/ui/long-operations.md, phase 1).
-  if (const CamPassProgress progress = CamPassProgressOf(state);
-      progress.running) {
-    // The same widget the STEP import draws (ui/Widgets.h). It used to be a
-    // greyed label and a small Cancel -- no bar at all -- so a surfacing
-    // pass that takes minutes looked like nothing happening.
-    JobProgress bar;
-    bar.status = progress.label;
-    bar.fraction = progress.total == 0
-                       ? -1.0
-                       : static_cast<double>(progress.done) /
-                             static_cast<double>(progress.total);
-    // Only when there IS a total. "1 / 0" is what this printed while the
-    // counters were being reset under a running pass; that is fixed at the
-    // source (CamJobs.cpp, LandedAPass), and a count nobody has is still not
-    // printed -- the widget's "working" says it honestly.
-    if (progress.total > 0) {
-      char overlay[48];
-      std::snprintf(overlay, sizeof(overlay), "%zu / %zu",
-                    std::min(progress.done + 1, progress.total),
-                    progress.total);
-      bar.overlay = overlay;
-    }
-    bar.cancelId = "###cam_cancel_passes";
-    bar.cancelTip = "Stops after the pass now cutting -- neither the clearing "
-                    "library nor the drop cutter can be interrupted mid-pass. "
-                    "What was waiting is queued again by the next edit or "
-                    "Generate.";
-    if (DrawJobProgress(bar))
-      CancelCamPasses(state);
-  }
-  // The verification, when it is on a worker: the same widget again, because
-  // it is the same kind of wait. Indeterminate -- the carve reports no
-  // fraction -- and not cancellable, since it has no interruption points and
-  // a newer request simply overtakes it.
-  if (BackgroundJobRunning(state, "cam-verify")) {
-    JobProgress bar;
-    const BackgroundJob* job = FindBackgroundJob(state, "cam-verify");
-    bar.status = job != nullptr ? job->label : "Verifying";
-    bar.cancellable = false;
-    DrawJobProgress(bar);
-  }
-
-  // G4: what the verifier found, in words, without being asked. The numbers
-  // behind these lines are in the same Verdict the RPC returns.
-  for (const cam::VerdictLine& line : state.camVerdict) {
-    const ImVec4 color = line.level == cam::VerdictLine::Level::Bad
-                             ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
-                         : line.level == cam::VerdictLine::Level::Warn
-                             ? ImVec4(0.95f, 0.80f, 0.40f, 1.0f)
-                             : ImVec4(0.55f, 0.90f, 0.60f, 1.0f);
-    // The icon font is merged into the UI atlas, so these are real glyphs;
-    // a literal U+2713 would not be (the text font stops at Latin-1).
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
-    ImGui::TextWrapped("%s %s",
-                       line.level == cam::VerdictLine::Level::Good
-                           ? ICON_FA_CIRCLE_CHECK
-                           : ICON_FA_TRIANGLE_EXCLAMATION,
-                       line.text.c_str());
+    const ImVec4 tint = bads > 0 ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
+                        : warns > 0
+                            ? ImVec4(0.95f, 0.80f, 0.40f, 1.0f)
+                            : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+    ImGui::PushStyleColor(ImGuiCol_Text, tint);
+    if (ImGui::Selectable(
+            (std::string(ICON_FA_GEARS " ") + status + "###cam_run_status")
+                .c_str()))
+      OpenCamGenerate(state, /*regenerate=*/false);
     ImGui::PopStyleColor();
+    ImGui::SetItemTooltip("Open the Generate window: the verdict, the output "
+                          "options and Save G-code");
   }
-
-  if (!state.camToolpaths.empty()) {
-    double total = 0.0;
-    int failed = 0;
-    for (const cam::Toolpath& tp : state.camToolpaths) {
-      total += tp.CutLength();
-      if (!tp.error.empty())
-        failed++;
-    }
-    ImGui::TextDisabled("%.0f mm of cutting", total);
-    if (failed > 0) {
-      ImGui::SameLine();
-      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f),
-                         "· %d operation%s produced nothing", failed,
-                         failed == 1 ? "" : "s");
-    }
-    ImGui::SameLine();
-    // NOT "###cam_post": that is the post-DIALECT combo on the setup row, and
-    // two widgets in one window answering to one id is a real ImGui error —
-    // it raised "2 visible items with conflicting ID" over the user's job.
-    // The collision was always there; it started firing when this button
-    // moved above the operations list and the two became visible at once
-    // (docs/cam/dogfood-round.md).
-    if (ImGui::Button("Save G-code###cam_save_gcode")) {
-      // BESIDE the project, which is what this always meant to say and did
-      // not: `projectPath` is the .dsgn bundle itself, so appending to it
-      // wrote the G-code INSIDE the project. `StampProject` walks every
-      // regular file in there, so the job's own output changed the project's
-      // disk stamp and the next save refused with "the project changed on
-      // disk since you opened it" — the app fighting itself over a file it
-      // had just written.
-      //
-      // With no project there is no "beside", and the fallback was a bare
-      // "job.nc" written into whatever directory the app was launched from.
-      // Refuse and say where it would go instead of leaving G-code somewhere
-      // nobody will look for it (docs/cam/dogfood-round.md).
-      if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
-        // A file written now would carry the PREVIOUS toolpath where a pass
-        // is still cutting.
-        state.camLastPost = why;
-        LOG_INFO("CAM: refused to post while passes are pending");
-      } else if (state.projectPath.empty()) {
-        state.camLastPost =
-            "save the project first — the G-code goes beside it, named after "
-            "the setup";
-        LOG_INFO("CAM: refused to post an unsaved project");
-      } else {
-        const std::filesystem::path project(state.projectPath);
-        std::filesystem::path dir = project.parent_path();
-        if (dir.empty())
-          dir = ".";
-        // Named for the project AND the setup: several parts' jobs land in
-        // one directory, and "Setup 1.nc" from two of them is one file.
-        const std::string stem = project.stem().string() + " - " + setup->name;
-        std::string error;
-        if (setup->splitOutput) {
-          // One file per tool, each named for it, all said.
-          std::vector<cam::PostFile> files;
-          bool ok = cam::PostProcessSplit(setup->machine.post, *setup,
-                                          state.camToolpaths, PostOpts(*setup),
-                                          files, &error);
-          std::string wrote;
-          for (const cam::PostFile& f : files) {
-            if (!ok)
-              break;
-            const std::string path =
-                (dir / (stem + "-T" + std::to_string(f.tool) + ".nc")).string();
-            ok = DocumentIO::WriteTextAtomic(path, f.gcode, &error);
-            if (ok) {
-              wrote += (wrote.empty() ? "" : "\n") + path;
-              LOG_INFO("CAM: wrote {}", path);
-            }
-          }
-          state.camLastPost = ok ? wrote : "could not write: " + error;
-        } else {
-          const std::string path = (dir / (stem + ".nc")).string();
-          std::string gcode;
-          if (cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
-                               PostOpts(*setup), gcode, &error) &&
-              DocumentIO::WriteTextAtomic(path, gcode, &error)) {
-            state.camLastPost = path;
-            LOG_INFO("CAM: wrote {}", path);
-          } else {
-            state.camLastPost = "could not write: " + error;
-          }
-        }
-      }
-    }
-  }
-  if (!state.camLastPost.empty())
-    ImGui::TextDisabled("%s", state.camLastPost.c_str());
   // Why Simulate (on the job toolbar) would not start. The transport itself
   // is a floating window over the viewport now (CamPlayback.cpp); it used to
   // be a section here, and this panel was the busiest thing on screen.
@@ -1316,414 +1160,33 @@ void DrawCamPanel(AppState& state) {
 
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");
-  // Both deferred past the loop, which walks the vector they would shrink.
-  std::vector<uint64_t> removeOps; // the row's own x button
-  bool deleteSelected = false;     // the row menu's Delete (the selection)
-  uint64_t moveOp = 0;             // dragged operation …
-  size_t moveTo = 0;               // … and where it was dropped
+  // Both deferred past the loop, which walks the vector they would change.
+  bool deleteSelected = false; // the row menu's Delete (the selection)
+  uint64_t moveOp = 0;         // dragged operation …
+  size_t moveTo = 0;           // … and where it was dropped
   std::vector<uint64_t> opOrder;
   for (const cam::Operation& op : setup->operations)
     opOrder.push_back(op.id);
+  // Rows in the feature list's style (CamOperationRow): the gestures are the
+  // part tab's -- click, double-click to edit, drag to reorder, right-click
+  // for the rest -- where each row used to carry a drag handle, a checkbox,
+  // "show", "x", a sentence and an "Advanced" tree.
   ImGui::PushID("ops");
   for (size_t opIndex = 0; opIndex < setup->operations.size(); opIndex++) {
     cam::Operation& op = setup->operations[opIndex];
     ImGui::PushID(static_cast<int>(op.id));
-    // The order is the cutting sequence — GenerateAll and the post both walk
-    // this vector — so it has to be editable. Rough before finish, and the
-    // tool changes fall where the order puts them.
-    ImGui::Selectable(ICON_FA_GRIP_VERTICAL "###drag", false,
-                      ImGuiSelectableFlags_None, ImVec2(12.0f, 0.0f));
-    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
-      ImGui::SetDragDropPayload("cam_op", &opIndex, sizeof(size_t));
-      ImGui::Text("%s", op.name.empty() ? kOpTypes[static_cast<int>(op.type)]
-                                        : op.name.c_str());
-      ImGui::EndDragDropSource();
-    }
-    if (ImGui::BeginDragDropTarget()) {
-      if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("cam_op")) {
-        size_t from = 0;
-        std::memcpy(&from, pl->Data, sizeof(size_t));
-        if (from < setup->operations.size() && from != opIndex) {
-          moveOp = setup->operations[from].id;
-          moveTo = opIndex;
-        }
-      }
-      ImGui::EndDragDropTarget();
-    }
-    ImGui::SetItemTooltip("Drag to reorder — this is the order it cuts in");
-    ImGui::SameLine();
-    if (ImGui::Checkbox("###enabled", &op.enabled))
-      touched(op.id);
-    ImGui::SameLine();
-    const bool ghosted = state.camGhostOp == op.id;
-    if (ImGui::SmallButton(ghosted ? "hide###ghost" : "show###ghost"))
-      state.camGhostOp = ghosted ? 0 : op.id;
-    ImGui::SetItemTooltip("Ghost the material this one removes");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("x###rmop"))
-      removeOps = {op.id};
-    ImGui::SetItemTooltip("Remove this operation");
-    ImGui::SameLine();
-    // What this operation IS, in a sentence. The numbers behind it are
-    // derived from the model and the cutter (docs/cam/gui.md); the fields
-    // that set them are one disclosure away, not the way in. The sentence is
-    // the ROW: click to select, Ctrl/Shift to extend, right-click to delete
-    // (CamOperationRow — the same row the tool window draws).
-    const cam::Tool* opTool = setup->FindTool(op.toolNumber);
-    const int passes = static_cast<int>(cam::DepthPasses(op).size());
-    char sentence[256];
-    std::snprintf(
-        sentence, sizeof(sentence),
-        "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s",
-        op.name.empty() ? kOpTypes[static_cast<int>(op.type)] : op.name.c_str(),
-        opTool != nullptr ? opTool->diameter : 0.0, op.topZ - op.bottomZ,
-        passes, passes == 1 ? "" : "es", op.climb ? "climb" : "conventional");
-    if (CamOperationRow(state, op.id, sentence, opOrder))
+    const CamOpRowResult row = CamOperationRow(state, *setup, op, opOrder);
+    if (row.deleteSelection)
       deleteSelected = true;
-
-    if (ImGui::TreeNode("Advanced###adv")) {
-      // WHICH CUTTER. There was no way to say it by clicking — `toolNumber`
-      // was read to print a diameter and never written — so "use a cutter of
-      // 5.46 mm or less" was a refusal naming a remedy the panel could not
-      // perform, even with the smaller tool already in the setup.
-      //
-      // A row of buttons rather than a combo: a setup has a handful of tools,
-      // so this shows every option at a glance and costs ONE click instead of
-      // two. It is also the only form the test engine can address — a combo
-      // gathers with an empty label whatever you name it (the trap the
-      // drawings round hit), so a combo here could not be gated.
-      ImGui::TextDisabled("Tool");
-      for (const cam::Tool& t : setup->tools) {
-        ImGui::SameLine();
-        const bool active = t.number == op.toolNumber;
-        if (active)
-          ImGui::PushStyleColor(
-              ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        char id[32];
-        std::snprintf(id, sizeof(id), "T%d###optool_t%d", t.number, t.number);
-        if (ImGui::SmallButton(id)) {
-          std::string why;
-          if (cam::Retool(*setup, op, t.number, why))
-            touched(op.id);
-          else
-            state.camRefusal = why;
-        }
-        if (active)
-          ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%.3g mm %s — the stepdown follows the cutter "
-                              "unless you have typed your own",
-                              t.diameter, t.name.c_str());
-      }
-      if (setup->FindTool(op.toolNumber) == nullptr) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "T%d missing",
-                           op.toolNumber);
-      }
-      int type = static_cast<int>(op.type);
-      ImGui::SetNextItemWidth(90.0f);
-      if (ImGui::Combo("###type", &type, kOpTypes, IM_ARRAYSIZE(kOpTypes))) {
-        op.type = static_cast<cam::OpType>(type);
-        touched(op.id);
-      }
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(60.0f);
-      float top = static_cast<float>(op.topZ);
-      if (ExprDragFloat(state, "###top", &top, 0.25f, -1000.0f, 1000.0f,
-                        "%.2f")) {
-        op.topZ = top;
-        touched(op.id);
-      }
-      ImGui::SetItemTooltip("Top of the cut (Z)");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(60.0f);
-      float bottom = static_cast<float>(op.bottomZ);
-      if (ExprDragFloat(state, "###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
-                        "%.2f")) {
-        op.bottomZ = bottom;
-        touched(op.id);
-      }
-      ImGui::SetItemTooltip("Bottom of the cut (Z)");
-      // Per-type from the ONE table (CamNames.h), not a predicate written
-      // here. These guards disagreed with the serializer's and the RPC's, and
-      // the unconditional ones offered a stepdown on an edge round and tabs
-      // on a drill -- controls that moved a number nothing would read.
-      if (cam::OpTypeHas(op.type, cam::OpField::Stepdown)) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f);
-        float step = static_cast<float>(op.stepdown);
-        if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
-                          "%.2f")) {
-          op.stepdown = step;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::CornerRelief)) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(90.0f);
-        const char* reliefLabel =
-            op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
-            : op.cornerRelief == cam::CornerRelief::TBone ? "T-bone"
-                                                          : "corners";
-        if (ImGui::BeginCombo("###cam_relief", reliefLabel)) {
-          const std::pair<const char*, cam::CornerRelief> choices[] = {
-              {"leave the radius", cam::CornerRelief::None},
-              {"dogbone", cam::CornerRelief::Dogbone},
-              {"T-bone", cam::CornerRelief::TBone}};
-          for (const auto& [label, value] : choices)
-            if (ImGui::Selectable(label, op.cornerRelief == value)) {
-              op.cornerRelief = value;
-              touched(op.id);
-            }
-          ImGui::EndCombo();
-        }
-        ImGui::SetItemTooltip("Inside corners: a round cutter leaves a radius. "
-                              "A dogbone clears it along the bisector, a "
-                              "T-bone along the longer wall, each by the "
-                              "tool's radius -- for a joint that takes a "
-                              "square tenon.");
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Finish)) {
-        // Rough then finish (R6): a second tool takes the wall in one pass.
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(90.0f);
-        const cam::Tool* finishTool = setup->FindTool(op.finishTool);
-        char finishLabel[32];
-        std::snprintf(
-            finishLabel, sizeof(finishLabel), "%s",
-            finishTool != nullptr
-                ? ("finish T" + std::to_string(finishTool->number)).c_str()
-                : "no finish");
-        if (ImGui::BeginCombo("###cam_finish", finishLabel)) {
-          if (ImGui::Selectable("no finishing pass", op.finishTool == 0)) {
-            op.finishTool = 0;
-            touched(op.id);
-          }
-          for (const cam::Tool& t : setup->tools) {
-            if (t.number == op.toolNumber)
-              continue;
-            char item[64];
-            std::snprintf(item, sizeof(item), "finish with T%d %.3g mm",
-                          t.number, t.diameter);
-            if (ImGui::Selectable(item, op.finishTool == t.number)) {
-              op.finishTool = t.number;
-              if (const cam::Tool* rough = setup->FindTool(op.toolNumber);
-                  rough != nullptr && op.finishStock <= 0.0)
-                op.finishStock = cam::DefaultFinishStock(*rough);
-              touched(op.id);
-            }
-          }
-          ImGui::EndCombo();
-        }
-        ImGui::SetItemTooltip("Rough with this tool leaving a little on the "
-                              "wall, then take it off in one full-depth pass "
-                              "with the finishing tool.");
-        if (op.finishTool != 0) {
-          ImGui::SameLine();
-          ImGui::SetNextItemWidth(55.0f);
-          float leave = static_cast<float>(op.finishStock);
-          if (ExprDragFloat(state, "left###cam_finish_stock", &leave, 0.05f,
-                            0.0f, 10.0f, "%.2f")) {
-            op.finishStock = leave;
-            touched(op.id);
-          }
-          ImGui::SetItemTooltip("What the rough leaves for the finish (mm)");
-        }
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::LeadArcs)) {
-        ImGui::SameLine();
-        if (ImGui::Checkbox("Lead arcs###cam_leads", &op.leadArcs))
-          touched(op.id);
-        ImGui::SetItemTooltip("Leave the wall on a tangent arc of the tool's "
-                              "radius instead of stopping against it and "
-                              "lifting -- the stop is the dwell mark.");
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Peck)) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f);
-        float peck = static_cast<float>(op.peck);
-        if (ExprDragFloat(state, "Peck###peck", &peck, 0.25f, 0.0f, 100.0f,
-                          "%.2f")) {
-          op.peck = peck;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
-                              "the chips clear (0 = one plunge)");
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
-        ImGui::SetNextItemWidth(70.0f);
-        float size = static_cast<float>(op.edgeSize);
-        if (ExprDragFloat(state, "Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
-                          "%.2f")) {
-          op.edgeSize = size;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
-                              "bevel (V-bit), mm. 0 = the biggest this tool "
-                              "can make within the wall.");
-      }
-      // Surfacing: across, along and down. Three fields because they are
-      // three quantities, and the table decides which of them this type has.
-      if (cam::OpTypeHas(op.type, cam::OpField::RotaryPattern)) {
-        // Radio buttons, for the reason the tool row above is buttons: two
-        // options are one click each this way, and a combo gathers with an
-        // empty label, so it could not be gated.
-        for (const cam::RotaryPatternRow& row : cam::RotaryPatterns()) {
-          const std::string label =
-              std::string(row.name) + "###pattern_" + row.name;
-          if (ImGui::RadioButton(label.c_str(),
-                                 op.rotaryPattern == row.pattern) &&
-              op.rotaryPattern != row.pattern) {
-            op.rotaryPattern = row.pattern;
-            touched(op.id);
-          }
-          ImGui::SetItemTooltip(
-              "%s",
-              row.pattern == cam::RotaryPattern::Spiral
-                  ? "One helix end to end, the part turning WHILE it cuts "
-                    "(continuous 4-axis): no seams, and the stepover is the "
-                    "spacing between turns, closer on steep walls."
-                  : "Passes along the axis, the part turning between them.");
-          ImGui::SameLine();
-        }
-        ImGui::NewLine();
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Lead) &&
-          op.rotaryPattern == cam::RotaryPattern::Helical) {
-        ImGui::SetNextItemWidth(80.0f);
-        float lead = static_cast<float>(op.leadMm);
-        if (ExprDragFloat(state, "lead mm###lead", &lead, 1.0f, -10000.0f,
-                          10000.0f, "%.1f")) {
-          op.leadMm = lead;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip(
-            "How far along the axis a pass advances per turn, signed for the "
-            "hand. 0 follows the part's own twist, measured from its surface. "
-            "A part with no twist is cut as parallel passes, and says so.");
-        ImGui::SameLine();
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
-        ImGui::SetNextItemWidth(70.0f);
-        float angle = static_cast<float>(op.cutAngleDeg);
-        if (ExprDragFloat(state, "deg###cutangle", &angle, 1.0f, -180.0f,
-                          180.0f, "%.0f")) {
-          op.cutAngleDeg = angle;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Raster direction, degrees anticlockwise from "
-                              "+X. Run the passes ACROSS the steepest slope, "
-                              "not along it.");
-        ImGui::SameLine();
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::ZStep)) {
-        ImGui::SetNextItemWidth(70.0f);
-        float zs = static_cast<float>(op.zStep);
-        if (ExprDragFloat(state, "Z step###zstep", &zs, 0.05f, 0.0f, 20.0f,
-                          "%.2f")) {
-          op.zStep = zs;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Millimetres of Z between laps. NOT a stepover: "
-                              "a waterline's spacing is a depth. 0 derives it "
-                              "from the cutter.");
-        ImGui::SameLine();
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::SampleStep)) {
-        ImGui::SetNextItemWidth(70.0f);
-        float ss = static_cast<float>(op.sampleStep);
-        if (ExprDragFloat(state, "sample###samplestep", &ss, 0.02f, 0.0f, 5.0f,
-                          "%.2f")) {
-          op.sampleStep = ss;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Millimetres ALONG a pass, where the surface is "
-                              "read. 0 derives it from the cutter and the "
-                              "scallop.");
-        ImGui::SameLine();
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
-        ImGui::SetNextItemWidth(70.0f);
-        float over = static_cast<float>(op.stepover);
-        if (ExprDragFloat(state, "Stepover###stepover", &over, 0.01f, 0.05f,
-                          0.9f, "%.2f")) {
-          op.stepover = over;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Fraction of the cutter taken per pass "
-                              "sideways — the number adaptive clearing holds "
-                              "constant");
-      }
-      // What this pass DOES NOT take: the roughing/finishing split. A pocket
-      // roughed with 0.3 mm left and then re-cut at 0 comes out with a wall
-      // the cutter has touched once, at full depth, in one pass — which is
-      // the difference between a flange a driver seats flat on and a stack of
-      // stepdown terraces. The engine has had it since C1; only a script
-      // could reach it.
-      if (cam::OpTypeHas(op.type, cam::OpField::StockToLeave)) {
-        float leave = static_cast<float>(op.stockToLeave);
-        ImGui::SetNextItemWidth(58.0f);
-        if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
-                          "%.2f")) {
-          op.stockToLeave = leave;
-          touched(op.id);
-        }
-        ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
-                              "with 0.2-0.4, then a second operation at 0 "
-                              "finishes the wall in one full-depth pass.");
-      }
-      // A hole in the floor is not an island: nothing stands in it, so the
-      // cutter should pass over rather than detour around — and a detour
-      // around a hole that nearly touches the pocket wall leaves an uncut
-      // sliver too narrow for the tool to come back to.
-      if (cam::OpTypeHas(op.type, cam::OpField::UseOutline)) {
-        if (ImGui::Checkbox("Over openings###useoutline", &op.useOutline))
-          touched(op.id);
-        ImGui::SetItemTooltip(
-            "Clear the face's outline and pass straight OVER the holes in it, "
-            "instead of going around each one. Turn it off when something "
-            "really does stand in the pocket.");
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Climb)) {
-        ImGui::SameLine();
-        if (ImGui::Checkbox("Climb###climb", &op.climb))
-          touched(op.id);
-      }
-      if (cam::OpTypeHas(op.type, cam::OpField::Tabs)) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f);
-        int tabs = op.tabCount;
-        if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
-          op.tabCount = tabs;
-          touched(op.id);
-        }
-        // No longer "(profile only)" in words on an op that is not one: the
-        // control is simply not there.
-        ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
-                              "pass");
-      }
-      if (!op.targets.empty())
-        ImGui::TextDisabled("boundary: %s", op.targets[0].ref.name.c_str());
-      ImGui::TreePop();
+    if (row.toggleEnabled) {
+      op.enabled = !op.enabled;
+      touched(op.id);
     }
-
-    // The op's own verdict, from the last generate. A failed op says why
-    // right here rather than only in the posted file.
-    for (const cam::Toolpath& tp : state.camToolpaths) {
-      if (tp.operationId != op.id)
-        continue;
-      if (tp.pending) {
-        ImGui::TextDisabled("  clearing%s", tp.moves.empty()
-                                                ? "..."
-                                                : "... (showing the "
-                                                  "previous toolpath)");
-      } else if (!tp.error.empty()) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "  %s",
-                           tp.error.c_str());
-      } else {
-        ImGui::TextDisabled("  %zu moves, %.0f mm of cutting, down to Z%.2f",
-                            tp.moves.size(), tp.CutLength(), tp.MinZ());
-      }
+    if (row.edit)
+      EditCamOperation(state, op.id);
+    if (row.droppedHere != 0) {
+      moveOp = row.droppedHere;
+      moveTo = opIndex;
     }
     ImGui::PopID();
   }
@@ -1739,8 +1202,6 @@ void DrawCamPanel(AppState& state) {
   }
   if (deleteSelected)
     DeleteSelection(state);
-  else if (!removeOps.empty())
-    RemoveCamOperations(state, removeOps);
 
   if (ImGui::SmallButton("Add operation###cam_add_op")) {
     // ONE derivation, two entry points: the same engine call the verbs use
@@ -1783,6 +1244,346 @@ void DrawCamPanel(AppState& state) {
     state.camLeftover.clear();
   }
   ImGui::End();
+}
+
+bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
+                       cam::Operation& op) {
+  // What the docked panel's "Advanced" tree held, moved rather than
+  // rewritten: the CAM tool window draws it for the operation being edited
+  // (docs/ui/cam-panel-tidy-plan.md).
+  cam::Setup* setup = &setupRef;
+  bool changed = false;
+  const auto touched = [&](uint64_t) { changed = true; };
+  // WHICH CUTTER. There was no way to say it by clicking — `toolNumber`
+  // was read to print a diameter and never written — so "use a cutter of
+  // 5.46 mm or less" was a refusal naming a remedy the panel could not
+  // perform, even with the smaller tool already in the setup.
+  //
+  // A row of buttons rather than a combo: a setup has a handful of tools,
+  // so this shows every option at a glance and costs ONE click instead of
+  // two. It is also the only form the test engine can address — a combo
+  // gathers with an empty label whatever you name it (the trap the
+  // drawings round hit), so a combo here could not be gated.
+  ImGui::TextDisabled("Tool");
+  for (const cam::Tool& t : setup->tools) {
+    ImGui::SameLine();
+    const bool active = t.number == op.toolNumber;
+    if (active)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    char id[32];
+    std::snprintf(id, sizeof(id), "T%d###optool_t%d", t.number, t.number);
+    if (ImGui::SmallButton(id)) {
+      std::string why;
+      if (cam::Retool(*setup, op, t.number, why))
+        touched(op.id);
+      else
+        state.camRefusal = why;
+    }
+    if (active)
+      ImGui::PopStyleColor();
+    ImGui::SetItemTooltip("%.3g mm %s — the stepdown follows the cutter "
+                          "unless you have typed your own",
+                          t.diameter, t.name.c_str());
+  }
+  if (setup->FindTool(op.toolNumber) == nullptr) {
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "T%d missing",
+                       op.toolNumber);
+  }
+  int type = static_cast<int>(op.type);
+  ImGui::SetNextItemWidth(90.0f);
+  if (ImGui::Combo("###type", &type, kOpTypes, IM_ARRAYSIZE(kOpTypes))) {
+    op.type = static_cast<cam::OpType>(type);
+    touched(op.id);
+  }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(60.0f);
+  float top = static_cast<float>(op.topZ);
+  if (ExprDragFloat(state, "###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
+    op.topZ = top;
+    touched(op.id);
+  }
+  ImGui::SetItemTooltip("Top of the cut (Z)");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(60.0f);
+  float bottom = static_cast<float>(op.bottomZ);
+  if (ExprDragFloat(state, "###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
+                    "%.2f")) {
+    op.bottomZ = bottom;
+    touched(op.id);
+  }
+  ImGui::SetItemTooltip("Bottom of the cut (Z)");
+  // Per-type from the ONE table (CamNames.h), not a predicate written
+  // here. These guards disagreed with the serializer's and the RPC's, and
+  // the unconditional ones offered a stepdown on an edge round and tabs
+  // on a drill -- controls that moved a number nothing would read.
+  if (cam::OpTypeHas(op.type, cam::OpField::Stepdown)) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(55.0f);
+    float step = static_cast<float>(op.stepdown);
+    if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
+                      "%.2f")) {
+      op.stepdown = step;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::CornerRelief)) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(90.0f);
+    const char* reliefLabel =
+        op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
+        : op.cornerRelief == cam::CornerRelief::TBone ? "T-bone"
+                                                      : "corners";
+    if (ImGui::BeginCombo("###cam_relief", reliefLabel)) {
+      const std::pair<const char*, cam::CornerRelief> choices[] = {
+          {"leave the radius", cam::CornerRelief::None},
+          {"dogbone", cam::CornerRelief::Dogbone},
+          {"T-bone", cam::CornerRelief::TBone}};
+      for (const auto& [label, value] : choices)
+        if (ImGui::Selectable(label, op.cornerRelief == value)) {
+          op.cornerRelief = value;
+          touched(op.id);
+        }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Inside corners: a round cutter leaves a radius. "
+                          "A dogbone clears it along the bisector, a "
+                          "T-bone along the longer wall, each by the "
+                          "tool's radius -- for a joint that takes a "
+                          "square tenon.");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Finish)) {
+    // Rough then finish (R6): a second tool takes the wall in one pass.
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(90.0f);
+    const cam::Tool* finishTool = setup->FindTool(op.finishTool);
+    char finishLabel[32];
+    std::snprintf(
+        finishLabel, sizeof(finishLabel), "%s",
+        finishTool != nullptr
+            ? ("finish T" + std::to_string(finishTool->number)).c_str()
+            : "no finish");
+    if (ImGui::BeginCombo("###cam_finish", finishLabel)) {
+      if (ImGui::Selectable("no finishing pass", op.finishTool == 0)) {
+        op.finishTool = 0;
+        touched(op.id);
+      }
+      for (const cam::Tool& t : setup->tools) {
+        if (t.number == op.toolNumber)
+          continue;
+        char item[64];
+        std::snprintf(item, sizeof(item), "finish with T%d %.3g mm", t.number,
+                      t.diameter);
+        if (ImGui::Selectable(item, op.finishTool == t.number)) {
+          op.finishTool = t.number;
+          if (const cam::Tool* rough = setup->FindTool(op.toolNumber);
+              rough != nullptr && op.finishStock <= 0.0)
+            op.finishStock = cam::DefaultFinishStock(*rough);
+          touched(op.id);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Rough with this tool leaving a little on the "
+                          "wall, then take it off in one full-depth pass "
+                          "with the finishing tool.");
+    if (op.finishTool != 0) {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(55.0f);
+      float leave = static_cast<float>(op.finishStock);
+      if (ExprDragFloat(state, "left###cam_finish_stock", &leave, 0.05f, 0.0f,
+                        10.0f, "%.2f")) {
+        op.finishStock = leave;
+        touched(op.id);
+      }
+      ImGui::SetItemTooltip("What the rough leaves for the finish (mm)");
+    }
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::LeadArcs)) {
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Lead arcs###cam_leads", &op.leadArcs))
+      touched(op.id);
+    ImGui::SetItemTooltip("Leave the wall on a tangent arc of the tool's "
+                          "radius instead of stopping against it and "
+                          "lifting -- the stop is the dwell mark.");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Peck)) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(55.0f);
+    float peck = static_cast<float>(op.peck);
+    if (ExprDragFloat(state, "Peck###peck", &peck, 0.25f, 0.0f, 100.0f,
+                      "%.2f")) {
+      op.peck = peck;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
+                          "the chips clear (0 = one plunge)");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
+    ImGui::SetNextItemWidth(70.0f);
+    float size = static_cast<float>(op.edgeSize);
+    if (ExprDragFloat(state, "Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
+                      "%.2f")) {
+      op.edgeSize = size;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
+                          "bevel (V-bit), mm. 0 = the biggest this tool "
+                          "can make within the wall.");
+  }
+  // Surfacing: across, along and down. Three fields because they are
+  // three quantities, and the table decides which of them this type has.
+  if (cam::OpTypeHas(op.type, cam::OpField::RotaryPattern)) {
+    // Radio buttons, for the reason the tool row above is buttons: two
+    // options are one click each this way, and a combo gathers with an
+    // empty label, so it could not be gated.
+    for (const cam::RotaryPatternRow& row : cam::RotaryPatterns()) {
+      const std::string label =
+          std::string(row.name) + "###pattern_" + row.name;
+      if (ImGui::RadioButton(label.c_str(), op.rotaryPattern == row.pattern) &&
+          op.rotaryPattern != row.pattern) {
+        op.rotaryPattern = row.pattern;
+        touched(op.id);
+      }
+      ImGui::SetItemTooltip(
+          "%s", row.pattern == cam::RotaryPattern::Spiral
+                    ? "One helix end to end, the part turning WHILE it cuts "
+                      "(continuous 4-axis): no seams, and the stepover is the "
+                      "spacing between turns, closer on steep walls."
+                    : "Passes along the axis, the part turning between them.");
+      ImGui::SameLine();
+    }
+    ImGui::NewLine();
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Lead) &&
+      op.rotaryPattern == cam::RotaryPattern::Helical) {
+    ImGui::SetNextItemWidth(80.0f);
+    float lead = static_cast<float>(op.leadMm);
+    if (ExprDragFloat(state, "lead mm###lead", &lead, 1.0f, -10000.0f, 10000.0f,
+                      "%.1f")) {
+      op.leadMm = lead;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip(
+        "How far along the axis a pass advances per turn, signed for the "
+        "hand. 0 follows the part's own twist, measured from its surface. "
+        "A part with no twist is cut as parallel passes, and says so.");
+    ImGui::SameLine();
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
+    ImGui::SetNextItemWidth(70.0f);
+    float angle = static_cast<float>(op.cutAngleDeg);
+    if (ExprDragFloat(state, "deg###cutangle", &angle, 1.0f, -180.0f, 180.0f,
+                      "%.0f")) {
+      op.cutAngleDeg = angle;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Raster direction, degrees anticlockwise from "
+                          "+X. Run the passes ACROSS the steepest slope, "
+                          "not along it.");
+    ImGui::SameLine();
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::ZStep)) {
+    ImGui::SetNextItemWidth(70.0f);
+    float zs = static_cast<float>(op.zStep);
+    if (ExprDragFloat(state, "Z step###zstep", &zs, 0.05f, 0.0f, 20.0f,
+                      "%.2f")) {
+      op.zStep = zs;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Millimetres of Z between laps. NOT a stepover: "
+                          "a waterline's spacing is a depth. 0 derives it "
+                          "from the cutter.");
+    ImGui::SameLine();
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::SampleStep)) {
+    ImGui::SetNextItemWidth(70.0f);
+    float ss = static_cast<float>(op.sampleStep);
+    if (ExprDragFloat(state, "sample###samplestep", &ss, 0.02f, 0.0f, 5.0f,
+                      "%.2f")) {
+      op.sampleStep = ss;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Millimetres ALONG a pass, where the surface is "
+                          "read. 0 derives it from the cutter and the "
+                          "scallop.");
+    ImGui::SameLine();
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
+    ImGui::SetNextItemWidth(70.0f);
+    float over = static_cast<float>(op.stepover);
+    if (ExprDragFloat(state, "Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,
+                      "%.2f")) {
+      op.stepover = over;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Fraction of the cutter taken per pass "
+                          "sideways — the number adaptive clearing holds "
+                          "constant");
+  }
+  // What this pass DOES NOT take: the roughing/finishing split. A pocket
+  // roughed with 0.3 mm left and then re-cut at 0 comes out with a wall
+  // the cutter has touched once, at full depth, in one pass — which is
+  // the difference between a flange a driver seats flat on and a stack of
+  // stepdown terraces. The engine has had it since C1; only a script
+  // could reach it.
+  if (cam::OpTypeHas(op.type, cam::OpField::StockToLeave)) {
+    float leave = static_cast<float>(op.stockToLeave);
+    ImGui::SetNextItemWidth(58.0f);
+    if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
+                      "%.2f")) {
+      op.stockToLeave = leave;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
+                          "with 0.2-0.4, then a second operation at 0 "
+                          "finishes the wall in one full-depth pass.");
+  }
+  // A hole in the floor is not an island: nothing stands in it, so the
+  // cutter should pass over rather than detour around — and a detour
+  // around a hole that nearly touches the pocket wall leaves an uncut
+  // sliver too narrow for the tool to come back to.
+  if (cam::OpTypeHas(op.type, cam::OpField::UseOutline)) {
+    if (ImGui::Checkbox("Over openings###useoutline", &op.useOutline))
+      touched(op.id);
+    ImGui::SetItemTooltip(
+        "Clear the face's outline and pass straight OVER the holes in it, "
+        "instead of going around each one. Turn it off when something "
+        "really does stand in the pocket.");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Climb)) {
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Climb###climb", &op.climb))
+      touched(op.id);
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Tabs)) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(55.0f);
+    int tabs = op.tabCount;
+    if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
+      op.tabCount = tabs;
+      touched(op.id);
+    }
+    // No longer "(profile only)" in words on an op that is not one: the
+    // control is simply not there.
+    ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
+                          "pass");
+  }
+  if (!op.targets.empty())
+    ImGui::TextDisabled("boundary: %s", op.targets[0].ref.name.c_str());
+  return changed;
+}
+
+void ApplyCamOpEdit(AppState& state, uint64_t opId) {
+  // One operation changed: re-cut it alone, as the panel's edits always did
+  // (`test_cam` pins one-at-a-time against all-at-once), and drop a verdict
+  // about the toolpath it replaces.
+  state.projectMetaDirty = true;
+  RefreshCamToolpath(state, opId);
+  state.camVerdict.clear();
+  state.camLeftover.clear();
 }
 
 int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
@@ -1832,25 +1633,218 @@ int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
   return removed;
 }
 
-bool CamOperationRow(AppState& state, uint64_t opId,
-                     const std::string& sentence,
-                     const std::vector<uint64_t>& order) {
+namespace {
+
+// The glyph for an operation type: the job toolbar's own where it has one,
+// so the row and the button that made it look alike.
+const char* OpGlyph(cam::OpType t) {
+  switch (t) {
+  case cam::OpType::Profile:
+    return ICON_FA_VECTOR_SQUARE;
+  case cam::OpType::Pocket:
+    return ICON_FA_SQUARE_MINUS;
+  case cam::OpType::Face:
+    return ICON_FA_GRIP_LINES;
+  case cam::OpType::Drill:
+    return ICON_FA_CIRCLE_DOT;
+  case cam::OpType::Adaptive:
+    return ICON_FA_WAVE_SQUARE;
+  case cam::OpType::EdgeRound:
+    return ICON_FA_BORDER_TOP_LEFT;
+  case cam::OpType::SurfaceParallel:
+    return ICON_FA_BARS;
+  case cam::OpType::SurfaceWaterline:
+    return ICON_FA_LAYER_GROUP;
+  case cam::OpType::SurfaceRotary:
+    return ICON_FA_ROTATE;
+  case cam::OpType::Count:
+    break;
+  }
+  return ICON_FA_SHAPES;
+}
+
+} // namespace
+
+std::string CamOpSummary(const cam::Setup& setup, const cam::Operation& op) {
+  const cam::Tool* tool = setup.FindTool(op.toolNumber);
+  const double dia = tool != nullptr ? tool->diameter : 0.0;
+  char buf[256];
+  if (op.type == cam::OpType::SurfaceRotary) {
+    // A rotary op has no depth and no climb: it has a pattern, a spacing and
+    // -- for the helical pattern -- a lead.
+    const double step = std::clamp(op.stepover, 0.02, 0.95) * dia;
+    std::snprintf(buf, sizeof(buf), "%s 4-axis, %.3g mm tool, %.2f mm apart",
+                  cam::RotaryPatternName(op.rotaryPattern), dia, step);
+    std::string out = buf;
+    if (op.rotaryPattern == cam::RotaryPattern::Helical) {
+      if (op.leadMm != 0.0) {
+        std::snprintf(buf, sizeof(buf), ", lead %.1f mm", op.leadMm);
+        out += buf;
+      } else {
+        out += ", lead from the part";
+      }
+    }
+    if (op.stepdown > 0.0) {
+      std::snprintf(buf, sizeof(buf), ", layers every %.3g mm", op.stepdown);
+      out += buf;
+    }
+    if (op.stockToLeave > 0.0) {
+      std::snprintf(buf, sizeof(buf), ", leaves %.3g mm", op.stockToLeave);
+      out += buf;
+    }
+    return out;
+  }
+  if (op.type == cam::OpType::SurfaceParallel ||
+      op.type == cam::OpType::SurfaceWaterline) {
+    std::snprintf(buf, sizeof(buf), "%s finish, %.3g mm tool, %.3g mm deep",
+                  op.type == cam::OpType::SurfaceParallel ? "raster"
+                                                          : "waterline",
+                  dia, op.topZ - op.bottomZ);
+    return buf;
+  }
+  const int passes = static_cast<int>(cam::DepthPasses(op).size());
+  std::snprintf(buf, sizeof(buf), "%.3g mm tool, %.3g mm deep in %d pass%s%s",
+                dia, op.topZ - op.bottomZ, passes, passes == 1 ? "" : "es",
+                cam::OpTypeHas(op.type, cam::OpField::Climb)
+                    ? (op.climb ? ", climb" : ", conventional")
+                    : "");
+  return buf;
+}
+
+std::string CamOpPathLine(const cam::Operation& op, const cam::Toolpath& tp) {
+  char buf[160];
+  if (tp.pending)
+    return tp.moves.empty() ? "cutting..."
+                            : "cutting... (showing the previous toolpath)";
+  if (!tp.error.empty())
+    return "cut nothing: " + tp.error;
+  // A rotary op's Z is its distance from the axis, so "down to" is a RADIUS.
+  std::snprintf(
+      buf, sizeof(buf), "%zu moves, %.0f mm of cutting, down to %s%.2f",
+      tp.moves.size(), tp.CutLength(),
+      op.type == cam::OpType::SurfaceRotary ? "radius " : "Z", tp.MinZ());
+  std::string out = buf;
+  if (!tp.strategy.empty())
+    out += "\ncut as " + tp.strategy;
+  return out;
+}
+
+CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
+                               const cam::Operation& op,
+                               const std::vector<uint64_t>& order) {
   constexpr SelectionItem::Kind kKind = SelectionItem::Kind::Operation;
-  // Own kind only: a plain click keeps the faces picked on the job — they
-  // are what the verb windows are aimed at.
-  if (ImGui::Selectable((sentence + "###op_row").c_str(),
-                        IsSelected(state, kKind, opId)))
-    ListRowClicked(state, kKind, opId, order, /*ownKindOnly=*/true);
+  CamOpRowResult out;
+
+  // What its toolpath came to: the one with something to say, else the last.
+  const cam::Toolpath* path = nullptr;
+  for (const cam::Toolpath& tp : state.camToolpaths)
+    if (tp.operationId == op.id && (path == nullptr || !tp.error.empty()))
+      path = &tp;
+  const bool failed = path != nullptr && !path->error.empty();
+
+  // The glyph, apart from the Selectable so the row's id is the op's --
+  // the feature list's layout. Red when it cut nothing: an op that produced
+  // no toolpath must not look like one that cut the part.
+  const ImVec4 dim = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+  const ImVec4 red(0.95f, 0.45f, 0.40f, 1.0f);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextColored(failed ? red : dim, "%s",
+                     failed ? ICON_FA_TRIANGLE_EXCLAMATION : OpGlyph(op.type));
+  ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
+
+  const std::string name =
+      op.name.empty() ? std::string(cam::OpTypeNameOrThrow(op.type)) : op.name;
+  if (!op.enabled)
+    ImGui::PushStyleColor(ImGuiCol_Text, dim);
+  if (ImGui::Selectable((name + "###op_row").c_str(),
+                        IsSelected(state, kKind, op.id),
+                        ImGuiSelectableFlags_AllowDoubleClick |
+                            ImGuiSelectableFlags_AllowOverlap)) {
+    if (ImGui::IsMouseDoubleClicked(0))
+      out.edit = true;
+    else
+      // Own kind only: a plain click keeps the faces picked on the job --
+      // they are what the verb windows are aimed at.
+      ListRowClicked(state, kKind, op.id, order, /*ownKindOnly=*/true);
+  }
+  if (!op.enabled)
+    ImGui::PopStyleColor();
+
+  // Drag to reorder: the order is the cutting sequence, which GenerateAll and
+  // the post both walk. The row itself is the handle, as a feature's is.
+  if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+    ImGui::SetDragDropPayload("cam_op", &op.id, sizeof(uint64_t));
+    ImGui::Text("%s %s", OpGlyph(op.type), name.c_str());
+    ImGui::EndDragDropSource();
+  }
+  if (ImGui::BeginDragDropTarget()) {
+    if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("cam_op")) {
+      uint64_t from = 0;
+      std::memcpy(&from, pl->Data, sizeof(uint64_t));
+      if (from != op.id)
+        out.droppedHere = from;
+    }
+    ImGui::EndDragDropTarget();
+  }
+
+  // The summary and what came of it, on hover -- the long sentence this row
+  // used to BE.
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) &&
+      ImGui::GetDragDropPayload() == nullptr) {
+    ImGui::BeginTooltip();
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+    ImGui::TextUnformatted(CamOpSummary(setup, op).c_str());
+    if (path != nullptr)
+      ImGui::TextColored(failed ? red : dim, "%s",
+                         CamOpPathLine(op, *path).c_str());
+    if (!op.enabled)
+      ImGui::TextDisabled("Disabled: not cut, not posted");
+    ImGui::TextDisabled("Double-click to edit, drag to reorder");
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+  }
+
   bool wantDelete = false;
   if (ImGui::BeginPopupContextItem("###op_ctx")) {
-    ListRowContext(state, kKind, opId, /*ownKindOnly=*/true);
+    if (ImGui::MenuItem("Edit###op_edit"))
+      out.edit = true;
+    if (ImGui::MenuItem(op.enabled ? "Disable###op_enable"
+                                   : "Enable###op_enable"))
+      out.toggleEnabled = true;
+    const bool ghosted = state.camGhostOp == op.id;
+    if (ImGui::MenuItem("Show what it removes###op_ghost", nullptr, ghosted))
+      state.camGhostOp = ghosted ? 0 : op.id;
+    ImGui::Separator();
+    ListRowContext(state, kKind, op.id, /*ownKindOnly=*/true);
     const size_t picked = SelectedIds(state, kKind).size();
     if (ImGui::MenuItem(
             (DeleteLabel(picked, "operation") + "###op_delete").c_str()))
       wantDelete = true;
     ImGui::EndPopup();
   }
-  return wantDelete;
+  out.deleteSelection = wantDelete;
+
+  // The tool, dim, at the right: which cutter is the one thing a list of
+  // operations is scanned for.
+  if (const cam::Tool* tool = setup.FindTool(op.toolNumber)) {
+    char tail[64];
+    std::snprintf(tail, sizeof(tail), "T%d %.3g mm", tool->number,
+                  tool->diameter);
+    const float w = ImGui::CalcTextSize(tail).x;
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - w));
+    ImGui::TextDisabled("%s", tail);
+  }
+  // A failure says why right under the row, not only in a tooltip: a job
+  // with a dead operation is the thing this list has to make obvious.
+  if (failed) {
+    ImGui::PushStyleColor(ImGuiCol_Text, red);
+    ImGui::Indent(ImGui::GetFontSize() * 1.8f);
+    ImGui::TextWrapped("%s", path->error.c_str());
+    ImGui::Unindent(ImGui::GetFontSize() * 1.8f);
+    ImGui::PopStyleColor();
+  }
+  return out;
 }
 
 } // namespace ui
@@ -1864,10 +1858,21 @@ void RefreshCamToolpaths(AppState&) {}
 void RefreshCamToolpath(AppState&, uint64_t) {}
 void DropCamToolpath(AppState&, uint64_t) {}
 int RemoveCamOperations(AppState&, const std::vector<uint64_t>&) { return 0; }
-bool CamOperationRow(AppState&, uint64_t, const std::string&,
-                     const std::vector<uint64_t>&) {
+CamOpRowResult CamOperationRow(AppState&, const cam::Setup&,
+                               const cam::Operation&,
+                               const std::vector<uint64_t>&) {
+  return {};
+}
+std::string CamOpSummary(const cam::Setup&, const cam::Operation&) {
+  return {};
+}
+std::string CamOpPathLine(const cam::Operation&, const cam::Toolpath&) {
+  return {};
+}
+bool DrawCamOpSettings(AppState&, cam::Setup&, cam::Operation&) {
   return false;
 }
+void ApplyCamOpEdit(AppState&, uint64_t) {}
 } // namespace ui
 
 #endif

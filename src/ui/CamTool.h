@@ -62,4 +62,9 @@ void DrawCamLabels(AppState& state);
 // stops being a thing you remember to run.
 void RunCamVerification(AppState& state);
 
+// Opens the CAM tool window on one operation's settings -- a double-click on
+// its row, or Edit in its menu. The settings used to be an "Advanced" tree in
+// every row of the docked panel (docs/ui/cam-panel-tidy-plan.md).
+void EditCamOperation(AppState& state, uint64_t opId);
+
 } // namespace ui

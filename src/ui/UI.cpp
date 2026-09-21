@@ -16,6 +16,7 @@
 #include "render/SketchRenderer.h"
 #include "render/StockRenderer.h"
 #include "render/UnderlayRenderer.h"
+#include "ui/CamGenerate.h" // DrawCamGenerateWindow
 #include "ui/CamPanel.h"
 #include "ui/CamPlayback.h" // DrawCamTransportWindow
 #include "ui/CamTool.h"
@@ -871,6 +872,7 @@ void DrawUI(AppState& state) {
   DrawPerfHud(state);
   DrawToolWindow(state);
   DrawCamTransportWindow(state); // the cutting simulation's transport
+  DrawCamGenerateWindow(state);  // the run: generate, verify, save
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);

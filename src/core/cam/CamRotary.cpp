@@ -421,8 +421,11 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
       lefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
       const size_t k = static_cast<size_t>(j) * machined.nx + i;
       endFacing[k] = facesEnd(i, j) ? 1 : 0;
-      if (got - hi > kLeftoverFloor)
+      if (got - hi > kLeftoverFloor) {
         over[k] = 1;
+        if (endFacing[k])
+          v.leftoverEndFaceArea += machined.res * machined.ArcAt(got);
+      }
       if (!endFacing[k]) {
         surfaceLefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
         if (got - hi > v.leftoverSurfaceMax) {

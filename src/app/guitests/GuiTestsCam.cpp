@@ -195,18 +195,20 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(panel != nullptr);
     // The setup row's combo is the MACHINE since round two; the post dialect
     // moved under "Stock and safety" as one of the machine's own fields.
+    // Save G-code moved to the Generate window (docs/ui/cam-panel-tidy-
+    // plan.md); the panel's run line is the widget that took its place.
     const ImGuiID machineCombo = panel->GetID("###cam_machine");
-    const ImGuiID saveButton = panel->GetID("###cam_save_gcode");
-    IM_CHECK(machineCombo != saveButton);
+    const ImGuiID runStatus = panel->GetID("###cam_run_status");
+    IM_CHECK(machineCombo != runStatus);
     ImGuiTestItemList items;
     ctx->GatherItems(&items, "//CAM###CamPanel");
-    bool sawCombo = false, sawSave = false;
+    bool sawCombo = false, sawRun = false;
     for (const ImGuiTestItemInfo& item : items) {
       sawCombo |= item.ID == machineCombo;
-      sawSave |= item.ID == saveButton;
+      sawRun |= item.ID == runStatus;
     }
     IM_CHECK(sawCombo); // the machine…
-    IM_CHECK(sawSave);  // …and Save G-code, as two separate widgets
+    IM_CHECK(sawRun);   // …and the run line, as two separate widgets
     // ...and the post combo is still reachable, under its header.
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemOpen("###cam_stock");
@@ -245,10 +247,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     const uint64_t first = Job()->FindSetup(setup.id)->operations[0].id;
     // The row PushID's the operation's id as an int, which "$$<n>" addresses.
+    // Removed from its row's menu, as a feature is: the rows lost their x
+    // buttons to the feature list's gestures (docs/ui/cam-panel-tidy-plan.md).
     const std::string ref = "//CAM###ToolWindow/$$" +
                             std::to_string(static_cast<int>(first)) +
-                            "/###rmop";
-    ctx->ItemClick(ref.c_str());
+                            "/###op_row";
+    ctx->ItemClick(ref.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###op_delete");
     ctx->Yield(3);
     const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
@@ -648,7 +654,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // to being a label.
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
-    ctx->ItemClick("###cam_generate");
+    // Generate is a toolbar tool with its own window now
+    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
+    // clicks of what follows.
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camGenerateOpen);
+    s_App->camGenerateOpen = false;
+    ctx->SetRef("//CAM###CamPanel");
     ctx->Yield(5);
     live = Job()->FindSetup(setup.id);
     IM_CHECK(!live->operations.empty());
@@ -722,14 +735,18 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const uint64_t firstId = live->operations[0].id;
     const uint64_t secondId = live->operations[1].id;
 
-    // Point the first operation at the smaller cutter, by clicking.
-    const std::string adv =
-        "**/$$" + std::to_string(firstId) + "/Advanced###adv";
-    ctx->ItemClick(adv.c_str());
+    // Point the first operation at the smaller cutter, by clicking: a
+    // double-click on its row opens its editor, as a feature's does, and the
+    // tool buttons are there (they were an inline "Advanced" tree).
+    const std::string rowA = "**/$$" + std::to_string(firstId) + "/###op_row";
+    ctx->ItemDoubleClick(rowA.c_str());
     ctx->Yield(2);
-    // Only one Advanced is open, so exactly one T2 button is visible.
-    ctx->ItemClick("**/###optool_t2");
+    IM_CHECK_EQ(s_App->camEditOp, firstId);
+    ctx->ItemClick("//###ToolWindow/**/###optool_t2");
     ctx->Yield(3);
+    s_App->camEditOp = 0;
+    s_App->camToolOpen = false;
+    ctx->Yield(2);
     live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations[0].toolNumber, 2);
     // And the stepdown followed the cutter: half of 3, not half of 6. A pass
@@ -740,8 +757,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(live->operations[1].stepdown - 3.0) < 1e-6);
 
     // Now drag the second operation above the first.
-    const std::string dragA = "**/$$" + std::to_string(firstId) + "/###drag";
-    const std::string dragB = "**/$$" + std::to_string(secondId) + "/###drag";
+    // The row is its own drag handle, as a feature's is.
+    const std::string dragA = "**/$$" + std::to_string(firstId) + "/###op_row";
+    const std::string dragB = "**/$$" + std::to_string(secondId) + "/###op_row";
     ctx->ItemDragAndDrop(dragB.c_str(), dragA.c_str());
     ctx->Yield(3);
     live = Job()->FindSetup(setup.id);
@@ -1261,10 +1279,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
 
-    const std::string adv = "**/$$" + std::to_string(op.id) + "/Advanced###adv";
-    ctx->ItemClick(adv.c_str());
+    // The op's settings open in its editor on a double-click.
+    const std::string row = "**/$$" + std::to_string(op.id) + "/###op_row";
+    ctx->ItemDoubleClick(row.c_str());
     ctx->Yield(2);
-    ctx->ItemClick("**/spiral###pattern_spiral");
+    IM_CHECK_EQ(s_App->camEditOp, op.id);
+    ctx->ItemClick("//###ToolWindow/**/spiral###pattern_spiral");
     ctx->Yield(3);
     setup = Job()->FindSetup(added.id);
     IM_CHECK(setup->operations[0].rotaryPattern == cam::RotaryPattern::Spiral);
@@ -1284,12 +1304,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // Helical is the third radio, and only it shows the lead: a number the
     // other two patterns do not read is not offered for them.
-    IM_CHECK(!ctx->ItemExists("**/lead mm###lead"));
-    ctx->ItemClick("**/helical###pattern_helical");
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/**/lead mm###lead"));
+    ctx->ItemClick("//###ToolWindow/**/helical###pattern_helical");
     ctx->Yield(3);
     setup = Job()->FindSetup(added.id);
     IM_CHECK(setup->operations[0].rotaryPattern == cam::RotaryPattern::Helical);
-    IM_CHECK(ctx->ItemExists("**/lead mm###lead"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/**/lead mm###lead"));
+    s_App->camEditOp = 0;
+    s_App->camToolOpen = false;
+    ctx->Yield(2);
 
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
@@ -1581,13 +1604,120 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       matchesFullPass("after editing one operation");
     }
 
-    // And a delete, through the tool window's own button.
+    // And a delete, from a row's menu in the tool window.
     const size_t before = s_App->camToolpaths.size();
-    ctx->ItemClick("//CAM###ToolWindow/**/x###rmop");
+    ctx->ItemClick("//###ToolWindow/**/###op_row", ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###op_delete");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->camToolpaths.size(), before - 1);
     matchesFullPass("after deleting one");
     s_App->camToolOpen = false;
+  };
+
+  t = IM_REGISTER_TEST(engine, "cam", "generate_is_a_tool_with_a_window");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/ui/cam-panel-tidy-plan.md. The toolbar's gears used to generate
+    // SILENTLY, with the verdict landing in the docked panel below the
+    // operations; now they open the run where they were pressed -- the
+    // verdict, the output options and Save G-code -- like Simulate.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    const cam::DerivedOp d =
+        cam::DeriveOperation(*Job()->FindSetup(setup.id), ui::JobBodies(*s_App),
+                             cam::OpType::Profile, {});
+    IM_CHECK(d.ok);
+    cam::Operation op = d.op;
+    op.id = Job()->AllocateId();
+    Job()->FindSetup(setup.id)->operations.push_back(op);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camGenerateOpen);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    ctx->SetRef("//###CamGenerate");
+    IM_CHECK(ctx->ItemExists("###cam_generate")); // Regenerate
+    IM_CHECK(ctx->ItemExists("###cam_split"));
+    IM_CHECK(ctx->ItemExists("###cam_save_gcode"));
+
+    // Save, from the window: beside the project, named for it and the setup.
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_cam_generate_test";
+    std::filesystem::create_directories(dir);
+    s_App->projectPath = (dir / "plate.dsgn").string();
+    ctx->ItemClick("###cam_save_gcode");
+    ctx->Yield(2);
+    ctx->LogInfo("wrote: %s", s_App->camLastPost.c_str());
+    IM_CHECK(std::filesystem::exists(s_App->camLastPost));
+    std::filesystem::remove_all(dir);
+    s_App->projectPath.clear();
+
+    // Closed by its own close box, like any window.
+    s_App->camGenerateOpen = false;
+    ctx->Yield(2);
+    IM_CHECK(ImGui::FindWindowByName("###CamGenerate") == nullptr ||
+             !ImGui::FindWindowByName("###CamGenerate")->Active);
+  };
+
+  t = IM_REGISTER_TEST(engine, "cam", "an_op_row_has_the_feature_gestures");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Rows in the part feature list's style: the menu disables (and the row
+    // dims), a double-click edits in the tool window.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 13.0;
+    op.bottomZ = -1.0;
+    Job()->FindSetup(setup.id)->operations.push_back(op);
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    const std::string row = "**/$$" + std::to_string(op.id) + "/###op_row";
+
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###op_enable");
+    ctx->Yield(2);
+    IM_CHECK(!Job()->FindSetup(setup.id)->operations[0].enabled);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###op_enable");
+    ctx->Yield(2);
+    IM_CHECK(Job()->FindSetup(setup.id)->operations[0].enabled);
+
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditOp, op.id);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###op_name"));
+    ctx->ItemClick("//###ToolWindow/###cam_edit_done");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditOp, (uint64_t)0);
+    IM_CHECK(!s_App->camToolOpen);
+
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
   };
 
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
@@ -1642,7 +1772,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
 
     // Generate: toolpaths exist, and the backplot draws them.
-    ctx->ItemClick("###cam_generate");
+    // Generate is a toolbar tool with its own window now
+    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
+    // clicks of what follows.
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camGenerateOpen);
+    s_App->camGenerateOpen = false;
+    ctx->SetRef("//CAM###CamPanel");
     ctx->Yield(2);
 
     // Hand the shared dock node back to Model NOW, not at the end. A test
@@ -1750,7 +1887,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
-    ctx->ItemClick("###cam_generate");
+    // Generate is a toolbar tool with its own window now
+    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
+    // clicks of what follows.
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camGenerateOpen);
+    s_App->camGenerateOpen = false;
+    ctx->SetRef("//CAM###CamPanel");
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolpaths.empty());
 

@@ -476,8 +476,8 @@ bridging, not porting.
 - **When it is used:** the verb stays one verb. Adaptive is chosen
   automatically for pockets deeper than one tool diameter — the regime where
   low radial engagement at full depth pays, and where a small spindle
-  benefits most — with the Advanced disclosure able to force either
-  strategy. "Two clicks, nothing typed" survives.
+  benefits most — with the op's settings (its editor, opened from its row)
+  able to force either strategy. "Two clicks, nothing typed" survives.
 - **Runtime:** `Execute` takes a progress callback and can be slow on a large
   region. v1 runs it synchronously and states the region cap; if it is slow
   in practice the app already has the `TopoJob`/`StudyJob` async pattern to

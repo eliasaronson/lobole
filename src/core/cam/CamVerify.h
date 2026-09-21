@@ -102,6 +102,11 @@ struct Verdict {
   double leftoverSurfaceMax = 0.0;
   glm::dvec2 leftoverSurfaceAt{0.0};
   double leftoverSurfaceP99 = 0.0;
+  // Rotary only: how much leftover (over the area floor) is on end faces,
+  // summed by CELL. Counting it by region printed "0 mm2 in 0 places" beside
+  // 1.26 mm of it: a region round a dome is mostly surface, so no region was
+  // called an end face while its steepest cells were.
+  double leftoverEndFaceArea = 0.0;
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material

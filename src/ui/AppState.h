@@ -1612,6 +1612,15 @@ struct AppState {
   // The operation the viewport is illustrating (G3): its removed volume, its
   // depth label. 0 = none, which is what closing the session leaves behind.
   uint64_t camGhostOp = 0;
+  // The operation whose settings the CAM tool window is editing (a double-
+  // click on its row, or Edit in its menu); 0 = none. Settings used to be an
+  // "Advanced" tree inline in every row of the docked panel
+  // (docs/ui/cam-panel-tidy-plan.md).
+  uint64_t camEditOp = 0;
+  // The Generate window is open: the run -- generate, verify, the verdict,
+  // the output options and Save G-code -- as a floating tool, like Simulate,
+  // instead of a block in the docked panel.
+  bool camGenerateOpen = false;
   // The face region the ghost and the hover preview draw, cached. Both used
   // to section the picked face — through a copy of every body — on EVERY
   // FRAME the ghost was on or the cursor sat over a face, which is OCC work

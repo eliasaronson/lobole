@@ -341,7 +341,8 @@ constexpr MethodDoc kCamMethods[] = {
      "/ _at / leftover_surface_p99_mm, the same measured OFF the faces "
      "turned toward the axis's ends (steeper than 70 degrees along it), which "
      "is what tells two rotary patterns apart; each leftover_biggest region "
-     "then says end_face), "
+     "then says end_face, and leftover_end_face_area_mm2 sums the end faces' "
+     "leftover by cell), "
      "file_errors (with first_file_error: lines the PARSER could not read -- "
      "a NaN coordinate, a feed of zero; anything else in the answer was "
      "measured on a different program, so this counts against ok), "
@@ -1581,6 +1582,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       out["leftover_surface_at"] = {v.leftoverSurfaceAt.x,
                                     v.leftoverSurfaceAt.y};
       out["leftover_surface_p99_mm"] = v.leftoverSurfaceP99;
+      out["leftover_end_face_area_mm2"] = v.leftoverEndFaceArea;
     }
     {
       // A simulated cut on a height map at `resolution_mm`, not the B-Rep —

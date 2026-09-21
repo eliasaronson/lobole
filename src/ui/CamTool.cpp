@@ -858,72 +858,93 @@ void OperationList(AppState& state, cam::Setup& setup) {
     return;
   ImGui::Separator();
   // Deferred, so the list is not mutated while it is being walked — the
-  // same shape the docked panel uses.
-  std::vector<uint64_t> removeOps; // the row's own x button
-  bool deleteSelected = false;     // the row menu's Delete (the selection)
+  // same shape the docked panel uses, and the same row (CamOperationRow):
+  // glyph, name, tool, a red mark and the reason when it cut nothing.
+  bool deleteSelected = false; // the row menu's Delete (the selection)
+  uint64_t moveOp = 0;
+  size_t moveTo = 0;
   std::vector<uint64_t> order;
   for (const cam::Operation& op : setup.operations)
     order.push_back(op.id);
-  for (const cam::Operation& op : setup.operations) {
-    const cam::Tool* tool = setup.FindTool(op.toolNumber);
-    const double depth = op.topZ - op.bottomZ;
-    const int passes = static_cast<int>(cam::DepthPasses(op).size());
+  for (size_t i = 0; i < setup.operations.size(); i++) {
+    cam::Operation& op = setup.operations[i];
     ImGui::PushID(static_cast<int>(op.id));
-    const bool ghosted = state.camGhostOp == op.id;
-    if (ImGui::RadioButton("###ghost", ghosted))
-      state.camGhostOp = ghosted ? 0 : op.id;
-    ImGui::SetItemTooltip("Show what this one removes");
-    ImGui::SameLine();
-    // Removing an operation was only possible in the DOCKED panel, which is
-    // a tab behind Model — while every operation is made here. An operation
-    // added by mistake (or three, when the first two silently cut nothing)
-    // could not be taken back without going to find another window
-    // (docs/cam/dogfood-round.md).
-    if (ImGui::SmallButton("x###rmop"))
-      removeOps = {op.id};
-    ImGui::SetItemTooltip("Remove this operation");
-    ImGui::SameLine();
-    // What the operation SAYS about itself, from its own fields — and then
-    // what actually came of it. This line used to be the description alone,
-    // so an operation that generated nothing rendered identically to one
-    // that cut the part: the user clicked "Clear a pocket" three times at a
-    // face that never changed, because nothing in this window ever said the
-    // op was dead (docs/cam/dogfood-round.md). The docked panel printed it;
-    // the floating window is where the work happens.
-    const cam::Toolpath* path = nullptr;
-    for (const cam::Toolpath& tp : state.camToolpaths)
-      if (tp.operationId == op.id && (path == nullptr || !tp.error.empty()))
-        path = &tp; // the one with something to say, else the last
-    char sentence[256];
-    std::snprintf(sentence, sizeof(sentence),
-                  "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
-                  op.name.c_str(), tool != nullptr ? tool->diameter : 0.0,
-                  depth, passes, passes == 1 ? "" : "es",
-                  op.climb ? "climb" : "conventional",
-                  op.type == cam::OpType::Adaptive ? ", adaptive" : "");
-    // The sentence is the ROW — select, Ctrl/Shift-extend, right-click
-    // Delete — the same row the docked panel draws (CamOperationRow).
-    if (CamOperationRow(state, op.id, sentence, order))
+    const CamOpRowResult row = CamOperationRow(state, setup, op, order);
+    if (row.deleteSelection)
       deleteSelected = true;
-    if (path != nullptr && !path->error.empty()) {
-      RefusalText(std::string(ICON_FA_TRIANGLE_EXCLAMATION) +
-                  " cut nothing — " + path->error);
-    } else if (path != nullptr && !path->strategy.empty()) {
-      // It cut, but not by the strategy its type names. Feeds were chosen
-      // for one of them.
-      ImGui::PushTextWrapPos(320.0f);
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
-      ImGui::TextWrapped("%s cut %s", ICON_FA_TRIANGLE_EXCLAMATION,
-                         path->strategy.c_str());
-      ImGui::PopStyleColor();
-      ImGui::PopTextWrapPos();
+    if (row.toggleEnabled) {
+      op.enabled = !op.enabled;
+      ApplyCamOpEdit(state, op.id);
+    }
+    if (row.edit)
+      EditCamOperation(state, op.id);
+    if (row.droppedHere != 0) {
+      moveOp = row.droppedHere;
+      moveTo = i;
     }
     ImGui::PopID();
   }
+  if (moveOp != 0 && cam::MoveOperation(setup, moveOp, moveTo)) {
+    state.projectMetaDirty = true;
+    state.camVerdict.clear();
+    state.camLeftover.clear();
+  }
   if (deleteSelected)
     DeleteSelection(state);
-  else if (!removeOps.empty())
-    RemoveCamOperations(state, removeOps);
+}
+
+// One operation's settings, when it is being edited (a double-click on its
+// row). False when there is nothing to edit, so the caller draws the plain
+// window instead.
+bool DrawOperationEditor(AppState& state) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  cam::Operation* op = nullptr;
+  if (setup != nullptr)
+    for (cam::Operation& o : setup->operations)
+      if (o.id == state.camEditOp)
+        op = &o;
+  if (op == nullptr) {
+    state.camEditOp = 0; // deleted, or its setup is no longer the active one
+    return false;
+  }
+  BeginToolWindowFrame(state, "Edit operation");
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+
+  char name[128];
+  std::snprintf(name, sizeof(name), "%s", op->name.c_str());
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
+  if (ImGui::InputText("Name###op_name", name, sizeof(name))) {
+    op->name = name; // a name changes no toolpath
+    state.projectMetaDirty = true;
+  }
+  ImGui::TextDisabled("%s", CamOpSummary(*setup, *op).c_str());
+  ImGui::Separator();
+
+  if (DrawCamOpSettings(state, *setup, *op))
+    ApplyCamOpEdit(state, op->id);
+
+  for (const cam::Toolpath& tp : state.camToolpaths)
+    if (tp.operationId == op->id) {
+      const bool failed = !tp.error.empty();
+      ImGui::PushStyleColor(
+          ImGuiCol_Text, failed
+                             ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
+                             : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::TextWrapped("%s", CamOpPathLine(*op, tp).c_str());
+      ImGui::PopStyleColor();
+    }
+  if (!state.camRefusal.empty())
+    RefusalText(state.camRefusal);
+
+  ImGui::PopTextWrapPos();
+  ImGui::Separator();
+  if (ImGui::Button("Done###cam_edit_done")) {
+    state.camEditOp = 0;
+    state.camToolOpen = false;
+    state.camRefusal.clear();
+  }
+  ImGui::End();
+  return true;
 }
 
 } // namespace
@@ -943,6 +964,8 @@ void DrawCamToolWindow(AppState& state) {
       state.slotPick = {};
     return;
   }
+  if (state.camEditOp != 0 && DrawOperationEditor(state))
+    return;
   const Verb* verb = FindVerb(state.camVerb);
   BeginToolWindowFrame(state, verb != nullptr ? verb->label : "CAM");
 
@@ -1053,6 +1076,20 @@ void DrawCamToolWindow(AppState& state) {
       state.slotPick = {};
   }
   ImGui::End();
+}
+
+void EditCamOperation(AppState& state, uint64_t opId) {
+  if (!state.job)
+    return;
+  // The editor takes the tool window over from whatever verb held it: one
+  // tool window at a time, the rule every tool here follows.
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.camVerb = CamVerb::None;
+  state.camVerbOp = 0;
+  state.camRefusal.clear();
+  state.camEditOp = opId;
+  state.camToolOpen = true;
 }
 
 void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
@@ -1358,6 +1395,7 @@ void RunCamVerification(AppState& state) {
 
 namespace ui {
 void DrawCamToolWindow(AppState&) {}
+void EditCamOperation(AppState&, uint64_t) {}
 void StartCamVerb(AppState&, AppState::CamVerb) {}
 int VerbTool(const AppState&, const cam::Setup&) { return 0; }
 void LookDownTheSpindle(AppState&) {}

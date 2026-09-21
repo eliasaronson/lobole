@@ -444,3 +444,11 @@ the tab bar's `+` and set up in the panel — machine, stock, parts — the way
 an assembly is made and then filled ([job-document.md](job-document.md),
 round two, M3).
 
+The panel is the job's STRUCTURE now, and the run is a tool
+([cam-panel-tidy-plan.md](../ui/cam-panel-tidy-plan.md)). Operations are rows
+in the feature list's style: double-click opens an op's settings in the CAM
+tool window, and right-click offers Edit, Enable/Disable, show what it
+removes, and Delete. Generate, the verdict, the output options and Save G-code
+are the Generate window, which the toolbar's gears open. The panel keeps one
+status line that opens it.
+

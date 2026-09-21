@@ -828,25 +828,17 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.worstOvershoot, v.outsideAxis, v.firstOutsideLine);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
-  double endArea = 0.0;
-  int endPlaces = 0;
-  for (const Verdict::Region& r : v.biggest)
-    if (r.endFace) {
-      endArea += r.area;
-      endPlaces++;
-    }
   if (v.rotary && v.maxLeftover > tolerance &&
       v.leftoverSurfaceMax <= tolerance) {
     // Everything left is on faces turned toward the ends of the axis, which
     // no rotary pass reaches whatever the pattern: said as that, not as the
     // missing operation the sentence below suspects.
     std::snprintf(buf, sizeof(buf),
-                  "Leaves %.2f mm on the end faces (%.0f mm2 in %d place%s) "
-                  "-- faces turned toward the ends of the axis, which no "
-                  "rotary pass reaches. The rest of the surface is within "
-                  "tolerance: %.3f mm at most.",
-                  v.maxLeftover, endArea, endPlaces, endPlaces == 1 ? "" : "s",
-                  v.leftoverSurfaceMax);
+                  "Leaves %.2f mm on the end faces (%.0f mm2) -- faces turned "
+                  "toward the ends of the axis, which no rotary pass reaches. "
+                  "The rest of the surface is within tolerance: %.3f mm at "
+                  "most.",
+                  v.maxLeftover, v.leftoverEndFaceArea, v.leftoverSurfaceMax);
     out.push_back({VerdictLine::Level::Warn, buf});
   } else if (v.rotary && v.leftoverSurfaceMax > tolerance) {
     std::snprintf(buf, sizeof(buf),
@@ -856,9 +848,10 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   "enough.",
                   v.leftoverSurfaceMax, v.leftoverSurfaceAt.x,
                   v.leftoverSurfaceAt.y, v.leftoverSurfaceP99,
-                  endPlaces > 0 ? "; the end faces, which no rotary pass "
-                                  "reaches, leave more"
-                                : "");
+                  v.leftoverEndFaceArea > 0.0
+                      ? "; the end faces, which no rotary pass "
+                        "reaches, leave more"
+                      : "");
     out.push_back({VerdictLine::Level::Warn, buf});
   } else if (v.maxLeftover > tolerance) {
     // The AREA is what makes this readable: four inside corners a 3 mm cutter

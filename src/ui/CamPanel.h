@@ -51,14 +51,42 @@ void DropCamToolpath(AppState& state, uint64_t opId);
 // Delete key (ListSelection.h) needed a third. Returns how many went.
 int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids);
 
-// The row every operation list draws for one operation: `sentence` is what
-// it is, drawn as a Selectable so a click selects it, Ctrl/Shift extend
-// (`order` is the ids as listed, which a Shift range spans) and right-click
-// offers Delete for the selection. Inside the caller's PushID(op.id). Returns
-// true when the menu asked for Delete — the caller defers it, because it is
-// walking the list the delete would shrink.
-bool CamOperationRow(AppState& state, uint64_t opId,
-                     const std::string& sentence,
-                     const std::vector<uint64_t>& order);
+// The row every operation list draws for one operation, in the part feature
+// list's style (docs/ui/cam-panel-tidy-plan.md): the type's glyph, the name as
+// a full-width Selectable, the tool as a dim tail, dimmed when disabled, a red
+// mark when it cut nothing. Click selects (Ctrl/Shift extend over `order`, the
+// ids as listed), double-click edits, drag reorders, right-click offers Edit,
+// Enable/Disable, show what it removes, and Delete for the selection. The
+// tooltip is the op's summary and what its toolpath came to. Inside the
+// caller's PushID(op.id). The caller applies what it asks for, because it is
+// walking the list those would change.
+struct CamOpRowResult {
+  bool deleteSelection = false; // the menu's Delete
+  bool edit = false;            // double-click, or the menu's Edit
+  bool toggleEnabled = false;   // the menu's Enable / Disable
+  uint64_t droppedHere = 0;     // an op dragged onto this row, by id
+};
+CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
+                               const cam::Operation& op,
+                               const std::vector<uint64_t>& order);
+
+// What an operation IS, in a phrase, from its own fields and its type: a
+// rotary op says its pattern, stepover and lead, a pocket its depth and
+// passes. Not "deep in 1 pass, climb" on an op where neither word means
+// anything.
+[[nodiscard]] std::string CamOpSummary(const cam::Setup& setup,
+                                       const cam::Operation& op);
+// What its toolpath came to: moves, cutting length, and how low it went --
+// as a RADIUS for a rotary op, whose Z is the distance from the axis.
+[[nodiscard]] std::string CamOpPathLine(const cam::Operation& op,
+                                        const cam::Toolpath& tp);
+
+// An operation's settings -- what the panel's "Advanced" tree held -- drawn by
+// the CAM tool window when an op is being edited. True when a field changed;
+// the caller then calls ApplyCamOpEdit.
+bool DrawCamOpSettings(AppState& state, cam::Setup& setup, cam::Operation& op);
+// After an edit to one operation: re-cut only it, mark the project dirty, and
+// drop a verdict about the previous toolpath.
+void ApplyCamOpEdit(AppState& state, uint64_t opId);
 
 } // namespace ui

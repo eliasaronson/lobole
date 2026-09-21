@@ -1,5 +1,6 @@
 #include "ui/Commands.h"
 #include "ui/AssemblyActions.h"
+#include "ui/CamGenerate.h" // OpenCamGenerate
 #include "ui/CamPanel.h"    // RefreshCamToolpaths
 #include "ui/CamPlayback.h" // BeginCamPlayback
 #include "ui/CamTool.h"     // StartCamVerb, the job verbs
@@ -528,10 +529,11 @@ const std::vector<Command>& Table() {
     verb("job.edge", AppState::CamVerb::Edge);
     verb("job.whole", AppState::CamVerb::Whole);
     verb("job.face", AppState::CamVerb::Face);
-    add("job.generate", HasJob, [](AppState& s) {
-      RefreshCamToolpaths(s);
-      RunCamVerification(s);
-    });
+    // A tool with a window, like Simulate: the run and what it found, where
+    // the button was pressed. It used to generate silently and put the
+    // verdict in the docked panel, below the operations list.
+    add("job.generate", HasJob,
+        [](AppState& s) { OpenCamGenerate(s, /*regenerate=*/true); });
     // Refuses in words when there is nothing it can play -- the u10 rule --
     // and says so AT THE CLICK. The words used to go only into the CAM panel,
     // below a screenful of verdict lines and out of sight of the toolbar
