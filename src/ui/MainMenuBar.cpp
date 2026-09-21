@@ -1,5 +1,8 @@
 #include "ui/MainMenuBar.h"
+#include "ui/OpenJob.h"
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "cad/FaceSelector.h"
 #include "common/BuildInfo.h"
@@ -68,12 +71,13 @@ void DrawOpenRecentMenu(AppState& state) {
     // which a menu ref parses as further submenu levels.
     if (ImGui::MenuItem(
             (label + "###recent" + std::to_string(index)).c_str())) {
+      // Off the frame (ui/OpenJob.h). A path that exists but fails to
+      // load stays in the list: the modal says why, and the failure may be
+      // this build's, not the file's.
       std::string error;
-      if (OpenProject(state, path, &error)) {
-        MarkProjectOpened(state, path);
-      } else {
-        LOG_ERROR("Could not open {}: {}", path, error);
-        forget = path; // it is in the list but no longer openable
+      if (!StartOpenProject(state, path, &error)) {
+        state.openError = "Could not open " + path + ": " + error;
+        LOG_ERROR("{}", state.openError);
       }
     }
     ImGui::EndDisabled();
@@ -455,36 +459,67 @@ void DrawHelpMenu(AppState& state) {
 
 // F8: the project changed on disk, said where it is always visible.
 //
-// Text, not a button. The actions this state needs — reload, or save over it
-// — both throw something away, and the menu bar is the one place in the app
-// you can hit by accident. They live where they can be read first: the
-// History panel's banner, and the modal the next save raises.
-void DrawDiskChangeNotice(const AppState& state) {
-  if (!state.diskChanged)
+// The notices at the right of the menu bar, right-aligned in the order given.
+// Each is a DISABLED menu item rather than plain text: it cannot be clicked by
+// accident, and unlike a Text widget it has an id, so it is addressable from a
+// gui test -- "the notice is visible" is the whole assertion. Disabled items
+// draw in TextDisabled, so that is the colour to override.
+struct MenuBarNotice {
+  const char* label; // "Changed on disk###disk_notice"
+  const char* tooltip;
+};
+
+void DrawMenuBarNotices(const std::vector<MenuBarNotice>& notices) {
+  if (notices.empty())
     return;
-  const char* label = "Changed on disk";
   const ImGuiStyle& style = ImGui::GetStyle();
-  // Measured, never a pixel literal — the style scales with the display's
+  // Measured, never a pixel literal -- the style scales with the display's
   // content scale and the Font Size setting.
-  const float width = ImGui::CalcTextSize(label).x + style.ItemSpacing.x * 2.0f;
+  float width = 0.0f;
+  for (const MenuBarNotice& n : notices)
+    width += ImGui::CalcTextSize(n.label, nullptr, true).x +
+             style.ItemSpacing.x * 2.0f;
   const float x = ImGui::GetWindowWidth() - width;
   if (x <= ImGui::GetCursorPosX())
     return; // a narrow window: the menus themselves come first
   ImGui::SetCursorPosX(x);
-  // A DISABLED menu item rather than plain text: it cannot be clicked by
-  // accident, and unlike a Text widget it has an id, so it is addressable
-  // from a gui test — "the notice is visible" is the whole assertion.
-  // Disabled items draw in TextDisabled, so that is the colour to override.
   ImGui::PushStyleColor(ImGuiCol_TextDisabled,
                         ImVec4(0.95f, 0.75f, 0.35f, 1.0f));
-  ImGui::MenuItem("Changed on disk###disk_notice", nullptr, false, false);
-  ImGui::PopStyleColor();
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Something else wrote to this project — a command in "
-                      "the terminal, another editor, or a second window.\n"
-                      "The History panel can reload it, and saving will ask "
-                      "before replacing it.");
+  for (const MenuBarNotice& n : notices) {
+    ImGui::MenuItem(n.label, nullptr, false, false);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("%s", n.tooltip);
   }
+  ImGui::PopStyleColor();
+}
+
+// Text, not buttons. "Changed on disk" needs a reload or a save over it, and
+// both throw something away, while the menu bar is the one place in the app
+// you can hit by accident: those live where they can be read first, the
+// History panel's banner and the modal the next save raises. "Geometry
+// rebuilt" is fixed by an ordinary save.
+void DrawNotices(const AppState& state) {
+  std::vector<MenuBarNotice> notices;
+  std::string rebuiltTip;
+  if (state.openRebuiltParts > 0) {
+    rebuiltTip =
+        "Opening rebuilt " + std::to_string(state.openRebuiltParts) +
+        (state.openRebuiltParts == 1 ? " part" : " parts") +
+        (state.openRebuildReason.empty()
+             ? std::string(".")
+             : ": " + state.openRebuildReason + ".") +
+        "\nSaving stores the geometry again, and the next open is a load "
+        "instead of a rebuild.";
+    notices.push_back(
+        {"Geometry rebuilt###rebuilt_notice", rebuiltTip.c_str()});
+  }
+  if (state.diskChanged)
+    notices.push_back(
+        {"Changed on disk###disk_notice",
+         "Something else wrote to this project — a command in the "
+         "terminal, another editor, or a second window.\nThe History panel can "
+         "reload it, and saving will ask before replacing it."});
+  DrawMenuBarNotices(notices);
 }
 
 } // namespace
@@ -501,7 +536,7 @@ void DrawMainMenuBar(AppState& state) {
   DrawEditMenu(state);
   DrawViewMenu(state);
   DrawHelpMenu(state);
-  DrawDiskChangeNotice(state);
+  DrawNotices(state);
 
   ImGui::EndMainMenuBar();
 }

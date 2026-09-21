@@ -85,6 +85,7 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
 
     // The shape→XCAF bridge: one assembly whose components are the placed
     // items, each carrying a name, a display color, and a PBR material.
+    std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
     XcafDocument doc;
     Handle(XCAFDoc_ShapeTool) shapes =
         XCAFDoc_DocumentTool::ShapeTool(doc->Main());

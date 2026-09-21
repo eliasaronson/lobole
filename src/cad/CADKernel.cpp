@@ -1107,6 +1107,7 @@ bool CADKernel::LoadSTEP(const std::string& filename,
   if (!std::filesystem::exists(filename))
     return false;
 
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
   STEPControl_Reader reader;
   IFSelect_ReturnStatus status = reader.ReadFile(filename.c_str());
 
@@ -1199,6 +1200,7 @@ bool CADKernel::LoadSTEPStructured(const std::string& filename,
   if (!std::filesystem::exists(filename))
     return false;
 
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
   XcafDocument doc;
   STEPCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
@@ -1301,6 +1303,7 @@ bool CADKernel::SaveSTEP(const std::string& filename,
   if (shapes.empty())
     return false;
 
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
   STEPControl_Writer writer;
 
   for (const auto& shape : shapes) {
@@ -1376,6 +1379,7 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
   if (model.products.empty() || model.instances.empty())
     return false;
 
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
   XcafDocument doc;
   Handle(XCAFDoc_ShapeTool) shapes =
       XCAFDoc_DocumentTool::ShapeTool(doc->Main());

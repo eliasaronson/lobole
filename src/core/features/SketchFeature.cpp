@@ -211,7 +211,11 @@ uint32_t SketchFeature::MintEntityId() const {
   // Seeded once per process. Not reproducible run to run, which is fine:
   // nothing asserts a particular entity id (the tests capture what AddEntity
   // returns), and the goldens compare counts and volumes rather than bytes.
-  static std::mt19937 rng(std::random_device{}());
+  // One engine PER THREAD: a project's parts rebuild side by side when it
+  // opens (docs/ui/project-open-progress-plan.md), and a sketch that grows a
+  // projected or patterned entity mints one during that rebuild -- a shared
+  // engine was a data race.
+  thread_local std::mt19937 rng(std::random_device{}());
   std::uniform_int_distribution<uint32_t> pick(1, UINT32_MAX); // 0 = "none"
   for (;;) {
     const uint32_t id = pick(rng);

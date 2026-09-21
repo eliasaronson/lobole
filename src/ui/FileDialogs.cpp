@@ -1,6 +1,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/AssemblyActions.h"
 #include "ui/ImportJob.h"
+#include "ui/OpenJob.h"
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
@@ -81,13 +82,14 @@ std::string NormalizeProjectPick(const std::string& path) {
 // (directory with project.json, flat single-document file) — unlike
 // OpenProjectFile above, which predates multi-document projects and is now
 // only right for recovery sidecars (always flat).
+// Off the frame, with a progress bar when it is slow (ui/OpenJob.h); the job
+// marks the project opened once it has been adopted.
 void OpenPickedProject(AppState& state, const std::string& path) {
   std::string error;
-  if (!OpenProject(state, path, &error)) {
-    LOG_ERROR("Failed to open project '{}': {}", path, error);
-    return;
+  if (!StartOpenProject(state, path, &error)) {
+    state.openError = "Could not open " + path + ": " + error;
+    LOG_ERROR("{}", state.openError);
   }
-  MarkProjectOpened(state, path);
 }
 
 void UpdateDirectoryContents(AppState& state) {

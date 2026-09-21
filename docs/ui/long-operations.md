@@ -473,6 +473,14 @@ and `ui/BackgroundJobs.h` is where someone looks for the list.
   is main-thread by construction, and it is not free by construction
   (docs/performance/motion-prep-copy.md).
 
+- **`"open"`** — opening a project (docs/ui/project-open-progress-plan.md).
+  The read (`ReadProject`) loads every document off the frame and touches no
+  AppState, so Cancel leaves the project that was open as it was, and the
+  adopt is the job's finish. Only the opens a person starts use it: File >
+  Open and Open Recent. The RPC, restore, merge and sync keep the synchronous
+  `OpenProject`. A quick open finishes inside `StartOpenProject` (a 300 ms
+  wait), so a baked open never flashes the modal.
+
 ## Out of scope
 
 **Regeneration itself.** `Document::Regenerate` is synchronous on the calling

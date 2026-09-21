@@ -1,4 +1,5 @@
 #include "ui/DockLayout.h"
+#include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
 
 #include "common/Logger.h"
@@ -203,6 +204,7 @@ void BeginDockspace(AppState& state) {
   // toolbar branch it would otherwise be opened from — materializing an
   // import switches the active tab from part to assembly halfway through.
   DrawImportModal(state);
+  DrawOpenProjectModal(state);
   DrawCamRefusalModal(state);
 
   // Dockspace filling the rest; passthru central node shows the 3D behind it.

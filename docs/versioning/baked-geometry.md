@@ -58,6 +58,15 @@ hand or by a merge. Each degrades in silence to exactly the behaviour the app
 had before this existed. A stale blob cannot make an open *wrong* — only
 faster.
 
+"In silence" is about correctness, not about the person waiting. A project
+whose every blob is refused (a geometry-format bump, a clone of a project that
+git-ignores `geometry/`) rebuilds every part, and the bike took 20 s doing it
+with a frozen window. So an open rebuilds a project's parts side by side, the
+opens a person starts run off the frame with a progress bar, and the menu bar
+says "Geometry rebuilt" until a save re-bakes. `open_project` reports the same
+as `rebuilt_parts` and `rebuild_reason`
+(docs/ui/project-open-progress-plan.md).
+
 Two consequences worth knowing:
 
 - **A model that failed to regenerate is not baked.** A blob is a promise that

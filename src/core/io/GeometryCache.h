@@ -46,6 +46,13 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
 // to read — never an error the user must act on.
 bool LoadGeometry(Document& doc, const std::string& dir);
 
+// What <dir>/geometry/ holds, without reading the bodies: so an open that had
+// to rebuild can say WHY (docs/ui/project-open-progress-plan.md). Present
+// means this build can read it; whether it still matches the recipe is only
+// known after the regeneration.
+enum class BakedGeometryOnDisk { None, OlderFormat, NewerFormat, Present };
+BakedGeometryOnDisk InspectGeometry(const std::string& dir);
+
 // Writes the repository hints a project needs for the blob, next to it:
 // `.gitattributes` marks the B-Reps binary and non-mergeable (derived data
 // has no sensible merge — the hash decides which side is right), and when

@@ -3,6 +3,7 @@
 #include "core/features/DerivedFeature.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/OpenJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
 
@@ -1654,5 +1655,99 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(d->sourcePart, servoId);
     IM_CHECK_EQ(d->sourceName, std::string("Servo"));
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
+
+  // Opening a project off the frame (docs/ui/project-open-progress-plan.md):
+  // a slow open puts the shared progress bar up, Cancel leaves the project
+  // that was open exactly as it was, and an open that had to rebuild parts
+  // says so until the project is saved. The per-document delay makes "slow"
+  // true on any machine; the real cause is baked geometry that cannot be used.
+  t = IM_REGISTER_TEST(engine, "file",
+                       "a_slow_open_shows_progress_and_cancels");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    namespace fs = std::filesystem;
+    const fs::path two = fs::temp_directory_path() / "designer_open_two.dsgn";
+    const fs::path one = fs::temp_directory_path() / "designer_open_one.dsgn";
+    fs::remove_all(two);
+    fs::remove_all(one);
+    std::string err;
+
+    // The project to open: two parts, saved WITHOUT its baked geometry.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::AddPart(*s_App, "Second");
+    ctx->Yield();
+    IM_CHECK(ui::SaveProject(*s_App, two.string(), &err));
+    for (const auto& e : fs::directory_iterator(two / "parts"))
+      fs::remove_all(e.path() / "geometry");
+
+    // The project that is open while it loads: one part.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    IM_CHECK(ui::SaveProject(*s_App, one.string(), &err));
+    ui::MarkProjectSaved(*s_App, one.string(), "test");
+    ctx->Yield();
+    const size_t tabsBefore = s_App->parts.size();
+
+    // Slow, then cancelled: nothing changes.
+    ui::OpenJobOptions slow;
+    slow.quietWaitMs = 0;
+    slow.delayEachMs = 1500;
+    IM_CHECK(ui::StartOpenProject(*s_App, two.string(), &err, slow));
+    IM_CHECK(ui::OpenRunning(*s_App)); // a job, not a call
+    const char* cancel = "//Opening project###open_project_modal/"
+                         "Cancel###open_cancel";
+    for (int i = 0; i < 200 && !ctx->ItemExists(cancel); i++)
+      ctx->Yield();
+    IM_CHECK(ctx->ItemExists(cancel));
+    ctx->ItemClick(cancel);
+    for (int i = 0; i < 2000 && ui::OpenRunning(*s_App); i++)
+      ctx->Yield();
+    IM_CHECK(!ui::OpenRunning(*s_App));
+    IM_CHECK_EQ(s_App->projectPath, one.string());
+    IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
+    IM_CHECK(s_App->openError.empty()); // a cancel is not a failure
+
+    // Slow, and let it finish: the modal was up, then the project is open,
+    // and it says it rebuilt both parts and why.
+    slow.delayEachMs = 200;
+    IM_CHECK(ui::StartOpenProject(*s_App, two.string(), &err, slow));
+    bool sawModal = false;
+    for (int i = 0; i < 2000 && ui::OpenRunning(*s_App); i++) {
+      ctx->Yield();
+      sawModal = sawModal || ctx->ItemExists(cancel);
+    }
+    IM_CHECK(sawModal);
+    IM_CHECK(!ui::OpenRunning(*s_App));
+    IM_CHECK_EQ(s_App->projectPath, two.string());
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->openRebuiltParts,
+                1); // "Second" is empty: nothing to build
+    IM_CHECK_EQ(s_App->openRebuildReason, std::string("no saved geometry"));
+
+    // A save re-bakes, so the notice goes.
+    IM_CHECK(ui::SaveProject(*s_App, two.string(), &err));
+    ui::MarkProjectSaved(*s_App, two.string(), "test");
+    IM_CHECK_EQ(s_App->openRebuiltParts, 0);
+
+    // And a project that loads quickly opens at the end of the frame that
+    // asked, with no modal at all -- the way every baked open has always
+    // looked.
+    IM_CHECK(ui::StartOpenProject(*s_App, one.string(), &err));
+    // (Not ItemExists: the engine remembers the Cancel button from the
+    // modals above after they close. Whether any popup is open is the state.)
+    IM_CHECK(!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId));
+    ctx->Yield();
+    IM_CHECK(!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId));
+    IM_CHECK(!ui::OpenRunning(*s_App));
+    IM_CHECK_EQ(s_App->projectPath, one.string());
+    IM_CHECK_EQ(s_App->openRebuiltParts, 0);
+
+    fs::remove_all(two);
+    fs::remove_all(one);
   };
 }

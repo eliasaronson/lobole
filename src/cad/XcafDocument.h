@@ -4,6 +4,23 @@
 #include <TDocStd_Document.hxx>
 #include <XCAFApp_Application.hxx>
 
+#include <mutex>
+
+// OpenCASCADE's data exchange is not safe to run on two threads at once, and
+// it is not only first use: XCAFApp_Application is ONE process-wide
+// application whose session list NewDocument and Close edit with no lock, and
+// the STEP controllers fill their Interface_Static tables lazily, marking
+// themselves initialised before they are. A project whose parts load side by
+// side (docs/ui/project-open-progress-plan.md) rebuilds its Import features in
+// parallel, and a background open can meet an export on the main thread. So
+// every STEP read or write, and every XCAF document, holds this for its whole
+// length. Recursive, because a structured export builds its document and then
+// writes it.
+inline std::recursive_mutex& DataExchangeMutex() {
+  static std::recursive_mutex mutex;
+  return mutex;
+}
+
 // A scoped XCAF document: NewDocument on construction, Close on destruction.
 //
 // TDocStd_Application keeps every document NewDocument() hands out in its

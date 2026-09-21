@@ -51,7 +51,11 @@ static constexpr MethodDoc ProjectMethods[] = {
      "exactly that, so it is not gated, and `ping` is how a caller checks "
      "which instance and which project it is talking to first.",
      "", remote::NotInBatch},
-    {"open_project", "Open a project {path} (.json file or .dsgn directory).",
+    {"open_project",
+     "Open a project {path} (.json file or .dsgn directory). Returns "
+     "rebuilt_parts (parts whose saved geometry could not be used, so they "
+     "were rebuilt from their features) and rebuild_reason when they share "
+     "one; saving re-bakes them, and the next open is a load.",
      "path", remote::NotInBatch},
     {"save_project",
      "Save the project to {path, message?, force?}. Refuses when the project "
@@ -616,6 +620,12 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // open with a silent success and nothing to poll.
     json out = {{"autosave_available", autosaveAvailable},
                 {"autosave_path", Autosaver::SidecarPath(path)}};
+    // Parts whose baked geometry could not be used and were rebuilt, and
+    // why: the difference between a 0.04 s open and a 20 s one, and what a
+    // save would fix (docs/ui/project-open-progress-plan.md).
+    out["rebuilt_parts"] = state.openRebuiltParts;
+    if (!state.openRebuildReason.empty())
+      out["rebuild_reason"] = state.openRebuildReason;
     AttachRegen(out, state.document.get());
     return out;
   }

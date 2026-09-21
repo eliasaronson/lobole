@@ -350,6 +350,22 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
   }
 }
 
+BakedGeometryOnDisk InspectGeometry(const std::string& dir) {
+  std::ifstream in(GeometryDir(dir) / "index.json");
+  if (!in)
+    return BakedGeometryOnDisk::None;
+  try {
+    const int format = json::parse(in).value("geometry_format", 0);
+    if (format < kGeometryFormat)
+      return BakedGeometryOnDisk::OlderFormat;
+    if (format > kGeometryFormat)
+      return BakedGeometryOnDisk::NewerFormat;
+    return BakedGeometryOnDisk::Present;
+  } catch (const std::exception&) {
+    return BakedGeometryOnDisk::None; // unreadable is as good as absent
+  }
+}
+
 bool WriteRepositoryHints(const std::string& dir, bool commit,
                           std::string* error) {
   try {

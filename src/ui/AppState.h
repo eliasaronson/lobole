@@ -62,6 +62,8 @@ struct GLFWwindow;
 
 namespace ui {
 
+struct OpenJob; // ui/OpenJob.h
+
 // Per-part tessellation + GPU asset cache; see AppState::partRenderCache.
 // Defined in AppActionsInternal.h, where Vertex3D is complete.
 struct PartRenderCacheStore;
@@ -1479,6 +1481,17 @@ struct AppState {
   // reads the payload; ImportRunning asks the registry.
   std::shared_ptr<ImportJob> importJob;
   std::string importError;
+  // A project being opened off the frame ("open" in `backgroundJobs`,
+  // ui/OpenJob.h), and the message left by the last one that failed, which
+  // the modal shows until it is closed.
+  std::shared_ptr<OpenJob> openJob;
+  std::string openError;
+  // How many parts the last open had to REBUILD because their baked geometry
+  // could not be used, and why. Kept until the project is saved -- a save
+  // re-bakes -- so the menu bar can say that saving makes the next open a
+  // load. The RPC's open_project reports the same two.
+  int openRebuiltParts = 0;
+  std::string openRebuildReason;
   // What the last one said, kept until the next one starts, so the panel has
   // something to show instead of the message flashing past.
   std::string syncMessage;

@@ -5,14 +5,18 @@
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
 
+#include "core/Parallel.h"
 #include "core/Units.h"
+#include "core/io/GeometryCache.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
 #include "ui/JobActions.h"
+#include <OSD.hxx>
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
 #include <chrono>
+#include <thread>
 #include <utility>
 
 #if defined(_WIN32)
@@ -324,21 +328,189 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
   }
 }
 
-bool OpenProject(AppState& state, const std::string& path, std::string* error) {
+namespace {
+
+// Why a rebuilt part could not use its baked geometry, in the words the
+// progress modal and the status line show.
+std::string RebuildReason(DocumentIO::BakedGeometryOnDisk onDisk) {
+  switch (onDisk) {
+  case DocumentIO::BakedGeometryOnDisk::None:
+    return "no saved geometry";
+  case DocumentIO::BakedGeometryOnDisk::OlderFormat:
+    return "the saved geometry is from an older build";
+  case DocumentIO::BakedGeometryOnDisk::NewerFormat:
+    return "the saved geometry is from a newer build";
+  case DocumentIO::BakedGeometryOnDisk::Present:
+    break;
+  }
+  return "the recipe changed since the geometry was saved";
+}
+
+// Did this load rebuild the part rather than adopt its baked bodies? A baked
+// open executes only datums and counts every other feature cached; a rebuild
+// starts from an empty cache.
+bool WasRebuilt(const Document& doc) {
+  const auto& stats = doc.LastRegenStats();
+  return doc.FeatureCount() > 0 && stats.cached == 0 && stats.executed > 0;
+}
+
+// One document of a project, read into a slot. Pure: no AppState.
+std::expected<PartSlot, std::string> ReadSlot(const nlohmann::json& entry,
+                                              size_t i,
+                                              const std::filesystem::path& root,
+                                              std::string* rebuiltReason) {
+  const std::string name = entry.at("name").get<std::string>();
+  const std::string dir = (root / entry.at("dir").get<std::string>()).string();
+  const std::string type = entry.value("type", std::string("part"));
+  PartSlot slot;
+  slot.id = entry.value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
+  slot.name = name;
+  slot.folder = entry.value("folder", std::string{});
+  if (type == "assembly") {
+    slot.kind = DocKind::Assembly;
+    auto r = DocumentIO::LoadAssembly(dir);
+    if (!r)
+      return std::unexpected(r.error());
+    slot.assembly = std::move(*r);
+  } else if (type == "drawing") {
+    slot.kind = DocKind::Drawing;
+    auto r = DocumentIO::LoadDrawing(dir);
+    if (!r)
+      return std::unexpected(r.error());
+    slot.drawing = std::move(*r);
+  } else if (type == "job") {
+    slot.kind = DocKind::Job;
+    auto r = DocumentIO::LoadJob(dir);
+    if (!r)
+      return std::unexpected(r.error());
+    slot.job = std::move(*r);
+  } else {
+    slot.kind = DocKind::Part;
+    const auto onDisk = DocumentIO::InspectGeometry(dir);
+    auto r = DocumentIO::Load(dir);
+    if (!r)
+      return std::unexpected(r.error());
+    if (WasRebuilt(**r))
+      *rebuiltReason = RebuildReason(onDisk);
+    slot.doc = std::move(*r);
+    slot.commands = std::make_unique<CommandStack>();
+  }
+  return slot;
+}
+
+} // namespace
+
+std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
+                                                      OpenProgress* progress) {
   namespace fs = std::filesystem;
+  LoadedProject out;
+  out.path = path;
+  const fs::path projFile = fs::path(path) / "project.json";
+  if (!fs::exists(projFile)) {
+    // Not a multi-document project: a single part.
+    if (progress)
+      progress->total.store(1);
+    const auto onDisk = DocumentIO::InspectGeometry(path);
+    auto loaded = DocumentIO::Load(path);
+    if (!loaded)
+      return std::unexpected(loaded.error());
+    if (WasRebuilt(**loaded)) {
+      out.rebuiltParts = 1;
+      out.rebuildReason = RebuildReason(onDisk);
+    }
+    out.single = std::move(*loaded);
+    if (progress)
+      progress->done.store(1);
+    return out;
+  }
+  try {
+    out.container = true;
+    std::ifstream(projFile) >> out.index;
+    // v2 has a typed `documents` list; v1 had a flat `parts` list (all parts,
+    // no ids/types). Normalize v1 into the same shape with defaulted reads.
+    nlohmann::json docs;
+    if (out.index.contains("documents")) {
+      docs = out.index.at("documents");
+    } else {
+      docs = nlohmann::json::array();
+      for (const auto& p : out.index.at("parts"))
+        docs.push_back(
+            {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
+    }
+    const size_t n = docs.size();
+    if (progress)
+      progress->total.store(static_cast<int>(n));
+
+    // Every document is independent of the others until the adopt wires the
+    // project scope in, so they load side by side, collected by index and
+    // taken in order afterwards so the result does not depend on which
+    // finished first.
+    std::vector<std::expected<PartSlot, std::string>> slots;
+    slots.reserve(n);
+    for (size_t i = 0; i < n; i++)
+      slots.emplace_back(std::unexpected(std::string("cancelled")));
+    std::vector<std::string> reasons(n);
+    parallel::For(n, [&](size_t i) {
+      if (progress && progress->cancel && progress->cancel->load())
+        return;
+      // OCC's signal handler is per thread; a pool thread has none yet.
+      OSD::SetSignal(Standard_False);
+      if (progress && progress->delayEachMs > 0) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(progress->delayEachMs));
+        if (progress->cancel && progress->cancel->load())
+          return;
+      }
+      const std::string name = docs[i].value("name", std::string{});
+      if (progress) {
+        std::lock_guard lock(progress->mutex);
+        progress->building.push_back(name);
+      }
+      try {
+        slots[i] = ReadSlot(docs[i], i, fs::path(path), &reasons[i]);
+      } catch (const std::exception& e) {
+        slots[i] = std::unexpected(std::string(e.what()));
+      }
+      if (progress) {
+        {
+          std::lock_guard lock(progress->mutex);
+          auto& b = progress->building;
+          if (auto it = std::find(b.begin(), b.end(), name); it != b.end())
+            b.erase(it);
+        }
+        progress->done.fetch_add(1);
+      }
+    });
+    if (progress && progress->cancel && progress->cancel->load())
+      return std::unexpected(std::string("cancelled"));
+    std::set<std::string> distinctReasons;
+    for (size_t i = 0; i < n; i++) {
+      if (!slots[i])
+        return std::unexpected(slots[i].error());
+      out.parts.push_back(std::move(*slots[i]));
+      if (!reasons[i].empty()) {
+        out.rebuiltParts++;
+        distinctReasons.insert(reasons[i]);
+      }
+    }
+    if (distinctReasons.size() == 1)
+      out.rebuildReason = *distinctReasons.begin();
+    return out;
+  } catch (const std::exception& e) {
+    return std::unexpected(std::string(e.what()));
+  }
+}
+
+bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
+  namespace fs = std::filesystem;
+  const std::string path = loaded.path;
+  state.openRebuiltParts = loaded.rebuiltParts;
+  state.openRebuildReason = loaded.rebuildReason;
   // The previous project's cuts are not this one's. Cleared for BOTH branches
   // here; the container branch refills them from the index below.
   ClearSections(state);
-  const fs::path projFile = fs::path(path) / "project.json";
-  if (!fs::exists(projFile)) {
-    // Not a multi-document project: load as a single part.
-    auto loaded = DocumentIO::Load(path);
-    if (!loaded) {
-      if (error)
-        *error = loaded.error();
-      return false;
-    }
-    ReplaceDocument(state, std::move(*loaded));
+  if (!loaded.container) {
+    ReplaceDocument(state, std::move(loaded.single));
     state.parts.clear();
     state.tabFolders.clear();
     state.nextPartId = 1;
@@ -347,23 +519,10 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     return true;
   }
   try {
-    nlohmann::json index;
-    std::ifstream(projFile) >> index;
+    const nlohmann::json& index = loaded.index;
     const auto loadedCatalogs =
         catalog::Deserialize(index.value("catalogs", nlohmann::json::array()));
-    // v2 has a typed `documents` list; v1 had a flat `parts` list (all parts,
-    // no ids/types). Normalize v1 into the same shape with defaulted reads.
-    nlohmann::json docs;
-    if (index.contains("documents")) {
-      docs = index.at("documents");
-    } else {
-      docs = nlohmann::json::array();
-      for (const auto& p : index.at("parts"))
-        docs.push_back(
-            {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
-    }
 
-    // Load every document into its slot; AppState holds nothing live yet.
     // This branch never goes through ReplaceDocument, so it releases the
     // per-part render cache itself — same id-reuse hazard.
     ReleasePartRenderCache(state);
@@ -371,58 +530,10 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     state.assembly = nullptr;
     state.drawing = nullptr;
     state.commands = nullptr;
-    state.parts.clear();
+    state.parts = std::move(loaded.parts);
     uint64_t maxId = 0;
-    for (size_t i = 0; i < docs.size(); i++) {
-      const std::string name = docs[i].at("name").get<std::string>();
-      const std::string dir =
-          (fs::path(path) / docs[i].at("dir").get<std::string>()).string();
-      const std::string type = docs[i].value("type", std::string("part"));
-      PartSlot slot;
-      slot.id = docs[i].value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
-      slot.name = name;
-      slot.folder = docs[i].value("folder", std::string{});
-      if (type == "assembly") {
-        slot.kind = DocKind::Assembly;
-        auto r = DocumentIO::LoadAssembly(dir);
-        if (!r) {
-          if (error)
-            *error = r.error();
-          return false;
-        }
-        slot.assembly = std::move(*r);
-      } else if (type == "drawing") {
-        slot.kind = DocKind::Drawing;
-        auto r = DocumentIO::LoadDrawing(dir);
-        if (!r) {
-          if (error)
-            *error = r.error();
-          return false;
-        }
-        slot.drawing = std::move(*r);
-      } else if (type == "job") {
-        slot.kind = DocKind::Job;
-        auto r = DocumentIO::LoadJob(dir);
-        if (!r) {
-          if (error)
-            *error = r.error();
-          return false;
-        }
-        slot.job = std::move(*r);
-      } else {
-        slot.kind = DocKind::Part;
-        auto r = DocumentIO::Load(dir);
-        if (!r) {
-          if (error)
-            *error = r.error();
-          return false;
-        }
-        slot.doc = std::move(*r);
-        slot.commands = std::make_unique<CommandStack>();
-      }
+    for (const PartSlot& slot : state.parts)
       maxId = std::max(maxId, slot.id);
-      state.parts.push_back(std::move(slot));
-    }
     state.nextPartId = maxId + 1;
     // Folder registry: the saved list (empty folders and their order), plus
     // any slot folder it doesn't know (pre-registry saves, hand-edits).
@@ -510,6 +621,16 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
       *error = e.what();
     return false;
   }
+}
+
+bool OpenProject(AppState& state, const std::string& path, std::string* error) {
+  auto loaded = ReadProject(path);
+  if (!loaded) {
+    if (error)
+      *error = loaded.error();
+    return false;
+  }
+  return AdoptProject(state, std::move(*loaded), error);
 }
 
 namespace {
@@ -659,6 +780,9 @@ void MarkProjectSaved(AppState& state, const std::string& path,
   state.projectPath = path;
   RecentProjects::Remember(path);
   StampAllSaved(state);
+  // A save re-bakes the geometry, so the next open is a load again.
+  state.openRebuiltParts = 0;
+  state.openRebuildReason.clear();
   // The save supersedes both possible sidecars: this project's, and the
   // unsaved slot if the document lived there before its first save.
   Autosaver::Clear(path);

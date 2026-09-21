@@ -8,8 +8,13 @@
 #include "render/SketchRenderer.h" // Vertex3D, PrimVertex
 #include "ui/AppState.h"
 
+#include <nlohmann/json.hpp>
+
+#include <atomic>
 #include <cstdint>
+#include <expected>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -112,6 +117,50 @@ void StampDiskState(AppState& state, const std::string& path);
 // As to a path we have not seen).
 bool ProjectChangedOnDisk(AppState& state);
 
+// Opening a project is a READ and an ADOPT
+// (docs/ui/project-open-progress-plan.md).
+//
+// The read loads every document in the project and touches nothing in
+// AppState, so it can run on a worker while the app keeps drawing, and a
+// cancel leaves the project that was open exactly as it was. It is where the
+// time goes: a part whose baked geometry cannot be used is rebuilt from its
+// recipe, and the bike (21 parts) spent 20 s doing that on the UI thread.
+// The adopt swaps the result in on the main thread, and is milliseconds.
+struct LoadedProject {
+  std::string path;
+  bool container = false;           // a project.json with several documents
+  std::unique_ptr<Document> single; // !container: the one document
+  std::vector<PartSlot> parts;      // container: every document, in order
+  nlohmann::json index;             // container: project.json, for the adopt
+  // Parts whose baked geometry could not be used, so they were rebuilt, and
+  // why, in words, when every one of them shares a reason ("from an older
+  // build", "none saved", "the recipe changed since").
+  int rebuiltParts = 0;
+  std::string rebuildReason;
+};
+
+// What the read publishes while it runs, for the progress bar. Written by
+// the worker(s), read by the main thread.
+struct OpenProgress {
+  std::atomic<int> done{0};
+  std::atomic<int> total{0};
+  // Checked before each document starts; points at the job's own flag, so
+  // the modal's Cancel and the cancel_background_job RPC are one switch.
+  const std::atomic<bool>* cancel = nullptr;
+  std::mutex mutex;                  // guards `building`
+  std::vector<std::string> building; // the parts being loaded right now
+  // A pause before each document, so a GUI test can see the progress modal
+  // and press Cancel on any machine. Zero everywhere else.
+  int delayEachMs = 0;
+};
+
+[[nodiscard]] std::expected<LoadedProject, std::string>
+ReadProject(const std::string& path, OpenProgress* progress = nullptr);
+bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error);
+
+// ReadProject then AdoptProject, synchronously: what every caller that needs
+// the answer before it returns uses (the RPC, restore, merge, sync, tests).
+// The opens a person starts go through StartOpenProject (ui/OpenJob.h).
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
 // Track the on-disk identity for dirty-state + autosave: call after every

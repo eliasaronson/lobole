@@ -48,6 +48,7 @@
  * const std::string &     _matSuffix = "" )*/
 #endif
 
+#include <mutex>
 #include <algorithm>
 #include <future>
 #include <iostream>
@@ -508,7 +509,12 @@ System::System()
     // currently Eigen only supports multithreading for multiplications
     // There is no appreciable gain from using more threads
 #ifdef EIGEN_SPARSEQR_COMPATIBLE
-    Eigen::setNbThreads(1);
+    // Designer: once per process, not once per System. setNbThreads writes a
+    // function-local static, and sketches solve on several threads at once
+    // when a project's parts rebuild side by side, so writing it from every
+    // constructor was a data race (ThreadSanitizer), if a same-value one.
+    static std::once_flag eigenThreads;
+    std::call_once(eigenThreads, [] { Eigen::setNbThreads(1); });
 #endif
 }
 
