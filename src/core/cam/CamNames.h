@@ -160,6 +160,16 @@ const char* SideName(Side s);
 bool TrySideFromName(const std::string& s, Side& out);
 std::string SideNameList();
 
+// A corner relief, by name: none, dogbone, tbone.
+struct CornerReliefRow {
+  CornerRelief relief;
+  const char* name;
+};
+std::span<const CornerReliefRow> CornerReliefs();
+const char* CornerReliefName(CornerRelief r);
+bool TryCornerReliefFromName(const std::string& s, CornerRelief& out);
+std::string CornerReliefNameList();
+
 // The rotary finish's pattern, refused by name like every enum here.
 struct RotaryPatternRow {
   RotaryPattern pattern;

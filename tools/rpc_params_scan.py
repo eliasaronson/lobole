@@ -25,6 +25,7 @@ each `m ==` mention gets 35% of branches wrong; tracking the brace depth of
 each method scope gets it right, because a key belongs to whichever method
 scope encloses it most tightly.
 """
+import os
 import re
 import sys
 
@@ -271,20 +272,71 @@ def _innermost(scopes, pos):
     return best[0] if best else None
 
 
+# Helpers the scanner FOLLOWS instead of trusting an annotation for. A
+# branch that hands its params to one reads the keys the helper's own body
+# reads by hand, plus the keys of the table it loops over. The annotation
+# route failed here in exactly the way it can: `ApplyOpFields` gained four
+# fields, the annotation did not, the gate compared the row to the stale
+# annotation and passed, and the generated SDK refused all four
+# (docs/cam/op-field-table-plan.md).
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KNOWN_HELPERS = {
+    "ApplyOpFields": os.path.join(_ROOT, "src", "core", "cam",
+                                  "CamOpFields.cpp"),
+}
+TABLE_KEY_RE = re.compile(r'\{"([a-z0-9_]+)",\s*OpField::')
+
+
+def _helper_keys(sources, helper, table_path):
+    """Keys `helper` reads: its body's own reads, plus its table's keys."""
+    keys = set()
+    for src in sources:
+        bare = _strip(src)
+        m = re.search(r'\b' + helper + r'\s*\([^)]*\)\s*\{', bare)
+        if not m:
+            continue
+        depth, i = 0, m.end() - 1
+        while i < len(bare):
+            if bare[i] == '{':
+                depth += 1
+            elif bare[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        for km in KEY_RE.finditer(bare, m.end(), i):
+            keys.add(km.group(1) or km.group(2))
+    with open(table_path) as f:
+        table = TABLE_KEY_RE.findall(f.read())
+    if not table:
+        raise SystemExit(f"rpc_params_scan: no table rows in {table_path} -- "
+                         f"did the op-field table move?")
+    return keys | set(table)
+
+
 def scan_files(paths):
     merged = {}
+    sources = []
     for path in paths:
         with open(path) as f:
-            for name, info in scan_source(f.read()).items():
-                e = merged.setdefault(name, {"keys": set(), "opaque": False,
-                                             "handoff": set(),
-                                             "annotated": False,
-                                             "literals": set()})
-                e["keys"].update(info["keys"])
-                e["literals"].update(info.get("literals", ()))
-                e["opaque"] = e["opaque"] or info["opaque"]
-                e["handoff"].update(info["handoff"])
-                e["annotated"] = e["annotated"] or info["annotated"]
+            sources.append(f.read())
+    helpers = {h: _helper_keys(sources, h, t)
+               for h, t in KNOWN_HELPERS.items()}
+    for src in sources:
+        for name, info in scan_source(src).items():
+            e = merged.setdefault(name, {"keys": set(), "opaque": False,
+                                         "handoff": set(),
+                                         "annotated": False,
+                                         "literals": set()})
+            e["keys"].update(info["keys"])
+            e["literals"].update(info.get("literals", ()))
+            e["opaque"] = e["opaque"] or info["opaque"]
+            e["handoff"].update(info["handoff"])
+            e["annotated"] = e["annotated"] or info["annotated"]
+            for h in info["handoff"]:
+                if h in helpers:
+                    e["keys"].update(helpers[h])
+                    e["annotated"] = True
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
                 "handoff": sorted(v["handoff"]), "annotated": v["annotated"],
                 "literals": sorted(v["literals"])}

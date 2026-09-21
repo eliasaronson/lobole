@@ -22,7 +22,9 @@
 // was the defect worth paying for.
 
 #include "cam_fixtures.h"
+#include "core/cam/CamOpFields.h"
 #include "core/io/Serialization.h"
+#include <set>
 
 namespace {
 
@@ -323,6 +325,24 @@ TEST_CASE("cam: every operation field survives a save and a reload", "[cam]") {
                         << " is declared by a type and has no entry in kPokes "
                            "-- add one, so this test and the one above see it");
     CHECK((poked & f) != 0);
+  }
+
+  // ...and a row in the op-field table (CamOpFields.cpp), which is what the
+  // file, the RPC and describe all read: a bit with no row would be a field
+  // nothing can save or set.
+  uint32_t tabled = 0;
+  std::set<std::string> keys;
+  for (const cam::OpFieldRow& r : cam::OpFieldRows()) {
+    tabled |= static_cast<uint32_t>(r.field);
+    INFO("duplicate op-field key " << r.key);
+    CHECK(keys.insert(r.key).second);
+  }
+  for (int bit = 0; bit < 32; bit++) {
+    const uint32_t f = 1u << bit;
+    if ((declared & f) == 0 || (kFacts & f) != 0)
+      continue;
+    INFO("OpField bit " << bit << " has no row in the op-field table");
+    CHECK((tabled & f) != 0);
   }
 
   for (const cam::OpTypeRow& row : cam::OpTypes()) {

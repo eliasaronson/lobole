@@ -1,5 +1,6 @@
 #include "core/cam/CamSurface.h"
 
+#include "core/cam/CamOpFields.h"
 #include "core/cam/CamToolpath.h" // GenerateContext (CamToolpathInternal)
 #include "core/cam/CamToolpathInternal.h" // kScale
 
@@ -661,13 +662,12 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   hash.I(static_cast<int64_t>(op.id));
   hash.D(op.topZ);
   hash.D(op.bottomZ);
-  hash.D(op.stockToLeave);
-  hash.D(op.stepover);
-  hash.D(op.sampleStep);
-  hash.D(op.zStep);
-  hash.D(op.cutAngleDeg);
-  hash.D(op.stepdown);
-  hash.I(static_cast<int64_t>(op.rotaryPattern));
+  // Every field in the op-field table, not a hand list of the ones surfacing
+  // reads today: a field added to the table is in the key the day it lands.
+  // Hashing a few the passes never read costs a cache miss on an edit
+  // nobody makes to a finishing op; missing one costs a stale toolpath.
+  for (const double v : OpFieldValues(op))
+    hash.D(v);
   hash.I(static_cast<int64_t>(op.targets.size()));
   for (const Target& t : op.targets) {
     hash.I(static_cast<int64_t>(t.jobPartId));

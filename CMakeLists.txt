@@ -307,6 +307,7 @@ set(core_sources
     src/core/cam/CamSetup.cpp
     src/core/cam/CamPicks.cpp
     src/core/cam/CamTravel.cpp
+    src/core/cam/CamOpFields.cpp
     src/core/cam/CamPost.cpp
     src/core/cam/CamRotaryFeed.cpp
     src/core/drawing/DrawingExport.cpp

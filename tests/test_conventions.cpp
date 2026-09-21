@@ -360,6 +360,19 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   for (auto it = std::sregex_iterator(key.begin(), key.end(), read);
        it != std::sregex_iterator(); ++it)
     inKey.insert((*it)[1].str() + "." + (*it)[2].str());
+  // The key hashes the op-field table whole (`OpFieldValues(op)`), so every
+  // member the table names counts as hashed -- read from the table's own
+  // source, the way this gate reads everything else.
+  if (key.find("OpFieldValues(op)") != std::string::npos) {
+    const std::string table =
+        slurp(fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamOpFields.cpp");
+    const std::regex member(R"(&Operation::([A-Za-z_][A-Za-z0-9_]*))");
+    size_t named = 0;
+    for (auto it = std::sregex_iterator(table.begin(), table.end(), member);
+         it != std::sregex_iterator(); ++it, ++named)
+      inKey.insert("op." + (*it)[1].str());
+    REQUIRE(named >= 15); // or the table moved and this reads nothing
+  }
   REQUIRE(inKey.size() >= 10);
 
   std::vector<std::string> missing;

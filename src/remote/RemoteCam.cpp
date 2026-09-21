@@ -1,6 +1,7 @@
 #include "remote/RemoteCam.h"
 
 #include "core/cam/CamNames.h"
+#include "core/cam/CamOpFields.h"
 
 #ifdef HAVE_CAM
 
@@ -280,7 +281,7 @@ constexpr MethodDoc kCamMethods[] = {
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
      "finish_stock, finish_tool, id, lead_arcs, name, peck, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
-     "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
+     "stock_to_leave, tabs, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
@@ -475,35 +476,15 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
   // were never read, and came back out of `get_state` looking like settings
   // that meant something. Checked after the type is settled above, because
   // the same call can change it.
-  static const struct {
-    const char* key;
-    cam::OpField field;
-  } kOwned[] = {
-      {"stepdown", cam::OpField::Stepdown},
-      {"stepover", cam::OpField::Stepover},
-      {"stock_to_leave", cam::OpField::StockToLeave},
-      {"side", cam::OpField::Side},
-      {"climb", cam::OpField::Climb},
-      {"tabs", cam::OpField::Tabs},
-      {"corner_relief", cam::OpField::CornerRelief},
-      {"lead_arcs", cam::OpField::LeadArcs},
-      {"drilled_bores", cam::OpField::DrilledBores},
-      {"peck", cam::OpField::Peck},
-      {"edge_size", cam::OpField::EdgeSize},
-      {"use_outline", cam::OpField::UseOutline},
-      {"finish_tool", cam::OpField::Finish},
-      {"finish_stock", cam::OpField::Finish},
-      {"cut_angle_deg", cam::OpField::CutAngle},
-      {"sample_step_mm", cam::OpField::SampleStep},
-      {"z_step_mm", cam::OpField::ZStep},
-      {"rotary_pattern", cam::OpField::RotaryPattern},
-  };
-  for (const auto& row : kOwned) {
-    if (!p.contains(row.key) || cam::OpTypeHas(op.type, row.field))
+  // The owned list is the op-field table (CamOpFields.h), so a field added
+  // there is refused, applied and reported here without a line of its own.
+  for (const cam::OpFieldRow& row : cam::OpFieldRows()) {
+    if (!p.contains(row.key) || cam::OpTypeHasRow(op.type, row))
       continue;
     std::string takes;
-    for (const auto& other : kOwned)
-      if (cam::OpTypeHas(op.type, other.field))
+    for (const cam::OpFieldRow& other : cam::OpFieldRows())
+      if (other.field != cam::OpField::None &&
+          cam::OpTypeHas(op.type, other.field))
         takes += (takes.empty() ? "" : ", ") + std::string(other.key);
     throw std::runtime_error(
         std::string("a ") + cam::OpTypeNameOrThrow(op.type) +
@@ -517,6 +498,7 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     // Through the same retool the panel's combo uses: a stepdown still at the
     // old cutter's derived value follows the new one, and a tool the setup
     // does not have is REFUSED rather than silently cutting with tool 1.
+    // BEFORE the table's fields, so a stepdown stated in the same call wins.
     std::string why;
     if (!cam::Retool(setup, op, p.at("tool").get<int>(), why))
       throw std::runtime_error(why);
@@ -525,14 +507,12 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.topZ = p.at("top_z").get<double>();
   if (p.contains("bottom_z"))
     op.bottomZ = p.at("bottom_z").get<double>();
-  if (p.contains("stepdown"))
-    op.stepdown = p.at("stepdown").get<double>();
-  if (p.contains("peck"))
-    op.peck = p.at("peck").get<double>();
-  if (p.contains("drilled_bores"))
-    op.drilledBores = p.at("drilled_bores").get<double>();
-  if (p.contains("lead_arcs"))
-    op.leadArcs = p.at("lead_arcs").get<bool>();
+  // Every table field, read THROUGH `p` so the strict unknown-key check sees
+  // the key was read.
+  for (const cam::OpFieldRow& row : cam::OpFieldRows())
+    if (!(row.flags & cam::kOpFieldByHand) && p.contains(row.key))
+      cam::SetOpField(row, p.at(row.key), op);
+  // The rows with rules of their own.
   if (p.contains("finish_tool")) {
     op.finishTool = p.at("finish_tool").get<int>();
     if (op.finishTool != 0 && setup.FindTool(op.finishTool) == nullptr)
@@ -547,44 +527,6 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
   }
   if (p.contains("finish_stock"))
     op.finishStock = p.at("finish_stock").get<double>();
-  if (p.contains("corner_relief")) {
-    const std::string r = p.at("corner_relief").get<std::string>();
-    if (r == "none")
-      op.cornerRelief = cam::CornerRelief::None;
-    else if (r == "dogbone")
-      op.cornerRelief = cam::CornerRelief::Dogbone;
-    else if (r == "tbone")
-      op.cornerRelief = cam::CornerRelief::TBone;
-    else
-      throw std::runtime_error("unknown corner_relief '" + r +
-                               "'; accepted: none, dogbone, tbone");
-  }
-  if (p.contains("stock_to_leave"))
-    op.stockToLeave = p.at("stock_to_leave").get<double>();
-  if (p.contains("side"))
-    op.side = SideFrom(p.at("side").get<std::string>());
-  if (p.contains("climb"))
-    op.climb = p.at("climb").get<bool>();
-  if (p.contains("use_outline"))
-    op.useOutline = p.at("use_outline").get<bool>();
-  if (p.contains("stepover"))
-    op.stepover = p.at("stepover").get<double>();
-  if (p.contains("edge_size"))
-    op.edgeSize = p.at("edge_size").get<double>();
-  if (p.contains("cut_angle_deg"))
-    op.cutAngleDeg = p.at("cut_angle_deg").get<double>();
-  if (p.contains("sample_step_mm"))
-    op.sampleStep = p.at("sample_step_mm").get<double>();
-  if (p.contains("z_step_mm"))
-    op.zStep = p.at("z_step_mm").get<double>();
-  if (p.contains("rotary_pattern")) {
-    const std::string r = p.at("rotary_pattern").get<std::string>();
-    if (!cam::TryRotaryPatternFromName(r, op.rotaryPattern))
-      throw std::runtime_error("unknown rotary_pattern '" + r +
-                               "'; accepted: " + cam::RotaryPatternNameList());
-  }
-  if (p.contains("enabled"))
-    op.enabled = p.at("enabled").get<bool>();
   if (p.contains("tabs")) {
     const json& t = p.at("tabs");
     op.tabCount = t.value("count", 0);
@@ -642,56 +584,22 @@ json ToolJson(const cam::Tool& t) {
 json OpJson(const cam::Operation& op) {
   json j = {
       {"id", op.id},           {"name", op.name},  {"type", TypeName(op.type)},
-      {"tool", op.toolNumber}, {"top_z", op.topZ}, {"bottom_z", op.bottomZ},
-      {"enabled", op.enabled}};
-  // Everything else is what this TYPE uses, from the one table (CamNames.h),
-  // so what comes back out is exactly what set_cam_op will take in. It used
-  // to be three hand-kept lists that disagreed with the panel's and the
-  // serializer's: `stepover` was reported for edge_round ALONE, so a pocket's
-  // stepover was settable and unreadable, while `peck` and `lead_arcs` were
-  // reported for every type including the ones that never read them.
-  const auto has = [&](cam::OpField f) { return cam::OpTypeHas(op.type, f); };
-  if (has(cam::OpField::Stepdown))
-    j["stepdown"] = op.stepdown;
-  if (has(cam::OpField::StockToLeave))
-    j["stock_to_leave"] = op.stockToLeave;
-  if (has(cam::OpField::EdgeSize))
-    j["edge_size"] = op.edgeSize;
-  if (has(cam::OpField::Stepover))
-    j["stepover"] = op.stepover;
-  if (has(cam::OpField::Peck))
-    j["peck"] = op.peck;
-  if (has(cam::OpField::LeadArcs))
-    j["lead_arcs"] = op.leadArcs;
-  if (has(cam::OpField::DrilledBores))
-    j["drilled_bores"] = op.drilledBores;
-  if (has(cam::OpField::Climb))
-    j["climb"] = op.climb;
-  if (has(cam::OpField::UseOutline))
-    j["use_outline"] = op.useOutline;
-  if (has(cam::OpField::Finish)) {
+      {"tool", op.toolNumber}, {"top_z", op.topZ}, {"bottom_z", op.bottomZ}};
+  // Everything else is what this TYPE uses, from the op-field table
+  // (CamOpFields.h), so what comes back out is exactly what set_cam_op will
+  // take in. It used to be hand-kept lists that disagreed with the panel's
+  // and the serializer's: `stepover` was reported for edge_round ALONE, so a
+  // pocket's stepover was settable and unreadable, while `peck` and
+  // `lead_arcs` were reported for every type including the ones that never
+  // read them. `side` is reported for the clearing types too: a pocket built
+  // over the RPC once kept the struct's Outside default INVISIBLY.
+  for (const cam::OpFieldRow& row : cam::OpFieldRows())
+    if (!(row.flags & cam::kOpFieldByHand) && cam::OpTypeHasRow(op.type, row))
+      j[row.key] = cam::OpFieldJson(row, op);
+  if (cam::OpTypeHas(op.type, cam::OpField::Finish)) {
     j["finish_tool"] = op.finishTool;
     j["finish_stock"] = op.finishStock;
   }
-  if (has(cam::OpField::CutAngle))
-    j["cut_angle_deg"] = op.cutAngleDeg;
-  if (has(cam::OpField::SampleStep))
-    j["sample_step_mm"] = op.sampleStep;
-  if (has(cam::OpField::ZStep))
-    j["z_step_mm"] = op.zStep;
-  if (has(cam::OpField::RotaryPattern))
-    j["rotary_pattern"] = cam::RotaryPatternName(op.rotaryPattern);
-  if (has(cam::OpField::CornerRelief))
-    j["corner_relief"] = op.cornerRelief == cam::CornerRelief::Dogbone
-                             ? "dogbone"
-                         : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"
-                                                                       : "none";
-  // Side is reported for the clearing types too. It was profile-only, so a
-  // pocket built over the RPC kept the struct's Outside default INVISIBLY —
-  // and adaptive, the one strategy that reads it, then cleared outside a
-  // boundary with nothing beyond it and produced silence.
-  if (cam::OpTypeHas(op.type, cam::OpField::Side))
-    j["side"] = cam::SideName(op.side);
   if (cam::OpTypeHas(op.type, cam::OpField::Tabs) && op.tabCount > 0)
     j["tabs"] = {{"count", op.tabCount},
                  {"width", op.tabWidth},
@@ -1430,13 +1338,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
     // Every field of an operation that is not depth or pick is read inside
-    // ApplyOpFields, which the scanner cannot follow -- and a key missing from
-    // the row is a key the generated SDK refuses to send, so `tabs` was
-    // documented in prose and unreachable through it.
-    // rpc-params: climb, corner_relief, edge_size, enabled, finish_stock
-    // rpc-params: finish_tool, lead_arcs, drilled_bores, name, peck, stepdown
-    // rpc-params: stepover, stock_to_leave, tabs, use_outline
-    // rpc-params: cut_angle_deg, sample_step_mm, z_step_mm, rotary_pattern
+    // ApplyOpFields, which tools/rpc_params_scan.py FOLLOWS: its own reads
+    // plus every key of the op-field table. No annotation to go stale.
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
@@ -1500,13 +1403,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // `job` is read in the preamble, before the active job is looked up --
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
-    // The add_cam_op fields, all of them through ApplyOpFields (above).
-    // rpc-params: bottom_z, climb, corner_relief, edge_size, enabled
-    // rpc-params: finish_stock, finish_tool, lead_arcs, drilled_bores, name
-    // rpc-params: peck, side, stepdown, stepover, stock_to_leave, tabs, target
-    // rpc-params: targets
-    // rpc-params: tool, top_z, type, use_outline
-    // rpc-params: cut_angle_deg, sample_step_mm, z_step_mm, rotary_pattern
+    // The add_cam_op fields, all of them through ApplyOpFields (above), which
+    // the params scanner follows.
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");

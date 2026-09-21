@@ -162,6 +162,11 @@ constexpr SideRow kSideRows[] = {
     {Side::Inside, "inside"},
     {Side::On, "on"},
 };
+constexpr CornerReliefRow kCornerReliefRows[] = {
+    {CornerRelief::None, "none"},
+    {CornerRelief::Dogbone, "dogbone"},
+    {CornerRelief::TBone, "tbone"},
+};
 constexpr RotaryPatternRow kRotaryPatternRows[] = {
     {RotaryPattern::Parallel, "parallel"},
     {RotaryPattern::Spiral, "spiral"},
@@ -243,6 +248,33 @@ bool TryRotaryPatternFromName(const std::string& s, RotaryPattern& out) {
 std::string RotaryPatternNameList() {
   std::string known;
   for (const RotaryPatternRow& row : kRotaryPatternRows)
+    known += (known.empty() ? "" : ", ") + std::string(row.name);
+  return known;
+}
+
+std::span<const CornerReliefRow> CornerReliefs() { return kCornerReliefRows; }
+
+const char* CornerReliefName(CornerRelief r) {
+  for (const CornerReliefRow& row : kCornerReliefRows)
+    if (row.relief == r)
+      return row.name;
+  throw std::logic_error("cam::CornerRelief " +
+                         std::to_string(static_cast<int>(r)) +
+                         " has no row in CamNames.cpp");
+}
+
+bool TryCornerReliefFromName(const std::string& s, CornerRelief& out) {
+  for (const CornerReliefRow& row : kCornerReliefRows)
+    if (s == row.name) {
+      out = row.relief;
+      return true;
+    }
+  return false;
+}
+
+std::string CornerReliefNameList() {
+  std::string known;
+  for (const CornerReliefRow& row : kCornerReliefRows)
     known += (known.empty() ? "" : ", ") + std::string(row.name);
   return known;
 }

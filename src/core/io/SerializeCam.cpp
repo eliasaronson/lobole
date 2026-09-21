@@ -1,6 +1,7 @@
 #include "core/cam/CamJob.h"
 #include "core/cam/CamMachine.h" // MachineFileName
 #include "core/cam/CamNames.h"
+#include "core/cam/CamOpFields.h"
 #include "core/cam/CamPost.h"     // PostExists, PostIds
 #include "core/cam/CamToolpath.h" // FrameIsSquare
 #include "core/io/Serialization.h" // WriteTextAtomic
@@ -54,19 +55,6 @@ cam::ToolType ToolTypeFromName(const std::string& s) {
                            ")");
 }
 
-cam::Side SideFromName(const std::string& s) {
-  cam::Side side{};
-  if (cam::TrySideFromName(s, side))
-    return side;
-  // Used to return Side::Outside. This field has already cost one bug in
-  // exactly this shape: when `side` was not serialized at all (before v62) a
-  // pocket reloaded clearing OUTSIDE its own boundary, where there is
-  // nothing, and produced no toolpath. A misspelt `side` did the same thing,
-  // and said as little.
-  throw std::runtime_error("unknown CAM side '" + s +
-                           "' (expected one of: " + cam::SideNameList() + ")");
-}
-
 // In what order the operations cut (v75). An unknown string is REFUSED
 // naming the three: a job that silently posts in a different order than it
 // says is a broken cutter, not a wrong-looking drawing.
@@ -113,11 +101,6 @@ cam::Target TargetFromJson(const json& j) {
 } // namespace
 
 namespace {
-
-// ONE default, read by the writer and the loader. Two copies of a literal is
-// how a field comes to be written when it equals the writer's idea of the
-// default and reloaded as the loader's.
-constexpr double kDefaultStepover = 0.45;
 
 std::string PostIdList() {
   std::string out;
@@ -417,69 +400,23 @@ json CamSetupToJson(const cam::Setup& setup) {
                {"tool", op.toolNumber},
                {"top_z", op.topZ},
                {"bottom_z", op.bottomZ}};
-    if (op.stepdown != 0.0)
-      oj["stepdown"] = op.stepdown;
-    if (op.peck != 0.0)
-      oj["peck"] = op.peck; // v79; omitted when off
-    if (op.stockToLeave != 0.0)
-      oj["stock_to_leave"] = op.stockToLeave;
-    // EVERY type that reads it, not just profiles. Adaptive clearing is the
-    // one strategy that acts on `side`, and it was the one type that never
-    // wrote it: a pocket saved and reloaded came back clearing OUTSIDE its
-    // own boundary, where there is nothing, and produced no toolpath at all.
-    // A job that worked before the save did not work after it
-    // (docs/cam/dogfood-round.md).
-    // By VALUE, like everything else here, not by type. Writing a field only
-    // when its owner's type is on a list is how `stepover` below came to be
-    // dropped for adaptive ops, and the list had already been wrong once for
-    // `side` itself.
-    if (op.side != cam::Side::Outside)
-      oj["side"] = cam::SideName(op.side);
-    if (!op.climb)
-      oj["climb"] = false;
-    // Written only when set, so an operation that goes around its islands —
-    // every one before this — re-saves byte-identically.
-    if (op.useOutline)
-      oj["use_outline"] = true;
-    if (op.leadArcs)
-      oj["lead_arcs"] = true;  // v81; omitted when off
-    if (op.drilledBores > 0.0) // v96; omitted when every opening is cut
-      oj["drilled_bores"] = op.drilledBores;
-    if (op.finishTool != 0) { // v82; omitted when there is no finishing pass
+    // Every field in the op-field table, by VALUE and never by type: left
+    // out when it equals a default-built Operation's, so a file re-saves
+    // byte for byte (docs/cam/op-field-table-plan.md). Writing a field only
+    // when its owner's type was on a list is how adaptive's `stepover` and
+    // then its `side` were each dropped on save once.
+    cam::WriteOpFields(op, oj);
+    // The rows with rules of their own. v82: the finishing pass, omitted
+    // when there is none -- and its stock only beside it.
+    if (op.finishTool != 0) {
       oj["finish_tool"] = op.finishTool;
       oj["finish_stock"] = op.finishStock;
     }
-    if (op.cornerRelief != cam::CornerRelief::None) // v80; omitted when none
-      oj["corner_relief"] =
-          op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone" : "tbone";
     if (op.tabCount != 0) {
       oj["tabs"] = {{"count", op.tabCount},
                     {"width", op.tabWidth},
                     {"height", op.tabHeight}};
     }
-    // ADAPTIVE was not on the old list and reads this field
-    // (CamAdaptive.cpp, `engine.stepOverFactor`), so an adaptive op set to
-    // 0.25 engagement saved without the key and reloaded at the 0.45 default
-    // -- the one number adaptive clearing exists to hold constant, changed by
-    // a round trip. tests/golden/job/v73-cam-clearing-side.json carries a
-    // 0.25 and nothing noticed, because the golden check compared op type
-    // NAMES and not numbers.
-    if (op.stepover != kDefaultStepover)
-      oj["stepover"] = op.stepover;
-    if (op.edgeSize != 0.0)
-      oj["edge_size"] = op.edgeSize;
-    // v118, surfacing. By value like everything else here.
-    if (op.cutAngleDeg != 0.0)
-      oj["cut_angle_deg"] = op.cutAngleDeg;
-    if (op.sampleStep != 0.0)
-      oj["sample_step_mm"] = op.sampleStep;
-    if (op.zStep != 0.0)
-      oj["z_step_mm"] = op.zStep;
-    // v123. Omitted when parallel, which is what every file before it meant.
-    if (op.rotaryPattern != cam::RotaryPattern::Parallel)
-      oj["rotary_pattern"] = cam::RotaryPatternName(op.rotaryPattern);
-    if (!op.enabled)
-      oj["enabled"] = false;
     if (!op.targets.empty()) {
       oj["targets"] = json::array();
       for (const cam::Target& t : op.targets)
@@ -602,52 +539,21 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.toolNumber = oj.value("tool", 1);
     op.topZ = oj.value("top_z", 0.0);
     op.bottomZ = oj.value("bottom_z", -1.0);
-    op.stepdown = oj.value("stepdown", 0.0);
-    op.peck = oj.value("peck", 0.0);
-    op.stockToLeave = oj.value("stock_to_leave", 0.0);
+    cam::ReadOpFields(oj, op);
     // A clearing operation clears INSIDE its boundary; "outside" is a
     // profile's notion. So the default when the key is missing depends on the
     // type — which is what repairs the documents written before this was
     // saved at all, without asking anyone to re-make their job.
-    const bool clears = cam::OpTypeHas(op.type, cam::OpField::ClearsInside);
-    op.side = SideFromName(
-        oj.value("side", std::string(clears ? "inside" : "outside")));
-    op.climb = oj.value("climb", true);
-    op.useOutline = oj.value("use_outline", false);
-    op.leadArcs = oj.value("lead_arcs", false);
-    op.drilledBores = oj.value("drilled_bores", 0.0);
+    if (!oj.contains("side") &&
+        cam::OpTypeHas(op.type, cam::OpField::ClearsInside))
+      op.side = cam::Side::Inside;
     op.finishTool = oj.value("finish_tool", 0);
     op.finishStock = oj.value("finish_stock", 0.0);
-    if (oj.contains("corner_relief")) {
-      const std::string r = oj.at("corner_relief").get<std::string>();
-      if (r == "dogbone")
-        op.cornerRelief = cam::CornerRelief::Dogbone;
-      else if (r == "tbone")
-        op.cornerRelief = cam::CornerRelief::TBone;
-      else if (r == "none")
-        op.cornerRelief = cam::CornerRelief::None;
-      else
-        throw std::runtime_error("unknown corner_relief '" + r +
-                                 "'; this build accepts none, dogbone, tbone");
-    }
     if (oj.contains("tabs")) {
       op.tabCount = oj["tabs"].value("count", 0);
       op.tabWidth = oj["tabs"].value("width", 6.0);
       op.tabHeight = oj["tabs"].value("height", 1.5);
     }
-    op.stepover = oj.value("stepover", kDefaultStepover);
-    op.edgeSize = oj.value("edge_size", 0.0);
-    op.cutAngleDeg = oj.value("cut_angle_deg", 0.0);
-    op.sampleStep = oj.value("sample_step_mm", 0.0);
-    op.zStep = oj.value("z_step_mm", 0.0);
-    if (oj.contains("rotary_pattern")) {
-      const std::string r = oj.at("rotary_pattern").get<std::string>();
-      if (!cam::TryRotaryPatternFromName(r, op.rotaryPattern))
-        throw std::runtime_error("unknown rotary_pattern '" + r +
-                                 "'; this build accepts " +
-                                 cam::RotaryPatternNameList());
-    }
-    op.enabled = oj.value("enabled", true);
     for (const json& rj : oj.value("targets", json::array()))
       op.targets.push_back(TargetFromJson(rj));
     setup.operations.push_back(std::move(op));
