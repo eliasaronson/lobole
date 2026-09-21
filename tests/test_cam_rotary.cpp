@@ -12,6 +12,8 @@
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
 
+#include <chrono>
+
 namespace {
 
 // A cylinder lying ON the rotary axis: setup-space +X through the origin.
@@ -550,6 +552,26 @@ TEST_CASE("cam rotary: the simulation refuses a part that turns", "[cam]") {
       cam::ParseGcode("(op 1)\nG0 Z25\nG0 X0 Y0\nG1 Z15 F300\nG1 X10\n"), 0.0);
   CHECK(flat.unsupported.empty());
   CHECK(flat.Segments() > 0);
+}
+
+TEST_CASE("cam rotary: the CL surface at the rolling pin's size",
+          "[cam][.bench]") {
+  // Not a gate -- hidden by `.` -- a stopwatch. The pin's finishing grid:
+  // 300 mm at the cusp-derived 0.149 mm, round a Phi 50 blank, under a 6 mm
+  // ball. `perf` put RotaryCL and its hypot at ~100% of that generation.
+  cam::RadiusMap model = cam::MakeRotaryStock(0.0, 300.0, 25.0, 0.149);
+  cam::Tool ball;
+  ball.number = 1;
+  ball.diameter = 6.0;
+  ball.type = cam::ToolType::Ball;
+  const auto t0 = std::chrono::steady_clock::now();
+  const cam::RadiusMap cl = cam::RotaryCL(model, ball);
+  const double s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  WARN("RotaryCL " << model.nx << " x " << model.nTheta << " cells: " << s
+                   << " s");
+  CHECK(cl.nx == model.nx);
 }
 
 #endif // HAVE_CAM
