@@ -14,16 +14,28 @@ glm::dvec3 Lerp(const GProgram& p, size_t seg, double t) {
   return a + (b - a) * std::clamp(t, 0.0, 1.0);
 }
 
-double SegmentLength(const GProgram& p, size_t seg) {
+// Two consecutive moves of a posted program, as the feed rules see them.
+RotarySegment SegmentAt(const GProgram& p, size_t seg) {
   const GMove& a = p.moves[seg];
   const GMove& b = p.moves[seg + 1];
-  // A rotation has length too: the arc the tool tip travels as the part
-  // turns under it -- the definition `CuttingMinutes` uses, so the clock and
-  // the slider agree. Without it a pure-A move is zero millimetres and the
-  // slider jumps straight across every rotation.
-  if (a.hasA && b.hasA)
-    return TipLength(a.to, a.a, b.to, b.a);
-  return glm::length(b.to - a.to);
+  RotarySegment s;
+  s.from = a.to;
+  s.aFrom = a.a;
+  s.fromHasA = a.hasA;
+  s.to = b.to;
+  s.aTo = b.a;
+  s.toHasA = b.hasA;
+  s.rapid = b.rapid;
+  s.feed = b.feed;
+  return s;
+}
+
+// A rotation has length too: the arc the tool tip travels as the part turns
+// under it -- the definition `CuttingMinutes` uses, so the clock and the
+// slider agree. Without it a pure-A move is zero millimetres and the slider
+// jumps straight across every rotation.
+double SegmentLength(const GProgram& p, size_t seg) {
+  return cam::SegmentLength(SegmentAt(p, seg));
 }
 
 double AngleOf(const GMove& m) { return m.hasA ? m.a : 0.0; }
@@ -51,21 +63,10 @@ Timeline BuildTimeline(GProgram program, double rapidFeed,
     const GMove& m = tl.program.moves[k + 1];
     const double len = SegmentLength(tl.program, k);
     dist += len;
-    // The same accounting `CuttingMinutes` does, move for move: a rapid is
-    // counted only when the setup states a traverse rate, because otherwise
-    // the number would be invented.
-    //
-    // A CUT that turns is timed the way the controller times it: its F was
-    // scaled for the controller's length (ControllerFeed), so dividing the
-    // tip's length by it would report the scaling instead of the time.
-    const double feed = m.rapid ? rapidFeed : m.feed;
-    const GMove& from = tl.program.moves[k];
-    const bool turningCut =
-        !m.rapid && from.hasA && m.hasA && std::abs(m.a - from.a) > 1e-9;
-    const double timed =
-        turningCut ? ControllerLength(from.to, from.a, m.to, m.a, model) : len;
-    if (feed > 1e-9 && timed > 1e-12)
-      minutes += timed / feed;
+    // The same accounting `CuttingMinutes` does, move for move, except that
+    // a file's F on a turning cut was already SCALED for the controller --
+    // so it is PostedMinutes, not PlanFeed, or the scaling counts twice.
+    minutes += PostedMinutes(SegmentAt(tl.program, k), rapidFeed, model);
     tl.distance.push_back(dist);
     tl.minutes.push_back(minutes);
 

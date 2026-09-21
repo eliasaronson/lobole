@@ -25,25 +25,6 @@ cam::RadiusMap Uniform(double radius = 15.0) {
   return cam::MakeRotaryStock(0.0, 40.0, radius, 0.5);
 }
 
-// The part the rotary tests turn: a Phi 30 bar with a Phi 22 journal turned
-// into its middle -- two shoulders, one corner a ball cannot reach.
-std::unique_ptr<Document> ShaftDoc() {
-  auto doc = std::make_unique<Document>();
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 40.0));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Waist", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 15.0, 16.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
-      BooleanOp::Subtract));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 11.0, 16.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
-      BooleanOp::Union));
-  return doc;
-}
-
 cam::Setup ShaftSetup() {
   cam::Setup setup = BasicSetup();
   setup.machine.hasRotaryAxis = true;
@@ -206,7 +187,7 @@ TEST_CASE("cam spiral: decimation stays inside its tolerance", "[cam]") {
 
 TEST_CASE("cam spiral: the part turns while it cuts, and verifies clean",
           "[cam]") {
-  auto doc = ShaftDoc();
+  auto doc = NeckedShaftDoc();
   REQUIRE(doc->GetBodies().size() == 1);
   cam::Setup setup = ShaftSetup();
   setup.operations.push_back(RotaryOp(1, cam::RotaryPattern::Spiral));
@@ -419,7 +400,7 @@ TEST_CASE("cam spiral: the parser reads G92 A as a rename, not a move",
 TEST_CASE("cam spiral: a wound axis is renamed, and the next op does not "
           "unwind it",
           "[cam]") {
-  auto doc = ShaftDoc();
+  auto doc = NeckedShaftDoc();
   cam::Setup setup = ShaftSetup();
   setup.operations.push_back(RotaryOp(1, cam::RotaryPattern::Spiral));
   setup.operations.push_back(RotaryOp(2, cam::RotaryPattern::Parallel));
@@ -461,7 +442,7 @@ TEST_CASE("cam spiral: a wound axis is renamed, and the next op does not "
 
 TEST_CASE("cam spiral: a stepdown cuts in layers from the blank inward",
           "[cam]") {
-  auto doc = ShaftDoc();
+  auto doc = NeckedShaftDoc();
   cam::Setup setup = ShaftSetup();
   // Parallel, because a raster's finish layer is directly comparable: the
   // spiral's is shifted to carry on from the turn the layer before ended on.
@@ -511,7 +492,7 @@ TEST_CASE("cam spiral: layers are asked for, never inherited", "[cam]") {
   // now would turn every rotary op -- derived, retooled, or reopened from a
   // v122 file -- into a rough from the blank that nobody asked for. Found
   // on the rolling pin: 114 m of cutting became 310.
-  auto doc = ShaftDoc();
+  auto doc = NeckedShaftDoc();
   cam::Setup setup = ShaftSetup();
   cam::Tool second = ShapedTool(cam::ToolType::Ball, 4.0);
   second.number = 2;

@@ -652,14 +652,13 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       const Move& end = tp.moves[straightTo];
       double feed = end.kind == Move::Kind::Rapid ? 0.0 : end.feed;
       // A cut that turns: F scaled so the controller's reading of it moves
-      // the TIP at the feed asked for (CamGcode.h). A merged run never turns
-      // -- LastCollinear stops at a change of A -- so the move before is
-      // where this one starts.
-      if (feed > 0.0 && straightTo > 0 && end.hasA) {
-        const Move& from = tp.moves[straightTo - 1];
-        if (from.hasA && Emitter::Differs(end.a, from.a)) {
-          const ScaledFeed f = ControllerFeed(from.to, from.a, end.to, end.a,
-                                              feed, feedModel, axisLimits);
+      // the TIP at the feed asked for (CamRotaryFeed.h). A merged run never
+      // turns -- LastCollinear stops at a change of A -- so the move before
+      // is where this one starts.
+      if (feed > 0.0 && straightTo > 0) {
+        const RotarySegment seg = SegmentOf(tp.moves[straightTo - 1], end);
+        if (TurnsWhileCutting(seg)) {
+          const ScaledFeed f = PlanFeed(seg, 0.0, feedModel, axisLimits).feed;
           // A tenth is finer than any controller's feed override, and a
           // file that writes F to four places on every line of a spiral is
           // a third longer for nothing.
@@ -668,8 +667,8 @@ bool PostProcess(const std::string& postId, const Setup& setup,
             capped++;
             cappedWanted = std::max(cappedWanted, f.wanted);
             cappedRadius = std::min(cappedRadius,
-                                    std::min(std::hypot(from.to.y, from.to.z),
-                                             std::hypot(end.to.y, end.to.z)));
+                                    std::min(std::hypot(seg.from.y, seg.from.z),
+                                             std::hypot(seg.to.y, seg.to.z)));
           }
         }
       }

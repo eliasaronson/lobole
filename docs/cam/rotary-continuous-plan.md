@@ -184,7 +184,8 @@ post, feed and winding work is what it will sit on.
 
 - `src/core/cam/CamSurface.{h,cpp}`: `RotarySpiralPath`, the lookup, the
   decimation.
-- `src/core/cam/CamStrategies.cpp`: the pattern switch, the layers, the
+- `src/core/cam/CamStrategies.cpp` (since moved to
+  `CamSurfaceStrategies.cpp`, docs/cam/cleanup-after-spiral-plan.md): the pattern switch, the layers, the
   spiral's approach and retract in `GenerateRotarySurface`.
 - `src/core/cam/CamJob.h`, `CamNames.cpp`: `RotaryPattern`, the field and
   its names, `Stepdown` on `surface_rotary`.

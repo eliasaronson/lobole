@@ -66,4 +66,63 @@ ScaledFeed ControllerFeed(const glm::dvec3& from, double aFrom,
   return out;
 }
 
+RotarySegment SegmentOf(const Move& from, const Move& to) {
+  RotarySegment s;
+  s.from = from.to;
+  s.aFrom = from.a;
+  s.fromHasA = from.hasA;
+  s.to = to.to;
+  s.aTo = to.a;
+  s.toHasA = to.hasA;
+  s.rapid = to.kind == Move::Kind::Rapid;
+  s.feed = to.feed;
+  return s;
+}
+
+bool TurnsWhileCutting(const RotarySegment& s) {
+  return !s.rapid && s.fromHasA && s.toHasA && std::abs(s.aTo - s.aFrom) > 1e-9;
+}
+
+double SegmentLength(const RotarySegment& s) {
+  if (s.fromHasA && s.toHasA)
+    return TipLength(s.from, s.aFrom, s.to, s.aTo);
+  return glm::length(s.to - s.from);
+}
+
+PlannedFeed PlanFeed(const RotarySegment& s, double rapidFeed,
+                     RotaryFeedModel model, const AxisLimits& limits) {
+  PlannedFeed out;
+  if (s.rapid) {
+    const double len = SegmentLength(s);
+    if (rapidFeed > 1e-9)
+      out.minutes = len / rapidFeed;
+    return out;
+  }
+  out.feed.feed = out.feed.wanted = s.feed;
+  if (s.feed <= 1e-9)
+    return out;
+  if (!TurnsWhileCutting(s)) {
+    out.minutes = SegmentLength(s) / s.feed;
+    return out;
+  }
+  // Scaled for the controller, so the controller's length over the scaled F
+  // is the time: the tip's length over the feed asked for, unless an axis
+  // held it back, and then longer -- the one number that says so.
+  out.feed =
+      ControllerFeed(s.from, s.aFrom, s.to, s.aTo, s.feed, model, limits);
+  out.minutes =
+      ControllerLength(s.from, s.aFrom, s.to, s.aTo, model) / out.feed.feed;
+  return out;
+}
+
+double PostedMinutes(const RotarySegment& s, double rapidFeed,
+                     RotaryFeedModel model) {
+  const double feed = s.rapid ? rapidFeed : s.feed;
+  const double timed =
+      TurnsWhileCutting(s)
+          ? ControllerLength(s.from, s.aFrom, s.to, s.aTo, model)
+          : SegmentLength(s);
+  return feed > 1e-9 && timed > 1e-12 ? timed / feed : 0.0;
+}
+
 } // namespace cam

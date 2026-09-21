@@ -12,6 +12,7 @@ Usage: headless_smoke.py <path-to-designer-binary>
 import glob
 import math
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -2085,6 +2086,84 @@ def main():
             # A job is a second document in the project, so the phases below --
             # which count tabs and lean on the single-document .json form -- start
             # from a clean one rather than inheriting this one.
+            d.call("new_project")
+
+        phase("Every op field set over the RPC reads back")
+        # docs/cam/cleanup-after-spiral-plan.md, 1. A field on an operation
+        # goes through three hand-kept places on this surface -- the owned
+        # list, the apply step and the answer -- and a field accepted but not
+        # reported (or reported but not applied) is invisible. The fields come
+        # from each op's OWN answer, so this grows with the table.
+        if has_cam:
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Block", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("machine_part")
+            sid = d.call("add_cam_setup", name="Every field")["id"]
+            d.call("set_cam_setup", id=sid, has_rotary_axis=True, tool={
+                "number": 2, "name": "finisher", "diameter": 3.0})
+            enums = {"side": ["outside", "inside", "on"],
+                     "corner_relief": ["none", "dogbone", "tbone"],
+                     "rotary_pattern": ["parallel", "spiral"]}
+            # Not fields to poke: identity, the type itself, and `tool`, whose
+            # change re-derives the stepdown (Retool) by design.
+            fixed = {"id", "type", "tool", "targets", "derived"}
+
+            def other(key, value):
+                if key in enums:
+                    return next(v for v in enums[key] if v != value)
+                if key == "finish_tool":
+                    return 2
+                if isinstance(value, bool):
+                    return not value
+                if isinstance(value, (int, float)):
+                    return round(value * 0.5 + 0.35, 6)
+                if isinstance(value, str):
+                    return value + " poked"
+                raise AssertionError(f"no poke for {key}={value!r}")
+
+            types = ("profile", "pocket", "face", "drill", "adaptive",
+                     "edge_round", "surface_parallel", "surface_waterline",
+                     "surface_rotary")
+            for t in types:
+                op = d.call("add_cam_op", setup=sid, type=t, tool=1,
+                            top_z=20.0, bottom_z=5.0)
+                want = {k: other(k, v) for k, v in op.items() if k not in fixed}
+                want["tabs"] = {"count": 3, "width": 5.0, "height": 1.25}
+                try:
+                    d.call("set_cam_op", id=op["id"], **want)
+                except RuntimeError as e:
+                    # Tabs are only reported once there are some, so they are
+                    # offered to every type; a type without them refuses by
+                    # name, which is the other half of the contract.
+                    expect("has no tabs" in str(e), f"{t}: {e}")
+                    del want["tabs"]
+                    d.call("set_cam_op", id=op["id"], **want)
+                back = next(o for s_ in d.call("list_cam_setups")["setups"]
+                            for o in s_["operations"] if o["id"] == op["id"])
+                for k, v in want.items():
+                    got = back.get(k)
+                    same = (abs(got - v) < 1e-9
+                            if isinstance(v, float) and isinstance(got, (int, float))
+                            else got == v)
+                    expect(same, f"{t}.{k}: set {v!r}, read back {got!r}")
+                # ...and the other direction: every field the type ACCEPTS is
+                # reported. The refusal for a field it lacks lists what it
+                # takes, which is the owned list's own answer.
+                takes = None
+                for probe in ("peck", "tabs", "z_step_mm", "cut_angle_deg"):
+                    try:
+                        d.call("set_cam_op", id=op["id"], **{probe: 1})
+                    except RuntimeError as e:
+                        m = re.search(r"it takes (.*?)\. Setting", str(e))
+                        if m:
+                            takes = m.group(1).split(", ")
+                            break
+                expect(takes is not None, f"{t}: no probe field was refused")
+                for k in takes:
+                    expect(k in back, f"{t} accepts `{k}` but does not report "
+                                      f"it: {sorted(back)}")
             d.call("new_project")
 
         phase("Tab addressing, duplicate names, the .json refusal")

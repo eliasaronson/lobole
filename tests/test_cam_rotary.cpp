@@ -447,19 +447,7 @@ TEST_CASE("cam rotary: generate, post and verify a turned part", "[cam]") {
   // diameters and two shoulders, which is the smallest shape with a corner a
   // ball cannot reach, so the leftover it reports is a real number rather
   // than zero by construction.
-  auto doc = std::make_unique<Document>();
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Waist", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 20.0, 20.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
-      BooleanOp::Subtract));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 15.0, 20.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
-      BooleanOp::Union));
+  auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
   REQUIRE(doc->GetBodies().size() == 1);
 
   cam::Setup setup = BasicSetup();
@@ -560,19 +548,7 @@ struct RotaryJob {
 
 RotaryJob SmallRotaryJob() {
   RotaryJob j;
-  j.doc = std::make_unique<Document>();
-  j.doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 40.0));
-  j.doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Waist", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 15.0, 16.0));
-  j.doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Necked", j.doc->GetFeature(0)->GetId(), j.doc->GetFeature(1)->GetId(),
-      BooleanOp::Subtract));
-  j.doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 11.0, 16.0));
-  j.doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Shaft", j.doc->GetFeature(2)->GetId(), j.doc->GetFeature(3)->GetId(),
-      BooleanOp::Union));
+  j.doc = NeckedShaftDoc();
   REQUIRE(j.doc->GetBodies().size() == 1);
   j.setup = BasicSetup();
   j.setup.machine.hasRotaryAxis = true;

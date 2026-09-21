@@ -318,11 +318,11 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   // read inside the surfacing strategies that `SurfaceKey` does not know
   // about means the cache answers a changed operation with the old moves.
   //
-  // Read against CamStrategies.cpp's SURFACING FUNCTIONS only -- the file
-  // holds every generator, and hashing the fields a profile reads would be
-  // a key that invalidates on things surfacing never looks at.
+  // Read against the SURFACING FUNCTIONS only (CamSurfaceStrategies.cpp) --
+  // hashing the fields a profile reads would be a key that invalidates on
+  // things surfacing never looks at.
   const fs::path strategies =
-      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamStrategies.cpp";
+      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamSurfaceStrategies.cpp";
   const fs::path surface =
       fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamSurface.cpp";
   const auto slurp = [](const fs::path& p) {

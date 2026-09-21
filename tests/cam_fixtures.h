@@ -327,4 +327,33 @@ ElementRef HoleWall(const Document& doc) {
 }
 } // namespace
 
+namespace {
+
+// A bar ON the rotary axis (setup-space +X) with a journal turned into it:
+// two diameters and two shoulders, the smallest shape with an inside corner a
+// ball cannot reach -- so a rotary check reports a real leftover, not zero by
+// construction. Defaults: Phi 30 x 40 with a Phi 22 journal from x = 12 to 28.
+std::unique_ptr<Document>
+NeckedShaftDoc(double radius = 15.0, double length = 40.0, double neckAt = 12.0,
+               double neckLength = 16.0, double neckRadius = 11.0) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), radius, length));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Waist", glm::vec3(neckAt, 0, 0), glm::vec3(1, 0, 0), radius,
+      neckLength));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Journal", glm::vec3(neckAt, 0, 0), glm::vec3(1, 0, 0), neckRadius,
+      neckLength));
+  doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
+      BooleanOp::Union));
+  return doc;
+}
+
+} // namespace
+
 #endif // HAVE_CAM

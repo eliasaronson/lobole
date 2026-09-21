@@ -68,4 +68,47 @@ struct ScaledFeed {
                                         double feed, RotaryFeedModel model,
                                         const AxisLimits& limits);
 
+// --- one segment, one answer ---------------------------------------------
+//
+// The post, the cycle time, the playback clock and the verdict all walk
+// moves asking the same questions -- is this a cut that turns the part, what
+// F does it get, how long does it take -- and each used to answer them in
+// its own loop. The rule lives here now, once.
+
+// Two consecutive moves, whatever they came from (a toolpath or a file).
+struct RotarySegment {
+  glm::dvec3 from{0.0};
+  double aFrom = 0.0;
+  bool fromHasA = false;
+  glm::dvec3 to{0.0};
+  double aTo = 0.0;
+  bool toHasA = false;
+  bool rapid = false;
+  double feed = 0.0; // the move's own F, mm/min; 0 = none stated
+};
+[[nodiscard]] RotarySegment SegmentOf(const Move& from, const Move& to);
+
+// A CUT that changes A: the one kind of move whose F is scaled.
+[[nodiscard]] bool TurnsWhileCutting(const RotarySegment& s);
+// The path the tool tip travels: TipLength when both ends state an A, the
+// straight distance otherwise. What the playback slider scrubs along.
+[[nodiscard]] double SegmentLength(const RotarySegment& s);
+
+// A PLANNED move -- a toolpath's, `feed` meant at the tip. The F to post (a
+// turning cut's scaled and held; any other move's own), and the minutes the
+// controller takes over it. A rapid is timed at `rapidFeed` when one is
+// stated and not at all otherwise, because an invented traverse rate is an
+// invented cycle time.
+struct PlannedFeed {
+  ScaledFeed feed;
+  double minutes = 0.0;
+};
+[[nodiscard]] PlannedFeed PlanFeed(const RotarySegment& s, double rapidFeed,
+                                   RotaryFeedModel model,
+                                   const AxisLimits& limits);
+// A POSTED move, whose F was already scaled for the controller: the minutes
+// it takes. Not PlanFeed on the file's F -- that would scale it twice.
+[[nodiscard]] double PostedMinutes(const RotarySegment& s, double rapidFeed,
+                                   RotaryFeedModel model);
+
 } // namespace cam

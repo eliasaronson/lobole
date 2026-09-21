@@ -613,43 +613,19 @@ double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
 }
 
 double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
+  // A ROTARY move has length too, and it used to have none: a pure A move is
+  // zero millimetres in XYZ, so it fell out of this loop and a rotary
+  // program's cycle time came back understated -- silently, which is the part
+  // that matters. A cut that turns is posted at a SCALED F and timed the way
+  // the controller runs it; PlanFeed is the one place that rule lives.
+  const RotaryFeedModel model = FeedModelOf(setup.machine.post);
+  const AxisLimits limits = AxisLimitsOf(setup);
   double minutes = 0.0;
-  for (const Toolpath& tp : paths) {
-    for (size_t i = 1; i < tp.moves.size(); i++) {
-      const Move& a = tp.moves[i - 1];
-      const Move& b = tp.moves[i];
-      // A ROTARY move has length too, and it used to have none. A pure A
-      // move is zero millimetres in XYZ, so it fell out of this loop
-      // entirely and a rotary program's cycle time came back understated --
-      // silently, which is the part that matters, because a wrong number
-      // with no warning beside it is worse than no number. The length is the
-      // arc the TOOL TIP travels, combined with the linear part.
-      const bool turning = a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9;
-      const double len =
-          turning ? TipLength(a.to, a.a, b.to, b.a) : glm::length(b.to - a.to);
-      if (len < 1e-12)
-        continue;
-      if (b.kind == Move::Kind::Rapid) {
-        if (setup.rapidFeed > 1e-9) // 0 = not stated, so not counted
-          minutes += len / setup.rapidFeed;
-        continue;
-      }
-      if (b.feed <= 1e-9)
-        continue;
-      if (!turning) {
-        minutes += len / b.feed;
-        continue;
-      }
-      // A cut that turns is posted at a SCALED F (ControllerFeed), and the
-      // controller divides its own length by that. Unclamped, that is the
-      // tip's length over the feed asked for; where the scaled F hit the
-      // machine's cap it is longer, and this is the one number that says so.
-      const RotaryFeedModel model = FeedModelOf(setup.machine.post);
-      const ScaledFeed f = ControllerFeed(a.to, a.a, b.to, b.a, b.feed, model,
-                                          AxisLimitsOf(setup));
-      minutes += ControllerLength(a.to, a.a, b.to, b.a, model) / f.feed;
-    }
-  }
+  for (const Toolpath& tp : paths)
+    for (size_t i = 1; i < tp.moves.size(); i++)
+      minutes += PlanFeed(SegmentOf(tp.moves[i - 1], tp.moves[i]),
+                          setup.rapidFeed, model, limits)
+                     .minutes;
   return minutes;
 }
 

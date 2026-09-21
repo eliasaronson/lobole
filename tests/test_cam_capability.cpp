@@ -22,6 +22,7 @@
 // was the defect worth paying for.
 
 #include "cam_fixtures.h"
+#include "core/io/Serialization.h"
 
 namespace {
 
@@ -166,32 +167,14 @@ std::unique_ptr<Document> PartDoc() {
   return doc;
 }
 
-// A bar ON the rotary axis (setup-space +X) with a turned-down waist: what a
-// continuous 4-axis pass is for, and the only fixture here that is not
-// machined from above.
-std::unique_ptr<Document> BarDoc() {
-  auto doc = std::make_unique<Document>();
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 20.0, 60.0));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Waist", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 20.0, 20.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Necked", doc->GetFeature(0)->GetId(), doc->GetFeature(1)->GetId(),
-      BooleanOp::Subtract));
-  doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::vec3(20, 0, 0), glm::vec3(1, 0, 0), 15.0, 20.0));
-  doc->AddFeature(std::make_unique<BooleanFeature>(
-      "Shaft", doc->GetFeature(2)->GetId(), doc->GetFeature(3)->GetId(),
-      BooleanOp::Union));
-  return doc;
-}
-
 TypedJob JobFor(cam::OpType type) {
   TypedJob j;
   const bool rotary = type == cam::OpType::SurfaceRotary;
   const bool surfacing = type == cam::OpType::SurfaceParallel ||
                          type == cam::OpType::SurfaceWaterline;
-  j.doc = rotary ? BarDoc() : surfacing ? DomedDoc() : PartDoc();
+  j.doc = rotary      ? NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0)
+          : surfacing ? DomedDoc()
+                      : PartDoc();
   j.setup = BasicSetup();
   // A 10 mm cutter, not the fixture's 6. Nothing here is about the tool, and
   // the clearing strategies cost passes: at 6 mm the adaptive cases alone put
@@ -310,6 +293,61 @@ TEST_CASE("cam: a generator reads only the fields its type declares", "[cam]") {
                                   << " DOES declare must move its path, or "
                                      "this fixture is not testing anything");
     CHECK(pokeAll(/*claimed=*/true) != base);
+  }
+}
+
+// Every operation field survives a save and a reload
+// (docs/cam/cleanup-after-spiral-plan.md, 1). The case above holds the
+// GENERATOR to the table; nothing held the FILE to it, and a field lost on
+// save is invisible until a job reopens cutting something else -- adaptive's
+// `stepover` did exactly that, found by accident. `Operation`'s defaulted
+// `==` compares every member, so a field added later is covered without
+// anyone listing it, and a new OpField bit with no poke fails by name.
+TEST_CASE("cam: every operation field survives a save and a reload", "[cam]") {
+  // Facts the table carries, not fields anything can set.
+  constexpr uint32_t kFacts =
+      static_cast<uint32_t>(cam::OpField::FullWidth) |
+      static_cast<uint32_t>(cam::OpField::ClearsInside) |
+      static_cast<uint32_t>(cam::OpField::NeedsFlatFloor);
+  uint32_t declared = 0;
+  for (const cam::OpTypeRow& row : cam::OpTypes())
+    declared |= static_cast<uint32_t>(row.fields);
+  uint32_t poked = 0;
+  for (const FieldPoke& p : kPokes)
+    poked |= static_cast<uint32_t>(p.field);
+  for (int bit = 0; bit < 32; bit++) {
+    const uint32_t f = 1u << bit;
+    if ((declared & f) == 0 || (kFacts & f) != 0)
+      continue;
+    INFO("OpField bit " << bit
+                        << " is declared by a type and has no entry in kPokes "
+                           "-- add one, so this test and the one above see it");
+    CHECK((poked & f) != 0);
+  }
+
+  for (const cam::OpTypeRow& row : cam::OpTypes()) {
+    INFO("type " << row.name);
+    cam::Setup setup = BasicSetup();
+    cam::Operation op;
+    op.id = 7;
+    op.type = row.type;
+    op.toolNumber = 1;
+    // Every field, not only the ones this type declares: a file keeps what
+    // it was given whatever the type, so a type change in the panel and back
+    // loses nothing.
+    for (const FieldPoke& p : kPokes)
+      p.poke(op);
+    op.name = "Poked";
+    op.topZ = 12.25;
+    op.bottomZ = -3.75;
+    op.enabled = false;
+    op.targets.push_back(cam::Target{3, ElementRef{41, "Face7"}});
+    setup.operations.push_back(op);
+
+    const cam::Setup back =
+        DocumentIO::CamSetupFromJson(DocumentIO::CamSetupToJson(setup));
+    REQUIRE(back.operations.size() == 1);
+    CHECK(back.operations[0] == op);
   }
 }
 

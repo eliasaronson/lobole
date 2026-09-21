@@ -373,6 +373,11 @@ struct Operation {
   RotaryPattern rotaryPattern = RotaryPattern::Parallel;
 
   bool enabled = true;
+
+  // Every member, compared without anyone listing them: what lets the
+  // round-trip gate (test_cam_capability.cpp) notice a field the serializer
+  // forgot, including one added after the gate was written.
+  bool operator==(const Operation&) const = default;
 };
 
 // In what ORDER the operations cut.

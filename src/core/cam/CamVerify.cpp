@@ -904,12 +904,10 @@ std::vector<VerdictLine> MachineLines(const Setup& setup,
       size_t capped = 0;
       double wanted = 0.0;
       for (size_t i = 1; i < tp.moves.size(); i++) {
-        const Move& a = tp.moves[i - 1];
-        const Move& b = tp.moves[i];
-        if (b.kind == Move::Kind::Rapid || !a.hasA || !b.hasA)
+        const RotarySegment seg = SegmentOf(tp.moves[i - 1], tp.moves[i]);
+        if (!TurnsWhileCutting(seg))
           continue;
-        const ScaledFeed f =
-            ControllerFeed(a.to, a.a, b.to, b.a, b.feed, model, limits);
+        const ScaledFeed f = PlanFeed(seg, 0.0, model, limits).feed;
         peakARate = std::max(peakARate, f.aRate);
         if (f.clamped) {
           capped++;

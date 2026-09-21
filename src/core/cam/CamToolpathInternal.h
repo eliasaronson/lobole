@@ -206,6 +206,12 @@ struct EdgeBreak {
 // top edge, or the size asked for, checked against the tool.
 EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window);
 
+// A surfacing operation (planar or rotary), from the surface cache, from a
+// worker later, or generated right here (CamSurfaceStrategies.cpp).
+void SurfaceThroughCache(const Setup& setup, const Operation& op,
+                         const Tool& tool, const std::vector<Body>& bodies,
+                         Toolpath& tp, GenerateContext* ctx);
+
 } // namespace detail
 
 // Defined at `cam` scope in the .cpp files but NOT part of the public
