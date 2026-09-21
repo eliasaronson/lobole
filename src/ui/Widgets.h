@@ -1,5 +1,8 @@
 #pragma once
 
+#include <imgui.h>
+
+#include <functional>
 #include <string>
 
 // Shared pieces of chrome, so the same thing looks the same wherever it
@@ -33,5 +36,44 @@ struct JobProgress {
 
 // Draws it. Returns true on the frame the cancel button is pressed.
 bool DrawJobProgress(const JobProgress& job);
+
+// A section that opens and closes (docs/ui/assembly-panel-tidy-plan.md): a
+// chevron pointing right when closed and down when open, the label, an
+// optional count after it ("Occurrences 22"), and a hover highlight across
+// the whole row. ImGui's CollapsingHeader -- a filled bar with a small
+// triangle -- was easy to miss as something that opens, in 12 places. The
+// open state lives where CollapsingHeader kept it (the window's storage,
+// under the label's id), so a section a person had open stays open, and the
+// test engine sees it as openable, so `ItemOpen` works on it as before.
+// Returns whether it is open.
+bool SectionHeader(const char* label, int count = -1, bool defaultOpen = false);
+
+// One row of a list in the feature tree's style: a glyph, the label as a
+// full-width selectable, a dim tail at the right, dimmed when `dimmed`, and --
+// when `eye` is not None -- a visibility eye at the right edge that shows on
+// hover, or always, struck through, when the row is hidden. The eye is always
+// submitted (invisible until hovered), so a test can click it.
+struct ListRowSpec {
+  const char* glyph = nullptr;
+  ImVec4 glyphColor{0, 0, 0, 0}; // alpha 0 = the disabled text colour
+  std::string label;             // "text###id"
+  bool selected = false;
+  bool dimmed = false;
+  std::string tail;                // dim text at the right; may be empty
+  const char* tailGlyph = nullptr; // a glyph before the tail (e.g. an anchor)
+  enum class Eye { None, Shown, Hidden } eye = Eye::None;
+  std::string eyeId; // "###occ_eye_7"
+  std::string tooltip;
+  // Drawn as the row's context menu when it is right-clicked; may be empty.
+  std::function<void()> menu;
+  std::string menuId; // "###occ_ctx_7"
+};
+struct ListRowResult {
+  bool clicked = false;       // a single click on the row
+  bool doubleClicked = false; // a double-click: edit
+  bool eyeClicked = false;
+  bool hovered = false;
+};
+ListRowResult ListRow(const ListRowSpec& row);
 
 } // namespace ui

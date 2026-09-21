@@ -2,6 +2,7 @@
 #include "ui/CatalogActions.h"
 #include "ui/SheetMetalActions.h"
 #include "ui/ToleranceActions.h"
+#include "ui/Widgets.h"
 
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/ExprComplete.h"
@@ -66,7 +67,7 @@ std::string FreshName(const AppState& state) {
 // touch the undo stack or bump the document version. It does mark the
 // project dirty, since it is written to the file.
 void DrawUnitsSection(AppState& state, Document& doc) {
-  if (!ImGui::CollapsingHeader("Units###units_header"))
+  if (!SectionHeader("Units###units_header"))
     return;
 
   units::System sys = doc.Units();

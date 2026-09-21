@@ -1080,6 +1080,17 @@ struct AppState {
   // Section tool's cuts do: closing the window means done EDITING the
   // explode, not done looking at it, so activeExplodedView is left alone.
   bool explodeToolOpen = false;
+  // The assembly panel's editors, floating (docs/ui/assembly-panel-tidy-
+  // plan.md): the occurrence or the relation whose properties the tool window
+  // shows, from a double-click on its row. 0 = none. They were "Selected
+  // occurrence" / relation fields inline under the lists, which changed the
+  // panel's length under the cursor. (A mate edits in the mate tool's own
+  // Edit Mate mode.)
+  uint64_t asmEditOccurrence = 0;
+  uint64_t asmEditRelation = 0;
+  // The bill of materials, as a floating window with real columns; it was a
+  // two-column table under a collapsing header in the narrow dock.
+  bool bomWindowOpen = false;
 
   // The Simulation tool window on an ASSEMBLY tab is open (S1,
   // docs/simulation/assembly-studies-plan.md): the third of the floating

@@ -1,4 +1,5 @@
 #include "ui/SheetMetalActions.h"
+#include "ui/Widgets.h"
 
 #include "core/Angles.h"
 #include "core/Command.h"
@@ -120,7 +121,7 @@ uint64_t FlatPatternId(const Document& doc) {
 } // namespace
 
 void DrawSheetMetalSection(AppState& state) {
-  if (!ImGui::CollapsingHeader("Sheet metal"))
+  if (!SectionHeader("Sheet metal"))
     return;
   if (state.document == nullptr) {
     ImGui::TextDisabled("Sheet metal belongs to a part.");

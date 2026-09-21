@@ -2,6 +2,7 @@
 #include "ui/AppState.h"
 #include "ui/CatalogActions.h"
 #include "ui/ExprInput.h"
+#include "ui/Widgets.h"
 #include <array>
 #include <cfloat>
 #include <map>
@@ -23,7 +24,7 @@ void MeasurementField(AppState& state, const char* label, double* value) {
 }
 } // namespace
 void DrawCatalogSection(AppState& state) {
-  if (!ImGui::CollapsingHeader("Engineering catalogs"))
+  if (!SectionHeader("Engineering catalogs"))
     return;
   ImGui::PushID("engineering_catalogs");
   static char path[1024] = "", id[128] = "", revision[128] = "";

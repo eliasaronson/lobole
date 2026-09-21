@@ -696,6 +696,9 @@ const std::vector<Command>& Table() {
             EnterSimulation(s);
         });
     add(
+        "assembly.bom", [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) { s.bomWindowOpen = !s.bomWindowOpen; });
+    add(
         "assembly.motion", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) {
           s.motionToolOpen = !s.motionToolOpen;

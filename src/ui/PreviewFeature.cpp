@@ -573,6 +573,9 @@ void DrawToolWindow(AppState& state) {
       DrawCamToolWindow(state); // the CAM verbs (docs/cam/gui.md G2)
     else if (state.fastenerTool.open)
       DrawFastenerToolWindow(state); // docs/parts/gui-plan.md
+    else if (state.assembly &&
+             (state.asmEditOccurrence != 0 || state.asmEditRelation != 0))
+      DrawAssemblyEditWindow(state); // docs/ui/assembly-panel-tidy-plan.md
     else if (state.assembly && state.explodeToolOpen)
       DrawExplodeToolWindow(state); // docs/ui/u15-assembly-panel.md
     else if (state.assembly && state.motionToolOpen)

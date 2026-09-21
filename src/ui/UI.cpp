@@ -873,6 +873,7 @@ void DrawUI(AppState& state) {
   DrawToolWindow(state);
   DrawCamTransportWindow(state); // the cutting simulation's transport
   DrawCamGenerateWindow(state);  // the run: generate, verify, save
+  DrawBomWindow(state);          // the assembly's bill of materials
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);

@@ -31,6 +31,18 @@ void DrawOccurrencePanel(AppState& state);
 void DrawExplodeToolWindow(AppState& state);
 void DrawMotionToolWindow(AppState& state);
 
+// The assembly panel's editors, floating in the tool window
+// (docs/ui/assembly-panel-tidy-plan.md): a double-click on an occurrence's or
+// a relation's row opens its properties there. Drawn from DrawToolWindow. A
+// mate edits in the mate tool's own Edit Mate mode (StartMateEdit).
+void EditAssemblyOccurrence(AppState& state, uint64_t occId);
+void EditAssemblyRelation(AppState& state, uint64_t relId);
+void DrawAssemblyEditWindow(AppState& state);
+
+// The bill of materials as a floating window with real columns, opened from
+// the assembly toolbar (state.bomWindowOpen).
+void DrawBomWindow(AppState& state);
+
 // The name of the occurrence an id refers to (its label, else its part name).
 // Shared with the Configurations panel, whose assembly arm lists occurrences
 // by the same name this panel does.

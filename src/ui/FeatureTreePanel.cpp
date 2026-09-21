@@ -4,6 +4,7 @@
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 #include "ui/TextFit.h"
+#include "ui/Widgets.h"
 #include <algorithm>
 
 #include "cad/CADMaterials.h"
@@ -46,7 +47,7 @@ void DrawMassPropertiesSection(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
   ImGui::Spacing();
-  if (!ImGui::CollapsingHeader("Mass properties"))
+  if (!SectionHeader("Mass properties"))
     return;
 
   static Measure::DocumentMass cache;

@@ -16,6 +16,7 @@
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 #include "ui/SelectionPipeline.h"
 #include "ui/TextFit.h"
+#include "ui/Theme.h" // ElevatedWindowBorder
 #include "ui/ToleranceActions.h"
 #include "ui/Widgets.h"
 
@@ -97,79 +98,75 @@ void DrawRelationsSection(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
   if (asmDoc.RelationCount() == 0)
     return;
-  ImGui::SeparatorText("Relations");
+  if (!SectionHeader("Relations###rel_section",
+                     static_cast<int>(asmDoc.RelationCount()), true))
+    return;
   uint64_t remove = 0;
-  // The rows as listed, for a Shift-click range — the same gesture the
-  // occurrence and mate lists take (ListSelection.h).
   std::vector<uint64_t> relOrder;
   for (const Relation& r : asmDoc.GetRelations())
     relOrder.push_back(r.id);
   for (Relation& r : asmDoc.GetRelations()) {
-    // The id goes in every LABEL, not a PushID(int) scope: an integer scope
-    // is not addressable as a path segment, so a row inside one cannot be
-    // clicked by name — which is why this list had no test until it became
-    // selectable.
     const std::string rid = std::to_string(r.id);
     const Mate* a = asmDoc.FindMateById(r.mateA);
     const Mate* b = asmDoc.FindMateById(r.mateB);
-    const std::string label =
-        (r.name.empty() ? std::string(DocumentIO::RelationKindToString(r.kind))
-                        : r.name) +
-        "  [" + DocumentIO::RelationKindToString(r.kind) + "]";
-    if (!r.error.empty()) {
-      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", r.error.c_str());
-      ImGui::SameLine();
-    }
-    // Selectable, like an occurrence or a mate: a relation was the one row
-    // in this panel that could not be picked, so nothing could point at the
-    // one it was talking about.
-    if (ImGui::Selectable(
-            (label + "###rel_row_" + rid).c_str(),
-            IsSelected(state, SelectionItem::Kind::Relation, r.id)))
+    const auto mateName = [](const Mate* m) {
+      return m == nullptr      ? std::string("?")
+             : m->name.empty() ? "mate " + std::to_string(m->id)
+                               : m->name;
+    };
+    ListRowSpec row;
+    row.glyph = r.error.empty() ? ICON_FA_GEARS : ICON_FA_TRIANGLE_EXCLAMATION;
+    if (!r.error.empty())
+      row.glyphColor = ImVec4(0.95f, 0.5f, 0.4f, 1.0f);
+    row.label = (r.name.empty() ? mateName(a) + " – " + mateName(b) : r.name) +
+                "###rel_row_" + rid;
+    row.selected = IsSelected(state, SelectionItem::Kind::Relation, r.id);
+    row.tail = DocumentIO::RelationKindToString(r.kind);
+    char tip[256];
+    std::snprintf(tip, sizeof(tip), "%s drives %s, ratio %.5g, phase %.5g%s%s",
+                  mateName(a).c_str(), mateName(b).c_str(), r.ratio, r.phase,
+                  r.error.empty() ? "" : "\n", r.error.c_str());
+    row.tooltip = tip;
+    row.menuId = "###rel_ctx_" + rid;
+    row.menu = [&state, &remove, id = r.id]() {
+      if (ImGui::MenuItem("Edit###rel_edit"))
+        EditAssemblyRelation(state, id);
+      ImGui::Separator();
+      if (ImGui::MenuItem("Delete###rel_delete"))
+        remove = id;
+    };
+    const ListRowResult res = ListRow(row);
+    if (res.clicked)
       ListRowClicked(state, SelectionItem::Kind::Relation, r.id, relOrder,
                      /*ownKindOnly=*/true);
-    if (a != nullptr && b != nullptr)
-      ImGui::TextDisabled(
-          "  %s -> %s",
-          (a->name.empty() ? "mate " + std::to_string(a->id) : a->name).c_str(),
-          (b->name.empty() ? "mate " + std::to_string(b->id) : b->name)
-              .c_str());
-    // A freewheel's history, read-only: set_relation {lead} re-engages it.
-    if (r.kind == RelationKind::Freewheel)
-      ImGui::TextDisabled("  drives %s, lead %.4g deg",
-                          DocumentIO::FreewheelDrivesToString(r.drives),
-                          angles::ToDegrees(r.lead));
-    double ratio = r.ratio, phase = r.phase;
-    ImGui::SetNextItemWidth(110.0f);
-    if (ExprInputDouble(state, ("ratio###rel_ratio_" + rid).c_str(), &ratio,
-                        "%.5g") &&
-        ratio != 0.0 && ratio != r.ratio) {
-      SnapshotAssembly(state);
-      r.ratio = ratio;
-      asmDoc.BumpVersion();
-      SolveActiveAssembly(state);
-    }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(110.0f);
-    if (ExprInputDouble(state, ("phase###rel_phase_" + rid).c_str(), &phase,
-                        "%.5g") &&
-        phase != r.phase) {
-      SnapshotAssembly(state);
-      r.phase = phase;
-      asmDoc.BumpVersion();
-      SolveActiveAssembly(state);
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton(("x###rel_remove_" + rid).c_str()))
-      remove = r.id;
+    if (res.doubleClicked)
+      EditAssemblyRelation(state, r.id);
   }
   if (remove != 0) {
     SnapshotAssembly(state);
     asmDoc.RemoveRelation(remove);
+    if (state.asmEditRelation == remove)
+      state.asmEditRelation = 0;
     SolveActiveAssembly(state);
   }
+}
+
+const char* MateGlyph(MateType t) {
+  switch (t) {
+  case MateType::Fastened:
+    return ICON_FA_LOCK;
+  case MateType::Revolute:
+    return ICON_FA_ROTATE;
+  case MateType::Slider:
+    return ICON_FA_ARROWS_LEFT_RIGHT;
+  case MateType::Cylindrical:
+    return ICON_FA_CIRCLE_NOTCH;
+  case MateType::Planar:
+    return ICON_FA_LAYER_GROUP;
+  case MateType::Ball:
+    return ICON_FA_CIRCLE;
+  }
+  return ICON_FA_LINK;
 }
 
 void DrawMatesSection(AppState& state) {
@@ -178,70 +175,65 @@ void DrawMatesSection(AppState& state) {
   if (state.mateTool.active && state.mateTool.previewMateId)
     return; // the Tool window owns the mid-preview UI; hide the transient mate
 
-  ImGui::SeparatorText("Mates");
+  if (!SectionHeader("Mates###mate_section",
+                     static_cast<int>(asmDoc.MateCount()), true))
+    return;
   if (asmDoc.MateCount() == 0) {
     TextDisabledWrapped("None. Use the mate tools in the toolbar.");
     return;
   }
 
-  // The rows as listed, for a Shift range — the same gesture the occurrence
-  // and relation lists take (ListSelection.h), plus `clickClears`: the
-  // selected-mate editor below opens inside this panel and has nothing to
-  // close it with, so clicking the row again is what puts it away. Delete
-  // removes what is picked.
   std::vector<uint64_t> mateOrder;
   for (const Mate& mate : asmDoc.GetMates())
     mateOrder.push_back(mate.id);
+  bool wantDelete = false;
   for (const Mate& mate : asmDoc.GetMates()) {
-    // The id goes in the LABEL, not a PushID(int) scope: an integer scope is
-    // not addressable as a path segment, so a row inside one cannot be
-    // clicked by name — the same fix the relation and exploded-view rows
-    // needed.
     const std::string mid = std::to_string(mate.id);
-    const std::string label =
-        (mate.name.empty() ? std::string(MateTypeLabel(mate.type))
-                           : mate.name) +
-        "  [" + MateTypeLabel(mate.type) + "]###mate_row_" + mid;
-    if (!mate.error.empty()) {
-      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", mate.error.c_str());
-      ImGui::SameLine();
-    }
-    if (ImGui::Selectable(
-            label.c_str(),
-            IsSelected(state, SelectionItem::Kind::Mate, mate.id)))
+    ListRowSpec row;
+    const bool failed = !mate.error.empty();
+    row.glyph = failed ? ICON_FA_TRIANGLE_EXCLAMATION : MateGlyph(mate.type);
+    if (failed)
+      row.glyphColor = ImVec4(0.95f, 0.5f, 0.4f, 1.0f);
+    // WHICH two occurrences: a column of "Mate [revolute]" said nothing
+    // until each one was clicked.
+    const std::string joins =
+        OccurrenceLabel(state, asmDoc, mate.a.occurrenceId) + " – " +
+        OccurrenceLabel(state, asmDoc, mate.b.occurrenceId);
+    row.label = (mate.name.empty() ? joins : mate.name) + "###mate_row_" + mid;
+    row.selected = IsSelected(state, SelectionItem::Kind::Mate, mate.id);
+    row.tail = MateTypeLabel(mate.type);
+    row.tooltip = joins + " (" + MateTypeLabel(mate.type) + ")" +
+                  (failed ? "\n" + mate.error : std::string()) +
+                  "\nDouble-click to edit";
+    row.menuId = "###mate_ctx_" + mid;
+    row.menu = [&state, &wantDelete, id = mate.id]() {
+      if (ImGui::MenuItem("Edit###mate_edit"))
+        StartMateEdit(state, id);
+      ImGui::Separator();
+      ListRowContext(state, SelectionItem::Kind::Mate, id,
+                     /*ownKindOnly=*/true);
+      const std::string del =
+          DeleteLabel(SelectedIds(state, SelectionItem::Kind::Mate).size(),
+                      "mate") +
+          "###mate_delete";
+      if (ImGui::MenuItem(del.c_str()))
+        wantDelete = true;
+    };
+    const ListRowResult res = ListRow(row);
+    if (res.clicked)
       ListRowClicked(state, SelectionItem::Kind::Mate, mate.id, mateOrder,
                      /*ownKindOnly=*/true, /*clickClears=*/true);
+    if (res.doubleClicked)
+      StartMateEdit(state, mate.id);
   }
+  if (wantDelete)
+    DeleteSelection(state);
+}
 
-  Mate* sel = SelectedMateId(state) ? asmDoc.FindMateById(SelectedMateId(state))
-                                    : nullptr;
-  if (!sel)
-    return;
-
-  ImGui::SeparatorText("Selected mate");
-  ImGui::Text("%s -> %s",
-              OccurrenceLabel(state, asmDoc, sel->a.occurrenceId).c_str(),
-              OccurrenceLabel(state, asmDoc, sel->b.occurrenceId).c_str());
-
-  char name[128];
-  std::snprintf(name, sizeof(name), "%s", sel->name.c_str());
-  if (ImGui::InputText("Name##mate", name, sizeof(name),
-                       ImGuiInputTextFlags_EnterReturnsTrue)) {
-    SnapshotAssembly(state);
-    sel->name = name;
-    asmDoc.BumpVersion();
-  }
-
-  if (ImGui::Checkbox("Flip##mate", &sel->flipped)) {
-    SnapshotAssembly(state);
-    SolveActiveAssembly(state);
-  }
-
-  // The DOF controls: which fields are live depends on the mate type. Editing
-  // them IS moving the mechanism numerically (the pre-gizmo stand-in). Each
-  // snapshots once per drag (IsItemActivated) and re-solves on change.
+// A mate's degrees of freedom, by type -- what the panel's "Selected mate"
+// section held, drawn by the mate tool's Edit Mate window now
+// (docs/ui/assembly-panel-tidy-plan.md). Each field is one undo step per drag.
+void DrawMateDofFields(AppState& state, Mate* sel) {
   auto angleDof = [&](const char* label) {
     float deg = glm::degrees(sel->rotation);
     const bool changed =
@@ -304,22 +296,6 @@ void DrawMatesSection(AppState& state) {
     angleDof("Angle (deg)");
     break;
   }
-
-  if (!sel->error.empty())
-    ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
-                       sel->error.c_str());
-
-  // Re-pick a connector face (U7c): opens the mate session on this mate —
-  // click a connector row in the Tool window, then pick in the viewport.
-  if (ImGui::Button("Edit connectors…"))
-    StartMateEdit(state, sel->id);
-
-  // The same verb the Delete key runs, so a multi-mate selection removes as
-  // one step and the label says how many it will take (ListSelection.h).
-  const std::string del =
-      DeleteLabel(SelectedIds(state, SelectionItem::Kind::Mate).size(), "mate");
-  if (ImGui::Button((del + "###mate_delete").c_str()))
-    DeleteSelection(state);
 }
 
 // What the motion row shows while a run is in flight: how far in, how long
@@ -701,10 +677,13 @@ void CellTooltip(const std::string& text) {
     ImGui::SetTooltip("%s", text.c_str());
 }
 
-void DrawBomSection(AppState& state) {
-  ImGui::Spacing();
-  if (!ImGui::CollapsingHeader("Bill of materials###bom_header"))
+void DrawBomWindow(AppState& state) {
+  if (!state.bomWindowOpen)
     return;
+  if (!state.assembly) {
+    state.bomWindowOpen = false;
+    return;
+  }
 
   static BomTable cache;
   static const void* cachedAsm = nullptr;
@@ -722,22 +701,54 @@ void DrawBomSection(AppState& state) {
     cachedKey = key;
   }
 
-  if (cache.rows.empty()) {
-    ImGui::TextDisabled("No occurrences.");
+  // A floating window, because a bill of materials is a TABLE and wants
+  // width (docs/ui/assembly-panel-tidy-plan.md). In the dock it was two
+  // columns with material and mass stacked under each name; the five-column
+  // form only appeared when the dock was wide, which it never was. The total
+  // is in the title, so it reads without scrolling to the bottom.
+  const std::string title = "Bill of materials" +
+                            (cache.massKnown && !cache.rows.empty()
+                                 ? " — " + MassText(state, cache.totalMassG)
+                                 : std::string()) +
+                            "###BomWindow";
+  const ImVec2 anchor(state.viewportPos.x + state.viewportSize.x - 12.0f,
+                      state.viewportPos.y + 12.0f);
+  ImGui::SetNextWindowPos(anchor, ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+  ImGui::SetNextWindowSize(
+      ImVec2(ImGui::GetFontSize() * 36.0f, ImGui::GetFontSize() * 28.0f),
+      ImGuiCond_Appearing);
+  ImGui::SetNextWindowBgAlpha(0.97f);
+  bool open = true;
+  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
+  const bool visible =
+      ImGui::Begin(title.c_str(), &open,
+                   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse |
+                       ImGuiWindowFlags_NoSavedSettings);
+  ImGui::PopStyleColor();
+  if (!open)
+    state.bomWindowOpen = false;
+  if (!visible) {
+    ImGui::End();
     return;
   }
-  // Five columns in a 210 px dock gave each about 40 characters' worth of
-  // pixels between them, so every cell clipped: three different parts all
-  // read "Gang", "stainless_steel" read "stair", and the masses lost their
-  // leading digits. The table ADAPTS the way the Variables one does — full
-  // five columns when there is room, and two rows per part when there is not
-  // (name and quantity, then material and total). Widen the dock to get the
-  // table back.
-  const float availW = ImGui::GetContentRegionAvail().x;
-  const bool wide = availW >= ImGui::GetFontSize() * 34.0f;
-  if (ImGui::BeginTable("###bom_table", wide ? 5 : 2,
-                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                            ImGuiTableFlags_SizingStretchProp)) {
+  if (cache.rows.empty()) {
+    ImGui::TextDisabled("No occurrences.");
+    ImGui::End();
+    return;
+  }
+  const bool wide = true; // the window is sized for the full table
+
+  // Sorted by the header the person clicked; listed order until they do.
+  std::vector<const BomRow*> rows;
+  for (const BomRow& r : cache.rows)
+    rows.push_back(&r);
+  if (ImGui::BeginTable(
+          "###bom_table", wide ? 5 : 2,
+          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable |
+              ImGuiTableFlags_ScrollY,
+          ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() * 3.0f))) {
+    ImGui::TableSetupScrollFreeze(0, 1);
     // Narrow: the second column carries a MASS on the stacked row, so it
     // needs room for "385.17 kg", not just for "19".
     ImGui::TableSetupColumn("Part", ImGuiTableColumnFlags_WidthStretch,
@@ -750,9 +761,33 @@ void DrawBomSection(AppState& state) {
       ImGui::TableSetupColumn("Unit", ImGuiTableColumnFlags_WidthStretch, 0.9f);
       ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthStretch,
                               0.9f);
-      ImGui::TableHeadersRow(); // "M… U… T…" helps nobody at the narrow width
+      ImGui::TableHeadersRow();
     }
-    for (const BomRow& r : cache.rows) {
+    if (ImGuiTableSortSpecs* sort = ImGui::TableGetSortSpecs();
+        sort != nullptr && sort->SpecsCount > 0) {
+      const ImGuiTableColumnSortSpecs& spec = sort->Specs[0];
+      const bool asc = spec.SortDirection == ImGuiSortDirection_Ascending;
+      const auto less = [&](const BomRow* x, const BomRow* y) {
+        switch (spec.ColumnIndex) {
+        case 1:
+          return x->quantity < y->quantity;
+        case 2:
+          return x->material < y->material;
+        case 3:
+          return x->unitMassG < y->unitMassG;
+        case 4:
+          return x->unitMassG * x->quantity < y->unitMassG * y->quantity;
+        default:
+          return x->partName < y->partName;
+        }
+      };
+      std::stable_sort(rows.begin(), rows.end(),
+                       [&](const BomRow* x, const BomRow* y) {
+                         return asc ? less(x, y) : less(y, x);
+                       });
+    }
+    for (const BomRow* rp : rows) {
+      const BomRow& r = *rp;
       const std::string material = r.material.empty() ? "-" : r.material;
       const std::string unit = r.massKnown ? MassText(state, r.unitMassG) : "?";
       const std::string total =
@@ -895,6 +930,7 @@ void DrawBomSection(AppState& state) {
         ImGui::TextWrapped("%s", w.c_str());
     }
   }
+  ImGui::End();
 }
 
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
@@ -909,200 +945,120 @@ void DrawOccurrencePanel(AppState& state) {
   }
   AssemblyDocument& asmDoc = *state.assembly;
 
-  ImGui::SeparatorText("Occurrences");
-  if (asmDoc.OccurrenceCount() == 0)
-    TextDisabledWrapped("Empty - use Insert part on the toolbar.");
+  if (SectionHeader("Occurrences###occ_section",
+                    static_cast<int>(asmDoc.OccurrenceCount()), true)) {
+    if (asmDoc.OccurrenceCount() == 0)
+      TextDisabledWrapped("Empty - use Insert part on the toolbar.");
 
-  // A part picked in the viewport highlights a row that may be scrolled out
-  // of sight. Bring it into view when the selection CHANGES — the last one
-  // picked, which is the one a Ctrl-click just added.
-  const std::vector<uint64_t> picked = SelectedOccurrenceIds(state);
-  const uint64_t primary = picked.empty() ? 0 : picked.back();
-  const uint64_t bringIntoView =
-      primary != state.occurrenceScrolledTo ? primary : 0;
-  state.occurrenceScrolledTo = primary;
+    const std::vector<uint64_t> picked = SelectedOccurrenceIds(state);
+    const uint64_t primary = picked.empty() ? 0 : picked.back();
+    const uint64_t bringIntoView =
+        primary != state.occurrenceScrolledTo ? primary : 0;
+    state.occurrenceScrolledTo = primary;
 
-  // The rows as listed — what a Shift-click range spans (ListSelection.h).
-  std::vector<uint64_t> occOrder;
-  for (const Occurrence& o : asmDoc.GetOccurrences())
-    occOrder.push_back(o.id);
-  for (const Occurrence& o : asmDoc.GetOccurrences()) {
-    // Ids in the LABELS, not a PushID(int) scope: an integer scope is not
-    // addressable as a path segment, so the assembly's primary list could
-    // only be reached by a "**" wildcard crawl that depends on the row's
-    // cosmetic decorations ("  [assembly]  (fixed)") to match.
-    const std::string suffix = std::to_string(o.id);
-    bool vis = o.visible;
-    if (ImGui::Checkbox(("###occ_vis_" + suffix).c_str(), &vis)) {
-      // The box is the ROW's own control: it toggles the row it sits on, not
-      // the selection, which is why it goes through the shared verb with a
-      // one-id list rather than the selection-wide one below.
-      SetOccurrencesVisible(state, {o.id}, vis);
-    }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip(o.visible ? "Hide" : "Show");
-    ImGui::SameLine();
-    const std::string label =
-        (o.name.empty() ? RefNameById(state, o) : o.name) +
-        (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
-        (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
-    // A hidden row reads as dimmed — the feature tree's Bodies list already
-    // says "not in the viewport" this way, and an unchecked box three pixels
-    // wide is not the difference you notice while hunting the part you hid.
-    if (!o.visible)
-      ImGui::PushStyleColor(ImGuiCol_Text,
-                            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    // Ctrl-click adds and removes, Shift-click ranges, a plain click
-    // replaces — the one list gesture (ListSelection.h). Own kind only: a
-    // selected mate stays, as the old separate fields let it.
-    if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id)))
-      ListRowClicked(state, SelectionItem::Kind::Occurrence, o.id, occOrder,
-                     /*ownKindOnly=*/true);
-    // Only when it is actually out of sight: clicking a row that is already
-    // visible must not re-centre the list under the cursor.
-    if (o.id == bringIntoView && !ImGui::IsItemVisible())
-      ImGui::SetScrollHereY(0.5f);
-    if (!o.visible)
-      ImGui::PopStyleColor();
-
-    // Right-click the row to go to what it references: the shortcut for the
-    // "Open"/"Edit" button below, which needs the row selected first and only
-    // shows for the selected one. Opening a row that is not the selected one
-    // would be a silent selection change, so the menu selects it too.
-    if (ImGui::BeginPopupContextItem(("###occ_ctx_" + suffix).c_str())) {
-      // Right-clicking INSIDE a multi-selection keeps it — collapsing to the
-      // clicked row is how you lose a five-part selection by aiming at it.
-      ListRowContext(state, SelectionItem::Kind::Occurrence, o.id,
-                     /*ownKindOnly=*/true);
+    std::vector<uint64_t> occOrder;
+    for (const Occurrence& o : asmDoc.GetOccurrences())
+      occOrder.push_back(o.id);
+    // What a row's menu asked for, applied after the loop: several of them
+    // change the list (or the document) being walked.
+    enum class After { None, Open, Detach, Delete };
+    After after = After::None;
+    uint64_t afterId = 0;
+    size_t afterSlot = 0;
+    for (const Occurrence& o : asmDoc.GetOccurrences()) {
+      const std::string suffix = std::to_string(o.id);
       const bool isSub = o.refKind == OccurrenceRef::Assembly;
-      const std::string item =
-          std::string("Open ") + (isSub ? "assembly" : "part") + "###occ_open";
-      const std::optional<size_t> slot = RefSlotIndex(state, o);
-      if (ImGui::MenuItem(item.c_str(), nullptr, false, slot.has_value())) {
-        SetActivePart(state, *slot);
-        ImGui::EndPopup();
-        ImGui::End();
-        return; // the panel is now drawing a different document
-      }
-      // The reference dangles (its tab was closed/deleted). Say so rather
-      // than offering an Open that would quietly do nothing.
-      if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
-                                      : "That part is not in this project");
-      }
-      // Hide/Show, on the row you aimed at and on everything else selected
-      // with it. ONE verb rather than a pair: it hides while any of the
-      // selection is still visible and shows once none of it is, so the menu
-      // item (and H) undoes itself, and the label always names what the click
-      // will do. Display only — a hidden occurrence still solves and still
-      // holds its mates.
-      const size_t pickedVis = SelectedOccurrenceIds(state).size();
-      const std::string visItem =
-          RowActionLabel(SelectionWouldHide(state) ? "Hide" : "Show", pickedVis,
-                         "occurrence") +
-          "###occ_hide";
-      if (ImGui::MenuItem(visItem.c_str()))
-        ToggleSelectedOccurrencesVisible(state); // rows keep their places
-      // Delete belongs HERE, on the thing being deleted. It existed only as a
-      // button in the "Selected occurrence" editor below the list, which you
-      // reach by selecting a row first and which is off the bottom of a short
-      // panel on any real assembly — so the answer to "how do I remove this"
-      // was invisible, and the tab bar's Delete part refused because of the
-      // very occurrences nobody could find. Reported from use.
-      // Detach: a model is allowed to be wrong on purpose, and the pose is
-      // derived only while the attachment stands.
-      if (o.attachedTo != 0 &&
-          ImGui::MenuItem("Detach from its part###occ_detach")) {
-        SnapshotAssembly(state);
-        asmDoc.FindById(o.id)->attachedTo = 0;
-        asmDoc.BumpVersion();
-        ImGui::EndPopup();
-        ImGui::End();
-        return;
-      }
-      ImGui::Separator();
-      const size_t picked = SelectedOccurrenceIds(state).size();
-      const std::string del =
-          DeleteLabel(picked, "occurrence") + "###occ_delete";
-      if (ImGui::MenuItem(del.c_str())) {
-        DeleteSelection(state);
-        ImGui::EndPopup();
-        ImGui::End();
-        return; // the list we are walking just changed under us
-      }
-      ImGui::EndPopup();
+      ListRowSpec row;
+      row.glyph = isSub ? ICON_FA_CUBES : ICON_FA_CUBE;
+      row.label = (o.name.empty() ? RefNameById(state, o) : o.name) +
+                  "###occ_" + suffix;
+      row.selected = IsOccurrenceSelected(state, o.id);
+      // Hidden rows grey out, as in other CAD programs, and the eye -- on
+      // hover, or always when hidden -- replaces a column of checkboxes that
+      // read as "selected" rather than "shown".
+      row.dimmed = !o.visible;
+      row.eye = o.visible ? ListRowSpec::Eye::Shown : ListRowSpec::Eye::Hidden;
+      row.eyeId = "###occ_eye_" + suffix;
+      if (o.fixed)
+        row.tailGlyph = ICON_FA_ANCHOR; // was "(fixed)" appended to the name
+      if (o.attachedTo != 0)
+        row.tail = "attached";
+      row.tooltip = std::string(isSub ? "Assembly: " : "Part: ") +
+                    RefNameById(state, o) +
+                    (o.fixed ? "\nFixed (grounded)" : "") +
+                    (o.visible ? "" : "\nHidden") + "\nDouble-click to edit";
+      row.menuId = "###occ_ctx_" + suffix;
+      row.menu = [&, occId = o.id, isSub]() {
+        if (ImGui::MenuItem("Edit###occ_edit"))
+          EditAssemblyOccurrence(state, occId);
+        ListRowContext(state, SelectionItem::Kind::Occurrence, occId,
+                       /*ownKindOnly=*/true);
+        const Occurrence* live = asmDoc.FindById(occId);
+        const std::optional<size_t> slot =
+            live != nullptr ? RefSlotIndex(state, *live) : std::nullopt;
+        const std::string item = std::string("Open ") +
+                                 (isSub ? "assembly" : "part") + "###occ_open";
+        if (ImGui::MenuItem(item.c_str(), nullptr, false, slot.has_value())) {
+          after = After::Open;
+          afterSlot = *slot;
+        }
+        if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
+                                        : "That part is not in this project");
+        const size_t pickedVis = SelectedOccurrenceIds(state).size();
+        const std::string visItem =
+            RowActionLabel(SelectionWouldHide(state) ? "Hide" : "Show",
+                           pickedVis, "occurrence") +
+            "###occ_hide";
+        if (ImGui::MenuItem(visItem.c_str()))
+          ToggleSelectedOccurrencesVisible(state); // rows keep their places
+        if (live != nullptr && live->attachedTo != 0 &&
+            ImGui::MenuItem("Detach from its part###occ_detach")) {
+          after = After::Detach;
+          afterId = occId;
+        }
+        ImGui::Separator();
+        const std::string del =
+            DeleteLabel(SelectedOccurrenceIds(state).size(), "occurrence") +
+            "###occ_delete";
+        if (ImGui::MenuItem(del.c_str()))
+          after = After::Delete;
+      };
+      const ListRowResult res = ListRow(row);
+      if (res.clicked)
+        ListRowClicked(state, SelectionItem::Kind::Occurrence, o.id, occOrder,
+                       /*ownKindOnly=*/true);
+      if (res.doubleClicked)
+        EditAssemblyOccurrence(state, o.id);
+      if (res.eyeClicked)
+        SetOccurrencesVisible(state, {o.id}, !o.visible);
+      if (o.id == bringIntoView && !ImGui::IsItemVisible())
+        ImGui::SetScrollHereY(0.5f);
+      if (after != After::None)
+        break; // the list, or the document, is about to change
     }
-  }
-
-  Occurrence* sel = SelectedOccurrenceId(state)
-                        ? asmDoc.FindById(SelectedOccurrenceId(state))
-                        : nullptr;
-  if (sel) {
-    ImGui::SeparatorText("Selected occurrence");
-    const bool isSub = sel->refKind == OccurrenceRef::Assembly;
-    ImGui::Text("%s: %s", isSub ? "Assembly" : "Part",
-                RefNameById(state, *sel).c_str());
-    // v1 does not expand a sub-assembly in place: its own tab IS the editor,
-    // and in-context editing there already works.
-    if (const auto slot = RefSlotIndex(state, *sel)) {
-      ImGui::SameLine();
-      if (ImGui::SmallButton(isSub ? "Open###open_ref" : "Edit###open_ref"))
-        SetActivePart(state, *slot);
-    }
-
-    char name[128];
-    std::snprintf(name, sizeof(name), "%s", sel->name.c_str());
-    if (ImGui::InputText("Name", name, sizeof(name),
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
-      SnapshotAssembly(state);
-      sel->name = name;
-      asmDoc.BumpVersion();
-    }
-
-    glm::vec3 pos = sel->position;
-    const bool posChanged = ExprDragFloat3(state, "Position", &pos.x, 0.1f);
-    if (ImGui::IsItemActivated())
-      SnapshotAssembly(state); // one snapshot per drag session
-    if (posChanged) {
-      sel->position = pos;
-      asmDoc.BumpVersion();
-    }
-
-    glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
-    const bool rotChanged =
-        ExprDragFloat3(state, "Rotation (deg)", &euler.x, 1.0f);
-    if (ImGui::IsItemActivated())
-      SnapshotAssembly(state);
-    if (rotChanged) {
-      sel->orientation = glm::quat(glm::radians(euler));
-      asmDoc.BumpVersion();
-    }
-
-    bool fixed = sel->fixed;
-    if (ImGui::Checkbox("Fixed (grounded)", &fixed)) {
-      SnapshotAssembly(state);
-      sel->fixed = fixed;
-      asmDoc.BumpVersion();
-    }
-
-    if (ImGui::Button("Edit in context")) { // A4: part tab, assembly ghosted
-      EnterInContextEdit(state, sel->id);
+    switch (after) {
+    case After::Open:
+      SetActivePart(state, afterSlot);
       ImGui::End();
-      return; // the panel just switched to a part tab
-    }
-    ImGui::SameLine();
-    const size_t picked = SelectedOccurrenceIds(state).size();
-    const std::string del = DeleteLabel(picked, "occurrence");
-    if (ImGui::Button(del.c_str())) {
+      return; // the panel is now drawing a different document
+    case After::Detach:
+      SnapshotAssembly(state);
+      if (Occurrence* d = asmDoc.FindById(afterId))
+        d->attachedTo = 0;
+      asmDoc.BumpVersion();
+      break;
+    case After::Delete:
       DeleteSelection(state);
       ImGui::End();
-      return; // `sel` pointed into the list that just shrank
+      return; // the list we were walking just changed under us
+    case After::None:
+      break;
     }
   }
 
   DrawMatesSection(state);
   DrawRelationsSection(state);
-  DrawBomSection(state);
 
   ImGui::End();
 }
@@ -1205,6 +1161,18 @@ void DrawMateToolWindow(AppState& state) {
         SnapshotAssembly(state);
       SolveActiveAssembly(state);
     };
+    if (editM != nullptr) {
+      // Editing: the mate's name, and below its degrees of freedom by type
+      // -- what the panel's "Selected mate" section held.
+      char name[128];
+      std::snprintf(name, sizeof(name), "%s", editM->name.c_str());
+      if (ImGui::InputText("Name###mate_name", name, sizeof(name),
+                           ImGuiInputTextFlags_EnterReturnsTrue)) {
+        SnapshotAssembly(state);
+        editM->name = name;
+        asmDoc.BumpVersion();
+      }
+    }
     if (ImGui::Checkbox("Flip", &live->flipped))
       edited();
     // Flip answers "which side", Rotate answers "which way up" — two faces
@@ -1222,13 +1190,17 @@ void DrawMateToolWindow(AppState& state) {
             glm::radians(turned - 360.0f * std::floor(turned / 360.0f));
         edited();
       }
-      float deg = glm::degrees(live->rotation);
-      if (ExprDragFloat(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
-                        -FLT_MAX, FLT_MAX, "%.3f")) {
-        live->rotation = glm::radians(deg);
-        edited();
+      if (editM == nullptr) {
+        float deg = glm::degrees(live->rotation);
+        if (ExprDragFloat(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
+                          -FLT_MAX, FLT_MAX, "%.3f")) {
+          live->rotation = glm::radians(deg);
+          edited();
+        }
       }
     }
+    if (editM != nullptr)
+      DrawMateDofFields(state, editM);
     if (!live->error.empty())
       ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
                          live->error.c_str());
@@ -1261,6 +1233,177 @@ void DrawMateToolWindow(AppState& state) {
     AcceptMateTool(state);
   else if (cancel)
     CancelMateTool(state);
+}
+
+void EditAssemblyOccurrence(AppState& state, uint64_t occId) {
+  if (!state.assembly)
+    return;
+  // One tool window at a time: an open mate session or relation editor ends.
+  if (state.mateTool.active)
+    CancelMateTool(state);
+  state.asmEditRelation = 0;
+  state.asmEditOccurrence = occId;
+}
+
+void EditAssemblyRelation(AppState& state, uint64_t relId) {
+  if (!state.assembly)
+    return;
+  if (state.mateTool.active)
+    CancelMateTool(state);
+  state.asmEditOccurrence = 0;
+  state.asmEditRelation = relId;
+}
+
+void DrawAssemblyEditWindow(AppState& state) {
+  if (!state.assembly) {
+    state.asmEditOccurrence = state.asmEditRelation = 0;
+    return;
+  }
+  AssemblyDocument& asmDoc = *state.assembly;
+
+  if (state.asmEditOccurrence != 0) {
+    Occurrence* sel = asmDoc.FindById(state.asmEditOccurrence);
+    if (sel == nullptr) { // deleted, or undone away
+      state.asmEditOccurrence = 0;
+      return;
+    }
+    const bool isSub = sel->refKind == OccurrenceRef::Assembly;
+    BeginToolWindowFrame(state,
+                         isSub ? "Edit sub-assembly" : "Edit occurrence");
+    ImGui::TextDisabled("%s: %s", isSub ? "Assembly" : "Part",
+                        RefNameById(state, *sel).c_str());
+    if (const auto slot = RefSlotIndex(state, *sel)) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton(isSub ? "Open###open_ref"
+                                   : "Edit part###open_ref")) {
+        state.asmEditOccurrence = 0;
+        ImGui::End();
+        SetActivePart(state, *slot);
+        return;
+      }
+    }
+    char name[128];
+    std::snprintf(name, sizeof(name), "%s", sel->name.c_str());
+    if (ImGui::InputText("Name###occ_name", name, sizeof(name),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+      SnapshotAssembly(state);
+      sel->name = name;
+      asmDoc.BumpVersion();
+    }
+    glm::vec3 pos = sel->position;
+    const bool posChanged =
+        ExprDragFloat3(state, "Position###occ_pos", &pos.x, 0.1f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state); // one snapshot per drag session
+    if (posChanged) {
+      sel->position = pos;
+      asmDoc.BumpVersion();
+    }
+    glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
+    const bool rotChanged =
+        ExprDragFloat3(state, "Rotation (deg)###occ_rot", &euler.x, 1.0f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (rotChanged) {
+      sel->orientation = glm::quat(glm::radians(euler));
+      asmDoc.BumpVersion();
+    }
+    bool fixed = sel->fixed;
+    if (ImGui::Checkbox("Fixed (grounded)###occ_fixed", &fixed)) {
+      SnapshotAssembly(state);
+      sel->fixed = fixed;
+      asmDoc.BumpVersion();
+    }
+    bool visible = sel->visible;
+    if (ImGui::Checkbox("Visible###occ_visible", &visible))
+      SetOccurrencesVisible(state, {sel->id}, visible);
+    ImGui::Separator();
+    bool remove = false;
+    if (ImGui::Button("Edit in context###occ_in_context")) {
+      // A4: the part tab, with the assembly ghosted around it.
+      const uint64_t id = sel->id;
+      state.asmEditOccurrence = 0;
+      ImGui::End();
+      EnterInContextEdit(state, id);
+      return;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete###occ_edit_delete"))
+      remove = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Done###occ_edit_done"))
+      state.asmEditOccurrence = 0;
+    const uint64_t id = sel->id;
+    ImGui::End();
+    if (remove) {
+      // Through the Delete verb, so mates on it and the undo step behave
+      // as they do from the list.
+      state.selection.items = {
+          SelectionItem{SelectionItem::Kind::Occurrence, id}};
+      state.asmEditOccurrence = 0;
+      DeleteSelection(state);
+    }
+    return;
+  }
+
+  if (state.asmEditRelation != 0) {
+    Relation* r = nullptr;
+    for (Relation& rel : asmDoc.GetRelations())
+      if (rel.id == state.asmEditRelation)
+        r = &rel;
+    if (r == nullptr) {
+      state.asmEditRelation = 0;
+      return;
+    }
+    BeginToolWindowFrame(state, "Edit relation");
+    const Mate* a = asmDoc.FindMateById(r->mateA);
+    const Mate* b = asmDoc.FindMateById(r->mateB);
+    const auto mateName = [](const Mate* m) {
+      return m == nullptr      ? std::string("?")
+             : m->name.empty() ? "mate " + std::to_string(m->id)
+                               : m->name;
+    };
+    ImGui::TextDisabled("%s: %s -> %s",
+                        DocumentIO::RelationKindToString(r->kind),
+                        mateName(a).c_str(), mateName(b).c_str());
+    if (r->kind == RelationKind::Freewheel)
+      ImGui::TextDisabled("drives %s, lead %.4g deg",
+                          DocumentIO::FreewheelDrivesToString(r->drives),
+                          angles::ToDegrees(r->lead));
+    double ratio = r->ratio, phase = r->phase;
+    if (ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
+        ratio != 0.0 && ratio != r->ratio) {
+      SnapshotAssembly(state);
+      r->ratio = ratio;
+      asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
+    }
+    if (ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
+        phase != r->phase) {
+      SnapshotAssembly(state);
+      r->phase = phase;
+      asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
+    }
+    if (!r->error.empty())
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
+                         r->error.c_str());
+    ImGui::Separator();
+    bool remove = false;
+    if (ImGui::Button("Delete###rel_edit_delete"))
+      remove = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Done###rel_edit_done"))
+      state.asmEditRelation = 0;
+    const uint64_t id = r->id;
+    ImGui::End();
+    if (remove) {
+      SnapshotAssembly(state);
+      asmDoc.RemoveRelation(id);
+      state.asmEditRelation = 0;
+      SolveActiveAssembly(state);
+    }
+  }
 }
 
 } // namespace ui

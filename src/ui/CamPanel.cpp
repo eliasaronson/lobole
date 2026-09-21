@@ -697,7 +697,7 @@ void DrawCamPanel(AppState& state) {
   // more than one part (v74) — four brackets out of one sheet — and until
   // this section existed the only door was the RPC, which makes a feature
   // half-built by this project's own rule.
-  if (ImGui::CollapsingHeader("Parts###cam_parts")) {
+  if (SectionHeader("Parts###cam_parts")) {
     const std::vector<cam::PlacementFit> fits =
         setup != nullptr ? cam::CheckPlacements(*setup, ui::JobBodies(state))
                          : std::vector<cam::PlacementFit>{};
@@ -814,7 +814,7 @@ void DrawCamPanel(AppState& state) {
   // The stock, and the rapid height above it. Both are properties of the JOB
   // rather than of an operation, and the facing verb refuses without the
   // first — so it lives where that refusal can send you.
-  if (ImGui::CollapsingHeader("Stock and safety###cam_stock")) {
+  if (SectionHeader("Stock and safety###cam_stock")) {
     ImGui::SetNextItemWidth(90.0f);
     if (ExprDragFloat(state, "Safe Z###cam_safez",
                       reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f,
@@ -965,7 +965,7 @@ void DrawCamPanel(AppState& state) {
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
 
   // --- tools -------------------------------------------------------------
-  if (ImGui::CollapsingHeader("Tools###cam_tools")) {
+  if (SectionHeader("Tools###cam_tools")) {
     // Namespaced: a tool number and an operation id are both small ints, and
     // PushID(int) hashes them into the same id space — two rows then share an
     // id and ImGui says so in a modal.

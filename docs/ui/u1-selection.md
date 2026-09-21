@@ -160,7 +160,9 @@ item ids the GUI tests address.
   selected row opens an editor INSIDE the panel — the selected mate's name,
   flip, DOF fields and connectors — because the row you just clicked is the
   only affordance there and it used to do nothing, so the editor could be
-  changed but never put away. Off everywhere else on purpose: most lists
+  changed but never put away. (The editor has since moved to the tool window,
+  opened by a double-click -- docs/ui/assembly-panel-tidy-plan.md -- and the
+  click-to-clear stays, as the way to put a selection down.) Off everywhere else on purpose: most lists
   auto-select what they just created (`ToolbarCreateAccept` leaves the new
   feature selected), and clicking that row to confirm what you are looking
   at must not make it vanish. `selection/survives_sibling_delete` is the

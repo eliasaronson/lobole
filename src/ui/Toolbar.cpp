@@ -998,6 +998,9 @@ void DrawAssemblyToolbar(AppState& state) {
                 "Simulation (mesh one occurrence, clamp it where the others "
                 "touch)",
                 state.simulationToolOpen);
+  CommandButton(state, ICON_FA_TABLE_LIST "###tb_asm_bom", "assembly.bom",
+                "Bill of materials (parts, quantities, materials, mass)",
+                state.bomWindowOpen);
 
   Divider();
   CommandButton(state,

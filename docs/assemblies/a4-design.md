@@ -108,7 +108,9 @@ BomRow { partId, partName, quantity,
 - Flat, one row per part — no nesting until subassemblies exist.
 
 **Surface:** a BOM section in the Model dock (table: part / qty / material /
-unit / total mass, with a mass-total footer and an Export CSV button), plus
+unit / total mass, with a mass-total footer and an Export CSV button) --
+since docs/ui/assembly-panel-tidy-plan.md a floating window from the assembly
+toolbar, sortable, with the total in its title -- plus
 `bom {}` (structured JSON, per-row + totals) and `export_bom {path}` RPCs,
 plus MCP mirrors. LLM parity: "how many M6 bolts and what does it weigh" is
 one `bom` call.

@@ -322,6 +322,9 @@ const Binding kDefaults[] = {
     // closes the other because both place the occurrences.
     {"assembly.explode", Context::Assembly, "Exploded view", "Tools", "X"},
     {"assembly.motion", Context::Assembly, "Motion study", "Tools", "M"},
+    // The bill of materials, a floating window with real columns
+    // (docs/ui/assembly-panel-tidy-plan.md).
+    {"assembly.bom", Context::Assembly, "Bill of materials", "Tools", "B"},
     // The third floating mode (S1): a study on the assembly, on the part
     // tab's simulation key.
     {"assembly.simulation", Context::Assembly, "Simulation", "Tools", "Q"},

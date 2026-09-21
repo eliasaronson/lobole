@@ -1,4 +1,5 @@
 #include "ui/SettingsWindow.h"
+#include "ui/Widgets.h"
 
 #include "ui/ExprInput.h" // expression-capable numeric fields
 
@@ -648,8 +649,8 @@ void DrawSettingsWindow(AppState& state) {
 
   for (const std::string& section : sections) {
     const std::string headerId = section + "###sec_" + section;
-    if (!ImGui::CollapsingHeader(headerId.c_str(),
-                                 ImGuiTreeNodeFlags_DefaultOpen))
+    if (!SectionHeader(headerId.c_str(), /*count=*/-1,
+                       /*defaultOpen=*/true))
       continue;
     for (const settings::Field& f : settings::Fields()) {
       if (section != f.section)
@@ -686,9 +687,9 @@ void DrawSettingsWindow(AppState& state) {
     }
   }
 
-  if (ImGui::CollapsingHeader("Keyboard###sec_Keyboard"))
+  if (SectionHeader("Keyboard###sec_Keyboard"))
     changed |= DrawKeyboardSection(state);
-  if (ImGui::CollapsingHeader("Machines###sec_Machines"))
+  if (SectionHeader("Machines###sec_Machines"))
     DrawMachinesSection(state);
 
   ImGui::Separator();

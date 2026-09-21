@@ -267,6 +267,9 @@ void StartMateEdit(AppState& state, uint64_t mateId) {
   if (!state.assembly || state.assembly->FindMateById(mateId) == nullptr)
     return;
   CancelMateTool(state);
+  // One tool window at a time: the occurrence and relation editors close.
+  state.asmEditOccurrence = 0;
+  state.asmEditRelation = 0;
   state.mateTool = AppState::MateToolState{};
   state.mateTool.active = true;
   state.mateTool.editMateId = mateId;

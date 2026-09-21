@@ -1,4 +1,5 @@
 #include "ui/ToleranceActions.h"
+#include "ui/Widgets.h"
 
 #include "core/Command.h"
 #include "core/Document.h"
@@ -278,7 +279,7 @@ void DrawTolerancePick(AppState& state) {
 }
 
 void DrawTolerancesSection(AppState& state) {
-  if (!ImGui::CollapsingHeader("Tolerances"))
+  if (!SectionHeader("Tolerances"))
     return;
   if (state.document == nullptr) {
     ImGui::TextDisabled("Tolerances belong to a part.");

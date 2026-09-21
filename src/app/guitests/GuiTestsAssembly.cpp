@@ -1,3 +1,4 @@
+#include "IconsFontAwesome6.h"
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Measure.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
@@ -61,12 +62,17 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // ItemOpen rather than ItemClick for the same reason as the fastener
     // test below: a click toggles, an ImGui collapsing header remembers, and
     // whichever of the two runs second used to close what the first opened.
-    ctx->ItemOpen("//###Model/###bom_header");
+    // The BOM is a floating window from the toolbar
+    // (docs/ui/assembly-panel-tidy-plan.md). Opened only if it is not: the
+    // button toggles, and a predecessor may have left it up.
+    if (!s_App->bomWindowOpen)
+      ToolbarClick(ctx, "###tb_asm_bom");
     ctx->Yield(2);
+    IM_CHECK(s_App->bomWindowOpen);
     // The export button only draws inside the open section, so its presence
     // is the proof the header actually expanded. (The table itself is an ID
     // SCOPE, not an item — ItemExists never finds one.)
-    IM_CHECK(ctx->ItemExists("//###Model/###bom_export"));
+    IM_CHECK(ctx->ItemExists("//###BomWindow/###bom_export"));
 
     // One row for the one part, counting through the sub-assembly.
     const ui::BomTable bom = ui::ComputeBom(*s_App);
@@ -77,6 +83,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(bom.massKnown);
     IM_CHECK(std::abs(bom.totalMassG - 3.0 * bom.rows[0].unitMassG) < 1e-6);
     IM_CHECK(bom.warnings.empty());
+    s_App->bomWindowOpen = false; // a floating window must not outlive its test
   };
 
   // An exploded view is pure display state: it must move what is drawn and
@@ -1059,17 +1066,30 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     const std::string row = "//###Model/###mate_row_" + std::to_string(mateId);
 
-    // Click: selected, and the editor for it appears.
+    // Click: selected. The editor is no longer inline under the list
+    // (docs/ui/assembly-panel-tidy-plan.md) -- a click selects and nothing
+    // grows under the cursor.
     ctx->ItemClick(row.c_str());
     ctx->Yield(2);
     IM_CHECK_EQ(ui::SelectedMateId(*s_App), mateId);
-    IM_CHECK(ctx->ItemExists("//###Model/###mate_delete"));
+    IM_CHECK(!s_App->mateTool.active);
 
-    // Click the same row again: cleared, and the editor goes with it.
+    // Click the same row again: cleared.
     ctx->ItemClick(row.c_str());
     ctx->Yield(2);
     IM_CHECK_EQ(ui::SelectedMateId(*s_App), (uint64_t)0);
-    IM_CHECK(!ctx->ItemExists("//###Model/###mate_delete"));
+
+    // Double-click: the mate's editor, floating -- Edit Mate, with its name.
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK(s_App->mateTool.active);
+    IM_CHECK_EQ(s_App->mateTool.editMateId, mateId);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###mate_name"));
+    ctx->ItemClick("//###ToolWindow/Done");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->mateTool.active);
+    s_App->selection.items.clear(); // the double-click left it selected
+    ctx->Yield();
 
     // Delete takes the selected mate — it used to reach occurrences only, so
     // this key did nothing at all with a mate picked.
@@ -1603,6 +1623,59 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // reads as hidden without opening anything: it dims. The pair matters more
   // than either half — the checkbox alone shipped for a year and the answer
   // to "how do I hide this" was still a three-pixel box with no label.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "the_panel_lists_and_the_editors_float");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/ui/assembly-panel-tidy-plan.md: sections open and close on a
+    // header that says it can, a double-click edits in the tool window, and
+    // the bill of materials is a window of its own.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    Occurrence o;
+    o.name = "Block";
+    o.partId = partId;
+    const uint64_t id = s_App->assembly->AddOccurrence(o);
+    ctx->Yield(4);
+    const std::string row = "//###Model/###occ_" + std::to_string(id);
+
+    // The section header: closed, the rows go; open, they come back.
+    ctx->ItemClose("//###Model/###occ_section");
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists(row.c_str()));
+    ctx->ItemOpen("//###Model/###occ_section");
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists(row.c_str()));
+
+    // Double-click: the occurrence's editor, floating; an edit there lands.
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->asmEditOccurrence, id);
+    IM_CHECK(!s_App->assembly->FindById(id)->fixed);
+    ctx->ItemClick("//###ToolWindow/###occ_fixed");
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly->FindById(id)->fixed);
+    ctx->ItemClick("//###ToolWindow/###occ_edit_done");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->asmEditOccurrence, (uint64_t)0);
+
+    // The BOM: a window from the toolbar, with the total in its title.
+    if (!s_App->bomWindowOpen)
+      ToolbarClick(ctx, "###tb_asm_bom");
+    ctx->Yield(3);
+    IM_CHECK(s_App->bomWindowOpen);
+    ImGuiWindow* bom = ImGui::FindWindowByName("###BomWindow");
+    IM_CHECK(bom != nullptr && bom->Active);
+    ctx->LogInfo("BOM window: %s", bom != nullptr ? bom->Name : "?");
+    ToolbarClick(ctx, "###tb_asm_bom"); // the button toggles it shut
+    ctx->Yield(2);
+    IM_CHECK(!s_App->bomWindowOpen);
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "a_part_is_hidden_from_its_own_row");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -1633,11 +1706,19 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     IM_CHECK(!s_App->assembly->FindById(ids[0])->visible);
     IM_CHECK(s_App->assembly->FindById(ids[1])->visible); // only the one
-    // The row's own box agrees with the flag: one state, two affordances.
-    IM_CHECK_EQ(
-        ctx->ItemIsChecked(
-            ("//###Model/###occ_vis_" + std::to_string(ids[0])).c_str()),
-        false);
+    // The row's own eye agrees with the flag: struck through, and shown
+    // without hovering, as in other CAD programs. One state, two affordances.
+    const std::string eye = "//###Model/###occ_eye_" + std::to_string(ids[0]);
+    IM_CHECK(std::string(ctx->ItemInfo(eye.c_str()).DebugLabel)
+                 .rfind(ICON_FA_EYE_SLASH, 0) == 0);
+    // ...and it is a button: clicking it shows the part again, and clicking
+    // it once more hides it -- the hover eye's whole job.
+    ctx->ItemClick(eye.c_str());
+    ctx->Yield(3);
+    IM_CHECK(s_App->assembly->FindById(ids[0])->visible);
+    ctx->ItemClick(eye.c_str());
+    ctx->Yield(3);
+    IM_CHECK(!s_App->assembly->FindById(ids[0])->visible);
 
     // The one verb undoes itself: the same item now reads Show.
     ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
@@ -2039,9 +2120,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // assembly does, and a shuffled run puts it immediately before this one
     // often enough — the click closed it instead, and everything inside went
     // out of reach ("Unable to locate item ###bom_check_fasteners").
-    ctx->ItemOpen("//###Model/Bill of materials###bom_header");
+    // The BOM is a floating window from the toolbar
+    // (docs/ui/assembly-panel-tidy-plan.md). Opened only if it is not: the
+    // button toggles, and a predecessor may have left it up.
+    if (!s_App->bomWindowOpen)
+      ToolbarClick(ctx, "###tb_asm_bom");
     ctx->Yield(2);
-    ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
+    IM_CHECK(s_App->bomWindowOpen);
+    ctx->ItemClick("//###BomWindow/###bom_check_fasteners");
     ctx->Yield(2);
     IM_CHECK(s_App->fastenerChecked);
     IM_CHECK(s_App->fastenerChecks.empty()); // nothing has moved yet
@@ -2051,7 +2137,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
         o.position.z -= 15.0f;
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
-    ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
+    ctx->ItemClick("//###BomWindow/###bom_check_fasteners");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->fastenerChecks.size(), (size_t)1);
     // What it complains ABOUT changed with the alternator round and is worth
@@ -2060,6 +2146,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // The plate slid over the hardware, which leaves the nut inside it.
     IM_CHECK(s_App->fastenerChecks[0].find("nut buried in") !=
              std::string::npos);
+    s_App->bomWindowOpen = false; // a floating window must not outlive its test
   };
 
   // A project variable is edited from an assembly tab, by clicking.
@@ -2254,9 +2341,10 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     const auto press = [&]() {
-      ctx->ItemOpen("//###Model/Bill of materials###bom_header");
+      if (!s_App->bomWindowOpen)
+        ToolbarClick(ctx, "###tb_asm_bom"); // the BOM window, from the bar
       ctx->Yield();
-      ctx->ItemClick("//###Model/###bom_check_fits");
+      ctx->ItemClick("//###BomWindow/###bom_check_fits");
       ctx->Yield(2);
     };
 
@@ -2281,5 +2369,6 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->fitSummary.find("1 unverified") != std::string::npos);
     IM_CHECK(s_App->fitChecks[0].find("has to be the bore") !=
              std::string::npos);
+    s_App->bomWindowOpen = false; // a floating window must not outlive its test
   };
 }
