@@ -292,39 +292,42 @@ def main():
             expect("no face selected" in str(e),
                    f"honest refusal, not the part gate ({e})")
 
-        phase("a rotary simulation screenshots, and turns the part")
-        # Two things at once. SyncCamPlayback runs on the offscreen path, and
-        # it asked ImGui for the time -- a null dereference where there is no
-        # ImGui context, so cam_simulate followed by a screenshot killed the
-        # process with SIGSEGV from the day the 12 Hz remesh cap landed until
-        # the rotary picture made somebody take that screenshot. And the
-        # picture itself: a program whose A moves plays now, on a radius
-        # field, instead of being refused (docs/cam/rotary-plan.md).
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Bar", "center": [0, 0, 0],
-            "direction": [1, 0, 0], "radius": 15.0, "height": 40.0})
-        job = d.call("machine_part")
-        sid = d.call("add_cam_setup", name="Trunnion", post="mach3")["id"]
-        d.call("set_cam_setup", id=sid, has_rotary_axis=True, safe_z=30.0,
-               stock={"mode": "relative", "margin": [0.0, 1.0, 1.0],
-                      "bottom_margin": 0.0})
-        d.call("set_cam_setup", id=sid, tool={
-            "number": 1, "name": "6 mm ball", "diameter": 6.0,
-            "tool_type": "ball"})
-        d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
-               stock_to_leave=1.0, stepover=0.6)
-        sim = d.request("cam_simulate", {"setup": sid, "at": 0.5},
-                        timeout=600)
-        expect(sim.get("rotary") is True, f"plays as rotary ({sim})")
-        expect(sim.get("removed_mm3", 0) > 0,
-               f"the radius field was carved ({sim})")
-        # The crash was HERE, in the scene sync the screenshot triggers.
-        shot = d.request("screenshot", {"path": os.path.join(tmp, "rot.png")},
-                         timeout=300)
-        expect(os.path.exists(os.path.join(tmp, "rot.png")),
-               f"the screenshot was written ({shot})")
-        expect(d.call("ping")["ok"], "and the app is still alive after it")
+        # Only in a build WITH the engine: optional subsystems are compile-time,
+        # and a CAM-off build answering "unknown method" is correct, not broken.
+        if d.call("ping").get("features", {}).get("cam", True):
+            phase("a rotary simulation screenshots, and turns the part")
+            # Two things at once. SyncCamPlayback runs on the offscreen path, and
+            # it asked ImGui for the time -- a null dereference where there is no
+            # ImGui context, so cam_simulate followed by a screenshot killed the
+            # process with SIGSEGV from the day the 12 Hz remesh cap landed until
+            # the rotary picture made somebody take that screenshot. And the
+            # picture itself: a program whose A moves plays now, on a radius
+            # field, instead of being refused (docs/cam/rotary-plan.md).
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Cylinder", "name": "Bar", "center": [0, 0, 0],
+                "direction": [1, 0, 0], "radius": 15.0, "height": 40.0})
+            job = d.call("machine_part")
+            sid = d.call("add_cam_setup", name="Trunnion", post="mach3")["id"]
+            d.call("set_cam_setup", id=sid, has_rotary_axis=True, safe_z=30.0,
+                   stock={"mode": "relative", "margin": [0.0, 1.0, 1.0],
+                          "bottom_margin": 0.0})
+            d.call("set_cam_setup", id=sid, tool={
+                "number": 1, "name": "6 mm ball", "diameter": 6.0,
+                "tool_type": "ball"})
+            d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
+                   stock_to_leave=1.0, stepover=0.6)
+            sim = d.request("cam_simulate", {"setup": sid, "at": 0.5},
+                            timeout=600)
+            expect(sim.get("rotary") is True, f"plays as rotary ({sim})")
+            expect(sim.get("removed_mm3", 0) > 0,
+                   f"the radius field was carved ({sim})")
+            # The crash was HERE, in the scene sync the screenshot triggers.
+            shot = d.request("screenshot", {"path": os.path.join(tmp, "rot.png")},
+                             timeout=300)
+            expect(os.path.exists(os.path.join(tmp, "rot.png")),
+                   f"the screenshot was written ({shot})")
+            expect(d.call("ping")["ok"], "and the app is still alive after it")
 
         return 0
     finally:

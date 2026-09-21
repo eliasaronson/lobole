@@ -80,6 +80,8 @@ enum class OpField : uint32_t {
   // The derivation refused a V-bit and a drill by naming three op types;
   // this is that list, in the one place op types are described.
   NeedsFlatFloor = 1u << 18,
+  // SurfaceRotary's pattern (v123): parallel passes, or one spiral.
+  RotaryPattern = 1u << 19,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {
@@ -157,5 +159,15 @@ std::span<const SideRow> Sides();
 const char* SideName(Side s);
 bool TrySideFromName(const std::string& s, Side& out);
 std::string SideNameList();
+
+// The rotary finish's pattern, refused by name like every enum here.
+struct RotaryPatternRow {
+  RotaryPattern pattern;
+  const char* name;
+};
+std::span<const RotaryPatternRow> RotaryPatterns();
+const char* RotaryPatternName(RotaryPattern p);
+bool TryRotaryPatternFromName(const std::string& s, RotaryPattern& out);
+std::string RotaryPatternNameList();
 
 } // namespace cam

@@ -107,6 +107,11 @@ struct Machine {
   // rapid is a per-job choice on the controllers that need one (Kiri:Moto
   // keeps it on the process, not the device).
   double rapidFeed = 0.0;
+  // The A axis's top speed, in degrees per minute; 0 = not stated. A cut
+  // that turns the part is held to it (CamRotaryFeed.h), and it is its own
+  // number because it is its own motor: a 4th axis turns at a few thousand
+  // degrees a minute on a router whose linear rapid is 1500 mm/min.
+  double rotaryMaxFeed = 0.0;
   // The tool library a new setup's table is copied from (M4). Copied, never
   // linked: FreeCAD's answer, and the one the per-setup table already gives.
   std::vector<Tool> library;
@@ -209,9 +214,10 @@ enum class OpType {
   // a Z step under one name.
   SurfaceParallel,
   SurfaceWaterline,
-  // Continuous 4-axis: passes ALONG the rotary axis, stepping round it. The
-  // part turns to present each pass to the spindle, so the A word changes
-  // between passes and holds within one (docs/cam/rotary-plan.md).
+  // 4-axis finishing: parallel passes ALONG the rotary axis, the part turning
+  // between them, or one spiral with A turning while the tool cuts -- by the
+  // op's `rotaryPattern` (docs/cam/rotary-plan.md,
+  // docs/cam/rotary-continuous-plan.md).
   SurfaceRotary,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
@@ -235,6 +241,12 @@ enum class Side { Outside, Inside, On };
 // walls, where a joint hides it. Off by default: a relief is a decision about
 // the joint, not a fact about the part.
 enum class CornerRelief { None, Dogbone, TBone };
+
+// How a rotary finish covers the part (docs/cam/rotary-continuous-plan.md).
+// Parallel: passes ALONG the axis, each at one A, the part turning between
+// them -- a rotary raster. Spiral: one helix from end to end, A turning WHILE
+// the tool cuts, one revolution per stepover -- continuous 4-axis.
+enum class RotaryPattern { Parallel, Spiral };
 
 struct Operation {
   uint64_t id = 0;
@@ -352,6 +364,13 @@ struct Operation {
   // sit, which is the conflation this field exists to avoid. 0 = derive it
   // from the tool and the cusp.
   double zStep = 0.0;
+
+  // SurfaceRotary only (v123): parallel passes or one spiral. The same
+  // `stepover` serves both, and means the spacing between neighbouring cuts
+  // in each: across the passes for parallel, the axial advance per turn for
+  // the spiral. `stepdown`, when set, cuts the rotary pass in LAYERS from the
+  // blank inward, each held off the part by the next ring of stock.
+  RotaryPattern rotaryPattern = RotaryPattern::Parallel;
 
   bool enabled = true;
 };

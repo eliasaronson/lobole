@@ -341,6 +341,20 @@ void DrawMachinesSection(AppState& state) {
     m.rapidFeed = rapid;
     edited = true;
   }
+  if (m.hasRotaryAxis) {
+    float amax = static_cast<float>(m.rotaryMaxFeed);
+    ImGui::SetNextItemWidth(ControlWidth());
+    if (ExprDragFloat(state,
+                      "A top speed (deg/min, 0 = not stated)###mach_amax",
+                      &amax, 10.0f, 0.0f, 1000000.0f, "%.0f")) {
+      m.rotaryMaxFeed = amax;
+      edited = true;
+    }
+    ImGui::SetItemTooltip(
+        "How fast the 4th axis turns at most -- the A motor's velocity in the "
+        "controller's motor tuning. A cut that turns the part is held to it, "
+        "and the cycle time counts the hold.");
+  }
   // The tool library (M4): what the shop owns for this machine. A new setup
   // on it copies the table; "Add tool" in the CAM panel offers these first.
   ImGui::TextDisabled("Tools (a setup copies them)");

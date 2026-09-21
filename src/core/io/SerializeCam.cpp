@@ -196,6 +196,8 @@ json MachineToJson(const cam::Machine& m) {
     j["has_rotary_axis"] = true;
   if (m.rapidFeed != 0.0)
     j["rapid_feed"] = m.rapidFeed;
+  if (m.rotaryMaxFeed != 0.0) // v123
+    j["a_max_deg_min"] = m.rotaryMaxFeed;
   if (!m.library.empty()) {
     j["tools"] = json::array();
     for (const cam::Tool& t : m.library)
@@ -230,6 +232,7 @@ cam::Machine MachineFromJson(const json& j) {
   m.fitArcs = j.value("fit_arcs", true);
   m.hasRotaryAxis = j.value("has_rotary_axis", false);
   m.rapidFeed = j.value("rapid_feed", 0.0);
+  m.rotaryMaxFeed = j.value("a_max_deg_min", 0.0);
   for (const json& tj : j.value("tools", json::array()))
     m.library.push_back(ToolFromJson(tj));
   return m;
@@ -472,6 +475,9 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["sample_step_mm"] = op.sampleStep;
     if (op.zStep != 0.0)
       oj["z_step_mm"] = op.zStep;
+    // v123. Omitted when parallel, which is what every file before it meant.
+    if (op.rotaryPattern != cam::RotaryPattern::Parallel)
+      oj["rotary_pattern"] = cam::RotaryPatternName(op.rotaryPattern);
     if (!op.enabled)
       oj["enabled"] = false;
     if (!op.targets.empty()) {
@@ -634,6 +640,13 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.cutAngleDeg = oj.value("cut_angle_deg", 0.0);
     op.sampleStep = oj.value("sample_step_mm", 0.0);
     op.zStep = oj.value("z_step_mm", 0.0);
+    if (oj.contains("rotary_pattern")) {
+      const std::string r = oj.at("rotary_pattern").get<std::string>();
+      if (!cam::TryRotaryPatternFromName(r, op.rotaryPattern))
+        throw std::runtime_error("unknown rotary_pattern '" + r +
+                                 "'; this build accepts " +
+                                 cam::RotaryPatternNameList());
+    }
     op.enabled = oj.value("enabled", true);
     for (const json& rj : oj.value("targets", json::array()))
       op.targets.push_back(TargetFromJson(rj));

@@ -416,6 +416,14 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
   return v;
 }
 
+double RotaryBlankRadius(const Setup& setup, double partRadius) {
+  // A box's margins are the only ones a `Stock` can state and a cylinder has
+  // one radius, so the radial margin is the larger of the two across the
+  // axis. Named here rather than silently chosen: a round stock MODE is the
+  // honest fix (docs/cam/rotary-plan.md, D3).
+  return partRadius + std::max(setup.stock.margin.y, setup.stock.margin.z);
+}
+
 RadiusMap MakeRotaryBlank(const Setup& setup, const std::vector<Body>& bodies,
                           double res, std::string* why) {
   // The blank, derived from the part it is cut from. The axis is setup-space
@@ -437,14 +445,8 @@ RadiusMap MakeRotaryBlank(const Setup& setup, const std::vector<Body>& bodies,
       *why = "this job has no part on the rotary axis to cut from";
     return {};
   }
-  // A box's margins are the only ones a `Stock` can state and a cylinder has
-  // one radius, so the radial margin is the larger of the two across the
-  // axis. Named here rather than silently chosen: a round stock MODE is the
-  // honest fix (docs/cam/rotary-plan.md, D3).
-  const double radialMargin =
-      std::max(setup.stock.margin.y, setup.stock.margin.z);
   return MakeRotaryStock(x0 - setup.stock.margin.x, x1 + setup.stock.margin.x,
-                         rad + radialMargin, res);
+                         RotaryBlankRadius(setup, rad), res);
 }
 
 RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,

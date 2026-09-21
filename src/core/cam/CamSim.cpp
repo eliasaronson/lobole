@@ -17,25 +17,21 @@ glm::dvec3 Lerp(const GProgram& p, size_t seg, double t) {
 double SegmentLength(const GProgram& p, size_t seg) {
   const GMove& a = p.moves[seg];
   const GMove& b = p.moves[seg + 1];
-  double len = glm::length(b.to - a.to);
   // A rotation has length too: the arc the tool tip travels as the part
-  // turns under it, at radius hypot(y, z) -- the definition `CuttingMinutes`
-  // uses, so the clock and the slider agree. Without it a pure-A move is
-  // zero millimetres and the slider jumps straight across every rotation.
-  if (a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9) {
-    const double radius = std::hypot(b.to.y, b.to.z);
-    const double arc =
-        std::abs(b.a - a.a) / 360.0 * 2.0 * 3.14159265358979323846 * radius;
-    len = std::hypot(len, arc);
-  }
-  return len;
+  // turns under it -- the definition `CuttingMinutes` uses, so the clock and
+  // the slider agree. Without it a pure-A move is zero millimetres and the
+  // slider jumps straight across every rotation.
+  if (a.hasA && b.hasA)
+    return TipLength(a.to, a.a, b.to, b.a);
+  return glm::length(b.to - a.to);
 }
 
 double AngleOf(const GMove& m) { return m.hasA ? m.a : 0.0; }
 
 } // namespace
 
-Timeline BuildTimeline(GProgram program, double rapidFeed) {
+Timeline BuildTimeline(GProgram program, double rapidFeed,
+                       RotaryFeedModel model) {
   // A program whose part turns is simulated now -- on a radius field, by
   // `RotaryStockSim`, with the part turning on screen. It used to be REFUSED
   // here, which was the honest answer while the only stock was a height map:
@@ -58,9 +54,18 @@ Timeline BuildTimeline(GProgram program, double rapidFeed) {
     // The same accounting `CuttingMinutes` does, move for move: a rapid is
     // counted only when the setup states a traverse rate, because otherwise
     // the number would be invented.
+    //
+    // A CUT that turns is timed the way the controller times it: its F was
+    // scaled for the controller's length (ControllerFeed), so dividing the
+    // tip's length by it would report the scaling instead of the time.
     const double feed = m.rapid ? rapidFeed : m.feed;
-    if (feed > 1e-9 && len > 1e-12)
-      minutes += len / feed;
+    const GMove& from = tl.program.moves[k];
+    const bool turningCut =
+        !m.rapid && from.hasA && m.hasA && std::abs(m.a - from.a) > 1e-9;
+    const double timed =
+        turningCut ? ControllerLength(from.to, from.a, m.to, m.a, model) : len;
+    if (feed > 1e-9 && timed > 1e-12)
+      minutes += timed / feed;
     tl.distance.push_back(dist);
     tl.minutes.push_back(minutes);
 

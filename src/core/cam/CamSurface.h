@@ -114,17 +114,15 @@ struct WaterlineRequest {
 
 // --- the rotary pattern ---------------------------------------------------
 
-// One pass of a continuous 4-axis finishing raster: a run ALONG the rotary
-// axis at a constant part angle. `pts` are (x mm, radius mm) -- where the
-// tool's TIP goes -- and the whole pass is cut with the part turned so that
-// `thetaDeg` faces the spindle.
+// One pass of a rotary RASTER: a run ALONG the rotary axis at a constant part
+// angle. `pts` are (x mm, radius mm) -- where the tool's TIP goes -- and the
+// whole pass is cut with the part turned so that `thetaDeg` faces the
+// spindle.
 //
-// Constant A per pass, changing between them, and that is the design rather
-// than a simplification. It keeps arcs fittable (the post refuses to fit an
-// arc across a CHANGING A, because an arc word carries no A), it keeps the
-// feed question honest (a pass cuts at its own radius, so one scaling serves
-// it), and it is what makes the rotary strategy a PATTERN over a surface
-// like every other one here instead of a second kinematics.
+// Constant A per pass, changing between them: the part turns only on the
+// link. That keeps arcs fittable (the post refuses to fit an arc across a
+// CHANGING A, because an arc word carries no A) -- and it is NOT continuous
+// 4-axis, which is the spiral below.
 struct RotaryPass {
   double thetaDeg = 0.0;
   std::vector<glm::dvec2> pts; // (x, radius)
@@ -147,6 +145,49 @@ struct RotaryParallelRequest {
 // the same rule the planar raster follows for its floor.
 [[nodiscard]] std::vector<RotaryPass>
 RotaryParallelPasses(const RadiusMap& cl, const RotaryParallelRequest& req);
+
+// Continuous 4-axis (docs/cam/rotary-continuous-plan.md): ONE helix from the
+// low end of the map to the high end, the part turning while the tool cuts.
+// FreeCAD's `rotary_spiral` and Kiri:Moto's lathe mode are the two surveyed
+// answers, and this takes the first's shape with the second's ends.
+struct RotarySpiralRequest {
+  // The spacing between neighbouring turns, in mm MEASURED ALONG THE
+  // SURFACE: the axial advance per revolution on a flat stretch, less where
+  // the surface climbs, so a shoulder gets turns as close as a flat gets
+  // them and the scallop stays the one a planar raster leaves at that
+  // stepover.
+  double pitch_mm = 1.0;
+  // Spacing ALONG the helix, in mm of arc at the part's widest point. The
+  // angular step is derived from it; zero takes the map's own cell.
+  double sampleStep_mm = 0.0;
+  // A point is dropped when it lies within this of the line through its
+  // neighbours (in x, radius and arc at the widest radius). Zero keeps every
+  // sample.
+  double tolerance_mm = 0.0;
+  // The radius to cut at where the tool reaches nothing: a helix cannot
+  // break without a relink, so an empty cell is crossed in the air, outside
+  // the blank. Must be > 0.
+  double airRadius = 0.0;
+  // Radii below this are raised to it: a roughing LAYER's floor. Zero is the
+  // finish, which follows the surface.
+  double floorRadius = 0.0;
+};
+
+// A point on the helix. `thetaDeg` is UNWOUND: it grows monotonically through
+// every revolution, because the axis turns that way and a value wrapped at
+// 360 would read as the part spinning back a full turn.
+struct RotaryPathPoint {
+  double x = 0.0;
+  double r = 0.0;
+  double thetaDeg = 0.0;
+};
+
+// The helix over `cl`, with ONE closed revolution at constant x at each end.
+// A helix started exactly at the end of the part covers its first half-turn
+// with only the tool's radius -- FreeCAD's does -- and a ring there is what
+// Kiri's rings pattern gets right. Empty when the map is.
+[[nodiscard]] std::vector<RotaryPathPoint>
+RotarySpiralPath(const RadiusMap& cl, const RotarySpiralRequest& req);
 
 // --- surfacing off the frame (docs/ui/long-operations.md, phase 5) --------
 //

@@ -14,8 +14,8 @@
 //
 // A height map is z(x, y): the stock as a surface seen from the spindle. It
 // cannot represent a part that turns, which is why `docs/cam/simulation.md`
-// excluded continuous 4-axis by name and why the G-code parser refuses a file
-// whose A moves rather than verifying it as though the part stood still.
+// excluded continuous 4-axis by name, and why a file whose A moves is routed
+// here rather than verified as though the part stood still.
 //
 // This is the same idea in the coordinates a rotary job actually works in:
 // r(x, theta), the stock as a RADIUS field about the rotary axis. Everything
@@ -146,6 +146,12 @@ struct RotaryInspection {
   bool ok = false; // false = nothing to check (no bodies, no rotary blank)
   std::string why; // why not, when ok is false
 };
+
+// The blank's radius for a part reaching `partRadius` from the axis: that
+// plus the setup's radial margin, the larger of Y and Z because a box's
+// margins are all a `Stock` can state. The rule MakeRotaryBlank builds with,
+// and the one a roughing layer starts from, so the two cannot disagree.
+[[nodiscard]] double RotaryBlankRadius(const Setup& setup, double partRadius);
 
 // The blank a rotary job is cut from, in setup space: the part's extent along
 // the axis and its furthest point from it, plus the setup's margins. ONE

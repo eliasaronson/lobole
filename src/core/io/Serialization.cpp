@@ -2192,8 +2192,17 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
     maxId = std::max(maxId, part.id);
     job->GetParts().push_back(std::move(part));
   }
+  const int version = j.value("version", kVersion);
   for (const json& cj : j.value("cam", json::array())) {
     cam::Setup setup = CamSetupFromJson(cj);
+    // A rotary op reads its stepdown from v123, as the depth between layers.
+    // Before that the derivation stored one on every op and a rotary op
+    // ignored it -- so reading it now would re-cut every v122 rotary job in
+    // layers nobody asked for. It was never the cut, so it is dropped.
+    if (version < 123)
+      for (cam::Operation& op : setup.operations)
+        if (op.type == cam::OpType::SurfaceRotary)
+          op.stepdown = 0.0;
     maxId = std::max(maxId, setup.id);
     for (const cam::Operation& op : setup.operations)
       maxId = std::max(maxId, op.id);

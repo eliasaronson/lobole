@@ -1,0 +1,27 @@
+{
+  "job_parts": [
+    "Shaft"
+  ],
+  "cam_op_types": [
+    "surface_rotary",
+    "surface_rotary"
+  ],
+  "cam_tool_types": [
+    "ball"
+  ],
+  "cam_setup_rotary": [
+    true
+  ],
+  "cam_op_sample_steps": [
+    0.4,
+    0.4
+  ],
+  "cam_op_rotary_patterns": [
+    "spiral",
+    "parallel"
+  ],
+  "cam_op_stepdowns": [
+    1.5,
+    0.0
+  ]
+}

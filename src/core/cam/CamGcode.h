@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/cam/CamJob.h" // Setup
+#include "core/cam/CamRotaryFeed.h"
 
 #include <glm/glm.hpp>
 
@@ -88,5 +89,9 @@ struct GProgram {
 // at origin (0,0,0) — every job before v68 — is invisible.
 [[nodiscard]] GProgram ProgramInSetupSpace(std::string_view text,
                                            const Setup& setup);
+
+// What a feed means when the part turns -- the controller's length, the
+// tip's, and the F a turning cut is posted at -- lives in CamRotaryFeed.h,
+// because the post needs it in a build without the engine.
 
 } // namespace cam

@@ -64,14 +64,18 @@ constexpr OpTypeRow kRows[] = {
          OpField::CutAngle},
     {OpType::SurfaceWaterline, "surface_waterline", true,
      OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
-    // Continuous 4-axis. Shorter still than the two above, and the absences
-    // are again the design: no side (there is no contour to be beside), no
-    // stepdown, no tabs, no relief, no lead arcs, no finish tool -- and no
-    // CUT ANGLE, because a rotary raster's direction is the axis. Its
-    // `stepover` is a fraction of the cutter like every other, converted to
-    // millimetres of ARC at the part's widest point where the tool is known.
+    // 4-axis finishing: parallel passes (a rotary raster) or one spiral
+    // (continuous 4-axis), by `rotaryPattern`. The absences are again the
+    // design: no side (there is no contour to be beside), no tabs, no relief,
+    // no lead arcs, no finish tool -- and no CUT ANGLE, because a rotary
+    // raster's direction is the axis. Its `stepover` is a fraction of the
+    // cutter like every other: millimetres of ARC at the part's widest point
+    // across parallel passes, the axial advance per turn on a spiral. It
+    // takes a `stepdown` because it is the only rotary op there is: with
+    // one, it cuts in layers from the blank inward, the last one the finish.
     {OpType::SurfaceRotary, "surface_rotary", true,
-     OpField::StockToLeave | OpField::Stepover | OpField::SampleStep},
+     OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
+         OpField::SampleStep | OpField::RotaryPattern},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a
@@ -158,6 +162,10 @@ constexpr SideRow kSideRows[] = {
     {Side::Inside, "inside"},
     {Side::On, "on"},
 };
+constexpr RotaryPatternRow kRotaryPatternRows[] = {
+    {RotaryPattern::Parallel, "parallel"},
+    {RotaryPattern::Spiral, "spiral"},
+};
 } // namespace
 
 std::span<const ToolTypeRow> ToolTypes() { return kToolRows; }
@@ -206,6 +214,35 @@ bool TrySideFromName(const std::string& s, Side& out) {
 std::string SideNameList() {
   std::string known;
   for (const SideRow& row : kSideRows)
+    known += (known.empty() ? "" : ", ") + std::string(row.name);
+  return known;
+}
+
+std::span<const RotaryPatternRow> RotaryPatterns() {
+  return kRotaryPatternRows;
+}
+
+const char* RotaryPatternName(RotaryPattern p) {
+  for (const RotaryPatternRow& row : kRotaryPatternRows)
+    if (row.pattern == p)
+      return row.name;
+  throw std::logic_error("cam::RotaryPattern " +
+                         std::to_string(static_cast<int>(p)) +
+                         " has no row in CamNames.cpp");
+}
+
+bool TryRotaryPatternFromName(const std::string& s, RotaryPattern& out) {
+  for (const RotaryPatternRow& row : kRotaryPatternRows)
+    if (s == row.name) {
+      out = row.pattern;
+      return true;
+    }
+  return false;
+}
+
+std::string RotaryPatternNameList() {
+  std::string known;
+  for (const RotaryPatternRow& row : kRotaryPatternRows)
     known += (known.empty() ? "" : ", ") + std::string(row.name);
   return known;
 }

@@ -17,9 +17,19 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    122; // v122: an `OpType` of `surface_rotary` — continuous 4-axis
-         //      finishing, passes ALONG the rotary axis stepping round it,
-         //      the part turning to present each one to the spindle. An
+    123; // v123: a `surface_rotary` op's `rotary_pattern` — `parallel`
+         //      (the v122 raster, and the default) or `spiral`, one helix
+         //      with A turning while the tool cuts: continuous 4-axis. And
+         //      the op reads `stepdown` now, cutting in layers from the
+         //      blank inward (a v122 file's unread stepdown on a rotary op
+         //      is dropped on load). The machine gains `a_max_deg_min`, the
+         //      A axis's top speed. A v122 build would read a spiral as
+         //      parallel passes, a different cut, so it is a bump
+         //      (docs/cam/rotary-continuous-plan.md).
+         // v122: an `OpType` of `surface_rotary` — 4-axis finishing by
+         //      passes ALONG the rotary axis stepping round it,
+         //      the part turning between them to present each one to the
+         //      spindle (a rotary raster; the spiral is v123). An
          //      unknown op type already refuses the file by name, so a v121
          //      build refuses this one, which is what the bump is for
          //      (docs/cam/rotary-plan.md).

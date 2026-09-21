@@ -188,8 +188,8 @@ variables, drawings, BOM + exploded).
    [cam/dogfood-round.md](cam/dogfood-round.md) ends with the five things to
    watch, in order, on the first cut. It is the one check simulation cannot
    stand in for, it costs no code, and every remaining CAM decision
-   (surfacing, continuous 4-axis, what the tool table really needs) is waiting
-   behind what it teaches.
+   (round stock, what the tool table really needs) is waiting behind what it
+   teaches.
 2. **Keep dogfooding through the GUI, on real objects.** Every defect found in
    the last six rounds came from a person or an agent *building something*,
    not from the suite — and the GUI-driven half found the ones the RPC-driven
@@ -440,8 +440,11 @@ process. One pair is known to fail when they meet and is invisible by default
   [cam/plan.md](cam/plan.md). **Phase 2 (C6–C9) also shipped**: helix entry
   for small pockets, arcs fitted at post time, Kresimir Tusek's adaptive
   clearing (LGPL, deliberately linked as a separate shared library so this
-  app's own licence stays a choice), and an indexed 4th axis. Only 3-axis
-  surfacing and continuous 4-axis remain, both unscheduled. **Nothing has cut
+  app's own licence stays a choice), and an indexed 4th axis. 3-axis
+  surfacing followed ([cam/surfacing.md](cam/surfacing.md)), then rotary
+  surfacing and continuous 4-axis — a spiral that turns A while it cuts, with
+  rotary roughing layers and a compensated feed
+  ([cam/rotary-continuous-plan.md](cam/rotary-continuous-plan.md)). **Nothing has cut
   a real part yet** — that is the check simulation cannot stand in for. The proposal that preceded it, kept because the
   survey numbers are the reason the scope is narrow:
   [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a

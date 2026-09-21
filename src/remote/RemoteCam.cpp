@@ -36,15 +36,18 @@ constexpr MethodDoc kCamMethods[] = {
     {"list_machines",
      "Your machines, from ~/.config/designer/machines/*.json: each {name, "
      "post, travel?: {min, max}, fit_arcs, has_rotary_axis, rapid_feed, "
+     "a_max_deg_min (the A axis's top speed; 0/absent = not stated), "
      "tools}. A setup names one and EMBEDS a copy of it; set_cam_setup "
      "{machine} puts one on a setup.",
      "", remote::NoFlags,
      "machines[]{name,post,travel?,fit_arcs?,has_rotary_axis?,rapid_feed?,"
+     "a_max_deg_min?,"
      "tools?}, "
      "dir"},
     {"save_machine",
      "Write a machine to the store {machine: {name, post?, travel?: {min: "
      "[x,y,z], max: [x,y,z]}, fit_arcs?, has_rotary_axis?, rapid_feed?, "
+     "a_max_deg_min?, "
      "tools?: [...]}}, replacing one of that name. Refused without a name, "
      "with an unknown post (naming the accepted ones), or with a name that "
      "would share a file with a different name. Open jobs are not changed: a "
@@ -160,13 +163,21 @@ constexpr MethodDoc kCamMethods[] = {
      "sample_step_mm; surface_waterline laps at constant Z, stepping DOWN by "
      "z_step_mm. Those are three different quantities and none of them is "
      "the others. A zero sample_step_mm or z_step_mm derives from the cutter. "
-     "surface_rotary is CONTINUOUS 4-AXIS finishing: passes run along the "
-     "rotary axis (setup-space X) and step round it, and the part turns to "
-     "present each one to the spindle, so the A word holds within a pass and "
-     "changes between them. It needs a machine with has_rotary_axis, takes "
-     "NO face pick (it turns the whole part under the cutter, and a pick is "
-     "refused rather than ignored), and its stepover is a fraction of the "
-     "cutter converted to millimetres of ARC at the part's widest point. "
+     "surface_rotary is 4-AXIS finishing, by rotary_pattern: parallel "
+     "(default) runs passes along the rotary axis (setup-space X) stepping "
+     "round it, the part turning BETWEEN passes, and stepover is a fraction "
+     "of the cutter converted to millimetres of ARC at the part's widest "
+     "point; spiral is CONTINUOUS 4-axis, one helix end to end with A "
+     "turning while the tool cuts, and stepover is the axial advance per "
+     "turn. A stepdown (mm, radial) cuts it in layers from the blank inward, "
+     "the last one the finish. A turning cut's F is scaled in the post for "
+     "how the controller reads a mixed mm/degree move, held to the "
+     "machine's axis speeds (rapid_feed for X/Y/Z, a_max_deg_min for A), and "
+     "the file says where it was held; a spiral "
+     "that winds A past a turn is followed by G92 A, renaming the angle so "
+     "the next op does not unwind it. It needs a machine with "
+     "has_rotary_axis and takes NO face pick (it turns the whole part under "
+     "the cutter, and a pick is refused rather than ignored). "
      "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
      "the whole tool): an operation cutting deeper than that is cutting with "
      "the shank and driving the holder into the work, and the reach finding "
@@ -359,7 +370,9 @@ constexpr MethodDoc kCamMethods[] = {
      "Reports the line "
      "count, the ops it skipped and why, the targets a multi-target op could "
      "not follow (`skipped`), how much cutting lay beyond the travel and is "
-     "missing from the file (`clipped_mm`), and `warnings`. Writes a "
+     "missing from the file (`clipped_mm`), the cycle time "
+     "(`cutting_minutes`, rapids only when the setup states a traverse rate), "
+     "and `warnings`. Writes a "
      "file; it does not send it "
      "to a machine. With split_output on the setup, `path` is the base and "
      "one file per tool is written beside it as `<base>-T<n>.<ext>` (no "
@@ -480,6 +493,7 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
       {"cut_angle_deg", cam::OpField::CutAngle},
       {"sample_step_mm", cam::OpField::SampleStep},
       {"z_step_mm", cam::OpField::ZStep},
+      {"rotary_pattern", cam::OpField::RotaryPattern},
   };
   for (const auto& row : kOwned) {
     if (!p.contains(row.key) || cam::OpTypeHas(op.type, row.field))
@@ -560,6 +574,12 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.sampleStep = p.at("sample_step_mm").get<double>();
   if (p.contains("z_step_mm"))
     op.zStep = p.at("z_step_mm").get<double>();
+  if (p.contains("rotary_pattern")) {
+    const std::string r = p.at("rotary_pattern").get<std::string>();
+    if (!cam::TryRotaryPatternFromName(r, op.rotaryPattern))
+      throw std::runtime_error("unknown rotary_pattern '" + r +
+                               "'; accepted: " + cam::RotaryPatternNameList());
+  }
   if (p.contains("enabled"))
     op.enabled = p.at("enabled").get<bool>();
   if (p.contains("tabs")) {
@@ -656,6 +676,8 @@ json OpJson(const cam::Operation& op) {
     j["sample_step_mm"] = op.sampleStep;
   if (has(cam::OpField::ZStep))
     j["z_step_mm"] = op.zStep;
+  if (has(cam::OpField::RotaryPattern))
+    j["rotary_pattern"] = cam::RotaryPatternName(op.rotaryPattern);
   if (has(cam::OpField::CornerRelief))
     j["corner_relief"] = op.cornerRelief == cam::CornerRelief::Dogbone
                              ? "dogbone"
@@ -1962,6 +1984,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"lines", lines},
                  {"operations", ops},
                  {"cut_length_mm", totalCut},
+                 // The panel's cycle time, which the RPC never had: a turning
+                 // cut is timed the way the controller reads its scaled F,
+                 // capped moves included (CamGcode.h).
+                 {"cutting_minutes", cam::CuttingMinutes(setup, paths)},
                  {"min_z", lowest},
                  // Surfaced, not buried: a job posted with a failed op is a
                  // part that comes off the machine unfinished.

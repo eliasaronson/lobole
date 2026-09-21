@@ -306,8 +306,9 @@ within this face" is the honest reading.
 
 ### Leaving room for the rotary axis
 
-Continuous 4-axis stays deferred, with plan.md's reasons. What this plan owes
-it is a shape, not an implementation — the same bargain C9 struck, where
+Continuous 4-axis stays out of this plan, with plan.md's reasons; it was
+built afterwards ([rotary-continuous-plan.md](rotary-continuous-plan.md)).
+What this plan owes it is a shape, not an implementation — the same bargain C9 struck, where
 committing to frame-per-setup and toolpaths-in-setup-space meant the indexed
 axis needed no new toolpath maths.
 

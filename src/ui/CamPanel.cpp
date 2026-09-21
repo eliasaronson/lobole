@@ -1564,6 +1564,30 @@ void DrawCamPanel(AppState& state) {
       }
       // Surfacing: across, along and down. Three fields because they are
       // three quantities, and the table decides which of them this type has.
+      if (cam::OpTypeHas(op.type, cam::OpField::RotaryPattern)) {
+        // Radio buttons, for the reason the tool row above is buttons: two
+        // options are one click each this way, and a combo gathers with an
+        // empty label, so it could not be gated.
+        for (const cam::RotaryPatternRow& row : cam::RotaryPatterns()) {
+          const std::string label =
+              std::string(row.name) + "###pattern_" + row.name;
+          if (ImGui::RadioButton(label.c_str(),
+                                 op.rotaryPattern == row.pattern) &&
+              op.rotaryPattern != row.pattern) {
+            op.rotaryPattern = row.pattern;
+            touched(op.id);
+          }
+          ImGui::SetItemTooltip(
+              "%s",
+              row.pattern == cam::RotaryPattern::Spiral
+                  ? "One helix end to end, the part turning WHILE it cuts "
+                    "(continuous 4-axis): no seams, and the stepover is the "
+                    "spacing between turns, closer on steep walls."
+                  : "Passes along the axis, the part turning between them.");
+          ImGui::SameLine();
+        }
+        ImGui::NewLine();
+      }
       if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
         ImGui::SetNextItemWidth(70.0f);
         float angle = static_cast<float>(op.cutAngleDeg);

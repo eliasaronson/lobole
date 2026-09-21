@@ -1167,9 +1167,10 @@ void EmitSurfacePasses(Toolpath& tp, const Setup& setup, const Tool& tool,
     Emit(tp, Move::Kind::Rapid, {at.x, at.y, setup.safeZ}, 0.0);
 }
 
-// Continuous 4-axis finishing (docs/cam/rotary-plan.md). The part turns to
-// present each pass to the spindle, so every move of a pass carries the same
-// A and consecutive passes carry different ones.
+// 4-axis finishing (docs/cam/rotary-plan.md), by the op's pattern: parallel
+// passes, each at one A with the part turning between them, or one spiral
+// per layer with A turning WHILE the tool cuts -- continuous 4-axis
+// (docs/cam/rotary-continuous-plan.md).
 //
 // The same shape as `GenerateSurface` and deliberately so: a contact surface,
 // a pattern over it, and a link between the passes. What changes is the
@@ -1219,18 +1220,26 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
           model.Set(i, j, static_cast<float>(r + op.stockToLeave));
 
   const RadiusMap cl = RotaryCL(model, tool);
-  RotaryParallelRequest req;
-  req.stepover_mm = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
-  req.sampleStep_mm = op.sampleStep;
-  const std::vector<RotaryPass> passes = RotaryParallelPasses(cl, req);
-  if (passes.empty()) {
-    tp.error = "this part gives no rotary passes — check the cutter against "
-               "the part's size on the axis";
-    return;
-  }
+
+  // Layers, when the op has a stepdown: floors from the blank inward, each
+  // the cutter-location surface held out at that radius, the last the
+  // surface itself. FreeCAD's rotary surface and Kiri:Moto's lathe both rough
+  // this way -- the same pattern over a clamped surface -- and it is the only
+  // rotary roughing there is. A cell the tool reaches nothing in stays empty
+  // at every floor, so a layer still breaks (or flies) where the finish does.
+  double clMin = 1e18;
+  for (float v : cl.r)
+    if (v > 0.0f)
+      clMin = std::min(clMin, static_cast<double>(v));
+  const double blankR = RotaryBlankRadius(setup, rad);
+  std::vector<double> floors;
+  if (op.stepdown > 0.0)
+    for (double f = blankR - op.stepdown; f > clMin + 1e-6; f -= op.stepdown)
+      floors.push_back(f);
+  floors.push_back(0.0); // the finish: the surface, unclamped
 
   // Setup space: the tool stands on +Z over the axis, at y = 0, and the PART
-  // turns. A pass at part angle theta is cut with A = 90 - theta, which is
+  // turns. A point at part angle theta is cut with A = 90 - theta, which is
   // the angle that brings theta to the top (a part angle appears in setup
   // space at theta + A).
   const auto go = [&](Move::Kind kind, double x, double r, double aDeg,
@@ -1243,22 +1252,68 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     m.a = aDeg;
     tp.moves.push_back(m);
   };
-  for (const RotaryPass& pass : passes) {
-    if (pass.pts.size() < 2)
+  // Clear of the work before the trunnion turns, every time. The post
+  // enforces safe Z before an index too, but a toolpath that arrives
+  // already retracted is one the post never has to correct -- and here
+  // the retract is RADIAL, so "safe" is a radius outside the blank.
+  const double safeR = std::max(blankR, rad) + std::max(2.0, tool.diameter);
+  const double pitch = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+
+  // Where the last layer's spiral left the axis, in unwound part degrees.
+  // The next one starts on the same turn rather than back at zero: a spiral
+  // winds the axis hundreds of turns, and restarting at theta = 0 would ask
+  // for all of them back on the rapid between two layers.
+  double thetaCarry = 0.0;
+  for (const double floorR : floors) {
+    RadiusMap layer = cl;
+    if (floorR > 0.0)
+      for (float& v : layer.r)
+        if (v > 0.0f)
+          v = std::max(v, static_cast<float>(floorR));
+
+    if (op.rotaryPattern == RotaryPattern::Spiral) {
+      RotarySpiralRequest req;
+      req.pitch_mm = pitch;
+      req.sampleStep_mm = op.sampleStep;
+      req.tolerance_mm = cusp * 0.25;
+      // Where the tool reaches nothing, the helix crosses outside the blank.
+      req.airRadius = blankR + 1.0;
+      std::vector<RotaryPathPoint> path = RotarySpiralPath(layer, req);
+      if (path.size() < 2)
+        continue;
+      const double shift = std::ceil(thetaCarry / 360.0) * 360.0;
+      for (RotaryPathPoint& q : path)
+        q.thetaDeg += shift;
+      thetaCarry = path.back().thetaDeg;
+      const RotaryPathPoint& p0 = path.front();
+      go(Move::Kind::Rapid, p0.x, safeR, 90.0 - p0.thetaDeg, 0.0);
+      go(Move::Kind::Plunge, p0.x, p0.r, 90.0 - p0.thetaDeg, tool.feedPlunge);
+      for (size_t k = 1; k < path.size(); k++)
+        go(Move::Kind::Cut, path[k].x, path[k].r, 90.0 - path[k].thetaDeg,
+           tool.feedCut);
+      go(Move::Kind::Rapid, path.back().x, safeR, 90.0 - path.back().thetaDeg,
+         0.0);
       continue;
-    const double a = 90.0 - pass.thetaDeg;
-    // Clear of the work before the trunnion turns, every time. The post
-    // enforces safe Z before an index too, but a toolpath that arrives
-    // already retracted is one the post never has to correct -- and here
-    // the retract is RADIAL, so "safe" is a radius outside the blank.
-    const double safeR = rad + std::max(2.0, tool.diameter);
-    go(Move::Kind::Rapid, pass.pts.front().x, safeR, a, 0.0);
-    go(Move::Kind::Plunge, pass.pts.front().x, pass.pts.front().y, a,
-       tool.feedPlunge);
-    for (size_t k = 1; k < pass.pts.size(); k++)
-      go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
-    go(Move::Kind::Rapid, pass.pts.back().x, safeR, a, 0.0);
+    }
+
+    RotaryParallelRequest req;
+    req.stepover_mm = pitch;
+    req.sampleStep_mm = op.sampleStep;
+    for (const RotaryPass& pass : RotaryParallelPasses(layer, req)) {
+      if (pass.pts.size() < 2)
+        continue;
+      const double a = 90.0 - pass.thetaDeg;
+      go(Move::Kind::Rapid, pass.pts.front().x, safeR, a, 0.0);
+      go(Move::Kind::Plunge, pass.pts.front().x, pass.pts.front().y, a,
+         tool.feedPlunge);
+      for (size_t k = 1; k < pass.pts.size(); k++)
+        go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
+      go(Move::Kind::Rapid, pass.pts.back().x, safeR, a, 0.0);
+    }
   }
+  if (tp.moves.empty())
+    tp.error = "this part gives no rotary passes — check the cutter against "
+               "the part's size on the axis";
 }
 
 void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,

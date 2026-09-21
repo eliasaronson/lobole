@@ -99,6 +99,12 @@ and report the clamping once per operation rather than per move. Take it, and
 take the reporting with it, because a clamped feed that nobody is told about
 is a cut running at the wrong speed.
 
+> As built it kept the clamp and the reporting and not the formula.
+> `360 / 2πr` is right only for a pure turn; a move that turns A while X
+> advances is fed by whatever the CONTROLLER measures, and Mach3 and LinuxCNC
+> measure it differently. The post scales by that dialect's length over the
+> tip's ([rotary-continuous-plan.md](rotary-continuous-plan.md), S3).
+
 ### D3. What is the stock?
 
 `StockMode` is `Relative | Fixed`, both boxes. A rotary job's blank is a
@@ -186,25 +192,28 @@ test caught it in one run, which is the argument for that test existing.
 
 ### Still open
 
-- **D2, the feed model.** HALF done. The verifier's half is closed: a
-  rotary move has length now -- the arc the tool tip travels, combined with
-  the linear part -- so a rotary program's cycle time is no longer
-  understated silently. The GENERATOR's half is the real question and waits
-  for a strategy: scaling `F` for constant surface speed with a radius floor
-  and a stated clamp, which is FreeCAD's answer and the only complete one in
-  the survey. Now that `surface_rotary` exists it is the next thing to
-  build — and it is cheap, because a pass cuts at ONE radius, so it is one
-  number per pass rather than one per move.
+- ~~**D2, the feed model.**~~ Done, both halves. The verifier's: a rotary
+  move has length -- the arc the tool tip travels, combined with the linear
+  part. The generator's landed in the POST rather than the strategy, and not
+  as FreeCAD's constant-surface-speed scale, which is right only for a pure
+  turn: a cutting move that turns A is posted at `F = f · L_controller /
+  L_tip`, where the controller's length is what the dialect measures (mach3
+  the combined vector with degrees as millimetres; linuxcnc the XYZ length
+  when there is one, else degrees). Clamped at the machine's `rapid_feed` and
+  reported once per operation; the cycle time is clocked the controller's way
+  too. See [rotary-continuous-plan.md](rotary-continuous-plan.md), S3.
 - **D3, round stock.** The blank is DERIVED from the part (its extent along
   the axis, its furthest point from it, plus the setup's margins — the radial
   one taken as the larger of Y and Z, because a box's margins are all a
   `Stock` can state). A round stock mode is the honest fix and is a format
   change.
-- **Nothing generates a rotary toolpath.** This verifies files, which is the
-  right order for this subsystem — the check exists before the generator, so
-  the generator is trustworthy from its first line — but it means the only
-  rotary programs it can be pointed at today are hand-written or from another
-  CAM.
+- ~~**Nothing generates a rotary toolpath.**~~ `surface_rotary` does (v122),
+  and the order held — the check existed before the generator, so the
+  generator was trustworthy from its first line. At v122 it was a raster:
+  passes along X at one A each, the part turning only between them, which is
+  not continuous 4-axis. v123 adds `rotary_pattern: spiral`, one helix with A
+  turning while the tool cuts, and roughing layers from `stepdown`
+  ([rotary-continuous-plan.md](rotary-continuous-plan.md)).
 - ~~Rapids are not checked against the rotary stock.~~ Done. One walk serves
   both cutting and asking, so the two cannot come to disagree about what the
   tool removes -- a rapid is tested against the stock and never carves it.

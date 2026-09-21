@@ -1230,6 +1230,65 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  t = IM_REGISTER_TEST(engine, "cam", "a_rotary_op_spirals_from_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/cam/rotary-continuous-plan.md. The pattern is a radio pair on a
+    // rotary op's Advanced row, offered because the capability table says
+    // the type has it -- and choosing "spiral" there has to turn a raster
+    // whose part turns only BETWEEN passes into one that turns while it cuts.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 30.0));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    ctx->Yield(2);
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup != nullptr);
+    setup->machine.hasRotaryAxis = true;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 1.0, 1.0};
+    setup->tools[0].type = cam::ToolType::Ball;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.type = cam::OpType::SurfaceRotary;
+    op.toolNumber = setup->tools[0].number;
+    op.stepover = 0.6;
+    setup->operations.push_back(op);
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+
+    const std::string adv = "**/$$" + std::to_string(op.id) + "/Advanced###adv";
+    ctx->ItemClick(adv.c_str());
+    ctx->Yield(2);
+    ctx->ItemClick("**/spiral###pattern_spiral");
+    ctx->Yield(3);
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup->operations[0].rotaryPattern == cam::RotaryPattern::Spiral);
+
+    ui::RefreshCamToolpaths(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    size_t turningCuts = 0;
+    const auto& moves = s_App->camToolpaths[0].moves;
+    for (size_t i = 1; i < moves.size(); i++)
+      if (moves[i].kind == cam::Move::Kind::Cut &&
+          std::abs(moves[i].a - moves[i - 1].a) > 1e-9)
+        turningCuts++;
+    ctx->LogInfo("%zu cuts turn the part", turningCuts);
+    IM_CHECK(turningCuts > 10);
+
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "a_rotary_part_turns_as_it_plays");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // docs/cam/rotary-plan.md, "The picture". A program whose A moves used to

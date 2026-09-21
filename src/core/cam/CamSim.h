@@ -113,7 +113,14 @@ struct Timeline {
 
 // `rapidFeed` is the setup's: zero leaves rapids out of the clock entirely,
 // which is what `CuttingMinutes` does and for the same reason.
-[[nodiscard]] Timeline BuildTimeline(GProgram program, double rapidFeed);
+//
+// `model` is how the controller reads F on a move that turns while it cuts
+// (CamGcode.h): the file's F on such a move was scaled for it, so the clock
+// divides the controller's length by it. It changes nothing for a file whose
+// A never moves in a cut.
+[[nodiscard]] Timeline
+BuildTimeline(GProgram program, double rapidFeed,
+              RotaryFeedModel model = RotaryFeedModel::Combined);
 
 // The stock at a cursor.
 //

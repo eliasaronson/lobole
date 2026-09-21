@@ -1,4 +1,4 @@
-# Rotary dogfood — the first continuous 4-axis job
+# Rotary dogfood — the first rotary surfacing jobs
 
 `generators/rotary/handle.py` is a file handle in oak: Ø36 at the swell,
 130 mm long, with five dimples spiralling down it at 43° apart. It is chosen
@@ -21,6 +21,11 @@ is to present the work at an angle.
 
 56 µm of gouge through the real post and the real verifier, on a part whose
 surface is nowhere flat. That is the number the round was for.
+
+Both jobs here are `surface_rotary` as it was at v122: a RASTER, every pass
+along X at one A, the part turning only between passes. That is a step past
+indexed 4-axis and not continuous 4-axis; the spiral that turns while it cuts
+is [rotary-continuous-plan.md](rotary-continuous-plan.md).
 
 ## What it found
 
@@ -96,8 +101,18 @@ finishing pass in wood.
    exists. It is not roughing: a constant-engagement clearing pass keeps the
    chip load steady, and offsetting a finishing pass keeps only the depth
    steady. It is also most of the 28 minutes.
-2. **The feed is not compensated** (D2's generator half). Every pass here cuts
-   at a different radius and they all carry the same F.
+
+   Layers exist now: `surface_rotary` reads `stepdown` and cuts from the
+   blank radius inward, the last layer being the finish, on either pattern
+   ([rotary-continuous-plan.md](rotary-continuous-plan.md), S2). That is
+   FreeCAD's and Kiri's roughing, a floor on the same generator; it keeps the
+   depth per layer steady, not the engagement, so the point above about
+   constant-engagement clearing still stands.
+2. ~~**The feed is not compensated**~~ (D2's generator half). Done in the
+   post: a cutting move that turns A is posted at the F the controller needs
+   for the tip to move at the op's feed ([rotary-plan.md](rotary-plan.md),
+   "Still open"). It was: every pass here cut at a different radius and they
+   all carried the same F.
 3. ~~**There is no picture.**~~ Built: the part turns as it plays, on the
    verifier's own radius field (docs/cam/rotary-plan.md, "The picture").
    It was: playback draws a height map, so this job could be verified and not
@@ -207,3 +222,53 @@ through `list_cam_setups`, which reports the derived stock box:
 | after | 278 ms | **2 ms each** |
 
 A memo is only a memo if it outlives the call that filled it.
+
+## The spiral on the pin (v123)
+
+`generators/rotary/rolling_pin_job.py --spiral` builds the same pin with the
+continuous pattern (docs/cam/rotary-continuous-plan.md): a spiral rough in
+2 mm layers from the dowel leaving 0.5 mm, then a spiral finish at the same
+nominal stepover as the parallel finish (0.10 of the 6 mm ball, 0.6 mm).
+Both jobs were regenerated on the same build, each on its own instance:
+
+| | parallel | spiral |
+|---|---|---|
+| tip path | 114.5 m | ~870 m |
+| cycle time, as the controller runs it | **87 min** | **580 min** |
+| program | 172,807 lines, 3.6 MB | 837,546 lines, 35 MB |
+| max gouge | 33 µm | 26 µm |
+| max leftover | 2.45 mm at X0.1 | 2.44 mm at X0.1 |
+| rapids through stock | 0 | 0 |
+
+The spiral verifies clean and plays as one engine with the verifier. On this
+part it is not a win, and the reason is the rule that made it right on a
+shoulder. The pitch is measured along the surface, so the axial advance per
+turn shrinks by the steepest slope anywhere round the ring. A barley twist's
+flutes are HELICAL, so at every angle the surface is steep along the axis. The
+finish averages about 0.1 mm per turn against the nominal 0.6: 3,061 turns
+where a flat bar would take 500. A helix cannot space its turns differently
+at different angles, since the gap at any one angle is the whole turn's
+advance, so a wall anywhere on the ring densifies every angle.
+
+The parallel passes are not spaced for the flute walls at all: they step
+0.6 mm of arc at the widest point whatever the slope. So the two finishes are
+not the same finish, and the verdict cannot say which is better. Its one
+leftover number lands on the pin's end face, which neither pattern reaches,
+and hides everything else. That is worth a leftover measure that excludes the
+unreachable, or a scallop map, before the comparison means anything.
+
+What this says about the pattern, as findings:
+
+1. **The spiral is for surfaces of revolution with shoulders, not for twists.**
+   On the test shaft it leaves less than the parallel passes (0.96 against
+   1.06 mm). On a helical part it pays for every flute wall at every angle.
+2. **A twist wants a path that FOLLOWS it**, a helix at the twist's own lead
+   stepping across the flutes, which is the feature-following round the plan
+   leaves out. Neither of today's patterns is that.
+3. **The A axis is asked for up to 4,255°/min** (about 12 rpm) while cutting,
+   and the 6090's profile does not say whether it can. The verdict says so;
+   `a_max_deg_min` on the machine is what turns that into a real limit and a
+   real cycle time.
+4. **The file is five times the size of the parallel one**, mostly F words:
+   a scaled F differs by a tenth from line to line. Quantizing the scaled F
+   to a percent would drop most of them.

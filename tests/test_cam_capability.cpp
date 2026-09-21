@@ -75,6 +75,8 @@ constexpr FieldPoke kPokes[] = {
      [](cam::Operation& o) { o.sampleStep = 2.5; }},
     {cam::OpField::ZStep, "z_step_mm",
      [](cam::Operation& o) { o.zStep = 3.5; }},
+    {cam::OpField::RotaryPattern, "rotary_pattern",
+     [](cam::Operation& o) { o.rotaryPattern = cam::RotaryPattern::Spiral; }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.

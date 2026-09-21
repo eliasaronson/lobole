@@ -502,7 +502,7 @@ rest on. That is A2's neighbourhood, not this one.
 
 `GenerateContext`'s own comment says it decides "how a generate treats **the
 one expensive step**, adaptive clearing". That stopped being true at v118 and
-is now emphatically false: a 3-axis finishing pass and a continuous 4-axis one
+is now emphatically false: a 3-axis finishing pass and a rotary one
 both run INLINE, on the frame, and the rotary rolling pin takes **seventeen
 minutes**. The frame HUD on that job shows single `ui` frames of 10 s and
 72 s — the app is not slow, it is stopped.

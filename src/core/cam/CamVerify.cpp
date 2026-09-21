@@ -889,6 +889,56 @@ std::vector<VerdictLine> MachineLines(const Setup& setup,
   } else if (const std::string over = MachineOverhang(setup, bodies);
              !over.empty())
     out.push_back({VerdictLine::Level::Warn, over});
+  // A cut that turns is posted at a SCALED feed, held to what the axes can
+  // do, and near the axis that hold bites: the tip then runs slower than the
+  // feed chosen. Said here, once per operation, with the same function the
+  // post scaled with -- the file says it too, in a comment nobody reads
+  // before the job runs. And where the machine does not state how fast its
+  // A turns, what the program ASKS of it is said instead, once: that is the
+  // number to compare with the motor tuning.
+  if (paths != nullptr) {
+    const RotaryFeedModel model = FeedModelOf(setup.machine.post);
+    const AxisLimits limits = AxisLimitsOf(setup);
+    double peakARate = 0.0;
+    for (const Toolpath& tp : *paths) {
+      size_t capped = 0;
+      double wanted = 0.0;
+      for (size_t i = 1; i < tp.moves.size(); i++) {
+        const Move& a = tp.moves[i - 1];
+        const Move& b = tp.moves[i];
+        if (b.kind == Move::Kind::Rapid || !a.hasA || !b.hasA)
+          continue;
+        const ScaledFeed f =
+            ControllerFeed(a.to, a.a, b.to, b.a, b.feed, model, limits);
+        peakARate = std::max(peakARate, f.aRate);
+        if (f.clamped) {
+          capped++;
+          wanted = std::max(wanted, f.wanted);
+        }
+      }
+      if (capped == 0)
+        continue;
+      char buf[256];
+      std::snprintf(buf, sizeof(buf),
+                    "Op %llu: %zu turning moves need up to F%.0f to hold the "
+                    "feed at the tip, past what the machine's axes can do, so "
+                    "they are held back and cut slower. The need grows as the "
+                    "radius shrinks; a lower feed keeps them under it.",
+                    static_cast<unsigned long long>(tp.operationId), capped,
+                    wanted);
+      out.push_back({VerdictLine::Level::Warn, buf});
+    }
+    if (limits.rotary <= 0.0 && peakARate > 0.0) {
+      char buf[256];
+      std::snprintf(buf, sizeof(buf),
+                    "The program turns A at up to %.0f deg/min while cutting. "
+                    "The machine does not state its A top speed "
+                    "(a_max_deg_min), so the cycle time assumes the axis "
+                    "keeps up.",
+                    peakARate);
+      out.push_back({VerdictLine::Level::Warn, buf});
+    }
+  }
   return out;
 }
 

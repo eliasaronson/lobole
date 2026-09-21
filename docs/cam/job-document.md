@@ -374,7 +374,8 @@ setup-frame.md's own terms, since it reads as a reversal and is not one.
 - **Non-milling job kinds** (sheet laser/plasma, print orientation). The doc
   kind is what would make them possible; this plan does not build them, and no
   field here should be shaped speculatively for them.
-- **Continuous 4-axis.** Still deferred, with plan.md's reasons.
+- **Continuous 4-axis.** Not this plan; built later as its own op
+  ([rotary-continuous-plan.md](rotary-continuous-plan.md)).
 - **Back-compat migration.** No users; fix the tests that assumed the old
   shape.
 

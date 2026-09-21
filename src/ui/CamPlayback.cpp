@@ -143,7 +143,8 @@ bool BeginCamPlayback(AppState& state) {
 
   state.camPlaybackGcode = gcode;
   state.camTimeline = cam::BuildTimeline(
-      cam::ProgramInSetupSpace(gcode, *setup), setup->rapidFeed);
+      cam::ProgramInSetupSpace(gcode, *setup), setup->rapidFeed,
+      cam::FeedModelOf(setup->machine.post));
   if (!state.camTimeline.unsupported.empty()) {
     // Refused VISIBLY, where the buttons are, rather than played wrong. The
     // transport's own rule (docs/cam/simulation.md S5) and the one the

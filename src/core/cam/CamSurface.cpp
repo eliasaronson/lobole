@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <numbers>
 #include <utility>
 
 namespace cam {
@@ -482,6 +483,155 @@ std::vector<RotaryPass> RotaryParallelPasses(const RadiusMap& cl,
 
 namespace {
 
+// The CL radius at (x, theta), bilinear between cell centres and wrapping
+// round in theta. Zero when any of the four cells is empty: the tool reaches
+// nothing there, and blending an empty cell with a full one would invent a
+// surface halfway to the axis.
+double SpiralRadiusAt(const RadiusMap& cl, double x, double theta) {
+  const double fx = std::clamp((x - cl.x0) / cl.res - 0.5, 0.0,
+                               static_cast<double>(cl.nx - 1));
+  const int i0 = std::min(static_cast<int>(fx), cl.nx - 1);
+  const int i1 = std::min(i0 + 1, cl.nx - 1);
+  const double u = fx - i0;
+  const double ft = theta / (2.0 * std::numbers::pi) * cl.nTheta - 0.5;
+  const double fl = std::floor(ft);
+  const double v = ft - fl;
+  const int j0 = ((static_cast<int>(fl) % cl.nTheta) + cl.nTheta) % cl.nTheta;
+  const int j1 = (j0 + 1) % cl.nTheta;
+  const double r00 = cl.At(i0, j0), r10 = cl.At(i1, j0);
+  const double r01 = cl.At(i0, j1), r11 = cl.At(i1, j1);
+  if (r00 <= 0.0 || r10 <= 0.0 || r01 <= 0.0 || r11 <= 0.0)
+    return 0.0;
+  return (1 - u) * (1 - v) * r00 + u * (1 - v) * r10 + (1 - u) * v * r01 +
+         u * v * r11;
+}
+
+} // namespace
+
+std::vector<RotaryPathPoint> RotarySpiralPath(const RadiusMap& cl,
+                                              const RotarySpiralRequest& req) {
+  std::vector<RotaryPathPoint> out;
+  if (cl.nx <= 0 || cl.nTheta <= 0 || req.pitch_mm <= 0.0 ||
+      req.airRadius <= 0.0)
+    return out;
+  double rMax = 0.0;
+  for (float v : cl.r)
+    rMax = std::max(rMax, static_cast<double>(v));
+  if (rMax <= 0.0)
+    return out;
+
+  // The angular step: `along` millimetres of arc at the widest point, the
+  // rule the parallel passes use to turn their stepover into an angle.
+  // Narrower parts of the part are sampled finer, which is the safe side.
+  // Rounded to a whole number per turn so every revolution samples the same
+  // angles, and never coarser than 16 a turn, whatever was asked.
+  const double along = req.sampleStep_mm > 0.0 ? req.sampleStep_mm : cl.res;
+  const int perTurn = std::max(
+      16, static_cast<int>(std::ceil(2.0 * std::numbers::pi * rMax / along)));
+  const double dTheta = 2.0 * std::numbers::pi / perTurn;
+
+  const double xLo = cl.CellX(0);
+  const double xHi = cl.CellX(cl.nx - 1);
+
+  // How steeply the surface climbs along the axis, per column: the worst
+  // slope round the part between this column and the next. Empty cells have
+  // no surface to climb.
+  std::vector<double> slope(static_cast<size_t>(cl.nx), 0.0);
+  for (int i = 0; i + 1 < cl.nx; i++)
+    for (int j = 0; j < cl.nTheta; j++) {
+      const double a = cl.At(i, j), b = cl.At(i + 1, j);
+      if (a > 0.0 && b > 0.0)
+        slope[i] = std::max(slope[i], std::abs(b - a) / cl.res);
+    }
+  // The pitch is measured ALONG THE SURFACE, not along the axis. A fixed
+  // axial pitch crosses a shoulder the way a planar raster crosses a steep
+  // wall: in big steps, leaving a scallop the height of the wall between
+  // two turns -- 3.7 mm on a test shaft whose parallel passes left 1.1. So
+  // the axial advance shrinks by the slope within a pitch EITHER side of the
+  // cutter, and the turns bunch up on a wall and spread out on a flat.
+  // Either side, not just ahead: a scallop lies between this turn and the
+  // last one at the same angle, and looking only ahead let the pitch spring
+  // back to full the moment the cutter passed the foot of a wall -- so at
+  // most angles the next turn landed a whole pitch past the corner.
+  const int window =
+      std::max(1, static_cast<int>(std::ceil(req.pitch_mm / cl.res)));
+  const auto slopeNear = [&](double x) {
+    const int at =
+        std::clamp(static_cast<int>((x - cl.x0) / cl.res - 0.5), 0, cl.nx - 1);
+    double worst = 0.0;
+    for (int i = std::max(0, at - window); i < std::min(cl.nx, at + window);
+         i++)
+      worst = std::max(worst, slope[i]);
+    return worst;
+  };
+
+  std::vector<RotaryPathPoint> raw;
+  const auto sample = [&](double x, double theta) {
+    double r = SpiralRadiusAt(cl, x, theta);
+    r = r > 0.0 ? std::max(r, req.floorRadius) : req.airRadius;
+    raw.push_back({x, r, glm::degrees(theta)});
+  };
+  // A ring at the low end, then the helix, then a ring at the high end. The
+  // rings are what close the ends: a helix started at x0 reaches the far
+  // side of the part half a pitch in.
+  for (int k = 0; k < perTurn; k++)
+    sample(xLo, k * dTheta);
+  double x = xLo, theta = perTurn * dTheta;
+  sample(x, theta);
+  const double flatStep = req.pitch_mm / perTurn;
+  while (x < xHi) {
+    const double s = slopeNear(x);
+    const double dx = flatStep / std::sqrt(1.0 + s * s);
+    if (x + dx >= xHi) {
+      // The last step lands ON the end, turning only its share of a step,
+      // so the helix meets the ring where it should.
+      theta += dTheta * (xHi - x) / dx;
+      x = xHi;
+    } else {
+      x += dx;
+      theta += dTheta;
+    }
+    sample(x, theta);
+  }
+  for (int k = 1; k <= perTurn; k++)
+    sample(xHi, theta + k * dTheta);
+
+  if (req.tolerance_mm <= 0.0)
+    return raw;
+  // Drop what lies on the line between its neighbours, measured in (x, r,
+  // arc at the widest radius): the controller interpolates X, Z and A
+  // linearly between the points it is given, so that is the space the
+  // programmed path is straight in. Runs are bounded, as the post bounds
+  // its own merge, so a turned stretch costs O(n) and not O(n^2).
+  const double arcPerDeg = rMax * std::numbers::pi / 180.0;
+  const auto p3 = [&](const RotaryPathPoint& q) {
+    return glm::dvec3(q.x, q.r, q.thetaDeg * arcPerDeg);
+  };
+  constexpr size_t kMaxRun = 256;
+  out.push_back(raw.front());
+  size_t from = 0;
+  while (from + 1 < raw.size()) {
+    size_t best = from + 1;
+    for (size_t j = from + 2; j < raw.size() && j - from <= kMaxRun; j++) {
+      const glm::dvec3 a = p3(raw[from]);
+      const glm::dvec3 dir = p3(raw[j]) - a;
+      const double len = glm::length(dir);
+      bool straight = len > 1e-12;
+      for (size_t k = from + 1; k < j && straight; k++)
+        straight = glm::length(glm::cross(p3(raw[k]) - a, dir)) / len <=
+                   req.tolerance_mm;
+      if (!straight)
+        break;
+      best = j;
+    }
+    out.push_back(raw[best]);
+    from = best;
+  }
+  return out;
+}
+
+namespace {
+
 struct Hasher {
   uint64_t h = 1469598103934665603ULL;
   void Bytes(const void* p, size_t n) {
@@ -516,6 +666,8 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   hash.D(op.sampleStep);
   hash.D(op.zStep);
   hash.D(op.cutAngleDeg);
+  hash.D(op.stepdown);
+  hash.I(static_cast<int64_t>(op.rotaryPattern));
   hash.I(static_cast<int64_t>(op.targets.size()));
   for (const Target& t : op.targets) {
     hash.I(static_cast<int64_t>(t.jobPartId));
@@ -525,6 +677,11 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   }
   hash.D(setup.safeZ);
   hash.D(setup.rotationA);
+  // A rotary layer starts from the BLANK, whose radius is the part's plus
+  // this margin (RotaryBlankRadius) -- read through a helper, which is why
+  // it is named here rather than caught by the gate's grep.
+  hash.D(setup.stock.margin.y);
+  hash.D(setup.stock.margin.z);
   hash.I(setup.machine.hasRotaryAxis ? 1 : 0);
   hash.D(tool.diameter);
   hash.I(static_cast<int64_t>(tool.type));

@@ -33,7 +33,14 @@ GProgram ParseGcode(std::string_view text) {
   // by the next move emitted — a tool change is a line of its own, so the
   // boundary belongs to the first move that cuts with the new tool.
   bool toolChange = false;
+  // `a` is the angle the axis is AT, continuous through every revolution.
+  // A `G92 A` renames the current angle without moving anything, so the words
+  // after it are read through `aOffset` -- and the moves keep the continuous
+  // angle, which is what lets a program that winds a spiral and then
+  // re-zeroes play without the part spinning back six hundred turns on the
+  // screen and in the clock.
   double a = 0.0;
+  double aOffset = 0.0;
   bool haveA = false;
 
   size_t i = 0;
@@ -89,6 +96,9 @@ GProgram ParseGcode(std::string_view text) {
     glm::dvec3 to = pos;
     bool motion = false;
     bool sawAxis = false;
+    bool g92 = false;
+    bool lineHasA = false;
+    double lineA = 0.0;
     // Arc centre, INCREMENTAL from the arc start (the post states G91.1).
     glm::dvec2 ij(0.0);
     for (size_t k = 0; k < clean.size(); k++) {
@@ -123,6 +133,11 @@ GProgram ParseGcode(std::string_view text) {
           mode = static_cast<int>(value);
           rapid = mode == 0;
           motion = true;
+        } else if (value == 92.0) {
+          // Set the named axes' CURRENT position to the values given, moving
+          // nothing. The post writes it for A alone, after a spiral has
+          // wound the axis round many turns (CamPost.cpp).
+          g92 = true;
         }
         // Everything else (G17/G21/G90/G91.1/G40…) is state this simulator
         // does not model. G91.1 in particular is ASSUMED — the post always
@@ -170,13 +185,34 @@ GProgram ParseGcode(std::string_view text) {
         // so a file whose part turns was simulated as though it stood still.
         // What to do about that is decided where the stock model is chosen;
         // here it is simply read, like every other word.
-        a = value;
-        haveA = true;
+        // Applied after the whole line is read: whether it is a move or a
+        // rename depends on a G92 that may stand anywhere on the line.
+        lineA = value;
+        lineHasA = true;
         break;
       default:
         break;
       }
       k = numEnd - 1;
+    }
+
+    if (g92) {
+      if (sawAxis)
+        out.errors.push_back(
+            "line " + std::to_string(lineNo) +
+            ": G92 on a linear axis moves the work zero, which this reader "
+            "does not model -- the post never writes one");
+      if (lineHasA) {
+        if (!haveA)
+          a = lineA; // nothing stated yet: the axis is where it is called
+        aOffset = a - lineA;
+        haveA = true;
+      }
+      continue;
+    }
+    if (lineHasA) {
+      a = lineA + aOffset;
+      haveA = true;
     }
 
     if (sawAxis || (motion && havePos)) {

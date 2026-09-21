@@ -51,7 +51,7 @@ def tools(d, sid):
         "feed_cut": 1500.0, "feed_plunge": 400.0, "spindle_rpm": 12000.0})
 
 
-def build_job(d):
+def build_job(d, spiral=False):
     # Refuse a second run rather than half-building one. The waveguide job
     # claimed a guard here and did not have one: it picked the first PART tab
     # and rebuilt the model into it, which left the first job's targets
@@ -97,6 +97,17 @@ def build_job(d):
     # to say it some other way.
     d.call("set_cam_setup", id=sid, origin_at="stock_centre")
 
+    if spiral:
+        # Continuous 4-axis (docs/cam/rotary-continuous-plan.md): one helix
+        # per layer, the part turning while it cuts. The rough comes down in
+        # 2 mm layers from the dowel and leaves half a millimetre; the finish
+        # follows the flutes' surface in turns 0.6 mm apart.
+        d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
+               name="Rough (spiral, 2 mm layers)", rotary_pattern="spiral",
+               stepdown=2.0, stock_to_leave=0.5, stepover=0.5)
+        d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
+               name="Finish (spiral)", rotary_pattern="spiral", stepover=0.10)
+        return sid
     for i, leave in enumerate(ROUGH):
         d.call("add_cam_op", setup=sid, type="surface_rotary", tool=1,
                name=f"Rough {i + 1} (leave {leave})",
@@ -124,7 +135,8 @@ def report(d, sid, path):
         if o.get("error"):
             print(f"  ! {o['error']}")
     print(f"  cutting      {r['cut_length_mm'] / 1000.0:.1f} m, "
-          f"{secs / 60.0:.0f} min at feed")
+          f"{secs / 60.0:.0f} min at feed, "
+          f"{r.get('cutting_minutes', 0.0):.0f} min as the controller runs it")
     print(f"  program      {r['lines']} lines, "
           f"{os.path.getsize(path) / 1024:.0f} kB")
     print(f"  checked as   {'ROTARY r(x, theta)' if v.get('rotary') else '3-AXIS height map'}")
@@ -145,9 +157,12 @@ def main():
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--post", default="/tmp/rolling_pin.nc")
     ap.add_argument("--save", default=None)
+    ap.add_argument("--spiral", action="store_true",
+                    help="continuous 4-axis: spiral rough in layers + spiral "
+                         "finish, instead of parallel passes")
     a = ap.parse_args()
     d = connect(a.port)
-    sid = build_job(d)
+    sid = build_job(d, spiral=a.spiral)
     report(d, sid, a.post)
     if a.save:
         d.call("save_project", path=a.save, message="barley-twist rolling pin")

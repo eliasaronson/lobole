@@ -85,6 +85,7 @@ add_executable(designer_tests
     test_cam_capability.cpp
     test_cam_travel.cpp
     test_cam_rotary.cpp
+    test_cam_spiral.cpp
     test_command_modify.cpp
     test_reorder.cpp
     test_remove_features.cpp

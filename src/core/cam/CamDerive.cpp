@@ -2,6 +2,7 @@
 
 #include "core/cam/CamDropCutter.h"
 #include "core/cam/CamNames.h"
+#include "core/cam/CamRotaryFeed.h"
 
 #include "core/cam/CamToolpathInternal.h"
 
@@ -492,6 +493,10 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.topZ = hi.z;
     op.bottomZ = lo.z;
     op.stepover = DerivedStepover(tool);
+    // A finish, unless asked for layers. The 2.5D rule of thumb above -- half
+    // the cutter per pass -- would turn every rotary op into a rough from the
+    // blank, which is a choice about the stock and not about the tool.
+    op.stepdown = 0.0;
     break;
   }
   case OpType::Count:
@@ -552,9 +557,15 @@ bool Retool(const Setup& setup, Operation& op, int toolNumber,
   const Tool* prev = setup.FindTool(op.toolNumber);
   // "Still derived" is the test, not "never edited": a stepdown equal to the
   // old cutter's own derivation is one nobody has stated, so it follows.
-  const bool derived = op.stepdown <= 0.0 ||
-                       (prev != nullptr &&
-                        std::abs(op.stepdown - DerivedStepdown(*prev)) < 1e-9);
+  // A rotary op's zero is not "unstated": it is "no layers", which is its
+  // derivation (above), and a new cutter must not turn it into a rough.
+  const bool rotaryFinish =
+      op.type == OpType::SurfaceRotary && op.stepdown <= 0.0;
+  const bool derived =
+      !rotaryFinish &&
+      (op.stepdown <= 0.0 ||
+       (prev != nullptr &&
+        std::abs(op.stepdown - DerivedStepdown(*prev)) < 1e-9));
   op.toolNumber = next->number;
   if (derived)
     op.stepdown = DerivedStepdown(*next);
@@ -607,33 +618,36 @@ double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
     for (size_t i = 1; i < tp.moves.size(); i++) {
       const Move& a = tp.moves[i - 1];
       const Move& b = tp.moves[i];
-      double len = glm::length(b.to - a.to);
       // A ROTARY move has length too, and it used to have none. A pure A
       // move is zero millimetres in XYZ, so it fell out of this loop
       // entirely and a rotary program's cycle time came back understated --
       // silently, which is the part that matters, because a wrong number
-      // with no warning beside it is worse than no number.
-      //
-      // The length added is the arc the TOOL TIP travels: the part turns
-      // under a cutter standing at radius hypot(y, z), so that is the metal
-      // going past it. Combined with the linear part as one path length,
-      // which is what a controller feeding along the programmed path does
-      // (FreeCAD's rotary addon is the only surveyed CAM that compensates at
-      // all, and it scales F for exactly this arc -- docs/cam/rotary-plan.md
-      // D2, where the GENERATOR's half of the question still sits).
-      if (a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9) {
-        const double radius = std::hypot(b.to.y, b.to.z);
-        const double arc =
-            std::abs(b.a - a.a) / 360.0 * 2.0 * glm::pi<double>() * radius;
-        len = std::hypot(len, arc);
-      }
+      // with no warning beside it is worse than no number. The length is the
+      // arc the TOOL TIP travels, combined with the linear part.
+      const bool turning = a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9;
+      const double len =
+          turning ? TipLength(a.to, a.a, b.to, b.a) : glm::length(b.to - a.to);
       if (len < 1e-12)
         continue;
-      double feed = tp.moves[i].feed;
-      if (tp.moves[i].kind == Move::Kind::Rapid)
-        feed = setup.rapidFeed; // 0 = not stated, so not counted
-      if (feed > 1e-9)
-        minutes += len / feed;
+      if (b.kind == Move::Kind::Rapid) {
+        if (setup.rapidFeed > 1e-9) // 0 = not stated, so not counted
+          minutes += len / setup.rapidFeed;
+        continue;
+      }
+      if (b.feed <= 1e-9)
+        continue;
+      if (!turning) {
+        minutes += len / b.feed;
+        continue;
+      }
+      // A cut that turns is posted at a SCALED F (ControllerFeed), and the
+      // controller divides its own length by that. Unclamped, that is the
+      // tip's length over the feed asked for; where the scaled F hit the
+      // machine's cap it is longer, and this is the one number that says so.
+      const RotaryFeedModel model = FeedModelOf(setup.machine.post);
+      const ScaledFeed f = ControllerFeed(a.to, a.a, b.to, b.a, b.feed, model,
+                                          AxisLimitsOf(setup));
+      minutes += ControllerLength(a.to, a.a, b.to, b.a, model) / f.feed;
     }
   }
   return minutes;

@@ -203,8 +203,9 @@ Dogfood: `front_wall` from `~/Documents/smart_speaker.dsgn`, the real part.
 
 ## Not this
 
-**Continuous 4-axis** (simultaneous XYZA) is untouched and stays deferred for
-the reasons `plan.md:177` gives. **Work offsets** (G54…) stay out: the file
+**Continuous 4-axis** (simultaneous XYZA) is untouched here; it was built
+later as its own op ([rotary-continuous-plan.md](rotary-continuous-plan.md)),
+and nothing in the setup frame had to change for it. **Work offsets** (G54…) stay out: the file
 remains in setup-frame coordinates with the operator setting the offset, per
 the existing documented convention — S7 only corrects which frame that
 sentence names.

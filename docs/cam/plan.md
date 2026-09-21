@@ -19,7 +19,9 @@
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous
-> 4-axis is deferred with reasons. Machine: **Mach3 today, LinuxCNC planned**.
+> 4-axis was deferred with reasons, and later built as its own op — see
+> [rotary-continuous-plan.md](rotary-continuous-plan.md). Machine: **Mach3
+> today, LinuxCNC planned**.
 
 ## Why this is even considered
 
@@ -196,7 +198,10 @@ The user plans a rotary axis. Two very different things wear that name:
   `rotary_parallel`, `rotary_rings`, `rotary_spiral`, `rotary_wrap` — 1 434
   lines together) to do it. **Explicitly deferred**; it also wants the
   drop-cutter machinery from opencamlib, so it is naturally downstream of
-  3-axis surfacing.
+  3-axis surfacing. It did come after surfacing, and without opencamlib:
+  `surface_rotary` (a raster, then a spiral that turns A while it cuts),
+  see [rotary-plan.md](rotary-plan.md) and
+  [rotary-continuous-plan.md](rotary-continuous-plan.md).
 
 The one thing v1 must not do is assume three axes in the *post interface* or
 in the toolpath representation — a move carries an optional A. *(Since C9 one
@@ -231,7 +236,7 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 | **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **done** `27033f2` (LGPL, linked as a shared library) |
 | **C9** | Indexed 4th axis (one A per setup) | **done** `ee530f9` |
 | **S1-S5** | Cutting simulation: scrub the posted program, watch the stock come off ([simulation.md](simulation.md)) | **done** 2026-08-27 |
-| later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | surfacing is costed in [surfacing.md](surfacing.md); the other two remain on demand |
+| later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | surfacing: [surfacing.md](surfacing.md), built; continuous 4-axis: [rotary-continuous-plan.md](rotary-continuous-plan.md), built; round stock remains on demand |
 
 ## What C1–C4 shipped
 
@@ -523,7 +528,9 @@ frame, the pick, and the safety rule.
 Explicitly not this phase: **continuous 4-axis** (simultaneous XYZA). It
 needs a different toolpath representation, because feed along a rotary axis
 is not a linear distance, and a different verifier, because a planar height
-map cannot represent a wrapped surface. It is a workstream, not a phase.
+map cannot represent a wrapped surface. It is a workstream, not a phase —
+and it ran as one: a cylindrical verifier ([rotary-plan.md](rotary-plan.md)),
+then the generator and the feed ([rotary-continuous-plan.md](rotary-continuous-plan.md)).
 
 ### As-built notes
 

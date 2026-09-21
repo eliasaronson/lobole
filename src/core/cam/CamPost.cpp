@@ -1,10 +1,12 @@
 #include "core/cam/CamPost.h"
 
+#include "core/cam/CamRotaryFeed.h"
 #include "core/cam/CamToolpath.h"
 
 #include <glm/geometric.hpp>
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <numbers>
@@ -293,6 +295,13 @@ size_t LastCollinear(const std::vector<Move>& moves, size_t i,
   constexpr size_t kMaxRun = 256;
   const Move& first = moves[i];
   size_t best = i;
+  // A move that TURNS the part is never merged forward: the run's end would
+  // carry its A, so a turn followed by a straight feed became one move doing
+  // both at once -- a different cut. Only a spiral makes the first of those,
+  // which is why nothing met it before.
+  if (i > 0 && first.hasA && moves[i - 1].hasA &&
+      Emitter::Differs(first.a, moves[i - 1].a))
+    return i;
   for (size_t j = i + 1; j < moves.size() && j - i < kMaxRun; j++) {
     const Move& m = moves[j];
     if (m.kind != first.kind || Emitter::Differs(m.feed, first.feed) ||
@@ -342,9 +351,8 @@ size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
   const double a = moves[first].a;
   // ...including against the move the arc STARTS from. If the run's A differs
   // from the one already emitted, the rotation happens on the arc's first
-  // move and the arc would swallow it. Unreachable today -- the generator
-  // stamps one constant A on a whole indexed toolpath -- and checked anyway,
-  // because the day a strategy emits two is not the day to discover this.
+  // move and the arc would swallow it. A spiral's every cut changes A, so
+  // this is what keeps a rotary helix out of the arc fitter.
   if (hasA != moves[first - 1].hasA ||
       (hasA && Emitter::Differs(a, moves[first - 1].a)))
     return first - 1;
@@ -473,7 +481,10 @@ bool PostProcess(const std::string& postId, const Setup& setup,
 
   int currentTool = -1;
   double currentRpm = -1.0;
-  for (const Toolpath& tp : paths) {
+  const RotaryFeedModel feedModel = FeedModelOf(dialect->id);
+  const AxisLimits axisLimits = AxisLimitsOf(setup);
+  for (size_t pathIndex = 0; pathIndex < paths.size(); pathIndex++) {
+    const Toolpath& tp = paths[pathIndex];
     if (!tp.error.empty()) {
       // Skipped, but SAID: an operation that vanishes silently is how a part
       // comes off the machine missing a feature nobody noticed.
@@ -581,6 +592,20 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       e.haveA = true;
       e.a = setup.rotationA;
     }
+    // Where the axis stood when this operation began: the index above, or
+    // -- on a setup that states none -- the operation's own first angle.
+    double aAtStart = e.a;
+    if (!e.haveA)
+      for (const Move& mv : tp.moves)
+        if (mv.hasA) {
+          aAtStart = mv.a;
+          break;
+        }
+    // Cuts that turn, whose F was scaled for the controller and hit the
+    // machine's cap. Counted and said ONCE for the operation: a feed nobody
+    // chose is worth a line, and not one per move.
+    size_t capped = 0;
+    double cappedWanted = 0.0, cappedRadius = 1e18;
     for (size_t i = 0; i < tp.moves.size();) {
       const Move& m = tp.moves[i];
       Circle circle;
@@ -592,20 +617,17 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         i = last + 1;
         continue;
       }
-      // C9: a rotary index NEVER happens with the tool down. The toolpath
+      // C9: a rotary INDEX never happens with the tool down. The toolpath
       // is supposed to arrive already retracted, but "supposed to" is how a
       // cutter ends up sweeping an arc through the part while the trunnion
       // turns — so the post enforces it rather than trusting its caller.
       //
-      // UNREACHABLE today, and kept deliberately. `PostProcess` takes ONE
-      // setup and the generator stamps ONE constant A on every move of it,
-      // so `Differs` cannot be true here; what enforces the rule for an
-      // indexed job is the one-shot retract-and-index above, which is what
-      // the C9 test asserts. This branch is for the file that arrives with a
-      // SECOND A — and when one does, this stops being an invariant and
-      // becomes a policy choice, because a continuous rotary move is by
-      // definition A moving with the tool down.
-      if (m.hasA && e.haveA && Emitter::Differs(m.a, e.a))
+      // An index is a RAPID that turns A. A feed move that turns it is the
+      // other thing entirely -- continuous 4-axis, the tool down by design
+      // (a spiral) -- and retracting there would lift the cutter out of
+      // every step of the cut.
+      if (m.kind == Move::Kind::Rapid && m.hasA && e.haveA &&
+          Emitter::Differs(m.a, e.a))
         e.Retract(setup.safeZ);
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";
       // A straight run collapses to its endpoint. Same line, fewer of them.
@@ -628,9 +650,69 @@ bool PostProcess(const std::string& postId, const Setup& setup,
           }
         }
       const Move& end = tp.moves[straightTo];
-      e.Motion(code, end.to, end.kind == Move::Kind::Rapid ? 0.0 : end.feed,
-               end.hasA, end.a);
+      double feed = end.kind == Move::Kind::Rapid ? 0.0 : end.feed;
+      // A cut that turns: F scaled so the controller's reading of it moves
+      // the TIP at the feed asked for (CamGcode.h). A merged run never turns
+      // -- LastCollinear stops at a change of A -- so the move before is
+      // where this one starts.
+      if (feed > 0.0 && straightTo > 0 && end.hasA) {
+        const Move& from = tp.moves[straightTo - 1];
+        if (from.hasA && Emitter::Differs(end.a, from.a)) {
+          const ScaledFeed f = ControllerFeed(from.to, from.a, end.to, end.a,
+                                              feed, feedModel, axisLimits);
+          // A tenth is finer than any controller's feed override, and a
+          // file that writes F to four places on every line of a spiral is
+          // a third longer for nothing.
+          feed = std::max(0.1, std::round(f.feed * 10.0) / 10.0);
+          if (f.clamped) {
+            capped++;
+            cappedWanted = std::max(cappedWanted, f.wanted);
+            cappedRadius = std::min(cappedRadius,
+                                    std::min(std::hypot(from.to.y, from.to.z),
+                                             std::hypot(end.to.y, end.to.z)));
+          }
+        }
+      }
+      e.Motion(code, end.to, feed, end.hasA, end.a);
       i = straightTo + 1;
+    }
+    if (capped > 0 && opts.comments)
+      e.Comment("op " + std::to_string(tp.operationId) + ": " +
+                std::to_string(capped) +
+                " turning moves held to the machine's axis speeds - down to "
+                "radius " +
+                Num(cappedRadius, 1) + " mm they needed up to F" +
+                Num(cappedWanted, 0) + ", so the tip runs slower there");
+
+    // A spiral winds the axis round hundreds of turns: the rolling pin at a
+    // half-millimetre pitch ends near A-216000. The next operation's first
+    // rapid would ask for all of them back. `G92 A` renames where the axis
+    // IS without moving it, and a whole number of turns names the same
+    // physical angle -- so the file carries on from the nearest equivalent
+    // of the next angle it needs, and the part never unwinds. Mach3 and
+    // LinuxCNC both honour it; the parser reads it (CamGcode.cpp), so the
+    // verifier and the simulator stay on the same angle as the machine.
+    // Modulo-360 output would be the other answer, and it is wrong for a
+    // cut: a feed move from 359 to 1 turns BACK 358 degrees, tool down, on
+    // any controller that does not take the short way.
+    if (e.haveA && std::abs(e.a - aAtStart) >= 360.0) {
+      double next = setup.rotationA;
+      bool found = false;
+      for (size_t n = pathIndex + 1; n < paths.size() && !found; n++) {
+        if (!paths[n].error.empty())
+          continue;
+        for (const Move& mv : paths[n].moves)
+          if (mv.hasA) {
+            next = mv.a;
+            found = true;
+            break;
+          }
+      }
+      const double renamed = e.a - 360.0 * std::round((e.a - next) / 360.0);
+      if (Emitter::Differs(renamed, e.a)) {
+        e.Raw("G92 A" + Num(renamed, opts.decimals));
+        e.a = renamed;
+      }
     }
   }
 
