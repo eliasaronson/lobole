@@ -111,6 +111,25 @@ def check(r, what):
     return r
 
 
+def fresh_project(d):
+    """Start a new project, for a generator's `--fresh`.
+
+    A generator refuses to build into an instance that already has its tab --
+    a rebuild renames the elements the first job's operations point at -- so
+    every comparison meant restarting an instance. This clears it instead,
+    and REFUSES when the open project has unsaved changes: `new_project` does
+    not ask, and the instance may be somebody's working session.
+    """
+    ping = d.call("ping")
+    if ping.get("dirty"):
+        raise SystemExit(
+            f"--fresh refused: the project open on port {ping.get('port')} "
+            f"({ping.get('project') or 'unsaved'}) has unsaved changes. Save "
+            "it, or run against a scratch instance "
+            "(tools/headless-preview.sh --start <port>).")
+    d.call("new_project")
+
+
 def connect(port=None):
     """The running app, by port or by discovery. Refuses to guess."""
     if port is None:

@@ -232,7 +232,6 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
   }
 
   if (m == "get_tube_rules") {
-    // rpc-params: part
     const Document& subject = SubjectPart(state, doc, p);
     if (!subject.Tube()) {
       json materials = json::object();
@@ -246,7 +245,6 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
   }
 
   if (m == "check_frame") {
-    // rpc-params: part
     const Document& subject = SubjectPart(state, doc, p);
     std::vector<tube::FrameMember> frame;
     for (size_t i = 0; i < subject.FeatureCount(); i++) {
@@ -330,7 +328,6 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
   }
 
   if (m == "check_tube") {
-    // rpc-params: part
     const Document& subject = SubjectPart(state, doc, p);
     if (!subject.Tube()) {
       throw std::runtime_error(
@@ -356,7 +353,6 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
   }
 
   if (m == "export_members") {
-    // rpc-params: part
     const Document& subject = SubjectPart(state, doc, p);
     const std::string dir = p.at("dir").get<std::string>();
     const bool overwrite = p.value("overwrite", false);
@@ -412,7 +408,6 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
   }
 
   if (m == "export_cut_list" || m == "export_bend_schedule") {
-    // rpc-params: part
     const Document& subject = SubjectPart(state, doc, p);
     const std::string path = p.at("path").get<std::string>();
     const std::vector<tube::MemberRow> rows = tube::Members(subject);

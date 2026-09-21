@@ -355,7 +355,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return StudyJson(asmDoc, *asmDoc.FindMotionStudyById(id));
   }
   if (m == "set_motion_study") {
-    // rpc-params: check_clash, clash_mode, from, name, samples, study, to
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& s = NeedStudy(asmDoc, p);
     ui::SnapshotAssembly(state);
@@ -384,7 +383,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return StudyJson(asmDoc, s);
   }
   if (m == "remove_motion_study") {
-    // rpc-params: study
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const uint64_t id = s.id;
@@ -412,7 +410,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return json{{"studies", out}};
   }
   if (m == "run_motion_study") {
-    // rpc-params: async, include_poses, leave_at, study
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
@@ -465,7 +462,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "motion_status") {
-    // rpc-params: include_poses, study
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
@@ -485,7 +481,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "set_motion_pose") {
-    // rpc-params: study, t
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const double t = p.at("t").get<double>();
@@ -507,7 +502,6 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "export_motion") {
-    // rpc-params: path, study
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const std::string path = p.at("path").get<std::string>();

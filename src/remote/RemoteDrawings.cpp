@@ -508,8 +508,6 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"drawings", arr}};
   }
   if (m == "add_drawing_view") {
-    // SelectDrawing reads it; the scanner cannot follow a helper.
-    // rpc-params: drawing
     // `drawing` (name or id) switches to that drawing tab first — the doc
     // has always described it, and the handler used to refuse the key.
     if (p.contains("drawing"))
@@ -684,8 +682,6 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "check_drawing") {
-    // SelectDrawing reads it; the scanner cannot follow a helper.
-    // rpc-params: drawing
     if (p.contains("drawing"))
       SelectDrawing(state,
                     p); // {drawing}: check THAT sheet, not the active one
@@ -736,8 +732,6 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "update_drawing") {
-    // SelectDrawing reads it; the scanner cannot follow a helper.
-    // rpc-params: drawing
     if (p.contains("drawing"))
       SelectDrawing(state, p); // {drawing}: re-project THAT sheet
     if (!state.drawing)

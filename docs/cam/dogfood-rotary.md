@@ -306,3 +306,14 @@ pictures in `scratch/rolling_pin_helical/`.
    no notion of "the surface the pattern is for" as against "the end faces no
    pass can reach", and that is worth building before the next comparison.
 
+## The end domes are not reached (found by the surface measure)
+
+`leftover_surface_max_mm` on the saved pin jobs is 1.25 mm for parallel and
+helical alike, at X0.6: the foot of the domed end, whose slope is just under
+the 70° line that makes a face "end-facing". A rotary pass could reach it, but
+only with the tool centre beyond the part's end, and the generator's grid
+stops at the end. Every rotary pattern has this. The fix is to run the passes
+a tool radius past each end. That is also a question about the work-holding:
+a chuck or tailstock sits there on a real machine, and nothing in the job
+says where. Left as a decision (docs/cam/friction-after-helical-plan.md).
+

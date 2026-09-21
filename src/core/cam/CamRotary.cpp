@@ -383,6 +383,24 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
   size_t compared = 0, missed = 0;
   std::vector<float> lefts; // every compared cell's leftover, for the P95
   lefts.reserve(machined.r.size());
+  std::vector<float> surfaceLefts; // the same, off the end faces
+  surfaceLefts.reserve(machined.r.size());
+  // Cells over the leftover floor, and which of them face the axis's ends:
+  // the flood fill below groups them into regions.
+  const size_t total = machined.r.size();
+  std::vector<uint8_t> over(total, 0), endFacing(total, 0);
+  // A designed cell FACES THE END when its surface climbs faster than 70
+  // degrees along the axis, or it is at the end of the part: no rotary pass
+  // reaches it, whatever the pattern, so its leftover is expected.
+  constexpr double kEndSlope = 2.7474774194546216; // tan(70 degrees)
+  const auto facesEnd = [&](int i, int j) {
+    if (i == 0 || i == designed.nx - 1)
+      return true;
+    const double a = designed.At(i - 1, j), b = designed.At(i + 1, j);
+    if (a <= 0.0 || b <= 0.0)
+      return true;
+    return std::abs(b - a) / (2.0 * designed.res) > kEndSlope;
+  };
   for (int j = 0; j < machined.nTheta; j++)
     for (int i = 0; i < machined.nx; i++) {
       const double want = designed.At(i, j);
@@ -401,6 +419,17 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
         v.gougeAt = {x, theta};
       }
       lefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
+      const size_t k = static_cast<size_t>(j) * machined.nx + i;
+      endFacing[k] = facesEnd(i, j) ? 1 : 0;
+      if (got - hi > kLeftoverFloor)
+        over[k] = 1;
+      if (!endFacing[k]) {
+        surfaceLefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
+        if (got - hi > v.leftoverSurfaceMax) {
+          v.leftoverSurfaceMax = got - hi;
+          v.leftoverSurfaceAt = {x, theta};
+        }
+      }
       if (const double left = got - hi; left > v.maxLeftover) {
         v.maxLeftover = left;
         v.leftoverAt = {x, theta};
@@ -412,6 +441,74 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
         v.leftoverArea += machined.res * machined.ArcAt(got);
     }
   v.cells = compared;
+  if (!surfaceLefts.empty()) {
+    const size_t k = (surfaceLefts.size() - 1) * 99 / 100;
+    std::nth_element(surfaceLefts.begin(),
+                     surfaceLefts.begin() + static_cast<long>(k),
+                     surfaceLefts.end());
+    v.leftoverSurfaceP99 = surfaceLefts[k];
+  }
+  // WHERE, as the height-map check says it: the cells over the floor joined
+  // across neighbours -- wrapping round theta, which a height map does not --
+  // each region sized by the arc of its cells, and marked when it sits on
+  // faces no rotary pass can reach. A rotary answer used to say "0 regions"
+  // next to hundreds of square millimetres of leftover.
+  {
+    std::vector<uint8_t> seen(total, 0);
+    std::vector<size_t> stack;
+    for (size_t start = 0; start < total; start++) {
+      if (over[start] == 0 || seen[start] != 0)
+        continue;
+      v.leftoverRegions++;
+      Verdict::Region region;
+      double sumX = 0.0, sumC = 0.0, sumS = 0.0, area = 0.0;
+      size_t mine = 0, ends = 0;
+      seen[start] = 1;
+      stack.push_back(start);
+      while (!stack.empty()) {
+        const size_t k = stack.back();
+        stack.pop_back();
+        const int i = static_cast<int>(k % machined.nx);
+        const int j = static_cast<int>(k / machined.nx);
+        const double r = machined.At(i, j);
+        area += machined.res * machined.ArcAt(r);
+        sumX += machined.CellX(i);
+        // The centroid's angle is taken as a vector average, so a region
+        // across the 0/360 seam does not land on the far side of the part.
+        sumC += std::cos(machined.CellTheta(j));
+        sumS += std::sin(machined.CellTheta(j));
+        mine++;
+        ends += endFacing[k];
+        region.depth =
+            std::max(region.depth, r - static_cast<double>(designed.At(i, j)));
+        const int ni[4] = {i - 1, i + 1, i, i};
+        const int nj[4] = {j, j, (j + 1) % machined.nTheta,
+                           (j + machined.nTheta - 1) % machined.nTheta};
+        for (int n = 0; n < 4; n++) {
+          if (ni[n] < 0 || ni[n] >= machined.nx)
+            continue;
+          const size_t nk = static_cast<size_t>(nj[n]) * machined.nx + ni[n];
+          if (over[nk] == 0 || seen[nk] != 0)
+            continue;
+          seen[nk] = 1;
+          stack.push_back(nk);
+        }
+      }
+      region.area = area;
+      double at = glm::degrees(std::atan2(sumS, sumC));
+      if (at < 0.0)
+        at += 360.0;
+      region.at = {sumX / static_cast<double>(mine), at};
+      region.endFace = ends * 2 > mine;
+      v.biggest.push_back(region);
+    }
+    std::sort(v.biggest.begin(), v.biggest.end(),
+              [](const Verdict::Region& a, const Verdict::Region& b) {
+                return a.area > b.area;
+              });
+    if (v.biggest.size() > 16)
+      v.biggest.resize(16);
+  }
   // The typical scallop: the few cells on an end face no rotary pass can
   // reach set `maxLeftover` for every pattern, and cannot move this.
   if (!lefts.empty()) {
@@ -420,10 +517,10 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
                      lefts.end());
     v.leftoverP95 = lefts[k];
   }
-  const size_t total = compared + missed;
-  v.untouchedFraction =
-      total > 0 ? static_cast<double>(missed) / static_cast<double>(total)
-                : 0.0;
+  const size_t seenCells = compared + missed;
+  v.untouchedFraction = seenCells > 0 ? static_cast<double>(missed) /
+                                            static_cast<double>(seenCells)
+                                      : 0.0;
   return v;
 }
 

@@ -62,9 +62,13 @@ EXTRA_RE = re.compile(r'rpc-params:\s*([a-z0-9_]+(?:\s*,\s*[a-z0-9_]+)*)\s*$',
 # against what it can SEE. The generated SDK builds from the row and refuses
 # the rest, so `tabs` was documented in prose and unreachable through it.
 #
-# So a hand-off must be ANNOTATED: `// rpc-params: a, b, c` for the keys the
-# helper reads, or `// rpc-params: none` when it reads none of them. The
-# annotation is a claim a human makes and a reader can check; silence is not.
+# A hand-off to a function in these files that takes the RpcParams is now
+# FOLLOWED (see `_helpers` below): its reads are the branch's reads. Anything
+# else must be ANNOTATED: `// rpc-params: a, b, c` for keys the scanner cannot
+# see -- read before the branch (a dispatcher's preamble), through a lambda's
+# argument, or by a constructor -- or `// rpc-params: none`. The annotation
+# is a claim a human makes and a reader can check; silence is not. Following
+# the helpers removed 22 of them.
 HANDOFF_RE = re.compile(r'\b([A-Za-z_][A-Za-z0-9_:]*)\s*\(([^;{}]*?)\)', re.S)
 HANDOFF_ARG_RE = re.compile(r'(?:^|,)\s*(?:const\s+)?(?:p|params)\s*(?:,|$)')
 # Not a hand-off: the readers themselves, and the scanner's own idioms.
@@ -272,46 +276,89 @@ def _innermost(scopes, pos):
     return best[0] if best else None
 
 
-# Helpers the scanner FOLLOWS instead of trusting an annotation for. A
-# branch that hands its params to one reads the keys the helper's own body
-# reads by hand, plus the keys of the table it loops over. The annotation
-# route failed here in exactly the way it can: `ApplyOpFields` gained four
-# fields, the annotation did not, the gate compared the row to the stale
-# annotation and passed, and the generated SDK refused all four
-# (docs/cam/op-field-table-plan.md).
+# Helpers the scanner FOLLOWS instead of trusting an annotation for: every
+# function in the scanned files that takes an `RpcParams&` and is not itself a
+# dispatcher (no `m == "..."` branch inside it). A branch that hands its params
+# to one reads what the helper reads, recursively. The annotation route failed
+# in exactly the way it can: `ApplyOpFields` gained four fields, its
+# annotation did not, the gate compared the row to the stale annotation and
+# passed, and the generated SDK refused all four
+# (docs/cam/op-field-table-plan.md, docs/cam/friction-after-helical-plan.md).
+#
+# A helper that loops over a TABLE of keys reads the table's keys too. Named
+# here, because a loop over rows is not a string the scanner can see.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KNOWN_HELPERS = {
+TABLE_HELPERS = {
     "ApplyOpFields": os.path.join(_ROOT, "src", "core", "cam",
                                   "CamOpFields.cpp"),
 }
 TABLE_KEY_RE = re.compile(r'\{"([a-z0-9_]+)",\s*OpField::')
+HELPER_DEF_RE = re.compile(
+    r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}()]*?\bRpcParams\s*&\s*'
+    r'(?:p|params)\b[^;{}()]*)\)\s*(?:const\s*)?\{')
 
 
-def _helper_keys(sources, helper, table_path):
-    """Keys `helper` reads: its body's own reads, plus its table's keys."""
-    keys = set()
+def _body_end(bare, open_brace):
+    depth, i = 0, open_brace
+    while i < len(bare):
+        if bare[i] == '{':
+            depth += 1
+        elif bare[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return len(bare)
+
+
+def _helpers(sources):
+    """{name: {"keys", "opaque", "calls"}} for every non-dispatcher function
+    taking RpcParams&, across `sources`."""
+    found = {}
     for src in sources:
         bare = _strip(src)
-        m = re.search(r'\b' + helper + r'\s*\([^)]*\)\s*\{', bare)
-        if not m:
-            continue
-        depth, i = 0, m.end() - 1
-        while i < len(bare):
-            if bare[i] == '{':
-                depth += 1
-            elif bare[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    break
-            i += 1
-        for km in KEY_RE.finditer(bare, m.end(), i):
-            keys.add(km.group(1) or km.group(2))
-    with open(table_path) as f:
-        table = TABLE_KEY_RE.findall(f.read())
-    if not table:
-        raise SystemExit(f"rpc_params_scan: no table rows in {table_path} -- "
-                         f"did the op-field table move?")
-    return keys | set(table)
+        for m in HELPER_DEF_RE.finditer(bare):
+            name = m.group(1)
+            if name in HANDOFF_SKIP:
+                continue
+            end = _body_end(bare, m.end() - 1)
+            body = bare[m.end():end]
+            if COND_RE.search(body):
+                continue  # a dispatcher: its branches are scanned as methods
+            e = found.setdefault(name, {"keys": set(), "opaque": False,
+                                        "calls": set()})
+            for km in KEY_RE.finditer(body):
+                e["keys"].add(km.group(1) or km.group(2))
+            e["opaque"] = e["opaque"] or bool(RAW_RE.search(body))
+            for hm in HANDOFF_RE.finditer(body):
+                callee = hm.group(1).split("::")[-1]
+                if callee != name and HANDOFF_ARG_RE.search(hm.group(2)):
+                    e["calls"].add(callee)
+    for name, table_path in TABLE_HELPERS.items():
+        if name not in found:
+            raise SystemExit(f"rpc_params_scan: table helper {name} not found")
+        with open(table_path) as f:
+            table = TABLE_KEY_RE.findall(f.read())
+        if not table:
+            raise SystemExit(f"rpc_params_scan: no table rows in "
+                             f"{table_path} -- did the op-field table move?")
+        found[name]["keys"].update(table)
+    return found
+
+
+def _resolve(helpers, name, seen=None):
+    """A helper's keys and opacity, following the helpers it calls."""
+    seen = set() if seen is None else seen
+    if name in seen or name not in helpers:
+        return set(), False
+    seen.add(name)
+    h = helpers[name]
+    keys, opaque = set(h["keys"]), h["opaque"]
+    for c in h["calls"]:
+        k, o = _resolve(helpers, c, seen)
+        keys |= k
+        opaque = opaque or o
+    return keys, opaque
 
 
 def scan_files(paths):
@@ -320,8 +367,7 @@ def scan_files(paths):
     for path in paths:
         with open(path) as f:
             sources.append(f.read())
-    helpers = {h: _helper_keys(sources, h, t)
-               for h, t in KNOWN_HELPERS.items()}
+    helpers = _helpers(sources)
     for src in sources:
         for name, info in scan_source(src).items():
             e = merged.setdefault(name, {"keys": set(), "opaque": False,
@@ -334,8 +380,11 @@ def scan_files(paths):
             e["handoff"].update(info["handoff"])
             e["annotated"] = e["annotated"] or info["annotated"]
             for h in info["handoff"]:
+                h = h.split("::")[-1]
                 if h in helpers:
-                    e["keys"].update(helpers[h])
+                    keys, opaque = _resolve(helpers, h)
+                    e["keys"].update(keys)
+                    e["opaque"] = e["opaque"] or opaque
                     e["annotated"] = True
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
                 "handoff": sorted(v["handoff"]), "annotated": v["annotated"],

@@ -93,6 +93,15 @@ struct Verdict {
   // no rotary pass can reach, whatever the pattern, so `maxLeftover` alone
   // cannot tell two finishes apart (docs/cam/rotary-helical-plan.md).
   double leftoverP95 = 0.0;
+  // Rotary only: leftover on the SURFACE a rotary pass is for -- every cell
+  // except those on faces turned toward the axis's ends (steeper than 70
+  // degrees along the axis, or at the part's end), where no rotary pass can
+  // reach and every job's worst cell sits. What tells two patterns apart,
+  // and what found the helical ridges
+  // (docs/cam/friction-after-helical-plan.md).
+  double leftoverSurfaceMax = 0.0;
+  glm::dvec2 leftoverSurfaceAt{0.0};
+  double leftoverSurfaceP99 = 0.0;
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
@@ -189,6 +198,9 @@ struct Verdict {
     glm::dvec2 at{0.0}; // centroid
     double area = 0.0;  // mm^2
     double depth = 0.0; // the worst leftover in it, mm
+    // Rotary only: the region sits on faces turned toward the axis's ends,
+    // which no rotary pass can reach -- expected, not a missing operation.
+    bool endFace = false;
   };
   std::vector<Region> biggest;
 

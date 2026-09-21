@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__)))), "tools"))
 
-from _lib import connect  # noqa: E402
+from _lib import connect, fresh_project  # noqa: E402
 import handle  # noqa: E402
 
 # Phi 40 oak dowel: the nearest stock size above the Phi 36 swell.
@@ -67,10 +67,10 @@ def build_job(d):
     named = {p.get("name") for p in d.call("list_parts")["parts"]}
     if "Handle job" in named or "Handle" in named:
         raise SystemExit(
-            "this instance already has a Handle tab: open a new project "
-            "(or run against a fresh instance) rather than building a second "
-            "one into it — a rebuild renames the elements the first job's "
-            "operations point at")
+            "this instance already has a Handle tab: pass --fresh to start "
+            "a new project first (or run against a fresh instance) rather "
+            "than building a second one into it — a rebuild renames the "
+            "elements the first job's operations point at")
     parts = [p for p in d.call("list_parts")["parts"] if p.get("type") == "part"]
     if not parts:
         d.call("add_part")
@@ -149,8 +149,14 @@ def main():
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--post", default="/tmp/handle.nc")
     ap.add_argument("--save", default=None)
+    ap.add_argument("--fresh", action="store_true",
+                    help="start a new project first, so the instance can be "
+                         "reused (refused when its project has unsaved "
+                         "changes)")
     a = ap.parse_args()
     d = connect(a.port)
+    if a.fresh:
+        fresh_project(d)
     sid = build_job(d)
     report(d, sid, a.post)
     if a.save:

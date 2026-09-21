@@ -3262,7 +3262,6 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"elements", std::move(elements)}};
   }
   if (m == "curve_points") {
-    // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);
     const uint64_t want = p.value("curve", uint64_t{0});
     const CurveFeature* curve = nullptr;
@@ -3310,7 +3309,6 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
   }
 
   if (m == "tube_schedule") {
-    // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);
     // ONE derivation, shared with export_cut_list and export_bend_schedule,
     // so the schedule an agent queries and the CSV a shop is sent cannot

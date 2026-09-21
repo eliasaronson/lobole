@@ -828,7 +828,39 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.worstOvershoot, v.outsideAxis, v.firstOutsideLine);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
-  if (v.maxLeftover > tolerance) {
+  double endArea = 0.0;
+  int endPlaces = 0;
+  for (const Verdict::Region& r : v.biggest)
+    if (r.endFace) {
+      endArea += r.area;
+      endPlaces++;
+    }
+  if (v.rotary && v.maxLeftover > tolerance &&
+      v.leftoverSurfaceMax <= tolerance) {
+    // Everything left is on faces turned toward the ends of the axis, which
+    // no rotary pass reaches whatever the pattern: said as that, not as the
+    // missing operation the sentence below suspects.
+    std::snprintf(buf, sizeof(buf),
+                  "Leaves %.2f mm on the end faces (%.0f mm2 in %d place%s) "
+                  "-- faces turned toward the ends of the axis, which no "
+                  "rotary pass reaches. The rest of the surface is within "
+                  "tolerance: %.3f mm at most.",
+                  v.maxLeftover, endArea, endPlaces, endPlaces == 1 ? "" : "s",
+                  v.leftoverSurfaceMax);
+    out.push_back({VerdictLine::Level::Warn, buf});
+  } else if (v.rotary && v.leftoverSurfaceMax > tolerance) {
+    std::snprintf(buf, sizeof(buf),
+                  "Leaves %.2f mm on the surface at X%.1f A%.1f (99%% of it "
+                  "within %.3f mm)%s. Check that every operation this part "
+                  "needs is in the job, and that the passes are close "
+                  "enough.",
+                  v.leftoverSurfaceMax, v.leftoverSurfaceAt.x,
+                  v.leftoverSurfaceAt.y, v.leftoverSurfaceP99,
+                  endPlaces > 0 ? "; the end faces, which no rotary pass "
+                                  "reaches, leave more"
+                                : "");
+    out.push_back({VerdictLine::Level::Warn, buf});
+  } else if (v.maxLeftover > tolerance) {
     // The AREA is what makes this readable: four inside corners a 3 mm cutter
     // cannot reach are four regions of about a square millimetre, and a
     // forgotten operation is one region of hundreds. Both used to print the

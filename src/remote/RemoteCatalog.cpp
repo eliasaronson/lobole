@@ -85,7 +85,6 @@ std::optional<nlohmann::json> HandleCatalogRpc(ui::AppState& state,
     return Json{{"catalogs", entries}};
   }
   if (m == "query_catalog") {
-    // rpc-params: catalog, revision, hash
     const auto& e = Entry(state, p);
     if (p.contains("designation"))
       return Json{{"catalog", catalog::Summary(e)},
@@ -109,7 +108,6 @@ std::optional<nlohmann::json> HandleCatalogRpc(ui::AppState& state,
         {"next_offset", next < rows.size() ? Json(next) : Json(nullptr)}};
   }
   if (m == "catalog_requirements") {
-    // rpc-params: catalog, revision, hash
     const auto& e = Entry(state, p);
     if (!p.contains("hash"))
       throw std::runtime_error(
@@ -118,7 +116,6 @@ std::optional<nlohmann::json> HandleCatalogRpc(ui::AppState& state,
                                      p.value("measurements", Json::object()));
   }
   if (m == "export_catalog") {
-    // rpc-params: catalog, revision, hash
     auto e = Entry(state, p);
     const auto mode = p.at("mode").get<std::string>();
     if (mode != "reference" && mode != "embedded")

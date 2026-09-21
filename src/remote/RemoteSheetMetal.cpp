@@ -199,7 +199,6 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "check_sheet_metal" || m == "export_dxf") {
-    // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);
     const std::vector<Body>& bodies = src.GetBodies();
     if (bodies.empty())
@@ -252,7 +251,6 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "list_bends") {
-    // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);
     if (!src.SheetMetal())
       throw std::runtime_error(
@@ -327,7 +325,6 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
   if (m == "get_sheet_metal_rules") {
     // Read-only, so it answers about any part rather than only the active tab
     // (docs/agent-scale-followup-plan.md, W2).
-    // rpc-params: part
     const Document& src = SubjectPart(state, doc, p);
     out = {{"rules",
             src.SheetMetal() ? RulesJson(*src.SheetMetal()) : json(nullptr)},

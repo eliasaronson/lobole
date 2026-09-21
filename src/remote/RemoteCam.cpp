@@ -2,6 +2,7 @@
 
 #include "core/cam/CamNames.h"
 #include "core/cam/CamOpFields.h"
+#include "ui/ViewActions.h"
 
 #ifdef HAVE_CAM
 
@@ -336,7 +337,11 @@ constexpr MethodDoc kCamMethods[] = {
      "every _at pair is then an ANGLE IN DEGREES, not a Y; a rotary answer "
      "also carries leftover_p95_mm, the 95th-percentile leftover -- the "
      "typical scallop, which the end faces no rotary pass can reach do not "
-     "move the way they set max_leftover_mm), "
+     "move the way they set max_leftover_mm -- and leftover_surface_max_mm "
+     "/ _at / leftover_surface_p99_mm, the same measured OFF the faces "
+     "turned toward the axis's ends (steeper than 70 degrees along it), which "
+     "is what tells two rotary patterns apart; each leftover_biggest region "
+     "then says end_face), "
      "file_errors (with first_file_error: lines the PARSER could not read -- "
      "a NaN coordinate, a feed of zero; anything else in the answer was "
      "measured on a different program, so this counts against ok), "
@@ -1502,10 +1507,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
          cam::MachineLines(setup, ui::JobBodies(state), &paths))
       says.push_back(line.text);
     json biggest = json::array();
-    for (const cam::Verdict::Region& r : v.biggest)
-      biggest.push_back(json{{"at", {r.at.x, r.at.y}},
-                             {"area_mm2", r.area},
-                             {"depth_mm", r.depth}});
+    for (const cam::Verdict::Region& r : v.biggest) {
+      json rj{{"at", {r.at.x, r.at.y}},
+              {"area_mm2", r.area},
+              {"depth_mm", r.depth}};
+      if (v.rotary)
+        rj["end_face"] = r.endFace;
+      biggest.push_back(std::move(rj));
+    }
     json out =
         json{{"max_gouge_mm", v.maxGouge},
              {"max_leftover_mm", v.maxLeftover},
@@ -1566,8 +1575,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // The typical scallop, where the worst cell is an end face no rotary
     // pass can reach. Rotary only: the height map does not compute it, and
     // a zero here would read as a measurement.
-    if (v.rotary)
+    if (v.rotary) {
       out["leftover_p95_mm"] = v.leftoverP95;
+      out["leftover_surface_max_mm"] = v.leftoverSurfaceMax;
+      out["leftover_surface_at"] = {v.leftoverSurfaceAt.x,
+                                    v.leftoverSurfaceAt.y};
+      out["leftover_surface_p99_mm"] = v.leftoverSurfaceP99;
+    }
     {
       // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
       // so PREDICTED (core/Receipt.h). Anything narrower than a cell is
@@ -1635,6 +1649,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ui::SettleCamToolpaths(state);
       if (!ui::BeginCamPlayback(state))
         throw std::runtime_error(state.camPlaybackRefusal);
+      // Framed ONCE, as the simulation opens: an instance driven entirely
+      // over the RPC has a camera nobody ever pointed, and its first
+      // screenshot of a simulation was a close-up of the stock. The camera's
+      // direction is kept, and a later seek leaves the view alone, so a
+      // caller who set one keeps it.
+      ui::FitCameraToDocument(state);
     }
 
     const cam::Timeline& tl = state.camTimeline;

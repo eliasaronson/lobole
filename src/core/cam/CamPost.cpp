@@ -663,6 +663,14 @@ bool PostProcess(const std::string& postId, const Setup& setup,
           // file that writes F to four places on every line of a spiral is
           // a third longer for nothing.
           feed = std::max(0.1, std::round(f.feed * 10.0) / 10.0);
+          // Keep the F already in force when this one is within 1% of it: a
+          // scaled F drifts by a tenth from line to line, and restating it
+          // on every line made a spiral 35 MB, mostly F words. A move held
+          // to an axis limit only keeps it when that F is under the limit.
+          if (!std::isnan(e.feed) && e.feed > 0.0 &&
+              std::abs(e.feed - feed) <= 0.01 * feed &&
+              (!f.clamped || e.feed <= f.feed))
+            feed = e.feed;
           if (f.clamped) {
             capped++;
             cappedWanted = std::max(cappedWanted, f.wanted);

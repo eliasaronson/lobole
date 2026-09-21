@@ -320,6 +320,32 @@ TEST_CASE("cam spiral: a turning cut is posted at the feed the tip needs",
   }
 }
 
+TEST_CASE("cam spiral: a scaled F within 1% of the one in force is not "
+          "restated",
+          "[cam]") {
+  // A scaled F drifts by a tenth from line to line as the radius changes, and
+  // restating it every line put 830,000 F words into the rolling pin's
+  // spiral. Within 1% of the F in force, the line keeps it.
+  cam::Setup setup = BasicSetup();
+  setup.machine.hasRotaryAxis = true;
+  cam::Toolpath tp;
+  tp.operationId = 1;
+  tp.toolNumber = 1;
+  tp.moves = {CutAt(0.0, 20.0, 0.0, 600.0), CutAt(0.0, 20.0, 30.0, 600.0),
+              CutAt(0.0, 20.1, 60.0, 600.0),  // 0.5% off: keeps the F
+              CutAt(0.0, 22.0, 90.0, 600.0)}; // 10% off: a new F
+  tp.moves[0].kind = cam::Move::Kind::Rapid;
+  std::string gcode;
+  REQUIRE(cam::PostProcess("mach3", setup, {tp}, {}, gcode));
+  INFO(gcode);
+  const double first = FeedOnLineWith(gcode, "A30");
+  CHECK(first > 0.0);
+  CHECK(FeedOnLineWith(gcode, "A60") < 0.0); // no F on that line
+  const double third = FeedOnLineWith(gcode, "A90");
+  CHECK(third > 0.0);
+  CHECK(std::abs(third - first) / first > 0.05);
+}
+
 TEST_CASE("cam spiral: a turning cut is held to each axis's own top speed",
           "[cam]") {
   // 3 mm off the axis a quarter turn is 4.7 mm of arc against 90 "mm" of

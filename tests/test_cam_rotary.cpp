@@ -747,4 +747,66 @@ TEST_CASE("cam rotary: carving a rolling-pin-sized program", "[cam][.bench]") {
   CHECK(moves == 20000);
 }
 
+TEST_CASE(
+    "cam rotary: leftover says whether it is on the surface or an end face",
+    "[cam]") {
+  // docs/cam/friction-after-helical-plan.md, 1. A rotary answer used to say
+  // "0 regions" beside its leftover area, and its one worst cell was an end
+  // face on every job -- so a band of passes left out altogether read the
+  // same as a correct program.
+  auto doc = BarDoc(15.0, 40.0);
+  cam::Setup setup = BasicSetup();
+  setup.machine.hasRotaryAxis = true;
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  setup.safeZ = 30.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceRotary;
+  op.toolNumber = 1;
+  op.stepover = 0.1; // 0.6 mm of arc: a 15 um scallop, under the floor
+  setup.operations.push_back(op);
+  std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+
+  std::string gcode;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode));
+  const cam::Verdict clean =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("clean: surface max "
+       << clean.leftoverSurfaceMax << " p99 " << clean.leftoverSurfaceP99
+       << ", max " << clean.maxLeftover << " in " << clean.leftoverRegions
+       << " regions");
+  REQUIRE(clean.rotary);
+  // The surface itself is finished to the scallop...
+  CHECK(clean.leftoverSurfaceMax < 0.05);
+  // ...and whatever is left over is on the end faces, and says so.
+  for (const cam::Verdict::Region& r : clean.biggest)
+    CHECK(r.endFace);
+
+  // Lift every cut between x = 15 and 25 clear of the part: a band the
+  // program never touches, which is what a missing operation looks like.
+  for (cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut && m.to.x > 15.0 && m.to.x < 25.0)
+      m.to.z = 25.0;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode));
+  const cam::Verdict missed =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("missed: surface max " << missed.leftoverSurfaceMax << " at X"
+                              << missed.leftoverSurfaceAt.x << ", "
+                              << missed.leftoverRegions << " regions");
+  CHECK(missed.leftoverSurfaceMax > 0.8); // the 1 mm margin, left standing
+  CHECK(missed.leftoverSurfaceAt.x > 14.0);
+  CHECK(missed.leftoverSurfaceAt.x < 26.0);
+  bool band = false;
+  for (const cam::Verdict::Region& r : missed.biggest)
+    band |= !r.endFace && r.at.x > 15.0 && r.at.x < 25.0 && r.area > 100.0;
+  CHECK(band);
+  // And the sentence says the SURFACE, not the end faces.
+  bool said = false;
+  for (const cam::VerdictLine& l : cam::Explain(missed, 0.05, 0.0, false))
+    said |= l.text.find("on the surface") != std::string::npos;
+  CHECK(said);
+}
+
 #endif // HAVE_CAM

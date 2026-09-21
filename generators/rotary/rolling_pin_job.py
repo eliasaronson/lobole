@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__)))), "tools"))
 
-from _lib import connect  # noqa: E402
+from _lib import connect, fresh_project  # noqa: E402
 import rolling_pin as pin  # noqa: E402
 
 # Phi 54 dowel: the nearest stock size above the Phi 50 pin.
@@ -63,10 +63,10 @@ def build_job(d, spiral=False, helical=False):
     named = {p.get("name") for p in d.call("list_parts")["parts"]}
     if "Rolling pin job" in named or "Rolling pin" in named:
         raise SystemExit(
-            "this instance already has a Rolling pin tab: open a new project "
-            "(or run against a fresh instance) rather than building a second "
-            "one into it — a rebuild renames the elements the first job's "
-            "operations point at")
+            "this instance already has a Rolling pin tab: pass --fresh to start "
+            "a new project first (or run against a fresh instance) rather "
+            "than building a second one into it — a rebuild renames the "
+            "elements the first job's operations point at")
     parts = [p for p in d.call("list_parts")["parts"] if p.get("type") == "part"]
     if not parts:
         d.call("add_part")
@@ -179,6 +179,10 @@ def main():
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--post", default="/tmp/rolling_pin.nc")
     ap.add_argument("--save", default=None)
+    ap.add_argument("--fresh", action="store_true",
+                    help="start a new project first, so the instance can be "
+                         "reused (refused when its project has unsaved "
+                         "changes)")
     ap.add_argument("--spiral", action="store_true",
                     help="continuous 4-axis: spiral rough in layers + spiral "
                          "finish, instead of parallel passes")
@@ -187,6 +191,8 @@ def main():
                          "rough in layers + helical finish")
     a = ap.parse_args()
     d = connect(a.port)
+    if a.fresh:
+        fresh_project(d)
     sid = build_job(d, spiral=a.spiral, helical=a.helical)
     report(d, sid, a.post)
     if a.save:
