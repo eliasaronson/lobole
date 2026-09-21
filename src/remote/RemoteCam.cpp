@@ -263,10 +263,11 @@ constexpr MethodDoc kCamMethods[] = {
      "to pick instead. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
-     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
-     "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
-     "type, use_outline"},
+     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
+     "finish_stock, finish_tool, lead_arcs, name, peck, rotary_pattern, "
+     "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
+     "z_step_mm"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields, whose lengths — "
      "stepdown, edge_size and the rest — are MILLIMETRES, while stepover is a "
@@ -276,10 +277,11 @@ constexpr MethodDoc kCamMethods[] = {
      "follows the new one (every derived number is a fraction of the "
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused.",
-     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
-     "finish_tool, id, lead_arcs, name, peck, side, stepdown, stepover, "
-     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
-     "type, use_outline"},
+     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
+     "finish_stock, finish_tool, id, lead_arcs, name, peck, rotary_pattern, "
+     "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
+     "z_step_mm"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -294,10 +296,11 @@ constexpr MethodDoc kCamMethods[] = {
      "one. The dry run behind add_cam_op's derivation, and its lengths are "
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
-     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
-     "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
-     "type, use_outline"},
+     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
+     "finish_stock, finish_tool, lead_arcs, name, peck, rotary_pattern, "
+     "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
+     "z_step_mm"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm), lowest Z, and the "
@@ -1433,6 +1436,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: climb, corner_relief, edge_size, enabled, finish_stock
     // rpc-params: finish_tool, lead_arcs, drilled_bores, name, peck, stepdown
     // rpc-params: stepover, stock_to_leave, tabs, use_outline
+    // rpc-params: cut_angle_deg, sample_step_mm, z_step_mm, rotary_pattern
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
@@ -1502,6 +1506,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: peck, side, stepdown, stepover, stock_to_leave, tabs, target
     // rpc-params: targets
     // rpc-params: tool, top_z, type, use_outline
+    // rpc-params: cut_angle_deg, sample_step_mm, z_step_mm, rotary_pattern
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");

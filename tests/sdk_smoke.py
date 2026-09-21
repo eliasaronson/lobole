@@ -295,6 +295,42 @@ def check_angle_units():
            "_deg (or _rad): " + ", ".join(offenders))
 
 
+def check_cam_op_fields(app):
+    """Every field an operation REPORTS can be SET through the generated SDK.
+
+    The generated methods refuse any keyword their `describe` row does not
+    list, and the op rows are hand-kept: `tabs`, then `cut_angle_deg`,
+    `sample_step_mm`, `z_step_mm` and `rotary_pattern` were each accepted by
+    the server, reported in its answers and refused by `app.set_cam_op(...)`
+    before the call left the client. Scripts using the raw `call` never saw
+    it. The fields come from each op's own answer, so this grows with them.
+    """
+    if not app.call("ping").get("features", {}).get("cam", True):
+        return
+    app.new()
+    app.call("add_feature", feature={
+        "type": "Box", "name": "Block", "position": [0, 0, 0],
+        "width": 40, "height": 30, "depth": 20})
+    app.call("machine_part")
+    sid = app.add_cam_setup(name="fields")["id"]
+    app.set_cam_setup(id=sid, has_rotary_axis=True)
+    fixed = {"id", "type", "targets", "derived"}
+    for t in ("profile", "pocket", "face", "drill", "adaptive", "edge_round",
+              "surface_parallel", "surface_waterline", "surface_rotary"):
+        op = app.add_cam_op(setup=sid, type=t, tool=1, top_z=20.0,
+                            bottom_z=5.0)
+        for k, v in op.items():
+            if k in fixed:
+                continue
+            try:
+                app.set_cam_op(id=op["id"], **{k: v})
+            except sdk.SdkError as e:
+                raise AssertionError(
+                    f"{t} reports `{k}` but the SDK's set_cam_op refuses it "
+                    f"-- add it to the describe row: {e}") from None
+    app.new()
+
+
 def main():
     check_angle_units()
     binary = sys.argv[1]
@@ -624,6 +660,9 @@ def main():
         # material(): a part made of one thing, in one call.
         f.material("aluminum")
         expect(f.volume() > 0, "still measurable after a material")
+        # ---- Every CAM op field is reachable through the generated SDK ---
+        # Last: it starts a new project, and everything above works in one.
+        check_cam_op_fields(app)
         print("sdk_smoke: ok")
     finally:
         app_proc.terminate()
