@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h"
 #include "ui/Widgets.h"
 
@@ -1164,10 +1165,17 @@ void DrawCamPanel(AppState& state) {
                        ? -1.0
                        : static_cast<double>(progress.done) /
                              static_cast<double>(progress.total);
-    char overlay[48];
-    std::snprintf(overlay, sizeof(overlay), "%zu / %zu", progress.done + 1,
-                  progress.total);
-    bar.overlay = overlay;
+    // Only when there IS a total. "1 / 0" is what this printed while the
+    // counters were being reset under a running pass; that is fixed at the
+    // source (CamJobs.cpp, LandedAPass), and a count nobody has is still not
+    // printed -- the widget's "working" says it honestly.
+    if (progress.total > 0) {
+      char overlay[48];
+      std::snprintf(overlay, sizeof(overlay), "%zu / %zu",
+                    std::min(progress.done + 1, progress.total),
+                    progress.total);
+      bar.overlay = overlay;
+    }
     bar.cancelId = "###cam_cancel_passes";
     bar.cancelTip = "Stops after the pass now cutting -- neither the clearing "
                     "library nor the drop cutter can be interrupted mid-pass. "
@@ -1175,6 +1183,17 @@ void DrawCamPanel(AppState& state) {
                     "Generate.";
     if (DrawJobProgress(bar))
       CancelCamPasses(state);
+  }
+  // The verification, when it is on a worker: the same widget again, because
+  // it is the same kind of wait. Indeterminate -- the carve reports no
+  // fraction -- and not cancellable, since it has no interruption points and
+  // a newer request simply overtakes it.
+  if (BackgroundJobRunning(state, "cam-verify")) {
+    JobProgress bar;
+    const BackgroundJob* job = FindBackgroundJob(state, "cam-verify");
+    bar.status = job != nullptr ? job->label : "Verifying";
+    bar.cancellable = false;
+    DrawJobProgress(bar);
   }
 
   // G4: what the verifier found, in words, without being asked. The numbers

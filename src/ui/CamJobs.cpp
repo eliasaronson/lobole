@@ -33,6 +33,25 @@ struct SurfacePassJob {
 
 void StartNextCamPass(AppState& state);
 
+// After ANY pass lands: start the next, and verify once nothing is left.
+//
+// "Nothing is left" means nothing QUEUED AND nothing IN FLIGHT. This used to
+// test the queues alone -- after `RefreshCamToolpaths`, which had just moved
+// the next pass from the queue onto the worker -- so the queues read empty
+// while a pass was running, the batch counters were reset under it, and the
+// progress row read "1 / 0" for the whole of the rolling pin's finishing
+// pass. The same test also fired the verification early, onto a job whose
+// last pass had not landed.
+void LandedAPass(AppState& s, bool cancelled) {
+  StartNextCamPass(s);
+  const bool idle = s.camAdaptiveInFlight == 0 && s.camAdaptiveQueue.empty() &&
+                    s.camSurfaceInFlight == 0 && s.camSurfaceQueue.empty();
+  if (idle && s.camVerifyWhenSettled && !cancelled) {
+    s.camVerifyWhenSettled = false;
+    RunCamVerification(s);
+  }
+}
+
 void StartNextAdaptivePass(AppState& state) {
   while (state.camAdaptiveInFlight == 0 && !state.camAdaptiveQueue.empty()) {
     auto pass = std::make_shared<Pass>();
@@ -75,16 +94,7 @@ void StartNextAdaptivePass(AppState& state) {
         // made during the pass gets its own passes cut next.
         RefreshCamToolpaths(s);
       }
-      if (!s.camAdaptiveQueue.empty() || !s.camSurfaceQueue.empty()) {
-        StartNextCamPass(s);
-      } else {
-        s.camPassBatchDone = 0;
-        s.camPassBatchTotal = 0;
-        if (s.camVerifyWhenSettled && !cancelled) {
-          s.camVerifyWhenSettled = false;
-          RunCamVerification(s);
-        }
-      }
+      LandedAPass(s, cancelled);
       return true;
     };
     state.camAdaptiveInFlight = key;
@@ -132,16 +142,7 @@ void StartNextSurfacePass(AppState& state) {
       } else if (s.job != nullptr) {
         RefreshCamToolpaths(s);
       }
-      if (!s.camAdaptiveQueue.empty() || !s.camSurfaceQueue.empty()) {
-        StartNextCamPass(s);
-      } else {
-        s.camPassBatchDone = 0;
-        s.camPassBatchTotal = 0;
-        if (s.camVerifyWhenSettled && !cancelled) {
-          s.camVerifyWhenSettled = false;
-          RunCamVerification(s);
-        }
-      }
+      LandedAPass(s, cancelled);
       return true;
     };
     state.camSurfaceInFlight = key;

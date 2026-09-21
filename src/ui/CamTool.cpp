@@ -11,6 +11,7 @@
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
 #include "ui/DocumentSlots.h"
@@ -1160,83 +1161,90 @@ void DrawCamLabels(AppState& state) {
   dl->AddText(ImVec2(at.x, at.y), IM_COL32(255, 190, 120, 255), text);
 }
 
-void RunCamVerification(AppState& state) {
-  state.camVerdict.clear();
-  state.camLeftover.clear();
-  if (!state.job || state.camToolpaths.empty())
-    return;
-  if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
-    // A verdict about the previous toolpath is worse than none. Say what is
-    // happening and verify when the last pass lands (CamJobs.cpp).
-    state.camVerifyWhenSettled = true;
-    state.camVerdict.push_back(
-        {cam::VerdictLine::Level::Warn, "Not verified yet: " + why +
-                                            ". The verdict "
-                                            "follows when the passes land."});
+namespace {
+
+// What the expensive half of a verification needs, COPIED -- plain values and
+// shape handles, nothing another thread can be mutating -- and what it makes.
+// The same split phase 1 made for adaptive clearing and phase 5 for
+// surfacing: prepare on the frame, inspect on a worker, land on the frame.
+struct VerifyWork {
+  // in
+  std::string gcode;
+  cam::Setup setup;
+  std::vector<Body> bodies;
+  std::vector<cam::Toolpath::Relief> reliefs;
+  std::vector<cam::Toolpath::Tab> tabs;
+  bool rotary = false;
+  uint64_t generation = 0;
+  // out
+  cam::Verdict verdict;
+  std::vector<glm::dvec3> leftover;
+  double tolerance = 0.0;
+  bool ok = false;
+  std::string why;
+};
+
+// 0.4 mm cells: fine enough to catch a gouge that matters on a mill, coarse
+// enough that the check keeps up with the button.
+constexpr double kVerifyRes = 0.4;
+// Half a millimetre: the rotary map's own default.
+constexpr double kRotaryVerifyRes = 0.5;
+
+// The expensive half. Touches nothing but its own struct, so it is the same
+// function inline and on a worker.
+//
+// The STOCK MODEL follows the file, exactly as `VerifyGcode` routes it: a
+// program whose A moves is cut from a cylinder that turns, and measuring it
+// against a height map produces a verdict about a program that does not
+// exist. This panel once did precisely that and showed the rolling pin "Cuts
+// 3.98 mm INTO the part, that is scrap" beside one quiet line admitting the
+// check could not read the file.
+void InspectWork(VerifyWork& w) {
+  if (w.rotary) {
+    const cam::RotaryInspection ri =
+        cam::InspectRotary(w.gcode, w.setup, w.bodies, kRotaryVerifyRes);
+    w.ok = ri.ok;
+    w.why = ri.why;
+    w.verdict = ri.verdict;
+    w.tolerance = kRotaryVerifyRes * 1.5;
+    // No overlay: the leftover is painted from a HEIGHT MAP, and a radius
+    // field has no renderer yet (docs/cam/rotary-plan.md).
     return;
   }
+  const cam::Inspection insp =
+      cam::Inspect(w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs);
+  w.ok = insp.ok;
+  w.verdict = insp.verdict;
+  // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
+  // reporting it would teach the user to ignore the verdict.
+  w.tolerance = kVerifyRes * 1.5;
+  if (insp.ok)
+    w.leftover = cam::LeftoverPoints(insp, w.tolerance, 3000);
+}
+
+// The cheap half, on the frame: the words, and everything that reads the
+// live setup. Drops a result a later request has overtaken -- a verdict about
+// the previous toolpath is worse than none.
+void LandVerification(AppState& state, const VerifyWork& w) {
+  if (w.generation != state.camVerifyGeneration)
+    return;
+  state.camVerdict.clear();
+  state.camLeftover.clear();
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
     return;
-
-  std::string gcode, error;
-  if (!cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
-                        PostOpts(*setup), gcode, &error)) {
-    state.camVerdict.push_back(
-        {cam::VerdictLine::Level::Bad, "Could not post this job: " + error});
+  if (!w.ok) {
+    if (!w.why.empty())
+      state.camVerdict.push_back({cam::VerdictLine::Level::Bad, w.why});
     return;
   }
-  // 0.4 mm cells: fine enough to catch a gouge that matters on a mill, coarse
-  // enough that the check runs while the user is still looking at the button.
-  constexpr double kRes = 0.4;
-  std::vector<cam::Toolpath::Relief> reliefs;
-  std::vector<cam::Toolpath::Tab> tabs;
-  for (const cam::Toolpath& tp : state.camToolpaths) {
-    reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
-    tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
-  }
-  // The STOCK MODEL follows the file, exactly as `VerifyGcode` routes it: a
-  // program whose A moves is cut from a cylinder that turns, and measuring it
-  // against a height map produces a verdict about a program that does not
-  // exist. This panel did precisely that -- it called the planar `Inspect`
-  // directly, because it also wants the Inspection for the leftover overlay
-  // -- and showed the rolling pin "Cuts 3.98 mm INTO the part, that is scrap"
-  // and "20 rapids through material" beside one quiet line admitting the
-  // check could not read the file. Three confident wrong numbers and one
-  // true one is worse than no verdict.
-  cam::Verdict verdict;
-  double tolerance = kRes * 1.5;
-  if (cam::RotatesWhileCutting(cam::ParseGcode(gcode))) {
-    // Half a millimetre: the rotary map's own default, and the grid is the
-    // tolerance here too.
-    constexpr double kRotaryRes = 0.5;
-    const cam::RotaryInspection ri =
-        cam::InspectRotary(gcode, *setup, ui::JobBodies(state), kRotaryRes);
-    if (!ri.ok) {
-      state.camVerdict.push_back({cam::VerdictLine::Level::Bad, ri.why});
-      return;
-    }
-    verdict = ri.verdict;
-    tolerance = kRotaryRes * 1.5;
-    // No overlay: the leftover is painted from a HEIGHT MAP and a radius
-    // field has no renderer yet (docs/cam/rotary-plan.md). Cleared rather
-    // than left standing from a previous job, which would draw one part's
-    // leftover on another.
-    state.camLeftover.clear();
-  } else {
-    const cam::Inspection insp =
-        cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs, tabs);
-    if (!insp.ok)
-      return;
-    verdict = insp.verdict;
-    state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
-  }
+  state.camLeftover = w.leftover;
   bool breaksAnEdge = false;
   for (const cam::Operation& op : setup->operations)
     breaksAnEdge |=
         op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
   state.camVerdict = cam::Explain(
-      verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
+      w.verdict, w.tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
   // A target one operation could not follow while its others cut. It is not
   // an `error` -- that would drop the good targets with the bad one -- so
@@ -1264,6 +1272,84 @@ void RunCamVerification(AppState& state) {
   for (const cam::VerdictLine& line :
        cam::MachineLines(*setup, ui::JobBodies(state), &state.camToolpaths))
     state.camVerdict.push_back(line);
+}
+
+} // namespace
+
+void RunCamVerification(AppState& state) {
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+  // Every request overtakes the one before it, whether that one is still on
+  // a worker or not: a verdict landing about a toolpath that has since moved
+  // is the thing this whole check exists to avoid.
+  state.camVerifyGeneration++;
+  if (!state.job || state.camToolpaths.empty())
+    return;
+  if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
+    // A verdict about the previous toolpath is worse than none. Say what is
+    // happening and verify when the last pass lands (CamJobs.cpp).
+    state.camVerifyWhenSettled = true;
+    state.camVerdict.push_back(
+        {cam::VerdictLine::Level::Warn, "Not verified yet: " + why +
+                                            ". The verdict "
+                                            "follows when the passes land."});
+    return;
+  }
+  const cam::Setup* setup = ActiveCamSetup(state);
+  if (setup == nullptr)
+    return;
+
+  auto work = std::make_shared<VerifyWork>();
+  std::string error;
+  if (!cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
+                        PostOpts(*setup), work->gcode, &error)) {
+    state.camVerdict.push_back(
+        {cam::VerdictLine::Level::Bad, "Could not post this job: " + error});
+    return;
+  }
+  for (const cam::Toolpath& tp : state.camToolpaths) {
+    work->reliefs.insert(work->reliefs.end(), tp.reliefs.begin(),
+                         tp.reliefs.end());
+    work->tabs.insert(work->tabs.end(), tp.tabs.begin(), tp.tabs.end());
+  }
+  work->setup = *setup;
+  work->bodies = ui::JobBodies(state);
+  work->rotary = cam::RotatesWhileCutting(cam::ParseGcode(work->gcode));
+  work->generation = state.camVerifyGeneration;
+
+  // Inline when the panel is not deferring -- the GUI suite's setting, so
+  // every test that reads the verdict right after Generate stays
+  // deterministic, which is phase 1's own precedent for `camDeferPasses`.
+  if (!state.camDeferPasses) {
+    InspectWork(*work);
+    LandVerification(state, *work);
+    return;
+  }
+
+  // Otherwise on a worker. This ran ON THE FRAME, and on the rolling pin --
+  // 644,160 rotary moves carved into a radius field -- it was minutes with
+  // the app stopped, in the continuation that fires when the last surfacing
+  // pass lands. Taking the passes off the frame had just moved the freeze to
+  // the moment they finished.
+  state.camVerdict.push_back(
+      {cam::VerdictLine::Level::Warn,
+       "Verifying the posted file against the model..."});
+  auto job = std::make_unique<BackgroundJob>();
+  job->kind = "cam-verify";
+  job->label = work->rotary ? "Verifying against the rotary stock"
+                            : "Verifying against the stock";
+  job->cancellable = false; // the carve has no interruption points
+  job->fraction.store(-1.0);
+  BackgroundJob* raw = job.get();
+  job->thread = std::thread([work, raw] {
+    InspectWork(*work);
+    raw->done.store(true); // last
+  });
+  job->finish = [work](AppState& s) -> bool {
+    LandVerification(s, *work);
+    return true;
+  };
+  StartBackgroundJob(state, std::move(job));
 }
 
 } // namespace ui

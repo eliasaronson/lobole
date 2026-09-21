@@ -1549,6 +1549,10 @@ struct AppState {
   // CAM panel below a screenful of verdict lines. From the toolbar button
   // that is a click that does nothing.
   bool camRefusalPopup = false;
+  // Bumped by every verification request. A verify runs on a worker now, and
+  // a result that lands after the toolpath moved on must be dropped rather
+  // than shown -- the generation it was asked under says whether it has.
+  uint64_t camVerifyGeneration = 0;
   bool camDeferPasses = true;
   // Progress for the row and the label: passes done / passes in this batch.
   // A batch is everything queued since the queue was last empty.

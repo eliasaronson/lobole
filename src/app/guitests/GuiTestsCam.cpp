@@ -1146,10 +1146,23 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     op.bottomZ = 0.0;
     op.stepover = 0.6; // coarse: this case is about the frame, not the finish
     live0->operations.push_back(op);
+    // A SECOND one, because the rolling pin found what one alone cannot: when
+    // the first pass lands, the refresh that follows moves the next one from
+    // the queue onto the worker, and the batch used to be judged finished on
+    // the queues alone -- counters reset under a running pass ("1 / 0"), and
+    // the verification fired onto a job whose last pass had not landed.
+    cam::Operation op2 = op;
+    op2.id = Job()->AllocateId();
+    op2.stepover = 0.7;
+    live0->operations.push_back(op2);
 
     s_App->camDeferPasses = true; // the real default, off for the suite
     const auto asked = std::chrono::steady_clock::now();
+    // What the Generate button does (Commands.cpp, "job.generate"): refresh,
+    // then ask for the verdict -- which, with the passes pending, is recorded
+    // as owed and fired when the last one lands.
     ui::RefreshCamToolpaths(*s_App);
+    ui::RunCamVerification(*s_App);
     const double askMs = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - asked)
                              .count();
@@ -1166,18 +1179,29 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     int frames = 0;
     double worstMs = 0.0;
+    bool countsSane = true;
     const auto t0 = std::chrono::steady_clock::now();
-    while (ui::BackgroundJobRunning(*s_App, "cam")) {
+    // Through the passes AND the verification that follows them: both are
+    // off the frame now, and it was the second that froze the rolling pin
+    // once the first had been moved -- minutes of rotary carve, run in the
+    // continuation that fires when the last pass lands.
+    while (ui::BackgroundJobRunning(*s_App, "cam") ||
+           ui::BackgroundJobRunning(*s_App, "cam-verify")) {
+      if (const ui::CamPassProgress p = ui::CamPassProgressOf(*s_App);
+          p.running && (p.total == 0 || p.done >= p.total))
+        countsSane = false;
       const auto f0 = std::chrono::steady_clock::now();
       ctx->Yield();
       worstMs = std::max(worstMs, std::chrono::duration<double, std::milli>(
                                       std::chrono::steady_clock::now() - f0)
                                       .count());
       frames++;
-      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(90))
+      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(120))
         break;
     }
-    ctx->LogInfo("%d frames while surfacing, worst %.1f ms", frames, worstMs);
+    ctx->LogInfo("%d frames while surfacing and verifying, worst %.1f ms",
+                 frames, worstMs);
+    IM_CHECK(countsSane);
     IM_CHECK(frames >= 2);
     // The same bound the clearing twin uses: generous against the idle pacer
     // (a resting loop is ~10 Hz), tight enough to exclude a frame that ran
@@ -1197,6 +1221,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->camToolpaths[0].error.empty());
     IM_CHECK_EQ(sync[0].moves.size(), s_App->camToolpaths[0].moves.size());
     IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+    // ...and the verdict landed, rather than the placeholder that says one is
+    // coming.
+    IM_CHECK(!s_App->camVerdict.empty());
+    for (const cam::VerdictLine& l : s_App->camVerdict)
+      IM_CHECK(l.text.find("Verifying") == std::string::npos &&
+               l.text.find("Not verified yet") == std::string::npos);
     s_App->camToolOpen = false;
   };
 
