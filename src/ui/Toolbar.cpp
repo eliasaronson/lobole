@@ -20,6 +20,7 @@
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
 #include "ui/ViewActions.h"
+#include "ui/Widgets.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -72,11 +73,18 @@ void DrawRenderModal(AppState& state) {
     float frac = job.totalSamples ? static_cast<float>(job.done) /
                                         static_cast<float>(job.totalSamples)
                                   : 0.0f;
-    ImGui::Text("Rendering %u x %u ...", job.width, job.height);
-    ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0));
-    ImGui::Text("%u / %u samples", job.done, job.totalSamples);
-    ImGui::Spacing();
-    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    char status[64], overlay[48];
+    std::snprintf(status, sizeof(status), "Rendering %u x %u ...", job.width,
+                  job.height);
+    std::snprintf(overlay, sizeof(overlay), "%u / %u samples", job.done,
+                  job.totalSamples);
+    JobProgress bar;
+    bar.status = status;
+    bar.fraction = job.totalSamples ? frac : -1.0;
+    bar.overlay = overlay;
+    bar.cancelAsked = job.cancel;
+    bar.cancelId = "###still_cancel";
+    if (DrawJobProgress(bar))
       job.cancel = true;
   } else {
     if (job.finished) {
@@ -172,6 +180,28 @@ void DrawRenderModal(AppState& state) {
 // moment materialization creates the assembly tab and the branch switches to
 // DrawAssemblyToolbar. Half of an import is spent on the far side of exactly
 // that switch. Same trap as a keybinding calling OpenPopup (U12).
+// Why a Simulate press did not start, where the press was made. Modal like
+// the import one, so the response to a click cannot be missed; small, because
+// it is one sentence and a way out.
+void DrawCamRefusalModal(AppState& state) {
+  constexpr const char* kTitle = "Cannot simulate";
+  if (state.camRefusalPopup && !ImGui::IsPopupOpen(kTitle))
+    ImGui::OpenPopup(kTitle);
+  state.camRefusalPopup = false;
+  ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal(kTitle, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+  ImGui::TextUnformatted(state.camPlaybackRefusal.c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  if (ImGui::Button("Close###cam_refusal_close", ImVec2(120, 0)) ||
+      ImGui::IsKeyPressed(ImGuiKey_Escape))
+    ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
+}
+
 void DrawImportModal(AppState& state) {
   if (!ImportRunning(state))
     return; // not calling BeginPopupModal is what closes it
@@ -198,24 +228,17 @@ void DrawImportModal(AppState& state) {
   const auto phase =
       static_cast<ImportJob::Phase>(job.phase.load(std::memory_order_relaxed));
 
-  ImGui::TextUnformatted(ImportStatusLine(state).c_str());
-  if (fraction >= 0.0) {
-    ImGui::ProgressBar(static_cast<float>(fraction), ImVec2(-FLT_MIN, 0));
-  } else {
-    // Indeterminate: OCC gives no hook for the file parse, and a bar sitting
-    // at 0% reads as "stuck" rather than "working".
-    ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()),
-                       ImVec2(-FLT_MIN, 0), "working");
-  }
-
-  ImGui::Spacing();
   // Cancelling once tabs exist would leave a half-built assembly behind, so
   // the button goes away exactly when unwinding stops being free.
   const bool cancellable = phase != ImportJob::Phase::Materializing;
-  ImGui::BeginDisabled(!cancellable || bg->cancel.load());
-  if (ImGui::Button("Cancel###import_cancel", ImVec2(120, 0)))
+  JobProgress bar;
+  bar.status = ImportStatusLine(state);
+  bar.fraction = fraction; // < 0 is indeterminate, and the widget says so
+  bar.cancellable = cancellable;
+  bar.cancelAsked = bg->cancel.load();
+  bar.cancelId = "###import_cancel";
+  if (DrawJobProgress(bar))
     bg->cancel.store(true);
-  ImGui::EndDisabled();
   if (!cancellable) {
     ImGui::SameLine();
     ImGui::TextDisabled("finishing");

@@ -2,6 +2,7 @@
 #include <filesystem>
 
 #include "ui/CamPanel.h"
+#include "ui/Widgets.h"
 
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
@@ -1154,14 +1155,26 @@ void DrawCamPanel(AppState& state) {
   // rest of the job stays editable (docs/ui/long-operations.md, phase 1).
   if (const CamPassProgress progress = CamPassProgressOf(state);
       progress.running) {
-    ImGui::TextDisabled("%s", progress.label.c_str());
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Cancel###cam_cancel_clearing"))
+    // The same widget the STEP import draws (ui/Widgets.h). It used to be a
+    // greyed label and a small Cancel -- no bar at all -- so a surfacing
+    // pass that takes minutes looked like nothing happening.
+    JobProgress bar;
+    bar.status = progress.label;
+    bar.fraction = progress.total == 0
+                       ? -1.0
+                       : static_cast<double>(progress.done) /
+                             static_cast<double>(progress.total);
+    char overlay[48];
+    std::snprintf(overlay, sizeof(overlay), "%zu / %zu", progress.done + 1,
+                  progress.total);
+    bar.overlay = overlay;
+    bar.cancelId = "###cam_cancel_passes";
+    bar.cancelTip = "Stops after the pass now cutting -- neither the clearing "
+                    "library nor the drop cutter can be interrupted mid-pass. "
+                    "What was waiting is queued again by the next edit or "
+                    "Generate.";
+    if (DrawJobProgress(bar))
       CancelCamPasses(state);
-    ImGui::SetItemTooltip("Stops after the pass now cutting -- the clearing "
-                          "library cannot be interrupted mid-pass. What was "
-                          "waiting is queued again by the next edit or "
-                          "Generate.");
   }
 
   // G4: what the verifier found, in words, without being asked. The numbers

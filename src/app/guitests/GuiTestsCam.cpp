@@ -1200,6 +1200,39 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  t = IM_REGISTER_TEST(engine, "cam", "simulate_says_why_at_the_click");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // "The simulation button still does nothing." It did something: it
+    // refused, and wrote why into `camPlaybackRefusal` -- which the CAM panel
+    // printed below a screenful of verdict lines, out of sight of the toolbar
+    // button that was pressed. From there a refusal is indistinguishable from
+    // a dead button. It answers at the click now, in a modal like the
+    // import's.
+    //
+    // Any refusal will do for the gate; the plainest is a job with nothing
+    // to play.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    MakeJob();
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists("//Cannot simulate/###cam_refusal_close"));
+
+    ToolbarClick(ctx, "###tb_job_simulate");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->camPlaybackRefusal.empty());
+    ctx->LogInfo("refused: %s", s_App->camPlaybackRefusal.c_str());
+    // The modal is up, and it is the thing on screen that says why.
+    IM_CHECK(ctx->ItemExists("//Cannot simulate/###cam_refusal_close"));
+
+    // ...and it goes away when asked, rather than trapping the app.
+    ctx->ItemClick("//Cannot simulate/###cam_refusal_close");
+    ctx->Yield(3);
+    IM_CHECK(!ctx->ItemExists("//Cannot simulate/###cam_refusal_close"));
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_an_edge_break");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -1495,6 +1528,13 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
           ImGui::FindWindowByName("Simulate the cut###CamTransport");
       IM_CHECK(t == nullptr || !t->WasActive);
     }
+    // ...and says so AT THE CLICK now, in a modal, rather than only in the
+    // panel below the verdict where a toolbar press cannot see it
+    // (simulate_says_why_at_the_click). Closed before carrying on, as a
+    // person would: it is modal because a refusal answers a press.
+    IM_CHECK(ctx->ItemExists("//Cannot simulate/###cam_refusal_close"));
+    ctx->ItemClick("//Cannot simulate/###cam_refusal_close");
+    ctx->Yield(2);
 
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemClick("###cam_add_op");

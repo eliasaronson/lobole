@@ -17,6 +17,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/TextFit.h"
 #include "ui/ToleranceActions.h"
+#include "ui/Widgets.h"
 
 #include "core/io/Serialization.h" // RelationKindToString
 
@@ -336,20 +337,23 @@ void DrawMotionProgress(BackgroundJob& job, int samples) {
   const double elapsed = std::chrono::duration<double>(
                              std::chrono::steady_clock::now() - job.started)
                              .count();
+  // The same widget the import modal draws (ui/Widgets.h), which is where
+  // the "indeterminate rather than a bar at 0%" rule this used to restate
+  // now lives.
   char overlay[64];
+  JobProgress bar;
   if (f >= 0.0 && samples > 0) {
     const int done =
         std::clamp(static_cast<int>(f * samples + 0.5), 0, samples);
     std::snprintf(overlay, sizeof(overlay), "sample %d / %d   %.0fs", done,
                   samples, elapsed);
-    ImGui::ProgressBar(static_cast<float>(f), ImVec2(-FLT_MIN, 0), overlay);
+    bar.fraction = f;
   } else {
-    // Before the first sample lands. Indeterminate rather than a bar at 0%,
-    // which reads as stuck (the import modal's rule).
     std::snprintf(overlay, sizeof(overlay), "starting   %.0fs", elapsed);
-    ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()),
-                       ImVec2(-FLT_MIN, 0), overlay);
   }
+  bar.overlay = overlay;
+  bar.cancellable = false; // this panel has its own Cancel, below
+  DrawJobProgress(bar);
 
   const bool asked = job.cancel.load();
   ImGui::BeginDisabled(asked);

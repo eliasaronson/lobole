@@ -23,6 +23,7 @@
 #include "ui/SketchOverlay.h"
 #include "ui/StudyHost.h"
 #include "ui/ViewportHandle.h"
+#include "ui/Widgets.h"
 #include <utility>
 
 #include "IconsFontAwesome6.h"
@@ -244,7 +245,11 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     char ov[48];
     std::snprintf(ov, sizeof(ov), "iter %d / %d", st.iteration,
                   st.maxIterations);
-    ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0), ov);
+    JobProgress bar; // the same widget the import modal draws (ui/Widgets.h)
+    bar.fraction = st.maxIterations > 0 ? frac : -1.0;
+    bar.overlay = ov;
+    bar.cancellable = false; // this panel has its own Cancel, below
+    DrawJobProgress(bar);
     ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance,
                 st.volumeFraction);
     ImGui::TextColored(kMuted, "%s   %.0fs", st.solver.c_str(),

@@ -532,11 +532,15 @@ const std::vector<Command>& Table() {
       RefreshCamToolpaths(s);
       RunCamVerification(s);
     });
-    // Refuses in words (camPlaybackRefusal, printed by the CAM panel) when
-    // there is nothing generated to play -- the u10 rule.
+    // Refuses in words when there is nothing it can play -- the u10 rule --
+    // and says so AT THE CLICK. The words used to go only into the CAM panel,
+    // below a screenful of verdict lines and out of sight of the toolbar
+    // button that was pressed; from there a refusal is indistinguishable from
+    // a button that does nothing.
     add("job.simulate", HasJob, [](AppState& s) {
 #ifdef HAVE_CAM
-      (void)BeginCamPlayback(s);
+      if (!BeginCamPlayback(s))
+        s.camRefusalPopup = true;
 #else
       (void)s;
 #endif

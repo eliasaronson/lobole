@@ -13,5 +13,6 @@ void DrawToolbar(AppState& state);
 // tab, and an import CHANGES the active tab while it runs (see the comment on
 // the definition).
 void DrawImportModal(AppState& state);
+void DrawCamRefusalModal(AppState& state);
 
 } // namespace ui

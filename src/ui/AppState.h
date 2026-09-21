@@ -1543,6 +1543,12 @@ struct AppState {
   cam::SurfaceCache camSurfaceCache;
   std::deque<cam::SurfaceRequest> camSurfaceQueue;
   uint64_t camSurfaceInFlight = 0;
+  // A Simulate press that refused, owed a modal saying why. Set by the
+  // command, consumed by the frame -- a command cannot call OpenPopup (U12),
+  // and the refusal used to go only into `camPlaybackRefusal`, printed in the
+  // CAM panel below a screenful of verdict lines. From the toolbar button
+  // that is a click that does nothing.
+  bool camRefusalPopup = false;
   bool camDeferPasses = true;
   // Progress for the row and the label: passes done / passes in this batch.
   // A batch is everything queued since the queue was last empty.

@@ -203,6 +203,7 @@ void BeginDockspace(AppState& state) {
   // toolbar branch it would otherwise be opened from — materializing an
   // import switches the active tab from part to assembly halfway through.
   DrawImportModal(state);
+  DrawCamRefusalModal(state);
 
   // Dockspace filling the rest; passthru central node shows the 3D behind it.
   // V2 (U8-0): versioned id — an imgui.ini written for the old layout has

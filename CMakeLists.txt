@@ -735,6 +735,7 @@ set(app_sources
     src/ui/SketchPick.cpp
     src/ui/SketchOps.cpp
     src/ui/Toolbar.cpp
+    src/ui/Widgets.cpp
     src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
     src/remote/RemoteServer.cpp
