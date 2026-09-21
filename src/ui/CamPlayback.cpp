@@ -7,6 +7,7 @@
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
 #include "render/MeshRenderer.h"
+#include "render/OutlineRenderer.h"
 #include "render/StockRenderer.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"      // ActiveCamSetup, PostOpts
@@ -19,6 +20,8 @@
 #include "imgui.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 #include <algorithm>
 #include <cstdio>
@@ -50,6 +53,13 @@ constexpr double kMaxStepSeconds = 0.25;
 // unit of contrast. It gives up some of its reading against the dark ground,
 // which is the right way round — a done move above the part is the one thing
 // on screen that is meant to recede.
+// The rotary playback's grid: the one the panel VERIFIES a rotary job on
+// (CamTool.cpp), so the last frame is the verdict's own stock. Coarser than
+// the planar simulation's default, and deliberately -- a radius field is
+// meshed as a tube with no run merging, and at this size the pin is ~200,000
+// cells, which remeshes inside the playback's 12 Hz cap.
+constexpr double kRotarySimRes = 0.5;
+
 constexpr glm::vec4 kDoneColor(0.20f, 0.22f, 0.30f, 0.85f);
 constexpr glm::vec4 kAheadCut(1.00f, 0.55f, 0.08f, 1.00f);
 constexpr glm::vec4 kAheadRapid(0.50f, 0.52f, 0.60f, 0.55f);
@@ -148,8 +158,27 @@ bool BeginCamPlayback(AppState& state) {
     state.camPlaybackGcode.clear();
     return false;
   }
-  state.camStockSim.Begin(state.camTimeline, *setup,
-                          cam::MakeStock(lo, hi, state.camSimRes));
+  if (state.camTimeline.rotary) {
+    // The part TURNS: a radius field about the rotary axis, from the same
+    // blank the verifier derives, at the grid the panel verifies on -- so
+    // the last frame of this playback is the stock the verdict was read
+    // from, cell for cell (cam rotary: playing to the end leaves the
+    // verifier's own stock).
+    std::string why;
+    cam::RadiusMap blank = cam::MakeRotaryBlank(
+        *setup, cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)),
+        kRotarySimRes, &why);
+    if (blank.r.empty()) {
+      state.camPlaybackRefusal = "This job cannot be simulated: " + why;
+      state.camPlaybackGcode.clear();
+      state.camTimeline = cam::Timeline{};
+      return false;
+    }
+    state.camRotarySim.Begin(state.camTimeline, *setup, std::move(blank));
+  } else {
+    state.camStockSim.Begin(state.camTimeline, *setup,
+                            cam::MakeStock(lo, hi, state.camSimRes));
+  }
   state.camCursor = {0, 0.0};
   state.camPlaybackOpen = true;
   // The simulation is the one thing on screen now: a verb window still
@@ -173,7 +202,14 @@ void EndCamPlayback(AppState& state) {
   state.camPlaybackOpen = false;
   state.camPlaying = false;
   state.camStockSim.Clear();
+  state.camRotarySim.Clear();
   state.camTimeline = cam::Timeline{};
+  // The part turned while it played. The bodies come back at identity by
+  // themselves -- the resync below recreates their instances -- but the
+  // stock renderer is not resynced, and a model matrix left standing would
+  // turn the NEXT playback's block by this one's last angle.
+  if (state.stockRenderer)
+    state.stockRenderer->SetModel(glm::mat4(1.0f));
   state.camPlaybackGcode.clear();
   state.camCursor = {0, 0.0};
   state.camStockDrawnRevision = 0;
@@ -188,8 +224,13 @@ void EndCamPlayback(AppState& state) {
 void SeekCamPlayback(AppState& state, cam::SimCursor to) {
   if (!state.camPlaybackOpen)
     return;
-  state.camStockSim.SeekTo(to);
-  state.camCursor = state.camStockSim.At();
+  if (state.camTimeline.rotary) {
+    state.camRotarySim.SeekTo(to);
+    state.camCursor = state.camRotarySim.At();
+  } else {
+    state.camStockSim.SeekTo(to);
+    state.camCursor = state.camStockSim.At();
+  }
 }
 
 void TickCamPlayback(AppState& state, double now) {
@@ -251,19 +292,33 @@ void SyncCamPlayback(AppState& state) {
   // every frame, so the cap is what keeps a 700,000-cell remesh off the
   // frame. Paused or stepped, it rebuilds at once and the picture is exact.
   constexpr double kStockRedrawSeconds = 1.0 / 12.0;
-  const double now = ImGui::GetTime();
-  const bool stale =
-      state.camStockSim.Revision() != state.camStockDrawnRevision;
+  // A steady clock, NOT ImGui::GetTime(). This function also runs on the
+  // OFFSCREEN path (SyncOffscreenScene), where there is no ImGui context at
+  // all, and asking one for the time there is a null dereference:
+  // `cam_simulate` followed by a `screenshot` on a headless instance crashed
+  // with SIGSEGV from the day this cap was added until the rotary picture made
+  // somebody take that screenshot.
+  const double now = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+  const bool rotary = state.camTimeline.rotary;
+  const uint64_t revision =
+      rotary ? state.camRotarySim.Revision() : state.camStockSim.Revision();
+  const bool stale = revision != state.camStockDrawnRevision;
   const bool allowed =
       !state.camPlaying || now - state.camStockDrawnAt >= kStockRedrawSeconds;
   if (stale && allowed) {
     state.camStockDrawnAt = now;
-    state.camStockDrawnRevision = state.camStockSim.Revision();
-    glm::dvec3 lo(0.0), hi(0.0);
-    const double floorZ =
-        cam::StockBounds(*setup, ui::JobBodies(state), lo, hi) ? lo.z : 0.0;
-    const cam::StockMesh mesh =
-        cam::BuildStockMesh(state.camStockSim.Stock(), floorZ);
+    state.camStockDrawnRevision = revision;
+    cam::StockMesh mesh;
+    if (rotary) {
+      mesh = cam::BuildRotaryStockMesh(state.camRotarySim.Stock());
+    } else {
+      glm::dvec3 lo(0.0), hi(0.0);
+      const double floorZ =
+          cam::StockBounds(*setup, ui::JobBodies(state), lo, hi) ? lo.z : 0.0;
+      mesh = cam::BuildStockMesh(state.camStockSim.Stock(), floorZ);
+    }
     std::vector<StockVertex> verts;
     verts.reserve(mesh.vertices.size());
     for (const cam::StockVertex& v : mesh.vertices)
@@ -276,9 +331,30 @@ void SyncCamPlayback(AppState& state) {
   // worth having. Re-applied every frame — instance ids change on every
   // regeneration, so an "already ghosted" early-out can hold only stale ids
   // (the FEM overlay learned this the hard way).
+  //
+  // And for a rotary program, TURNED: one matrix, R_x(A) at the cursor, on
+  // everything that belongs to the part -- the ghosted bodies, their
+  // outlines and the stock -- because the part is what the machine turns.
+  // The tool below is in machine space already and does not move with it.
+  // Every frame, not on change: the instances are recreated on any resync,
+  // and the angle moves continuously while it plays. Identity for a planar
+  // program, which is what these instances always had.
+  const glm::mat4 partTurn =
+      rotary ? glm::rotate(glm::mat4(1.0f),
+                           glm::radians(static_cast<float>(
+                               state.camTimeline.AngleAt(state.camCursor))),
+                           glm::vec3(1.0f, 0.0f, 0.0f))
+             : glm::mat4(1.0f);
+  state.stockRenderer->SetModel(partTurn);
   if (state.meshRenderer)
-    for (const DocumentRenderMesh& m : state.documentMeshes)
+    for (const DocumentRenderMesh& m : state.documentMeshes) {
       state.meshRenderer->SetInstanceGhost(m.meshId, 0.22f);
+      if (rotary) {
+        state.meshRenderer->SetMeshTransform(m.meshId, partTurn);
+        if (state.outlineRenderer && m.outlineId != 0)
+          state.outlineRenderer->SetMeshTransform(m.outlineId, partTurn);
+      }
+    }
 
   // The tool, where it is.
   const cam::GMove* move = state.camTimeline.MoveAt(state.camCursor);
@@ -361,6 +437,32 @@ void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
   const cam::Timeline& tl = state.camTimeline;
   const size_t at = state.camCursor.seg;
   const size_t segs = tl.Segments();
+
+  // A ROTARY program draws a WINDOW of it, in machine space, around the
+  // cursor -- not all of it.
+  //
+  // In machine space every pass of a rotary job lies along the top of the
+  // axis, which is exactly where the tool is while the part turns under it:
+  // the window shows where the cutter is travelling, and is true. The passes
+  // already cut are grooves in the turning stock, which is the better record
+  // of them. Drawing the whole program here would put the pin's 644,160
+  // moves in one line along the top -- the flat fan the backplot used to be
+  // -- and rebuild it for nothing.
+  if (tl.rotary) {
+    constexpr size_t kBehind = 600, kAhead = 1800;
+    const size_t from = at > kBehind ? at - kBehind : 0;
+    const size_t to = std::min(segs, at + kAhead);
+    out.reserve(out.size() + (to - from) * kVertsPerSeg);
+    for (size_t k = from; k < to; k++) {
+      const cam::GMove& m = tl.program.moves[k + 1];
+      glm::vec4 color;
+      float halfPx = 1.0f;
+      SegmentStyle(m, k < at, color, halfPx);
+      AppendPrimLine(shown(tl.program.moves[k].to), shown(m.to), halfPx, color,
+                     out);
+    }
+    return;
+  }
 
   if (const uint64_t key = PlayedKey(tl);
       key != g_playedKey || g_played.size() != segs * kVertsPerSeg) {
@@ -518,6 +620,12 @@ void DrawCamTransportWindow(AppState& state) {
       ImGui::TextDisabled("%.0f mm/min  ·  line %d", move->feed, move->line);
     else
       ImGui::TextDisabled("line %d", move->line);
+    // Where the trunnion is. The one number a rotary program adds, and the
+    // one the picture is turning by -- read off the same timeline.
+    if (tl.rotary) {
+      ImGui::SameLine();
+      ImGui::TextDisabled("·  A %.1f°", tl.AngleAt(state.camCursor));
+    }
     // Two numbers, and what each one counts. The cutting clock excludes
     // rapids unless the setup states a traverse rate — saying so here is
     // cheaper than having the number doubted later.

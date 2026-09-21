@@ -1727,7 +1727,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"distance_mm", tl.DistanceAt(state.camCursor)},
              {"total_mm", tl.totalDistance},
              {"cutting_minutes", tl.MinutesAt(state.camCursor)},
-             {"removed_mm3", state.camStockSim.RemovedVolume()},
+             // From whichever stock is armed: a rotary program is carved
+             // into a radius field, and reading the (empty) height map would
+             // report nothing removed while the part turned.
+             {"removed_mm3", state.camTimeline.rotary
+                                 ? state.camRotarySim.RemovedVolume()
+                                 : state.camStockSim.RemovedVolume()},
+             {"rotary", state.camTimeline.rotary},
+             {"a_deg", state.camTimeline.AngleAt(state.camCursor)},
              {"resolution_mm", state.camSimRes},
              {"segments", tl.Segments()},
              {"position", {pos.x, pos.y, pos.z}}};

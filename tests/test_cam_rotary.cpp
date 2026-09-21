@@ -514,44 +514,209 @@ TEST_CASE("cam rotary: generate, post and verify a turned part", "[cam]") {
   CHECK(v.maxLeftover < 3.5);
 }
 
-TEST_CASE("cam rotary: the simulation refuses a part that turns", "[cam]") {
-  // The simulation's stock is a HEIGHT MAP. Pointed at a rotary program it
-  // would carve the block as though the part stood still and report the
-  // result with a straight face: the first handle job came back "5,004 mm3
-  // removed" against about 77,000 actually cut, and the picture would have
-  // been just as confident.
-  //
-  // That is the one outright bug the rotary survey found in another project
-  // -- blendercam leaves its 2-D map reachable from a 4-axis path with no
-  // guard -- so this is the case that keeps us on the other side of it.
-  // `BuildTimeline` is the funnel every caller goes through, which is why
-  // the refusal lives there and not in each of them.
+TEST_CASE("cam rotary: a turning program is a timeline the slider can cross",
+          "[cam]") {
+  // It used to be REFUSED here, which was the honest answer while the only
+  // stock was a height map. It is simulated now, on a radius field, so the
+  // timeline has to carry what the picture needs: that it is rotary, where A
+  // is part way through a segment, and a LENGTH for a rotation.
   const cam::Timeline turning =
-      cam::BuildTimeline(cam::ParseGcode("(op 1)\nG0 Z25 A0\nG1 Z15 F300\n"
-                                         "G1 X10 A90\nG1 X20 A180\n"),
+      cam::BuildTimeline(cam::ParseGcode("(op 1)\nG0 Z25 A0\nG1 Z20 F300\n"
+                                         "G1 A180\nG1 X10 A270\n"),
                          0.0);
-  INFO(turning.unsupported);
-  CHECK_FALSE(turning.unsupported.empty());
-  CHECK(turning.unsupported.find("height map") != std::string::npos);
-  CHECK(turning.Empty()); // and nothing to scrub, so nothing can be drawn
+  CHECK(turning.unsupported.empty());
+  CHECK(turning.rotary);
+  REQUIRE(turning.Segments() == 3);
 
-  // An INDEXED file is not that: one constant A before the first cut, the
-  // part standing still while the tool moves, which is exactly what a height
-  // map represents. It must still simulate.
-  const cam::Timeline indexed =
-      cam::BuildTimeline(cam::ParseGcode("(op 1)\nG0 Z25\nG0 A90\nG0 X0 Y0\n"
-                                         "G1 Z15 F300\nG1 X10\nG1 X20\n"),
-                         0.0);
-  INFO(indexed.unsupported);
-  CHECK(indexed.unsupported.empty());
-  CHECK(indexed.Segments() > 0);
+  // A is interpolated along a segment exactly as the position is.
+  CHECK_THAT(turning.AngleAt({1, 0.0}), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(turning.AngleAt({1, 0.5}), WithinAbs(90.0, 1e-9));
+  CHECK_THAT(turning.AngleAt({1, 1.0}), WithinAbs(180.0, 1e-9));
 
-  // ...and so must a plain 3-axis one, which is the control: a refusal that
-  // fires on everything is not a refusal.
-  const cam::Timeline flat = cam::BuildTimeline(
-      cam::ParseGcode("(op 1)\nG0 Z25\nG0 X0 Y0\nG1 Z15 F300\nG1 X10\n"), 0.0);
-  CHECK(flat.unsupported.empty());
-  CHECK(flat.Segments() > 0);
+  // Half a turn with the tool 20 mm off the axis is pi * 20 of metal past the
+  // edge, and it is a distance on the slider -- zero here and the slider
+  // would jump straight across every rotation.
+  const double halfTurn = turning.distance[1] - turning.distance[0];
+  CHECK_THAT(halfTurn, WithinAbs(glm::pi<double>() * 20.0, 1e-6));
+
+  // A 3-axis and an indexed file are not rotary: the part stands still.
+  CHECK_FALSE(
+      cam::BuildTimeline(cam::ParseGcode("G0 Z25 A90\nG1 X10 F300\n"), 0.0)
+          .rotary);
+  CHECK_FALSE(
+      cam::BuildTimeline(cam::ParseGcode("G0 Z25\nG1 X10 F300\n"), 0.0).rotary);
+}
+
+namespace {
+
+// The rolling pin's program in miniature: a bar, a ball, passes along the
+// axis stepping round it -- generated and posted for real, so the simulator
+// is fed exactly what the verifier is.
+struct RotaryJob {
+  std::unique_ptr<Document> doc;
+  cam::Setup setup;
+  std::string gcode;
+};
+
+RotaryJob SmallRotaryJob() {
+  RotaryJob j;
+  j.doc = std::make_unique<Document>();
+  j.doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 40.0));
+  j.doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Waist", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 15.0, 16.0));
+  j.doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Necked", j.doc->GetFeature(0)->GetId(), j.doc->GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  j.doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Journal", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 11.0, 16.0));
+  j.doc->AddFeature(std::make_unique<BooleanFeature>(
+      "Shaft", j.doc->GetFeature(2)->GetId(), j.doc->GetFeature(3)->GetId(),
+      BooleanOp::Union));
+  REQUIRE(j.doc->GetBodies().size() == 1);
+  j.setup = BasicSetup();
+  j.setup.machine.hasRotaryAxis = true;
+  j.setup.stock.margin = {0.0, 1.0, 1.0};
+  j.setup.safeZ = 30.0;
+  j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceRotary;
+  op.toolNumber = 1;
+  op.stepover = 0.5;
+  j.setup.operations.push_back(op);
+  const auto paths = cam::GenerateAll(j.setup, j.doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  std::string error;
+  REQUIRE(cam::PostProcess("linuxcnc", j.setup, paths, {}, j.gcode, &error));
+  return j;
+}
+
+} // namespace
+
+TEST_CASE("cam rotary: playing to the end leaves the verifier's own stock",
+          "[cam]") {
+  // The load-bearing equality, the rotary twin of the planar simulator's
+  // first test. The picture and the verdict come from ONE engine: the same
+  // blank (`MakeRotaryBlank`), the same carve (`CarveSweepRotary`), the same
+  // posted file. If they ever diverge, what is on screen stops being evidence
+  // and becomes an impression -- which is the thing FreeCAD's two simulators
+  // are, and the reason this one was built as one.
+  RotaryJob job = SmallRotaryJob();
+  constexpr double kRes = 0.5;
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ProgramInSetupSpace(job.gcode, job.setup), 0.0);
+  REQUIRE(tl.rotary);
+
+  cam::RotaryStockSim sim;
+  const std::vector<Body> bodies =
+      cam::BodiesInSetupFrame(job.setup, job.doc->GetBodies());
+  sim.Begin(tl, job.setup, cam::MakeRotaryBlank(job.setup, bodies, kRes));
+  REQUIRE(sim.Ready());
+  sim.SeekTo(tl.End());
+
+  const cam::RotaryInspection ri =
+      cam::InspectRotary(job.gcode, job.setup, job.doc->GetBodies(), kRes);
+  REQUIRE(ri.ok);
+  REQUIRE(ri.machined.r.size() == sim.Stock().r.size());
+  size_t differ = 0;
+  for (size_t k = 0; k < ri.machined.r.size(); k++)
+    if (ri.machined.r[k] != sim.Stock().r[k])
+      differ++;
+  INFO(differ << " of " << ri.machined.r.size() << " cells differ");
+  CHECK(differ == 0); // bit-identical, not "close"
+  CHECK(sim.RemovedVolume() > 100.0);
+}
+
+TEST_CASE("cam rotary: scrubbing back lands where playing forward does",
+          "[cam]") {
+  // Backward cannot un-cut, so it restarts from a SNAPSHOT -- and a snapshot
+  // is only correct if it holds exactly "every segment before this one
+  // carved, and this one untouched". Get that wrong and scrubbing back shows
+  // material the cursor has not reached yet. So: play to the end, scrub back
+  // to several cursors (whole segments and part way into them), and each must
+  // match a fresh simulation played forward to the same place.
+  RotaryJob job = SmallRotaryJob();
+  constexpr double kRes = 0.5;
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ProgramInSetupSpace(job.gcode, job.setup), 0.0);
+  const std::vector<Body> bodies =
+      cam::BodiesInSetupFrame(job.setup, job.doc->GetBodies());
+  const cam::RadiusMap blank = cam::MakeRotaryBlank(job.setup, bodies, kRes);
+
+  cam::RotaryStockSim scrubbed;
+  scrubbed.Begin(tl, job.setup, blank);
+  scrubbed.SeekTo(tl.End());
+  INFO("snapshots every " << scrubbed.KeyframeEvery() << " segments, "
+                          << scrubbed.Keyframes() << " kept");
+  REQUIRE(scrubbed.Keyframes() >= 2); // or this is not testing snapshots
+
+  const size_t n = tl.Segments();
+  for (const cam::SimCursor at :
+       {cam::SimCursor{n / 2, 0.0}, cam::SimCursor{n / 2, 0.37},
+        cam::SimCursor{scrubbed.KeyframeEvery(), 0.0},
+        cam::SimCursor{scrubbed.KeyframeEvery(), 0.6},
+        cam::SimCursor{n / 7, 0.9}, cam::SimCursor{1, 0.0}}) {
+    scrubbed.SeekTo(at);
+    cam::RotaryStockSim forward;
+    forward.Begin(tl, job.setup, blank);
+    forward.SeekTo(at);
+    size_t differ = 0;
+    for (size_t k = 0; k < forward.Stock().r.size(); k++)
+      if (forward.Stock().r[k] != scrubbed.Stock().r[k])
+        differ++;
+    INFO("cursor " << at.seg << "+" << at.t << ": " << differ
+                   << " cells differ");
+    CHECK(differ == 0);
+  }
+}
+
+TEST_CASE("cam rotary: the stock mesh is a closed tube facing outward",
+          "[cam]") {
+  // Two gates the planar block already has, for the tube. Winding: every
+  // triangle's geometric normal agrees with its vertices' -- the glyph was
+  // inside out for a month and three rounds of screenshots missed it. And
+  // closure: by the divergence theorem the mesh encloses the radius field's
+  // own volume, which it cannot if a cap is missing or wound backwards.
+  cam::RadiusMap map = cam::MakeRotaryStock(0.0, 40.0, 15.0, 0.5);
+  for (int i = 0; i < map.nx; i++)
+    if (map.CellX(i) > 12.0 && map.CellX(i) < 28.0)
+      for (int j = 0; j < map.nTheta; j++)
+        map.Set(i, j, 11.0f); // a journal, so there is a shoulder to face
+  const cam::StockMesh m = cam::BuildRotaryStockMesh(map);
+  REQUIRE(!m.Empty());
+
+  int agree = 0, disagree = 0;
+  for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+    const glm::vec3& a = m.vertices[m.indices[i]].position;
+    const glm::vec3& b = m.vertices[m.indices[i + 1]].position;
+    const glm::vec3& c = m.vertices[m.indices[i + 2]].position;
+    const glm::vec3 geo = glm::cross(b - a, c - a);
+    if (glm::length(geo) < 1e-9f)
+      continue;
+    const glm::vec3 vn = m.vertices[m.indices[i]].normal +
+                         m.vertices[m.indices[i + 1]].normal +
+                         m.vertices[m.indices[i + 2]].normal;
+    (glm::dot(glm::normalize(geo), glm::normalize(vn)) > 0.0f ? agree
+                                                              : disagree)++;
+  }
+  INFO(agree << " agree, " << disagree << " disagree");
+  CHECK(agree > 1000);
+  CHECK(disagree == 0);
+
+  // The volume the tube encloses, against the field's own: the solid between
+  // the first and last cell CENTRES, where the caps sit.
+  const double dTheta = 2.0 * glm::pi<double>() / map.nTheta;
+  double field = 0.0;
+  for (int j = 0; j < map.nTheta; j++)
+    for (int i = 0; i + 1 < map.nx; i++) {
+      const double r = 0.5 * (map.At(i, j) + map.At(i + 1, j));
+      field += 0.5 * r * r * dTheta * map.res;
+    }
+  INFO("mesh " << m.Volume() << " field " << field);
+  CHECK_THAT(m.Volume(), WithinRel(field, 0.01));
 }
 
 TEST_CASE("cam rotary: the CL surface at the rolling pin's size",

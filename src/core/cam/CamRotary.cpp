@@ -416,15 +416,8 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
   return v;
 }
 
-RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
-                               const std::vector<Body>& rawBodies, double res) {
-  RotaryInspection out;
-  // Framed, exactly as the planar check frames: the file is in setup space,
-  // so the part must be too. For a continuous job `rotationA` is 0 -- the
-  // angle lives in the FILE, per move, not in the setup -- and the frame is
-  // whatever fixture put the part on the trunnion.
-  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
-
+RadiusMap MakeRotaryBlank(const Setup& setup, const std::vector<Body>& bodies,
+                          double res, std::string* why) {
   // The blank, derived from the part it is cut from. The axis is setup-space
   // +X through the origin, so "furthest from the axis" is hypot(y, z).
   double x0 = 1e18, x1 = -1e18, rad = 0.0;
@@ -440,8 +433,9 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
     }
   }
   if (x1 <= x0 || rad <= 0.0) {
-    out.why = "this job has no part on the rotary axis to cut from";
-    return out;
+    if (why != nullptr)
+      *why = "this job has no part on the rotary axis to cut from";
+    return {};
   }
   // A box's margins are the only ones a `Stock` can state and a cylinder has
   // one radius, so the radial margin is the larger of the two across the
@@ -449,9 +443,22 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   // honest fix (docs/cam/rotary-plan.md, D3).
   const double radialMargin =
       std::max(setup.stock.margin.y, setup.stock.margin.z);
-  out.machined =
-      MakeRotaryStock(x0 - setup.stock.margin.x, x1 + setup.stock.margin.x,
-                      rad + radialMargin, res);
+  return MakeRotaryStock(x0 - setup.stock.margin.x, x1 + setup.stock.margin.x,
+                         rad + radialMargin, res);
+}
+
+RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
+                               const std::vector<Body>& rawBodies, double res) {
+  RotaryInspection out;
+  // Framed, exactly as the planar check frames: the file is in setup space,
+  // so the part must be too. For a continuous job `rotationA` is 0 -- the
+  // angle lives in the FILE, per move, not in the setup -- and the frame is
+  // whatever fixture put the part on the trunnion.
+  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
+
+  out.machined = MakeRotaryBlank(setup, bodies, res, &out.why);
+  if (out.machined.r.empty())
+    return out;
   out.designed = SampleModelRotary(bodies, out.machined);
 
   const GProgram program = ProgramInSetupSpace(gcode, setup);

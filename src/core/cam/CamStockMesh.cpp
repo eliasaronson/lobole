@@ -332,4 +332,90 @@ StockMesh BuildToolMesh(const Tool& tool) {
   return mesh;
 }
 
+StockMesh BuildRotaryStockMesh(const RadiusMap& map) {
+  StockMesh mesh;
+  const int nx = map.nx, n = map.nTheta;
+  if (nx < 2 || n < 3 || map.r.size() != static_cast<size_t>(nx) * n)
+    return mesh;
+  const double dTheta = 2.0 * 3.14159265358979323846 / n;
+
+  // The tube: one vertex per cell, normals from the tangent plane. With the
+  // surface written r(x, theta), the two tangents are
+  //   dP/dx     = (1, r_x cos, r_x sin)
+  //   dP/dtheta = (0, r_t cos - r sin, r_t sin + r cos)
+  // and their cross product, theta first, points OUTWARD -- checked against a
+  // plain cylinder, where it is the radial direction.
+  mesh.vertices.reserve(static_cast<size_t>(nx) * n + 2 * (n + 1));
+  for (int j = 0; j < n; j++) {
+    const double th = map.CellTheta(j);
+    const double c = std::cos(th), sn = std::sin(th);
+    const int jm = (j + n - 1) % n, jp = (j + 1) % n;
+    for (int i = 0; i < nx; i++) {
+      const double r = map.At(i, j);
+      const int im = std::max(0, i - 1), ip = std::min(nx - 1, i + 1);
+      const double rx = (map.At(ip, j) - map.At(im, j)) / ((ip - im) * map.res);
+      const double rt = (map.At(i, jp) - map.At(i, jm)) / (2.0 * dTheta);
+      const glm::dvec3 px(1.0, rx * c, rx * sn);
+      const glm::dvec3 pt(0.0, rt * c - r * sn, rt * sn + r * c);
+      glm::dvec3 nrm = glm::cross(pt, px);
+      const double len = glm::length(nrm);
+      // On the axis (a cell turned to nothing) the tangent in theta vanishes;
+      // the radial direction is the honest answer there.
+      nrm = len > 1e-12 ? nrm / len : glm::dvec3(0.0, c, sn);
+      mesh.vertices.push_back(
+          {glm::vec3(map.CellX(i), r * c, r * sn), glm::vec3(nrm)});
+    }
+  }
+  const auto at = [nx](int i, int j) {
+    return static_cast<uint32_t>(j * nx + i);
+  };
+  // Two triangles per cell, wound so their geometric normal agrees with the
+  // outward vertex normals: for corners A=(i,j) B=(i+1,j) C=(i+1,j+1)
+  // D=(i,j+1), (A, D, B) and (B, D, C). The other order draws the tube
+  // inside out -- the mistake the tool glyph made for a month, which is why
+  // the winding gate exists.
+  mesh.indices.reserve(static_cast<size_t>(nx - 1) * n * 6 + 6 * n);
+  for (int j = 0; j < n; j++) {
+    const int jn = (j + 1) % n;
+    for (int i = 0; i + 1 < nx; i++) {
+      const uint32_t a = at(i, j), b = at(i + 1, j), cc = at(i + 1, jn),
+                     d = at(i, jn);
+      mesh.indices.insert(mesh.indices.end(), {a, d, b, b, d, cc});
+    }
+  }
+
+  // The two caps, with their OWN vertices: a cap is flat and faces along the
+  // axis, and sharing the tube's radial normals would shade the end face as
+  // though it were round.
+  const auto cap = [&](int i, bool high) {
+    const float x = static_cast<float>(map.CellX(i));
+    const glm::vec3 nrm(high ? 1.0f : -1.0f, 0.0f, 0.0f);
+    const uint32_t centre = static_cast<uint32_t>(mesh.vertices.size());
+    mesh.vertices.push_back({glm::vec3(x, 0.0f, 0.0f), nrm});
+    const uint32_t ring0 = static_cast<uint32_t>(mesh.vertices.size());
+    for (int j = 0; j < n; j++)
+      mesh.vertices.push_back({mesh.vertices[at(i, j)].position, nrm});
+    for (int j = 0; j < n; j++) {
+      const uint32_t v0 = ring0 + j, v1 = ring0 + (j + 1) % n;
+      // Increasing theta runs anticlockwise seen from +X, so (centre, j, j+1)
+      // faces +X and the low end takes the reverse.
+      if (high)
+        mesh.indices.insert(mesh.indices.end(), {centre, v0, v1});
+      else
+        mesh.indices.insert(mesh.indices.end(), {centre, v1, v0});
+    }
+  };
+  cap(0, false);
+  cap(nx - 1, true);
+
+  glm::vec3 lo(1e30f), hi(-1e30f);
+  for (const StockVertex& v : mesh.vertices) {
+    lo = glm::min(lo, v.position);
+    hi = glm::max(hi, v.position);
+  }
+  mesh.bboxMin = lo;
+  mesh.bboxMax = hi;
+  return mesh;
+}
+
 } // namespace cam

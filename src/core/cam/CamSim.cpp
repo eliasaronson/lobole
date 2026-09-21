@@ -15,23 +15,34 @@ glm::dvec3 Lerp(const GProgram& p, size_t seg, double t) {
 }
 
 double SegmentLength(const GProgram& p, size_t seg) {
-  return glm::length(p.moves[seg + 1].to - p.moves[seg].to);
+  const GMove& a = p.moves[seg];
+  const GMove& b = p.moves[seg + 1];
+  double len = glm::length(b.to - a.to);
+  // A rotation has length too: the arc the tool tip travels as the part
+  // turns under it, at radius hypot(y, z) -- the definition `CuttingMinutes`
+  // uses, so the clock and the slider agree. Without it a pure-A move is
+  // zero millimetres and the slider jumps straight across every rotation.
+  if (a.hasA && b.hasA && std::abs(b.a - a.a) > 1e-9) {
+    const double radius = std::hypot(b.to.y, b.to.z);
+    const double arc =
+        std::abs(b.a - a.a) / 360.0 * 2.0 * 3.14159265358979323846 * radius;
+    len = std::hypot(len, arc);
+  }
+  return len;
 }
+
+double AngleOf(const GMove& m) { return m.hasA ? m.a : 0.0; }
 
 } // namespace
 
 Timeline BuildTimeline(GProgram program, double rapidFeed) {
-  if (RotatesWhileCutting(program)) {
-    Timeline out;
-    out.unsupported =
-        "the A axis moves in this program and the simulation's stock is a "
-        "height map, which cannot represent a part that turns — it would "
-        "carve the block as though it stood still. `cam_verify` checks a "
-        "rotary file properly (docs/cam/rotary-plan.md); there is no picture "
-        "for one yet.";
-    return out;
-  }
+  // A program whose part turns is simulated now -- on a radius field, by
+  // `RotaryStockSim`, with the part turning on screen. It used to be REFUSED
+  // here, which was the honest answer while the only stock was a height map:
+  // the first rotary job, simulated anyway, reported 5,004 mm3 removed
+  // against about 77,000 actually cut.
   Timeline tl;
+  tl.rotary = RotatesWhileCutting(program);
   tl.program = std::move(program);
   const size_t segs = tl.Segments();
   tl.distance.reserve(segs);
@@ -75,6 +86,15 @@ glm::dvec3 Timeline::PositionAt(SimCursor at) const {
     return program.moves.empty() ? glm::dvec3(0.0) : program.moves[0].to;
   at.seg = std::min(at.seg, Segments() - 1);
   return Lerp(program, at.seg, at.t);
+}
+
+double Timeline::AngleAt(SimCursor at) const {
+  if (Empty())
+    return program.moves.empty() ? 0.0 : AngleOf(program.moves[0]);
+  at.seg = std::min(at.seg, Segments() - 1);
+  const double a0 = AngleOf(program.moves[at.seg]);
+  const double a1 = AngleOf(program.moves[at.seg + 1]);
+  return a0 + (a1 - a0) * std::clamp(at.t, 0.0, 1.0);
 }
 
 const GMove* Timeline::MoveAt(SimCursor at) const {
@@ -198,6 +218,112 @@ void StockSim::SeekTo(SimCursor to) {
     // Backwards: the map cannot be un-cut, so start over. See the header.
     m_stock = m_pristine;
     m_at = {0, 0.0};
+  }
+  Carve(m_at, to);
+  m_at = to;
+  m_revision++;
+}
+
+// --- RotaryStockSim -------------------------------------------------------
+
+namespace {
+// What the snapshots may cost, in total. A budget, not a count: the pin's
+// 0.5 mm grid is ~800 KB a snapshot, so this is about eighty of them, and a
+// part a tenth the size gets ten times as many for the same memory.
+constexpr size_t kKeyframeBudgetBytes = 64u << 20;
+} // namespace
+
+void RotaryStockSim::Begin(const Timeline& timeline, const Setup& setup,
+                           RadiusMap pristine) {
+  m_timeline = &timeline;
+  m_setup = setup;
+  m_pristine = std::move(pristine);
+  m_stock = m_pristine;
+  m_at = {0, 0.0};
+  m_keys.clear();
+  const size_t bytes = std::max<size_t>(1, m_pristine.r.size() * sizeof(float));
+  const size_t budgetKeys = std::max<size_t>(1, kKeyframeBudgetBytes / bytes);
+  // At least a few hundred segments between snapshots: below that the replay
+  // a snapshot saves is cheaper than the copy it costs.
+  m_every = std::max<size_t>(256, (timeline.Segments() + budgetKeys - 1) /
+                                      budgetKeys);
+  m_revision++;
+}
+
+void RotaryStockSim::Clear() {
+  m_timeline = nullptr;
+  m_pristine = RadiusMap{};
+  m_stock = RadiusMap{};
+  m_at = {0, 0.0};
+  m_keys.clear();
+  m_revision++;
+}
+
+double RotaryStockSim::RemovedVolume() const {
+  if (m_pristine.r.size() != m_stock.r.size() || m_stock.nTheta <= 0)
+    return 0.0;
+  // Each cell is a wedge of an annulus: (r0^2 - r1^2)/2 per radian, times the
+  // cell's angle and its axial length.
+  const double dTheta = 2.0 * 3.14159265358979323846 / m_stock.nTheta;
+  double sum = 0.0;
+  for (size_t i = 0; i < m_stock.r.size(); i++) {
+    const double r0 = m_pristine.r[i];
+    const double r1 = m_stock.r[i];
+    sum += 0.5 * (r0 * r0 - r1 * r1);
+  }
+  return sum * dTheta * m_stock.res;
+}
+
+void RotaryStockSim::Carve(SimCursor from, SimCursor to) {
+  const GProgram& p = m_timeline->program;
+  for (size_t seg = from.seg; seg <= to.seg && seg < m_timeline->Segments();
+       seg++) {
+    // A snapshot at every m_every-th segment boundary on the way past it.
+    // Before this segment is carved, every segment before it already is --
+    // this call carves in order, and a segment the previous call stopped
+    // part way through is carved again from its own start below -- so the
+    // snapshot is exactly "all of [0, seg) carved".
+    if (m_every > 0 && seg % m_every == 0) {
+      const size_t k = seg / m_every;
+      if (k == m_keys.size())
+        m_keys.push_back(m_stock.r);
+    }
+    const double t1 = seg == to.seg ? to.t : 1.0;
+    if (t1 <= 0.0)
+      continue;
+    // Rapids are CHECKED, not applied -- `InspectRotary`'s convention, and
+    // the planar simulator's.
+    if (p.moves[seg + 1].rapid)
+      continue;
+    const double a0 = AngleOf(p.moves[seg]);
+    const double a1 = AngleOf(p.moves[seg + 1]);
+    CarveSweepRotary(p.moves[seg].to, Lerp(p, seg, t1), a0,
+                     a0 + (a1 - a0) * std::clamp(t1, 0.0, 1.0),
+                     m_setup.FindTool(p.moves[seg + 1].tool), m_stock);
+  }
+}
+
+void RotaryStockSim::SeekTo(SimCursor to) {
+  if (m_timeline == nullptr || m_timeline->Empty() || !Ready())
+    return;
+  to.seg = std::min(to.seg, m_timeline->Segments() - 1);
+  to.t = std::clamp(to.t, 0.0, 1.0);
+  if (to == m_at)
+    return;
+  if (to < m_at) {
+    // Backwards: restart from the nearest snapshot at or behind `to`, not
+    // from the blank. That snapshot is "every segment before k * m_every
+    // carved", so carving on from the start of that segment is the same
+    // stock a replay from the beginning would reach.
+    size_t k = m_every > 0 ? to.seg / m_every : 0;
+    k = std::min(k, m_keys.empty() ? size_t{0} : m_keys.size() - 1);
+    if (!m_keys.empty()) {
+      m_stock.r = m_keys[k];
+      m_at = {k * m_every, 0.0};
+    } else {
+      m_stock = m_pristine;
+      m_at = {0, 0.0};
+    }
   }
   Carve(m_at, to);
   m_at = to;

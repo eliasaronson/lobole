@@ -1230,6 +1230,119 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  t = IM_REGISTER_TEST(engine, "cam", "a_rotary_part_turns_as_it_plays");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/cam/rotary-plan.md, "The picture". A program whose A moves used to
+    // be REFUSED by the simulator -- honestly, while its only stock was a
+    // height map. It plays now, and the part TURNS: one matrix, R_x(A) at the
+    // cursor, on the ghosted bodies, their outlines and the stock, while the
+    // tool stays where the machine keeps it. Read off the RENDERER's own
+    // instance state rather than trusted from the code path.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 40.0));
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Waist", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 15.0, 16.0));
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Necked", CamPart()->GetFeature(0)->GetId(),
+        CamPart()->GetFeature(1)->GetId(), BooleanOp::Subtract));
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Journal", glm::vec3(12, 0, 0), glm::vec3(1, 0, 0), 11.0, 16.0));
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Shaft", CamPart()->GetFeature(2)->GetId(),
+        CamPart()->GetFeature(3)->GetId(), BooleanOp::Union));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    ctx->Yield(2);
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup != nullptr);
+    setup->machine.hasRotaryAxis = true;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 1.0, 1.0};
+    setup->tools[0].type = cam::ToolType::Ball;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.type = cam::OpType::SurfaceRotary;
+    op.toolNumber = setup->tools[0].number;
+    op.stepover = 0.6; // coarse: this case is about the picture
+    setup->operations.push_back(op);
+    ui::RefreshCamToolpaths(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+
+    ToolbarClick(ctx, "###tb_job_simulate");
+    ctx->Yield(3);
+    ctx->LogInfo("refusal: '%s'", s_App->camPlaybackRefusal.c_str());
+    IM_CHECK(s_App->camPlaybackOpen); // plays, rather than refusing
+    IM_CHECK(s_App->camTimeline.rotary);
+    IM_CHECK(!ctx->ItemExists("//Cannot simulate/###cam_refusal_close"));
+
+    // Somewhere the part has turned well away from zero.
+    cam::SimCursor at{s_App->camTimeline.Segments() / 2, 0.5};
+    for (size_t seg = at.seg; seg < s_App->camTimeline.Segments(); seg++)
+      if (std::abs(s_App->camTimeline.AngleAt({seg, 0.5})) > 30.0) {
+        at = {seg, 0.5};
+        break;
+      }
+    ui::SeekCamPlayback(*s_App, at);
+    ctx->Yield(3);
+    const double a = s_App->camTimeline.AngleAt(s_App->camCursor);
+    ctx->LogInfo("A at the cursor: %.1f deg", a);
+    IM_CHECK(std::abs(a) > 30.0);
+    IM_CHECK(s_App->camRotarySim.RemovedVolume() > 0.0);
+    IM_CHECK(s_App->stockRenderer != nullptr &&
+             s_App->stockRenderer->HasMesh());
+
+    // The part, TURNED by exactly that angle about the rotary axis: a point
+    // at +Y must land where R_x(A) puts it.
+    IM_CHECK(!s_App->documentMeshes.empty());
+    const std::optional<glm::mat4> xf =
+        s_App->meshRenderer->GetInstanceTransform(
+            s_App->documentMeshes[0].meshId);
+    IM_CHECK(xf.has_value());
+    const glm::vec3 got = glm::vec3((*xf) * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+    const float ar = glm::radians(static_cast<float>(a));
+    const glm::vec3 want(0.0f, std::cos(ar), std::sin(ar));
+    ctx->LogInfo("+Y went to (%.3f %.3f %.3f), want (%.3f %.3f %.3f)", got.x,
+                 got.y, got.z, want.x, want.y, want.z);
+    IM_CHECK(glm::length(got - want) < 1e-3f);
+
+    // Playing it: frames keep coming while the stock is carved and re-meshed
+    // as a tube, which is the cost the plan named as the one to measure.
+    s_App->camPlaying = true;
+    s_App->camPlaybackSpeed = 20.0f;
+    double worstMs = 0.0;
+    int frames = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3) &&
+           s_App->camPlaying) {
+      const auto f0 = std::chrono::steady_clock::now();
+      ctx->Yield();
+      worstMs = std::max(worstMs, std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - f0)
+                                      .count());
+      frames++;
+    }
+    s_App->camPlaying = false;
+    ctx->LogInfo("%d frames playing, worst %.1f ms", frames, worstMs);
+    IM_CHECK(frames >= 10);
+
+    // And it all goes back: the part stands still once the playback ends.
+    ui::EndCamPlayback(*s_App);
+    ctx->Yield(4);
+    IM_CHECK(!s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->documentMeshes.empty());
+    const std::optional<glm::mat4> back =
+        s_App->meshRenderer->GetInstanceTransform(
+            s_App->documentMeshes[0].meshId);
+    IM_CHECK(back.has_value());
+    const glm::vec3 still =
+        glm::vec3((*back) * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+    IM_CHECK(glm::length(still - glm::vec3(0.0f, 1.0f, 0.0f)) < 1e-4f);
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "simulate_says_why_at_the_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // "The simulation button still does nothing." It did something: it

@@ -246,6 +246,11 @@ almost answer:
   > remain excluded. There is still no PICTURE for a rotary job -- playback
   > draws a height map -- so this is a verdict without a simulation, which is
   > the one place the "one engine, one answer" rule is not yet honoured.
+  >
+  > Honoured now (2026-09-21): a rotary program PLAYS, with the part turning
+  > by the cursor's A, on the same radius field and the same carve the
+  > verifier uses — its last frame is the verdict's own stock, cell for cell
+  > (`RotaryStockSim`, docs/cam/rotary-plan.md "The picture").
 - **Machine/fixture collision, work-envelope checks.** A different model (the
   machine, which the app does not have) rather than a harder version of this
   one.

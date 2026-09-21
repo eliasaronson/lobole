@@ -147,6 +147,15 @@ struct RotaryInspection {
   std::string why; // why not, when ok is false
 };
 
+// The blank a rotary job is cut from, in setup space: the part's extent along
+// the axis and its furthest point from it, plus the setup's margins. ONE
+// function for the verifier and the simulator, so the picture and the verdict
+// start from the same stock -- the one-engine rule, applied to the thing both
+// begin with. Empty, with `why`, when there is no part on the axis.
+[[nodiscard]] RadiusMap MakeRotaryBlank(const Setup& setup,
+                                        const std::vector<Body>& bodies,
+                                        double res, std::string* why = nullptr);
+
 // The whole loop for a file whose A MOVES: parse, turn the blank, compare.
 //
 // The blank is DERIVED, not typed: the part's own extent along the axis and

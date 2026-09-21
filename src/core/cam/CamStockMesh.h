@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/cam/CamJob.h"    // Tool, TipHeight
+#include "core/cam/CamRotary.h" // RadiusMap
 #include "core/cam/CamVerify.h" // HeightMap
 
 #include <glm/glm.hpp>
@@ -47,6 +48,19 @@ struct StockMesh {
 // it (a through cut with a sacrificial pass) still meshes: the floor follows
 // the lowest point rather than clipping the cut away.
 [[nodiscard]] StockMesh BuildStockMesh(const HeightMap& map, double floorZ);
+
+// The ROTARY stock as a closed solid: a tube over the radius field, one vertex
+// per cell at (x, r cos theta, r sin theta), and a flat cap at each end.
+// In the PART's frame -- the playback turns it by the cursor's A, which is
+// what "the part turns" means (docs/cam/rotary-plan.md, "The picture").
+//
+// Smooth-shaded, where the planar block is flat-shaded, and for the reason
+// the planar comment gives in reverse: milled 2.5D stock is floors and walls,
+// and smoothing a wall into a ramp draws a part that was never cut; a turned
+// part is overwhelmingly CURVED, and flat-shading 200,000 cells of it draws
+// facets that were never cut either. Normals come from the surface's own
+// partial derivatives, so a shoulder still leans the way it faces.
+[[nodiscard]] StockMesh BuildRotaryStockMesh(const RadiusMap& map);
 
 // The cutter itself, as a solid of revolution about +Z with its TIP AT THE
 // ORIGIN — the same point every `Move` in a toolpath addresses, so placing it

@@ -98,9 +98,11 @@ finishing pass in wood.
    steady. It is also most of the 28 minutes.
 2. **The feed is not compensated** (D2's generator half). Every pass here cuts
    at a different radius and they all carry the same F.
-3. **There is no picture.** Playback draws a height map, so this job can be
-   verified and not watched. Of everything on this list that is the one a
-   person notices first.
+3. ~~**There is no picture.**~~ Built: the part turns as it plays, on the
+   verifier's own radius field (docs/cam/rotary-plan.md, "The picture").
+   It was: playback draws a height map, so this job could be verified and not
+   watched. Of everything on this list that was the one a person noticed
+   first.
 
    Asked directly, and the answer was worse than "no": the simulation ran it.
    It carved the block as though the part stood still and reported **5,004

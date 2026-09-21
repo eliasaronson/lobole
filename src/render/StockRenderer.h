@@ -59,6 +59,15 @@ public:
   // upright through a part laid flat once the viewport drew setup space.
   void SetColor(const glm::vec4& c) { m_color = c; }
 
+  // ...and it is back, for ONE thing, which is not that one: a ROTARY
+  // playback turns the part, and the stock is part of the part. The tube is
+  // meshed in the part's frame and this is R_x(A) at the cursor -- the same
+  // matrix the ghosted bodies get, so the two cannot drift apart. It is not
+  // an indexed setup's lean (an index is baked into setup space, and a model
+  // matrix for it is exactly the bug above); `CamPlayback` sets it only while
+  // a rotary program plays and puts identity back when playback ends.
+  void SetModel(const glm::mat4& m) { m_model = m; }
+
   void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
@@ -144,6 +153,7 @@ private:
   std::vector<uint32_t> m_indices;
 
   glm::vec4 m_color = glm::vec4(0.62f, 0.64f, 0.68f, 1.0f);
+  glm::mat4 m_model = glm::mat4(1.0f);
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
   ClipPlaneArray m_clipPlanes = NoClipPlanes();

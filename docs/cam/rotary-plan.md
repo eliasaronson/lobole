@@ -208,8 +208,9 @@ test caught it in one run, which is the argument for that test existing.
 - ~~Rapids are not checked against the rotary stock.~~ Done. One walk serves
   both cutting and asking, so the two cannot come to disagree about what the
   tool removes -- a rapid is tested against the stock and never carves it.
-- **No picture.** `CamPlayback` draws a height map. A radius map has no
-  renderer, so a rotary file verifies but cannot be watched — and it is
+- ~~**No picture.**~~ Built — see "The picture, as built" below. It was:
+  `CamPlayback` draws a height map. A radius map had no
+  renderer, so a rotary file verified but could not be watched — and it is
   REFUSED rather than drawn wrong (`Timeline::unsupported`), because the
   first thing the dogfood asked of it was to simulate the handle and it did,
   reporting 5,004 mm³ removed against about 77,000 actually cut.
@@ -228,3 +229,80 @@ test caught it in one run, which is the argument for that test existing.
   INTO the part, that is scrap", "20 rapids through material", beside one
   quiet line admitting the file could not be read. Three confident wrong
   numbers and one true one is worse than no verdict.
+
+## The picture: simulating a part that turns
+
+Decided: **the part turns** — the tool stays where the machine keeps it, over
+the axis, and the part, the stock and everything drawn on them rotate by the
+cursor's A. That is what the 6090 will do, so it is what the picture should
+show.
+
+It is display and transport, not simulation math — the same thing
+simulation.md said of the planar simulator — because the math is built:
+`RadiusMap`, `CarveSweepRotary` and the blank derivation are the verifier's.
+Carving with them is what keeps the one-engine rule: the last frame of a
+rotary playback is the stock `InspectRotary` reads its verdict from.
+
+**Timeline.** A is interpolated along a segment like X, Y and Z, and a pure-A
+move gets a length — the arc the tool tip travels, the same definition
+`CuttingMinutes` uses — or the slider would jump across every rotation.
+
+**The stock while scrubbing.** `RotaryStockSim`, the twin of `StockSim` over a
+radius field. Forward is incremental; backward cannot un-cut, and the planar
+header already says what to do when replaying from the blank is too slow:
+keep snapshots. For the pin it is too slow — 644,160 moves at 65 µs is a
+42-second replay from the end. Snapshots every K segments, K DERIVED from a
+memory budget rather than typed, bound any backward seek.
+
+**The mesh.** A tube over the grid, `(x, r·cosθ, r·sinθ)`, with normals from
+the surface's own partial derivatives and caps at both ends, built in the
+PART's frame. Gated by the existing "every triangle faces the way its normals
+do" test.
+
+**Turning it.** One matrix, `R_x(A)`, on everything attached to the part: the
+ghosted bodies and their outlines (per-instance transforms, identity on a job
+tab because the geometry is already placed), and the stock (its push constant
+has always carried a model matrix and the shader already applies it to
+normals). The tool is in machine space already and does not move with it.
+Everything returns to identity when playback ends.
+
+**The path.** Drawn in MACHINE space during rotary playback — a window of
+moves around the cursor. In machine space every pass lies along the top of
+the axis, which is exactly where the tool is; the passes already cut show as
+grooves in the stock, which is the better record of them.
+
+### The picture, as built
+
+`a_rotary_part_turns_as_it_plays` reads the renderer's OWN instance state:
+at A = −88° a point at +Y on the part lands at (0, 0.035, −0.999), exactly
+where R_x(−88°) puts it; 179 frames while playing at 20x, worst 18 ms; and
+the part stands still again once the playback ends.
+
+On the rolling pin itself, through `cam_simulate`: removed volume climbs
+through the program to 156,712 mm³ against ~163,000 for a Ø54 blank down to
+the 524 cm³ pin, A turns with the cursor, and **scrubbing back from the end
+to 10% takes no measurable time** — it restores a snapshot, where a replay
+from the blank would have been 42 seconds.
+
+Three things the build found:
+
+**The one-engine rule held bit for bit, because the blank was shared first.**
+`MakeRotaryBlank` came out of `InspectRotary` so the simulator and the
+verifier derive the stock ONCE; two derivations would each be right and drift
+apart. With that, playing to the end leaves a radius field identical to the
+verifier's cell for cell — tested as an exact equality, not a tolerance.
+
+**A snapshot is only correct on its FIRST visit.** It must hold "every
+segment before this one carved, and this one untouched". The carve walks
+segments in order and re-carves a partly-cut one from its own start, so the
+first arrival at a snapshot boundary always has that property — and a later
+arrival (from a backward seek) never re-takes it. Tested by scrubbing to six
+cursors, whole segments and part way into them, against a fresh forward play.
+
+**`SyncCamPlayback` crashed offscreen, and had since the 12 Hz remesh cap.**
+It asked `ImGui::GetTime()` for the clock, and the offscreen path has no ImGui
+context: `cam_simulate` then `screenshot` on a headless instance was a
+SIGSEGV. Nobody had taken that screenshot until the rotary picture wanted
+looking at. A steady clock now, and `offscreen_smoke` has the phase that
+catches it — checked by putting the old line back, which fails the smoke.
+
