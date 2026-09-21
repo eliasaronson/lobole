@@ -48,6 +48,12 @@ struct RadiusMap {
   int nx = 0;
   int nTheta = 0;       // cells around; theta step is 2*pi / nTheta
   std::vector<float> r; // mm from the axis
+  // The widest radius this map can ever hold: the blank's, set when it is
+  // made. Material only comes off, so it stays a true upper bound for the
+  // map's whole life -- which is what lets the carve use it without looking.
+  // It used to scan every cell for it on every move: ~190,000 cells times
+  // the rolling pin's 644,160 moves, before a single cell was carved.
+  double rMax = 0.0;
 
   [[nodiscard]] float At(int i, int j) const {
     return r[static_cast<size_t>(j) * static_cast<size_t>(nx) +

@@ -30,11 +30,14 @@ constexpr double kLeftoverFloor = 0.1;
 // about setup-space Z, opening upward without limit, whose profile is
 // `TipHeight`. "Without limit" is what makes a plunge remove the column above
 // it, and it is as true here as there.
-bool InsideTool(double x, double theta, double rad, double aRad,
+// `cphi`/`sphi` are cos and sin of theta + A, taken by the CALLER once per
+// ray. The bisection below asks this forty times along one ray whose
+// direction never changes, and computing the direction here cost eighty trig
+// calls a cell -- the bulk of a rotary verify once the stock scan was gone.
+bool InsideTool(double x, double cphi, double sphi, double rad,
                 const glm::dvec3& tip, const Tool* tool, double toolR) {
-  const double phi = theta + aRad;
-  const double y = rad * std::cos(phi);
-  const double z = rad * std::sin(phi);
+  const double y = rad * cphi;
+  const double z = rad * sphi;
   const double dx = x - tip.x, dy = y - tip.y;
   const double d = std::hypot(dx, dy);
   if (d > toolR)
@@ -52,16 +55,16 @@ bool InsideTool(double x, double theta, double rad, double aRad,
 // gone (the cutter has passed the centreline, which is a real thing a rotary
 // job does and the reason this is not just `min`), and a tip that does not
 // reach `r0` leaves it alone.
-double CarveRay(double x, double theta, double r0, double aRad,
+double CarveRay(double x, double cphi, double sphi, double r0,
                 const glm::dvec3& tip, const Tool* tool, double toolR) {
-  if (!InsideTool(x, theta, r0, aRad, tip, tool, toolR))
+  if (!InsideTool(x, cphi, sphi, r0, tip, tool, toolR))
     return r0;
-  if (InsideTool(x, theta, 0.0, aRad, tip, tool, toolR))
+  if (InsideTool(x, cphi, sphi, 0.0, tip, tool, toolR))
     return 0.0;
   double lo = 0.0, hi = r0; // lo outside, hi inside
   for (int k = 0; k < 40; k++) {
     const double mid = 0.5 * (lo + hi);
-    if (InsideTool(x, theta, mid, aRad, tip, tool, toolR))
+    if (InsideTool(x, cphi, sphi, mid, tip, tool, toolR))
       hi = mid;
     else
       lo = mid;
@@ -86,6 +89,7 @@ RadiusMap MakeRotaryStock(double x0, double x1, double radius, double res) {
                           8, 20000);
   map.r.assign(static_cast<size_t>(map.nx) * static_cast<size_t>(map.nTheta),
                static_cast<float>(std::max(0.0, radius)));
+  map.rMax = std::max(0.0, radius);
   return map;
 }
 
@@ -172,9 +176,8 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
   if (stock.nx <= 0 || stock.nTheta <= 0)
     return hit;
   const double toolR = tool != nullptr ? tool->diameter * 0.5 : 1.0;
-  double rMax = 0.0;
-  for (float v : stock.r)
-    rMax = std::max(rMax, static_cast<double>(v));
+  // The blank's radius, not a scan for the current widest: see `rMax`.
+  const double rMax = stock.rMax;
   if (rMax <= 0.0)
     return hit;
 
@@ -204,20 +207,49 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
     const int i1 =
         std::min(stock.nx - 1,
                  static_cast<int>((tip.x + toolR - stock.x0) / stock.res) + 1);
+
+    // ...and in theta, only the BAND the cutter can reach. It walked every
+    // row, and a 6 mm cutter over a 25 mm radius touches about fourteen of
+    // three hundred and forty -- which, with the stock scan gone, was most of
+    // a rotary verify: 263 us a move, three minutes on the rolling pin, and
+    // on the frame once its passes landed.
+    //
+    // The cutter occupies |y - tip.y| <= R above the tip, and seen from the
+    // axis that region spans the angles between its two LOWER corners. A ball
+    // or a cone rises from there, which only pulls its rays towards the top,
+    // so the band from the tip is a superset of the band the shape needs --
+    // conservative by construction, never short. Below the axis the region
+    // wraps most of the way round, so the whole half-turn is walked as
+    // before.
+    const int n = stock.nTheta;
+    const double dTheta = kTwoPi / n;
+    int jFirst = 0, jCount = n;
+    if (tip.z > 1e-6) {
+      const double phiLo = std::atan2(tip.z, tip.y + toolR);
+      const double phiHi = std::atan2(tip.z, tip.y - toolR);
+      // Two rows of margin either side for the cell-centre discretisation.
+      jFirst = static_cast<int>(std::floor((phiLo - aRad) / dTheta)) - 2;
+      const int jLast =
+          static_cast<int>(std::ceil((phiHi - aRad) / dTheta)) + 2;
+      jCount = std::min(jLast - jFirst + 1, n);
+    }
     for (int i = i0; i <= i1; i++) {
       const double x = stock.CellX(i);
       if (std::abs(x - tip.x) > toolR)
         continue;
-      for (int j = 0; j < stock.nTheta; j++) {
+      for (int k = 0; k < jCount; k++) {
+        const int j = ((jFirst + k) % n + n) % n;
         const double theta = stock.CellTheta(j);
+        const double sphi = std::sin(theta + aRad);
         // Cheap rejection before the bisection: a ray pointing away from the
         // spindle cannot meet a tool that only descends.
-        if (std::sin(theta + aRad) <= 0.0)
+        if (sphi <= 0.0)
           continue;
         const double r0 = stock.At(i, j);
         if (r0 <= 0.0)
           continue;
-        const double cut = CarveRay(x, theta, r0, aRad, tip, tool, toolR);
+        const double cphi = std::cos(theta + aRad);
+        const double cut = CarveRay(x, cphi, sphi, r0, tip, tool, toolR);
         if (cut >= r0)
           continue;
         if (apply) {

@@ -574,4 +574,36 @@ TEST_CASE("cam rotary: the CL surface at the rolling pin's size",
   CHECK(cl.nx == model.nx);
 }
 
+TEST_CASE("cam rotary: carving a rolling-pin-sized program", "[cam][.bench]") {
+  // A stopwatch, hidden by `.`. The verify grid the panel uses on the pin
+  // (0.5 mm), and a stream of rotary finishing moves shaped like the real
+  // ones: runs along X at one A, stepping A between them. 20,000 moves is
+  // about 3% of the pin's 644,160, so the full verify is ~30x this.
+  cam::RadiusMap stock = cam::MakeRotaryStock(0.0, 300.0, 27.0, 0.5);
+  cam::Tool ball;
+  ball.number = 1;
+  ball.diameter = 6.0;
+  ball.type = cam::ToolType::Ball;
+  glm::dvec3 from(0.0, 0.0, 26.0);
+  double a = 0.0;
+  const auto t0 = std::chrono::steady_clock::now();
+  int moves = 0;
+  for (int pass = 0; pass < 40 && moves < 20000; pass++) {
+    for (int k = 0; k < 500 && moves < 20000; k++) {
+      const glm::dvec3 to((pass % 2 == 0 ? k : 500 - k) * 0.6, 0.0, 25.0);
+      cam::CarveSweepRotary(from, to, a, a, &ball, stock);
+      from = to;
+      moves++;
+    }
+    a += 3.0;
+  }
+  const double s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  WARN("carved " << moves << " moves on " << stock.nx << " x " << stock.nTheta
+                 << " cells: " << s << " s  (" << s / moves * 1e6
+                 << " us/move)");
+  CHECK(moves == 20000);
+}
+
 #endif // HAVE_CAM
