@@ -11,6 +11,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <memory>
+#include <optional>
 #include <vector>
 
 // Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
@@ -336,6 +337,8 @@ public:
                       double radius1, double radius2, double height);
 
   // File I/O
+  // One shape per placed leaf product, at its placement — the bodies of a
+  // structured file as well as the roots of a flat one.
   bool LoadSTEP(const std::string& filename, std::vector<CADShape>& shapes);
 
   // Structured STEP import (XCAF): what the file actually carries beyond
@@ -381,9 +384,46 @@ public:
   // read returns false with `out` empty, exactly like a failed one.
   bool LoadSTEPStructured(const std::string& filename, ImportedModel& out,
                           ImportProgress* progress = nullptr);
-  // The write half: products (named, colored) + one flat assembly of
-  // placed instances → a STEP with real product structure. Used by the
-  // assembly-import round-trip tests; the seed of assembly STEP export.
+  // STEP export as another CAD system wants it (X4,
+  // docs/interchange/step-export-plan.md): named, coloured products, placed
+  // by reference, nested the way the assembly is. A part occurring twelve
+  // times is one product and twelve instances, not twelve anonymous copies.
+  struct StepBody {
+    CADShape shape;
+    std::string name;
+    std::optional<glm::vec3> color; // linear RGB, what the viewport lights
+  };
+  // A leaf product. One body is written as the product itself; several make
+  // the product an assembly of body products, because STEP colours attach to
+  // products and a part's bodies may differ.
+  struct StepPart {
+    std::string name;
+    std::vector<StepBody> bodies;
+  };
+  struct StepComponent {
+    bool isAssembly = false; // `index` into assemblies, else into parts
+    size_t index = 0;
+    glm::mat4 local{1.0f}; // rigid placement in the parent
+    std::string name;      // the instance's name ("" = unnamed)
+  };
+  struct StepAssembly {
+    std::string name;
+    std::vector<StepComponent> components;
+  };
+  struct StepExportModel {
+    std::vector<StepPart> parts;
+    std::vector<StepAssembly> assemblies;
+    // What the file IS: one part (a part-tab export) or one assembly.
+    bool rootIsAssembly = false;
+    size_t root = 0;
+  };
+  // Millimetres, always written as such. False on a non-rigid transform, an
+  // invalid shape or a reference past the end; `error` says which.
+  bool SaveSTEPModel(const std::string& filename, const StepExportModel& model,
+                     std::string* error = nullptr);
+  // The flat form: products + one assembly of placed instances. Kept for the
+  // import tests that author their fixtures with it; it writes through
+  // SaveSTEPModel.
   bool SaveSTEPStructured(const std::string& filename,
                           const ImportedModel& model,
                           const std::string& assemblyName = "Assembly");

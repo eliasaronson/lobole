@@ -143,6 +143,23 @@ struct FlatInstance {
   // the root places this part directly.
   std::vector<uint64_t> innerIds;
   bool visible = true; // every level's visibility, ANDed
+
+  // The tree `world` and `path` flatten away, for a consumer that writes the
+  // tree back out (STEP export). `levels` are the sub-assembly placements
+  // above this leaf, outermost first — empty when the top document places
+  // the part directly; `occurrenceId`/`local`/`name` are the leaf's own
+  // placement in the document that holds it. world == levels' locals * local.
+  struct Level {
+    uint64_t occurrenceId = 0;    // the placement, in its parent document
+    uint64_t assemblyId = 0;      // the sub-assembly's slot id
+    uint64_t configurationId = 0; // what the placement asked for (0 = active)
+    glm::mat4 local{1.0f};
+    std::string name;
+  };
+  std::vector<Level> levels;
+  uint64_t occurrenceId = 0;
+  glm::mat4 local{1.0f};
+  std::string name;
 };
 
 // The leaf parts of `top`, in document order, depth first.

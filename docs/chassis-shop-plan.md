@@ -59,7 +59,9 @@ anywhere else, and each file is named by the caller rather than by the part.
 `export_members {dir}` writes them in one call, each named for its member,
 and returns the manifest rows. The name matters more than the convenience: a
 STEP carries no part name inside it, so the file name IS the identity, and
-one place deciding it is one spelling.
+one place deciding it is one spelling. (2026-09-22: since X4,
+docs/interchange/step-export-plan.md, each file also holds one product named
+after the member, so the name survives the file being renamed.)
 
 Files: `src/remote/RemoteTube.cpp`.
 

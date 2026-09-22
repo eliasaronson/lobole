@@ -71,8 +71,8 @@ static constexpr MethodDoc TubeMethods[] = {
      "members_checked, bends_checked, not_checked"},
     {"export_members",
      "Write one STEP per tube MEMBER into {dir}, each file named for its "
-     "member — which is the part's only identity, because a STEP carries no "
-     "name inside it. That is what a tube laser takes: a solid with its ends "
+     "member and holding one product of the same name. That is what a tube "
+     "laser takes: a solid with its ends "
      "already coped and mitred, one file per tube. Returns a row per file so "
      "a manifest can be built from the same call that wrote them. "
      "`overwrite` (default false) refuses rather than replacing a file that "
@@ -380,8 +380,8 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
       if (!used.insert(safe).second) {
         throw std::runtime_error(
             "two members are both called '" + body.name +
-            "', and a file name is a member's only identity - a STEP carries "
-            "no name inside it, so they would overwrite each other");
+            "', and each member's file is named after it, so they would "
+            "overwrite each other");
       }
       const std::string path = dir + "/" + safe + ".step";
       if (!overwrite && std::filesystem::exists(path)) {
@@ -391,8 +391,14 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
             "directory half from one run and half from another is an order "
             "nobody can check");
       }
-      if (!CADKernel::Instance().SaveSTEP(path, {body.shape}))
-        throw std::runtime_error("could not write '" + path + "'");
+      // The product inside is named after the member too, so the file still
+      // says what it is once it has been renamed or opened in another system.
+      CADKernel::StepExportModel model;
+      model.parts.push_back(
+          {body.name, {{body.shape, body.name, std::nullopt}}});
+      std::string why;
+      if (!CADKernel::Instance().SaveSTEPModel(path, model, &why))
+        throw std::runtime_error("could not write '" + path + "': " + why);
       files.push_back({{"member", body.name},
                        {"file", safe + ".step"},
                        {"volume_mm3", body.shape.Volume()}});

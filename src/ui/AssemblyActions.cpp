@@ -1,4 +1,5 @@
 #include "ui/AssemblyActions.h"
+#include "ui/BodyAppearance.h"
 
 #include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
 #include "imgui.h" // KeyCtrl: the placement drag snaps unless Ctrl says free
@@ -294,28 +295,21 @@ bool AssemblyPartsStale(AppState& state) {
 }
 
 namespace {
-// A body's export appearance: its material's PBR, or a palette color (cycled
-// by `paletteIndex`) with a neutral-plastic default when unassigned — the
-// same rule the renderer uses, so an export looks like the viewport.
-void FillItemAppearance(const Body& body, size_t paletteIndex,
+// A body's export appearance: the colour the viewport resolves
+// (ui/BodyAppearance.h, so an appearance override and an imported colour
+// survive), with the material's PBR when one applies and a neutral plastic
+// when not.
+void FillItemAppearance(const Body& body, size_t& palette,
                         MeshExport::Item& item) {
-  if (!body.material.empty()) {
-    const auto& mat =
-        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
-    item.baseColor = mat.baseColor;
-    item.metallic = mat.metallic;
-    item.roughness = mat.roughness;
-  } else {
-    item.baseColor = kBodyPalette[paletteIndex % std::size(kBodyPalette)];
-    item.metallic = 0.0f;
-    item.roughness = 0.5f;
-  }
+  const BodyLook look = ResolveBodyLook(body, palette);
+  item.baseColor = look.Color();
+  item.metallic = look.hasMaterial ? look.mat.metallic : 0.0f;
+  item.roughness = look.hasMaterial ? look.mat.roughness : 0.5f;
 }
 } // namespace
 
 std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
   std::vector<MeshExport::Item> items;
-  size_t palette = 0;
   if (state.assembly) {
     // One item per (occurrence × body) at the occurrence's SOLVED placement
     // (never exploded — an export is the real assembly). Occurrences of one
@@ -324,6 +318,9 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
     for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
       if (!inst.visible)
         continue;
+      // Seeded from the PART, as the assembly renderer seeds it: every
+      // occurrence of a part is the colour it is on screen.
+      size_t palette = static_cast<size_t>(inst.partId);
       const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++) {
         if (!bodies[bi].shape.IsValid() || bodies[bi].reference)
@@ -331,25 +328,25 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
         MeshExport::Item item;
         item.shape = bodies[bi].shape;
         // The tree path names the item ("Gangway/Board 03"), which is what a
-        // glTF/STEP consumer needs to tell two identical boards apart.
+        // glTF consumer needs to tell two identical boards apart.
         const std::string label =
             inst.path.empty() ? ("occ" + std::to_string(inst.rootOccurrenceId))
                               : inst.path;
         item.name = bodies.size() > 1 ? label + "-" + bodies[bi].name : label;
         item.transform = inst.world; // solved, not exploded
-        FillItemAppearance(bodies[bi], palette++, item);
+        FillItemAppearance(bodies[bi], palette, item);
         items.push_back(std::move(item));
       }
     }
   } else if (state.document) {
-    const auto& bodies = state.document->GetBodies();
-    for (size_t bi = 0; bi < bodies.size(); bi++) {
-      if (!bodies[bi].shape.IsValid())
-        continue;
+    size_t palette = 0; // the part tab's count, over every body it lists
+    for (const Body& body : state.document->GetBodies()) {
       MeshExport::Item item;
-      item.shape = bodies[bi].shape;
-      item.name = bodies[bi].name;
-      FillItemAppearance(bodies[bi], palette++, item);
+      FillItemAppearance(body, palette, item);
+      if (!body.shape.IsValid() || body.reference)
+        continue; // a derived ghost is another part's geometry
+      item.shape = body.shape;
+      item.name = body.name;
       items.push_back(std::move(item));
     }
   }

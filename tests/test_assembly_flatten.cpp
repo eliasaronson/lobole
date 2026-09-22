@@ -8,6 +8,7 @@
 #include "core/Occurrence.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <map>
 #include <memory>
@@ -91,6 +92,46 @@ TEST_CASE("Flatten composes transforms down the tree", "[assembly][flatten]") {
   // Paths read the way the tree does.
   CHECK((*flat)[0].path == "Gangway/Board A");
   CHECK((*flat)[2].path == "Ladder");
+}
+
+TEST_CASE("Flatten keeps the levels a tree-writing consumer needs",
+          "[assembly][flatten]") {
+  // STEP export writes the tree back out, so each leaf carries the
+  // sub-assembly placements above it and its own local placement — and
+  // those must compose to exactly the `world` every other consumer uses.
+  World w;
+  w.parts[1] = BoxPart();
+  auto sub = std::make_unique<AssemblyDocument>();
+  sub->AddOccurrence(Place("Board B", 1, OccurrenceRef::Part, {10, 0, 0}));
+  w.assemblies[2] = std::move(sub);
+
+  AssemblyDocument top;
+  Occurrence gang = Place("Gangway", 2, OccurrenceRef::Assembly, {100, 0, 0});
+  gang.orientation = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1));
+  gang.configurationId = 7;
+  top.AddOccurrence(gang);
+  top.AddOccurrence(Place("Ladder", 1, OccurrenceRef::Part, {0, 50, 0}));
+
+  const auto flat = assembly::Flatten(top, w.PartById(), w.AsmById());
+  REQUIRE(flat);
+  REQUIRE(flat->size() == 2);
+  const assembly::FlatInstance& board = (*flat)[0];
+  REQUIRE(board.levels.size() == 1);
+  CHECK(board.levels[0].occurrenceId == top.GetOccurrences()[0].id);
+  CHECK(board.levels[0].assemblyId == 2);
+  CHECK(board.levels[0].configurationId == 7);
+  CHECK(board.levels[0].name == "Gangway");
+  CHECK(board.name == "Board B");
+  CHECK(board.occurrenceId == w.assemblies[2]->GetOccurrences()[0].id);
+  const glm::mat4 composed = board.levels[0].local * board.local;
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++)
+      CHECK_THAT(composed[c][r], WithinAbs(board.world[c][r], 1e-5));
+
+  const assembly::FlatInstance& ladder = (*flat)[1];
+  CHECK(ladder.levels.empty());
+  CHECK(ladder.name == "Ladder");
+  CHECK_THAT(ladder.local[3].y, WithinAbs(50.0, 1e-6));
 }
 
 TEST_CASE("Flatten hides a whole subtree with its occurrence",

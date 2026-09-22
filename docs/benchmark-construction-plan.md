@@ -100,6 +100,10 @@ OCC reports after build → export → import is a *prediction* until measured:
 - A `Sweep` along a `Curve3D` helix — `bspline` or `extrusion`, unknown which.
 - A `Pipe` bend is `torus` only if the path segment is a true arc.
 - `Refine` heals the B-Rep and may convert between these. STEP export may too.
+  (2026-09-22: the census below was measured through the flat
+  `STEPControl_Writer`. X4 moved `export_step` onto XCAF,
+  docs/interchange/step-export-plan.md; the geometry it writes is the same,
+  and `reference.py`'s face-census checks pass unchanged on it.)
 
 So: build one probe part per operation with `reference.py`'s helpers, export,
 run the oracle, and **write the observed census into the plan** before writing a

@@ -1280,11 +1280,16 @@ def save_project(path: str, message: str = "save") -> dict:
     return _call("save_project", path=path, message=message)
 
 
-@mcp.tool(description="Export to STEP (one shape per body). Whole document, "
-          "or one body by index. STEP moves the exact B-Rep to other CAD.")
-def export_step(path: str, body: int = -1) -> dict:
+@mcp.tool(description="Export to STEP, the exact B-Rep other CAD opens. "
+          "The active part (or `part`, from any tab), or the active "
+          "assembly at its solved placements. The file keeps names, "
+          "colours and structure: each part is one product placed once per "
+          "occurrence, sub-assemblies nest. `body` exports one body of a "
+          "part by index.")
+def export_step(path: str, body: int = -1, part: str = "") -> dict:
     return _call("export_step", path=path,
-                 **({"body": body} if body >= 0 else {}))
+                 **({"body": body} if body >= 0 else {}),
+                 **({"part": part} if part else {}))
 
 
 @mcp.tool(description="Export to binary STL (re-meshed at `deflection`, "

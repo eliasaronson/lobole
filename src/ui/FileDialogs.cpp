@@ -2,6 +2,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/ImportJob.h"
 #include "ui/OpenJob.h"
+#include "ui/StepExport.h"
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
@@ -488,72 +489,28 @@ void ExportDialog(AppState& state) {
   const bool havePart = state.document && !state.document->GetBodies().empty();
   if (!haveAssembly && !havePart)
     return;
-  // Assemblies export only through the visual (tessellation) writers; a part
-  // additionally offers the B-Rep CAD formats.
-  const nfdu8filteritem_t asmFilters[] = {{"Visual mesh", "glb,gltf,obj,ply"}};
+  // STEP first on both: it is the format another CAD system opens. An
+  // assembly has no single-solid formats (STL/BREP fuse ONE part).
+  const nfdu8filteritem_t asmFilters[] = {{"STEP", "step,stp"},
+                                          {"Visual mesh", "glb,gltf,obj,ply"}};
   const nfdu8filteritem_t partFilters[] = {
       {"CAD / mesh", "step,stp,stl,brep,glb,gltf,obj,ply"}};
   nfdu8char_t* outPath = nullptr;
-  if (NFD_SaveDialogU8(&outPath, haveAssembly ? asmFilters : partFilters, 1,
-                       nullptr, haveAssembly ? "assembly.glb" : "part.step") !=
+  if (NFD_SaveDialogU8(&outPath, haveAssembly ? asmFilters : partFilters,
+                       haveAssembly ? 2 : 1, nullptr,
+                       haveAssembly ? "assembly.step" : "part.step") !=
       NFD_OKAY) {
     return;
   }
   std::string path(outPath);
   NFD_FreePathU8(outPath);
-  std::string ext = std::filesystem::path(path).extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-  if (ext.empty()) {
-    ext = haveAssembly ? ".glb" : ".step";
-    path += ext;
-  }
-
-  // Visual mesh formats (glTF/OBJ/PLY): tessellation of the part or the whole
-  // assembly, materials carried through. Works on either tab.
-  if (ext == ".glb" || ext == ".gltf" || ext == ".obj" || ext == ".ply") {
-    const std::vector<MeshExport::Item> items = BuildVisualExportItems(state);
-    std::string error;
-    if (MeshExport::SaveVisual(path, items, 0.1, &error))
-      LOG_INFO("Exported {} item(s) to {}", items.size(), path);
-    else
-      LOG_ERROR("Export failed: {}", error);
-    return;
-  }
-
-  // B-Rep CAD formats (part only).
-  if (!havePart) {
-    LOG_WARN("STEP/STL/BREP export needs a part tab; use glTF/OBJ/PLY for an "
-             "assembly");
-    return;
-  }
-  auto& kernel = CADKernel::Instance();
-  // Derived reference bodies are other parts' geometry: never exported.
-  std::vector<Body> bodies;
-  for (const Body& b : state.document->GetBodies())
-    if (!b.reference)
-      bodies.push_back(b);
-  if (bodies.empty()) {
-    LOG_WARN("Export: the part has only reference bodies, nothing to export");
-    return;
-  }
-  bool ok = false;
-  if (ext == ".stl" || ext == ".brep") {
-    // Single-shape formats: fuse the document into one solid.
-    CADShape shape = bodies[0].shape;
-    for (size_t i = 1; i < bodies.size(); i++)
-      shape = shape.Union(bodies[i].shape);
-    ok = ext == ".stl" ? kernel.SaveSTL(path, shape)
-                       : kernel.SaveBREP(path, shape);
-  } else {
-    std::vector<CADShape> shapes;
-    for (const auto& b : bodies)
-      shapes.push_back(b.shape);
-    ok = kernel.SaveSTEP(path, shapes);
-  }
-  if (ok)
-    LOG_INFO("Exported {} bodies to {}", bodies.size(), path);
+  if (std::filesystem::path(path).extension().empty())
+    path += ".step";
+  std::string error;
+  if (ExportActiveDocument(state, path, &error))
+    LOG_INFO("Exported to {}", path);
   else
-    LOG_ERROR("Export failed: {}", path);
+    LOG_ERROR("Export failed: {}", error);
 }
 
 void ExportBomDialog(AppState& state) {
@@ -602,6 +559,56 @@ void ExportBomDialog(AppState&) {
 }
 
 #endif
+
+bool ExportActiveDocument(AppState& state, const std::string& path,
+                          std::string* error) {
+  const auto fail = [&](std::string why) {
+    if (error != nullptr)
+      *error = std::move(why);
+    return false;
+  };
+  std::string ext = std::filesystem::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+  // Visual mesh formats (glTF/OBJ/PLY): tessellation of the part or the whole
+  // assembly, materials carried through. Works on either tab.
+  if (ext == ".glb" || ext == ".gltf" || ext == ".obj" || ext == ".ply") {
+    const std::vector<MeshExport::Item> items = BuildVisualExportItems(state);
+    if (items.empty())
+      return fail("nothing to export");
+    std::string why;
+    return MeshExport::SaveVisual(path, items, 0.1, &why) || fail(why);
+  }
+  // STEP: the part or the assembly, with names, colours and structure (X4).
+  if (ext == ".step" || ext == ".stp") {
+    if (!state.assembly && !state.document)
+      return fail("STEP export needs a part or an assembly tab");
+    const auto counts = ExportStep(
+        state, state.assembly ? nullptr : state.document.get(), -1, path);
+    return counts.has_value() || fail(counts.error());
+  }
+  if (ext != ".stl" && ext != ".brep")
+    return fail("unknown export format \"" + ext +
+                "\" — use .step/.stp, .stl, .brep, .glb, .gltf, .obj or .ply");
+  // Single-solid formats: the part tab only, the document fused into one.
+  if (!state.document)
+    return fail("STL/BREP export needs a part tab; use STEP or glTF/OBJ/PLY "
+                "for an assembly");
+  // Derived reference bodies are other parts' geometry: never exported.
+  std::vector<Body> bodies;
+  for (const Body& b : state.document->GetBodies())
+    if (!b.reference)
+      bodies.push_back(b);
+  if (bodies.empty())
+    return fail("the part has only reference bodies, nothing to export");
+  CADShape shape = bodies[0].shape;
+  for (size_t i = 1; i < bodies.size(); i++)
+    shape = shape.Union(bodies[i].shape);
+  auto& kernel = CADKernel::Instance();
+  const bool ok = ext == ".stl" ? kernel.SaveSTL(path, shape)
+                                : kernel.SaveBREP(path, shape);
+  return ok || fail("could not write " + path);
+}
 
 void SaveProjectAction(AppState& state) {
   if (NothingToSave(state)) {

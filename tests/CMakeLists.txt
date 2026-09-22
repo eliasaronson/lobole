@@ -21,6 +21,7 @@ add_executable(designer_tests
     # CMakeLists for why this is per-executable.
     ${SANITIZER_DEFAULTS_SRC}
     test_assembly_flatten.cpp
+    test_step_export.cpp
     test_cadkernel.cpp
     test_sketch.cpp
     test_document.cpp

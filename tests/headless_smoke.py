@@ -1434,8 +1434,8 @@ def main():
         expect(tdxf.count("LINE") >= 4 and "TILT" in tdxf,
                "a blank at an angle to the axes exports like any other")
 
-        # One STEP per member, named for it — a STEP carries no name inside,
-        # so the file name is the part's only identity.
+        # One STEP per member, the file and the product inside it both named
+        # for the member.
         d.call("new_project")
         for i, y in enumerate((0.0, 200.0)):
             cl = d.call("add_feature", feature={
@@ -1618,8 +1618,10 @@ def main():
                f"staged sidecar adopted into the project on save: {adopted}")
         d.call("open_project", path=proj)
         parts = d.call("list_parts")["parts"]
+        # By its import folder, not its name: the STEP carries the name of
+        # the tab it was exported from ("Part 1", like ours) since X4.
         imported = [p for p in parts
-                    if p["type"] == "part" and p["name"] != "Part 1"]
+                    if p["type"] == "part" and p.get("folder") == "part"]
         expect(len(imported) == 1, f"imported part reloads: {parts}")
         d.call("set_active_part", index=imported[0]["index"])
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,

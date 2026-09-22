@@ -1104,27 +1104,48 @@ CADShape CADKernel::CreateCone(const glm::vec3& center,
 
 bool CADKernel::LoadSTEP(const std::string& filename,
                          std::vector<CADShape>& shapes) {
+  shapes.clear();
   if (!std::filesystem::exists(filename))
     return false;
 
+  // Through XCAF, not STEPControl_Reader: a structured file (ours, since X4)
+  // has ONE root — the top assembly — and a flat reader hands that back as a
+  // single compound, so a three-body part would read as one body. Walking the
+  // product tree gives one shape per placed leaf, placed exactly (gp_Trsf,
+  // not a float matrix), and a flat file's free shapes are its leaves.
   std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
-  STEPControl_Reader reader;
-  IFSelect_ReturnStatus status = reader.ReadFile(filename.c_str());
-
-  if (status != IFSelect_RetDone)
+  XcafDocument doc;
+  STEPCAFControl_Reader reader;
+  if (reader.ReadFile(filename.c_str()) != IFSelect_RetDone)
     return false;
-
-  reader.TransferRoots();
-  int nbShapes = reader.NbShapes();
-
-  shapes.clear();
-  for (int i = 1; i <= nbShapes; i++) {
-    TopoDS_Shape shape = reader.Shape(i);
-    if (!shape.IsNull()) {
-      shapes.push_back(CADShape(shape));
-    }
+  try {
+    if (!reader.Transfer(doc))
+      return false;
+  } catch (const Standard_Failure&) {
+    return false;
   }
-
+  Handle(XCAFDoc_ShapeTool) tool = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+  std::function<void(const TDF_Label&, const TopLoc_Location&)> visit =
+      [&](const TDF_Label& label, const TopLoc_Location& parent) {
+        TDF_Label def = label;
+        XCAFDoc_ShapeTool::GetReferredShape(label, def); // no-op if plain
+        const TopLoc_Location here =
+            parent * XCAFDoc_ShapeTool::GetLocation(label);
+        if (XCAFDoc_ShapeTool::IsAssembly(def)) {
+          TDF_LabelSequence comps;
+          XCAFDoc_ShapeTool::GetComponents(def, comps);
+          for (Standard_Integer i = 1; i <= comps.Length(); i++)
+            visit(comps.Value(i), here);
+          return;
+        }
+        const TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(def);
+        if (!shape.IsNull())
+          shapes.push_back(CADShape(shape.Moved(here)));
+      };
+  TDF_LabelSequence roots;
+  tool->GetFreeShapes(roots);
+  for (Standard_Integer i = 1; i <= roots.Length(); i++)
+    visit(roots.Value(i), TopLoc_Location());
   return !shapes.empty();
 }
 
@@ -1378,6 +1399,49 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
                                    const std::string& assemblyName) {
   if (model.products.empty() || model.instances.empty())
     return false;
+  StepExportModel m;
+  for (const auto& p : model.products) {
+    StepBody body{p.shape, "", std::nullopt};
+    if (p.hasColor)
+      body.color = p.color;
+    m.parts.push_back({p.name, {std::move(body)}});
+  }
+  StepAssembly top{assemblyName, {}};
+  for (const auto& inst : model.instances)
+    top.components.push_back({false, inst.product, inst.transform, inst.name});
+  m.assemblies.push_back(std::move(top));
+  m.rootIsAssembly = true;
+  m.root = 0;
+  return SaveSTEPModel(filename, m);
+}
+
+namespace {
+// A rigid glm placement as OCC's. gp_Trsf refuses a matrix that is not a
+// similarity, which is what a sheared (or degenerate) placement would be.
+std::optional<gp_Trsf> RigidTrsf(const glm::mat4& m) {
+  gp_Trsf t;
+  try {
+    t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
+                m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+  return t;
+}
+} // namespace
+
+bool CADKernel::SaveSTEPModel(const std::string& filename,
+                              const StepExportModel& model,
+                              std::string* error) {
+  const auto fail = [&](std::string why) {
+    if (error != nullptr)
+      *error = std::move(why);
+    return false;
+  };
+  const size_t rootCount =
+      model.rootIsAssembly ? model.assemblies.size() : model.parts.size();
+  if (model.root >= rootCount)
+    return fail("nothing to write: the export has no root");
 
   std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
   XcafDocument doc;
@@ -1385,53 +1449,123 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
       XCAFDoc_DocumentTool::ShapeTool(doc->Main());
   Handle(XCAFDoc_ColorTool) colors =
       XCAFDoc_DocumentTool::ColorTool(doc->Main());
+  // Our geometry is in millimetres. Say so on the document and to the
+  // writer, rather than relying on both defaulting to it.
+  XCAFDoc_DocumentTool::SetLengthUnit(doc, 0.001);
+  Interface_Static::SetCVal("write.step.unit", "MM");
 
-  std::vector<TDF_Label> productLabels;
-  for (const auto& p : model.products) {
-    if (!p.shape.IsValid())
-      return false;
-    TDF_Label label = shapes->AddShape(p.shape.GetShape(),
-                                       /*makeAssembly=*/Standard_False);
-    if (!p.name.empty())
-      TDataStd_Name::Set(label, p.name.c_str());
-    if (p.hasColor) {
-      colors->SetColor(
-          label,
-          Quantity_Color(p.color.r, p.color.g, p.color.b, Quantity_TOC_RGB),
-          XCAFDoc_ColorSurf);
+  const auto name = [](const TDF_Label& label, const std::string& n) {
+    if (!n.empty())
+      TDataStd_Name::Set(label, n.c_str());
+  };
+  // Colours are linear, as the shaders light them; OCC's RGB is linear too
+  // and the writer converts to the file's sRGB itself.
+  const auto paint = [&](const TDF_Label& label,
+                         const std::optional<glm::vec3>& c) {
+    if (c)
+      colors->SetColor(label,
+                       Quantity_Color(c->r, c->g, c->b, Quantity_TOC_RGB),
+                       XCAFDoc_ColorSurf);
+  };
+  const auto bodyLabel = [&](const StepBody& b) {
+    TopoDS_Shape shape = b.shape.GetShape();
+    // XCAF makes a LOCATED shape an assembly of one placed component, again
+    // anonymous ("SOLID"). A body's location is where it sits in its part,
+    // which is exactly what the product must hold: bake it into the geometry.
+    if (!shape.Location().IsIdentity()) {
+      BRepBuilderAPI_Transform bake(shape.Located(TopLoc_Location()),
+                                    shape.Location().Transformation(),
+                                    /*copy=*/Standard_True);
+      if (bake.IsDone())
+        shape = bake.Shape();
     }
-    productLabels.push_back(label);
+    TDF_Label label = shapes->AddShape(shape, /*makeAssembly=*/Standard_False);
+    name(label, b.name);
+    paint(label, b.color);
+    return label;
+  };
+
+  // Parts first: every placement below refers to one of these labels.
+  std::vector<TDF_Label> partLabels;
+  for (const StepPart& part : model.parts) {
+    if (part.bodies.empty())
+      return fail("part \"" + part.name + "\" has no bodies to write");
+    for (const StepBody& b : part.bodies)
+      if (!b.shape.IsValid())
+        return fail("part \"" + part.name + "\" has an invalid body");
+    TDF_Label label;
+    if (part.bodies.size() == 1) {
+      label = bodyLabel(part.bodies.front());
+      name(label, part.name);
+    } else {
+      label = shapes->NewShape();
+      name(label, part.name);
+      for (const StepBody& b : part.bodies) {
+        const TDF_Label comp =
+            shapes->AddComponent(label, bodyLabel(b), TopLoc_Location());
+        name(comp, b.name);
+      }
+    }
+    partLabels.push_back(label);
   }
 
-  TDF_Label assembly = shapes->NewShape();
-  if (!assemblyName.empty())
-    TDataStd_Name::Set(assembly, assemblyName.c_str());
-  for (const auto& inst : model.instances) {
-    if (inst.product >= productLabels.size())
+  // Assemblies on demand, children before parents; a model built from a tree
+  // has no cycle, and `building` refuses one that does rather than recursing
+  // forever.
+  std::vector<TDF_Label> asmLabels(model.assemblies.size());
+  std::vector<char> built(model.assemblies.size(), 0);
+  std::string why;
+  std::function<bool(size_t)> build = [&](size_t ai) -> bool {
+    if (built[ai] == 2)
+      return true;
+    if (built[ai] == 1) {
+      why = "assembly \"" + model.assemblies[ai].name + "\" contains itself";
       return false;
-    gp_Trsf t;
-    try {
-      const glm::mat4& m = inst.transform;
-      t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
-                  m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
-    } catch (const Standard_Failure&) {
-      return false; // sheared transform: not representable in STEP
     }
-    TDF_Label comp = shapes->AddComponent(assembly, productLabels[inst.product],
-                                          TopLoc_Location(t));
-    if (!inst.name.empty())
-      TDataStd_Name::Set(comp, inst.name.c_str());
-  }
+    built[ai] = 1;
+    const StepAssembly& a = model.assemblies[ai];
+    for (const StepComponent& c : a.components) {
+      if (c.isAssembly ? c.index >= model.assemblies.size()
+                       : c.index >= model.parts.size()) {
+        why = "assembly \"" + a.name + "\" refers past the end of the model";
+        return false;
+      }
+      if (c.isAssembly && !build(c.index))
+        return false;
+    }
+    TDF_Label label = shapes->NewShape();
+    name(label, a.name);
+    for (const StepComponent& c : a.components) {
+      const std::optional<gp_Trsf> t = RigidTrsf(c.local);
+      if (!t) {
+        why =
+            "\"" + c.name + "\" in \"" + a.name + "\" is not a rigid placement";
+        return false;
+      }
+      const TDF_Label comp = shapes->AddComponent(
+          label, c.isAssembly ? asmLabels[c.index] : partLabels[c.index],
+          TopLoc_Location(*t));
+      name(comp, c.name);
+    }
+    asmLabels[ai] = label;
+    built[ai] = 2;
+    return true;
+  };
+  if (model.rootIsAssembly && !build(model.root))
+    return fail(why);
   shapes->UpdateAssemblies();
 
   STEPCAFControl_Writer writer;
   try {
     if (!writer.Transfer(doc, STEPControl_AsIs))
-      return false;
-    return writer.Write(filename.c_str()) == IFSelect_RetDone;
-  } catch (const Standard_Failure&) {
-    return false;
+      return fail("the STEP translator refused the model");
+    if (writer.Write(filename.c_str()) != IFSelect_RetDone)
+      return fail("could not write " + filename);
+  } catch (const Standard_Failure& e) {
+    return fail(std::string("the STEP translator failed: ") +
+                e.GetMessageString());
   }
+  return true;
 }
 
 // Helper functions

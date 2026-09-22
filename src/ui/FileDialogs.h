@@ -22,8 +22,14 @@ void SaveProjectDialog(AppState& state);
 // first save falls through to the Save As dialog.
 void SaveProjectAction(AppState& state);
 // Export the whole document; format chosen by the chosen file's extension
-// (.step/.stp, .stl, .brep). No-op without NFD.
+// (.step/.stp, .stl, .brep, .glb/.gltf/.obj/.ply). No-op without NFD.
 void ExportDialog(AppState& state);
+// What Export does once it has a path, without the dialog — so it can be
+// driven where a native dialog cannot open (tests, a container). STEP and the
+// visual formats work on a part or an assembly tab; STL/BREP on a part only.
+// Refuses an extension it does not write, naming the ones it does.
+bool ExportActiveDocument(AppState& state, const std::string& path,
+                          std::string* error = nullptr);
 // Export the active assembly's bill of materials as CSV (A4). No-op without
 // NFD or an active assembly.
 void ExportBomDialog(AppState& state);

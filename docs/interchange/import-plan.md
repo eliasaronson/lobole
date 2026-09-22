@@ -105,7 +105,10 @@ a pile of shapes.
   (2 parts, 3 occurrences, rotations), export STEP (X2 XCAF writer), import
   into a fresh project: assert part count, occurrence transforms (to
   tolerance), volumes, names. This tests both directions at once and needs
-  no binary fixtures.
+  no binary fixtures. (2026-09-22: the tests were built on
+  `SaveSTEPStructured`, which no export path called; since X4,
+  docs/interchange/step-export-plan.md, `export_step` itself writes named
+  products and placed instances.)
 
 ## I3 — Onshape parametric import (2–3 sessions, own mini-workstream)
 

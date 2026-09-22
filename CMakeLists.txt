@@ -710,6 +710,8 @@ set(app_sources
     src/ui/SketchOverlay.cpp
     src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp
+    src/ui/BodyAppearance.cpp
+    src/ui/StepExport.cpp
     src/ui/Bom.cpp
     src/ui/MateActions.cpp
     src/ui/GizmoInput.cpp

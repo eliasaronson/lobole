@@ -165,7 +165,10 @@ Files: `src/remote/RemoteInspection.cpp` (+ its `MethodDoc` row),
   programmed from, and it is not the cut list's shape.
 * `export_step {path, members: true}` — one solid per member, named by the
   member id, which is what a tube laser takes. `export_step` already takes a
-  `body`; this is the batch a forty-member frame needs.
+  `body`; this is the batch a forty-member frame needs. (2026-09-22: it
+  shipped as `export_members {dir}`, docs/chassis-shop-plan.md S2, and each
+  file holds one product named after its member since X4,
+  docs/interchange/step-export-plan.md.)
 * Stock packing: `cut_list` reports how many six-metre sticks the frame needs
   and what falls off the end, because "how many do I buy" is the question a
   cut list exists to answer. First-fit decreasing over the stocked length,
@@ -250,7 +253,8 @@ chassis reports 63 of them.
 
 **Members are not exported one STEP file per member yet.** `export_step`
 takes a `body`, so a generator loops; the batch a forty-member frame wants is
-a convenience, not a capability.
+a convenience, not a capability. (2026-09-22: superseded — the convenience
+is `export_members {dir}`, docs/chassis-shop-plan.md S2.)
 
 **`contact_report` is still slow on a frame.** An oriented-box prefilter took
 the chassis from 84.5 s to 68.7 s, and what is left is 100 pairs of fuzzy

@@ -621,6 +621,9 @@ task above T3 is for: `export_step` REFUSED on an assembly tab ("switch to a
 part tab"), so the one document kind a customer asks for could not be
 exported to the interchange format at all — only as a mesh. It now walks the
 occurrences at their solved placements, the same walk `export_visual` uses.
+(2026-09-22: it wrote them as a flat pile of anonymous solids; since X4,
+docs/interchange/step-export-plan.md, each part is one named product placed
+per occurrence, with sub-assemblies nested.)
 
 The reference build also had to be rewritten onto NAMED FRAMES (G0): mated
 origin-to-origin, all three parts stack on the crank axis, and the bbox check

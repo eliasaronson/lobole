@@ -49,6 +49,7 @@
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SketchRenderer.h"
+#include "ui/BodyAppearance.h"
 
 #include "core/features/DraftFeature.h"
 #include "core/features/LoftFeature.h"
@@ -308,33 +309,12 @@ void SyncDocumentRenderers(AppState& state) {
     uploadMs += msSince(uploadStart);
     // Albedo is per-instance state (not baked into vertices): palette color
     // by default; a body with an assigned material overrides it with the
-    // material's base color and real PBR params.
-    glm::vec3 albedo = body.hasDisplayColor
-                           ? body.displayColor
-                           : kBodyPalette[palette++ % std::size(kBodyPalette)];
+    // material's base color and real PBR params (ui/BodyAppearance.h).
+    const BodyLook look = ResolveBodyLook(body, palette);
+    glm::vec3 albedo = look.palette;
     state.meshRenderer->SetMeshColor(meshId, albedo);
-    // Resolve order: appearance > material > displayColor > palette. The
-    // override edits the CPU-resolved params, so the 128-byte push constant
-    // never grows (the appearance-plan constraint).
-    if (!body.material.empty() || body.appearance.Any()) {
-      CADMaterials::MaterialProperties mat =
-          CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
-      if (body.material.empty()) {
-        // No physical material: a neutral dielectric carrying the palette
-        // color, so a color-only override doesn't inherit DEFAULT's metal.
-        mat.baseColor = albedo;
-        mat.metallic = 0.0f;
-        mat.roughness = 0.6f;
-        mat.specular = 0.5f;
-        mat.reflectance = 0.04f;
-        mat.pattern = CADMaterials::SurfacePattern::Flat;
-      }
-      if (body.appearance.color)
-        mat.baseColor = *body.appearance.color;
-      if (body.appearance.roughness)
-        mat.roughness = *body.appearance.roughness;
-      if (body.appearance.metallic)
-        mat.metallic = *body.appearance.metallic;
+    if (look.hasMaterial) {
+      const CADMaterials::MaterialProperties& mat = look.mat;
       state.meshRenderer->SetMeshMaterial(meshId, mat.baseColor,
                                           glm::vec4(mat.metallic, mat.roughness,
                                                     mat.specular,
@@ -1194,31 +1174,14 @@ void SyncAssemblyRenderers(AppState& state) {
           shared.push_back(std::move(sb)); // keep index alignment
           continue;
         }
-        sb.palette = body.hasDisplayColor
-                         ? body.displayColor
-                         : kBodyPalette[palette++ % std::size(kBodyPalette)];
+        // Resolve order: appearance > material > displayColor > palette
+        // (ui/BodyAppearance.h — the part-tab loop and the exports share it).
+        const BodyLook look = ResolveBodyLook(body, palette);
+        sb.palette = look.palette;
         if (state.outlineRenderer)
           OutlineAssetFor(state, *sb.tess);
-        // Resolve order: appearance > material > displayColor > palette
-        // (same merge as the part-tab draw loop, SyncDocumentRenderers above).
-        if (!body.material.empty() || body.appearance.Any()) {
-          CADMaterials::MaterialProperties mat =
-              CADMaterials::MaterialLibrary::GetMaterialOrDefault(
-                  body.material);
-          if (body.material.empty()) {
-            mat.baseColor = sb.palette;
-            mat.metallic = 0.0f;
-            mat.roughness = 0.6f;
-            mat.specular = 0.5f;
-            mat.reflectance = 0.04f;
-            mat.pattern = CADMaterials::SurfacePattern::Flat;
-          }
-          if (body.appearance.color)
-            mat.baseColor = *body.appearance.color;
-          if (body.appearance.roughness)
-            mat.roughness = *body.appearance.roughness;
-          if (body.appearance.metallic)
-            mat.metallic = *body.appearance.metallic;
+        if (look.hasMaterial) {
+          const CADMaterials::MaterialProperties& mat = look.mat;
           sb.hasMaterial = true;
           sb.albedo = mat.baseColor;
           sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,

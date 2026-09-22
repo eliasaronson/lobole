@@ -3,6 +3,7 @@
 #include "core/Measure.h"
 #include "remote/InspectionContracts.h"
 #include "ui/AssemblyActions.h"
+#include "ui/StepExport.h"
 #include <set>
 
 #include "cad/CADKernel.h"
@@ -93,11 +94,15 @@ static constexpr MethodDoc ProjectMethods[] = {
      "as_assembly, keep_origin, path, units",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
-     "Export to STEP {path}: the active part (or {part}), or — on an "
-     "assembly tab — every occurrence at its SOLVED placement. `deflection` is "
-     "the tessellation chord tolerance in MILLIMETRES (smaller = finer, more "
-     "triangles); STEP and BREP are exact solids and ignore it.",
-     "body, deflection, path", remote::NotInBatch},
+     "Export to STEP {path}: the active part (or {part}, from any tab), or — "
+     "on an assembly tab — the assembly at its SOLVED placements. The file "
+     "carries product structure: each part is ONE named, coloured product "
+     "placed once per occurrence, each sub-assembly a nested assembly, each "
+     "body of a multi-body part its own named product; millimetres. {body} "
+     "exports one body of a part. Replies {bodies} (part) or {shapes} "
+     "(assembly) — placed body shapes — plus {products} and {instances}. "
+     "`deflection` is ignored: STEP is exact.",
+     "body, deflection, part, path", remote::NotInBatch},
     {"export_stl",
      "Export to STL {path, deflection?}. `deflection` is the tessellation "
      "chord tolerance in MILLIMETRES (smaller = finer, more triangles); STEP "
@@ -1181,16 +1186,27 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // "export the assembly" refusing with "switch to a part tab" made the
     // one document kind a customer actually asks for unexportable except as
     // a mesh (found by the T4 benchmark task, agent-scale plan G6).
-    if (state.assembly && m == "export_step") {
-      std::vector<CADShape> shapes;
-      for (const MeshExport::Item& item : ui::BuildVisualExportItems(state))
-        shapes.push_back(item.shape.Transformed(item.transform));
-      if (shapes.empty())
+    // STEP goes through ui::ExportStep (X4): named, coloured products placed
+    // by reference, nested as the assembly is.
+    if (m == "export_step") {
+      const bool onAssembly = state.assembly && !p.contains("part");
+      Document* target = p.contains("part")
+                             ? remote::ResolvePartParam(state, p.at("part"))
+                             : doc;
+      if (!onAssembly && target == nullptr)
         throw std::runtime_error(
-            "nothing to export: the assembly places no visible geometry");
-      if (!CADKernel::Instance().SaveSTEP(path, shapes))
-        throw std::runtime_error("STEP export failed writing " + path);
-      return json{{"path", path}, {"shapes", shapes.size()}};
+            "no part to export: switch to a part tab or pass `part`");
+      const auto counts = ui::ExportStep(state, onAssembly ? nullptr : target,
+                                         p.value("body", -1), path);
+      if (!counts)
+        throw std::runtime_error(counts.error());
+      json out{{"path", path},
+               {"products", counts->products},
+               {"instances", counts->instances}};
+      // `bodies` for a part, `shapes` for an assembly: the counts each reply
+      // has always carried, so a caller reading either keeps working.
+      out[onAssembly ? "shapes" : "bodies"] = counts->bodies;
+      return out;
     }
     // Derived reference bodies are other parts' geometry: never exported.
     // `body` indexes the document's body list as get_state reports it.
@@ -1209,13 +1225,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
 
     auto& kernel = CADKernel::Instance();
     bool ok = false;
-    if (m == "export_step") {
-      std::vector<CADShape> shapes;
-      for (size_t i = 0; i < bodies.size(); i++)
-        if (only < 0 || i == static_cast<size_t>(only))
-          shapes.push_back(bodies[i].shape);
-      ok = kernel.SaveSTEP(path, shapes);
-    } else {
+    {
       // STL/BREP are single-shape; a whole-document export of several bodies
       // fuses them (the usual CAD behavior) so one file holds the whole part.
       CADShape shape;

@@ -38,6 +38,7 @@ struct FlattenCtx {
   std::vector<uint64_t> stack; // assembly slot ids on the current path
   std::vector<std::string> names;
   std::vector<uint64_t> ids; // occurrence ids below the root, current path
+  std::vector<FlatInstance::Level> levels; // sub-assembly placements, path
   std::vector<FlatInstance> out;
   std::string error;
 };
@@ -64,6 +65,8 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
   }
   ctx.stack.push_back(occ.partId);
   ctx.names.push_back(occ.name);
+  ctx.levels.push_back(
+      {occ.id, occ.partId, occ.configurationId, PlacementOf(occ), occ.name});
   // Not the root itself: the chain records what is INSIDE it.
   if (!ctx.names.empty() && ctx.names.size() > 1)
     ctx.ids.push_back(occ.id);
@@ -71,6 +74,7 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
   // Gangways, one "short", one "long", from one document.
   const bool ok = FlattenInto(ctx, *sub, world, rootOccurrenceId, visible,
                               depth + 1, occ.configurationId);
+  ctx.levels.pop_back();
   ctx.names.pop_back();
   ctx.stack.pop_back();
   if (!ctx.ids.empty() && ctx.names.size() >= 1)
@@ -123,6 +127,10 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     if (!ctx.names.empty())
       fi.innerIds.push_back(occ.id); // the leaf's own id inside its parent
     fi.visible = visible;
+    fi.levels = ctx.levels;
+    fi.occurrenceId = occ.id;
+    fi.local = PlacementOf(occ);
+    fi.name = occ.name;
     ctx.out.push_back(std::move(fi));
   }
   return true;
@@ -132,7 +140,7 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
 std::expected<std::vector<FlatInstance>, std::string>
 Flatten(const AssemblyDocument& top, const PartResolver& partById,
         const AssemblyResolver& asmById, int maxDepth) {
-  FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}, {}};
+  FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}, {}, {}};
   // The top itself uses its own active configuration (nobody placed it).
   if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0, 0))
     return std::unexpected(ctx.error);

@@ -58,10 +58,16 @@ finish or general-tolerance field. All deferred together in
 `docs/drawings/plan.md` on the grounds that assembly drawings should mature
 first — they have, across four dogfoods since.
 
-**STEP goes out naked.** `CADKernel::SaveSTEP` is a bare `STEPControl_Writer`
-loop: no names, no colours, no assembly structure, no PMI. The IMPORT side
-already uses XCAF, so the app reads more than it writes. This is the cheapest
-item in this file by a wide margin.
+**STEP carries no PMI.** Since X4
+([interchange/step-export-plan.md](interchange/step-export-plan.md)),
+`export_step` and File → Export write through XCAF: each part is one named
+product placed once per occurrence, sub-assemblies are nested STEP
+assemblies, every body carries the colour the viewport shows, and the unit is
+written as millimetres. What still does not go out is manufacturing
+information — no AP242 GD&T, no tolerances (the ones `docs/tolerances/`
+records stay in the app) — and an occurrence cannot pick its part's
+configuration, so every occurrence exports the part as its document's active
+configuration.
 
 **A bought part loses its name on import** (`docs/modeling/derived-*`), so a
 BOM cannot name a vendor part.
