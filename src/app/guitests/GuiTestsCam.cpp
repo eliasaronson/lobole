@@ -1786,7 +1786,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemOpen("###cam_fixtures");
     ctx->Yield(2);
 
-    ctx->ItemClick("**/###cam_fixture_box");
+    ctx->ItemClick("**/###cam_fixture_add_menu");
+    ctx->Yield(2);
+    ctx->ItemClick("//$FOCUSED/###cam_fixture_box");
     ctx->Yield(2);
     const auto live = [&]() -> cam::Setup& { return *Job()->FindSetup(sid); };
     IM_CHECK_EQ(live().fixtures.size(), (size_t)1);
@@ -2205,6 +2207,71 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!after.empty());
   };
 
+  // docs/cam/job-panel-add-menus-plan.md: one Add menu per section, and
+  // each offers what it should. The part menu lists the project parts the
+  // job does not hold; the fixture menu lists the box and the same parts,
+  // and says when nothing holds the stock.
+  t = IM_REGISTER_TEST(engine, "cam", "add_menus_offer_the_right_parts");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    ui::AddPart(*s_App, "Spacer");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Blk", glm::vec3(0, 0, 0), 20, 20, 12));
+    const size_t jaw = ui::AddPart(*s_App, "Vise jaw");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Jaw", glm::vec3(0, 0, 0), 80, 10, 25));
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    cam::Setup& made = MakeJob()->AddSetup("Sheet");
+    const uint64_t sid = made.id;
+    s_App->camActiveSetup = sid;
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_parts");
+    ctx->ItemOpen("###cam_fixtures");
+    ctx->Yield(2);
+
+    // The two parts the job does not hold, and not the one it does.
+    const auto menuCount = [&](const char* button, const char* item) {
+      ctx->SetRef("//CAM###CamPanel");
+      ctx->ItemClick((std::string("**/") + button).c_str());
+      ctx->Yield(2);
+      ImGuiTestItemList items;
+      ctx->GatherItems(&items, "//$FOCUSED", 2);
+      int n = 0;
+      for (int i = 0; i < items.GetSize(); i++)
+        if (std::strstr(items[i]->DebugLabel, item) != nullptr)
+          n++;
+      ctx->KeyPress(ImGuiKey_Escape);
+      ctx->Yield(2);
+      return n;
+    };
+    IM_CHECK_EQ(menuCount("###cam_part_add_menu", "###cam_part_add"), 2);
+    IM_CHECK_EQ(menuCount("###cam_fixture_add_menu", "###cam_fixture_add"), 2);
+
+    // Hold it with the jaw, from the menu's part group.
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("**/###cam_fixture_add_menu");
+    ctx->Yield(2);
+    ctx->ItemClick(("//$FOCUSED/$$" +
+                    std::to_string(static_cast<int>(s_App->parts[jaw].id)) +
+                    "/###cam_fixture_add")
+                       .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(sid)->fixtures.size(), (size_t)1);
+    IM_CHECK(Job()->FindSetup(sid)->fixtures[0].name == "Vise jaw");
+  };
+
   // A job holds more than one part, and you can say so by clicking. Until
   // this section existed the only door was the RPC, which by this project's
   // own rule makes a feature half-built.
@@ -2221,7 +2288,6 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
-    (void)second;
 
     cam::Setup& setup = MakeJob()->AddSetup("Sheet");
     s_App->camActiveSetup = setup.id;
@@ -2239,8 +2305,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemOpen("###cam_parts");
     ctx->Yield(2);
 
-    // Add the second part by clicking its button.
-    ctx->ItemClick("**/###cam_part_add");
+    // Add the second part from the section's one Add menu.
+    ctx->ItemClick("**/###cam_part_add_menu");
+    ctx->Yield(2);
+    // The popup's items sit under the part's id (PushID), as the op rows do.
+    ctx->ItemClick(("//$FOCUSED/$$" +
+                    std::to_string(static_cast<int>(s_App->parts[second].id)) +
+                    "/###cam_part_add")
+                       .c_str());
     ctx->Yield(2);
     IM_CHECK_EQ(Job()->GetParts().size(), (size_t)2);
 

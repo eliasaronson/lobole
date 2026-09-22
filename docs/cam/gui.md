@@ -484,3 +484,13 @@ cut-out everywhere, and on the helical rolling pin that meant a 3-axis
 contour round the dowel, sectioned inline, which held the frame for two
 minutes. The sectioning itself now runs off the frame as well
 ([long-operations.md](../ui/long-operations.md), phase 6).
+
+**2026-09-22, later still:** Parts and Fixtures each add through **one**
+menu ([job-panel-add-menus-plan.md](job-panel-add-menus-plan.md)). They
+used to have a button per project part: a column under Parts, and a row
+under Fixtures that ran off the panel, offering the same parts again with
+nothing to tell cutting a part from clamping with it. "+ Add fixture" puts
+the keep-out box first and then "Hold it with a part:". An empty Fixtures
+section says that verify checks no clamps. A placed part's verbs (Cut,
+Remove) sit on its name line, and its X, Y and turn share the next line,
+named inside the fields.

@@ -778,6 +778,9 @@ void DrawCamPanel(AppState& state) {
   // more than one part (v74) — four brackets out of one sheet — and until
   // this section existed the only door was the RPC, which makes a feature
   // half-built by this project's own rule.
+  // One name per popup, opened by its button and drawn by BeginPopup.
+  constexpr const char* kPartAddPopup = "###cam_part_add_popup";
+  constexpr const char* kFixtureAddPopup = "###cam_fixture_add_popup";
   if (SectionHeader("Parts###cam_parts")) {
     const std::vector<cam::PlacementFit> fits =
         setup != nullptr ? cam::CheckPlacements(*setup, ui::JobBodies(state))
@@ -796,6 +799,19 @@ void DrawCamPanel(AppState& state) {
       } else {
         ImGui::TextUnformatted(part.name.c_str());
       }
+      // The row's verbs sit on the NAME line and its numbers get a line of
+      // their own: in one row they ran past a 220 px panel, and Cut and
+      // Remove were the part that fell off (docs/cam/job-panel-add-menus-
+      // plan.md).
+      const auto removeButton = [&] {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Remove###cam_part_remove"))
+          removePart = part.id;
+        ImGui::SetItemTooltip("Take this part out of the job (its operations "
+                              "go with it)");
+      };
+      if (setup == nullptr)
+        removeButton();
       if (setup != nullptr) {
         cam::Placement* place = nullptr;
         for (cam::Placement& pl : setup->placements)
@@ -812,28 +828,8 @@ void DrawCamPanel(AppState& state) {
             dirty = true;
           }
           ImGui::SetItemTooltip("Say where this part sits in the stock");
+          removeButton();
         } else {
-          float xy[2] = {static_cast<float>(place->pos.x),
-                         static_cast<float>(place->pos.y)};
-          ImGui::SetNextItemWidth(140.0f);
-          // Through the expression wrapper, like every other numeric field
-          // here: a raw drag reads "10/2" as 10.
-          if (ui::ExprDragFloat2(state, "###cam_place_xy", xy, 0.5f)) {
-            place->pos = {xy[0], xy[1]};
-            state.job->BumpVersion();
-            dirty = true;
-          }
-          ImGui::SetItemTooltip("Where on the stock (X, Y in setup space)");
-          ImGui::SameLine();
-          float rot = static_cast<float>(place->rotZdeg);
-          ImGui::SetNextItemWidth(70.0f);
-          if (ui::ExprDragFloat(state, "###cam_place_rot", &rot, 1.0f, -360.0f,
-                                360.0f, "%.1f°")) {
-            place->rotZdeg = rot;
-            state.job->BumpVersion();
-            dirty = true;
-          }
-          ImGui::SetItemTooltip("Spin under the spindle");
           ImGui::SameLine();
           if (ImGui::Checkbox("Cut###cam_place_on", &place->enabled)) {
             state.job->BumpVersion();
@@ -841,6 +837,45 @@ void DrawCamPanel(AppState& state) {
           }
           ImGui::SetItemTooltip("Off leaves it on the sheet and does not cut "
                                 "it");
+          removeButton();
+          // Through the expression wrapper, like every other numeric field
+          // here: a raw drag reads "10/2" as 10. The axis is named INSIDE
+          // the field ("X 0.000"), so three numbers say what each one is
+          // without a label beside them; typing into one trims the name
+          // (ImParseFormatTrimDecorations). The three share the panel's
+          // width rather than taking a fixed one.
+          const float gap = ImGui::GetStyle().ItemSpacing.x;
+          const float w =
+              std::max(40.0f, (ImGui::GetContentRegionAvail().x - 2 * gap) / 3);
+          float x = static_cast<float>(place->pos.x);
+          float y = static_cast<float>(place->pos.y);
+          ImGui::SetNextItemWidth(w);
+          if (ui::ExprDragFloat(state, "###cam_place_x", &x, 0.5f, 0.0f, 0.0f,
+                                "X %.2f")) {
+            place->pos.x = x;
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Where on the stock, along X (setup space)");
+          ImGui::SameLine();
+          ImGui::SetNextItemWidth(w);
+          if (ui::ExprDragFloat(state, "###cam_place_y", &y, 0.5f, 0.0f, 0.0f,
+                                "Y %.2f")) {
+            place->pos.y = y;
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Where on the stock, along Y (setup space)");
+          ImGui::SameLine();
+          float rot = static_cast<float>(place->rotZdeg);
+          ImGui::SetNextItemWidth(w);
+          if (ui::ExprDragFloat(state, "###cam_place_rot", &rot, 1.0f, -360.0f,
+                                360.0f, "%.1f°")) {
+            place->rotZdeg = rot;
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Turn: spin the part under the spindle");
           for (const cam::PlacementFit& f : fits) {
             if (f.placementId != place->id)
               continue;
@@ -858,11 +893,6 @@ void DrawCamPanel(AppState& state) {
           }
         }
       }
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Remove###cam_part_remove"))
-        removePart = part.id;
-      ImGui::SetItemTooltip("Take this part out of the job (its operations go "
-                            "with it)");
       ImGui::PopID();
     }
     if (removePart != 0) {
@@ -870,25 +900,43 @@ void DrawCamPanel(AppState& state) {
       state.job->BumpVersion();
       dirty = true;
     }
-    // Every part of the project this job does not already hold. Buttons, not
-    // a combo: an ImGui combo gathers with an empty label and cannot be
-    // gated by a GUI test (docs/cam/stock-and-origin.md W6).
+    // Every part of the project this job does not already hold, behind ONE
+    // button. A button per part was a column as long as the project, and
+    // Fixtures offered the same parts again for a different purpose with
+    // nothing to tell the two apart (docs/cam/job-panel-add-menus-plan.md).
+    // A popup, not a combo: an ImGui combo gathers with an empty label and
+    // cannot be gated by a GUI test (docs/cam/stock-and-origin.md W6).
+    std::vector<const ui::PartSlot*> addable;
     for (const ui::PartSlot& slot : state.parts) {
       if (slot.kind != ui::DocKind::Part)
         continue;
       bool held = false;
       for (const cam::JobPart& part : state.job->GetParts())
         held = held || part.sourceDocId == slot.id;
-      if (held)
-        continue;
-      ImGui::PushID(static_cast<int>(slot.id));
-      if (ImGui::SmallButton(
-              ("Add " + slot.name + "###cam_part_add").c_str())) {
-        state.job->AddPart(slot.id, slot.name);
-        state.job->BumpVersion();
-        dirty = true;
+      if (!held)
+        addable.push_back(&slot);
+    }
+    ImGui::BeginDisabled(addable.empty());
+    if (ImGui::SmallButton(ICON_FA_PLUS " Add part###cam_part_add_menu"))
+      ImGui::OpenPopup(kPartAddPopup);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip(addable.empty()
+                            ? "Every part in this project is already in the job"
+                            : "Cut another part of this project in this job");
+    if (ImGui::BeginPopup(kPartAddPopup)) {
+      for (const ui::PartSlot* slot : addable) {
+        ImGui::PushID(static_cast<int>(slot->id));
+        if (ImGui::MenuItem((slot->name + "###cam_part_add").c_str())) {
+          state.job->AddPart(slot->id, slot->name);
+          state.job->BumpVersion();
+          dirty = true;
+        }
+        ImGui::SetItemTooltip("Cut it: place it in the stock and give it "
+                              "operations");
+        ImGui::PopID();
       }
-      ImGui::PopID();
+      ImGui::EndPopup();
     }
   }
 
@@ -954,6 +1002,14 @@ void DrawCamPanel(AppState& state) {
       if (res.doubleClicked)
         EditCamFixture(state, f.id);
     }
+    if (setup->fixtures.empty()) {
+      // Said, not left blank: an empty list here means verify is checking
+      // the cutter against no workholding at all.
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextDisabled("Nothing holds the stock -- verify checks no "
+                          "clamps.");
+      ImGui::PopTextWrapPos();
+    }
     if (removeFixture != 0) {
       std::erase_if(setup->fixtures, [removeFixture](const cam::Fixture& f) {
         return f.id == removeFixture;
@@ -976,34 +1032,49 @@ void DrawCamPanel(AppState& state) {
       setup->fixtures.push_back(f);
       changedFixtures = true;
     };
-    if (ImGui::SmallButton(ICON_FA_BOX " Keep-out box###cam_fixture_box")) {
-      cam::Fixture f;
-      f.box = cam::DefaultKeepOutBox(*setup, ui::JobBodies(state));
-      f.name = "Clamp " + std::to_string(setup->fixtures.size() + 1);
-      add(f);
-    }
-    ImGui::SetItemTooltip("A box the tool must keep out of -- a clamp, this "
-                          "big, here. No part needed.");
-    for (const ui::PartSlot& slot : state.parts) {
-      if (slot.kind != ui::DocKind::Part)
-        continue;
-      bool cut = false;
-      for (const cam::JobPart& part : state.job->GetParts())
-        cut = cut || part.sourceDocId == slot.id;
-      if (cut)
-        continue;
-      ImGui::PushID(static_cast<int>(slot.id));
-      ImGui::SameLine();
-      if (ImGui::SmallButton(
-              (ICON_FA_LOCK " " + slot.name + "###cam_fixture_add").c_str())) {
+    // One button and a menu, as Parts has: a SameLine button per part ran
+    // off the panel on a project of any size, and read as rows of fixtures
+    // that did not exist (docs/cam/job-panel-add-menus-plan.md).
+    if (ImGui::SmallButton(ICON_FA_PLUS " Add fixture###cam_fixture_add_menu"))
+      ImGui::OpenPopup(kFixtureAddPopup);
+    ImGui::SetItemTooltip("What holds the stock. Verify reports every move of "
+                          "the cutter or holder into it.");
+    if (ImGui::BeginPopup(kFixtureAddPopup)) {
+      if (ImGui::MenuItem(ICON_FA_BOX " Keep-out box###cam_fixture_box")) {
         cam::Fixture f;
-        f.sourceDocId = slot.id;
-        f.name = slot.name;
+        f.box = cam::DefaultKeepOutBox(*setup, ui::JobBodies(state));
+        f.name = "Clamp " + std::to_string(setup->fixtures.size() + 1);
         add(f);
       }
-      ImGui::SetItemTooltip("Hold the stock with this part: placed against "
-                            "the stock, never cut, checked against the tool");
-      ImGui::PopID();
+      ImGui::SetItemTooltip("A box the tool must keep out of -- a clamp, this "
+                            "big, here. No part needed.");
+      bool heading = false;
+      for (const ui::PartSlot& slot : state.parts) {
+        if (slot.kind != ui::DocKind::Part)
+          continue;
+        bool cut = false;
+        for (const cam::JobPart& part : state.job->GetParts())
+          cut = cut || part.sourceDocId == slot.id;
+        if (cut)
+          continue;
+        if (!heading) {
+          ImGui::Separator();
+          ImGui::TextDisabled("Hold it with a part:");
+          heading = true;
+        }
+        ImGui::PushID(static_cast<int>(slot.id));
+        if (ImGui::MenuItem((slot.name + "###cam_fixture_add").c_str())) {
+          cam::Fixture f;
+          f.sourceDocId = slot.id;
+          f.name = slot.name;
+          add(f);
+        }
+        ImGui::SetItemTooltip("Hold the stock with this part: placed against "
+                              "the stock, never cut, checked against the "
+                              "tool");
+        ImGui::PopID();
+      }
+      ImGui::EndPopup();
     }
     ImGui::PopID(); // "fixtures"
     if (changedFixtures)
