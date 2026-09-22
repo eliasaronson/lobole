@@ -5,7 +5,9 @@
 
 #include <glm/glm.hpp>
 
+#include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // What a CLICK on the model means to CAM: a face, and the region or contour
@@ -98,6 +100,54 @@ struct WallContour {
 [[nodiscard]] std::vector<std::vector<Loop>>
 ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
                   const std::vector<double>& passes, double deflection = 0.02);
+
+// --- projected outlines off the frame (docs/ui/long-operations.md) --------
+//
+// The expensive half of a profile: one OCC section per depth pass, which on
+// a 300 mm helically fluted pin is seconds EACH and froze the frame for two
+// minutes (docs/cam/add-operation-plan.md). Deferred at this call rather
+// than around the whole operation because the call is a pure function of
+// the geometry and three plain values -- so its key hashes every argument
+// and is complete by construction, where a key around `GenerateProfile`
+// would have to name every field a profile reads.
+struct OutlineRequest {
+  uint64_t key = 0;
+  std::vector<Body> bodies; // already framed, as the profile wants them
+  double topZ = 0.0;
+  std::vector<double> passes;
+  double deflection = 0.02;
+};
+
+struct OutlineResult {
+  std::vector<std::vector<Loop>> outlines; // one entry per pass
+};
+
+// `bodiesKey` is the caller's fingerprint of the geometry, as for surfacing
+// (`JobRenderVersion`); the rest are ProjectedOutlines' own arguments.
+[[nodiscard]] uint64_t OutlineKey(uint64_t bodiesKey, double topZ,
+                                  const std::vector<double>& passes,
+                                  double deflection);
+
+// The same projection, from a request -- the form a worker thread calls.
+[[nodiscard]] OutlineResult OutlinePass(const OutlineRequest& request);
+
+// Results by key, bounded like the other two caches. An entry is a few
+// thousand points per pass, so the count is the only bound it needs.
+class OutlineCache {
+public:
+  [[nodiscard]] const OutlineResult* Find(uint64_t key);
+  void Put(uint64_t key, OutlineResult result);
+  [[nodiscard]] bool Contains(uint64_t key) const;
+  [[nodiscard]] size_t Size() const { return m_entries.size(); }
+  void Clear();
+  size_t hits = 0;
+  size_t misses = 0;
+
+private:
+  static constexpr size_t kMaxEntries = 64;
+  std::unordered_map<uint64_t, OutlineResult> m_entries;
+  std::deque<uint64_t> m_order;
+};
 
 // What a click on a face of ANY orientation means for a finishing pass: the
 // region to stay inside, as its SILHOUETTE in XY (docs/cam/surfacing.md).

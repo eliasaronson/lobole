@@ -628,6 +628,73 @@ ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
   return out;
 }
 
+uint64_t OutlineKey(uint64_t bodiesKey, double topZ,
+                    const std::vector<double>& passes, double deflection) {
+  // Every argument ProjectedOutlines takes, and nothing else: the function
+  // is pure, so this is complete by construction and needs no gate.
+  uint64_t h = 1469598103934665603ULL;
+  const auto bytes = [&h](const void* p, size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; i++) {
+      h ^= c[i];
+      h *= 1099511628211ULL;
+    }
+  };
+  bytes(&bodiesKey, sizeof bodiesKey);
+  bytes(&topZ, sizeof topZ);
+  bytes(&deflection, sizeof deflection);
+  const uint64_t count = passes.size();
+  bytes(&count, sizeof count);
+  for (const double z : passes)
+    bytes(&z, sizeof z);
+  return h;
+}
+
+OutlineResult OutlinePass(const OutlineRequest& request) {
+  // The worker's form. Thread-safe for the reason the surfacing pass is:
+  // the sections go through Measure::SectionCaps, whose booleans are built
+  // non-destructive (BuildQuery), so nothing is written onto a shape the
+  // frame may be reading.
+  OutlineResult out;
+  out.outlines = ProjectedOutlines(request.bodies, request.topZ, request.passes,
+                                   request.deflection);
+  return out;
+}
+
+const OutlineResult* OutlineCache::Find(uint64_t key) {
+  const auto it = m_entries.find(key);
+  if (it == m_entries.end()) {
+    misses++;
+    return nullptr;
+  }
+  hits++;
+  return &it->second;
+}
+
+bool OutlineCache::Contains(uint64_t key) const {
+  return m_entries.find(key) != m_entries.end();
+}
+
+void OutlineCache::Put(uint64_t key, OutlineResult result) {
+  if (const auto it = m_entries.find(key); it != m_entries.end()) {
+    it->second = std::move(result);
+    return;
+  }
+  m_entries.emplace(key, std::move(result));
+  m_order.push_back(key);
+  while (m_entries.size() > kMaxEntries) {
+    m_entries.erase(m_order.front());
+    m_order.pop_front();
+  }
+}
+
+void OutlineCache::Clear() {
+  m_entries.clear();
+  m_order.clear();
+  hits = 0;
+  misses = 0;
+}
+
 std::vector<double> DepthPasses(const Operation& op) {
   std::vector<double> zs;
   const double top = op.topZ;

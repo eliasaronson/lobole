@@ -14,6 +14,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
@@ -191,8 +192,50 @@ std::vector<glm::dvec2> AddCornerRelief(const std::vector<glm::dvec2>& pts,
                                         CornerRelief style,
                                         std::vector<glm::dvec2>* corners);
 
+// ProjectedOutlines, from the context's cache, from a worker later, or right
+// here -- the same three-way surfacing has (docs/cam/add-operation-plan.md).
+// Empty when deferred, and `tp` is then pending: a profile has nothing to
+// follow until its outlines land.
+std::optional<std::vector<std::vector<Loop>>>
+OutlinesThroughCache(const std::vector<Body>& bodies, double topZ,
+                     const std::vector<double>& passes, Toolpath& tp,
+                     GenerateContext* ctx) {
+  constexpr double kDeflection = 0.02;
+  const bool cached =
+      ctx != nullptr && ctx->outlineCache != nullptr && ctx->bodiesKey != 0;
+  if (!cached)
+    return ProjectedOutlines(bodies, topZ, passes, kDeflection);
+  const uint64_t key = OutlineKey(ctx->bodiesKey, topZ, passes, kDeflection);
+  if (const OutlineResult* hit = ctx->outlineCache->Find(key))
+    return hit->outlines;
+  OutlineRequest req;
+  req.key = key;
+  req.bodies = bodies;
+  req.topZ = topZ;
+  req.passes = passes;
+  req.deflection = kDeflection;
+  if (ctx->defer) {
+    // The worker gets shapes nobody else holds. Its booleans are
+    // non-destructive, but the frame may MESH these bodies while it reads
+    // them, and a triangulation is written onto the shared TShape -- the
+    // race GenerateMeshDetached exists for. Copied HERE, on the thread that
+    // owns the originals, so not even the copy reads them concurrently.
+    for (Body& b : req.bodies)
+      if (b.shape.IsValid())
+        b.shape = CADShape(BRepBuilderAPI_Copy(b.shape.GetShape()).Shape());
+    ctx->pendingOutline.push_back(std::move(req));
+    tp.pending = true;
+    return std::nullopt;
+  }
+  OutlineResult r = OutlinePass(req);
+  std::vector<std::vector<Loop>> out = r.outlines;
+  ctx->outlineCache->Put(key, std::move(r));
+  return out;
+}
+
 void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
-                     const std::vector<Body>& bodies, Toolpath& tp) {
+                     const std::vector<Body>& bodies, Toolpath& tp,
+                     GenerateContext* ctx) {
   // Above this there can be no material, so it is the lowest height an entry
   // may RAPID to; below it the descent feeds (EmitDescent).
   glm::dvec3 stockLo(0.0), stockHi(0.0);
@@ -283,8 +326,11 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // The outline the cutter may follow at each depth: the part's projection
   // from the operation's top down to that pass, NOT its cross-section there
   // (ProjectedOutlines, and docs/known-bugs.md for the gouge that is).
-  const std::vector<std::vector<Loop>> projected =
-      ProjectedOutlines(bodies, op.topZ, passes);
+  const std::optional<std::vector<std::vector<Loop>>> projectedOr =
+      OutlinesThroughCache(bodies, op.topZ, passes, tp, ctx);
+  if (!projectedOr)
+    return; // pending: the worker is sectioning
+  const std::vector<std::vector<Loop>>& projected = *projectedOr;
   // Without a target a profile follows the part's own outline, which is what
   // "cut it out" means and is nonsense for an inside cut: offsetting the
   // perimeter INWARD by a tool radius carves a trench a whisker inside the
@@ -359,8 +405,19 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
         modelBottom = std::min(modelBottom, static_cast<double>(bmin.z));
       }
       if (modelBottom < op.topZ) {
-        const std::vector<std::vector<Loop>> atBottom =
-            ProjectedOutlines(bodies, op.topZ, {modelBottom + 1e-3});
+        const std::optional<std::vector<std::vector<Loop>>> atBottomOr =
+            OutlinesThroughCache(bodies, op.topZ, {modelBottom + 1e-3}, tp,
+                                 ctx);
+        if (!atBottomOr) {
+          // Pending, and nothing drawn yet is honest: a half-cut profile
+          // would read as the whole operation.
+          tp.moves.clear();
+          tp.tabs.clear();
+          tp.reliefs.clear();
+          tp.skipped.clear();
+          return;
+        }
+        const std::vector<std::vector<Loop>>& atBottom = *atBottomOr;
         std::vector<Loop> low;
         if (!atBottom.empty())
           for (const Loop& l : atBottom[0])
@@ -1080,7 +1137,7 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
                  GenerateContext* ctx) {
   switch (op.type) {
   case OpType::Profile:
-    GenerateProfile(setup, op, tool, bodies, tp);
+    GenerateProfile(setup, op, tool, bodies, tp, ctx);
     break;
   case OpType::Pocket:
     GeneratePocket(setup, op, tool, bodies, tp);

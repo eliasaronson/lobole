@@ -1690,6 +1690,128 @@ TEST_CASE("cam: an adaptive pass is cached, and can be deferred to a worker",
   }
 }
 
+TEST_CASE("cam: a profile's outlines are cached, and can be deferred to a "
+          "worker",
+          "[cam]") {
+  // docs/cam/add-operation-plan.md. The projected outlines are the one
+  // expensive step of a profile -- an OCC section per depth pass -- and they
+  // froze the frame for two minutes on a helically fluted pin. Deferred, the
+  // profile comes back pending; the worker's answer, put into the cache,
+  // must regenerate EXACTLY what the inline generate cuts.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, {});
+  REQUIRE(derived.ok);
+  cam::Operation op = derived.op;
+  op.id = 1;
+  setup.operations.push_back(op);
+  REQUIRE(cam::DepthPasses(op).size() >= 2);
+
+  const std::vector<cam::Toolpath> ref =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(ref.size() == 1);
+  INFO(ref[0].error);
+  REQUIRE(ref[0].error.empty());
+  REQUIRE(ref[0].CutLength() > 0.0);
+
+  constexpr uint64_t kBodies = 0x5eed;
+  SECTION("a cache fills on the first generate and answers the second") {
+    cam::OutlineCache cache;
+    cam::GenerateContext ctx;
+    ctx.outlineCache = &cache;
+    ctx.bodiesKey = kBodies;
+    const std::vector<cam::Toolpath> first =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    CHECK(ctx.pendingOutline.empty());
+    CHECK(cache.Size() == 1);
+    CHECK(SameMoves(first[0], ref[0]));
+    const std::vector<cam::Toolpath> second =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    CHECK(cache.hits >= 1);
+    CHECK(SameMoves(second[0], ref[0]));
+  }
+
+  SECTION("no geometry key, no cache: a result cut from other geometry is "
+          "never read") {
+    cam::OutlineCache cache;
+    cam::GenerateContext ctx;
+    ctx.outlineCache = &cache;
+    ctx.defer = true;
+    const std::vector<cam::Toolpath> inline_ =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    CHECK(ctx.pendingOutline.empty());
+    CHECK(cache.Size() == 0);
+    CHECK(SameMoves(inline_[0], ref[0]));
+  }
+
+  SECTION("deferred: pending, no error, and the worker's answer lands") {
+    cam::OutlineCache cache;
+    cam::GenerateContext ctx;
+    ctx.outlineCache = &cache;
+    ctx.bodiesKey = kBodies;
+    ctx.defer = true;
+    const std::vector<cam::Toolpath> deferred =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    REQUIRE(deferred.size() == 1);
+    CHECK(deferred[0].pending);
+    CHECK(deferred[0].moves.empty());
+    CHECK(deferred[0].error.empty()); // not "produced no toolpath"
+    REQUIRE(ctx.pendingOutline.size() == 1);
+    const cam::OutlineRequest& req = ctx.pendingOutline.front();
+    CHECK(req.key ==
+          cam::OutlineKey(kBodies, req.topZ, req.passes, req.deflection));
+    CHECK(req.passes == cam::DepthPasses(op));
+
+    cache.Put(req.key, cam::OutlinePass(req));
+    cam::GenerateContext again;
+    again.outlineCache = &cache;
+    again.bodiesKey = kBodies;
+    again.defer = true;
+    const std::vector<cam::Toolpath> landed =
+        cam::GenerateAll(setup, doc->GetBodies(), &again);
+    CHECK(again.pendingOutline.empty());
+    CHECK_FALSE(landed[0].pending);
+    CHECK(SameMoves(landed[0], ref[0]));
+  }
+
+  SECTION("the key moves with every argument") {
+    const std::vector<double> passes = cam::DepthPasses(op);
+    const uint64_t k = cam::OutlineKey(kBodies, op.topZ, passes, 0.02);
+    CHECK(cam::OutlineKey(kBodies + 1, op.topZ, passes, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, op.topZ + 0.5, passes, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, op.topZ, {passes.front()}, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, op.topZ, passes, 0.05) != k);
+  }
+}
+
+TEST_CASE("cam: Add operation follows the setup", "[cam]") {
+  // docs/cam/add-operation-plan.md. The panel's button added a whole-part
+  // cut-out to a job cut on the trunnion -- a 3-axis contour round a dowel,
+  // plausible and wrong.
+  cam::Setup setup = BasicSetup();
+  CHECK(cam::AddOperationType(setup) == cam::OpType::Profile);
+
+  // A 4th-axis machine is not the evidence: a plate on its bed is 3-axis.
+  setup.machine.hasRotaryAxis = true;
+  cam::Operation profile;
+  profile.id = 1;
+  profile.type = cam::OpType::Profile;
+  setup.operations.push_back(profile);
+  CHECK(cam::AddOperationType(setup) == cam::OpType::Profile);
+
+  // What the setup already cuts on the axis is.
+  cam::Operation rotary;
+  rotary.id = 2;
+  rotary.type = cam::OpType::SurfaceRotary;
+  setup.operations.push_back(rotary);
+  CHECK(cam::AddOperationType(setup) == cam::OpType::SurfaceRotary);
+
+  // ...and only on a machine that has the axis to cut it with.
+  setup.machine.hasRotaryAxis = false;
+  CHECK(cam::AddOperationType(setup) == cam::OpType::Profile);
+}
+
 TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
   auto doc = PocketDoc(); // 20 x 14 pocket, floor at z = 12
   cam::Setup setup = BasicSetup();

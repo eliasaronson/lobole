@@ -590,6 +590,20 @@ DerivedOp DeriveRest(const Setup& setup, const std::vector<Body>& bodies,
   return out;
 }
 
+OpType AddOperationType(const Setup& setup) {
+  // What the setup already cuts is the evidence, the same evidence DeriveRest
+  // reads to choose its pattern. The machine alone is not: a plate clamped to
+  // the bed of a 4th-axis machine is a 3-axis job, and handing it a rotary
+  // pass would be this bug turned round. A 3-axis "cut out" on a part held
+  // on the trunnion contours the dowel from its top to its bottom -- a
+  // plausible operation and a wrong one (docs/cam/add-operation-plan.md).
+  if (setup.machine.hasRotaryAxis)
+    for (const Operation& o : setup.operations)
+      if (o.type == OpType::SurfaceRotary)
+        return OpType::SurfaceRotary;
+  return OpType::Profile;
+}
+
 DerivedOp DeriveRotaryRough(const Setup& setup, const std::vector<Body>& bodies,
                             int toolNumber) {
   DerivedOp out =

@@ -31,6 +31,17 @@ struct SurfacePassJob {
   cam::SurfaceResult result;
 };
 
+struct OutlinePassJob {
+  cam::OutlineRequest request;
+  cam::OutlineResult result;
+};
+
+bool CamPassesIdle(const AppState& s) {
+  return s.camOutlineInFlight == 0 && s.camOutlineQueue.empty() &&
+         s.camAdaptiveInFlight == 0 && s.camAdaptiveQueue.empty() &&
+         s.camSurfaceInFlight == 0 && s.camSurfaceQueue.empty();
+}
+
 void StartNextCamPass(AppState& state);
 
 // After ANY pass lands: start the next, and verify once nothing is left.
@@ -44,9 +55,7 @@ void StartNextCamPass(AppState& state);
 // last pass had not landed.
 void LandedAPass(AppState& s, bool cancelled) {
   StartNextCamPass(s);
-  const bool idle = s.camAdaptiveInFlight == 0 && s.camAdaptiveQueue.empty() &&
-                    s.camSurfaceInFlight == 0 && s.camSurfaceQueue.empty();
-  if (idle && s.camVerifyWhenSettled && !cancelled) {
+  if (CamPassesIdle(s) && s.camVerifyWhenSettled && !cancelled) {
     s.camVerifyWhenSettled = false;
     RunCamVerification(s);
   }
@@ -151,16 +160,68 @@ void StartNextSurfacePass(AppState& state) {
   }
 }
 
-// Clearing first, then surfacing. Not arbitrary: a finishing pass is planned
+// A profile's projected outlines on the worker (docs/cam/add-operation-
+// plan.md): one OCC section per depth pass, which on the helical rolling pin
+// held the frame for two minutes.
+void StartNextOutlinePass(AppState& state) {
+  while (state.camOutlineInFlight == 0 && !state.camOutlineQueue.empty()) {
+    auto pass = std::make_shared<OutlinePassJob>();
+    pass->request = std::move(state.camOutlineQueue.front());
+    state.camOutlineQueue.pop_front();
+    if (state.camOutlineCache.Contains(pass->request.key)) {
+      state.camPassBatchDone++;
+      continue;
+    }
+    const uint64_t key = pass->request.key;
+    auto job = std::make_unique<BackgroundJob>();
+    job->kind = kKind;
+    job->cancellable = false; // an OCC section has no interruption points
+    job->label = "Sectioning the part at " +
+                 std::to_string(pass->request.passes.size()) + " depth" +
+                 (pass->request.passes.size() == 1 ? "" : "s") + ", " +
+                 std::to_string(state.camPassBatchDone + 1) + " of " +
+                 std::to_string(state.camPassBatchTotal);
+    job->fraction.store(state.camPassBatchTotal == 0
+                            ? -1.0
+                            : static_cast<double>(state.camPassBatchDone) /
+                                  static_cast<double>(state.camPassBatchTotal));
+    BackgroundJob* raw = job.get();
+    job->thread = std::thread([pass, raw] {
+      pass->result = cam::OutlinePass(pass->request);
+      raw->done.store(true); // last
+    });
+    job->finish = [pass, raw, key](AppState& s) -> bool {
+      s.camOutlineInFlight = 0;
+      s.camOutlineCache.Put(key, std::move(pass->result));
+      s.camPassBatchDone++;
+      const bool cancelled = raw->cancel.load();
+      if (cancelled) {
+        s.camOutlineQueue.clear();
+        s.camAdaptiveQueue.clear();
+        s.camSurfaceQueue.clear();
+      } else if (s.job != nullptr) {
+        RefreshCamToolpaths(s);
+      }
+      LandedAPass(s, cancelled);
+      return true;
+    };
+    state.camOutlineInFlight = key;
+    StartBackgroundJob(state, std::move(job));
+    return;
+  }
+}
+
+// Outlines first: seconds, and a profile waits on nothing else.
+// Clearing next, then surfacing. Not arbitrary: a finishing pass is planned
 // against the part, not against what roughing left, so neither waits on the
 // other -- but clearing is seconds and surfacing is minutes, and filling the
 // cheap ones first means the backplot grows steadily instead of sitting
 // empty through the long one.
 void StartNextCamPass(AppState& state) {
+  StartNextOutlinePass(state);
   StartNextAdaptivePass(state);
   StartNextSurfacePass(state);
-  if (state.camAdaptiveInFlight == 0 && state.camAdaptiveQueue.empty() &&
-      state.camSurfaceInFlight == 0 && state.camSurfaceQueue.empty()) {
+  if (CamPassesIdle(state)) {
     state.camPassBatchDone = 0;
     state.camPassBatchTotal = 0;
   }
@@ -197,6 +258,23 @@ void QueueSurfacePasses(AppState& state,
     if (queued)
       continue;
     state.camSurfaceQueue.push_back(std::move(req));
+    state.camPassBatchTotal++;
+  }
+  StartNextCamPass(state);
+}
+
+void QueueOutlinePasses(AppState& state,
+                        std::vector<cam::OutlineRequest> pending) {
+  for (cam::OutlineRequest& req : pending) {
+    if (state.camOutlineCache.Contains(req.key) ||
+        req.key == state.camOutlineInFlight)
+      continue;
+    bool queued = false;
+    for (const cam::OutlineRequest& q : state.camOutlineQueue)
+      queued |= q.key == req.key;
+    if (queued)
+      continue;
+    state.camOutlineQueue.push_back(std::move(req));
     state.camPassBatchTotal++;
   }
   StartNextCamPass(state);
@@ -251,12 +329,14 @@ std::vector<cam::Toolpath> GenerateCamToolpathsNow(AppState& state,
   cam::GenerateContext ctx;
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
+  ctx.outlineCache = &state.camOutlineCache;
   ctx.bodiesKey = JobRenderVersion(state);
   ctx.defer = false; // the reader's path: compute what is missing, now
   return cam::GenerateAll(setup, JobBodies(state), &ctx);
 }
 
 void CancelCamPasses(AppState& state) {
+  state.camOutlineQueue.clear();
   state.camAdaptiveQueue.clear();
   state.camSurfaceQueue.clear();
   (void)CancelBackgroundJobs(state, kKind);

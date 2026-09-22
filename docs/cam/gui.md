@@ -475,3 +475,12 @@ an add button per part the job does not cut and one for a keep-out box. The
 job viewport draws them ghosted grey, and Simulate marks the worst hit
 ([workholding-plan.md](workholding-plan.md)).
 
+
+**2026-09-22, later:** the panel's **Add operation** follows the setup
+([add-operation-plan.md](add-operation-plan.md)). A setup that already cuts
+on the 4th axis (it holds a rotary finish) gets another rotary pass. Every
+other setup gets the whole-part cut-out, as before. It used to add the
+cut-out everywhere, and on the helical rolling pin that meant a 3-axis
+contour round the dowel, sectioned inline, which held the frame for two
+minutes. The sectioning itself now runs off the frame as well
+([long-operations.md](../ui/long-operations.md), phase 6).

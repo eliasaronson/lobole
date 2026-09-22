@@ -589,3 +589,55 @@ generators rather than the whole of `CamStrategies.cpp` — hashing the fields
 a profile reads would be a key that invalidates on things surfacing never
 looks at. Checked by deleting `hash.D(op.stepover)`: it names the field.
 
+
+## Phase 6 — a profile's sections off the frame (2026-09-22)
+
+A profile follows `ProjectedOutlines`, and that function takes one OCC
+section of every body at each depth pass. Nothing ever measured it on a
+curved part, and it turned out to be the next thing that stops the frame.
+Pressing **Add operation** on the helical rolling pin
+(`scratch/rolling_pin_helical`) held the frame for about two minutes, running
+18 sections of a 300 mm body cut by helical sweeps
+([add-operation-plan.md](../cam/add-operation-plan.md)).
+
+**The unit is the projection, not the operation.** `ProjectedOutlines` is a
+pure function of the framed bodies and three plain values: the top, the pass
+heights and the deflection. So `OutlineKey` hashes exactly those, with
+`bodiesKey` standing in for the bodies. The key is complete by construction,
+and unlike the adaptive and surface keys it needs no field-coverage gate. A
+key taken around the whole of `GenerateProfile` would have had to name every
+field a profile reads: side, tabs, leads, reliefs, stock and more. The
+Clipper work after the projection is cheap and still runs inline once the
+outlines are cached.
+
+**The worker's bodies are its own.** The deferred request deep-copies the
+bodies (`BRepBuilderAPI_Copy`) on the MAIN thread, when it is made. The
+section booleans are non-destructive, but the frame may mesh these shapes
+while a worker reads them, and a triangulation is written onto the shared
+`TShape`.
+
+**A third queue** (`camOutlineQueue`), started first. An outline takes
+seconds and every profile waits on its own, so it comes before clearing and
+surfacing. Each queue has its own in-flight slot, so an outline is sectioned
+while a surfacing pass runs. The passage above that calls this "one worker"
+is describing one registry and one set of batch counters, not one thread.
+`cam_toolpath {async}` now counts all three queues in `queued_passes`; it
+used to count only the adaptive one.
+
+Measured on the pin in an offscreen instance (`add_cam_op` for a profile,
+then `cam_toolpath {async: true}`):
+
+```
+async 0.00s {'pending': 3, 'queued_passes': 3}
+settled after 21.1s, 43 polls, worst reply 0.003s
+```
+
+The same list that a synchronous call returns, move for move. The gates are
+the `test_cam.cpp` case "a profile's outlines are cached, and can be deferred
+to a worker" and the GUI case `cam/a_profile_is_cut_off_the_frame`.
+
+**Not in scope:** Pocket's and Face's per-pass `SectionLoops`, and the
+section loops adaptive still takes on the frame. Each of those is one
+section per pass, not a projection over all the passes, and none has been
+seen to hold a frame yet. The outline cache is the natural home for them if
+one ever does.

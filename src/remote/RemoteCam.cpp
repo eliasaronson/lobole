@@ -357,7 +357,8 @@ constexpr MethodDoc kCamMethods[] = {
      "travel and is NOT in the file -- both also as `warnings`, which "
      "carries the work-area verdict too. The cheap way to check a job. "
      "Synchronous by default -- an adaptive pocket costs seconds and this "
-     "waits for it. `async: true` hands the adaptive passes to a background "
+     "waits for it. `async: true` hands the slow passes -- adaptive clearing, "
+     "surfacing, and the sections a profile follows -- to a background "
      "job and answers {pending, queued_passes, job: \"cam\"} at once; "
      "watch `background_jobs` until none of kind cam remains, then call "
      "again without `async` for the list.",
@@ -1950,7 +1951,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // key and not cam_post's (rpc_params_gate). Without it, fall through to
     // the shared synchronous handler below.
     if (p.value("async", false)) {
-      // Defer the adaptive passes to the worker and answer with what is
+      // Defer the slow passes to the worker and answer with what is
       // owed; `background_jobs` shows them landing. A script that reads
       // `pending: 0` here has the same list a synchronous call returns.
       const cam::Setup& setup =
@@ -1961,10 +1962,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       size_t pending = 0;
       for (const cam::Toolpath& tp : state.camToolpaths)
         pending += tp.pending ? 1 : 0;
-      return json{{"pending", pending},
-                  {"queued_passes", state.camAdaptiveQueue.size() +
-                                        (state.camAdaptiveInFlight ? 1 : 0)},
-                  {"job", "cam"}};
+      // Every queue the worker drains, not only the adaptive one: a
+      // surfacing op or a profile's sections is a pass owed the same way.
+      const size_t queued =
+          state.camOutlineQueue.size() + (state.camOutlineInFlight ? 1 : 0) +
+          state.camAdaptiveQueue.size() + (state.camAdaptiveInFlight ? 1 : 0) +
+          state.camSurfaceQueue.size() + (state.camSurfaceInFlight ? 1 : 0);
+      return json{
+          {"pending", pending}, {"queued_passes", queued}, {"job", "cam"}};
     }
   }
 

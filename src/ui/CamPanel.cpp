@@ -90,6 +90,7 @@ cam::GenerateContext ContextOf(AppState& state) {
   // is already the mix of the job, its sources, the active setup, the
   // fixturing and every placement -- which is exactly "which bodies, where".
   ctx.bodiesKey = JobRenderVersion(state);
+  ctx.outlineCache = &state.camOutlineCache;
   ctx.defer = state.camDeferPasses;
   return ctx;
 }
@@ -107,6 +108,7 @@ void RefreshCamToolpaths(AppState& state) {
     for (const cam::Toolpath& old : previous)
       if (old.operationId == fresh.operationId && old.finish == fresh.finish)
         KeepPreviousMoves(old, fresh);
+  QueueOutlinePasses(state, std::move(ctx.pendingOutline));
   QueueAdaptivePasses(state, std::move(ctx.pending));
   QueueSurfacePasses(state, std::move(ctx.pendingSurface));
 }
@@ -154,6 +156,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
     if (existing.operationId == opId) {
       KeepPreviousMoves(existing, fresh);
       existing = std::move(fresh);
+      QueueOutlinePasses(state, std::move(ctx.pendingOutline));
       QueueAdaptivePasses(state, std::move(ctx.pending));
       QueueSurfacePasses(state, std::move(ctx.pendingSurface));
       return;
@@ -177,6 +180,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
       state.camToolpaths.begin() +
           static_cast<ptrdiff_t>(std::min(at, state.camToolpaths.size())),
       std::move(fresh));
+  QueueOutlinePasses(state, std::move(ctx.pendingOutline));
   QueueAdaptivePasses(state, std::move(ctx.pending));
   QueueSurfacePasses(state, std::move(ctx.pendingSurface));
 }
@@ -1344,8 +1348,11 @@ void DrawCamPanel(AppState& state) {
     // `2 -> -0` default — and it derived a stepdown from the depth rather
     // than from the cutter. A refusal is shown rather than an operation that
     // cannot cut (the u10 rule).
+    // Which operation follows the setup: a job cut on the trunnion gets a
+    // rotary pass, not a 3-axis contour round the dowel
+    // (docs/cam/add-operation-plan.md).
     const cam::DerivedOp derived = cam::DeriveOperation(
-        *setup, ui::JobBodies(state), cam::OpType::Profile, {});
+        *setup, ui::JobBodies(state), cam::AddOperationType(*setup), {});
     if (derived.ok) {
       cam::Operation op = derived.op;
       op.id = state.job->AllocateId();

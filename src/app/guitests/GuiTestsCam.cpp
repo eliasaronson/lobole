@@ -1129,6 +1129,97 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  t = IM_REGISTER_TEST(engine, "cam", "a_profile_is_cut_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/cam/add-operation-plan.md: "Add operation" on a helically fluted
+    // pin held the frame for two minutes, sectioning the part at every
+    // depth pass inline. The panel's REAL path (deferred, which the suite
+    // otherwise turns off): the click returns, the sections are cut on the
+    // worker, and what lands is what a synchronous generate says.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("Side A");
+    added.safeZ = 20.0;
+    s_App->camActiveSetup = added.id;
+    ctx->Yield(2);
+    s_App->camDeferPasses = true; // the real default, off for the suite
+    s_App->camOutlineCache.Clear();
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_add_op");
+
+    int frames = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ui::BackgroundJobRunning(*s_App, "cam") &&
+           std::chrono::steady_clock::now() - t0 < std::chrono::seconds(60)) {
+      ctx->Yield();
+      frames++;
+    }
+    ctx->LogInfo("%d frames while sectioning", frames);
+    ctx->Yield(2);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "cam"));
+    IM_CHECK(!ui::CamToolpathsPending(*s_App));
+    // Only the worker puts an outline in the cache when passes are deferred,
+    // so an entry here says the sections were cut off the frame.
+    IM_CHECK_EQ(s_App->camOutlineCache.Size(), (size_t)1);
+
+    const cam::Setup* live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK(live != nullptr);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    IM_CHECK(live->operations[0].type == cam::OpType::Profile);
+    const std::vector<cam::Toolpath> sync =
+        cam::GenerateAll(*live, ui::JobBodies(*s_App));
+    IM_CHECK_EQ(sync.size(), s_App->camToolpaths.size());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK_EQ(sync[0].moves.size(), s_App->camToolpaths[0].moves.size());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+  };
+
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "add_operation_on_the_trunnion_is_rotary");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/cam/add-operation-plan.md: the button added a 3-axis cut-out to a
+    // job cut on the trunnion -- a contour round the dowel from its top to
+    // its bottom. A setup that already cuts on the 4th axis gets a pass
+    // that does too.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 30.0));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    ctx->Yield(2);
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup != nullptr);
+    setup->machine.hasRotaryAxis = true;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 1.0, 1.0};
+    setup->tools[0].type = cam::ToolType::Ball;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.type = cam::OpType::SurfaceRotary;
+    op.toolNumber = setup->tools[0].number;
+    op.stepover = 0.6;
+    setup->operations.push_back(op);
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_add_op");
+    ctx->Yield(2);
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK(setup != nullptr);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)2);
+    IM_CHECK(setup->operations[1].type == cam::OpType::SurfaceRotary);
+    IM_CHECK(s_App->camRefusal.empty());
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "surfacing_runs_off_the_frame");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // docs/ui/long-operations.md, phase 5. `GenerateContext`'s comment called

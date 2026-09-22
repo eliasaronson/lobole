@@ -63,6 +63,10 @@ struct GenerateContext {
   // silently reads a result cut from other geometry.
   uint64_t bodiesKey = 0;
   std::vector<SurfaceRequest> pendingSurface; // out
+  // ...and a profile's projected outlines, the third (docs/cam/
+  // add-operation-plan.md). Keyed on `bodiesKey` too, so zero turns it off.
+  OutlineCache* outlineCache = nullptr;
+  std::vector<OutlineRequest> pendingOutline; // out
 };
 
 // One operation's toolpath. Never throws: a failure comes back as
@@ -192,6 +196,13 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 // the same region, with tool `toolNumber` and `restFromTool` = the finish's
 // tool, so it cuts only where that larger cutter could not reach. Refused with
 // no finish to follow, or a tool that is not smaller.
+// What the CAM panel's "Add operation" adds to this setup: a rotary finish
+// when the setup already cuts on the 4th axis, the whole-part cut-out
+// otherwise. Read from what the setup HOLDS, not from the machine alone -- a
+// plate clamped to the bed of a 4th-axis machine is still a 3-axis job
+// (docs/cam/add-operation-plan.md).
+[[nodiscard]] OpType AddOperationType(const Setup& setup);
+
 [[nodiscard]] DerivedOp DeriveRest(const Setup& setup,
                                    const std::vector<Body>& bodies,
                                    int toolNumber = 0);

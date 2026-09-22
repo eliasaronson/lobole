@@ -1578,6 +1578,11 @@ struct AppState {
   cam::SurfaceCache camSurfaceCache;
   std::deque<cam::SurfaceRequest> camSurfaceQueue;
   uint64_t camSurfaceInFlight = 0;
+  // A profile's projected outlines, the third (docs/cam/add-operation-
+  // plan.md): one section per depth pass, seconds each on a curved part.
+  cam::OutlineCache camOutlineCache;
+  std::deque<cam::OutlineRequest> camOutlineQueue;
+  uint64_t camOutlineInFlight = 0;
   // A Simulate press that refused, owed a modal saying why. Set by the
   // command, consumed by the frame -- a command cannot call OpenPopup (U12),
   // and the refusal used to go only into `camPlaybackRefusal`, printed in the

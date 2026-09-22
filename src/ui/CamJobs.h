@@ -36,6 +36,12 @@ void QueueAdaptivePasses(AppState& state,
 void QueueSurfacePasses(AppState& state,
                         std::vector<cam::SurfaceRequest> pending);
 
+// The same, for the projected outlines a deferred profile skipped
+// (docs/cam/add-operation-plan.md). Started before the other two: an outline
+// is seconds and every profile waits on its own.
+void QueueOutlinePasses(AppState& state,
+                        std::vector<cam::OutlineRequest> pending);
+
 // Whether any toolpath in `state.camToolpaths` is still pending, and why in
 // words — post, verify and simulate refuse on this rather than acting on a
 // list that is not yet the job.
