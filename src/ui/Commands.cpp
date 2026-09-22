@@ -529,6 +529,13 @@ const std::vector<Command>& Table() {
     verb("job.edge", AppState::CamVerb::Edge);
     verb("job.whole", AppState::CamVerb::Whole);
     verb("job.face", AppState::CamVerb::Face);
+    // 3D and 4D finishing (docs/cam/surface-verbs-plan.md). The two surface
+    // verbs were written, with their picks and derivations, and never given
+    // a command; the rotary ones only mean something with the axis.
+    verb("job.surface", AppState::CamVerb::Surface);
+    verb("job.walls", AppState::CamVerb::Walls);
+    verb("job.rotary_finish", AppState::CamVerb::RotaryFinish, HasRotaryAxis);
+    verb("job.rotary_rough", AppState::CamVerb::RotaryRough, HasRotaryAxis);
     // A tool with a window, like Simulate: the run and what it found, where
     // the button was pressed. It used to generate silently and put the
     // verdict in the docked panel, below the operations list.

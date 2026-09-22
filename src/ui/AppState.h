@@ -1616,6 +1616,8 @@ struct AppState {
     Face,
     Surface,
     Walls,
+    RotaryFinish, // docs/cam/surface-verbs-plan.md
+    RotaryRough,
   };
   CamVerb camVerb = CamVerb::None;
   // The operation the no-pick verbs (Whole, Face) just made, so the window

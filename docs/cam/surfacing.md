@@ -178,6 +178,11 @@ phase 1's refusals, not here.
 > three fields, derivation and its refusals, the strategy dispatch,
 > serialization, the RPC surface, the panel fields and two verbs.
 >
+> The two verbs had no command and no toolbar button until 2026-09-22:
+> written, derived and unreachable from the GUI. They are `job.surface` (R) and
+> `job.walls` (W) on the job toolbar now, beside the two rotary verbs
+> (docs/cam/surface-verbs-plan.md).
+>
 > Phase 0 paid for itself on the first build of the enum values: the missing
 > `kRows` entries and the two `default:`-less switches broke the compile,
 > rather than producing an op that saved as `"profile"` and derived a default

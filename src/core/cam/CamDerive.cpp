@@ -513,6 +513,26 @@ DerivedOp DeriveOperation(const Setup& setup,
   return out;
 }
 
+DerivedOp DeriveRotaryRough(const Setup& setup, const std::vector<Body>& bodies,
+                            int toolNumber) {
+  DerivedOp out =
+      DeriveOperation(setup, bodies, OpType::SurfaceRotary, {}, toolNumber);
+  if (!out.ok)
+    return out; // the finish's refusals are the rough's: no axis, a cone
+  const Tool* tool = setup.FindTool(out.op.toolNumber);
+  if (tool == nullptr) {
+    out.ok = false;
+    out.why = "no tool " + std::to_string(out.op.toolNumber) + " in the setup";
+    return out;
+  }
+  out.op.name = "Rough on the rotary";
+  // Half the cutter per layer: the rule the 2.5D operations derive their
+  // stepdown by, and the one DeriveOperation leaves off a rotary finish.
+  out.op.stepdown = 0.5 * tool->diameter;
+  out.op.stockToLeave = DefaultFinishStock(*tool);
+  return out;
+}
+
 int RederiveDepths(Setup& setup, const std::vector<Body>& bodies) {
   int moved = 0;
   for (Operation& op : setup.operations) {

@@ -2530,6 +2530,114 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camToolOpen);
   };
 
+  // The 3D finishing verbs (docs/cam/surface-verbs-plan.md) were written with
+  // their picks and derivations and never given a button. Clicked here, on a
+  // curved face that every other verb refuses.
+  t = IM_REGISTER_TEST(engine, "cam", "the_surface_verbs_take_a_curved_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 30.0));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("Three axis");
+    s_App->camActiveSetup = added.id;
+    Job()->FindSetup(added.id)->tools[0].type = cam::ToolType::Ball;
+    ctx->Yield(2);
+
+    // The bar's round side: the one face with no plane.
+    const Body& body = CamPart()->GetBodies()[0];
+    ui::SelectionItem side;
+    side.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!body.shape.FacePlane(index, o, n, u)) {
+        side.element = ElementRef{body.createdBy, name};
+        break;
+      }
+    }
+    IM_CHECK(side.element.IsSet());
+
+    // No 4th axis: the rotary verbs are not on the bar.
+    ctx->SetRef("//##DockHost");
+    IM_CHECK_EQ(
+        ctx->ItemInfo("**/###tb_job_rotary_finish", ImGuiTestOpFlags_NoError)
+            .ID,
+        (ImGuiID)0);
+
+    const struct {
+      const char* button;
+      cam::OpType type;
+    } verbs[] = {{"###tb_job_surface", cam::OpType::SurfaceParallel},
+                 {"###tb_job_walls", cam::OpType::SurfaceWaterline}};
+    for (const auto& v : verbs) {
+      ToolbarClick(ctx, v.button);
+      ctx->Yield();
+      IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+      IM_CHECK_EQ(s_App->slotPick.slot,
+                  static_cast<int>(ui::PickSlot::CamSurfaceRegion));
+      ui::CamFacePicked(*s_App, side);
+      ctx->Yield(2);
+      IM_CHECK_EQ(s_App->slotPick.miss, std::string());
+      const cam::Setup* live = Job()->FindSetup(added.id);
+      IM_CHECK(!live->operations.empty());
+      IM_CHECK(live->operations.back().type == v.type);
+      ctx->KeyPress(ImGuiKey_Escape); // disarm before the next verb
+      ctx->Yield();
+    }
+    IM_CHECK_EQ(Job()->FindSetup(added.id)->operations.size(), (size_t)2);
+    for (const cam::Toolpath& tp : s_App->camToolpaths)
+      IM_CHECK_EQ(tp.error, std::string());
+
+    s_App->camToolOpen = false;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // The rotary verbs: no pick, only on a machine with the axis, a rough in
+  // layers that leaves a skin and a finish that takes it.
+  t = IM_REGISTER_TEST(engine, "cam", "the_rotary_verbs_rough_then_finish");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 30.0));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    setup->machine.hasRotaryAxis = true;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 3.0, 3.0};
+    setup->tools[0].type = cam::ToolType::Ball;
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_job_rotary_rough");
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_job_rotary_finish");
+    ctx->Yield(2);
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)2);
+    if (setup->operations.size() == 2) {
+      const cam::Operation& rough = setup->operations[0];
+      const cam::Operation& finish = setup->operations[1];
+      IM_CHECK(rough.type == cam::OpType::SurfaceRotary);
+      IM_CHECK(finish.type == cam::OpType::SurfaceRotary);
+      IM_CHECK_GT(rough.stepdown, 0.0);     // layers
+      IM_CHECK_GT(rough.stockToLeave, 0.0); // a skin
+      IM_CHECK_EQ(finish.stepdown, 0.0);    // one pass, to the part
+      IM_CHECK_EQ(finish.stockToLeave, 0.0);
+    }
+    IM_CHECK_EQ(s_App->camToolpaths.size(), (size_t)2);
+    for (const cam::Toolpath& tp : s_App->camToolpaths) {
+      IM_CHECK_EQ(tp.error, std::string());
+      IM_CHECK(!tp.moves.empty());
+    }
+
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
   // Floating windows share one placement (ui/FloatingWindow.h). Generate used
   // to anchor at exactly the tool window's corner, so opening it while an op
   // or a tool was being edited put it on top of that editor.

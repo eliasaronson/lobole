@@ -1247,6 +1247,31 @@ void DrawJobToolbar(AppState& state) {
 
   Divider();
 
+  // Finishing (docs/cam/surface-verbs-plan.md): a curved or tilted face, which
+  // every verb above refuses, and -- with a 4th axis -- the whole part turned.
+  btn(ICON_FA_WATER "###tb_job_surface", "job.surface",
+      "Finish a surface: click it, curved or sloped (rough it out first)",
+      state.camVerb == AppState::CamVerb::Surface &&
+          armedFor(PickSlot::CamSurfaceRegion));
+  btn(ICON_FA_MOUNTAIN_SUN "###tb_job_walls", "job.walls",
+      "Finish walls: click the surface, lapped at constant depths (for steep "
+      "walls)",
+      state.camVerb == AppState::CamVerb::Walls &&
+          armedFor(PickSlot::CamSurfaceRegion));
+#ifdef HAVE_CAM
+  if (const cam::Setup* setup = ActiveCamSetup(state);
+      setup != nullptr && setup->machine.hasRotaryAxis) {
+    btn(ICON_FA_DRUM "###tb_job_rotary_rough", "job.rotary_rough",
+        "Rough on the rotary: the blank down to the part in layers, leaving a "
+        "skin (no pick)");
+    btn(ICON_FA_SCROLL "###tb_job_rotary_finish", "job.rotary_finish",
+        "Finish on the rotary: the whole part, turned under a ball nose (no "
+        "pick; the pattern is in its settings)");
+  }
+#endif
+
+  Divider();
+
   btn(ICON_FA_GEARS "###tb_job_generate", "job.generate",
       "Generate every toolpath and verify the job");
   btn(ICON_FA_PLAY "###tb_job_simulate", "job.simulate",

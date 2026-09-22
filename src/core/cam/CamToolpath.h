@@ -176,6 +176,16 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
                                         OpType type, const Target& target,
                                         int toolNumber = 0);
 
+// A rotary ROUGH (docs/cam/surface-verbs-plan.md): the rotary finish's
+// derivation and refusals, then layers of half the cutter from the blank
+// inward and a stock to leave of DefaultFinishStock(tool), so the finish that
+// follows takes an even skin. The rotary finish deliberately derives no
+// stepdown -- a finish is not a choice about the stock -- and this is the
+// verb that makes that choice.
+[[nodiscard]] DerivedOp DeriveRotaryRough(const Setup& setup,
+                                          const std::vector<Body>& bodies,
+                                          int toolNumber = 0);
+
 // Where a placed part sits with respect to the stock. Three states, not two:
 // a part hanging over the sheet edge and a part that is not on the sheet at
 // all are different mistakes, and the second is usually "I forgot to place

@@ -167,6 +167,9 @@ struct Verb {
   bool cutter; // true: the window offers the tool the verb derives for
   const char* prompt;
   const char* tip;
+  // Rough on the rotary: the rotary finish's derivation with layers and a
+  // skin (cam::DeriveRotaryRough), rather than DeriveOperation's.
+  bool rotaryRough = false;
 };
 
 using CamVerb = AppState::CamVerb;
@@ -243,6 +246,21 @@ constexpr Verb kVerbs[] = {
      "of Finish a surface and for the opposite shape: good where the wall is "
      "steep, poor where it is shallow, because the laps spread out as the "
      "surface flattens."},
+    // The rotary verbs (docs/cam/surface-verbs-plan.md) take no pick: the part
+    // turns under the cutter, so a face would name a patch the axis rotates
+    // away. Only offered on a machine with a 4th axis.
+    {CamVerb::RotaryFinish, "Finish on the rotary", cam::OpType::SurfaceRotary,
+     PickSlot::CamSurfaceRegion, false, true, "",
+     "Turn the whole part under a ball nose and finish it all the way round, "
+     "along the axis. The pattern -- parallel passes, one spiral, or a helix "
+     "that follows a twist -- is in the operation's settings. It FINISHES: "
+     "rough the blank down first with Rough on the rotary."},
+    {CamVerb::RotaryRough, "Rough on the rotary", cam::OpType::SurfaceRotary,
+     PickSlot::CamSurfaceRegion, false, true, "",
+     "Take the blank down to the part in layers of half the cutter, turning "
+     "it all the way round, and leave a skin of a tenth of the cutter for "
+     "Finish on the rotary to take off evenly.",
+     /*rotaryRough=*/true},
 };
 
 const Verb* FindVerb(CamVerb verb) {
@@ -306,7 +324,8 @@ std::string ToolpathError(const AppState& state, uint64_t opId) {
 // only an answer while the element name is unique across the job.
 // Returns the new operation's id, 0 when refused.
 uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
-                             const ElementRef& target, uint64_t hint = 0) {
+                             const ElementRef& target, uint64_t hint = 0,
+                             bool rotaryRough = false) {
   state.camRefusal.clear();
   if (!state.job)
     return 0;
@@ -323,8 +342,11 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
     state.camRefusal = why;
     return 0;
   }
-  const cam::DerivedOp derived = cam::DeriveOperation(
-      *setup, ui::JobBodies(state), type, picked, VerbTool(state, *setup));
+  const cam::DerivedOp derived =
+      rotaryRough ? cam::DeriveRotaryRough(*setup, ui::JobBodies(state),
+                                           VerbTool(state, *setup))
+                  : cam::DeriveOperation(*setup, ui::JobBodies(state), type,
+                                         picked, VerbTool(state, *setup));
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return 0;
@@ -385,8 +407,11 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   JobUndoGuard undoGuard(state);
   const cam::Target target =
       op->targets.empty() ? cam::Target{} : op->targets.front();
-  const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, ui::JobBodies(state), verb.type, target, tool);
+  const cam::DerivedOp derived =
+      verb.rotaryRough
+          ? cam::DeriveRotaryRough(setup, ui::JobBodies(state), tool)
+          : cam::DeriveOperation(setup, ui::JobBodies(state), verb.type, target,
+                                 tool);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return;
@@ -771,7 +796,7 @@ void StartCamVerb(AppState& state, AppState::CamVerb verb) {
   // that opens shows it, and offers the other tools (RederiveVerbOp).
   if (state.slotPick.featureId == kCamToolSlot)
     state.slotPick = {};
-  state.camVerbOp = CreateVerbOperation(state, v->type, {});
+  state.camVerbOp = CreateVerbOperation(state, v->type, {}, 0, v->rotaryRough);
 }
 
 namespace {

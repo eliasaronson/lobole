@@ -809,4 +809,57 @@ TEST_CASE(
   CHECK(said);
 }
 
+TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
+          "[cam]") {
+  // docs/cam/surface-verbs-plan.md: Rough on the rotary is the finish's
+  // derivation with layers of half the cutter and a skin of a tenth of it.
+  // Cut from a blank 4 mm proud of the part, it must not gouge, must leave
+  // material for the finish, and must take more than one layer to get there.
+  auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
+  cam::Setup setup = BasicSetup();
+  setup.machine.hasRotaryAxis = true;
+  setup.stock.margin = {0.0, 4.0, 4.0};
+  setup.safeZ = 40.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+
+  const cam::DerivedOp d = cam::DeriveRotaryRough(setup, doc->GetBodies());
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK(d.op.type == cam::OpType::SurfaceRotary);
+  CHECK(d.op.name == "Rough on the rotary");
+  CHECK(d.op.stepdown == 3.0);                      // half of the 6 mm ball
+  CHECK(std::abs(d.op.stockToLeave - 0.6) < 1e-12); // a tenth of the cutter
+
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.stepover = 0.25;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  // Layers: the tool reaches several distinct radii on its cutting moves,
+  // where one finishing pass over this part touches two (the diameters).
+  std::set<long> radii;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      radii.insert(std::lround(m.to.z * 2.0));
+  CHECK(radii.size() > 3);
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover);
+  REQUIRE(v.rotary);
+  CHECK(v.maxGouge < 0.1);
+  CHECK(v.maxLeftover > 0.5); // the skin is still there for the finish
+
+  // The finish's refusals are the rough's.
+  setup.machine.hasRotaryAxis = false;
+  const cam::DerivedOp none = cam::DeriveRotaryRough(setup, doc->GetBodies());
+  CHECK_FALSE(none.ok);
+  CHECK(none.why.find("4th axis") != std::string::npos);
+}
+
 #endif // HAVE_CAM
