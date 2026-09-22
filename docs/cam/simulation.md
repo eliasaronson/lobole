@@ -214,6 +214,11 @@ almost answer:
   never cut into — a clamp, a boss beside a pocket, a tall neighbour on the
   same sheet — and that is exactly and only what this one adds.
 
+  > 2026-09-22: a clamp was not in the model this check reads, so it never
+  > saw one. Fixtures now have their own never-carved height field, checked
+  > against the cutter and the collar on every move, rapid or cut
+  > (docs/cam/workholding-plan.md).
+
   Silent unless both numbers are stated, on the `Machine::HasWorkArea` rule:
   a limit nobody typed is not a limit. They come as a PAIR and the RPC refuses
   one alone, because half a holder disables the check while looking like it
@@ -254,6 +259,12 @@ almost answer:
 - **Machine/fixture collision, work-envelope checks.** A different model (the
   machine, which the app does not have) rather than a harder version of this
   one.
+
+  > 2026-09-22: fixture collision is built, as a second height field beside
+  > this one rather than inside it: clamps, vises and keep-out boxes placed on
+  > a setup's bed, checked against every move, drawn ghosted through playback
+  > with the worst hit marked (docs/cam/workholding-plan.md). The machine
+  > itself — spindle nose, chuck and tailstock — is still excluded.
 - **Chip load, force, deflection.** Would need feeds and speeds this app
   deliberately does not compute (`CamJob.h`: a wrong number here breaks a tool).
 - **Real-time clock playback.** Requires a rapid traverse rate and acceleration

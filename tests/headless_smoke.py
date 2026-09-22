@@ -1864,6 +1864,72 @@ def main():
                    "and the setup before it")
             d.call("new_project")
 
+        phase("Workholding over the RPC")
+        # docs/cam/workholding-plan.md: a clamp is a keep-out the verifier
+        # sees -- a keep-out box, or any part the job does not cut.
+        if has_cam:
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("add_part", name="Clamp")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Jaw", "position": [0, 0, 0],
+                "width": 8, "height": 10, "depth": 30})
+            d.call("machine_part", part="Part 1")
+            sid = d.call("add_cam_setup", name="Clamped")["id"]
+            d.call("add_cam_op", setup=sid, type="profile", top_z=21.0,
+                   bottom_z=0.0, stepdown=8.0)
+            box = d.call("add_job_fixture", setup=sid, box=[10, 30, 25])
+            # The first takes -X, flat on the bed: the stock runs -2..42 in X
+            # and -1..21 in Z, so the box spans X -12..-2 and stands to 24.
+            expect(abs(box["pos"][0] + 12.0) < 1e-6 and
+                   abs(box["pos"][2] + 1.0) < 1e-6,
+                   f"a box goes against -X, on the bed: {box}")
+            expect(box["safe_z"] > 24.0,
+                   f"safe Z clears a fixture taller than the stock: {box}")
+            jaw = d.call("add_job_fixture", setup=sid, part="Clamp")
+            expect(jaw["part"] > 0 and jaw["name"] == "Clamp",
+                   f"a part is a fixture too: {jaw}")
+            expect_error(d, "add_job_fixture", "CUTS", setup=sid,
+                         part="Part 1")
+            expect_error(d, "add_job_fixture", "exactly one", setup=sid,
+                         part="Clamp", box=[1, 1, 1])
+            expect_error(d, "add_job_fixture", "centre", setup=sid,
+                         box=[1, 1, 1], side="left")
+            expect_error(d, "set_job_fixture", "pass one", setup=sid,
+                         fixture=jaw["id"], side="top", pos=[0, 0, 0])
+            moved = d.call("set_job_fixture", setup=sid, fixture=jaw["id"],
+                           side="top")
+            expect(abs(moved["pos"][2] - 21.0) < 1e-6,
+                   f"`top` lays it on the stock: {moved}")
+            listed = d.call("list_cam_setups")["setups"][0]["fixtures"]
+            expect(len(listed) == 2 and "box" in listed[0] and
+                   "part" in listed[1], f"the setup lists both: {listed}")
+            # The profile's cutter runs round the plate at X -3: into the box
+            # on the bed, and under the jaw lying across the -X edge -- the
+            # deeper of the two, so the one reported worst.
+            v = d.call("cam_verify", setup=sid)
+            expect(v["fixture_collisions"] > 0 and v["fixtures_checked"] == 2
+                   and v["worst_fixture"] == "Clamp" and not v["ok"],
+                   f"verify reports the cutter in the clamps: "
+                   f"{ {k: v[k] for k in v if 'fixture' in k} }")
+            expect(any('fixture "Clamp"' in line for line in v["says"]),
+                   "and says so in words")
+            d.call("set_job_fixture", setup=sid, fixture=box["id"],
+                   enabled=False)
+            v = d.call("cam_verify", setup=sid)
+            expect(v["fixtures_checked"] == 1,
+                   f"a fixture switched off is drawn, not checked: "
+                   f"{ {k: v[k] for k in v if 'fixture' in k} }")
+            d.call("remove_job_fixture", setup=sid, fixture=box["id"])
+            expect(len(d.call("list_cam_setups")["setups"][0]["fixtures"]) == 1,
+                   "remove takes it off")
+            d.call("undo")
+            expect(len(d.call("list_cam_setups")["setups"][0]["fixtures"]) == 2,
+                   "and undo puts it back")
+            d.call("new_project")
+
         phase("A job is addressed by name, not by whichever tab is in front")
         if not has_cam:
             expect_error(d, "list_cam_setups", "unknown method")

@@ -528,6 +528,35 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_fixtures")) {
+    // v126: what holds the stock (docs/cam/workholding-plan.md). A fixture
+    // that loses its place or its size stops being where the clamp is, and
+    // the verifier then signs off a path through the real one.
+    const auto& want = expect.at("cam_fixtures");
+    std::vector<const cam::Fixture*> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Fixture& f : s.fixtures)
+        got.push_back(&f);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("fixture " << i);
+      const cam::Fixture& f = *got[i];
+      const nlohmann::json& w = want[i];
+      CHECK(f.name == w.at("name").get<std::string>());
+      CHECK(f.sourceDocId == w.value("part", uint64_t{0}));
+      CHECK(f.IsBox() == w.contains("box"));
+      for (int k = 0; k < 3; k++) {
+        CHECK_THAT(f.pos[k], Catch::Matchers::WithinAbs(
+                                 w.at("pos")[k].get<double>(), 1e-12));
+        if (w.contains("box"))
+          CHECK_THAT(f.box[k], Catch::Matchers::WithinAbs(
+                                   w.at("box")[k].get<double>(), 1e-12));
+      }
+      CHECK_THAT(f.rotZdeg,
+                 Catch::Matchers::WithinAbs(w.value("rot_z", 0.0), 1e-12));
+      CHECK(f.enabled == w.value("enabled", true));
+    }
+  }
   if (expect.contains("cam_reach_offsets")) {
     const auto& want = expect.at("cam_reach_offsets");
     REQUIRE(want.size() == setups.size());

@@ -430,6 +430,47 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // which is a broken cutter on a real machine.
 [[nodiscard]] double DeriveSafeZ(const Setup& setup,
                                  const std::vector<Body>& bodies);
+// ...and clear of every FIXTURE too (bodies in setup space): a toe clamp
+// standing above the stock puts every rapid at the stock's safe Z through it
+// (docs/cam/workholding-plan.md). The same clearance rule, over the taller of
+// the two.
+[[nodiscard]] double DeriveSafeZ(const Setup& setup,
+                                 const std::vector<Body>& bodies,
+                                 const std::vector<Body>& fixtureBodies);
+
+// Where a fixture goes, derived from the stock and the fixture's own size --
+// never a typed position. A side puts it on the bed (its bottom at the
+// stock's), against that face of the stock, centred along it; Centre puts its
+// footprint on the stock's, bottom at the stock's bottom (a vise, which
+// SURROUNDS the stock); Top lays it on the stock's top face, straddling the
+// -X edge, which is where a toe clamp's arm belongs. `fixtureModel` is the
+// fixture's bodies in its OWN coordinates; `rotZdeg` the spin it is placed
+// with.
+enum class FixtureSide { MinusX, PlusX, MinusY, PlusY, Centre, Top };
+[[nodiscard]] bool ParseFixtureSide(const std::string& text, FixtureSide& out);
+[[nodiscard]] std::string FixtureSideName(FixtureSide side);
+// The placement a NEW fixture takes: Centre when it is wider than the stock
+// in X or Y (it goes round it), otherwise the next free side, -X, +X, -Y, +Y
+// and round again.
+[[nodiscard]] FixtureSide
+DefaultFixtureSide(const Setup& setup, const std::vector<Body>& bodies,
+                   const std::vector<Body>& fixtureModel, double rotZdeg);
+// A keep-out box's size when nobody has said: a toe clamp's worth, from the
+// stock -- a quarter of its footprint each way, a quarter taller than it.
+[[nodiscard]] glm::dvec3 DefaultKeepOutBox(const Setup& setup,
+                                           const std::vector<Body>& bodies);
+// Which derived placement `pos` is, for a row to say where the fixture sits;
+// empty when it has been moved off every one of them.
+[[nodiscard]] std::string
+FixturePlaceName(const Setup& setup, const std::vector<Body>& bodies,
+                 const std::vector<Body>& fixtureModel, const Fixture& f);
+// False when there is no stock to place against, or the fixture has no
+// geometry.
+[[nodiscard]] bool PlaceFixture(const Setup& setup,
+                                const std::vector<Body>& bodies,
+                                const std::vector<Body>& fixtureModel,
+                                double rotZdeg, FixtureSide side,
+                                glm::dvec3& pos);
 
 // Time spent CUTTING, from each move's own feed. Rapids are counted only when
 // the setup states a rapid feed — inventing one would be a guess about the

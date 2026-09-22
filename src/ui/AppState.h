@@ -1292,6 +1292,11 @@ struct AppState {
   // resync, like the section caps).
   uint64_t topoGhostStudyId = 0;
   uint32_t topoGhostInstance = 0;
+  // A job tab's FIXTURES (docs/cam/workholding-plan.md), drawn ghosted at
+  // their bed placement. Apart from documentMeshes for the same reason as
+  // the section caps: they are not the document's bodies, and must not shift
+  // the body<->index alignment picking relies on. Rebuilt every resync.
+  std::vector<uint32_t> fixtureInstances;
   // Geometry-delta overlay (compare_geometry's `materialize`, and F11's
   // "Compare shape"): the two boolean-diff solids drawn over the part, so
   // ONE look answers "where did it change?" instead of eyeballing a number
@@ -1656,6 +1661,13 @@ struct AppState {
   // of the docked panel, with no way to delete a tool at all
   // (docs/ui/consistency-round-plan.md).
   int camEditTool = 0;
+  // The fixture the tool window is editing (docs/cam/workholding-plan.md),
+  // 0 = none; like camEditTool, one editor holds the window at a time.
+  uint64_t camEditFixture = 0;
+  // Where the worst fixture hit of the last verdict was, setup space, for a
+  // marker in the viewport and in Simulate. Drawn only while there IS a
+  // verdict, so every place that drops the verdict drops the marker too.
+  std::optional<glm::dvec3> camFixtureHit;
   // The Generate window is open: the run -- generate, verify, the verdict,
   // the output options and Save G-code -- as a floating tool, like Simulate,
   // instead of a block in the docked panel.

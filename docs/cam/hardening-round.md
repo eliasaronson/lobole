@@ -83,6 +83,8 @@ because it costs a full rebuild.
 compares a cut's DEPTH against the flute length, which catches a cutter too
 short; it cannot see a holder fouling a feature the tool never cut into — a
 boss beside a pocket, a clamp, a tall neighbour on the same sheet.
+(2026-09-22: a clamp was never in the model this check reads; the holder
+against a clamp is the fixture check's — docs/cam/workholding-plan.md.)
 
 `TipHeight` generalises to a radius-above-tip profile for the whole assembly,
 and a cell whose stock stands above that envelope is a collision, reported

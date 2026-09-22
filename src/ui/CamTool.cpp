@@ -15,6 +15,7 @@
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
 #include "ui/DocumentSlots.h"
+#include "ui/ExprInput.h"
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
 #include "ui/SketchOverlay.h"
@@ -337,7 +338,7 @@ cam::Setup* EnsureCamSetup(AppState& state) {
   cam::Setup& fresh = state.job->AddSetup();
   state.camActiveSetup = fresh.id;
   (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
-  fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
+  fresh.safeZ = ui::DeriveJobSafeZ(state, fresh);
   state.camSafeZEdit = static_cast<float>(fresh.safeZ);
   state.projectMetaDirty = true;
   return &fresh;
@@ -499,7 +500,7 @@ void CamOrientationChanged(AppState& state, cam::Setup& setup) {
   const bool hadZero = setup.topFace.IsSet();
   ReZeroFromTopFace(state, setup);
   const int moved = cam::RederiveDepths(setup, ui::JobBodies(state));
-  setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+  setup.safeZ = ui::DeriveJobSafeZ(state, setup);
   state.camSafeZEdit = static_cast<float>(setup.safeZ);
 
   std::string note;
@@ -649,7 +650,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     }
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
-    setup->safeZ = cam::DeriveSafeZ(*setup, ui::JobBodies(state));
+    setup->safeZ = ui::DeriveJobSafeZ(state, *setup);
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
     // Operations that started above the stock come down to it — never up: an
     // operation asked for a shallower top than the stock is a choice.
@@ -845,6 +846,7 @@ void StartCamVerb(AppState& state, AppState::CamVerb verb) {
   // drawn first, so leaving either set would keep the window on it.
   state.camEditOp = 0;
   state.camEditTool = 0;
+  state.camEditFixture = 0;
   if (v->picks) {
     // Any pick button switches to itself: greying the others out while one
     // was armed meant Escape between every change of verb.
@@ -1088,6 +1090,87 @@ bool DrawToolEditor(AppState& state) {
   return true;
 }
 
+// One fixture's numbers (docs/cam/workholding-plan.md): where it sits, its
+// spin, a box's size, and the derived placements as buttons. Applies as you
+// go, like the tool editor, so it says Close.
+bool DrawFixtureEditor(AppState& state) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  cam::Fixture* f =
+      setup != nullptr ? setup->FindFixture(state.camEditFixture) : nullptr;
+  if (f == nullptr) {
+    state.camEditFixture = 0; // removed, or its setup is no longer active
+    return false;
+  }
+  BeginToolWindowFrame(state, "Fixture: " + f->name);
+  bool changed = false;
+  float xyz[3] = {static_cast<float>(f->pos.x), static_cast<float>(f->pos.y),
+                  static_cast<float>(f->pos.z)};
+  if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", xyz, 0.5f)) {
+    f->pos = {xyz[0], xyz[1], xyz[2]};
+    changed = true;
+  }
+  ImGui::SetItemTooltip("Where its origin sits on the bed (setup space, mm)");
+  float rot = static_cast<float>(f->rotZdeg);
+  if (ui::ExprDragFloat(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0f,
+                        360.0f, "%.1f°")) {
+    f->rotZdeg = rot;
+    changed = true;
+  }
+  if (f->IsBox()) {
+    float size[3] = {static_cast<float>(f->box.x), static_cast<float>(f->box.y),
+                     static_cast<float>(f->box.z)};
+    if (ui::ExprDragFloat3(state, "Size###cam_fixture_size", size, 0.5f) &&
+        size[0] > 0.0f && size[1] > 0.0f && size[2] > 0.0f) {
+      f->box = {size[0], size[1], size[2]};
+      changed = true;
+    }
+    ImGui::SetItemTooltip("The keep-out box, X by Y by Z, mm");
+  }
+  if (ImGui::Checkbox("Check the tool against it###cam_fixture_on",
+                      &f->enabled))
+    changed = true;
+  ImGui::SeparatorText("Put it");
+  const std::vector<Body> model = ui::FixtureModelBodies(state, *f);
+  static const std::pair<const char*, cam::FixtureSide> kPlaces[] = {
+      {"-X###cam_fixture_mx", cam::FixtureSide::MinusX},
+      {"+X###cam_fixture_px", cam::FixtureSide::PlusX},
+      {"-Y###cam_fixture_my", cam::FixtureSide::MinusY},
+      {"+Y###cam_fixture_py", cam::FixtureSide::PlusY},
+      {"Centre###cam_fixture_centre", cam::FixtureSide::Centre},
+      {"Top###cam_fixture_top", cam::FixtureSide::Top}};
+  for (size_t k = 0; k < std::size(kPlaces); k++) {
+    if (k > 0)
+      ImGui::SameLine();
+    if (ImGui::Button(kPlaces[k].first) &&
+        cam::PlaceFixture(*setup, ui::JobBodies(state), model, f->rotZdeg,
+                          kPlaces[k].second, f->pos))
+      changed = true;
+  }
+  ImGui::SetItemTooltip("Against that side of the stock, centred on it (a "
+                        "vise), or on its top straddling the -X edge (a toe "
+                        "clamp)");
+  if (changed)
+    CamFixturesChanged(state, *setup);
+  ImGui::Separator();
+  if (ImGui::Button(ICON_FA_TRASH_CAN " Remove###cam_fixture_editor_remove")) {
+    const uint64_t id = f->id;
+    std::erase_if(setup->fixtures,
+                  [id](const cam::Fixture& x) { return x.id == id; });
+    state.camEditFixture = 0;
+    state.camToolOpen = false;
+    CamFixturesChanged(state, *setup);
+    ImGui::End();
+    return true;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Close###cam_fixture_editor_close")) {
+    state.camEditFixture = 0;
+    state.camToolOpen = false;
+  }
+  ImGui::End();
+  return true;
+}
+
 } // namespace
 
 void DrawCamToolWindow(AppState& state) {
@@ -1108,6 +1191,8 @@ void DrawCamToolWindow(AppState& state) {
   if (state.camEditOp != 0 && DrawOperationEditor(state))
     return;
   if (state.camEditTool != 0 && DrawToolEditor(state))
+    return;
+  if (state.camEditFixture != 0 && DrawFixtureEditor(state))
     return;
   const Verb* verb = FindVerb(state.camVerb);
   BeginToolWindowFrame(state, verb != nullptr ? verb->label : "CAM");
@@ -1256,6 +1341,7 @@ void EditCamOperation(AppState& state, uint64_t opId) {
   state.camVerbOp = 0;
   state.camRefusal.clear();
   state.camEditTool = 0;
+  state.camEditFixture = 0;
   state.camEditOp = opId;
   state.camToolOpen = true;
 }
@@ -1269,8 +1355,38 @@ void EditCamTool(AppState& state, int number) {
   state.camVerbOp = 0;
   state.camRefusal.clear();
   state.camEditOp = 0;
+  state.camEditFixture = 0;
   state.camEditTool = number;
   state.camToolOpen = true;
+}
+
+void EditCamFixture(AppState& state, uint64_t fixtureId) {
+  if (!state.job)
+    return;
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.camVerb = CamVerb::None;
+  state.camVerbOp = 0;
+  state.camRefusal.clear();
+  state.camEditOp = 0;
+  state.camEditTool = 0;
+  state.camEditFixture = fixtureId;
+  state.camToolOpen = true;
+}
+
+void CamFixturesChanged(AppState& state, cam::Setup& setup) {
+  if (!state.job)
+    return;
+  state.job->BumpVersion();
+  // A clamp taller than the stock puts every rapid through it unless safe Z
+  // clears it too.
+  setup.safeZ = ui::DeriveJobSafeZ(state, setup);
+  state.camSafeZEdit = static_cast<float>(setup.safeZ);
+  state.projectMetaDirty = true;
+  RefreshCamToolpaths(state);
+  // A verdict about the fixtures as they WERE is worse than none.
+  state.camVerdict.clear();
+  state.camLeftover.clear();
 }
 
 void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
@@ -1344,6 +1460,13 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
   // a fact about the generated job rather than about a decision in progress.
   for (const glm::dvec3& p : state.camLeftover)
     AppendPrimDot(glm::vec3(p), 2.0f, kLeftoverDot, prims);
+
+  // Where the worst fixture hit was, on the fixture's top: the one finding an
+  // operator has to find on the bed. Only while there is a verdict, which is
+  // what every place that drops the verdict relies on.
+  if (state.camFixtureHit && !state.camVerdict.empty())
+    AppendPrimDot(glm::vec3(*state.camFixtureHit), 9.0f,
+                  glm::vec4(0.95f, 0.25f, 0.20f, 1.0f), prims);
 }
 
 void DrawCamLabels(AppState& state) {
@@ -1392,6 +1515,8 @@ struct VerifyWork {
   std::vector<Body> bodies;
   std::vector<cam::Toolpath::Relief> reliefs;
   std::vector<cam::Toolpath::Tab> tabs;
+  std::vector<cam::FixtureSolid> fixtures; // bed space
+  std::vector<std::string> missingFixtures;
   bool rotary = false;
   uint64_t generation = 0;
   // out
@@ -1424,13 +1549,14 @@ void InspectWork(VerifyWork& w) {
     w.ok = ri.ok;
     w.why = ri.why;
     w.verdict = ri.verdict;
+    w.verdict.fixturesSkippedRotary = !w.fixtures.empty();
     w.tolerance = kRotaryVerifyRes * 1.5;
     // No overlay: the leftover is painted from a HEIGHT MAP, and a radius
     // field has no renderer yet (docs/cam/rotary-plan.md).
     return;
   }
-  const cam::Inspection insp =
-      cam::Inspect(w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs);
+  const cam::Inspection insp = cam::Inspect(
+      w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs, w.fixtures);
   w.ok = insp.ok;
   w.verdict = insp.verdict;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
@@ -1464,6 +1590,11 @@ void LandVerification(AppState& state, const VerifyWork& w) {
   state.camVerdict = cam::Explain(
       w.verdict, w.tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
+  if (w.verdict.fixtureCollisions > 0)
+    state.camFixtureHit =
+        glm::dvec3(w.verdict.worstFixtureAt, w.verdict.worstFixtureZ);
+  if (const auto line = ui::FixtureTravelLine(state, *setup, w.verdict))
+    state.camVerdict.push_back(*line);
   // A target one operation could not follow while its others cut. It is not
   // an `error` -- that would drop the good targets with the bad one -- so
   // nothing else in the panel would say the file is short of a hole.
@@ -1482,6 +1613,10 @@ void LandVerification(AppState& state, const VerifyWork& w) {
   for (const cam::Finding& f : feeds.findings)
     state.camVerdict.push_back({cam::VerdictLine::Level::Warn, f.text});
   // What could NOT be checked, said as such: silence reads as approval.
+  for (const std::string& name : w.missingFixtures)
+    state.camVerdict.push_back(
+        {cam::VerdictLine::Level::Warn,
+         "Not checked: fixture \"" + name + "\" -- its part is gone"});
   for (const std::string& u : feeds.unchecked)
     state.camVerdict.push_back(
         {cam::VerdictLine::Level::Warn, "Not checked: " + u});
@@ -1497,6 +1632,7 @@ void LandVerification(AppState& state, const VerifyWork& w) {
 void RunCamVerification(AppState& state) {
   state.camVerdict.clear();
   state.camLeftover.clear();
+  state.camFixtureHit.reset();
   // Every request overtakes the one before it, whether that one is still on
   // a worker or not: a verdict landing about a toolpath that has since moved
   // is the thing this whole check exists to avoid.
@@ -1532,6 +1668,8 @@ void RunCamVerification(AppState& state) {
   }
   work->setup = *setup;
   work->bodies = ui::JobBodies(state);
+  work->fixtures =
+      ui::JobFixtureSolids(state, *setup, true, &work->missingFixtures);
   work->rotary = cam::RotatesWhileCutting(cam::ParseGcode(work->gcode));
   work->generation = state.camVerifyGeneration;
 
@@ -1578,6 +1716,8 @@ namespace ui {
 void DrawCamToolWindow(AppState&) {}
 void EditCamOperation(AppState&, uint64_t) {}
 void EditCamTool(AppState&, int) {}
+void EditCamFixture(AppState&, uint64_t) {}
+void CamFixturesChanged(AppState&, cam::Setup&) {}
 void StartCamVerb(AppState&, AppState::CamVerb) {}
 int VerbTool(const AppState&, const cam::Setup&) { return 0; }
 void LookDownTheSpindle(AppState&) {}

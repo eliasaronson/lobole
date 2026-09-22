@@ -392,6 +392,29 @@ json CamSetupToJson(const cam::Setup& setup) {
       j["placements"].push_back(std::move(pj));
     }
   }
+  // What holds the stock down (v126, docs/cam/workholding-plan.md). Omitted
+  // when there are none and each key at its default, so every older job
+  // re-saves byte-identically.
+  if (!setup.fixtures.empty()) {
+    j["fixtures"] = json::array();
+    for (const cam::Fixture& f : setup.fixtures) {
+      // A part, or a keep-out box: one key or the other, never both.
+      json fj = {{"id", f.id}};
+      if (f.IsBox())
+        fj["box"] = {f.box.x, f.box.y, f.box.z};
+      else
+        fj["part"] = f.sourceDocId;
+      if (!f.name.empty())
+        fj["name"] = f.name;
+      if (f.pos != glm::dvec3(0.0))
+        fj["pos"] = {f.pos.x, f.pos.y, f.pos.z};
+      if (f.rotZdeg != 0.0)
+        fj["rot_z"] = f.rotZdeg;
+      if (!f.enabled)
+        fj["enabled"] = false;
+      j["fixtures"].push_back(std::move(fj));
+    }
+  }
   j["operations"] = json::array();
   for (const cam::Operation& op : setup.operations) {
     json oj = {{"id", op.id},
@@ -530,6 +553,21 @@ cam::Setup CamSetupFromJson(const json& j) {
           pj["frame"][3].get<double>(), pj["frame"][0].get<double>(),
           pj["frame"][1].get<double>(), pj["frame"][2].get<double>());
     setup.placements.push_back(p);
+  }
+  for (const json& fj : j.value("fixtures", json::array())) {
+    cam::Fixture f;
+    f.id = fj.value("id", uint64_t{0});
+    f.sourceDocId = fj.value("part", uint64_t{0});
+    if (fj.contains("box") && fj["box"].is_array() && fj["box"].size() == 3)
+      f.box = {fj["box"][0].get<double>(), fj["box"][1].get<double>(),
+               fj["box"][2].get<double>()};
+    f.name = fj.value("name", std::string{});
+    if (fj.contains("pos") && fj["pos"].is_array() && fj["pos"].size() == 3)
+      f.pos = {fj["pos"][0].get<double>(), fj["pos"][1].get<double>(),
+               fj["pos"][2].get<double>()};
+    f.rotZdeg = fj.value("rot_z", 0.0);
+    f.enabled = fj.value("enabled", true);
+    setup.fixtures.push_back(std::move(f));
   }
   for (const json& oj : j.value("operations", json::array())) {
     cam::Operation op;

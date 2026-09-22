@@ -132,6 +132,22 @@ struct Verdict {
   double worstHolderDepth = 0.0; // mm the stock stands above the collar
   glm::dvec2 worstHolderAt{0.0};
   int worstHolderLine = 0;
+  // Moves that drive the cutter, or the holder, into a FIXTURE -- a clamp or
+  // a vise the job was told about (docs/cam/workholding-plan.md). Checked on
+  // every move against the fixtures' own height field, which is never
+  // carved: a clamp does not come off because the path went through it.
+  int fixtureCollisions = 0;
+  double worstFixtureDepth = 0.0; // mm of fixture above the tool there
+  glm::dvec2 worstFixtureAt{0.0}; // setup space
+  double worstFixtureZ = 0.0;     // the fixture's top there: where to mark it
+  int worstFixtureLine = 0;
+  std::string worstFixtureName;
+  bool worstFixtureByHolder = false; // the collar hit it, not the cutter
+  int fixturesChecked = 0;
+  // Fixtures were given but not checked, because the file turns the part
+  // (a rotary setup): a bed-space clamp has no meaning in the part's own
+  // turning frame. Said, not skipped.
+  bool fixturesSkippedRotary = false;
   // Moves in the POSTED FILE that ask for somewhere the machine cannot go.
   // Checked on the artifact rather than on the generator that made it: the
   // generator's own idea of reach was wrong once already (it nailed the
@@ -216,7 +232,8 @@ struct Verdict {
   // through material are unambiguous — no job wants either, ever.
   [[nodiscard]] bool Safe(double tolerance) const {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
-           outsideTravel == 0 && holderCollisions == 0 && fileErrors == 0;
+           outsideTravel == 0 && holderCollisions == 0 &&
+           fixtureCollisions == 0 && fileErrors == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of
@@ -257,6 +274,15 @@ struct Inspection {
   bool ok = false; // false = there was nothing to check (no stock, no bodies)
 };
 
+// A fixture as the verifier sees it: its bodies already in SETUP (bed) space
+// -- never through BodiesInSetupFrame, whose frame turns the part and not
+// the vise -- and the name a finding reports it by.
+struct FixtureSolid {
+  uint64_t id = 0;
+  std::string name;
+  std::vector<Body> bodies;
+};
+
 // `reliefs`: where the toolpaths deliberately cut into the model (corner
 // relief, R4) -- cells within a relief's radius are not counted as gouge.
 // `tabs`: where they deliberately did NOT cut -- material at or below a tab's
@@ -265,7 +291,8 @@ struct Inspection {
 Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<Body>& bodies, double res = 0.25,
         const std::vector<Toolpath::Relief>& reliefs = {},
-        const std::vector<Toolpath::Tab>& tabs = {});
+        const std::vector<Toolpath::Tab>& tabs = {},
+        const std::vector<FixtureSolid>& fixtures = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -281,7 +308,8 @@ Inspect(const std::string& gcode, const Setup& setup,
 VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<Body>& bodies, double res = 0.25,
             const std::vector<Toolpath::Relief>& reliefs = {},
-            const std::vector<Toolpath::Tab>& tabs = {});
+            const std::vector<Toolpath::Tab>& tabs = {},
+            const std::vector<FixtureSolid>& fixtures = {});
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/gui.md). Empty only when there is nothing to say.

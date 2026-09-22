@@ -120,7 +120,9 @@ The full shank-and-holder envelope collision designed at
 tip profile for the whole assembly and reporting a cell standing above it with
 its G-code line. That is the real version of check 2 and wants the holder
 geometry the `Tool` record does not carry. Fixture and clamp collision stays
-excluded: no fixture solid exists in the model.
+excluded: no fixture solid exists in the model. (2026-09-22: fixtures now
+exist, and every move is checked against them —
+docs/cam/workholding-plan.md.)
 
 `Verdict::outsideTravel` checks X and Y only (`CamVerify.cpp:687-700`), so a Z
 move past the machine's travel is unflagged. Real, adjacent, and its own fix.

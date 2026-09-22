@@ -354,10 +354,56 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
 // at a cut. A micron of graze does not break a cutter; a millimetre does.
 constexpr double kGrazeTolerance = 1e-3;
 
+namespace {
+// The FIXTURES as a height field of their own (docs/cam/workholding-plan.md):
+// each cell the top of the tallest fixture over it, and which fixture that
+// was. On its own grid, over the fixtures' footprint -- a vise beside the
+// stock has no cells in the stock's map -- and never carved: the path going
+// through a clamp does not remove the clamp.
+constexpr float kNoFixture = -1.0e9f;
+struct FixtureField {
+  HeightMap top;
+  std::vector<int> owner; // index into the fixture list, -1 = none
+  double tallest = -1.0e9;
+};
+
+FixtureField BuildFixtureField(const std::vector<FixtureSolid>& fixtures,
+                               double res) {
+  FixtureField field;
+  glm::dvec3 lo(1e30), hi(-1e30);
+  for (const FixtureSolid& f : fixtures)
+    for (const Body& b : f.bodies) {
+      if (!b.shape.IsValid())
+        continue;
+      glm::vec3 blo, bhi;
+      b.shape.GetBoundingBox(blo, bhi);
+      lo = glm::min(lo, glm::dvec3(blo));
+      hi = glm::max(hi, glm::dvec3(bhi));
+    }
+  if (lo.x > hi.x)
+    return field; // nothing with geometry
+  field.top = MakeStock(lo, hi, res);
+  field.top.z.assign(field.top.z.size(), kNoFixture);
+  field.owner.assign(field.top.z.size(), -1);
+  for (size_t k = 0; k < fixtures.size(); k++) {
+    const HeightMap one = SampleModel(fixtures[k].bodies, field.top,
+                                      static_cast<double>(kNoFixture));
+    for (size_t c = 0; c < one.z.size(); c++)
+      if (one.z[c] > field.top.z[c]) {
+        field.top.z[c] = one.z[c];
+        field.owner[c] = static_cast<int>(k);
+        field.tallest = std::max(field.tallest, static_cast<double>(one.z[c]));
+      }
+  }
+  return field;
+}
+} // namespace
+
 Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Body>& rawBodies, double res,
                    const std::vector<Toolpath::Relief>& reliefs,
-                   const std::vector<Toolpath::Tab>& tabs) {
+                   const std::vector<Toolpath::Tab>& tabs,
+                   const std::vector<FixtureSolid>& fixtures) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -382,6 +428,19 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   double worstHolderDepth = 0.0;
   glm::dvec2 worstHolderAt(0.0);
   int worstHolderLine = 0;
+  // Fixtures, on a setup whose bed they sit on. An indexed (A) setup turns
+  // the part under the spindle, and a bed-space clamp has no meaning in that
+  // frame: said in the verdict, not checked against the wrong picture.
+  const bool fixturesSkipped = !fixtures.empty() && EmitsRotary(setup);
+  const FixtureField field =
+      fixturesSkipped ? FixtureField{} : BuildFixtureField(fixtures, res);
+  int fixtureCollisions = 0;
+  double worstFixtureDepth = 0.0;
+  glm::dvec2 worstFixtureAt(0.0);
+  double worstFixtureZ = 0.0;
+  int worstFixtureLine = 0;
+  int worstFixtureOwner = -1;
+  bool worstFixtureByHolder = false;
   std::vector<uint8_t> touched(machined.z.size(), 0);
   {
     HeightMap probe = machined;
@@ -537,6 +596,84 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
             }
           }
         }();
+      // Fixtures, on EVERY move, like the holder: a cutter fed into a clamp
+      // breaks just as a rapid through one does. The cutter is its TipHeight
+      // shape; beyond its radius, out to the collar's, it is the collar's
+      // underside when the tool states one. The tool's height is taken where
+      // the move passes closest to the cell, not at the move's lowest Z, so a
+      // ramp past a clamp is not charged a depth it never reached beside it.
+      if (!field.top.z.empty())
+        [&] {
+          const Tool* tool = setup.FindTool(m.tool);
+          const double rc = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+          const bool holder = tool != nullptr && HasHolder(*tool);
+          const double reach = holder ? tool->collarDiameter * 0.5 : rc;
+          if (std::min(from.z, m.to.z) >= field.tallest - kGrazeTolerance)
+            return; // above every fixture: the common case, one compare
+          const HeightMap& f = field.top;
+          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+          const bool vertical = glm::length(b - a) < 1e-9;
+          const int i0 = std::max(
+              0, static_cast<int>((std::min(a.x, b.x) - reach - f.x0) / f.res));
+          const int i1 = std::min(
+              f.nx - 1,
+              static_cast<int>((std::max(a.x, b.x) + reach - f.x0) / f.res) +
+                  1);
+          const int j0 = std::max(
+              0, static_cast<int>((std::min(a.y, b.y) - reach - f.y0) / f.res));
+          const int j1 = std::min(
+              f.ny - 1,
+              static_cast<int>((std::max(a.y, b.y) + reach - f.y0) / f.res) +
+                  1);
+          bool hit = false;
+          double deepest = 0.0;
+          glm::dvec2 deepestAt(0.0);
+          double deepestTop = 0.0;
+          int deepestOwner = -1;
+          bool deepestByHolder = false;
+          for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+              const float top = f.At(i, j);
+              if (top <= kNoFixture)
+                continue;
+              double t = 0.0;
+              const glm::dvec2 c(f.CellX(i), f.CellY(j));
+              const double d = DistToSegment(c, a, b, t);
+              if (d > reach)
+                continue;
+              const double z = vertical ? std::min(from.z, m.to.z)
+                                        : from.z + (m.to.z - from.z) * t;
+              const bool byHolder = d > rc;
+              const double under =
+                  byHolder ? z + tool->overallLength
+                           : z + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+              const double into = top - under;
+              if (into <= kGrazeTolerance)
+                continue;
+              hit = true;
+              if (into > deepest) {
+                deepest = into;
+                deepestAt = c;
+                deepestTop = top;
+                deepestOwner = field.owner[static_cast<size_t>(j) *
+                                               static_cast<size_t>(f.nx) +
+                                           static_cast<size_t>(i)];
+                deepestByHolder = byHolder;
+              }
+            }
+          }
+          if (hit) {
+            fixtureCollisions++;
+            if (deepest > worstFixtureDepth) {
+              worstFixtureDepth = deepest;
+              worstFixtureAt = deepestAt;
+              worstFixtureZ = deepestTop;
+              worstFixtureLine = m.line;
+              worstFixtureOwner = deepestOwner;
+              worstFixtureByHolder = deepestByHolder;
+            }
+          }
+        }();
       // Apply every move (cuts remove material; rapids over air do nothing).
       if (!m.rapid) {
         CarveSweep(from, m.to, setup.FindTool(m.tool), probe);
@@ -581,6 +718,17 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.worstHolderDepth = worstHolderDepth;
   out.verdict.worstHolderAt = worstHolderAt;
   out.verdict.worstHolderLine = worstHolderLine;
+  out.verdict.fixtureCollisions = fixtureCollisions;
+  out.verdict.worstFixtureDepth = worstFixtureDepth;
+  out.verdict.worstFixtureAt = worstFixtureAt;
+  out.verdict.worstFixtureZ = worstFixtureZ;
+  out.verdict.worstFixtureLine = worstFixtureLine;
+  out.verdict.worstFixtureByHolder = worstFixtureByHolder;
+  if (worstFixtureOwner >= 0)
+    out.verdict.worstFixtureName = fixtures[worstFixtureOwner].name;
+  out.verdict.fixturesChecked =
+      fixturesSkipped ? 0 : static_cast<int>(fixtures.size());
+  out.verdict.fixturesSkippedRotary = fixturesSkipped;
 
   // Can the machine actually GO where the file asks? Checked on the posted
   // file, not on the toolpath that produced it -- the generator's own idea of
@@ -691,7 +839,8 @@ std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
 Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Body>& bodies, double res,
                     const std::vector<Toolpath::Relief>& reliefs,
-                    const std::vector<Toolpath::Tab>& tabs) {
+                    const std::vector<Toolpath::Tab>& tabs,
+                    const std::vector<FixtureSolid>& fixtures) {
   // The STOCK MODEL follows the file, not the setup. A program whose A moves
   // is cut from a cylinder that turns and one whose A does not is cut from a
   // block that does not, and asking the setup would get the answer wrong in
@@ -699,9 +848,14 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
   // Reliefs and tabs are 2.5D statements about a contour and mean nothing to
   // a rotary pass, so they are not carried into one rather than being
   // silently ignored inside it.
-  if (RotatesWhileCutting(ParseGcode(gcode)))
-    return InspectRotary(gcode, setup, bodies, res).verdict;
-  return Inspect(gcode, setup, bodies, res, reliefs, tabs).verdict;
+  // Fixtures likewise: a bed-space clamp means nothing in the frame of a
+  // part that turns, so a rotary file says they were not checked.
+  if (RotatesWhileCutting(ParseGcode(gcode))) {
+    Verdict v = InspectRotary(gcode, setup, bodies, res).verdict;
+    v.fixturesSkippedRotary = !fixtures.empty();
+    return v;
+  }
+  return Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures).verdict;
 }
 
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
@@ -818,6 +972,27 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.worstHolderLine);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
+  if (v.fixtureCollisions > 0) {
+    // The name travels with the finding: "a fixture" on a bed with four
+    // clamps sends the operator to check all four.
+    const std::string name = v.worstFixtureName.empty()
+                                 ? "a fixture"
+                                 : "fixture \"" + v.worstFixtureName + "\"";
+    char fb[512]; // the name is the user's, and may be long
+    std::snprintf(fb, sizeof(fb),
+                  "%d move%s drive the %s into %s, worst %.2f mm at X%.1f "
+                  "Y%.1f (line %d). Move the fixture, or keep the path clear "
+                  "of it.",
+                  v.fixtureCollisions, v.fixtureCollisions == 1 ? "" : "s",
+                  v.worstFixtureByHolder ? "HOLDER" : "cutter", name.c_str(),
+                  v.worstFixtureDepth, v.worstFixtureAt.x, v.worstFixtureAt.y,
+                  v.worstFixtureLine);
+    out.push_back({VerdictLine::Level::Bad, fb});
+  }
+  if (v.fixturesSkippedRotary)
+    out.push_back({VerdictLine::Level::Warn,
+                   "Fixtures were not checked: this setup turns the part, and "
+                   "a clamp on the bed has no place in its turning frame."});
   if (v.outsideTravel > 0) {
     std::snprintf(buf, sizeof(buf),
                   "%d move%s ask for somewhere the machine cannot go — %.1f mm "

@@ -197,6 +197,7 @@ operation each undo and redo.
   stops, which is the half that was free.
 - **Clamps and hold-down keep-outs.** Wanted, not in this round: it needs a
   shape on the sheet and a verifier check, which is its own small plan.
+  (2026-09-22: fixtures now exist — docs/cam/workholding-plan.md.)
 - **Draggable tabs.** Kiri:Moto's are click-to-add on the face; ours are
   counted and spaced. Enough until a job shows otherwise.
 - **3D surfacing, nesting, text and V-carving, probing macros.**

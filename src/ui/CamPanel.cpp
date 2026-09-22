@@ -623,7 +623,7 @@ void DrawCamPanel(AppState& state) {
     cam::Setup& fresh = state.job->AddSetup();
     state.camActiveSetup = fresh.id;
     (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
-    fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
+    fresh.safeZ = ui::DeriveJobSafeZ(state, fresh);
     state.camSafeZEdit = static_cast<float>(fresh.safeZ);
     state.projectMetaDirty = true;
     ImGui::End();
@@ -647,7 +647,7 @@ void DrawCamPanel(AppState& state) {
     other.rapidFeed = setup->rapidFeed;
     other.machine.hasRotaryAxis = setup->machine.hasRotaryAxis;
     other.originAt = setup->originAt;
-    other.safeZ = cam::DeriveSafeZ(other, ui::JobBodies(state));
+    other.safeZ = ui::DeriveJobSafeZ(state, other);
     (void)cam::RecomputeOrigin(other, ui::JobBodies(state));
     state.camActiveSetup = other.id;
     state.camSafeZEdit = static_cast<float>(other.safeZ);
@@ -871,6 +871,124 @@ void DrawCamPanel(AppState& state) {
       }
       ImGui::PopID();
     }
+  }
+
+  // What HOLDS the stock in this setup: clamps, a vise, a fixture plate --
+  // a part, or a keep-out box with no part at all
+  // (docs/cam/workholding-plan.md). Verify reports every move into one. Per
+  // setup, because re-clamping is what a second setup is. Rows in the list
+  // style the tools use (docs/ui/consistency-round-plan.md): the numbers are
+  // in the tool window, the verbs in the row's menu.
+  if (setup != nullptr && SectionHeader("Fixtures###cam_fixtures")) {
+    ImGui::PushID("fixtures"); // PushID(int) below shares an id space
+    bool changedFixtures = false;
+    uint64_t removeFixture = 0;
+    static const std::pair<const char*, cam::FixtureSide> kPlaces[] = {
+        {"-X side###cam_fixture_to_mx", cam::FixtureSide::MinusX},
+        {"+X side###cam_fixture_to_px", cam::FixtureSide::PlusX},
+        {"-Y side###cam_fixture_to_my", cam::FixtureSide::MinusY},
+        {"+Y side###cam_fixture_to_py", cam::FixtureSide::PlusY},
+        {"Centre###cam_fixture_to_centre", cam::FixtureSide::Centre},
+        {"Top###cam_fixture_to_top", cam::FixtureSide::Top}};
+    for (cam::Fixture& f : setup->fixtures) {
+      const std::vector<Body> model = ui::FixtureModelBodies(state, f);
+      const bool missing = model.empty();
+      ListRowSpec row;
+      row.glyph = f.IsBox() ? ICON_FA_BOX : ICON_FA_LOCK;
+      row.label = f.name + "###cam_fixture_" + std::to_string(f.id);
+      row.selected = state.camEditFixture == f.id;
+      row.dimmed = !f.enabled || missing;
+      const std::string place =
+          missing
+              ? std::string("its part is gone")
+              : cam::FixturePlaceName(*setup, ui::JobBodies(state), model, f);
+      row.tail = !place.empty() ? place : std::string("placed");
+      if (!f.enabled && !missing)
+        row.tail += ", not checked";
+      row.tooltip =
+          (f.IsBox() ? std::string("A keep-out box. ") : std::string()) +
+          (missing ? "Its part is gone, so nothing is checked against it."
+           : f.enabled
+               ? "Verify reports every move of the cutter or holder into it."
+               : "Drawn, not checked.");
+      row.menuId = "###cam_fixture_ctx_" + std::to_string(f.id);
+      row.menu = [&] {
+        if (ImGui::MenuItem("Edit###cam_fixture_edit"))
+          EditCamFixture(state, f.id);
+        if (ImGui::MenuItem("Check###cam_fixture_check", nullptr, f.enabled)) {
+          f.enabled = !f.enabled;
+          changedFixtures = true;
+        }
+        if (ImGui::BeginMenu("Move to###cam_fixture_move")) {
+          for (const auto& [label, side] : kPlaces)
+            if (ImGui::MenuItem(label) &&
+                cam::PlaceFixture(*setup, ui::JobBodies(state), model,
+                                  f.rotZdeg, side, f.pos))
+              changedFixtures = true;
+          ImGui::EndMenu();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###cam_fixture_remove"))
+          removeFixture = f.id;
+      };
+      const ListRowResult res = ListRow(row);
+      if (res.doubleClicked)
+        EditCamFixture(state, f.id);
+    }
+    if (removeFixture != 0) {
+      std::erase_if(setup->fixtures, [removeFixture](const cam::Fixture& f) {
+        return f.id == removeFixture;
+      });
+      changedFixtures = true;
+    }
+    // Adding one: a keep-out box, sized from the stock, or any part the job
+    // does not CUT. Placed from the stock and its own size -- centred when it
+    // is wider than the stock (a vise), else against the next free side.
+    const auto add = [&](cam::Fixture f) {
+      const std::vector<Body> model = ui::FixtureModelBodies(state, f);
+      if (model.empty())
+        return;
+      const cam::FixtureSide side = cam::DefaultFixtureSide(
+          *setup, ui::JobBodies(state), model, f.rotZdeg);
+      if (!cam::PlaceFixture(*setup, ui::JobBodies(state), model, f.rotZdeg,
+                             side, f.pos))
+        return;
+      f.id = state.job->AllocateId();
+      setup->fixtures.push_back(f);
+      changedFixtures = true;
+    };
+    if (ImGui::SmallButton(ICON_FA_BOX " Keep-out box###cam_fixture_box")) {
+      cam::Fixture f;
+      f.box = cam::DefaultKeepOutBox(*setup, ui::JobBodies(state));
+      f.name = "Clamp " + std::to_string(setup->fixtures.size() + 1);
+      add(f);
+    }
+    ImGui::SetItemTooltip("A box the tool must keep out of -- a clamp, this "
+                          "big, here. No part needed.");
+    for (const ui::PartSlot& slot : state.parts) {
+      if (slot.kind != ui::DocKind::Part)
+        continue;
+      bool cut = false;
+      for (const cam::JobPart& part : state.job->GetParts())
+        cut = cut || part.sourceDocId == slot.id;
+      if (cut)
+        continue;
+      ImGui::PushID(static_cast<int>(slot.id));
+      ImGui::SameLine();
+      if (ImGui::SmallButton(
+              (ICON_FA_LOCK " " + slot.name + "###cam_fixture_add").c_str())) {
+        cam::Fixture f;
+        f.sourceDocId = slot.id;
+        f.name = slot.name;
+        add(f);
+      }
+      ImGui::SetItemTooltip("Hold the stock with this part: placed against "
+                            "the stock, never cut, checked against the tool");
+      ImGui::PopID();
+    }
+    ImGui::PopID(); // "fixtures"
+    if (changedFixtures)
+      CamFixturesChanged(state, *setup);
   }
 
   // The stock, and the rapid height above it. Both are properties of the JOB

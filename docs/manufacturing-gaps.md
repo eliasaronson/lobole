@@ -14,13 +14,20 @@ say where they went.
 A gap that several rounds each worked around SEPARATELY is a gap; a gap one
 round noticed is a wish. Ranked by that:
 
-**1. Workholding does not exist.** Five documents, four rounds, and the CAM
-docs mark it "Wanted" in so many words. `docs/cam/reach-and-fidelity-plan.md`
-— "Fixture and clamp collision stays excluded: no fixture solid exists in the
-model"; `docs/cam/dogfood-round.md` leaves "check the tool actually clears the
-clamps" to the operator's eyes; `docs/cam/simulation.md` excludes machine and
-fixture collision as "a different model". The stated prerequisite is small: a
-solid the verifier can see.
+**1. Workholding.** Five documents, four rounds, and the CAM docs marked it
+"Wanted" in so many words: `docs/cam/reach-and-fidelity-plan.md` excluded
+fixture and clamp collision because "no fixture solid exists in the model",
+`docs/cam/dogfood-round.md` left "check the tool actually clears the clamps"
+to the operator's eyes, and `docs/cam/simulation.md` excluded fixture
+collision as "a different model". **Shipped 2026-09-22 (format v126)** —
+[cam/workholding-plan.md](cam/workholding-plan.md): a setup holds fixtures,
+each a part document or a keep-out box placed on the bed; the verifier checks
+the cutter and the holder collar against them on every move, rapid or cut,
+and names the fixture; safe Z is derived to clear them. Still open: dragging
+a fixture in the viewport, generated vises and toe clamps, planning AROUND a
+fixture rather than reporting it, the spindle nose, a setup sheet, a chuck
+and tailstock for rotary setups (which are not checked against fixtures, and
+say so), and holding the part down on 3D operations.
 
 **2. A press or interference fit has no representation.** Four rounds, four
 different workarounds. The watch modelled the cannon pinion's friction fit as

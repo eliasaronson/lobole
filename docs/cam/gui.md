@@ -468,3 +468,10 @@ removes, and Delete. Generate, the verdict, the output options and Save G-code
 are the Generate window, which the toolbar's gears open. The panel keeps one
 status line that opens it.
 
+**2026-09-22:** a **Fixtures** section under Parts lists the active setup's
+clamps and keep-out boxes in the same row style — its place as a dim tail,
+greyed when not checked; right-click Edit, Check, Move to and Remove — with
+an add button per part the job does not cut and one for a keep-out box. The
+job viewport draws them ghosted grey, and Simulate marks the worst hit
+([workholding-plan.md](workholding-plan.md)).
+

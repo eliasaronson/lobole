@@ -712,6 +712,156 @@ double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
   return hi.z + std::max(2.0, (hi.z - lo.z) * 0.1);
 }
 
+double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies,
+                   const std::vector<Body>& fixtureBodies) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return setup.safeZ;
+  // The same clearance as over the stock, over the taller of the stock and
+  // every fixture: a clamp is cleared by as much as the block is.
+  double top = hi.z;
+  for (const Body& b : fixtureBodies) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 blo, bhi;
+    b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
+    top = std::max(top, static_cast<double>(bhi.z));
+  }
+  return top + std::max(2.0, (hi.z - lo.z) * 0.1);
+}
+
+bool ParseFixtureSide(const std::string& text, FixtureSide& out) {
+  static const std::pair<const char*, FixtureSide> kSides[] = {
+      {"-x", FixtureSide::MinusX},     {"+x", FixtureSide::PlusX},
+      {"-y", FixtureSide::MinusY},     {"+y", FixtureSide::PlusY},
+      {"centre", FixtureSide::Centre}, {"center", FixtureSide::Centre},
+      {"top", FixtureSide::Top}};
+  for (const auto& [name, side] : kSides)
+    if (text == name) {
+      out = side;
+      return true;
+    }
+  return false;
+}
+
+std::string FixtureSideName(FixtureSide side) {
+  switch (side) {
+  case FixtureSide::MinusX:
+    return "-x";
+  case FixtureSide::PlusX:
+    return "+x";
+  case FixtureSide::MinusY:
+    return "-y";
+  case FixtureSide::PlusY:
+    return "+y";
+  case FixtureSide::Centre:
+    return "centre";
+  case FixtureSide::Top:
+    return "top";
+  }
+  return "-x";
+}
+
+namespace {
+// The fixture's box, spun as it will be placed, at the bed origin.
+bool SpunFixtureBox(const std::vector<Body>& fixtureModel, double rotZdeg,
+                    glm::dvec3& flo, glm::dvec3& fhi) {
+  Fixture spun;
+  spun.rotZdeg = rotZdeg;
+  const glm::mat4 turn(FixtureTransform(spun));
+  flo = glm::dvec3(1e30);
+  fhi = glm::dvec3(-1e30);
+  for (const Body& b : fixtureModel) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 blo, bhi;
+    b.shape.Transformed(turn).GetBoundingBox(blo, bhi, /*tight=*/true);
+    flo = glm::min(flo, glm::dvec3(blo));
+    fhi = glm::max(fhi, glm::dvec3(bhi));
+  }
+  return flo.x <= fhi.x;
+}
+} // namespace
+
+FixtureSide DefaultFixtureSide(const Setup& setup,
+                               const std::vector<Body>& bodies,
+                               const std::vector<Body>& fixtureModel,
+                               double rotZdeg) {
+  glm::dvec3 lo(0.0), hi(0.0), flo, fhi;
+  if (StockBounds(setup, bodies, lo, hi) &&
+      SpunFixtureBox(fixtureModel, rotZdeg, flo, fhi) &&
+      (fhi.x - flo.x > hi.x - lo.x || fhi.y - flo.y > hi.y - lo.y))
+    return FixtureSide::Centre; // it goes round the stock: a vise
+  static const FixtureSide kOrder[] = {FixtureSide::MinusX, FixtureSide::PlusX,
+                                       FixtureSide::MinusY, FixtureSide::PlusY};
+  return kOrder[setup.fixtures.size() % std::size(kOrder)];
+}
+
+glm::dvec3 DefaultKeepOutBox(const Setup& setup,
+                             const std::vector<Body>& bodies) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return glm::dvec3(0.0);
+  const glm::dvec3 size = hi - lo;
+  return {size.x * 0.25, size.y * 0.25, size.z * 1.25};
+}
+
+std::string FixturePlaceName(const Setup& setup,
+                             const std::vector<Body>& bodies,
+                             const std::vector<Body>& fixtureModel,
+                             const Fixture& f) {
+  static const FixtureSide kAll[] = {FixtureSide::MinusX, FixtureSide::PlusX,
+                                     FixtureSide::MinusY, FixtureSide::PlusY,
+                                     FixtureSide::Centre, FixtureSide::Top};
+  static const char* const kSay[] = {"-X side", "+X side", "-Y side",
+                                     "+Y side", "centred", "on top"};
+  for (size_t k = 0; k < std::size(kAll); k++) {
+    glm::dvec3 at;
+    if (PlaceFixture(setup, bodies, fixtureModel, f.rotZdeg, kAll[k], at) &&
+        glm::length(at - f.pos) < 1e-6)
+      return kSay[k];
+  }
+  return {};
+}
+
+bool PlaceFixture(const Setup& setup, const std::vector<Body>& bodies,
+                  const std::vector<Body>& fixtureModel, double rotZdeg,
+                  FixtureSide side, glm::dvec3& pos) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return false;
+  glm::dvec3 flo, fhi;
+  if (!SpunFixtureBox(fixtureModel, rotZdeg, flo, fhi))
+    return false;
+  const glm::dvec3 stockMid = (lo + hi) * 0.5, fixMid = (flo + fhi) * 0.5;
+  // Centred along the side it is put against; standing on the bed, which is
+  // the stock's underside.
+  pos = stockMid - fixMid;
+  pos.z = lo.z - flo.z;
+  switch (side) {
+  case FixtureSide::MinusX:
+    pos.x = lo.x - fhi.x;
+    break;
+  case FixtureSide::PlusX:
+    pos.x = hi.x - flo.x;
+    break;
+  case FixtureSide::MinusY:
+    pos.y = lo.y - fhi.y;
+    break;
+  case FixtureSide::PlusY:
+    pos.y = hi.y - flo.y;
+    break;
+  case FixtureSide::Centre:
+    break; // centred both ways, standing on the bed: already so
+  case FixtureSide::Top:
+    // On the top face, straddling the -X edge: a toe clamp's arm.
+    pos.x = lo.x - fixMid.x;
+    pos.z = hi.z - flo.z;
+    break;
+  }
+  return true;
+}
+
 double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
   // A ROTARY move has length too, and it used to have none: a pure A move is
   // zero millimetres in XYZ, so it fell out of this loop and a rotary

@@ -68,5 +68,12 @@ void RunCamVerification(AppState& state);
 void EditCamOperation(AppState& state, uint64_t opId);
 // The same for one of the active setup's tools, by number.
 void EditCamTool(AppState& state, int number);
+// Opens a fixture of the active setup in the tool window.
+void EditCamFixture(AppState& state, uint64_t fixtureId);
+// A fixture of `setup` was added, moved, changed or removed: the one place
+// that answers it -- safe Z clears it (or no longer has to), the job is
+// dirty, and the toolpaths and the verdict follow, as a placement change
+// does. The panel, the tool window and the RPC all come through here.
+void CamFixturesChanged(AppState& state, cam::Setup& setup);
 
 } // namespace ui

@@ -479,6 +479,46 @@ struct Placement {
   std::optional<glm::dquat> frame;
 };
 
+// What HOLDS the stock: a clamp, a vise, a fixture plate -- an ordinary part
+// document, placed on the bed of one setup (docs/cam/workholding-plan.md).
+//
+// Not a Placement and not a JobPart: those are WORKPIECES, which get stock,
+// targets and toolpaths. A fixture gets none of that; it is only somewhere
+// the tool must never go, so it can never grow the stock box or become a
+// surface a gouge is measured against.
+//
+// BED space, not model space. The setup's `frame` turns the PART to lie on
+// the bed and a vise does not turn with it, so a fixture's model is read as
+// bed coordinates, Z up, then spun and moved (FixtureTransform). It belongs to
+// a setup because re-clamping between setups is what a second setup is.
+//
+// Or a KEEP-OUT BOX, with no part at all: "there is a clamp here, this big"
+// is most of what a first job needs, and a part tab per toe clamp is the
+// friction that would leave the feature unused.
+struct Fixture {
+  uint64_t id = 0;          // from the job's one id counter
+  uint64_t sourceDocId = 0; // the part slot it is a copy of; 0 = a box
+  glm::dvec3 box{0.0};      // a keep-out box's size, mm, corner at its origin
+  std::string name;         // display; a part owns its own name
+  glm::dvec3 pos{0.0};      // setup space, mm
+  double rotZdeg = 0.0;     // spin about +Z, degrees
+  bool enabled = true;      // off = drawn, not checked
+
+  [[nodiscard]] bool IsBox() const { return sourceDocId == 0; }
+};
+
+// bed = T(pos) * Rz(rotZ) * model.
+[[nodiscard]] inline glm::dmat4 FixtureTransform(const Fixture& f) {
+  const double a = glm::radians(f.rotZdeg);
+  glm::dmat4 m(1.0);
+  m[0][0] = std::cos(a);
+  m[0][1] = std::sin(a);
+  m[1][0] = -std::sin(a);
+  m[1][1] = std::cos(a);
+  m[3] = glm::dvec4(f.pos, 1.0);
+  return m;
+}
+
 struct Setup {
   uint64_t id = 0;
   std::string name;
@@ -545,6 +585,9 @@ struct Setup {
   // reading of "nobody has said".
   std::vector<Placement> placements;
 
+  // What holds the stock down in this setup (Fixture, above).
+  std::vector<Fixture> fixtures;
+
   // In what order the operations cut, and whether the post writes one file
   // per group. Properties of the JOB, unlike the machine above.
   OrderOutputBy order = OrderOutputBy::Authored;
@@ -561,6 +604,19 @@ struct Setup {
     for (const Placement& p : placements)
       if (p.id == id)
         return &p;
+    return nullptr;
+  }
+
+  [[nodiscard]] const Fixture* FindFixture(uint64_t id) const {
+    for (const Fixture& f : fixtures)
+      if (f.id == id)
+        return &f;
+    return nullptr;
+  }
+  [[nodiscard]] Fixture* FindFixture(uint64_t id) {
+    for (Fixture& f : fixtures)
+      if (f.id == id)
+        return &f;
     return nullptr;
   }
 

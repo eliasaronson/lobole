@@ -2214,6 +2214,13 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
     maxId = std::max(maxId, setup.id);
     for (const cam::Operation& op : setup.operations)
       maxId = std::max(maxId, op.id);
+    // Placements and fixtures draw from the same counter. Placements were
+    // left out of this rebuild until v126, so a placement made after a
+    // reload could be handed an id an existing one already had.
+    for (const cam::Placement& pl : setup.placements)
+      maxId = std::max(maxId, pl.id);
+    for (const cam::Fixture& f : setup.fixtures)
+      maxId = std::max(maxId, f.id);
     job->GetSetups().push_back(std::move(setup));
   }
   job->EnsureNextIdAtLeast(maxId + 1);

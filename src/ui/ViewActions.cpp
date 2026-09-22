@@ -297,6 +297,36 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
       max = glm::max(max, bmax);
       any = true;
     }
+    // ...and what holds them, which is drawn too. The MODEL shape's box
+    // (memoized on it) with the fixture's transform applied to its corners,
+    // as the assembly branch does: a transformed copy would be a new shape
+    // with a cold memo, bounded afresh on every call.
+    if (const cam::Setup* setup = ActiveJobSetup(state))
+      for (const cam::Fixture& f : setup->fixtures) {
+        const glm::mat4 xf(cam::FixtureTransform(f));
+        // A part's bodies by reference (this runs every frame under the
+        // section tool, and a Body copy carries its element map); a box is
+        // one small cached shape.
+        const Document* doc =
+            f.IsBox() ? nullptr : JobSourceDocument(state, f.sourceDocId);
+        const std::vector<Body> box =
+            f.IsBox() ? FixtureModelBodies(state, f) : std::vector<Body>{};
+        for (const Body& body : doc != nullptr ? doc->GetBodies() : box) {
+          if (body.reference || !body.shape.IsValid())
+            continue;
+          glm::vec3 bmin, bmax;
+          body.shape.GetBoundingBox(bmin, bmax);
+          for (int c = 0; c < 8; c++) {
+            const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                                   (c & 2) ? bmax.y : bmin.y,
+                                   (c & 4) ? bmax.z : bmin.z);
+            const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+            min = glm::min(min, w);
+            max = glm::max(max, w);
+            any = true;
+          }
+        }
+      }
   }
   return any;
 }

@@ -22,6 +22,7 @@ add_executable(designer_tests
     ${SANITIZER_DEFAULTS_SRC}
     test_assembly_flatten.cpp
     test_step_export.cpp
+    test_cam_workholding.cpp
     test_cadkernel.cpp
     test_sketch.cpp
     test_document.cpp

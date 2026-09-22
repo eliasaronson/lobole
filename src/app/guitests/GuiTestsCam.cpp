@@ -1666,6 +1666,104 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
              !ImGui::FindWindowByName("###CamGenerate")->Active);
   };
 
+  // Workholding by clicking (docs/cam/workholding-plan.md): a keep-out box
+  // from the panel, placed from the stock; its row checks, moves and edits
+  // it; and Verify names the clamp the profile runs into.
+  t = IM_REGISTER_TEST(engine, "cam", "a_clamp_is_a_row_the_verdict_names");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& made = MakeJob()->AddSetup("Clamped");
+    const uint64_t sid = made.id;
+    s_App->camActiveSetup = sid;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 13.0;
+    op.bottomZ = -1.0;
+    made.operations.push_back(op);
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_fixtures");
+    ctx->Yield(2);
+
+    ctx->ItemClick("**/###cam_fixture_box");
+    ctx->Yield(2);
+    const auto live = [&]() -> cam::Setup& { return *Job()->FindSetup(sid); };
+    IM_CHECK_EQ(live().fixtures.size(), (size_t)1);
+    const uint64_t id = live().fixtures[0].id;
+    glm::dvec3 lo, hi;
+    IM_CHECK(cam::StockBounds(live(), ui::JobBodies(*s_App), lo, hi));
+    // Against -X on the bed, a quarter of the stock's width, taller than it
+    // -- and safe Z now clears it.
+    const cam::Fixture& f0 = live().fixtures[0];
+    IM_CHECK(f0.IsBox());
+    IM_CHECK(std::abs(f0.pos.x + f0.box.x - lo.x) < 1e-6);
+    IM_CHECK(std::abs(f0.pos.z - lo.z) < 1e-6);
+    IM_CHECK(live().safeZ > f0.pos.z + f0.box.z);
+
+    const std::string row = "**/###cam_fixture_" + std::to_string(id);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_fixture_check");
+    ctx->Yield(2);
+    IM_CHECK(!live().fixtures[0].enabled);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_fixture_check");
+    ctx->Yield(2);
+    IM_CHECK(live().fixtures[0].enabled);
+
+    // Moved through the menu: on the stock's top.
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_fixture_move");
+    ctx->Yield(2);
+    // A submenu is a window of its own, "<label>###Menu_00" -- so its id is
+    // the depth's, not the label's.
+    ctx->ItemClick("//###Menu_00/###cam_fixture_to_top");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(live().fixtures[0].pos.z - hi.z) < 1e-6);
+
+    // Edited in the tool window, and back against -X from there.
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditFixture, id);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###cam_fixture_editor_close"));
+    ctx->ItemClick("//###ToolWindow/###cam_fixture_mx");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(live().fixtures[0].pos.z - lo.z) < 1e-6);
+    ctx->ItemClick("//###ToolWindow/###cam_fixture_editor_close");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditFixture, (uint64_t)0);
+
+    // The profile runs round the plate, into the clamp: the verdict says
+    // which one, and marks where.
+    ui::RefreshCamToolpaths(*s_App);
+    ui::RunCamVerification(*s_App);
+    ctx->Yield(2);
+    bool named = false;
+    for (const cam::VerdictLine& l : s_App->camVerdict)
+      named = named || l.text.find("fixture \"" + live().fixtures[0].name +
+                                   "\"") != std::string::npos;
+    IM_CHECK(named);
+    IM_CHECK(s_App->camFixtureHit.has_value());
+
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "an_op_row_has_the_feature_gestures");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // Rows in the part feature list's style: the menu disables (and the row

@@ -5,7 +5,12 @@
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 
+#include "cad/CADKernel.h"
+
 #include <algorithm>
+#include <cmath>
+#include <map>
+#include <tuple>
 
 namespace ui {
 
@@ -131,8 +136,116 @@ uint64_t JobRenderVersion(AppState& state) {
       mix(p.rotZdeg);
       key = (key ^ (p.enabled ? 1u : 2u)) * 1099511628211ull;
     }
+    // Fixtures are drawn too, and their parts can be edited like any other.
+    for (const cam::Fixture& f : setup.fixtures) {
+      key = (key ^ f.id) * 1099511628211ull;
+      key = (key ^ JobSourceVersion(state, f.sourceDocId)) * 1099511628211ull;
+      mix(f.pos.x);
+      mix(f.pos.y);
+      mix(f.pos.z);
+      mix(f.rotZdeg);
+      key = (key ^ (f.enabled ? 1u : 2u)) * 1099511628211ull;
+    }
   }
   return key;
+}
+
+std::vector<Body> FixtureModelBodies(AppState& state, const cam::Fixture& f) {
+  std::vector<Body> out;
+  if (f.IsBox()) {
+    if (f.box.x <= 0.0 || f.box.y <= 0.0 || f.box.z <= 0.0)
+      return out;
+    // One shape per size, kept: the renderer's tessellation cache is keyed on
+    // the SHAPE, so a fresh box every resync would be meshed every resync.
+    static std::map<std::tuple<double, double, double>, CADShape> boxes;
+    const auto key = std::make_tuple(f.box.x, f.box.y, f.box.z);
+    auto it = boxes.find(key);
+    if (it == boxes.end())
+      it = boxes
+               .emplace(key, CADKernel::Instance().CreateBox(glm::vec3(0.0f),
+                                                             glm::vec3(f.box)))
+               .first;
+    Body b;
+    b.name = f.name;
+    b.shape = it->second;
+    out.push_back(std::move(b));
+    return out;
+  }
+  if (const Document* doc = JobSourceDocument(state, f.sourceDocId))
+    for (const Body& b : doc->GetBodies())
+      if (!b.reference && b.shape.IsValid())
+        out.push_back(b);
+  return out;
+}
+
+std::optional<cam::VerdictLine> FixtureTravelLine(AppState& state,
+                                                  const cam::Setup& setup,
+                                                  const cam::Verdict& v) {
+  if (v.outsideTravel == 0 || v.outsideAxis != 'Z')
+    return std::nullopt;
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!cam::StockBounds(setup, JobBodies(state), lo, hi))
+    return std::nullopt;
+  // The tallest fixture standing above the stock is the one safe Z cleared.
+  std::string name;
+  double tallest = hi.z;
+  for (const cam::FixtureSolid& f : JobFixtureSolids(state, setup))
+    for (const Body& b : f.bodies) {
+      glm::vec3 blo, bhi;
+      b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
+      if (bhi.z > tallest) {
+        tallest = bhi.z;
+        name = f.name;
+      }
+    }
+  if (name.empty())
+    return std::nullopt;
+  return cam::VerdictLine{
+      cam::VerdictLine::Level::Warn,
+      "Safe Z is " +
+          std::to_string(static_cast<int>(std::lround(setup.safeZ))) +
+          " mm because it clears fixture \"" + name + "\" (its top is " +
+          std::to_string(static_cast<int>(std::lround(tallest - hi.z))) +
+          " mm above the stock): that is what asks for more Z than the "
+          "machine has. Lower the fixture, or hold the work lower in it."};
+}
+
+std::vector<cam::FixtureSolid>
+JobFixtureSolids(AppState& state, const cam::Setup& setup, bool enabledOnly,
+                 std::vector<std::string>* missing) {
+  std::vector<cam::FixtureSolid> out;
+  for (const cam::Fixture& f : setup.fixtures) {
+    if (enabledOnly && !f.enabled)
+      continue;
+    std::vector<Body> bodies = FixtureModelBodies(state, f);
+    if (bodies.empty()) {
+      if (missing != nullptr)
+        missing->push_back(f.name);
+      continue;
+    }
+    // Bed space straight from the part's own coordinates: never through
+    // BodiesInSetupFrame, whose frame turns the PART and not the vise.
+    const glm::mat4 m(cam::FixtureTransform(f));
+    for (Body& b : bodies)
+      b.shape = b.shape.Transformed(m);
+    out.push_back({f.id, f.name, std::move(bodies)});
+  }
+  return out;
+}
+
+double DeriveJobSafeZ(AppState& state, const cam::Setup& setup) {
+#ifdef HAVE_CAM
+  std::vector<Body> fixtureBodies;
+  for (cam::FixtureSolid& f : JobFixtureSolids(state, setup))
+    for (Body& b : f.bodies)
+      fixtureBodies.push_back(std::move(b));
+  return cam::DeriveSafeZ(setup, JobBodies(state), fixtureBodies);
+#else
+  // The derivation is CAM's (CamDerive.cpp), and only CAM calls this; a
+  // build without it keeps what the job file says.
+  (void)state;
+  return setup.safeZ;
+#endif
 }
 
 const std::vector<Body>& JobBodies(AppState& state) {

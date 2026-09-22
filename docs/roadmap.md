@@ -444,7 +444,9 @@ process. One pair is known to fail when they meet and is invisible by default
   surfacing followed ([cam/surfacing.md](cam/surfacing.md)), then rotary
   surfacing and continuous 4-axis — a spiral that turns A while it cuts, with
   rotary roughing layers and a compensated feed
-  ([cam/rotary-continuous-plan.md](cam/rotary-continuous-plan.md)). **Nothing has cut
+  ([cam/rotary-continuous-plan.md](cam/rotary-continuous-plan.md)), then
+  workholding: clamps and keep-out boxes on a setup's bed that the verifier
+  checks every move against ([cam/workholding-plan.md](cam/workholding-plan.md)). **Nothing has cut
   a real part yet** — that is the check simulation cannot stand in for. The proposal that preceded it, kept because the
   survey numbers are the reason the scope is narrow:
   [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a

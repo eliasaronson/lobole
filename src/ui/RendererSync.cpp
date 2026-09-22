@@ -250,6 +250,10 @@ void SyncDocumentRenderers(AppState& state) {
   for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
     state.meshRenderer->RemoveMesh(cap.meshId);
   state.sectionCapMeshes.clear();
+  // So are a job's fixtures.
+  for (const uint32_t id : state.fixtureInstances)
+    state.meshRenderer->RemoveInstance(id);
+  state.fixtureInstances.clear();
   // The topology shape-guide ghost is likewise rebuilt each resync.
   if (state.topoGhostInstance) {
     state.meshRenderer->RemoveMesh(state.topoGhostInstance);
@@ -361,6 +365,27 @@ void SyncDocumentRenderers(AppState& state) {
                                     {},
                                     tess->edges});
   }
+
+  // A job's fixtures: what holds the stock, drawn ghosted where they sit on
+  // the bed. Instanced from their part's own tessellation at the fixture's
+  // transform, so moving a clamp re-meshes nothing. A disabled one (drawn,
+  // not checked) is fainter.
+  if (state.job)
+    if (const cam::Setup* setup = ActiveJobSetup(state))
+      for (const cam::Fixture& f : setup->fixtures) {
+        const glm::mat4 xf(cam::FixtureTransform(f));
+        for (const Body& b : FixtureModelBodies(state, f)) {
+          const std::shared_ptr<BodyTessellation> tess =
+              TessellationFor(state, b.shape);
+          if (!tess)
+            continue;
+          const uint32_t id =
+              state.meshRenderer->AddInstance(tess->meshAsset, xf);
+          state.meshRenderer->SetMeshColor(id, glm::vec3(0.62f, 0.62f, 0.66f));
+          state.meshRenderer->SetInstanceGhost(id, f.enabled ? 0.45f : 0.2f);
+          state.fixtureInstances.push_back(id);
+        }
+      }
 
   // Reference geometry is sized from the document's reach
   // (ScenePlaneHalfExtent), and the bounding box behind it is an OCC pass per

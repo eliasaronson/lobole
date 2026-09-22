@@ -1,10 +1,12 @@
 #pragma once
 
 #include "core/Feature.h"
+#include "core/cam/CamVerify.h" // FixtureSolid
 #include "core/cam/JobDocument.h"
 #include "ui/AppState.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,6 +60,33 @@ const std::vector<Body>& JobPlacedBodies(AppState& state);
 // The active setup of the active job, or null. "Active" means the one the
 // panel is showing; with none chosen it is the first.
 const cam::Setup* ActiveJobSetup(AppState& state);
+
+// A setup's FIXTURES as solids in setup (bed) space, each named for the
+// verdict (docs/cam/workholding-plan.md). `enabledOnly` is the verifier's
+// list; the viewport draws every fixture. A fixture whose part is gone is
+// left out and its name appended to `missing` -- the caller says so rather
+// than checking less than it was asked to.
+std::vector<cam::FixtureSolid>
+JobFixtureSolids(AppState& state, const cam::Setup& setup,
+                 bool enabledOnly = true,
+                 std::vector<std::string>* missing = nullptr);
+
+// A fixture's bodies in its OWN coordinates, before FixtureTransform: its
+// part's, reference bodies left out, or its keep-out box. Empty when the part
+// is gone.
+std::vector<Body> FixtureModelBodies(AppState& state, const cam::Fixture& f);
+
+// When safe Z was raised to clear a fixture and the file then asks for more
+// Z than the machine has, the finding that says WHICH fixture did it --
+// otherwise it reads as a travel problem with no cause. Empty otherwise.
+std::optional<cam::VerdictLine> FixtureTravelLine(AppState& state,
+                                                  const cam::Setup& setup,
+                                                  const cam::Verdict& v);
+
+// Safe Z for a setup of the active job: clear of the stock AND of the
+// setup's fixtures. Every place that derives safe Z goes through here, so a
+// clamp taller than the stock cannot be forgotten by one of them.
+double DeriveJobSafeZ(AppState& state, const cam::Setup& setup);
 
 // A change counter for everything a job TAB draws: the job itself plus every
 // source part it references. The renderer resyncs on it, so a model edit in

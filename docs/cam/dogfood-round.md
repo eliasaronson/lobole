@@ -329,6 +329,9 @@ When it does, watch these, in this order:
 
 1. **The first rapid.** Safe Z is derived (20 mm on 18 mm stock); check the
    tool actually clears the clamps, which the app knows nothing about.
+   (2026-09-22: fixtures now exist — model the clamps as keep-out boxes and
+   the verifier checks every move against them, and safe Z clears them;
+   docs/cam/workholding-plan.md.)
 2. **Z zero. THIS CHANGED IN v68 — re-read it even if you knew the old rule.**
    The file is now written *relative to the work origin*: zero in the g-code
    is the corner the panel names (Stock corner / Stock centre / Part corner)

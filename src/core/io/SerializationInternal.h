@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    125; // v125: a `surface_parallel` op reads `stepdown`, ROUGHING in
+    126; // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
+         //      placed on the bed ({id, part, name, pos, rot_z, enabled}),
+         //      which the verifier treats as somewhere the tool must never
+         //      go (docs/cam/workholding-plan.md).
+         // v125: a `surface_parallel` op reads `stepdown`, ROUGHING in
          //      layers from the stock top (a v124 file's unread stepdown on
          //      one is dropped on load), and surface ops gain
          //      `rest_from_tool`: cut only where that larger cutter could not

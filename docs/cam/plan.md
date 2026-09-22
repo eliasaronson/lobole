@@ -155,6 +155,8 @@ cam::Setup                     // a document object, like fem::Study
                  // flutes, length, feeds/speeds. The type is what the
                  // verifier simulates and what an edge break reads (R15).
   operations[]
+  fixtures[]     // clamps, vises, keep-out boxes, placed in BED space and
+                 // checked by the verifier (docs/cam/workholding-plan.md, v126)
 
 cam::Operation
   type      // Profile | Pocket | Face | Drill | Adaptive | EdgeRound

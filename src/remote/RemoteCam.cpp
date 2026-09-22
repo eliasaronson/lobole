@@ -18,6 +18,7 @@
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
+#include "ui/CamTool.h"       // CamFixturesChanged
 #include "ui/DocumentSlots.h" // JobUndoGuard
 #include "ui/JobActions.h"
 #include "ui/MachineActions.h"
@@ -112,6 +113,33 @@ constexpr MethodDoc kCamMethods[] = {
      "a baffle on its face beside a rail on its edge. It says nothing about "
      "the machine: no A word is posted.",
      "enabled, job, lay_face_up, part, pos, rot_z, setup"},
+    {"add_job_fixture",
+     "Put a FIXTURE in a setup {setup, part: id or name | box: [x,y,z] mm, "
+     "side?: -x|+x|-y|+y|centre|top, pos?: [x,y,z] mm in setup space, "
+     "rot_z?: degrees, name?} -- what holds the stock: any part (a vise, a "
+     "shaped clamp), read in its own coordinates as bed coordinates (Z up), "
+     "or a keep-out BOX with no part at all (a clamp, this big, here; its "
+     "corner at its origin). Exactly one of part and box. It is not cut; it "
+     "is where the tool must never go, and cam_verify reports every move "
+     "into it. Without pos it is placed from the stock and its own size: a "
+     "side puts it on the bed against that face, `centre` centres it on the "
+     "stock (a vise goes round it), `top` lays it on the stock straddling "
+     "the -X edge (a toe clamp's arm). With neither, it is centred when it "
+     "is wider than the stock and otherwise takes the next free side. Safe "
+     "Z is re-derived to clear it. A part the job CUTS is refused.",
+     "box, job, name, part, pos, rot_z, setup, side", remote::NoFlags,
+     "id, part|box, name, pos, rot_z, enabled, setup, safe_z"},
+    {"set_job_fixture",
+     "Move or change a fixture {setup, fixture: id, pos?: [x,y,z] mm in "
+     "setup space, side?: -x|+x|-y|+y|centre|top (re-derive against the "
+     "stock), rot_z?: degrees, box?: [x,y,z] mm (a keep-out box's size), "
+     "enabled?: false = drawn, not checked, name?}. pos and side both place "
+     "it, so passing both is refused. Safe Z is re-derived.",
+     "box, enabled, fixture, job, name, pos, rot_z, setup, side",
+     remote::NoFlags, "id, part|box, name, pos, rot_z, enabled, setup, safe_z"},
+    {"remove_job_fixture",
+     "Take a fixture off a setup {setup, fixture: id}. Safe Z is re-derived.",
+     "fixture, job, setup"},
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc|grbl, safe_z?}; "
      "returns "
@@ -130,12 +158,14 @@ constexpr MethodDoc kCamMethods[] = {
      "fit_arcs, machine (the embedded copy) and machine_match "
      "(unnamed|global|differs|missing -- how that copy stands against your "
      "store, by name), tools, "
-     "operations, and the stock box derived from the model — in SETUP space, "
+     "operations, fixtures (what holds the stock: {id, part or box, name, "
+     "pos, rot_z, enabled}), and the stock box derived from the model — in "
+     "SETUP space, "
      "so a setup that lays the part flat reports the box the machine sees.",
      "job", remote::NoFlags,
      "setups[]{id,name,post,safe_z,rotation_a,has_rotary_axis,frame,origin,"
      "origin_at,reach_offset,fit_arcs,machine,machine_match,split_output,order,"
-     "tools,operations,top_face?,stock?}"},
+     "tools,operations,fixtures,top_face?,stock?}"},
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
@@ -359,12 +389,18 @@ constexpr MethodDoc kCamMethods[] = {
      "holder_collisions (with worst_holder_depth_mm/_at/_line: the collet "
      "nut driven into material the cutter never touched -- silent unless the "
      "tool states overall_length and collar_diameter), "
+     "fixture_collisions (with worst_fixture_depth_mm/_at/_line, "
+     "worst_fixture (its name) and worst_fixture_by: cutter|holder -- moves "
+     "into a FIXTURE of the setup, see add_job_fixture; fixtures_checked "
+     "counts them, and not_checked names any that were not: a fixture whose "
+     "part is gone, or every fixture on a rotary setup), "
      "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
      "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
      "`ok` = nothing scraps the part or breaks the tool (no "
-     "gouge, no rapid through material, no holder collision, and a file that "
+     "gouge, no rapid through material, no holder or fixture collision, and "
+     "a file that "
      "read straight) and is the one to gate on; `complete` "
      "= nothing left standing. A TAB is not left standing by accident -- the "
      "toolpath says where it put each one and they are excused, up to their "
@@ -662,6 +698,43 @@ void ApplyNamedMachine(ui::AppState& state, cam::Setup& setup,
     RefuseUnknownMachine(state, name);
   ui::ApplyMachine(setup, *mc);
 }
+json FixtureJson(const cam::Fixture& f) {
+  json j = {{"id", f.id},
+            {"name", f.name},
+            {"pos", {f.pos.x, f.pos.y, f.pos.z}},
+            {"rot_z", f.rotZdeg},
+            {"enabled", f.enabled}};
+  if (f.IsBox())
+    j["box"] = {f.box.x, f.box.y, f.box.z};
+  else
+    j["part"] = f.sourceDocId;
+  return j;
+}
+
+glm::dvec3 RequireBoxSize(const json& v) {
+  const auto size = v.get<std::vector<double>>();
+  if (size.size() != 3 || size[0] <= 0.0 || size[1] <= 0.0 || size[2] <= 0.0)
+    throw std::runtime_error("box is [x, y, z] in mm, each above zero");
+  return {size[0], size[1], size[2]};
+}
+
+cam::Fixture& RequireFixture(cam::Setup& setup, uint64_t id) {
+  if (cam::Fixture* f = setup.FindFixture(id))
+    return *f;
+  throw std::runtime_error("no fixture " + std::to_string(id) + " in setup " +
+                           std::to_string(setup.id) +
+                           "; list_cam_setups lists each setup's fixtures");
+}
+
+cam::FixtureSide RequireSide(const std::string& text) {
+  cam::FixtureSide side{};
+  if (!cam::ParseFixtureSide(text, side))
+    throw std::runtime_error("unknown side \"" + text +
+                             "\" — the sides are -x, +x, -y, +y, centre and "
+                             "top");
+  return side;
+}
+
 const char* MatchName(cam::MachineMatch match) {
   switch (match) {
   case cam::MachineMatch::Unnamed:
@@ -996,6 +1069,128 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     return out;
   }
 
+  if (m == "add_job_fixture") {
+    // rpc-params: job
+    cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    if (p.contains("part") == p.contains("box"))
+      throw std::runtime_error(
+          "a fixture is a part {part: id or name} or a keep-out box {box: "
+          "[x, y, z] mm}; pass exactly one");
+    cam::Fixture f;
+    if (p.contains("box")) {
+      f.box = RequireBoxSize(p.at("box"));
+      f.name =
+          p.value("name", "Clamp " + std::to_string(setup.fixtures.size() + 1));
+    } else {
+      const nlohmann::json& pj = p.at("part");
+      const ui::PartSlot* slot = nullptr;
+      for (const ui::PartSlot& s : state.parts)
+        if (s.kind == ui::DocKind::Part &&
+            (pj.is_string() ? s.name == pj.get<std::string>()
+                            : s.id == pj.get<uint64_t>()))
+          slot = &s;
+      if (slot == nullptr)
+        throw std::runtime_error("no part " + pj.dump() +
+                                 " in this project; list_parts shows them");
+      for (const cam::JobPart& jp : job->GetParts())
+        if (jp.sourceDocId == slot->id)
+          throw std::runtime_error(
+              "\"" + slot->name +
+              "\" is a part this job CUTS; a fixture is what holds it, and "
+              "one part cannot be both");
+      f.sourceDocId = slot->id;
+      f.name = p.value("name", slot->name);
+    }
+    const std::vector<Body> model = ui::FixtureModelBodies(state, f);
+    if (model.empty())
+      throw std::runtime_error("\"" + f.name +
+                               "\" has no solid to hold anything with");
+    f.id = job->AllocateId();
+    f.rotZdeg = p.value("rot_z", 0.0);
+    if (p.contains("pos")) {
+      const auto v = p.at("pos").get<std::vector<double>>();
+      if (v.size() != 3)
+        throw std::runtime_error("pos is [x, y, z] in setup space, mm");
+      f.pos = {v[0], v[1], v[2]};
+    } else {
+      // Derived from the stock and the fixture's own size, never typed.
+      const cam::FixtureSide side =
+          p.contains("side")
+              ? RequireSide(p.at("side"))
+              : cam::DefaultFixtureSide(setup, ui::JobBodies(state), model,
+                                        f.rotZdeg);
+      if (!cam::PlaceFixture(setup, ui::JobBodies(state), model, f.rotZdeg,
+                             side, f.pos))
+        throw std::runtime_error(
+            "there is no stock to place a fixture against yet; add a part "
+            "to the job first");
+    }
+    setup.fixtures.push_back(f);
+    ui::CamFixturesChanged(state, setup);
+    json out = FixtureJson(f);
+    out["setup"] = setup.id;
+    out["safe_z"] = setup.safeZ;
+    return out;
+  }
+
+  if (m == "set_job_fixture") {
+    // rpc-params: job
+    cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    cam::Fixture& f = RequireFixture(setup, p.at("fixture").get<uint64_t>());
+    // Validate everything before changing anything: a refused call leaves
+    // the fixture as it was.
+    std::optional<cam::FixtureSide> side;
+    if (p.contains("side"))
+      side = RequireSide(p.at("side"));
+    std::optional<glm::dvec3> pos;
+    if (p.contains("pos")) {
+      const auto v = p.at("pos").get<std::vector<double>>();
+      if (v.size() != 3)
+        throw std::runtime_error("pos is [x, y, z] in setup space, mm");
+      pos = glm::dvec3(v[0], v[1], v[2]);
+    }
+    if (pos && side)
+      throw std::runtime_error(
+          "pos and side both say where the fixture goes; pass one");
+    if (p.contains("name"))
+      f.name = p.at("name").get<std::string>();
+    if (p.contains("enabled"))
+      f.enabled = p.at("enabled").get<bool>();
+    if (p.contains("box") && !f.IsBox())
+      throw std::runtime_error("\"" + f.name +
+                               "\" is a part, not a box: its size is the "
+                               "part's");
+    std::optional<glm::dvec3> box;
+    if (p.contains("box"))
+      box = RequireBoxSize(p.at("box"));
+    if (p.contains("rot_z"))
+      f.rotZdeg = p.at("rot_z").get<double>();
+    if (box)
+      f.box = *box;
+    if (pos)
+      f.pos = *pos;
+    if (side && !cam::PlaceFixture(setup, ui::JobBodies(state),
+                                   ui::FixtureModelBodies(state, f), f.rotZdeg,
+                                   *side, f.pos))
+      throw std::runtime_error("no stock, or no fixture solid, to place by");
+    ui::CamFixturesChanged(state, setup);
+    json out = FixtureJson(f);
+    out["setup"] = setup.id;
+    out["safe_z"] = setup.safeZ;
+    return out;
+  }
+
+  if (m == "remove_job_fixture") {
+    // rpc-params: job
+    cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    const uint64_t id = p.at("fixture").get<uint64_t>();
+    (void)RequireFixture(setup, id);
+    std::erase_if(setup.fixtures,
+                  [id](const cam::Fixture& f) { return f.id == id; });
+    ui::CamFixturesChanged(state, setup);
+    return json{{"removed", id}, {"setup", setup.id}, {"safe_z", setup.safeZ}};
+  }
+
   if (m == "add_cam_setup") {
     // `job` is read in the preamble, before the active job is looked up --
     // one place for every branch, and invisible to the scanner from here.
@@ -1017,7 +1212,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // stock taller than that: the first dogfooding round over the RPC
     // produced 68 rapids through material on an 18 mm plate. The GUI got
     // this fix in the G-round; this door did not.
-    setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+    setup.safeZ = ui::DeriveJobSafeZ(state, setup);
     if (named != nullptr)
       ui::ApplyMachine(setup, *named);
     if (p.contains("post")) {
@@ -1116,6 +1311,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       sj["operations"] = json::array();
       for (const cam::Operation& op : setup.operations)
         sj["operations"].push_back(OpJson(op));
+      sj["fixtures"] = json::array();
+      for (const cam::Fixture& f : setup.fixtures)
+        sj["fixtures"].push_back(FixtureJson(f));
       out.push_back(std::move(sj));
     }
     return json{{"setups", out}};
@@ -1247,12 +1445,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "no planar face '" + ref.name + "' on feature " +
             std::to_string(ref.featureId) + " — lay_face_up needs a flat face");
       setup.frame = cam::SolveFaceUp(glm::dvec3(normal), setup.frame);
-      setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+      setup.safeZ = ui::DeriveJobSafeZ(state, setup);
     }
     // The other side of the part, derived from this frame rather than typed.
     if (p.value("flip", false)) {
       setup.frame = cam::FlipFrame(setup.frame);
-      setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+      setup.safeZ = ui::DeriveJobSafeZ(state, setup);
     }
     // Anything above can have moved the stock box, and the work origin is
     // derived from it — as is every coordinate the post writes.
@@ -1496,8 +1694,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                           gcode, &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
-    const cam::Verdict v = cam::VerifyGcode(gcode, setup, ui::JobBodies(state),
-                                            res, reliefs, tabs);
+    std::vector<std::string> missingFixtures;
+    const cam::Verdict v = cam::VerifyGcode(
+        gcode, setup, ui::JobBodies(state), res, reliefs, tabs,
+        ui::JobFixtureSolids(state, setup, true, &missingFixtures));
     const double tol = res * 1.5; // one cell of quantisation, plus slack
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
@@ -1514,6 +1714,19 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     for (const cam::VerdictLine& line :
          cam::MachineLines(setup, ui::JobBodies(state), &paths))
       says.push_back(line.text);
+    // A fixture that pushed safe Z past the machine's Z, named.
+    if (const auto line = ui::FixtureTravelLine(state, setup, v))
+      says.push_back(line->text);
+    // A fixture whose part is gone was not checked, and says so: the same
+    // words the panel shows.
+    json notChecked = json::array();
+    for (const std::string& name : missingFixtures) {
+      const std::string line = "fixture \"" + name + "\" -- its part is gone";
+      notChecked.push_back(line);
+      says.push_back("Not checked: " + line);
+    }
+    if (v.fixturesSkippedRotary)
+      notChecked.push_back("fixtures, on a rotary setup");
     json biggest = json::array();
     for (const cam::Verdict::Region& r : v.biggest) {
       json rj{{"at", {r.at.x, r.at.y}},
@@ -1558,6 +1771,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"worst_holder_depth_mm", v.worstHolderDepth},
              {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
              {"worst_holder_line", v.worstHolderLine},
+             // The cutter or the holder into a fixture (a clamp, a vise):
+             // docs/cam/workholding-plan.md.
+             {"fixture_collisions", v.fixtureCollisions},
+             {"fixtures_checked", v.fixturesChecked},
+             {"worst_fixture_depth_mm", v.worstFixtureDepth},
+             {"worst_fixture_at", {v.worstFixtureAt.x, v.worstFixtureAt.y}},
+             {"worst_fixture_line", v.worstFixtureLine},
+             {"worst_fixture", v.worstFixtureName},
+             {"worst_fixture_by", v.worstFixtureByHolder ? "holder" : "cutter"},
+             {"not_checked", notChecked},
              // Moves the machine cannot reach. A verdict field nothing
              // reports is the same silence this check exists to end.
              {"outside_travel", v.outsideTravel},
