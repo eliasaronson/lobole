@@ -31,8 +31,11 @@ from designer_remote import Designer  # noqa: E402
 # a new feature type that isn't documented here fails the suite.
 # ---------------------------------------------------------------------------
 
-AXIS_REF = """An axis reference is {"kind": "x"|"y"|"z"} (global axes) or
-{"kind": "sketch_line", "sketch_id": <feature id>, "entity_id": <line id>}."""
+AXIS_REF = """An axis reference is {"kind": "x"|"y"|"z"} (world axes through
+the world origin), {"kind": "sketch_line", "sketch_id": <feature id>,
+"entity_id": <line id>}, {"kind": "datum_axis", "datum_axis_id": <id>}, or
+{"kind": "custom", "origin": [x,y,z], "direction": [x,y,z]} (mm; any axis,
+written out: the one for a turned feature off the origin)."""
 
 FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 
@@ -179,7 +182,10 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   bent round, to the centreline. Built line-arc-line, so the bend has a
   radius and an angle a bender can be given (tube_schedule)
   helix: "origin": [x,y,z], "axis": [x,y,z], "radius": num, "pitch": num,
-  "turns": num (each with "_expr" twins), "left_handed"?: bool
+  "turns": num (each with "_expr" twins), "left_handed"?: bool,
+  "start_deg"?: num (+"_expr") — where it starts round the axis, right-handed
+  from a reference: +X for a +Z axis, -X for -Z, +Z for +X or +Y, -Z for
+  -X or -Y
 - Pipe (tube along a path, no profile sketch needed): {{"type": "Pipe",
   "name": str, "path_id": <sketch/Curve3D id>, "outer_diameter": num,
   "wall_thickness": num (0 = solid rod), "outer_diameter_expr"?/
@@ -673,11 +679,11 @@ def attached_to():
 def _call(method, /, **params):
     """Call the app, reconnecting once across a dropped connection.
 
-    `method` is positional-ONLY and the body goes through request(), not
-    call(): an RPC parameter named "method" (describe narrows by one) would
-    otherwise collide with this function's own first argument — the exact
-    trap designer_remote.request() exists for, reproduced here the first
-    time an MCP client called describe(method=...).
+    `method` is positional-ONLY, like designer_remote.call's: an RPC
+    parameter named "method" (describe narrows by one) would otherwise
+    collide with this function's own first argument — which happened the
+    first time an MCP client called describe(method=...). The body goes
+    through request() because that is the call that takes a timeout.
     """
     global _client
     for attempt in (1, 2):
@@ -789,16 +795,19 @@ def list_variables() -> dict:
           "('xy'|'xz'|'yz' — anything else is refused) + offset in mm. Works "
           "on part AND assembly tabs, with filled cut caps on both. For an "
           "off-axis plane use rpc('add_section', {plane_id | tilt_u, "
-          "tilt_v}). (This is the visual cut; use `section` for the "
-          "cross-section AREA.)")
+          "tilt_v}). The default keeps the half BELOW the plane (z <= "
+          "offset for xy, y <= for xz, x <= for yz); reverse=True keeps "
+          "the half above, and the answer's `keeps` says which. View the "
+          "cut from the removed side. (This is the visual cut; use "
+          "`section` for the cross-section AREA.)")
 def set_section(enabled: bool = True, base_plane: str = "xy",
-                offset: float = 0.0) -> dict:
+                offset: float = 0.0, reverse: bool = False) -> dict:
     # origin/normal were forwarded here and refused by the RPC, which never
     # had them: a datum plane (add_section plane_id) or a tilt cuts off-axis.
     if not enabled:
         return _call("set_section", enabled=False)
     return _call("set_section", enabled=True, base_plane=base_plane,
-                 offset=offset)
+                 offset=offset, reverse=reverse)
 
 
 @_reference(description="Cross-section area where a plane cuts through all "
@@ -828,7 +837,10 @@ def section(base_plane: str = "xy", offset: float = 0.0,
           "or occurrence names (str); each occurrence's part bodies are "
           "placed by its solved transform and checked in world space — or "
           "OMIT a/b to sweep EVERY visible occurrence pair (returns {clash, "
-          "pairs: [{a, b, clash, volume}], and the same list again as "
+          "pairs: [{a, b, a_name, b_name, a_id?, b_id?, clash, volume}] — "
+          "a/b and a_name/b_name are the names, a_id/b_id the occurrence "
+          "ids when both are occurrences of this assembly — and the same "
+          "list again as "
           "`clashes`, which is what contact_report calls it). Run it after "
           "mating — clash checks matter most in assemblies.")
 def interference(a: int | str | None = None, b: int | str | None = None) -> dict:
@@ -1496,8 +1508,12 @@ def list_mates() -> dict:
 
 
 @_reference(description="Re-solve the active assembly's mates (place every "
-          "mated, non-fixed occurrence by frame alignment). Returns the "
-          "count of errored mates and each mate's status. Solves run "
+          "mated, non-fixed occurrence by frame alignment). Always returns "
+          "errored_mates, placed, occurrences, placed_by_mates, "
+          "placed_by_transform and mates[] (each with its status); the loop "
+          "keys — loop_mates, dof, loops_closed, residual_mm, "
+          "redundant_mates — only when the assembly HAS mate loops, so read "
+          "them with a default. Solves run "
           "automatically after mate/occurrence edits; call this to inspect.")
 def solve_assembly() -> dict:
     return _call("solve_assembly")
@@ -2272,6 +2288,20 @@ def help(method: str = "") -> dict:
             return {"method": method,
                     "doc": "Exposed directly as the MCP tool of the same "
                            "name — see its tool description."}
+        # Not wrapped here, but it may still be an RPC — most are (motion
+        # studies, appearance, sections...), and "documented by help()" has
+        # to hold for them too. The app's own row is the authority.
+        try:
+            rows = _call("describe", method=method)
+            rows = rows.get("methods", rows) if isinstance(rows, dict) else rows
+            row = next((r for r in rows if r.get("name") == method), None)
+        except Exception:
+            row = None
+        if row is not None:
+            return {"method": method, "doc": row.get("doc", ""),
+                    "params": row.get("params", []),
+                    "source": "the app's describe row; reach it with "
+                              f"rpc('{method}', {{...}})"}
         import difflib
         near = difflib.get_close_matches(method, sorted(_REFERENCE), n=5)
         raise ValueError(f"no such method {method!r}" +

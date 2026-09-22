@@ -104,16 +104,12 @@ def assemble(app, parts):
         fixed_to(ho, fr, parts["barrel"], f"barrel {el}", "axis")
         sl = rig.place(parts["sleeve"], name=f"control sleeve {el}")
         sm = rig.revolute((ho, fr), (sl, "axis"), name=f"control sleeve {el}")
-        rig.activate()
-        app.add_relation(type="rack", a=sm["id"], b=rack_m["id"],
-                         pitch_radius=PITCH_R, name=f"sleeve {el} on rack")
+        rig.rack(sm, rack_m, PITCH_R, name=f"sleeve {el} on rack")
         pl = rig.place(parts["plunger"], name=f"plunger {el}")
         pm = rig.cylindrical((ho, fr), (pl, "axis"), name=f"plunger {el}")
         rig.cam(cam_m, pm, lift=table(lambda t: plunger_lift(el, t)),
                 dof_b="offset", name=f"plunger {el} lift")
-        rig.activate()
-        app.add_relation(type="rack", a=pm["id"], b=rack_m["id"],
-                         pitch_radius=PITCH_R, name=f"plunger {el} on rack")
+        rig.rack(pm, rack_m, PITCH_R, name=f"plunger {el} on rack")
         fixed_to(ho, fr, parts["vseat"], f"delivery valve seat {el}", "axis")
         dv = rig.place(parts["valve"], name=f"delivery valve {el}")
         dm = rig.slider((ho, fr), (dv, "axis"), name=f"delivery valve {el}")
@@ -123,6 +119,7 @@ def assemble(app, parts):
         fixed_to(ho, fr, parts["holder"], f"delivery valve holder {el}", "axis")
         ids[f"tappet{el}"], ids[f"plunger{el}"] = tp.id, pl.id
         ids[f"sleeve{el}"], ids[f"valve{el}"] = sl.id, dv.id
+        ids[f"plunger_mate{el}"], ids[f"sleeve_mate{el}"] = pm["id"], sm["id"]
 
     ft = rig.place(parts["feed_tappet"], name="feed pump tappet")
     fm = rig.slider((ho, "feed"), (ft, "slide"), name="feed pump tappet")
@@ -169,15 +166,20 @@ def configure(app, rig, mates):
     return cfg
 
 
-def studies(app, rig, mates, samples):
+def studies(app, rig, mates, cfg, samples):
+    """Each study names the configuration it measures: the camshaft turn is
+    a FULL-LOAD turn whatever the tab has active, and the rack sweep runs
+    under the base, where nothing holds the rack."""
     rig.activate()
     s = {}
     s["run"] = rig.motion(mates["cam"], dof="rotation", **{"from": 0.0},
                           to=360.0, samples=samples, clash_mode="exact",
-                          check_clash=True, name="camshaft, one turn")
+                          check_clash=True, configuration=cfg["Full load"],
+                          name="camshaft, one turn at full load")
     s["load"] = rig.motion(mates["rack"], dof="offset", **{"from": 0.0},
                            to=RACK_TRAVEL, samples=16, clash_mode="exact",
-                           check_clash=True, name="control rack, stop to full load")
+                           check_clash=True, configuration=0,
+                           name="control rack, stop to full load")
     s["advance"] = rig.motion(mates["weight"], dof="rotation", **{"from": 0.0},
                               to=-WEIGHT_SWING, samples=11, clash_mode="exact",
                               check_clash=True, name="timing device, full advance")
@@ -191,9 +193,8 @@ def pose(sample, occ_id):
     return next(p for p in sample["poses"] if p["occurrence"] == occ_id)
 
 
-def turn_deg(q, axis=2):
-    """Rotation about one world axis from a quaternion (x, y, z, w)."""
-    return math.degrees(2.0 * math.atan2(q[axis], q[3]))
+def mate_value(sample, mate_id, key):
+    return next(m[key] for m in sample["mates"] if m["mate"] == mate_id)
 
 
 def run_study(app, sid, label):
@@ -241,14 +242,12 @@ def check_load(r, ids):
     out["rack travel"] = round(abs(rx[1] - rx[0]), 4)
     expected = math.degrees(RACK_TRAVEL / PITCH_R)
     for el in range(1, N_EL + 1):
-        a = [turn_deg(pose(s, ids[f"plunger{el}"])["orientation"])
-             for s in (first, last)]
-        b = [turn_deg(pose(s, ids[f"sleeve{el}"])["orientation"])
-             for s in (first, last)]
-        da = (a[1] - a[0] + 180.0) % 360.0 - 180.0
-        db = (b[1] - b[0] + 180.0) % 360.0 - 180.0
-        out[f"plunger {el} turn (deg)"] = round(da, 3)
-        out[f"sleeve {el} turn (deg)"] = round(db, 3)
+        # The mates' own values: what the rack turned, straight off the study.
+        for what in ("plunger", "sleeve"):
+            m = ids[f"{what}_mate{el}"]
+            turn = (mate_value(last, m, "rotation_deg")
+                    - mate_value(first, m, "rotation_deg"))
+            out[f"{what} {el} turn (deg)"] = round(turn, 3)
     out["expected turn (deg)"] = round(expected, 3)
     out["effective stroke at stop / idle / full (mm)"] = [
         round(effective_stroke(math.degrees(o / PITCH_R)), 3)
@@ -333,7 +332,7 @@ def main():
     print(f"  solve: dof={solved.get('dof')} residual={solved.get('residual_mm')} "
           f"errored={solved.get('errored_mates')}", flush=True)
     cfg = configure(app, rig, mates)
-    sids = studies(app, rig, mates, a.samples)
+    sids = studies(app, rig, mates, cfg, a.samples)
     t_build = time.perf_counter() - t0
     app.save_project(path=os.path.join(out, "pes_pump-unchecked.dsgn"))
     print(f"  built in {t_build:.1f} s", flush=True)
@@ -342,13 +341,11 @@ def main():
     report = {"build_s": round(t_build, 1), "part_s": times}
     failures = []
 
-    app.call("set_active_configuration", id=cfg["Full load"])
     r, dt, cl, bad = run_study(app, sids["run"], "run (full load)")
     report["run"] = dict(check_run(r, ids), seconds=round(dt, 1),
                          clashes=len(cl), unsolved=len(bad),
                          pairs_checked=r.get("pairs_checked"))
     failures += cl and ["run: clashes"] or []
-    app.call("set_active_configuration", id=0)
     for key, label in (("load", "load"), ("advance", "advance"),
                        ("prime", "prime")):
         r2, dt, cl, bad = run_study(app, sids[key], label)

@@ -223,3 +223,66 @@ TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {
   CHECK_THAT(read->radius, WithinAbs(12.0, 1e-12));
   CHECK(read->radiusExpr == "former");
 }
+
+TEST_CASE("Helix start_deg turns its start round the axis", "[curve3d]") {
+  const auto start = [](glm::vec3 axis, double deg, bool rh = true) {
+    Document doc;
+    auto cv = std::make_unique<CurveFeature>("H", Curve3DKind::Helix);
+    cv->axisOrigin = {0, 0, 0};
+    cv->axisDir = axis;
+    cv->radius = 2.0;
+    cv->pitch = 1.0;
+    cv->turns = 0.5;
+    cv->rightHanded = rh;
+    cv->startDeg = deg;
+    CurveFeature* c = AddCurve(doc, std::move(cv));
+    REQUIRE(doc.Regenerate());
+    return c->Polyline().front();
+  };
+  // Unchanged default: a +Z axis starts on +X.
+  CHECK(glm::length(start({0, 0, 1}, 0.0) - glm::vec3(2, 0, 0)) < 1e-3f);
+  // Right-handed about +Z: 90 degrees is +Y, 190 is just past -X.
+  CHECK(glm::length(start({0, 0, 1}, 90.0) - glm::vec3(0, 2, 0)) < 1e-3f);
+  const glm::vec3 p = start({0, 0, 1}, 190.0);
+  CHECK_THAT(std::atan2(p.y, p.x) * 180.0 / M_PI, WithinAbs(-170.0, 1e-2));
+  // The start does not depend on the winding.
+  CHECK(glm::length(start({0, 0, 1}, 90.0, false) - glm::vec3(0, 2, 0)) <
+        1e-3f);
+  // The documented references for the world axes.
+  CHECK(glm::distance(glm::vec3(HelixReference({0, 0, -1})),
+                      glm::vec3(-1, 0, 0)) < 1e-9f);
+  CHECK(glm::distance(glm::vec3(HelixReference({1, 0, 0})),
+                      glm::vec3(0, 0, 1)) < 1e-9f);
+  CHECK(glm::distance(glm::vec3(HelixReference({0, 1, 0})),
+                      glm::vec3(0, 0, 1)) < 1e-9f);
+  CHECK(glm::distance(glm::vec3(HelixReference({0, -1, 0})),
+                      glm::vec3(0, 0, -1)) < 1e-9f);
+  CHECK(glm::length(start({0, 1, 0}, 0.0) - glm::vec3(0, 0, 2)) < 1e-3f);
+}
+
+TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
+  auto helix = std::make_unique<CurveFeature>("Coil", Curve3DKind::Helix);
+  helix->startDeg = 45.0;
+  helix->startDegExpr = "phase + 15";
+  const nlohmann::json j = DocumentIO::FeatureToJson(*helix);
+  CHECK_THAT(j.at("start_deg").get<double>(), WithinAbs(45.0, 1e-12));
+  auto back = DocumentIO::FeatureFromJson(j);
+  auto* cv = dynamic_cast<CurveFeature*>(back.get());
+  REQUIRE(cv);
+  CHECK_THAT(cv->startDeg, WithinAbs(45.0, 1e-12));
+  CHECK(cv->startDegExpr == "phase + 15");
+  // A helix that never set it writes nothing: files from before v127 stay
+  // byte-identical when re-saved.
+  CurveFeature plain("P", Curve3DKind::Helix);
+  CHECK_FALSE(DocumentIO::FeatureToJson(plain).contains("start_deg"));
+
+  Document doc;
+  doc.SetParameter("phase", "75");
+  auto cv2 = std::make_unique<CurveFeature>("H", Curve3DKind::Helix);
+  cv2->radius = 2.0;
+  cv2->turns = 0.25;
+  cv2->startDegExpr = "phase + 15"; // 90
+  CurveFeature* c = AddCurve(doc, std::move(cv2));
+  REQUIRE(doc.Regenerate());
+  CHECK(glm::length(c->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3f);
+}

@@ -22,6 +22,26 @@ double ValueAt(const MotionStudy& study, double t) {
 }
 
 std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
+  // A study that names its configuration is judged UNDER it: its holds and
+  // suppressions are the ones the run will see, whatever the tab has active.
+  if (study.configuration) {
+    const uint64_t want = *study.configuration;
+    if (want != 0 && asmDoc.FindConfiguration(want) == nullptr) {
+      std::string names;
+      for (const Configuration& c : asmDoc.GetConfigurations())
+        names += (names.empty() ? "" : ", ") + std::to_string(c.id) + " (" +
+                 c.name + ")";
+      return "the study runs under configuration " + std::to_string(want) +
+             ", which no longer exists; configurations: " +
+             (names.empty() ? std::string("none") : names) +
+             " (0 = the base, unset = whichever is active)";
+    }
+    if (asmDoc.ActiveConfiguration() != want) {
+      AssemblyDocument under = asmDoc;
+      under.SetActiveConfigurationRaw(want);
+      return WhyNot(under, study);
+    }
+  }
   const Mate* m = asmDoc.FindMateById(study.driverMate);
   if (m == nullptr) {
     std::string mates;
@@ -105,8 +125,11 @@ Result Run(const AssemblyDocument& asmDocIn,
     return out;
 
   // A COPY: the run drives a mate through its whole range and the document
-  // on the tab must not be left at the last sample.
+  // on the tab must not be left at the last sample. It carries the study's
+  // own configuration when it names one, which the solve then applies.
   AssemblyDocument asmDoc = asmDocIn;
+  if (study.configuration)
+    asmDoc.SetActiveConfigurationRaw(*study.configuration);
   Mate* driver = asmDoc.FindMateById(study.driverMate);
 
   MeshCache own;
@@ -176,6 +199,19 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;
+    for (const Mate& m : asmDoc.GetMates()) {
+      const bool turns = assembly::MateHasDof(m.type, MateDof::Rotation);
+      const bool slides = assembly::MateHasDof(m.type, MateDof::Offset);
+      if (!turns && !slides)
+        continue; // fastened: nothing to report
+      Sample::MateValue v;
+      v.mate = m.id;
+      if (turns)
+        v.rotation = assembly::MateDofValue(m, MateDof::Rotation);
+      if (slides)
+        v.offset = assembly::MateDofValue(m, MateDof::Offset);
+      s.mates.push_back(v);
+    }
 
     auto flat = assembly::Flatten(asmDoc, parts, assemblies);
     if (!flat) {

@@ -345,7 +345,9 @@ class App:
                                 observed)
         return self.call(method, **params)
 
-    def call(self, method, _timeout=None, **params):
+    def call(self, method, /, _timeout=None, **params):
+        # `method` positional-only: describe(method=...) is a parameter, not
+        # this argument (designer_remote.call says the same).
         if method in self._schemas:
             _validate_contract(self._schemas[method], params, method)
         if method in self._MOVES_TAB:
@@ -948,7 +950,31 @@ class SketchBuilder:
                               "start_angle": math.radians(start_deg),
                               "end_angle": math.radians(end_deg),
                               "construction": bool(construction)})
-        return self._attach_exprs(1)
+        # Its own index (it said 1, so an expression pending on an arc landed
+        # on the second entity) — and `self`, so it chains like line().
+        self._attach_exprs(n)
+        return self
+
+    def spline(self, poles, degree=3, closed=False, construction=False):
+        """A B-spline through CONTROL POLES [(u, v), ...] (the app's `spline`
+        entity, v40): the curve follows the poles and touches only the first
+        and last. `closed` repeats the first pole at the end, which makes a
+        closed profile an extrude can use — dense poles sampled off a smooth
+        outline (a cam lobe) give one smooth face where a polyline gives a
+        facet per segment. A closed spline through a convex polygon lies
+        just INSIDE it."""
+        pts = [tuple(_uv(self, q)) for q in poles]
+        if closed and pts and pts[0] != pts[-1]:
+            pts.append(pts[0])
+        if len(pts) < degree + 1:
+            raise SdkError(f"a degree-{degree} spline needs at least "
+                           f"{degree + 1} poles, got {len(pts)}")
+        e = {"type": "spline", "degree": int(degree),
+             "poles": [[float(u), float(v)] for u, v in pts]}
+        if construction:
+            e["construction"] = True
+        self.entities.append(e)
+        return self
 
     def rect(self, c1, c2):
         self.entities.append({"type": "rect", "c1": list(_uv(self, c1)),
@@ -2100,6 +2126,17 @@ class Asm(_Tab):
                                      b=_id(mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
 
+    def rack(self, rotating, sliding, pitch_radius, **kw):
+        """Rack and pinion: `rotating`'s turn and `sliding`'s slide, coupled
+        by the pinion's pitch radius (mm) — offset = pitch_radius * angle.
+        Either side can drive: a rack slider turns the pinion, a turned
+        pinion slides the rack. `rotating` is a revolute or cylindrical mate
+        (its turn), `sliding` a slider or cylindrical one (its slide)."""
+        self.activate()
+        return self.app.add_relation(type="rack", a=_id(rotating),
+                                     b=_id(sliding),
+                                     pitch_radius=pitch_radius, **kw)
+
     def cam(self, mate_a, mate_b, **kw):
         """A cam: rotation to the follower's slide or turn through a lift
         table (lift in mm for a slide, degrees for a turn), or {rise (mm) |
@@ -2141,11 +2178,18 @@ class Asm(_Tab):
         return self.app.fit_fastener(rim=ref, standard=standard, **kw)
 
     def motion(self, driver, **kw):
-        """A motion study on this assembly (v87)."""
+        """A motion study on this assembly (v87). `configuration=` names the
+        assembly configuration it runs under (v127): an id, 0 for the base,
+        omitted for whichever is active when it runs."""
         self.activate()
         return self.app.add_motion_study(driver=_id(driver), **kw)
 
     def solve(self):
+        """Run the mate solver. Always answers errored_mates, placed,
+        occurrences, placed_by_mates, placed_by_transform and mates[]; the
+        loop keys — dof, loop_mates, loops_closed, residual_mm,
+        redundant_mates — only when the assembly HAS mate loops, so read
+        those with .get()."""
         self.activate()
         return self.app.solve_assembly()
 

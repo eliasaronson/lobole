@@ -1,9 +1,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/Document.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
@@ -310,4 +312,101 @@ TEST_CASE("BuildLoops arc endpoints match the wire builder's rounding",
   const bool fwd = arc->a == s && arc->b == en;
   const bool rev = arc->a == en && arc->b == s;
   CHECK((fwd || rev));
+}
+
+// --- Custom axis (v127)
+// -------------------------------------------------------
+
+TEST_CASE("Revolve about a custom axis off the origin", "[revolve]") {
+  // The same 2 x 3 rectangle, 10 mm further out, turned about a Y-parallel
+  // axis through (10, 0, 0): Pappus gives the same 24 pi, and the solid sits
+  // round x = 10, not round the world Y axis.
+  Document doc;
+  uint64_t sid = AddRectSketch(doc, {11, 0}, {13, 3});
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
+  rev->axis.kind = AxisRef::Kind::Custom;
+  rev->axis.origin = {10.0, 0.0, 0.0};
+  rev->axis.direction = {0.0, 2.0, 0.0}; // need not be unit
+  doc.AddFeature(std::move(rev));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(BodyVolume(doc), WithinRel(24.0 * M_PI, 1e-3));
+  glm::vec3 lo, hi;
+  doc.GetBodies()[0].shape.GetBoundingBox(lo, hi, /*tight=*/true);
+  CHECK_THAT(lo.x, WithinAbs(7.0, 1e-3));
+  CHECK_THAT(hi.x, WithinAbs(13.0, 1e-3));
+}
+
+TEST_CASE("A custom axis out of the sketch plane fails", "[revolve]") {
+  Document doc;
+  uint64_t sid = AddRectSketch(doc, {11, 0}, {13, 3});
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
+  rev->axis.kind = AxisRef::Kind::Custom;
+  rev->axis.origin = {10.0, 0.0, 5.0}; // 5 mm above the XY sketch
+  rev->axis.direction = {0.0, 1.0, 0.0};
+  doc.AddFeature(std::move(rev));
+  CHECK_FALSE(doc.Regenerate());
+}
+
+TEST_CASE("A custom axis round-trips, and a zero direction is refused",
+          "[revolve]") {
+  AxisRef a;
+  a.kind = AxisRef::Kind::Custom;
+  a.origin = {1.5, -2.0, 3.25};
+  a.direction = {0.0, 0.0, -1.0};
+  RevolveFeature rev("Rev", 1, 90.0, ExtrudeMode::NewBody);
+  rev.axis = a;
+  const nlohmann::json j = DocumentIO::FeatureToJson(rev);
+  CHECK(j.at("axis").at("kind") == "custom");
+  auto back = DocumentIO::FeatureFromJson(j);
+  auto* r = dynamic_cast<RevolveFeature*>(back.get());
+  REQUIRE(r);
+  CHECK(r->axis.kind == AxisRef::Kind::Custom);
+  CHECK(r->axis.origin == glm::dvec3(1.5, -2.0, 3.25));
+  CHECK(r->axis.direction == glm::dvec3(0.0, 0.0, -1.0));
+
+  nlohmann::json bad = j;
+  bad["axis"]["direction"] = {0, 0, 0};
+  CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("direction is zero"));
+  bad["axis"] = {{"kind", "diagonal"}};
+  CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("custom {origin"));
+}
+
+// The v127 part golden: a custom-axis revolve and a helix that starts at
+// 90 degrees. Written by this recipe (DESIGNER_WRITE_GOLDEN_V127=<path>) and
+// loaded here every time, so the file and the code cannot drift.
+TEST_CASE("The v127 golden: custom axis and helix start", "[revolve][golden]") {
+  Document doc;
+  uint64_t sid = AddRectSketch(doc, {11, 0}, {13, 3});
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
+  rev->axis.kind = AxisRef::Kind::Custom;
+  rev->axis.origin = {10.0, 0.0, 0.0};
+  rev->axis.direction = {0.0, 1.0, 0.0};
+  doc.AddFeature(std::move(rev));
+  auto cv = std::make_unique<CurveFeature>("Coil", Curve3DKind::Helix);
+  cv->axisOrigin = {0, 0, 0};
+  cv->axisDir = {0, 0, 1};
+  cv->radius = 2.0;
+  cv->pitch = 1.0;
+  cv->turns = 1.0;
+  cv->startDeg = 90.0;
+  doc.AddFeature(std::move(cv));
+  REQUIRE(doc.Regenerate());
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V127"))
+    REQUIRE(testio::Save(doc, out));
+
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/v127-custom-axis-helix-start.json";
+  auto g = testio::Load(golden.string());
+  REQUIRE(g != nullptr);
+  REQUIRE(g->GetBodies().size() == 1);
+  CHECK_THAT(g->GetBodies()[0].shape.Volume(), WithinRel(24.0 * M_PI, 1e-3));
+  auto* coil = dynamic_cast<CurveFeature*>(g->GetFeature(2));
+  REQUIRE(coil);
+  CHECK(glm::length(coil->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3f);
 }

@@ -264,8 +264,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "body, feature_id, material", remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "
-     "{feature_id|body, color?: [r,g,b] sRGB 0..1, roughness?: 0..1, "
-     "metallic?: 0..1}. Unset fields inherit from the material; passing NO "
+     "{feature_id|body, color?: [r,g,b] LINEAR 0..1 (not sRGB: the renderer "
+     "lights it as linear and STEP/GLB are handed it as linear, so an sRGB "
+     "grey "
+     "of 0.5 comes out near 0.73 — convert with c^2.2, e.g. 0.2 for a mid "
+     "grey), roughness?: 0..1, metallic?: 0..1}. Unset fields inherit from the "
+     "material; passing NO "
      "optional fields clears the override. Never affects mass/FEM/BOM, and "
      "recoloring rebuilds no geometry.",
      "body, color, feature_id, metallic, roughness", remote::NeedsPart},
@@ -668,7 +672,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // V-appearance: a visual override on a body's creating feature, separate
     // from the physical material (docs/rendering/appearance-plan.md). Same
     // addressing as set_material: {feature_id | body}. Optional fields
-    // color [r,g,b] (sRGB 0..1), roughness, metallic; passing none clears
+    // color [r,g,b] (LINEAR 0..1), roughness, metallic; passing none clears
     // the override. Appearance is stripped from the regen chain hash, so
     // this never rebuilds geometry — just restamps and resyncs.
     const bool byId = p.contains("feature_id");
@@ -702,7 +706,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (v < 0.0 || v > 1.0)
         throw std::runtime_error(std::string(field) + " is " +
                                  std::to_string(v) +
-                                 " — appearance fields are 0..1 (sRGB / "
+                                 " — appearance fields are 0..1 (linear / "
                                  "PBR fractions), not 0..255");
       return static_cast<float>(v);
     };
@@ -713,7 +717,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (col.x < 0 || col.x > 1 || col.y < 0 || col.y > 1 || col.z < 0 ||
           col.z > 1)
         throw std::runtime_error(
-            "color components are sRGB 0..1, not 0..255 — got [" +
+            "color components are LINEAR 0..1, not 0..255 — got [" +
             std::to_string(col.x) + ", " + std::to_string(col.y) + ", " +
             std::to_string(col.z) + "]");
       ap.color = col;

@@ -433,8 +433,12 @@ def drawings(app, parts, out):
 def verify(app, parts, rig, drives, moving):
     rig.activate()
     solved = rig.solve()
+    # The clamp's screws close a loop; without one the loop keys are absent
+    # and this should fail as an assertion, not a KeyError.
     assert (
-        solved["loops_closed"] and solved["dof"] == 1 and not solved["errored_mates"]
+        solved.get("loops_closed")
+        and solved.get("dof") == 1
+        and not solved["errored_mates"]
     ), solved
     volumes = {}
     for key, p in parts.items():

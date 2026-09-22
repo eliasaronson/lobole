@@ -434,3 +434,102 @@ TEST_CASE("A cancelled motion run keeps the samples it finished", "[motion]") {
   for (size_t i = 0; i < res.samples.size(); i++)
     CHECK(res.samples[i].value == full.samples[i].value);
 }
+
+TEST_CASE("A study runs under the configuration it names", "[motion]") {
+  // A configuration that takes the stop out: the study that names it is
+  // clean although the tab still has the base (stop in) active, and the one
+  // that names none still hits the stop.
+  Rig r = MakeRig(90.0);
+  Configuration& noStop = r.asmDoc.AddConfiguration("no stop");
+  noStop.suppressedFeatures.push_back(r.stopOcc);
+  const uint64_t noStopId = noStop.id;
+  REQUIRE(r.asmDoc.ActiveConfiguration() == 0);
+
+  MotionStudy study = FullTurn(r.axle, 13);
+  CHECK_FALSE(motion::Run(r.asmDoc, r.Parts(), nullptr, study).clean);
+  study.configuration = noStopId;
+  const motion::Result res = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
+  INFO(res.error);
+  REQUIRE(res.error.empty());
+  CHECK(res.clean);
+  CHECK(r.asmDoc.ActiveConfiguration() == 0); // the tab was not switched
+
+  // 0 is the BASE, not "whichever is active": with the stop-less
+  // configuration active, a study naming 0 still has the stop in.
+  REQUIRE(r.asmDoc.SetActiveConfiguration(noStopId));
+  study.configuration = 0;
+  CHECK_FALSE(motion::Run(r.asmDoc, r.Parts(), nullptr, study).clean);
+  study.configuration.reset(); // unset: whichever is active — no stop
+  CHECK(motion::Run(r.asmDoc, r.Parts(), nullptr, study).clean);
+  REQUIRE(r.asmDoc.SetActiveConfiguration(0));
+
+  // It is JUDGED under it too: a configuration holding the driver refuses.
+  Configuration& held = r.asmDoc.AddConfiguration("axle held");
+  MateOverride o;
+  o.mate = r.axle;
+  o.rotation = 0.5f;
+  held.mateOverrides.push_back(o);
+  study.configuration = held.id;
+  CHECK_THAT(motion::WhyNot(r.asmDoc, study),
+             ContainsSubstring("held by the active configuration"));
+  // And one that no longer exists is named, with what does.
+  study.configuration = 9999;
+  CHECK_THAT(motion::WhyNot(r.asmDoc, study),
+             ContainsSubstring("no longer exists") &&
+                 ContainsSubstring("no stop"));
+
+  // It is saved with the study, and a study that names none writes nothing.
+  study.configuration = noStopId;
+  const nlohmann::json j = DocumentIO::MotionStudyToJson(study);
+  CHECK(j.at("configuration").get<uint64_t>() == noStopId);
+  CHECK(DocumentIO::MotionStudyFromJson(j).configuration == noStopId);
+  CHECK_FALSE(DocumentIO::MotionStudyToJson(FullTurn(r.axle))
+                  .contains("configuration"));
+  study.configuration = 0; // the base is written, and read back as the base
+  const nlohmann::json base = DocumentIO::MotionStudyToJson(study);
+  REQUIRE(base.contains("configuration"));
+  CHECK(DocumentIO::MotionStudyFromJson(base).configuration ==
+        std::optional<uint64_t>(0));
+}
+
+TEST_CASE("Every sample records the moving mates' values", "[motion]") {
+  Rig r = MakeRig(0.0, /*withStop=*/false);
+  const MotionStudy study = FullTurn(r.axle, 5); // 0, 90, 180, 270, 360
+  const motion::Result res = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
+  REQUIRE(res.error.empty());
+  REQUIRE(res.samples.size() == 5);
+  for (size_t i = 0; i < res.samples.size(); i++) {
+    const auto& mates = res.samples[i].mates;
+    REQUIRE(mates.size() == 1); // the one revolute; nothing fastened
+    CHECK(mates[0].mate == r.axle);
+    CHECK_THAT(mates[0].rotation, WithinAbs(i * kPi / 2.0, 1e-6));
+  }
+}
+
+// The v127 assembly golden: a study that names its configuration.
+// DESIGNER_WRITE_GOLDEN_V127_ASM=<path> writes it.
+TEST_CASE("The v127 golden: a study that names its configuration",
+          "[motion][golden]") {
+  Rig r = MakeRig(90.0);
+  Configuration& noStop = r.asmDoc.AddConfiguration("no stop");
+  noStop.suppressedFeatures.push_back(r.stopOcc);
+  MotionStudy s = FullTurn(r.axle, 13);
+  s.name = "turn without the stop";
+  s.configuration = noStop.id;
+  r.asmDoc.AddMotionStudy(s);
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V127_ASM"))
+    REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
+
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/assembly/v127-study-configuration.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->GetMotionStudies().size() == 1);
+  const MotionStudy& gs = (*g)->GetMotionStudies()[0];
+  REQUIRE(gs.configuration.has_value());
+  CHECK(*gs.configuration != 0);
+  CHECK((*g)->ActiveConfiguration() == 0);
+  const motion::Result res = motion::Run(**g, r.Parts(), nullptr, gs);
+  REQUIRE(res.error.empty());
+  CHECK(res.clean); // the stop is out, under the study's own configuration
+}

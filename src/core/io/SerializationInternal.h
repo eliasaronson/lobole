@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    126; // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
+    127; // v127: an AxisRef kind `custom` {origin, direction} (revolve,
+         //      pattern and datum planes about any axis); a helix's
+         //      `start_deg` (+_expr); a motion study's `configuration`
+         //      (docs/pes-friction-plan.md).
+         // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
          //      placed on the bed ({id, part, name, pos, rot_z, enabled}),
          //      which the verifier treats as somewhere the tool must never
          //      go (docs/cam/workholding-plan.md).

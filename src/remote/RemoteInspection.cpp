@@ -657,7 +657,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "mode: exact (default — a real boolean, and the clash VOLUME) or "
      "mesh (triangles + an AABB tree: ~10x faster, a yes/no and no "
      "volume, decided to the reported deflection_mm; re-run exact on "
-     "anything that must be certain). ",
+     "anything that must be certain). On an assembly every pair names its "
+     "sides `a_name`/`b_name` (and `a`/`b`, the same labels) plus "
+     "`a_id`/`b_id` when both are occurrences of this assembly — the "
+     "vocabulary run_motion_study and contact_report use.",
      "a, b, deadline_s, max_pairs, mode, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
@@ -746,7 +749,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Enable/disable the live section clip {base_plane: xy|xz|yz, offset?, "
      "reverse?}. Works on part AND assembly tabs, with filled cut caps on "
      "both; `offset` is MILLIMETRES along the normal, and omitting it cuts "
-     "through the middle of what is shown; reverse keeps the other side. "
+     "through the middle of what is shown. The DEFAULT keeps the half below "
+     "the plane (z <= offset for xy, y <= for xz, x <= for yz) and reverse "
+     "keeps the half above; the response says which as `keeps` (e.g. "
+     "\"y <= 0\"). Look at the cut from the side that was removed — seen "
+     "from the kept side it looks like no cut at all. "
      "Shorthand for one cut — add_section/update_section address several, "
      "and cut on a datum plane (plane_id) or tilted (tilt_u/tilt_v) for a "
      "plane that is not a base plane.",
@@ -754,7 +761,9 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"add_section",
      "Add a section cut and return its id {base_plane: xy|xz|yz, plane_id? "
      "(a datum plane), offset?, tilt_u?, tilt_v? (degrees), reverse?}. Up to "
-     "four; they persist with the project.",
+     "four; they persist with the project. Like set_section, the default "
+     "keeps the half opposite the plane's normal (below: z <= offset for "
+     "xy, y <= for xz, x <= for yz) and reverse keeps the other half.",
      "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"list_sections",
      "Every section cut: id, source (base plane / datum / face, with "
@@ -765,8 +774,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "sections[]{id,offset,tilt_u,tilt_v,reverse,visible,normal,d,source}"},
     {"update_section",
      "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
-     "normal), tilt_u?, tilt_v? (degrees), reverse?, visible?}. Only the "
-     "fields present are touched.",
+     "normal), tilt_u?, tilt_v? (degrees), reverse? (false keeps the half "
+     "opposite the normal, true the half it points into), visible?}. Only "
+     "the fields present are touched.",
      "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
      "all, id"},
@@ -820,8 +830,17 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (p.contains("offset"))
         sec->offset = p.at("offset").get<float>();
       sec->reverse = p.value("reverse", false);
-      return json{
-          {"id", id}, {"offset", sec->offset}, {"reverse", sec->reverse}};
+      // WHICH half stays, in words: the shaders drop what lies on the
+      // normal's side, so the default keeps the half BELOW the plane. A cut
+      // whose kept half faces the camera looks exactly like no cut at all.
+      const char axis = basePlane == 1 ? 'y' : basePlane == 2 ? 'x' : 'z';
+      char keeps[64];
+      std::snprintf(keeps, sizeof keeps, "%c %s %.6g", axis,
+                    sec->reverse ? ">=" : "<=", double(sec->offset));
+      return json{{"id", id},
+                  {"offset", sec->offset},
+                  {"reverse", sec->reverse},
+                  {"keeps", keeps}};
     }
     throw std::runtime_error(
         "set_section wants base_plane (\"xy\"|\"xz\"|\"yz\") with an "
@@ -1050,6 +1069,23 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const auto subtreeOf = [&](uint64_t rootId) {
         return ui::OccurrenceSubtreeBodies(state, rootId);
       };
+      // One vocabulary with run_motion_study and contact_report: every pair
+      // names its sides `a_name`/`b_name`, and carries `a_id`/`b_id` when
+      // both are occurrences of THIS assembly (a path into a sub-assembly
+      // names an inner occurrence, whose id means nothing up here). `a`/`b`
+      // keep the label they always held.
+      const auto nameSides = [&](json& j, const Target& ta, const Target& tb) {
+        j["a_name"] = ta.label;
+        j["b_name"] = tb.label;
+        const auto top = [&](const Target& t) {
+          return t.occ != nullptr &&
+                 state.assembly->FindById(t.occ->id) == t.occ;
+        };
+        if (top(ta) && top(tb)) {
+          j["a_id"] = ta.occ->id;
+          j["b_id"] = tb.occ->id;
+        }
+      };
       auto targetOf = [&](const json& v) -> Target {
         Target t;
         if (v.is_number()) {
@@ -1224,6 +1260,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               json hit{{"a", occs[keep[ki]].label},
                        {"b", occs[keep[kj]].label},
                        {"clash", true}};
+              nameSides(hit, occs[keep[ki]], occs[keep[kj]]);
               if (mode != "mesh")
                 hit["volume"] = v;
               pairs.push_back(std::move(hit));
@@ -1260,9 +1297,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         // The same yes/no the sweep gives, for ONE named pair: no volume,
         // no distance, and the deflection it was decided to.
         const bool hit = pairMesh(ta, tb);
-        return json{{"clash", hit},  {"state", hit ? "clash" : "clear"},
-                    {"mode", mode},  {"deflection_mm", meshDeflection.load()},
-                    {"a", ta.label}, {"b", tb.label}};
+        json out{{"clash", hit},  {"state", hit ? "clash" : "clear"},
+                 {"mode", mode},  {"deflection_mm", meshDeflection.load()},
+                 {"a", ta.label}, {"b", tb.label}};
+        nameSides(out, ta, tb);
+        return out;
       }
       const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
                                              tb.bodies, glm::mat4(1.0f));
@@ -1278,6 +1317,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                {"mode", mode},
                {"a", ta.label},
                {"b", tb.label}};
+      nameSides(out, ta, tb);
       AddOverlapSite(out, *c);
       return out;
     }

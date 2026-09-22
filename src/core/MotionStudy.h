@@ -60,6 +60,14 @@ struct Sample {
   std::vector<std::pair<uint64_t, glm::mat4>> worlds;
   std::vector<Clash> clashes;
   std::vector<UnknownContact> unknownContacts;
+  // Every moving mate's DOF values at this sample (radians, mm): what the
+  // study actually turned and slid, so a caller need not recover an angle
+  // from a quaternion.
+  struct MateValue {
+    uint64_t mate = 0;
+    double rotation = 0.0, offset = 0.0;
+  };
+  std::vector<MateValue> mates;
 };
 
 struct Result {

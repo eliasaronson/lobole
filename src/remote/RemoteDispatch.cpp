@@ -914,7 +914,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"extrude_end_modes",
          {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},
         {"drawing_dim_kinds", DrawingDimKindNames()},
-        {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis"}},
+        {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis", "custom"}},
         {"material_slugs", CADMaterials::MaterialLibrary::AllSlugs()}};
   }
 

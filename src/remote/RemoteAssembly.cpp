@@ -217,7 +217,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "and, for an assembly with mate loops, `dof` = the freedom left IN THE "
      "LOOPED COMPONENTS only, whether every loop closed and by how much it "
      "missed, and which mates were redundant but consistent (three bolts "
-     "through a flange: satisfied, saying nothing new — not an error).",
+     "through a flange: satisfied, saying nothing new — not an error). "
+     "ALWAYS present: errored_mates, placed, occurrences, placed_by_mates, "
+     "placed_by_transform, mates[]. ONLY when the assembly has mate loops: "
+     "loop_mates, dof, loops_closed, residual_mm, redundant_mates — a tree "
+     "assembly has no loop to report on, so read them with a default.",
      ""},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/plan.md). "

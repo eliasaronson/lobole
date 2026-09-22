@@ -19,14 +19,18 @@ something to inspect), `pes_pump.glb` (the camshaft study, 73 frames),
 
 | study | driver | what follows |
 |---|---|---|
-| camshaft, one turn | camshaft revolute, 0-360 deg | 4 tappets + plungers (cam relations), 4 rollers (rolling ratio), 4 delivery valves, feed-pump tappet, timing hub and flyweights |
+| camshaft, one turn at full load | camshaft revolute, 0-360 deg | 4 tappets + plungers (cam relations), 4 rollers (rolling ratio), 4 delivery valves, feed-pump tappet, timing hub and flyweights |
 | control rack, stop to full load | rack slider, 0-15 mm | 4 control sleeves and 4 plungers turn (rack relations), governor diaphragm |
 | timing device, full advance | flyweight A, 0 to -20 deg | flyweight B, sprocket advances 8 deg against the hub |
 | hand primer stroke | primer slider, 0-15 mm | — |
 
 The rack is held by three assembly configurations — **Stop** (0 mm),
-**Idle** (4 mm) and **Full load** (15 mm) — so the camshaft study can be
-run at any load setting. The saved document is left on Full load.
+**Idle** (4 mm) and **Full load** (15 mm). Each study NAMES the configuration
+it measures, whatever the tab has active: the camshaft turn runs under Full
+load, and the rack sweep under the base, where nothing holds the rack. To
+see the camshaft at another load, point its study at Stop or Idle
+(`set_motion_study {configuration}`). The saved document is left on Full
+load.
 
 ## Measured (from the study poses, not the inputs)
 

@@ -20,7 +20,10 @@
 // creating feature (v54), stamped onto its bodies each regeneration, and
 // STRIPPED from the regen chain hash — recoloring never rebuilds B-Rep.
 struct Appearance {
-  std::optional<glm::vec3> color; // sRGB base color
+  // LINEAR base colour: the shaders light it as linear and the STEP/GLB
+  // writers are handed it as linear. A mid-grey written as sRGB 0.5 renders as
+  // about 0.73 — so a casting that should read grey wants ~0.2.
+  std::optional<glm::vec3> color;
   std::optional<float> roughness; // 0..1
   std::optional<float> metallic;  // 0..1
   bool Any() const {

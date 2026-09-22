@@ -239,7 +239,17 @@ void CurveFeature::VisitExprs(const ExprVisitor& visit) {
     visit(radiusExpr, radius);
     visit(pitchExpr, pitch);
     visit(turnsExpr, turns);
+    visit(startDegExpr, startDeg);
   }
+}
+
+glm::dvec3 HelixReference(const glm::dvec3& axis) {
+  // OpenCASCADE's own choice for gp_Ax3(P, V), asked of it rather than
+  // re-derived, so every helix that predates start_deg keeps its start.
+  const glm::dvec3 d =
+      glm::dot(axis, axis) > 1e-18 ? glm::normalize(axis) : glm::dvec3(0, 0, 1);
+  const gp_Dir x = gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(d.x, d.y, d.z)).XDirection();
+  return {x.X(), x.Y(), x.Z()};
 }
 
 bool CurveFeature::Execute(RegenContext& ctx) {
@@ -300,7 +310,12 @@ bool CurveFeature::Execute(RegenContext& ctx) {
       }
       const glm::vec3 d = glm::length(axisDir) > 1e-9f ? glm::normalize(axisDir)
                                                        : glm::vec3(0, 0, 1);
-      gp_Ax3 axis(ToPnt(axisOrigin), gp_Dir(d.x, d.y, d.z));
+      // The reference is named (HelixReference) and the start turned from it,
+      // right-handed about the axis: the parameter-space line starts at
+      // u = start_deg instead of 0.
+      const glm::dvec3 ref = HelixReference(glm::dvec3(d));
+      gp_Ax3 axis(ToPnt(axisOrigin), gp_Dir(d.x, d.y, d.z),
+                  gp_Dir(ref.x, ref.y, ref.z));
       Handle(Geom_CylindricalSurface) cyl =
           new Geom_CylindricalSurface(axis, radius);
       // Helix as a straight line in the cylinder's (u=angle, v=height) param
@@ -312,7 +327,8 @@ bool CurveFeature::Execute(RegenContext& ctx) {
       const double norm = std::sqrt(1.0 + k * k);
       const double wLast = 2.0 * M_PI * turns * norm;
       gp_Dir2d dir(rightHanded ? 1.0 : -1.0, k);
-      Handle(Geom2d_Line) line2d = new Geom2d_Line(gp_Pnt2d(0.0, 0.0), dir);
+      const double u0 = angles::ToRadians(startDeg);
+      Handle(Geom2d_Line) line2d = new Geom2d_Line(gp_Pnt2d(u0, 0.0), dir);
       edge = BRepBuilderAPI_MakeEdge(line2d, cyl, 0.0, wLast).Edge();
       BRepLib::BuildCurve3d(
           edge); // materialize the 3D curve for downstream use

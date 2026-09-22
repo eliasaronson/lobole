@@ -21,6 +21,12 @@ enum class Curve3DKind {
   BentPath,
 };
 
+// Where a helix on `axis` starts when its start_deg is 0: the direction
+// OpenCASCADE's gp_Ax3(P, V) chooses, written out so it is OUR rule and can be
+// documented — +X for a Z axis, +Z for a Y axis, -Z... (see the .cpp). Every
+// helix made before start_deg existed started here, so none of them moves.
+[[nodiscard]] glm::dvec3 HelixReference(const glm::dvec3& axis);
+
 // A free 3D curve as its own history feature — the first Designer geometry that
 // is NOT a sketch entity and NOT a solid body (curves-3d-plan Phase 0). Like a
 // datum, it contributes no body: Execute caches a resulting OCC edge plus a
@@ -103,7 +109,12 @@ public:
   double pitch = 1.0; // rise along the axis per full turn
   double turns = 1.0;
   bool rightHanded = true;
+  // Where the helix starts round its axis (v127), degrees, right-handed about
+  // the axis from HelixReference(axisDir). 0 is where every helix started
+  // before the field existed.
+  double startDeg = 0.0;
   std::string radiusExpr, pitchExpr, turnsExpr; // expression-driven (v42)
+  std::string startDegExpr;                     // v127
 
 private:
   std::vector<glm::vec3> m_polyline;

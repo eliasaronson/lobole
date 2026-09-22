@@ -41,9 +41,11 @@ import om615_accessories as A
 def _solved(what, rig):
     """Solve and say the three numbers that matter, not the mate list."""
     r = rig.solve()
-    print(f"  {what}: {len(r['mates'])} mates, dof {r['dof']}, "
-          f"{r['loop_mates']} in loops, closed={r['loops_closed']}, "
-          f"residual {r['residual_mm']:.2e} mm, "
+    # The loop keys are only there when the assembly has loops.
+    print(f"  {what}: {len(r['mates'])} mates, dof {r.get('dof', '-')}, "
+          f"{r.get('loop_mates', 0)} in loops, "
+          f"closed={r.get('loops_closed', True)}, "
+          f"residual {r.get('residual_mm', 0.0):.2e} mm, "
           f"{r['errored_mates']} errored")
     if r["errored_mates"]:
         raise SdkError(f"{r['errored_mates']} mates could not be solved")

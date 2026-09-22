@@ -178,18 +178,22 @@ def housing(app):
                  (H_X0, 0)], "Seal bore", mode="cut")
     turned_x(p, [(H_X1 - 1.0, 0), (H_X1 - 1.0, 6.8), (H_X1 + 9.0, 6.8),
                  (H_X1 + 9.0, 0)], "Stub pocket", mode="cut")
-    # The element bores: one stage per sketch, all four elements at once.
-    stages = [(10.0, TAPPET_TOP, TAPPET_BORE_D, "Tappet bores"),
-              (TAPPET_TOP, WEB_Z0, SPRING_CHAMBER_D, "Spring chambers"),
-              (WEB_Z0 - 1.0, RACK_GALLERY_Z0 + 1.0, 15.6, "Web bores"),
-              (RACK_GALLERY_Z1 - 1.0, BARREL_COLLAR_Z, 12.3, "Barrel bores"),
-              (BARREL_COLLAR_Z, BARREL_TOP, 17.2, "Collar bores"),
-              (BARREL_TOP, H_TOP + 1.0, 18.2, "Holder bores")]
-    for z0_, z1_, d, name in stages:
-        sk = p.sketch(Plane.xy(z0_), name=name)
-        for x in EL_X:
-            sk.circle((x, 0), d=d)
-        p.extrude(sk.add(), _snap(z1_) - _snap(z0_), mode="cut", name=name)
+    # Each element's stepped bore, turned about its own axis: tappet bore,
+    # spring chamber, web, barrel, collar and holder seat in one outline.
+    steps = [(TAPPET_BORE_D / 2.0, 10.0), (SPRING_CHAMBER_D / 2.0, TAPPET_TOP),
+             (7.8, WEB_Z0), (6.15, RACK_GALLERY_Z0 + 1.0),
+             (8.6, BARREL_COLLAR_Z), (9.1, BARREL_TOP)]
+    for i, x in enumerate(EL_X):
+        pts = [(x, 10.0)]
+        for k, (r, z0_) in enumerate(steps):
+            z1_ = steps[k + 1][1] if k + 1 < len(steps) else H_TOP + 1.0
+            pts += [(x + r, z0_), (x + r, z1_)]
+        pts.append((x, H_TOP + 1.0))
+        sk = p.sketch(Plane.xz(0.0), name=f"Element {i + 1} bore")
+        sk.polyline(pts)
+        p.revolve(sk.add(), axis={"kind": "custom", "origin": [x, 0, 0],
+                                  "direction": [0, 0, 1]},
+                  mode="cut", name=f"Element {i + 1} bore")
     # The rack gallery, open on +Y: the inspection window.
     slab(p, -49.0, -12.0, RACK_GALLERY_Z0, 49.0, UP_Y1 + 1.0, RACK_GALLERY_Z1,
          "Rack gallery", mode="cut")
@@ -272,9 +276,7 @@ def camshaft(app):
         # microns — and the lobe is one smooth face, not 180 facets.
         pts = lobe_profile(i + 1)
         k = min(range(len(pts)), key=lambda j: pts[j][1])   # start on the base
-        pts = pts[k:] + pts[:k]
-        sk.entities.append({"type": "spline", "degree": 3,
-                            "poles": [list(q) for q in pts + [pts[0]]]})
+        sk.spline(pts[k:] + pts[:k], closed=True)
         p.extrude(sk.add(), LOBE_W, mode="add", name=f"Lobe {i + 1}")
     sk = p.sketch(Plane.yz(ECC_X - ECC_W / 2.0), name="Feed-pump eccentric")
     sk.circle(ECC_C0, r=ECC_R - CAM_ALLOW)
@@ -352,7 +354,8 @@ def plunger_spring(app):
 
 # The helix law (HELIX_SPAN, land_height, effective_stroke) lives in pes_spec.
 HELIX_GROOVE_D = 2.4
-PLUNGER_FRAME_DEG = HELIX_SPAN + 90.0
+# The port is on -Y, so at the stop position the vertical groove faces it.
+GROOVE_DEG = -90.0
 
 
 def plunger(app):
@@ -360,34 +363,28 @@ def plunger(app):
     r = PLUNGER_D / 2.0 - 0.01
     turned(p, [(0, PLUNGER_FOOT_Z), (4.0, PLUNGER_FOOT_Z), (4.0, 46.0),
                (r, 46.0), (r, PLUNGER_TOP), (0, PLUNGER_TOP)], "Plunger")
-    # The drive vanes, on the frame's X axis.
-    a = math.radians(PLUNGER_FRAME_DEG)
-    ux, uy = math.cos(a), math.sin(a)
-    vx, vy = -uy, ux
+    # The drive vanes, along X: the sleeve's slots.
     sk = p.sketch(Plane.xy(VANE_Z0), name="Vanes")
     for s in (-1, 1):
-        pts = []
-        for (t, w) in ((2.5, -1), (VANE_R, -1), (VANE_R, 1), (2.5, 1)):
-            pts.append((s * t * ux + w * VANE_W / 2.0 * vx,
-                        s * t * uy + w * VANE_W / 2.0 * vy))
-        sk.polyline(pts)
+        sk.rect((s * 2.5, -VANE_W / 2.0), (s * VANE_R, VANE_W / 2.0))
     p.extrude(sk.add(), VANE_Z1 - VANE_Z0, mode="add", name="Vanes")
-    # The control helix: a helical groove rising counter-clockwise from local
-    # angle 0 (the full-load end) to HELIX_SPAN (next to the vertical groove).
+    # The control helix: a helical groove rising counter-clockwise from its
+    # full-load end, HELIX_SPAN short of the vertical groove, up to it.
     z_top = PLUNGER_TOP - LAND_MIN - HELIX_GROOVE_D / 2.0
     z_bot = PLUNGER_TOP - LAND_MAX - HELIX_GROOVE_D / 2.0
     pitch = (z_top - z_bot) * 360.0 / HELIX_SPAN
     p.app.add_feature(feature={
         "type": "Curve3D", "name": "Helix path", "kind": "helix",
         "origin": [0, 0, z_bot], "axis": [0, 0, 1], "radius": r,
-        "pitch": pitch, "turns": HELIX_SPAN / 360.0})
+        "pitch": pitch, "turns": HELIX_SPAN / 360.0,
+        "start_deg": GROOVE_DEG - HELIX_SPAN})
     path = p.state()["features"][-1]["id"]
     p.app.add_feature(feature={"type": "Pipe", "name": "Control helix",
                                "path_id": path,
                                "outer_diameter": HELIX_GROOVE_D,
                                "mode": "cut"})
     # The vertical groove from the top face down to the helix's upper end.
-    g = math.radians(HELIX_SPAN)          # on the port at the stop position
+    g = math.radians(GROOVE_DEG)          # on the port at the stop position
     gx, gy = math.cos(g), math.sin(g)
     sk = p.sketch(Plane.xy(z_top - 0.6), name="Vertical groove")
     w = 0.7
@@ -397,7 +394,7 @@ def plunger(app):
                  (1.8 * gx + w * gy, 1.8 * gy - w * gx)])
     p.extrude(sk.add(), PLUNGER_TOP - z_top + 1.6, mode="cut",
               name="Vertical groove")
-    p.frame("axis", origin=(0, 0, 0), z=(0, 0, 1), x=(ux, uy, 0))
+    p.frame("axis", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     finish(p, "steel", (0.78, 0.79, 0.80), roughness=0.2)
     p.check(solids=1)
     return p

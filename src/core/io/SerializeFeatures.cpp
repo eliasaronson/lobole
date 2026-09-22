@@ -602,6 +602,11 @@ json AxisRefToJson(const AxisRef& axis) {
             {"entity_id", axis.entityId}};
   case AxisRef::Kind::DatumAxis:
     return {{"kind", "datum_axis"}, {"datum_axis_id", axis.datumAxisId}};
+  case AxisRef::Kind::Custom:
+    return {
+        {"kind", "custom"},
+        {"origin", {axis.origin.x, axis.origin.y, axis.origin.z}},
+        {"direction", {axis.direction.x, axis.direction.y, axis.direction.z}}};
   }
   return {{"kind", "x"}};
 }
@@ -622,8 +627,27 @@ AxisRef AxisRefFromJson(const json& j) {
   } else if (kind == "datum_axis") {
     axis.kind = AxisRef::Kind::DatumAxis;
     axis.datumAxisId = j.at("datum_axis_id").get<uint64_t>();
+  } else if (kind == "custom") {
+    // A point and a direction, both written out: [x, y, z] in mm.
+    axis.kind = AxisRef::Kind::Custom;
+    const auto triple = [&](const char* key) {
+      const json& v = j.at(key);
+      if (!v.is_array() || v.size() != 3)
+        throw std::runtime_error(std::string("a custom axis's ") + key +
+                                 " is [x, y, z]");
+      return glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                        v[2].get<double>());
+    };
+    axis.origin = triple("origin");
+    axis.direction = triple("direction");
+    if (glm::dot(axis.direction, axis.direction) < 1e-18)
+      throw std::runtime_error("a custom axis's direction is zero; give the "
+                               "way the axis points, e.g. [0, 0, 1]");
   } else {
-    throw std::runtime_error("Unknown axis kind: " + kind);
+    throw std::runtime_error("Unknown axis kind \"" + kind +
+                             "\": x, y, z, sketch_line {sketch_id, "
+                             "entity_id}, datum_axis {datum_axis_id} or "
+                             "custom {origin, direction}");
   }
   return axis;
 }
@@ -979,6 +1003,10 @@ json FeatureToJson(const Feature& feature) {
         j["turns_expr"] = cv->turnsExpr;
       if (!cv->rightHanded)
         j["left_handed"] = true;
+      if (cv->startDeg != 0.0 || !cv->startDegExpr.empty())
+        j["start_deg"] = cv->startDeg; // v127
+      if (!cv->startDegExpr.empty())
+        j["start_deg_expr"] = cv->startDegExpr;
       break;
     }
   } else if (auto* boo = dynamic_cast<const BooleanFeature*>(&feature)) {
@@ -1378,9 +1406,14 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(docs/modeling/derived-plan.md)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
-     "flip?, axis?, angle_deg? (+_expr)"},
+     "flip?, axis? {kind: x|y|z|sketch_line|datum_axis|custom}, the same as "
+     "Revolve's, angle_deg? (+_expr)"},
     {"Revolve", 1,
-     "sketch_id, axis {kind: x|y|z|sketch_line|datum_axis, ...}, angle_deg "
+     "sketch_id, axis {kind: x|y|z (world axes THROUGH THE WORLD ORIGIN)|"
+     "sketch_line {sketch_id, entity_id}|datum_axis {datum_axis_id}|custom "
+     "{origin: [x,y,z] mm, direction: [x,y,z]}} — the axis must lie in the "
+     "sketch plane; custom is the one to use for a turned feature off the "
+     "origin — angle_deg "
      "(+_expr), mode: new_body|add|cut, symmetric?, reversed?. Positive "
      "angles sweep RIGHT-HANDED about the axis direction starting from the "
      "sketch position (about +x, a point at +z rotates toward -y) — confirm "
@@ -1402,7 +1435,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "degree?, closed?; bent_path: points are the CORNERS in order and "
      "radius (+_expr) is REQUIRED — the former the tube is bent round, to "
      "its centreline, built line-arc-line; helix: origin, axis, radius "
-     "(+_expr), pitch (+_expr), turns (+_expr), left_handed?"},
+     "(+_expr), pitch (+_expr), turns (+_expr), left_handed?, start_deg? "
+     "(+_expr): where it starts round the axis, degrees right-handed about "
+     "`axis` from the reference direction — +X for a +Z axis, -X for -Z, +Z "
+     "for +X or +Y, -Z for -X or -Y (in general OpenCASCADE's gp_Ax3 "
+     "choice). The helix then winds right-handed (or left) from there"},
     {"Boolean", 1,
      "target_id, tool_id (body created_by ids), op: "
      "union|subtract|intersect"},
@@ -1454,7 +1491,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Pattern", 1,
      "kind: linear|circular, source_id (feature to repeat), count (+_expr), "
      "linear: base_plane/axis + spacing (+_expr); circular: axis + angle_deg "
-     "(+_expr)"},
+     "(+_expr). axis is the same {kind: x|y|z|sketch_line|datum_axis|custom} "
+     "as Revolve's"},
 };
 std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
 
@@ -2010,6 +2048,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       cv->turns = j.value("turns", 1.0);
       cv->turnsExpr = j.value("turns_expr", std::string{});
       cv->rightHanded = !j.value("left_handed", false);
+      cv->startDeg = j.value("start_deg", 0.0);
+      cv->startDegExpr = j.value("start_deg_expr", std::string{});
       break;
     }
     out = std::move(cv);

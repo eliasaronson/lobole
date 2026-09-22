@@ -27,7 +27,7 @@ def expect(condition, message):
 
 def expect_error(d, needle, **call):
     try:
-        d.call(**call)
+        d.call(call.pop("method"), **call)
     except RuntimeError as e:
         expect(needle in str(e), f"expected '{needle}' in: {e}")
         return

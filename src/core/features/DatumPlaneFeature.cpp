@@ -57,6 +57,15 @@ bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
     outDir = glm::normalize(d);
     return true;
   }
+  case AxisRef::Kind::Custom: {
+    const glm::dvec3 d = ref.direction;
+    if (glm::dot(d, d) < 1e-18) {
+      return false; // no direction to turn about
+    }
+    outOrigin = glm::vec3(ref.origin);
+    outDir = glm::vec3(glm::normalize(d));
+    return true;
+  }
   case AxisRef::Kind::DatumAxis: {
     const auto* datum =
         dynamic_cast<const DatumAxisFeature*>(ctx.FindById(ref.datumAxisId));

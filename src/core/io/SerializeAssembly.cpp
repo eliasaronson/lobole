@@ -457,6 +457,8 @@ json MotionStudyToJson(const MotionStudy& s) {
   j["samples"] = s.samples;
   j["check_clash"] = s.checkClash;
   j["clash_mode"] = s.clashMode;
+  if (s.configuration)
+    j["configuration"] = *s.configuration; // v127; 0 = the base
   return j;
 }
 
@@ -476,6 +478,8 @@ MotionStudy MotionStudyFromJson(const json& j) {
   if (s.clashMode != "mesh" && s.clashMode != "exact")
     throw std::runtime_error("unknown motion study clash_mode '" + s.clashMode +
                              "' (expected mesh or exact)");
+  if (j.contains("configuration") && !j.at("configuration").is_null())
+    s.configuration = j.at("configuration").get<uint64_t>();
   return s;
 }
 

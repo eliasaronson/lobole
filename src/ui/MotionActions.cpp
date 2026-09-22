@@ -238,6 +238,15 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
       *error = why;
     return false;
   }
+  // A study that names its configuration is posed under it: a pose of the
+  // "full load" study with the rack at idle would be a pose the study never
+  // made. Switching is a document change, so it is an undo step.
+  if (s->configuration &&
+      state.assembly->ActiveConfiguration() != *s->configuration) {
+    SnapshotAssembly(state);
+    state.assembly->SetActiveConfiguration(*s->configuration);
+    SolveActiveAssembly(state);
+  }
   Mate* driver = state.assembly->FindMateById(s->driverMate);
   const double target = motion::ValueAt(*s, t);
 
