@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    124; // v124: a third `rotary_pattern`, `helical` -- passes that follow
+    125; // v125: a `surface_parallel` op reads `stepdown`, ROUGHING in
+         //      layers from the stock top (a v124 file's unread stepdown on
+         //      one is dropped on load), and surface ops gain
+         //      `rest_from_tool`: cut only where that larger cutter could not
+         //      reach (docs/cam/rough-rest-range-plan.md).
+         // v124: a third `rotary_pattern`, `helical` -- passes that follow
          //      a twist, helices stepped round the part -- and `lead_mm`,
          //      their advance per turn (0 = the part's own twist). A v123
          //      build refuses the pattern name, which is what the bump is for

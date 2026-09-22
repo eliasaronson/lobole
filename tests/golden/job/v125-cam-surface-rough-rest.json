@@ -1,0 +1,88 @@
+{
+  "format": "designer-document",
+  "version": 125,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 1,
+      "name": "Part"
+    }
+  ],
+  "cam": [
+    {
+      "id": 2,
+      "name": "Rough, finish, clean up",
+      "post": "mach3",
+      "safe_z": 25.0,
+      "stock": {
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ],
+        "bottom_margin": 1.0
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm ball",
+          "diameter": 6.0,
+          "tool_type": "ball",
+          "flutes": 2,
+          "flute_length": 20.0,
+          "feed_cut": 600.0,
+          "feed_plunge": 200.0,
+          "spindle_rpm": 12000.0
+        },
+        {
+          "number": 2,
+          "name": "2 mm ball",
+          "diameter": 2.0,
+          "tool_type": "ball",
+          "flutes": 2,
+          "flute_length": 8.0,
+          "feed_cut": 300.0,
+          "feed_plunge": 100.0,
+          "spindle_rpm": 18000.0
+        }
+      ],
+      "operations": [
+        {
+          "id": 3,
+          "name": "Rough a surface",
+          "type": "surface_parallel",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 4.0,
+          "stepover": 0.45,
+          "stepdown": 3.0,
+          "stock_to_leave": 0.6
+        },
+        {
+          "id": 4,
+          "name": "Finish surface",
+          "type": "surface_parallel",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 4.0,
+          "stepover": 0.18,
+          "cut_angle_deg": 45.0,
+          "sample_step_mm": 0.12
+        },
+        {
+          "id": 5,
+          "name": "Clean up after T1",
+          "type": "surface_parallel",
+          "tool": 2,
+          "top_z": 10.0,
+          "bottom_z": 4.0,
+          "stepover": 0.18,
+          "sample_step_mm": 0.12,
+          "rest_from_tool": 1
+        }
+      ],
+      "fit_arcs": true
+    }
+  ]
+}

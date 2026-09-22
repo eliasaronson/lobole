@@ -35,6 +35,7 @@ const OpFieldRow kRows[] = {
     {"z_step_mm", OpField::ZStep, &Operation::zStep},
     {"rotary_pattern", OpField::RotaryPattern, &Operation::rotaryPattern},
     {"lead_mm", OpField::Lead, &Operation::leadMm},
+    {"rest_from_tool", OpField::RestFromTool, &Operation::restFromTool},
     {"enabled", OpField::None, &Operation::enabled},
 };
 

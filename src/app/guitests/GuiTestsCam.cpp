@@ -2638,6 +2638,158 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // Rough, finish, clean up from the toolbar
+  // (docs/cam/rough-rest-range-plan.md): a dome on a plate, whose ring where
+  // they meet a 6 mm ball cannot reach.
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "rough_finish_and_clean_up_from_the_toolbar");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Document* part = CamPart();
+    part->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 50, 50, 12));
+    part->AddFeature(
+        std::make_unique<SphereFeature>("Dome", glm::vec3(25, 25, 12), 10.0));
+    part->AddFeature(std::make_unique<BooleanFeature>(
+        "Domed plate", part->GetFeature(0)->GetId(),
+        part->GetFeature(1)->GetId(), BooleanOp::Union));
+    ctx->Yield(2);
+    IM_CHECK_EQ(part->GetBodies().size(), (size_t)1);
+    cam::Setup& added = MakeJob()->AddSetup("Relief");
+    s_App->camActiveSetup = added.id;
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    setup->tools[0].type = cam::ToolType::Ball;
+    setup->tools[0].diameter = 6.0;
+    cam::Tool small = setup->tools[0];
+    small.number = 2;
+    small.name = "2 mm ball";
+    small.diameter = 2.0;
+    setup->tools.push_back(small);
+    ctx->Yield(2);
+
+    // Rough: no pick.
+    ToolbarClick(ctx, "###tb_job_surface_rough");
+    ctx->Yield(2);
+    // Finish: pick the dome.
+    const Body& body = CamPart()->GetBodies()[0];
+    ui::SelectionItem dome;
+    dome.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!body.shape.FacePlane(index, o, n, u)) {
+        dome.element = ElementRef{body.createdBy, name};
+        break;
+      }
+    }
+    IM_CHECK(dome.element.IsSet());
+    ToolbarClick(ctx, "###tb_job_surface");
+    ctx->Yield();
+    ui::CamFacePicked(*s_App, dome);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    // Clean up, with the small ball chosen as the verb's window would.
+    s_App->camVerbTool = 2;
+    ToolbarClick(ctx, "###tb_job_rest");
+    ctx->Yield(2);
+
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)3);
+    if (setup->operations.size() == 3) {
+      const cam::Operation& rough = setup->operations[0];
+      const cam::Operation& finish = setup->operations[1];
+      const cam::Operation& rest = setup->operations[2];
+      IM_CHECK(rough.type == cam::OpType::SurfaceParallel);
+      IM_CHECK_GT(rough.stepdown, 0.0);
+      IM_CHECK_GT(rough.stockToLeave, 0.0);
+      IM_CHECK(finish.type == cam::OpType::SurfaceParallel);
+      IM_CHECK_EQ(finish.stepdown, 0.0);
+      IM_CHECK_EQ(rest.toolNumber, 2);
+      IM_CHECK_EQ(rest.restFromTool, 1);
+    }
+    IM_CHECK_EQ(s_App->camRefusal, std::string());
+    for (const cam::Toolpath& tp : s_App->camToolpaths)
+      IM_CHECK_EQ(tp.error, std::string());
+
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // A rotary pass bounded ALONG the axis by a picked face, from the verb's
+  // window, and back to the whole length.
+  t = IM_REGISTER_TEST(engine, "cam", "a_rotary_pass_limits_to_a_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Document* part = CamPart();
+    part->AddFeature(std::make_unique<CylinderFeature>(
+        "Big", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 15.0));
+    part->AddFeature(std::make_unique<CylinderFeature>(
+        "Small", glm::vec3(15, 0, 0), glm::vec3(1, 0, 0), 8.0, 15.0));
+    part->AddFeature(std::make_unique<BooleanFeature>(
+        "Stepped", part->GetFeature(0)->GetId(), part->GetFeature(1)->GetId(),
+        BooleanOp::Union));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    setup->machine.hasRotaryAxis = true;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 1.0, 1.0};
+    setup->tools[0].type = cam::ToolType::Ball;
+    ctx->Yield(2);
+
+    const auto cutSpan = [&]() {
+      double x0 = 1e9, x1 = -1e9;
+      for (const cam::Toolpath& tp : s_App->camToolpaths)
+        for (const cam::Move& m : tp.moves)
+          if (m.kind == cam::Move::Kind::Cut) {
+            x0 = std::min(x0, m.to.x);
+            x1 = std::max(x1, m.to.x);
+          }
+      return x1 - x0;
+    };
+    ToolbarClick(ctx, "###tb_job_rotary_finish");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(added.id)->operations.size(), (size_t)1);
+    const double whole = cutSpan();
+    IM_CHECK_GT(whole, 25.0);
+
+    ctx->ItemClick("//###ToolWindow/###cam_verb_limit");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+    const Body& body = CamPart()->GetBodies()[0];
+    ui::SelectionItem round;
+    round.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!body.shape.FacePlane(index, o, n, u)) {
+        round.element = ElementRef{body.createdBy, name};
+        break;
+      }
+    }
+    IM_CHECK(round.element.IsSet());
+    ui::CamFacePicked(*s_App, round);
+    ctx->Yield(2);
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)1); // limited, not added
+    IM_CHECK_EQ(setup->operations[0].targets.size(), (size_t)1);
+    const double limited = cutSpan();
+    ctx->LogInfo("whole %.1f mm, limited %.1f mm", whole, limited);
+    IM_CHECK_LT(limited, 17.0); // one of the two 15 mm faces
+
+    ctx->ItemClick("//###ToolWindow/###cam_verb_whole");
+    ctx->Yield(2);
+    IM_CHECK(Job()->FindSetup(added.id)->operations[0].targets.empty());
+    IM_CHECK_GT(cutSpan(), 25.0);
+
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
   // Floating windows share one placement (ui/FloatingWindow.h). Generate used
   // to anchor at exactly the tool window's corner, so opening it while an op
   // or a tool was being edited put it on top of that editor.

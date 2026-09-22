@@ -88,6 +88,10 @@ constexpr FieldPoke kPokes[] = {
        o.rotaryPattern = cam::RotaryPattern::Helical;
        o.leadMm = 80.0;
      }},
+    // A rest pass after its own cutter: nothing is left that T1 did not
+    // reach, so a type that reads the field says so and cuts nothing.
+    {cam::OpField::RestFromTool, "rest_from_tool",
+     [](cam::Operation& o) { o.restFromTool = 1; }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.

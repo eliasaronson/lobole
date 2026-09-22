@@ -182,6 +182,19 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 // follows takes an even skin. The rotary finish deliberately derives no
 // stepdown -- a finish is not a choice about the stock -- and this is the
 // verb that makes that choice.
+// A 3-axis ROUGH: the whole-part raster finish's derivation, then layers of
+// half the cutter from the stock top and a skin of DefaultFinishStock(tool)
+// (docs/cam/rough-rest-range-plan.md).
+[[nodiscard]] DerivedOp DeriveSurfaceRough(const Setup& setup,
+                                           const std::vector<Body>& bodies,
+                                           int toolNumber = 0);
+// A REST pass: the same kind of pass as the setup's last surface finish, over
+// the same region, with tool `toolNumber` and `restFromTool` = the finish's
+// tool, so it cuts only where that larger cutter could not reach. Refused with
+// no finish to follow, or a tool that is not smaller.
+[[nodiscard]] DerivedOp DeriveRest(const Setup& setup,
+                                   const std::vector<Body>& bodies,
+                                   int toolNumber = 0);
 [[nodiscard]] DerivedOp DeriveRotaryRough(const Setup& setup,
                                           const std::vector<Body>& bodies,
                                           int toolNumber = 0);

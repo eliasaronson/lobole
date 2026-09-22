@@ -483,8 +483,20 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_op_rest_from_tools")) {
+    // v125: a rest pass's reference cutter. One that reloads as 0 cuts the
+    // whole region again with the small tool -- hours, for a corner.
+    const auto want =
+        expect.at("cam_op_rest_from_tools").get<std::vector<int>>();
+    std::vector<int> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Operation& o : s.operations)
+        got.push_back(o.restFromTool);
+    CHECK(got == want);
+  }
   if (expect.contains("cam_op_stepdowns")) {
-    // v123: a rotary op reads its stepdown, as the depth between layers.
+    // v123: a rotary op reads its stepdown, as the depth between layers;
+    // v125: so does a raster, which then roughs.
     const auto& want = expect.at("cam_op_stepdowns");
     std::vector<double> got;
     for (const cam::Setup& s : setups)

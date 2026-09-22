@@ -432,6 +432,10 @@ DerivedOp DeriveOperation(const Setup& setup,
     }
     op.name =
         op.type == OpType::SurfaceParallel ? "Finish surface" : "Finish walls";
+    // A finish is not a stack of levels. The generic stepdown above is the
+    // 2.5D rule; left on a raster, it now reads as LAYERS (v125), which is a
+    // rough (DeriveSurfaceRough says so on purpose).
+    op.stepdown = 0.0;
     if (target.ref.IsSet())
       op.targets = {target};
     // The band to finish. The top of the stock down to the lowest point the
@@ -476,16 +480,13 @@ DerivedOp DeriveOperation(const Setup& setup,
       return out;
     }
     op.name = "Finish on the rotary";
-    // No target: a rotary pass turns the WHOLE part under the cutter. A face
-    // pick would name one patch of a surface that the part rotates out from
-    // under, which is a statement about a 3-axis fixture, not this one. Said
-    // by refusing rather than by ignoring what was picked.
-    if (target.ref.IsSet()) {
-      out.why = "a rotary finishing pass turns the whole part under the "
-                "cutter, so it takes no face pick — clear the selection and "
-                "add it to the setup";
-      return out;
-    }
+    // A rotary pass turns the whole part under the cutter, so a picked face
+    // cannot bound it AROUND the axis. It bounds it ALONG the axis: the pass
+    // runs the face's extent in X and all the way round
+    // (docs/cam/rough-rest-range-plan.md), so one journal or the handle alone
+    // can be finished. No pick: the whole length.
+    if (target.ref.IsSet())
+      op.targets = {target};
     // Depths are not what a rotary pass is bounded by: it runs the length of
     // the part on the axis and all the way round. They are filled in so the
     // panel and the post have something honest to show, and neither is read
@@ -513,6 +514,82 @@ DerivedOp DeriveOperation(const Setup& setup,
   return out;
 }
 
+DerivedOp DeriveSurfaceRough(const Setup& setup,
+                             const std::vector<Body>& bodies, int toolNumber) {
+  DerivedOp out =
+      DeriveOperation(setup, bodies, OpType::SurfaceParallel, {}, toolNumber);
+  if (!out.ok)
+    return out; // the finish's refusals are the rough's: a cone, no part
+  const Tool* tool = setup.FindTool(out.op.toolNumber);
+  if (tool == nullptr) {
+    out.ok = false;
+    out.why = "no tool " + std::to_string(out.op.toolNumber) + " in the setup";
+    return out;
+  }
+  out.op.name = "Rough a surface";
+  out.op.stepdown = DerivedStepdown(*tool);
+  out.op.stockToLeave = DefaultFinishStock(*tool);
+  return out;
+}
+
+DerivedOp DeriveRest(const Setup& setup, const std::vector<Body>& bodies,
+                     int toolNumber) {
+  DerivedOp out;
+  const Tool* tool = toolNumber != 0       ? setup.FindTool(toolNumber)
+                     : setup.tools.empty() ? nullptr
+                                           : &setup.tools.front();
+  if (tool == nullptr) {
+    out.why =
+        "there is no tool " + std::to_string(toolNumber) + " in this setup";
+    return out;
+  }
+  // The finish to clean up after: the LAST surface finish in the setup --
+  // not a rough (it leaves a skin everywhere, which is not "what is left")
+  // and not another rest pass.
+  const Operation* after = nullptr;
+  for (const Operation& o : setup.operations)
+    if ((o.type == OpType::SurfaceParallel ||
+         o.type == OpType::SurfaceWaterline ||
+         o.type == OpType::SurfaceRotary) &&
+        o.enabled && o.stepdown <= 0.0 && o.restFromTool == 0)
+      after = &o;
+  if (after == nullptr) {
+    out.why = "there is no surface finish to clean up after — finish the "
+              "surface with a larger ball first, then this cuts only where "
+              "that one could not reach";
+    return out;
+  }
+  const Tool* big = setup.FindTool(after->toolNumber);
+  if (big == nullptr) {
+    out.why = "the finish it follows names a tool this setup does not have";
+    return out;
+  }
+  if (tool->diameter >= big->diameter - 1e-9) {
+    out.why = "tool " + std::to_string(tool->number) + " (" +
+              Round2(tool->diameter) + " mm) is not smaller than T" +
+              std::to_string(big->number) + " (" + Round2(big->diameter) +
+              " mm), which finished it — a clean-up needs a smaller cutter "
+              "to reach where that one could not";
+    return out;
+  }
+  // The same kind of pass over the same region; a waterline finish is
+  // cleaned up by a raster, because the rest region, not the pattern, is the
+  // point.
+  const OpType type = after->type == OpType::SurfaceRotary
+                          ? OpType::SurfaceRotary
+                          : OpType::SurfaceParallel;
+  const Target target =
+      after->targets.empty() ? Target{} : after->targets.front();
+  out = DeriveOperation(setup, bodies, type, target, tool->number);
+  if (!out.ok)
+    return out;
+  out.op.name = "Clean up after T" + std::to_string(big->number);
+  out.op.restFromTool = big->number;
+  out.op.stepdown = 0.0;
+  out.op.stockToLeave = after->stockToLeave;
+  return out;
+}
+
 DerivedOp DeriveRotaryRough(const Setup& setup, const std::vector<Body>& bodies,
                             int toolNumber) {
   DerivedOp out =
@@ -528,7 +605,7 @@ DerivedOp DeriveRotaryRough(const Setup& setup, const std::vector<Body>& bodies,
   out.op.name = "Rough on the rotary";
   // Half the cutter per layer: the rule the 2.5D operations derive their
   // stepdown by, and the one DeriveOperation leaves off a rotary finish.
-  out.op.stepdown = 0.5 * tool->diameter;
+  out.op.stepdown = DerivedStepdown(*tool);
   out.op.stockToLeave = DefaultFinishStock(*tool);
   return out;
 }
@@ -579,8 +656,11 @@ bool Retool(const Setup& setup, Operation& op, int toolNumber,
   // old cutter's own derivation is one nobody has stated, so it follows.
   // A rotary op's zero is not "unstated": it is "no layers", which is its
   // derivation (above), and a new cutter must not turn it into a rough.
-  const bool rotaryFinish =
-      op.type == OpType::SurfaceRotary && op.stepdown <= 0.0;
+  // Since v125 a raster's zero means the same (a finish, where a stepdown
+  // makes it a rough), and so does a rest pass's.
+  const bool rotaryFinish = (op.type == OpType::SurfaceRotary ||
+                             op.type == OpType::SurfaceParallel) &&
+                            op.stepdown <= 0.0;
   const bool derived =
       !rotaryFinish &&
       (op.stepdown <= 0.0 ||

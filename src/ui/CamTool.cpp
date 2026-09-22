@@ -167,10 +167,28 @@ struct Verb {
   bool cutter; // true: the window offers the tool the verb derives for
   const char* prompt;
   const char* tip;
-  // Rough on the rotary: the rotary finish's derivation with layers and a
-  // skin (cam::DeriveRotaryRough), rather than DeriveOperation's.
-  bool rotaryRough = false;
+  // How the verb's operation is derived: DeriveOperation for the type, or
+  // one of the derivations that makes a choice the plain one does not --
+  // layers and a skin (the two roughs), or a larger cutter to follow (Rest).
+  enum class Derive { Standard, RotaryRough, SurfaceRough, Rest };
+  Derive derive = Derive::Standard;
 };
+
+cam::DerivedOp DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
+                             const std::vector<Body>& bodies, cam::OpType type,
+                             const cam::Target& target, int tool) {
+  switch (derive) {
+  case Verb::Derive::RotaryRough:
+    return cam::DeriveRotaryRough(setup, bodies, tool);
+  case Verb::Derive::SurfaceRough:
+    return cam::DeriveSurfaceRough(setup, bodies, tool);
+  case Verb::Derive::Rest:
+    return cam::DeriveRest(setup, bodies, tool);
+  case Verb::Derive::Standard:
+    break;
+  }
+  return cam::DeriveOperation(setup, bodies, type, target, tool);
+}
 
 using CamVerb = AppState::CamVerb;
 
@@ -260,7 +278,24 @@ constexpr Verb kVerbs[] = {
      "Take the blank down to the part in layers of half the cutter, turning "
      "it all the way round, and leave a skin of a tenth of the cutter for "
      "Finish on the rotary to take off evenly.",
-     /*rotaryRough=*/true},
+     Verb::Derive::RotaryRough},
+    // Rough, finish, clean up (docs/cam/rough-rest-range-plan.md). Neither
+    // takes a pick: the rough is the whole part, the clean-up follows the
+    // last finish.
+    {CamVerb::SurfaceRough, "Rough a surface", cam::OpType::SurfaceParallel,
+     PickSlot::CamSurfaceRegion, false, true, "",
+     "Take the stock down to a curved part in layers of half the cutter, "
+     "following it, and leave a skin of a tenth of the cutter for Finish a "
+     "surface. It clears a ring one cutter wide round the part, so the "
+     "finishing ball can reach its edges, and leaves the rest of the block to "
+     "hold it.",
+     Verb::Derive::SurfaceRough},
+    {CamVerb::Rest, "Clean up what's left", cam::OpType::SurfaceParallel,
+     PickSlot::CamSurfaceRegion, false, true, "",
+     "Follow the last surface finish with a SMALLER ball, cutting only where "
+     "the larger one could not reach: inside corners and narrow valleys. "
+     "Choose the smaller tool below.",
+     Verb::Derive::Rest},
 };
 
 const Verb* FindVerb(CamVerb verb) {
@@ -325,7 +360,7 @@ std::string ToolpathError(const AppState& state, uint64_t opId) {
 // Returns the new operation's id, 0 when refused.
 uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
                              const ElementRef& target, uint64_t hint = 0,
-                             bool rotaryRough = false) {
+                             Verb::Derive derive = Verb::Derive::Standard) {
   state.camRefusal.clear();
   if (!state.job)
     return 0;
@@ -343,10 +378,8 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
     return 0;
   }
   const cam::DerivedOp derived =
-      rotaryRough ? cam::DeriveRotaryRough(*setup, ui::JobBodies(state),
-                                           VerbTool(state, *setup))
-                  : cam::DeriveOperation(*setup, ui::JobBodies(state), type,
-                                         picked, VerbTool(state, *setup));
+      DeriveForVerb(derive, *setup, ui::JobBodies(state), type, picked,
+                    VerbTool(state, *setup));
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return 0;
@@ -407,11 +440,12 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   JobUndoGuard undoGuard(state);
   const cam::Target target =
       op->targets.empty() ? cam::Target{} : op->targets.front();
-  const cam::DerivedOp derived =
-      verb.rotaryRough
-          ? cam::DeriveRotaryRough(setup, ui::JobBodies(state), tool)
-          : cam::DeriveOperation(setup, ui::JobBodies(state), verb.type, target,
-                                 tool);
+  cam::DerivedOp derived = DeriveForVerb(
+      verb.derive, setup, ui::JobBodies(state), verb.type, target, tool);
+  // A rotary pass limited to a face keeps the face across a change of tool
+  // (the rough's derivation takes no target of its own).
+  if (derived.ok && target.ref.IsSet() && derived.op.targets.empty())
+    derived.op.targets = {target};
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return;
@@ -536,6 +570,31 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     return;
   }
   JobUndoGuard undoGuard(state); // one step per pick (R7)
+
+  // A rotary verb's "Limit to a face": the pick bounds the operation the
+  // verb already made ALONG the axis (docs/cam/rough-rest-range-plan.md),
+  // rather than making another one.
+  if (slot == PickSlot::CamSurfaceRegion &&
+      (state.camVerb == CamVerb::RotaryFinish ||
+       state.camVerb == CamVerb::RotaryRough) &&
+      state.camVerbOp != 0) {
+    cam::Setup* setup = ActiveCamSetup(state);
+    cam::Operation* op = nullptr;
+    if (setup != nullptr)
+      for (cam::Operation& o : setup->operations)
+        if (o.id == state.camVerbOp)
+          op = &o;
+    const Verb* verb = FindVerb(state.camVerb);
+    if (op == nullptr || verb == nullptr) {
+      state.slotPick.miss = "the operation to limit is gone";
+      return;
+    }
+    op->targets = {ui::TargetFor(state, item.element, item.jobPartId)};
+    RederiveVerbOp(state, *setup, *verb, op->toolNumber);
+    state.slotPick = {};
+    state.camNote = "limited to that face's length along the axis";
+    return;
+  }
 
   if (slot == PickSlot::CamTopFace) {
     cam::Setup* setup = EnsureCamSetup(state);
@@ -796,7 +855,7 @@ void StartCamVerb(AppState& state, AppState::CamVerb verb) {
   // that opens shows it, and offers the other tools (RederiveVerbOp).
   if (state.slotPick.featureId == kCamToolSlot)
     state.slotPick = {};
-  state.camVerbOp = CreateVerbOperation(state, v->type, {}, 0, v->rotaryRough);
+  state.camVerbOp = CreateVerbOperation(state, v->type, {}, 0, v->derive);
 }
 
 namespace {
@@ -1099,6 +1158,30 @@ void DrawCamToolWindow(AppState& state) {
     }
     if (verb->cutter && setup != nullptr)
       VerbToolRow(state, *setup, *verb);
+    // The rotary verbs cut the whole length unless a face says otherwise.
+    const cam::Operation* made = nullptr;
+    if (setup != nullptr && (state.camVerb == CamVerb::RotaryFinish ||
+                             state.camVerb == CamVerb::RotaryRough))
+      for (const cam::Operation& o : setup->operations)
+        if (o.id == state.camVerbOp)
+          made = &o;
+    if (made != nullptr) {
+      ImGui::TextDisabled(made->targets.empty()
+                              ? "The whole length of the part."
+                              : "One face's length along the axis.");
+      if (ImGui::Button("Limit to a face###cam_verb_limit"))
+        ArmCamPick(state, PickSlot::CamSurfaceRegion,
+                   "Click the face whose length to cut");
+      if (!made->targets.empty()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Whole length###cam_verb_whole")) {
+          for (cam::Operation& o : setup->operations)
+            if (o.id == state.camVerbOp)
+              o.targets.clear();
+          RederiveVerbOp(state, *setup, *verb, made->toolNumber);
+        }
+      }
+    }
   }
 
   // Why the last pick did not take. This window never drew it, so a refused

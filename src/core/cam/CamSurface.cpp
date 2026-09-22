@@ -39,6 +39,41 @@ double Bilinear(const HeightMap& m, double x, double y) {
   return a * (1 - ty) + b * ty;
 }
 
+// The same, except that a sample with an UNREACHED cell among its four is
+// unreached itself. Interpolating toward a cell holding the floor dips the
+// pass by up to the whole height between them: at the part's edge that dip
+// went into air, which hid it, but a cell masked ON the part -- a roughing
+// layer's cut-already cells, a rest pass's reached-already ones -- put it
+// 15 mm into a dome (docs/cam/rough-rest-range-plan.md).
+//
+// And across a CLIFF -- four cells differing by more than a steep slope
+// allows, where the tool rolls off an edge onto the floor within one cell --
+// it takes the highest of the four, not the blend. Interpolation undercuts a
+// cliff: a 6 mm ball started 2.7 mm from a plate's vertical corner edge was
+// sent 1.1 mm into it. The highest corner can only hold the tool up, so on a
+// flank steeper than ~63 degrees (where a raster is the wrong pattern anyway)
+// it leaves stock rather than gouging.
+double BilinearReached(const HeightMap& m, double x, double y, double floorZ) {
+  const double fx = (x - m.x0) / m.res - 0.5;
+  const double fy = (y - m.y0) / m.res - 0.5;
+  const int i0 = static_cast<int>(std::floor(fx));
+  const int j0 = static_cast<int>(std::floor(fy));
+  double lo = 1e18, hi = -1e18;
+  for (int dj = 0; dj <= 1; dj++)
+    for (int di = 0; di <= 1; di++) {
+      const int i = std::clamp(i0 + di, 0, m.nx - 1);
+      const int j = std::clamp(j0 + dj, 0, m.ny - 1);
+      const double z = m.At(i, j);
+      if (z <= floorZ + 1e-9)
+        return floorZ;
+      lo = std::min(lo, z);
+      hi = std::max(hi, z);
+    }
+  if (hi - lo > 2.0 * m.res)
+    return hi;
+  return Bilinear(m, x, y);
+}
+
 } // namespace
 
 double SampleCL(const CLSurface& cl, double x, double y) {
@@ -190,7 +225,7 @@ SurfacePaths ParallelPasses(const CLSurface& cl,
       const double t = static_cast<double>(k) / steps;
       const double x = x0 + (x1 - x0) * (reverse ? 1.0 - t : t);
       const glm::dvec2 w = toWorld({x, y});
-      const double z = Bilinear(cl.z, w.x, w.y);
+      const double z = BilinearReached(cl.z, w.x, w.y, req.floorZ);
       // Where the tool reaches nothing, the pass ENDS: cutting to the floor
       // across a void is a plunge through whatever is beside it.
       if (z <= req.floorZ + 1e-9) {
@@ -831,6 +866,12 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   hash.D(tool.tipAngleDeg);
   hash.D(tool.feedCut);
   hash.D(tool.feedPlunge);
+  // A rest pass's reference cutter shapes where it cuts: its size and end,
+  // not just its number (which the op-field table already hashed).
+  if (const Tool* bigger = setup.FindTool(op.restFromTool)) {
+    hash.D(bigger->diameter);
+    hash.I(static_cast<int64_t>(bigger->type));
+  }
   return hash.h;
 }
 

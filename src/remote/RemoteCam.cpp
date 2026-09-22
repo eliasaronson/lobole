@@ -157,9 +157,15 @@ constexpr MethodDoc kCamMethods[] = {
      "cutter wants in the material this setup cuts (a vendor's chart), given "
      "as a pair or not at all; without them the chip-load check falls back "
      "to a rule off the diameter, and every finding cites which it used. "
-     "surface_parallel and surface_waterline are FINISHING passes, whose Z "
-     "varies within a pass: they take no stepdown, no side, no tabs and no "
-     "climb, and setting one is refused. surface_parallel rasters at "
+     "surface_parallel and surface_waterline are surface passes, whose Z "
+     "varies within a pass: they take no side, no tabs and no climb, and "
+     "setting one is refused. A surface_parallel with a stepdown (mm) ROUGHS: "
+     "layers from the stock top down to the surface plus stock_to_leave, over "
+     "the part's outline and a ring one cutter wide; without one it "
+     "finishes. rest_from_tool on a surface_parallel or surface_rotary names "
+     "the LARGER cutter that finished before, and the pass then cuts only "
+     "where that one could not reach (rest machining). surface_parallel "
+     "rasters at "
      "cut_angle_deg (degrees anticlockwise from +X), stepping ACROSS by "
      "stepover (a fraction of the cutter) and reading the surface ALONG by "
      "sample_step_mm; surface_waterline laps at constant Z, stepping DOWN by "
@@ -183,8 +189,9 @@ constexpr MethodDoc kCamMethods[] = {
      "the file says where it was held; a spiral "
      "that winds A past a turn is followed by G92 A, renaming the angle so "
      "the next op does not unwind it. It needs a machine with "
-     "has_rotary_axis and takes NO face pick (it turns the whole part under "
-     "the cutter, and a pick is refused rather than ignored). "
+     "has_rotary_axis. With no target it cuts the whole length; a target "
+     "face bounds it ALONG the axis to that face's extent (it still turns "
+     "all the way round). "
      "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
      "the whole tool): an operation cutting deeper than that is cutting with "
      "the shank and driving the holder into the work, and the reach finding "
@@ -272,7 +279,7 @@ constexpr MethodDoc kCamMethods[] = {
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
      "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
-     "rotary_pattern, "
+     "rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -287,7 +294,7 @@ constexpr MethodDoc kCamMethods[] = {
      "refused.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
      "finish_stock, finish_tool, id, lead_arcs, lead_mm, name, peck, "
-     "rotary_pattern, "
+     "rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -307,7 +314,7 @@ constexpr MethodDoc kCamMethods[] = {
      "is the same FRACTION of the tool diameter.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
      "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
-     "rotary_pattern, "
+     "rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},

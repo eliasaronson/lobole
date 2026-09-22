@@ -557,4 +557,52 @@ TEST_CASE("cam spiral: layers are asked for, never inherited", "[cam]") {
   }
 }
 
+TEST_CASE("cam surfacing: a raster's layers are asked for, never inherited",
+          "[cam]") {
+  // v125, the rotary op's v123 move for the raster: it reads `stepdown` as
+  // ROUGHING layers now, and the derivation used to give every raster one.
+  // Derived, retooled or reopened from a v124 file, a finish stays a finish.
+  auto doc = NeckedShaftDoc();
+  cam::Setup setup = ShaftSetup();
+  setup.machine.hasRotaryAxis = false;
+  cam::Tool second = ShapedTool(cam::ToolType::Ball, 4.0);
+  second.number = 2;
+  setup.tools.push_back(second);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::SurfaceParallel, cam::Target{});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK(d.op.stepdown == 0.0);
+  setup.operations.push_back(d.op);
+  setup.operations[0].id = 1;
+  std::string why;
+  REQUIRE(cam::Retool(setup, setup.operations[0], 2, why));
+  CHECK(setup.operations[0].stepdown == 0.0);
+  // The rough asks for its layers, and a new cutter re-derives them.
+  const cam::DerivedOp r = cam::DeriveSurfaceRough(setup, doc->GetBodies());
+  REQUIRE(r.ok);
+  CHECK(r.op.stepdown == 3.0);
+
+  const std::filesystem::path golden =
+      std::filesystem::path(DESIGNER_SOURCE_DIR) /
+      "tests/golden/job/v118-cam-surfacing.json";
+  std::ifstream in(golden);
+  REQUIRE(in.good());
+  nlohmann::json j = nlohmann::json::parse(in);
+  j["cam"][0]["operations"][1]["stepdown"] = 3.0; // the raster finish
+  for (const int version : {124, 125}) {
+    j["version"] = version;
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("raster_stepdown_v" + std::to_string(version) + ".json");
+    std::ofstream(file) << j.dump();
+    auto job = DocumentIO::LoadJob(file.string());
+    std::filesystem::remove(file);
+    REQUIRE(job.has_value());
+    const double got = (*job)->GetSetups()[0].operations[1].stepdown;
+    INFO("v" << version);
+    CHECK(got == (version < 125 ? 0.0 : 3.0));
+  }
+}
+
 #endif // HAVE_CAM

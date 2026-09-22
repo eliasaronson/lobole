@@ -32,6 +32,7 @@ add_executable(designer_tests
     test_serialization.cpp
     test_baked_geometry.cpp
     test_open_project.cpp
+    test_cam_rough_rest.cpp
     test_instance_registry.cpp
     test_screen_space_mapping.cpp
     test_recent_projects.cpp

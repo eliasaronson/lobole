@@ -1,0 +1,18 @@
+{
+  "part": "v60-cam-arcs.json",
+  "cam_op_types": [
+    "surface_parallel",
+    "surface_parallel",
+    "surface_parallel"
+  ],
+  "cam_op_stepdowns": [
+    3.0,
+    0.0,
+    0.0
+  ],
+  "cam_op_rest_from_tools": [
+    0,
+    0,
+    1
+  ]
+}

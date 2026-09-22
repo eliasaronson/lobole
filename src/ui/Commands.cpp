@@ -536,6 +536,10 @@ const std::vector<Command>& Table() {
     verb("job.walls", AppState::CamVerb::Walls);
     verb("job.rotary_finish", AppState::CamVerb::RotaryFinish, HasRotaryAxis);
     verb("job.rotary_rough", AppState::CamVerb::RotaryRough, HasRotaryAxis);
+    // Rough a 3D part, and clean up after the finish with a smaller ball
+    // (docs/cam/rough-rest-range-plan.md).
+    verb("job.surface_rough", AppState::CamVerb::SurfaceRough);
+    verb("job.rest", AppState::CamVerb::Rest);
     // A tool with a window, like Simulate: the run and what it found, where
     // the button was pressed. It used to generate silently and put the
     // verdict in the docked panel, below the operations list.

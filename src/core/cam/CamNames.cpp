@@ -59,9 +59,14 @@ constexpr OpTypeRow kRows[] = {
     // The raster steps ACROSS by a fraction of the cutter and samples ALONG
     // in mm; the waterline steps DOWN in mm and has no stepover at all, which
     // is the whole reason they are two types.
+    // v125: the raster takes a stepdown, and with one ROUGHS in layers from
+    // the stock top (docs/cam/rough-rest-range-plan.md) -- the rotary op's
+    // move at v123, for the same reason: it is the pattern that can follow a
+    // surface the 2.5D levels cannot. And either finish can be a REST pass,
+    // cutting only where a larger cutter could not reach.
     {OpType::SurfaceParallel, "surface_parallel", true,
-     OpField::StockToLeave | OpField::Stepover | OpField::SampleStep |
-         OpField::CutAngle},
+     OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
+         OpField::SampleStep | OpField::CutAngle | OpField::RestFromTool},
     {OpType::SurfaceWaterline, "surface_waterline", true,
      OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
     // 4-axis finishing: parallel passes (a rotary raster), one spiral, or
@@ -76,7 +81,8 @@ constexpr OpTypeRow kRows[] = {
     // one, it cuts in layers from the blank inward, the last one the finish.
     {OpType::SurfaceRotary, "surface_rotary", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
-         OpField::SampleStep | OpField::RotaryPattern | OpField::Lead},
+         OpField::SampleStep | OpField::RotaryPattern | OpField::Lead |
+         OpField::RestFromTool},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a

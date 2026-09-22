@@ -273,6 +273,11 @@ struct Operation {
   // two operations that must agree about a boundary. 0 = no finishing pass.
   int finishTool = 0;
   double finishStock = 0.0; // derived: the roughing tool's diameter / 10
+  // Rest machining (v125, docs/cam/rough-rest-range-plan.md): the number of
+  // the LARGER cutter that finished before this one. A surface op with it set
+  // cuts only where that cutter could not reach -- where this tool's tip goes
+  // measurably deeper than its did. 0 = cut the whole region.
+  int restFromTool = 0;
   // Profile only (R5): leave the wall on a tangent arc of the tool's radius
   // at the end of every pass instead of stopping against it and lifting --
   // the stop is the dwell mark. The ramp is the entry, so there is no lead

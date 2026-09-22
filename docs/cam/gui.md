@@ -409,7 +409,7 @@ button each, the way the part bar has one per feature:
 ```
 [Z zero] [Lay face up] [Turn face up*] [Look down spindle] |
 [Clear a pocket] [Cut it out] [Drill a hole] [Break an edge] [Whole part] [Face top] |
-[Finish a surface] [Finish walls] [Rough on the rotary*] [Finish on the rotary*] |
+[Rough a surface] [Finish a surface] [Finish walls] [Rough on the rotary*] [Finish on the rotary*] [Clean up what's left] |
 [Generate] [Simulate] | [Fit] [Measure]        * only on a setup with a rotary axis
 ```
 
@@ -418,7 +418,15 @@ Finish walls (W) take a face, curved or tilted, and differ in the pattern, a
 raster or constant-depth laps. Rough on the rotary (Shift+O) and Finish on the
 rotary (Shift+R) take no pick: the whole part turns under the cutter. The
 rough goes down in layers of half the cutter and leaves a tenth of it, and
-the finish's pattern (parallel, spiral, helical) is in its settings.
+the finish's pattern (parallel, spiral, helical) is in its settings. Their
+window's **Limit to a face** bounds the pass along the axis to a picked
+face's length, and **Whole length** undoes it.
+
+Rough a surface (Shift+S) roughs a 3D part in layers from the stock top,
+over its outline and a ring one cutter wide, leaving a skin for the finish.
+Clean up what's left (Shift+E) follows the last surface finish with the
+smaller ball chosen in its window, cutting only where the finish's ball
+could not reach (docs/cam/rough-rest-range-plan.md).
 
 Every button is a command (`job.*`, keymap context **`job`**), so the keys,
 the palette and the tooltips agree with the bar. Pressing a verb opens **that

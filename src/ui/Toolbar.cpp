@@ -1247,8 +1247,12 @@ void DrawJobToolbar(AppState& state) {
 
   Divider();
 
-  // Finishing (docs/cam/surface-verbs-plan.md): a curved or tilted face, which
-  // every verb above refuses, and -- with a 4th axis -- the whole part turned.
+  // Rough, finish, clean up (docs/cam/surface-verbs-plan.md,
+  // docs/cam/rough-rest-range-plan.md): a curved or tilted face, which every
+  // verb above refuses, and -- with a 4th axis -- the whole part turned.
+  btn(ICON_FA_CHART_AREA "###tb_job_surface_rough", "job.surface_rough",
+      "Rough a surface: the stock down to a curved part in layers, leaving a "
+      "skin (no pick)");
   btn(ICON_FA_WATER "###tb_job_surface", "job.surface",
       "Finish a surface: click it, curved or sloped (rough it out first)",
       state.camVerb == AppState::CamVerb::Surface &&
@@ -1269,6 +1273,9 @@ void DrawJobToolbar(AppState& state) {
         "pick; the pattern is in its settings)");
   }
 #endif
+  btn(ICON_FA_WAND_MAGIC_SPARKLES "###tb_job_rest", "job.rest",
+      "Clean up what's left: a smaller ball, only where the last finish's "
+      "could not reach (no pick)");
 
   Divider();
 

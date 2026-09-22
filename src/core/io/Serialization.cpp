@@ -2203,6 +2203,14 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
       for (cam::Operation& op : setup.operations)
         if (op.type == cam::OpType::SurfaceRotary)
           op.stepdown = 0.0;
+    // The same move for the raster at v125, and for the same reason: it
+    // reads `stepdown` as roughing layers now, the derivation stored one on
+    // every raster before, and honouring it would turn every saved finish
+    // into a rough (docs/cam/rough-rest-range-plan.md).
+    if (version < 125)
+      for (cam::Operation& op : setup.operations)
+        if (op.type == cam::OpType::SurfaceParallel)
+          op.stepdown = 0.0;
     maxId = std::max(maxId, setup.id);
     for (const cam::Operation& op : setup.operations)
       maxId = std::max(maxId, op.id);

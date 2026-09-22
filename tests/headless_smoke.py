@@ -2113,8 +2113,8 @@ def main():
             def other(key, value):
                 if key in enums:
                     return next(v for v in enums[key] if v != value)
-                if key == "finish_tool":
-                    return 2
+                if key in ("finish_tool", "rest_from_tool"):
+                    return 2  # a tool NUMBER: the setup's second cutter
                 if isinstance(value, bool):
                     return not value
                 if isinstance(value, (int, float)):
