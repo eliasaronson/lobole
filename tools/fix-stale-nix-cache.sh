@@ -36,7 +36,8 @@ for a in "$@"; do
 done
 if [ ${#dirs[@]} -eq 0 ]; then
   for d in build build-asan build-tsan build-coverage \
-           .ci-local/build .ci-local/build-no-te ../designer-wt*/build; do
+           .ci-local/build .ci-local/build-no-te .ci-local/build-nocam \
+           ../designer-wt*/build; do
     [ -f "$d/CMakeCache.txt" ] && dirs+=("$d")
   done
 fi

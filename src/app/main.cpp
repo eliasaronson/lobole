@@ -86,7 +86,18 @@ std::string IblCacheDir() {
 // Which display protocol this session actually runs. Wayland deliberately
 // provides no window POSITION (a client may not know or choose where it sits)
 // and has no X11 handles, so three things below have to ask before they act.
-static bool OnWayland() { return glfwGetPlatform() == GLFW_PLATFORM_WAYLAND; }
+// glfwGetPlatform is GLFW 3.4; the stock distros CI builds against ship 3.3,
+// where a build is X11 or Wayland at compile time and the X11 display getter
+// answers null on anything but X11.
+extern "C" void* glfwGetX11Display(void);
+static bool OnWayland() {
+#if GLFW_VERSION_MAJOR > 3 ||                                                  \
+    (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 4)
+  return glfwGetPlatform() == GLFW_PLATFORM_WAYLAND;
+#else
+  return glfwGetX11Display() == nullptr;
+#endif
+}
 
 // Map the window ourselves via XMapWindow instead of glfwShowWindow. GLFW's
 // show path calls waitForVisibilityNotify, which blocks until the window is
