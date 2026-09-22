@@ -15,6 +15,7 @@
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
+#include "ui/SelectionPipeline.h" // ArmedPrompt
 
 #include <chrono>
 #include <filesystem>
@@ -1760,6 +1761,119 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // Workholding by clicking (docs/cam/workholding-plan.md): a keep-out box
   // from the panel, placed from the stock; its row checks, moves and edits
   // it; and Verify names the clamp the profile runs into.
+  // docs/cam/fixture-seat-plan.md: a step clamp RESTS ON the work. Two
+  // clicks -- the face it rests on, then where it presses -- seat it, and it
+  // stays seated when the stock changes. The clicks are rays handed to the
+  // handler the selection pipeline calls, as the placement-gizmo test hands
+  // rays to HandleGizmoInput.
+  t = IM_REGISTER_TEST(engine, "cam", "a_clamp_is_seated_by_two_clicks");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    // The clamp: a bar, a nose pad under one end, a stud at the other.
+    const size_t clampSlot = ui::AddPart(*s_App, "Step clamp");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 10), 100, 20, 8));
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Pad", glm::vec3(80, 0, 5), 20, 20, 5));
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Stud", glm::vec3(5, 5, -40), 10, 10, 50));
+    ctx->Yield(2);
+    const uint64_t clampDoc = s_App->parts[clampSlot].id;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    cam::Setup& made = MakeJob()->AddSetup("Clamped");
+    const uint64_t sid = made.id;
+    s_App->camActiveSetup = sid;
+    ctx->Yield(2);
+    const auto live = [&]() -> cam::Setup& { return *Job()->FindSetup(sid); };
+    cam::Fixture clamp;
+    clamp.id = Job()->AllocateId();
+    clamp.sourceDocId = clampDoc;
+    clamp.name = "Step clamp";
+    IM_CHECK(cam::PlaceFixture(live(), ui::JobBodies(*s_App),
+                               ui::FixtureModelBodies(*s_App, clamp), 0.0,
+                               cam::FixtureSide::MinusX, clamp.pos));
+    live().fixtures.push_back(clamp);
+    ui::EditCamFixture(*s_App, clamp.id);
+    ctx->Yield(3);
+
+    // Arm it from the editor.
+    ctx->ItemClick("//###ToolWindow/**/###cam_seat_arm");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camSeat.Active());
+    IM_CHECK(ui::ArmedPrompt(*s_App) != nullptr);
+
+    // One: up into the pad's underside, where the clamp is drawn now.
+    const cam::Fixture* f = live().FindFixture(clamp.id);
+    const glm::dvec4 pad = cam::FixtureTransform(*f) * glm::dvec4(90, 10, 5, 1);
+    ui::FixtureSeatClicked(*s_App, glm::vec3(pad) - glm::vec3(0, 0, 30),
+                           glm::vec3(0, 0, 1));
+    IM_CHECK(s_App->camSeat.pickSpot); // the face was taken
+    IM_CHECK(s_App->camSeat.miss.empty());
+
+    // Two: down onto the stock's top, 10 mm in from the -X edge.
+    glm::dvec3 lo, hi;
+    IM_CHECK(cam::StockBounds(live(), ui::JobBodies(*s_App), lo, hi));
+    const float midY = static_cast<float>((lo.y + hi.y) * 0.5);
+    ui::FixtureSeatClicked(*s_App,
+                           glm::vec3(static_cast<float>(lo.x + 10.0), midY,
+                                     static_cast<float>(hi.z + 100.0)),
+                           glm::vec3(0, 0, -1));
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camSeat.Active());
+    f = live().FindFixture(clamp.id);
+    IM_CHECK(f->seat.has_value());
+    IM_CHECK(f->seat->edge == cam::StockEdge::MinusX);
+    IM_CHECK(std::abs(f->seat->overMm - 10.0) < 1e-3);
+    // Where verify sees it: the pad's underside ON the stock top, its nose
+    // 10 mm in past the edge.
+    const auto padBox = [&](glm::dvec3& plo, glm::dvec3& phi) {
+      for (const cam::FixtureSolid& fs : ui::JobFixtureSolids(*s_App, live()))
+        if (fs.id == clamp.id && fs.bodies.size() == 3) {
+          glm::vec3 a, b;
+          fs.bodies[1].shape.GetBoundingBox(a, b, /*tight=*/true);
+          plo = glm::dvec3(a);
+          phi = glm::dvec3(b);
+          return true;
+        }
+      return false;
+    };
+    glm::dvec3 plo, phi;
+    IM_CHECK(padBox(plo, phi));
+    IM_CHECK(std::abs(plo.z - hi.z) < 1e-3);
+    IM_CHECK(std::abs(phi.x - (lo.x + 10.0)) < 1e-3);
+
+    // The stock grows: the clamp stays on it, where a bed position floats.
+    live().stock.margin.x += 5.0;
+    live().stock.margin.y += 5.0;
+    live().stock.margin.z += 3.0;
+    ctx->Yield(3);
+    glm::dvec3 lo2, hi2;
+    IM_CHECK(cam::StockBounds(live(), ui::JobBodies(*s_App), lo2, hi2));
+    IM_CHECK(padBox(plo, phi));
+    IM_CHECK(std::abs(plo.z - hi2.z) < 1e-3);
+    IM_CHECK(std::abs(phi.x - (lo2.x + 10.0)) < 1e-3);
+    // ...and the pose the per-frame readers use followed it (the re-sync).
+    f = live().FindFixture(clamp.id);
+    IM_CHECK(std::abs((cam::FixtureTransform(*f) * glm::dvec4(90, 10, 5, 1)).z -
+                      hi2.z) < 1e-3);
+
+    // The editor speaks in the stock's terms; Unseat keeps the pose.
+    const glm::dvec3 before = f->pos;
+    ctx->ItemClick("//###ToolWindow/**/###cam_seat_unseat");
+    ctx->Yield(2);
+    f = live().FindFixture(clamp.id);
+    IM_CHECK(!f->seat.has_value());
+    IM_CHECK(glm::length(f->pos - before) < 1e-9);
+    ctx->ItemClick("//###ToolWindow/**/###cam_fixture_editor_close");
+    ctx->Yield(2);
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "a_clamp_is_a_row_the_verdict_names");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

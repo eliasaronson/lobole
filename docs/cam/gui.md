@@ -494,3 +494,13 @@ the keep-out box first and then "Hold it with a part:". An empty Fixtures
 section says that verify checks no clamps. A placed part's verbs (Cut,
 Remove) sit on its name line, and its X, Y and turn share the next line,
 named inside the fields.
+
+**2026-09-22, v127:** a fixture made from a part can **rest on the stock**
+([fixture-seat-plan.md](fixture-seat-plan.md)). "Rest it on the stock" in its
+editor asks for two clicks: the face that rests on the work (it must face
+down), then the spot on the stock's top where it presses. The editor then
+shows the edge it reaches over, Along, Over the stock and Spin, all measured
+from the stock. It has "Move: click a new spot", and Unseat, which keeps the
+pose. A seated clamp follows the stock when the stock changes. Its row reads
+"over the -X edge", or "its seat is gone: …" when its face no longer
+resolves.

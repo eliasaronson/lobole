@@ -76,4 +76,13 @@ void EditCamFixture(AppState& state, uint64_t fixtureId);
 // does. The panel, the tool window and the RPC all come through here.
 void CamFixturesChanged(AppState& state, cam::Setup& setup);
 
+// Seating a fixture on the stock by two clicks (docs/cam/fixture-seat-
+// plan.md): the face of the fixture that rests on the stock, then the spot on
+// the stock's top where it presses. `spotOnly` keeps the face it has and asks
+// for the spot alone (Move). The selection pipeline hands every click's ray
+// to FixtureSeatClicked while `state.camSeat` is armed.
+void ArmFixtureSeat(AppState& state, uint64_t fixtureId, bool spotOnly);
+void FixtureSeatClicked(AppState& state, const glm::vec3& origin,
+                        const glm::vec3& direction);
+
 } // namespace ui

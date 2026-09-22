@@ -15,12 +15,15 @@
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -387,6 +390,211 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
     out.push_back(std::move(copy));
   }
   return out;
+}
+
+// --- seats (docs/cam/fixture-seat-plan.md) --------------------------------
+
+bool ParseStockEdge(const std::string& text, StockEdge& out) {
+  static const std::pair<const char*, StockEdge> kEdges[] = {
+      {"-x", StockEdge::MinusX},
+      {"+x", StockEdge::PlusX},
+      {"-y", StockEdge::MinusY},
+      {"+y", StockEdge::PlusY}};
+  for (const auto& [name, edge] : kEdges)
+    if (text == name) {
+      out = edge;
+      return true;
+    }
+  return false;
+}
+
+std::string StockEdgeName(StockEdge edge) {
+  switch (edge) {
+  case StockEdge::MinusX:
+    return "-x";
+  case StockEdge::PlusX:
+    return "+x";
+  case StockEdge::MinusY:
+    return "-y";
+  case StockEdge::PlusY:
+    return "+y";
+  }
+  return "-x";
+}
+
+namespace {
+
+struct SeatFace {
+  TopoDS_Face face;
+  glm::dvec3 centroid{0.0};
+};
+
+// The face a seat names, in the fixture's own model, and whether it can be
+// one. Refused rather than bent to fit: a fixture only turns about Z, so a
+// face that does not face down would have to be TILTED onto the stock, and
+// a clamp drawn tilted is a clamp nobody placed.
+bool FindSeatFace(const std::vector<Body>& model, const ElementRef& ref,
+                  SeatFace& out, std::string& why) {
+  for (const Body& b : model) {
+    if (b.createdBy != ref.featureId || !b.shape.IsValid())
+      continue;
+    const std::optional<int> index = b.elementMap.Resolve(ref.name);
+    if (!index)
+      continue;
+    glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+    if (!b.shape.FacePlane(*index, c, n, u)) {
+      why = "that face is not flat -- a fixture rests on a flat face";
+      return false;
+    }
+    if (n.z > -0.999f) {
+      why = "that face does not face down -- a fixture only turns about Z, "
+            "so the face it rests on has to be one that faces down";
+      return false;
+    }
+    int i = 0;
+    for (TopExp_Explorer e(b.shape.GetShape(), TopAbs_FACE); e.More();
+         e.Next(), i++)
+      if (i == *index) {
+        out.face = TopoDS::Face(e.Current());
+        break;
+      }
+    out.centroid = glm::dvec3(c);
+    if (out.face.IsNull()) {
+      why = "the face it rests on could not be found on the fixture's part";
+      return false;
+    }
+    return true;
+  }
+  why = "the face it rests on (" + ref.name +
+        ") is no longer on the fixture's part";
+  return false;
+}
+
+// Into the stock, square to the edge.
+glm::dvec2 InwardOf(StockEdge edge) {
+  switch (edge) {
+  case StockEdge::MinusX:
+    return {1.0, 0.0};
+  case StockEdge::PlusX:
+    return {-1.0, 0.0};
+  case StockEdge::MinusY:
+    return {0.0, 1.0};
+  case StockEdge::PlusY:
+    return {0.0, -1.0};
+  }
+  return {1.0, 0.0};
+}
+
+bool AlongX(StockEdge edge) {
+  return edge == StockEdge::MinusY || edge == StockEdge::PlusY;
+}
+
+} // namespace
+
+std::string SeatFaceRefusal(const std::vector<Body>& fixtureModel,
+                            const ElementRef& face) {
+  SeatFace sf;
+  std::string why;
+  return FindSeatFace(fixtureModel, face, sf, why) ? std::string() : why;
+}
+
+bool SolveFixtureSeat(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
+                      const std::vector<Body>& fixtureModel,
+                      const FixtureSeat& seat, glm::dvec3& pos, double& rotZdeg,
+                      std::string* why) {
+  std::string reason;
+  const auto refuse = [&](std::string w) {
+    if (why != nullptr)
+      *why = std::move(w);
+    return false;
+  };
+  if (!(stockHi.x > stockLo.x && stockHi.y > stockLo.y))
+    return refuse("there is no stock to rest it on");
+  SeatFace sf;
+  if (!FindSeatFace(fixtureModel, seat.face, sf, reason))
+    return refuse(reason);
+
+  // Which way the NOSE points: from the middle of the whole fixture to the
+  // face it rests on. A step clamp's pad is at one end and its studs at the
+  // other, so this is the direction it reaches; a face in the middle has no
+  // direction of its own and takes +X.
+  glm::dvec3 lo(1e30), hi(-1e30);
+  for (const Body& b : fixtureModel) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 blo(0.0f), bhi(0.0f);
+    b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
+    lo = glm::min(lo, glm::dvec3(blo));
+    hi = glm::max(hi, glm::dvec3(bhi));
+  }
+  glm::dvec2 nose(sf.centroid.x - (lo.x + hi.x) * 0.5,
+                  sf.centroid.y - (lo.y + hi.y) * 0.5);
+  nose = glm::length(nose) < 1e-6 ? glm::dvec2(1.0, 0.0) : glm::normalize(nose);
+
+  const glm::dvec2 in = InwardOf(seat.edge);
+  const double turn = std::atan2(in.y, in.x) - std::atan2(nose.y, nose.x) +
+                      glm::radians(seat.spinDeg);
+  const double c = std::cos(turn), s = std::sin(turn);
+
+  // The face, turned, as a box: its far side along `in` is how far it
+  // reaches in, which is what `overMm` measures.
+  gp_Trsf spin;
+  spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), turn);
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(sf.face.Moved(TopLoc_Location(spin)), box, false,
+                         false);
+  if (box.IsVoid())
+    return refuse("the face it rests on has no extent");
+  double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+  box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  const double reach = in.x > 0.5    ? xmax
+                       : in.x < -0.5 ? -xmin
+                       : in.y > 0.5  ? ymax
+                                     : -ymin;
+  // The edge's own coordinate along `in`, the same way round.
+  const double edgeIn = in.x > 0.5    ? stockLo.x
+                        : in.x < -0.5 ? -stockHi.x
+                        : in.y > 0.5  ? stockLo.y
+                                      : -stockHi.y;
+  const double posIn = edgeIn + seat.overMm - reach;
+
+  const glm::dvec2 turned(c * sf.centroid.x - s * sf.centroid.y,
+                          s * sf.centroid.x + c * sf.centroid.y);
+  const bool alongX = AlongX(seat.edge);
+  const double low = alongX ? stockLo.x : stockLo.y;
+  const double posAlong = low + seat.alongMm - (alongX ? turned.x : turned.y);
+
+  const glm::dvec2 t = alongX ? glm::dvec2(1.0, 0.0) : glm::dvec2(0.0, 1.0);
+  const glm::dvec2 xy = in * posIn + t * posAlong;
+  pos = glm::dvec3(xy.x, xy.y, stockHi.z - sf.centroid.z);
+  double deg = glm::degrees(turn);
+  deg = std::remainder(deg, 360.0);
+  rotZdeg = std::abs(deg) < 1e-9 ? 0.0 : deg;
+  return true;
+}
+
+bool SeatAtPoint(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
+                 const glm::dvec3& point, FixtureSeat& seat, std::string* why) {
+  constexpr double kEps = 1e-6;
+  if (point.x < stockLo.x - kEps || point.x > stockHi.x + kEps ||
+      point.y < stockLo.y - kEps || point.y > stockHi.y + kEps) {
+    if (why != nullptr)
+      *why = "that is off the stock -- click on its top, where the clamp "
+             "should press";
+    return false;
+  }
+  const std::pair<double, StockEdge> gaps[] = {
+      {point.x - stockLo.x, StockEdge::MinusX},
+      {stockHi.x - point.x, StockEdge::PlusX},
+      {point.y - stockLo.y, StockEdge::MinusY},
+      {stockHi.y - point.y, StockEdge::PlusY}};
+  const auto nearest = std::min_element(
+      std::begin(gaps), std::end(gaps),
+      [](const auto& a, const auto& b) { return a.first < b.first; });
+  seat.edge = nearest->second;
+  seat.overMm = std::max(0.0, nearest->first);
+  seat.alongMm = AlongX(seat.edge) ? point.x - stockLo.x : point.y - stockLo.y;
+  return true;
 }
 
 } // namespace cam

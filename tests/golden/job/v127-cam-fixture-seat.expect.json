@@ -1,0 +1,52 @@
+{
+  "job_parts": [
+    "Bracket"
+  ],
+  "cam_op_types": [
+    "pocket"
+  ],
+  "cam_fixtures": [
+    {
+      "name": "Kurt vise",
+      "part": 5,
+      "pos": [
+        20.0,
+        15.0,
+        -24.5
+      ],
+      "rot_z": 90.0
+    },
+    {
+      "name": "Clamp 2",
+      "box": [
+        11.0,
+        8.0,
+        26.25
+      ],
+      "pos": [
+        -7.5,
+        11.0,
+        -1.0
+      ],
+      "enabled": false
+    },
+    {
+      "name": "Step clamp",
+      "part": 6,
+      "pos": [
+        -40.0,
+        12.5,
+        16.0
+      ],
+      "rot_z": 180.0,
+      "seat": {
+        "feature": 7,
+        "name": "7/face3",
+        "edge": "+x",
+        "along_mm": 12.5,
+        "over_mm": 15.0,
+        "spin_deg": -10.0
+      }
+    }
+  ]
+}

@@ -136,9 +136,33 @@ uint64_t JobRenderVersion(AppState& state) {
       mix(p.rotZdeg);
       key = (key ^ (p.enabled ? 1u : 2u)) * 1099511628211ull;
     }
+    // A seated fixture follows the STOCK, and editing the stock bumps no
+    // version: without its definition here, a clamp would stay drawn where
+    // the old stock put it (docs/cam/fixture-seat-plan.md).
+    key = (key ^ static_cast<uint64_t>(setup.stock.mode)) * 1099511628211ull;
+    mix(setup.stock.margin.x);
+    mix(setup.stock.margin.y);
+    mix(setup.stock.margin.z);
+    mix(setup.stock.bottomMargin);
+    mix(setup.stock.size.x);
+    mix(setup.stock.size.y);
+    mix(setup.stock.size.z);
+    mix(setup.stock.place.x);
+    mix(setup.stock.place.y);
+    mix(setup.stock.place.z);
     // Fixtures are drawn too, and their parts can be edited like any other.
     for (const cam::Fixture& f : setup.fixtures) {
       key = (key ^ f.id) * 1099511628211ull;
+      if (f.seat) {
+        key = (key ^ static_cast<uint64_t>(f.seat->edge) ^ 0x5ea7u) *
+              1099511628211ull;
+        key = (key ^ f.seat->face.featureId) * 1099511628211ull;
+        key = (key ^ std::hash<std::string>{}(f.seat->face.name)) *
+              1099511628211ull;
+        mix(f.seat->alongMm);
+        mix(f.seat->overMm);
+        mix(f.seat->spinDeg);
+      }
       key = (key ^ JobSourceVersion(state, f.sourceDocId)) * 1099511628211ull;
       mix(f.pos.x);
       mix(f.pos.y);
@@ -176,6 +200,44 @@ std::vector<Body> FixtureModelBodies(AppState& state, const cam::Fixture& f) {
       if (!b.reference && b.shape.IsValid())
         out.push_back(b);
   return out;
+}
+
+glm::dmat4 FixtureBedTransform(AppState& state, const cam::Setup& setup,
+                               const cam::Fixture& f, std::string* why) {
+  if (!f.seat)
+    return cam::FixtureTransform(f);
+  // Re-solved against the stock as it is NOW, on every read: that is the
+  // point of a seat. A clamp placed on the board stays on the board when a
+  // margin or the parts change the stock (docs/cam/fixture-seat-plan.md).
+  glm::dvec3 lo(0.0), hi(0.0);
+  std::string reason = "there is no stock to rest it on";
+  cam::Fixture solved = f;
+  if (cam::StockBounds(setup, JobBodies(state), lo, hi) &&
+      cam::SolveFixtureSeat(lo, hi, FixtureModelBodies(state, f), *f.seat,
+                            solved.pos, solved.rotZdeg, &reason))
+    return cam::FixtureTransform(solved);
+  if (why != nullptr)
+    *why = reason;
+  return cam::FixtureTransform(f); // the pose it last solved to
+}
+
+void RefreshFixtureSeats(AppState& state, cam::Setup& setup) {
+  for (cam::Fixture& f : setup.fixtures) {
+    state.camSeatRefusals.erase(f.id);
+    if (!f.seat)
+      continue;
+    glm::dvec3 lo(0.0), hi(0.0), pos(0.0);
+    double rot = 0.0;
+    std::string why = "there is no stock to rest it on";
+    if (cam::StockBounds(setup, JobBodies(state), lo, hi) &&
+        cam::SolveFixtureSeat(lo, hi, FixtureModelBodies(state, f), *f.seat,
+                              pos, rot, &why)) {
+      f.pos = pos;
+      f.rotZdeg = rot;
+    } else {
+      state.camSeatRefusals[f.id] = why;
+    }
+  }
 }
 
 std::optional<cam::VerdictLine> FixtureTravelLine(AppState& state,
@@ -225,7 +287,7 @@ JobFixtureSolids(AppState& state, const cam::Setup& setup, bool enabledOnly,
     }
     // Bed space straight from the part's own coordinates: never through
     // BodiesInSetupFrame, whose frame turns the PART and not the vise.
-    const glm::mat4 m(cam::FixtureTransform(f));
+    const glm::mat4 m(FixtureBedTransform(state, setup, f));
     for (Body& b : bodies)
       b.shape = b.shape.Transformed(m);
     out.push_back({f.id, f.name, std::move(bodies)});

@@ -371,7 +371,12 @@ void SyncDocumentRenderers(AppState& state) {
   // transform, so moving a clamp re-meshes nothing. A disabled one (drawn,
   // not checked) is fainter.
   if (state.job)
-    if (const cam::Setup* setup = ActiveJobSetup(state))
+    if (cam::Setup* setup = ActiveCamSetup(state)) {
+      // A seat is solved against the stock as it is now, and the pose kept
+      // on the fixture for the per-frame readers (docs/cam/fixture-seat-
+      // plan.md). This sync is keyed on the stock's definition, so it runs
+      // whenever the stock can have moved.
+      RefreshFixtureSeats(state, *setup);
       for (const cam::Fixture& f : setup->fixtures) {
         const glm::mat4 xf(cam::FixtureTransform(f));
         for (const Body& b : FixtureModelBodies(state, f)) {
@@ -386,6 +391,7 @@ void SyncDocumentRenderers(AppState& state) {
           state.fixtureInstances.push_back(id);
         }
       }
+    }
 
   // Reference geometry is sized from the document's reach
   // (ScenePlaneHalfExtent), and the bounding box behind it is an OCC pass per

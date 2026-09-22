@@ -412,6 +412,18 @@ json CamSetupToJson(const cam::Setup& setup) {
         fj["rot_z"] = f.rotZdeg;
       if (!f.enabled)
         fj["enabled"] = false;
+      // v127: resting on the stock (docs/cam/fixture-seat-plan.md). `pos`
+      // and `rot_z` above are then the pose it last solved to.
+      if (f.seat) {
+        fj["seat"] = {{"face",
+                       {{"feature", f.seat->face.featureId},
+                        {"name", f.seat->face.name}}},
+                      {"edge", cam::StockEdgeName(f.seat->edge)},
+                      {"along_mm", f.seat->alongMm},
+                      {"over_mm", f.seat->overMm}};
+        if (f.seat->spinDeg != 0.0)
+          fj["seat"]["spin_deg"] = f.seat->spinDeg;
+      }
       j["fixtures"].push_back(std::move(fj));
     }
   }
@@ -567,6 +579,23 @@ cam::Setup CamSetupFromJson(const json& j) {
                fj["pos"][2].get<double>()};
     f.rotZdeg = fj.value("rot_z", 0.0);
     f.enabled = fj.value("enabled", true);
+    if (fj.contains("seat") && fj["seat"].is_object()) {
+      const json& sj = fj["seat"];
+      cam::FixtureSeat seat;
+      const json face = sj.value("face", json::object());
+      seat.face.featureId = face.value("feature", uint64_t{0});
+      seat.face.name = face.value("name", std::string{});
+      const std::string edge = sj.value("edge", std::string{});
+      // Refused, not defaulted: a clamp read onto the wrong edge loads, looks
+      // placed, and is on the wrong side of the part.
+      if (!cam::ParseStockEdge(edge, seat.edge))
+        throw std::runtime_error("unknown fixture seat edge '" + edge +
+                                 "'; use -x, +x, -y or +y");
+      seat.alongMm = sj.value("along_mm", 0.0);
+      seat.overMm = sj.value("over_mm", 0.0);
+      seat.spinDeg = sj.value("spin_deg", 0.0);
+      f.seat = seat;
+    }
     setup.fixtures.push_back(std::move(f));
   }
   for (const json& oj : j.value("operations", json::array())) {

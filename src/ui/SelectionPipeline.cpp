@@ -1,5 +1,6 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/AssemblyActions.h"
+#include "ui/CamTool.h" // FixtureSeatClicked
 #include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
@@ -447,6 +448,11 @@ bool ResolveEdgeItem(const AppState& state, const SelectionItem& item,
 }
 
 const char* ArmedPrompt(AppState& state) {
+  // Seating a fixture is armed without a pick slot: its clicks are rays, not
+  // candidates (docs/cam/fixture-seat-plan.md).
+  if (state.camSeat.Active())
+    return state.camSeat.miss.empty() ? state.camSeat.prompt.c_str()
+                                      : state.camSeat.miss.c_str();
   const auto armed = ActiveArmedContext(state);
   return armed ? armed->prompt : nullptr;
 }
@@ -479,6 +485,15 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
       static_cast<int>(state.viewportSize.x),
       static_cast<int>(state.viewportSize.y), *state.camera);
+  // Seating a fixture takes the RAY: the first click is cast at the fixture,
+  // which is not in the face selector, and the second at the stock's top,
+  // which is not a body at all (docs/cam/fixture-seat-plan.md).
+  if (state.camSeat.Active()) {
+    ClearHoverPreviews(state);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+      FixtureSeatClicked(state, ray.origin, ray.direction);
+    return;
+  }
   const uint32_t defaultKinds =
       state.assembly ? KindBit(SelectionItem::Kind::Occurrence) : kDefaultKinds;
   const std::vector<Candidate> candidates =

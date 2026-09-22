@@ -495,6 +495,23 @@ struct Placement {
 // Or a KEEP-OUT BOX, with no part at all: "there is a clamp here, this big"
 // is most of what a first job needs, and a part tab per toe clamp is the
 // friction that would leave the feature unused.
+// Which edge of the stock's top a seated fixture reaches in over.
+enum class StockEdge : uint8_t { MinusX, PlusX, MinusY, PlusY };
+
+// A fixture that RESTS ON the stock rather than standing at a bed position:
+// one face of it on the stock's top, reaching in over one edge
+// (docs/cam/fixture-seat-plan.md). A face-to-face relation, stored and
+// re-solved against the stock as it is now -- so a clamp placed on a board
+// stays on the board when the stock grows, where a bed position floats.
+// Every number is measured from the stock, not the bed.
+struct FixtureSeat {
+  ElementRef face; // the fixture's face that rests on the stock top
+  StockEdge edge = StockEdge::MinusX;
+  double alongMm = 0.0; // from the edge's low end to the face's centre
+  double overMm = 0.0;  // how far the face reaches in past the edge
+  double spinDeg = 0.0; // turned from pointing straight in
+};
+
 struct Fixture {
   uint64_t id = 0;          // from the job's one id counter
   uint64_t sourceDocId = 0; // the part slot it is a copy of; 0 = a box
@@ -503,6 +520,10 @@ struct Fixture {
   glm::dvec3 pos{0.0};      // setup space, mm
   double rotZdeg = 0.0;     // spin about +Z, degrees
   bool enabled = true;      // off = drawn, not checked
+  // When set, `pos` and `rotZdeg` are the pose it last solved to, kept so a
+  // reader that cannot solve still has somewhere sane to draw it; the seat
+  // is the truth (ui::FixtureBedTransform re-solves it on every read).
+  std::optional<FixtureSeat> seat;
 
   [[nodiscard]] bool IsBox() const { return sourceDocId == 0; }
 };

@@ -76,6 +76,20 @@ JobFixtureSolids(AppState& state, const cam::Setup& setup,
 // is gone.
 std::vector<Body> FixtureModelBodies(AppState& state, const cam::Fixture& f);
 
+// Where a fixture IS, bed = T * model: its seat solved against the stock as
+// it is now, or its stored pose when it has no seat. A seat that cannot solve
+// falls back to the stored pose and says why in `why` -- the row shows it,
+// rather than drawing a clamp somewhere plausible in silence.
+glm::dmat4 FixtureBedTransform(AppState& state, const cam::Setup& setup,
+                               const cam::Fixture& f,
+                               std::string* why = nullptr);
+// Re-solves every seated fixture of `setup` and KEEPS the pose on the
+// fixture, so the per-frame readers (fit, the section bounds) can read `pos`
+// without solving. Why a seat could not solve goes to
+// `state.camSeatRefusals` for the row to say. Run where the job is
+// re-synced, which the stock's definition now keys.
+void RefreshFixtureSeats(AppState& state, cam::Setup& setup);
+
 // When safe Z was raised to clear a fixture and the file then asks for more
 // Z than the machine has, the finding that says WHICH fixture did it --
 // otherwise it reads as a travel problem with no cause. Empty otherwise.
