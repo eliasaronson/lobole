@@ -353,8 +353,23 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
       UploadRaw(m_primOnTopBuffers[frame], m_overlayPrims.data(),
                 m_overlayPrims.size() * sizeof(PrimVertex),
                 static_cast<uint32_t>(m_overlayPrims.size()));
+  // The cached list: copied into this frame's buffer only when the buffer
+  // holds an older version. A frame buffer is reused only once the GPU is
+  // done with it -- the same guarantee every per-frame upload above relies on.
+  uint32_t cachedCount = 0;
+  if (m_cachedPrims && !m_cachedPrims->empty()) {
+    const auto n = static_cast<uint32_t>(m_cachedPrims->size());
+    if (m_cachedUploaded[frame] != m_cachedVersion) {
+      cachedCount = UploadRaw(m_cachedBuffers[frame], m_cachedPrims->data(),
+                              m_cachedPrims->size() * sizeof(PrimVertex), n);
+      m_cachedUploaded[frame] = cachedCount == n ? m_cachedVersion : 0;
+      m_cachedUploads++;
+    } else {
+      cachedCount = n;
+    }
+  }
   if (quadCount == 0 && lineCount == 0 && overlayCount == 0 && primCount == 0 &&
-      gizmoCount == 0 && onTopCount == 0)
+      gizmoCount == 0 && onTopCount == 0 && cachedCount == 0)
     return;
 
   VkViewport vp{};
@@ -378,7 +393,10 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
              1.0f);
   DrawBuffer(commandBuffer, m_linePipeline, m_overlayBuffers[frame],
              overlayCount, 1.0f);
-  // Expanded primitives (thick entity lines + dots) draw last, on top.
+  // Expanded primitives (thick entity lines + dots) draw last, on top. The
+  // cached list first: a backplot is the ground the rest is drawn over.
+  DrawBuffer(commandBuffer, m_primPipeline, m_cachedBuffers[frame], cachedCount,
+             1.0f);
   DrawBuffer(commandBuffer, m_primPipeline, m_primBuffers[frame], primCount,
              1.0f);
   // Gizmo handles draw absolutely last with depth test off (A2.5).
@@ -406,6 +424,8 @@ void SketchRenderer::Shutdown() {
     DestroyDynamic(m_quadBuffers[i]);
     DestroyDynamic(m_primBuffers[i]);
     DestroyDynamic(m_primOnTopBuffers[i]);
+    DestroyDynamic(m_cachedBuffers[i]);
+    m_cachedUploaded[i] = 0;
   }
   if (m_linePipeline)
     vkDestroyPipeline(m_device, m_linePipeline, nullptr);

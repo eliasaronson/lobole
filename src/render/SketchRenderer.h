@@ -4,6 +4,7 @@
 #include "render/SceneRenderer.h"
 
 #include <glm/glm.hpp>
+#include <memory>
 #include <vulkan/vulkan.h>
 
 #include <string>
@@ -67,6 +68,27 @@ public:
   // the second while failing the first (a `state.document` gate on a tab
   // that has none).
   [[nodiscard]] size_t PrimitiveCount() const { return m_primitives.size(); }
+  // The same primitives for a LARGE list that rarely changes -- the CAM
+  // backplot, hundreds of thousands of vertices. Shared rather than moved in,
+  // and uploaded into a frame's buffer only when `version` differs from what
+  // that buffer last held: an idle frame copies nothing. Handed over through
+  // SetPrimitives it cost 93% of an idle frame on the rolling pin, two 38 MB
+  // copies per frame (docs/cam/backplot-frame-cost-plan.md). The list must
+  // not be mutated once handed over; a change is a NEW list and version.
+  void SetCachedPrimitives(std::shared_ptr<const std::vector<PrimVertex>> prims,
+                           uint64_t version) {
+    m_cachedPrims = std::move(prims);
+    m_cachedVersion = m_cachedPrims ? version : 0;
+  }
+  [[nodiscard]] size_t CachedPrimitiveCount() const {
+    return m_cachedPrims ? m_cachedPrims->size() : 0;
+  }
+  [[nodiscard]] const std::vector<PrimVertex>* CachedPrimitives() const {
+    return m_cachedPrims.get();
+  }
+  // How many times the cached list has been copied into a frame buffer, for a
+  // test to see an idle frame copy nothing.
+  [[nodiscard]] size_t CachedUploads() const { return m_cachedUploads; }
   // The same thick primitives with DEPTH TEST OFF, for annotations that
   // describe the solid rather than living on it. A measurement is the case
   // this exists for: a plate's thickness or a bore-to-wall distance runs
@@ -144,6 +166,11 @@ private:
   DynamicBuffer m_quadBuffers[kFramesInFlight];
   DynamicBuffer m_primBuffers[kFramesInFlight];
   DynamicBuffer m_primOnTopBuffers[kFramesInFlight];
+  DynamicBuffer m_cachedBuffers[kFramesInFlight];
+  uint64_t m_cachedUploaded[kFramesInFlight] = {};
+  std::shared_ptr<const std::vector<PrimVertex>> m_cachedPrims;
+  uint64_t m_cachedVersion = 0;
+  size_t m_cachedUploads = 0;
 
   std::vector<LineVertex3D> m_staticLines;
   std::vector<LineVertex3D> m_overlayLines;

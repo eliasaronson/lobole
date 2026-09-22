@@ -259,7 +259,10 @@ namespace {
 // 84% of the time in `ui`.
 //
 // The vertices are a pure function of the toolpaths, so build them once.
-std::vector<PrimVertex> g_backplot;
+// Shared with the renderer, which draws them from its own cached channel
+// (docs/cam/backplot-frame-cost-plan.md): a rebuild makes a NEW list, and the
+// one the renderer may still hold is never touched.
+std::shared_ptr<const std::vector<PrimVertex>> g_backplot;
 uint64_t g_backplotKey = 0;
 
 // A fingerprint, not a revision counter: `camToolpaths` is also mutated IN
@@ -298,7 +301,9 @@ glm::vec3 OnPart(const cam::Move& m) {
   return glm::vec3(m.to.x, m.to.y * c - m.to.z * s, m.to.y * s + m.to.z * c);
 }
 
-uint64_t BackplotKey(const std::vector<cam::Toolpath>& paths) {
+} // namespace
+
+uint64_t CamToolpathsKey(const std::vector<cam::Toolpath>& paths) {
   uint64_t k = 1469598103934665603ull;
   const auto mix = [&k](uint64_t v) { k = (k ^ v) * 1099511628211ull; };
   mix(paths.size());
@@ -325,22 +330,17 @@ uint64_t BackplotKey(const std::vector<cam::Toolpath>& paths) {
   return k;
 }
 
-} // namespace
-
-void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
-  // While a simulation is open the line drawn is the file being PLAYED, dimmed
-  // behind the cursor — one path on screen, and it is the one being cut.
-  if (CamPlaybackDrawsPath(state)) {
-    AppendCamPlaybackPath(state, out);
-    return;
-  }
-  if (!state.camShowToolpath || state.camToolpaths.empty())
-    return;
+CamBackplotRef CamBackplot(AppState& state) {
+  // While a simulation is open the line drawn is the file being PLAYED
+  // (AppendCamToolpathExtras), not this one.
+  if (CamPlaybackDrawsPath(state) || !state.camShowToolpath ||
+      state.camToolpaths.empty())
+    return {};
   // Moves are in SETUP space (C9), and so is the viewport on a job tab
   // (v73/J6) — the parts are drawn laid out. Nothing to convert.
-  if (const uint64_t key = BackplotKey(state.camToolpaths);
-      key != g_backplotKey) {
-    g_backplot.clear();
+  if (const uint64_t key = CamToolpathsKey(state.camToolpaths);
+      key != g_backplotKey || g_backplot == nullptr) {
+    auto built = std::make_shared<std::vector<PrimVertex>>();
     for (const cam::Toolpath& tp : state.camToolpaths) {
       for (size_t i = 1; i < tp.moves.size(); i++) {
         const cam::Move& m = tp.moves[i];
@@ -361,24 +361,39 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
                                     : kCutColor;
         AppendPrimLine(OnPart(tp.moves[i - 1]), OnPart(tp.moves[j]),
                        m.kind == cam::Move::Kind::Rapid ? 1.0f : 2.4f, color,
-                       g_backplot);
+                       *built);
         i = j;
       }
     }
+    g_backplot = std::move(built);
     g_backplotKey = key;
   }
-  // Reserved, not grown: this is the largest single thing the overlay
-  // appends -- a rotary finishing pass is hundreds of thousands of segments
-  // at six 56-byte vertices each -- and letting the vector find that out by
-  // reallocating copies it more than once.
-  out.reserve(out.size() + g_backplot.size());
-  out.insert(out.end(), g_backplot.begin(), g_backplot.end());
+  return {g_backplot, g_backplotKey};
+}
 
+void AppendCamToolpathExtras(AppState& state, std::vector<PrimVertex>& out) {
+  // While a simulation is open the line drawn is the file being PLAYED, dimmed
+  // behind the cursor — one path on screen, and it is the one being cut.
+  if (CamPlaybackDrawsPath(state)) {
+    AppendCamPlaybackPath(state, out);
+    return;
+  }
+  if (!state.camShowToolpath || state.camToolpaths.empty())
+    return;
   // The tool glyph stays OUT of the cache: it is a handful of vertices and it
   // follows the setup, which can move without the toolpath changing.
   if (const cam::Setup* setup = ActiveCamSetup(state))
     for (const cam::Toolpath& tp : state.camToolpaths)
       AppendToolGlyph(state, *setup, tp, out);
+}
+
+void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
+  // The whole picture in one list -- for a test. The frame hands the backplot
+  // to the renderer's cached channel instead of copying it here
+  // (docs/cam/backplot-frame-cost-plan.md).
+  if (const CamBackplotRef bp = CamBackplot(state); bp.verts != nullptr)
+    out.insert(out.end(), bp.verts->begin(), bp.verts->end());
+  AppendCamToolpathExtras(state, out);
 }
 
 namespace {
@@ -2136,6 +2151,9 @@ CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
 namespace ui {
 void DrawCamPanel(AppState&) {}
 void AppendCamToolpathOverlay(AppState&, std::vector<PrimVertex>&) {}
+CamBackplotRef CamBackplot(AppState&) { return {}; }
+void AppendCamToolpathExtras(AppState&, std::vector<PrimVertex>&) {}
+uint64_t CamToolpathsKey(const std::vector<cam::Toolpath>&) { return 0; }
 void RefreshCamToolpaths(AppState&) {}
 void RefreshCamToolpath(AppState&, uint64_t) {}
 void DropCamToolpath(AppState&, uint64_t) {}

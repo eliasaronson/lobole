@@ -4,6 +4,7 @@
 #include "render/SketchRenderer.h" // PrimVertex
 #include "ui/AppState.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,26 @@ void DrawCamPanel(AppState& state);
 // never re-derived — a picture that can disagree with the file is worse than
 // no picture.
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out);
+
+// The same backplot split for the renderer's cached channel
+// (docs/cam/backplot-frame-cost-plan.md). `CamBackplot` is the cached vertex
+// list, SHARED rather than copied, with the key that changes when it does --
+// null when nothing is drawn this way (the path hidden, no toolpath, or a
+// simulation playing its own). `AppendCamToolpathExtras` is everything else
+// the overlay draws: the tool glyphs, or the played path.
+// `AppendCamToolpathOverlay` is the two joined, for a test that reads the
+// whole picture.
+struct CamBackplotRef {
+  std::shared_ptr<const std::vector<PrimVertex>> verts;
+  uint64_t key = 0;
+};
+[[nodiscard]] CamBackplotRef CamBackplot(AppState& state);
+void AppendCamToolpathExtras(AppState& state, std::vector<PrimVertex>& out);
+
+// A fingerprint of the toolpaths, O(toolpaths) not O(moves): what the
+// backplot is keyed on, and what anything else derived from every move can be
+// cached on too.
+[[nodiscard]] uint64_t CamToolpathsKey(const std::vector<cam::Toolpath>& paths);
 
 // Regenerates the cached toolpaths for the active setup — ALL of them. Use it
 // when something setup-wide changed (the stock, a tool, the frame); for an

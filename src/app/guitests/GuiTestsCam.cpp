@@ -2595,30 +2595,58 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->document == nullptr); // a job tab: no part document
     IM_CHECK(s_App->sketchRenderer != nullptr);
     ctx->Yield(2);
-    const size_t before = s_App->sketchRenderer->PrimitiveCount();
+    IM_CHECK_EQ(s_App->sketchRenderer->CachedPrimitiveCount(), (size_t)0);
 
     ToolbarClick(ctx, "###tb_job_whole");
     ctx->Yield(3);
     IM_CHECK(!s_App->camToolpaths.empty());
     IM_CHECK(s_App->camShowToolpath);
-    // What the renderer HOLDS grew by the backplot, not just what the
-    // contributor would produce if asked.
-    std::vector<PrimVertex> backplot;
-    ui::AppendCamToolpathOverlay(*s_App, backplot);
-    IM_CHECK(!backplot.empty());
-    IM_CHECK(s_App->sketchRenderer->PrimitiveCount() >=
-             before + backplot.size());
-    const size_t withPath = s_App->sketchRenderer->PrimitiveCount();
+    // What the renderer HOLDS is the backplot, not just what the contributor
+    // would produce if asked. It lives in the renderer's cached channel
+    // (docs/cam/backplot-frame-cost-plan.md), so that is where to look.
+    const ui::CamBackplotRef backplot = ui::CamBackplot(*s_App);
+    IM_CHECK(backplot.verts != nullptr && !backplot.verts->empty());
+    IM_CHECK_EQ(s_App->sketchRenderer->CachedPrimitiveCount(),
+                backplot.verts->size());
 
-    // ...and hiding the path takes it back out. Measured against what the
-    // renderer HELD with the path shown, not against `before + backplot` --
-    // that margin only held while the backplot was enormous, so collapsing
-    // collinear runs for the frame budget broke a test that was really only
-    // asserting "a toolpath is big".
+    // ...and hiding the path takes it back out.
     s_App->camShowToolpath = false;
     ctx->Yield(2);
-    IM_CHECK(s_App->sketchRenderer->PrimitiveCount() < withPath);
+    IM_CHECK_EQ(s_App->sketchRenderer->CachedPrimitiveCount(), (size_t)0);
     s_App->camShowToolpath = true;
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+  };
+
+  // docs/cam/backplot-frame-cost-plan.md: the backplot was cached and then
+  // copied twice per frame -- into the primitive list, and into the frame's
+  // vertex buffer -- which on the rolling pin was 93% of an idle frame. An
+  // idle frame now copies nothing: the renderer holds the SAME list the
+  // panel built, and uploads it only when it changes.
+  t = IM_REGISTER_TEST(engine, "cam", "backplot_is_not_copied_per_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(4);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    const ui::CamBackplotRef backplot = ui::CamBackplot(*s_App);
+    IM_CHECK(backplot.verts != nullptr && !backplot.verts->empty());
+    // Shared, not copied: the renderer holds the panel's own list.
+    IM_CHECK(s_App->sketchRenderer->CachedPrimitives() == backplot.verts.get());
+
+    const size_t uploads = s_App->sketchRenderer->CachedUploads();
+    ctx->Yield(10);
+    IM_CHECK(s_App->sketchRenderer->CachedPrimitives() == backplot.verts.get());
+    // At most one upload per frame in flight catching up, then none.
+    ctx->LogInfo("%zu uploads over 10 idle frames",
+                 s_App->sketchRenderer->CachedUploads() - uploads);
+    IM_CHECK(s_App->sketchRenderer->CachedUploads() - uploads <= 2);
     ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
   };

@@ -1009,10 +1009,18 @@ void DrawUI(AppState& state) {
     }
     if (state.document || state.assembly)
       AppendSimulationBCGlyphs(state, prims); // FEM load/fixed/keep glyphs
+    // The CAM backplot goes to the renderer's CACHED channel, shared: it is
+    // hundreds of thousands of vertices on a surfacing job, and copied into
+    // `prims` it was 93% of an idle frame (docs/cam/backplot-frame-cost-
+    // plan.md). Null on every tab that has none, so it never outlives one.
+    CamBackplotRef backplot;
     if (state.document || state.job) {
-      AppendCamToolpathOverlay(state, prims); // CAM backplot
+      backplot = CamBackplot(state);
+      AppendCamToolpathExtras(state, prims); // tool glyphs, a played path
       prims.insert(prims.end(), camPrims.begin(), camPrims.end());
     }
+    state.sketchRenderer->SetCachedPrimitives(std::move(backplot.verts),
+                                              backplot.key);
     state.sketchRenderer->SetPrimitives(std::move(prims));
 
     // The measurement draws in its OWN channel, with depth test off: a

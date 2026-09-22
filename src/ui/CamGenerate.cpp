@@ -139,11 +139,19 @@ void DrawCamGenerateWindow(AppState& state) {
     ImGui::TextDisabled("Not verified since the last change -- Regenerate.");
 
   int failed = 0;
-  double total = 0.0;
-  for (const cam::Toolpath& tp : state.camToolpaths) {
-    total += tp.CutLength();
+  for (const cam::Toolpath& tp : state.camToolpaths)
     if (!tp.error.empty())
       failed++;
+  // The total walks every move, so it is kept until the toolpaths change: on
+  // the rolling pin that is 660,000 moves, every frame this window is open.
+  static uint64_t totalKey = 0;
+  static double total = 0.0;
+  if (const uint64_t key = CamToolpathsKey(state.camToolpaths);
+      key != totalKey) {
+    total = 0.0;
+    for (const cam::Toolpath& tp : state.camToolpaths)
+      total += tp.CutLength();
+    totalKey = key;
   }
   if (!state.camToolpaths.empty()) {
     ImGui::TextDisabled("%.0f mm of cutting", total);
