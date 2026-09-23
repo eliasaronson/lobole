@@ -62,8 +62,10 @@ person who closes the window is done editing, not done looking.
 refusal text), the driver combo, the range line, the `WhyNot` refusal, the
 Pose scrub, the Run/Delete row, the in-flight progress bar and the validation
 verdict. The scrub stays *in* this window rather than becoming a second
-bottom-centre transport like CAM's: motion has no play, the window is small,
-and a second floating slot buys nothing until it does.
+bottom-centre transport like CAM's: the window is small, and a second
+floating slot buys nothing. (Motion gained Play in the window itself —
+Play/Pause/Stop over a run's stored poses — without moving the scrub out;
+docs/ui/motion-panel-plan.md.)
 
 **4. What is left in the Model dock** is the occurrence tree, Mates,
 Relations and the Bill of materials header — a list of what the assembly *is*,

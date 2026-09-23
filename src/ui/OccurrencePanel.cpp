@@ -459,6 +459,8 @@ void DrawMotionBody(AppState& state) {
   // The scrub: live, no snapshot.
   LeftLabel("Pose");
   if (ImGui::SliderFloat("###motion_t", &state.motionT, 0.0f, 1.0f)) {
+    // The scrub poses the DOCUMENT; playback would paint over it.
+    StopMotionPlayback(state);
     std::string err;
     ApplyMotionPose(state, sel->id, state.motionT, &err);
   }
@@ -483,16 +485,13 @@ void DrawMotionBody(AppState& state) {
                                   : "Validate motion###motion_run";
       row.Next(ButtonWidth(label));
       if (ImGui::SmallButton(label)) {
-        if (sel->checkClash == preview ||
-            (!preview && sel->clashMode != "exact")) {
-          SnapshotAssembly(state);
-          sel->checkClash = !preview;
-          if (!preview)
-            sel->clashMode = "exact";
-          asmDoc.BumpVersion();
-        }
+        // A RUN, not an edit: the study keeps the clash settings a script
+        // gave it, and no undo step is pushed for pressing a button.
+        RunOverride run;
+        run.checkClash = !preview;
+        run.clashMode = "exact";
         std::string err;
-        if (!StartMotionRun(state, sel->id, &err))
+        if (!StartMotionRun(state, sel->id, &err, &run))
           state.motionAddRefusal = err;
       }
       if (ImGui::IsItemHovered())
@@ -512,35 +511,83 @@ void DrawMotionBody(AppState& state) {
     }
   }
   if (const motion::Result* r = MotionResultFor(state, sel->id)) {
-    if (MotionResultStale(state, sel->id))
-      ImGui::TextWrapped("Motion validation stale: model or study changed. "
-                         "Run again to validate this revision.");
-    else if (!r->checkedClashes)
-      ImGui::TextWrapped("Kinematics only: collision checks not run.");
-    else if (r->cancelled)
-      // Split from the unknown-pairs case now that Cancel is a button rather
-      // than an RPC: a cancelled run reported "incomplete: 0 unknown pairs",
-      // which names the one thing that did NOT go wrong.
-      ImGui::TextWrapped("Cancelled: %zu of %d samples checked, the rest not "
-                         "looked at.",
-                         r->samples.size(), sel->samples);
-    else if (r->pairsUnknown)
-      ImGui::TextWrapped("Motion validation incomplete: %zu unknown pairs.",
-                         r->pairsUnknown);
-    else if (r->clean)
-      ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f),
-                         "Clean: %zu samples, %zu pair checks, %.1f s",
-                         r->samples.size(), r->pairsChecked, r->seconds);
-    else
-      ImGui::TextColored(
-          ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
-          "NOT clean: worst at sample %zu (%.1f %s)", r->worstSample,
-          r->samples.empty() ? 0.0 : r->samples[r->worstSample].value * k,
-          rot ? "deg" : "mm");
-    ImGui::TextDisabled("Reused %zu pair results; executed %zu", r->pairsCached,
-                        r->pairsChecked - r->pairsCached);
+    const bool stale = MotionResultStale(state, sel->id);
+    // One verdict, from core (motion::Summarize): whether it MOVED through
+    // every sample first, collisions second — a preview that locks at 90
+    // degrees must not read like one that works.
+    const motion::Verdict v = motion::Summarize(*r, *sel, stale);
+    const ImVec4 colour = v.level == motion::Verdict::Level::Good
+                              ? ImVec4(0.4f, 0.85f, 0.4f, 1.0f)
+                          : v.level == motion::Verdict::Level::Bad
+                              ? ImVec4(0.9f, 0.4f, 0.4f, 1.0f)
+                              : ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    ImGui::PushStyleColor(ImGuiCol_Text, colour);
+    ImGui::TextWrapped("%s", v.text.c_str());
+    ImGui::PopStyleColor();
+    if (r->checkedClashes && !stale)
+      ImGui::TextDisabled("Reused %zu pair results; executed %zu",
+                          r->pairsCached, r->pairsChecked - r->pairsCached);
+
+    // What a run is FOR once it has run: watch it, and take it away. Both
+    // refuse the same way the export always has — no result, a stale one,
+    // or a sample with no pose.
+    const std::string no = MotionPlaybackRefusal(state, sel->id);
+    const bool playingThis = state.motionPlaybackStudy == sel->id;
+    WrapRow transport;
+    // One button whose label changes: one ###id, so the test engine and the
+    // widget-id lint see one widget.
+    const std::string playLabel =
+        std::string(playingThis && state.motionPlaying ? "Pause" : "Play") +
+        "###motion_play";
+    transport.Next(ButtonWidth(playLabel.c_str()));
+    ImGui::BeginDisabled(!no.empty());
+    if (ImGui::SmallButton(playLabel.c_str())) {
+      if (playingThis && state.motionPlaying) {
+        state.motionPlaying = false;
+      } else {
+        std::string why;
+        if (!StartMotionPlayback(state, sel->id, &why))
+          state.motionAddRefusal = why;
+      }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("%s", no.empty() ? "Play the poses this run made, "
+                                           "in the viewport only: nothing "
+                                           "is solved or changed."
+                                         : no.c_str());
+    if (playingThis) {
+      transport.Next(ButtonWidth("Stop"));
+      if (ImGui::SmallButton("Stop###motion_stop"))
+        StopMotionPlayback(state);
+    }
+    const bool canSave = FileDialogsAvailable();
+    const char* exportLabel = "Export animation...###motion_export";
+    transport.Next(ButtonWidth(exportLabel));
+    ImGui::BeginDisabled(!no.empty() || !canSave);
+    if (ImGui::SmallButton(exportLabel))
+      ExportMotionDialog(state, sel->id);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("%s", !no.empty() ? no.c_str()
+                              : !canSave
+                                  ? "No file dialog here; export_motion "
+                                    "{study, path} writes the same file."
+                                  : "An animated GLB of this run, 24 samples "
+                                    "a second.");
+    if (playingThis) {
+      const size_t n = r->samples.size();
+      const size_t at =
+          std::min(n - 1, static_cast<size_t>(state.motionPlaybackPos + 0.5));
+      const bool rotDof = sel->driverDof == MateDof::Rotation;
+      ImGui::TextDisabled("%s sample %zu of %zu (%.4g %s)",
+                          state.motionPlaying ? "Playing" : "Paused at", at,
+                          n - 1, r->samples[at].value * (rotDof ? k : 1.0),
+                          rotDof ? "deg" : "mm");
+    }
   } else {
-    ImGui::TextWrapped("Motion validation not run for this study.");
+    ImGui::TextWrapped("Not run yet: Preview solves every sample, Validate "
+                       "also checks collisions.");
   }
 }
 

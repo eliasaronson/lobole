@@ -116,4 +116,15 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study);
 // be PRINTED, and what an agent pastes into its report.
 std::string Table(const Result& result, const MotionStudy& study);
 
+// What a stored result SAYS, as one line and a severity — the panel's
+// verdict, kept here so it is tested without a GUI. Asks whether the
+// mechanism MOVED through every sample before it asks about collisions: a
+// preview that locks at 90 degrees must not read like one that works.
+struct Verdict {
+  enum class Level { Good, Neutral, Bad };
+  Level level = Level::Neutral;
+  std::string text;
+};
+Verdict Summarize(const Result& result, const MotionStudy& study, bool stale);
+
 } // namespace motion

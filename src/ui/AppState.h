@@ -1113,6 +1113,12 @@ struct AppState {
   std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
+  // Playback of a stored result (docs/ui/motion-panel-plan.md): display-only,
+  // read by DisplayMatrix and the renderer sync. 0 = not showing one.
+  uint64_t motionPlaybackStudy = 0;
+  bool motionPlaying = false;     // advancing; false = paused on a frame
+  double motionPlaybackPos = 0.0; // in samples, 0 .. n-1 (fractional)
+  double motionPlaybackLastTick = 0.0;
 
   // UI state
   // The tolerance editor in the Measure tool window (docs/tolerances/plan.md

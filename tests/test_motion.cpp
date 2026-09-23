@@ -533,3 +533,62 @@ TEST_CASE("The v128 golden: a study that names its configuration",
   REQUIRE(res.error.empty());
   CHECK(res.clean); // the stop is out, under the study's own configuration
 }
+
+TEST_CASE("The verdict asks whether it moved before it asks about clashes",
+          "[motion]") {
+  MotionStudy s;
+  s.driverDof = MateDof::Rotation;
+  s.samples = 5;
+  const auto samples = [](int n) {
+    motion::Result r;
+    for (int i = 0; i < n; i++) {
+      motion::Sample x;
+      x.value = i * kPi / 2.0; // 0, 90, 180 ... degrees
+      r.samples.push_back(x);
+    }
+    return r;
+  };
+
+  // A preview that moves: says so, and that collisions were not checked.
+  motion::Result preview = samples(5);
+  preview.checkedClashes = false;
+  motion::Verdict v = motion::Summarize(preview, s, false);
+  CHECK(v.level == motion::Verdict::Level::Neutral);
+  CHECK_THAT(v.text, ContainsSubstring("Moves through all 5 samples") &&
+                         ContainsSubstring("not checked"));
+
+  // A preview that locks at 90 degrees: THE case the old panel hid behind
+  // "kinematics only".
+  preview.samples[1].solved = false;
+  preview.samples[1].residualMm = 0.4;
+  preview.samples[1].erroredMates = 1;
+  preview.clean = false;
+  preview.worstSample = 1;
+  v = motion::Summarize(preview, s, false);
+  CHECK(v.level == motion::Verdict::Level::Bad);
+  CHECK_THAT(v.text, ContainsSubstring("Does not solve at sample 1 (90 deg)") &&
+                         ContainsSubstring("0.4 mm") &&
+                         ContainsSubstring("1 errored mate;"));
+
+  // Validation: clean, and not clean naming the pair.
+  motion::Result checked = samples(5);
+  checked.checkedClashes = true;
+  CHECK(motion::Summarize(checked, s, false).level ==
+        motion::Verdict::Level::Good);
+  checked.clean = false;
+  checked.worstSample = 2;
+  motion::Clash c;
+  c.aName = "Arm";
+  c.bName = "Stop";
+  checked.samples[2].clashes.push_back(c);
+  v = motion::Summarize(checked, s, false);
+  CHECK(v.level == motion::Verdict::Level::Bad);
+  CHECK_THAT(v.text, ContainsSubstring("Arm x Stop at sample 2 (180 deg)"));
+
+  // Stale and cancelled come first, whatever the samples say.
+  CHECK_THAT(motion::Summarize(checked, s, true).text,
+             ContainsSubstring("Stale"));
+  checked.cancelled = true;
+  CHECK_THAT(motion::Summarize(checked, s, false).text,
+             ContainsSubstring("Cancelled"));
+}

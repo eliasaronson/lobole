@@ -440,3 +440,93 @@ std::string Table(const Result& result, const MotionStudy& study) {
 }
 
 } // namespace motion
+
+namespace motion {
+
+Verdict Summarize(const Result& r, const MotionStudy& study, bool stale) {
+  const bool deg = study.driverDof == MateDof::Rotation;
+  const char* unit = deg ? "deg" : "mm";
+  const auto shown = [&](const Sample& s) {
+    return deg ? angles::ToDegrees(s.value) : s.value;
+  };
+  char line[512];
+  Verdict v;
+  if (stale) {
+    v.text = "Stale: the model or the study changed since this run. Run "
+             "again to see this revision.";
+    return v;
+  }
+  if (!r.error.empty()) {
+    v.level = Verdict::Level::Bad;
+    v.text = "Could not run: " + r.error;
+    return v;
+  }
+  if (r.cancelled) {
+    std::snprintf(line, sizeof line,
+                  "Cancelled: %zu of %d samples done, the rest not looked "
+                  "at.",
+                  r.samples.size(), study.samples);
+    v.text = line;
+    return v;
+  }
+  // Did it MOVE? Asked first, for a preview and a validation alike: a sample
+  // that did not solve is a mechanism that locks or jumps there, and no
+  // collision verdict means anything past it.
+  size_t unsolved = 0;
+  const Sample* first = nullptr;
+  for (const Sample& s : r.samples)
+    if (!s.solved) {
+      ++unsolved;
+      if (first == nullptr)
+        first = &s;
+    }
+  if (first != nullptr) {
+    const size_t idx = static_cast<size_t>(first - r.samples.data());
+    std::snprintf(line, sizeof line,
+                  "Does not solve at sample %zu (%.4g %s): residual %.3g mm, "
+                  "%d errored mate%s; %zu of %zu samples unsolved.",
+                  idx, shown(*first), unit, first->residualMm,
+                  first->erroredMates, first->erroredMates == 1 ? "" : "s",
+                  unsolved, r.samples.size());
+    v.level = Verdict::Level::Bad;
+    v.text = line;
+    return v;
+  }
+  if (!r.checkedClashes) {
+    std::snprintf(line, sizeof line,
+                  "Moves through all %zu samples. Collisions not checked "
+                  "(a preview): Validate to check them.",
+                  r.samples.size());
+    v.text = line;
+    return v;
+  }
+  if (r.pairsUnknown) {
+    std::snprintf(line, sizeof line,
+                  "Incomplete: %zu pairs could not be checked.",
+                  r.pairsUnknown);
+    v.level = Verdict::Level::Bad;
+    v.text = line;
+    return v;
+  }
+  if (r.clean) {
+    std::snprintf(line, sizeof line,
+                  "Clean: moves through %zu samples, %zu pair checks, %.1f s.",
+                  r.samples.size(), r.pairsChecked, r.seconds);
+    v.level = Verdict::Level::Good;
+    v.text = line;
+    return v;
+  }
+  // Not clean, every sample solved: name the pair at the worst sample.
+  const Sample& worst = r.samples.at(r.worstSample);
+  std::string pair = "a clash";
+  if (!worst.clashes.empty())
+    pair = worst.clashes.front().aName + " x " + worst.clashes.front().bName;
+  std::snprintf(line, sizeof line, "NOT clean: %s at sample %zu (%.4g %s)%s.",
+                pair.c_str(), r.worstSample, shown(worst), unit,
+                worst.clashes.size() > 1 ? ", and more there" : "");
+  v.level = Verdict::Level::Bad;
+  v.text = line;
+  return v;
+}
+
+} // namespace motion

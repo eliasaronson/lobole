@@ -1,5 +1,6 @@
 #include "ui/RendererSync.h"
 #include "ui/DocumentSlots.h"
+#include "ui/MotionActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/SceneOverlays.h"
 #include "ui/ViewActions.h"
@@ -1240,9 +1241,17 @@ void SyncAssemblyRenderers(AppState& state) {
     // The flattened world transform, offset by the TOP-LEVEL occurrence's
     // explode vector — exploding a sub-assembly moves the whole unit, not
     // each of its parts to its own corner.
-    const glm::mat4 xf =
+    //
+    // Motion playback swaps the unit's solved placement for the pose the
+    // run recorded — display-only. Only when playing, so every other frame
+    // is computed exactly as before (the pixel gate is byte-exact).
+    glm::mat4 xf =
         glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
         inst.world;
+    glm::mat4 played;
+    if (MotionPlaybackWorld(state, occ.id, played))
+      xf = glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
+           played * glm::inverse(OccurrenceMatrix(occ)) * inst.world;
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
       const SharedBody& sb = it->second.bodies[bi];
       if (!sb.tess)

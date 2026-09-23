@@ -46,6 +46,7 @@
 #include "ui/ImportActions.h"
 #include "ui/ImportJob.h"
 #include "ui/MachineActions.h"
+#include "ui/MotionActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
 #include "ui/SelectionPipeline.h"
@@ -1657,6 +1658,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     // Playback is WALL-CLOCK: it has to advance whether or not anybody is
     // looking, so it ticks here while the projection it feeds does not.
     ui::TickCamPlayback(g_App, now);
+    ui::TickMotionPlayback(g_App, now);
     // Every long-running operation, from one place (ui/BackgroundJobs.h):
     // whether a background job can finish must not depend on which panel is
     // open, which is what two of them used to depend on.
@@ -2491,6 +2493,7 @@ int main(int argc, char** argv) {
     ui::SyncFieldRenderer(g_App);
     ui::TickCamPlayback(g_App, glfwGetTime());
     ui::SyncCamPlayback(g_App);
+    ui::TickMotionPlayback(g_App, glfwGetTime());
     // Per frame on purpose: the resyncs are version-gated and
     // picking a rim or ticking a washer bumps no version.
     ui::SyncFastenerGhost(g_App);
@@ -2639,7 +2642,7 @@ int main(int argc, char** argv) {
                           ImGui::IsAnyMouseDown() || keyHeld;
       pin.wantTextInput = io.WantTextInput;
       pin.cameraAnimating = g_Camera && g_Camera->IsAnimating();
-      pin.simPlaying = g_App.camPlaying;
+      pin.simPlaying = g_App.camPlaying || g_App.motionPlaying;
       pin.jobRunning = !g_App.backgroundJobs.empty() || g_App.renderJob.active;
       pin.remoteRequests = static_cast<int>(remoteActivity);
       pin.documentVersion = g_App.assembly   ? g_App.assembly->Version()

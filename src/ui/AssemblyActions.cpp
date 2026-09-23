@@ -1,5 +1,6 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BodyAppearance.h"
+#include "ui/MotionActions.h"
 
 #include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
 #include "imgui.h" // KeyCtrl: the placement drag snaps unless Ctrl says free
@@ -479,6 +480,11 @@ glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
 // What an occurrence renders (and picks) at: the solved placement, displaced
 // by the active exploded view.
 glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
+  // Motion playback (docs/ui/motion-panel-plan.md): the pose a run recorded
+  // stands in for the solved placement, for display only.
+  glm::mat4 played;
+  if (MotionPlaybackWorld(state, o.id, played))
+    return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) * played;
   return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) *
          OccurrenceMatrix(o);
 }
