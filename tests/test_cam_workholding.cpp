@@ -375,24 +375,68 @@ TEST_CASE("cam workholding: a clamp rests on the stock by its face",
   }
 }
 
-TEST_CASE("cam workholding: a click on the stock top is a seat",
+TEST_CASE("cam workholding: the seat is read back from where it was put",
           "[cam][workholding]") {
+  // docs/cam/fixture-gizmo-plan.md: a clamp dragged onto the stock rests
+  // there, so a seat is READ from a pose -- and must solve straight back to
+  // it, or a clamp put down would jump when the next sync re-solves it.
   Bench b;
+  auto clamp = StepClampDoc();
+  const std::vector<Body>& model = clamp->GetBodies();
+  const ElementRef pad = FaceFacing(model[1], {0, 0, -1});
+  REQUIRE(pad.IsSet());
+  for (const cam::StockEdge edge :
+       {cam::StockEdge::MinusX, cam::StockEdge::PlusX, cam::StockEdge::MinusY,
+        cam::StockEdge::PlusY})
+    for (const double spin : {0.0, 17.5, -30.0}) {
+      INFO("edge " << cam::StockEdgeName(edge) << " spin " << spin);
+      cam::FixtureSeat seat;
+      seat.face = pad;
+      seat.edge = edge;
+      seat.alongMm = 11.0;
+      seat.overMm = 7.5;
+      seat.spinDeg = spin;
+      glm::dvec3 pos(0.0);
+      double rot = 0.0;
+      REQUIRE(
+          cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
+      // The face that lies on the top is the pad's underside...
+      const ElementRef on = cam::FaceOnStockTop(b.lo, b.hi, model, pos, rot);
+      CHECK(on.name == pad.name);
+      // ...and the seat read from the pose is the one it was solved from.
+      cam::FixtureSeat back;
+      REQUIRE(
+          cam::SeatFromPose(b.lo, b.hi, model, pad, pos, rot, back, nullptr));
+      CHECK(back.edge == edge);
+      CHECK_THAT(back.spinDeg, WithinAbs(spin, 1e-9));
+      CHECK_THAT(back.overMm, WithinAbs(7.5, 1e-6));
+      CHECK_THAT(back.alongMm, WithinAbs(11.0, 1e-6));
+    }
+
+  // Lifted off the top, nothing rests there.
   cam::FixtureSeat seat;
-  seat.face = ElementRef{7, "kept"};
-  // 12 mm in from the +Y edge and 20 along from -X, which makes +Y the
-  // NEAREST edge (the stock is 44 x 34): the +Y edge, 12 over.
-  const glm::dvec3 click(b.lo.x + 20.0, b.hi.y - 12.0, b.hi.z);
-  std::string why;
-  REQUIRE(cam::SeatAtPoint(b.lo, b.hi, click, seat, &why));
-  CHECK(seat.edge == cam::StockEdge::PlusY);
-  CHECK_THAT(seat.overMm, WithinAbs(12.0, 1e-9));
-  CHECK_THAT(seat.alongMm, WithinAbs(20.0, 1e-9));
-  CHECK(seat.face.name == "kept"); // the face is the caller's
-  // Off the top is refused, not snapped onto the nearest edge.
+  seat.face = pad;
+  glm::dvec3 pos(0.0);
+  double rot = 0.0;
+  REQUIRE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
   CHECK_FALSE(
-      cam::SeatAtPoint(b.lo, b.hi, b.hi + glm::dvec3(5, 0, 0), seat, &why));
-  CHECK(why.find("off the stock") != std::string::npos);
+      cam::FaceOnStockTop(b.lo, b.hi, model, pos + glm::dvec3(0, 0, 5), rot)
+          .IsSet());
+  // Beside the stock at the top's height, nothing either: over the top only.
+  CHECK_FALSE(
+      cam::FaceOnStockTop(b.lo, b.hi, model, pos - glm::dvec3(60, 0, 0), rot)
+          .IsSet());
+
+  // A face square to each axis, by which way it faces: the pad's underside
+  // is one of the downward Z planes.
+  const auto planes = cam::AxisFacePlanes(model);
+  bool padUnder = false;
+  for (const cam::AxisFacePlane& p : planes[2])
+    padUnder = padUnder ||
+               (p.body == 1 && p.facing < 0 && std::abs(p.at - 5.0) < 1e-9);
+  CHECK(padUnder);
+  CHECK(planes[0].size() == 6); // two X faces on each of three boxes
+
   // Edges by name, and one that is not refused.
   cam::StockEdge edge{};
   CHECK(cam::ParseStockEdge("+y", edge));

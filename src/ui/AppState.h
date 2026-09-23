@@ -1041,6 +1041,20 @@ struct AppState {
     glm::dvec2 startPlace{0.0, 0.0};
     double startRotZ = 0.0;
     glm::vec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
+    // A FIXTURE on a job tab (docs/cam/fixture-gizmo-plan.md): non-zero ->
+    // the drag moves this fixture, X/Y/Z and a spin about Z, snapping its
+    // own flat faces to the stock's planes. `facePlanes[axis]` are those
+    // faces square to each axis at grab, as (coordinate, what it is) in bed
+    // space; `snapLabel` says what the drag is snapped to now, for the
+    // editor to show while it moves.
+    uint64_t fixtureId = 0;
+    glm::dvec3 startFixturePos{0.0};
+    struct FacePlane {
+      double at = 0.0;
+      std::string what;
+    };
+    std::vector<FacePlane> facePlanes[3];
+    std::string snapLabel;
   };
 
   // Direct-manipulation handle on the pending preview feature (docs/ui/
@@ -1669,18 +1683,6 @@ struct AppState {
   // The fixture the tool window is editing (docs/cam/workholding-plan.md),
   // 0 = none; like camEditTool, one editor holds the window at a time.
   uint64_t camEditFixture = 0;
-  // Seating a fixture on the stock by two clicks
-  // (docs/cam/fixture-seat-plan.md): the face it rests on, then the spot it
-  // presses. Armed while `fixtureId` is set; the selection pipeline hands it
-  // the click's ray before any candidate is gathered.
-  struct CamSeatPick {
-    uint64_t fixtureId = 0;
-    bool pickSpot = false; // step two: the face is known
-    ElementRef face;
-    std::string prompt;
-    std::string miss;
-    [[nodiscard]] bool Active() const { return fixtureId != 0; }
-  } camSeat;
   // Why a seated fixture could not solve, by fixture id: its face gone, the
   // stock gone. Filled by RefreshFixtureSeats, read by the row.
   std::map<uint64_t, std::string> camSeatRefusals;
