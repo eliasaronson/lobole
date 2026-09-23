@@ -10,6 +10,19 @@ human users.
 
 See [docs/roadmap.md](docs/roadmap.md) for the current state and the long-term plan.
 
+## Gallery
+
+Every model here is built by a generator — an ordinary Python program driving
+the same API the GUI and an LLM assistant use — and rendered by Designer's own
+path tracer. See [generators/README.md](generators/README.md) for all of them.
+
+| | | |
+|:---:|:---:|:---:|
+| [![Formula Student space frame](docs/gallery/fs-chassis.jpg)](generators/chassis) | [![Automatic watch](docs/gallery/automatic-watch.jpg)](generators/watch) | [![Four-cylinder diesel engine](docs/gallery/om615-engine.jpg)](generators/om615) |
+| **Formula Student chassis** — 91 coped chromoly members read from a team's CAD, with its cut list, bend schedule and weld jig | **Automatic watch** — a working movement: gear train, escapement and keyless works, geared together and set to a time | **OM615 diesel** — 241 occurrences driven by one crank, clash-checked over two revolutions |
+| [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) | [![Gas grill](docs/gallery/gas-grill.jpg)](generators/grill) |
+| **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms | **Gas grill** — sheet-metal parts, bent from flat blanks and assembled by mates |
+
 ## Requirements
 
 Designer builds on any Linux with the libraries below; two paths are verified
