@@ -13,6 +13,11 @@ namespace {
 // ranges a smaller member takes, and the larger rounds a chassis or a roll
 // cage uses. Metric and imperial-derived both, because both are what real
 // orders say, and which a shop stocks is not this table's decision.
+//
+// The imperial rows are the chromoly sizes Formula Student teams actually
+// buy, at their EXACT walls: 0.049" is 1.245 mm and 0.058" is 1.473 mm. The
+// 25.4 x 1.2 row is 1" x 0.049" rounded, and a CAD that models the real wall
+// (the FS chassis generator's does) reads 1.245 and was refused.
 struct SizeRow {
   double od;
   double wall;
@@ -20,11 +25,35 @@ struct SizeRow {
 
 const std::vector<SizeRow>& StructuralRounds() {
   static const std::vector<SizeRow> rows = {
-      {38.10, 2.60}, {38.10, 1.65}, {31.75, 2.40}, {31.75, 1.65}, {30.00, 2.00},
-      {28.00, 2.00}, {25.40, 2.60}, {25.40, 2.40}, {25.40, 1.65}, {25.40, 1.20},
-      {25.00, 2.50}, {25.00, 1.50}, {22.00, 2.00}, {22.00, 1.50}, {20.00, 2.00},
-      {20.00, 1.50}, {19.05, 1.65}, {19.05, 1.20}, {16.00, 1.50}, {16.00, 1.00},
-      {12.00, 1.50}, {12.00, 1.00}};
+      {38.10, 2.60},
+      {38.10, 1.65},
+      {31.75, 2.40},
+      {31.75, 1.65},
+      {30.00, 2.00},
+      {28.00, 2.00},
+      {25.40, 2.60},
+      {25.40, 2.40},
+      {25.40, 1.65},
+      {25.40, 1.20},
+      {25.00, 2.50},
+      {25.00, 1.50},
+      {22.00, 2.00},
+      {22.00, 1.50},
+      {20.00, 2.00},
+      {20.00, 1.50},
+      {19.05, 1.65},
+      {19.05, 1.20},
+      {16.00, 1.50},
+      {16.00, 1.00},
+      {12.00, 1.50},
+      {12.00, 1.00},
+      // 1-1/8" x 0.058", 1" x 0.049", 3/4" x 0.049", 5/8" x 0.049", and the
+      // metric 25 x 1 a lightly loaded member is drawn in.
+      {28.575, 1.473},
+      {25.40, 1.245},
+      {19.05, 1.245},
+      {15.875, 1.245},
+      {25.00, 1.00}};
   return rows;
 }
 

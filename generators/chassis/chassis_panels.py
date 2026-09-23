@@ -73,22 +73,30 @@ def _saddle(d, part, at, direction, od, i):
 # --- the panels -----------------------------------------------------------
 
 def floor(d):
-    """The floor, on top of the lower rails from the bulkhead to the seat."""
+    """The floor, on the lower rails where they run flat: from the node where
+    they come down to floor level back to the main hoop. The nose sits
+    higher — its rails fall to the floor behind the front hoop — so a floor
+    drawn from the bulkhead would hang in the air under it."""
+    low = sorted((p for p in S.NODES if p[2] < S.Z_FLOOR + 20.0 and p[1] > 0
+                  and p[0] <= S.X_MAIN_HOOP + 1.0), key=lambda p: p[0])
+    front, back = low[0], low[-1]
     # Sketch on the XY plane at the rails' height: u is +X, so V is +Y.
-    plane = {"origin": [0.0, 0.0, S.Z_FLOOR + 12.7],
+    plane = {"origin": [0.0, 0.0, S.Z_FLOOR + 15.0],
              "normal": [0.0, 0.0, 1.0], "uAxis": [1.0, 0.0, 0.0]}
-    out = [(S.X_BULKHEAD, S.W_BULKHEAD), (S.X_MAIN_HOOP, S.W_MAIN_HOOP),
-           (S.X_MAIN_HOOP, -S.W_MAIN_HOOP), (S.X_BULKHEAD, -S.W_BULKHEAD)]
+    out = [(front[0], front[1]), (back[0], back[1]),
+           (back[0], -back[1]), (front[0], -front[1])]
     return _blank(d, "Floor", PANEL_GAUGE, plane, out)
 
 
 def firewall(d):
-    """Behind the driver, closing the cockpit off from the engine bay."""
+    """Behind the driver, closing the cockpit off from the engine bay: up
+    the main hoop's splayed legs to its knee, just in front of it."""
+    knee = min(S.MAIN_HOOP["corners"], key=lambda c: c[2])
     # Normal +X, u +Y, so V is +Z: it stands up.
-    plane = {"origin": [S.X_MAIN_HOOP, 0.0, 0.0],
+    plane = {"origin": [S.X_MAIN_HOOP - 20.0, 0.0, 0.0],
              "normal": [1.0, 0.0, 0.0], "uAxis": [0.0, 1.0, 0.0]}
     out = [(-S.W_MAIN_HOOP, S.Z_FLOOR), (S.W_MAIN_HOOP, S.Z_FLOOR),
-           (S.W_MAIN_HOOP, S.Z_SIDE_UPPER), (-S.W_MAIN_HOOP, S.Z_SIDE_UPPER)]
+           (abs(knee[1]), knee[2]), (-abs(knee[1]), knee[2])]
     return _blank(d, "Firewall", PANEL_GAUGE, plane, out)
 
 
@@ -127,7 +135,9 @@ def tabs(d, frame):
     for m in frame.members:
         # The lower rails carry the front suspension; the engine bay members
         # carry the engine.
-        if m["name"] in ("Lower rail L", "Lower rail R"):
+        # The front suspension hangs off the nose's lower rails, which is
+        # where the photographs of the car on its stand put the pickups.
+        if m["name"] in ("Nose lower rail L", "Nose lower rail R"):
             line = frame._metal(m)
             for k, frac in ((0, 0.18), (1, 0.42)):
                 i = int(frac * (len(line) - 1))

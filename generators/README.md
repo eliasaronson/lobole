@@ -172,10 +172,14 @@ an invalid body poisons everything asked of it — the assembly sweep reported
 17 cm3 of the rear cog buried in a frame that does not reach it, and the hunt
 for that phantom cost more than the rear triangle did to build.
 
-`chassis/` is a Formula Student space frame, and the first generator whose
-point is the ORDER rather than the model: 52 members, 49 of them coped or
-mitred to their neighbours, and out of it a cut list, a bend schedule and the
-number of six-metre sticks to buy. `--shop <dir>` writes the whole order —
+`chassis/` is a Formula Student space frame, and the first
+generator whose point is the ORDER rather than the model: 91 members, 86 of
+them coped or mitred to their neighbours, and out of it a cut list, a bend
+schedule and the number of six-metre sticks to buy. The FRAME is a team's
+own CAD: `sldprt_frame.py` reads a SolidWorks part without SolidWorks (its
+container is raw-deflate streams, two of which are Parasolid transmit files)
+and writes the node graph to `fs_chassis_frame.json`, which is what the generator
+builds; see [the CAD round](../docs/chassis-cad-plan.md). `--shop <dir>` writes the whole order —
 a STEP per member, a DXF per flat blank (floor, firewall, suspension tabs,
 and a notched plate for every jig station) and a manifest naming each file,
 what it is and what it is made of; `--save` keeps the project to look at. Each member is its own body — a member is what gets
@@ -186,10 +190,12 @@ and [the round](../docs/chassis-round-plan.md).
 
 Three things it found are worth carrying to the next frame:
 
-**Rank the members by what runs THROUGH.** A lower rail is continuous from
-bulkhead to engine bay and the hoops land on it; the hoops carry the bracing;
+**Rank the members by what runs THROUGH.** A member a node sits in the
+MIDDLE of is tacked before one that ENDS there: the hoops carry the bracing,
 the bracing carries the rest. Coping in that order is how a frame is tacked
-up, and it is what stops two members eating each other.
+up, and it is what stops two members eating each other — and it is read off
+the node graph, so every member gets its own rank and every pair that meets
+is resolved by exactly one cope or mitre.
 
 **A joint is not where the lines cross.** A hoop turns SHORT of its corner —
 with a 152 mm former the metal is 63 mm away from it — so a brace attached to

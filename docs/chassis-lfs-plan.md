@@ -1,5 +1,12 @@
 # The LFS19 chassis, recreated
 
+> **Superseded (2026-09-23):** the frame is now READ from the team's CAD, not
+> recreated from a photograph — the team's SolidWorks frame part turned out
+> to be readable after all (its streams are raw deflate, and two are Parasolid
+> models). See [chassis-cad-plan.md](chassis-cad-plan.md). What
+> follows is the photograph-era plan, kept for its reasoning about jigs,
+> tabs and hoops.
+
 The frame the generator builds now is *a* Formula Student chassis: rectangular
 hoops, a boxed rear, a bulkhead and five stations, every bay triangulated
 because the rules of a space frame say so. The car Lund Formula Student

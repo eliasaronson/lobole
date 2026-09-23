@@ -23,196 +23,137 @@ from chassis_frame import Frame   # noqa: E402
 from designer_remote import Designer  # noqa: E402
 
 
-def members(f):
-    """Every member of the LFS19 frame, by name, in the order it is tacked.
+def _name(a, b):
+    """A member's name from where it is and which way it runs: what a
+    fabricator calls it on the jig. The CAD has none to give — a weldment's
+    members are nameless solids — so the name is read off the geometry."""
+    mid = [(a[k] + b[k]) / 2.0 for k in range(3)]
+    if mid[0] < S.X_BULKHEAD_SUPPORT - 1.0:
+        zone = "Nose"
+    elif mid[0] < S.X_FRONT_HOOP - 1.0:
+        zone = "Footwell"
+    elif mid[0] < S.X_MAIN_HOOP - 1.0:
+        zone = "Cockpit"
+    elif mid[0] < S.X_REAR - 150.0:
+        zone = "Engine bay"
+    else:
+        zone = "Rear"
+    d = [b[k] - a[k] for k in range(3)]
+    n = sum(c * c for c in d) ** 0.5
+    u = [abs(c) / n for c in d]
+    if u[0] > 0.9:
+        low = max(a[2], b[2]) < S.Z_FLOOR + 90.0
+        kind = "lower rail" if low else "rail"
+    elif u[1] > 0.9:
+        kind = "cross"
+    elif u[2] > 0.9:
+        kind = "upright"
+    else:
+        kind = "diagonal"
+    side = "" if abs(mid[1]) < 5.0 else (" L" if mid[1] > 0 else " R")
+    return f"{zone} {kind}{side}"
 
-    Rank 0 is primary (coped to nothing), rank 1 lands on rank 0, and so on.
 
-    The shape is READ off a photograph of the car on its weld jig; the sizes
-    are the rulebook's; the lengths are in chassis_spec.py with their
-    provenance beside them. What makes this the LFS car rather than a
-    textbook one is in three places: the hoops LEAN IN to a narrow crown,
-    the rear is a truss that CONVERGES on a pair of node clusters rather
-    than a box, and the main hoop is braced both forward and rearward with
-    the braces triangulated to each other.
+def _order(table):
+    """The order the frame is tacked up in, as a rank per member.
+
+    A member that a node sits in the MIDDLE of runs through it, and is tacked
+    before anything that ENDS there — the rule the old generator applied by
+    hand, now read off the topology. Where several members END at one node
+    (a corner) there is nothing to say which goes first, so the heavier and
+    then the longer one does. Every member gets its own rank, so every pair
+    that meets is resolved by exactly one cope or one mitre.
     """
-    fh = lambda z: S.lean(S.FRONT_HOOP, z)   # noqa: E731 - half width at z
-    mh = lambda z: S.lean(S.MAIN_HOOP, z)    # noqa: E731
+    n = len(table)
+    before = [set() for _ in range(n)]
+    for i, m in enumerate(table):
+        for j, o in enumerate(table):
+            if i != j and set(o["through"]) & set(m["ends"]):
+                before[i].add(j)
+    weight = lambda k: (-table[k]["od"], -table[k]["length"])  # noqa: E731
+    done, order = set(), []
+    while len(order) < n:
+        ready = [k for k in range(n) if k not in done
+                 and before[k] <= done]
+        if not ready:  # a cycle: take the heaviest remaining
+            ready = [k for k in range(n) if k not in done]
+        k = min(ready, key=weight)
+        done.add(k)
+        order.append(k)
+    return {k: r for r, k in enumerate(order)}
 
-    # --- rank 0: the lower rails, the spine of the car -------------------
-    # Unbroken from the bulkhead to the front of the engine bay, with ONE
-    # bend, at the front taper. Everything else lands on them, and both
-    # hoops' feet sit on the straight stretch — which is why no joint in
-    # this frame is on a bend.
-    f.pair("Lower rail", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_TAPER_FRONT, S.W_TAPER_FRONT, S.Z_FLOOR),
-        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
-    ], S.STRUCT, rank=0)
 
-    # --- rank 1: the hoops, each bent from ONE length of tube -------------
-    # Vertical off the feet, then leaning inward to a crown half as wide.
-    f.add("Main hoop", S.MAIN_HOOP, S.HOOP, rank=1, former=S.HOOP_FORMER)
-    f.add("Front hoop", S.FRONT_HOOP, S.HOOP, rank=1, former=S.HOOP_FORMER)
+def members(f):
+    """Every member of the frame, from the team's CAD.
 
-    # --- rank 2: the front bulkhead --------------------------------------
-    # Nearly square, and braced across its own opening: the photograph shows
-    # a single diagonal inside the bulkhead frame.
-    f.pair("Bulkhead upright", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.HOOP, rank=2)
-    f.add("Bulkhead top", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.HOOP, rank=2)
-    f.add("Bulkhead bottom", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_FLOOR),
-    ], S.HOOP, rank=2)
-    f.add("Bulkhead diagonal", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD, -S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-    ], S.SMALL, rank=3)
+    fs_chassis_frame.json is the node graph `sldprt_frame.py` read out of
+    the team's SolidWorks frame part: straight members as node pairs, the two
+    hoops as bent members through their corners on the CAD's own 100 mm
+    bends. What this adds is what the CAD cannot say: a name for each piece
+    and the order they are tacked in.
+    """
+    N = S.NODES
+    table = []
+    for b in S.FRAME["bent"]:
+        pts = [N[b["feet"][0]]] + [tuple(c) for c in b["corners"]] + \
+              [N[b["feet"][1]]]
+        tall = max(c[2] for c in b["corners"])
+        name = "Main hoop" if b is S.MAIN_HOOP else "Front hoop"
+        table.append({"name": name, "points": pts, "od": b["od"],
+                      "size": S.size_name(b["od"], b["wall"]),
+                      "ends": set(b["feet"]), "through": set(b["through"]),
+                      "former": b["radius"], "length": tall})
+    # The members the rules NAME get their names: a scrutineer asks for the
+    # main hoop bracing by that name, not for "engine bay diagonal 7".
+    on_hoop = {id(b): set(b["feet"]) | set(b["through"])
+               for b in S.FRAME["bent"]}
+    knee = {id(b): min(c[2] for c in b["corners"]) for b in S.FRAME["bent"]}
 
-    # --- rank 2: the upper rails of the front box ------------------------
-    # From the bulkhead's top corners back to the front hoop. They land ON
-    # the hoop, which by then is leaning, so the width is asked of the hoop
-    # rather than assumed.
-    f.pair("Front upper rail", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=2)
+    def special(m, a, b):
+        side = "" if abs(a[1] + b[1]) < 10.0 else \
+            (" L" if a[1] + b[1] > 0 else " R")
+        if abs(a[0] - S.X_BULKHEAD) < 5.0 and abs(b[0] - S.X_BULKHEAD) < 5.0:
+            return "Bulkhead " + _name(a, b).split(" ", 1)[1]
+        if abs(m["od"] - 30.0) < 0.1:
+            return ("Shoulder harness bar" if abs(a[1] + b[1]) < 10.0
+                    else "Harness bar strut" + side)
+        for hoop, label, rearward in ((S.MAIN_HOOP, "Main hoop brace", True),
+                                      (S.FRONT_HOOP, "Front hoop brace",
+                                       False)):
+            for end, other in ((m["nodes"][0], b), (m["nodes"][1], a)):
+                p = N[end]
+                if (end in on_hoop[id(hoop)] and p[2] > knee[id(hoop)] + 50.0
+                        and ((other[0] > p[0] + 100.0) if rearward
+                             else (other[0] < p[0] - 100.0))):
+                    return label + side
+        return None
 
-    # --- rank 3: the bulkhead support ------------------------------------
-    # A ring on the rails a little behind the bulkhead, and the triangles
-    # that tie the bulkhead to it. The rules ask for this to be a truss,
-    # and the photograph shows it as one.
-    f.pair("Support upright", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-    ], S.STRUCT, rank=3)
-    f.add("Support top", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-    ], S.STRUCT, rank=3)
-    f.pair("Support side diagonal", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-    ], S.STRUCT, rank=4)
-    f.add("Nose floor diagonal", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_FLOOR),
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT, S.Z_FLOOR),
-    ], S.SMALL, rank=4)
-    f.add("Nose roof diagonal", [
-        (S.X_BULKHEAD, S.W_BULKHEAD, S.Z_BULKHEAD_TOP),
-        (S.X_BULKHEAD_SUPPORT, -S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-    ], S.SMALL, rank=4)
-
-    # --- rank 4: the footwell, support ring to front hoop -----------------
-    f.pair("Footwell side diagonal", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=4)
-    f.add("Footwell floor diagonal", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
-    ], S.SMALL, rank=4)
-    f.add("Footwell roof diagonal", [
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-        (S.X_FRONT_HOOP, -fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-    ], S.SMALL, rank=4)
-    f.add("Front hoop bottom", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_FRONT_HOOP, -S.W_FRONT_HOOP, S.Z_FLOOR),
-    ], S.STRUCT, rank=3)
-
-    # --- rank 4: the front hoop's bracing --------------------------------
-    # Forward and down onto the support ring, which is where the photograph
-    # puts it and what the rules allow. It lands BELOW the crown bend.
-    f.pair("Front hoop brace", [
-        (S.X_FRONT_HOOP, S.W_FH_BRACE, S.Z_FH_BRACE),
-        (S.X_BULKHEAD_SUPPORT, S.W_SUPPORT_TOP, S.Z_SUPPORT_TOP),
-    ], S.STRUCT, rank=4)
-
-    # --- rank 3: the side impact structure -------------------------------
-    # The rules want three members a side between the hoops. The lower one
-    # IS the lower rail; the upper one and the diagonal are these.
-    f.pair("Side impact upper", [
-        (S.X_FRONT_HOOP, fh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-        (S.X_MAIN_HOOP, mh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=3)
-    f.pair("Side impact diagonal", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, mh(S.Z_SIDE_UPPER), S.Z_SIDE_UPPER),
-    ], S.STRUCT, rank=4)
-    f.add("Cockpit floor diagonal", [
-        (S.X_FRONT_HOOP, S.W_FRONT_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
-    ], S.SMALL, rank=4)
-    f.add("Main hoop bottom", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
-        (S.X_MAIN_HOOP, -S.W_MAIN_HOOP, S.Z_FLOOR),
-    ], S.STRUCT, rank=3)
-    # The shoulder harness bar: the CAD has a `shoulder harness mount`, and
-    # the rules want the belts on a member of their own.
-    f.add("Shoulder harness bar", [
-        (S.X_MAIN_HOOP, mh(S.Z_HARNESS), S.Z_HARNESS),
-        (S.X_MAIN_HOOP, -mh(S.Z_HARNESS), S.Z_HARNESS),
-    ], S.STRUCT, rank=3)
-
-    # --- rank 4: the rear truss ------------------------------------------
-    # It CONVERGES: everything behind the main hoop runs in toward a pair of
-    # node clusters at the back, which is where the rear suspension and the
-    # top of the main hoop bracing all land. That convergence is the single
-    # biggest difference from a boxed rear bay.
-    f.pair("Rear upper rail", [
-        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.STRUCT, rank=4)
-    f.pair("Main hoop brace", [
-        (S.X_MAIN_HOOP, S.W_MH_BRACE, S.Z_MH_BRACE),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.HOOP, rank=4)
-    f.pair("Rear lower rail", [
-        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
-        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
-    ], S.STRUCT, rank=4)
-    f.pair("Rear upright", [
-        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.STRUCT, rank=5)
-    f.add("Rear top cross", [
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-        (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
-    ], S.STRUCT, rank=5)
-    f.add("Rear bottom cross", [
-        (S.X_REAR, S.W_REAR, S.Z_FLOOR),
-        (S.X_REAR, -S.W_REAR, S.Z_FLOOR),
-    ], S.STRUCT, rank=5)
-    f.pair("Rear side diagonal", [
-        (S.X_ENGINE_FRONT, S.W_ENGINE, S.Z_FLOOR),
-        (S.X_REAR, S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
-    f.add("Rear roof diagonal", [
-        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
-        (S.X_REAR, -S.W_REAR, S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
-    f.add("Engine bay floor diagonal", [
-        (S.X_MAIN_HOOP, S.W_MAIN_HOOP, S.Z_FLOOR),
-        (S.X_REAR, -S.W_REAR, S.Z_FLOOR),
-    ], S.SMALL, rank=5)
-    # The two main hoop braces are triangulated to EACH OTHER. Without this
-    # they are two long struts that can only fold sideways together.
-    _bx = (S.X_MAIN_HOOP + S.X_REAR) / 2.0
-    _by = (S.W_MH_BRACE + S.W_REAR) / 2.0
-    _bz = (S.Z_MH_BRACE + S.Z_REAR_TOP) / 2.0
-    f.add("Brace cross", [(_bx, _by, _bz), (_bx, -_by, _bz)],
-          S.SMALL, rank=5)
-    f.pair("Brace stay", [
-        (_bx, _by, _bz),
-        (S.X_MAIN_HOOP, mh(S.Z_REAR_TOP), S.Z_REAR_TOP),
-    ], S.SMALL, rank=5)
+    for m in S.FRAME["members"]:
+        a, b = N[m["nodes"][0]], N[m["nodes"][1]]
+        length = sum((a[k] - b[k]) ** 2 for k in range(3)) ** 0.5
+        table.append({"name": special(m, a, b) or _name(a, b),
+                      "points": [a, b], "od": m["od"],
+                      "size": S.size_name(m["od"], m["wall"]),
+                      "ends": set(m["nodes"]), "through": set(m["through"]),
+                      "former": None, "length": length})
+    # Two members read the same name (a nose has four diagonals a side):
+    # number them front to back so every piece in the cut list is its own.
+    seen = {}
+    for t in sorted(table, key=lambda t: min(p[0] for p in t["points"])):
+        k = t["name"]
+        seen[k] = seen.get(k, 0) + 1
+        t["n"] = seen[k]
+    for t in table:
+        if seen[t["name"]] > 1:
+            base, _, side = t["name"].rpartition(" ")
+            if side in ("L", "R"):
+                t["name"] = f"{base} {t['n']} {side}"
+            else:
+                t["name"] = f"{t['name']} {t['n']}"
+    rank = _order(table)
+    for k, t in enumerate(table):
+        f.add(t["name"], t["points"], t["size"], rank=rank[k],
+              former=t["former"])
 
 
 def main():
@@ -265,6 +206,8 @@ def main():
         d.call("set_active_part", part="Chassis")
     for i in range(len(bodies)):
         d.call("set_material", body=i, material=S.MATERIAL)
+        d.call("set_appearance", body=i, color=list(S.FINISH),
+               roughness=0.35, metallic=0.2)
 
     # --- what a shop asks -------------------------------------------------
     print("\n-- is it sound --")

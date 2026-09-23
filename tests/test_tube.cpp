@@ -49,6 +49,18 @@ tube::Member Easy(double radius, double angle = 90.0, double od = kHoopOD,
 
 } // namespace
 
+TEST_CASE("The chromoly sizes a Formula Student frame is bought in are stocked",
+          "[tube]") {
+  // At their exact walls: 0.049" is 1.245 mm, 0.058" is 1.473 mm. A real FS
+  // frame's CAD models them so, and every member of it was refused as
+  // unstocked.
+  for (const char* s :
+       {"28.575x1.473", "25.4x1.245", "19.05x1.245", "15.875x1.245", "25x1"}) {
+    INFO(s);
+    CHECK(tube::LookupSize("steel", s, nullptr).has_value());
+  }
+}
+
 TEST_CASE("A tube size is looked up, never rounded to a neighbour", "[tube]") {
   const auto s = tube::LookupSize("steel", "25.4x2.4", nullptr);
   REQUIRE(s.has_value());
