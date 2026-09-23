@@ -42,9 +42,9 @@ with, only the icons"*, and raising the Font size preference to 140% scales
 both, so the ratio never improves.
 
 It is a ratio, and the numbers say so. Text is `16.0f * scale`
-(src/ui/Theme.cpp:186); the Font Awesome icon font merged into it is
-`14.0f * scale` with `GlyphMinAdvanceX = 15.0f * scale`
-(src/ui/Theme.cpp:190-198). **The icons are 87% of the text size.** Toolbar
+(src/ui/Theme.cpp); the two icon fonts merged into it (Font Awesome, and
+Designer's own CAD glyphs since docs/ui/icons-plan.md) are `14.0f * scale`
+with `GlyphMinAdvanceX = GlyphMaxAdvanceX = 14.0f * scale` (src/ui/Theme.cpp). **The icons are 87% of the text size.** Toolbar
 buttons pass no explicit size (src/ui/Toolbar.cpp:245-257 — `ImGui::Button(icon)`),
 so a button is exactly one glyph plus padding. Every other CAD toolbar puts
 icons well ABOVE body-text size; ours is the only element a user cannot read

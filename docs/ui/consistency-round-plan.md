@@ -156,12 +156,14 @@ As planned, with these differences.
   - Profile, Drill, Whole and Index face on the job bar.
 
   The feature tree follows the toolbar for Thread, Hole, Corner relief,
-  Unfold, Loft, Derived, Draft and Split. The gate
-  (`test_conventions.cpp`, "a toolbar glyph means one thing and a feature has
-  one glyph") parses both files. It fails on a glyph shared by different
-  tools, with an explicit list of same-idea groups (Fit, Measure, Extrude,
-  Hole and others on several bars), and on a feature whose tree glyph is not
-  its button's.
+  Unfold, Loft, Derived, Draft and Split. Since the icons round
+  (docs/ui/icons-plan.md) both read ONE table, `src/ui/Icons.cpp`, so the
+  tree cannot disagree with the button. The gate (`test_conventions.cpp`,
+  "a toolbar glyph means one thing and a feature has one glyph") reads that
+  table: it fails on a glyph shared by different commands, with an explicit
+  list of same-idea groups (Extrude, Hole, Fillet and others on several
+  bars), and on a panel asking it for a command it does not hold.
+  `toolbar/no_duplicate_glyph` checks the drawn bars and flyouts.
 - **Words:** Measure, Section, the fastener tool, the op, tool, occurrence
   and relation editors and the reference-image session say Close. The mate
   window uses the tool window's Accept and Cancel (`###tw_accept`,

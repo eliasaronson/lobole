@@ -937,56 +937,43 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
   // features with a different glyph from the button that creates them
   // (Revolve, Hole, Draft, Split). A glyph is how a person finds a tool
   // without reading, so neither kind of drift is cosmetic.
+  //
+  // Both now come from ONE table, ui/Icons.cpp (docs/ui/icons-plan.md): the
+  // tree answers through CommandIcon, so it cannot disagree with the button,
+  // and what is left to check is the table itself.
   auto read = [](const char* rel) {
     std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
   };
-  const std::string toolbar = read("src/ui/Toolbar.cpp");
-  const std::string tree = read("src/ui/FeatureTreePanel.cpp");
-  REQUIRE(!toolbar.empty());
-  REQUIRE(!tree.empty());
-
-  // Every button: `ICON "###tb_id"`, or a sketch tool's `ICON, "sketch.x"`
-  // (answering to ###tb_sk_x).
-  std::map<std::string, std::set<std::string>> idsByGlyph;
-  std::map<std::string, std::string> glyphById;
-  const std::regex tagged(R"re((ICON_FA_[A-Z0-9_]+)\s*"###(tb_[a-z0-9_]+)")re");
-  const std::regex sketch(
-      R"re((ICON_FA_[A-Z0-9_]+)\s*,\s*"sketch\.([a-z0-9_]+)")re");
-  for (std::sregex_iterator it(toolbar.begin(), toolbar.end(), tagged), end;
+  const std::string table = read("src/ui/Icons.cpp");
+  REQUIRE(!table.empty());
+  std::map<std::string, std::set<std::string>> commandsByGlyph;
+  std::set<std::string> commands;
+  const std::regex entry(
+      R"re(\{"([a-z0-9_]+\.[a-z0-9_]+)",\s*(ICON_(?:FA|DS)_[A-Z0-9_]+)\})re");
+  for (std::sregex_iterator it(table.begin(), table.end(), entry), end;
        it != end; ++it) {
-    idsByGlyph[(*it)[1]].insert((*it)[2]);
-    glyphById[(*it)[2]] = (*it)[1];
+    commandsByGlyph[(*it)[2]].insert((*it)[1]);
+    commands.insert((*it)[1]);
   }
-  for (std::sregex_iterator it(toolbar.begin(), toolbar.end(), sketch), end;
-       it != end; ++it) {
-    const std::string id = "tb_sk_" + std::string((*it)[2]);
-    idsByGlyph[(*it)[1]].insert(id);
-    glyphById[id] = (*it)[1];
-  }
-  REQUIRE(glyphById.size() > 80); // the parse found the bars, not a handful
+  REQUIRE(commands.size() > 100); // the parse found the table, not a handful
 
-  // Buttons that share a glyph because they are the SAME idea on different
+  // Commands that share a glyph because they are the SAME idea on different
   // bars. Anything else sharing one is a clash.
   const std::vector<std::set<std::string>> sameIdea = {
-      {"tb_fit", "tb_sk_fit", "tb_asm_fit", "tb_dwg_fit", "tb_job_fit"},
-      {"tb_measure", "tb_asm_measure", "tb_job_measure"},
-      {"tb_render", "tb_asm_render"},
-      {"tb_simulation", "tb_asm_simulation"},
-      {"tb_extrude", "tb_sk_extrude"},
-      {"tb_revolve", "tb_sk_revolve"},
-      {"tb_hole", "tb_sk_hole", "tb_dwg_hole_callout", "tb_job_drill"},
-      {"tb_mirror", "tb_sk_mirror"},
-      {"tb_pattern", "tb_sk_pattern", "tb_dwg_pattern_callout"},
-      {"tb_fillet", "tb_sk_fillet", "tb_job_edge"},
-      {"tb_planes", "tb_sk_glyphs"},        // show or hide
-      {"tb_insert", "tb_dwg_add_view"},     // put a thing in
-      {"tb_mate_fastened", "tb_sim_fixed"}, // held rigid
-      {"tb_sim_run", "tb_job_simulate"},    // run it
-      {"tb_datum_plane", "tb_mate_planar"}, // a plane
-      {"tb_sk_arc_3point", "tb_sk_arc_center", "tb_sk_ellipse_arc"}, // arcs
+      {"view.section", "sketch.toggle_slice"}, // a cut at a plane
+      {"part.simulation", "assembly.simulation"},
+      {"part.extrude", "sketch.extrude"},
+      {"part.revolve", "sketch.revolve"},
+      {"part.hole", "sketch.hole", "drawing.dim_hole_callout", "job.drill"},
+      {"part.mirror", "sketch.mirror"},
+      {"part.pattern", "sketch.pattern", "drawing.dim_pattern_callout"},
+      {"part.fillet", "sketch.fillet", "job.edge"},
+      {"view.toggle_planes", "sketch.toggle_glyphs"}, // show or hide
+      {"assembly.insert", "drawing.add_view"},        // put a thing in
+      {"sim.run", "job.simulate"},                    // run it
   };
   const auto groupOf = [&](const std::string& id) -> int {
     for (size_t g = 0; g < sameIdea.size(); g++)
@@ -995,8 +982,8 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
     return -1;
   };
   std::vector<std::string> clashes;
-  for (const auto& [glyph, ids] : idsByGlyph) {
-    std::set<std::string> ideas; // a group index, or the id itself
+  for (const auto& [glyph, ids] : commandsByGlyph) {
+    std::set<std::string> ideas; // a group index, or the command itself
     for (const std::string& id : ids) {
       const int g = groupOf(id);
       ideas.insert(g >= 0 ? "group" + std::to_string(g) : id);
@@ -1018,41 +1005,79 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
           }());
   CHECK(clashes.empty());
 
-  // The tree's glyph for a feature is the glyph of the button that makes it.
-  const std::regex icon(
-      R"re(type == "([A-Za-z0-9]+)"\)\s*return (ICON_FA_[A-Z0-9_]+);)re");
-  const std::map<std::string, std::string> alias = {{"Derived", "tb_derive"}};
-  std::vector<std::string> drift;
-  int compared = 0;
-  for (std::sregex_iterator it(tree.begin(), tree.end(), icon), end; it != end;
-       ++it) {
-    const std::string type = (*it)[1];
-    std::string id = "tb_";
-    if (auto a = alias.find(type); a != alias.end()) {
-      id = a->second;
-    } else {
-      for (size_t i = 0; i < type.size(); i++) { // CamelCase -> snake_case
-        const char c = type[i];
-        if (std::isupper(static_cast<unsigned char>(c)) && i > 0)
-          id += '_';
-        id += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      }
+  // Every command a panel asks the table for is IN it: a misspelt one would
+  // quietly show the unknown-command glyph on its tree row.
+  std::vector<std::string> unknown;
+  int asked = 0;
+  const std::regex ask(
+      R"re((?:CommandIcon\(|\{"[A-Za-z0-9]+", )"([a-z]+\.[a-z0-9_]+)")re");
+  for (const char* rel :
+       {"src/ui/FeatureTreePanel.cpp", "src/ui/OccurrencePanel.cpp",
+        "src/ui/CamPanel.cpp", "src/ui/SketchToolbar.cpp"}) {
+    const std::string text = read(rel);
+    for (std::sregex_iterator it(text.begin(), text.end(), ask), end; it != end;
+         ++it) {
+      asked++;
+      if (!commands.count((*it)[1]))
+        unknown.push_back(std::string(rel) + ": " + std::string((*it)[1]));
     }
-    const auto b = glyphById.find(id);
-    if (b == glyphById.end())
-      continue; // no button makes it (Sketch, Import, FlatPattern...)
-    compared++;
-    if (b->second != std::string((*it)[2]))
-      drift.push_back(type + ": tree " + std::string((*it)[2]) + ", toolbar " +
-                      b->second);
   }
-  CHECK(compared > 20);
-  INFO("The feature tree and the toolbar disagree:\n"
+  CHECK(asked > 40); // the tree's table, six mates, nine op types
+  INFO("Not in src/ui/Icons.cpp:\n"
        << [&] {
             std::string s;
-            for (const std::string& d : drift)
-              s += "  " + d + "\n";
+            for (const std::string& u : unknown)
+              s += "  " + u + "\n";
             return s;
           }());
-  CHECK(drift.empty());
+  CHECK(unknown.empty());
+}
+
+TEST_CASE("a command's icon comes from ui/Icons.cpp alone", "[convention]") {
+  // Four hand-kept copies of "which glyph is this" had drifted: the mate list
+  // disagreed with the assembly bar on four of six mates, and OpGlyph claimed
+  // the job bar's glyphs while showing others (docs/ui/icons-plan.md). The
+  // glyph is now CommandIcon's, and nothing else may name one for a command:
+  // not a toolbar button, a flyout variant, or the three tree-row tables.
+  const auto read = [](const char* rel) {
+    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    REQUIRE(!ss.str().empty());
+    return ss.str();
+  };
+  std::vector<std::string> named;
+
+  // A glyph literal as the first argument of a command button — it still
+  // compiles, since "###tb_*" concatenates onto it, and would show two
+  // glyphs — or as a flyout variant's first field.
+  const std::string toolbar = read("src/ui/Toolbar.cpp");
+  const std::regex button(
+      R"(\b(CommandButton|btn|mateBtn|bcBtn|dimBtn|conBtn|toolBtn)\(\s*(state,\s*)?ICON_(FA|DS)_\w+)");
+  const std::regex variant(R"(\{\{?\s*ICON_(FA|DS)_\w+)");
+  for (const std::regex* re : {&button, &variant})
+    for (std::sregex_iterator it(toolbar.begin(), toolbar.end(), *re), end;
+         it != end; ++it)
+      named.push_back("src/ui/Toolbar.cpp: " + it->str());
+
+  // The tree-row tables: each must answer through CommandIcon.
+  for (const auto& [rel, fn] :
+       {std::pair{"src/ui/FeatureTreePanel.cpp", "const char* FeatureIcon("},
+        std::pair{"src/ui/OccurrencePanel.cpp", "const char* MateGlyph("},
+        std::pair{"src/ui/CamPanel.cpp", "const char* OpGlyph("}}) {
+    const std::string text = read(rel);
+    const size_t at = text.find(fn);
+    REQUIRE(at != std::string::npos); // renamed? then follow it here
+    const std::string body = text.substr(at, text.find("\n}\n", at) - at);
+    for (const char* prefix : {"ICON_FA_", "ICON_DS_"})
+      if (body.find(prefix) != std::string::npos)
+        named.push_back(std::string(rel) + ": " + fn + " names a glyph");
+  }
+  INFO([&] {
+    std::string s = "Name the glyph in src/ui/Icons.cpp instead:\n";
+    for (const std::string& n : named)
+      s += "  " + n + "\n";
+    return s;
+  }());
+  CHECK(named.empty());
 }

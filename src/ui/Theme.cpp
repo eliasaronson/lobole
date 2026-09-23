@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 
+#include "IconsDesigner.h"
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
@@ -207,19 +208,47 @@ void ApplyTheme(float uiScale, float framebufferScale) {
     io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * uiScale, nullptr,
                                  kUiRanges);
 
-    // Merge Font Awesome icons into the same atlas so ICON_FA_* works inline
-    const std::string iconPath = (dir / "fa-solid-900.ttf").string();
-    if (std::filesystem::exists(iconPath)) {
-      static const ImWchar kIconRange[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
+    // Merge the icon fonts into the same atlas so ICON_FA_* and ICON_DS_*
+    // work inline: Font Awesome, then Designer's own CAD glyphs
+    // (tools/icons/build_icon_font.py) in a range FA leaves empty.
+    //
+    // Every icon gets the SAME advance, min and max alike, so no glyph can
+    // make its button wider than its neighbours (a 15 px floor alone let the
+    // 16.8 px ones do it, and the planes toggle grew 2 px on every click).
+    //
+    // The slot is 14 px: exactly the grid Designer's glyphs are drawn on,
+    // centred in, and snapped to, so they fill it with no shift and their
+    // edges stay on pixels. Font Awesome's are then CENTRED in it by ImGui —
+    // which needs PixelSnapH off: with it on, the centring offset is
+    // truncated, and every FA icon sat ~0.8 px left of its button's middle.
+    // Their edges never landed on pixels at this size anyway, so they lose
+    // nothing, and are oversampled like text. The wide ones (16.8 px)
+    // overhang into the button's padding, centred (docs/ui/icons-plan.md).
+    static const ImWchar kFaRange[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
+    static const ImWchar kDsRange[] = {ICON_MIN_DS, ICON_MAX_DS, 0};
+    struct IconFont {
+      const char* file;
+      const ImWchar* range;
+      bool onPixelGrid; // drawn on the 14 px grid: keep it snapped
+    };
+    for (const IconFont& f : {IconFont{"fa-solid-900.ttf", kFaRange, false},
+                              IconFont{"designer-icons.ttf", kDsRange, true}}) {
+      const std::string iconPath = (dir / f.file).string();
+      if (!std::filesystem::exists(iconPath)) {
+        LOG_WARN("Icon font not found at {}", iconPath);
+        continue;
+      }
       ImFontConfig cfg;
       cfg.MergeMode = true;
-      cfg.PixelSnapH = true;
-      cfg.GlyphMinAdvanceX = 15.0f * uiScale; // fixed-width icon column
-      cfg.GlyphOffset = ImVec2(0.0f, 2.0f * uiScale);
+      cfg.PixelSnapH = f.onPixelGrid;
+      cfg.GlyphMinAdvanceX = cfg.GlyphMaxAdvanceX = 14.0f * uiScale;
+      // No GlyphOffset. It was +2 px from the first toolbar on, which put
+      // every icon 2 px below its button's middle (measured on all six bars).
+      // Unshifted, FA's glyph box is centred 5.0 px above the baseline, where
+      // the middle of Roboto's capitals is (5.7 px), so an icon inline with
+      // text lines up with it too.
       io.Fonts->AddFontFromFileTTF(iconPath.c_str(), 14.0f * uiScale, &cfg,
-                                   kIconRange);
-    } else {
-      LOG_WARN("Icon font not found at {}", iconPath);
+                                   f.range);
     }
 
     // The terminal panel's font, as a SEPARATE atlas entry rather than a

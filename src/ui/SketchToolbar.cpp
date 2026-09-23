@@ -1,4 +1,5 @@
 #include "ui/SketchToolbar.h"
+#include "ui/Icons.h"
 #include "ui/SelectionPipeline.h"
 
 #include "core/features/ExtrudeFeature.h"
@@ -627,10 +628,12 @@ void DrawSketchModelSections(AppState& state) {
         std::snprintf(label, sizeof(label), ICON_FA_LINK "  Linked copy (%zu)",
                       op.sourceIds.size());
       } else if (op.kind == sketch::DerivedKind::Mirror) {
-        std::snprintf(label, sizeof(label), ICON_FA_LEFT_RIGHT "  Mirror (%zu)",
-                      op.sourceIds.size());
+        // The glyph of the tool that made the row (ui/Icons.h).
+        std::snprintf(label, sizeof(label), "%s  Mirror (%zu)",
+                      CommandIcon("sketch.mirror"), op.sourceIds.size());
       } else {
-        std::snprintf(label, sizeof(label), ICON_FA_GRIP "  %s pattern (x%d)",
+        std::snprintf(label, sizeof(label), "%s  %s pattern (x%d)",
+                      CommandIcon("sketch.pattern"),
                       op.kind == sketch::DerivedKind::CircularPattern
                           ? "Circular"
                           : "Linear",

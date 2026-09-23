@@ -1,4 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/DocumentSlots.h"
+#include "ui/Icons.h"
+#include "ui/SimulationActions.h"
 
 // Shell GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -7,10 +10,9 @@
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
 
-// Every button on the model toolbar, in bar order. File scope because two
-// tests read it — "every_tool_is_reachable" (the row fits, nothing is culled)
-// and "no_duplicate_glyph" (no two of them wear the same icon). A tool added
-// to the bar and not to this list is caught by the first of those.
+// Every button on the model toolbar, in bar order, for
+// "every_tool_is_reachable" (the row fits, nothing is culled).
+// "no_duplicate_glyph" walks what is drawn instead, on every bar.
 static const char* const kModelTools[] = {
     "###tb_new_sketch", "###tb_box",         "###tb_sphere",
     "###tb_cylinder",   "###tb_extrude",     "###tb_revolve",
@@ -24,6 +26,72 @@ static const char* const kModelTools[] = {
     "###tb_simulation", "###tb_section",     "###tb_measure",
     "###tb_render",
 };
+
+namespace {
+
+// The icon glyph a label starts with: its first code point, when that is in
+// the Private Use Area both icon fonts live in. 0 = no icon.
+uint32_t LeadingIcon(const char* label) {
+  unsigned int cp = 0;
+  ImTextCharFromUtf8(&cp, label, nullptr);
+  return cp >= 0xE000 && cp <= 0xF8FF ? cp : 0;
+}
+
+// What a toolbar item IS, for telling a duplicate from the same command met
+// twice: its "###" id where it has one, its visible text otherwise (a sketch
+// flyout's rows carry no id).
+std::string ItemIdentity(const char* label) {
+  const char* hash = std::strstr(label, "###");
+  if (hash != nullptr)
+    return hash + 3;
+  std::string s = label;
+  const size_t text = s.find_first_not_of(' ', s.find(' '));
+  return text == std::string::npos ? s : s.substr(text);
+}
+
+// Adds every icon-led item under `ref` to `seen` (glyph -> identity) and
+// fails on a glyph two DIFFERENT items share. `skip` drops a flyout's face,
+// which shows one of the rows it opens and would read as a second copy — and
+// WHICH row depends on the last one used, so it lists every candidate.
+void CollectToolbarIcons(ImGuiTestContext* ctx, const char* ref,
+                         const char* bar,
+                         std::unordered_map<uint32_t, std::string>& seen,
+                         std::initializer_list<const char*> skip = {}) {
+  ImGuiTestItemList items;
+  ctx->GatherItems(&items, ref, -1);
+  for (const ImGuiTestItemInfo& item : items) {
+    const uint32_t glyph = LeadingIcon(item.DebugLabel);
+    if (glyph == 0)
+      continue;
+    const std::string who = ItemIdentity(item.DebugLabel);
+    if (std::any_of(skip.begin(), skip.end(), [&](const char* k) {
+          return who.find(k) != std::string::npos;
+        }))
+      continue;
+    if (glyph == LeadingIcon(ui::kUnknownIcon))
+      IM_ERRORF("%s toolbar: \"%s\" has no icon in src/ui/Icons.cpp", bar,
+                who.c_str());
+    const auto [it, fresh] = seen.emplace(glyph, who);
+    if (!fresh && it->second != who)
+      IM_ERRORF("%s toolbar: \"%s\" and \"%s\" show the same icon U+%04X", bar,
+                it->second.c_str(), who.c_str(), glyph);
+  }
+}
+
+// Opens a flyout by its caret and collects its rows into the same bar.
+void CollectFlyout(ImGuiTestContext* ctx, const char* caret, const char* bar,
+                   std::unordered_map<uint32_t, std::string>& seen) {
+  ctx->SetRef("//##DockHost");
+  ctx->ItemClick((std::string("**/") + caret).c_str());
+  ctx->Yield(2);
+  CollectToolbarIcons(ctx, "//$FOCUSED", bar, seen);
+  // Not Escape: in a sketch that is the session's own modal verb, and it
+  // would end the sketch along with the popup.
+  ctx->PopupCloseAll();
+  ctx->Yield(2);
+}
+
+} // namespace
 
 void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
@@ -397,44 +465,69 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   };
 
   // No two commands in ONE bar may wear the same glyph. Split and Section
-  // both shipped as SCISSORS, one row apart, and Datum Plane and Toggle
-  // Planes as two sizes of the same grid — a bar of 30 unlabelled icons is
-  // already a memory test, and a duplicate makes it a guess.
+  // both shipped as SCISSORS, one row apart; Datum Plane and Toggle Planes as
+  // two sizes of the same grid; later Revolve and Hem as one arrow mirrored,
+  // Boolean and Corner relief as Font Awesome's group/ungroup pair, and three
+  // arc tools under one glyph. A bar of 30 unlabelled icons is already a
+  // memory test, and a duplicate makes it a guess.
   //
-  // Reuse ACROSS bars is fine and deliberate: scissors is Section here and
-  // Trim in the sketch bar, the eye is plane visibility here and glyph
-  // visibility there. One glyph, one MEANING, is the rule; this checks the
-  // stronger property that holds within a single row.
-  //
-  // Reading the glyph back from the live item, not from the source: the
-  // button's label is "<glyph>###tb_x", and DebugLabel carries it whole (the
-  // engine's buffer is 32 bytes and the longest of these is 20).
+  // Reuse ACROSS bars is fine when it is one idea (the eye is plane
+  // visibility here and glyph visibility there); the convention test
+  // "a toolbar glyph means one thing" holds that rule over the icon table.
+  // This checks what is DRAWN, on every bar and in every flyout, and that no
+  // button fell through to the unknown-command glyph (docs/ui/icons-plan.md).
   t = IM_REGISTER_TEST(engine, "toolbar", "no_duplicate_glyph");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    Doc()->AddFeature(
-        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
-    ctx->Yield(4);
-    ctx->SetRef("//##DockHost");
-
-    std::unordered_map<std::string, std::string> byGlyph; // glyph -> first id
-    for (const char* id : kModelTools) {
-      const ImGuiTestItemInfo info =
-          ctx->ItemInfo((std::string("**/") + id).c_str());
-      IM_CHECK_SILENT(info.ID != 0);
-      const std::string label = info.DebugLabel;
-      const size_t hash = label.find("###");
-      // A button with no "###" has no stable id either, which the reachability
-      // test would already have caught — but say which one, not just "0 != 0".
-      IM_CHECK_NO_RET(hash != std::string::npos && hash > 0);
-      if (hash == std::string::npos || hash == 0)
-        continue;
-      const std::string glyph = label.substr(0, hash);
-      const auto [it, fresh] = byGlyph.emplace(glyph, id);
-      // NO_RET so one run names EVERY collision, not just the first.
-      if (!fresh)
-        ctx->LogError("%s and %s share one glyph", it->second.c_str(), id);
-      IM_CHECK_NO_RET(fresh);
+    using Seen = std::unordered_map<uint32_t, std::string>;
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    {
+      Seen part;
+      CollectToolbarIcons(ctx, "//##DockHost", "part", part,
+                          {"tb_base_flange", "tb_edge_flange", "tb_hem",
+                           "tb_jog", "tb_corner_relief", "tb_normal_cut",
+                           "tb_flat_pattern", "tb_unfold", "tb_refold"});
+      CollectFlyout(ctx, "sheet/###more", "part", part);
+      IM_CHECK_GT((int)part.size(), 30);
     }
+    {
+      EnterSketchOnPlane(ctx, 0);
+      Seen sketch;
+      CollectToolbarIcons(ctx, "//##DockHost", "sketch", sketch, {"grp"});
+      for (const char* g : {"circlegrp", "rectgrp", "arcgrp"})
+        CollectFlyout(ctx, (std::string(g) + "/###more").c_str(), "sketch",
+                      sketch);
+      IM_CHECK_GT((int)sketch.size(), 25);
+      ctx->SetRef("//##DockHost");
+      ctx->ItemClick("**/###tb_sk_finish");
+      ctx->Yield(2);
+    }
+    {
+      ui::EnterSimulation(*s_App);
+      ctx->Yield(3);
+      Seen sim;
+      CollectToolbarIcons(ctx, "//##DockHost", "simulation", sim);
+      IM_CHECK_GE((int)sim.size(), 4);
+      ui::ExitSimulation(*s_App);
+      ctx->Yield(2);
+    }
+    const auto check = [&](size_t slot, const char* bar, int atLeast) {
+      ui::SetActivePart(*s_App, slot);
+      ctx->Yield(3);
+      Seen seen;
+      CollectToolbarIcons(ctx, "//##DockHost", bar, seen);
+      IM_CHECK_GE((int)seen.size(), atLeast);
+    };
+    check(ui::AddAssembly(*s_App, "Unit"), "assembly", 12);
+    check(ui::AddDrawing(*s_App, "Sheet"), "drawing", 12);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    MakeJob();
+    ctx->Yield(3);
+    Seen job;
+    CollectToolbarIcons(ctx, "//##DockHost", "job", job);
+    IM_CHECK_GE((int)job.size(), 15);
   };
 
   t = IM_REGISTER_TEST(engine, "palette", "ctrl_k_creates_box");

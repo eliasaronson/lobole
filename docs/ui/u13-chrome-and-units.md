@@ -46,6 +46,10 @@ sizing and its rejection of `AlwaysAutoResize` (`SettingsWindow.cpp:370-379`),
 
 Findings 1-3. One file, no new concepts.
 
+> Superseded for the glyphs themselves by docs/ui/icons-plan.md: Split,
+> Draft and Section now wear Designer's own CAD glyphs from ONE table
+> (`src/ui/Icons.cpp`), and `toolbar/no_duplicate_glyph` walks every bar.
+
 | Command | Now | Proposed | Why |
 |---|---|---|---|
 | `part.split` | `SCISSORS` | `TABLE_COLUMNS` | a rect divided in two; Section keeps scissors as the more-used cut |

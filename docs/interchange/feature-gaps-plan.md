@@ -137,7 +137,7 @@ work and dragging a pole reshapes the curve (poles capped at 255 — `which`
 is `uint8_t`). Profiles: a self-closed spline is its own loop; an open
 spline chains with lines/arcs (endpoints = first/last pole; poles reversed
 on chain-swap). A `SketchTool::Spline` (click poles, Enter/double-click to
-finish, Esc cancels) + toolbar (`ICON_FA_PEN_NIB`, key `S`) + pole
+finish, Esc cancels) + toolbar (`ICON_FA_PEN_NIB` then, `BEZIER_CURVE` since docs/ui/icons-plan.md; key `S`) + pole
 dots/control-polygon preview. Drawing projection already samples B-spline
 edges via its generic path — no change. Serialize + v40 golden
 (`tests/golden/v40-spline.*`) + `tests/test_spline.cpp` (14 cases:

@@ -3,6 +3,7 @@
 
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h"
+#include "ui/Icons.h"
 #include "ui/Widgets.h"
 
 #include "ui/DockLayout.h" // PanelHeading
@@ -2003,32 +2004,33 @@ int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
 
 namespace {
 
-// The glyph for an operation type: the job toolbar's own where it has one,
-// so the row and the button that made it look alike.
+// The glyph for an operation type: the glyph of the job toolbar verb that
+// makes it (ui/Icons.h), so the row and the button that made it look alike.
+// Several verbs make one type (Whole and Profile are both a Profile); the
+// row takes the verb that names the type.
 const char* OpGlyph(cam::OpType t) {
   switch (t) {
   case cam::OpType::Profile:
-    return ICON_FA_VECTOR_SQUARE;
+    return CommandIcon("job.profile");
   case cam::OpType::Pocket:
-    return ICON_FA_SQUARE_MINUS;
+  case cam::OpType::Adaptive: // adaptive clearing of a pocket
+    return CommandIcon("job.pocket");
   case cam::OpType::Face:
-    return ICON_FA_GRIP_LINES;
+    return CommandIcon("job.face");
   case cam::OpType::Drill:
-    return ICON_FA_CIRCLE_DOT;
-  case cam::OpType::Adaptive:
-    return ICON_FA_WAVE_SQUARE;
+    return CommandIcon("job.drill");
   case cam::OpType::EdgeRound:
-    return ICON_FA_BORDER_TOP_LEFT;
+    return CommandIcon("job.edge");
   case cam::OpType::SurfaceParallel:
-    return ICON_FA_BARS;
+    return CommandIcon("job.surface");
   case cam::OpType::SurfaceWaterline:
-    return ICON_FA_LAYER_GROUP;
+    return CommandIcon("job.walls");
   case cam::OpType::SurfaceRotary:
-    return ICON_FA_ROTATE;
+    return CommandIcon("job.rotary_finish");
   case cam::OpType::Count:
     break;
   }
-  return ICON_FA_SHAPES;
+  return kUnknownIcon;
 }
 
 } // namespace

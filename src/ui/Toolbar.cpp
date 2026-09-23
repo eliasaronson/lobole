@@ -14,6 +14,7 @@
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
+#include "ui/Icons.h"
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
@@ -286,8 +287,11 @@ bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
 //
 // Every button on every toolbar goes through this. A new button without a
 // command id fails the keys/every_toolbar_button_is_a_command GUI test.
-bool CommandButton(AppState& state, const char* icon, const char* id,
-                   const char* tooltip, bool active = false) {
+// A command's button showing a glyph of the caller's choosing: for a toggle
+// whose face says what the NEXT click does (the planes eye). Everything else
+// is a CommandButton, which cannot name a glyph at all.
+bool CommandButtonShowing(AppState& state, const char* icon, const char* id,
+                          const char* tooltip, bool active = false) {
   if (active)
     ImGui::PushStyleColor(ImGuiCol_Button,
                           ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
@@ -298,6 +302,16 @@ bool CommandButton(AppState& state, const char* icon, const char* id,
   if (clicked)
     RunCommand(state, id);
   return clicked;
+}
+
+// A command's button: the glyph is the command's own (ui/Icons.h), so it is
+// the same here, in any flyout, and on the tree row of what the command made.
+// `tbId` is the "###tb_*" id tests and agents address the button by.
+bool CommandButton(AppState& state, const char* tbId, const char* id,
+                   const char* tooltip, bool active = false) {
+  return CommandButtonShowing(state,
+                              (std::string(CommandIcon(id)) + tbId).c_str(), id,
+                              tooltip, active);
 }
 
 void Divider() {
@@ -355,7 +369,7 @@ bool FlyoutCaret() {
 // and one id (###tb_section) is what tests and agents address. Only one
 // toolbar is drawn at a time, so the shared id is unambiguous.
 void SectionToolButton(AppState& state) {
-  CommandButton(state, ICON_FA_SWATCHBOOK "###tb_section", "view.section",
+  CommandButton(state, "###tb_section", "view.section",
                 "Section view (up to four cut planes at once)",
                 state.sectionToolOpen);
 }
@@ -373,7 +387,7 @@ void SectionToolButton(AppState& state) {
 // showing and on its row in the popup otherwise, because that id is what
 // tests, the defaults gate and agents address.
 struct CommandVariant {
-  const char* icon;
+  const char* tbId; // "###tb_*"
   const char* id;
   const char* label;
 };
@@ -385,18 +399,17 @@ void CommandGroup(AppState& state, const char* groupId, int& current,
   if (current < 0 || current >= n)
     current = 0;
   ImGui::PushID(groupId);
-  if (CommandButton(state, v[current].icon, v[current].id, v[current].label))
+  if (CommandButton(state, v[current].tbId, v[current].id, v[current].label))
     ; // the command ran; the face keeps showing it
   if (FlyoutCaret())
     ImGui::OpenPopup("variants");
   if (ImGui::BeginPopup("variants")) {
     for (int i = 0; i < n; i++) {
-      // The icon carries the "###tb_*" id, so the row is addressable by the
-      // same name the face button would have.
-      const std::string item =
-          std::string(v[i].icon).substr(0, std::string(v[i].icon).find("###")) +
-          "   " + WithChord(state, v[i].id, v[i].label) +
-          std::string(v[i].icon).substr(std::string(v[i].icon).find("###"));
+      // The row carries the "###tb_*" id, so it is addressable by the same
+      // name the face button would have.
+      const std::string item = std::string(CommandIcon(v[i].id)) + "   " +
+                               WithChord(state, v[i].id, v[i].label) +
+                               v[i].tbId;
       ImGui::BeginDisabled(!CommandEnabled(state, v[i].id));
       if (ImGui::Selectable(item.c_str(), i == current)) {
         current = i;
@@ -414,18 +427,18 @@ void DrawModelToolbar(AppState& state) {
   // Icon buttons carry a stable "###tb_*" id (hidden from the glyph label) so
   // the GUI/remote tests can address them regardless of the icon codepoint.
   // The tooltip's chord and the enable gate both come from the command.
-  const auto btn = [&state](const char* icon, const char* id, const char* tip) {
-    CommandButton(state, icon, id, tip);
+  const auto btn = [&state](const char* tbId, const char* id, const char* tip) {
+    CommandButton(state, tbId, id, tip);
   };
 
-  btn(ICON_FA_PENCIL "###tb_new_sketch", "part.new_sketch", "New Sketch");
+  btn("###tb_new_sketch", "part.new_sketch", "New Sketch");
 
   Divider();
 
-  btn(ICON_FA_CUBE "###tb_box", "part.box", "Box");
-  btn(ICON_FA_CIRCLE "###tb_sphere", "part.sphere", "Sphere");
-  btn(ICON_FA_DATABASE "###tb_cylinder", "part.cylinder", "Cylinder");
-  btn(ICON_FA_LINK "###tb_derive", "part.derive",
+  btn("###tb_box", "part.box", "Box");
+  btn("###tb_sphere", "part.sphere", "Sphere");
+  btn("###tb_cylinder", "part.cylinder", "Cylinder");
+  btn("###tb_derive", "part.derive",
       "Derive (a copy of another part, to draw on)");
 
   Divider();
@@ -433,66 +446,49 @@ void DrawModelToolbar(AppState& state) {
   // Turn a FINISHED sketch into a solid. The same operations live in the
   // sketch toolbar for a sketch you are still editing; without these, closing
   // a sketch with the check mark left no way to extrude it at all.
-  btn(ICON_FA_UP_LONG "###tb_extrude", "part.extrude",
+  btn("###tb_extrude", "part.extrude",
       "Extrude a sketch (the selected one, else the last)");
-  btn(ICON_FA_ROTATE "###tb_revolve", "part.revolve",
+  btn("###tb_revolve", "part.revolve",
       "Revolve a sketch (the selected one, else the last)");
 
   Divider();
 
   // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe
   // that consume it. Each command gates on the references it needs.
-  btn(ICON_FA_WAVE_SQUARE "###tb_curve3d", "part.curve3d",
-      "3D Curve (helix / fit-spline)");
-  btn(ICON_FA_ROUTE "###tb_sweep", "part.sweep",
-      "Sweep a profile along a path");
-  btn(ICON_FA_CUBES_STACKED "###tb_loft", "part.loft", "Loft through sections");
-  btn(ICON_FA_ROAD "###tb_pipe", "part.pipe", "Pipe / tube along a path");
+  btn("###tb_curve3d", "part.curve3d", "3D Curve (helix / fit-spline)");
+  btn("###tb_sweep", "part.sweep", "Sweep a profile along a path");
+  btn("###tb_loft", "part.loft", "Loft through sections");
+  btn("###tb_pipe", "part.pipe", "Pipe / tube along a path");
 
   Divider();
 
   // Datums.
-  btn(ICON_FA_TABLE_CELLS_LARGE "###tb_datum_plane", "part.datum_plane",
-      "Datum Plane");
-  btn(ICON_FA_ARROWS_UP_DOWN "###tb_datum_axis", "part.datum_axis",
-      "Datum Axis");
-  btn(ICON_FA_LOCATION_CROSSHAIRS "###tb_frame", "part.frame",
+  btn("###tb_datum_plane", "part.datum_plane", "Datum Plane");
+  btn("###tb_datum_axis", "part.datum_axis", "Datum Axis");
+  btn("###tb_frame", "part.frame",
       "Datum Frame (a named origin + axes a mate anchors to)");
 
   Divider();
 
   // Body combinators (need existing bodies).
-  btn(ICON_FA_OBJECT_GROUP "###tb_boolean", "part.boolean",
+  btn("###tb_boolean", "part.boolean",
       "Boolean (union / subtract / intersect)");
-  btn(ICON_FA_LEFT_RIGHT "###tb_mirror", "part.mirror", "Mirror a body");
-  btn(ICON_FA_GRIP "###tb_pattern", "part.pattern",
-      "Pattern (linear / circular)");
+  btn("###tb_mirror", "part.mirror", "Mirror a body");
+  btn("###tb_pattern", "part.pattern", "Pattern (linear / circular)");
 
   Divider();
 
   // Edge / wall / detail ops on a body.
-  btn(ICON_FA_BORDER_TOP_LEFT "###tb_fillet", "part.fillet", "Fillet edges");
-  btn(ICON_FA_CROP_SIMPLE "###tb_chamfer", "part.chamfer", "Chamfer edges");
-  btn(ICON_FA_BARS_STAGGERED "###tb_rib", "part.rib",
-      "Rib (thin web from an open sketch)");
-  btn(ICON_FA_BULLSEYE "###tb_hole", "part.hole",
-      "Hole: pick a flat face, click the centres");
-  btn(ICON_FA_LINES_LEANING "###tb_thread", "part.thread",
-      "Thread (cosmetic; pick a cyl. face)");
-  btn(ICON_FA_BOX_OPEN "###tb_shell", "part.shell",
-      "Shell (hollow a body; pick faces to open)");
-  // A tapered face, not ANGLES_RIGHT — that glyph is "»", which every other
-  // toolbar in the world uses to mean "more items", so a tool wearing it
-  // mid-row reads as broken chrome rather than as a modelling operation.
-  btn(ICON_FA_MOUNTAIN "###tb_draft", "part.draft",
-      "Draft (taper faces for moulding)");
-  // A rectangle divided in two. Split used to be SCISSORS, which Section
-  // (SectionToolButton, above) also wears — two commands, one glyph, one
-  // bar. Section keeps the scissors: it is the more-used of the two, and a
-  // view cut is what people reach for scissors expecting.
-  btn(ICON_FA_TABLE_COLUMNS "###tb_split", "part.split",
+  btn("###tb_fillet", "part.fillet", "Fillet edges");
+  btn("###tb_chamfer", "part.chamfer", "Chamfer edges");
+  btn("###tb_rib", "part.rib", "Rib (thin web from an open sketch)");
+  btn("###tb_hole", "part.hole", "Hole: pick a flat face, click the centres");
+  btn("###tb_thread", "part.thread", "Thread (cosmetic; pick a cyl. face)");
+  btn("###tb_shell", "part.shell", "Shell (hollow a body; pick faces to open)");
+  btn("###tb_draft", "part.draft", "Draft (taper faces for moulding)");
+  btn("###tb_split", "part.split",
       "Split a body with a plane or one of its faces");
-  btn(ICON_FA_BROOM "###tb_refine", "part.refine",
+  btn("###tb_refine", "part.refine",
       "Refine (merge coplanar faces and boolean seams)");
 
   Divider();
@@ -501,45 +497,41 @@ void DrawModelToolbar(AppState& state) {
   static int sheetTool = 0;
   CommandGroup(
       state, "sheet", sheetTool,
-      {{ICON_FA_LAYER_GROUP "###tb_base_flange", "part.sheet_base_flange",
+      {{"###tb_base_flange", "part.sheet_base_flange",
         "Base flange (a sheet part one gauge thick from a profile)"},
-       {ICON_FA_ARROW_TURN_UP "###tb_edge_flange", "part.sheet_edge_flange",
+       {"###tb_edge_flange", "part.sheet_edge_flange",
         "Edge flange (bend a wall up from a straight edge)"},
-       {ICON_FA_ROTATE_LEFT "###tb_hem", "part.sheet_hem",
+       {"###tb_hem", "part.sheet_hem",
         "Hem (fold a panel edge right back on itself)"},
-       {ICON_FA_STAIRS "###tb_jog", "part.sheet_jog",
+       {"###tb_jog", "part.sheet_jog",
         "Jog (step a panel up along a one-line sketch)"},
-       {ICON_FA_OBJECT_UNGROUP "###tb_corner_relief",
-        "part.sheet_corner_relief",
+       {"###tb_corner_relief", "part.sheet_corner_relief",
         "Corner relief (cut where two bends cross, so neither tears)"},
-       {ICON_FA_CIRCLE_MINUS "###tb_normal_cut", "part.sheet_normal_cut",
+       {"###tb_normal_cut", "part.sheet_normal_cut",
         "Normal cut (through the sheet, square to it wherever it lands)"},
-       {ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
+       {"###tb_flat_pattern", "part.sheet_flat_pattern",
         "Flat pattern (lay the sheet flat; the blank a shop cuts)"},
-       {ICON_FA_MAP "###tb_unfold", "part.sheet_unfold",
+       {"###tb_unfold", "part.sheet_unfold",
         "Unfold (lay bends flat, to draw a cut across them)"},
-       {ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER "###tb_refold",
-        "part.sheet_refold",
+       {"###tb_refold", "part.sheet_refold",
         "Refold (fold the last Unfold back up, carrying its cuts)"}});
 
   Divider();
 
-  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit", "view.fit",
-      "Fit view");
-  // An eye, not a second grid: TABLE_CELLS sat one row from Datum Plane's
-  // TABLE_CELLS_LARGE, so the bar carried two near-identical grids meaning
-  // unrelated things. A visibility toggle should look like one — and it
-  // shows what the NEXT click does, which a static glyph cannot. The icon
-  // font is loaded with a fixed advance (Theme.cpp GlyphMinAdvanceX), so
+  btn("###tb_fit", "view.fit", "Fit view");
+  // An eye: a visibility toggle should look like one (it was a grid, one row
+  // from Datum Plane's), and it shows what the NEXT click does, which the
+  // command's one glyph cannot — hence CommandButtonShowing. Every icon
+  // is loaded at one fixed advance (Theme.cpp, min and max alike), so
   // swapping the glyph cannot change the button width or re-wrap the row.
   const std::string planesIcon =
       std::string(state.showPlanes ? ICON_FA_EYE : ICON_FA_EYE_SLASH) +
       "###tb_planes";
-  btn(planesIcon.c_str(), "view.toggle_planes", "Toggle planes");
+  CommandButtonShowing(state, planesIcon.c_str(), "view.toggle_planes",
+                       "Toggle planes");
 
   // Enter the FEM simulation workspace (needs a body to analyze).
-  btn(ICON_FA_GAUGE_HIGH "###tb_simulation", "part.simulation",
-      "Simulation (FEM stress study)");
+  btn("###tb_simulation", "part.simulation", "Simulation (FEM stress study)");
 
 #ifdef HAVE_CAM
   // CAM left the part bar (docs/cam/job-document.md, round two, M3): a job
@@ -555,7 +547,7 @@ void DrawModelToolbar(AppState& state) {
   // a second element for the distance. The button reflects the armed state,
   // snapshotted BEFORE the click toggles it (a live read would unbalance the
   // style stack and trip ImGui's PopStyleColor assert).
-  CommandButton(state, ICON_FA_RULER "###tb_measure", "view.measure",
+  CommandButton(state, "###tb_measure", "view.measure",
                 "Measure (pick 1-2 faces/edges; Esc to exit)",
                 state.measure.active);
 
@@ -564,8 +556,7 @@ void DrawModelToolbar(AppState& state) {
   // Offline path-traced still (KeyShot-style). Opens the render dialog — the
   // command records the request rather than calling OpenPopup, because the
   // same command runs from a key press outside any window (Commands.h).
-  btn(ICON_FA_CAMERA "###tb_render", "view.render",
-      "Render (offline raytrace)");
+  btn("###tb_render", "view.render", "Render (offline raytrace)");
   if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);
@@ -601,20 +592,18 @@ void DrawSketchModeToolbar(AppState& state) {
   // buttons answer to their ###tb_* id: an icon-only label left them
   // addressable by nothing a test could name.
   static constexpr const char* kSketchId = "###tb_sk_"; // + the command's name
-  const auto skId = [](const char* icon, const char* command) {
+  const auto skId = [](const char* command) {
     const std::string c = command;
-    return std::string(icon) + kSketchId + c.substr(c.find('.') + 1);
+    return kSketchId + c.substr(c.find('.') + 1);
   };
-  auto toolBtn = [&](const char* icon, const char* id, const char* tip,
-                     SketchTool t) {
-    CommandButton(state, skId(icon, id).c_str(), id, tip, edit.tool == t);
+  auto toolBtn = [&](const char* id, const char* tip, SketchTool t) {
+    CommandButton(state, skId(id).c_str(), id, tip, edit.tool == t);
   };
   // A flyout group: the face shows the last-picked variant —
   // click it to use that tool — and the caret opens a popup to switch which
   // variant the group holds. `current` persists the pick across frames. Each
   // VARIANT is its own command, so every one of them can carry a chord.
   struct ToolVariant {
-    const char* icon;
     const char* id;
     const char* label;
     SketchTool tool;
@@ -636,7 +625,8 @@ void DrawSketchModeToolbar(AppState& state) {
     if (groupActive)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button((std::string(v[current].icon) + kSketchId + id).c_str()))
+    if (ImGui::Button(
+            (std::string(CommandIcon(v[current].id)) + kSketchId + id).c_str()))
       RunCommand(state, v[current].id);
     if (groupActive)
       ImGui::PopStyleColor();
@@ -647,7 +637,7 @@ void DrawSketchModeToolbar(AppState& state) {
       ImGui::OpenPopup("variants");
     if (ImGui::BeginPopup("variants")) {
       for (int i = 0; i < n; i++) {
-        const std::string item = std::string(v[i].icon) + "   " +
+        const std::string item = std::string(CommandIcon(v[i].id)) + "   " +
                                  WithChord(state, v[i].id, v[i].label);
         if (ImGui::Selectable(item.c_str(), i == current)) {
           current = i;
@@ -664,51 +654,46 @@ void DrawSketchModeToolbar(AppState& state) {
   static int rectVariant = 0;
   static int arcVariant = 0;
 
-  toolBtn(ICON_FA_SLASH, "sketch.line", "Line", SketchTool::Line);
+  toolBtn("sketch.line", "Line", SketchTool::Line);
   toolGroup("circlegrp", circleVariant,
-            {{ICON_FA_RING, "sketch.circle", "Circle", SketchTool::Circle},
-             {ICON_FA_EGG, "sketch.ellipse", "Ellipse", SketchTool::Ellipse}});
+            {{"sketch.circle", "Circle", SketchTool::Circle},
+             {"sketch.ellipse", "Ellipse", SketchTool::Ellipse}});
   toolGroup("rectgrp", rectVariant,
-            {{ICON_FA_VECTOR_SQUARE, "sketch.rectangle", "Rectangle",
-              SketchTool::Rectangle},
-             {ICON_FA_EXPAND, "sketch.rectangle_center", "Centre Rectangle",
+            {{"sketch.rectangle", "Rectangle", SketchTool::Rectangle},
+             {"sketch.rectangle_center", "Centre Rectangle",
               SketchTool::RectangleCenter}});
-  toolGroup("arcgrp", arcVariant,
-            {{ICON_FA_BEZIER_CURVE, "sketch.arc_3point", "3-Point Arc",
-              SketchTool::ArcThreePoint},
-             {ICON_FA_BEZIER_CURVE, "sketch.arc_center",
-              "Centre Arc (centre, start, end)", SketchTool::Arc},
-             {ICON_FA_BEZIER_CURVE, "sketch.ellipse_arc",
-              "Elliptic Arc (centre, major, minor, start, end)",
-              SketchTool::EllipseArc}});
-  toolBtn(ICON_FA_PEN_NIB, "sketch.spline", "Spline", SketchTool::Spline);
-  toolBtn(ICON_FA_CIRCLE_DOT, "sketch.point", "Point", SketchTool::Point);
-  toolBtn(ICON_FA_SCISSORS, "sketch.trim", "Trim", SketchTool::Trim);
-  toolBtn(ICON_FA_RULER_COMBINED, "sketch.dimension", "Dimension",
-          SketchTool::Dimension);
+  toolGroup(
+      "arcgrp", arcVariant,
+      {{"sketch.arc_3point", "3-Point Arc", SketchTool::ArcThreePoint},
+       {"sketch.arc_center", "Centre Arc (centre, start, end)",
+        SketchTool::Arc},
+       {"sketch.ellipse_arc", "Elliptic Arc (centre, major, minor, start, end)",
+        SketchTool::EllipseArc}});
+  toolBtn("sketch.spline", "Spline", SketchTool::Spline);
+  toolBtn("sketch.point", "Point", SketchTool::Point);
+  toolBtn("sketch.trim", "Trim", SketchTool::Trim);
+  toolBtn("sketch.dimension", "Dimension", SketchTool::Dimension);
   Divider();
-  toolBtn(ICON_FA_LEFT_RIGHT, "sketch.mirror", "Mirror", SketchTool::Mirror);
-  toolBtn(ICON_FA_BORDER_TOP_LEFT, "sketch.fillet", "Fillet a corner",
-          SketchTool::Fillet);
-  toolBtn(ICON_FA_GRIP, "sketch.pattern", "Pattern", SketchTool::Pattern);
-  toolBtn(ICON_FA_CLONE, "sketch.offset", "Offset", SketchTool::Offset);
-  toolBtn(ICON_FA_DIAGRAM_PROJECT, "sketch.project",
+  toolBtn("sketch.mirror", "Mirror", SketchTool::Mirror);
+  toolBtn("sketch.fillet", "Fillet a corner", SketchTool::Fillet);
+  toolBtn("sketch.pattern", "Pattern", SketchTool::Pattern);
+  toolBtn("sketch.offset", "Offset", SketchTool::Offset);
+  toolBtn("sketch.project",
           "Project geometry — click a body edge/face -> live reference",
           SketchTool::Project);
   Divider();
 
   // Constraints act on the current selection (validated in
   // ApplySketchConstraint; an invalid combination just no-ops with a hint).
-  auto conBtn = [&](const char* label, const char* id, const char* tip) {
-    CommandButton(state, skId(label, id).c_str(), id, tip);
+  auto conBtn = [&](const char* id, const char* tip) {
+    CommandButton(state, skId(id).c_str(), id, tip);
   };
   // The everyday constraints stay visible; the rest live in the flyout below.
-  conBtn("H", "sketch.constraint_horizontal", "Horizontal");
-  conBtn("V", "sketch.constraint_vertical", "Vertical");
-  conBtn(ICON_FA_ARROWS_TO_DOT, "sketch.constraint_coincident", "Coincident");
-  conBtn(ICON_FA_GRIP_LINES_VERTICAL, "sketch.constraint_parallel", "Parallel");
-  conBtn(ICON_FA_ANGLE_RIGHT, "sketch.constraint_perpendicular",
-         "Perpendicular");
+  conBtn("sketch.constraint_horizontal", "Horizontal");
+  conBtn("sketch.constraint_vertical", "Vertical");
+  conBtn("sketch.constraint_coincident", "Coincident");
+  conBtn("sketch.constraint_parallel", "Parallel");
+  conBtn("sketch.constraint_perpendicular", "Perpendicular");
 
   // "More constraints" flyout: the less-common relational constraints, one
   // click away. Always openable (so the menu is discoverable); each item
@@ -754,18 +739,16 @@ void DrawSketchModeToolbar(AppState& state) {
   }
   Divider();
 
-  CommandButton(state, ICON_FA_MINUS "###tb_sk_construction",
-                "sketch.toggle_construction",
+  CommandButton(state, "###tb_sk_construction", "sketch.toggle_construction",
                 "Construction — reference geometry, dashed");
   Divider();
 
   // Mode toggles (were the Sketch panel's checkboxes, U8a).
-  CommandButton(state, ICON_FA_MAGNET "###tb_sk_autocon",
-                "sketch.toggle_autoconstrain",
+  CommandButton(state, "###tb_sk_autocon", "sketch.toggle_autoconstrain",
                 "Auto-constrain — snap and add constraints while drawing "
                 "(hold Ctrl to place freely)",
                 edit.autoConstrain);
-  CommandButton(state, ICON_FA_EYE "###tb_sk_glyphs", "sketch.toggle_glyphs",
+  CommandButton(state, "###tb_sk_glyphs", "sketch.toggle_glyphs",
                 "Show constraint glyphs", edit.showConstraintGlyphs);
   // Slice at the sketch plane: what helps when the sketch is INSIDE existing
   // material, where there is no consuming feature for the automatic rollback
@@ -776,14 +759,14 @@ void DrawSketchModeToolbar(AppState& state) {
             "the camera and the sketch"
           : "Slice at the sketch plane \xe2\x80\x94 no clip plane free, all "
             "four section planes are in use";
-  CommandButton(state, ICON_FA_EYE_LOW_VISION "###tb_sk_slice",
-                "sketch.toggle_slice", sliceTip.c_str(), state.sketchSlice);
+  CommandButton(state, "###tb_sk_slice", "sketch.toggle_slice",
+                sliceTip.c_str(), state.sketchSlice);
   Divider();
 
   // Insert reference image (U8 polish): file dialog, then the fresh image's
   // session (opacity/calibrate/delete) opens in the Tool window. Editing
   // later: double-click the image's Operations row in the Model panel.
-  CommandButton(state, ICON_FA_IMAGE "###tb_sk_image", "sketch.image",
+  CommandButton(state, "###tb_sk_image", "sketch.image",
                 "Insert reference image\xe2\x80\xa6");
   Divider();
 
@@ -791,17 +774,15 @@ void DrawSketchModeToolbar(AppState& state) {
   // Finish already exits without a solid. BeginSketchHole tears down the
   // sketch session, so `edit` must not be touched after these run — every
   // one of them is the last thing this function does with it.
-  CommandButton(state, ICON_FA_UP_LONG "###tb_sk_extrude", "sketch.extrude",
+  CommandButton(state, "###tb_sk_extrude", "sketch.extrude",
                 "Extrude the sketch");
-  CommandButton(state, ICON_FA_ROTATE "###tb_sk_revolve", "sketch.revolve",
+  CommandButton(state, "###tb_sk_revolve", "sketch.revolve",
                 "Revolve the sketch");
-  CommandButton(state, ICON_FA_BULLSEYE "###tb_sk_hole", "sketch.hole",
+  CommandButton(state, "###tb_sk_hole", "sketch.hole",
                 "Drill holes at the sketch's points");
   Divider();
 
-  CommandButton(state,
-                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_sk_fit",
-                "view.fit", "Fit view");
+  CommandButton(state, "###tb_sk_fit", "view.fit", "Fit view");
   ImGui::NewLine();
 }
 
@@ -879,7 +860,7 @@ void DrawAssemblyToolbar(AppState& state) {
   // with the part count you are about to place.
   // The command records the request rather than calling OpenPopup, because
   // the same command runs from a key press outside any window (Commands.h).
-  CommandButton(state, ICON_FA_CIRCLE_PLUS "###tb_insert", "assembly.insert",
+  CommandButton(state, "###tb_insert", "assembly.insert",
                 "Insert a part or sub-assembly (place an occurrence)");
   if (TakePopupRequest(state, "insert_occurrence"))
     ImGui::OpenPopup("insert_occurrence");
@@ -965,54 +946,48 @@ void DrawAssemblyToolbar(AppState& state) {
   // Every button carries a stable "###tb_*" id like the model toolbar's, so
   // tests and scripted humans address them by name rather than by icon
   // codepoint (the assembly/drawing/simulation bars had none at all).
-  auto mateBtn = [&](const char* icon, const char* id, const char* tip,
+  auto mateBtn = [&](const char* tbId, const char* id, const char* tip,
                      MateType t) {
-    CommandButton(state, icon, id, tip,
+    CommandButton(state, tbId, id, tip,
                   state.mateTool.active && state.mateTool.type == t);
   };
-  mateBtn(ICON_FA_LOCK "###tb_mate_fastened", "assembly.mate_fastened",
+  mateBtn("###tb_mate_fastened", "assembly.mate_fastened",
           "Fastened mate (rigid)", MateType::Fastened);
-  mateBtn(ICON_FA_ARROWS_SPIN "###tb_mate_revolute", "assembly.mate_revolute",
+  mateBtn("###tb_mate_revolute", "assembly.mate_revolute",
           "Revolute mate (hinge)", MateType::Revolute);
-  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT "###tb_mate_slider", "assembly.mate_slider",
-          "Slider mate", MateType::Slider);
-  mateBtn(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT "###tb_mate_cylindrical",
-          "assembly.mate_cylindrical", "Cylindrical mate (spin + slide)",
-          MateType::Cylindrical);
-  mateBtn(ICON_FA_TABLE_CELLS_LARGE "###tb_mate_planar", "assembly.mate_planar",
+  mateBtn("###tb_mate_slider", "assembly.mate_slider", "Slider mate",
+          MateType::Slider);
+  mateBtn("###tb_mate_cylindrical", "assembly.mate_cylindrical",
+          "Cylindrical mate (spin + slide)", MateType::Cylindrical);
+  mateBtn("###tb_mate_planar", "assembly.mate_planar",
           "Planar mate (slide in a plane)", MateType::Planar);
-  mateBtn(ICON_FA_GLOBE "###tb_mate_ball", "assembly.mate_ball",
-          "Ball mate (free rotation)", MateType::Ball);
+  mateBtn("###tb_mate_ball", "assembly.mate_ball", "Ball mate (free rotation)",
+          MateType::Ball);
   Divider();
   // A standard part is placed the way a mate is made: pick geometry, and the
   // numbers derive from it (docs/parts/gui-plan.md).
-  CommandButton(state, ICON_FA_SCREWDRIVER "###tb_fastener",
-                "assembly.fastener",
+  CommandButton(state, "###tb_fastener", "assembly.fastener",
                 "Fastener (pick a hole's rim; size and length derive)",
                 state.fastenerTool.open);
   Divider();
   // The two viewport modes. They open the floating tool window rather than a
   // panel section, so they belong on the bar with the other tools that do
   // (docs/ui/u15-assembly-panel.md).
-  CommandButton(state, ICON_FA_EXPLOSION "###tb_asm_explode",
-                "assembly.explode", "Exploded view (slide the parts apart)",
-                state.explodeToolOpen);
-  CommandButton(state, ICON_FA_FILM "###tb_asm_motion", "assembly.motion",
+  CommandButton(state, "###tb_asm_explode", "assembly.explode",
+                "Exploded view (slide the parts apart)", state.explodeToolOpen);
+  CommandButton(state, "###tb_asm_motion", "assembly.motion",
                 "Motion study (drive a mate and scrub the mechanism)",
                 state.motionToolOpen);
-  CommandButton(state, ICON_FA_GAUGE_HIGH "###tb_asm_simulation",
-                "assembly.simulation",
+  CommandButton(state, "###tb_asm_simulation", "assembly.simulation",
                 "Simulation (mesh one occurrence, clamp it where the others "
                 "touch)",
                 state.simulationToolOpen);
-  CommandButton(state, ICON_FA_TABLE_LIST "###tb_asm_bom", "assembly.bom",
+  CommandButton(state, "###tb_asm_bom", "assembly.bom",
                 "Bill of materials (parts, quantities, materials, mass)",
                 state.bomWindowOpen);
 
   Divider();
-  CommandButton(state,
-                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",
-                "view.fit", "Fit view");
+  CommandButton(state, "###tb_asm_fit", "view.fit", "Fit view");
 
   // Measure across the assembly: same tool as the part tab — picks carry
   // their occurrence, so distances span occurrences in world space. Snapshot
@@ -1020,7 +995,7 @@ void DrawAssemblyToolbar(AppState& state) {
   // the model-toolbar measure button).
   SectionToolButton(state);
 
-  CommandButton(state, ICON_FA_RULER "###tb_asm_measure", "view.measure",
+  CommandButton(state, "###tb_asm_measure", "view.measure",
                 "Measure (pick 1-2 faces/edges; Esc to exit)",
                 state.measure.active);
 
@@ -1030,7 +1005,7 @@ void DrawAssemblyToolbar(AppState& state) {
   // walked assembly occurrences at their solved placements since the RT work
   // landed; only the buttons and the RPC guard said otherwise, so an assembly
   // could be modelled, mated and exploded but never rendered.
-  CommandButton(state, ICON_FA_CAMERA "###tb_asm_render", "view.render",
+  CommandButton(state, "###tb_asm_render", "view.render",
                 "Render (offline raytrace)");
   if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
@@ -1062,16 +1037,16 @@ void DrawSimulationToolbar(AppState& state) {
   SimulationState& sim = state.simulation;
 
   // A boundary-condition tool button: armed state highlighted like Measure.
-  auto bcBtn = [&](const char* icon, const char* id, const char* tip,
+  auto bcBtn = [&](const char* tbId, const char* id, const char* tip,
                    SimulationState::Tool t) {
-    CommandButton(state, icon, id, tip, sim.tool == t); // toggles
+    CommandButton(state, tbId, id, tip, sim.tool == t); // toggles
   };
-  bcBtn(ICON_FA_LOCK "###tb_sim_fixed", "sim.fixed",
-        "Fixed support (click a face)", SimulationState::Tool::Fixed);
-  bcBtn(ICON_FA_BOLT "###tb_sim_force", "sim.force",
-        "Force load (click a face)", SimulationState::Tool::Force);
-  bcBtn(ICON_FA_DOWN_LONG "###tb_sim_pressure", "sim.pressure",
-        "Pressure load (click a face)", SimulationState::Tool::Pressure);
+  bcBtn("###tb_sim_fixed", "sim.fixed", "Fixed support (click a face)",
+        SimulationState::Tool::Fixed);
+  bcBtn("###tb_sim_force", "sim.force", "Force load (click a face)",
+        SimulationState::Tool::Force);
+  bcBtn("###tb_sim_pressure", "sim.pressure", "Pressure load (click a face)",
+        SimulationState::Tool::Pressure);
 
   Divider();
 
@@ -1079,8 +1054,7 @@ void DrawSimulationToolbar(AppState& state) {
   // called the blocking RunStudyAndCache once, so the toolbar could freeze the
   // app for the length of a solve — and on a topology study, for the length of
   // an optimization.
-  CommandButton(state, ICON_FA_PLAY "###tb_sim_run", "sim.run",
-                "Run study (mesh + solve)");
+  CommandButton(state, "###tb_sim_run", "sim.run", "Run study (mesh + solve)");
 
   Divider();
 
@@ -1109,58 +1083,52 @@ void DrawSimulationToolbar(AppState& state) {
 void DrawDrawingToolbar(AppState& state) {
   // Add view: the tool window with the source, configuration, orientation
   // and scale -- the sheet equivalent of inserting a part.
-  CommandButton(state, ICON_FA_CIRCLE_PLUS "###tb_dwg_add_view",
-                "drawing.add_view", "Add view (project a part/assembly)",
-                state.drawingAddViewOpen);
+  CommandButton(state, "###tb_dwg_add_view", "drawing.add_view",
+                "Add view (project a part/assembly)", state.drawingAddViewOpen);
   ImGui::SameLine();
   Divider();
 
-  CommandButton(state, ICON_FA_ARROWS_ROTATE "###tb_dwg_update",
-                "drawing.update", "Update views (re-project)");
+  CommandButton(state, "###tb_dwg_update", "drawing.update",
+                "Update views (re-project)");
 
   Divider();
 
   // Dimension tools: arm state.dimTool; the sheet then picks projected refs.
-  auto dimBtn = [&](const char* icon, const char* id, const char* tip,
+  auto dimBtn = [&](const char* tbId, const char* id, const char* tip,
                     DrawingDimKind k) {
-    CommandButton(state, icon, id, tip,
+    CommandButton(state, tbId, id, tip,
                   state.dimTool.active && state.dimTool.kind == k);
   };
-  dimBtn(ICON_FA_ARROWS_LEFT_RIGHT_TO_LINE "###tb_dwg_dist",
-         "drawing.dim_distance", "Distance dimension",
+  dimBtn("###tb_dwg_dist", "drawing.dim_distance", "Distance dimension",
          DrawingDimKind::Distance);
-  dimBtn(ICON_FA_RULER_HORIZONTAL "###tb_dwg_distx", "drawing.dim_distance_x",
-         "Horizontal (X) distance", DrawingDimKind::DistanceX);
-  dimBtn(ICON_FA_UP_DOWN "###tb_dwg_disty", "drawing.dim_distance_y",
-         "Vertical (Y) distance", DrawingDimKind::DistanceY);
-  dimBtn(ICON_FA_CIRCLE_NOTCH "###tb_dwg_radius", "drawing.dim_radius",
-         "Radius dimension", DrawingDimKind::Radius);
-  dimBtn(ICON_FA_CIRCLE_HALF_STROKE "###tb_dwg_diameter",
-         "drawing.dim_diameter", "Diameter dimension",
+  dimBtn("###tb_dwg_distx", "drawing.dim_distance_x", "Horizontal (X) distance",
+         DrawingDimKind::DistanceX);
+  dimBtn("###tb_dwg_disty", "drawing.dim_distance_y", "Vertical (Y) distance",
+         DrawingDimKind::DistanceY);
+  dimBtn("###tb_dwg_radius", "drawing.dim_radius", "Radius dimension",
+         DrawingDimKind::Radius);
+  dimBtn("###tb_dwg_diameter", "drawing.dim_diameter", "Diameter dimension",
          DrawingDimKind::Diameter);
-  dimBtn(ICON_FA_ANGLE_LEFT "###tb_dwg_angle", "drawing.dim_angle",
-         "Angle dimension", DrawingDimKind::Angle);
-  dimBtn(ICON_FA_BULLSEYE "###tb_dwg_hole_callout", "drawing.dim_hole_callout",
+  dimBtn("###tb_dwg_angle", "drawing.dim_angle", "Angle dimension",
+         DrawingDimKind::Angle);
+  dimBtn("###tb_dwg_hole_callout", "drawing.dim_hole_callout",
          "Hole callout (pick a drilled hole's circle)",
          DrawingDimKind::HoleCallout);
-  dimBtn(ICON_FA_GRIP "###tb_dwg_pattern_callout",
-         "drawing.dim_pattern_callout",
+  dimBtn("###tb_dwg_pattern_callout", "drawing.dim_pattern_callout",
          "Pattern callout (pick 2+ circles, Enter finishes)",
          DrawingDimKind::PatternCallout);
   // Part note: it existed only as a button in the docked panel.
-  dimBtn(ICON_FA_TAG "###tb_dwg_part_note", "drawing.dim_part_note",
+  dimBtn("###tb_dwg_part_note", "drawing.dim_part_note",
          "Part note (pick a fastener or a part to label)",
          DrawingDimKind::FastenerCallout);
 
   Divider();
 
   // `view.fit` knows a drawing tab has a sheet scale rather than a camera.
-  CommandButton(state,
-                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_dwg_fit",
-                "view.fit", "Fit sheet");
+  CommandButton(state, "###tb_dwg_fit", "view.fit", "Fit sheet");
   // Export needs a native save dialog; without one (bare session, container)
   // the click used to do nothing at all. Say so on the button instead.
-  CommandButton(state, ICON_FA_FILE_EXPORT "###tb_dwg_export", "drawing.export",
+  CommandButton(state, "###tb_dwg_export", "drawing.export",
                 FileDialogsAvailable()
                     ? "Export drawing (SVG / PDF)"
                     : "Export needs a system file dialog (unavailable here) - "
@@ -1196,9 +1164,9 @@ void DrawDrawingToolbar(AppState& state) {
 // glyph. `job_tab_has_its_own_toolbar` asserts the row FITS and that no two
 // wear one glyph, the way the part bar's tests do.
 void DrawJobToolbar(AppState& state) {
-  const auto btn = [&state](const char* icon, const char* id, const char* tip,
+  const auto btn = [&state](const char* tbId, const char* id, const char* tip,
                             bool active = false) {
-    CommandButton(state, icon, id, tip, active);
+    CommandButton(state, tbId, id, tip, active);
   };
   const bool armed = state.slotPick.featureId == kCamToolSlot;
   const auto armedFor = [&](PickSlot slot) {
@@ -1207,10 +1175,10 @@ void DrawJobToolbar(AppState& state) {
 
   // Set up: Z zero first, and loudly, because it is the number that breaks
   // tools; then how the part is clamped.
-  btn(ICON_FA_CROSSHAIRS "###tb_job_top_face", "job.top_face",
+  btn("###tb_job_top_face", "job.top_face",
       "Pick the top face: Z zero for the job (also lays the part flat on it)",
       armedFor(PickSlot::CamTopFace));
-  btn(ICON_FA_HAND "###tb_job_lay_face_up", "job.lay_face_up",
+  btn("###tb_job_lay_face_up", "job.lay_face_up",
       "Lay a face up: clamp the part with this face towards the spindle",
       armedFor(PickSlot::CamLayFaceUp));
   // Only on a machine that has the axis -- the command's gate says so, and a
@@ -1218,31 +1186,30 @@ void DrawJobToolbar(AppState& state) {
 #ifdef HAVE_CAM
   if (const cam::Setup* setup = ActiveCamSetup(state);
       setup != nullptr && setup->machine.hasRotaryAxis)
-    btn(ICON_FA_ROTATE_RIGHT "###tb_job_index_face", "job.index_face",
+    btn("###tb_job_index_face", "job.index_face",
         "Turn a face up: index the rotary table so this face points at the "
         "spindle",
         armedFor(PickSlot::CamIndexFace));
 #endif
-  btn(ICON_FA_VIDEO "###tb_job_spindle", "job.look_down_spindle",
+  btn("###tb_job_spindle", "job.look_down_spindle",
       "Look down the spindle: the plan view of this setup, framed on the "
       "stock");
 
   Divider();
 
   // Machine it: each verb is one click on the model. The lit one is armed.
-  btn(ICON_FA_SQUARE_MINUS "###tb_job_pocket", "job.pocket",
-      "Clear a pocket: click its floor", armedFor(PickSlot::CamPocketFloor));
-  btn(ICON_FA_DRAW_POLYGON "###tb_job_profile", "job.profile",
+  btn("###tb_job_pocket", "job.pocket", "Clear a pocket: click its floor",
+      armedFor(PickSlot::CamPocketFloor));
+  btn("###tb_job_profile", "job.profile",
       "Cut it out: click the wall to follow",
       armedFor(PickSlot::CamProfileOutline));
-  btn(ICON_FA_BULLSEYE "###tb_job_drill", "job.drill",
-      "Drill a hole: click inside it", armedFor(PickSlot::CamDrillHole));
-  btn(ICON_FA_BORDER_TOP_LEFT "###tb_job_edge", "job.edge",
+  btn("###tb_job_drill", "job.drill", "Drill a hole: click inside it",
+      armedFor(PickSlot::CamDrillHole));
+  btn("###tb_job_edge", "job.edge",
       "Break an edge: click the wall whose top edge to round or chamfer",
       armedFor(PickSlot::CamEdgeWall));
-  btn(ICON_FA_BORDER_ALL "###tb_job_whole", "job.whole",
-      "Cut out the whole part (no pick)");
-  btn(ICON_FA_GRIP_LINES "###tb_job_face", "job.face",
+  btn("###tb_job_whole", "job.whole", "Cut out the whole part (no pick)");
+  btn("###tb_job_face", "job.face",
       "Face the top: skim the material above the part (no pick)");
 
   Divider();
@@ -1250,14 +1217,14 @@ void DrawJobToolbar(AppState& state) {
   // Rough, finish, clean up (docs/cam/surface-verbs-plan.md,
   // docs/cam/rough-rest-range-plan.md): a curved or tilted face, which every
   // verb above refuses, and -- with a 4th axis -- the whole part turned.
-  btn(ICON_FA_CHART_AREA "###tb_job_surface_rough", "job.surface_rough",
+  btn("###tb_job_surface_rough", "job.surface_rough",
       "Rough a surface: the stock down to a curved part in layers, leaving a "
       "skin (no pick)");
-  btn(ICON_FA_WATER "###tb_job_surface", "job.surface",
+  btn("###tb_job_surface", "job.surface",
       "Finish a surface: click it, curved or sloped (rough it out first)",
       state.camVerb == AppState::CamVerb::Surface &&
           armedFor(PickSlot::CamSurfaceRegion));
-  btn(ICON_FA_MOUNTAIN_SUN "###tb_job_walls", "job.walls",
+  btn("###tb_job_walls", "job.walls",
       "Finish walls: click the surface, lapped at constant depths (for steep "
       "walls)",
       state.camVerb == AppState::CamVerb::Walls &&
@@ -1265,32 +1232,31 @@ void DrawJobToolbar(AppState& state) {
 #ifdef HAVE_CAM
   if (const cam::Setup* setup = ActiveCamSetup(state);
       setup != nullptr && setup->machine.hasRotaryAxis) {
-    btn(ICON_FA_DRUM "###tb_job_rotary_rough", "job.rotary_rough",
+    btn("###tb_job_rotary_rough", "job.rotary_rough",
         "Rough on the rotary: the blank down to the part in layers, leaving a "
         "skin (no pick)");
-    btn(ICON_FA_SCROLL "###tb_job_rotary_finish", "job.rotary_finish",
+    btn("###tb_job_rotary_finish", "job.rotary_finish",
         "Finish on the rotary: the whole part, turned under a ball nose (no "
         "pick; the pattern is in its settings)");
   }
 #endif
-  btn(ICON_FA_WAND_MAGIC_SPARKLES "###tb_job_rest", "job.rest",
+  btn("###tb_job_rest", "job.rest",
       "Clean up what's left: a smaller ball, only where the last finish's "
       "could not reach (no pick)");
 
   Divider();
 
-  btn(ICON_FA_GEARS "###tb_job_generate", "job.generate",
+  btn("###tb_job_generate", "job.generate",
       "Generate every toolpath and verify the job");
-  btn(ICON_FA_PLAY "###tb_job_simulate", "job.simulate",
+  btn("###tb_job_simulate", "job.simulate",
       "Simulate the cut: play the posted file against the stock",
       state.camPlaybackOpen);
 
   Divider();
 
-  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_job_fit", "view.fit",
-      "Fit view");
-  CommandButton(state, ICON_FA_RULER "###tb_job_measure", "view.measure",
-                "Measure", state.measure.active);
+  btn("###tb_job_fit", "view.fit", "Fit view");
+  CommandButton(state, "###tb_job_measure", "view.measure", "Measure",
+                state.measure.active);
   ImGui::NewLine();
 }
 

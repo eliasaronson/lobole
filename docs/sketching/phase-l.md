@@ -49,7 +49,7 @@ defaults (not stored). Header de Boor evaluator agrees with the OCC
 `Geom_BSplineCurve` profile edge (same knot vector → watertight). Each pole
 is a free solver point (Coincident/Distance/Fixed work; drag reshapes);
 poles capped at 255 (`PointRef::which` is `uint8_t`). `SketchTool::Spline`
-(click poles, Enter/double-click finish), toolbar `ICON_FA_PEN_NIB`, key
+(click poles, Enter/double-click finish), toolbar `ICON_FA_BEZIER_CURVE` (was `PEN_NIB`), key
 `S`. Tests in `tests/test_spline.cpp` + v40 golden. See the shipped summary
 in [../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md).
 **Deferred:** fully-solved poles (`GCS::BSpline` + point-on-spline/tangent-

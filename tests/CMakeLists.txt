@@ -651,6 +651,11 @@ add_test(NAME rpc_names_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_names_gate.py)
 set_tests_properties(rpc_names_gate PROPERTIES TIMEOUT 60)
 
+# The committed icon font is what its script draws (docs/ui/icons-plan.md).
+add_test(NAME icon_font_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/icon_font_gate.py)
+set_tests_properties(icon_font_gate PROPERTIES TIMEOUT 30)
+
 # ...and that a dimensional one says what UNIT it is in. Same source-only
 # scan, same MethodDoc rows, different question: every angle bug this project
 # has shipped was a number crossing the JSON boundary with nothing but its

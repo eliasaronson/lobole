@@ -20,6 +20,7 @@
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/FeatureEditor.h"     // ArmSlot (blend edge re-pick)
+#include "ui/Icons.h"
 #include "ui/ListSelection.h"     // ListRowClicked / DeleteSelection
 #include "ui/SelectionPipeline.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
@@ -31,6 +32,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 namespace ui {
@@ -88,79 +90,48 @@ void DrawMassPropertiesSection(AppState& state) {
   state.cogWorld = glm::vec3(cache.centerOfMass);
 }
 
-// Per-kind glyph for the feature tree (U5) — same atlas as the toolbar.
+// Per-kind glyph for the feature tree (U5): the glyph of the command that
+// makes that kind (ui/Icons.h), so a row looks like the button that made it.
 const char* FeatureIcon(const std::string& type) {
-  if (type == "Sketch")
-    return ICON_FA_PENCIL;
-  if (type == "Extrude")
-    return ICON_FA_UP_LONG;
-  if (type == "Revolve")
-    return ICON_FA_ROTATE;
-  if (type == "Box")
-    return ICON_FA_CUBE;
-  if (type == "Sphere")
-    return ICON_FA_CIRCLE;
-  if (type == "Cylinder")
-    return ICON_FA_DATABASE;
-  if (type == "Boolean")
-    return ICON_FA_OBJECT_GROUP;
-  if (type == "Pattern")
-    return ICON_FA_GRIP;
-  if (type == "DatumPlane")
-    return ICON_FA_TABLE_CELLS_LARGE;
-  if (type == "DatumAxis")
-    return ICON_FA_ARROWS_UP_DOWN;
-  if (type == "Frame")
-    return ICON_FA_LOCATION_CROSSHAIRS;
-  if (type == "Curve3D")
-    return ICON_FA_WAVE_SQUARE;
-  if (type == "Pipe")
-    return ICON_FA_ROAD;
-  if (type == "Fillet")
-    return ICON_FA_BORDER_TOP_LEFT;
-  if (type == "Chamfer")
-    return ICON_FA_CROP_SIMPLE;
-  if (type == "Rib")
-    return ICON_FA_BARS_STAGGERED;
-  if (type == "Thread")
-    return ICON_FA_LINES_LEANING;
-  if (type == "Hole")
-    return ICON_FA_BULLSEYE;
-  if (type == "Shell")
-    return ICON_FA_BOX_OPEN;
-  if (type == "Draft")
-    return ICON_FA_MOUNTAIN;
-  if (type == "Split")
-    return ICON_FA_TABLE_COLUMNS;
-  if (type == "Refine")
-    return ICON_FA_BROOM;
-  if (type == "BaseFlange")
-    return ICON_FA_LAYER_GROUP;
-  if (type == "EdgeFlange")
-    return ICON_FA_ARROW_TURN_UP;
-  if (type == "FlatPattern")
-    return ICON_FA_FILE_LINES;
-  if (type == "NormalCut")
-    return ICON_FA_CIRCLE_MINUS;
-  if (type == "CornerRelief")
-    return ICON_FA_OBJECT_UNGROUP;
-  if (type == "Hem")
-    return ICON_FA_ROTATE_LEFT;
-  if (type == "Jog")
-    return ICON_FA_STAIRS;
-  if (type == "Unfold")
-    return ICON_FA_MAP;
-  if (type == "Refold")
-    return ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER;
-  if (type == "Loft")
-    return ICON_FA_CUBES_STACKED;
-  if (type == "Sweep")
-    return ICON_FA_ROUTE;
-  if (type == "Import")
-    return ICON_FA_FILE_IMPORT;
-  if (type == "Derived")
-    return ICON_FA_LINK;
-  return ICON_FA_SHAPES;
+  static const std::unordered_map<std::string, const char*> kCommandOf = {
+      {"Sketch", "part.new_sketch"},
+      {"Extrude", "part.extrude"},
+      {"Revolve", "part.revolve"},
+      {"Box", "part.box"},
+      {"Sphere", "part.sphere"},
+      {"Cylinder", "part.cylinder"},
+      {"Boolean", "part.boolean"},
+      {"Pattern", "part.pattern"},
+      {"DatumPlane", "part.datum_plane"},
+      {"DatumAxis", "part.datum_axis"},
+      {"Frame", "part.frame"},
+      {"Curve3D", "part.curve3d"},
+      {"Pipe", "part.pipe"},
+      {"Fillet", "part.fillet"},
+      {"Chamfer", "part.chamfer"},
+      {"Rib", "part.rib"},
+      {"Thread", "part.thread"},
+      {"Hole", "part.hole"},
+      {"Shell", "part.shell"},
+      {"Draft", "part.draft"},
+      {"Split", "part.split"},
+      {"Refine", "part.refine"},
+      {"BaseFlange", "part.sheet_base_flange"},
+      {"EdgeFlange", "part.sheet_edge_flange"},
+      {"FlatPattern", "part.sheet_flat_pattern"},
+      {"NormalCut", "part.sheet_normal_cut"},
+      {"CornerRelief", "part.sheet_corner_relief"},
+      {"Hem", "part.sheet_hem"},
+      {"Jog", "part.sheet_jog"},
+      {"Unfold", "part.sheet_unfold"},
+      {"Refold", "part.sheet_refold"},
+      {"Loft", "part.loft"},
+      {"Sweep", "part.sweep"},
+      {"Import", "file.import"},
+      {"Derived", "part.derive"},
+  };
+  const auto it = kCommandOf.find(type);
+  return it == kCommandOf.end() ? kUnknownIcon : CommandIcon(it->second);
 }
 
 // The rollback bar: a grabbable divider drawn where regeneration stops (or at

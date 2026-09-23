@@ -743,6 +743,7 @@ set(app_sources
     src/ui/SketchPick.cpp
     src/ui/SketchOps.cpp
     src/ui/Toolbar.cpp
+    src/ui/Icons.cpp
     src/ui/Widgets.cpp
     src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
@@ -769,6 +770,11 @@ file(COPY ${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+# Designer's own icon font is REGENERATED (tools/icons/build_icon_font.py), so
+# it is copied with configure_file: file(COPY) runs only at configure time, and
+# a rebuilt font never reached the build tree (docs/ui/icons-plan.md).
+configure_file(${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf
+               ${CMAKE_BINARY_DIR}/assets/fonts/designer-icons.ttf COPYONLY)
 # Monospace for the terminal panel: the UI font has no box-drawing glyphs, and
 # a TUI drawn in a proportional font is unreadable (docs/ui/terminal-panel.md).
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
@@ -1237,6 +1243,7 @@ install(DIRECTORY "${SHADER_OUTPUT_DIR}/"
 install(FILES
         "${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
+        "${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")

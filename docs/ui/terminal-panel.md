@@ -115,7 +115,7 @@ drawing and key mapping need a GUI test.
 ### Rendering
 
 A monospace font is added to the atlas as a **second font** (the app already
-merges Font Awesome into Roboto at runtime from `assets/fonts`) — a font with
+merges Font Awesome and Designer's icon font into Roboto at runtime from `assets/fonts`) — a font with
 box-drawing coverage, so `─` and `❯` are not tofu. Cell size comes from the
 font's advance width; columns/rows follow the panel's content region, so
 resizing the dock node resizes the PTY.

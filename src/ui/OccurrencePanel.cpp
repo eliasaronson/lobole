@@ -10,6 +10,7 @@
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
 #include "ui/FloatingWindow.h"
+#include "ui/Icons.h"
 #include "ui/ListSelection.h"
 #include "ui/MotionActions.h"
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
@@ -152,22 +153,24 @@ void DrawRelationsSection(AppState& state) {
   }
 }
 
+// The mate's glyph is the glyph of the toolbar button that makes that type,
+// so the list and the bar agree (they had drifted apart on four of six).
 const char* MateGlyph(MateType t) {
   switch (t) {
   case MateType::Fastened:
-    return ICON_FA_LOCK;
+    return CommandIcon("assembly.mate_fastened");
   case MateType::Revolute:
-    return ICON_FA_ROTATE;
+    return CommandIcon("assembly.mate_revolute");
   case MateType::Slider:
-    return ICON_FA_ARROWS_LEFT_RIGHT;
+    return CommandIcon("assembly.mate_slider");
   case MateType::Cylindrical:
-    return ICON_FA_CIRCLE_NOTCH;
+    return CommandIcon("assembly.mate_cylindrical");
   case MateType::Planar:
-    return ICON_FA_LAYER_GROUP;
+    return CommandIcon("assembly.mate_planar");
   case MateType::Ball:
-    return ICON_FA_CIRCLE;
+    return CommandIcon("assembly.mate_ball");
   }
-  return ICON_FA_LINK;
+  return kUnknownIcon;
 }
 
 void DrawMatesSection(AppState& state) {

@@ -483,14 +483,15 @@ rigid — full `GCS::Ellipse` constrainability is the deferred follow-up in
 phase-l.md), profile (`gp_Elips` wire edge + tessellation → extrudes
 to π·a·b·h), render/pick (centre dot + tessellated body-hit), and a 3-click
 `SketchTool::Ellipse` (centre → major-axis end → minor radius) with an
-`ICON_FA_EGG` toolbar button. Trim/circle-line-break bug and the trackball
+`ICON_FA_EGG` toolbar button (`ICON_DS_ELLIPSE_TOOL` since
+docs/ui/icons-plan.md). Trim/circle-line-break bug and the trackball
 gimbal-lock fix shipped alongside on fix/sketch-usability.
 
 **B-splines** — ✅ **v1 SHIPPED (format v40)**: `sketch::BSpline{poles,
 degree}` (non-rational, clamped, uniform) through the full pipeline; rigid-
 net solver (each pole a free solver point), OCC `Geom_BSplineCurve` profile
 edge matching a header de Boor evaluator, `SketchTool::Spline` (key `S`,
-`ICON_FA_PEN_NIB`), `tests/test_spline.cpp` + v40 golden. Fully-solved poles
+`ICON_FA_BEZIER_CURVE` since docs/ui/icons-plan.md), `tests/test_spline.cpp` + v40 golden. Fully-solved poles
 (point-on-spline / tangent-at-knot via `GCS::BSpline`), expression-driven
 poles, and 3D fit-splines are deferred — see phase-l.md and
 [../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md).
