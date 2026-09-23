@@ -133,9 +133,17 @@ constexpr MethodDoc kCamMethods[] = {
      "Move or change a fixture {setup, fixture: id, pos?: [x,y,z] mm in "
      "setup space, side?: -x|+x|-y|+y|centre|top (re-derive against the "
      "stock), rot_z?: degrees, box?: [x,y,z] mm (a keep-out box's size), "
-     "enabled?: false = drawn, not checked, name?}. pos and side both place "
-     "it, so passing both is refused. Safe Z is re-derived.",
-     "box, enabled, fixture, job, name, pos, rot_z, setup, side",
+     "enabled?: false = drawn, not checked, name?, seat?: {feature_id, "
+     "element, edge: -x|+x|-y|+y, along_mm, over_mm, spin_deg?} | null}. pos "
+     "and side both place it, so passing both is refused. `seat` RESTS it on "
+     "the stock instead: that face of the fixture (it must face down) on the "
+     "stock's top, reaching over_mm in past `edge`, its middle along_mm from "
+     "that edge's low (-X or -Y) end, turned spin_deg from pointing straight "
+     "in -- all in mm and degrees, measured from the stock, and re-solved "
+     "whenever the stock changes. null stands it back on its own at the pose "
+     "it has. A seat with pos, side or rot_z is refused. Safe Z is "
+     "re-derived.",
+     "box, enabled, fixture, job, name, pos, rot_z, seat, setup, side",
      remote::NoFlags, "id, part|box, name, pos, rot_z, enabled, setup, safe_z"},
     {"remove_job_fixture",
      "Take a fixture off a setup {setup, fixture: id}. Safe Z is re-derived.",
@@ -709,6 +717,13 @@ json FixtureJson(const cam::Fixture& f) {
     j["box"] = {f.box.x, f.box.y, f.box.z};
   else
     j["part"] = f.sourceDocId;
+  if (f.seat)
+    j["seat"] = {{"feature_id", f.seat->face.featureId},
+                 {"element", f.seat->face.name},
+                 {"edge", cam::StockEdgeName(f.seat->edge)},
+                 {"along_mm", f.seat->alongMm},
+                 {"over_mm", f.seat->overMm},
+                 {"spin_deg", f.seat->spinDeg}};
   return j;
 }
 
@@ -1153,6 +1168,52 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (pos && side)
       throw std::runtime_error(
           "pos and side both say where the fixture goes; pass one");
+    // A seat (docs/cam/fixture-seat-plan.md): validated whole -- the face, the
+    // edge, and that it SOLVES against the stock -- before anything changes.
+    std::optional<std::optional<cam::FixtureSeat>> seat; // outer: given
+    const bool placing = pos || side || p.contains("rot_z");
+    const bool unseating = p.contains("seat") && p.at("seat").is_null();
+    // A seated fixture's pose is SOLVED: a pos written into it would be
+    // replaced by the next solve, in silence. Say so instead.
+    if (f.seat && placing && !unseating)
+      throw std::runtime_error(
+          "\"" + f.name +
+          "\" rests on the stock, so its place is solved from its seat; pass "
+          "seat: null with pos, side or rot_z to stand it on its own");
+    if (p.contains("seat")) {
+      const json& sj = p.at("seat");
+      if (!sj.is_null() && placing)
+        throw std::runtime_error(
+            "a seat says where the fixture goes and how it is turned; pass it "
+            "without pos, side or rot_z");
+      if (sj.is_null()) {
+        seat = std::optional<cam::FixtureSeat>{};
+      } else {
+        if (f.IsBox())
+          throw std::runtime_error("\"" + f.name +
+                                   "\" is a keep-out box, which has no faces "
+                                   "to rest on; give it a pos");
+        cam::FixtureSeat s;
+        s.face.featureId = sj.at("feature_id").get<uint64_t>();
+        s.face.name = sj.at("element").get<std::string>();
+        const std::string edge = sj.at("edge").get<std::string>();
+        if (!cam::ParseStockEdge(edge, s.edge))
+          throw std::runtime_error("unknown seat edge '" + edge +
+                                   "'; use -x, +x, -y or +y");
+        s.alongMm = sj.at("along_mm").get<double>();
+        s.overMm = sj.at("over_mm").get<double>();
+        s.spinDeg = sj.value("spin_deg", 0.0);
+        glm::dvec3 lo(0.0), hi(0.0), at(0.0);
+        double rot = 0.0;
+        std::string why = "there is no stock to rest it on";
+        if (!cam::StockBounds(setup, ui::JobBodies(state), lo, hi) ||
+            !cam::SolveFixtureSeat(lo, hi, ui::FixtureModelBodies(state, f), s,
+                                   at, rot, &why))
+          throw std::runtime_error("cannot rest \"" + f.name +
+                                   "\" there: " + why);
+        seat = s;
+      }
+    }
     if (p.contains("name"))
       f.name = p.at("name").get<std::string>();
     if (p.contains("enabled"))
@@ -1170,6 +1231,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       f.box = *box;
     if (pos)
       f.pos = *pos;
+    if (seat)
+      f.seat = *seat; // CamFixturesChanged below solves it into pos/rot_z
     if (side && !cam::PlaceFixture(setup, ui::JobBodies(state),
                                    ui::FixtureModelBodies(state, f), f.rotZdeg,
                                    *side, f.pos))

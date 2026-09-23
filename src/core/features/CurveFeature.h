@@ -109,12 +109,12 @@ public:
   double pitch = 1.0; // rise along the axis per full turn
   double turns = 1.0;
   bool rightHanded = true;
-  // Where the helix starts round its axis (v127), degrees, right-handed about
+  // Where the helix starts round its axis (v128), degrees, right-handed about
   // the axis from HelixReference(axisDir). 0 is where every helix started
   // before the field existed.
   double startDeg = 0.0;
   std::string radiusExpr, pitchExpr, turnsExpr; // expression-driven (v42)
-  std::string startDegExpr;                     // v127
+  std::string startDegExpr;                     // v128
 
 private:
   std::vector<glm::vec3> m_polyline;

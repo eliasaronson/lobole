@@ -1004,7 +1004,7 @@ json FeatureToJson(const Feature& feature) {
       if (!cv->rightHanded)
         j["left_handed"] = true;
       if (cv->startDeg != 0.0 || !cv->startDegExpr.empty())
-        j["start_deg"] = cv->startDeg; // v127
+        j["start_deg"] = cv->startDeg; // v128
       if (!cv->startDegExpr.empty())
         j["start_deg_expr"] = cv->startDegExpr;
       break;

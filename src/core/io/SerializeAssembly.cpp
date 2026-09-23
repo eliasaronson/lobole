@@ -458,7 +458,7 @@ json MotionStudyToJson(const MotionStudy& s) {
   j["check_clash"] = s.checkClash;
   j["clash_mode"] = s.clashMode;
   if (s.configuration)
-    j["configuration"] = *s.configuration; // v127; 0 = the base
+    j["configuration"] = *s.configuration; // v128; 0 = the base
   return j;
 }
 

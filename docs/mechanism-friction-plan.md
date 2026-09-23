@@ -73,7 +73,7 @@ from the mesh path and still carry names only.
 So nothing about the far end of the travel can be measured afterwards — a
 `section` after the run sees the shut throttle twice. The generator had to
 read orientations out of the sample poses and do quaternion arithmetic in
-Python to recover the angle the butterfly turned. (Since v127 the samples
+Python to recover the angle the butterfly turned. (Since v128 the samples
 carry `mates: [{mate, name, rotation_deg, offset}]`, docs/pes-friction-plan.md.)
 
 **Fix — DONE 2026-09-06.** `leave_at` on `run_motion_study`: `"start"`

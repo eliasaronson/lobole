@@ -298,7 +298,7 @@ struct MotionStudy {
   // "mesh" (the default: triangles, the speed a sweep needs) or "exact"
   // (the boolean, at a boolean's price, for a final gate).
   std::string clashMode = "mesh";
-  // The configuration the study runs under (v127): an id, or 0 for the BASE
+  // The configuration the study runs under (v128): an id, or 0 for the BASE
   // (no configuration); unset = whichever is active when it runs. A study
   // that measures "full load" has to SAY full load, or it measures whatever
   // the last person left switched on — and one that must run with nothing

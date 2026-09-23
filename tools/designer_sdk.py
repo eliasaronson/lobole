@@ -2179,7 +2179,7 @@ class Asm(_Tab):
 
     def motion(self, driver, **kw):
         """A motion study on this assembly (v87). `configuration=` names the
-        assembly configuration it runs under (v127): an id, 0 for the base,
+        assembly configuration it runs under (v128): an id, 0 for the base,
         omitted for whichever is active when it runs."""
         self.activate()
         return self.app.add_motion_study(driver=_id(driver), **kw)

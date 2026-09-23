@@ -314,7 +314,7 @@ TEST_CASE("BuildLoops arc endpoints match the wire builder's rounding",
   CHECK((fwd || rev));
 }
 
-// --- Custom axis (v127)
+// --- Custom axis (v128)
 // -------------------------------------------------------
 
 TEST_CASE("Revolve about a custom axis off the origin", "[revolve]") {
@@ -376,10 +376,10 @@ TEST_CASE("A custom axis round-trips, and a zero direction is refused",
                     Catch::Matchers::ContainsSubstring("custom {origin"));
 }
 
-// The v127 part golden: a custom-axis revolve and a helix that starts at
-// 90 degrees. Written by this recipe (DESIGNER_WRITE_GOLDEN_V127=<path>) and
+// The v128 part golden: a custom-axis revolve and a helix that starts at
+// 90 degrees. Written by this recipe (DESIGNER_WRITE_GOLDEN_V128=<path>) and
 // loaded here every time, so the file and the code cannot drift.
-TEST_CASE("The v127 golden: custom axis and helix start", "[revolve][golden]") {
+TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {11, 0}, {13, 3});
   auto rev =
@@ -397,11 +397,11 @@ TEST_CASE("The v127 golden: custom axis and helix start", "[revolve][golden]") {
   cv->startDeg = 90.0;
   doc.AddFeature(std::move(cv));
   REQUIRE(doc.Regenerate());
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V127"))
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128"))
     REQUIRE(testio::Save(doc, out));
 
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
-                          "tests/golden/v127-custom-axis-helix-start.json";
+                          "tests/golden/v128-custom-axis-helix-start.json";
   auto g = testio::Load(golden.string());
   REQUIRE(g != nullptr);
   REQUIRE(g->GetBodies().size() == 1);

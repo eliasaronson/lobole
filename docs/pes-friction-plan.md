@@ -7,7 +7,7 @@ recur; the two that are real modelling gaps are left for their own plan.
 
 ## The fixes
 
-### Format (v127): three fields a script could not reach
+### Format (v128): three fields a script could not reach
 
 1. **Revolve and pattern about any axis.** `AxisRef` knows world X/Y/Z,
    a sketch line and a datum axis. A turned bore off the origin needs a
@@ -40,7 +40,7 @@ recur; the two that are real modelling gaps are left for their own plan.
    `SerializeAssembly.cpp`, `RemoteMotion.cpp`.
 
 One bump, one row in docs/versioning/format.md, a part golden and an
-assembly golden at v127.
+assembly golden at v128.
 
 ### Answers that were incomplete or inconsistent (no format change)
 
@@ -102,7 +102,7 @@ assembly golden at v127.
   that is not active; WhyNot honours its suppressions); sample mate values.
 - Smokes: interference names/ids, `set_section` `keeps`, `describe(method=)`
   through both clients, `sdk_smoke` contracts.
-- Goldens at v127; `test_golden` gates.
+- Goldens at v128; `test_golden` gates.
 - `tools/test-fast.sh`, then the full headless suite and the GUI suite
   (the axis combo is UI).
 - The pump generator: same strokes, firing order, turns and clean sweeps.

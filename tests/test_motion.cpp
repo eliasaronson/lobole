@@ -506,9 +506,9 @@ TEST_CASE("Every sample records the moving mates' values", "[motion]") {
   }
 }
 
-// The v127 assembly golden: a study that names its configuration.
-// DESIGNER_WRITE_GOLDEN_V127_ASM=<path> writes it.
-TEST_CASE("The v127 golden: a study that names its configuration",
+// The v128 assembly golden: a study that names its configuration.
+// DESIGNER_WRITE_GOLDEN_V128_ASM=<path> writes it.
+TEST_CASE("The v128 golden: a study that names its configuration",
           "[motion][golden]") {
   Rig r = MakeRig(90.0);
   Configuration& noStop = r.asmDoc.AddConfiguration("no stop");
@@ -517,11 +517,11 @@ TEST_CASE("The v127 golden: a study that names its configuration",
   s.name = "turn without the stop";
   s.configuration = noStop.id;
   r.asmDoc.AddMotionStudy(s);
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V127_ASM"))
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128_ASM"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
 
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
-                          "tests/golden/assembly/v127-study-configuration.json";
+                          "tests/golden/assembly/v128-study-configuration.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
   REQUIRE((*g)->GetMotionStudies().size() == 1);

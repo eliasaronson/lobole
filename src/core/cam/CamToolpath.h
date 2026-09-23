@@ -483,6 +483,33 @@ FixturePlaceName(const Setup& setup, const std::vector<Body>& bodies,
                                 double rotZdeg, FixtureSide side,
                                 glm::dvec3& pos);
 
+// --- seats (docs/cam/fixture-seat-plan.md) ------------------------------
+// Built with CAM off too (CamSetup.cpp): fixtures are drawn in any build.
+[[nodiscard]] bool ParseStockEdge(const std::string& text, StockEdge& out);
+[[nodiscard]] std::string StockEdgeName(StockEdge edge);
+// The pose that puts `seat.face` of the fixture (its bodies in their OWN
+// coordinates) on the top of the stock box [stockLo, stockHi]: the face's
+// plane on the top, its nose pointing in square to `seat.edge` (plus
+// `spinDeg`), its innermost point `overMm` in past the edge and its centre
+// `alongMm` from the edge's low end. False, with `why`, when the face is
+// gone, is not planar, or does not face down -- a fixture turns about Z
+// only, so a face that does not face down cannot rest on anything.
+[[nodiscard]] bool SolveFixtureSeat(const glm::dvec3& stockLo,
+                                    const glm::dvec3& stockHi,
+                                    const std::vector<Body>& fixtureModel,
+                                    const FixtureSeat& seat, glm::dvec3& pos,
+                                    double& rotZdeg, std::string* why);
+// A click on the stock's top as a seat: the nearest edge, `overMm` the
+// click's distance in from it (so the face's innermost point lands where
+// you clicked), `alongMm` its place along it. `seat.face` is kept.
+[[nodiscard]] bool SeatAtPoint(const glm::dvec3& stockLo,
+                               const glm::dvec3& stockHi,
+                               const glm::dvec3& point, FixtureSeat& seat,
+                               std::string* why);
+// Why `face` (in the fixture's own model) cannot be a seat, or empty.
+[[nodiscard]] std::string SeatFaceRefusal(const std::vector<Body>& fixtureModel,
+                                          const ElementRef& face);
+
 // Time spent CUTTING, from each move's own feed. Rapids are counted only when
 // the setup states a rapid feed — inventing one would be a guess about the
 // machine, and this number exists to be trusted.

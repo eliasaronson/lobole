@@ -271,7 +271,7 @@ TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
   REQUIRE(cv);
   CHECK_THAT(cv->startDeg, WithinAbs(45.0, 1e-12));
   CHECK(cv->startDegExpr == "phase + 15");
-  // A helix that never set it writes nothing: files from before v127 stay
+  // A helix that never set it writes nothing: files from before v128 stay
   // byte-identical when re-saved.
   CurveFeature plain("P", Curve3DKind::Helix);
   CHECK_FALSE(DocumentIO::FeatureToJson(plain).contains("start_deg"));

@@ -31,6 +31,14 @@
 
 #include <limits>
 
+#include "ui/RayMath.h" // RayPlane
+#include <IntCurvesFace_ShapeIntersector.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pnt.hxx>
+
 #include <cmath>
 
 namespace ui {
@@ -1103,52 +1111,140 @@ bool DrawFixtureEditor(AppState& state) {
   }
   BeginToolWindowFrame(state, "Fixture: " + f->name);
   bool changed = false;
-  float xyz[3] = {static_cast<float>(f->pos.x), static_cast<float>(f->pos.y),
-                  static_cast<float>(f->pos.z)};
-  if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", xyz, 0.5f)) {
-    f->pos = {xyz[0], xyz[1], xyz[2]};
-    changed = true;
-  }
-  ImGui::SetItemTooltip("Where its origin sits on the bed (setup space, mm)");
-  float rot = static_cast<float>(f->rotZdeg);
-  if (ui::ExprDragFloat(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0f,
-                        360.0f, "%.1f°")) {
-    f->rotZdeg = rot;
-    changed = true;
-  }
-  if (f->IsBox()) {
-    float size[3] = {static_cast<float>(f->box.x), static_cast<float>(f->box.y),
-                     static_cast<float>(f->box.z)};
-    if (ui::ExprDragFloat3(state, "Size###cam_fixture_size", size, 0.5f) &&
-        size[0] > 0.0f && size[1] > 0.0f && size[2] > 0.0f) {
-      f->box = {size[0], size[1], size[2]};
+  // Esc backs out of a half-made seat, as it does out of every armed pick.
+  if (state.camSeat.Active() && !ImGui::GetIO().WantTextInput &&
+      ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    state.camSeat = {};
+  if (f->seat) {
+    // RESTING ON the stock (docs/cam/fixture-seat-plan.md): every number is
+    // measured from the stock, and the pose follows it. The bed position and
+    // the side buttons are for a fixture that stands on its own.
+    ImGui::SeparatorText("Resting on the stock");
+    if (const auto it = state.camSeatRefusals.find(f->id);
+        it != state.camSeatRefusals.end()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+      ImGui::TextWrapped("It cannot rest there any more: %s. It is drawn "
+                         "where it last sat.",
+                         it->second.c_str());
+      ImGui::PopStyleColor();
+    }
+    static const std::pair<const char*, cam::StockEdge> kEdges[] = {
+        {"-X###cam_seat_mx", cam::StockEdge::MinusX},
+        {"+X###cam_seat_px", cam::StockEdge::PlusX},
+        {"-Y###cam_seat_my", cam::StockEdge::MinusY},
+        {"+Y###cam_seat_py", cam::StockEdge::PlusY}};
+    ImGui::TextUnformatted("Over the edge");
+    for (const auto& [label, edge] : kEdges) {
+      ImGui::SameLine();
+      const bool on = f->seat->edge == edge;
+      if (on)
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      if (ImGui::SmallButton(label) && !on) {
+        SnapshotJob(state);
+        f->seat->edge = edge;
+        changed = true;
+      }
+      if (on)
+        ImGui::PopStyleColor();
+    }
+    const bool alongX = f->seat->edge == cam::StockEdge::MinusY ||
+                        f->seat->edge == cam::StockEdge::PlusY;
+    float along = static_cast<float>(f->seat->alongMm);
+    if (ui::ExprDragFloat(state, "Along###cam_seat_along", &along, 0.5f, 0.0f,
+                          0.0f, "%.2f mm")) {
+      f->seat->alongMm = along;
       changed = true;
     }
-    ImGui::SetItemTooltip("The keep-out box, X by Y by Z, mm");
-  }
+    ImGui::SetItemTooltip(alongX ? "From the stock's -X end to the middle of "
+                                   "the face it rests on"
+                                 : "From the stock's -Y end to the middle of "
+                                   "the face it rests on");
+    float over = static_cast<float>(f->seat->overMm);
+    if (ui::ExprDragFloat(state, "Over the stock###cam_seat_over", &over, 0.5f,
+                          0.0f, 0.0f, "%.2f mm")) {
+      f->seat->overMm = over;
+      changed = true;
+    }
+    ImGui::SetItemTooltip("How far it reaches in past the edge -- where its "
+                          "nose presses");
+    float spin = static_cast<float>(f->seat->spinDeg);
+    if (ui::ExprDragFloat(state, "Spin###cam_seat_spin", &spin, 1.0f, -180.0f,
+                          180.0f, "%.1f°")) {
+      f->seat->spinDeg = spin;
+      changed = true;
+    }
+    ImGui::SetItemTooltip("Turned from pointing straight in");
+    if (ImGui::Button("Move: click a new spot###cam_seat_move"))
+      ArmFixtureSeat(state, f->id, /*spotOnly=*/true);
+    ImGui::SetItemTooltip("Click where on the stock it should press");
+    ImGui::SameLine();
+    if (ImGui::Button("Unseat###cam_seat_unseat")) {
+      // Keeps the pose it has: the bed position it stood at a moment ago.
+      SnapshotJob(state);
+      f->seat.reset();
+      state.camSeat = {};
+      changed = true;
+    }
+    ImGui::SetItemTooltip("Stand it on its own at this bed position; it will "
+                          "no longer follow the stock");
+  } else {
+    float xyz[3] = {static_cast<float>(f->pos.x), static_cast<float>(f->pos.y),
+                    static_cast<float>(f->pos.z)};
+    if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", xyz, 0.5f)) {
+      f->pos = {xyz[0], xyz[1], xyz[2]};
+      changed = true;
+    }
+    ImGui::SetItemTooltip("Where its origin sits on the bed (setup space, mm)");
+    float rot = static_cast<float>(f->rotZdeg);
+    if (ui::ExprDragFloat(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0f,
+                          360.0f, "%.1f°")) {
+      f->rotZdeg = rot;
+      changed = true;
+    }
+    if (f->IsBox()) {
+      float size[3] = {static_cast<float>(f->box.x),
+                       static_cast<float>(f->box.y),
+                       static_cast<float>(f->box.z)};
+      if (ui::ExprDragFloat3(state, "Size###cam_fixture_size", size, 0.5f) &&
+          size[0] > 0.0f && size[1] > 0.0f && size[2] > 0.0f) {
+        f->box = {size[0], size[1], size[2]};
+        changed = true;
+      }
+      ImGui::SetItemTooltip("The keep-out box, X by Y by Z, mm");
+    }
+    ImGui::SeparatorText("Put it");
+    const std::vector<Body> model = ui::FixtureModelBodies(state, *f);
+    static const std::pair<const char*, cam::FixtureSide> kPlaces[] = {
+        {"-X###cam_fixture_mx", cam::FixtureSide::MinusX},
+        {"+X###cam_fixture_px", cam::FixtureSide::PlusX},
+        {"-Y###cam_fixture_my", cam::FixtureSide::MinusY},
+        {"+Y###cam_fixture_py", cam::FixtureSide::PlusY},
+        {"Centre###cam_fixture_centre", cam::FixtureSide::Centre},
+        {"Top###cam_fixture_top", cam::FixtureSide::Top}};
+    for (size_t k = 0; k < std::size(kPlaces); k++) {
+      if (k > 0)
+        ImGui::SameLine();
+      if (ImGui::Button(kPlaces[k].first) &&
+          cam::PlaceFixture(*setup, ui::JobBodies(state), model, f->rotZdeg,
+                            kPlaces[k].second, f->pos))
+        changed = true;
+    }
+    ImGui::SetItemTooltip("Against that side of the stock, centred on it (a "
+                          "vise), or on its top straddling the -X edge (a toe "
+                          "clamp)");
+    // A part has named faces to rest on; a keep-out box has none.
+    if (!f->IsBox()) {
+      if (ImGui::Button("Rest it on the stock###cam_seat_arm"))
+        ArmFixtureSeat(state, f->id, /*spotOnly=*/false);
+      ImGui::SetItemTooltip(
+          "Click the face that rests on the stock, then where "
+          "it presses. It stays there when the stock changes.");
+    }
+  } // unseated
   if (ImGui::Checkbox("Check the tool against it###cam_fixture_on",
                       &f->enabled))
     changed = true;
-  ImGui::SeparatorText("Put it");
-  const std::vector<Body> model = ui::FixtureModelBodies(state, *f);
-  static const std::pair<const char*, cam::FixtureSide> kPlaces[] = {
-      {"-X###cam_fixture_mx", cam::FixtureSide::MinusX},
-      {"+X###cam_fixture_px", cam::FixtureSide::PlusX},
-      {"-Y###cam_fixture_my", cam::FixtureSide::MinusY},
-      {"+Y###cam_fixture_py", cam::FixtureSide::PlusY},
-      {"Centre###cam_fixture_centre", cam::FixtureSide::Centre},
-      {"Top###cam_fixture_top", cam::FixtureSide::Top}};
-  for (size_t k = 0; k < std::size(kPlaces); k++) {
-    if (k > 0)
-      ImGui::SameLine();
-    if (ImGui::Button(kPlaces[k].first) &&
-        cam::PlaceFixture(*setup, ui::JobBodies(state), model, f->rotZdeg,
-                          kPlaces[k].second, f->pos))
-      changed = true;
-  }
-  ImGui::SetItemTooltip("Against that side of the stock, centred on it (a "
-                        "vise), or on its top straddling the -X edge (a toe "
-                        "clamp)");
   if (changed)
     CamFixturesChanged(state, *setup);
   ImGui::Separator();
@@ -1158,6 +1254,7 @@ bool DrawFixtureEditor(AppState& state) {
                   [id](const cam::Fixture& x) { return x.id == id; });
     state.camEditFixture = 0;
     state.camToolOpen = false;
+    state.camSeat = {};
     CamFixturesChanged(state, *setup);
     ImGui::End();
     return true;
@@ -1166,12 +1263,122 @@ bool DrawFixtureEditor(AppState& state) {
   if (ImGui::Button("Close###cam_fixture_editor_close")) {
     state.camEditFixture = 0;
     state.camToolOpen = false;
+    state.camSeat = {};
   }
   ImGui::End();
   return true;
 }
 
 } // namespace
+
+void ArmFixtureSeat(AppState& state, uint64_t fixtureId, bool spotOnly) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  const cam::Fixture* f =
+      setup != nullptr ? setup->FindFixture(fixtureId) : nullptr;
+  if (f == nullptr || f->IsBox())
+    return;
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.camSeat = {};
+  state.camSeat.fixtureId = fixtureId;
+  if (spotOnly && f->seat) {
+    state.camSeat.pickSpot = true;
+    state.camSeat.face = f->seat->face;
+    state.camSeat.prompt =
+        "Click where " + f->name + " presses on the stock - Esc cancels";
+  } else {
+    state.camSeat.prompt = "Click the face of " + f->name +
+                           " that rests on the stock - Esc cancels";
+  }
+}
+
+void FixtureSeatClicked(AppState& state, const glm::vec3& origin,
+                        const glm::vec3& direction) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  cam::Fixture* f =
+      setup != nullptr ? setup->FindFixture(state.camSeat.fixtureId) : nullptr;
+  if (f == nullptr) {
+    state.camSeat = {};
+    return;
+  }
+  const std::vector<Body> model = FixtureModelBodies(state, *f);
+  if (!state.camSeat.pickSpot) {
+    // Step one: the face it rests on, found by casting the click at the
+    // fixture where it is DRAWN. Fixtures are not in the face selector --
+    // they are drawn outside the body list so picking indices stay the
+    // document's -- and one ray against one part on a click needs nothing
+    // that it has.
+    const glm::mat4 xf(cam::FixtureTransform(*f));
+    const gp_Lin line(gp_Pnt(origin.x, origin.y, origin.z),
+                      gp_Dir(direction.x, direction.y, direction.z));
+    double best = std::numeric_limits<double>::max();
+    ElementRef hit;
+    for (const Body& b : model) {
+      const TopoDS_Shape placed = b.shape.Transformed(xf).GetShape();
+      IntCurvesFace_ShapeIntersector inter;
+      inter.Load(placed, 1e-6);
+      inter.Perform(line, 0.0, std::numeric_limits<double>::max());
+      for (int i = 1; inter.IsDone() && i <= inter.NbPnt(); i++) {
+        if (inter.WParameter(i) >= best)
+          continue;
+        int index = 0;
+        for (TopExp_Explorer e(placed, TopAbs_FACE); e.More();
+             e.Next(), index++)
+          if (e.Current().IsSame(inter.Face(i)))
+            break;
+        if (const std::string* name = b.elementMap.NameOf(index)) {
+          best = inter.WParameter(i);
+          hit = ElementRef{b.createdBy, *name};
+        }
+      }
+    }
+    if (!hit.IsSet()) {
+      state.camSeat.miss = "Nothing of " + f->name +
+                           " there - click the face it rests on (Esc cancels)";
+      return;
+    }
+    if (const std::string why = cam::SeatFaceRefusal(model, hit);
+        !why.empty()) {
+      state.camSeat.miss = "Not that face: " + why + " (Esc cancels)";
+      return;
+    }
+    state.camSeat.face = hit;
+    state.camSeat.pickSpot = true;
+    state.camSeat.miss.clear();
+    state.camSeat.prompt =
+        "Click where " + f->name + " presses on the stock - Esc cancels";
+    return;
+  }
+  // Step two: where on the stock's top it presses.
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!cam::StockBounds(*setup, JobBodies(state), lo, hi)) {
+    state.camSeat.miss = "There is no stock to rest it on";
+    return;
+  }
+  glm::vec3 on(0.0f);
+  if (!RayPlane(origin, direction,
+                glm::vec3(0.0f, 0.0f, static_cast<float>(hi.z)),
+                glm::vec3(0.0f, 0.0f, 1.0f), on)) {
+    state.camSeat.miss = "Click on the top of the stock (Esc cancels)";
+    return;
+  }
+  cam::FixtureSeat seat = f->seat ? *f->seat : cam::FixtureSeat{};
+  seat.face = state.camSeat.face;
+  std::string why;
+  glm::dvec3 pos(0.0);
+  double rot = 0.0;
+  if (!cam::SeatAtPoint(lo, hi, glm::dvec3(on), seat, &why) ||
+      !cam::SolveFixtureSeat(lo, hi, model, seat, pos, rot, &why)) {
+    state.camSeat.miss = "Not there: " + why + " (Esc cancels)";
+    return;
+  }
+  SnapshotJob(state); // one undo step: the whole seat
+  f->seat = seat;
+  f->pos = pos;
+  f->rotZdeg = rot;
+  state.camSeat = {};
+  CamFixturesChanged(state, *setup);
+}
 
 void DrawCamToolWindow(AppState& state) {
   // The session belongs to the JOB (v73), so without one there is nothing to
@@ -1370,6 +1577,8 @@ void EditCamFixture(AppState& state, uint64_t fixtureId) {
   state.camRefusal.clear();
   state.camEditOp = 0;
   state.camEditTool = 0;
+  if (state.camEditFixture != fixtureId)
+    state.camSeat = {}; // a half-made seat belongs to the fixture it began on
   state.camEditFixture = fixtureId;
   state.camToolOpen = true;
 }
@@ -1378,6 +1587,8 @@ void CamFixturesChanged(AppState& state, cam::Setup& setup) {
   if (!state.job)
     return;
   state.job->BumpVersion();
+  // A seat is re-solved first: safe Z below reads where the fixtures ARE.
+  RefreshFixtureSeats(state, setup);
   // A clamp taller than the stock puts every rapid through it unless safe Z
   // clears it too.
   setup.safeZ = ui::DeriveJobSafeZ(state, setup);
@@ -1718,6 +1929,8 @@ void EditCamOperation(AppState&, uint64_t) {}
 void EditCamTool(AppState&, int) {}
 void EditCamFixture(AppState&, uint64_t) {}
 void CamFixturesChanged(AppState&, cam::Setup&) {}
+void ArmFixtureSeat(AppState&, uint64_t, bool) {}
+void FixtureSeatClicked(AppState&, const glm::vec3&, const glm::vec3&) {}
 void StartCamVerb(AppState&, AppState::CamVerb) {}
 int VerbTool(const AppState&, const cam::Setup&) { return 0; }
 void LookDownTheSpindle(AppState&) {}

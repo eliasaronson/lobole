@@ -12,7 +12,7 @@ struct RegenContext;
 // variant), Revolve and Pattern. Never references B-Rep edges — that
 // waits for topological naming (M6).
 //
-// Custom (v127) is an axis written out as a point and a direction, in mm:
+// Custom (v128) is an axis written out as a point and a direction, in mm:
 // the way a script already knows where a turned bore off the origin is, which
 // otherwise needed a datum axis or a sketch line whose entity id is random.
 struct AxisRef {

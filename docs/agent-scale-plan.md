@@ -497,7 +497,7 @@ The RPC parameter is `mode`, not `method`: the python client takes the RPC
 name as its own `method` argument, so a parameter of that name can only be
 reached through `request()`. `help` and `describe` are already stuck there
 and it is not a club to grow — the smoke test found this by failing.
-(Since v127 `call`'s `method` is positional-only, so `call("describe",
+(Since v128 `call`'s `method` is positional-only, so `call("describe",
 method=...)` works; the parameter is still better named `mode` here.)
 
 **Measured**, a bored plate swept past a pin over 64 poses, every pose
