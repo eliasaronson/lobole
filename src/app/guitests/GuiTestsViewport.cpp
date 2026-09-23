@@ -937,6 +937,52 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   // without that, hovering and clicking through a section answer with the
   // material the cut removed — which on an assembly is the housing you
   // sectioned to see past (docs/ui/section-pick-plan.md).
+  // N ("look straight at the selected face") with the cursor on the CUT.
+  // The cap is not a B-Rep face, so N used to find no hovered face on a part
+  // (and did nothing) and the wall the ray entered through on an assembly
+  // (and turned to a hidden wall). It must look straight at the cut plane —
+  // on both tabs, which reach the cap through different candidates.
+  t = IM_REGISTER_TEST(engine, "section", "n_looks_straight_at_the_cut");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 40, 20));
+    ctx->Yield(2);
+    const auto lookAtCut = [&]() {
+      // Cut at z = 10: the kept half is below, the cap faces +Z.
+      ui::ClearSections(*s_App);
+      IM_CHECK(ui::AddSection(*s_App, 0) != 0);
+      s_App->sections[0].offset = 10.0f;
+      // Seen from above at a slant, so "straight at the cut" is a real turn.
+      const glm::vec3 onCap(20.0f, 20.0f, 10.0f);
+      s_App->camera->SetTarget(onCap);
+      s_App->camera->SetUp(glm::vec3(0.0f, 0.0f, 1.0f));
+      s_App->camera->SetPosition(onCap + glm::vec3(250.0f, -250.0f, 300.0f));
+      ctx->Yield(3);
+      ctx->MouseMoveToPos(WorldToWindow(onCap));
+      ctx->Yield(2);
+      IM_CHECK(s_App->pick.hoverCap);
+      ctx->KeyPress(ImGuiKey_N);
+      for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+        ctx->Yield();
+      const glm::vec3 look = glm::normalize(s_App->camera->GetTarget() -
+                                            s_App->camera->GetPosition());
+      IM_CHECK(glm::dot(look, glm::vec3(0.0f, 0.0f, -1.0f)) > 0.999f);
+      ui::ClearSections(*s_App);
+      ctx->Yield(2);
+    };
+    lookAtCut(); // a part tab: the cap is a Body candidate
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Cut");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence occ;
+    occ.name = "Block";
+    occ.partId = s_App->parts[0].id;
+    occ.fixed = true;
+    s_App->assembly->AddOccurrence(occ);
+    ctx->Yield(2);
+    lookAtCut(); // an assembly tab: an Occurrence candidate
+  };
+
   t = IM_REGISTER_TEST(engine, "section", "a_cut_picks_what_you_can_see");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

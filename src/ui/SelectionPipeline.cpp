@@ -98,6 +98,12 @@ struct Candidate {
   // center / plain face centroid) — drives the hover marker style.
   bool snapMidpoint = false;
   bool snapCorner = false;
+  // Occurrence/Body candidates from a hit on a SECTION CAP: the point on the
+  // cut and the cut plane's normal (RayHit::cap). `index` is then only the
+  // face the ray entered through, which is not what the cursor is over.
+  bool cap = false;
+  glm::vec3 capPoint{0.0f};
+  glm::vec3 capNormal{0.0f};
 };
 
 // Candidates under the cursor, best first, restricted to `kinds`. Edges
@@ -153,9 +159,13 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
     if (face.hit) {
       for (const DocumentRenderMesh& m : state.documentMeshes) {
         if (m.meshId == face.meshId && m.occurrenceId != 0) {
-          out.push_back({{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
-                         face.meshId,
-                         face.faceIndex});
+          Candidate c{{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
+                      face.meshId,
+                      face.faceIndex};
+          c.cap = face.cap;
+          c.capPoint = face.point;
+          c.capNormal = face.normal;
+          out.push_back(c);
           break;
         }
       }
@@ -207,9 +217,13 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
         }
       }
       if (kinds & KindBit(SelectionItem::Kind::Body)) {
-        if (const Body* body = BodyOfMesh(state, face.meshId))
-          out.push_back(
-              {{SelectionItem::Kind::Body, body->createdBy, {}}, 0, 0});
+        if (const Body* body = BodyOfMesh(state, face.meshId)) {
+          Candidate c{{SelectionItem::Kind::Body, body->createdBy, {}}, 0, 0};
+          c.cap = face.cap;
+          c.capPoint = face.point;
+          c.capNormal = face.normal;
+          out.push_back(c);
+        }
       }
     }
   }
@@ -374,6 +388,7 @@ void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
   state.pick.regionHoverIds.clear();
   state.pick.hoverFace = {};
+  state.pick.hoverCap = false;
   // The measure tool's hover measurable (M3), cleared on every path that
   // clears a hover — including the off-viewport early return, which is how a
   // preview gets stranded on screen after the cursor leaves.
@@ -490,6 +505,11 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   ClearHoverPreviews(state);
   if (!candidates.empty()) {
     const Candidate& top = candidates.front();
+    if (top.cap) {
+      state.pick.hoverCap = true;
+      state.pick.hoverCapPoint = top.capPoint;
+      state.pick.hoverCapNormal = top.capNormal;
+    }
     // While the measure tool is armed, the top candidate is also a
     // MEASURABLE: remember it whole (ref + kind + occurrence) so the hover
     // measurement can be taken against it without re-deriving any of that.

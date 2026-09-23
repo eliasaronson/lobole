@@ -308,6 +308,14 @@ void AlignToPickedFace(AppState& s) {
   bool have = false;
   if (const SelectionItem* it = s.selection.First(SelectionItem::Kind::Face))
     have = ResolveFaceItem(s, *it, mesh, index);
+  // Pointing at a SECTION CAP: look straight at the cut. The cap is not a
+  // B-Rep face, so the hovered face there is at best the wall the ray
+  // entered through (an assembly) and at worst nothing (a part) — N turned
+  // to a hidden wall, or did nothing at all.
+  if (!have && s.pick.hoverCap) {
+    s.camera->AlignToFace(s.pick.hoverCapPoint, s.pick.hoverCapNormal);
+    return;
+  }
   if (!have) {
     if (const Face* hovered = s.faceSelector->GetHoveredFace()) {
       mesh = hovered->meshId;

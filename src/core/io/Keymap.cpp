@@ -133,7 +133,9 @@ const Binding kDefaults[] = {
     {"view.zoom_selection", Context::Global, "Zoom to selection", "View",
      "Shift+F"},
     {"view.align_to_face", Context::Global,
-     "Look straight at the selected face", "View", "N"},
+     "Look straight at the selected face, or the section cut under the "
+     "cursor",
+     "View", "N"},
     {"view.toggle_planes", Context::Global, "Show / hide the base planes",
      "View", "Shift+P"},
     {"view.front", Context::Global, "Front view", "View", "Shift+1"},

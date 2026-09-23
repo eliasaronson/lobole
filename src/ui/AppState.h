@@ -1168,6 +1168,13 @@ struct AppState {
     // model it is, and a preview of "the region that would be cleared" has to
     // ask the B-Rep.
     ElementRef hoverFace;
+    // The cursor is on a SECTION CAP: the cut face, which is not a B-Rep
+    // face and so is never the hovered face. Where on it, and the cut
+    // plane's normal pointing out of the kept material (toward the viewer):
+    // what "look straight at this" (N) needs there.
+    bool hoverCap = false;
+    glm::vec3 hoverCapPoint{0.0f};
+    glm::vec3 hoverCapNormal{0.0f};
     glm::vec2 lastClickPos{-1e9f, -1e9f};
     int cycle = 0;
   };
