@@ -44,6 +44,7 @@
 #include "render/MeshRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
+#include "render/Screenshot.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
@@ -1272,7 +1273,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               "` is a path-tracer setting; a quick render draws what the "
               "viewport draws (supersample sets its smoothness). Drop it, or "
               "use mode: path");
-      if (!state.renderRaster)
+      if (!state.captureRaster)
         throw std::runtime_error(
             "a quick render needs a renderer: this instance is --headless");
       ui::AppState::RasterStill req;
@@ -1289,7 +1290,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       ui::SyncRenderersToDocument(state);
       std::string error, warning;
       const auto t0 = std::chrono::steady_clock::now();
-      const bool ok = state.renderRaster(req, &error, &warning);
+      // Captured on this (the main) thread, then averaged down and written
+      // in line: the RPC answers with the file on disk.
+      ui::RasterFrame frame;
+      const bool ok = state.captureRaster(req, &frame, &error, &warning) &&
+                      DownsampleToPng(frame.rgb, frame.width, frame.height,
+                                      frame.factor, req.path, &error);
       json result = {{"ok", ok},
                      {"mode", "quick"},
                      {"path", req.path},

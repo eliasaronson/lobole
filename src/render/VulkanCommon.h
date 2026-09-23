@@ -60,6 +60,18 @@ bool CreateBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
                   VkMemoryPropertyFlags props, VkBuffer& buffer,
                   VkDeviceMemory& memory);
 
+// A buffer for the GPU to copy INTO and the CPU to read: host-visible and,
+// where the device has it, host-CACHED. Plain HOST_COHERENT memory is
+// uncached on a discrete GPU, and reading it a byte at a time is two orders
+// of magnitude slower than the copy that filled it. Read it through
+// MapReadback, which invalidates the mapping for a non-coherent type.
+bool CreateReadbackBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
+                          VkDeviceSize size, VkBuffer& buffer,
+                          VkDeviceMemory& memory);
+// Map a readback buffer's memory (whole) and make the GPU's writes visible.
+// nullptr on failure. Unmap with vkUnmapMemory.
+const void* MapReadback(VkDevice device, VkDeviceMemory memory);
+
 // Destroy a buffer and free its memory, tolerating nulls, and null both
 // handles so a double-destroy is a no-op rather than a use-after-free.
 // `mapped`, when given, is unmapped first and cleared.

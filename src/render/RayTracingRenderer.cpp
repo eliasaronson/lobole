@@ -1,4 +1,5 @@
 #include "render/RayTracingRenderer.h"
+#include "render/StillOutlines.h"
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
@@ -313,8 +314,9 @@ bool RayTracingRenderer::CreateRTPipeline() {
   VkPushConstantRange pushRange{};
   pushRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
   pushRange.offset = 0;
-  // {uint sampleIndex; uint frameSeed; uint auxPass;}
-  pushRange.size = 3 * sizeof(uint32_t);
+  // {uint sampleIndex; uint frameSeed; uint auxPass; uint auxRow0;
+  //  uint auxHeight;} -- the last two place an outline strip in the image.
+  pushRange.size = 5 * sizeof(uint32_t);
 
   VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
   pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -770,14 +772,28 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   m_stillOutlines = desc.outlines;
   m_stillOutlineColor = desc.outlineColor;
   m_stillOutlineWidth = desc.outlineWidth;
-  // Supersample the G-buffer so the edge mask downsamples into coverage
-  // rather than a hard 1 px line. It is 16 bytes a pixel and the readback
-  // buffer matches it, so 2x is affordable up to 1080p and 1x above: at 4K a
-  // 2x buffer would be half a gigabyte twice over, on top of the still's own
-  // 132 MB pair.
-  constexpr uint64_t kAuxPixelBudget = 1920ull * 1080ull * 4ull;
-  const uint64_t stillPixels = static_cast<uint64_t>(desc.width) * desc.height;
-  m_auxScale = (stillPixels * 4ull <= kAuxPixelBudget) ? 2u : 1u;
+  // The G-buffer is supersampled 4x4 so the edge mask averages down into
+  // coverage with 17 levels, not a hard 1 px staircase, and it is traced in
+  // STRIPS of rows so its memory does not grow with the still: a whole-image
+  // G-buffer is 16 bytes a ray, which is why this used to be 2x2 up to ~2 Mpx
+  // and 1x1 above (docs/rendering/still-quality-plan.md). The scale drops
+  // only if 4 x the width passes the device's largest image.
+  {
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+    m_auxScale = 4;
+    while (m_auxScale > 1 &&
+           desc.width * m_auxScale > props.limits.maxImageDimension2D)
+      --m_auxScale;
+    constexpr uint64_t kAuxStripTexels = 4ull * 1024ull * 1024ull; // 64 MB
+    const uint32_t aw = desc.width * m_auxScale;
+    const uint32_t ah = desc.height * m_auxScale;
+    const uint32_t halo = static_cast<uint32_t>(
+        stilloutline::HaloRows(desc.outlineWidth, m_auxScale));
+    const uint32_t outRows = std::max<uint32_t>(
+        1, static_cast<uint32_t>(kAuxStripTexels / aw) / m_auxScale);
+    m_auxStripRows = std::min(ah, outRows * m_auxScale + 2 * halo);
+  }
   // The image is created either way. Binding 9 must be written even with
   // outlines off (an unwritten descriptor is undefined behaviour, not a
   // no-op), and it has to be a uint view to match the shader's rgba32ui
@@ -786,9 +802,9 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   {
     VkImageCreateInfo auxInfo = imgInfo;
     auxInfo.format = VK_FORMAT_R32G32B32A32_UINT;
-    auxInfo.extent = m_stillOutlines ? VkExtent3D{desc.width * m_auxScale,
-                                                  desc.height * m_auxScale, 1}
-                                     : VkExtent3D{1, 1, 1};
+    auxInfo.extent =
+        m_stillOutlines ? VkExtent3D{desc.width * m_auxScale, m_auxStripRows, 1}
+                        : VkExtent3D{1, 1, 1};
     if (vkCreateImage(m_device, &auxInfo, nullptr, &m_auxImage) != VK_SUCCESS ||
         !vkutil::AllocateImageMemory(m_device, m_physicalDevice, m_auxImage,
                                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -1036,7 +1052,7 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
                           nullptr);
 
   for (uint32_t s = 0; s < samplesInBatch; ++s) {
-    uint32_t push[3] = {firstSample + s, m_stillSeed, 0u};
+    uint32_t push[5] = {firstSample + s, m_stillSeed, 0u, 0u, 0u};
     vkCmdPushConstants(cb, m_rtPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR,
                        0, sizeof(push), push);
     m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
@@ -1064,166 +1080,89 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
   return true;
 }
 
-// Traces the outline G-buffer and reduces it to per-output-pixel edge
-// coverage. The viewport gets its edges from mesh adjacency (feature edges by
-// dihedral angle, plus boundaries and silhouettes); the still cannot reuse
-// that without a second raster pass, so it detects the same three things as
-// discontinuities in a primary-ray G-buffer:
-//   - a different body id  -> a boundary / silhouette (this is what makes a
-//                             row of butted deck boards read as boards)
-//   - face normals apart by more than 60 degrees -> a feature edge. 60 is
-//                             outline::BuildEdgeAdjacency's featureCos = 0.5,
-//                             so both renderers call the same angle "sharp".
-//   - a large relative jump in hit distance -> a body occluding itself.
-// Returns an empty vector when outlines are off or the readback fails; the
+// Traces the outline G-buffer strip by strip and reduces each strip to
+// per-output-pixel edge coverage (render/StillOutlines.h says what counts as
+// an edge). Each strip carries a halo of rows above and below, so a seam
+// computes exactly what one whole-image pass would.
+// Returns an empty vector when outlines are off or a readback fails; the
 // caller then writes the picture without them rather than failing the render.
 std::vector<float> RayTracingRenderer::TraceOutlineCoverage() {
   if (!m_stillOutlines || m_auxImage == VK_NULL_HANDLE)
     return {};
 
-  const uint32_t aw = m_stillWidth * m_auxScale;
-  const uint32_t ah = m_stillHeight * m_auxScale;
+  const uint32_t s = m_auxScale;
+  const uint32_t aw = m_stillWidth * s;
+  const uint32_t ah = m_stillHeight * s;
+  const uint32_t halo =
+      static_cast<uint32_t>(stilloutline::HaloRows(m_stillOutlineWidth, s));
+  // Output rows each strip answers for: all of them when the image fits one
+  // strip, else what is left of the strip once both halos are taken out.
+  const uint32_t perStrip =
+      m_auxStripRows >= ah ? m_stillHeight : (m_auxStripRows - 2 * halo) / s;
 
   const VkDeviceSize bufSize =
-      static_cast<VkDeviceSize>(aw) * ah * 16; // rgba32ui
+      static_cast<VkDeviceSize>(aw) * m_auxStripRows * 16; // rgba32ui
   VkDeviceMemory mem = VK_NULL_HANDLE;
-  VkBuffer buf = CreateBuffer(bufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                              mem);
-
-  // One extra primary-ray launch. Tracing is cheap next to this render's
-  // fixed costs -- 8x the samples buys only 1.7x the wall clock at 4K -- so
-  // the G-buffer, even supersampled, does not show up in the timings.
-  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
-  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
-  vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          m_rtPipelineLayout, 0, 1, &m_rtDescriptorSet, 0,
-                          nullptr);
-  uint32_t push[3] = {0u, m_stillSeed, 1u};
-  vkCmdPushConstants(cb, m_rtPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0,
-                     sizeof(push), push);
-  m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
-                                  &m_callableSBT, aw, ah, 1);
-
-  TransitionImage(cb, m_auxImage, VK_IMAGE_LAYOUT_GENERAL,
-                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                  VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
-                  VK_ACCESS_TRANSFER_READ_BIT);
-  VkBufferImageCopy copy{};
-  copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  copy.imageSubresource.layerCount = 1;
-  copy.imageExtent = {aw, ah, 1};
-  vkCmdCopyImageToBuffer(cb, m_auxImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         buf, 1, &copy);
-  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
-
-  void* mapped = nullptr;
-  vkMapMemory(m_device, mem, 0, bufSize, 0, &mapped);
-  const uint32_t* src = static_cast<const uint32_t*>(mapped);
-
-  const size_t auxCount = static_cast<size_t>(aw) * ah;
-  std::vector<glm::vec3> nrm(auxCount);
-  std::vector<float> dist(auxCount);
-  std::vector<uint32_t> ids(auxCount);
-  for (size_t i = 0; i < auxCount; ++i) {
-    const glm::vec2 nxy = glm::unpackHalf2x16(src[i * 4 + 0]);
-    const glm::vec2 nz = glm::unpackHalf2x16(src[i * 4 + 1]);
-    nrm[i] = glm::vec3(nxy.x, nxy.y, nz.x);
-    std::memcpy(&dist[i], &src[i * 4 + 2], sizeof(float));
-    ids[i] = src[i * 4 + 3];
-  }
-  vkUnmapMemory(m_device, mem);
-  vkDestroyBuffer(m_device, buf, nullptr);
-  vkFreeMemory(m_device, mem, nullptr);
-
-  // outline::BuildEdgeAdjacency's default featureCos.
-  constexpr float kFeatureCos = 0.5f;
-
-  std::vector<uint8_t> edge(auxCount, 0);
-  auto separated = [&](size_t a, size_t b) {
-    if (ids[a] != ids[b])
-      return true;
-    if (ids[a] == 0u) // both background: nothing to outline
-      return false;
-    // No depth test. A surface seen at a grazing angle changes distance fast
-    // between neighbouring pixels, so any threshold loose enough to ignore
-    // that is too loose to catch the self-occlusion it would be for -- it
-    // drew three times the lines the viewport does. Id and normal already
-    // cover boundaries, silhouettes and feature edges; a body occluding
-    // ITSELF along a smooth curve is the one case left out, and drawing it
-    // wrongly everywhere is the worse trade.
-    return glm::dot(nrm[a], nrm[b]) < kFeatureCos;
-  };
-  // Mark the NEARER pixel of a differing pair, not both: marking both doubles
-  // every line, and putting it on the front surface keeps a silhouette sitting
-  // on the body instead of bleeding into the sky behind it.
-  auto nearer = [&](size_t a, size_t b) {
-    if (ids[a] == 0u)
-      return b;
-    if (ids[b] == 0u)
-      return a;
-    return dist[a] <= dist[b] ? a : b;
-  };
-  for (uint32_t y = 0; y < ah; ++y) {
-    for (uint32_t x = 0; x < aw; ++x) {
-      const size_t i = static_cast<size_t>(y) * aw + x;
-      if (x + 1 < aw && separated(i, i + 1))
-        edge[nearer(i, i + 1)] = 1;
-      if (y + 1 < ah && separated(i, i + aw))
-        edge[nearer(i, i + aw)] = 1;
-    }
-  }
-
-  // Widen to the requested line width (separable box dilation), then average
-  // each block of aux pixels down to the output pixel's coverage.
-  // The base mask is already about one OUTPUT pixel wide: a corner is marked
-  // by the horizontal test and the vertical test at two different pixels, and
-  // the block average then spreads it. So dilate only for what is asked for
-  // ABOVE one pixel -- a radius-1 dilation here is a 3x3 element on top of
-  // that, which is how the first version drew 3.4 px lines against the
-  // viewport's 1.0. Truncating (not rounding) keeps 1.5 px at radius 0.
-  const int radius =
-      std::max(0, static_cast<int>((m_stillOutlineWidth - 1.0f) *
-                                   static_cast<float>(m_auxScale) * 0.5f));
-  if (radius > 0) {
-    std::vector<uint8_t> tmp(auxCount, 0);
-    for (uint32_t y = 0; y < ah; ++y)
-      for (uint32_t x = 0; x < aw; ++x) {
-        uint8_t v = 0;
-        for (int d = -radius; d <= radius && !v; ++d) {
-          const int xx = static_cast<int>(x) + d;
-          if (xx >= 0 && xx < static_cast<int>(aw))
-            v = edge[static_cast<size_t>(y) * aw + xx];
-        }
-        tmp[static_cast<size_t>(y) * aw + x] = v;
-      }
-    for (uint32_t y = 0; y < ah; ++y)
-      for (uint32_t x = 0; x < aw; ++x) {
-        uint8_t v = 0;
-        for (int d = -radius; d <= radius && !v; ++d) {
-          const int yy = static_cast<int>(y) + d;
-          if (yy >= 0 && yy < static_cast<int>(ah))
-            v = tmp[static_cast<size_t>(yy) * aw + x];
-        }
-        edge[static_cast<size_t>(y) * aw + x] = v;
-      }
-  }
+  VkBuffer buf = VK_NULL_HANDLE;
+  if (!vkutil::CreateReadbackBuffer(m_device, m_physicalDevice, bufSize, buf,
+                                    mem))
+    return {};
 
   std::vector<float> coverage(static_cast<size_t>(m_stillWidth) *
                               m_stillHeight);
-  const float inv = 1.0f / static_cast<float>(m_auxScale * m_auxScale);
-  for (uint32_t y = 0; y < m_stillHeight; ++y)
-    for (uint32_t x = 0; x < m_stillWidth; ++x) {
-      uint32_t hits = 0;
-      for (uint32_t sy = 0; sy < m_auxScale; ++sy)
-        for (uint32_t sx = 0; sx < m_auxScale; ++sx)
-          hits += edge[static_cast<size_t>(y * m_auxScale + sy) * aw +
-                       (x * m_auxScale + sx)];
-      coverage[static_cast<size_t>(y) * m_stillWidth + x] =
-          static_cast<float>(hits) * inv;
+  bool ok = true;
+  for (uint32_t out0 = 0; out0 < m_stillHeight && ok; out0 += perStrip) {
+    const uint32_t out1 = std::min(m_stillHeight, out0 + perStrip);
+    const uint32_t row0 = out0 * s > halo ? out0 * s - halo : 0;
+    const uint32_t row1 = std::min(ah, out1 * s + halo);
+    const uint32_t rows = row1 - row0;
+
+    // One primary-ray launch over the strip. Tracing is cheap next to this
+    // render's fixed costs, so even 4x4 does not show in the timings.
+    VkCommandBuffer cb =
+        vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            m_rtPipelineLayout, 0, 1, &m_rtDescriptorSet, 0,
+                            nullptr);
+    uint32_t push[5] = {0u, m_stillSeed, 1u, row0, ah};
+    vkCmdPushConstants(cb, m_rtPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+                       0, sizeof(push), push);
+    m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
+                                    &m_callableSBT, aw, rows, 1);
+    TransitionImage(cb, m_auxImage, VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_TRANSFER_READ_BIT);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {aw, rows, 1};
+    vkCmdCopyImageToBuffer(cb, m_auxImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buf, 1, &copy);
+    // Back to GENERAL for the next strip's launch to write.
+    TransitionImage(cb, m_auxImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+    vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
+
+    const auto* texels = static_cast<const stilloutline::Texel*>(
+        vkutil::MapReadback(m_device, mem));
+    if (texels == nullptr) {
+      ok = false;
+      break;
     }
+    stilloutline::Coverage(
+        texels, aw, ah, row0, rows, s, m_stillOutlineWidth, out0, out1,
+        coverage.data() + static_cast<size_t>(out0) * m_stillWidth);
+    vkUnmapMemory(m_device, mem);
+  }
+  vkDestroyBuffer(m_device, buf, nullptr);
+  vkFreeMemory(m_device, mem, nullptr);
+  if (!ok)
+    return {};
   return coverage;
 }
 
@@ -1246,10 +1185,9 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
   VkDeviceSize bufSize =
       static_cast<VkDeviceSize>(m_stillWidth) * m_stillHeight * pixelBytes;
   VkDeviceMemory readMem = VK_NULL_HANDLE;
-  VkBuffer readBuf = CreateBuffer(bufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                  readMem);
+  VkBuffer readBuf = VK_NULL_HANDLE;
+  vkutil::CreateReadbackBuffer(m_device, m_physicalDevice, bufSize, readBuf,
+                               readMem);
 
   VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
   TransitionImage(cb, m_stillImage, VK_IMAGE_LAYOUT_GENERAL,
@@ -1265,9 +1203,8 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
                          readBuf, 1, &copy);
   vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
-  void* mapped = nullptr;
-  vkMapMemory(m_device, readMem, 0, bufSize, 0, &mapped);
-  const float* src = static_cast<const float*>(mapped);
+  const float* src =
+      static_cast<const float*>(vkutil::MapReadback(m_device, readMem));
   std::vector<uint8_t> rgb(static_cast<size_t>(m_stillWidth) * m_stillHeight *
                            3);
   const float invN = 1.0f / static_cast<float>(totalSamples);

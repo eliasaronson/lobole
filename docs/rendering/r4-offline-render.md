@@ -76,11 +76,22 @@ The `RayTracingRenderer` scaffold is ~40% real:
   - **Quick mode** (the dialog's default; `render_still {mode: "quick"}`):
     the viewport's raster renderers — mesh, FEM field, outlines, no overlays
     or selection tints — drawn into an image of exactly W x H, supersampled
-    1-4x (default 2) and averaged down in linear light. Seconds, not minutes,
-    and needs a renderer rather than ray tracing, so the dialog opens on a
-    GPU without RT offering quick only. Path-tracer parameters (`samples`,
-    `seed`, `ground`, `backdrop`, `outlines`) are refused in quick mode.
-    docs/rendering/quick-render-plan.md; `tests/render_quick_smoke.py`.
+    1-4x (default 2) and averaged down in linear light. About a second even
+    at 4x, and needs a renderer rather than ray tracing, so the dialog opens
+    on a GPU without RT offering quick only. The dialog runs it as a job: the
+    capture on the next frame, the average and PNG encode on a worker with a
+    progress bar and Cancel; the RPC does both in line. Path-tracer
+    parameters (`samples`, `seed`, `ground`, `backdrop`, `outlines`) are
+    refused in quick mode. docs/rendering/quick-render-plan.md,
+    docs/rendering/still-quality-plan.md; `tests/render_quick_smoke.py`.
+  - **Outlines** on a traced still come from a primary-ray G-buffer (body
+    id, face normal) traced 4x4 per pixel in strips of rows, each with a
+    halo so a seam matches a whole-image pass, and averaged into coverage
+    (`render/StillOutlines.{h,cpp}`, `tests/test_still_outlines.cpp`).
+  - **Readbacks** (`CaptureScreenshot`, the still's radiance and its
+    G-buffer) use host-CACHED memory (`vkutil::CreateReadbackBuffer`):
+    reading uncached memory a byte at a time made a 4x quick render 27 s of
+    CPU behind 0.3 s of GPU.
   - **Fixed en route**: the scaffold shadow ray (`isShadowed` was never
     initialized to `true`; `sbtRecordOffset` was `1`, past the 1-entry hit
     region) → now `true` + offset `0`, miss index `1`.

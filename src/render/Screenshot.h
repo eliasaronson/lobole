@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -64,6 +65,10 @@ bool CaptureScreenshot(
 // it as a PNG. The average is taken in LINEAR light (sRGB decoded, averaged,
 // re-encoded): averaging the encoded values darkens every edge between a
 // light and a dark surface, which is the one place supersampling shows.
+// Safe on a worker thread. `progress` (0..1) advances as it goes; a set
+// `cancel` stops it before the file is written, returning false.
 bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
                      uint32_t height, uint32_t factor, const std::string& path,
-                     std::string* error = nullptr);
+                     std::string* error = nullptr,
+                     std::atomic<float>* progress = nullptr,
+                     const std::atomic<bool>* cancel = nullptr);

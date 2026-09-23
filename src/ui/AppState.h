@@ -636,8 +636,23 @@ struct SimulationState {
 // Drives an offline path-traced still across UI frames (one sample batch per
 // frame) so the Render modal can show progress and stay cancellable. main.cpp
 // owns the pump; the toolbar modal reads/writes the request + result fields.
+// A quick render's capture: `factor` x the still's size, RGB.
+struct RasterFrame {
+  std::vector<uint8_t> rgb;
+  uint32_t width = 0, height = 0; // of `rgb`
+  uint32_t factor = 1;            // supersampling; the PNG is width/factor
+};
+
+// A quick render's downsample + encode, on its worker (RendererSync.cpp).
+struct QuickEncode;
+
 struct RenderJob {
   bool active = false;  // a render is in flight
+  // QUICK (the raster capture, then an encode on a worker) or a path trace.
+  bool quick = false;
+  uint32_t supersample = 2;
+  float progress = 0.0f; // quick: the encode's, 0..1
+  std::shared_ptr<QuickEncode> encode;
   bool started = false; // BeginStill has run (internal)
   bool cancel = false;  // set by the UI to abort
   uint32_t width = 1280;
@@ -1815,19 +1830,21 @@ struct AppState {
 
   // QUICK render (docs/rendering/quick-render-plan.md): the scene as the
   // viewport rasterizes it — materials, lights, shadow map, SSAO, outlines —
-  // into an image of the requested size, without the overlays drawn on top
-  // of the model. Installed by main.cpp in the windowed and --offscreen
-  // loops (only they own the renderers); null under --headless. Synchronous,
-  // main thread. `supersample` is lowered, and `warning` says so, if the
-  // device cannot hold the supersampled image.
+  // captured k x the requested size, without the overlays drawn on top of
+  // the model. Installed by main.cpp in the windowed and --offscreen loops
+  // (only they own the renderers); null under --headless. Synchronous, main
+  // thread, a few hundred ms; averaging the frame down and writing the PNG is
+  // DownsampleToPng's, which the Render dialog runs on a worker
+  // (docs/rendering/still-quality-plan.md). `supersample` is lowered, and
+  // `warning` says so, if the device cannot hold the supersampled image.
   struct RasterStill {
     uint32_t width = 1920, height = 1080;
     uint32_t supersample = 2; // render k x the size, average down
     std::string path = "render.png";
   };
-  std::function<bool(const RasterStill&, std::string* error,
+  std::function<bool(const RasterStill&, RasterFrame* out, std::string* error,
                      std::string* warning)>
-      renderRaster;
+      captureRaster;
 
   // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
   // it costs five clock reads a frame — but the HUD is off unless asked for

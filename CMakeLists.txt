@@ -246,6 +246,7 @@ set(core_sources
     # through it, and a test binary that links only core still needs them.
     src/common/RuntimePaths.cpp
     src/render/OutlineEdges.cpp
+    src/render/StillOutlines.cpp
     src/cad/CADKernel.cpp
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp

@@ -108,10 +108,12 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          std::string* warning = nullptr,
                          bool studioBackdrop = true, bool outlines = true);
 
-// Advances an active AppState::renderJob by one sample batch per call (the
-// non-blocking counterpart of RenderStillBlocking). Call once per UI frame on
-// the main thread. No-op when no job is active. Updates job.done/finished/
-// success/error so the Render modal can show progress.
+// Advances an active AppState::renderJob by one step per call: a path trace
+// by one sample batch (the non-blocking counterpart of RenderStillBlocking),
+// a quick render by its capture and then polling its encode worker. Call once
+// per UI frame on the main thread. No-op when no job is active. Updates
+// job.done/progress/finished/success/error so the Render modal can show
+// progress.
 void PumpRenderJob(AppState& state);
 
 } // namespace ui

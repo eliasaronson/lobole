@@ -3,9 +3,10 @@
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0, rgba32f) uniform image2D image;
-// Primary-hit G-buffer for the outline pass. Written by ONE extra launch (see
-// the auxPass push constant), which may run at a higher resolution than the
-// still so the lines come out antialiased rather than stair-stepped.
+// Primary-hit G-buffer for the outline pass. Written by extra launches (see
+// the auxPass push constant), one strip of rows at a time, at a higher
+// resolution than the still so the lines come out antialiased rather than
+// stair-stepped.
 layout(binding = 9, set = 0, rgba32ui) uniform uimage2D auxImage;
 
 layout(binding = 2, set = 0) uniform UniformBufferObject {
@@ -33,6 +34,12 @@ layout(push_constant) uniform PushConstants {
     // 1 = the outline G-buffer launch: trace one unjittered ray through the
     // pixel centre and write auxImage instead of accumulating radiance.
     uint auxPass;
+    // The G-buffer is traced in STRIPS of rows (docs/rendering/
+    // still-quality-plan.md): a launch covers rows [auxRow0, auxRow0 +
+    // launch height) of an image auxHeight rows tall, and writes them to the
+    // strip-sized auxImage from row 0.
+    uint auxRow0;
+    uint auxHeight;
 } pc;
 
 // Radiance + RNG state, plus the primary-hit G-buffer the outline pass reads.
@@ -87,8 +94,13 @@ void main() {
     float jy = float((payload.rngState >> 8) & 0xFFFFu) / 65536.0;
     if (pc.auxPass != 0u) { jx = 0.5; jy = 0.5; }
 
-    const vec2 pixel = vec2(gl_LaunchIDEXT.xy) + vec2(jx, jy);
-    const vec2 inUV = pixel / vec2(gl_LaunchSizeEXT.xy);
+    vec2 pixel = vec2(gl_LaunchIDEXT.xy) + vec2(jx, jy);
+    vec2 size = vec2(gl_LaunchSizeEXT.xy);
+    if (pc.auxPass != 0u) {
+        pixel.y += float(pc.auxRow0);
+        size.y = float(pc.auxHeight);
+    }
+    const vec2 inUV = pixel / size;
     vec2 d = inUV * 2.0 - 1.0;
 
     vec4 origin = ubo.viewInverse * vec4(0, 0, 0, 1);

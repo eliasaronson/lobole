@@ -153,11 +153,8 @@ bool CaptureScreenshot(
   VkBuffer buffer = VK_NULL_HANDLE;
   VkDeviceMemory bufferMemory = VK_NULL_HANDLE;
   if (write)
-    vkutil::CreateBuffer(device, physicalDevice, bufferSize,
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                         buffer, bufferMemory);
+    vkutil::CreateReadbackBuffer(device, physicalDevice, bufferSize, buffer,
+                                 bufferMemory);
 
   // One-shot command buffer: render the scene again, then copy out
   VkCommandBufferAllocateInfo cbInfo{
@@ -248,9 +245,8 @@ bool CaptureScreenshot(
   }
 
   // BGRA (typical swapchain format) -> RGB PNG
-  void* mapped = nullptr;
-  vkMapMemory(device, bufferMemory, 0, bufferSize, 0, &mapped);
-  const uint8_t* src = static_cast<const uint8_t*>(mapped);
+  const uint8_t* src =
+      static_cast<const uint8_t*>(vkutil::MapReadback(device, bufferMemory));
   std::vector<uint8_t> rgb(size_t(width) * height * 3);
   const bool bgra =
       (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB);
@@ -328,7 +324,8 @@ bool CaptureScreenshot(
 
 bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
                      uint32_t height, uint32_t factor, const std::string& path,
-                     std::string* error) {
+                     std::string* error, std::atomic<float>* progress,
+                     const std::atomic<bool>* cancel) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -357,7 +354,14 @@ bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
   const uint32_t w = width / factor, h = height / factor;
   const float inv = 1.0f / float(factor * factor);
   std::vector<uint8_t> out(size_t(w) * h * 3);
-  for (uint32_t y = 0; y < h; y++)
+  // The average is most of the time until the encode, which reports nothing
+  // until it is done: call it 60/40.
+  constexpr float kAverageShare = 0.6f;
+  for (uint32_t y = 0; y < h; y++) {
+    if (cancel != nullptr && cancel->load())
+      return fail("cancelled");
+    if (progress != nullptr)
+      progress->store(kAverageShare * float(y) / float(h));
     for (uint32_t x = 0; x < w; x++)
       for (int c = 0; c < 3; c++) {
         float sum = 0.0f;
@@ -368,9 +372,16 @@ bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
                      c]];
         out[(size_t(y) * w + x) * 3 + c] = toSrgb(sum * inv);
       }
+  }
+  if (cancel != nullptr && cancel->load())
+    return fail("cancelled");
+  if (progress != nullptr)
+    progress->store(kAverageShare);
   if (stbi_write_png(path.c_str(), int(w), int(h), 3, out.data(), int(w) * 3) ==
       0)
     return fail("could not write " + path);
+  if (progress != nullptr)
+    progress->store(1.0f);
   LOG_INFO("Render written to {} ({}x{}, {}x supersampled)", path, w, h,
            factor);
   return true;

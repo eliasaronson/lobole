@@ -16,7 +16,7 @@ A **quick** mode beside the path tracer, in the Render dialog and as
 `render_still {mode: "quick"}`:
 
 1. **Renders the scene into an image of the requested size.** `main.cpp`
-   installs `AppState::renderRaster` (the shape `renderBurst` already has: a
+   installs `AppState::captureRaster` (the shape `renderBurst` already has: a
    capability only main.cpp can provide, reachable from `ui/` and `remote/`),
    in both the windowed and the `--offscreen` loop. It points every scene
    renderer's viewport and the SSAO targets at W x H, projects the camera at
@@ -41,7 +41,7 @@ A **quick** mode beside the path tracer, in the Render dialog and as
 
 ## Files
 
-`src/ui/AppState.h` (`RasterStill`, `renderRaster`), `src/app/main.cpp`,
+`src/ui/AppState.h` (`RasterStill`, `captureRaster`), `src/app/main.cpp`,
 `src/render/Screenshot.{h,cpp}` (`DownsampleToPng`), `src/ui/Toolbar.cpp` (the
 dialog), `src/ui/Commands.cpp` (the gate), `src/remote/RemoteDispatch.cpp`
 (`render_still`), `tools/designer_mcp.py`, docs/rendering/r4-offline-render.md.

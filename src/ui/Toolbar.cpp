@@ -77,17 +77,25 @@ void DrawRenderModal(AppState& state) {
   RenderJob& job = state.renderJob;
 
   if (job.active) {
-    float frac = job.totalSamples ? static_cast<float>(job.done) /
-                                        static_cast<float>(job.totalSamples)
-                                  : 0.0f;
     char status[64], overlay[48];
     std::snprintf(status, sizeof(status), "Rendering %u x %u ...", job.width,
                   job.height);
-    std::snprintf(overlay, sizeof(overlay), "%u / %u samples", job.done,
-                  job.totalSamples);
     JobProgress bar;
     bar.status = status;
-    bar.fraction = job.totalSamples ? frac : -1.0;
+    if (job.quick) {
+      // Drawing, then the worker's average and PNG encode.
+      std::snprintf(overlay, sizeof(overlay), "%s",
+                    !job.started          ? "Drawing"
+                    : job.progress < 0.6f ? "Averaging down"
+                                          : "Writing PNG");
+      bar.fraction = job.progress;
+    } else {
+      std::snprintf(overlay, sizeof(overlay), "%u / %u samples", job.done,
+                    job.totalSamples);
+      bar.fraction = job.totalSamples ? static_cast<float>(job.done) /
+                                            static_cast<float>(job.totalSamples)
+                                      : -1.0;
+    }
     bar.overlay = overlay;
     bar.cancelAsked = job.cancel;
     bar.cancelId = "###still_cancel";
@@ -117,7 +125,7 @@ void DrawRenderModal(AppState& state) {
       ImGui::SetTooltip("The model as the viewport draws it — materials, "
                         "lights, shadows, ambient occlusion, outlines — "
                         "without sketches, gizmos or selection. About a "
-                        "second.");
+                        "second, even at 4x.");
     ImGui::SameLine();
     ImGui::BeginDisabled(!rtReady);
     if (ImGui::RadioButton("Path traced###render_mode_path", !quick))
@@ -168,7 +176,7 @@ void DrawRenderModal(AppState& state) {
             ? state.assembly->OccurrenceCount() > 0
             : (state.document && !state.document->GetBodies().empty());
     const bool canRender =
-        hasBodies && (quick ? state.renderRaster != nullptr : rtReady);
+        hasBodies && (quick ? state.captureRaster != nullptr : rtReady);
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!canRender);
@@ -177,20 +185,15 @@ void DrawRenderModal(AppState& state) {
     const bool clicked =
         ImGui::Button(ICON_FA_CAMERA " Render###render_go", ImVec2(150, 0));
     if (clicked && quick) {
-      // Synchronous: seconds even at 4x, and the result lands in the
-      // same fields a traced still reports through.
-      AppState::RasterStill req;
-      req.width = kRes[resIdx].w;
-      req.height = kRes[resIdx].h;
-      req.supersample = static_cast<uint32_t>(supersample);
-      req.path = "render.png";
-      SyncRenderersToDocument(state);
+      // The capture runs on the next frame and the encode on a worker
+      // (PumpRenderJob), so the bar shows and the app keeps drawing.
       job = RenderJob{};
-      job.width = req.width;
-      job.height = req.height;
-      job.success = state.renderRaster(req, &job.error, &job.warning);
-      job.resultPath = req.path;
-      job.finished = true;
+      job.active = true;
+      job.quick = true;
+      job.width = kRes[resIdx].w;
+      job.height = kRes[resIdx].h;
+      job.supersample = static_cast<uint32_t>(supersample);
+      job.outPath = "render.png";
     } else if (clicked) {
       job = RenderJob{};
       job.active = true;

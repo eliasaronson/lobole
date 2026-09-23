@@ -84,6 +84,47 @@ bool CreateBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
   return true;
 }
 
+bool CreateReadbackBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
+                          VkDeviceSize size, VkBuffer& buffer,
+                          VkDeviceMemory& memory) {
+  VkPhysicalDeviceMemoryProperties memProps;
+  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+  const auto has = [&](VkMemoryPropertyFlags want) {
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++)
+      if ((memProps.memoryTypes[i].propertyFlags & want) == want)
+        return true;
+    return false;
+  };
+  constexpr VkMemoryPropertyFlags kVisible =
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  constexpr VkMemoryPropertyFlags kCached =
+      kVisible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+  constexpr VkMemoryPropertyFlags kCoherent =
+      kVisible | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  // Cached first: uncached memory is write-combined, and reading it back a
+  // pixel at a time cost 27 s for a 10240 x 6400 frame the GPU drew in 0.3.
+  const VkMemoryPropertyFlags props = has(kCached | kCoherent)
+                                          ? (kCached | kCoherent)
+                                      : has(kCached) ? kCached
+                                                     : kCoherent;
+  return CreateBuffer(device, physicalDevice, size,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, props, buffer, memory);
+}
+
+const void* MapReadback(VkDevice device, VkDeviceMemory memory) {
+  void* mapped = nullptr;
+  if (vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS)
+    return nullptr;
+  // Needed when the memory is cached but not coherent; allowed (and free)
+  // when it is coherent.
+  VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+  range.memory = memory;
+  range.offset = 0;
+  range.size = VK_WHOLE_SIZE;
+  vkInvalidateMappedMemoryRanges(device, 1, &range);
+  return mapped;
+}
+
 void DestroyBuffer(VkDevice device, VkBuffer& buffer, VkDeviceMemory& memory,
                    void** mapped) {
   if (mapped != nullptr && *mapped != nullptr) {

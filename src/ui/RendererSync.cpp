@@ -12,7 +12,9 @@
 #include "ui/JobActions.h"
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
+#include <atomic>
 #include <chrono>
+#include <thread>
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -49,6 +51,7 @@
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
+#include "render/Screenshot.h"
 #include "render/SketchRenderer.h"
 #include "ui/BodyAppearance.h"
 
@@ -970,10 +973,90 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   return true;
 }
 
+// A quick render's second half, on a worker: average the supersampled frame
+// down and write the PNG (docs/rendering/still-quality-plan.md). The capture
+// before it needs the renderers and runs on the frame; this needs nothing but
+// the pixels, so the app keeps drawing, the dialog shows the progress, and
+// Cancel stops it before the file is written.
+struct QuickEncode {
+  RasterFrame frame;
+  std::string path;
+  std::atomic<float> progress{0.0f};
+  std::atomic<bool> cancel{false};
+  std::atomic<bool> done{false};
+  bool ok = false; // read once `done`
+  std::string error;
+  std::jthread thread; // last: joined before the fields it uses are freed
+};
+
+static void PumpQuickRenderJob(AppState& state) {
+  RenderJob& job = state.renderJob;
+  auto finish = [&](bool ok, const std::string& err) {
+    job.active = false;
+    job.started = false;
+    job.finished = true;
+    job.success = ok;
+    job.error = ok ? std::string() : err;
+    job.resultPath = ok ? job.outPath : std::string();
+    job.encode.reset();
+  };
+
+  if (!job.started) {
+    // The frame after the click, so the dialog is already showing the bar.
+    if (job.cancel) {
+      finish(false, "cancelled");
+      return;
+    }
+    if (!state.captureRaster) {
+      finish(false, "a quick render needs a renderer");
+      return;
+    }
+    SyncRenderersToDocument(state);
+    AppState::RasterStill req;
+    req.width = job.width;
+    req.height = job.height;
+    req.supersample = job.supersample;
+    req.path = job.outPath;
+    auto encode = std::make_shared<QuickEncode>();
+    job.warning.clear();
+    std::string err;
+    if (!state.captureRaster(req, &encode->frame, &err, &job.warning)) {
+      finish(false, err.empty() ? "the capture failed" : err);
+      return;
+    }
+    encode->path = job.outPath;
+    QuickEncode* e = encode.get();
+    e->thread = std::jthread([e] {
+      e->ok = DownsampleToPng(e->frame.rgb, e->frame.width, e->frame.height,
+                              e->frame.factor, e->path, &e->error, &e->progress,
+                              &e->cancel);
+      e->frame.rgb = {};
+      e->done.store(true);
+    });
+    job.encode = std::move(encode);
+    job.progress = 0.0f;
+    job.started = true;
+    return;
+  }
+
+  QuickEncode& e = *job.encode;
+  if (job.cancel)
+    e.cancel.store(true);
+  job.progress = e.progress.load();
+  if (!e.done.load())
+    return;
+  e.thread.join();
+  finish(e.ok, e.error.empty() ? "the PNG could not be written" : e.error);
+}
+
 void PumpRenderJob(AppState& state) {
   RenderJob& job = state.renderJob;
   if (!job.active)
     return;
+  if (job.quick) {
+    PumpQuickRenderJob(state);
+    return;
+  }
 
   auto finish = [&](bool ok, const std::string& err) {
     if (state.rayTracer && job.started)

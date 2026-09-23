@@ -2189,14 +2189,22 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     }
 
     // A quick still needs a renderer, not ray tracing, so it renders on
-    // every GPU — and it is synchronous, so the file is there on return.
+    // every GPU. It runs as a job — the capture on the next frame, the
+    // encode on a worker — so frames keep coming while it does.
     std::error_code ec;
     std::filesystem::remove("render.png", ec);
     ctx->ItemClick("//Render Still/###render_mode_quick");
     IM_CHECK((ctx->ItemInfo("//Render Still/###render_go").ItemFlags &
               ImGuiItemFlags_Disabled) == 0);
     ctx->ItemClick("//Render Still/###render_go");
-    ctx->Yield(2);
+    IM_CHECK(s_App->renderJob.active && s_App->renderJob.quick);
+    int frames = 0;
+    while (s_App->renderJob.active && frames < 2000) {
+      ctx->Yield();
+      ++frames;
+    }
+    IM_CHECK(!s_App->renderJob.active);
+    IM_CHECK(s_App->renderJob.success);
     IM_CHECK(std::filesystem::exists("render.png"));
     IM_CHECK(std::filesystem::file_size("render.png", ec) > 0);
     std::filesystem::remove("render.png", ec);

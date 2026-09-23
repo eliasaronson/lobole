@@ -270,13 +270,15 @@ private:
   VkDeviceMemory m_stillImageMemory = VK_NULL_HANDLE;
   VkImageView m_stillImageView = VK_NULL_HANDLE;
   // Outline G-buffer (rgba32ui: packed face normal, hit distance, body id),
-  // traced by one extra primary-ray launch. It runs at m_auxScale x the still
-  // so the edge mask can be downsampled into coverage -- an aliased 1 px line
-  // is exactly the "cheap render" look this pass exists to remove.
+  // traced by primary-ray launches one strip of rows at a time, at
+  // m_auxScale x the still so the edge mask can be averaged into coverage --
+  // an aliased 1 px line is exactly the "cheap render" look this pass exists
+  // to remove.
   VkImage m_auxImage = VK_NULL_HANDLE;
   VkDeviceMemory m_auxImageMemory = VK_NULL_HANDLE;
   VkImageView m_auxImageView = VK_NULL_HANDLE;
   uint32_t m_auxScale = 1;
+  uint32_t m_auxStripRows = 1; // G-buffer rows per launch (the image's height)
   bool m_stillOutlines = true;
   bool m_stillHasClip = false; // any section plane live this render
   glm::vec3 m_stillOutlineColor{0.2f};

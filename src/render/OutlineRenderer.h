@@ -91,6 +91,13 @@ public:
   void UpdateCamera(const glm::mat4& view,
                     const glm::mat4& projection) override;
   void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
+  // A capture (screenshot, quick render) is a picture of the camera at rest:
+  // count it as settled now, so the next Render classifies silhouettes
+  // instead of drawing the static edges a moving camera gets. The settle
+  // clock is wall time, and a capture that follows a camera move by less
+  // than silhouetteSettleMs used to lose its silhouettes -- invisible while
+  // every capture spent a second in readback first.
+  void SettleSilhouettes() { m_lastCameraMove = {}; }
 
   // Settings
   void SetOutlineSettings(const OutlineSettings& settings) {

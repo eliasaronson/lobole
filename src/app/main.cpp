@@ -1048,7 +1048,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
   // (stale) maps and the image layouts stay read-only.
 }
 
-// Where a quick render (RenderRasterStill) draws and what it must put back:
+// Where a quick render (CaptureRasterStill) draws and what it must put back:
 // the render pass and format of the loop it runs in, an idle frame slot, the
 // SSAO targets' size and the viewport rect the next frame expects.
 struct RasterTarget {
@@ -1063,12 +1063,14 @@ struct RasterTarget {
 };
 
 // QUICK render (docs/rendering/quick-render-plan.md): the model as the
-// viewport rasterizes it, at the requested size, supersampled. Synchronous;
+// viewport rasterizes it, captured supersampled at k x the requested size
+// into `out` (DownsampleToPng averages it down and writes it). Synchronous;
 // every size it changes is put back before it returns, so the next frame is
 // the frame it would have been.
-static bool RenderRasterStill(const RasterTarget& t,
-                              const ui::AppState::RasterStill& req,
-                              std::string* error, std::string* warning) {
+static bool CaptureRasterStill(const RasterTarget& t,
+                               const ui::AppState::RasterStill& req,
+                               ui::RasterFrame* out, std::string* error,
+                               std::string* warning) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -1123,7 +1125,9 @@ static bool RenderRasterStill(const RasterTarget& t,
   for (SceneRenderer* r : g_Scene)
     r->UpdateCamera(view, proj);
 
-  std::vector<uint8_t> pixels;
+  out->rgb.clear();
+  if (g_OutlineRenderer)
+    g_OutlineRenderer->SettleSilhouettes();
   std::string captureError;
   FrameStats stats; // whole frame: there is no chrome in it
   const bool captured = CaptureScreenshot(
@@ -1140,7 +1144,7 @@ static bool RenderRasterStill(const RasterTarget& t,
       },
       /*outputPath=*/"", &captureError, g_MSAASamples,
       [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, t.frame); }, &stats,
-      t.finalLayout, 1, {}, &pixels);
+      t.finalLayout, 1, {}, &out->rgb);
 
   // Put back everything the next frame reads.
   vkDeviceWaitIdle(g_Device);
@@ -1158,9 +1162,9 @@ static bool RenderRasterStill(const RasterTarget& t,
 
   if (!captured)
     return fail(captureError.empty() ? "the capture failed" : captureError);
-  std::string writeError;
-  if (!DownsampleToPng(pixels, W, H, k, req.path, &writeError))
-    return fail(writeError);
+  out->width = W;
+  out->height = H;
+  out->factor = k;
   // Saved is not the same as good, as for a traced still: a picture that is
   // all one colour framed nothing.
   if (stats.dominantFraction > 0.995f && warning) {
@@ -1755,8 +1759,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
 
   // Quick render (docs/rendering/quick-render-plan.md). Synchronous like the
   // burst; the lazy projection is brought up to date first, as a capture is.
-  g_App.renderRaster = [&](const ui::AppState::RasterStill& req,
-                           std::string* error, std::string* warning) {
+  g_App.captureRaster = [&](const ui::AppState::RasterStill& req,
+                            ui::RasterFrame* out, std::string* error,
+                            std::string* warning) {
     SyncOffscreenScene();
     RasterTarget t;
     t.pass = offscreenPass;
@@ -1767,7 +1772,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     t.clear.color = {{vp.r, vp.g, vp.b, 1.0f}};
     t.aoW = t.vpW = kOffW;
     t.aoH = t.vpH = kOffH;
-    return RenderRasterStill(t, req, error, warning);
+    return CaptureRasterStill(t, req, out, error, warning);
   };
 
   std::signal(SIGINT, HandleOffscreenStop);
@@ -1838,6 +1843,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
       // frame loop to collide with. (The windowed screenshot path stays
       // untimed — there it WOULD collide with the live frame's slot.)
       constexpr uint32_t kTimerSlot = 0;
+      if (g_OutlineRenderer)
+        g_OutlineRenderer->SettleSilhouettes();
       const bool ok = CaptureScreenshot(
           g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, offscreenPass,
           kOffFormat, kOffW, kOffH, clear,
@@ -2383,8 +2390,9 @@ int main(int argc, char** argv) {
   // render_still. Both run on this thread between frames, so after a wait the
   // current frame slot is idle; the viewport rect it restores is the one
   // UI.cpp sets every frame (the dock between the panels, in framebuffer px).
-  g_App.renderRaster = [](const ui::AppState::RasterStill& req,
-                          std::string* error, std::string* warning) {
+  g_App.captureRaster = [](const ui::AppState::RasterStill& req,
+                           ui::RasterFrame* out, std::string* error,
+                           std::string* warning) {
     ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
     RasterTarget t;
     t.pass = wd->RenderPass;
@@ -2405,7 +2413,7 @@ int main(int argc, char** argv) {
       t.vpW = t.aoW;
       t.vpH = t.aoH;
     }
-    return RenderRasterStill(t, req, error, warning);
+    return CaptureRasterStill(t, req, out, error, warning);
   };
 
   // Load startup file if specified
@@ -2772,6 +2780,8 @@ int main(int argc, char** argv) {
         shotStats.y = static_cast<int>(g_App.viewportPos.y);
         shotStats.w = static_cast<int>(g_App.viewportSize.x);
         shotStats.h = static_cast<int>(g_App.viewportSize.y);
+        if (g_OutlineRenderer)
+          g_OutlineRenderer->SettleSilhouettes();
         const bool ok = CaptureScreenshot(
             g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
             wd->SurfaceFormat.format, static_cast<uint32_t>(wd->Width),
