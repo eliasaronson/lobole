@@ -7,7 +7,8 @@
 // area -- had no test anywhere. It was reached only through `GenerateAll` on
 // fixtures that happened to fit. It is also the function a 4th axis has to
 // teach about A, since a clipped move is a move split in two
-// (docs/cam/rotary-plan.md), which is why it is being pinned down first.
+// (docs/cam/rotary.md#verifying-a-turning-part), which is why it is being
+// pinned down first.
 
 #include "cam_fixtures.h"
 

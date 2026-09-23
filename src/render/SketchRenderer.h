@@ -73,7 +73,7 @@ public:
   // and uploaded into a frame's buffer only when `version` differs from what
   // that buffer last held: an idle frame copies nothing. Handed over through
   // SetPrimitives it cost 93% of an idle frame on the rolling pin, two 38 MB
-  // copies per frame (docs/cam/backplot-frame-cost-plan.md). The list must
+  // copies per frame (docs/cam/gui.md#what-the-viewport-draws). The list must
   // not be mutated once handed over; a change is a NEW list and version.
   void SetCachedPrimitives(std::shared_ptr<const std::vector<PrimVertex>> prims,
                            uint64_t version) {

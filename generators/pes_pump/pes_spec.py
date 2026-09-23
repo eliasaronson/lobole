@@ -6,7 +6,7 @@ relations are BOTH made from.
 A four-element M-size pump as fitted to the OM615 (Mercedes L306D / W115
 200 D). None of the reference images is dimensioned, so every value here is
 an engineering estimate consistent with an M-size element pump; see
-docs/modeling/pes-pump-plan.md.
+generators/pes_pump/README.md.
 
 **The frame of reference:**
 

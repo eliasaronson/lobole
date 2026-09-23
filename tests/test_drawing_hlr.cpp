@@ -344,7 +344,7 @@ TEST_CASE("HLR says which source its time went to", "[drawing][hlr]") {
   // A view that costs seconds is usually one occupant's fault — an imported
   // driver was 16 s of an 18 s sheet view — and nothing said which. The
   // clocks the hide loop already keeps are attributed per SOURCE, so the
-  // answer arrives with the view (docs/drawings/view-cost-report-plan.md).
+  // answer arrives with the view (docs/drawings/README.md#what-a-view-costs).
   CADShape part = BlockWithHole();
   REQUIRE(part.IsValid());
 
@@ -555,7 +555,7 @@ TEST_CASE("HLR marks full-sweep conic intervals closed",
 TEST_CASE("A deep-copied shape projects identically, edge names included",
           "[drawing][hlr]") {
   // The precondition for taking HLR off the main thread
-  // (docs/agent-scale-followup-plan.md, W3). A worker cannot read the live
+  // (docs/drawings/README.md#projection-hlr). A worker cannot read the live
   // documents' shapes — poly HLR MESHES them, which writes triangulation into
   // the shared TFace — so it would have to work on copies.
   //

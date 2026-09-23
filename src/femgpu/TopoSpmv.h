@@ -1,11 +1,11 @@
 #pragma once
 
-// Matrix-free FEM stiffness product on the GPU (GPU0 of
-// docs/topopt/gpu-plan.md): Ap = K(rho)·p without ever assembling K, computed
-// element-by-element with an atomicAdd scatter. fem_gpu stays Vulkan-pure —
-// the caller (tests now; the GPU1 solver adapter later) packs the element data
-// from the FemMesh + DOF map, so this library needs neither Eigen nor
-// designer_core.
+// Matrix-free FEM stiffness product on the GPU
+// (docs/topopt/README.md#the-gpu-solver): Ap = K(rho)·p without ever assembling
+// K, computed element-by-element with an atomicAdd scatter. fem_gpu stays
+// Vulkan-pure — the caller (tests now; the GPU1 solver adapter later) packs the
+// element data from the FemMesh + DOF map, so this library needs neither Eigen
+// nor designer_core.
 
 #include "femgpu/ComputeContext.h"
 

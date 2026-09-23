@@ -1971,9 +1971,9 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   //
   // Insert is NOT clicked here: the first thing it does is open a native file
   // dialog, which the test engine cannot drive — the same reason Import has
-  // no clicked coverage (docs/ui/gui-coverage.md). The action behind it is
-  // called directly and everything AFTER it is clicked, which is where the
-  // panel actually lives.
+  // no clicked coverage (docs/ui/testing.md#what-the-gui-tests-cover). The
+  // action behind it is called directly and everything AFTER it is clicked,
+  // which is where the panel actually lives.
   t = IM_REGISTER_TEST(engine, "sketch", "reference_image_panel_by_clicking");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

@@ -277,8 +277,8 @@ ProjRef EdgeRef(uint64_t fid, const std::string& name) {
 
 TEST_CASE("A fastener callout names the standard part it points at",
           "[drawing][dimension][parts]") {
-  // Phase 5 of docs/parts/plan.md. The text is not composed here and not
-  // typed by anyone: it is the occurrence's own Fastener feature's
+  // docs/parts/README.md#bom-and-drawings. The text is not composed here and
+  // not typed by anyone: it is the occurrence's own Fastener feature's
   // designation, which is the same string the BOM and a purchase order carry.
   // A drawing that says "M6x50" while the BOM says "M6x45" is the exact
   // divergence a derived callout exists to prevent.

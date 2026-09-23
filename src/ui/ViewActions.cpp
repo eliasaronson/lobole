@@ -90,8 +90,8 @@
 // What the camera looks at, and what is cut away: fitting to a document, a
 // selection or a box, and the section views -- their planes, their source
 // face picks, and the filled cap meshes a cut leaves behind.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, second wave). AppActions.h still declares everything, so no
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still declares everything, so no
 // caller changed.
 
 namespace ui {
@@ -115,7 +115,7 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
   // (RendererSync's MakeStillDesc), so a fit solved for the viewport crops
   // the still whenever the two differ — a fifth of a 210 mm panel in frame
   // at 400x1100, correctly projected and framed for a different picture
-  // (docs/rendering/still-framing-plan.md).
+  // (docs/rendering/still-render.md#framing).
   float aspect = forAspect > 0.0f ? forAspect : cam.GetAspectRatio();
   if (!(aspect > 0.0f))
     aspect = 1.0f;
@@ -131,7 +131,7 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
   // CAM's verb window counts too. It was missing from this list, so fitting
   // the view with the verbs open parked the model under the very window that
   // was asking you to click it — the thing this whole branch exists to stop
-  // (docs/cam/dogfood-round.md, round 2).
+  // (docs/ui/README.md#viewport).
   const bool toolWindowOpen = HasPendingFeature(state) ||
                               state.editFeatureId != 0 ||
                               state.measure.active || state.dimTool.active ||
@@ -236,7 +236,7 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
     // target moves RIGHT so the model appears LEFT of it — away from the
     // window on the right. It moved the other way, which pushed the model
     // under the very window this branch exists to clear (found with the CAM
-    // verbs open, docs/cam/dogfood-round.md).
+    // verbs open, docs/ui/README.md#viewport).
     const glm::vec3 right = cam.GetRight();
     const float halfWidthWorld = distance * tanHalfV * aspect;
     // Off the SOLVED aim, not the box centre — the fit above re-centred the

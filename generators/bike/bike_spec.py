@@ -1,7 +1,7 @@
 """The bicycle's dimensions, and the layout derived from them.
 
 The model is of a real bicycle that was photographed, not measured
-(docs/modeling/bike-plan.md). So this file keeps two kinds of number strictly
+(generators/bike/README.md). So this file keeps two kinds of number strictly
 apart, and says which is which on every line:
 
   READ      what the photographs establish: a gents' diamond frame, 28"
@@ -139,7 +139,7 @@ GUARD_CLEAR = 6.5          # ASSUMED: the guard's plate, outboard of the
                            # chainring. It sits in the gap between the chain
                            # and the CRANK ARM, which sweeps outside it —
                            # which is what you see on the bicycle, and what
-                           # makes the layout close (docs/modeling/bike.md)
+                           # makes the layout close (generators/bike/README.md#what-a-run-checks)
 GUARD_DISC_MARGIN = 14.0   # ASSUMED beyond the chainring's teeth
 GUARD_EYE_D = 140.0        # ASSUMED: the hole the crank spider shows
                            # through — and it must CLEAR the spider, which

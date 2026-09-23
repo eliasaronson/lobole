@@ -206,7 +206,8 @@ TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
   // each mapped every edge of the WHOLE BODY — one of them once PER EDGE,
   // from inside the caller's loop over a face's edges. The mate tool resolves
   // this every frame while hovering, so a plate covered in holes cost
-  // 10 ms/frame at 144 holes and 88 ms at 400. See docs/known-bugs.md.
+  // 10 ms/frame at 144 holes and 88 ms at 400. See
+  // docs/assemblies/README.md#snap-points-while-hovering.
   //
   // A box cannot catch it. The cost is the PRODUCT of the face's edge count
   // and the body's, so it needs a face that carries many edges on a body that
@@ -388,7 +389,7 @@ TEST_CASE("GenerateMesh honours a stated deflection", "[kernel][mesh]") {
   // bounding box, which is always. So `GenerateMesh(0.05)` on a 200 mm part
   // meshed at 0.4 mm, and the CAM verifier compared machined stock against a
   // "designed" surface coarser than the 0.25 mm grid measuring it
-  // (docs/cam/reach-and-fidelity-plan.md).
+  // (docs/cam/simulation.md#one-engine).
   //
   // A cylinder, because only a curved face has a chord tolerance to observe.
   const auto cylinder = [] {
@@ -784,7 +785,8 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
 }
 
 // An STL has no unit field, so the import is told what it was drawn in
-// (docs/mesh-units-plan.md). Storage stays mm: the shape is scaled as read.
+// (docs/interchange/README.md#importing-into-a-part). Storage stays mm: the
+// shape is scaled as read.
 TEST_CASE("An STL import is read in the unit it was drawn in",
           "[feature][import]") {
   namespace fs = std::filesystem;

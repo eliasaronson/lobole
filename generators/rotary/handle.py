@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A file handle to cut on the 6090's 4th axis.
 
-The dogfood for continuous 4-axis (docs/cam/rotary-plan.md). It is a real
+The dogfood for continuous 4-axis (docs/cam/rotary.md#continuous-surface_rotary). It is a real
 part -- a handle for a bastard file, in beech, turned and carved on the
 rotary -- and it is chosen because it cannot be made on a lathe, which is the
 whole point of having the axis.

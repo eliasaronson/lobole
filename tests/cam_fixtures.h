@@ -4,8 +4,8 @@
 
 // Shared fixtures for the CAM test files (test_cam*.cpp).
 //
-// They were one 5,965-line test_cam.cpp until 2026-09-06. Splitting it was
-// stage 1 of docs/architecture-review-2026-09-06.md, and it turned up a real
+// They were one 5,965-line test_cam.cpp until 2026-09-06. Splitting it
+// (docs/architecture.md#source-layout) turned up a real
 // bug on the way: `#endif // HAVE_CAM` sat at line 4322 with 38 test cases
 // appended AFTER it, so -DENABLE_CAM=OFF did not compile. One guard per file
 // cannot drift that way.
@@ -46,7 +46,7 @@
 #include <numbers>
 #include <unistd.h>
 
-// CAM's testable half (docs/cam/plan.md): bodies in, moves out, then G-code.
+// CAM's testable half (docs/cam/README.md): bodies in, moves out, then G-code.
 // Every number here is one a machinist could check by hand, because the
 // failure mode this suite exists to prevent is scrap metal.
 using Catch::Matchers::WithinAbs;

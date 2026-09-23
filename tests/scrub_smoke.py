@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""A scrub lands on the branch the run walked (agent-scale plan G2).
+"""A scrub lands on the branch the run walked.
 
 Found building the single-cylinder engine
-(docs/modeling/single-cylinder-dogfood.md). A mechanism's pose is NOT a
+(generators/README.md#single-cylinder-and-air-cooled-engines). A mechanism's pose is NOT a
 function of its driver alone: a slider-crank at 180 degrees has the crank and
 rod collinear, and both branches close the loop exactly — the piston at
 `rod - crank` and the piston at `-(rod + crank)` are equally valid answers to

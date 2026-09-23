@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Named datum frames over the RPC, headless (docs/agent-scale-plan.md, G0).
+"""Named datum frames over the RPC, headless (docs/assemblies/solver.md#connector-frames).
 
 The property under test is the one the SO-101 gripper dogfood lacked: a
 position an agent never transcribed. A Frame is built FROM the geometry (a

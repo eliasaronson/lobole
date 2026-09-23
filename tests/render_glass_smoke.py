@@ -3,7 +3,7 @@
 
 `glass` rendered as an opaque, near-white mirror: the ray tracer declared a
 `transmission` on both sides of its material upload and never read it, so a
-watch crystal hid the dial in every still (docs/rendering/glass-plan.md).
+watch crystal hid the dial in every still (docs/rendering/materials.md#glass).
 
 The shape of the test: a red block behind a pane, the camera looking through
 the pane at the block. With the pane `glass` the middle of the frame must be

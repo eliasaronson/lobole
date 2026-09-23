@@ -9,7 +9,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-// Key-light shadow mapping (S1, docs/rendering/ssao-soft-shadows.md): a
+// Key-light shadow mapping (docs/rendering/README.md#shadows): a
 // depth-only pass into a 2048^2 D32 map from the primary light's direction,
 // recorded before the main render pass each frame. The ortho frustum is re-fit
 // to the combined scene bounds every frame (CAD scenes are compact, so no

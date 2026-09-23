@@ -1,563 +1,242 @@
-# Cutting simulation — watching the stock come off
+# Verification and the cutting simulation
 
-> Status: **BUILT** (2026-08-27), S1–S5. From: *"a cutting simulation/visualizer
-> similar to Fusion 360"*. What follows is the design as written, with an
-> [as-built section](#as-built) at the end recording what changed and what the
-> first real job measured.
->
-> The engine ([plan.md](plan.md)) and the way in ([gui.md](gui.md)) are built.
-> C5 already **simulates material removal** — it just never shows it. This is
-> about turning a check that prints two numbers into a picture you can scrub.
+A wrong FEM number misleads you; wrong G-code breaks a tool, a spindle or a
+hand. So the posted file is checked, headless and automatically, and the
+picture a person scrubs through is the same simulation the check reads.
 
-## What is already here
+Code: `src/core/cam/CamGcode.{h,cpp}` (the parser), `CamVerify.{h,cpp}` (the
+height map, the carve, the compare, the verdict and its sentences),
+`CamRotary.{h,cpp}` (the rotary twin, [rotary.md](rotary.md)),
+`CamFeeds.{h,cpp}` (cutter findings), `CamSim.{h,cpp}` (timeline and
+playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
+`src/ui/CamPlayback.{h,cpp}`, `src/ui/CamTool.cpp` (the panel's verification).
 
-`src/core/cam/CamVerify.h` is most of a simulator with no display:
+## One engine
 
-| piece | where | note |
-|---|---|---|
-| G-code parser, modal, per-move line + T | `ParseGcode` | arcs already become chords at parse time, so playback gets G2/G3 free |
-| stock as a height map | `MakeStock` | `x0/y0/res/nx/ny` + `vector<float>` |
-| swept-tool removal, analytic per cell | `Simulate`, `CamVerify.cpp:240` | exact against the segment, not oversampled |
-| the tool's real end shape | `TipHeight`, `CamJob.h:69` | flat / ball / V / drill from ONE function |
-| the designed surface on the same grid | `SampleModel` | a flat-tool drop cutter already |
-| compare + leftover regions | `Compare`, `LeftoverPoints` | Fusion's *compare* view, shipped as dots |
-| cutting time from real feeds | `CuttingMinutes` | rapids excluded unless the setup states a rate |
-| backplot, tool glyph, stock box | `CamPanel.cpp:167`, `CamTool.cpp:597` | already in setup space |
+- **It runs on the posted file.** `ParseGcode` reads the program back —
+  modal state, `F` (a non-positive feed is reported, not adopted), `T`, `M6`,
+  `G2`/`G3` as chords, a modal A, `G92 A`, and the `(op N)` comments that
+  attribute moves to operations (only exactly `op <digits>`, so a
+  `SKIPPED op` line does not start one). `ProgramInSetupSpace` adds the work
+  origin back. So a bug in the post, in modal state or in linking is seen,
+  and so is a rapid through material that leaves the part perfect.
+- **The stock is a height map** `z(x, y)` over the stock box (`MakeStock`),
+  and a tool is its profile function `TipHeight(tool, r)` — flat, ball, V and
+  drill from one function. `CarveSweep(from, to, tool, stock)` tests each
+  cell analytically against the swept segment (exact, not oversampled) and is
+  the one carve: `Simulate`, `Inspect` and the playback all call it, carving
+  each segment from its own start so a program played in pieces ends
+  bit-identical to one played whole.
+- **The designed surface** is sampled on the same grid (`SampleModel`, a
+  flat-tool drop cutter). It meshes the model detached
+  (`GenerateMeshDetached`) at a quarter of a cell, because the default mesh
+  deflection scales with the part and would be coarser than the grid
+  measuring it, and because meshing a shared shape would re-mesh the
+  document behind the renderer's back.
+- **One simulator, not two.** The picture comes from the same map, fed by the
+  same posted file, as the verdict: `StockSim::SeekTo(End())` equals
+  `Inspect`'s machined map bit for bit (a test), so every pixel on screen is a
+  number the panel can also state.
 
-So this workstream is **display and transport**, not simulation math. The two
-things genuinely missing are a *surface* for the height map and a *cursor*
-through the program.
+## The verifier
 
-## Surveyed first (`~/Documents/CAD/CAM`)
+`Inspect` (and `VerifyGcode`, which routes a file whose A moves to
+`InspectRotary`) compares the machined map with the designed one.
 
-FreeCAD ships **two** cutting simulators, and the difference between them is
-the whole design decision here:
+- **Resolution.** `cam_verify` defaults to 0.25 mm cells (`resolution`); the
+  panel verifies at 0.4 mm, on a `cam-verify` background job, and its
+  tolerance is one and a half cells — a "gouge" of half a cell is
+  quantisation.
+- **Neighbour rule.** A cell is gouged only if it is below everything its
+  neighbours were designed to be, and left over only if above all of them, so
+  a cell centre landing on an island's corner does not read as the island's
+  whole height, and two grids of different resolution agree.
+- **Leftover only where the tool went** (`Inspection::touched`): a job that
+  clears one pocket in a block leaves the rest of the block correctly. A
+  program that machines nothing at all shows as `untouchedFraction`.
+- **Below the stock** (`below_stock_mm`) is cutting into the spoilboard,
+  which is what a through cut is for; it is reported and never counted as
+  gouge.
+- **Told, not guessed:** each toolpath's corner reliefs are skipped for gouge,
+  and its tabs are excused for leftover up to their own height (a relief
+  excuses a cut too deep, a tab one that did not happen, so a tab needs its
+  height or it would excuse a genuinely uncut slab above it).
+- **Rapids through material** are counted with the worst depth, place and
+  line (`rapids_through_stock`, `worst_rapid_depth_mm/_at/_line`: a graze and
+  a crash are the same count and different numbers). The rapid check models
+  the tool by `TipHeight` like the cut does, so a drill retracting up its own
+  hole does not find its own cone in the way. A rapid never carves.
+- **File errors and warnings.** What the parser could not read (a NaN
+  coordinate, a zero feed) counts against `ok`; what a controller may refuse
+  though the parser survived it (a nested comment) is a warning.
 
-- **`PathSimulator/App/VolSim`** (821 lines) — the height map. `Array2D<float>`
-  + a tool profile function, `ApplyLinearTool` / `ApplyCircularTool`, and a
-  `Tessellate` that greedily merges equal-height cells into rectangles
-  (`FindRectTop`, `TesselTop`, `TesselSidesX/Y`) instead of emitting a quad per
-  cell. That merge is worth stealing outright.
-- **`PathSimulator/AppGL`** (~4 500 lines) — the newer GUI one. It keeps **no
-  stock model at all**: every frame it re-renders every swept tool segment from
-  step 0 to the cursor, four times over (forward, reversed, back faces), and
-  lets depth and culling do the subtraction (`MillSimulation.cpp:282`). Scrubs
-  instantly, needs a whole shader/FBO stack of its own, costs O(steps) draw
-  calls per frame — and, being pixels, **can answer no question**. FreeCAD's
-  verdict and FreeCAD's picture come from two different engines.
-- **CAMotics** — implicit field + AABB trees of tool sweeps + marching cubes.
-  General enough for undercuts, which is exactly why it needs its own build
-  system. We are 3-axis.
-- **Kiri:Moto** (`grid-apps`) — animation is a small part of a 12.4k-line CAM
-  mode; the lesson from C1 still holds: the display is cheap once the
-  infrastructure exists.
+### Verdict
 
-**Decision: one simulator, not two.** The picture comes from the same height
-map, fed by the same posted file, as the verdict. This is the C4/C5 rule
-("a picture that can disagree with the file is worse than no picture") applied
-once more — and it is where FreeCAD's split is a warning rather than a model.
-The cost is that the surface must be meshed; the return is that every pixel on
-screen is a number the panel can also state.
+`ok` (`Verdict::Safe`) means nothing scraps the part or breaks the tool: no
+gouge beyond tolerance, no rapid through material, nothing past the travel,
+no holder or fixture collision, and a file that read straight — the flag to
+gate on. `complete` means nothing is left standing. They are separate
+because a height map cannot watch a slug drop out of a through cut, so a
+correct job can be `ok` and not `complete`; tabs do not count against
+`complete`. `cam_verify` also reports how much is left over and where
+(`leftover_area_mm2`, `leftover_regions`, `leftover_biggest`, largest first):
+several tiny regions are inside corners a round cutter cannot reach and are
+correct, one large region is a missing operation.
 
-## The shape
+`Explain` turns a verdict into the sentences the panel shows and `cam_verify`
+returns as `says`, each at level Good, Warn or Bad; `MachineLines` adds the
+work-area lines ([setup.md](setup.md#the-machines-work-area)). The verdict
+text is asserted in tests against jobs with known faults, so the words cannot
+drift from the numbers.
 
-A **transport**, in the CAM panel, under Generate/Post:
+### Holder collisions
 
-```
- ├────────────●──────────────────────┤   64 %   op 3/5 "Pocket floor"
- [◀◀] [▶] [▶|] [▶▶]      speed ×4      T2 6 mm flat · line 812 · 300 mm/min
-```
+A tool that states both `overall_length` (tip to the collet nut's underside)
+and `collar_diameter` (the nut at its widest) has its holder checked: on every
+move, a cell standing above `tip + overall_length`, further from the axis than
+the cutter's radius and no further than the collar's, is the nut in the work
+(`FoulsHolder`, `holder_collisions` with worst depth, place and line). Blind
+inside the cutter's radius on purpose: there the material is either cut or it
+is a cut deeper than the flute, which the reach finding already states. Silent
+unless both numbers are stated, and the RPC refuses one without the other —
+half a holder would disable the check while looking like it enabled it. A
+collar riding above the uncut stock top is skipped whole, which keeps the
+check nearly free on ordinary jobs. The tool glyph draws the stated collar.
 
-- The **cursor** is a point in the program: `(moveIndex, fraction)`.
-- The slider axis is **path distance**, not wall-clock. Cutting time we can
-  defend (`CuttingMinutes`, from each move's own feed); a rapid traverse rate
-  is a fact about the machine that the setup usually does not state, and
-  inventing one would put a fabricated cycle time in front of a user. Distance
-  is exact, needs no claim, and animates smoothly. Time is a *readout*, and it
-  reads `cutting time`.
-- Playback shows the **stock**, the **tool to scale where it actually is**, the
-  path **already cut** dimmed and the path **still to come** bright, and the
-  model bodies ghosted underneath (`SetInstanceGhost` exists).
+### Fixture collisions
 
-A **session, like the CAM verb window — not a mode**, but an honest one: it
-hides bodies, so it owns exactly ONE exit path that restores them. The U11
-mode-exit bug class (gui.md) came from transitions scattered across call
-sites; a single `EndCamPlayback(state)` called from every one of them is the
-whole mitigation, and a GUI test asserts visibility is restored.
+Fixtures ([setup.md](setup.md#workholding-fixtures)) get a height field of
+their own, never carved: over the union of their footprints, each cell holds
+the top of the tallest fixture there (sampled with `SampleModel`) and which one
+it is. On every move, rapid or cut, each fixture cell the tool can reach is
+tested — against `TipHeight` inside the cutter's radius and against the
+collar's underside out to the collar's radius when the tool states a holder —
+with the tool's height taken where the segment passes closest to the cell, so
+a ramp past a clamp is not charged for a depth it never reached there. A hit
+is reported per move: `fixture_collisions`, `worst_fixture_depth_mm/_at/_line`,
+`worst_fixture` (name) and `worst_fixture_by` (`cutter` | `holder`);
+`fixtures_checked` counts them. The stock touching a fixture is the point of a
+fixture and is not a finding. What is not checked is said: a fixture whose
+part is gone, and every fixture on a rotary setup (`not_checked`). When safe Z
+was raised to clear a fixture and then exceeds the Z travel, the travel line
+names the fixture.
 
-## Phases
+### Machine travel
 
-| | scope | size |
-|---|---|---|
-| **S1** | Cursor + incremental simulate over the posted program | ~250 lines, ½ session |
-| **S2** | Height map → surface mesh (run-merged, with skirts and walls) | ~300 lines, ½–1 session |
-| **S3** | `StockRenderer` — a dynamic-buffer mesh path that does not stall | ~350 lines + 2 shaders, ½ session |
-| **S4** | The tool, to scale, moving; ghosted bodies; past/future path | ~150 lines, ¼ session |
-| **S5** | Transport UI, frame pacing, refusals, RPC | ~250 lines, ½ session |
-| **S6** | What it can then answer for free — colour by op, holder collision (BUILT v121), deviation map | ~200 lines each, on demand |
+With a work area stated, `outsideTravel` counts moves past it: X and Y against
+the reach window ([setup.md](setup.md#the-machines-work-area)); Z as a span,
+the program's deepest point against its highest retract.
 
-S1–S5 is the deliverable: **about one and a half sessions.**
+### Findings about the cutter
 
-### S1 — a cursor through the program
+`cam::FeedsFor` (`CamFeeds.cpp`) says what can be said about each tool's feeds
+and reach — with the arithmetic and its source beside each sentence — and
+what could NOT be checked (`unchecked`), because "checked, fine" and "nobody
+looked" are different answers. Feeds stay the user's; these are findings, not
+prescriptions.
 
-`Simulate` is already a straight loop over moves that only ever lowers cells,
-so making it resumable is a signature change, not a rewrite:
+- **Chip load** = feed / (rpm × flutes), against a band per material class
+  (from the material of the bodies being cut) scaled by the cutter's
+  diameter, or the tool's own `chipload_min`/`chipload_max` when stated (a
+  vendor chart for that cutter beats any rule). Under the band is said, not
+  shouted: light machines often run under it and still cut. When the band
+  needs a feed the machine's `rapid_feed` cannot reach, that is stated too.
+- **Reach**: the deepest cut against `flute_length`, with a margin for the
+  collet, per operation (a micron of overrun, not a nanometre); skipped for
+  `surface_rotary`, whose Z span is not a depth.
+- **Chip room** for full-width cuts (the `FullWidth` column: profile, drill).
 
-```cpp
-struct SimCursor { size_t move = 0; double t = 0.0; };  // t = fraction into `move`
-void SimulateTo(const GProgram&, const Setup&, HeightMap&, SimCursor to);
-```
+The findings reach the panel's verdict and `cam_verify`.
 
-Forward is incremental and cheap (the swept bbox is small). **Backward is a
-re-run from zero**, because the height map is lossy — a cell that was lowered
-cannot say what it was. Measure before optimising: the whole-program sim at
-0.4 mm already runs inside a button press. If a real job at playback
-resolution is too slow to scrub, keyframe the map every N moves (`nx*ny*4`
-bytes a snapshot) — that is a cache, not a design change.
+## The simulation
 
-Two parser gaps to close while here, both small and both real bugs today:
+### Timeline
 
-- **`GMove` drops the F word.** The parser reads `F` into `default:` and throws
-  it away, so the verifier cannot check feeds at all and playback cannot show
-  the one number a machinist looks at. Add modal `feed` to `GMove`.
-- **Tool changes are invisible.** `T` is read; `M6` is not. "Skip to the next
-  tool" wants the boundary.
+`BuildTimeline(program, rapidFeed, model)` turns the parsed file into a
+cursor space: the cursor is `(segment, fraction)` and the slider axis is
+**path distance**, not a clock. Cutting time can be defended from each
+move's own feed; a rapid traverse rate is a fact the setup usually does not
+state, and inventing one would put a fabricated cycle time in front of a
+user. Time is a readout (`cutting_minutes`, rapids included only when a rate
+is stated; a turning cut clocked the controller's way). The timeline holds the
+segments that begin an operation or a tool change, for the skip buttons.
 
-### S2 — the surface
+### Stock
 
-One vertex per cell is 750 k vertices on a 200×150 mm plate at 0.2 mm. Milled
-2.5D stock is overwhelmingly **flat**: an uncut top, a few floors, walls
-between them. So mesh runs, not cells — merge equal-height cells along a row,
-then merge identical rows, exactly as `VolSim::TesselTop` does with a 2D greedy
-rectangle. Runs-per-row is most of the win for a fraction of the code; go 2D
-only if a measurement asks for it. Between differing heights, emit the vertical
-wall — a milled step is a wall, and smoothing it into a ramp is a lie about the
-part. Skirt down to the stock floor so the block reads as a solid.
+`StockSim` holds the pristine block and the cursor. Forward is incremental;
+**backward re-runs from the pristine block**, because a height map is lossy
+and a lowered cell cannot say what it was — a full re-run of a real program is
+a frame. The rotary twin keeps snapshots ([rotary.md](rotary.md#the-rotary-picture)).
 
-Regenerate the whole mesh per update once merged (small); dirty-rect
-bookkeeping is an optimisation to defer.
+The height map is meshed by runs, not cells (`BuildStockMesh`): equal-height
+cells merge along a row and identical rows merge, a vertical wall joins
+differing heights (a milled step is a wall), and a skirt closes the block. The
+mesh encloses exactly the volume the map describes, including a cut below the
+stock bottom; a milled block meshes to far fewer triangles than cells (gated).
+The stock remeshes whole, at most 12 times a second while playing.
 
-### S3 — getting it on screen every frame
+`StockRenderer` draws it from host-visible, persistently mapped vertex and
+index buffers per frame in flight (the `FieldRenderer` pattern): no device
+wait except when a buffer grows. It honours the section clip plane, depth-tests
+against the scene and is registered in `RegisterSceneRenderers` like every
+scene renderer. It takes the scene's light directions, colours and ambient from
+`core/Conventions.h`, the same constants the mesh renderer reads.
 
-**`MeshRenderer::UpdateAsset` cannot be used for this.** It does
-`vkDeviceWaitIdle` + destroy + recreate device-local buffers through a staging
-upload, per call (`MeshRenderer.cpp`). That is correct for a regen and a stutter
-machine at 15 Hz.
+### Tool glyph
 
-The pattern that fits already exists in this repo: **`FieldRenderer`** (297
-lines) — its own pipeline and vertex format, host-visible persistently-mapped
-vertex/index buffers *per frame in flight*, `SetMesh` + a dirty flag,
-`EnsureCapacity` growing them, no device wait anywhere. `StockRenderer` is that
-file with a lit shader. It must honour the section clip plane (FieldRenderer
-does) and depth-test against the scene so the tool and the part interpenetrate
-correctly.
+The tool is a `MeshRenderer` instance — static geometry that moves, built once
+per tool number and placed by transform each frame. Its mesh revolves the
+`TipHeight` profile (so it shares its shape with the removal math), with the
+flute at full length, a short collar, and the stated holder collar when there
+is one. Normals are per segment, blended only across joints within a crease
+angle, so a flat shoulder shades flat and a ball's tip stays round; every
+triangle winds the way its normals point (gated for all four shapes and for
+the stock mesh). The material is matte: a mirror finish slides reflections
+across the glyph as the camera orbits.
 
-Alternative considered: teach `MeshRenderer` a *dynamic asset* kind, which
-would buy PBR, shadows and SSAO for the stock. Rejected for v1 — it touches the
-shadow-caster collection and every draw path that binds `asset->vertexBuffer`,
-which is a viewport-wide regression risk for a cosmetic gain. Promote it later
-if the stock looks wrong beside the part; the FEM field sets the precedent that
-it will not.
+### Transport
 
-### S4 — the tool
+**Simulate** (`job.simulate`) opens a floating transport along the bottom of
+the viewport (`DrawCamTransportWindow`): start, back one, play/pause, forward
+one, end, next operation, next tool change (only when the job has one), the
+scrub bar, speed, a Path toggle and Close, and a readout of the operation, the
+tool, the G-code line and the feed. It refuses in words, at the click, when
+nothing is generated. Playback:
 
-Revolve the `TipHeight` profile and you have every tool the app models,
-correct by construction and sharing its shape with the removal math. Add the
-shank above the flutes (`fluteLength`) and a stub holder. One instance, moved
-by transform per frame — free.
+- ghosts the model bodies at 0.22 (the part inside the block is most of why
+  the picture is worth having), re-applied every frame because instance ids
+  change on every regeneration;
+- draws the path already cut dim and the path ahead bright (ahead of the
+  cursor it is usually buried in uncut stock and appears as the cutter
+  arrives);
+- marks the worst fixture hit; leaves fixtures visible;
+- never regenerates: it reads the cached toolpaths and the posted text, and a
+  model edit invalidates it rather than re-cutting under the cursor;
+- is a session, not a mode, with one exit (`EndCamPlayback`) that restores
+  everything — a GUI test asserts nothing is left behind;
+- wakes the frame pacer while playing;
+- uses a steady clock, not ImGui's, so an offscreen instance can play.
 
-### S5 — transport
+The overlay colours that land on the workpiece (`kDoneColor`, `kAheadCut`,
+`kGhostLine`) are calibrated against the stock's brightness; they are the
+ones to re-check whenever stock or part shading changes.
 
-Play/pause/step/scrub, speed multiplier, jump to next operation and next tool
-change, and the readout (op, tool, line, feed). (All of it shipped; it needed
-two rows to fit the panel — see [as built](#where-it-differs-from-the-plan).)
-Three things this codebase specifically requires:
-
-- **Frame pacing.** `FramePacer` (`src/app/FramePacer.h`) parks the app on
-  `glfwWaitEvents` when nothing is happening; playback needs its own wake
-  reason beside `cameraAnimating` or it will render one frame and stop.
-- **Refuse visibly.** No toolpaths, or a job that failed to post → the
-  transport says so where the buttons are. The `defaults/*` gate exists for
-  exactly this.
-- **Never regenerate during playback.** Op add/delete already freezes the app
-  for ~a second (`docs/known-bugs.md`); playback reads the cached
-  `camToolpaths` and the last posted text, and a model edit *invalidates* the
-  playback rather than silently re-cutting under the cursor.
-
-RPC: `cam_simulate {setup, at}` returning the height map's summary at that
-cursor (and, with `render`, a still) — so the whole thing is drivable headless
-and by an agent, like every other verb here.
-
-### S6 — what the height map can then answer
-
-Cheap, once S1–S3 exist, and each one is a question the panel can already
-almost answer:
-
-- **Colour by operation.** A parallel `vector<uint16_t>` of "which op last cut
-  this cell", written in the same loop. Answers *which operation left that?*
-  and makes a redundant op visible as an area nothing else touched.
-- **Holder and shank collision.** BUILT (v121). Two numbers on the `Tool` —
-  `overall_length`, tip to the underside of the collet nut, and
-  `collar_diameter`, that nut at its widest — and every move in the posted
-  file is checked against the height map: a cell standing above
-  `tip + overall_length`, further out than the cutter's own radius and no
-  further than the collar's, is the nut in the work. Reported as
-  `holder_collisions` with a depth, a place and a G-code line, exactly like
-  `rapidsThroughStock`, and it counts against `ok`.
-
-  Deliberately blind INSIDE the cutter's radius. There the tool is the tool:
-  material in that column is either cut (and the map records it) or it is a
-  plunge deeper than the cutter is long, which `CamFeeds` already states at
-  the SETUP, before a file exists (docs/cam/reach-and-fidelity-plan.md). Two
-  checks for one fault, in two vocabularies, is how a check stops being read.
-  What the reach finding cannot see is a holder fouling something the tool
-  never cut into — a clamp, a boss beside a pocket, a tall neighbour on the
-  same sheet — and that is exactly and only what this one adds.
-
-  > 2026-09-22: a clamp was not in the model this check reads, so it never
-  > saw one. Fixtures now have their own never-carved height field, checked
-  > against the cutter and the collar on every move, rapid or cut
-  > (docs/cam/workholding-plan.md).
-
-  Silent unless both numbers are stated, on the `Machine::HasWorkArea` rule:
-  a limit nobody typed is not a limit. They come as a PAIR and the RPC refuses
-  one alone, because half a holder disables the check while looking like it
-  enabled it. The tool GLYPH draws the stated collar too, so the collision is
-  something you watch happen and not only a line number.
-
-  On cost, measured rather than assumed: the collar's swept box is five times
-  wider than the cutter's, and walking it per move took the waveguide job
-  (5 ops, 33 803 lines) from 1.5 s to 4.4 s. One comparison fixes that —
-  nothing can ever stand taller than the UNCUT block, and a height map only
-  comes down, so a collar riding above the stock's own top is skipped whole.
-  That is the common case (a 60 mm stickout over a 25 mm blank), and with it
-  the same job verifies in 1.4 s, which is what it cost before the check
-  existed.
-- **Deviation map.** `machined - designed` on the same grid, painted on the
-  stock. `Compare` computes it now and throws away everything but the extremes.
-
-## Excluded on purpose
-
-- **Undercuts, 5-axis, continuous 4-axis.** A height map cannot represent them
-  and this CAM cannot cut them. When the A axis moves, this needs revisiting
-  with the rest of C9's deferred half.
-
-  > Revisited 2026-09-20. Continuous 4-axis has its own stock model now --
-  > `r(x, theta)` about the rotary axis, `core/cam/CamRotary.h` -- and
-  > `VerifyGcode` routes to it when the FILE's A moves. The height map's
-  > limit is unchanged and this path is deliberately separate from it: the
-  > 3-axis check refuses a turning part by name rather than answering as
-  > though it stood still (docs/cam/rotary-plan.md). Undercuts and 5-axis
-  > remain excluded. There is still no PICTURE for a rotary job -- playback
-  > draws a height map -- so this is a verdict without a simulation, which is
-  > the one place the "one engine, one answer" rule is not yet honoured.
-  >
-  > Honoured now (2026-09-21): a rotary program PLAYS, with the part turning
-  > by the cursor's A, on the same radius field and the same carve the
-  > verifier uses — its last frame is the verdict's own stock, cell for cell
-  > (`RotaryStockSim`, docs/cam/rotary-plan.md "The picture").
-- **Machine/fixture collision, work-envelope checks.** A different model (the
-  machine, which the app does not have) rather than a harder version of this
-  one.
-
-  > 2026-09-22: fixture collision is built, as a second height field beside
-  > this one rather than inside it: clamps, vises and keep-out boxes placed on
-  > a setup's bed, checked against every move, drawn ghosted through playback
-  > with the worst hit marked (docs/cam/workholding-plan.md). The machine
-  > itself — spindle nose, chuck and tailstock — is still excluded.
-- **Chip load, force, deflection.** Would need feeds and speeds this app
-  deliberately does not compute (`CamJob.h`: a wrong number here breaks a tool).
-- **Real-time clock playback.** Requires a rapid traverse rate and acceleration
-  the setup does not state. See the cursor decision above.
-
-## Gates
-
-What actually gates it, in `tests/test_cam_sim.cpp` (headless) and
-`GuiTestsCam.cpp::simulation_plays_and_gives_it_back`:
-
-- **`SeekTo(End())` is bit-identical to `Inspect`'s machined map.** The
-  premise of the whole design: the picture and the verdict cannot drift apart.
-  (Against `Inspect`, not `Simulate` — `Simulate` applies rapids, and the
-  playback follows `Inspect` in checking them instead.)
-- **Scrubbing past and back lands on the same map**, which only holds because
-  going backwards re-runs from the pristine block.
-- **The mesh is the map**: a pocket-in-a-block meshes to the right bounds and
-  the right enclosed volume, and the volume equals the columns the map
-  describes — run-merging may change the triangle count, never the volume. A
-  cut BELOW the stock bottom still closes.
-- **Merging keeps its promise**: `triangles < cells / 4` on a machined block.
-- **The distance axis is what the file travels**: monotonic, ending exactly at
-  the total, and every cutting move carries a feed the SETUP states rather
-  than one invented here.
-- **The parser keeps the feed, the tool change and the operation** — including
-  that `(SKIPPED op 9: …)` does not read as operation 9 starting.
-- **A rapid is not counted as time it cannot know**, and the distance axis is
-  the same whether or not a traverse rate is stated.
-- **GUI**: the button refuses in words before anything is generated; play →
-  step → scrub back → skip-to-op all move the cursor; mid-playback there is a
-  real stock mesh and a real tool instance; and closing leaves no session
-  state, no stock mesh and no tool instance (the U11 class).
-- **No format bump.** Playback is session state; nothing here serializes.
-
-## As built
-
-Built in the order above; S1–S5 landed together. What the code argued back:
-
-**The file already said which operation a move belongs to.** The plan assumed
-op attribution would need the toolpath list matched back against the program —
-which cannot be done reliably, because the post interleaves retracts and tool
-changes. But `Emitter::Comment` has been writing `(op 7)` since C4, and the
-parser was throwing comment text away one line before it could read it.
-Keeping the text costs six lines and the boundary comes out of the FILE, which
-is the thing being simulated. (`(SKIPPED op 9: …)` means the opposite, so the
-match is exactly `op <digits>` and nothing else — there is a test.)
-
-**The parser was dropping the F word entirely.** `F` fell into the `default:`
-of the word switch, so the one number a machinist looks at was the one number
-nothing downstream could see: no feed check in the verifier, and no honest
-clock here. It is on `GMove` now, modal, and a non-positive feed is reported
-rather than adopted. `M6` was invisible too — both were real gaps, found by
-needing them rather than by looking.
-
-**One carve, not two.** `Simulate`'s inner loop became `CarveSweep(from, to,
-tool, stock)` and everything calls it: `Simulate`, `Inspect`, and the
-playback. That also removed a per-move `GProgram` allocation from `Inspect`'s
-hot loop, which was building a two-move program for every cutting move.
-
-**Every segment is carved from its own start.** The obvious implementation
-carves the slice between the old cursor and the new one, and it is wrong in a
-way that would never have been noticed: a sub-segment clamps the tool's Z at
-the split, so a program with an ascending cut could finish a hair deeper than
-the same program run in one pass. Carving each segment from its own start (the
-current one truncated at the cursor) is idempotent, costs nothing, and makes
-the end state **bit-identical** to the map `Inspect` reads the verdict from —
-which is the property the whole "one simulator" argument rests on, and now a
-test.
-
-### What it measured
-
-A 60 × 40 × 12 plate, faced and profiled with tabs — 5 677 mm of path, 316
-lines of Mach3:
-
-| | |
-|---|---|
-| play to the end, 0.25 mm grid | **25 ms** |
-| play to the end, 0.1 mm grid | **46 ms** |
-| scrub backwards (re-runs from pristine) | **3–8 ms** |
-| step forward one frame | **2–4 ms** |
-| the machined block, 24 249 cells | **28 triangles** |
-
-Two things follow. The keyframe cache S1 hedged about is **not needed** — a
-full re-run of a real program is a frame, so backward scrubbing can stay the
-simple thing. And run-merging does what it was chosen for: a profiled block is
-flats and walls, and 24 249 cells come out as 28 triangles. The gate that
-pins it (`triangles < cells / 4`) has three orders of magnitude of headroom
-today, which is the point — it fails loudly if the mesher ever degrades to
-per-cell.
-
-Removed volume on that job: **13 871 mm³** against 14 208 mm³ of stock-minus-
-part, the difference being four tabs and grid quantisation. That number comes
-back over the RPC (`removed_mm3`), so a headless caller can assert a
+`cam_simulate {setup?, at?: 0..1 | "end", play?, close?, resolution?}`
+generates toolpaths if they are not current, leaves the app showing the
+simulation (screenshot it, or `close`), frames the job once as it opens, and
+returns `distance_mm`, `total_mm`, `cutting_minutes`, `removed_mm3`, the
+operation, tool, feed, line and position — so a headless caller can assert a
 simulation did something without owning a renderer.
 
-### Where it differs from the plan
+## Tests
 
-- **The stock's `EnsureCapacity` does wait — but only on a GROW.** Buffers
-  double, so a playback pays it a handful of times at the start and never
-  again. The steady state is a memcpy into a mapped, per-frame-in-flight
-  buffer, which was the point.
-- **The tool is a `MeshRenderer` instance, not part of the stock draw.** It is
-  static geometry that MOVES, which is the one thing that renderer is best at:
-  built once per tool number, then a transform per frame. It gets PBR and
-  shadows for free; the stock, which changes every frame, does not.
-- **Bodies are ghosted at 0.22, not hidden.** Seeing the part inside the block
-  is most of why the picture is worth having. Re-applied every frame, because
-  instance ids change on every regeneration — an "already ghosted" early-out
-  can hold only stale ids, which is the bug the FEM overlay shipped once.
-- **`cam_simulate` generates the toolpaths if there are none.** A GUI user has
-  pressed Generate; an agent has not, and refusing would only teach it to
-  press an invisible button first.
-- **`SimulateTo(...)` became `StockSim::SeekTo`.** The resumable simulation
-  needs somewhere to keep the pristine block and the cursor, and threading
-  both through a free function only moved that state to the caller.
-- **The RPC has no `render` flag.** The existing `screenshot` RPC works while
-  a playback is open — that is how the pictures in this doc were taken — so a
-  second way to ask for the same still would only be a second thing to keep
-  working.
-- **The transport is two rows, not one.** The CAM panel is 217 px wide; seven
-  buttons on one line run off the end of it. Row one is the moves (start,
-  back one, play/pause, forward one, end), row two the jumps (next operation,
-  next tool change, close). The tool-change button appears only when the job
-  HAS a tool change — one that could only ever jump to the end would be a
-  button lying about the job.
-
-### The frame it exposed (RESOLVED 2026-08-28)
-
-The spindle is model **+Z** while this application was **+Y up**, so a job
-machined the face the app itself called "Front", picking the visual top face
-was refused as "a wall", and the cutter was drawn lying on its side. None of
-that was the simulation's — it was the fourth collision with the Y-up
-decision (`docs/dogfooding.md:364` named CAM's Z as the third) — but the
-simulation is what made it impossible to keep missing: a thin backplot line
-looks like a line from any angle, a solid cutter does not.
-
-Deliberately NOT worked around here, and the discipline paid: the world went
-Z-up ([../up-axis.md](../up-axis.md)) and this all became correct with zero
-CAM changes — the compensation code that was never written is the code that
-never had to be deleted.
-
-### The renderer bug it exposed (FIXED 2026-08-30)
-
-The stock shipped drawing into the WHOLE WINDOW while everything else drew into
-the 3D sub-region between the panels, because `StockRenderer` was never added
-to the per-frame viewport list in `UI.cpp`. On screen: a workpiece not parallel
-to the part with its cuts shifted sideways, while the cutter — a `MeshRenderer`
-instance, correctly aimed — sat exactly right. That asymmetry is what the
-report named, and it is what identified the cause.
-
-Not a simulation bug, and the second renderer to hit the same list
-(`0346a8e` did it before). Fixed in `4a3083d`, and the list it was missing from
-no longer exists: see [../rendering/renderer-wiring.md](../rendering/renderer-wiring.md).
-
-Worth keeping for the method: **an `--offscreen` instance has no panels, so the
-sub-region IS the whole framebuffer and the bug cannot appear there.** Every
-test and screenshot taken while building this was offscreen, which is why the
-geometry could be verified to 8 um and still look wrong on a real screen. The
-gate is therefore a windowed GUI test.
-
-### The tool glyph's shading (FIXED 2026-08-30)
-
-Reported from a laid-flat job (docs/cam/setup-frame.md): the holder "seems to
-have a fixed rotation against the camera". It was not the frame — the glyph is
-oriented correctly along the spindle. `Revolve` in `CamStockMesh.cpp` took a
-**central difference across every profile point** for its normals, which
-averages the two faces meeting at a corner into one. A tool profile has three
-hard corners (flute→shoulder, shoulder→holder, holder→cap), so the flat
-annular shoulder was shaded as a 45° cone: a lit facet that does not answer to
-the camera the way the rest of the glyph does. Normals are now per SEGMENT,
-blended across a joint only when the two segments agree to within a ~30°
-crease angle — so the tip's sampled curve stays round and the corners stay
-corners. Gated by `cam tool mesh: a flat shoulder is shaded flat`, which
-checks both halves: flat-down normals on the shoulder, and a ball nose that
-still shades as a curve rather than a disc.
-
-### The tool glyph, again (2026-08-31)
-
-Still reading as "strange" after the matte fix and after the orientation was
-measured off the renderer's own matrix (correct: drawn axis == the spindle,
-pure rotation, opaque, depth-tested). Two things about the MESH were wrong in
-a way no matrix check would catch, both found by dumping it ring by ring:
-
-- **The holder was a slug.** `flutes + max(20, r*6)` gave 49 mm of Ø16 for an
-  8 mm cutter — longer than most of what it was cutting. Its length carries no
-  information; the FLUTE's length is the depth capability and is drawn at full
-  size. What it cost was occlusion, and a long near object under a wide
-  perspective FOV swings its apparent axis far more than it turns. It is a
-  6 mm collar now.
-- **A flat tip was sampled twelve times.** `TipHeight` is 0 across a flat end
-  mill, so twelve tip steps put twelve segments at the SAME height — 24
-  coincident rings of 33 vertices for a disc two triangles could draw, three
-  quarters of the mesh. Sampled only for the shapes that have one (ball, V,
-  drill).
-
-330 vertices where there were 1056.
-
-**And then the actual bug: the glyph was inside-out.** `Revolve` wound every
-triangle the opposite way to its own normals — 0 agree, 256 disagree, the
-whole mesh — so with backface culling the near wall was culled and the far
-wall's INTERIOR drawn. The cutter looked transparent and you could see down
-its own bore. It had always been so, since the function was written; a
-mirror-bright material and a 49 mm holder hid it, and a matte 6 mm collar did
-not.
-
-That is what "it's transparent, I don't want to see the inside of it" was, and
-it is what every other explanation in this section was circling. Orientation,
-matrix, ghost flag, holder length, tip sampling — all real, none of them this.
-
-Gated by `cam mesh: every triangle faces the way its normals do`, which checks
-the geometric normal of each triangle against the vertex normals at its
-corners, for all four tool shapes and for the stock mesh. Cheap to check,
-impossible to eyeball, and it survived three rounds of looking at
-screenshots.
-
-### One light rig, four copies of it (2026-08-31)
-
-The stock read as though it came from a different scene than the part beside
-it, and it did: `stock.frag` carried its own three hard-coded light
-directions, `MeshRenderer.cpp` had its own inline literals, and
-`core/Conventions.h` held the `kKeyLightDir` / `kFillLightDir` /
-`kRimLightDir` the two were supposed to share. The constants had already
-drifted apart once. The directions (and now colours and intensities) live in
-`Conventions.h`; both renderers read them, `StockRenderer`'s UBO carries them
-per frame.
-
-**Matching the directions is not matching the look, and the difference is
-instructive.** Ported straight across, the stock went nearly black. The part
-is not lit by those three lights alone — most of what fills its shadowed
-faces is the IBL probe, which the stock has no descriptor for. So the stock
-gets the scene's *directions and hue* with a wrap term on key and fill and a
-lifted ambient stanza standing in for the probe: same rig, same colour
-temperature, brightness calibrated back to where the old shader had it. A
-stock face reads ~0.8 of white as it did before, but now it warms and cools
-with the same lights the part does.
-
-The honest limit: this is consistency of direction, not of illumination. A
-real match means the stock sampling the same IBL, which is a descriptor-set
-change to `StockRenderer` rather than a shader edit.
-
-### The backplot's dim half (2026-08-31)
-
-Brightening the stock to the scene's rig broke a colour that had been
-calibrated against the old, darker stock: `kDoneColor` — the part of the file
-already cut — was value 0.40 at **alpha 0.40**, which composites to 0.63 over
-a 0.78 surface. Fifteen hundredths of contrast, on the one line that has to
-sit on the workpiece. It is 0.20/0.22/0.30 at 0.85 alpha now, ~0.30 against
-the stock, and 1.4 px rather than 1.0.
-
-The trade is deliberate: a dark line reads less well against the dark ground
-behind the part, and a *done* move above the part is the one thing on screen
-meant to recede.
-
-Worth naming as a class — **a colour is calibrated against a brightness, so
-changing a material's lighting silently decalibrates every overlay drawn on
-it.** Nothing failed; both suites stayed green through the regression. The
-three overlay colours that land on the workpiece (`kDoneColor`,
-`kAheadCut`, `kGhostLine`) are the ones to re-check whenever the stock or
-part shading moves.
-
-Also worth knowing while reading a backplot: **the path ahead of the cursor
-is usually buried.** It lies in stock that has not been cut yet, so a
-depth-tested overlay hides it, and it appears as the cutter arrives. The done
-path is visible for the mirror-image reason — it lies in material that is
-gone. This is correct, and it is why a screenshot taken down the tool axis at
-50% shows dark done-lines all round and almost no amber.
-
-### Still open
-
-- The stock re-meshes whole on every advance. It is 1–2 ms on a plate and
-  scales with the grid; a part four times the area at 0.1 mm would be worth a
-  dirty-rect rebuild. Measure before building it.
-- S6 is half done: HOLDER COLLISION shipped at v121 (above). Colour by
-  operation and the deviation map are untouched, and both are still cheap —
-  the height map and the op id per move are in place.
-
-### The transport is a floating window (2026-09-02)
-
-The transport left the CAM panel for **its own floating window along the
-bottom of the viewport** (`DrawCamTransportWindow`), open only while a
-playback is: one row of buttons, the scrub bar, speed, the readout, a Path
-toggle and Close. The panel had become the busiest thing on screen once the
-job document put setups, parts, stock, tools *and* the transport in one
-217 px column. The way in is the job toolbar's Simulate (`job.simulate`);
-its refusal — nothing generated yet — is printed by the panel under Generate,
-where Generate is.
-
-Two things found in the same round. The stock and the cutter were still
-multiplied by setup-to-model in a viewport that draws setup space (see
-gui.md, "The verbs became the toolbar"). And **no CAM drawing reached the
-renderer on a job tab at all**: every contributor in `UI.cpp` was gated on
-`state.document`, which a job tab does not have — so since v73 the backplot,
-the stock box and the ghost were built and thrown away. The GUI tests call
-the contributors directly and never asked the renderer;
-`backplot_reaches_the_renderer_on_a_job_tab` does now.
-
+`tests/test_cam_verify.cpp` and `test_cam_sim.cpp` (headless):
+`SeekTo(End())` equals `Inspect`'s map; scrubbing past and back lands on the
+same map; the mesh is the map (bounds, volume, below-stock cuts, the triangle
+budget); the distance axis is monotonic and ends at the total; the parser keeps
+feed, tool change and operation; a rapid is not counted as time nobody
+stated; a zeroed-on-corner job plays its own verdict. The GUI cases
+`cam/simulation_plays_and_gives_it_back`, `cam/simulate_says_why_at_the_click`
+and `cam/a_rotary_part_turns_as_it_plays` run windowed, because an offscreen
+instance has no panels and a renderer drawing into the wrong sub-region looks
+right there. `tests/render_pixel_smoke.py` covers the renderers.

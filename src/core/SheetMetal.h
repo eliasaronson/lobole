@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-// Sheet-metal rules and bend arithmetic (docs/sheetmetal/plan.md, S1).
+// Sheet-metal rules and bend arithmetic
+// (docs/sheetmetal/README.md#rules-the-stock-a-part-is-cut-from).
 //
 // A sheet part is a solid of uniform thickness whose bends are cylindrical:
 // the only surface a brake press makes. Everything a flange needs to know

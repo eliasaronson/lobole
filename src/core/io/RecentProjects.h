@@ -5,7 +5,7 @@
 
 // The projects this user opened or saved, most recent first.
 //
-// STATE, not config (docs/ui/settings.md's bucket rule): the app writes it,
+// STATE, not config (docs/ui/settings.md#three-buckets): the app writes it,
 // the user never edits it, and losing it costs a convenience rather than a
 // choice. It lives beside the autosave in the user state directory
 // (`$XDG_STATE_HOME/designer`; `%LOCALAPPDATA%\Designer\state` on Windows),

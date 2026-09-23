@@ -96,7 +96,8 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   // active and `Hidden`, so its body was never submitted and every widget
   // inside it vanished. It reproduced only when those two tests shared a
   // process, which the 4-shard partition usually prevented, so the suite was
-  // green while `--serial` was 177/178 (docs/versioning/f7-handoff.md).
+  // green while `--serial` was 177/178
+  // (docs/ui/testing.md#independence-any-partition-is-valid).
   //
   // Inheriting coverage from another domain's test is how that stayed hidden:
   // nothing NAMED the behaviour, so nothing failed for the right reason. This
@@ -120,7 +121,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
 
     // Rebuilt while it is OFF — this deletes the node the panel lived in,
     // and is the case that once re-homed the window into the CENTRAL node,
-    // on top of the whole 3D viewport (docs/ui/gui-test-isolation.md).
+    // on top of the whole 3D viewport (docs/ui/terminal.md).
     s_App->settings.terminalPanel = false;
     s_App->buildDefaultDockLayout = true;
     ctx->Yield(12);
@@ -462,9 +463,9 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   };
 
   // Frame timing is always measured; the HUD is not shown unless asked for
-  // (docs/rendering/frame-timing.md). Both halves asserted here — a
-  // measurement nobody can reach and an overlay nobody asked for are the two
-  // ways this feature goes wrong.
+  // (docs/rendering/frame-pacing.md#the-frame-time-instrument). Both halves
+  // asserted here — a measurement nobody can reach and an overlay nobody asked
+  // for are the two ways this feature goes wrong.
   // Category "frametime", NOT "perf": the test engine routes a category of
   // exactly "perf" into ImGuiTestGroup_Perfs, which this suite never queues
   // (it queues ImGuiTestGroup_Tests) — the test would list but never run.

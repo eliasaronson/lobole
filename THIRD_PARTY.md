@@ -133,7 +133,7 @@ packages and source distributions.
 Vendored from https://github.com/shaise/FreeCAD_FastenersWB (`FsData/`),
 **GPL-2.0-or-later**, unmodified below a provenance header. Data only — no code
 is taken. These are the dimension tables a generated fastener is built from and
-checked against (docs/parts/plan.md).
+checked against (docs/parts/README.md).
 
 ## bd_warehouse — clearance-hole table
 
@@ -144,5 +144,5 @@ Vendored from https://github.com/gumyr/bd_warehouse
 only — upstream also carries imperial sizes whose columns are fractional drill
 designations ("17/64") rather than numbers. Data only; no code is taken. It is
 what lets a plain 6.6 mm hole be read back as "an M6 normal clearance"
-(docs/parts/plan.md, phase 3).
+(docs/parts/README.md, phase 3).
 

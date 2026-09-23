@@ -160,9 +160,9 @@ void StartNextSurfacePass(AppState& state) {
   }
 }
 
-// A profile's projected outlines on the worker (docs/cam/add-operation-
-// plan.md): one OCC section per depth pass, which on the helical rolling pin
-// held the frame for two minutes.
+// A profile's projected outlines on the worker
+// (docs/cam/README.md#background-work): one OCC section per depth pass, which
+// on the helical rolling pin held the frame for two minutes.
 void StartNextOutlinePass(AppState& state) {
   while (state.camOutlineInFlight == 0 && !state.camOutlineQueue.empty()) {
     auto pass = std::make_shared<OutlinePassJob>();

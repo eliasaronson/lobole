@@ -34,10 +34,10 @@
 // Editing a sketch after it is drawn: applying a constraint, the derived
 // operations (pattern, offset) and their parameters, and toggling
 // construction geometry.
-// Split out of SketchInteraction.cpp (docs/architecture-review-2026-09-06.md,
-// stage 7a). The 843-line viewport router stays there; these are the blocks
-// it calls into, and SketchInteractionInternal.h is that interface written
-// down.
+// Split out of SketchInteraction.cpp
+// (docs/architecture.md#the-ui-actions-layer). The 843-line viewport router
+// stays there; these are the blocks it calls into, and
+// SketchInteractionInternal.h is that interface written down.
 
 namespace ui {
 

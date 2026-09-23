@@ -5,7 +5,7 @@
 #include <vector>
 
 // A child process on the other end of a pseudo-terminal
-// (docs/ui/terminal-panel.md).
+// (docs/ui/terminal.md).
 //
 // POSIX only, and deliberately the ONLY platform-specific piece of the
 // terminal: the screen and the panel above it never touch a file descriptor,

@@ -16,8 +16,8 @@ stripes or as rings: at that angle the flute travels as far round the pin as
 it does along it. Cut from a Phi 54 dowel in maple or
 beech: the surface takes 2 mm off the radius and the flutes 4 mm more, so
 nothing here asks a finishing pass to remove more than it should -- which
-matters, because there is no rotary roughing strategy yet
-(docs/cam/dogfood-rotary.md).
+matters, because rotary roughing is layers, not constant engagement
+(docs/cam/rotary.md#limits).
 
 Run against a running instance:
   python3 generators/rotary/rolling_pin.py --port N
@@ -61,7 +61,7 @@ def twist(d, solid):
     clear to make the crossings transversal traded that for a part with
     0.2 cm3 left in it. A single hand has no crossings at all, is valid
     first time, and is the shape everybody recognises as turned-and-twisted
-    anyway. The lattice is written up in docs/cam/dogfood-rotary.md.
+    anyway.
 
     A circular `Pattern` of the flute would say what this means -- six
     copies of one thing at six angles -- and is refused: a Pipe that CUTS
@@ -111,9 +111,8 @@ def round_ends(d):
 
     The other orders were tried: intersecting the latticed cylinder with a
     domed revolve came back with BOTH bodies and their volumes added, which
-    is a boolean that did nothing and said nothing. Written up in
-    docs/cam/dogfood-rotary.md; the part is shaped around it rather than
-    waiting for it.
+    is a boolean that did nothing and said nothing. The part is shaped
+    around it rather than waiting for it.
     """
     c45 = math.cos(math.radians(45))
     s45 = math.sin(math.radians(45))

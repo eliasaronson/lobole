@@ -142,7 +142,7 @@ int DeleteSelectedOccurrences(AppState& state, bool takeSnapshot) {
   for (const uint64_t id : doomed) {
     // Whatever rides on it goes with it. A screw whose plate is gone is not a
     // screw, and leaving it behind reintroduces exactly the floating hardware
-    // attaching it was for (docs/parts/f1-loose-ends.md).
+    // attaching it was for (docs/parts/README.md).
     std::vector<uint64_t> riders;
     for (const Occurrence& o : state.assembly->GetOccurrences())
       if (o.attachedTo == id)
@@ -450,7 +450,7 @@ void MaterializeImportedAssembly(AppState& state,
 
 // ---------------------------------------------------------------------------
 // Occurrence placement and part lookup, from AppActions.cpp
-// (docs/architecture-review-2026-09-06.md, stage 3, third wave). They were in
+// (docs/architecture.md#the-ui-actions-layer). They were in
 // the monolith because the lifecycle and drawing code needed them too;
 // AppActionsInternal.h keeps declaring the two that still cross a file, and
 // they are defined here now, with the assembly they describe.
@@ -480,8 +480,8 @@ glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
 // What an occurrence renders (and picks) at: the solved placement, displaced
 // by the active exploded view.
 glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
-  // Motion playback (docs/ui/motion-panel-plan.md): the pose a run recorded
-  // stands in for the solved placement, for display only.
+  // Motion playback (docs/ui/panels.md#assembly-tab-the-model-panel): the pose
+  // a run recorded stands in for the solved placement, for display only.
   glm::mat4 played;
   if (MotionPlaybackWorld(state, o.id, played))
     return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) * played;

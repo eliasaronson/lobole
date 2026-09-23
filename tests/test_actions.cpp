@@ -27,7 +27,7 @@
 // than failing to compile. Click paths stay in the GUI suite, where they are
 // the actual subject.
 //
-// See docs/architecture-review-2026-08-24.md.
+// See docs/architecture.md#the-ui-actions-layer.
 
 #include "core/cam/CamToolpath.h"
 #include "ui/CreateActions.h"
@@ -331,11 +331,12 @@ TEST_CASE("assembly bounds rotate a placed part's corners",
 // This half used to live only in the GUI suite, in a test that also asserted
 // docking — and that test is the one which failed when it ran behind
 // cam/tool_window_follows_the_viewport, invisibly, because the shard
-// partition happened to separate them (docs/versioning/f7-handoff.md).
-// Splitting it puts the assertions that are not about widgets somewhere a
-// dock node cannot reach them: NewTerminalTab, ShutdownTerminal and
-// TerminalRunning are free functions over AppState with no ImGui in them, so
-// they run here in milliseconds rather than ~1 s on a GPU.
+// partition happened to separate them
+// (docs/ui/testing.md#independence-any-partition-is-valid). Splitting it puts
+// the assertions that are not about widgets somewhere a dock node cannot reach
+// them: NewTerminalTab, ShutdownTerminal and TerminalRunning are free functions
+// over AppState with no ImGui in them, so they run here in milliseconds rather
+// than ~1 s on a GPU.
 //
 // What CANNOT move is the docking, which is genuinely about ImGui. It stays
 // in GuiTestsTerminal.cpp, where a case now exercises the layout rebuild
@@ -628,9 +629,10 @@ TEST_CASE("duplicating a tab you are not looking at copies that tab",
 
 TEST_CASE("A fastener is one part per spec, placed in an assembly",
           "[actions][parts]") {
-  // The architectural claims of docs/parts/plan.md phase 2, which is the
-  // phase that exists to test them: if part-per-spec is the wrong shape it is
-  // cheap to discover with one fastener type and expensive with twenty.
+  // The architectural claims of
+  // docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence:
+  // if part-per-spec is the wrong shape it is cheap to discover with one
+  // fastener type and expensive with twenty.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -846,12 +848,12 @@ TEST_CASE("Deleting a placed part refuses with a reason, and says where",
 
 TEST_CASE("A circular edge that is the end of a solid is not a hole",
           "[actions][parts]") {
-  // From the dock round (docs/dogfooding.md): a 49-part assembly whose every
-  // circular edge was the end cap of a SOLID — a roller axle, a ladder rung,
-  // a hinge pin, a mooring eye. Not one hole. The verb takes any circular
-  // edge as a rim, so all of them were pickable, and the refusal a person got
-  // talked about plates and reaching past things and never once said "that is
-  // a solid, not a hole".
+  // From the dock (docs/parts/README.md#deriving-a-fastener-from-a-hole): a
+  // 49-part assembly whose every circular edge was the end cap of a SOLID — a
+  // roller axle, a ladder rung, a hinge pin, a mooring eye. Not one hole. The
+  // verb takes any circular edge as a rim, so all of them were pickable, and
+  // the refusal a person got talked about plates and reaching past things and
+  // never once said "that is a solid, not a hole".
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -905,8 +907,8 @@ TEST_CASE("A circular edge that is the end of a solid is not a hole",
 }
 
 TEST_CASE("A second pick says where the joint ends", "[actions][parts]") {
-  // docs/parts/plan.md, "Two picks, but only when you want them". The stack
-  // the axis passes through IS the joint — until the axis carries on into
+  // docs/parts/README.md#deriving-a-fastener-from-a-hole, the second pick. The
+  // stack the axis passes through IS the joint — until the axis carries on into
   // something the fastener is not clamping, and then a screw sized to span
   // the lot is twice as long as it should be and looks entirely reasonable.
   ui::AppState state;
@@ -1001,7 +1003,7 @@ TEST_CASE("A far end on several placements is refused, not taken as the first",
   // said it "resolved the same way" and took the first, which fitted a bolt
   // on a grill's right-hand cart side to the hole in its LEFT one, 624 mm
   // away, and only a disagreement about the axis gave it away
-  // (docs/grill-friction-plan.md).
+  // (docs/parts/README.md#deriving-a-fastener-from-a-hole).
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1052,8 +1054,8 @@ TEST_CASE("A thread ends a joint the way a nut does",
   // rim — which is all check_fasteners has — the stack carried on down the
   // axis into whatever was behind it, and two correct screws in a grill's lid
   // handle were reported as having "0 mm of thread" in a part they do not
-  // touch (docs/grill-friction-plan.md). The threads were in the model the
-  // whole time; nothing read them.
+  // touch (docs/parts/README.md#deriving-a-fastener-from-a-hole). The threads
+  // were in the model the whole time; nothing read them.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1123,7 +1125,7 @@ TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
   // shipped since dissolve that — hole-standards gives a hole a recorded
   // thread, and FindHoleForRef already matches a picked circle against the
   // COUNTERSINK radius as well as the bore — so the blanket refusal becomes
-  // three real questions (docs/parts/f1-loose-ends.md).
+  // three real questions (docs/parts/README.md).
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1384,9 +1386,9 @@ TEST_CASE("A placed fastener rides on the part it bears on",
   // unmated occurrence untouched. Neither held nor carried.
   //
   // Not a mate: the HARDWARE is a zero-DOF leaf, so this is a composition
-  // (docs/parts/f1-loose-ends.md). The joint between the two PARTS is a mate,
-  // and it took a second report to see that — see "A bolt through two parts
-  // mates them" below.
+  // (docs/parts/README.md#attached-and-mated). The joint between the two PARTS
+  // is a mate, and it took a second report to see that — see "A bolt through
+  // two parts mates them" below.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1550,11 +1552,11 @@ TEST_CASE("A hole that says what it is for is believed over its diameter",
 TEST_CASE("A rim on two placements of one part names which",
           "[actions][parts]") {
   // The bug the click path would have hit on its first try, found while
-  // planning it (docs/parts/gui-plan.md, phase 1): every occurrence of a part
-  // carries every one of its element names, so an ElementRef alone does not
-  // name a rim in an assembly. Resolving it by first match put the fastener
-  // at the NEAR end of a joint made of two of the same plate — the ordinary
-  // case, and wrong in a way nothing shows.
+  // planning it (docs/parts/README.md#deriving-a-fastener-from-a-hole): every
+  // occurrence of a part carries every one of its element names, so an
+  // ElementRef alone does not name a rim in an assembly. Resolving it by first
+  // match put the fastener at the NEAR end of a joint made of two of the same
+  // plate — the ordinary case, and wrong in a way nothing shows.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1660,11 +1662,12 @@ TEST_CASE("Save works from every kind of tab, not just a part", "[actions]") {
 TEST_CASE(
     "A joint is derived whole: washers, nut and a length that covers them",
     "[actions][parts]") {
-  // Phase 4 of docs/parts/plan.md. The argument for deriving at all is that a
-  // typed length is right for the stack somebody had in mind and wrong for
-  // every other — and a joint is where that bites hardest, because a screw
-  // sized for the plates and THEN fitted with two washers and a nut is too
-  // short by the 8.4 mm of hardware and looks perfectly correct in a viewport.
+  // docs/parts/README.md#deriving-a-fastener-from-a-hole. The argument for
+  // deriving at all is that a typed length is right for the stack somebody had
+  // in mind and wrong for every other — and a joint is where that bites
+  // hardest, because a screw sized for the plates and THEN fitted with two
+  // washers and a nut is too short by the 8.4 mm of hardware and looks
+  // perfectly correct in a viewport.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1677,7 +1680,7 @@ TEST_CASE(
 
   // Returns the occurrence id: an element name is unique within a PART, so
   // two plates built the same way carry the same one and the id is what tells
-  // them apart (docs/parts/gui-plan.md, phase 1).
+  // them apart (docs/parts/README.md#deriving-a-fastener-from-a-hole).
   const auto place = [&](const char* part, glm::vec3 at) {
     Occurrence occ;
     occ.partId = ui::PartIdByName(state, part);
@@ -1822,10 +1825,11 @@ TEST_CASE(
 TEST_CASE(
     "A fastener derives its size and length from the hole it is picked in",
     "[actions][parts]") {
-  // Phase 3 of docs/parts/plan.md, and the four cases that decide whether
-  // "derive from the hole" is a real interface or a demo. Each is a finding
-  // rather than an obstacle: what the geometry cannot disambiguate gets
-  // reported, and what it can rules a fastener out gets refused by name.
+  // docs/parts/README.md#deriving-a-fastener-from-a-hole, and the four cases
+  // that decide whether "derive from the hole" is a real interface or a demo.
+  // Each is a finding rather than an obstacle: what the geometry cannot
+  // disambiguate gets reported, and what it can rules a fastener out gets
+  // refused by name.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1842,7 +1846,7 @@ TEST_CASE(
 
   // Returns the occurrence id: an element name is unique within a PART, so
   // two plates built the same way carry the same one and the id is what tells
-  // them apart (docs/parts/gui-plan.md, phase 1).
+  // them apart (docs/parts/README.md#deriving-a-fastener-from-a-hole).
   const auto place = [&](const char* part, glm::vec3 at) {
     Occurrence occ;
     occ.partId = ui::PartIdByName(state, part);
@@ -1907,7 +1911,7 @@ TEST_CASE(
 }
 
 // ---------------------------------------------------------------------------
-// Long operations off the frame (docs/ui/long-operations.md, phase 1)
+// Long operations off the frame (docs/ui/long-operations.md#the-registry)
 //
 // The registry is polled by the loop and nowhere else; here the loop is the
 // test, calling PollBackgroundJobs the way HeadlessMain.cpp does. Headless,
@@ -2406,9 +2410,9 @@ TEST_CASE(
 // ---------------------------------------------------------------------------
 // An EMPTY sketch has no constraint status
 //
-// The first outside tester (docs/ui/windows-tester-round.md) opened a sketch,
-// drew nothing, and the app told him it was "Fully defined". The solver was
-// not wrong -- an empty system has no free parameters, so zero degrees of
+// The first outside tester (docs/ui/tool-sessions.md#sketch-sessions) opened a
+// sketch, drew nothing, and the app told him it was "Fully defined". The solver
+// was not wrong -- an empty system has no free parameters, so zero degrees of
 // freedom is the arithmetic truth -- but that pill answers "am I done
 // constraining?", and answering "yes" before there is anything to constrain is
 // the app being confidently wrong about geometry it does not have.

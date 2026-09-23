@@ -11,7 +11,7 @@ measured off SCREENSHOTS, and three of its numbers were wrong:
                 it is 68.5, and the 8 mm between them is the rim fillet
 
 `section {loops}` gives the real outline for the asking, and every number
-below is read off it (docs/inspect/review-checklist.md; the RPC exists for
+below is read off it (docs/inspect/README.md#sections; the RPC exists for
 exactly this and its own description cites this brace as the cautionary
 case). The blend joining each window to the ring solves exactly:
 (h + R)^2 + 77.196^2 = (68.5 + R)^2 gives R = 11.000.

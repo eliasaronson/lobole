@@ -78,7 +78,7 @@ class Designer:
         # queue, so it is execution that is serialized, not connection. An
         # earlier note here said it handled one client at a time; it does not,
         # and several agents driving several instances is the point of
-        # docs/scripting/fanout.md.
+        # docs/scripting/README.md#fan-out-several-agents-several-parts-one-project.
         self.file.close()
         self.sock.close()
 

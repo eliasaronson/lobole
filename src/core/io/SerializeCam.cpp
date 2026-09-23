@@ -13,7 +13,7 @@
 
 #include <algorithm>
 
-// CAM setups (v58, docs/cam/plan.md). Small enough to live inline in the
+// CAM setups (v58, docs/cam/README.md). Small enough to live inline in the
 // document rather than file-per-setup as studies do — a setup is a few
 // hundred bytes of parameters, and studies earned their own files by
 // carrying meshes.
@@ -31,7 +31,7 @@ namespace {
 // merged one, or a hand-edited one, which the directory format invites --
 // loaded that operation as a PROFILE: a different strategy against a
 // different region, posted and cut without a word. Same rule as the rest of
-// the loader now (docs/architecture-review-2026-08-24.md, follow-up E):
+// the loader now (docs/conventions.md#refuse-dont-substitute):
 // refuse, naming what IS accepted.
 cam::OpType OpTypeFromJson(const std::string& s) {
   cam::OpType t{};
@@ -392,8 +392,8 @@ json CamSetupToJson(const cam::Setup& setup) {
       j["placements"].push_back(std::move(pj));
     }
   }
-  // What holds the stock down (v126, docs/cam/workholding-plan.md). Omitted
-  // when there are none and each key at its default, so every older job
+  // What holds the stock down (v126, docs/cam/setup.md#workholding-fixtures).
+  // Omitted when there are none and each key at its default, so every older job
   // re-saves byte-identically.
   if (!setup.fixtures.empty()) {
     j["fixtures"] = json::array();
@@ -412,7 +412,7 @@ json CamSetupToJson(const cam::Setup& setup) {
         fj["rot_z"] = f.rotZdeg;
       if (!f.enabled)
         fj["enabled"] = false;
-      // v127: resting on the stock (docs/cam/fixture-seat-plan.md). `pos`
+      // v127: resting on the stock (docs/cam/setup.md#seats). `pos`
       // and `rot_z` above are then the pose it last solved to.
       if (f.seat) {
         fj["seat"] = {{"face",
@@ -437,9 +437,10 @@ json CamSetupToJson(const cam::Setup& setup) {
                {"bottom_z", op.bottomZ}};
     // Every field in the op-field table, by VALUE and never by type: left
     // out when it equals a default-built Operation's, so a file re-saves
-    // byte for byte (docs/cam/op-field-table-plan.md). Writing a field only
-    // when its owner's type was on a list is how adaptive's `stepover` and
-    // then its `side` were each dropped on save once.
+    // byte for byte
+    // (docs/cam/operations.md#the-capability-table-and-the-field-table).
+    // Writing a field only when its owner's type was on a list is how
+    // adaptive's `stepover` and then its `side` were each dropped on save once.
     cam::WriteOpFields(op, oj);
     // The rows with rules of their own. v82: the finishing pass, omitted
     // when there is none -- and its stock only beside it.

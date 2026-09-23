@@ -17,7 +17,7 @@
 // same enum could disagree without any test noticing -- which is exactly the
 // shape of the shipped defect where a `profile` followed only
 // targets.front() while its predicate said otherwise
-// (docs/architecture-review-2026-09-06.md, section 7).
+// (docs/architecture.md#one-table-per-kind-of-thing).
 //
 // The generator itself stays a switch in CamStrategies.cpp on purpose: it has
 // no `default:`, so -Wswitch fails the build when a new type has no

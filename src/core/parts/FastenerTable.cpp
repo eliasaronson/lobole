@@ -97,7 +97,7 @@ std::optional<double> KeyNumber(const std::string& raw) {
 // ones: "M7" is not in ISO 4762 and what the caller needs to hear is "M6 or
 // M8", not the ends of an 84-entry list. Truncating the list alone dropped
 // exactly the two sizes that answer the question, which is what a test caught.
-// (docs/scripting/error-style.md: a refusal carries one concrete correction.)
+// (docs/scripting/rpc.md#refusals: a refusal carries one concrete correction.)
 std::string KeyList(const Table& table, const std::string& wanted) {
   const std::vector<std::string>& keys = table.order;
   std::string neighbours;

@@ -48,7 +48,7 @@ void ModifyActiveConfig(AppState& state, const char* desc, Mutate mutate) {
 // active config's editor is a suppression checklist per kind plus a "hold"
 // per mate DOF. Structurally the same object a part config is, which is why
 // it shares this panel rather than living in the assembly's Model dock
-// (docs/ui/u15-assembly-panel.md).
+// (docs/ui/panels.md#assembly-tab-the-model-panel).
 void DrawAssemblyConfigs(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
   ImGui::SeparatorText("Configurations");
@@ -335,7 +335,8 @@ void DrawConfigurationsPanel(AppState& state) {
       ImGui::TableNextColumn();
       // A stable name, not a PushID scope around a "##" label: either one
       // leaves the cell reachable only by numeric id, and this is the cell
-      // that makes a configuration mean anything (docs/ui/gui-coverage.md).
+      // that makes a configuration mean anything
+      // (docs/ui/testing.md#making-a-widget-addressable).
       const std::string ovId = "###cfg_override_" + p.name;
       char buf[128];
       std::snprintf(buf, sizeof(buf), "%s", OverrideOf(*cfg, p.name).c_str());

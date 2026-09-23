@@ -1,0 +1,304 @@
+# CAM operations
+
+What an operation is, how the verbs derive one from a click, and how each
+strategy turns it into moves. The data is `cam::Operation` in
+`src/core/cam/CamJob.h`; derivation is `CamDerive.cpp`; the 2.5D strategies
+are `CamStrategies.cpp` (with `CamGeometry.cpp` and `CamAdaptive.cpp`), the
+surfacing ones `CamSurfaceStrategies.cpp` over `CamSurface.cpp` and
+`CamDropCutter.cpp`. The 4th-axis operation is in [rotary.md](rotary.md).
+
+## Operation types
+
+| type | name | what it cuts |
+|---|---|---|
+| `Profile` | `profile` | follow a contour, the tool outside or inside it by its radius (or `on` it) |
+| `Pocket` | `pocket` | clear a closed region, islands respected, concentric rings |
+| `Face` | `face` | skim the top of the stock down to the part |
+| `Drill` | `drill` | plunge, peck or bore at picked holes |
+| `Adaptive` | `adaptive` | clear a region at near-constant engagement (libarea) |
+| `EdgeRound` | `edge_round` | break a wall's top edge: a chamfer with a V-bit, a round with a ball |
+| `SurfaceParallel` | `surface_parallel` | raster finish of a curved or tilted surface; with a stepdown, a 3D rough |
+| `SurfaceWaterline` | `surface_waterline` | constant-Z laps of a steep surface |
+| `SurfaceRotary` | `surface_rotary` | 4th-axis finishing and roughing ([rotary.md](rotary.md)) |
+
+Common fields: `toolNumber`, `targets` (`Target{jobPartId, ElementRef}`),
+`topZ`/`bottomZ` (setup space; top is where the cut starts, usually the stock
+top), `stepdown` (0 = one pass), `stockToLeave`, `enabled`. The per-type
+fields are in the capability table below. The operation list's order is the
+authored cutting order ([setup.md](setup.md#cutting-order-and-split-output)).
+
+An operation with several targets is generated once per target: five holes
+picked into one operation are five bores, in the order given. A target that
+cannot be followed goes into the toolpath's `skipped` (and a `SKIPPED` comment
+in the file) without costing the others; `error` means the operation produced
+nothing at all, and the post skips it with a comment saying why.
+
+## Derivation — what a click means
+
+`cam::DeriveOperation(setup, bodies, type, target, toolNumber)` is the one
+place an operation's numbers come from, for the GUI verbs, for `add_cam_op`
+without depths, for the panel's Add operation and for `cam_derive_op` (the dry
+run). Every depth is derived from the face, the stock and the tool, so a
+depth pair like "top 2, bottom −0" that produces nothing cannot be expressed.
+The panel's **Add operation** asks `cam::AddOperationType` what the setup
+calls for — another `surface_rotary` on a setup that already cuts on the 4th
+axis, the whole-part cut-out otherwise — rather than adding one type
+everywhere: a 3-axis contour round a turned part means nothing.
+
+| verb | pick | derives |
+|---|---|---|
+| Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top. A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
+| Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
+| Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
+| Cut out the whole part | none | the part's outline, through the stock, with tabs |
+| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out; peck = one diameter when deeper than three |
+| Break an edge | the wall whose top edge to break | the edge; `edge_size` = the biggest break that tool can make within the wall; a flat mill is refused |
+| Face the top | none | the stock above the part, top = stock top, bottom = part top |
+| Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
+| Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
+| Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
+
+Derived numbers are fractions of the cutter: **stepdown** = half the tool
+diameter (`DerivedStepdown`); **stepover** = 45 % for a flat mill, and for a
+ball the step that leaves a cusp of 2 % of the tool radius,
+`s = 2·sqrt(2·r·cusp − cusp²)` (`DerivedStepover`); **finish stock** a tenth
+of the roughing cutter. Re-pointing an operation at another tool
+(`cam::Retool`, `set_cam_op {tool}`, the panel's `T1 T2 …` buttons, the verb
+window's tool row) carries a stepdown still at the old tool's derived value
+to the new tool's, keeps one the user typed, and refuses a tool the setup does
+not have.
+
+What derivation refuses, by name and with what to do instead: a curved or
+tilted face for a verb that needs a level one ("pick a level face"); a wall
+where a floor is wanted and the reverse; a hole that does not point at the
+spindle ("lay a face up"); a cutter wider than the hole; a V-bit or drill on
+anything with a floor (pocket, face, adaptive — the `NeedsFlatFloor` column:
+a cone ploughs a groove as deep as the pass, and no stepover fixes that); a
+V-bit or drill on a surface finish; an inside profile with nothing to follow.
+"Cut it out" on a level face that has material standing round it refuses
+rather than routing a full-depth contour round a pocket floor.
+
+## The 2.5D pipeline
+
+```
+bodies --SectionCaps--> planar cross-section at Z
+       --wire walk-->   ordered 2D loops (Loop{pts, hole, boreDiameter})
+       --Clipper2-->    offset / clear
+       --link-->        moves with entry, plunge and retract
+```
+
+`SectionLoops` sections the (framed) bodies at a Z; Clipper2 offsets in
+scaled integers with one mm↔int convention; everything is headless — bodies
+in, moves out (`CamToolpath.h`).
+
+### Depth passes and entries
+
+`DepthPasses(op)` visits `topZ − stepdown, …, bottomZ`, and the last pass
+lands **exactly** on `bottomZ`: a short final pass is correct, one a hair deep
+is scrap.
+
+- **Ramp.** A loop is entered by ramping down along the toolpath at 3°
+  (`kRampAngleDeg`) from the height the previous pass already cleared, never
+  by plunging: a vertical plunge with a non-centre-cutting end mill rubs. The
+  lap then starts where the ramp finished. A loop shorter than the ramp
+  descends over one lap.
+- **Helix.** A pocket region too small to ramp around is entered on a helix
+  inside it, on the circle the tool centre can walk (inscribed radius minus
+  tool radius, bracketed by the insets the pocket already computes).
+- A lateral rapid that starts at the bottom of a cut climbs straight up
+  first. Drilling plunges, being a plunge by definition.
+- The reported cut length is slightly over the true length (a fraction of a
+  percent), because the ramp ends mid-segment and the lap restarts there.
+
+### Profile
+
+- **Follows the part's projection, not its section.** A cutter at depth z
+  removes the whole column above it, so it may only travel where everything
+  between the operation's top and z is waste. The contour at each pass is
+  `ProjectedOutlines` — the union of sections from `topZ` down — so a bore
+  opening onto a side face does not pull the profile into a notch with solid
+  above and below it. A picked wall is re-resolved against the projection per
+  pass. Projecting from the operation's top (not the stock's) is what lets an
+  opening that starts below the stock top be profiled. This is the expensive
+  step of a profile and runs on the background worker.
+- **Tabs** (`tabCount`, `tabWidth`, `tabHeight`; derived as four tabs, twice
+  the tool diameter wide, a fifth of the depth tall with a 0.5 mm floor, on
+  any profile that is not cutting an opening — an opening's slug is scrap)
+  split the segments they cross; the ramp and lap are one function of arc length, so a tab is a pillar
+  from the bottom of the cut to its stated height and nothing crosses it. Each
+  toolpath records its tabs (`Toolpath::tabs`: point, pillar radius, top
+  height) so the verifier excuses them, up to their height.
+- **Lead arcs** (`leadArcs`): the cut leaves the wall on a tangent arc of the
+  tool's radius at the end of every pass instead of stopping against it (the
+  dwell mark). Lead-out only: the ramp is the entry, arriving already moving
+  along the wall. Refused inside an opening with no room for the arc.
+- **Corner relief** (`cornerRelief`: `none`, `dogbone`, `tbone`), on profile
+  and pocket: at inside corners of the material, computed on the offset ring
+  from the turn direction and the side, a bite of the tool's radius along the
+  bisector (dogbone) or along the longer wall (T-bone). Off by default — a
+  relief is a decision about the joint. Each toolpath records its bites
+  (`Toolpath::reliefs`) so the verifier reads them as relieved corners, not
+  gouges.
+- A through cut's bottom is below the stock, not the part, so the part is not
+  left welded to the sheet.
+
+### Pocket and adaptive
+
+- **Islands.** The picked floor's outer wire is where to stop and every inner
+  wire an island to go around. `useOutline` (Over openings) crosses the inner
+  wires that are HOLES instead of detouring round thin air, but only those
+  the cutter cannot enter: an opening the tool fits into stays an island, and
+  an inner wire with material standing in it (sectioned just above the floor)
+  is kept whatever the option says — no flag may point the cutter at
+  material.
+- **Concentric rings link at depth.** A ring whose neighbour starts within
+  one and a half step-overs keeps the tool down and rotates the next ring to
+  start where the tool is; further than that (disjoint regions) it lifts. A
+  lap can end without retracting for this.
+- **Adaptive** (`OpType::Adaptive`, Tusek's `Adaptive2d` from FreeCAD's
+  libarea, vendored under `deps/` and linked as the LGPL shared library
+  `designer_adaptive`) clears at near-constant engagement, so the full depth
+  can be taken in one pass. Parameters map straight across: stepover factor,
+  stock to leave, the chord tolerance, helix ramp diameters from the tool.
+  Its three motion types map to cut, link-at-depth through cleared material,
+  and retract-rapid-re-enter. Its failure flags become `Toolpath::error` in
+  words. When the library declines a region, concentric clearing cuts it and
+  `strategy` says so.
+- Both refuse cones (`NeedsFlatFloor`).
+
+### Face
+
+Clears the stock above the part, starting with the cutter centred on the
+stock edge and spiralling inward at the stepover, down to the part top. The allowance is the stock's Z margin (default 1 mm: a rough board).
+
+### Drill
+
+A hole the cutter's size is plunged, fed from the top of the cut (a rapid to
+there first, not a feed from safe Z). With `peck`, the tool retracts to the
+hole's top between pecks (the G83 reading, as plain moves — no canned
+cycles) and rapids back to just above the last floor. A hole **wider** than
+the tool is **bored**: a helix down at the ramp angle on the circle the tool
+centre walks, a flat turn at the bottom, and for a hole wider than two tools
+rings from the centre outward by the stepover, the wall last so a through
+hole's slug goes progressively. A hole narrower than the tool is refused. A
+hole must point at the spindle.
+
+### Edge break
+
+Follows a wall's top edge and breaks it with the tool's own shape: a V-bit
+chamfers (tip angle is the included angle; `edge_size` is the bevel's
+horizontal width), a ball rounds (`edge_size` is the radius). `stepover` sets
+the cusp between arc passes. A flat mill is refused rather than cutting a
+square step nobody asked for.
+
+## Rough then finish
+
+`finishTool` / `finishStock` on profile, pocket, face, drill, adaptive and
+edge round: the operation roughs with its own tool leaving `finishStock`
+(default a tenth of the roughing cutter) on the wall and in Z, then a second
+toolpath with the finishing tool takes the final boundary in one full-depth
+pass. One operation with two tools rather than two operations that must agree
+about a boundary; tool ordering groups the two toolpaths. The panel's
+operation settings offer "finish with T<n>".
+
+## 3-axis surfacing
+
+A finishing pass is a **pattern** swept over a **contact surface**, and the
+two are independent.
+
+- **The cutter-location surface** (`CamDropCutter`): for each (x, y), the
+  lowest Z the tool can sit at without cutting the model — the designed
+  surface sampled on a grid (`SampleModel`) dilated by the tool's own profile,
+  `z_CL(x,y) = max over p within the radius of (z(p) − TipHeight(tool, |p − (x,y)|))`.
+  `TipHeight` is the same function the verifier carves with. A grid dilation
+  is exact at vertices and facets and loses precision only on sharp convex
+  edges, which a finish is not for. The drop cutter takes a frame and refuses
+  a rotated one by name rather than dropping along the wrong axis.
+- **The region** (`PickedSurfaceRegion`): a face of any orientation,
+  tessellated and projected to its XY silhouette; with no pick the whole
+  part's silhouette. The face contributes only its outline — Z always comes
+  from the CL surface of the whole model, or a pass would gouge the material
+  beside the face.
+- **`surface_parallel`**: raster passes at `cut_angle_deg` (anticlockwise
+  from +X), spaced `stepover` (a fraction of the cutter) across and sampled
+  `sample_step_mm` along. Passes are ordered nearest end to nearest end and
+  neighbouring passes are linked by a cut straight across rather than a lift,
+  which also keeps a ball's rim out of the uncut strip beside a steep groove.
+  A pass ends at any sample with an unreached cell among its four neighbours,
+  and takes the highest of four where they differ steeply, so bilinear
+  interpolation cannot undercut a cliff or a masked cell.
+- **`surface_waterline`**: constant-Z laps (marching squares on the CL
+  surface), `z_step_mm` apart.
+
+Three quantities, three names: `stepover` (across passes, a fraction of the
+cutter), `sample_step_mm` (along a pass, mm; 0 derives from the CL grid) and
+`z_step_mm` (between laps, mm; 0 derives from the tool). None is the others.
+
+A surface op refuses every field that presupposes a contour and discrete
+levels — `side`, tabs, `corner_relief`, `lead_arcs`, `drilled_bores`,
+`use_outline`, `peck`, a finishing tool and `climb` — by name. Waterline also
+refuses `stepdown`; a raster's stepdown means roughing (below). V-bits and
+drills are refused.
+
+Arc fitting leaves a sloped raster alone (an arc must be a cut at constant Z
+with no A word) and fits a constant-Z waterline lap.
+
+### Rough a surface, and rest machining
+
+- **3D rough**: a `surface_parallel` with a `stepdown` cuts in layers from
+  the stock top down to the surface plus `stock_to_leave`. A cell with nothing
+  left above its floor is unreached for that layer, so the pass breaks there
+  instead of dragging the tool through cut air. The region is the part's
+  outline plus a ring one cutter wide, cut down to the op's bottom, so the
+  finishing ball can reach the part's edges while the rest of the block stays
+  to hold the part. A finish derives no stepdown, which is what keeps a
+  finish a finish; a raster finish saved by a build that derived one loses it
+  on load, so it is not read as a rough. Waterline roughing is not built.
+- **Rest machining** (`restFromTool`, on `surface_parallel` and
+  `surface_rotary`): the number of the larger cutter that finished before.
+  Both cutters' CL surfaces are computed and each tool's swept envelope taken
+  from its own; the pass cuts only where the larger tool leaves measurably
+  more than both the smaller tool and the part itself (a point probe of the
+  part), so no rest passes run round the rim over air. Envelopes are taken
+  over blocks a third of the small ball's radius across, conservative in the
+  direction that only adds cutting. A rest pass after a waterline finish is a
+  raster: the region, not the pattern, is the point. The verb refuses without
+  a finish to follow or with a tool that is not smaller.
+
+## The capability table and the field table
+
+`cam::Operation` is one struct for every type; two tables keep that honest.
+
+- **Capability** (`CamNames.cpp`, one `OpTypeRow` per type, in enum order,
+  `static_assert`ed against `OpType::Count`): the type's name and an `OpField`
+  mask of the fields its generator reads, plus per-type facts `FullWidth`,
+  `ClearsInside` and `NeedsFlatFloor`. The panel's field guards, the RPC's
+  answer and its refusals, the feed checks and the edge-break census all read
+  it. A field the type does not have is refused at the RPC by name rather than
+  stored where nothing reads it. `test_cam_capability.cpp` enforces the table:
+  for each type, every field it does NOT declare is poked (in bulk, bisected
+  on failure) and the moves must be identical; a negative control pokes a
+  declared field and requires the path to move. Over-claiming (a field shown
+  that does nothing) is allowed; under-claiming (a field that silently steers
+  a cut) fails.
+- **Fields** (`CamOpFields.cpp`, one `OpFieldRow` per field: file/RPC key,
+  capability bit, pointer to member, flags): `WriteOpFields`/`ReadOpFields`
+  serialize every field that differs from a default-constructed `Operation`;
+  the RPC's owned list, apply step and answer loop over `OpFieldRows()`; the
+  surfacing cache key hashes it; `tools/rpc_params_scan.py` reads it to check
+  the `describe` rows. Enums read and write through the name tables and
+  refuse an unknown name with one wording. `tabs` and `finish_tool`/
+  `finish_stock` are saved, applied and reported by hand (flagged
+  `kOpFieldByHand`), and so is `side`'s type-dependent load default: a
+  clearing operation saved with no `side` key loads as `inside`
+  (`SerializeCam.cpp`). Adding a field is the member, a table row, the panel
+  widget and a poke in the capability test.
+
+The round trip is gated both ways: `Operation` has a defaulted `operator==`,
+and every field of every type goes through save and load and must come back
+equal; `headless_smoke.py` sets each field an op reports through `set_cam_op`
+and requires `list_cam_setups` to report it back.
+
+A new `OpType` without a row fails the `static_assert`; without a case in a
+switch it fails the build (`-Werror=switch` on `src/core/cam/`); the name
+functions never fall back to `"profile"`.

@@ -201,12 +201,12 @@ struct StudyJobInput {
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
                   std::string* error);
 
-// PrepareStudy split one step further, at the meshing (docs/ui/
-// long-operations.md, phase 3): PlanStudy keeps everything that needs the
-// Document or the material library on the main thread and hands over deep
-// copies of the shapes plus plain loads; MeshPlannedStudy meshes them and
-// derives the fixed nodes and face tractions from the mesh it made, and is
-// safe on a worker. PrepareStudy == PlanStudy + MeshPlannedStudy.
+// PrepareStudy split one step further, at the meshing
+// (docs/ui/long-operations.md#fem-meshing-and-solving): PlanStudy keeps
+// everything that needs the Document or the material library on the main thread
+// and hands over deep copies of the shapes plus plain loads; MeshPlannedStudy
+// meshes them and derives the fixed nodes and face tractions from the mesh it
+// made, and is safe on a worker. PrepareStudy == PlanStudy + MeshPlannedStudy.
 struct StudyBodyPlan {
   int bodyIndex = 0;
   std::string bodyName;
@@ -257,20 +257,21 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
 bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       std::string* error);
 
-// PlanStudy for a study on an ASSEMBLY (S1, docs/simulation/
-// assembly-studies-plan.md): one occurrence meshed, the rigid ones clamped
-// where they touch it. The caller supplies the placed geometry, because the
-// assembly document does not own its parts: `placedBodies` returns an
-// occurrence's bodies in WORLD space (reference bodies excluded), element
-// maps intact. What it does, in order: refuses more or fewer than one meshed
-// occurrence; refuses a rigid support that INTERPENETRATES the meshed part
-// (a press fit fuses into slivers); imprints every rigid body onto the
-// meshed body with a fuzzy general fuse (parts sit microns apart at float32)
-// WITHOUT touching either document; maps each load's face onto the imprinted
-// shape (a face the imprint split becomes several, a force's total spread by
-// area); and turns each contact anchor into the shared faces, refusing one
-// whose support does not touch. The result meshes and solves through
-// MeshPlannedStudy / SolvePreparedStudy unchanged, in world coordinates.
+// PlanStudy for a study on an ASSEMBLY
+// (docs/simulation/README.md#assembly-studies): one occurrence meshed, the
+// rigid ones clamped where they touch it. The caller supplies the placed
+// geometry, because the assembly document does not own its parts:
+// `placedBodies` returns an occurrence's bodies in WORLD space (reference
+// bodies excluded), element maps intact. What it does, in order: refuses more
+// or fewer than one meshed occurrence; refuses a rigid support that
+// INTERPENETRATES the meshed part (a press fit fuses into slivers); imprints
+// every rigid body onto the meshed body with a fuzzy general fuse (parts sit
+// microns apart at float32) WITHOUT touching either document; maps each load's
+// face onto the imprinted shape (a face the imprint split becomes several, a
+// force's total spread by area); and turns each contact anchor into the shared
+// faces, refusing one whose support does not touch. The result meshes and
+// solves through MeshPlannedStudy / SolvePreparedStudy unchanged, in world
+// coordinates.
 struct AssemblyStudyContext {
   std::function<std::vector<Body>(uint64_t occurrenceId)> placedBodies;
   const SymbolTable* symbols = nullptr; // the project's variables; may be null

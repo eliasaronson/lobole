@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """fit_fastener and check_fasteners agree about where a joint ENDS
-(docs/agent-scale-followup-plan.md, W1).
+(docs/parts/README.md#deriving-a-fastener-from-a-hole).
 
 They did not. `fit_fastener` stopped at the floor of a blind hole, which is
 what a grip is; `check_fasteners` re-derived from the probed stack alone and

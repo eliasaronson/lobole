@@ -98,10 +98,10 @@ std::string StudyStateWord(AppState& state, const fem::Study& s) {
 }
 
 // The studies as rows in the feature list's style (ui::ListRow,
-// docs/ui/consistency-round-plan.md): a glyph for the analysis, the name, and
-// where it stands as the tail. Click selects -- its editor is the Simulation
-// window -- and Delete is in the row's menu, where a big button at the bottom
-// of the editor used to be.
+// docs/ui/panels.md#simulation-the-study-panel-and-window): a glyph for the
+// analysis, the name, and where it stands as the tail. Click selects -- its
+// editor is the Simulation window -- and Delete is in the row's menu, where a
+// big button at the bottom of the editor used to be.
 void DrawStudyList(AppState& state) {
   const StudyHost host = StudyHostOf(state);
   SimulationState& sim = state.simulation;
@@ -113,7 +113,8 @@ void DrawStudyList(AppState& state) {
   uint64_t toDelete = 0;
   for (const fem::Study& s : host.Studies()) {
     // The id goes in the label, not a PushID(int): a PushID scope is not
-    // addressable from a test path (docs/ui/gui-coverage.md).
+    // addressable from a test path
+    // (docs/ui/testing.md#making-a-widget-addressable).
     ListRowSpec row;
     row.glyph = StudyGlyph(s.type);
     row.label = s.name + "###study_sel_" + std::to_string(s.id);
@@ -562,7 +563,7 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   const char* kRoles[] = {"Ignored", "Rigid", "Meshed", "Bonded"};
   // No PushID(int) around the rows: every widget carries its occurrence id
   // in its own ###label, which is what a test path can address (a PushID
-  // scope is not — docs/ui/u13-chrome-and-units.md).
+  // scope is not — docs/ui/testing.md#making-a-widget-addressable).
   for (const Occurrence& occ : host.asmDoc->GetOccurrences()) {
     const fem::Participant* pt = s.FindParticipant(occ.id);
     int role = !pt                                        ? 0
@@ -820,7 +821,7 @@ void DrawStudyBody(AppState& state, fem::Study* s) {
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
     if (ImGui::Checkbox("Gravity (self-weight)###study_gravity", &on)) {
       // Straight down in the WORLD frame — a hand-written axis here once
-      // sagged the part sideways (docs/up-axis.md).
+      // sagged the part sideways (docs/conventions.md#world-axes).
       const glm::dvec3 g = on ? conv::kGravity : glm::dvec3(0, 0, 0);
       ModifyStudy(state, s->id, "Toggle gravity",
                   [&](fem::Study& cs) { cs.gravity = g; });
@@ -860,7 +861,7 @@ void DrawStudyPanel(AppState& state) {
   // The list only. The selected study is edited, run and read in the
   // Simulation window, as an assembly's studies already were: one home for
   // the editor, and a panel that does not change length under the cursor
-  // (docs/ui/consistency-round-plan.md).
+  // (docs/ui/panels.md#simulation-the-study-panel-and-window).
   DrawStudyList(state);
   if (host.Find(state.simulation.activeStudyId) == nullptr)
     ImGui::TextColored(kMuted, "Select or add a study.");

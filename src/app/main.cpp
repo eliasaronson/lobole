@@ -159,14 +159,15 @@ static ImGui_ImplVulkanH_Window g_MainWindowData;
 // that overruns the refresh period by a microsecond costs a WHOLE extra
 // period — and the GPU, blocked and idle for most of it, clocks down, which
 // makes the next frame overrun too. Measured on the RTX 4060 + Intel-driven
-// display (docs/performance/present-stall.md): 10-25 fps at two images,
-// 48 fps at three, with the same scene and the same binary. Four and five
-// are WORSE again (37-38), so this is not "more is better" — it is one
+// display (docs/rendering/frame-pacing.md#swapchain-and-present): 10-25 fps at
+// two images, 48 fps at three, with the same scene and the same binary. Four
+// and five are WORSE again (37-38), so this is not "more is better" — it is one
 // spare image so the queue never runs dry.
 //
 // The driver clamps this to what the surface allows, and the renderers hold
-// kMaxFramesInFlight = 8 slots indexed by image (docs/rendering/
-// frames-in-flight.md), so a bigger count is correct here, only slower.
+// kMaxFramesInFlight = 8 slots indexed by image
+// (docs/rendering/frame-pacing.md#frames-in-flight), so a bigger count is
+// correct here, only slower.
 static uint32_t g_MinImageCount = 3;
 static bool g_SwapChainRebuild = false;
 static bool g_DisableVSync = false;
@@ -181,10 +182,10 @@ static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<StockRenderer> g_StockRenderer;
 
 // THE list of renderers that draw into the 3D scene, IN DRAW ORDER
-// (docs/rendering/renderer-wiring.md). The order is real information, not
-// incidental: the field and the stock stand in front of the mesh they replace,
-// the outline goes over the solids it traces, reference images go under the
-// sketch lines drawn on top of them.
+// (docs/rendering/README.md#scene-renderers). The order is real information,
+// not incidental: the field and the stock stand in front of the mesh they
+// replace, the outline goes over the solids it traces, reference images go
+// under the sketch lines drawn on top of them.
 //
 // Every per-frame duty below loops over this instead of naming six renderers
 // six times. That is the whole point — the same list written out seven times
@@ -755,7 +756,7 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
     // Sync validation flags it as WRITE_AFTER_WRITE the moment the swapchain
     // has more than two images: a 2-image swapchain (this NVIDIA) never
     // overlapped enough to show it, a 3-image one (Mesa/Intel) does.
-    // docs/rendering/frames-in-flight.md
+    // docs/rendering/frame-pacing.md#frames-in-flight
     VkSubpassDependency dep{};
     dep.srcSubpass = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass = 0;
@@ -944,7 +945,8 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
   SetupDepthBuffer(wd);
   // Logged because a driver-dependent image count is exactly what made the
   // "camera shakes on Intel" report impossible to guess at: this NVIDIA
-  // reports 2, Mesa reports 3+. See docs/rendering/frames-in-flight.md.
+  // reports 2, Mesa reports 3+. See
+  // docs/rendering/frame-pacing.md#frames-in-flight.
   g_App.swapchainImages = wd->ImageCount;
   g_App.presentMode =
       wd->PresentMode == VK_PRESENT_MODE_MAILBOX_KHR        ? "mailbox"
@@ -958,7 +960,7 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
   // Mesa on the Intel Arc answers 3 whether asked for 2, 3 or 4. A machine
   // that lands on 2 anyway (a surface with maxImageCount 2) is on the FIFO
   // cliff with nothing the app can do, and this line is how anyone would
-  // know (docs/performance/present-stall.md).
+  // know (docs/rendering/frame-pacing.md#swapchain-and-present).
   VkSurfaceCapabilitiesKHR caps{};
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface,
                                             &caps);
@@ -1062,7 +1064,7 @@ struct RasterTarget {
   uint32_t vpW = 0, vpH = 0;
 };
 
-// QUICK render (docs/rendering/quick-render-plan.md): the model as the
+// QUICK render (docs/rendering/still-render.md#quick-mode): the model as the
 // viewport rasterizes it, captured supersampled at k x the requested size
 // into `out` (DownsampleToPng averages it down and writes it). Synchronous;
 // every size it changes is put back before it returns, so the next frame is
@@ -1202,7 +1204,8 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   // results are ready to read without waiting — the GpuTimer contract.
   g_GpuTimer.Harvest(wd->FrameIndex);
   // The acquire and that fence are the frame's GPU/vsync wait; everything
-  // after is our recording (docs/rendering/frame-timing.md).
+  // after is our recording
+  // (docs/rendering/frame-pacing.md#the-frame-time-instrument).
   g_App.frameTimer.Mark(render::FramePhase::Wait, glfwGetTime());
 
   {
@@ -1546,7 +1549,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   // The GUI sets these in SetupVulkanWindow, which never runs here. The
   // timer is why this mode is worth measuring in: with no swapchain there is
   // no image to wait for, so the main pass reports shading and nothing else
-  // (docs/rendering/offscreen-gpu-timing-plan.md).
+  // (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen).
   g_MSAASamples = GetMaxUsableSampleCount();
   g_GpuTimer.Initialize(g_Device, g_PhysicalDevice, g_QueueFamily);
 
@@ -1757,8 +1760,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
     return ok ? count : 0;
   };
 
-  // Quick render (docs/rendering/quick-render-plan.md). Synchronous like the
-  // burst; the lazy projection is brought up to date first, as a capture is.
+  // Quick render (docs/rendering/still-render.md#quick-mode). Synchronous like
+  // the burst; the lazy projection is brought up to date first, as a capture
+  // is.
   g_App.captureRaster = [&](const ui::AppState::RasterStill& req,
                             ui::RasterFrame* out, std::string* error,
                             std::string* warning) {
@@ -2386,9 +2390,9 @@ int main(int argc, char** argv) {
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
 
-  // Quick render (docs/rendering/quick-render-plan.md), from the dialog or
-  // render_still. Both run on this thread between frames, so after a wait the
-  // current frame slot is idle; the viewport rect it restores is the one
+  // Quick render (docs/rendering/still-render.md#quick-mode), from the dialog
+  // or render_still. Both run on this thread between frames, so after a wait
+  // the current frame slot is idle; the viewport rect it restores is the one
   // UI.cpp sets every frame (the dock between the panels, in framebuffer px).
   g_App.captureRaster = [](const ui::AppState::RasterStill& req,
                            ui::RasterFrame* out, std::string* error,
@@ -2469,8 +2473,8 @@ int main(int argc, char** argv) {
   // Before EITHER Start path (here and ensureRemotePort below): the reader
   // threads call this unsynchronized. An enqueued request wakes a throttled
   // loop out of WaitEventsTimeout, so RPC latency does not inherit the idle
-  // floor (docs/rendering/idle-throttle.md). glfwPostEmptyEvent is one of the
-  // few GLFW calls documented thread-safe.
+  // floor (docs/rendering/frame-pacing.md#idle-throttle). glfwPostEmptyEvent is
+  // one of the few GLFW calls documented thread-safe.
   remoteServer.SetWakeCallback([] { glfwPostEmptyEvent(); });
   if (args.remoteRequested) {
     // Fail fast on a taken port, as the headless path does (HeadlessMain.cpp).
@@ -2499,7 +2503,7 @@ int main(int argc, char** argv) {
   }
 
   // The terminal panel binds a Claude Code session to THIS window by port
-  // (docs/ui/terminal-panel.md), which is useless if the app was started
+  // (docs/ui/terminal.md), which is useless if the app was started
   // without --remote. main.cpp owns the server, so it hands the panel a way
   // to open one on demand.
   //
@@ -2538,13 +2542,13 @@ int main(int argc, char** argv) {
   static app::FramePacer s_pacer;
   bool paceIdle = false; // last iteration's verdict paces this one
   while (!glfwWindowShouldClose(window)) {
-    // Idle throttle (docs/rendering/idle-throttle.md): with nothing
-    // happening, wait for events at a ~10 Hz floor instead of re-rendering
-    // the unchanged scene at vsync rate. BEFORE BeginFrame on purpose — the
-    // wait is not part of the frame, so frame_stats keeps reading "10 fps of
-    // cheap frames", not "100 ms frames". Any OS event or a posted wake (a
-    // remote request) ends the wait immediately. Every iteration that runs
-    // still renders exactly as before.
+    // Idle throttle (docs/rendering/frame-pacing.md#idle-throttle): with
+    // nothing happening, wait for events at a ~10 Hz floor instead of
+    // re-rendering the unchanged scene at vsync rate. BEFORE BeginFrame on
+    // purpose — the wait is not part of the frame, so frame_stats keeps reading
+    // "10 fps of cheap frames", not "100 ms frames". Any OS event or a posted
+    // wake (a remote request) ends the wait immediately. Every iteration that
+    // runs still renders exactly as before.
     if (paceIdle)
       glfwWaitEventsTimeout(app::FramePacer::kIdleTimeoutSeconds);
     g_App.frameTimer.BeginFrame(glfwGetTime());
@@ -2718,7 +2722,8 @@ int main(int argc, char** argv) {
     }
 
     // Everything above is per-frame CPU work on the document and renderers;
-    // the ImGui build is measured on its own (docs/rendering/frame-timing.md).
+    // the ImGui build is measured on its own
+    // (docs/rendering/frame-pacing.md#the-frame-time-instrument).
     g_App.frameTimer.Mark(render::FramePhase::Update, glfwGetTime());
 
     // Start ImGui frame
@@ -2802,8 +2807,9 @@ int main(int argc, char** argv) {
     }
 
     // Idle-throttle verdict for the NEXT iteration, from THIS one's state
-    // (docs/rendering/idle-throttle.md). Input covers every drag (a button
-    // is down); the rest are the ways the picture changes without input.
+    // (docs/rendering/frame-pacing.md#idle-throttle). Input covers every drag
+    // (a button is down); the rest are the ways the picture changes without
+    // input.
     {
       const ImGuiIO& io = ImGui::GetIO();
       bool keyHeld = false;

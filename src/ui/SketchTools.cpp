@@ -34,10 +34,10 @@
 // Starting and ending a sketch, and what each drawing tool COMMITS: a line, a
 // rectangle, an arc, a drag of an existing entity. Copy and paste of a
 // selection is here too -- pasting is committing entities someone else drew.
-// Split out of SketchInteraction.cpp (docs/architecture-review-2026-09-06.md,
-// stage 7a). The 843-line viewport router stays there; these are the blocks
-// it calls into, and SketchInteractionInternal.h is that interface written
-// down.
+// Split out of SketchInteraction.cpp
+// (docs/architecture.md#the-ui-actions-layer). The 843-line viewport router
+// stays there; these are the blocks it calls into, and
+// SketchInteractionInternal.h is that interface written down.
 
 namespace ui {
 
@@ -570,7 +570,8 @@ void CopySketchSelection(AppState& state, SketchFeature& sketch) {
 
 // Pastes the clipboard into the active sketch as UNLINKED copies with fresh
 // ids, offset so the paste is visible beside the source. (Linked copies that
-// track the source are a separate design — docs/sketching/copy-links.md.)
+// track the source are a separate design —
+// docs/sketching/README.md#linked-copies.)
 void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
                           size_t index) {
   if (state.sketchClipboard.empty())
@@ -610,10 +611,11 @@ void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
       std::to_string(state.sketchClipboard.size()) + " entities pasted";
 }
 
-// Pastes the clipboard as a LINKED copy (docs/sketching/copy-links.md):
-// outputs re-sync from the source until the link is broken. Cross-sketch
-// requires the source EARLIER in the history; cross-part (source not in
-// this document) falls back to a plain paste with an explanation.
+// Pastes the clipboard as a LINKED copy
+// (docs/sketching/README.md#linked-copies): outputs re-sync from the source
+// until the link is broken. Cross-sketch requires the source EARLIER in the
+// history; cross-part (source not in this document) falls back to a plain paste
+// with an explanation.
 void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
                                 size_t index) {
   if (state.sketchClipboardIds.empty())

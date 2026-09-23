@@ -81,8 +81,8 @@ using nlohmann::json;
 //
 // Only in a build with Dear ImGui Test Engine; `ping` reports whether this
 // build has it.
-// Split out of RemoteServer.cpp (docs/architecture-review-2026-09-06.md,
-// stage 8a). RemoteServer.h is unchanged: these are the same class's members,
+// Split out of RemoteServer.cpp (docs/architecture.md#the-remote-json-rpc).
+// RemoteServer.h is unchanged: these are the same class's members,
 // defined across three translation units instead of one.
 
 // The test-engine hook lives with the actions it runs: SetTestEngine

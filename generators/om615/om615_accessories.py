@@ -1,4 +1,4 @@
-"""Front accessories. Photo-derived envelopes; see docs/modeling/om615-accessories.md.
+"""Front accessories. Photo-derived envelopes; see generators/om615/README.md.
 
 Coordinates follow the engine (+Y rearward). Revolving hardware is built about
 local Z and located by named mounting/shaft datums, not by bounding boxes.

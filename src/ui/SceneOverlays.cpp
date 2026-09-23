@@ -94,8 +94,8 @@
 // Overlays.cpp is the neighbouring half and says where the line was drawn:
 // text and pills go on ImGui's foreground draw list, and THIS is the vertex
 // geometry the renderers consume, which needs no ImGui at all.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, third wave -- the wave that empties it). AppActions.h still
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still
 // declares everything, so no caller changed.
 
 namespace ui {

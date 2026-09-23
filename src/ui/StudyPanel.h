@@ -13,7 +13,7 @@
 // Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
 // every domain in the app and is included by 40 translation units — so every
 // panel and RPC module paid for all of it. See
-// docs/architecture-review-2026-08-24.md.
+// docs/architecture.md#the-ui-actions-layer.
 namespace ui {
 
 // The Studies panel drawn in the Model dock while in simulation mode on a

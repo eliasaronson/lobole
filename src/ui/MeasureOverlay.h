@@ -5,8 +5,8 @@
 
 #include <vector>
 
-// What a measurement LOOKS like in the viewport (M2,
-// docs/inspect/measure-v2.md).
+// What a measurement LOOKS like in the viewport
+// (docs/inspect/README.md#measure).
 //
 // Before this the whole visualization was one 2 px line between OCC's
 // extrema pair, with the value in a panel in the opposite corner of the

@@ -176,7 +176,7 @@ bool DrawField(AppState& state, const settings::Field& f) {
   return changed;
 }
 
-// Preferences > Machines (docs/cam/job-document.md, round two). Not a
+// Preferences > Machines (docs/cam/setup.md#machine-profiles). Not a
 // `Field` either: a LIST of structs, each its own file in
 // ~/.config/designer/machines, written on every edit the way settings.json
 // is -- there is no Save button to forget. A job names one of these and
@@ -409,7 +409,7 @@ void DrawMachinesSection(AppState& state) {
 
 // Preferences > Keyboard. Not a `Field`: the table above is one scalar per
 // row rendered as a slider or a combo, and a chord is neither
-// (docs/ui/u12-keybindings.md). One collapsing node per context, because a
+// (docs/ui/keybindings.md). One collapsing node per context, because a
 // context binding legitimately reuses a key another context owns — `N` is
 // Coincident in a sketch and align-to-face everywhere else — so grouping is
 // what makes the list readable instead of looking full of duplicates.

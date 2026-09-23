@@ -72,7 +72,7 @@ public:
   // Returns the tick's remote activity: requests executed, plus one while an
   // async job (ui action / screenshot / sheet render) is still in flight —
   // the idle pacer treats nonzero as "stay at full rate"
-  // (docs/rendering/idle-throttle.md).
+  // (docs/rendering/frame-pacing.md#idle-throttle).
   size_t ProcessPending(ui::AppState& state);
 
   // Called from the socket reader threads whenever a request lands in the

@@ -29,9 +29,10 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
-// S7 (docs/sheetmetal/plan.md): the hem, the mitred corner and the jog. Each
-// is checked three ways — against a hand-computed volume or outline, laid flat
-// one gauge thick, and folded back up to exactly where it was.
+// Hem and jog (docs/sheetmetal/README.md#features): the hem, the mitred corner
+// and the jog. Each is checked three ways — against a hand-computed volume or
+// outline, laid flat one gauge thick, and folded back up to exactly where it
+// was.
 namespace {
 
 constexpr double kT = 1.5;

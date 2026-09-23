@@ -285,7 +285,7 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
   // their intersection with a line is ONE interval, so the per-triangle test
   // below is two float compares rather than a dot product per plane — this
   // loop is the most expensive thing in a frame the cursor is over the
-  // viewport (docs/performance/hover-pick.md) and must not grow.
+  // viewport (docs/rendering/README.md#picking) and must not grow.
   float tEnter = 0.0f;
   float tExit = std::numeric_limits<float>::max();
   glm::vec3 enterNormal(0.0f);
@@ -301,7 +301,7 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     // every triangle of every occurrence, whether the ray came near it or
     // not. On a 241-occurrence engine that was 42% of the app's CPU, every
     // frame the cursor was over the viewport
-    // (docs/performance/hover-pick.md).
+    // (docs/rendering/README.md#picking).
     if (!mesh->hasBounds ||
         !RayHitsBounds(ray, mesh->boundsMin, mesh->boundsMax))
       continue;
@@ -343,7 +343,7 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
             lastCrossing = distance;
             // In MESH space, where the tessellation's winding is reliably
             // outward. A mirrored placement reverses winding, so the world
-            // normal there points INWARD (docs/performance/hover-pick.md
+            // normal there points INWARD (docs/rendering/README.md#picking
             // pins that quirk) — and a mirrored occurrence would then read
             // every entry as an exit. The mapping preserves inside/outside,
             // so the local sign is the physical one.

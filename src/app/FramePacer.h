@@ -3,11 +3,11 @@
 #include <cstdint>
 
 // Decides whether the next main-loop iteration runs at full rate or waits
-// for events with a timeout (docs/rendering/idle-throttle.md). Pure logic —
-// main.cpp gathers the Inputs at the end of an iteration and the verdict
-// paces the next one — so the decision is testable without a GPU or a frame
-// loop. Every iteration that runs still renders exactly as before; the pacer
-// only controls WHEN iterations happen.
+// for events with a timeout (docs/rendering/frame-pacing.md#idle-throttle).
+// Pure logic — main.cpp gathers the Inputs at the end of an iteration and the
+// verdict paces the next one — so the decision is testable without a GPU or a
+// frame loop. Every iteration that runs still renders exactly as before; the
+// pacer only controls WHEN iterations happen.
 namespace app {
 
 struct PacerInputs {

@@ -3,7 +3,7 @@
 // CAM's core toolpath generation: sections, depth passes, profiles,
 // pockets, tabs, adaptive clearing and the arcs they post as.
 // One of five files split from test_cam.cpp
-// (docs/architecture-review-2026-09-06.md, stage 1).
+// (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
 
@@ -109,7 +109,8 @@ TEST_CASE("cam: an inside profile with nothing to cut inside of refuses",
   // This used to offset the PART'S OWN outline inward by a tool radius and
   // cut a trench a whisker inside the perimeter, full depth, all the way
   // round — a 15 mm gouge, found by asking for a slot this way in the first
-  // dogfooding round (docs/cam/dogfood-round.md finding 4). An inside profile
+  // dogfooding round (docs/cam/operations.md#derivation--what-a-click-means).
+  // An inside profile
   // needs a contour to be inside OF.
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
@@ -167,7 +168,7 @@ TEST_CASE("cam: a tab is as tall as it was asked to be", "[cam]") {
   // tall. That is a part that breaks free under the cutter and is thrown —
   // the one thing tabs exist to stop. Found by the second dogfooding round,
   // as four 16 mm2 patches of "leftover" 1 mm deep where 3.8 mm was asked
-  // for (docs/cam/dogfood-round.md).
+  // for (docs/cam/operations.md#profile).
   auto doc = BlockDoc(); // 40 x 30 x 20, stock -2..42 x -2..32 x -1..21
   cam::Setup setup = BasicSetup();
   cam::Operation op;
@@ -369,7 +370,7 @@ TEST_CASE("cam: clicking a pocket floor derives every depth", "[cam]") {
   REQUIRE(derived.ok);
   // Nothing here was typed: the floor is the face, the top is the stock, the
   // stepdown is half the cutter. This is the `2 -> -0` failure made
-  // unexpressible (docs/cam/gui.md).
+  // unexpressible (docs/cam/operations.md#derivation--what-a-click-means).
   CHECK_THAT(derived.op.bottomZ, WithinAbs(12.0, 1e-9));
   CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9)); // part top + 1 mm stock
   CHECK_THAT(derived.op.stepdown, WithinAbs(3.0, 1e-9)); // half of a 6 mm tool
@@ -1413,7 +1414,7 @@ TEST_CASE("cam: a through cut carries the contour past the bottom of the part",
   // The model stops at z = 0 and the cut is asked for z = -1. Sectioning
   // finds nothing below the part, so the last pass used to be SKIPPED and the
   // part stayed welded to the sheet — the exact failure tabs exist to control
-  // (docs/cam/dogfood-round.md finding 2).
+  // (docs/cam/operations.md#profile).
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
   cam::Operation op;
@@ -1448,7 +1449,7 @@ TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam][slow]") {
   // inclusive — so a clean job reported the island's whole height as a gouge.
   // The panel checks at 0.4 mm and the RPC defaulted to 0.25, so the two
   // disagreed about the SAME job: "cuts 6.00 mm INTO the part, that is scrap"
-  // against a verdict of nothing (docs/cam/dogfood-round.md, round 2). The
+  // against a verdict of nothing (docs/cam/simulation.md#the-verifier). The
   // numbers below are the coupon's own pocket, because which grids land on a
   // corner depends on the actual coordinates.
   auto doc = std::make_unique<Document>();
@@ -1549,9 +1550,9 @@ bool SameMoves(const cam::Toolpath& a, const cam::Toolpath& b) {
 
 TEST_CASE("cam: an adaptive pass is cached, and can be deferred to a worker",
           "[cam]") {
-  // docs/ui/long-operations.md, phase 1. The panel's generate must be able
-  // to hand the expensive passes to a worker and still come back, later,
-  // with EXACTLY what the synchronous generate produces — the cache is
+  // docs/ui/long-operations.md#cam-toolpath-passes. The panel's generate must
+  // be able to hand the expensive passes to a worker and still come back,
+  // later, with EXACTLY what the synchronous generate produces — the cache is
   // keyed by content, so the worker's answer and the inline answer are the
   // same entry.
   if (!cam::AdaptiveAvailable())
@@ -1693,7 +1694,7 @@ TEST_CASE("cam: an adaptive pass is cached, and can be deferred to a worker",
 TEST_CASE("cam: a profile's outlines are cached, and can be deferred to a "
           "worker",
           "[cam]") {
-  // docs/cam/add-operation-plan.md. The projected outlines are the one
+  // docs/cam/README.md#background-work. The projected outlines are the one
   // expensive step of a profile -- an OCC section per depth pass -- and they
   // froze the frame for two minutes on a helically fluted pin. Deferred, the
   // profile comes back pending; the worker's answer, put into the cache,
@@ -1786,9 +1787,9 @@ TEST_CASE("cam: a profile's outlines are cached, and can be deferred to a "
 }
 
 TEST_CASE("cam: Add operation follows the setup", "[cam]") {
-  // docs/cam/add-operation-plan.md. The panel's button added a whole-part
-  // cut-out to a job cut on the trunnion -- a 3-axis contour round a dowel,
-  // plausible and wrong.
+  // docs/cam/operations.md#derivation--what-a-click-means. The panel's button
+  // added a whole-part cut-out to a job cut on the trunnion -- a 3-axis contour
+  // round a dowel, plausible and wrong.
   cam::Setup setup = BasicSetup();
   CHECK(cam::AddOperationType(setup) == cam::OpType::Profile);
 
@@ -1875,7 +1876,7 @@ TEST_CASE("cam: the vendored adaptive library throws on some vertex layouts",
   // fine at 24, 60, 120 and 200 points and throws at 37. Which is why it
   // looked ellipse-specific from the GUI: every ellipse OCC discretises at the
   // 0.02 mm chord tolerance happened to land in the failing set
-  // (docs/cam/dogfood-round.md).
+  // (docs/cam/operations.md#pocket-and-adaptive).
   if (!cam::AdaptiveAvailable())
     return;
   cam::Setup setup = BasicSetup();
@@ -1912,7 +1913,7 @@ TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
   // that reads it — so a pocket that cut correctly came back from its own
   // file clearing OUTSIDE its boundary, where there is nothing, and produced
   // no toolpath at all. A job that worked before the save did not work after
-  // it (docs/cam/dogfood-round.md).
+  // it (docs/cam/operations.md#the-capability-table-and-the-field-table).
   cam::JobDocument job;
   cam::Setup& s = job.AddSetup("Job");
   for (const cam::OpType type : {cam::OpType::Pocket, cam::OpType::Adaptive}) {
@@ -1961,7 +1962,8 @@ TEST_CASE("cam: cut it out refuses the floor of a pocket", "[cam]") {
   // Clicking a pocket floor and pressing "Cut it out" derived an OUTSIDE
   // profile through the whole part — a full-depth slot routed around the
   // pocket, in the middle of the board. The verifier called it 22 mm of gouge
-  // on a 20 mm plate, which is scrap (docs/cam/dogfood-round.md). The mirror
+  // on a 20 mm plate, which is scrap
+  // (docs/cam/operations.md#derivation--what-a-click-means). The mirror
   // of this mistake was already guarded: a pocket asked for on a WALL says
   // "click the pocket's FLOOR".
   auto doc = PocketDoc();
@@ -1993,8 +1995,9 @@ TEST_CASE("cam: asking for adaptive derives the pocket it is", "[cam]") {
   // OpType::Adaptive had no case in the derivation, so it fell through the
   // switch and returned a DEFAULT operation — top 0, bottom -1, no target —
   // and said ok. A script asking for the strategy by name got an operation
-  // pointing at nothing (docs/cam/dogfood-round.md). Adaptive IS a pocket;
-  // only the clearing strategy differs.
+  // pointing at nothing
+  // (docs/cam/operations.md#derivation--what-a-click-means). Adaptive IS a
+  // pocket; only the clearing strategy differs.
   auto doc = PocketDoc();
   const cam::Setup setup = BasicSetup();
   const ElementRef floor = UpFaceAt(*doc, 12.0);
@@ -2270,8 +2273,8 @@ TEST_CASE("cam: one operation at a time cuts what all of them cut",
 
 // --- the front_wall section probe -------------------------------------------
 //
-// docs/known-bugs.md, "A profile cuts ONE contour at every depth, but the
-// outline changes with depth": four synthetic fixtures failed to reproduce
+// docs/cam/operations.md#profile (a profile follows the projection, not the
+// section): four synthetic fixtures failed to reproduce
 // the 8 mm gouge, so the entry's own next step is to stop rebuilding the part
 // from a description and read the REAL one. This is that read.
 //
@@ -2590,11 +2593,11 @@ TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
 
 // --- a profile follows the projection, not the section ----------------------
 //
-// docs/known-bugs.md: a bore that opens onto a side face notches the part's
-// cross-section at its own height and nowhere else. A profile that follows
-// that notch cuts the bore's own 8 mm plus the 4 mm of solid above it and the
-// 4 mm below — measured on the real part as an 8.00 mm gouge, and reproduced
-// here in a fixture small enough to read.
+// docs/cam/operations.md#profile: a bore that opens onto a side face notches
+// the part's cross-section at its own height and nowhere else. A profile that
+// follows that notch cuts the bore's own 8 mm plus the 4 mm of solid above it
+// and the 4 mm below — measured on the real part as an 8.00 mm gouge, and
+// reproduced here in a fixture small enough to read.
 //
 // Two directions, deliberately. "Never cut a notch" would pass the first of
 // these and is wrong: a notch that reaches the operation's top IS reachable

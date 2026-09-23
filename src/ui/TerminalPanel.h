@@ -11,7 +11,7 @@
 
 namespace ui {
 
-// The terminal panel (docs/ui/terminal-panel.md): a dockable window on the
+// The terminal panel (docs/ui/terminal.md): a dockable window on the
 // right holding one PTY session per tab, so Claude Code — or a shell, or git
 // — runs beside the model it is editing.
 //

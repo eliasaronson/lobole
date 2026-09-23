@@ -168,7 +168,7 @@ def _compare(app, made, deep=False):
     # which is the only thing that can say two solids are the same SHAPE
     # rather than the same size, and costs three OCC booleans: 13.2 s for the
     # ring brace alone, 22 s of a 56 s run for the three of them
-    # (docs/inspect/compare-metrics-plan.md).
+    # (docs/inspect/README.md#comparing-against-a-reference).
     metrics = "all" if deep else "volume"
     print(f'  against the export ({"shape, deep" if deep else "size + census"}):')
     for name, stem in refs.items():
@@ -192,7 +192,7 @@ def _compare(app, made, deep=False):
             elif r["faces"]["reference"] != r["faces"]["candidate"]:
                 # Stated, not judged. The census catches a shape faked at the
                 # right volume (stacked discs against a true cone,
-                # docs/benchmark-construction-plan.md) — but a STEP round
+                # docs/scripting/benchmark.md#construction-checks) — but a STEP round
                 # trip splits faces too, and these braces come back 95 faces
                 # against the export's 45 at an IoU of 0.991. --deep is what
                 # answers it.

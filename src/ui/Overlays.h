@@ -12,8 +12,8 @@
 //
 // They live here rather than in AppActions.cpp because they were its only
 // ImGui dependency — three functions in a 4,700-line file that is otherwise
-// pure document logic. See docs/architecture-review-2026-08-24.md; separating
-// them is the first step toward that logic being unit-testable.
+// pure document logic. See docs/architecture.md#the-ui-actions-layer;
+// separating them is the first step toward that logic being unit-testable.
 namespace ui {
 
 // The draw list every viewport annotation belongs in: the dockspace host's,

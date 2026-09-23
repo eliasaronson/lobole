@@ -39,7 +39,7 @@ namespace remote {
 // the human's running instance would silently wipe all of it.
 //
 // So every read-only RPC that can take `part` should
-// (docs/agent-scale-followup-plan.md, W2).
+// (docs/scripting/rpc.md#reads-name-their-part).
 [[nodiscard]] Document* ResolvePartParam(ui::AppState& state,
                                          const nlohmann::json& part);
 
@@ -76,7 +76,7 @@ struct MethodDoc {
   // entries), kNotInBatch (31), kDeferrable (10) and IsUiAction -- none of them
   // next to a handler, so adding a method meant remembering four places that
   // no test compared. That is the shape of every gate-list bug this project
-  // has already paid for (docs/architecture-review-2026-09-06.md, section 4).
+  // has already paid for (docs/architecture.md#the-remote-json-rpc).
   //
   // A flag is stated only where it is NOT the default, so most rows are
   // unchanged: needing a part tab is the minority (41 of 230), and reaching

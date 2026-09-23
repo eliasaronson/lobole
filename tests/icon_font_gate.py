@@ -6,7 +6,7 @@ and deps/fonts/IconsDesigner.h together; the header records the SHA-256 of the
 script it came from and of the font written beside it. Edit a glyph without
 rebuilding, or touch the font by hand, and the two stop matching. Standard
 library only: the drawing needs fontTools and shapely, and ctest and CI have
-neither (docs/ui/icons-plan.md).
+neither (docs/ui/README.md#icons).
 """
 import hashlib
 import os

@@ -115,7 +115,7 @@ def main():
         # call, so a caller tries them and tests the result. Park the arm
         # turned a quarter about Z and half over, and ask for a joint that
         # keeps that: the mate must come back holding it, not one of the
-        # seven others (docs/porting-friction-plan.md, C).
+        # seven others (docs/assemblies/README.md#deriving-a-mate-from-the-placement).
         d.call("remove_mate", id=mate_id)
         turned = [0.0, 0.0, 0.70710678, 0.70710678]  # +90 deg about Z
         d.call("set_occurrence_transform", id=o2,

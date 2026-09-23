@@ -11,7 +11,7 @@
 
 // Shared viewport drag math — rays against the axes/planes/arcs that drag
 // handles are built from. Hoisted unchanged from the A2.5 occurrence gizmo
-// (AssemblyActions.cpp) so the preview handles (docs/ui/direct-manipulation.md)
+// (AssemblyActions.cpp) so the preview handles (docs/ui/viewport-handles.md)
 // use the exact same geometry.
 namespace ui {
 
@@ -28,8 +28,7 @@ inline float GizmoScale(const AppState& state) {
 // ONE POLARITY, everywhere it is offered: snap is the DEFAULT and Ctrl frees
 // it. The preview handles used to mean the opposite by Ctrl (fine by default,
 // coarse while held), so "Ctrl frees the snap" was true on an assembly tab and
-// backwards on a part tab -- docs/ui/direct-manipulation.md carried that as an
-// open question from the day handles shipped.
+// backwards on a part tab (docs/ui/viewport-handles.md#snapping-one-polarity).
 //
 // A CAPTURE WINDOW, not a quantizer: the round value is sticky and everything
 // between two of them is still reachable, so 37 degrees is as reachable by

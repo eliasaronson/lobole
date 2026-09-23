@@ -20,26 +20,27 @@ inline constexpr int kVersion =
     128; // v128: an AxisRef kind `custom` {origin, direction} (revolve,
          //      pattern and datum planes about any axis); a helix's
          //      `start_deg` (+_expr); a motion study's `configuration`
-         //      (docs/pes-friction-plan.md).
+         //      (generators/pes_pump/README.md#how-it-moves).
          // v127: a fixture's optional `seat` -- one of its faces resting on
          //      the stock's top, reaching in over an edge ({face: {feature,
          //      name}, edge: -x|+x|-y|+y, along_mm, over_mm, spin_deg}),
          //      re-solved against the stock on every read
-         //      (docs/cam/fixture-seat-plan.md).
+         //      (docs/cam/setup.md#seats).
          // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
          //      placed on the bed ({id, part, name, pos, rot_z, enabled}),
          //      which the verifier treats as somewhere the tool must never
-         //      go (docs/cam/workholding-plan.md).
+         //      go (docs/cam/setup.md#workholding-fixtures).
          // v125: a `surface_parallel` op reads `stepdown`, ROUGHING in
          //      layers from the stock top (a v124 file's unread stepdown on
          //      one is dropped on load), and surface ops gain
          //      `rest_from_tool`: cut only where that larger cutter could not
-         //      reach (docs/cam/rough-rest-range-plan.md).
+         //      reach
+         //      (docs/cam/operations.md#rough-a-surface-and-rest-machining).
          // v124: a third `rotary_pattern`, `helical` -- passes that follow
          //      a twist, helices stepped round the part -- and `lead_mm`,
          //      their advance per turn (0 = the part's own twist). A v123
          //      build refuses the pattern name, which is what the bump is for
-         //      (docs/cam/rotary-helical-plan.md).
+         //      (docs/cam/rotary.md#patterns-rotary_pattern).
          // v123: a `surface_rotary` op's `rotary_pattern` — `parallel`
          //      (the v122 raster, and the default) or `spiral`, one helix
          //      with A turning while the tool cuts: continuous 4-axis. And
@@ -48,27 +49,28 @@ inline constexpr int kVersion =
          //      is dropped on load). The machine gains `a_max_deg_min`, the
          //      A axis's top speed. A v122 build would read a spiral as
          //      parallel passes, a different cut, so it is a bump
-         //      (docs/cam/rotary-continuous-plan.md).
+         //      (docs/cam/rotary.md#continuous-surface_rotary).
          // v122: an `OpType` of `surface_rotary` — 4-axis finishing by
          //      passes ALONG the rotary axis stepping round it,
          //      the part turning between them to present each one to the
          //      spindle (a rotary raster; the spiral is v123). An
          //      unknown op type already refuses the file by name, so a v121
          //      build refuses this one, which is what the bump is for
-         //      (docs/cam/rotary-plan.md).
+         //      (docs/cam/rotary.md#verifying-a-turning-part).
          // v121: a `Tool`'s `overall_length` and `collar_diameter` — how far
          //      the cutter sticks out of the collet and how wide the nut is.
          //      Together they turn on the holder check in the verifier, which
          //      finds the collar driven into material the cutter never went
          //      near. Written only when stated, so a v120 build reads a job
          //      of undimensioned tools byte-identically and one WITH them
-         //      simply stops checking the holder (docs/cam/simulation.md S6).
+         //      simply stops checking the holder
+         //      (docs/cam/simulation.md#holder-collisions).
          // v120: a `Cope`'s `mitre` list — the members it meets END TO END,
          //      cut on the plane that bisects them, which is the cut a
          //      corner wants and a fishmouth cannot make. A v119 build
          //      reads the key as absent and leaves every corner in the
          //      frame square-cut, which is a tube that does not sit down
-         //      on its neighbour (docs/mitre-plan.md).
+         //      on its neighbour (docs/tube/README.md#cope-and-mitre).
          // v119: a `Cope` feature, which cuts a frame member to the members
          //      it MEETS and leaves those standing; and `tube`, the SHOP a
          //      part is bent in — the material, and the bender's die set,
@@ -76,7 +78,7 @@ inline constexpr int kVersion =
          //      each member's Pipe carries its own, because a frame is
          //      several at once. An unknown feature type is refused by name;
          //      a build without the rules reads the key as nothing and
-         //      checks a frame against nothing (docs/tube/plan.md).
+         //      checks a frame against nothing (docs/tube/README.md).
          // v118: two finishing OpTypes, `surface_parallel` and
          //      `surface_waterline`, whose Z varies continuously WITHIN a
          //      pass -- and the three quantities they need, each named for
@@ -84,37 +86,38 @@ inline constexpr int kVersion =
          //      `sample_step_mm` (spacing ALONG a pass) and `z_step_mm` (the
          //      Z between waterline laps, which is NOT a stepover). A build
          //      without the types refuses the file by name, which is why it
-         //      is a bump (docs/cam/surfacing.md).
+         //      is a bump (docs/cam/operations.md#3-axis-surfacing).
          // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
          //      of a centreline and `radius` (+ _expr) the former it is
          //      bent round, swept line-arc-line. A build without the kind
          //      refuses the file by name, which is why it is a bump
-         //      (docs/modeling/curves-3d-plan.md).
+         //      (docs/modeling/README.md#3d-curves-sweep-loft-and-pipe).
          // v116: a Hem's `offset_start` / `offset_end` (+ _expr): insets
          //      from the ends of the picked edge, as an EdgeFlange has. A
          //      hem running the full length of a pan's wall fuses to the
          //      wall beside it and the part flattens from no blank
-         //      (docs/sheetmetal/plan.md, S7).
+         //      (docs/sheetmetal/README.md#features).
          // v115: a drawing view's `configuration` (omitted = the part's
          //      active one) and a drawing note's `table`: none | bends — a
-         //      flat pattern on a sheet (docs/sheetmetal/plan.md, S11).
+         //      flat pattern on a sheet
+         //      (docs/sheetmetal/README.md#dxf-and-drawings).
          // v114: `NormalCut` {sketch_id, body_id?, regions?}: a cut through
          //      a sheet square to the metal wherever the profile lands
-         //      (docs/sheetmetal/plan.md, S10).
+         //      (docs/sheetmetal/README.md#features).
          // v113: `CornerRelief` {body_id, style?, size?} and an EdgeFlange's
          //      `corners`: open (default) | closed. Both refuse an unknown
-         //      name (docs/sheetmetal/plan.md, S8).
+         //      name (docs/sheetmetal/README.md#features).
          // v112: `Hem` {edges, length, kind?, gap?, outside?} and `Jog`
          //      {sketch_id, height, angle_deg?, flip?}; an edge flange over
          //      edges meeting at a corner now MITRES them (bends record the
          //      trim, transiently). An unknown hem `kind` is refused by name
-         //      (docs/sheetmetal/plan.md, S7).
+         //      (docs/sheetmetal/README.md#features).
          // v111: `Unfold` {body_id, fixed_face?, bends?} and `Refold`
          //      {unfold_id}: lay chosen bends flat in place, and fold them
          //      back carrying every through-cut across each crease. The
          //      creases they leave carry their parent placement on the body,
          //      transiently — nothing new is written but the two features
-         //      (docs/sheetmetal/plan.md, S9).
+         //      (docs/sheetmetal/README.md#how-the-unfolder-works).
          // v110: the BLANK. `FlatPattern` {body_id, fixed_face?} replaces a
          //      sheet body's shape with its flat pattern IN PLACE (a folded
          //      part and its blank occupy the same space, so a second body
@@ -124,7 +127,7 @@ inline constexpr int kVersion =
          //      the last word over both suppression lists. Without it a
          //      configuration could only ever REMOVE, so a feature that is
          //      off in the authored model could not be the thing a
-         //      configuration is for (docs/sheetmetal/plan.md, S4).
+         //      configuration is for (docs/sheetmetal/README.md#features).
          // v109: the first two sheet features. `BaseFlange` {sketch_id,
          //      reversed?, regions?} is a closed profile thickened by the
          //      document's sheet-metal thickness; `EdgeFlange` {edges,
@@ -133,7 +136,7 @@ inline constexpr int kVersion =
          //      straight edge of a panel. Neither carries a thickness — that
          //      is what v108's rules are for — and an unknown `position`,
          //      `length_mode` or `relief` is refused naming the accepted set
-         //      (docs/sheetmetal/plan.md, S2+S3).
+         //      (docs/sheetmetal/README.md#features).
          // v108: sheet-metal rules in the envelope (`sheet_metal`, absent
          //      when the part is not sheet metal): {material, gauge,
          //      thickness, bend_radius?, k_factor?, relief?, relief_width?,
@@ -141,7 +144,7 @@ inline constexpr int kVersion =
          //      material and gauge when absent, so a table correction reaches
          //      the part; a v107 build drops the object and every sheet
          //      feature then refuses for want of a thickness
-         //      (docs/sheetmetal/plan.md, S1).
+         //      (docs/sheetmetal/README.md#rules-the-stock-a-part-is-cut-from).
          // v107: a participant role `bonded` (S2): meshed AND glued to the
          //      meshed occurrence where they touch — one mesh spans them,
          //      each keeps its material. A v106 build refuses the file
@@ -152,10 +155,11 @@ inline constexpr int kVersion =
          //      carrying `occurrence`, and a fixed load anchored on a CONTACT
          //      (`contact_with`, no `face`) — clamped where that rigid
          //      occurrence touches the meshed one, re-derived at mesh time
-         //      (docs/simulation/assembly-studies-plan.md, S1).
+         //      (docs/simulation/README.md#assembly-studies).
          // v105: a CLICK relation (a pawl: one DOF that may only travel one
          //      way), and a freewheel's `teeth` and `ride` — riding over
-         //      them lifts a named DOF (docs/click-and-breguet-plan.md).
+         //      them lifts a named DOF
+         //      (generators/watch/README.md#keyless-works-and-winding).
          // v104: a FREEWHEEL relation (one-way clutch): `kind` "freewheel",
          //      `drives` positive|negative and `lead`, the history it keeps.
          // v103: an Import's `units` -- the length unit an STL/BREP was drawn
@@ -217,56 +221,56 @@ inline constexpr int kVersion =
          //      between a dimensionable drawing of a swept-surface model and
          //      no drawing at all: the single-cylinder engine is 47 s a view
          //      and 0.0 s without its two valve springs
-         //      (docs/dogfood-friction-plan.md, F4).
+         //      (generators/README.md#single-cylinder-and-air-cooled-engines).
          // (v89: a drawing view's `quality` — "exact" (curve HLR, every curve
          //      traced to the edge that made it, what a dimension attaches to)
          //      or "fast" (polygonal HLR: orders of magnitude cheaper, and a
          //      LOOK). Exact costs what the SURFACES cost, not what the part
          //      count costs: 16 bored boxes project in 3.1 ms, one 4-turn
          //      helical spring in 6.4 s
-         //      (docs/agent-scale-followup-plan.md, W3).)
+         //      (docs/drawings/README.md#projection-hlr).)
          // (v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
          //      chain or belt does not reverse) and `cam` (rotation to offset
          //      through a periodic LIFT TABLE, not a ratio), with the table
-         //      in `lift` (docs/agent-scale-plan.md, G4).)
+         //      in `lift` (docs/assemblies/relations.md#kinds).)
          // (v87: assembly `motion` -- a MotionStudy: one mate DOF driven over a
          //      range in N samples, solved at each and clash-checked, so a
          //      mechanism's motion is a thing the document holds
-         //      (docs/agent-scale-plan.md, G2).)
+         //      (docs/assemblies/README.md#motion-studies).)
          // (v86: the `Frame` feature (a named datum frame: explicit, from one
          //      or several elements, or offset from another) and the mate
          //      connector anchor `{frame: <id>}` that mates to it by name
-         //      (docs/agent-scale-plan.md, G0).)
+         //      (docs/assemblies/solver.md#connector-frames).)
          // (v85: `Derived.body_names` -- pick a source's bodies by NAME as well
          //      as by their created_by id, because one Import feature creates
          //      every body of a STEP (a camera module arrives as 197)
-         //      (docs/modeling/derived-followup-plan.md, I3).)
+         //      (docs/modeling/derived.md#the-feature).)
          // (v84: the `Derived` feature -- a snapshot of another part's bodies
          //      (B-Reps as content-addressed document assets, names + element
          //      maps in the feature), placement, `reference` flag, and the
          //      source's chain hash for the stale check
-         //      (docs/modeling/derived-plan.md).)
+         //      (docs/modeling/derived.md).)
          // (v83: assembly `relations` -- a gear, rack, screw or linear coupling
          //      between two mates' degrees of freedom, dofB = ratio * dofA +
-         //      phase. Omitted when none (docs/assemblies/relations-plan.md).
+         //      phase. Omitted when none (docs/assemblies/relations.md).
          // (v82: `finish_tool` + `finish_stock` on a profile or pocket -- rough
          //      with the operation's tool leaving the stock, then one
          //      full-depth pass with the finishing tool. Omitted when none
-         //      (docs/cam/router-round.md, R6).)
+         //      (docs/cam/operations.md#rough-then-finish).)
          // (v81: `lead_arcs` on a profile -- leave the wall on a tangent arc of
          //      the tool's radius at the end of every pass. Omitted when off
-         //      (docs/cam/router-round.md, R5).
+         //      (docs/cam/operations.md#profile).
          // (v80: `corner_relief` on a profile or pocket (dogbone | tbone):
          //      clear the inside corners a round cutter leaves, by the tool's
-         //      radius. Omitted when none (docs/cam/router-round.md, R4).
+         //      radius. Omitted when none (docs/cam/operations.md#profile).
          // (v79: `peck` on a drill operation -- retract fully between pecks of
          //      this depth, as plain moves. Omitted when 0. A hole wider than
          //      the tool is bored, which needs no key: the tool decides
-         //      (docs/cam/router-round.md, R3).
+         //      (docs/cam/operations.md#drill).
          // (v78: `split_output` on a setup -- one program per tool, which most
          //      hobby controllers need because they cannot take a tool change
          //      mid-file. Forces tool order. Omitted when off
-         //      (docs/cam/router-round.md, R2).
+         //      (docs/cam/post.md#files).
          // (v77: a setup EMBEDS its machine. `post`, `fit_arcs` and
          //      `has_rotary_axis` were keys of the setup and every new job
          //      re-answered "which machine" with a combo; they are now a
@@ -275,7 +279,7 @@ inline constexpr int kVersion =
          //      named by `name` (~/.config/designer/machines/<slug>.json), so
          //      the file opens on a machine that has never seen the profile
          //      and the panel says which copy it is using when the two differ
-         //      (docs/cam/job-document.md, round two). The three old keys are
+         //      (docs/cam/setup.md#machine-profiles). The three old keys are
          //      still read from a file without the block.
          // (v76: fixturing is per PART. A placement can carry its own `frame`,
          //      so one sheet can hold a baffle laid on its face beside a rail
@@ -284,7 +288,8 @@ inline constexpr int kVersion =
          //      keeps Setup::frame the single-part answer and re-saves an
          //      existing job byte-identically. Optional rather than defaulted
          //      to identity: a default would silently un-clamp a part the
-         //      moment you gave it a position (docs/cam/job-document.md).
+         //      moment you gave it a position
+         //      (docs/cam/setup.md#fixturing-frame-and-rotary-index).
          // (v75: a setup says in what ORDER it cuts (`order`:
          //      authored|tool|part). With one part authoring order IS
          //      cutting order; with four, authoring per part means a tool
@@ -292,7 +297,7 @@ inline constexpr int kVersion =
          //      byte-for-byte what this app posted before -- the bump is for
          //      reading, where an older build would cut a file that says
          //      "tool" in the order it was written, which is a different
-         //      program (docs/cam/job-document.md J5).
+         //      program (docs/cam/setup.md#cutting-order-and-split-output).
          // (v74: a job holds MORE THAN ONE part, which is what the job document
          //      was for. A machining selection names the part it is on
          //      (`part` beside `feature_id`/`element`), because two parts in
@@ -303,12 +308,12 @@ inline constexpr int kVersion =
          //      v73 re-saves byte-identically. The bump is for the other
          //      direction: a v73 build reads a qualified target and drops the
          //      qualifier, which silently machines the wrong part
-         //      (docs/cam/job-document.md).
+         //      (docs/cam/README.md#the-model).
          // (v73: CAM setups are no longer part of the part. They live in a JOB
          //      document of their own (`kind: "job"` -- a parts list plus the
          //      setups that cut them), which is what makes a job about more
          //      than one part: four brackets out of one sheet used to be
-         //      inexpressible (docs/cam/job-document.md). BREAKING for any
+         //      inexpressible (docs/cam/README.md#the-model). BREAKING for any
          //      document carrying `cam`: a part's setups are not migrated,
          //      because the job they belong in is a document that did not
          //      exist. No users, so no migration (CLAUDE.md).
@@ -316,37 +321,38 @@ inline constexpr int kVersion =
          //      `attach_offset`/`attach_rotation`), so a fastener travels with
          //      the part it is bolted to and cannot be dragged out of its hole
          //      on its own. Composition, not a mate: no solver sees it
-         //      (docs/parts/f1-loose-ends.md). Omitted when free, so every
-         //      existing assembly serializes byte-identically.
+         //      (docs/parts/README.md#attached-and-mated). Omitted when free,
+         //      so every existing assembly serializes byte-identically.
          // (v71: a Hole records what it is FOR — `fit: {thread, kind, pitch?}`
          //      — and the diameter is DERIVED from it, so a clearance hole
          //      stops being a number somebody looked up once. Additive and
          //      optional: a hole without one serializes exactly as before
-         //      (docs/modeling/hole-standards.md).
+         //      (docs/modeling/holes-and-threads.md#hole).
          // (v70: seven fastener standards instead of one (nuts, washers, hex
          //      and countersunk and button heads, a hexalobular drive), the
          //      drive DEFAULTED to the one its standard is made with rather
          //      than to "hex", and the `fastener_callout` drawing dimension.
          //      All three widen what a loader must ACCEPT — a v69 build reads
          //      "iso4017" as an unknown standard — which is what the bump is
-         //      for (docs/parts/plan.md, phases 4-5).
-         // (v69: the Fastener feature — a standard part built from a vendored
-         //      dimension table (docs/parts/plan.md), carrying only what the
-         //      table cannot give it: which standard, which size, how long
-         // (v68: cam operation `use_outline` (clear the face's outline,
-         //      passing over its openings rather than around them);
-         //      the cam work origin is DERIVED from a named corner
-         // (`origin_at`) and the post subtracts it; fixed-size stock
-         // (`stock.mode`/`size`/`place`) — docs/cam/stock-and-origin.md
-         // (v67: the cam setup's fixture frame + whether the machine has a
-         // rotary axis (docs/cam/setup-frame.md))
-         // (v66: drawing notes; cam tool type/tip angle + the edge-break op)
-         // (v65: mate connector corner snap (anchor snap_edge2))
-         // (v64: display units (length/mass/angle) travel with the document)
-         // (v63: the cam setup remembers the face Z zero was picked from)
-         // (v62: cam operation `side` written for clearing ops too)
-         // (v61: expression-driven Box/Sphere/Cylinder dimensions)
-         // (v57: mate connector inner_path)
+         //      for
+//      (docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence).
+// (v69: the Fastener feature — a standard part built from a vendored
+//      dimension table (docs/parts/README.md), carrying only what the
+//      table cannot give it: which standard, which size, how long
+// (v68: cam operation `use_outline` (clear the face's outline,
+//      passing over its openings rather than around them);
+//      the cam work origin is DERIVED from a named corner
+// (`origin_at`) and the post subtracts it; fixed-size stock
+// (`stock.mode`/`size`/`place`) — docs/cam/setup.md#work-origin
+// (v67: the cam setup's fixture frame + whether the machine has a
+// rotary axis (docs/cam/setup.md#fixturing-frame-and-rotary-index))
+// (v66: drawing notes; cam tool type/tip angle + the edge-break op)
+// (v65: mate connector corner snap (anchor snap_edge2))
+// (v64: display units (length/mass/angle) travel with the document)
+// (v63: the cam setup remembers the face Z zero was picked from)
+// (v62: cam operation `side` written for clearing ops too)
+// (v61: expression-driven Box/Sphere/Cylinder dimensions)
+// (v57: mate connector inner_path)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

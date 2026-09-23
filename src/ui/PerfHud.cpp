@@ -28,7 +28,7 @@ void DrawPerfHud(AppState& state) {
   // The chord belongs to `view.perf_hud` in the one command table, marked
   // hidden there — so it still works everywhere, and still appears in no
   // menu, no Preferences row and no shortcuts window
-  // (docs/rendering/frame-timing.md).
+  // (docs/rendering/frame-pacing.md#the-frame-time-instrument).
   if (!state.perfHudOpen)
     return;
 
@@ -56,11 +56,12 @@ void DrawPerfHud(AppState& state) {
   }
 
   ImGui::TextColored(TotalColor(s.avgMs), "%.1f fps  %.2f ms", s.fps, s.avgMs);
-  // A resting app reads ~10 fps BY DESIGN (docs/rendering/idle-throttle.md);
-  // without this line that is indistinguishable from "slow". And when it is
-  // NOT resting, the wake name says who keeps it awake — the field's first
-  // screenshots read "idle 1%" after seconds of hands-off, and the cause (an
-  // agent session's RPCs) was only findable by reproduction.
+  // A resting app reads ~10 fps BY DESIGN
+  // (docs/rendering/frame-pacing.md#idle-throttle); without this line that is
+  // indistinguishable from "slow". And when it is NOT resting, the wake name
+  // says who keeps it awake — the field's first screenshots read "idle 1%"
+  // after seconds of hands-off, and the cause (an agent session's RPCs) was
+  // only findable by reproduction.
   if (state.settings.idleThrottle) {
     ImGui::SameLine();
     const int share =
@@ -163,7 +164,7 @@ void DrawPerfHud(AppState& state) {
           "Read these only when the frame is NOT display-bound: the\n"
           "wait for the swapchain image falls INSIDE the main pass, so\n"
           "a stalled frame reports shading time it never spent.\n"
-          "docs/performance/present-stall.md");
+          "docs/rendering/frame-pacing.md#swapchain-and-present");
   }
   // The other half of a `present`-heavy frame: what the swapchain is. Two
   // images with FIFO is a cliff, not a detail.
@@ -175,7 +176,7 @@ void DrawPerfHud(AppState& state) {
           "With FIFO and TWO images a frame that overruns the refresh\n"
           "period waits a whole extra period, and the idle GPU clocks\n"
           "down — measured 10-25 fps at two, 48 at three.\n"
-          "docs/performance/present-stall.md");
+          "docs/rendering/frame-pacing.md#swapchain-and-present");
   }
 
   ImGui::Separator();

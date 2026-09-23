@@ -1,67 +1,68 @@
-# Design review checklist (agent + human)
+# Design review checklist
 
-The V6 companion to the modeling-workflow prompt: run this list against the
-model BEFORE showing it to anyone. Every box is one RPC call — none of this
-is eyeball-only anymore. Seeded by the floating-dock dogfooding round
-(docs/dogfooding.md, the 2026-08-18 round), where the unchecked versions of
-these boxes each cost a review cycle.
+Run this against a model before showing it to anyone — an agent before it
+reports done, a person before a review. Every box is one RPC call. The MCP
+`modeling-workflow` prompt points agents here. What each RPC returns is in
+[README.md](README.md).
 
 ## Every model
 
-- [ ] `get_state`: no feature `error`s, no `warning`s (a warning means a
-      feature built but likely did nothing — the silent no-op cut).
-- [ ] Mutating responses' `digest.delta` matched intent at every step: the
-      volume moved the right direction, `added`/`removed` name the bodies
-      you meant, `solids` didn't silently split a body into two lumps.
-- [ ] `mass_properties`: total mass and CoM are physically plausible for
-      the object (the render cannot fake these).
-- [ ] Every driving dimension is a named variable; no literal that should
-      be an expression.
-- [ ] `render_sheet`: one call, four views + the numeric footer. Check the
-      pixels AGAINST the footer numbers in the same image.
-- [ ] Orientation of any new swept/revolved feature read from the
-      DIGEST BBOX, never from a render tile (the round-7 bend lesson:
-      small tiles lie, the bbox does not).
-- [ ] Multi-body parts: body-scope `contact_report` says ONE component
-      (intra-part overlaps count as welds; do not assert clashes empty
-      at body scope).
+- [ ] `get_state`: no feature `error`s and no `warning`s. A warning means a
+      feature built but likely did nothing — a cut that removed no material.
+- [ ] Each mutating response's `digest.delta` matched the intent: the volume
+      moved the right way, `added` / `removed` name the bodies you meant, and
+      no body's `solids` count silently went to two.
+- [ ] `mass_properties`: total mass and centre of mass are physically
+      plausible for the object. A render cannot fake these.
+- [ ] Every driving dimension is a named variable; no literal where an
+      expression belongs.
+- [ ] `render_sheet`: one call, four views and the numeric footer. Check the
+      pixels against the footer numbers in the same image.
+- [ ] The orientation of any swept or revolved feature is read from the
+      digest bbox, not from a render tile — small tiles mislead, the bbox
+      does not.
+- [ ] Multi-body part: `contact_report` on the part tab reports ONE component.
+      Overlapping bodies join like a weld at this scope, so do not assert
+      `clashes` empty here.
 
 ## Assemblies
 
-- [ ] `contact_report`: `connected` is true (ONE component) — anything in
-      its own component is floating in mid-air, the canonical failure.
-- [ ] `contact_report`: `clashes` empty, `near_misses` empty (a 0.1–1 mm
-      gap is almost always an arithmetic slip, not a design choice).
-- [ ] Every bolted/fastened joint asserted `"touching"` via
-      `interference {a, b}` — clash-only checks pass exactly when nothing
+- [ ] `contact_report`: `connected` is true. Anything in its own component
+      is floating.
+- [ ] `contact_report`: `clashes` and `near_misses` empty. A 0.1–1 mm gap is
+      almost always an arithmetic slip, not a design choice.
+- [ ] Its receipt's `standing` is not `unverified` — a truncated sweep is not
+      a clean one.
+- [ ] Every bolted or fastened joint asserted `"touching"` with
+      `interference {a, b}`. A clash-only check passes exactly when nothing
       touches.
-- [ ] Every designed clearance asserted by number
-      (`state == "clear" && |distance - intended| < tol`).
-- [ ] With mates: `unrealized_mates` and `unmated_contacts` both empty or
+- [ ] Every designed clearance asserted by number:
+      `state == "clear"` and `|distance - intended| < tol`.
+- [ ] With mates: `unrealized_mates` and `unmated_contacts` empty or
       explained.
-- [ ] `bom`: no `warnings`, total mass non-null, quantities match intent.
+- [ ] `bom`: no `warnings`, total mass non-null, quantities as intended.
 
-## Against a reference (regression / reproduction)
+## Against a reference
 
-- [ ] `compare_geometry {golden_path}`: verdict "identical within
-      tolerance" for regressions; for reproductions read the verdicts —
-      they name over/under-generation and size/offset errors.
-- [ ] Reproducing a SHAPE rather than a placement? Add `align: true`. IoU is
+- [ ] `compare_geometry {golden_path}`: "identical within tolerance" for a
+      regression; for a reproduction, read the verdicts — they name over- and
+      under-generation and size or offset errors.
+- [ ] Reproducing a shape rather than a placement: add `align: true`. IoU is
       computed where the two solids sit, so a correct re-draw built about its
-      own origin scores 0.333 against a reference a few hundred mm away —
-      measured, on a tube whose volume matched to four figures.
-- [ ] When the verdict is off: export `missing_path`/`extra_path` and look
-      at WHERE the difference lives before touching parameters.
+      own origin scores low against a reference placed elsewhere.
+- [ ] When the verdict is off: export `missing_path` / `extra_path` (or
+      `materialize: true` and a screenshot) and look at where the difference
+      lives before changing parameters.
 
 ## Symptom → cause → fix
 
-| Symptom | Likely cause | Fix |
+| symptom | likely cause | fix |
 | --- | --- | --- |
-| Cut/add changed nothing (warning set) | Sketch-plane V axis points away (V = normal × uAxis) or profile misses the body | Re-plane: e.g. normal −Y with uAxis +X for V = +Z; check the digest delta |
-| `unknown field 'x' for T` | Typo, or a field that type never had (Box has no `mode`) | Read `describe feature_types[].params` for T's dialect |
-| BOM mass null / material "mixed" | A body was created without `set_material` (check `bom.warnings` — it names the body) | `set_material` on that body's creating feature |
-| `contact_report` shows 2+ components | A member's coordinates drifted from the geometry it was meant to touch | The component listing names the floater; fix its transform |
-| near_miss at 0.1–1 mm | Arithmetic slip in a position (an offset applied once, not twice, …) | Recompute from the mating face, assert `touching` after |
-| Screenshot from inside the model | `set_camera direction` points target→camera | Pass `eye` instead |
-| render_still shows only the environment | Assembly tab (part-only renderer) | `render_sheet` / `screenshot` |
-| Occurrence ends up inside a neighbor after rotation | Hand-derived quaternion + rotated-corner arithmetic | Use `transform.rotate {axis, angle_deg}` |
+| A cut or add changed nothing (warning set) | The sketch plane's V axis points away (V = normal × uAxis), or the profile misses the body | Re-plane: normal −Y with uAxis +X gives V = +Z; check the digest delta |
+| `unknown field 'x' for T` | A typo, or a field that type never had (a Box has no `mode`) | Read `describe` → `feature_types[].params` for T |
+| BOM mass null | A body has no material (`bom.warnings` names it) | `set_material` on that body's creating feature |
+| `contact_report` shows two or more components | A member's coordinates drifted from the geometry it should touch | The component listing names the floater; fix its placement, prefer a mate onto a named frame |
+| A near miss at 0.1–1 mm | An arithmetic slip in a position (an offset applied once instead of twice) | Recompute from the mating face, then assert `touching` |
+| A screenshot from inside the model | `set_camera direction` points from the target toward the camera | Pass `eye` instead |
+| An occurrence ends up inside a neighbour after rotating | A hand-derived quaternion and rotated-corner arithmetic | Use `transform.rotate {axis, angle_deg}` |
+| `render_still` on an assembly refuses with "no occurrences" | The assembly tab is empty | Add occurrences, or render the part tab |

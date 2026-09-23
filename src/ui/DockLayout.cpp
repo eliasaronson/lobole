@@ -156,7 +156,7 @@ void BeginDockspace(AppState& state) {
   // physical pixels while the buttons inside it grew with the display and the
   // font preference -- the bar got measurably tighter the more a user scaled
   // the UI up, which is the opposite of what they asked for. Reported by the
-  // first Windows tester (docs/ui/windows-tester-round.md).
+  // first Windows tester (docs/ui/README.md#chrome).
   //
   // The vertical figure is what separates the buttons from the menu bar above
   // and the panel tabs below, and 4 was too little to see: at the 2.0 scale a

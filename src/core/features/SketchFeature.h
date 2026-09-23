@@ -635,10 +635,10 @@ enum class DerivedKind {
   // symmetry-constraint fan-out (which cluttered the constraint list and
   // could not be edited as one thing).
   Mirror,
-  // A LINKED COPY (docs/sketching/copy-links.md): pasted entities that
-  // re-sync from their source until the link is broken. Same-sketch sources
-  // replay in RegenerateDerived; cross-sketch sources (sourceSketchId != 0)
-  // replay in SketchFeature::Execute, where the source sketch — required
+  // A LINKED COPY (docs/sketching/README.md#linked-copies): pasted entities
+  // that re-sync from their source until the link is broken. Same-sketch
+  // sources replay in RegenerateDerived; cross-sketch sources (sourceSketchId
+  // != 0) replay in SketchFeature::Execute, where the source sketch — required
   // earlier in the history — has already executed. Outputs are solver-fixed
   // anchors: target-sketch constraints may reference them, but their
   // position is owned by the sync.

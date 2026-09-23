@@ -479,7 +479,7 @@ void DrawFeatureTreePanel(AppState& state) {
           state.commands->PushApplied(
               std::make_unique<ModifyFeatureCommand>(i, before, after));
         }
-        // A Derived copy's verbs (docs/modeling/derived-plan.md): retake the
+        // A Derived copy's verbs (docs/modeling/derived.md): retake the
         // snapshot (one undo step), or freeze it as an unlinked body.
         // Both replace the feature object (a ModifyFeatureCommand), so
         // `feature` is dangling afterwards: leave the row like Delete does.

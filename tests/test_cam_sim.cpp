@@ -75,9 +75,9 @@ Job ProfiledBlock() {
 // The same job on a panel that stands UPRIGHT — thin in Y, tall in Z, like
 // every part imported in its assembly orientation — laid flat on the bed by
 // the setup's fixture frame rather than by editing the model
-// (docs/cam/setup-frame.md). Every other fixture in this file is modelled
-// face-up, which means setup space and model space are identical in them and
-// nothing here has ever exercised the distinction.
+// (docs/cam/setup.md#fixturing-frame-and-rotary-index). Every other fixture in
+// this file is modelled face-up, which means setup space and model space are
+// identical in them and nothing here has ever exercised the distinction.
 Job LaidFlatPanel() {
   Job j;
   j.doc = BlockDoc(40, 10, 30); // 40 wide, 10 THICK, 30 tall: on its edge

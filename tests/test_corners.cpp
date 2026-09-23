@@ -24,8 +24,8 @@
 
 using Catch::Matchers::WithinAbs;
 
-// S8 (docs/sheetmetal/plan.md): closing a corner, relieving one, and refusing
-// the corners neither is shaped for.
+// Corners (docs/sheetmetal/README.md#features): closing a corner, relieving
+// one, and refusing the corners neither is shaped for.
 namespace {
 
 constexpr double kT = 1.5;

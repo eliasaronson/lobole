@@ -7,7 +7,8 @@
 #include <string>
 #include <vector>
 
-// What an axis passes through (docs/parts/plan.md, phase 3).
+// What an axis passes through
+// (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 //
 // A fastener's length is not typed, it is derived — from the stack the hole
 // runs through. That means asking a question no other part of this codebase
@@ -82,7 +83,7 @@ TraverseAxis(const std::vector<PlacedBody>& placed, const glm::dvec3& origin,
 // mm blind hole under a 20 mm plate came back as a 45 mm grip from one and an
 // 80 mm stack from the other, with nothing happening in between, so every
 // blind-hole joint in a model read as too short by exactly the material under
-// its hole (docs/agent-scale-followup-plan.md, W1).
+// its hole (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 //
 // Both callers already hold both traversals; only one of them was using the
 // second. Taking the answer from here means they agree by construction rather
@@ -99,7 +100,7 @@ TraverseAxis(const std::vector<PlacedBody>& placed, const glm::dvec3& origin,
 // BOSS — a bore that runs out into open air with the far wall of the part
 // beyond it — re-derived as a much longer joint ending in that wall, and a
 // correct screw was reported as having no thread in a part it does not touch
-// (docs/grill-friction-plan.md).
+// (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 struct JointExtent {
   double end = 0.0;   // how far down the axis the joint reaches, in mm
   bool blind = false; // it stopped ON material, not in daylight

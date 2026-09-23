@@ -6,8 +6,8 @@
 
 #include <string>
 
-// What a feed means when the part turns (docs/cam/rotary-continuous-plan.md,
-// S3).
+// What a feed means when the part turns
+// (docs/cam/rotary.md#feed-on-a-turning-cut).
 //
 // A move that turns A while it cuts mixes millimetres and degrees, and F is
 // one number. Controllers disagree on what it measures, and the two families

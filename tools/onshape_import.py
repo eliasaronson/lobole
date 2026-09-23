@@ -1379,7 +1379,7 @@ def _query_strings(param):
 
 
 # Onshape feature types that produce a free 3D curve. Designer models these
-# as Curve3D (format v42) — see docs/modeling/curves-3d-plan.md.
+# as Curve3D (format v42) — see docs/modeling/README.md#3d-curves-sweep-loft-and-pipe.
 _CURVE_FEATURE_TYPES = ("fitSpline",)
 
 
@@ -1914,7 +1914,7 @@ class Replayer:
     # Coordinates stream in unrotated, so these stay geometric whatever
     # either app calls "up" — an imported model keeps Onshape's own
     # orientation and may need a re-orient in the Z-up world
-    # (docs/up-axis.md).
+    # (docs/conventions.md#world-axes).
     BASE_PLANES = {  # query token -> (point mm, unit normal)
         "Frontplane": ((0, 0, 0), (0, 0, 1)),
         "Topplane": ((0, 0, 0), (0, 1, 0)),
@@ -2171,7 +2171,7 @@ class Replayer:
         Until 2026-08-25 this branch reported a skip claiming Designer had no
         3D curve type, which had been false since v42. The skip outlived the
         gap it guarded because its stated reason still read plausible, so
-        nobody re-read it — docs/loose-ends-2026-08-25.md L1."""
+        nobody re-read it — docs/interchange/README.md#the-onshape-importer."""
         name = feature.get("name", "Curve")
         pts = self.src.curve_points(feature_index)
         out, notes = map_fit_spline(feature, pts)

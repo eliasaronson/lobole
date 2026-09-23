@@ -198,7 +198,7 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
     // length arrives as 25.00000025 and took the overrun branch -- which then
     // said "the last 0.0 mm is cut by the shank", a sentence that reads as
     // nonsense. Same trap as the low-top_z warning
-    // (docs/cam/dogfood-waveguide.md).
+    // (docs/cam/README.md#invariants).
     const double over = reach - t.fluteLength;
     if (t.fluteLength > 0.0 && over > 1e-3) {
       Finding f;

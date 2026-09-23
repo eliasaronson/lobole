@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-// A JOB: what is in the vise, and how it gets cut (docs/cam/job-document.md).
+// A JOB: what is in the vise, and how it gets cut
+// (docs/cam/README.md#the-model).
 //
 // A job is a project document, the third of a shape `AssemblyDocument` and
 // `DrawingDocument` already have: it references parts by their stable

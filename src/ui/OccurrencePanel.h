@@ -10,7 +10,7 @@
 // Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
 // every domain in the app and is included by 40 translation units — so every
 // panel and RPC module paid for all of it. See
-// docs/architecture-review-2026-08-24.md.
+// docs/architecture.md#the-ui-actions-layer.
 namespace ui {
 
 // The mate session's Tool-window contents (connector slot rows, flip/error,
@@ -23,18 +23,19 @@ void DrawMateToolWindow(AppState& state);
 void DrawOccurrencePanel(AppState& state);
 
 // The assembly's two viewport MODES, drawn in the floating tool window rather
-// than in the Model dock (docs/ui/u15-assembly-panel.md): both pose the
-// occurrences and are driven with a slider or a drag gizmo, so they belong
-// over the model they are moving. Called from DrawToolWindow, which gives
-// them the one-at-a-time slot — an exploded view and a motion study placing
-// the same occurrences at once has no meaning.
+// than in the Model dock (docs/ui/panels.md#assembly-tab-the-model-panel): both
+// pose the occurrences and are driven with a slider or a drag gizmo, so they
+// belong over the model they are moving. Called from DrawToolWindow, which
+// gives them the one-at-a-time slot — an exploded view and a motion study
+// placing the same occurrences at once has no meaning.
 void DrawExplodeToolWindow(AppState& state);
 void DrawMotionToolWindow(AppState& state);
 
 // The assembly panel's editors, floating in the tool window
-// (docs/ui/assembly-panel-tidy-plan.md): a double-click on an occurrence's or
-// a relation's row opens its properties there. Drawn from DrawToolWindow. A
-// mate edits in the mate tool's own Edit Mate mode (StartMateEdit).
+// (docs/ui/panels.md#assembly-tab-the-model-panel): a double-click on an
+// occurrence's or a relation's row opens its properties there. Drawn from
+// DrawToolWindow. A mate edits in the mate tool's own Edit Mate mode
+// (StartMateEdit).
 void EditAssemblyOccurrence(AppState& state, uint64_t occId);
 void EditAssemblyRelation(AppState& state, uint64_t relId);
 void DrawAssemblyEditWindow(AppState& state);

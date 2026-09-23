@@ -16,7 +16,7 @@
 // over-constrained. This closes them, in REDUCED (joint) coordinates: the
 // unknowns are the mates' own DOF fields, which the document already stores,
 // so there is no new state and no format change. See
-// docs/assemblies/a6-loop-solver-plan.md.
+// docs/assemblies/solver.md#closing-loops.
 //
 // The formulation is MuJoCo's: a spanning tree in generalized coordinates plus
 // the cut edges re-added as equality constraints. The redundancy handling is
@@ -86,7 +86,7 @@ struct LoopTreeEdge {
 
 // The problem the caller hands over: the spanning forest it already walked,
 // the edges that closed loops, and where each component is pinned.
-// A relation between two mates' DOFs (docs/assemblies/relations-plan.md):
+// A relation between two mates' DOFs (docs/assemblies/relations.md):
 // one residual row, dofB - ratio * dofA - phase, beside the six per cut mate.
 struct LoopRelation {
   size_t mateA = 0; // indices into LoopProblem::mates
@@ -108,8 +108,9 @@ struct LoopRelation {
 // Without this the driven DOF is one more unknown in an underdetermined
 // least-squares, and the solver moves it: setting a crank to 90 degrees and
 // reading back 67 is what the single-cylinder engine found
-// (docs/modeling/single-cylinder-dogfood.md). A closed loop's whole point is
-// that turning the crank moves the piston, and it did not.
+// (generators/README.md#single-cylinder-and-air-cooled-engines). A closed
+// loop's whole point is that turning the crank moves the piston, and it did
+// not.
 struct LoopPin {
   size_t mate = 0; // index into LoopProblem::mates
   MateDof dof = MateDof::Rotation;

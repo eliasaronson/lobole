@@ -509,11 +509,11 @@ TEST_CASE("A loop leaves a mate tree elsewhere in the document alone",
 TEST_CASE("A driven DOF is HELD while the loop closes around it",
           "[assembly][solve][loops]") {
   // The defect the single-cylinder engine found
-  // (docs/modeling/single-cylinder-dogfood.md): a closed loop has one more
-  // unknown than it has equations, so the least-squares step is free to move
-  // ANY of them — including the one the caller just drove. Setting a crank to
-  // 90 degrees and reading back 67 is not a tolerance; it is the solver
-  // answering a different question.
+  // (generators/README.md#single-cylinder-and-air-cooled-engines): a closed
+  // loop has one more unknown than it has equations, so the least-squares step
+  // is free to move ANY of them — including the one the caller just drove.
+  // Setting a crank to 90 degrees and reading back 67 is not a tolerance; it is
+  // the solver answering a different question.
   //
   // The same four-bar, with J1 driven to a quarter turn.
   const auto build = [](double drive, bool pin) {

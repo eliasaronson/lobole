@@ -117,7 +117,7 @@ struct MaterialProperties {
 
   // Light passing THROUGH the body: 0 = opaque (every row but glass), 1 =
   // clear. The still refracts through it at `ior`; the viewport draws it
-  // see-through at ViewportAlpha. docs/rendering/glass-plan.md.
+  // see-through at ViewportAlpha. docs/rendering/materials.md#glass.
   float transmission = 0.0f;
   float ior = 0.0f; // index of refraction; meaningful only with transmission
 };

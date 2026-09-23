@@ -234,7 +234,7 @@ void DrawMeasureToolWindow(AppState& state) {
   // may vary are the same gesture on the same pick, which is why the editor
   // lives here rather than in a panel of its own: one pick is that face's
   // size, two are the distance between them, and those are exactly a
-  // Tolerance's ref and ref2 (docs/tolerances/plan.md T3).
+  // Tolerance's ref and ref2 (docs/tolerances/README.md#gui).
   DrawTolerancePick(state);
 
   // The pinned list. Hovering a row brightens its dimension in the viewport
@@ -265,7 +265,7 @@ void DrawMeasureToolWindow(AppState& state) {
 
   ImGui::Separator();
   // Close, as every window that applies as you go says
-  // (docs/ui/consistency-round-plan.md); Accept/Cancel are for one that makes
+  // (docs/ui/panels.md); Accept/Cancel are for one that makes
   // something.
   if (ImGui::Button("Close###measure_close"))
     state.measure = MeasureState{};
@@ -536,14 +536,14 @@ void DrawToolWindow(AppState& state) {
     else if (state.sectionToolOpen)
       DrawSectionToolWindow(state);
     else if (state.camToolOpen)
-      DrawCamToolWindow(state); // the CAM verbs (docs/cam/gui.md G2)
+      DrawCamToolWindow(state); // the CAM verbs (docs/cam/gui.md#verb-windows)
     else if (state.fastenerTool.open)
-      DrawFastenerToolWindow(state); // docs/parts/gui-plan.md
+      DrawFastenerToolWindow(state); // docs/parts/README.md
     else if (state.assembly &&
              (state.asmEditOccurrence != 0 || state.asmEditRelation != 0))
-      DrawAssemblyEditWindow(state); // docs/ui/assembly-panel-tidy-plan.md
+      DrawAssemblyEditWindow(state); // docs/ui/panels.md
     else if (state.assembly && state.explodeToolOpen)
-      DrawExplodeToolWindow(state); // docs/ui/u15-assembly-panel.md
+      DrawExplodeToolWindow(state); // docs/ui/panels.md
     else if (state.assembly && state.motionToolOpen)
       DrawMotionToolWindow(state);
     else if (state.assembly && state.simulationToolOpen)

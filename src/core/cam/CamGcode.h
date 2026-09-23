@@ -10,15 +10,15 @@
 #include <string_view>
 #include <vector>
 
-// Reading a posted G-code file back (docs/cam/plan.md, C5).
+// Reading a posted G-code file back (docs/cam/simulation.md#one-engine).
 //
 // Split out of CamVerify.h, which was two subjects in one file: this half
 // turns text into moves and knows nothing about stock, and the other half is
 // the height map that cuts those moves into a block. The seam matters beyond
 // tidiness -- a 4th axis touches the PARSER (an A word is a word like any
 // other) and needs a different stock model entirely
-// (docs/cam/rotary-plan.md), so the two halves change for different reasons
-// and at different times.
+// (docs/cam/rotary.md#verifying-a-turning-part), so the two halves change for
+// different reasons and at different times.
 //
 // The parser reads the FILE, not the toolpath that produced it. That
 // independence is the point of the whole module: a bug in the post, in modal
@@ -82,7 +82,8 @@ struct GProgram {
 // the work origin (the operator's zero); everything that compares a file to
 // the model — the verifier, the simulator, the backplot — works in setup
 // space. This is the one place the origin is added back, and it is the exact
-// inverse of what `Emitter` subtracts (docs/cam/stock-and-origin.md W1).
+// inverse of what `Emitter` subtracts
+// (docs/cam/post.md#work-origin-in-the-file).
 //
 // Take this rather than ParseGcode wherever a Setup is in hand: a program
 // parsed raw and compared against a framed model is off by the origin, which

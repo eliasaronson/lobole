@@ -97,8 +97,8 @@
 //
 // DrawingPanel.cpp is the other half -- the sheet as the user manipulates
 // it. This is what a view IS; that is how it is edited.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, second wave). AppActions.h still declares everything, so no
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still declares everything, so no
 // caller changed.
 
 namespace ui {
@@ -284,8 +284,8 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
 //
 // Split from the HLR so the expensive half can run OFF the main thread: this
 // part needs the live documents (their ElementMaps) and the sheet layout, and
-// the part it is split from needs neither (docs/agent-scale-followup-plan.md,
-// W3).
+// the part it is split from needs neither
+// (docs/drawings/README.md#projection-hlr).
 drawing::SheetView
 AssembleSheetView(AppState& state, const DrawingView& view,
                   const std::vector<SourceBody>& bodies,

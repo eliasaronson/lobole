@@ -266,7 +266,8 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
 
   // Plan on this thread — expressions, face refs, materials need the
   // Document. The worker meshes the plan's copied shapes and solves; it
-  // never sees the Document (docs/ui/long-operations.md, phase 3).
+  // never sees the Document
+  // (docs/ui/long-operations.md#fem-meshing-and-solving).
   auto job = std::make_shared<StudyJob>();
   if (!fem::PlanStudy(doc, *s, job->plan, error))
     return false;
@@ -424,7 +425,7 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   // meaningless — the study runs and reports zero stress everywhere, which
   // looks like an answer. Self-weight is a real number derived from what the
   // load acts on: "this part's own weight" is a scale a user can reason about
-  // and edit (docs/ui/u10-defaults-and-refusals.md).
+  // and edit (docs/ui/tool-sessions.md#defaults-and-refusals).
   // The part's own weight — or, on an assembly, the MESHED occurrence's.
   std::vector<Body> placed;
   const std::vector<Body>* bodies = nullptr;

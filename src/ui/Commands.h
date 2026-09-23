@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-// The executable half of a binding (docs/ui/u12-keybindings.md).
+// The executable half of a binding (docs/ui/keybindings.md).
 // keymap::Binding (core) says what a command is called, which context it
 // belongs to and which chord runs it; Command (here) says whether it can run
 // right now and what happens when it does.

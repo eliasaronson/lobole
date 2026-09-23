@@ -4,10 +4,11 @@
 
 #include <string>
 
-// The machine store, as the app sees it (docs/cam/job-document.md, round
-// two). `state.machines` mirrors `~/.config/designer/machines/*.json`: loaded
-// at startup, reloaded after every save and delete, so the panel's "is this
-// setup on one of my machines" question is answered from memory.
+// The machine store, as the app sees it
+// (docs/cam/setup.md#machine-profiles). `state.machines` mirrors
+// `~/.config/designer/machines/*.json`: loaded at startup, reloaded after every
+// save and delete, so the panel's "is this setup on one of my machines"
+// question is answered from memory.
 namespace ui {
 
 // settings::ConfigDir()/machines.

@@ -12,7 +12,7 @@ namespace ui {
 struct AppState;
 }
 
-// CAM RPC handlers (docs/cam/plan.md): setups, tools, operations, toolpath
+// CAM RPC handlers (docs/cam/README.md): setups, tools, operations, toolpath
 // generation and posting. Returns the result json if `method` is one of them,
 // std::nullopt otherwise.
 //

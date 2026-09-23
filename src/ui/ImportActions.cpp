@@ -90,8 +90,8 @@
 
 // Bringing something in from outside: a mesh or STEP file as a feature, and
 // the reference images a sketch is traced over (insert, calibrate, delete).
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, third wave -- the wave that empties it). AppActions.h still
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still
 // declares everything, so no caller changed.
 
 namespace ui {
@@ -100,7 +100,7 @@ namespace ui {
 // to `sk`, and stash the raw bytes in the document asset store. Returns the new
 // image id, or 0 on read failure. The pixel bytes live on the Document (not the
 // feature) so they survive undo/redo; see
-// docs/sketching/reference-image-plan.md.
+// docs/sketching/README.md#reference-images-underlays.
 static uint32_t AppendReferenceImage(AppState& state, SketchFeature* sk,
                                      const std::string& path) {
   std::ifstream in(path, std::ios::binary);

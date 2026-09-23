@@ -11,10 +11,11 @@
 #include <set>
 #include <vector>
 
-// The traced still's outlines (docs/rendering/still-quality-plan.md). They
-// were a binary 1 px staircase above ~2 Mpx, because the G-buffer they come
-// from was traced whole and so could only afford 1x1 there. It is now 4x4 and
-// traced in strips; these pin what that has to deliver.
+// The traced still's outlines
+// (docs/rendering/still-render.md#outlines-on-a-traced-still). They were a
+// binary 1 px staircase above ~2 Mpx, because the G-buffer they come from was
+// traced whole and so could only afford 1x1 there. It is now 4x4 and traced in
+// strips; these pin what that has to deliver.
 
 namespace {
 

@@ -4,7 +4,7 @@
 // The machine profile and the posted file: travel limits, dialects,
 // feeds, and the G-code itself.
 // One of five files split from test_cam.cpp
-// (docs/architecture-review-2026-09-06.md, stage 1).
+// (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
 
@@ -104,7 +104,7 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   CHECK(lcnc.find("M2") != std::string::npos);
   CHECK(lcnc.find("M0 (change tool") == std::string::npos);
 
-  // GRBL (docs/cam/router-round.md, R1): no M6 -- GRBL ignores it unless
+  // GRBL (docs/cam/post.md#dialects): no M6 -- GRBL ignores it unless
   // built for it, and an inline "M6 T2" runs on into the next cut with the
   // wrong tool -- so the change is M5, a message naming the tool, M0 (a feed
   // hold every GRBL honours), then the spindle again. No G43 either. The
@@ -161,7 +161,7 @@ TEST_CASE("cam: the spindle is restated after a manual tool change", "[cam]") {
   // Two tools at the same rpm: the S/M3 was emitted only when the SPEED
   // changed, so the file paused for a manual tool change — which is done with
   // the spindle stopped — and the next line was a cutting move. Found by
-  // reading the coupon's own file (docs/cam/dogfood-round.md).
+  // reading the coupon's own file (docs/cam/post.md#what-the-file-says).
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
   cam::Tool second = setup.tools.front();
@@ -336,7 +336,7 @@ TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
 }
 
 // ---------------------------------------------------------------------------
-// The machine profile (docs/cam/job-document.md, round two; format v77).
+// The machine profile (docs/cam/setup.md#machine-profiles; format v77).
 
 TEST_CASE("cam machine: JSON round-trips, and an unknown post is refused",
           "[cam][machine]") {

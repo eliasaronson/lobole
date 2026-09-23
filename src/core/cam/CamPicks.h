@@ -22,7 +22,8 @@
 // declarations has to change to keep seeing them.
 namespace cam {
 
-// --- picking a face, and what it implies (docs/cam/gui.md G2) -------------
+// --- picking a face, and what it implies
+// (docs/cam/operations.md#derivation--what-a-click-means) ---
 
 // A planar horizontal face of the model, as the region it bounds: the outer
 // wire plus any inner wires (islands standing in a pocket). This is what a
@@ -86,7 +87,7 @@ struct WallContour {
 // feature opens part-way down: a bore that opens onto a side face notches the
 // section at its own height and nowhere else, and a profile that follows that
 // notch cuts the bore's own depth plus the solid above and below it
-// (docs/known-bugs.md, the front_wall gouge).
+// (docs/cam/operations.md#profile, the front_wall gouge).
 //
 // Accumulated from `topZ` DOWNWARD, which is why it is a walk rather than a
 // function of z. `topZ` and not the stock top: an operation's top is the
@@ -101,11 +102,12 @@ struct WallContour {
 ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
                   const std::vector<double>& passes, double deflection = 0.02);
 
-// --- projected outlines off the frame (docs/ui/long-operations.md) --------
+// --- projected outlines off the frame
+// (docs/ui/long-operations.md#cam-toolpath-passes)
 //
 // The expensive half of a profile: one OCC section per depth pass, which on
 // a 300 mm helically fluted pin is seconds EACH and froze the frame for two
-// minutes (docs/cam/add-operation-plan.md). Deferred at this call rather
+// minutes (docs/cam/README.md#background-work). Deferred at this call rather
 // than around the whole operation because the call is a pure function of
 // the geometry and three plain values -- so its key hashes every argument
 // and is complete by construction, where a key around `GenerateProfile`
@@ -150,7 +152,8 @@ private:
 };
 
 // What a click on a face of ANY orientation means for a finishing pass: the
-// region to stay inside, as its SILHOUETTE in XY (docs/cam/surfacing.md).
+// region to stay inside, as its SILHOUETTE in XY
+// (docs/cam/operations.md#3-axis-surfacing).
 //
 // The two picks above both refuse curvature on purpose -- one wants a level
 // face, the other a dead-vertical one -- and between them they cover the 2.5D

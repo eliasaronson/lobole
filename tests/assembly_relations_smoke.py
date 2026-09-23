@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Relations over the RPC, headless: a gear pair whose ratio is DERIVED from
 tooth counts, driven from either side; a rack; the refusals in words.
-(docs/assemblies/relations-plan.md)
+(docs/assemblies/relations.md)
 """
 import math
 import os
@@ -239,7 +239,7 @@ def main():
                 lift=[[0, 0], [400, 5]])
         refused(d, "add_relation", "rise > 0", type="cam", a=a, b=cyl, rise=0)
 
-        # ---- freewheel (v104, docs/freewheel-plan.md) ---------------------
+        # ---- freewheel (v104, docs/assemblies/relations.md#freewheel) ---------------------
         for r in d.call("list_relations")["relations"]:
             d.call("remove_relation", id=r["id"])
         d.call("set_mate", id=a, rotation=0.0)

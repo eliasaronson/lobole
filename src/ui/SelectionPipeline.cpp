@@ -899,7 +899,7 @@ void AppendCalibrationMarkers(AppState& state, std::vector<PrimVertex>& out) {
 
 // ---------------------------------------------------------------------------
 // What is selected, from AppActions.cpp
-// (docs/architecture-review-2026-09-06.md, stage 3, third wave). This file
+// (docs/architecture.md#the-ui-actions-layer). This file
 // already turned a click into a SelectionItem; these are the questions the rest
 // of the app asks about the result, and the pruning that keeps it honest when
 // the document changes underneath it.

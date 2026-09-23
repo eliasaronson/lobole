@@ -1,4 +1,4 @@
-// Relations: gear, rack, screw, linear (docs/assemblies/relations-plan.md).
+// Relations: gear, rack, screw, linear (docs/assemblies/relations.md).
 //
 // A relation couples two mates' degrees of freedom, dofB = ratio * dofA +
 // phase. In a mate tree it is enforced by propagation before the closed-form
@@ -511,7 +511,7 @@ TEST_CASE("Relations round-trip through the file, and the v83 golden loads",
   CHECK_THAT((*g)->FindMateById(5)->rotation, WithinAbs(-0.5 / 3.0, 1e-5));
 }
 
-// --- chain and cam (v88, docs/agent-scale-plan.md G4) -----------------------
+// --- chain and cam (v88, docs/assemblies/relations.md#kinds) -----------------
 
 TEST_CASE("A chain keeps the sign a gear reverses", "[assembly][relations]") {
   Train t = MakeTrain();
@@ -837,8 +837,8 @@ TEST_CASE("A turning cam round-trips, and the v102 golden drives",
              WithinAbs(float(angles::ToRadians(10.0)), 1e-5f));
 }
 
-// A freewheel on the two-axle train (docs/freewheel-plan.md). Drives the
-// named axle and propagates from it, as set_mate does.
+// A freewheel on the two-axle train (docs/assemblies/relations.md#freewheel).
+// Drives the named axle and propagates from it, as set_mate does.
 struct Freewheel {
   Train t = MakeTrain();
   explicit Freewheel(int drives) {
@@ -911,11 +911,11 @@ TEST_CASE("A freewheel that drives negative mirrors all four",
 
 TEST_CASE("Two freewheels drive one output: a reverser winds both ways",
           "[assembly][relations][freewheel]") {
-  // The watch's reverser (docs/reverser-plan.md): the rotor drives wheel A,
-  // wheel A drives wheel B the other way, each wheel reaches its pinion
-  // through a one-way clutch, and both pinions mesh the ratchet. Whichever
-  // way the rotor turns, one path drives and the other slips — and the
-  // slipping one is reached with BOTH its ends already settled.
+  // The watch's reverser (docs/assemblies/relations.md#freewheel): the rotor
+  // drives wheel A, wheel A drives wheel B the other way, each wheel reaches
+  // its pinion through a one-way clutch, and both pinions mesh the ratchet.
+  // Whichever way the rotor turns, one path drives and the other slips — and
+  // the slipping one is reached with BOTH its ends already settled.
   AssemblyDocument d;
   const uint64_t carrier = d.AddOccurrence([] {
     Occurrence o;
@@ -1042,7 +1042,8 @@ TEST_CASE("A freewheel whose output is driven BEHIND its line says so",
 
 TEST_CASE("A click lets one DOF travel its way and holds it the other",
           "[assembly][relations][click]") {
-  // A pawl on a watch's ratchet (docs/click-and-breguet-plan.md): ONE mate's
+  // A pawl on a watch's ratchet
+  // (generators/watch/README.md#keyless-works-and-winding): ONE mate's
   // rotation, free the way it drives and held at its mark the other way.
   Train t = MakeTrain();
   Relation click;

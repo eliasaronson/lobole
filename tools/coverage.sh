@@ -14,7 +14,7 @@
 # Reading the output: a 0%-covered FUNCTION in src/core is the interesting
 # signal. Low percentages in src/render or src/ui are expected — those need a
 # GPU and are verified by the GUI suite and screenshots instead (see
-# docs/architecture-review-2026-08-24.md).
+# docs/architecture.md#tests).
 #
 # Usage:
 #   tools/coverage.sh [builddir]      # default: build-coverage/

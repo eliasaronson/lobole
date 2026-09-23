@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// Tube manufacturability as a query (docs/tube/plan.md, T1).
+// Tube manufacturability as a query (docs/tube/README.md#checks).
 //
 // Every one of these is valid geometry and comes back from the bender as a
 // question: a former tighter than the wall can take, a radius nobody owns a

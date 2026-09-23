@@ -13,7 +13,7 @@ namespace ui {
 struct AppState;
 
 // A STEP import running off the UI thread, plus the sliced materialization
-// that follows it (interchange I2, docs/interchange/import-plan.md).
+// that follows it (docs/interchange/README.md#importing-an-assembly).
 //
 // Importing a real assembly STEP is the app's second genuinely long-running
 // operation. A 48 MB / 299-product file froze the window for ~38 s with no

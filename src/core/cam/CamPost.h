@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// Posting toolpaths to a machine dialect (docs/cam/plan.md).
+// Posting toolpaths to a machine dialect (docs/cam/post.md).
 //
 // A post is small — FreeCAD's are 150 (Mach3) to 481 (LinuxCNC) lines — so
 // this is a narrow interface with one implementation per machine, not a
@@ -41,7 +41,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
                  const std::vector<Toolpath>& paths, const PostOptions& opts,
                  std::string& out, std::string* error = nullptr);
 
-// One program per tool (docs/cam/router-round.md, R2): `paths` in the order
+// One program per tool (docs/cam/post.md#files): `paths` in the order
 // given, grouped by consecutive tool, each group posted as a complete program
 // that starts by loading its tool. A group for a tool that appears twice in
 // the order would be two files with one name, so the caller passes paths in

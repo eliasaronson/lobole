@@ -1,7 +1,7 @@
-// Workholding (docs/cam/workholding-plan.md): fixtures the verifier can see.
-// Every case posts a real program -- written by hand where the point is a
-// move no strategy would emit -- and reads the verdict, so what is asserted is
-// what an operator would be told.
+// Workholding (docs/cam/setup.md#workholding-fixtures): fixtures the verifier
+// can see. Every case posts a real program -- written by hand where the point
+// is a move no strategy would emit -- and reads the verdict, so what is
+// asserted is what an operator would be told.
 
 #ifdef HAVE_CAM
 
@@ -290,7 +290,7 @@ Placed PlaceClamp(const std::vector<Body>& model, const glm::dvec3& pos,
 
 TEST_CASE("cam workholding: a clamp rests on the stock by its face",
           "[cam][workholding]") {
-  // docs/cam/fixture-seat-plan.md. PlaceFixture's "top" rests the clamp's
+  // docs/cam/setup.md#seats. PlaceFixture's "top" rests the clamp's
   // BOUNDING BOX on the stock -- the bottom of its stud -- with the nose in
   // the air. A seat rests the named FACE there, reaching in over one edge.
   Bench b;
@@ -377,7 +377,7 @@ TEST_CASE("cam workholding: a clamp rests on the stock by its face",
 
 TEST_CASE("cam workholding: the seat is read back from where it was put",
           "[cam][workholding]") {
-  // docs/cam/fixture-gizmo-plan.md: a clamp dragged onto the stock rests
+  // docs/cam/gui.md#gizmos: a clamp dragged onto the stock rests
   // there, so a seat is READ from a pose -- and must solve straight back to
   // it, or a clamp put down would jump when the next sync re-solves it.
   Bench b;

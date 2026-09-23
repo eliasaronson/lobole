@@ -12,10 +12,10 @@
 #include <nlohmann/json.hpp>
 
 // Opening a project is a read that touches no AppState and an adopt that swaps
-// it in (docs/ui/project-open-progress-plan.md). The read loads the project's
-// parts side by side, so what it produces must not depend on how many threads
-// did it -- the same rule tests/sweep_parallel_smoke.py holds the clash sweep
-// to, because a race in a rebuild corrupts an ANSWER before it crashes.
+// it in (docs/ui/long-operations.md#opening-a-project). The read loads the
+// project's parts side by side, so what it produces must not depend on how many
+// threads did it -- the same rule tests/sweep_parallel_smoke.py holds the clash
+// sweep to, because a race in a rebuild corrupts an ANSWER before it crashes.
 
 namespace fs = std::filesystem;
 

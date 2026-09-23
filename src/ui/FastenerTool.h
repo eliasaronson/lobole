@@ -3,7 +3,7 @@
 #include "ui/AppState.h"
 
 // The fastener session: place a standard part by clicking a hole's rim
-// (docs/parts/gui-plan.md).
+// (docs/parts/README.md).
 //
 // The panel side of standard parts is the BOM — what ended up in the model.
 // This is the way in, and it is deliberately not a form. F1 established that
@@ -29,7 +29,7 @@ void ArmFastenerRim(AppState& state);
 
 // Arm the OPTIONAL second pick: where the joint ends. One pick derives; a
 // second overrides the far end, for an axis that carries on past the joint
-// into material the fastener was never meant to span (docs/parts/plan.md).
+// into material the fastener was never meant to span (docs/parts/README.md).
 void ArmFastenerFarEnd(AppState& state);
 
 // Routed from SlotPickClicked for kFastenerToolSlot — for BOTH of the tool's

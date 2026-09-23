@@ -83,11 +83,11 @@ using nlohmann::json;
 // the routing to the nine domain modules that own everything else.
 //
 // A method's name is a key into four separate string sets, none of them next
-// to its handler -- docs/architecture-review-2026-09-06.md section 4.
+// to its handler -- docs/architecture.md#the-remote-json-rpc.
 // Collapsing those into MethodDoc columns is the next stage; this one only
 // gets the code out of a 2,947-line file.
-// Split out of RemoteServer.cpp (docs/architecture-review-2026-09-06.md,
-// stage 8a). RemoteServer.h is unchanged: these are the same class's members,
+// Split out of RemoteServer.cpp (docs/architecture.md#the-remote-json-rpc).
+// RemoteServer.h is unchanged: these are the same class's members,
 // defined across three translation units instead of one.
 
 // RemoteHelpers.h already has this one. Defining a second, non-inline copy at
@@ -375,7 +375,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
      "*", remote::NotInBatch},
     {"get_keymap",
-     "The keyboard bindings (docs/ui/u12-keybindings.md): every command with "
+     "The keyboard bindings (docs/ui/keybindings.md): every command with "
      "its context, label, current chord and default, plus any conflicts. "
      "{context: \"sketch\"} narrows it. A context binding SHADOWS a global "
      "one with the same chord — that is how N is Coincident while sketching "
@@ -487,7 +487,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
 // compared them. Building it found three names that were in those lists for
 // methods that DO NOT EXIST (export_mesh, move_feature, rename_feature): dead
 // entries a list apart from its handlers accumulates in silence.
-// docs/architecture-review-2026-09-06.md, section 4.
+// docs/architecture.md#the-remote-json-rpc.
 const remote::MethodDoc* FindMethod(const std::string& m) {
   static const std::map<std::string, const remote::MethodDoc*> byName = [] {
     std::map<std::string, const remote::MethodDoc*> out;
@@ -575,7 +575,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
   if (m == "batch") {
     // One transaction, one regeneration, one undo step
-    // (docs/agent-scale-plan.md, G1a). The gripper dogfood spent 86 calls on
+    // (docs/scripting/rpc.md#batch). The gripper dogfood spent 86 calls on
     // two parts and an assembly, each paying a full regeneration of a
     // 200-body part; adding the features and regenerating once is the same
     // document for a fraction of the work (Document::BulkEdit's own
@@ -1209,7 +1209,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              // can reproduce the projection and check its own framing.
              // Without them the block said where the camera is and not what
              // it sees, and a script could not tell a fitted view from a
-             // cropped one (docs/rendering/still-framing-plan.md).
+             // cropped one (docs/rendering/still-render.md#framing).
              {{"position", Vec3ToJson(state.camera->GetPosition())},
               {"target", Vec3ToJson(state.camera->GetTarget())},
               {"distance", state.camera->GetDistance()},
@@ -1261,10 +1261,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                "the viewport draws)");
     if (mode == "quick") {
       // What the viewport rasterizes, at this size
-      // (docs/rendering/quick-render-plan.md). The path tracer's parameters
-      // mean nothing here, and are refused rather than dropped: a caller
-      // asking for 4096 samples of a raster image has the wrong idea about
-      // what came back.
+      // (docs/rendering/still-render.md#quick-mode). The path tracer's
+      // parameters mean nothing here, and are refused rather than dropped: a
+      // caller asking for 4096 samples of a raster image has the wrong idea
+      // about what came back.
       for (const char* k :
            {"samples", "seed", "ground", "backdrop", "outlines"})
         if (p.contains(k))
@@ -1335,7 +1335,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // is the only way a script can frame correctly, because the still
     // projects at width/height while `fit_view` alone solves for the
     // viewport, which offscreen is whatever the framebuffer happens to be
-    // (docs/rendering/still-framing-plan.md).
+    // (docs/rendering/still-render.md#framing).
     if (p.value("fit", false))
       ui::FitCameraToDocument(state, height > 0 ? static_cast<float>(width) /
                                                       static_cast<float>(height)
@@ -1432,7 +1432,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // handle uses. Without it "which tab is in front?" needed the index and
     // the list to be cross-referenced by hand, and a client caching the
     // active tab had no way to check itself
-    // (docs/dogfood-friction-plan.md, papercuts).
+    // (generators/README.md#single-cylinder-and-air-cooled-engines).
     json out = {{"parts", arr},
                 {"active", state.activePart},
                 {"active_id",
@@ -1494,7 +1494,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "fit_view") {
     // The aspect of the PICTURE being framed, when that is not the viewport.
     // A `render_still` projects at the size it was asked for, so a fit solved
-    // for the viewport crops it (docs/rendering/still-framing-plan.md).
+    // for the viewport crops it (docs/rendering/still-render.md#framing).
     // Both or neither: a width without a height is an aspect nobody stated,
     // and applying half of it silently frames for the wrong picture.
     const bool hasW = p.contains("width"), hasH = p.contains("height");
@@ -1531,7 +1531,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   if (m == "frame_stats") {
     // The door that matters for agents and CI: a HUD nobody is looking at
-    // proves nothing (docs/rendering/frame-timing.md).
+    // proves nothing
+    // (docs/rendering/frame-pacing.md#the-frame-time-instrument).
     if (p.contains("hud"))
       state.perfHudOpen = p.at("hud").get<bool>();
     // Start a fresh measurement window and say so, rather than returning an
@@ -1554,12 +1555,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // would read as "infinitely fast" to anything that plots it. What IS
       // measured is the part nothing else can measure honestly: with no
       // swapchain there is no image to wait for, so `main` is shading and not
-      // the display stalling inside it (docs/rendering/
-      // offscreen-gpu-timing-plan.md). Each capture is one sample.
-      // {renders: N} measures N renders taken back to back, saving nothing:
-      // the PNG encode between captures is what leaves the GPU idle long
-      // enough for a laptop to drop its clocks, so a burst measures the card
-      // as it runs in a real frame loop rather than at its idle floor.
+      // the display stalling inside it
+      // (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen). Each
+      // capture is one sample. {renders: N} measures N renders taken back to
+      // back, saving nothing: the PNG encode between captures is what leaves
+      // the GPU idle long enough for a laptop to drop its clocks, so a burst
+      // measures the card as it runs in a real frame loop rather than at its
+      // idle floor.
       if (p.contains("renders")) {
         const long want = p.at("renders").get<long>();
         if (want <= 0 || want > 10000)
@@ -1626,9 +1628,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"phases_ms", phases},
             {"cpu_ms", fs.avgMs - display},
             {"display_ms", display},
-            // Iterations the idle throttle paced (docs/rendering/
-            // idle-throttle.md): a low fps with a high idle share is the
-            // app resting, not the app slow.
+            // Iterations the idle throttle paced
+            // (docs/rendering/frame-pacing.md#idle-throttle): a low fps with a
+            // high idle share is the app resting, not the app slow.
             {"idle_frames", fs.idleFrames},
             // Who last held/restored full rate, and how long ago — "idle 0%
             // while hands-off" is undiagnosable without the waker's name.

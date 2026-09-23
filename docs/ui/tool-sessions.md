@@ -1,0 +1,245 @@
+# Tool sessions
+
+Every tool that collects picks and parameters — a feature being created or
+edited, measure, section, a mate, a drawing dimension, a sketch operation,
+the CAM verbs — runs as a session in **one floating tool window**, driven by
+declarative pick slots and the one selection pipeline
+([selection.md](selection.md)).
+
+## The preview flow
+
+A creation tool is a `Create*` action (`src/ui/CreateActions.cpp`) ending in
+one `BeginPreviewFeature(state, feature)` call (`src/ui/PreviewFeature.cpp`),
+which:
+
+1. adds the feature straight to the Document (not through a command), so it
+   regenerates, renders and is pickable while the user decides;
+2. `SeedSlotsFromSelection` — select-first: whatever was already selected
+   fills the tool's slots, greedily in slot order, oldest pick first;
+3. `SelectFeature` on the new feature;
+4. `ArmNextUnfilledSlot` — the first unfilled **required** slot arms for the
+   next viewport click (nothing arms when the seed satisfied everything, so
+   Enter commits).
+
+While previewing, parameter edits mutate the feature and regenerate with no
+undo entry. `AcceptPendingFeature` removes it and re-adds it through an
+`AddFeatureCommand` (id preserved), so accept is one undo step.
+`CancelPendingFeature` removes it. A pending preview lives in the document
+outside the undo stack, so every tab switch cancels it before stashing the
+active document (`CancelPendingFeature` before `StashActive`,
+`preview/tab_switch_discards_pending`).
+
+A committed feature is edited by double-clicking its tree row (or the
+context menu's Edit): `OpenFeatureEditor` opens the same widgets in the tool
+window with `commit=true`, and each edit is an undoable modify. There is no
+docked Properties panel; editing is an explicit session.
+
+## Pick slots
+
+`PickSlot` (`src/ui/FeatureEditor.h`) enumerates every slot any tool has —
+extrude end face, boolean target and tool, blend edges, shell open faces,
+split knife, the CAM picks, fastener rims, sheet-metal edges, mate
+connectors. It is **append-only**: tests address slot rows as
+`###slot<enum value>`. `SlotSpecsFor(feature)` returns the tool's slots as
+`SlotSpec {slot, label, kinds, multi, prompt, required}`; `SlotFilled` and
+`ApplySlotItem` complete the set. The three switches have no `default:`, so a
+new enumerator is a `-Wswitch` build break, and that break is the per-tool
+checklist.
+
+The armed slot is `AppState::slotPick` (`SlotPickState`: feature, slot,
+kinds, multi, prompt, and `miss` — why the last click did not land, shown
+under the slot rows). Exactly one slot is armed. A single slot auto-advances
+to the next unfilled required slot after a pick; a multi slot stays armed and
+toggles items until another row is clicked, Enter accepts, or Escape
+disarms. Every slot row is editable — per-item remove, click to re-pick — so a
+wrong seed is a one-click fix. The feature tree fills an armed pick too: body
+rows fill a Body slot, plane rows a plane pick.
+
+Conditional slots appear only in the mode that uses them (the extrude end
+face for Up-to-face, the split knife face for Face-knife mode).
+
+A slot armed by something that is not a feature — a mate, section, a CAM
+verb, the fastener tool — carries a sentinel in `slotPick.featureId`, and
+`kToolSessions` (`FeatureEditor.cpp`) says, for each sentinel, whether the
+session is still alive (checked every frame, so a dead session disarms) and
+who consumes a pick. Adding such a session is one row there;
+`test_conventions.cpp` checks every `k*Slot` sentinel appears.
+
+## The tool window
+
+`BeginToolWindowFrame(state, title)` opens `"<Title>###ToolWindow"` through
+the shared floating-window helper (`ui::BeginFloatingWindow`,
+[panels.md](panels.md#floating-windows)): anchored top-right of the 3D
+viewport, re-anchored when the viewport moves, clamped inside the app, with a
+border and drawn shadow. **Never bottom-centre** — a window there covers the
+clicks the viewport receives. The id is the same for every tool, so tests
+address rows as `//<Title>###ToolWindow/###slotN`; a ref that looks specific
+(`//Hole###ToolWindow`) drives whichever session is actually open.
+
+Only one session draws at a time. `DrawToolWindow` takes, in order: a sketch
+session (or plane pick), a mate session, a drawing dimension, the drawing's
+Add view, then a feature preview; with none of those it shows the committed-
+feature editor, or measure, section, the CAM verbs, the fastener tool, an
+assembly editor, exploded views, motion, or simulation.
+
+For a feature preview the window shows the slot rows and parameters, then:
+
+- the pending feature's own **error** in red, with **Accept disabled**
+  (button and Enter) — unless the failure only happened because an earlier
+  feature failed, which is not this dialog's fault;
+- "**Pick <slot> to continue**" and Accept disabled while a required slot is
+  empty. `Feature::WhyIncomplete()` names a missing input (distinct from
+  `GetError()`, a regeneration failure) and is enforced by
+  `AcceptPendingFeature` and by the `add_feature` RPC, so a script is refused
+  exactly what the GUI refuses;
+- "**Changes nothing - the model would be identical without this feature**"
+  in amber, with **Accept left enabled**. It compares
+  `CachedBodiesAfter(idx - 1)` with `CachedBodiesAfter(idx)` (a comparison,
+  not a rebuild); features that never touch bodies are exempt. It warns
+  rather than blocks because a no-op is sometimes right — Refine on an
+  already-clean body, a draft about to be given an angle — and blocking would
+  make correct tools feel broken. The silence was the bug, not the
+  permissiveness.
+
+Accept and Cancel are `###tw_accept` / `###tw_cancel`, Accept in the accent
+colour (Cancel is not destructive, so it is not red). A window that applies
+as you go (measure, section, the fastener tool, the editors) has **Close**
+instead.
+
+## Defaults and refusals
+
+**A default carrying a unit — a length, an angle, a scale, a position — is
+derived from what it acts on (the bore, the body's bounding box, the sheet,
+the document's reach), never a literal.** A literal is correct in the
+abstract and wrong against any real part: a countersink four times the bore,
+a 2 mm part drawn as a dot on A4, every inserted occurrence buried in the
+first, a revolve axis not in the sketch plane, a split plane through the
+origin that misses the body. Examples in the code:
+
+- `CreateSplit` puts the knife mid-body along the plane's normal, and
+  re-centres it whenever the plane changes (`RecenterSplitOffset`).
+- The revolve axis defaults to a world axis lying in the sketch plane.
+- Sweep's profile is the latest *closed* sketch and its path the latest open
+  chain or curve that is not that profile.
+- Switching a Hole's type sizes the counterbore/countersink from the bore
+  unless the user already set those numbers.
+- The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
+  span clear of the ones already taken, with a gap scaled to the item; the
+  occurrence insert and drawing-view placement use it.
+- A simulation force defaults to the negated outward normal of the face it is
+  placed on and a magnitude from the part's own weight.
+- Reference geometry is sized from the document's reach
+  ([README.md](README.md#viewport)).
+
+The companion rule is **refuse visibly**: a tool that cannot do anything with
+its inputs says so where the user is looking, rather than committing a no-op
+or failing silently.
+
+**The `defaults/*` GUI gate** enforces both for creation tools. `kToolCases`
+(`src/app/guitests/GuiTestsCommon.cpp`) lists every creation tool by its
+`###tb_*` id with what it needs set up first, and registers one test per
+tool, so a failure names the tool. With the tool's own defaults and no picks,
+exactly one of these must hold:
+
+- `Expect::Changes` — Accept is **offered** (the button, not only the
+  outcome: a tool that opens already failing is the same bug one step
+  earlier), and accepting changes the document (`FingerprintOf`: body count,
+  per-body volumes, feature count) with no error on the new feature;
+- `Expect::RefusesUntilPicked` — Accept is disabled and the window says what
+  is missing;
+- `Expect::ArmsAPick` — not a preview at all; the tool asks for a face or a
+  plane first (Hole, New Sketch);
+- `Expect::HarmlessNoOp` — accepts cleanly and legitimately changes nothing.
+
+"Enabled button, accepts, changes nothing" is the failure it exists to catch.
+`defaults/no_op_warns_without_blocking` pins the amber warning.
+
+## The Hole tool
+
+A sketch session and a feature preview cannot coexist (the sketch session has
+priority in the tool window), so Hole is staged:
+
+```
+[idle] --tb_hole----------------------------> A: face pick
+       --tb_hole + planar face selected-----> B            (A skipped)
+A --click planar face--> B      (a point sketch on that face)
+A --click curved face--> A      (stays armed: "that face is curved - pick a flat one")
+B --click--> B                  (Point tool places centres)
+B --Enter / check / Shift+H--> C (BeginSketchHole; refuses with no points)
+B --Esc--> [idle]               (CancelHoleSession, tiered)
+C --Accept--> committed         (one undo step)
+```
+
+- `SketchPurpose` (`Freeform` / `Hole`) is a **parameter** of
+  `BeginSketchOn{Plane,Datum,Face}`, applied after `BeginSketch` resets
+  `SketchEditState`, because a flag set before the call would be wiped. Being
+  inside `SketchEditState` means every existing reset (tab switch, undo of
+  the sketch, File > New) ends the Hole session with no extra bookkeeping.
+- **The face must be genuinely planar.** `BeginHoleSketchOnFace` gates on
+  `CADShape::FacePlane`, the B-Rep answer; the tessellation's averaged normal
+  would happily build a tangent plane on a cylinder.
+- **Cancel is tiered.** Escape discards the sketch the tool made only when
+  `HasUserGeometry(sketch)` is false (it ignores entities projected from the
+  face); anything the user drew is kept. The discard is a
+  `RemoveFeatureCommand`, so Ctrl+Z brings it back.
+- `###tb_sk_hole` (Shift+H in a sketch) drills an existing point sketch and
+  does not set the purpose, which is what makes `purpose == Hole` proof that
+  the session created its own sketch.
+
+Hole matters as a feature rather than an extruded cut: its tool solid is
+built from primitives, so counterbore and countersink are expressible, and it
+stamps its id into every element it creates, which drawing hole callouts
+read.
+
+## Sketch sessions
+
+The sketcher's tool sessions use the same tool window: Mirror, Sketch Fillet,
+Sketch Pattern, Offset, Linked Copy, Reference Image, Calibrate Image,
+Dimension and the Hole's point sketch. Select and the drawing tools need no
+window; the prompt pill is enough. There is no Sketch panel: its toggles
+(auto-constrain, constraint glyphs) are on the sketch toolbar, Extrude,
+Revolve and the finish check mark (`###tb_sk_finish`) are on the sketch
+toolbar, and two sections sit at the bottom of the Model panel while a sketch
+is edited (`DrawSketchModelSections`): **Operations** (reference images,
+patterns and linked copies as rows; a double-click opens the operation's edit
+session) and **Constraints**.
+
+Three families of sketch tools share one interaction grammar:
+
+- **collect** tools (Mirror, Pattern, Offset): click toggles, drag
+  box-selects, a tap in empty space or Enter continues;
+- **act-per-click** tools (Fillet, Trim): each click acts; a tap in empty
+  space or Enter finishes;
+- **draw** tools chain until Escape.
+
+Applying returns to Select. A preselected sole construction line is the
+mirror axis, whether Mirror is armed from the toolbar or the keyboard (both go
+through `SetSketchTool`).
+
+**Select-profile-first.** `BeginSketchExtrude` / `BeginSketchRevolve` seed
+the Profiles slot from the sketch selection: loops containing any selected
+entity become the feature's `regions` (nothing selected = the whole sketch).
+Extrude and Revolve are also on the model toolbar for a finished sketch; they
+take the selected sketch, else the newest with a closed profile.
+
+One prompt-pill renderer serves both the sketch (DOF status, the staged step
+prompt, action messages) and model space (the armed prompt). An **empty**
+sketch reports no DOF status at all (`dof = -1`), rather than "Fully
+defined": zero degrees of freedom is arithmetically true of an empty system,
+but the pill answers "am I done constraining?".
+
+The sketch's own entity selection stays in `SketchEditState`
+([selection.md](selection.md#one-selection-set)).
+
+## Tests
+
+- `defaults/*` (one per creation tool), `defaults/no_op_warns_without_blocking`.
+- `hole/face_pick_to_accept`, `hole/preselected_face_skips_pick`, and the
+  other `hole/*` cases (Enter opens the params without accepting, the tiered
+  Escape and its undo, curved-face refusal, drilling existing points).
+- `shell/open_face_pick_hollows_the_box` (error line and disabled Accept),
+  `draft/face_pick_names_the_body`, `split/default_plane_cuts_the_body_in_two`,
+  `split/switching_the_plane_re_centers_the_knife`,
+  `refine/merges_the_seam_left_by_a_union`,
+  `sketch/model_toolbar_extrudes_finished`, `preview/tab_switch_discards_pending`.
+- `tests/test_actions.cpp`: an empty sketch reports no DOF status.

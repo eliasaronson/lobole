@@ -1,6 +1,6 @@
-// Derived (A2, docs/modeling/derived-plan.md): a copy of another part's
+// Derived (docs/modeling/derived.md): a copy of another part's
 // bodies inside this part, regenerated from its snapshot and updated on
-// request. The properties pinned here are the ones the plan lists as gates:
+// request. The properties pinned here are the ones the page's Tests list:
 // the snapshot regenerates with the source ABSENT, an update replaces the
 // geometry and clears the stale flag (and undoes), the names on the copy are
 // the source's under the derived id and a sketch on a derived face survives

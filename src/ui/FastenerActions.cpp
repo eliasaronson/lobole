@@ -86,8 +86,8 @@
 // Putting a standard fastener in a hole: deriving which one from the hole it
 // is dropped on, sizing it to the stack it has to span, and mating it to
 // every interface along the way.
-// Split out of AssemblyActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 6). AssemblyActions.h still declares everything it declared.
+// Split out of AssemblyActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AssemblyActions.h still declares everything it declared.
 
 namespace ui {
 
@@ -151,7 +151,7 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
   occ.position = position;
   occ.orientation = orientation;
   // Attached to the part it bears on, so it travels with that part and cannot
-  // be dragged out of its hole on its own (docs/parts/f1-loose-ends.md). The
+  // be dragged out of its hole on its own (docs/parts/README.md). The
   // offset is whatever the two poses already imply, expressed in the parent's
   // frame — quaternion arithmetic rather than a matrix round trip, which is
   // exact for a rigid placement and needs no decomposition.
@@ -267,7 +267,7 @@ std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
 
 // Hold two parts a fastener clamps to each other: a fastened mate across the
 // interface between them, in the pose they are ALREADY in
-// (docs/parts/f1-loose-ends.md).
+// (docs/parts/README.md).
 //
 // Attaching the hardware to the parts makes the screw follow its plate. It
 // does not make the plates follow each other, so before this a bolted joint
@@ -412,7 +412,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // free. Worth the two lines: this loop runs over every leaf in the
     // assembly (302 on the OM615) and describes each one's geometry, which
     // was HALF of a fit's time; a bolt's rim lives on one part
-    // (docs/performance/axis-stack.md).
+    // (docs/parts/README.md#fitting-a-fastener-what-the-axis-crosses).
     const auto& instBodies = inst.part->GetBodies();
     if (std::none_of(instBodies.begin(), instBodies.end(), [&](const Body& b) {
           return b.createdBy == rim.element.featureId;
@@ -483,7 +483,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // clearance table only guesses at it — a guess the dock round showed is
   // weak, since 48% of whole millimetres from 1 to 160 are some size's
   // clearance and a Ø32 ladder rung reads as an M30
-  // (docs/modeling/hole-standards.md).
+  // (docs/modeling/holes-and-threads.md#hole).
   std::string why;
   const HoleFeature* drilled =
       drawing::FindHoleForRef(*chosen->inst->part, rim.element.name, radius);
@@ -529,7 +529,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // countersunk hole and the rim picked has to be the COUNTERSINK's, not the
   // bore's. This was a blanket refusal until holes could describe themselves;
   // the three questions below are the ones that refusal was standing in for
-  // (docs/parts/f1-loose-ends.md).
+  // (docs/parts/README.md).
   if (screwProfile->lengthOverHead) {
     if (drilled == nullptr || drilled->kind != HoleKind::Countersink)
       return fail(screwProfile->designation +
@@ -664,9 +664,10 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
       placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
   // Where the joint ends, from the same helper `check_fasteners` uses, so the
-  // two cannot drift apart (docs/agent-scale-followup-plan.md, W1) — thread
-  // bound included, or the two would disagree about a tapped boss the moment
-  // the check re-derived it.
+  // two cannot drift apart
+  // (docs/parts/README.md#deriving-a-fastener-from-a-hole) — thread bound
+  // included, or the two would disagree about a tapped boss the moment the
+  // check re-derived it.
   const double threadEnds = parts::ThreadEndAlong(placed, glm::dvec3(centre),
                                                   glm::dvec3(-axis), fit.size);
   const parts::JointExtent extent =
@@ -754,8 +755,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // is the end of a SOLID — a boss, a pin, a shaft — whose end cap has a
     // circular edge like any bore does.
     //
-    // Found by dogfooding the dock (docs/dogfooding.md): every circular edge
-    // in a 49-part assembly was one of these, and the refusal a person got
+    // Found by dogfooding the dock
+    // (docs/parts/README.md#deriving-a-fastener-from-a-hole): every circular
+    // edge in a 49-part assembly was one of these, and the refusal a person got
     // was about plates and reaching past things, which never once said "that
     // is a solid". A circular edge is not a hole, and on a real model it
     // usually is not.
@@ -977,7 +979,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // pattern is the redundant-BUT-CONSISTENT case it exists to handle: the
   // extra mates are satisfied, add no constraint, and `solve_assembly` names
   // them in `redundant_mates` instead of erroring
-  // (docs/assemblies/a6-loop-solver-plan.md).
+  // (docs/assemblies/solver.md#closing-loops).
   {
     const auto instFor = [&](uint64_t occ) -> const assembly::FlatInstance* {
       for (const assembly::FlatInstance& inst : flat)
@@ -1023,7 +1025,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // Kept, at DEBUG: the next "why is fitting slow" is READ rather than
     // re-profiled, which is how SyncAssemblyRenderers earns its phase line.
     // Derive is the axis traversal and the rim search; place is the hardware;
-    // mates are the joint (docs/performance/axis-stack.md).
+    // mates are the joint
+    // (docs/parts/README.md#fitting-a-fastener-what-the-axis-crosses).
     LOG_DEBUG("fit_fastener phases: flatten {:.1f} ms, derive {:.1f}, place "
               "{:.1f}, mates {:.1f} (total {:.1f})",
               ms(tPhase0, tPhaseFlat), ms(tPhaseFlat, tPhasePlan),

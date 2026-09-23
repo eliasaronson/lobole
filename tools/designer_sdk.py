@@ -13,7 +13,7 @@ nothing here can drift from the server. `tests/sdk_smoke.py` fails if a
 hand-written method ever shadows a generated one.
 
 **Only what `describe` cannot express is hand-written**, which is exactly
-what the SO-101 gripper dogfood was missing (docs/agent-scale-plan.md, G0):
+what the SO-101 gripper dogfood was missing (docs/scripting/sdk.md#the-hand-written-layer):
 
 - `Face`, `Edge`, `Frame`, `Plane`, `Body` — REFERENCES. A position stays an
   object with `.center`, `.axis`, `.normal`, `.plane()`; it never becomes a
@@ -70,7 +70,7 @@ def _renamed(**renames):
     degrees in `revolve` and radians in `bolt_circle`; the new keyword names
     its unit, and the old one is refused rather than guessed at, because
     `bolt_circle(start_angle=0.5)` read as degrees is a plausible wrong part
-    (docs/sdk-units-plan.md).
+    (docs/scripting/sdk.md#angles-name-their-unit).
     """
     def wrap(fn):
         @functools.wraps(fn)
@@ -941,7 +941,7 @@ class SketchBuilder:
         The entity type always existed — `slot` emits two of them — but there
         was no way to draw one, so every rounded corner in the air-cooled
         engine is a slot or a polygon. A radius on a drawn profile is the
-        normal case (docs/dogfood-friction-plan.md, F2).
+        normal case (generators/README.md#single-cylinder-and-air-cooled-engines).
         """
         n = len(self.entities)
         self.entities.append({"type": "arc",
@@ -1061,7 +1061,7 @@ class SketchBuilder:
         (0,43) that is 90 wide spans -45..88, not 0..43 — which is how a crank
         web drawn round a pin 43 up came to reach z=85 and hit a barrel whose
         underside is at 82. `extent()` below is the cheap way to check before
-        extruding (docs/dogfood-friction-plan.md, F2).
+        extruding (generators/README.md#single-cylinder-and-air-cooled-engines).
         """
         (au, av), (bu, bv) = _uv(self, a), _uv(self, b)
         dx, dy = bu - au, bv - av
@@ -1639,7 +1639,7 @@ class Part(_Tab):
     # one is not free: it clears the selection, the hidden bodies, the measure
     # session, simulation mode and the explode state. Read a part on somebody's
     # running instance and that was their work
-    # (docs/agent-scale-followup-plan.md, W2).
+    # (docs/scripting/rpc.md#reads-name-their-part).
     def state(self):
         return self.app.get_state(part=self.id)
 
@@ -1680,7 +1680,7 @@ class Part(_Tab):
         feature is not joined to the rest THERE, whatever it may be joined to
         somewhere else — which is how four bolt bosses came to hang off a deck
         flange with every other check green
-        (docs/dogfood-friction-plan.md, F1).
+        (generators/README.md#single-cylinder-and-air-cooled-engines).
         """
         if origin is None:
             origin = (0.0, 0.0, float(z or 0.0))
@@ -1723,7 +1723,7 @@ class Part(_Tab):
                 lambda s: s.circle((0, rod_l), d=40),
             ], 28.0, name="Rod")
 
-        (docs/dogfood-friction-plan.md, F2)
+        (generators/README.md#single-cylinder-and-air-cooled-engines)
         """
         body = None
         for i, draw in enumerate(draws):
@@ -1743,7 +1743,7 @@ class Part(_Tab):
         Here because looking is what caught the defect none of the other
         checks could: four bolt bosses hanging off a deck flange, one solid
         body, clean study, bolts correctly sized, `check()` green
-        (docs/dogfood-friction-plan.md, F1).
+        (generators/README.md#single-cylinder-and-air-cooled-engines).
         """
         self.activate()
         self.app.screenshot(path=path, view=view, fit=True)
@@ -1773,7 +1773,7 @@ class Part(_Tab):
         Not get_state's, which is a cheap conservative bound — it wraps a
         swept surface by its control points, so a helical spring reads about
         sixty per cent over. That box is right for a broad phase and wrong for
-        a person (docs/dogfood-friction-plan.md).
+        a person (generators/README.md#single-cylinder-and-air-cooled-engines).
         """
         rows = self.app.mass_properties(part=self.id).get("bodies") or []
         boxes = [(V(r["bbox_min"]), V(r["bbox_max"])) for r in rows

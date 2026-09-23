@@ -5,7 +5,7 @@
 
 // The timer takes its timestamps as arguments, so the statistics can be
 // checked against a sequence with known percentiles instead of against a HUD
-// (docs/rendering/frame-timing.md).
+// (docs/rendering/frame-pacing.md#the-frame-time-instrument).
 using render::FramePhase;
 using render::FrameTimer;
 

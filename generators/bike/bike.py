@@ -11,7 +11,7 @@ alloy chainguard, full mudguards, a tubular rear carrier, north-road bars.
 Nothing about it was measured. What the photographs establish and what is
 assumed are kept apart in `bike_spec.py`, every dimension is a project
 variable, and the run refuses to save what it has not checked
-(docs/modeling/bike-plan.md).
+(generators/bike/README.md).
 
 It MOVES: the wheels turn, the bars steer, the cranks turn the rear wheel
 through a chain relation at 46/18, and a motion study drives all of it.

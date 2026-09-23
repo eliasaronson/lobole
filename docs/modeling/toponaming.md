@@ -1,176 +1,156 @@
-# Topological naming — design study & plan
+# Topological naming
 
-Persistent identification of faces/edges across regeneration: how "the face I
-sketched on" or "the edge I filleted" stays identified after an upstream edit
-adds, removes, or reorders topology. Getting this wrong is the #1 way parametric
-kernels die — FreeCAD lived with the bug for a decade before the RealThunder
-element-map work. It gates every face/edge-referencing feature
-([modeling plan](plan.md) M6): fillet/chamfer, up-to-face extrude, plane-on-face,
-shell, projected/external sketch geometry, and (later) assembly mates on faces.
+A face or edge of a body has two identities:
 
-**Strategy: design early, adopt incrementally.** The study costs reading + a
-memo; the prototype targets one feature (Extrude); adoption then spreads
-feature-by-feature. Do not block the toponaming-free modeling milestones on it.
+- its **index** — the `TopExp_Explorer` order `CADShape::GenerateMesh`,
+  picking and the element maps share. It is stable within one shape and
+  **not** across regenerations: an upstream edit that adds, removes or
+  reorders topology renumbers it.
+- its **MappedName** — a string saying *why the element exists*. This is what
+  references store, and every regeneration re-resolves it to whatever index the
+  element now has.
 
-## What we already have (the precedents)
+Every sketch on a face, fillet edge, shell face, up-to-face target, thread,
+tolerance, mate connector, drawing dimension and CAM operation stores a name.
+A document whose names change between two regenerations of the same input
+silently repoints all of them, which is worse than a geometry change;
+`tests/test_determinism.cpp` therefore compares element names, not only
+volumes, across regenerations of the golden corpus.
 
-- **Stable feature ids** — `Document` features are referenced by id via
-  `RegenContext`, never by index.
-- **Stable sketch-entity ids** (sketching Phase B) — monotonic, never reused;
-  the id-stable replay discipline from `RegenerateDerived` is the in-sketch
-  analogue of this whole problem, solved.
-- **Face mapping** — `FaceSelector` maps triangles → B-Rep faces with surface
-  normals, so "a face" is already a first-class pickable thing; it just has no
-  *persistent* name.
-- The anti-precedent: sketches **bake** their plane at creation
-  (`SketchPlane`), which is exactly the behavior toponaming replaces.
+## Data model
 
-## Reading list (before designing)
+`src/core/ElementMap.h`:
 
-- **FreeCAD RealThunder element maps** — the mapped-element-name design:
-  every subshape gets a string name composed from the generating feature +
-  OCC history ops; names propagate through the feature chain. Study the
-  design notes and `ElementMap`/`TopoShape` code in the checkout under
-  `~/Documents/CAD/FreeCAD`.
-- **OCC modification history** — `BRepBuilderAPI_MakeShape::Modified /
-  Generated / IsDeleted` (and the same API on `BRepAlgoAPI_*` booleans,
-  `BRepFilletAPI_*`): for each input subshape, which output subshapes it
-  became. This is the raw material every naming scheme is built from.
-- **SolveSpace** — entity naming via stable request handles (already studied
-  for the sketcher; the same philosophy at the 3D level).
+- `ElementMap` — per body, transient, rebuilt every regeneration, never
+  serialized: `names` (face index → name) and `edgeNames` (edge index → name).
+  Edge indices follow the deduplicated first-appearance order of
+  `TopExp::MapShapes(shape, TopAbs_EDGE)`, the order `GenerateEdgePolylines`
+  and edge picking use (a raw explorer walk visits a shared edge once per
+  adjacent face). `Resolve(name)` / `ResolveEdge(name)` return `nullopt` when
+  the name is gone.
+- `ElementRef {featureId, name}` — a persistent reference, serialized as
+  `{"feature_id": N, "element": "4/g7"}`. `featureId` is the id of the feature
+  whose **body** owns the name (the body's `createdBy`), which is not
+  necessarily the feature that made the face: a hole cut into a box leaves its
+  bore on the box's body. Resolution finds that body and looks the name up.
 
-## Candidate design (to validate in the memo)
+## Naming grammar
 
-**Element maps, seeded by our stable ids.** Each feature, during `Regenerate()`,
-labels every face/edge of its output shape with a name derived from *why that
-element exists*:
+A name is a plain readable string; nothing hashes it. A step appends and never
+rewrites the prefix, so a name records its derivation.
 
-- **Extrude**: side face ← the generating sketch entity's stable id
-  (`extrude42/side/entity17`); start/end caps ← `cap/start`, `cap/end`; side
-  edges ← the adjacent entity pair. Sketch-entity ids are stable, so these
-  names survive any sketch edit that keeps the entity.
-- **Primitives**: fixed names (`box/top`, `cylinder/side`, …).
-- **Booleans / fillets / later features**: propagate input names through OCC's
-  `Modified`/`Generated`/`IsDeleted` history — an element that survives keeps
-  its name; a new element gets a name composed from its generators; splits get
-  a disambiguating suffix.
+```
+name  := seed (';' step)* ('#' instance)?
+seed  := tag '/g' entityId       side face swept from sketch entity <entityId>
+       | tag '/cap0' | '/cap1'   extrude/revolve start and end caps
+       | tag '/cap0@g' key       caps of one profile group of a multi-profile
+                                 sketch (key = its outer loop's lowest entity id)
+       | tag '/pole' n           a revolve's degenerate pole edge at the axis
+       | tag '/seam' i           boolean section edge history did not name
+       | prefix '/face' i        a primitive, import or rebuilt shape (below)
+step  := 'M' tag ('.' i)?        modified by feature <tag>; .i when one input splits into N
+       | 'G' tag                 generated by feature <tag> (a blend face from its spine edge)
+       | 'U' i                   fallback: an unnamed edge of a named face
+       | 'L'                     fallback: a face named from its boundary edges
+```
 
-A **persistent reference** is then `ElementRef { featureId, elementName }`,
-serialized. Resolution happens each regeneration: walk the named map of the
-referenced feature's output → concrete `TopoDS` subshape.
+`tag` is the owning feature's id, so two features' elements never collide when
+bodies combine. `entityId` is the sketch's stable entity id (monotonic, never
+reused), which is what makes the names stable: moving, resizing or reordering
+sketch entities keeps the names, and adding a hole never renames a cap because
+caps are fixed sentinels. Deleting the entity removes the name.
 
-**Resolution failure is a feature, not a crash**: if a name no longer resolves
-(the generating entity was deleted), the referencing feature enters the
-per-feature **error state** (modeling plan cross-cutting: regeneration-failure
-UX) with a "reattach" repair action. An optional geometric-similarity fallback
-(nearest face by centroid + normal + area) can *suggest* a reattachment but
-must never silently guess.
+Examples: extrude 4 over line 7 gives side face `4/g7` and caps `4/cap0`,
+`4/cap1`; a fillet 5 on an edge of it gives a blend face `<edge name>;G5`;
+the same side face after cut 6 goes through it is `4/g7;M6`; the third copy of
+a pattern is `4/g7#2`, a mirror's `4/g7#m`.
 
-## Milestones
+## How each operation names its output
 
-### T1 — Design memo (no code) — **done (July 2026)**
-See **[toponaming-design.md](toponaming-design.md)**: the naming grammar
-(human-readable, no hashing), per-OCC-op propagation rules with reliability
-verdicts (extrude/revolve safe; boolean/fillet need care), the `ElementRef`
-API + resolution + serialization, failure semantics, and the three scenario
-walkthroughs. It also pins five **prerequisites** T2 depends on: thread the
-sketch-entity id onto profile edges, keep OCC makers alive (booleans currently
-discard theirs), a per-feature error state, an `ElementMap` on `Body`, and
-normalizing op history onto `BRepTools_History`.
+`src/core/ElementHistory.{h,cpp}` (namespace `topo`) and
+`src/core/sketch/SketchProfile.cpp`. Every operation keeps its OCC maker alive
+and folds its `Modified`/`Generated`/`IsDeleted` reports into one
+`BRepTools_History`, so propagation is one code path.
 
-### T2 — Prototype on Extrude — **done (July 2026)**
-Extrude NewBody faces are named from sketch-entity ids: `BuildPrismNamed`
-(`src/core/SketchProfile.cpp`) keeps the `MakePrism` maker, names each side
-face `<extrudeId>/g<entityId>` via `Generated(edge)` + geometric edge→entity
-matching (reusing `EdgeToSketchEntity`), and the caps `cap0`/`cap1` via
-`FirstShape`/`LastShape`. The name↔faceIndex map (`ElementMap`, new header)
-rides on the `Body` (transient); face indices align with `GenerateMesh`/picking
-because the prism's TShape is shared unchanged into the body (NewBody only —
-Add/Cut run a boolean that renumbers, so `ApplyBodyMode` clears the map there).
-`LoopEdge` gained an `entityId`. A **View → Show Element Names** overlay labels
-the hovered/selected face. Mutation tests (`tests/test_toponaming.cpp`) prove
-the contract: names survive a geometry edit and an added hole; a deleted
-entity's name stops resolving. Landed T1 prerequisites 1, 2, 4.
+- **Extrude / revolve** (`BuildPrismNamed`, `BuildThinPrismNamed`,
+  `BuildRevolveNamed`): side faces from `Generated(profileEdge)`, matched back
+  to their sketch entity; caps from `FirstShape()`/`LastShape()`. Revolve pole
+  edges have no generating parent and are named by position.
+- **Booleans** (`topo::BooleanNamed`, used by `Boolean`, body modes, rib,
+  patterns): a face the operation leaves untouched keeps its name; `Modified`
+  appends `;M<tag>` (`.i` on a split); `Generated` appends `;G<tag>`; section
+  edges history misses get `<tag>/seam<i>`. In OCC 7.9 faces created along an
+  intersection are reported as `Modified`, and a pierced face *generates* its
+  section edges.
+- **Fillet / chamfer** (`topo::EdgeBlendNamed`): blend faces
+  `<spine edge name>;G<tag>`; support faces keep their names through
+  `Modified`; corner patches fall to the fallback passes. The spine edge itself
+  is consumed, so a reference to it stops resolving.
+- **Fallback passes** (`topo::ApplyFallbackPasses`), run after history: **U**
+  — a named face names each unnamed boundary edge `<face>;U<k>`, which is what
+  gives edges (fillet spines) stable names; **L** — a still-unnamed face takes
+  its sorted boundary-edge names joined with `,` plus `;L`.
+- **Primitives and rebuilt shapes** (`topo::NamePrimitiveElements`): every face
+  `<prefix>/face<i>` in index order, then the fallback passes. Used by
+  Box/Sphere/Cylinder/Import (a multi-body import adds a body ordinal,
+  `<tag>/b1`) and by features that rebuild topology wholesale — shell, draft,
+  refine, split, sweep, loft, pipe, hole and rib tools, fasteners. These names
+  are stable while the operation produces the same topology in the same order,
+  not across a change that reorganises it.
+- **Patterns** (`PatternFeature.cpp`): instances take the source's names with
+  `#<instance>`; the fused result is split back into solids by looking each
+  piece's faces up in the fused map (`topo::NamesOfSubShape`) — the pieces
+  share their faces with the shape they came out of, so no second history pass
+  is needed.
+- **Derived** copies rename the source's elements
+  `<derived id>/<source created_by>/<source name>` ([derived.md](derived.md)).
 
-### T3 — `ElementRef` plumbing — **done (July 2026)**
-`ElementRef {featureId, name}` (`src/core/ElementMap.h`); resolution finds the
-body the feature produced (`Body::createdBy`) and looks the name up in its
-`ElementMap`. `CADShape::FacePlane(faceIndex)` extracts a planar face's frame
-at the B-Rep level (centroid + normal + deterministic u-axis). Per-feature
-**error state**: `Feature::m_error` (transient, mirrors `Parameter::error`);
-`Document::Regenerate` clears it before each `Execute` and stamps a generic
-message on silent failure; features `SetError` specifics. Landed T1
-prerequisite 3.
+A MappedName is compared whole almost everywhere. The one reader that parses
+it is drawing provenance (`drawing::MappedNameFeatureIds`), which extracts the
+feature ids a name mentions to find the Hole or tolerance behind a circle.
 
-### T4 — Adopt: sketch-on-face — **done (July 2026)**
-`SketchFeature` gained a `faceRef` (`ElementRef`) resolved in `Execute` before
-the datum block: the sketch re-derives its plane from the attached face every
-regeneration, so **editing the base body moves the dependent sketch and
-everything built on it** (verified: raising a base box from 3→6 carried the
-top feature from z=3 to z=6). "Sketch on Selected Face" stores a `faceRef` when
-the face is named (extrude-NewBody faces), else bakes (no regression). Format
-v16. UI: errored features show red + a tooltip in the tree, and a face-attached
-sketch has a **Reattach face…** context action. Base/datum-plane sketches keep
-their stable feature-id refs unchanged.
+An unnamed face cannot be picked, threaded, filleted, fitted or measured by
+reference, and `list_elements` omits it; its `unnamed_faces` count is what says
+whether the listing is complete.
 
-### T5 — Adopt: booleans propagation + fillet edges — **done (July 2026)**
-Booleans keep their `BRepAlgoAPI_*` maker alive, normalize its reports onto
-`BRepTools_History` (T1 prerequisite 5, the last one), and `PropagateNames`
-(`src/core/ElementHistory.{h,cpp}`) rewrites the operands' names onto the
-result: survivors verbatim, `Modified` → `;M<tag>` (`.i` on 1→N splits),
-`Generated` → `;G<tag>` (a pierced face *generates* its section edges —
-verified against OCC 7.9.3), leftovers `<tag>/seam<i>`. The **U/L fallback
-passes** then name everything history missed; U is what gives edges stable
-names. `ElementMap` gained an edge space (`edgeNames`, keyed by the deduped
-`TopExp::MapShapes(TopAbs_EDGE)` order that `GenerateEdgePolylines` and edge
-picking share). `BooleanFeature` and extrude/revolve Add/Cut all attach
-propagated maps — no path clears a map anymore — and `BuildRevolveNamed`
-brought revolve up to extrude's naming (sides, caps, poles).
+## Resolution and failure
 
-On top of that, **M7 fillet + chamfer** (`src/core/FilletFeature`,
-`topo::EdgeBlendNamed`): edges held as `ElementRef`s, resolved each regen,
-blend faces named `<spineEdgeName>;G<tag>`, dangling refs error with a
-re-pick repair action. Edge picking = `FaceSelector::PickEdge`
-(ray-to-polyline, occlusion-aware) + depth-tested highlight through the
-sketch-primitive pipeline. Format v17. Mutation tests:
-`tests/test_toponaming.cpp` (T5 section), `tests/test_fillet.cpp`.
+References resolve against the body of the feature they name, so features added
+downstream never disturb them; only editing that feature or its ancestors
+exercises name stability. A name that no longer resolves is a feature error
+naming the element — never a silent snap to a neighbouring face. Repair is
+re-picking: Reattach face… for a face-attached sketch, Pick edges… for a
+blend.
 
-From here every new feature uses `ElementRef` from birth.
+Edge picks for a blend are stored against the blend's **input** body, not its
+displayed output (whose names already carry the blend's own tag):
+`Document::CachedBodiesAfter` supplies the input, and
+`topo::ResolveEdgeOnBody` maps the picked edge onto it by name or, failing
+that, by an interior point of the edge (`PolylineArcMidpoint` — an endpoint is
+shared by every incident edge and would match an arbitrary one).
 
-**Patterned bodies are named too** (`FuseInstancesReplacingSource`). Each
-instance carries the seed's names with an instance suffix — `"4/g7"` becomes
-`"4/g7#2"` for the third copy and `"4/g7#m"` for a mirror's reflection — the
-convention patterned CUTS had used since R14, now on the body path as well.
-The instances fuse through `topo::BooleanNamed` so the names survive the
-union, and the split back into connected solids is a lookup rather than a
-second history pass (`topo::NamesOfSubShape`: the pieces share their faces
-with the shape they came out of). Nothing parses a MappedName — it is
-compared whole — so the suffix stays opaque everywhere else.
+## Picking
 
-It matters because an unnamed face is not merely unlabelled: it cannot be
-picked, threaded, filleted, fitted or measured, and `list_elements` does not
-show it, so the listing looks complete. Every repeated part of the gas grill
-was in that state — 105 faces across the cooking grate and the warming rack,
-each patterned bar reporting three faces of three unnamed.
+`FaceSelector` (`src/cad/FaceSelector.cpp`) maps a ray to a face index
+(`PickFace`) or an edge index (`PickEdge`: ray-to-polyline by angular error,
+rejecting occluded edges; ties go to the nearest edge, which matters looking
+straight down a bore where every rim is collinear with the ray). The index is
+turned into a name through the body's `ElementMap`.
 
-*Still out of scope: per-instance REFERENCES into a pattern as a structure
-(FreeCAD's `;:C` child maps) — the suffix names the face, it does not give
-the pattern a queryable instance list.*
+## Tests
 
-## Test strategy
+`tests/test_toponaming.cpp` is mutation tests: build a model, capture
+references, apply an upstream edit (dimension change, entity added, entity
+deleted), regenerate, and assert each reference resolves to the geometrically
+right element or fails exactly when it should. `tests/test_fillet.cpp` covers
+blend naming and dangling edges; `tests/test_toponaming.cpp` also pins pattern
+instance names; `tests/test_determinism.cpp` name stability over the golden corpus.
 
-Mutation tests, not unit tests: build a model, capture refs, apply an upstream
-edit (dimension change / entity insert / entity delete / feature reorder),
-regenerate, assert each ref still resolves to the geometrically-correct element
-(compare centroid/normal/area) or reports failure exactly when it should.
-These run headless — pure `designer_core`.
+## Limits
 
-## Risks
-
-- **Name explosion in boolean chains** — RealThunder names grow long through
-  deep histories; mitigate with hashing long names (keep the readable form for
-  debugging).
-- **OCC history gaps** — some OCC ops report incomplete `Generated` sets;
-  the memo must list which ops we rely on and prototype-verify each.
-- **Over-engineering** — we need names good enough for *our* features, not a
-  general theory. T2's extrude-only scope is the guard.
+- A 1→N split is disambiguated by position (`.i`), the one place stability can
+  leak in boolean-heavy models.
+- No references into a pattern as a structure: the `#i` suffix names a face of
+  an instance; there is no queryable instance list.
+- No geometric-similarity suggestion when a reference dangles; repair is a
+  re-pick.

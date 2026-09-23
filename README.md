@@ -8,7 +8,8 @@ with transformation checkpoints, global variables, a Python REPL/scripting API, 
 versioning, and an interface designed so that LLM assistants can use the same commands as
 human users.
 
-See [docs/roadmap.md](docs/roadmap.md) for the current state and the long-term plan.
+See [docs/README.md](docs/README.md) for how each part of the program works, and
+[docs/roadmap.md](docs/roadmap.md) for what is not built yet.
 
 ## Gallery
 

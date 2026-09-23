@@ -5,7 +5,8 @@
 #include <string>
 
 // A standard fastener, built from a vendored dimension table rather than from
-// typed numbers (docs/parts/plan.md, phase 2).
+// typed numbers
+// (docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence).
 //
 // Every dimension except the length comes out of `core/parts/FastenerTable` —
 // the row for this size in this standard IS the specification, so a test that

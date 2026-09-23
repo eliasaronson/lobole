@@ -125,7 +125,7 @@ def body(app):
     # 12 mm clear of the casting it belongs to. `islands()` said so: two
     # regions at every height, the barrel and the bowl, exactly the way four
     # bolt bosses once hung off a deck flange
-    # (docs/dogfood-friction-plan.md, F1).
+    # (generators/README.md#single-cylinder-and-air-cooled-engines).
     web = p.sketch(Plane.xy(FLANGE_T), name="Bowl web")
     web.rect((BARREL_R - 6.0, -9.0), (BOWL_X - BOWL_R + 6.0, 9.0))
     p.extrude(web.add(), BOWL_HI - FLANGE_T - 6.0, mode="add", name="Bowl web")
@@ -541,7 +541,7 @@ def carburettor(app, name="carburettor"):
     # unrelated poses -- 2589, 2558, 2719, 2533 mm2 at what were meant to be
     # ten-degree steps -- but that was a UNIT bug, not the solver: `rotation`
     # is RADIANS and named no unit, so 60 meant 197.7 and the walk asked for
-    # 213, 66, 279, 132. There is a `rotation_deg` now (docs/known-bugs.md).
+    # 213, 66, 279, 132. There is a `rotation_deg` now (docs/conventions.md#units-and-angles).
     # The study is
     # still the right instrument here, because it reports a clash verdict at
     # every one of its thirteen poses instead of the two a pair of set_mate

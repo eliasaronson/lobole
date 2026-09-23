@@ -11,11 +11,11 @@
 // application whose session list NewDocument and Close edit with no lock, and
 // the STEP controllers fill their Interface_Static tables lazily, marking
 // themselves initialised before they are. A project whose parts load side by
-// side (docs/ui/project-open-progress-plan.md) rebuilds its Import features in
-// parallel, and a background open can meet an export on the main thread. So
-// every STEP read or write, and every XCAF document, holds this for its whole
-// length. Recursive, because a structured export builds its document and then
-// writes it.
+// side (docs/ui/long-operations.md#opening-a-project) rebuilds its Import
+// features in parallel, and a background open can meet an export on the main
+// thread. So every STEP read or write, and every XCAF document, holds this for
+// its whole length. Recursive, because a structured export builds its document
+// and then writes it.
 inline std::recursive_mutex& DataExchangeMutex() {
   static std::recursive_mutex mutex;
   return mutex;

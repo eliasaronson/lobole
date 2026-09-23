@@ -1,6 +1,7 @@
 #ifdef HAVE_CAM
 
-// The capability table, enforced (docs/cam/operation-shape-plan.md).
+// The capability table, enforced
+// (docs/cam/operations.md#the-capability-table-and-the-field-table).
 //
 // `CamNames.h`'s OpField column states, per op type, exactly which fields of
 // `Operation` that type's generator reads. It was traced by hand through the
@@ -311,12 +312,12 @@ TEST_CASE("cam: a generator reads only the fields its type declares", "[cam]") {
 }
 
 // Every operation field survives a save and a reload
-// (docs/cam/cleanup-after-spiral-plan.md, 1). The case above holds the
-// GENERATOR to the table; nothing held the FILE to it, and a field lost on
-// save is invisible until a job reopens cutting something else -- adaptive's
-// `stepover` did exactly that, found by accident. `Operation`'s defaulted
-// `==` compares every member, so a field added later is covered without
-// anyone listing it, and a new OpField bit with no poke fails by name.
+// (docs/cam/operations.md#the-capability-table-and-the-field-table). The case
+// above holds the GENERATOR to the table; nothing held the FILE to it, and a
+// field lost on save is invisible until a job reopens cutting something else --
+// adaptive's `stepover` did exactly that, found by accident. `Operation`'s
+// defaulted `==` compares every member, so a field added later is covered
+// without anyone listing it, and a new OpField bit with no poke fails by name.
 TEST_CASE("cam: every operation field survives a save and a reload", "[cam]") {
   // Facts the table carries, not fields anything can set.
   constexpr uint32_t kFacts =

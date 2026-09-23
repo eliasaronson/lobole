@@ -9,12 +9,13 @@
 
 namespace render {
 
-// Per-pass GPU timing via timestamp queries (docs/rendering/frame-timing.md,
-// "GPU timestamps"). The CPU frame timer splits OUR work by phase but reports
-// the GPU as one opaque display number; this says which PASS the GPU spends
-// it on — the question every "slow on my GPU" report needs answered, and the
-// one the Intel assessment could not (an offscreen harness cannot even run on
-// that GPU; the numbers have to come from the real session).
+// Per-pass GPU timing via timestamp queries
+// (docs/rendering/frame-pacing.md#gpu-timestamps). The CPU frame timer
+// splits OUR work by phase but reports the GPU as one opaque display number;
+// this says which PASS the GPU spends it on — the question every "slow on my
+// GPU" report needs answered, and the one the Intel assessment could not (an
+// offscreen harness cannot even run on that GPU; the numbers have to come from
+// the real session).
 //
 // Four write points per frame: command-buffer start, after the shadow pass,
 // after the SSAO chain, after the main pass. The deltas are contiguous, so
@@ -82,8 +83,8 @@ public:
   // over ~2 s) and for a MEASUREMENT is a trap — six renders of a new
   // configuration read as the average of those six and the 114 that came
   // before, which walks the answer towards whatever ran previously
-  // (docs/rendering/offscreen-gpu-timing-plan.md). Queries in flight are
-  // unaffected: this touches the ring, not the pool.
+  // (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen). Queries in
+  // flight are unaffected: this touches the ring, not the pool.
   void ResetSamples();
 
 private:

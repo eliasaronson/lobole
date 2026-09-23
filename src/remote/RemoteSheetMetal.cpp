@@ -324,7 +324,7 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
 
   if (m == "get_sheet_metal_rules") {
     // Read-only, so it answers about any part rather than only the active tab
-    // (docs/agent-scale-followup-plan.md, W2).
+    // (docs/scripting/rpc.md#reads-name-their-part).
     const Document& src = SubjectPart(state, doc, p);
     out = {{"rules",
             src.SheetMetal() ? RulesJson(*src.SheetMetal()) : json(nullptr)},

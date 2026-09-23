@@ -4,8 +4,8 @@
 // Not a public interface: only src/remote includes this.
 //
 // RemoteServer.cpp was 2,947 lines and three subjects -- the socket, the
-// dispatch, and the GUI-action queue. Splitting it (stage 8a of
-// docs/architecture-review-2026-09-06.md) left exactly two helpers used by
+// dispatch, and the GUI-action queue. Splitting it
+// (docs/architecture.md#the-remote-json-rpc) left exactly two helpers used by
 // two of them, plus two the session owns and the dispatch reports in `ping`.
 
 #include "remote/RemoteServer.h"

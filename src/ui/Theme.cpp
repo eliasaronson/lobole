@@ -223,7 +223,7 @@ void ApplyTheme(float uiScale, float framebufferScale) {
     // truncated, and every FA icon sat ~0.8 px left of its button's middle.
     // Their edges never landed on pixels at this size anyway, so they lose
     // nothing, and are oversampled like text. The wide ones (16.8 px)
-    // overhang into the button's padding, centred (docs/ui/icons-plan.md).
+    // overhang into the button's padding, centred (docs/ui/README.md#icons).
     static const ImWchar kFaRange[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
     static const ImWchar kDsRange[] = {ICON_MIN_DS, ICON_MAX_DS, 0};
     struct IconFont {
@@ -254,7 +254,7 @@ void ApplyTheme(float uiScale, float framebufferScale) {
     // The terminal panel's font, as a SEPARATE atlas entry rather than a
     // merge: a terminal needs every glyph at one advance width, and merging
     // it into a proportional font would give it Roboto's metrics
-    // (docs/ui/terminal-panel.md). Loaded even when the panel is off — it is
+    // (docs/ui/terminal.md). Loaded even when the panel is off — it is
     // 260 KB and the alternative is rebuilding the atlas on a preference.
     const std::string monoPath = (dir / "JetBrainsMono-Regular.ttf").string();
     if (std::filesystem::exists(monoPath)) {

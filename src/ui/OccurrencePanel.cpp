@@ -92,7 +92,7 @@ const char* MateTypeLabel(MateType t) {
 // The mate list and its selected-mate editor. The create/edit session's
 // controls (connector slot rows, flip, accept/cancel) live in the floating
 // Tool window (DrawMateToolWindow below, U7c).
-// Relations (docs/assemblies/relations-plan.md): listed with their ratio
+// Relations (docs/assemblies/relations.md): listed with their ratio
 // and phase editable and a remove button. Made by RPC in this round — a
 // relation names two mates and the panel selects one — so there is no
 // creation tool here for the defaults gate to hold.
@@ -236,7 +236,8 @@ void DrawMatesSection(AppState& state) {
 
 // A mate's degrees of freedom, by type -- what the panel's "Selected mate"
 // section held, drawn by the mate tool's Edit Mate window now
-// (docs/ui/assembly-panel-tidy-plan.md). Each field is one undo step per drag.
+// (docs/ui/panels.md#assembly-tab-the-model-panel). Each field is one undo step
+// per drag.
 void DrawMateDofFields(AppState& state, Mate* sel) {
   auto angleDof = [&](const char* label) {
     float deg = glm::degrees(sel->rotation);
@@ -310,8 +311,8 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
 // under the assembly before the worker exists, no frame is drawn while it
 // does, and on a real assembly that was seconds. It is ~11 ms since those
 // copies stopped re-deriving geometry they were handed
-// (docs/performance/motion-prep-copy.md), so the bar now starts about when
-// the button is pressed.
+// (docs/assemblies/README.md#background-motion-copies-without-regenerating), so
+// the bar now starts about when the button is pressed.
 void DrawMotionProgress(BackgroundJob& job, int samples) {
   const double f = job.fraction.load();
   const double elapsed = std::chrono::duration<double>(
@@ -609,7 +610,7 @@ void DrawExplodeBody(AppState& state) {
   for (ExplodedView& v : asmDoc.GetExplodedViews()) {
     // The id goes in the LABEL, not a PushID(int) scope: an integer scope is
     // not addressable as a path segment, so no test could ever select a view
-    // (docs/ui/gui-coverage.md).
+    // (docs/ui/testing.md#making-a-widget-addressable).
     const bool active = state.activeExplodedView == v.id;
     const std::string label = (v.name.empty() ? "(unnamed)" : v.name) +
                               "###explode_view_" + std::to_string(v.id);
@@ -672,16 +673,16 @@ void DrawExplodeBody(AppState& state) {
 // the occurrences and is driven with a slider or a drag gizmo while you watch
 // the model. They used to be two more sections in the Model dock, scrolled
 // off under the occurrence tree that they were moving
-// (docs/ui/u15-assembly-panel.md). The one-at-a-time tool slot is the right
-// home twice over — it puts the controls over the thing they move, and it
-// makes the two mutually exclusive, which they have to be: both place the
-// same occurrences.
+// (docs/ui/panels.md#assembly-tab-the-model-panel). The one-at-a-time tool slot
+// is the right home twice over — it puts the controls over the thing they move,
+// and it makes the two mutually exclusive, which they have to be: both place
+// the same occurrences.
 void DrawExplodeToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Exploded view");
   DrawExplodeBody(state);
   ImGui::Separator();
   // Close, not Esc: the window is a way in to a display state that outlives
-  // it, and it applies as you go (docs/ui/consistency-round-plan.md).
+  // it, and it applies as you go (docs/ui/panels.md).
   if (ImGui::Button("Close###explode_close"))
     state.explodeToolOpen = false;
   ImGui::End();
@@ -747,8 +748,8 @@ void DrawBomWindow(AppState& state) {
   }
 
   // A floating window, because a bill of materials is a TABLE and wants
-  // width (docs/ui/assembly-panel-tidy-plan.md). In the dock it was two
-  // columns with material and mass stacked under each name; the five-column
+  // width (docs/ui/panels.md#assembly-tab-the-model-panel). In the dock it was
+  // two columns with material and mass stacked under each name; the five-column
   // form only appeared when the dock was wide, which it never was. The total
   // is in the title, so it reads without scrolling to the bottom.
   const std::string title = "Bill of materials" +
@@ -902,9 +903,9 @@ void DrawBomWindow(AppState& state) {
   }
 
   // Every placed fastener, re-derived against the stack it is IN
-  // (docs/parts/gui-plan.md, phase 4). Next to the BOM because that is where
-  // a person looks at what the assembly is MADE of, and because the answer
-  // has the same shape as the mass warnings above it.
+  // (docs/parts/README.md#checking-placed-fasteners). Next to the BOM because
+  // that is where a person looks at what the assembly is MADE of, and because
+  // the answer has the same shape as the mass warnings above it.
   //
   // On demand rather than every frame: it walks the whole assembly along a
   // ray per fastener. And ON DEMAND rather than never — a length derived
@@ -931,7 +932,7 @@ void DrawBomWindow(AppState& state) {
   // walking the whole thing, so it is asked for rather than run per frame.
   //
   // The assembly's own round mates ARE the pairing — nothing has to be set up
-  // first (docs/tolerances/plan.md T2).
+  // first (docs/tolerances/README.md#checks).
   if (ImGui::Button("Check fits###bom_check_fits")) {
     state.fitChecks.clear();
     int pass = 0, warn = 0, fail = 0, reported = 0, unverified = 0;
@@ -1248,7 +1249,7 @@ void DrawMateToolWindow(AppState& state) {
 
   ImGui::Separator();
   bool accept = false, cancel = false;
-  // The feature tool window's buttons (docs/ui/consistency-round-plan.md):
+  // The feature tool window's buttons (docs/ui/panels.md):
   // Accept and Cancel where a mate is being made, Close where one is being
   // edited, since those edits are applied as they are made.
   if (editM != nullptr) {

@@ -14,8 +14,8 @@ void PollBackgroundJobs(AppState& state) {
 
   // Advance an in-flight offline render by one sample batch. Not a worker
   // thread at all: it slices on the main thread with its own one-shot submits
-  // (docs/ui/long-operations.md says why that is the one candidate for a real
-  // background render thread later).
+  // (docs/ui/long-operations.md#what-is-not-on-the-registry says why that is
+  // the one candidate for a real background render thread later).
   PumpRenderJob(state);
 
   // (A git fetch/push/clone is a "sync" entry in the registry below — A3

@@ -79,7 +79,7 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
   // Without this each fit paid four ray casts AND a solid classifier for
   // every body in the model: fit_fastener was 747 ms a call, 21% of that
   // engine's whole build. Same prune, same reason, as the hover pick
-  // (docs/performance/hover-pick.md). The bounds are memoized on CADShape,
+  // (docs/rendering/README.md#picking). The bounds are memoized on CADShape,
   // and the ray is already in the body's local frame, so this is a slab test
   // against numbers already computed.
   const auto reaches = [&](const glm::dvec3& localOrigin,

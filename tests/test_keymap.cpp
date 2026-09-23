@@ -1,5 +1,5 @@
 // Keymap: the chord parser, the defaults table and the conflict gate
-// (docs/ui/u12-keybindings.md). These run headless because the metadata lives
+// (docs/ui/keybindings.md). These run headless because the metadata lives
 // in core — designer_tests links designer_core alone, so a broken default
 // binding fails here in 8 seconds rather than in the GUI suite.
 
@@ -126,7 +126,7 @@ TEST_CASE("the shipped defaults have no conflicts", "[keymap]") {
   CHECK(conflicts.empty());
 }
 
-// The rule from docs/ui/u12-keybindings.md: EVERY toolbar button ships with a
+// The rule from docs/ui/keybindings.md: EVERY toolbar button ships with a
 // chord. The only rows allowed to be unbound are the ones that live in a
 // flyout or a menu rather than on a toolbar — listed here by name, so adding
 // a toolbar button without a chord fails instead of passing quietly.

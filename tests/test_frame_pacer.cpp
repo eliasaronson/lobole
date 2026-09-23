@@ -2,9 +2,9 @@
 
 #include "app/FramePacer.h"
 
-// The idle-throttle decision (docs/rendering/idle-throttle.md), headless.
-// Each case was checked against sabotage: a pacer that never idles fails
-// "goes idle after the cooldown"; one that ignores the cooldown fails the
+// The idle-throttle decision (docs/rendering/frame-pacing.md#idle-throttle),
+// headless. Each case was checked against sabotage: a pacer that never idles
+// fails "goes idle after the cooldown"; one that ignores the cooldown fails the
 // tooltip case; one that latches activity forever fails the expiry case.
 
 using app::FramePacer;

@@ -2,7 +2,7 @@
 
 // Continuous 4-axis: the spiral, the feed a turning cut is posted at, and the
 // G92 that keeps a wound axis from unwinding
-// (docs/cam/rotary-continuous-plan.md).
+// (docs/cam/rotary.md#continuous-surface_rotary).
 //
 // The checking side was continuous before the generator was -- the carve,
 // the timeline and the simulator all interpolate A along a move -- so the

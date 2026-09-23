@@ -336,7 +336,7 @@ void DrawShortcutsWindow(AppState& state) {
     // The modal verbs, listed where people look for them but marked as what
     // they are: fixed. They resolve against armed tools, previews, plane
     // picks and text fields, so they are not commands and cannot be rebound
-    // (docs/ui/u12-keybindings.md).
+    // (docs/ui/keybindings.md).
     if (ctx == keymap::Context::Global) {
       row("Esc", "Cancel the current tool, pick or preview (fixed)");
       row("Enter", "Accept the open tool dialog (fixed)");

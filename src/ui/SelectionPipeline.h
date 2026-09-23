@@ -5,18 +5,18 @@
 
 namespace ui {
 
-// U1b (docs/ui/u1-selection.md): the one model-space pick pipeline for the
-// default (nothing-armed) part-tab context. Builds the pick ray once, ranks
-// edge/face/body candidates under the cursor, drives the hover preview, and
-// applies the signed-off click conventions: plain click replaces the
-// selection (empty space clears), Ctrl+click toggles, clicking the same spot
-// again cycles the overlapping candidates, Shift+click also aligns the
-// camera to the picked face (the old Ctrl gesture — Ctrl now multi-selects).
-// While a tool is armed (blend edge collection, measure, sim BC/keep — U1c),
-// its filter restricts the candidates and the resolved pick is routed to the
-// tool instead of the Selection. `allowEscapeClear` is false when a tool
-// already consumed this frame's Escape (disarming), so the selection isn't
-// also cleared by the same key press.
+// The pick pipeline (docs/ui/selection.md#the-pick-pipeline): the one
+// model-space pick pipeline for the default (nothing-armed) part-tab context.
+// Builds the pick ray once, ranks edge/face/body candidates under the cursor,
+// drives the hover preview, and applies the signed-off click conventions: plain
+// click replaces the selection (empty space clears), Ctrl+click toggles,
+// clicking the same spot again cycles the overlapping candidates, Shift+click
+// also aligns the camera to the picked face (the old Ctrl gesture — Ctrl now
+// multi-selects). While a tool is armed (blend edge collection, measure, sim
+// BC/keep — U1c), its filter restricts the candidates and the resolved pick is
+// routed to the tool instead of the Selection. `allowEscapeClear` is false when
+// a tool already consumed this frame's Escape (disarming), so the selection
+// isn't also cleared by the same key press.
 void HandleSelectionInput(AppState& state, bool overViewport,
                           bool allowEscapeClear = true);
 
@@ -53,7 +53,7 @@ bool ResolveEdgeItem(const AppState& state, const SelectionItem& item,
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 // Feature selection through the one Selection set (U1a). Stored by stable
 // feature id, so it survives regeneration, reordering and sibling deletes;

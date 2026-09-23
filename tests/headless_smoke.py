@@ -258,7 +258,7 @@ def main():
         d.call("undo")  # camera/view state functions without a GUI
         v = d.call("view", name="front")
         offset = [p - t for p, t in zip(v["position"], v["target"])]
-        # Z-up world: the front-view camera sits toward -Y (docs/up-axis.md).
+        # Z-up world: the front-view camera sits toward -Y (docs/conventions.md#world-axes).
         expect(abs(offset[0]) < 1e-4 and offset[1] < 0, "front view headless")
         # Direct camera control (set_camera) is pure state — works headless.
         v = d.call("set_camera", target=[1.0, 2.0, 3.0], distance=250.0)
@@ -282,7 +282,7 @@ def main():
         # projects at the size it was asked for, so fit-then-render cropped
         # whenever the two differed: a fifth of a 210 mm panel in frame at
         # 400x1100, correctly projected and framed for a different picture
-        # (docs/rendering/still-framing-plan.md). Checked by projecting the
+        # (docs/rendering/still-render.md#framing). Checked by projecting the
         # part's own corners through the reported camera, which is why the
         # camera block reports fov_deg and aspect at all — and it needs no
         # GPU, unlike the picture it is about.
@@ -454,7 +454,7 @@ def main():
         # Every GUI-dependent method degrades with its specific error
         # "a rendered frame", not "the GUI": with -DENABLE_TEST_ENGINE=OFF a
         # windowed build has no test engine and still screenshots fine, so the
-        # two capabilities are named separately (docs/scripting/mcp.md).
+        # two capabilities are named separately (docs/scripting/mcp.md#the-tool-surface).
         expect_error(d, "screenshot", "requires a rendered frame",
                      path="/tmp/x.png")
         expect_error(d, "menu_click", "unavailable in --headless",
@@ -1546,7 +1546,7 @@ def main():
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STL is a solid with the original volume")
         # An STL carries no unit, so the caller says what it was drawn in
-        # (docs/mesh-units-plan.md): read as cm, the 2x3x4 box is 10x per side.
+        # (docs/interchange/README.md#importing-into-a-part): read as cm, the 2x3x4 box is 10x per side.
         d.call("new_project")
         d.call("import_step", path=stl, units="cm")
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24000.0) < 0.1,
@@ -1756,7 +1756,7 @@ def main():
         else:
             # The store is global (a scratch XDG_CONFIG_HOME here) and a setup
             # EMBEDS a copy of the machine it names; the RPC says how the two
-            # stand (docs/cam/job-document.md, round two).
+            # stand (docs/cam/setup.md#machine-profiles).
             for stale in ("Smoke router",):
                 try:
                     d.call("delete_machine", name=stale)
@@ -1865,7 +1865,7 @@ def main():
             d.call("new_project")
 
         phase("Workholding over the RPC")
-        # docs/cam/workholding-plan.md: a clamp is a keep-out the verifier
+        # docs/cam/setup.md#workholding-fixtures: a clamp is a keep-out the verifier
         # sees -- a keep-out box, or any part the job does not cut.
         if has_cam:
             d.call("new_project")
@@ -1904,7 +1904,7 @@ def main():
             expect(abs(moved["pos"][2] - 21.0) < 1e-6,
                    f"`top` lays it on the stock: {moved}")
             # A seat RESTS it on the stock by one of its faces
-            # (docs/cam/fixture-seat-plan.md): the jaw's underside on the
+            # (docs/cam/setup.md#seats): the jaw's underside on the
             # top, 6 mm in over the +Y edge, 10 mm along from -X.
             jels = d.call("list_elements", part="Clamp")["bodies"][0]
             under = next(f["name"] for f in jels["faces"]
@@ -2039,7 +2039,7 @@ def main():
             # so from the GUI it looked ellipse-specific: three clicks on "Clear a
             # pocket" and the face never changed. The pocket still has to be
             # cleared, so adaptive falls back to the concentric strategy and SAYS
-            # which one cut it (docs/cam/dogfood-round.md).
+            # which one cut it (docs/cam/operations.md#pocket-and-adaptive).
             d.call("new_project")
             d.call("add_feature", feature={
                 "type": "Box", "name": "Plate", "position": [-100, -60, 0],
@@ -2136,7 +2136,7 @@ def main():
             # silently edit the first tool -- rename it, resize it, change
             # its type -- and report success, which is how a second cutter
             # asked for as tool 2 became a rename of tool 1 with nothing said
-            # (docs/cam/dogfood-waveguide.md).
+            # (docs/cam/README.md#invariants).
             try:
                 d.call("set_cam_setup", id=cam_setup,
                        tool={"name": "no number here"})
@@ -2191,7 +2191,7 @@ def main():
             d.call("new_project")
 
         phase("Every op field set over the RPC reads back")
-        # docs/cam/cleanup-after-spiral-plan.md, 1. A field on an operation
+        # docs/cam/operations.md#the-capability-table-and-the-field-table. A field on an operation
         # goes through three hand-kept places on this surface -- the owned
         # list, the apply step and the answer -- and a field accepted but not
         # reported (or reported but not applied) is invisible. The fields come

@@ -1,257 +1,159 @@
-# Settings — a home for preferences, and a rule for where things live
+# Settings: user preferences and where things live
 
-> Status: written 2026-08-17 as a design because GPU device selection had
-> nowhere to live; **built 2026-08-20**, with the gaps found on review folded
-> in below (they are marked *added on review*).
+## Three buckets
 
-## Why now
+1. **Project settings** belong to the model and travel with it in git
+   (`commit_geometry`, sheet defaults, a body's material, the document's unit
+   system). They live in the project, not here.
+2. **User preferences** belong to the person, survive a restart and apply to
+   every project. They live in `settings.json`, described here.
+3. **Session state** belongs to the moment: the dock layout (`imgui.ini`), the
+   camera, armed tools, the section plane, View > Show Planes. Never written
+   to `settings.json`.
 
-Nothing in this app remembers what a *person* prefers. Render quality is
-session state that `set_render_options` mutates and forgets; `showPlanes` and
-friends are flags on `AppState`; the dock layout lives in `imgui.ini`; and
-project-level choices like `commit_geometry` correctly live in the project.
-The gap is the middle: preferences that belong to the user, survive a restart,
-and apply to every project.
-
-GPU selection was the forcing function. Rendering *used* to call
-`ImGui_ImplVulkanH_SelectPhysicalDevice` (prefers discrete) while FEM compute
-ranked its own (needs `VK_EXT_shader_atomic_float`); neither was controllable,
-and on a dual-GPU machine the right answer is the user's, not ours. Both now
-go through one shared rule (`common/DevicePreference.h`) that honours the
-preference — see the two findings at the end of "The window".
-
-## The rule: three buckets
-
-1. **Project settings** — belong to the model and travel with it in git.
-   `commit_geometry`, sheet defaults, the material assigned to a body. These
-   stay in the project's `index.json`. *Not this doc.*
-2. **User preferences** — belong to the person, survive restarts, apply to
-   every project. GPU device, render quality, navigation style, autosave
-   interval. *This doc.*
-3. **Session state** — belongs to the moment. Dock layout, camera, armed
-   tools, the section plane. Stays exactly where it is; never persisted here.
-
-The test for bucket 2: *would the user be annoyed to set it again tomorrow,
-and would they expect the same answer in every project?* If a project could
-reasonably disagree, it belongs in bucket 1.
+The test for bucket 2: would the user be annoyed to set it again tomorrow, and
+would they expect the same answer in every project? If a project could
+reasonably disagree, it is bucket 1. The same rule puts the recent-projects
+list and the autosave in the **state** directory, not the config one: the app
+writes them and can regenerate them; the user did not choose them.
 
 ## Storage
 
 `$XDG_CONFIG_HOME/designer/settings.json`, falling back to
-`~/.config/designer/settings.json` — a sibling of the `onshape.env` already
-there. **Config, not state**: `~/.local/state/designer` (where the autosave
-lives) is for things the app can regenerate; this is for things the user
-chose.
-
-All three per-user directories — config, state and the IBL cache — resolve
-through one helper, `RuntimePaths::User{Config,State,Cache}Dir`. Windows has
-neither `$XDG_*` nor `$HOME`, so each used to fall through to
-`temp_directory_path()`, putting the settings, the recent list, the instance
-registry and the recovery autosave in `%TEMP%`, which the OS sweeps. There
-they are `%LOCALAPPDATA%\Designer\{config,state,cache}`: one folder to find,
-one to delete for a clean slate.
+`~/.config/designer/settings.json`; on Windows `%LOCALAPPDATA%\Designer\config`.
+All three per-user directories (config, state, cache) resolve through
+`RuntimePaths::User{Config,State,Cache}Dir`, which on Windows gives
+`%LOCALAPPDATA%\Designer\{config,state,cache}` rather than `%TEMP%`, which the
+OS sweeps.
 
 ```json
 { "settings_format": 1, "gpu_device": "", "shadows": true, "ssao": "half", … }
 ```
 
-Rules that matter more than the schema:
-
-- **Written with `WriteTextAtomic`** (already in `Serialization.cpp`). An
-  interrupted save must never leave a truncated file that silently resets
-  someone's preferences.
-- **Unknown keys are preserved on write, not dropped.** An older build must
-  not delete a newer build's settings just by running once. This is the
-  opposite of the recipe format, where an unknown key is a hard error —
-  because there, silence would corrupt geometry; here, silence would corrupt
-  the user's choices.
-- **Absent file = defaults**, no complaint. **Corrupt file = defaults**, a log
-  line, and the bad file renamed `.bak` rather than overwritten — the one
-  copy of a hand-edited config is not ours to destroy.
-- **No live reload.** Read at startup, write on change (debounced ~1 s so a
-  slider drag is one write).
-- *(added on review)* **A save re-reads and merges first.** Preserving unknown
-  keys covers an old build meeting a new file; it does nothing about two
-  instances running at once, which is the normal case here — a windowed
-  `dev-watch` on 8799 while agents drive `headless-preview` on scratch ports.
-  Without a merge the last writer wins and an agent silently reverts the
-  human's preferences. Save therefore re-reads the file, overwrites only the
-  keys this instance actually changed, and writes that.
-- *(added on review)* **A newer `settings_format` is read, not refused.** The
-  recipe format refuses a future version because guessing would corrupt
-  geometry; here the whole design is that unknown keys survive and missing
-  ones default, so refusing would only lock a user out of their own
-  preferences. The number is for humans reading the file: nothing in the
-  current design requires it to move, and a bump means "we changed what an
-  existing key MEANS", which is the only case worth a migration.
-- *(added on review)* **No `kVersion` bump, no golden file.** This is not the
-  document format. The repo's reflex — a format change bumps `kVersion` and
-  adds a golden pair — does not apply, and saying so here saves the next
-  person the question.
+- **Written atomically** (`DocumentIO::WriteTextAtomic`): an interrupted save
+  never leaves a truncated file that silently resets someone's preferences.
+- **Unknown keys are preserved**, kept verbatim in `Settings::unknown`, so an
+  older build cannot delete a newer build's settings by running once. (The
+  document format does the opposite — an unknown key there is an error —
+  because there silence would corrupt geometry.)
+- **A save re-reads the file and merges**, overwriting only the keys this
+  instance changed. Two instances at once is the normal case (the human's
+  windowed instance plus agents' scratch instances); without the merge the
+  last writer would revert the other's preferences.
+- **Absent file = defaults.** **Corrupt file = defaults**, a log line, and the
+  bad file renamed to `.bak` rather than overwritten.
+- **A newer `settings_format` is read, not refused.** Unknown keys survive and
+  missing ones default, so refusing would only lock a user out of their own
+  preferences. The number moves only if an existing key changes meaning.
+- **No live reload.** Read at startup; written on change, debounced 1 s
+  (`kSaveDebounceSeconds`) so a slider drag is one write.
+- Not the document format: no `kVersion` bump and no golden when a setting is
+  added.
 
 ## Shape in code
 
-One `struct Settings` with its defaults in the struct itself and exactly one
-live copy at `AppState::settings`. Nothing else caches a copy — two sources of
-truth for a preference is how "it reverted when I opened a second project"
-bugs happen.
+`struct settings::Settings` in `src/core/io/Settings.{h,cpp}` — in core, not
+`src/ui/`, because `designer_tests` links `designer_core` alone and the store
+must be unit-testable. Defaults live in the struct. Exactly one live copy
+exists, `AppState::settings`; nothing else caches one.
 
-*(added on review)* It lives in **`src/core/io/Settings.{h,cpp}`**, not
-`src/ui/`, for one reason: `designer_tests` links `designer_core` alone, so
-anything in `src/ui/` cannot be unit-tested. The store is pure IO and belongs
-in core anyway; only the window is UI. (Same call as `ProjectSaveTarget` the
-same day.)
+One table, `kFields`, drives the field list, the JSON round trip and the
+window rows, so adding a setting is one row. Rows are grouped by section and
+the grouping is load-bearing (the window draws one header per section); a
+test holds it.
 
-Worth the small effort up front: drive the field list, the JSON round trip and
-the window rows from **one table** (name, member, default, tier, blurb), so
-adding a setting is one line rather than three edits that can drift. A dozen
-settings do not need reflection machinery, but they do need a single list.
+Two members are deliberately not `kFields` rows: `keys` (the keymap
+overrides, [keybindings.md](keybindings.md)) and `window` (the main window's
+last geometry — remembered state nobody wants to type, restored through
+`FitToMonitors` in `core/io/WindowGeometry.h`, which drops a rect no current
+monitor can show).
 
-## Applying: three tiers, and the window says which
+## Tiers: how a change arrives
 
-- **Live** — the next frame reads the field: shadows, SSAO, shadow map, font
-  size. No Apply button anywhere in this window. (Font size is live but not
-  free: the atlas is rebuilt between frames, so the change ASKS for a rebuild
-  rather than just moving the number — see the findings below.)
-- **Next time** — autosave interval (rearms the timer on the next tick).
-- **Restart** — the *render* GPU. The swapchain and every renderer are built
-  at startup, so the row states it and shows the device currently in use
-  beside the one chosen, making a pending change visible rather than a lie.
-  Note the asymmetry worth documenting on that row: the FEM **compute**
-  context is recreated per run, so the same setting takes effect there
+Each row says which tier it is, so a pending change is visible:
+
+- **Live** — the next frame reads it.
+- **Next time** — the next save, new part or next run of the thing.
+- **Restart** — the render GPU: the swapchain and renderers are built once at
+  startup. The row shows the device in use beside the one chosen. The FEM
+  compute context is created per run, so the same choice applies there
   immediately.
+
+## The current settings
+
+| Section | JSON key | Tier | Notes |
+|---|---|---|---|
+| Appearance | `ui_font_scale` | Live | 85 / 100 / 120 / 140 %; the font atlas is rebuilt between frames |
+| Performance | `gpu_device` | Restart | `""` = automatic (prefers discrete) |
+| Performance | `shadows` | Live | |
+| Performance | `ssao` | Live | `off`, `half`, `full` |
+| Performance | `idle_throttle` | Live | rest at ~10 Hz when nothing is happening (docs/rendering) |
+| Performance | `shadow_map` | Live | 1024 or 2048 |
+| Sharing | `git_user_name`, `git_user_email` | Next time | who a commit is by; empty = git's own configuration |
+| General | `terminal_panel` | Live | off by default ([terminal.md](terminal.md)) |
+| General | `autosave_interval` | Next time | seconds, 0 disables |
+
+Render quality and font size are not in the View menu: one control per
+setting is the only way two copies cannot drift. What stays in View is session
+state (Show Planes, Show Element Names, Viewport Controls).
+
+## The GPU choice
+
+Rendering and FEM compute pick their device through one rule
+(`common/DevicePreference.h`) that honours `gpu_device`. A device that cannot
+present to the window is scored ineligible at startup and skipped, with the
+reason recorded, and the row shows that reason instead of "restart to use it".
+Only `vkGetPhysicalDeviceSurfaceSupportKHR` against a real surface is
+trustworthy (`glfwGetPhysicalDevicePresentationSupport` asks the X server,
+which can say yes for a device the driver then refuses), so selection creates
+a throwaway surface.
 
 ## The window
 
-Edit ▸ Preferences (Ctrl+,) opens one floating window, `###SettingsWindow` —
-not a dock tab; it is not part of the workspace. Collapsing-header sections in
-one scroll, generated from the table's `section` column, so a section exists
-exactly when a setting is in it. **Shipped: Appearance** (font size),
-**Performance** (GPU, shadows, SSAO, shadow map) and **General** (autosave,
-**terminal panel**).
-The design's Viewport & Navigation, Simulation and Advanced sections have no
-tenants yet and are therefore absent rather than empty.
+Edit > Preferences (`Ctrl+,`) opens one floating window,
+`Preferences###SettingsWindow` — not a dock tab; it is not part of the
+workspace. One collapsing header per section, generated from the table, then
+two that are not table rows: **Keyboard** ([keybindings.md](keybindings.md))
+and **Machines** — the user's CAM machine profiles, a list of structs each
+stored as its own file in `~/.config/designer/machines`, written on every
+edit; a CAM setup picks one and keeps a copy. At the foot: "Reset all to defaults"
+(`###set_reset_all`, which keeps unknown keys) beside the config file's path.
 
-Three properties it must have, all learned the hard way this month:
-
-- **Every control carries a stable `###id`, and no `PushID` scopes.** A hidden
-  label or an ID scope leaves a widget reachable only by the numeric id
-  `ui_items` prints — which is exactly what made the Hole type combo, the Loft
-  section combo and the study material combo unreachable to scripts and tests
-  (docs/ui/gui-coverage.md).
-- **Each row explains itself** in one muted line: what it costs, what it
-  affects. A settings window that does not explain its settings moves the
-  confusion rather than removing it.
-- **A reset that does not need the JSON.** Shipped as one "Reset all to
-  defaults" at the foot of the window, beside the config file's path; the
-  design's per-section resets wait for a window big enough to need them.
-  Resetting keeps unknown keys — they belong to another build, not to us.
-- *(learned building it)* **The View menu's copies are gone.** Render quality
-  and font size lived there as session flags that reset every launch; they are
-  preferences now, and one control per setting is the only way the two ends
-  cannot drift. What stays in View is genuinely session state: Show Planes,
-  Show Element Names, Viewport Controls.
-- *(learned building it)* **A restart-tier row must not promise what a restart
-  cannot deliver.** Choosing a GPU that cannot present to a window aborted
-  startup outright ("no WSI support on physical device 0") — recoverable only
-  by hand-editing settings.json. Startup now scores such devices ineligible,
-  falls back, and records WHY, and the row shows that reason instead of
-  "restart to use it". Note `glfwGetPhysicalDevicePresentationSupport` is NOT
-  sufficient: it asks the X server, which said yes for a device Mesa then
-  refused. Only `vkGetPhysicalDeviceSurfaceSupportKHR` against a real surface
-  is trustworthy, so selection creates a throwaway one.
-- *(added on review)* **Every width is measured, never a pixel literal.**
-  `CalcTextSize` plus the style's own padding — the style scales with the
-  display's content scale *and* with the font-size row this very window owns.
-  The History panel shipped with `-70.0f` and `58.0f` the same week and its
-  buttons hung off the edge on a HiDPI screen; a window that is nothing but
-  label-and-control rows, and that can change its own metrics, cannot afford
-  that mistake.
-
-No search field in v1; a dozen rows do not need one.
+- Every control has a stable `###id` and there are no `PushID` scopes, so
+  scripts and tests can address every row ([testing.md](testing.md)).
+- Each row explains itself in one muted line: what it costs, what it affects.
+- Every width is measured (`CalcTextSize` plus the style's padding), never a
+  pixel literal, because the window can change its own font size.
+- Sized in font units, capped to the viewport, centred when it appears, and
+  not `AlwaysAutoResize` (the blurbs wrap to the content region, so
+  content-driven width ran off the screen).
 
 ## The script surface
 
-Two RPCs, not one per setting: `get_settings` returns the whole struct;
-`set_settings {…}` validates, applies, persists, and returns the new state.
-That keeps the assistant and the human on the same interface (roadmap goal 5)
-and makes every setting testable headlessly.
-
-`set_render_options` stays, as a thin alias over the same fields — it is used
-by scripts and the MCP today, and it already mutates three of what become
-settings.
-
-*(added on review)* Both new methods need a row in the `describe` table beside
-their dispatch chain, or the introspection test fails — the repo enforces
-"one row per RPC".
+`get_settings` returns the whole struct; `set_settings {key: value, …}`
+validates, applies, persists immediately and returns the new state.
+`set_render_options` remains as a thin alias over the render fields. Keys use
+the JSON names above.
 
 ## Tests
 
-- **`ResetAppForTest` must reset `settings` to defaults.** Otherwise the
-  developer's own config decides whether a GUI test passes, and CI and the
-  desk disagree. (Precedent from this month: a function-local `static bool`
-  for the shortcuts window leaked into five later tests.)
-- **Tests point `XDG_CONFIG_HOME` at a scratch dir**, so no test run can write
-  the developer's real preferences. *(2026-08-24: this had been written down
-  and only half done. `gui-tests-xvfb.sh` isolated per shard; the PYTHON smoke
-  tests isolated `XDG_STATE_HOME` alone, and `headless_smoke` calls
-  `set_settings ui_font_scale=1.2` to prove the RPC is not part-gated — so
-  every headless suite run reset the developer's font size to 120%, visible
-  only at their next launch. All 28 launchers are isolated now and
-  `config_isolation_lint` holds it: a test that spawns the app must mention
-  `XDG_CONFIG_HOME`.)*
-- *(added on review)* **Per SHARD, not per suite.** `gui-tests-xvfb.sh` now
-  runs four app processes at once, and already gives each its own
-  `XDG_STATE_HOME` because the recent-projects list is machine-global and
-  broke `file/open_recent`. `XDG_CONFIG_HOME` needs the same treatment the
-  moment settings exist, or the shards race on one `settings.json`.
-- Headless: defaults → set → save → load → identical; unknown keys survive a
-  round trip; a corrupt file falls back to defaults and leaves a `.bak`.
-- GUI: `settings/toggle_persists_across_a_reload`, and one asserting a
-  restart-tier row *says* it needs a restart instead of pretending to apply.
+- Headless: defaults → set → save → load is identical; unknown keys survive a
+  round trip; a corrupt file falls back and leaves a `.bak`.
+- `ResetAppForTest` resets `settings` to defaults before every GUI test, so
+  the developer's own config never decides whether a test passes.
+- Nothing a test runs may write the developer's real preferences, and
+  `set_settings` persists immediately, so any test that touches one is a
+  writer. The GUI runner gives each shard its own `XDG_CONFIG_HOME`; the
+  Python smokes launch through `tests/smoke_app.py`'s `launch_app()`, which
+  sets it; and `tests/config_isolation_lint.py` fails a script that spawns
+  the binary itself.
+- GUI: `settings/a_restart_row_says_restart`,
+  `settings/a_change_reaches_the_renderer`.
 
-## First tenants
+## Not built
 
-GPU device (render + compute), shadows, SSAO quality, shadow-map size,
-**UI font size**, autosave interval. Deliberately short: the deliverable of v1
-is the store, the rule and the window — not the list.
-
-*(2026-08-20)* **Terminal panel** joined General, and is the first setting
-whose job is to keep a feature *out* of the way: it is off by default, and
-turning it on is what makes the panel and its right-hand dock node exist at
-all ([terminal-panel.md](terminal-panel.md)). Live tier — it appears on the
-next frame — and turning it off ends the running session rather than hiding
-it, because a process kept alive behind a closed panel is one nobody can see
-or stop.
-
-*(added on review)* **Font size was the omission.** `View > Font Size` already
-exists and writes `AppState::uiFontScale`, which nothing persists — it resets
-to 1.0 on every launch. It passes this doc's own test more cleanly than
-anything else in the app: an accessibility choice nobody wants to re-make
-daily, and identical in every project. It is a first tenant, and the View
-submenu now points here rather than owning it.
-
-Navigation style is dropped from v1: there is no discrete flag to persist —
-trackpad-friendliness is Alt+drag being accepted everywhere, not a mode. The
-remote port is dropped too; it is a launch flag (`--remote`), and a preference
-that silently disagrees with the command line would be worse than neither.
-
-## Not in v1, and why
-
-- ~~**Keybindings.**~~ SHIPPED 2026-08-24 as U12 — it did need its own model
-  (conflicts, chords, per-mode maps), which is why it is a separate table and
-  a separate renderer rather than a `Field` row. The overrides live in this
-  file under `"keys"`; see docs/ui/u12-keybindings.md.
-- **Per-project overrides of user preferences.** A project that forces a GPU
-  on whoever opens it is wrong.
-- **Synced/cloud settings.** No account system, and no reason to invent one.
-- **Live reload of the file.** Watching config files earns a class of
-  half-applied-state bugs for a benefit nobody asked for.
-
-## Open question to settle when it is built
-
-**Display units (mm/inch).** The model is always millimetres, so a unit is a
-display choice — bucket 2. But a drawing's dimensions are part of the
-document, so their units are bucket 1. The likely answer is "both, and they
-are different settings", which is worth deciding deliberately rather than
-discovering. Flagged for the units workstream, not for this window's v1.
+Per-project overrides of user preferences (a project must not force a GPU on
+whoever opens it), synced settings, live reload of the file, a search field,
+per-section resets. The remote port is a launch flag (`--remote`), not a
+preference: one that silently disagreed with the command line would be worse
+than neither.

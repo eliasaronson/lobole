@@ -1,11 +1,11 @@
 #pragma once
 
-// The Derived feature's project-level verbs (docs/modeling/derived-plan.md,
-// D2). The feature itself (core/features/DerivedFeature.h) knows only two
-// Documents; everything that needs the PROJECT — which part a slot id is,
-// whether a source is loaded, the context assembly's placements — lives
-// here, and both the GUI (tool window, tree verbs) and the RPCs go through
-// it, so the two surfaces cannot disagree about a refusal.
+// The Derived feature's project-level verbs (docs/modeling/derived.md#verbs).
+// The feature itself (core/features/DerivedFeature.h) knows only two Documents;
+// everything that needs the PROJECT — which part a slot id is, whether a source
+// is loaded, the context assembly's placements — lives here, and both the GUI
+// (tool window, tree verbs) and the RPCs go through it, so the two surfaces
+// cannot disagree about a refusal.
 
 #include "core/features/DerivedFeature.h"
 #include "ui/AppState.h"

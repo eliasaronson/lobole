@@ -13,7 +13,7 @@ and the power brick are bought and arrive as STEP (`extract_bought.py`).
 
 This replaces an Onshape port that brought over the six panels and stopped.
 What it is for, and what it fixes about that port, is
-[the plan](../../docs/smart-speaker-generator-plan.md). The short version:
+[README.md](README.md#structure). The short version:
 one parameter table instead of six copies of one, driver heights derived from
 the floor and the top rather than typed into a sketch, bolt rings that are a
 count and a diameter, and the parts that were missing.

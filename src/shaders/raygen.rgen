@@ -34,10 +34,10 @@ layout(push_constant) uniform PushConstants {
     // 1 = the outline G-buffer launch: trace one unjittered ray through the
     // pixel centre and write auxImage instead of accumulating radiance.
     uint auxPass;
-    // The G-buffer is traced in STRIPS of rows (docs/rendering/
-    // still-quality-plan.md): a launch covers rows [auxRow0, auxRow0 +
-    // launch height) of an image auxHeight rows tall, and writes them to the
-    // strip-sized auxImage from row 0.
+    // The G-buffer is traced in STRIPS of rows
+    // (docs/rendering/still-render.md#outlines-on-a-traced-still): a launch
+    // covers rows [auxRow0, auxRow0 + launch height) of an image auxHeight rows
+    // tall, and writes them to the strip-sized auxImage from row 0.
     uint auxRow0;
     uint auxHeight;
 } pc;
@@ -53,7 +53,7 @@ struct RayPayload {
     vec3 gnormal;
     float hitT;   // < 0.0 on a miss
     uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
-    // A path through glass (docs/rendering/glass-plan.md): closest-hit sets
+    // A path through glass (docs/rendering/materials.md#glass): closest-hit sets
     // kFlagContinue and the next ray, and raygen's loop traces it, weighting
     // what it finds by `throughput`. SHADOW rays carry this payload too, so
     // the one hit group's any-hit can read it: then radiance is the ray's

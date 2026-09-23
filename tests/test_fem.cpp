@@ -1083,11 +1083,11 @@ TEST_CASE("a study refuses an unknown analysis or load type", "[fem][enums]") {
 }
 
 // ---------------------------------------------------------------------------
-// docs/ui/long-operations.md, phase 3: PrepareStudy and MeshStudy are split
-// at the meshing so a worker can do that half from copied shapes. The split
-// must be invisible — same nodes, same tets, same supports and tractions —
-// and the copy must be a copy, or the worker writes triangulation into the
-// document's own faces under the renderer.
+// docs/ui/long-operations.md#fem-meshing-and-solving: PrepareStudy and
+// MeshStudy are split at the meshing so a worker can do that half from copied
+// shapes. The split must be invisible — same nodes, same tets, same supports
+// and tractions — and the copy must be a copy, or the worker writes
+// triangulation into the document's own faces under the renderer.
 // ---------------------------------------------------------------------------
 
 #ifdef HAVE_NETGEN
@@ -1170,7 +1170,8 @@ TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
 // catches this class.
 #ifdef HAVE_NETGEN
 
-// --- P0: can one mesh span two solids? (docs/simulation/plan.md) ----------
+// --- P0: can one mesh span two solids?
+// (docs/simulation/README.md#assembly-studies)
 //
 // The question the whole "assembly studies" ladder rests on. A bonded
 // assembly needs a CONFORMING mesh across the interface — the nodes on the
@@ -1315,7 +1316,7 @@ TEST_CASE("P0: a mesh spans two solids only when they SHARE the face",
 
 #endif // HAVE_NETGEN
 
-// ---- S1: a study on an assembly (docs/simulation/assembly-studies-plan.md)
+// ---- A study on an assembly (docs/simulation/README.md#assembly-studies)
 
 namespace {
 

@@ -44,7 +44,7 @@ double Bilinear(const HeightMap& m, double x, double y) {
 // pass by up to the whole height between them: at the part's edge that dip
 // went into air, which hid it, but a cell masked ON the part -- a roughing
 // layer's cut-already cells, a rest pass's reached-already ones -- put it
-// 15 mm into a dome (docs/cam/rough-rest-range-plan.md).
+// 15 mm into a dome (docs/cam/operations.md#3-axis-surfacing).
 //
 // And across a CLIFF -- four cells differing by more than a steep slope
 // allows, where the tool rolls off an edge onto the floor within one cell --
@@ -728,8 +728,8 @@ RotaryHelicalPasses(const RadiusMap& cl, const RotaryHelicalRequest& req) {
       // under this pass: a pass along a flat land took a full step and put
       // the next one partway down a flute wall, leaving a ridge between
       // them -- 0.69 mm on the rolling pin, where the parallel passes left
-      // 0.04 (docs/cam/rotary-helical-plan.md). The spiral's window made the
-      // same mistake the same way, looking only one way.
+      // 0.04 (docs/cam/rotary.md#patterns-rotary_pattern). The spiral's window
+      // made the same mistake the same way, looking only one way.
       for (int f = 0; f <= 4; f++) {
         const double tb = th + glm::radians(baseStep) * f / 4.0;
         const double rp = SpiralRadiusAt(cl, x, tb + cellRad);

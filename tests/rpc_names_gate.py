@@ -21,7 +21,7 @@ one thing a caller holding a feature does not have: it has to count the tree
 to roll back to the thing it just made. Both now take `feature_id`.
 
 Sixteen of the fifty-four failed iterations in one modelling round were the
-API's shape rather than the model's (docs/inspection-friction-plan.md). Most
+API's shape rather than the model's (docs/scripting/rpc.md#parameters). Most
 were guessed methods and guessed values, which no gate can prevent. This one
 class can: a caller who has just written `suppress_feature(feature_id=...)`
 should not have to learn a second spelling for the next call.

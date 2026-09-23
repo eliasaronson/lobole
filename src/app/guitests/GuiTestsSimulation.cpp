@@ -99,8 +99,8 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   };
 
   // The force arrow must POINT the way the force pushes, and be draggable to
-  // change its magnitude (docs/ui/viewport-handles.md). Both asserted on the
-  // drawn primitives and the study, not on pixels.
+  // change its magnitude (docs/ui/viewport-handles.md#simulation-load-drag).
+  // Both asserted on the drawn primitives and the study, not on pixels.
   t = IM_REGISTER_TEST(engine, "sim", "force_arrow_points_along_the_force");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -294,17 +294,16 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // CAM (docs/cam/plan.md): a setup on a part, an operation with derived
+  // CAM (docs/cam/README.md): a setup on a part, an operation with derived
   // depths, and a backplot drawn from the SAME toolpath the post consumes.
-  // G1 (docs/cam/gui.md): Z zero is PICKED, not typed. Getting it wrong —
-  // zeroing on the table instead of the stock top — is the mistake that
+  // docs/cam/gui.md#verb-windows: Z zero is PICKED, not typed. Getting it wrong
+  // — zeroing on the table instead of the stock top — is the mistake that
   // breaks tools, so the panel refuses to guess it.
   // A new document takes the CAM job with it. This state used to survive:
   // the panel claimed "Z zero at 17.000" and offered to Save G-code for a
   // part that no longer existed, and the armed face pick came along too —
   // into a document where the button that re-arms it is DISABLED while a pick
-  // is live, so the panel was simply stuck (docs/cam/dogfood-round.md,
-  // round 2).
+  // is live, so the panel was simply stuck (docs/cam/gui.md#verb-windows).
   // The only two cases that need a real tet mesh: both assert on solve
   // numbers (beam-theory deflection and stress; a held volume fraction), and
   // Netgen is the one mesher — without it fem::Mesh returns "built without
@@ -594,10 +593,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // S1 (docs/simulation/assembly-studies-plan.md): a study on an ASSEMBLY
-  // tab. Two placed blocks; the upper meshed, the lower a rigid support;
-  // one click clamps the upper where the lower touches it. The picture
-  // says so: the support is a ghost, its contact face tinted as a fixture.
+  // A study on an ASSEMBLY tab (docs/simulation/README.md#assembly-studies).
+  // Two placed blocks; the upper meshed, the lower a rigid support; one click
+  // clamps the upper where the lower touches it. The picture says so: the
+  // support is a ghost, its contact face tinted as a fixture.
   t = IM_REGISTER_TEST(engine, "sim",
                        "an_assembly_study_clamps_where_the_support_touches");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -757,7 +756,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   // A study is a row in the part's dock (ui::ListRow): click selects it, its
   // editor is the Simulation window, and Delete is in its menu -- where the
   // whole editor, and a Delete button at its foot, used to be inline under
-  // the list (docs/ui/consistency-round-plan.md).
+  // the list (docs/ui/panels.md#simulation-the-study-panel-and-window).
   t = IM_REGISTER_TEST(engine, "sim", "a_study_is_a_row_edited_in_the_window");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 60.0);

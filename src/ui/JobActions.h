@@ -12,7 +12,7 @@
 
 class Document;
 
-// The CAM job tab (docs/cam/job-document.md).
+// The CAM job tab (docs/cam/README.md#the-model).
 //
 // A job references parts by their stable project-document id and owns no
 // geometry, so everything CAM used to reach through `state.document` now goes
@@ -62,10 +62,10 @@ const std::vector<Body>& JobPlacedBodies(AppState& state);
 const cam::Setup* ActiveJobSetup(AppState& state);
 
 // A setup's FIXTURES as solids in setup (bed) space, each named for the
-// verdict (docs/cam/workholding-plan.md). `enabledOnly` is the verifier's
-// list; the viewport draws every fixture. A fixture whose part is gone is
-// left out and its name appended to `missing` -- the caller says so rather
-// than checking less than it was asked to.
+// verdict (docs/cam/setup.md#workholding-fixtures). `enabledOnly` is the
+// verifier's list; the viewport draws every fixture. A fixture whose part is
+// gone is left out and its name appended to `missing` -- the caller says so
+// rather than checking less than it was asked to.
 std::vector<cam::FixtureSolid>
 JobFixtureSolids(AppState& state, const cam::Setup& setup,
                  bool enabledOnly = true,

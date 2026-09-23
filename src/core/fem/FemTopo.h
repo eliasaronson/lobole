@@ -10,8 +10,8 @@
 // worker thread over an immutable snapshot (the progress/cancel callback is
 // that seam).
 //
-// This is the TO0 spike core: the numerics behind the topology workstream,
-// with no Study/serialization/RPC/GUI surface yet (see docs/topopt/plan.md).
+// This is the numerics of topology optimization; the Study, serialization,
+// RPC and GUI surface are elsewhere (see docs/topopt/README.md).
 
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h" // Material, FaceLoad
@@ -72,9 +72,9 @@ struct TopoResult {
 // TopologyOptimize's inner loop solves K(x) u = F once per SIMP iteration,
 // with K = sum_e scale_e * Ke0_e over the reduced DOF map. A TopoLinearSolver
 // replaces the built-in Eigen CG-IC with an external implementation — the
-// Vulkan matrix-free CG in fem_gpu (docs/topopt/gpu-plan.md) — without pulling
-// any GPU dependency into designer_core. Null = the built-in CPU path, which
-// remains the fallback and the correctness oracle.
+// Vulkan matrix-free CG in fem_gpu (docs/topopt/README.md#the-gpu-solver) —
+// without pulling any GPU dependency into designer_core. Null = the built-in
+// CPU path, which remains the fallback and the correctness oracle.
 class TopoLinearSolver {
 public:
   virtual ~TopoLinearSolver() = default;

@@ -191,7 +191,7 @@ TEST_CASE("A cap that STRADDLES a shaft is clear, not buried in it",
   // which is inside the shaft. Testing that centre said the cap was buried in
   // a shaft it merely sits on: `camshaft x cam cap` in a clean engine, where
   // an exact boolean called the same pose clear
-  // (docs/modeling/aircooled-dogfood.md).
+  // (generators/README.md#single-cylinder-and-air-cooled-engines).
   // The shaft carries a LOBE, which is what makes its bounding box wide
   // enough to swallow the cap's — without that the boxes do not nest and the
   // containment path is never reached. That is why this needs a camshaft and

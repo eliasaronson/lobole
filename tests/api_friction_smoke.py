@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The PES pump round's fixes, over the RPC and through both clients
-(docs/pes-friction-plan.md): a revolve about a custom axis, a helix that
+"""What the PES pump relies on, over the RPC and through both clients
+(generators/pes_pump/README.md#how-it-moves): a revolve about a custom axis, a helix that
 starts where it is told, a study that names its configuration and reports
 its mates, one clash vocabulary, a section that says what it kept, and the
 Python verbs (describe(method=...), spline, arc chaining, rack).

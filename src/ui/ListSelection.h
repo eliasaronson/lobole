@@ -2,10 +2,10 @@
 
 // The one click gesture and the one Delete verb for every LIST of things
 // with ids — features in a part, occurrences in an assembly, operations in a
-// job (docs/ui/u1-selection.md, "Lists"). The rows themselves stay in their
-// panels: a feature row carries a rollback bar and a suppress item, an
-// occurrence row a visibility box, an operation row an enabled box and a
-// ghost button, so a shared row widget would be a configuration blob and
+// job (docs/ui/selection.md#lists-one-gesture-one-delete). The rows themselves
+// stay in their panels: a feature row carries a rollback bar and a suppress
+// item, an occurrence row a visibility box, an operation row an enabled box and
+// a ghost button, so a shared row widget would be a configuration blob and
 // would rename the item ids the GUI tests address. What IS shared is the
 // part that had drifted: two lists could Ctrl-click, one could right-click
 // Delete, none could Shift-click a range, and Delete on the keyboard reached

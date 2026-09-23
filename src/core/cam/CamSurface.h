@@ -12,7 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
-// The PATTERN half of a finishing pass (docs/cam/surfacing.md).
+// The PATTERN half of a finishing pass
+// (docs/cam/operations.md#3-axis-surfacing).
 //
 // A strategy is a pattern swept over a contact surface, and the two are
 // independent: the pattern is 2D, and the contact algorithm puts it on the
@@ -146,10 +147,10 @@ struct RotaryParallelRequest {
 [[nodiscard]] std::vector<RotaryPass>
 RotaryParallelPasses(const RadiusMap& cl, const RotaryParallelRequest& req);
 
-// Continuous 4-axis (docs/cam/rotary-continuous-plan.md): ONE helix from the
-// low end of the map to the high end, the part turning while the tool cuts.
-// FreeCAD's `rotary_spiral` and Kiri:Moto's lathe mode are the two surveyed
-// answers, and this takes the first's shape with the second's ends.
+// Continuous 4-axis (docs/cam/rotary.md#continuous-surface_rotary): ONE helix
+// from the low end of the map to the high end, the part turning while the tool
+// cuts. FreeCAD's `rotary_spiral` and Kiri:Moto's lathe mode are the two
+// surveyed answers, and this takes the first's shape with the second's ends.
 struct RotarySpiralRequest {
   // The spacing between neighbouring turns, in mm MEASURED ALONG THE
   // SURFACE: the axial advance per revolution on a flat stretch, less where
@@ -173,10 +174,10 @@ struct RotarySpiralRequest {
   double floorRadius = 0.0;
 };
 
-// Passes that FOLLOW a twist (docs/cam/rotary-helical-plan.md): helices at
-// `lead_mm` per turn, each running the length of the map, stepped round one
-// from the next. In the unrolled (x, arc) plane they are parallel lines at the
-// twist's angle, and an infinite lead is the parallel pattern.
+// Passes that FOLLOW a twist (docs/cam/rotary.md#patterns-rotary_pattern):
+// helices at `lead_mm` per turn, each running the length of the map, stepped
+// round one from the next. In the unrolled (x, arc) plane they are parallel
+// lines at the twist's angle, and an infinite lead is the parallel pattern.
 struct RotaryHelicalRequest {
   // Axial advance per turn of a pass, signed for the hand. Must be non-zero:
   // no twist is the parallel pattern, and the caller says so.
@@ -223,7 +224,7 @@ RotaryHelicalPasses(const RadiusMap& cl, const RotaryHelicalRequest& req);
 // 360 / (2 pi 25) = 2.29.
 [[nodiscard]] double DeriveRotaryTwist(const RadiusMap& cl);
 
-// --- surfacing off the frame (docs/ui/long-operations.md, phase 5) --------
+// --- surfacing off the frame (docs/ui/long-operations.md#cam-toolpath-passes)
 //
 // A finishing pass is minutes of work and it ran INLINE, on the frame: the
 // rotary rolling pin takes seventeen of them, and the frame HUD shows single

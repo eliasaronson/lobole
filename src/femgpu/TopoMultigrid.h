@@ -1,9 +1,9 @@
 #pragma once
 
-// Geometric multigrid for the topology solver (GPU3 —
-// docs/topopt/gpu3-plan.md): CPU-side construction of the two-level
-// hierarchy (node aggregation + rigid-body-mode prolongation + Galerkin
-// coarse operator) and a pure-fp64 reference V(1,1)-PCG.
+// Geometric multigrid for the topology solver
+// (docs/topopt/README.md#the-gpu-solver): CPU-side construction of the
+// two-level hierarchy (node aggregation + rigid-body-mode prolongation +
+// Galerkin coarse operator) and a pure-fp64 reference V(1,1)-PCG.
 //
 // The fp64 path is both MG0's gate (does the coarse space kill the void-mode
 // tail in exact arithmetic?) and MG1's oracle (the GPU cycle is diffed

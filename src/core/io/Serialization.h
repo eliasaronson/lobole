@@ -107,7 +107,7 @@ std::vector<std::string> RelationKindNames();
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);
 ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 
-// Single-relation (de)serialization (v83, docs/assemblies/relations-plan.md);
+// Single-relation (de)serialization (v83, docs/assemblies/relations.md);
 // same convention. An unknown kind or DOF name is refused naming the
 // accepted ones — never demoted to a default.
 nlohmann::json RelationToJson(const Relation& relation);
@@ -121,10 +121,10 @@ MateDof MateDofFromString(const std::string& s);
 const char* FreewheelDrivesToString(int drives);
 int FreewheelDrivesFromString(const std::string& s);
 
-// Single-motion-study (de)serialization (v87, docs/agent-scale-plan.md G2).
-// The definition only: driver mate + DOF, range in the DOF's own unit,
-// sample count, and the clash check's mode. An unknown DOF or mode is
-// refused naming the accepted ones.
+// Single-motion-study (de)serialization (v87,
+// docs/assemblies/README.md#motion-studies). The definition only: driver mate +
+// DOF, range in the DOF's own unit, sample count, and the clash check's mode.
+// An unknown DOF or mode is refused naming the accepted ones.
 nlohmann::json ClearanceAssertionToJson(const ClearanceAssertion& a);
 ClearanceAssertion ClearanceAssertionFromJson(const nlohmann::json& j);
 nlohmann::json MotionStudyToJson(const MotionStudy& study);
@@ -138,7 +138,7 @@ nlohmann::json StudyToJson(const fem::Study& study);
 // CAM setups (v58) — SerializeCam.cpp. Inline in both save formats.
 nlohmann::json CamSetupToJson(const cam::Setup& setup);
 cam::Setup CamSetupFromJson(const nlohmann::json& j);
-// The machine (docs/cam/job-document.md, round two): its JSON, embedded in a
+// The machine (docs/cam/setup.md#machine-profiles): its JSON, embedded in a
 // setup and written as one file per machine in the global store.
 nlohmann::json MachineToJson(const cam::Machine& m);
 cam::Machine
@@ -182,7 +182,7 @@ SaveDrawing(const DrawingDocument& drawing, const std::string& path);
 [[nodiscard]] std::expected<std::unique_ptr<DrawingDocument>, std::string>
 LoadDrawing(const std::string& path);
 
-// Job (de)serialization: the CAM job document (docs/cam/job-document.md),
+// Job (de)serialization: the CAM job document (docs/cam/README.md#the-model),
 // discriminated by `kind: "job"`. Unlike a part or a drawing the two on-disk
 // forms carry the SAME body — a job is a parts list and a few setups, none of
 // which earns a file of its own — so only the filename differs (`index.json`

@@ -11,7 +11,7 @@
 // REGENERATING against its overrides — the document overlays them onto the
 // symbol table and composes its suppression set, never mutating the authored
 // model. A doc-level object, the FEM Study sibling — not a Feature, does not
-// participate in the feature list. See docs/configurations/plan.md.
+// participate in the feature list. See docs/configurations/README.md.
 
 // A mate degree of freedom an ASSEMBLY configuration holds at a value of its
 // own (v101). The solve uses it in place of the mate's value, which stays as

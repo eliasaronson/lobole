@@ -2,11 +2,11 @@
 
 // Helpers shared between the CamToolpath*.cpp files.
 //
-// CamToolpath.cpp was 3,306 lines and six subjects (docs/architecture-review-
-// 2026-09-06.md, stage 2). Splitting it left 21 helpers that more than one of
-// the six needs -- the Clipper2 conversions, the move emitters, the ramp
-// geometry. They were file-static; they are `cam::detail` now, which is the
-// only linkage change the split makes.
+// CamToolpath.cpp was 3,306 lines and six subjects
+// (docs/architecture.md#source-layout). Splitting it left 21 helpers that more
+// than one of the six needs -- the Clipper2 conversions, the move emitters,
+// the ramp geometry. They were file-static; they are `cam::detail` now, which
+// is the only linkage change the split makes.
 //
 // NOT a public interface: nothing outside src/core/cam includes this. The
 // public surface is still CamToolpath.h, unchanged.

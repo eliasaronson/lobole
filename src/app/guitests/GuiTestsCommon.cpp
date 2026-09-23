@@ -98,7 +98,8 @@ void ResetAppForTest() {
   // Toolpaths generate INLINE in this suite: thirty tests read
   // `camToolpaths` right after a pick, and the real (deferred) path is the
   // subject of exactly one of them, `cam/adaptive_clears_off_the_frame`,
-  // which turns it back on for itself (docs/ui/long-operations.md).
+  // which turns it back on for itself
+  // (docs/ui/long-operations.md#cam-toolpath-passes).
   s_App->camDeferPasses = false;
   s_App->backgroundJobs.clear(); // joins whatever a previous test left
   s_App->camAdaptiveQueue.clear();
@@ -150,10 +151,11 @@ void ResetAppForTest() {
   // state belongs to ImGui. Rebuilding the default layout is the only reset
   // that owns it, and it re-focuses Model as its last act.
   //
-  // Unconditional on purpose (docs/ui/gui-test-isolation.md): tracking
-  // whether a test "touched the layout" would have read clean in exactly the
-  // case that mattered, because a window docking itself is not an action any
-  // test performs.
+  // Unconditional on purpose
+  // (docs/ui/testing.md#independence-any-partition-is-valid): tracking whether
+  // a test "touched the layout" would have read clean in exactly the case that
+  // mattered, because a window docking itself is not an action any test
+  // performs.
   s_App->buildDefaultDockLayout = true;
   // A FRESH PROJECT, the same one File > New makes — which also returns the
   // app to a single part tab. Without it a test ending on an ASSEMBLY tab

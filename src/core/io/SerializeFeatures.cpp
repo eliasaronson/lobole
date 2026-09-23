@@ -106,8 +106,9 @@ json EntityToJson(const sketch::Entity& entity) {
 // builds a plausible arc of the wrong size and says nothing at all. These
 // looked like the last angles in the API still naming no unit. They were not:
 // `pattern`'s per-step angle, `set_reference_image.rotation` and
-// `add_constraint.value` followed on 2026-09-10 (docs/units-plan.md), and
-// tests/rpc_units_gate.py is what stops the next one.
+// `add_constraint.value` followed on 2026-09-10
+// (docs/conventions.md#units-and-angles), and tests/rpc_units_gate.py is what
+// stops the next one.
 
 double AngleRadians(const json& j, const char* radKey, const char* degKey) {
   const bool hasRad = j.contains(radKey);
@@ -848,7 +849,7 @@ json FeatureToJson(const Feature& feature) {
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
   } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
-    // v84 (docs/modeling/derived-plan.md). The snapshot rides here in full
+    // v84 (docs/modeling/derived.md). The snapshot rides here in full
     // but for the B-Reps, which are document assets: the chain hash is a
     // hash of this JSON, so an update (new asset names, new element maps,
     // new source hash) invalidates everything after the feature.
@@ -1315,7 +1316,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "omitted for a nut or a washer; drive?: leave empty for the one the "
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
-     "(docs/parts/plan.md)"},
+     "(docs/parts/README.md)"},
     {"BaseFlange", 109,
      "sketch_id, reversed?, regions? - the FIRST wall of a sheet part: the "
      "closed profile thickened by the document's sheet-metal thickness, so "
@@ -1403,7 +1404,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "part). A COPY of another part's bodies, taken when the feature is "
      "added and on update_derived; regeneration reads the snapshot, never "
      "the source, and get_state reports `stale` when the source has moved "
-     "(docs/modeling/derived-plan.md)"},
+     "(docs/modeling/derived.md)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
      "flip?, axis? {kind: x|y|z|sketch_line|datum_axis|custom}, the same as "
@@ -1474,7 +1475,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "clearance, 5.0 tapped) and is what a drawing callout and a fastener "
      "check read. A TAPPED fit also threads the bore it cuts, so a screw in "
      "it engages instead of reading as interference "
-     "(docs/modeling/hole-standards.md)"},
+     "(docs/modeling/holes-and-threads.md#hole)"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
@@ -1601,7 +1602,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         // it happened to evaluate to: `generators/gear.py` sent
         // `radius_expr` (the field is `r_expr`) and advertised an adjustable
         // bore that was frozen. Refuse the key instead, naming the ones this
-        // entity takes (docs/agent-scale-plan.md, G1b).
+        // entity takes (docs/variables/README.md#concepts).
         for (auto it = ej.begin(); it != ej.end(); ++it) {
           const std::string& key = it.key();
           if (key.size() <= 5 || key.compare(key.size() - 5, 5, "_expr") != 0)

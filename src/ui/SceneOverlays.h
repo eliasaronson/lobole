@@ -27,7 +27,7 @@ struct Ray;          // defined in FaceSelector.h
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 
@@ -76,11 +76,11 @@ inline constexpr float kDefaultPlaneHalfExtent = 8.0f;
 // How far the base planes reach from the origin, and the size everything else
 // that is a REFERENCE (datum quads, the sketch background) is derived from:
 // the document's own reach, floored at the empty-workspace default. A unit
-// default has to come from what it acts on (docs/ui/u10-defaults-and-
-// refusals.md) — 8 mm planes are a speck against a 1 m speaker panel, which
-// is exactly the part you most need a plane to sketch on. Cached against the
-// document's version: the bbox under it is an OCC pass per body, and this is
-// asked for every frame the planes are up.
+// default has to come from what it acts on
+// (docs/ui/tool-sessions.md#defaults-and-refusals) — 8 mm planes are a speck
+// against a 1 m speaker panel, which is exactly the part you most need a plane
+// to sketch on. Cached against the document's version: the bbox under it is an
+// OCC pass per body, and this is asked for every frame the planes are up.
 float ScenePlaneHalfExtent(AppState& state);
 
 // The active sketch's grid: how far it reaches, and how big one cell is.

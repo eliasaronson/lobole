@@ -13,7 +13,7 @@
 #
 # What it cannot do is find the cost you did not think to time. A sampling
 # profiler starts from the answer instead of from a hypothesis, and nothing in
-# this repo had one (docs/capability-review-2026-08-31.md, P1).
+# this repo had one (docs/architecture.md#tests).
 #
 # perf is deliberately NOT in shell.nix: it is coupled to the running kernel,
 # and a dev shell that fails to evaluate on someone else's machine costs more

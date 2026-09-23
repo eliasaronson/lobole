@@ -89,8 +89,8 @@
 //
 // Pure functions of a document -- no renderer, no ImGui -- so unlike most of
 // the assembly code this can be tested headlessly.
-// Split out of AssemblyActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 6). AssemblyActions.h still declares everything it declared.
+// Split out of AssemblyActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AssemblyActions.h still declares everything it declared.
 
 namespace ui {
 
@@ -264,7 +264,7 @@ FastenerReport CheckFasteners(AppState& state) {
     // material. Without this the check re-derived the untruncated stack and
     // called three correctly sized alternator through-bolts 21.6 mm short,
     // because the bolt-circle line carries on into a cast rib the bolts were
-    // deliberately not spanning (docs/dogfooding.md). A check that cries wolf
+    // deliberately not spanning (docs/parts/README.md). A check that cries wolf
     // on a correct model is worse than no check.
     //
     // Derived rather than recorded: the nut's own placement says where the

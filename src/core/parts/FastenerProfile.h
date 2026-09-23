@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-// Which standard is which shape (docs/parts/plan.md, phase 4).
+// Which standard is which shape
+// (docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence).
 //
 // The plan's interface table said the head and the drive are CHOSEN, and that
 // is wrong in a way worth writing down: you do not order an ISO 4762 with a

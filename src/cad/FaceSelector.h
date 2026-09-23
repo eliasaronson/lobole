@@ -38,7 +38,8 @@ struct RayHit {
   // `faceIndex` is only the face the ray entered through, kept so highlight
   // and cycling have something to hold. A cap has no element map entry and
   // therefore no stable name -- every caller that needs one refuses it
-  // rather than substituting that entered face (docs/ui/section-pick-plan.md).
+  // rather than substituting that entered face
+  // (docs/ui/selection.md#picking-through-a-section).
   bool cap = false;
 };
 

@@ -28,7 +28,8 @@
 
 using Catch::Matchers::WithinRel;
 
-// S10 (docs/sheetmetal/plan.md): a cut square to the metal wherever it lands.
+// NormalCut (docs/sheetmetal/README.md#features): a cut square to the metal
+// wherever it lands.
 namespace {
 
 constexpr double kT = 1.5;
@@ -168,7 +169,8 @@ TEST_CASE("every hole of a sketch is cut as one body, not one at a time",
   // time: the same body, to the last face. What changed underneath is that
   // the first pays for the ray tree — and for the unfold, where some outline
   // needs it — once instead of twelve times, which took a grill's firebox
-  // from 26 s to 3 (docs/grill-friction-plan.md).
+  // from 26 s to 3
+  // (docs/sheetmetal/README.md#normalcut-shares-its-ray-tree-and-unfolds-only-when-it-must).
   const auto grid = [](int i, int j) {
     return glm::vec2{20.0f + 20.0f * static_cast<float>(i),
                      15.0f + 15.0f * static_cast<float>(j)};

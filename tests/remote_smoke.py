@@ -118,7 +118,7 @@ def main():
 
         phase("Idle throttle wakes on RPC")
         # The frame loop drops to a ~10 Hz event-wait when nothing is
-        # happening (docs/rendering/idle-throttle.md); an enqueued request
+        # happening (docs/rendering/frame-pacing.md#idle-throttle); an enqueued request
         # must WAKE it, not eat the timeout. Let the app go idle, then time a
         # ping: with the wake these answer in single-digit ms; without it
         # most land mid-wait and take tens of ms. Eight rounds with slack for
@@ -138,7 +138,7 @@ def main():
         # on screen, so any overrun of the refresh period costs a whole extra
         # period and the idle GPU clocks down with it. Measured 10-25 fps at
         # two images against 59 at three, same scene, same binary
-        # (docs/performance/present-stall.md). Asserted through frame_stats
+        # (docs/rendering/frame-pacing.md#swapchain-and-present). Asserted through frame_stats
         # because that is also where a human reads it.
         sc = d.call("frame_stats")["swapchain"]
         expect(sc["images"] >= 3,
@@ -861,7 +861,7 @@ def main():
         # Standard views: instant (no animation), fit + exact axis alignment
         d.call("new_project")
         d.call("add_feature", feature=BOX)
-        # Z-up world (docs/up-axis.md): front camera toward -Y, top on +Z.
+        # Z-up world (docs/conventions.md#world-axes): front camera toward -Y, top on +Z.
         v = d.call("view", name="front")
         offset = [p - t for p, t in zip(v["position"], v["target"])]
         expect(abs(offset[0]) < 1e-4 and abs(offset[2]) < 1e-4
@@ -981,7 +981,7 @@ def main():
         # with nothing left is a tool the wrong way round or a boolean the
         # kernel could not do -- and it used to say nothing at all, so the
         # next thing you saw was "no bodies" from mass_properties with no
-        # clue which feature did it (docs/cam/dogfood-rotary.md, where it
+        # clue which feature did it (docs/modeling/README.md#features; it once
         # cost two rounds of bisecting a helix chain by hand).
         ska = d.call("add_feature", feature={
             "type": "Sketch", "name": "Swallow",
@@ -1193,7 +1193,7 @@ def main():
         d.call("new_project")
 
         phase("Measuring by clicking and measuring by script agree")
-        # The parity gate for measure (docs/inspect/measure-v2.md M7). The
+        # The parity gate for measure (docs/inspect/README.md#measure). The
         # GUI has measured across occurrences since assembly measure shipped;
         # the RPC resolved ONE body set and used it for both refs, so the
         # assembly question the tool could ask, a script could not. Nothing

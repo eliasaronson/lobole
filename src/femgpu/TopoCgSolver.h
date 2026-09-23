@@ -1,10 +1,10 @@
 #pragma once
 
 // On-device preconditioned Conjugate Gradient over the matrix-free stiffness
-// product (GPU1 of docs/topopt/gpu-plan.md). The whole CG loop — SpMV,
-// reductions, alpha/beta, vector updates — runs in compute shaders recorded
-// in chunks, so vectors never cross PCIe between iterations; the host only
-// reads one scalar (the residual norm) per chunk to decide convergence.
+// product (docs/topopt/README.md#the-gpu-solver). The whole CG
+// loop — SpMV, reductions, alpha/beta, vector updates — runs in compute shaders
+// recorded in chunks, so vectors never cross PCIe between iterations; the host
+// only reads one scalar (the residual norm) per chunk to decide convergence.
 // Jacobi (element-assembled diagonal) preconditioning, warm-started from the
 // previous SIMP iteration's displacement. fp32 throughout: the SIMP loop is
 // validated against the CPU fp64 path by the femgpu tests.

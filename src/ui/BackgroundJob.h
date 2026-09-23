@@ -1,7 +1,7 @@
 #pragma once
 
 // One long-running operation, as the registry sees it
-// (docs/ui/long-operations.md, "The mechanism").
+// (docs/ui/long-operations.md#the-registry).
 //
 // Deliberately NOT a union of every job's needs. `fraction` and a `label`
 // the domain writes are the common denominator; a topology run's compliance
@@ -47,7 +47,7 @@ struct BackgroundJob {
   ~BackgroundJob() {
     // Closing the app or the tab mid-pass blocks for the remainder of THIS
     // job's work — one adaptive pass, not the operation — and is accepted
-    // (docs/ui/long-operations.md, "Cancel, quit and close").
+    // (docs/ui/long-operations.md#cancel-quit-and-close).
     cancel.store(true);
     if (thread.joinable())
       thread.join();

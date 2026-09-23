@@ -1,0 +1,221 @@
+# Assembly solver
+
+How mates place occurrences: the connector frames a mate joins, the mate types
+and their maths, the closed-form placement pass, and the numeric pass that
+closes mate loops. Code: `src/core/AssemblySolve.{h,cpp}` (`Solve`,
+`ConnectorLocalFrame`), `src/core/AssemblyLoopSolve.{h,cpp}` (`SolveLoops`).
+The model is in [README.md](README.md).
+
+## Mates are joints between connector frames
+
+A mate connects two **connectors** — a frame on each of two occurrences — with
+one mate type. The type is the *normal form* of a constraint stack: a hinge is
+one revolute mate, not "concentric + coincident" whose hinge-ness is implicit.
+The DOF two rigid bodies can be left with are the lower kinematic pairs, and
+those are the types.
+
+### Connector frames
+
+A connector names an occurrence and an **anchor**; the frame (origin, X, Y, Z
+in the part's coordinates) is derived from the anchor at solve time and never
+stored, so a part edit moves the connector with the geometry.
+
+| anchor | frame |
+|---|---|
+| `origin: true` | the part's coordinate frame |
+| `frame: <id>` | a named Frame feature of the part — the mate as designed (a bolt-circle centre, a shaft axis). An errored Frame refuses the mate. |
+| `face: {feature_id, element}` planar | origin at the face centroid, Z the outward normal, X a deterministic in-plane axis (`CADShape::FacePlane`) |
+| … cylindrical | Z the axis, origin the face centroid projected onto the axis (`CADShape::FaceAxis`) |
+| … conical | Z the axis, origin the apex |
+| … spherical | origin the centre, Z world +Z |
+| `snap_edge` (with a face) | origin moved to that edge's characteristic point — a circular edge's centre, else its midpoint; the face still gives Z |
+| `snap_edge` + `snap_edge2` | origin at the vertex the two edges share (a corner). A corner has no persistent name of its own, but two named edges do; when they share none or more than one vertex, the origin falls back to `snap_edge`'s own point rather than guess. |
+
+Faces and edges are toponaming `ElementRef`s
+([../modeling/README.md](../modeling/README.md)). A face that no
+longer resolves puts the **mate** in an error state naming which connector
+failed and, when the stored name is a prefix of current ones (a later feature
+modified the face), suggesting them. An unnamed face cannot be picked for a
+mate. Connectors on a placed sub-assembly use `inner_path` (the occurrence ids
+down to the part); the frame comes back in the top-level occurrence's space.
+
+Centring falls out of the connector choice: a cylindrical-face connector sits
+on the axis, so two cylinders mate coaxially; a hole-centre snap does the same
+for a bolt in a bore. A planar-face connector sits at the centroid, so two
+planar faces coincide centroid to centroid — mate a cylinder or a hole centre,
+plus an axial `offset`, to centre a part.
+
+### Mate types
+
+Every mate stores the same fields; the type decides which are fixed
+parameters and which are the live DOF. Because the DOF value is stored, a file
+re-solves to identical placements, and a drag or `set_mate` just writes the
+field.
+
+| type | free | DOF fields | fixed parameters |
+|---|---|---|---|
+| fastened | nothing (0) | — | `rotation` (authored twist), `offset`, `dx`, `dy` |
+| revolute | turn about Z (1) | `rotation` | `offset` (axial seat along the shaft) |
+| slider | slide along Z (1) | `offset` | `rotation` |
+| cylindrical | turn + slide (2) | `rotation`, `offset` | — |
+| planar | slide in plane + spin (3) | `dx`, `dy`, `rotation` | `offset` (plane gap) |
+| ball | any rotation (3) | `ball_rotation` (quaternion) | — |
+
+`flipped` **defaults to true**: b's Z is reversed against a's, which is what
+two touching faces want (opposed normals). Two seat *frames* usually want
+`flipped: false`. `rotation` is radians on the wire and in the file;
+`rotation_deg` is accepted beside it.
+
+### The alignment
+
+With `Wa` a's connector frame in the world and `Fb` b's connector frame in b's
+part:
+
+```
+Adjust = T(dx, dy, offset) · Rz(rotation) · R_ball · Flip
+T_b    = Wa · Adjust · Fb⁻¹
+```
+
+`Flip` is 180° about X. The translation is applied in **a's connector frame**,
+so a positive `offset` moves b along a's +Z (a's outward normal). A reference
+face whose normal points into the assembly therefore reads as the "wrong"
+world sign; the convention is asserted by `test_assembly_solve.cpp`.
+
+`MateAdjustFor` (`AssemblyLoopSolve.cpp`) is the one definition of this
+composition; the placement pass and the loop solver both call it, via a
+template (`MateAdjustT<T>`) so the placement pass evaluates in float and the
+loop solver in double from the same code.
+
+`DeriveMateDofs` inverts it: `add_mate {derive: "twist"}` reads `flipped` and
+`rotation` off where the two occurrences already lie (anchors coincident),
+`"pose"` reads all five so the mate holds the parts exactly where they are. It
+refuses when the two frames are not square to one axis — a nearest quarter
+turn there would be a guess. `fit_fastener` builds its mates the same way.
+
+## The placement pass
+
+`assembly::Solve`:
+
+1. **Relations propagate** first ([relations.md](relations.md)); in a mate
+   tree that is their enforcement.
+2. **Frames.** Both connector frames of every mate are resolved. A mate that
+   cannot resolve is errored and sits out; a mate suppressed by the active
+   configuration (or touching a suppressed occurrence) sits out without an
+   error. DOFs the configuration *holds* overlay the mates' own values for the
+   whole solve and are restored after.
+3. **Anchors.** Every `fixed`, unsuppressed occurrence is placed at its stored
+   transform.
+4. **Propagate.** Mates are scanned in list order; a mate with exactly one side
+   placed places the other by the alignment above. Repeat to a fixpoint. If a
+   mate still has an unplaced side, the **lowest-id** unplaced occurrence among
+   usable mates is anchored at its stored transform (a floating component
+   stays where it was left) and propagation resumes.
+5. **Cut mates.** A mate that finds both sides already placed closes a loop
+   and goes into the cut set. With no cut mates nothing numeric runs, so a
+   loop-free assembly is placed purely in closed form.
+6. **Close loops** (below) if there are cut mates.
+7. **Write back** solved transforms to non-fixed occurrences; unmated
+   occurrences keep theirs. Then `ApplyAttachments` re-seats riders.
+8. **Check relations**: every equality relation must now hold (see
+   [relations.md](relations.md#when-relations-disagree)).
+
+`Solve` does not bump the assembly version; the caller does, so a no-op solve
+does not churn the renderer. A solve that knows what was just driven (a drag,
+`set_mate`, a motion sample) passes it as `Driven`, and that DOF is held while
+loops close.
+
+Mate errors are transient (like a feature's error): cleared and re-stamped on
+every solve, never saved. Placements always stand.
+
+## Closing loops
+
+A loop is closed in **reduced (joint) coordinates**: the unknowns are the
+mates' own DOF fields, which the document already stores. The forward map from
+those values to world placements is the tree walk above. So there is no new
+state and no format involvement — the solver needs only a residual, a
+Jacobian and a factorization.
+
+- **Components.** The mate graph is split into connected components and each
+  component with a cut mate is solved on its own. Otherwise one small loop
+  would put a column for every mate in the document into the Jacobian (each
+  column a full tree walk), and independent loops stay independent. Placements
+  from the loop pass are **merged** into the walk's result, never substituted
+  for it, so mate trees elsewhere keep their placements.
+- **Unknowns** are every free DOF of every mate in the component, tree mates
+  and cut mates alike. The component's anchor is pinned, which fixes the
+  gauge.
+- **Residual.** For each cut mate, the 6-vector between where the mate says b's
+  frame should be and where the tree put it: translation in mm, then the
+  rotation (log of the rotation part) scaled by a characteristic length — the
+  spread of the component's occurrence origins at the seed, at least 1 mm — so
+  every row is in mm and the tolerance means one thing. Relation rows and
+  pinned-DOF rows (the driven DOF, configuration holds) are added beside them.
+- **Precision.** Evaluation runs in double and narrows once at the end. A
+  float chain of matrices carries ~1e-3 mm of noise at 100 mm scale, which a
+  finite difference at small h turns into a useless Jacobian.
+- **Jacobian:** forward differences, one tree walk per column
+  (h = 1e-7 · max(1, |q|)). It cannot disagree with the forward map.
+- **Solve:** Levenberg–Marquardt from the stored values, at most 100
+  iterations, converging when the worst row is under 1e-5 mm. A column that
+  moves the residual by no more than the 1e-3 mm tolerance per whole unit of
+  its DOF is **frozen** at its seed: Marquardt's damping is relative to the
+  diagonal, so an uninfluential DOF would otherwise be handed whatever
+  satisfies 0 = 0. This matters because every bolt in a pattern closes a small
+  loop, pulling everything hanging off that component (a lid's hinge, say)
+  into the loop problem.
+- **A component with no unknowns** (a bolt pattern: all fastened) skips LM and
+  the factorization: one walk, one residual per cut mate.
+
+### Classification
+
+After the solve, `rank` comes from a column-pivoted QR of Jᵀ (so the pivoting
+runs over the rows of J):
+
+| residual | rows | verdict |
+|---|---|---|
+| ≤ 1e-3 mm | — | closed; `dof = columns − rank` |
+| ≤ 1e-3 mm | all six rows of a cut mate dependent | that mate is **redundant but consistent** — named in `redundant_mates`, status `redundant`, not an error (the extra bolts through a flange) |
+| > 1e-3 mm | — | the cut mate errors: `loop does not close (off by N mm)` |
+
+A mate is redundant only when **all six** of its rows are dependent: a planar
+four-bar's closing joint has three structurally-zero rows (a loop of parallel
+axes says nothing about z or tilt) while being the joint that makes it a
+linkage.
+
+DOF comes from the rank, not from a Grübler/Kutzbach count: a planar
+four-bar in 3D scores 6·3 − 5·4 = −2 ("over-constrained") by Grübler, while
+its rank gives 4 − 3 = 1. `dof` covers the looped components only.
+
+### Loop mates are outputs
+
+Inside a loop a mate's DOF is an output — turn the crank and the rocker
+follows — so the loop pass writes the solved DOFs back to the mates. The
+file then reopens where it converged, and the next solve seeds from there. A
+loop-free document is never dirtied by a solve.
+
+A mechanism can close on more than one branch (a four-bar's open and crossed
+modes); which one a solve lands on is a property of the seed. Seeding from
+the stored values keeps it on the branch it is on, and motion studies walk
+their samples in order for the same reason (`test_assembly_loops.cpp`, "A
+four-bar seeded on a branch stays on it").
+
+### Without Eigen
+
+The loop pass needs Eigen (`HAVE_EIGEN`). A build without it places trees as
+usual and errors every cut mate with "this build has no Eigen, so mate loops
+are reported, not solved" rather than placing something plausible.
+
+## Reports
+
+`solve_assembly` returns every mate with a `status` (`satisfied`,
+`redundant`, `error`) and its error text, `errored_mates`, `placed`,
+`occurrences`,
+`placed_by_mates` / `placed_by_transform`, and — only when there are loops —
+`loop_mates`, `dof`, `loops_closed`, `residual_mm`, `redundant_mates`.
+
+## Cost
+
+The floor is one tree walk. A bolt pattern costs about the same as no loop
+(zero unknowns). A genuine mechanism costs one tree walk per unknown per LM
+iteration; analytic Jacobians (a revolute's column is a cross product) are the
+lever if that ever matters.

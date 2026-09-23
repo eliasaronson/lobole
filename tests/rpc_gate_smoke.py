@@ -33,8 +33,9 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 # reason is not accepted.
 GATED_ON_PURPOSE = {
     # The study verbs used to sit here ("studies belong to a part document").
-    # Since S1 (docs/simulation/assembly-studies-plan.md) a study lives on a
-    # part OR an assembly, and the handler resolves the tab itself.
+    # A study now lives on a part OR an assembly
+    # (docs/simulation/README.md#assembly-studies), and the handler resolves
+    # the tab itself.
     # A pending (preview) feature only ever exists on a part tab.
     "accept_pending": "a pending feature only exists on a part tab",
     "cancel_pending": "a pending feature only exists on a part tab",

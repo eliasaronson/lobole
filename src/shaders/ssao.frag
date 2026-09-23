@@ -1,6 +1,6 @@
 #version 450
 
-// SSAO (S2, docs/rendering/ssao-soft-shadows.md): normal-oriented hemisphere
+// SSAO (docs/rendering/README.md#ssao): normal-oriented hemisphere
 // sampling in view space against the prepass depth, rotated per-pixel by a
 // 4x4 tiled noise texture. Output is half-res R8 occlusion, bilaterally
 // blurred by ssao_blur.frag before mesh.frag multiplies it into ambient/IBL.

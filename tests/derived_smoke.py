@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Derived feature over the RPC, headless (docs/modeling/derived-plan.md):
+"""The Derived feature over the RPC, headless (docs/modeling/derived.md):
 a jaw derives a servo as a ghost; the refusals in words; stale reported and
 never auto-resolved; update_derived as one undo step; derive_occurrence in
 an in-context edit lands the copy where the neighbour is; the project

@@ -2,7 +2,7 @@
 """The generators build what they say, headless.
 
 generators/gear.py is the answer to "would we need scripted features for a
-gear" (docs/capability-review-2026-08-31.md): a Python generator against the
+gear" (docs/roadmap.md#6-the-agent-interface): a Python generator against the
 API, an ordinary part out. This runs it against a headless app and checks
 the part by numbers — no display, no GPU.
 

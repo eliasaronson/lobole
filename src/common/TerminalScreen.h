@@ -6,7 +6,7 @@
 #include <vector>
 
 // A terminal screen: bytes from a PTY in, a character grid out
-// (docs/ui/terminal-panel.md).
+// (docs/ui/terminal.md).
 //
 // Wraps libvterm — the escape-sequence state machine neovim's `:terminal`
 // uses — because hosting Claude Code needs a real VT: it renders INLINE (no

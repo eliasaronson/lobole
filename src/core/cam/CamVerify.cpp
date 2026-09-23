@@ -355,7 +355,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
 constexpr double kGrazeTolerance = 1e-3;
 
 namespace {
-// The FIXTURES as a height field of their own (docs/cam/workholding-plan.md):
+// The FIXTURES as a height field of their own
+// (docs/cam/simulation.md#fixture-collisions):
 // each cell the top of the tallest fixture over it, and which fixture that
 // was. On its own grid, over the fixtures' footprint -- a vise beside the
 // stock has no cells in the stock's map -- and never carved: the path going
@@ -701,9 +702,10 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // here is a height map, z(x, y), and a height map cannot represent a part
   // that rotates -- every cut was applied as though it stood still, so the
   // gouge and the leftover below are measurements of a program that does not
-  // exist. `InspectRotary` is the model that can (docs/cam/rotary-plan.md)
-  // and `VerifyGcode` routes to it; this path is reached by a caller that
-  // wants the height map specifically, and it gets told.
+  // exist. `InspectRotary` is the model that can
+  // (docs/cam/rotary.md#verifying-a-turning-part) and `VerifyGcode` routes to
+  // it; this path is reached by a caller that wants the height map
+  // specifically, and it gets told.
   if (RotatesWhileCutting(program)) {
     out.verdict.fileErrors++;
     if (out.verdict.firstFileError.empty())

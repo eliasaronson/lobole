@@ -120,9 +120,9 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     overlay.external = external;
 
     if (modeled) {
-      // Reserved (docs/modeling/thread-rib.md): the helical cut ships as a
-      // follow-up. The error never takes the document down and the cosmetic
-      // overlay above stays drawn.
+      // Reserved (docs/modeling/holes-and-threads.md#thread): the helical cut
+      // ships as a follow-up. The error never takes the document down and the
+      // cosmetic overlay above stays drawn.
       SetError("modeled threads are not implemented yet (cosmetic only)");
       return false;
     }

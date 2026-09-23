@@ -573,7 +573,8 @@ double RelationValue(const Relation& r, double a) {
   // A click stands at the mark it was last carried to or held at.
   if (r.kind == RelationKind::Click)
     return r.lead;
-  // A freewheel carries its history in `lead` (docs/freewheel-plan.md).
+  // A freewheel carries its history in `lead`
+  // (docs/assemblies/relations.md#freewheel).
   if (r.kind == RelationKind::Freewheel)
     return r.ratio * a + r.phase + FreewheelNotch(r);
   return r.ratio * a + r.phase;
@@ -824,8 +825,8 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
           // the drive direction) it drives b. Behind, the clutch SLIPS: b
           // is left where it is and, just as important, left UNSETTLED —
           // another relation may be the one that moves it, which is how a
-          // reverser works (docs/reverser-plan.md). The history is
-          // reconciled once, after the walk.
+          // reverser works (docs/assemblies/relations.md#freewheel). The
+          // history is reconciled once, after the walk.
           const double line = RelationValue(r, valueOf(*a, r.dofA));
           const double now = valueOf(*b, r.dofB);
           if ((line - now) * r.drives < -FreewheelSlack(now))
@@ -919,7 +920,8 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         // where it was drawn: dogs are solid, so one part way over another
         // would be inside it. (A real Breguet tooth ramps and its clutch
         // rides part way out; drawing that takes a swept helical tooth,
-        // which docs/click-and-breguet-plan.md leaves for later.)
+        // which generators/watch/README.md#approximate-and-not-modelled leaves
+        // out.)
         const double lift =
             std::abs(r.lead - FreewheelNotch(r)) > FreewheelSlack(r.lead)
                 ? r.rideAmount
@@ -1060,7 +1062,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
         continue;
       // A freewheel is an inequality — it may slip — and the loop solve
       // holds only equations. It is left out, and reported below if the loop
-      // moves one of its mates (docs/freewheel-plan.md).
+      // moves one of its mates (docs/assemblies/relations.md#freewheel).
       if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)
         continue;
       const auto ia = indexOfMate.find(r.mateA);
@@ -1073,7 +1075,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   }
   // The driven DOF is PINNED while the loop closes: without it the solver
   // treats it as one more unknown and moves it, so a crank set to 90 degrees
-  // solved to 67 (docs/modeling/single-cylinder-dogfood.md).
+  // solved to 67 (generators/README.md#single-cylinder-and-air-cooled-engines).
   if (driven.mate != 0) {
     std::unordered_map<uint64_t, size_t> indexOfMate;
     for (size_t i = 0; i < asmDoc.GetMates().size(); i++)
@@ -1278,7 +1280,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // relation that drives that DOF gave it its base, and the ride was added
   // on top, so the base is what this check must compare against. Without
   // this, a watch's yoke reports a fault every time its clutch rides up a
-  // dog (docs/click-and-breguet-plan.md).
+  // dog (generators/watch/README.md#keyless-works-and-winding).
   std::vector<std::pair<std::pair<uint64_t, MateDof>, double>> ridden;
   for (const Relation& r : asmDoc.GetRelations())
     if (r.rideMate != 0 && r.rideApplied != 0.0 &&

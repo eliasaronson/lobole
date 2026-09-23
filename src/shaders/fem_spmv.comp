@@ -1,6 +1,6 @@
 #version 450
 // Matrix-free FEM stiffness product Ap += scale_e * Ke0_e * p_e, one workgroup
-// per tet10 element (GPU0 of docs/topopt/gpu-plan.md). The element's 30 DOF of
+// per tet10 element (docs/topopt/README.md#the-gpu-solver). The element's 30 DOF of
 // p are staged in shared memory, then 30 threads each compute one row of the
 // 30x30 element product and scatter with float atomicAdd (shared nodes are
 // touched by many elements). Fixed DOFs carry index -1: they contribute 0 on

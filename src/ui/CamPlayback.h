@@ -6,15 +6,15 @@
 #include <vector>
 
 // The cutting simulation's session: arm it, run it, draw it, end it
-// (docs/cam/simulation.md, S4–S5).
+// (docs/cam/simulation.md#transport).
 //
 // The transport is a FLOATING window over the viewport (DrawCamTransportWindow,
 // since 2026-09-02 -- it used to be a section of the CAM panel, which made
 // that panel the busiest thing on screen); this owns the state machine behind
 // it. It is deliberately ONE begin and ONE end, because
 // playback hides things — the bodies go translucent and a stock block stands
-// in front of them — and a mode with several exits is the U11 bug class this
-// codebase has already paid for once (docs/cam/gui.md).
+// in front of them — and a mode with several exits is a bug class this
+// codebase has already paid for once (docs/cam/simulation.md#transport).
 namespace ui {
 
 // Posts the cached toolpaths, parses the file back, builds the timeline and

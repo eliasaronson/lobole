@@ -10,7 +10,7 @@
 // Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
 // every domain in the app and is included by 40 translation units — so every
 // panel and RPC module paid for all of it. See
-// docs/architecture-review-2026-08-24.md.
+// docs/architecture.md#the-ui-actions-layer.
 namespace ui {
 
 // Live status of the active run. `running` is false when no job is running for
@@ -42,7 +42,7 @@ struct StudyRunStatus {
 // nothing.
 void SimulationArmTool(AppState& state, SimulationState::Tool tool);
 
-// ---- Studies on an ASSEMBLY (S1, docs/simulation/assembly-studies-plan.md)
+// ---- Studies on an ASSEMBLY (docs/simulation/README.md#assembly-studies)
 // The assembly document does not own its parts, so everything that places
 // geometry or reads a part's version goes through the app state.
 //

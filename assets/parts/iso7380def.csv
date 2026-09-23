@@ -1,6 +1,6 @@
 # Vendored from FreeCAD_FastenersWB (github.com/shaise/FreeCAD_FastenersWB),
 # GPL-2.0-or-later. Upstream file: FsData/iso7380def.csv, unmodified below this header.
-# See THIRD_PARTY.md and docs/parts/plan.md.
+# See THIRD_PARTY.md and docs/parts/README.md.
 "ISO7380-1def"
 "Dia","P","b","a","da","dk","dk_mean","s_mean","t_min","r","k","e","w"
 "M3",0.5,18.0,1.0,3.6,5.7,5.5,2.03,1.04,0.1,1.65,2.3,0.2

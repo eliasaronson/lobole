@@ -17,9 +17,9 @@
 
 // One placed instance of a part within an assembly. Stores an *explicit*
 // transform — its last solved placement — so an occurrence is always loadable
-// on its own; A3 mates will re-solve over non-`fixed` occurrences on load
+// on its own; mates re-solve over non-`fixed` occurrences on load
 // (the literal-plus-`_expr` pattern applied to placement). See
-// docs/assemblies/a2-design.md.
+// docs/assemblies/README.md#occurrences.
 // What an occurrence places (A5). The field it qualifies is `partId`, whose
 // SHAPE does not change — a slot id is a slot id — but whose resolution
 // widens from "a part document" to "a part or an assembly document". Stored
@@ -42,8 +42,8 @@ struct Occurrence {
   bool visible = true;
   bool fixed = false; // grounded flag; the anchor for the A3 solve
 
-  // What this occurrence RIDES ON (docs/parts/f1-loose-ends.md): the id of
-  // another occurrence in the same assembly, with `attachOffset` /
+  // What this occurrence RIDES ON (docs/parts/README.md#attached-and-mated):
+  // the id of another occurrence in the same assembly, with `attachOffset` /
   // `attachRotation` its placement in that occurrence's frame. 0 = free.
   //
   // Not a mate, deliberately. A mate is for kinematics and a fastener has
@@ -75,12 +75,12 @@ struct Occurrence {
   uint64_t configurationId = 0;
 };
 
-// Where on its part a connector frame is anchored (A3 mates,
-// docs/assemblies/a3-design.md). Either the part's coordinate origin (an
-// identity frame) or a face named by a toponaming ElementRef — planar (frame
-// = centroid + normal, CADShape::FacePlane) or cylindrical (frame = axis,
-// CADShape::FaceAxis). The frame itself is *derived* at solve time, never
-// stored, so a part edit moves the connector with the geometry.
+// Where on its part a connector frame is anchored
+// (docs/assemblies/solver.md#connector-frames). Either the part's coordinate
+// origin (an identity frame) or a face named by a toponaming ElementRef —
+// planar (frame = centroid + normal, CADShape::FacePlane) or cylindrical (frame
+// = axis, CADShape::FaceAxis). The frame itself is *derived* at solve time,
+// never stored, so a part edit moves the connector with the geometry.
 struct ConnectorAnchor {
   bool origin = false; // true → the part origin; `face` is ignored
   ElementRef face;     // valid when !origin
@@ -189,7 +189,7 @@ struct ExplodedView {
 };
 
 // A relation couples two mates' degrees of freedom
-// (docs/assemblies/relations-plan.md): dofB = ratio * dofA + phase. The kind
+// (docs/assemblies/relations.md): dofB = ratio * dofA + phase. The kind
 // is a label and a unit convention on that one equation — a gear is
 // rotation-to-rotation with ratio -zA/zB, a rack is the pinion's rotation to
 // the rack's slide with the pitch radius as ratio (mm per radian), a screw
@@ -204,7 +204,8 @@ struct ExplodedView {
 // cam:   rotation -> offset OR rotation through a LIFT TABLE, not a ratio
 //        (v102: a follower may turn — a rocker, a pallet fork)
 // freewheel: rotation -> rotation that drives ONE way and slips the other
-//        (v104, docs/freewheel-plan.md): b = ratio * a + phase + lead
+//        (v104, docs/assemblies/relations.md#freewheel):
+//        b = ratio * a + phase + lead
 // click: ONE mate's DOF that may only travel one way — a pawl (v105)
 enum class RelationKind {
   Gear,
@@ -256,7 +257,8 @@ struct Relation {
   // band. `ride` is what riding over them lifts: while slipping, the named
   // DOF is raised by `rideAmount * frac(lead / pitch)`, zero at a notch and
   // full just before the next. It is applied after the walk, so it ADDS to
-  // whatever drove that DOF (docs/click-and-breguet-plan.md).
+  // whatever drove that DOF
+  // (generators/watch/README.md#keyless-works-and-winding).
   int teeth = 0;
   double rideAmount = 0.0;
   uint64_t rideMate = 0;
@@ -272,10 +274,10 @@ struct Relation {
 double CamLift(const std::vector<std::pair<double, double>>& table,
                double angleRad, double* slopeOut = nullptr);
 
-// A motion study (v87, docs/agent-scale-plan.md G2): ONE mate's degree of
-// freedom driven from `from` to `to` in `samples` steps, the assembly solved
-// at each, and every occurrence pair checked for a clash. The definition is
-// persisted; the samples and the collision table are not — they are a
+// A motion study (v87, docs/assemblies/README.md#motion-studies): ONE mate's
+// degree of freedom driven from `from` to `to` in `samples` steps, the assembly
+// solved at each, and every occurrence pair checked for a clash. The definition
+// is persisted; the samples and the collision table are not — they are a
 // product of running it, like a FEM result.
 //
 // "The animation is the deliverable": a crank turned through 720 degrees
@@ -307,7 +309,7 @@ struct MotionStudy {
 };
 
 // A CLEARANCE the designer declared, held by the document and re-checked on
-// demand (docs/peer-survey-plan.md, W3).
+// demand (docs/assemblies/README.md#clearance-assertions).
 //
 // The drone's `verify()` says "prop tip to arm is at least 2 mm" in a python
 // script, and so does the engine's, and the clamp's. That is design intent
@@ -431,7 +433,7 @@ public:
   ExplodedView* FindExplodedViewById(uint64_t id);
   const ExplodedView* FindExplodedViewById(uint64_t id) const;
 
-  // Relations (v83, docs/assemblies/relations-plan.md): same id space and
+  // Relations (v83, docs/assemblies/relations.md): same id space and
   // the same add/remove/find discipline as mates and exploded views.
   const std::vector<Relation>& GetRelations() const { return m_relations; }
   std::vector<Relation>& GetRelations() { return m_relations; }
@@ -466,7 +468,7 @@ public:
       m_nextId = next;
   }
 
-  // ---- FEM studies (S1, docs/simulation/assembly-studies-plan.md) --------
+  // ---- FEM studies (docs/simulation/README.md#assembly-studies) ------------
   // A study is a question asked of the assembly and lives on it, the way a
   // part's studies live on the part: participants by occurrence, loads with
   // occurrence-qualified anchors. The same fem::Study record; the shape of

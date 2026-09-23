@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <string>
 
-// The blank: the sheet body laid flat (docs/sheetmetal/plan.md, S4).
+// The blank: the sheet body laid flat
+// (docs/sheetmetal/README.md#how-the-unfolder-works).
 //
 // A terminal feature, authored SUPPRESSED, that replaces the body's shape
 // with its flat pattern in place. It is not a second body — a folded part and

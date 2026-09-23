@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCP server for Designer — drive a running instance over its JSON-RPC remote.
 
-Design: docs/scripting/s1-mcp.md. Register this server with an MCP client:
+Design: docs/scripting/mcp.md. Register this server with an MCP client:
 
     claude mcp add designer -- python3 tools/designer_mcp.py   # from a checkout
     claude mcp add designer -- designer-mcp    # installed (uv tool install .)
@@ -305,7 +305,7 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   countersunk screw; omit for a nut or a washer), "length_expr"?: str,
   "drive"?: str (omit for the drive the standard is made with)}} — in an
   ASSEMBLY, prefer the `add_fastener`/`fit_fastener` RPCs, which derive all
-  of this from the hole you pick (docs/parts/plan.md).
+  of this from the hole you pick (docs/parts/README.md).
 
 Call the `describe` tool for the authoritative method/type/enum lists.
 

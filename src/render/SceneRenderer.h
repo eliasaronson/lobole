@@ -8,7 +8,7 @@
 #include <cstdint>
 
 // The per-frame contract every renderer that draws into the 3D scene owes the
-// frame loop (docs/rendering/renderer-wiring.md).
+// frame loop (docs/rendering/README.md#scene-renderers).
 //
 // It exists because that contract used to be seven hand-maintained lists in
 // main.cpp and UI.cpp, and the compiler checked none of them. Every one of the

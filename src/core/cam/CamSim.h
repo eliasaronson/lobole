@@ -166,7 +166,7 @@ private:
 };
 
 // The stock at a cursor, for a program whose part TURNS
-// (docs/cam/rotary-plan.md, "The picture").
+// (docs/cam/rotary.md#the-rotary-picture).
 //
 // The twin of `StockSim` over a radius field, carving with the same
 // `CarveSweepRotary` the verifier uses -- which is what makes the last frame

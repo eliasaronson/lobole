@@ -58,7 +58,7 @@ TEST_CASE("Axis traversal keeps material when the ray has one crossing",
   }
 }
 
-// The vendored standard-parts tables (docs/parts/plan.md, phase 1).
+// The vendored standard-parts tables (docs/parts/README.md#the-data).
 //
 // What these check is not the parser. It is that the DATA says what ISO says,
 // because the vendored row is the specification a generated screw will be
@@ -717,10 +717,10 @@ TEST_CASE("parts: a grip a hair over a nominal length snaps to it", "[parts]") {
 TEST_CASE("parts: an ambiguous clearance diameter is refused, not guessed",
           "[parts]") {
   // Found building the single-cylinder engine
-  // (docs/modeling/single-cylinder-dogfood.md). 46 of the clearance table's
-  // 111 diameters are a clearance for two different threads, and the
-  // backward lookup returned whichever came first in table order — always
-  // the SMALLER thread on the LOOSER fit.
+  // (generators/README.md#single-cylinder-and-air-cooled-engines). 46 of the
+  // clearance table's 111 diameters are a clearance for two different threads,
+  // and the backward lookup returned whichever came first in table order —
+  // always the SMALLER thread on the LOOSER fit.
   const SourceTables tables;
   std::string error;
 
@@ -754,7 +754,7 @@ TEST_CASE("parts: an ambiguous clearance diameter is refused, not guessed",
 }
 
 TEST_CASE("parts: a hole knows what it is for", "[parts]") {
-  // docs/modeling/hole-standards.md. The other direction from
+  // docs/modeling/holes-and-threads.md#hole. The other direction from
   // ThreadForClearance: given the intent, the number — so "a clearance hole
   // for an M6, normal fit" stops being 6.6 that somebody had to know, look up
   // and type.
@@ -857,7 +857,8 @@ TEST_CASE("Axis traversal ignores the bodies its ray cannot reach",
   // OM615 — and a bolt's axis crosses three or four. Without a box test each
   // fit paid four ray casts AND a solid classifier for every body in the
   // model: measured A/B on that engine's build, the prune is 82.1 s -> 74.9
-  // and fit_fastener 528 ms a call -> 369 (docs/performance/axis-stack.md).
+  // and fit_fastener 528 ms a call -> 369
+  // (docs/parts/README.md#fitting-a-fastener-what-the-axis-crosses).
   //
   // What must not change is the ANSWER.
   Body plate;

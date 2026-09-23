@@ -142,10 +142,10 @@ std::string FormatToleranceSuffix(const Tolerance& tol,
 std::string FormatHoleCallout(const HoleFeature& hole,
                               const units::System& units) {
   // A hole that recorded what it is FOR says so, instead of leaving a reader
-  // to recognise 6.6 as an M6 clearance. docs/modeling/hole-standards.md
-  // promised exactly this when the fit landed and it was the half that never
-  // got built, so a drawing went on calling every hole by its diameter while
-  // the model knew better.
+  // to recognise 6.6 as an M6 clearance.
+  // docs/modeling/holes-and-threads.md#hole promised exactly this when the fit
+  // landed and it was the half that never got built, so a drawing went on
+  // calling every hole by its diameter while the model knew better.
   //
   // A TAPPED hole leads with its thread, because M6 is the designation a
   // machinist reads and the tap drill is not what gets made — printing Ø5.0

@@ -93,8 +93,8 @@
 //
 // SketchInteraction.cpp owns what a click MEANS; this owns what the result
 // looks like to the renderer.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, third wave -- the wave that empties it). AppActions.h still
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still
 // declares everything, so no caller changed.
 
 namespace ui {

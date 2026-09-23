@@ -76,13 +76,13 @@ struct SheetView {
   // What that projection COST. Kept because a drawing view holds no geometry
   // until it is exported, so nothing else can tell a caller what it just
   // spent: an assembly view is 66-86 s and looked like a hang
-  // (docs/agent-scale-followup-plan.md, W3).
+  // (docs/drawings/README.md#what-a-view-costs).
   ProjectionResult::Stats projectionStats;
   // The same hiding time, folded onto the SEMANTIC source — the occurrence on
   // an assembly view, the body's owning feature on a part view — because that
   // is the name a reader can act on: `hidden` takes occurrences, not body
   // slots. One imported driver was 16 s of an 18 s view and nothing said so
-  // (docs/drawings/view-cost-report-plan.md). Shares OVERLAP: a pair's cost
+  // (docs/drawings/README.md#what-a-view-costs). Shares OVERLAP: a pair's cost
   // counts for both of its members, since leaving out either avoids it.
   std::vector<ProjectionResult::Stats::BodyCost> costBySource;
   double updateMs = 0.0; // HLR outline building

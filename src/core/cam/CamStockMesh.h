@@ -10,7 +10,7 @@
 #include <vector>
 
 // A surface for the height map, so the stock can be LOOKED at
-// (docs/cam/simulation.md, S2).
+// (docs/cam/simulation.md#stock).
 //
 // One vertex per cell is 750k vertices on a 200x150 mm plate at 0.2 mm, and
 // almost all of them would be co-planar: milled 2.5D stock is an uncut top, a
@@ -52,7 +52,7 @@ struct StockMesh {
 // The ROTARY stock as a closed solid: a tube over the radius field, one vertex
 // per cell at (x, r cos theta, r sin theta), and a flat cap at each end.
 // In the PART's frame -- the playback turns it by the cursor's A, which is
-// what "the part turns" means (docs/cam/rotary-plan.md, "The picture").
+// what "the part turns" means (docs/cam/rotary.md#the-rotary-picture).
 //
 // Smooth-shaded, where the planar block is flat-shaded, and for the reason
 // the planar comment gives in reverse: milled 2.5D stock is floors and walls,

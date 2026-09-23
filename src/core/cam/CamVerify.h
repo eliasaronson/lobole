@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-// Verifying the G-code we emit (docs/cam/plan.md, C5).
+// Verifying the G-code we emit (docs/cam/simulation.md).
 //
 // The loop runs on the POSTED FILE, not on the in-memory toolpath: parse the
 // G-code back, simulate the material it removes, and compare the result with
@@ -91,14 +91,15 @@ struct Verdict {
   // Rotary only: the 95th percentile of leftover over the compared cells --
   // the TYPICAL scallop. The worst cell of a rotary job sits on an end face
   // no rotary pass can reach, whatever the pattern, so `maxLeftover` alone
-  // cannot tell two finishes apart (docs/cam/rotary-helical-plan.md).
+  // cannot tell two finishes apart
+  // (docs/cam/rotary.md#verifying-a-turning-part).
   double leftoverP95 = 0.0;
   // Rotary only: leftover on the SURFACE a rotary pass is for -- every cell
   // except those on faces turned toward the axis's ends (steeper than 70
   // degrees along the axis, or at the part's end), where no rotary pass can
   // reach and every job's worst cell sits. What tells two patterns apart,
   // and what found the helical ridges
-  // (docs/cam/friction-after-helical-plan.md).
+  // (docs/cam/rotary.md#verifying-a-turning-part).
   double leftoverSurfaceMax = 0.0;
   glm::dvec2 leftoverSurfaceAt{0.0};
   double leftoverSurfaceP99 = 0.0;
@@ -133,9 +134,9 @@ struct Verdict {
   glm::dvec2 worstHolderAt{0.0};
   int worstHolderLine = 0;
   // Moves that drive the cutter, or the holder, into a FIXTURE -- a clamp or
-  // a vise the job was told about (docs/cam/workholding-plan.md). Checked on
-  // every move against the fixtures' own height field, which is never
-  // carved: a clamp does not come off because the path went through it.
+  // a vise the job was told about (docs/cam/simulation.md#fixture-collisions).
+  // Checked on every move against the fixtures' own height field, which is
+  // never carved: a clamp does not come off because the path went through it.
   int fixtureCollisions = 0;
   double worstFixtureDepth = 0.0; // mm of fixture above the tool there
   glm::dvec2 worstFixtureAt{0.0}; // setup space
@@ -239,7 +240,7 @@ struct Verdict {
   // This one is SOFTER, because a height map cannot watch a slug fall out of
   // a through cut — so a correct job can still report material left over, and
   // the two used to be one flag that no real job could ever set
-  // (docs/cam/dogfood-round.md). Tabs no longer count against it: they are
+  // (docs/cam/simulation.md#verdict). Tabs no longer count against it: they are
   // asked for, and the toolpath now says where it left them, so every job
   // that used one reported `complete: false` for a reason the flag could not
   // express. Read it with leftoverArea and `biggest`: several small places
@@ -265,7 +266,8 @@ struct Verdict {
                               double leftoverTolerance = 0.0);
 
 // Everything the check produced, for a caller that wants to SHOW it rather
-// than just pass or fail (docs/cam/gui.md G4 paints the leftover on the part).
+// than just pass or fail (the leftover painted on the part,
+// docs/cam/gui.md#what-the-viewport-draws).
 struct Inspection {
   Verdict verdict;
   HeightMap machined;
@@ -312,18 +314,19 @@ VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<FixtureSolid>& fixtures = {});
 
 // The verdict in the words a person needs, one line each, most severe first
-// (docs/cam/gui.md). Empty only when there is nothing to say.
+// (docs/cam/simulation.md#verdict). Empty only when there is nothing to say.
 struct VerdictLine {
   enum class Level { Good, Warn, Bad };
   Level level = Level::Good;
   std::string text;
 };
 
-// The MACHINE's lines of the verdict (docs/cam/job-document.md, M2): the
-// parts' reach beyond the travel, or the sheet's overhang when the parts
-// fit -- as WARN lines, never refusals. One helper for the panel and the
-// RPC, so the two verdicts cannot disagree about the machine.
-// `paths`, when given, adds how much cutting was clipped off at the travel.
+// The MACHINE's lines of the verdict
+// (docs/cam/setup.md#the-machines-work-area): the parts' reach beyond the
+// travel, or the sheet's overhang when the parts fit -- as WARN lines, never
+// refusals. One helper for the panel and the RPC, so the two verdicts cannot
+// disagree about the machine. `paths`, when given, adds how much cutting was
+// clipped off at the travel.
 [[nodiscard]] std::vector<VerdictLine>
 MachineLines(const Setup& setup, const std::vector<Body>& bodies,
              const std::vector<Toolpath>* paths = nullptr);

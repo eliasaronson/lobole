@@ -10,7 +10,7 @@ class Document;
 // Timed autosave to a sidecar file with atomic replace (temp + rename), so a
 // crash mid-write can never corrupt the previous autosave. GUI-free: pumped
 // from both the GUI frame loop and the headless loop. Design:
-// docs/versioning/f1-f2.md (F2).
+// docs/versioning/README.md#autosave-and-recovery.
 class Autosaver {
 public:
   explicit Autosaver(double intervalSeconds = 60.0)

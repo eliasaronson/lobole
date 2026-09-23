@@ -1,11 +1,11 @@
 # Using the Onshape importer: what their terms say
 
-> Read 2026-08-17 from the public pages linked below. **This is a summary of
-> what those pages say, not legal advice**, and the one document that governs
-> API access most directly is not public. Anyone using
+> A summary of Onshape's public pages linked below, **not legal advice**. The
+> document that governs API access most directly is not public. Anyone using
 > `tools/onshape_import.py` is responsible for their own compliance.
 
-The importer (`tools/onshape_import.py`, interchange I3) reads *your own*
+The importer (`tools/onshape_import.py`, see
+[README.md](README.md#the-onshape-importer)) reads *your own*
 Onshape documents with *your own* API keys and replays their feature history
 into Designer. That shape of use — a user exporting their own content — is
 what the Terms of Use contemplate when they say users own their Content and
@@ -41,7 +41,8 @@ That is a risk to take deliberately rather than discover.
 
 ## 3. API calls are a metered annual budget, not a rate limit
 
-Per the developer docs, usage is capped **per year**, by account type:
+Onshape's developer docs cap usage **per year**, by account type (check the
+source for current figures):
 
 | Account | Annual API calls |
 | --- | --- |

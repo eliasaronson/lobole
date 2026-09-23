@@ -148,7 +148,7 @@ bool BeginCamPlayback(AppState& state) {
       cam::FeedModelOf(setup->machine.post));
   if (!state.camTimeline.unsupported.empty()) {
     // Refused VISIBLY, where the buttons are, rather than played wrong. The
-    // transport's own rule (docs/cam/simulation.md S5) and the one the
+    // transport's own rule (docs/cam/simulation.md#transport) and the one the
     // rotary survey exists to keep us on the right side of.
     state.camPlaybackRefusal =
         "This job cannot be simulated: " + state.camTimeline.unsupported;
@@ -241,7 +241,7 @@ void TickCamPlayback(AppState& state, double now) {
   // A document edit invalidates the playback rather than re-cutting under the
   // cursor: the toolpaths it was posted from no longer describe this model,
   // and regenerating here would put a multi-second freeze inside the frame
-  // loop (docs/known-bugs.md).
+  // loop (docs/cam/simulation.md#transport).
   if (state.camToolpaths.empty()) {
     EndCamPlayback(state);
     return;

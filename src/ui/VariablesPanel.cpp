@@ -249,11 +249,11 @@ void DrawVariablesPanel(AppState& state) {
       ImGui::TableNextRow();
       // Every cell carries a STABLE NAME instead of sitting in a PushID(i)
       // scope behind a "##" label. Both of those leave a widget reachable
-      // only by numeric id (docs/ui/gui-coverage.md), and between them this
-      // panel could not be clicked by a test or an agent at all — which is
-      // why a whole workstream had zero GUI coverage. The scope is in the id
-      // because a part variable is allowed to shadow a project one, so the
-      // name alone is not unique.
+      // only by numeric id (docs/ui/testing.md#making-a-widget-addressable),
+      // and between them this panel could not be clicked by a test or an agent
+      // at all — which is why a whole workstream had zero GUI coverage. The
+      // scope is in the id because a part variable is allowed to shadow a
+      // project one, so the name alone is not unique.
       const std::string rowId =
           std::string(r.isProject ? "_project_" : "_part_") + p.name;
       const std::string nameId = "###var_name" + rowId;

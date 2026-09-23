@@ -5,7 +5,7 @@
 // resolve it themselves, and the exports had fallen behind — glTF ignored an
 // appearance override and a colour imported from STEP, and coloured two
 // occurrences of one unpainted part differently
-// (docs/interchange/step-export-plan.md).
+// (docs/interchange/README.md#exporting-step).
 //
 // Resolve order: appearance > material > displayColor > palette.
 

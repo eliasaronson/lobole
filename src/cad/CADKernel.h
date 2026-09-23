@@ -86,7 +86,8 @@ public:
   // only a regen can change. The section tool asked four times a frame
   // through every visible body of an assembly: 54% of the app's entire CPU
   // and 5.6 -> 30 ms of frame time on a 33-occurrence engine, for the same
-  // box every time (docs/performance/shape-bounds-memo.md).
+  // box every time
+  // (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape).
   //
   // THREADING: filling a slot writes to the shape, so it lives by the rule
   // the parallel clash sweep already set — OpenCASCADE fills its own caches
@@ -208,8 +209,9 @@ public:
   // over a face's edges. Resolving the mate-tool hover therefore mapped every
   // edge of the body N+2 times and cost O(face edges x body edges) EVERY
   // FRAME: 10 ms on a 144-hole plate, 88 ms on a 400-hole one. See
-  // docs/known-bugs.md. A box hid it completely — the cost is in the product,
-  // so it needs a part that is both drilled and hovered.
+  // docs/assemblies/README.md#snap-points-while-hovering. A box hid it
+  // completely — the cost is in the product, so it needs a part that is both
+  // drilled and hovered.
   struct FaceSnap {
     int edgeIndex = -1;
     glm::vec3 point{0.0f};
@@ -273,7 +275,7 @@ public:
   // the other way round -- the argument was overwritten whenever the shape had
   // a bounding box, so every value ever passed here was decoration, and the
   // CAM verifier compared machined stock against a 0.4 mm-faceted "designed"
-  // surface on a 0.25 mm grid (docs/cam/reach-and-fidelity-plan.md).
+  // surface on a 0.25 mm grid (docs/cam/simulation.md#one-engine).
   Mesh GenerateMesh(double deflection = 0.0) const;
 
   // The same mesh, WITHOUT touching this shape's own triangulation.
@@ -384,10 +386,11 @@ public:
   // read returns false with `out` empty, exactly like a failed one.
   bool LoadSTEPStructured(const std::string& filename, ImportedModel& out,
                           ImportProgress* progress = nullptr);
-  // STEP export as another CAD system wants it (X4,
-  // docs/interchange/step-export-plan.md): named, coloured products, placed
-  // by reference, nested the way the assembly is. A part occurring twelve
-  // times is one product and twelve instances, not twelve anonymous copies.
+  // STEP export as another CAD system wants it
+  // (docs/interchange/README.md#exporting-step): named, coloured products,
+  // placed by reference, nested the way the assembly is. A part occurring
+  // twelve times is one product and twelve instances, not twelve anonymous
+  // copies.
   struct StepBody {
     CADShape shape;
     std::string name;

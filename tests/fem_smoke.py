@@ -74,8 +74,8 @@ def build_bar(d):
 
 
 def assembly_study(d):
-    """S1 (docs/simulation/assembly-studies-plan.md): a study on an ASSEMBLY
-    tab, over the same verbs. Two 100 x 100 x 16 steel blocks as parts, the
+    """A study on an ASSEMBLY tab (docs/simulation/README.md#assembly-studies),
+    over the same verbs. Two 100 x 100 x 16 steel blocks as parts, the
     upper placed on the lower; the upper meshed, the lower a rigid support
     clamped at their contact, a pressure on the upper's top."""
     d.call("new_project")

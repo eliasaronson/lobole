@@ -7,7 +7,7 @@
 
 #include <vector>
 
-// The CAM verb session and what it draws (docs/cam/gui.md, G2-G4).
+// The CAM verb session and what it draws (docs/cam/gui.md#verb-windows).
 //
 // The panel (CamPanel.cpp) is the LIST — setups, tools, operations, the
 // numbers. This is the way IN: three verbs, each one click on the model, with
@@ -64,7 +64,7 @@ void RunCamVerification(AppState& state);
 
 // Opens the CAM tool window on one operation's settings -- a double-click on
 // its row, or Edit in its menu. The settings used to be an "Advanced" tree in
-// every row of the docked panel (docs/ui/cam-panel-tidy-plan.md).
+// every row of the docked panel (docs/ui/panels.md#cam-job-tab-the-cam-panel).
 void EditCamOperation(AppState& state, uint64_t opId);
 // The same for one of the active setup's tools, by number.
 void EditCamTool(AppState& state, int number);

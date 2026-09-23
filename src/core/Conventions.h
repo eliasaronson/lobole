@@ -12,7 +12,7 @@
 // vec3(0,1,0) literals and hand-written view tables. Everything that MEANS
 // "up" — a named view, a plane name, a gravity default, a light rig — derives
 // from the constants here, and tests/test_world_up.cpp fails if any consumer
-// drifts. docs/up-axis.md is the full story.
+// drifts. docs/conventions.md#world-axes is the full story.
 //
 // A literal (0,1,0) elsewhere in the tree is a claim that the value is NOT
 // world up — a local basis pick, a UV axis, a face normal. If it means "up",
@@ -27,7 +27,8 @@ namespace conv {
 // Z-up, front toward -Y: the frame every convention we interoperate with
 // uses — G-code's spindle, drawing practice, and every CAD and DCC tool we
 // exchange files with. The app was Y-up until 2026-08-28 (the renderer's habit,
-// adopted as a model convention); docs/up-axis.md is the history and the flip.
+// adopted as a model convention); docs/conventions.md#world-axes states the
+// frame.
 inline constexpr glm::dvec3 kWorldUp{0.0, 0.0, 1.0};
 inline constexpr glm::dvec3 kWorldFront{0.0, -1.0, 0.0};
 inline constexpr glm::dvec3 kWorldRight{1.0, 0.0, 0.0};

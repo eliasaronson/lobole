@@ -27,11 +27,11 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
-// Unfold / Refold (docs/sheetmetal/plan.md, S9). The headline is the
-// involution the whole recorded-bend design exists to make testable:
-// refold(unfold(x)) == x, to the micron, over a single bend, a tree and a
-// chain. Then the reason the pair exists at all: a hole drawn FLAT across a
-// crease, wrapped onto the bend, and laid flat again by the flat pattern as
+// Unfold / Refold (docs/sheetmetal/README.md#how-the-unfolder-works). The
+// headline is the involution the whole recorded-bend design exists to make
+// testable: refold(unfold(x)) == x, to the micron, over a single bend, a tree
+// and a chain. Then the reason the pair exists at all: a hole drawn FLAT across
+// a crease, wrapped onto the bend, and laid flat again by the flat pattern as
 // the same hole.
 namespace {
 

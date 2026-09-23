@@ -6,7 +6,7 @@
 # reader takes dimensions, and a table that half-loads is worse than one that
 # refuses. The vendored fastener standards are all ISO metric, so an imperial
 # hole is refused as a size nothing here is drilled to, which is true.
-# See THIRD_PARTY.md and docs/parts/plan.md.
+# See THIRD_PARTY.md and docs/parts/README.md.
 Size,Close,Normal,Loose
 M1,1.1,1.2,1.3
 M1.2,1.3,1.4,1.5

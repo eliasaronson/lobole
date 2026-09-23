@@ -1,0 +1,252 @@
+# Topology optimization
+
+Generative design: given a design envelope, the faces it is fixed by and the
+loads it carries, the optimizer removes material down to a target volume
+fraction while keeping the part as stiff as possible. The result is an
+organic shape to print from, or to re-model clean parametric geometry
+against.
+
+It is a third kind of study (`AnalysisType::Topology` on `fem::Study`), so it
+shares the meshing, materials, face references, loads, staleness and panel of
+the FEM studies described in [../simulation/README.md](../simulation/README.md).
+
+## The method
+
+SIMP with an optimality-criteria update (`fem::TopologyOptimize`,
+`src/core/fem/FemTopo.{h,cpp}`), on the same tet10 mesh and element math as
+the static solver (`src/core/fem/FemSolverInternal.h`, shared verbatim):
+
+1. Each tet's density ρ is a design variable in [0, 1]; its modulus is
+   `Emin + ρᵖ (E0 − Emin)` with p = 3 and `Emin = 1e-6 E0` (modified SIMP).
+   The penalty pushes intermediate densities toward 0 or 1.
+2. Solve `K(ρ) u = F` for the study's force and pressure loads.
+3. Sensitivity of compliance per element, `−p ρᵖ⁻¹ uₑᵀ Kₑ⁰ uₑ` — the element
+   strain energy at full modulus.
+4. **Sensitivity filter** (Sigmund) over element centroids with radius R,
+   found through a uniform grid hash. The physical density equals the design
+   variable, so the field goes crisply to 0/1 and the volume stays linear in
+   the variables. R is `filterRadius` (mm), or 2.5 × the mean element size
+   when 0; it sets the minimum member size.
+5. OC update: bisect the Lagrange multiplier on the volume constraint, move
+   limit 0.2, damping 0.5.
+6. Stop when the largest density change is below 0.01, or at
+   `maxIterations` (default 60).
+
+Invariants:
+
+- **Every tet touching a fixed node, a loaded boundary triangle or a keep
+  face is frozen at density 1**, so supports, load regions, bolt bosses and
+  bearing seats never vanish. The rest starts uniform at the value that meets
+  the target volume.
+- **Gravity is excluded.** Self-weight is a design-dependent load (F depends
+  on ρ); the objective uses only the study's face loads.
+- **Penalty is constant.** `TopoParams::penaltyRampIters` exists but is 0:
+  sensitivity filtering already yields a discrete design at constant p, and
+  ramping p from 1 converges to a softer, greyer design.
+- **One body.** The design domain is the single loaded body; modelled holes
+  are keep-out by construction. A study loading several bodies is refused.
+- The CPU linear solver is Eigen CG with an incomplete-Cholesky
+  preconditioner, warm-started from the previous iteration's displacement (K
+  changes little between SIMP steps). This is the correctness oracle and the
+  fallback for the GPU solver below.
+
+Validation happens before the run, on `study.error`: a fixed support and a
+force or pressure load, volume fraction in (0, 1), a material with stiffness
+data, a single loaded body.
+
+## Results
+
+A topology result **is saved with the project**, unlike FEM results: it
+costs minutes, and it is tied to a mesh that Netgen does not reproduce across
+versions or machines, so re-running would not give it back. It is written as
+`studies/<id>-<slug>.result.json` beside the study (flat arrays: mesh nodes
+and tets, per-tet density, compliance history, iterations, achieved volume
+fraction) and loaded into the same `StudyRuntime` slot FEM results use. On
+load it is stamped with the settled document version, so it reads current
+until the part changes; a stale result is still displayed, badged. The solver
+name and wall time are not saved. Goldens use a hand-made mesh, never Netgen
+output.
+
+Display and export (`FemTopo.cpp`, pure geometry, so a saved result displays
+on a build without the solver or mesher):
+
+- `fem::ExtractIsoSurface`: densities averaged to corner nodes, marching
+  tetrahedra over each tet's corners (midside nodes ignored), capped at the
+  domain boundary, facet normals outward.
+- `fem::AutoIsoThreshold`: the threshold whose solid volume matches the
+  achieved fraction, by bisection; used when the threshold is 0.
+- The **Shape** view is that surface as a grey `MeshRenderer` body; the
+  **Density** view colours the node-averaged density through `FieldRenderer`.
+  The design body is hidden while either is shown.
+- The **shape guide** (`set_topo_ghost`, or the panel's "Shape guide
+  (modeling overlay)") draws the extracted surface translucent in normal
+  modelling, to sketch and extrude against. There is no snapping to it.
+- `fem::ExportTopoStl`: extract, weld, Taubin (λ/μ) smoothing, which fairs
+  the staircase without shrinking, then a binary STL. It reports triangle and
+  boundary-edge counts and whether the surface is watertight.
+
+There is no automatic reconstruction of a B-Rep or feature tree from the
+result. The workflow is to re-model over the ghost, then check the new part
+with a static study.
+
+## The run
+
+A run takes minutes, so it happens on a worker thread over an immutable
+snapshot. `fem::PrepareTopology` (main thread) evaluates expressions,
+resolves faces, meshes the body and builds a `fem::TopoInput` of plain data;
+the worker runs `TopologyOptimize` with no document access, publishing
+iteration, compliance, largest change and volume fraction through atomics,
+and checking a cancel flag each iteration. The result is stored at the one
+join point on the main thread (`ui::StartTopologyRun`,
+`src/ui/SimulationActions.cpp`). Cancelling keeps the best densities so far
+as a valid result marked cancelled. One study run at a time.
+
+## The GPU solver
+
+`src/femgpu/` builds the `fem_gpu` static library (Vulkan compute, no
+surface). `designer_core` stays GPU-free: `TopologyOptimize` takes an
+optional `fem::TopoLinearSolver` (the seam in `FemTopo.h`), and the app
+passes a `gpu::TopoGpuSolver` when a usable hardware device exists. The build
+option is `DESIGNER_ENABLE_FEM_GPU` (default ON); compute shaders are
+compiled to embedded SPIR-V (`src/shaders/fem_*.comp`, `cg_*.comp`,
+`cheb_*.comp`, `mg_*.comp`).
+
+- **Matrix-free SpMV** (`gpu::TopoSpmv`, `fem_spmv.comp`): one workgroup per
+  tet applies `scale_e · Kₑ⁰` to its 30 DOF and scatters with float
+  `atomicAdd` (requires `VK_EXT_shader_atomic_float`). K is never assembled.
+- **On-device PCG** (`gpu::TopoCgSolver`): the whole loop runs in compute
+  shaders recorded in 32-iteration chunks, reading back one scalar per chunk.
+  fp32 needs three guards: the true residual replaces the recurrence one at
+  chunk boundaries (the recurrence reads optimistic); the best iterate is
+  what is returned (fp32 CG drifts past its round-off floor); a stall
+  restarts from the best iterate, and two restarts with no gain end the
+  solve. The target is a 1e-5 relative residual.
+- **Multigrid preconditioner** (default; `gpu::TopoMultigrid`,
+  `mg_restrict.comp`, `mg_prolong.comp`): a two-level V(1,1) cycle. Nodes are
+  aggregated once per run; each aggregate gets 6 coarse DOF (rigid-body
+  modes about its centroid — piecewise-constant prolongation cannot represent
+  rotation). The Galerkin coarse operator is reassembled each SIMP iteration
+  from per-element blocks precomputed at setup and factorized on the CPU in
+  fp64; Chebyshev on the Jacobi-scaled operator is the smoother. The coarse
+  space is what removes the low-energy void-region modes that polynomial
+  preconditioning cannot reach. If the hierarchy cannot be built, Jacobi is
+  used.
+- **Element energies on the GPU** (`TopoLinearSolver::ElementEnergies`,
+  `fem_energy.comp`): the sensitivities' `uₑᵀ Kₑ⁰ uₑ` from the resident
+  fp32 element matrices, one workgroup per element, no atomics. A solver may
+  decline, and the CPU loop (the oracle) runs instead.
+- **Warm solves are capped at 128 iterations.** Past the first solve, the
+  fp32 residual floors well above the target on real SIMP systems while the
+  compliance is settled within the first hundred or so; everything after was
+  grinding at the floor. The cold first solve keeps a generous cap. A capped
+  or floored solve is accepted: SIMP reacts to element energies, not to the
+  last digit of u.
+
+Device choice: discrete over integrated; the settings' `gpuDevice` names one.
+Software devices (llvmpipe) lose to the CPU and are not used by the app.
+Environment overrides: `DESIGNER_TOPO_GPU=0` forces the CPU, `=1` admits a
+software device; `FEMGPU_PRECOND=mg|jacobi|cheb`, `FEMGPU_CHEB_DEGREE`,
+`FEMGPU_CHEB_RATIO`. Diagnostics: `TOPO_PROFILE=1` prints per-phase SIMP
+timing, `FEMGPU_SOLVE_TRACE=1` one line per linear solve, `FEMGPU_CG_TRACE=1`
+single-iteration chunks.
+
+### The fp32 limit on slender parts
+
+The fp32 CG cannot solve a slender bending problem. The achieved residual
+floor tracks the part's length-to-depth ratio (about an order of magnitude
+per doubling) and not its element count; refining the mesh makes it worse,
+because κ grows as h⁻². SIMP's frozen skin (density 1 against a bulk at the
+volume fraction cubed) multiplies the conditioning by another ~20×. On a
+20:1 beam with a bending load, κ(K) reaches ~2.7e8, beyond what seven
+decimal digits can resolve, and the first, cold solve makes no progress at
+all: its best iterate is the zero initial guess. Jacobi and multigrid fail
+identically, so fp32 is the binding constraint, not the preconditioner.
+
+A zero displacement field would read downstream as a converged design (zero
+compliance, zero sensitivities, the OC step walking to its bound). So
+`TopoGpuSolver::Solve` fails a solve that is unconverged with a relative
+residual ≥ 0.99, naming it, and `TopologyOptimize` then **drops the external
+solver and finishes the run on the CPU**. `TopoResult::solverFallback`
+records why, and the stored result's solver name says the CPU finished it
+(`study_status`, `study_results`). A beam-shaped part therefore optimizes
+correctly at CPU speed. Getting it onto the GPU is
+[../plans/topopt-gpu-mixed-precision.md](../plans/topopt-gpu-mixed-precision.md).
+
+## Using it
+
+### GUI
+
+1. Model a **design envelope**: a solid that bounds where material may go.
+   A bar or bracket gives the optimizer room to form struts; a cube fixed and
+   loaded on opposite faces has no room for a load path. Assign a material
+   with stiffness data.
+2. Enter simulation, add a study and set the analysis to **Topology**.
+3. Arm **Fixed** and click the support faces; arm **Force** or **Pressure**
+   and click the loaded faces. Optionally arm **Keep face** for faces that
+   must stay solid, and set a mesh size.
+4. Set the **Volume fraction** (0.3 keeps 30 % of the material), and
+   optionally the filter radius and max iterations. **Run** shows a progress
+   bar with the iteration; **Cancel** keeps the best shape so far.
+5. The result shows iterations, a compliance start→end, the achieved volume
+   fraction and a stale badge. **Display**: *Shape* (the grey optimized body,
+   with a **Threshold** slider; 0 = volume-matched), *Density* or *Off*.
+6. Tick **Shape guide (modeling overlay)** and leave simulation to model
+   against the result.
+
+Volume fractions of 0.4–0.5 give chunkier, cleaner members than 0.3 on small
+parts; lower fractions need finer meshes. A finer mesh gives a crisper shape
+at a higher cost per iteration.
+
+### RPC
+
+```
+add_study {type: "topology", name?}                -> {id}
+set_study {id, mesh_size?, volume_fraction?, filter_radius?, max_iterations?}
+add_load  {study, type: "fixed", face}
+add_load  {study, type: "force", face, magnitude, direction?}   # N, total on the face
+add_keep_face {study, face}      / remove_keep_face
+run_study {id}                                     -> {started: true}   (always async)
+study_status {id}   -> {running, iteration, max_iterations, compliance,
+                        max_change, volume_fraction, solver, elapsed_seconds}
+cancel_study {id}                                  -> {cancelled}
+study_results {id}  -> {iterations, converged, cancelled, volume_fraction,
+                        compliance, solver, solve_seconds, stale}
+set_result_display {study, field: "shape"|"density"|"none", threshold?}
+set_topo_ghost {study, on}
+export_topo_stl {study, path, threshold?, smooth?}  # smooth: Taubin passes, default 3
+```
+
+`volume_fraction` and `filter_radius` also take expression strings. Export
+to STL is RPC-only; the panel has no button for it.
+
+## Tests
+
+- `tests/test_topopt.cpp` (`[topopt]`): the SIMP gate on a deterministic,
+  Netgen-free structured tet10 cantilever (volume target, compliance drop,
+  frozen skin solid, a recognizable truss), the same problem through Netgen,
+  cancel keeping best-so-far, input refusals, the injected-solver seam,
+  `RunTopology` end to end and its single-body refusal, result persistence
+  and JSON round-trips, iso-surface closure and orientation,
+  `AutoIsoThreshold`, STL output. `[.][topobench]` is a manual benchmark.
+- `tests/test_femgpu.cpp` (`femgpu_tests`, every case SKIPs without a
+  compute device): SpMV and element energies against the CPU on a structured
+  and a Netgen mesh; CG to tolerance; `TopologyOptimize` via the GPU landing
+  on the CPU design; a slender cantilever that either solves on the GPU or
+  falls back — never returns zeros. Hidden: `[fp32floor]` probes (residual
+  floor vs slenderness, what zeroes the solve, condition numbers, penalty
+  ramp, fp64 refinement), `[mg0gate]`, `[mgscale]`, benches.
+- `tests/topo_smoke.py`: start → poll → done, STL export, cancel keeping a
+  best-so-far result, one run at a time. Skips without Netgen. Reloading a
+  saved result is covered by `test_topopt.cpp`.
+- GUI: `sim/topology_holds_its_volume_target`.
+
+## Not done
+
+- Stress-constrained optimization, multiple load cases, manufacturing
+  constraints (draw direction, symmetry, extrusion), frequency objectives.
+- Assembly-level optimization and keep-out bodies.
+- Density filtering with Heaviside projection (sharper edges and true
+  minimum-member-size control); the current sensitivity filter leaves a grey
+  band at member boundaries that the threshold and STL smoothing clean up.
+- Automatic parametric reconstruction.
+- GPU speed on slender parts (the fallback above).

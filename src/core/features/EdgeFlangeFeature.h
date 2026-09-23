@@ -8,9 +8,9 @@
 #include <vector>
 
 // Where the flange's wall sits relative to the edge that was picked
-// (docs/sheetmetal/plan.md, S3). All three are the same construction with a
-// different SETBACK from the picked edge to the bend's tangent line, so the
-// choice is about which mold line the original edge marks:
+// (docs/sheetmetal/README.md#features). All three are the same construction
+// with a different SETBACK from the picked edge to the bend's tangent line, so
+// the choice is about which mold line the original edge marks:
 //   MaterialInside  - the OUTSIDE mold line lands on the picked edge, so the
 //                     part does not grow past the profile that was drawn.
 //   MaterialOutside - the INSIDE mold line lands on it; the wall hangs out

@@ -627,7 +627,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                 {"autosave_path", Autosaver::SidecarPath(path)}};
     // Parts whose baked geometry could not be used and were rebuilt, and
     // why: the difference between a 0.04 s open and a 20 s one, and what a
-    // save would fix (docs/ui/project-open-progress-plan.md).
+    // save would fix (docs/ui/long-operations.md#opening-a-project).
     out["rebuilt_parts"] = state.openRebuiltParts;
     if (!state.openRebuildReason.empty())
       out["rebuild_reason"] = state.openRebuildReason;

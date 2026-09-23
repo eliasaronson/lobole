@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A READ does not switch tabs (docs/agent-scale-followup-plan.md, W2).
+"""A READ does not switch tabs (docs/scripting/rpc.md#reads-name-their-part).
 
 The app holds exactly one live document: a PartSlot's `doc` is moved into
 AppState when the tab activates and moved back when it leaves, so "the active

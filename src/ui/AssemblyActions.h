@@ -13,7 +13,7 @@
 // Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
 // every domain in the app and is included by 40 translation units — so every
 // panel and RPC module paid for all of it. See
-// docs/architecture-review-2026-08-24.md.
+// docs/architecture.md#the-ui-actions-layer.
 namespace ui {
 
 // Resolves a viewport ray to a face of an occurrence in the active assembly:
@@ -54,7 +54,7 @@ struct BomRow {
   double unitMassG = 0.0; // valid when massKnown
   // A BOUGHT part, and what to order it as: the standard's name ("iso4762")
   // and the designation ("ISO 4762 M6x50"). Both empty for a part somebody
-  // modelled (docs/parts/plan.md, phase 5).
+  // modelled (docs/parts/README.md#bom-and-drawings).
   //
   // Derived, not stored: a part whose whole feature list is one Fastener is a
   // bought item by construction. That keeps the distinction right when the
@@ -216,11 +216,12 @@ BomTable ComputeBom(AppState& state); // empty without an active assembly
 
 // What is wrong with a fastener already placed, or an empty list.
 //
-// The plan's staleness gate (docs/parts/plan.md): a fastener whose stack has
-// changed under it must REPORT that rather than silently keeping the length it
-// was fitted with. Deriving from the plates is a dependency on other
-// documents' geometry that regeneration cannot express (A2), so the value is
-// derived once at placement — and this is what makes a stale one visible.
+// The staleness gate (docs/parts/README.md#checking-placed-fasteners): a
+// fastener whose stack has changed under it must REPORT that rather than
+// silently keeping the length it was fitted with. Deriving from the plates is a
+// dependency on other documents' geometry that regeneration cannot express
+// (A2), so the value is derived once at placement — and this is what makes a
+// stale one visible.
 //
 // Nothing is stored to make it work. A placed fastener's position and
 // orientation ARE its rim and its axis, so the stack is re-traversed from
@@ -294,11 +295,12 @@ bool ImportStepAsAssembly(AppState& state,
 // The tab-bar folder generated standard parts live in. One name, here: a
 // project with five sizes across four lengths is twenty documents, and a tab
 // bar nobody can find their own part in is a failure discovered late and
-// blamed on something else (docs/parts/plan.md).
+// blamed on something else (docs/parts/README.md).
 inline constexpr const char* kStandardPartsFolder = "Standard parts";
 
-// Place a standard fastener in the ACTIVE ASSEMBLY (docs/parts/plan.md,
-// phase 2). Returns the new occurrence's id, or 0 with `error` filled.
+// Place a standard fastener in the ACTIVE ASSEMBLY
+// (docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence).
+// Returns the new occurrence's id, or 0 with `error` filled.
 //
 // One generated part document per distinct (standard, size, length, drive),
 // reused by every occurrence of that spec and named as its BOM designation —
@@ -320,7 +322,7 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
                      uint64_t ridesOn = 0);
 
 // The rim, as a pick names it: WHICH occurrence, and which circular edge on
-// it (docs/parts/gui-plan.md, phase 1).
+// it (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 //
 // The occurrence is not decoration. Every occurrence of one part shares every
 // element name, so an ElementRef alone does not name a rim in an assembly —
@@ -341,10 +343,11 @@ struct RimPick {
 // could place one. Returned so the caller can SAY it: the decomposition is the
 // product, not a by-product — a gap in the stack is either an unmodelled
 // gasket or a defect, and printing "Plate 12.0, gap 3.0, Bracket 26.5" is what
-// makes the second kind visible (docs/parts/plan.md, phase 3).
-// PlannedPart is declared in AppState.h: the tool's own state holds a plan
-// (it is what the ghost draws), and AppState.h is the header this one
-// includes rather than the other way round.
+// makes the second kind visible
+// (docs/parts/README.md#deriving-a-fastener-from-a-hole). PlannedPart is
+// declared in AppState.h: the tool's own state holds a plan (it is what the
+// ghost draws), and AppState.h is the header this one includes rather than the
+// other way round.
 
 struct FastenerFit {
   bool ok = false;
@@ -368,11 +371,12 @@ struct FastenerFit {
   // The mates the joint became: one per INTERFACE it spans that nothing
   // already held together — two for a bolt through three parts. Empty is the
   // ordinary case for a second bolt through a stack the first one already
-  // joined, and is not a failure (docs/parts/f1-loose-ends.md).
+  // joined, and is not a failure (docs/parts/README.md).
   std::vector<uint64_t> mates;
 };
 
-// What to put on the axis (docs/parts/plan.md, phase 4).
+// What to put on the axis
+// (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 //
 // The screw's own dimensions are still derived — this is only the CHOICE of
 // what a joint is made of, which is the one thing the geometry cannot answer.
@@ -411,7 +415,7 @@ struct FastenerRequest {
   // Names a rim like the first pick does. It TRUNCATES rather than replaces:
   // everything between the two picks is still traversed, because the grip and
   // the far-side hardware still depend on what is in there
-  // (docs/parts/plan.md, "Two picks, but only when you want them").
+  // (docs/parts/README.md#deriving-a-fastener-from-a-hole, the second pick).
   RimPick farEnd;
   bool dryRun = false; // derive and explain without placing
 };
@@ -451,7 +455,7 @@ void MaterializeImportedAssembly(AppState& state,
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 // The part document an occurrence (or a cross-part query) references, by
 // stable id — active or stashed; never switches the active tab. Null when the

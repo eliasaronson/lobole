@@ -60,10 +60,10 @@ constexpr OpTypeRow kRows[] = {
     // in mm; the waterline steps DOWN in mm and has no stepover at all, which
     // is the whole reason they are two types.
     // v125: the raster takes a stepdown, and with one ROUGHS in layers from
-    // the stock top (docs/cam/rough-rest-range-plan.md) -- the rotary op's
-    // move at v123, for the same reason: it is the pattern that can follow a
-    // surface the 2.5D levels cannot. And either finish can be a REST pass,
-    // cutting only where a larger cutter could not reach.
+    // the stock top (docs/cam/operations.md#rough-a-surface-and-rest-machining)
+    // -- the rotary op's move at v123, for the same reason: it is the pattern
+    // that can follow a surface the 2.5D levels cannot. And either finish can
+    // be a REST pass, cutting only where a larger cutter could not reach.
     {OpType::SurfaceParallel, "surface_parallel", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
          OpField::SampleStep | OpField::CutAngle | OpField::RestFromTool},

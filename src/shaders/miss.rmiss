@@ -12,7 +12,7 @@ struct RayPayload {
     vec3 gnormal;
     float hitT;   // < 0.0 on a miss
     uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
-    // A path through glass (docs/rendering/glass-plan.md): closest-hit sets
+    // A path through glass (docs/rendering/materials.md#glass): closest-hit sets
     // kFlagContinue and the next ray, and raygen's loop traces it, weighting
     // what it finds by `throughput`. SHADOW rays carry this payload too, so
     // the one hit group's any-hit can read it: then radiance is the ray's

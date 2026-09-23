@@ -1,6 +1,6 @@
 # Vendored from FreeCAD_FastenersWB (github.com/shaise/FreeCAD_FastenersWB),
 # GPL-2.0-or-later. Upstream file: FsData/iso14579def.csv, unmodified below this header.
-# See THIRD_PARTY.md and docs/parts/plan.md.
+# See THIRD_PARTY.md and docs/parts/README.md.
 "ISO14579def"
 "Dia","DriveSize","A","t_mean"
 "M2","T6",1.75,0.8

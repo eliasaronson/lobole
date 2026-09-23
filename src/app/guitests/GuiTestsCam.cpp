@@ -142,7 +142,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // The pick says where Z zero is, and NOTHING about how much material sits
     // above the part — it used to zero that, which threw away an allowance
     // already typed and made "Face the top" refuse right after the pick meant
-    // to set the job up (docs/cam/dogfood-round.md, round 2).
+    // to set the job up (docs/cam/gui.md#verb-windows).
     IM_CHECK(std::abs(live->stock.margin.z - 1.0) < 1e-9);
     const cam::DerivedOp face = cam::DeriveOperation(
         *live, CamPart()->GetBodies(), cam::OpType::Face, cam::Target{});
@@ -154,7 +154,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // failure, so nothing caught "Save G-code" and the post-dialect combo both
   // answering to ###cam_post for as long as they both existed. It only became
   // visible when the button moved above the operations list and the two were
-  // on screen at once (docs/cam/dogfood-round.md).
+  // on screen at once (docs/cam/gui.md#the-cam-panel).
   //
   // ui_items cannot see this: GatherItems is keyed BY id, so a collision
   // shows up as one entry, not two. ImGui's own detection is the check.
@@ -196,8 +196,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(panel != nullptr);
     // The setup row's combo is the MACHINE since round two; the post dialect
     // moved under "Stock and safety" as one of the machine's own fields.
-    // Save G-code moved to the Generate window (docs/ui/cam-panel-tidy-
-    // plan.md); the panel's run line is the widget that took its place.
+    // Save G-code moved to the Generate window
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel); the panel's run line is
+    // the widget that took its place.
     const ImGuiID machineCombo = panel->GetID("###cam_machine");
     const ImGuiID runStatus = panel->GetID("###cam_run_status");
     IM_CHECK(machineCombo != runStatus);
@@ -222,7 +223,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // every operation is created in the floating verb window. Adding three by
   // mistake (because the first two silently cut nothing) and being unable to
   // take any of them back is how a job ends up with duplicates in it
-  // (docs/cam/dogfood-round.md).
+  // (docs/cam/gui.md#verb-windows).
   t = IM_REGISTER_TEST(engine, "cam", "an_operation_can_be_removed_where_made");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -249,7 +250,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const uint64_t first = Job()->FindSetup(setup.id)->operations[0].id;
     // The row PushID's the operation's id as an int, which "$$<n>" addresses.
     // Removed from its row's menu, as a feature is: the rows lost their x
-    // buttons to the feature list's gestures (docs/ui/cam-panel-tidy-plan.md).
+    // buttons to the feature list's gestures
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
     const std::string ref = "//CAM###ToolWindow/$$" +
                             std::to_string(static_cast<int>(first)) +
                             "/###op_row";
@@ -336,7 +338,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // including a feature-editor session naming a feature that had just been
   // discarded. The one that bit was camToolOpen: it is a TOGGLE, so a stale
   // one turned OFF at the next click on the button meant to turn it on, and
-  // the failure surfaced in an unrelated test (docs/cam/dogfood-round.md).
+  // the failure surfaced in an unrelated test (docs/cam/gui.md#verb-windows).
   t = IM_REGISTER_TEST(engine, "cam", "fit_keeps_the_model_clear_of_the_tool");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -410,7 +412,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // The view a machinist works in. The app's up is +Y and CAM's is +Z, so the
   // plan view — down the spindle — is filed under "Front" in Standard Views
   // and the entry called "Top" shows the part edge-on. CAM offers the view it
-  // means, in the frame THIS setup cuts in (docs/cam/dogfood-round.md).
+  // means, in the frame THIS setup cuts in (docs/cam/gui.md#the-job-toolbar).
   t = IM_REGISTER_TEST(engine, "cam", "look_down_the_spindle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -610,10 +612,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
-  // W2/W5 (docs/cam/stock-and-origin.md): the corner the operator touches off
-  // on, chosen by clicking, and honoured by the file. Before v68 `origin` was
-  // a label the post never read, so "Z zero at 16.000" was a claim no line of
-  // the g-code kept.
+  // Work origin (docs/cam/setup.md#work-origin): the corner the operator
+  // touches off on, chosen by clicking, and honoured by the file. Before v68
+  // `origin` was a label the post never read, so "Z zero at 16.000" was a claim
+  // no line of the g-code kept.
   t = IM_REGISTER_TEST(engine, "cam", "work_origin_is_where_it_says");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -656,8 +658,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
     // Generate is a toolbar tool with its own window now
-    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
-    // clicks of what follows.
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel); closed again so it cannot
+    // take the clicks of what follows.
     ToolbarClick(ctx, "###tb_job_generate");
     ctx->Yield(2);
     IM_CHECK(s_App->camGenerateOpen);
@@ -778,12 +780,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
-  // S2 (docs/cam/setup-frame.md): the case every other fixture in this file
-  // dodges by being modelled face-up. A panel that stands upright — an
-  // imported speaker baffle, and every part that arrives from STEP or a
-  // parametric import in the orientation it has in the assembly — has no level
-  // face worth zeroing on. Laying one flat is a statement about the FIXTURE, so
-  // it must work on a 3-axis machine and put no A word in the file.
+  // docs/cam/setup.md#fixturing-frame-and-rotary-index: the case every other
+  // fixture in this file dodges by being modelled face-up. A panel that stands
+  // upright — an imported speaker baffle, and every part that arrives from STEP
+  // or a parametric import in the orientation it has in the assembly — has no
+  // level face worth zeroing on. Laying one flat is a statement about the
+  // FIXTURE, so it must work on a 3-axis machine and put no A word in the file.
   t = IM_REGISTER_TEST(engine, "cam", "upright_panel_lays_flat");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -847,15 +849,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
-  // G2-G4 (docs/cam/gui.md): the verbs. Two clicks — the verb, then the face
-  // — produce a machinable operation with nothing typed, the viewport shows
-  // what will be removed, and the verdict arrives without being asked for.
-  // The CAM window is usable on a part that has no CAM job — which is the
+  // The verbs (docs/cam/gui.md#verb-windows). Two clicks — the verb, then the
+  // face — produce a machinable operation with nothing typed, the viewport
+  // shows what will be removed, and the verdict arrives without being asked
+  // for. The CAM window is usable on a part that has no CAM job — which is the
   // only state it can be in the first time anyone opens it. The machining
   // verbs already made a setup on demand; the two picks in the Zero section
   // answered "add a setup first" into a field this window does not draw, so
   // pressing "Pick top face" on a fresh part and clicking a face did nothing
-  // at all, visibly or otherwise (docs/cam/dogfood-round.md).
+  // at all, visibly or otherwise (docs/cam/gui.md#verb-windows).
   t = IM_REGISTER_TEST(engine, "cam", "the_first_pick_makes_the_setup");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -999,7 +1001,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // 0.4 mm grid and the RPC defaulted to 0.25, and a cell centre landing on
     // the corner of an island counted the island's whole height as a gouge:
     // "Cuts 6.00 mm INTO the part — that is scrap" about a part the RPC's own
-    // check called clean (docs/cam/dogfood-round.md, round 2). Leftover is a
+    // check called clean (docs/cam/simulation.md#the-verifier). Leftover is a
     // WARN and expected here — nothing has cut the outside yet.
     IM_CHECK(!s_App->camVerdict.empty());
     for (const cam::VerdictLine& line : s_App->camVerdict) {
@@ -1049,10 +1051,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // ploughing a square step where a chamfer was asked for.
   t = IM_REGISTER_TEST(engine, "cam", "adaptive_clears_off_the_frame");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/ui/long-operations.md, phase 1: generating an adaptive operation
-    // does not block a frame. The same pocket the two-clicks test derives,
-    // on the panel's REAL path (deferred, which the suite otherwise turns
-    // off), watched frame by frame while the passes cut.
+    // docs/ui/long-operations.md#cam-toolpath-passes: generating an adaptive
+    // operation does not block a frame. The same pocket the two-clicks test
+    // derives, on the panel's REAL path (deferred, which the suite otherwise
+    // turns off), watched frame by frame while the passes cut.
     if (!cam::AdaptiveAvailable())
       return;
     ctx->SetRef("//##MainMenuBar");
@@ -1132,7 +1134,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "cam", "a_profile_is_cut_off_the_frame");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/cam/add-operation-plan.md: "Add operation" on a helically fluted
+    // docs/cam/README.md#background-work: "Add operation" on a helically fluted
     // pin held the frame for two minutes, sectioning the part at every
     // depth pass inline. The panel's REAL path (deferred, which the suite
     // otherwise turns off): the click returns, the sections are cut on the
@@ -1184,10 +1186,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam",
                        "add_operation_on_the_trunnion_is_rotary");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/cam/add-operation-plan.md: the button added a 3-axis cut-out to a
-    // job cut on the trunnion -- a contour round the dowel from its top to
-    // its bottom. A setup that already cuts on the 4th axis gets a pass
-    // that does too.
+    // docs/cam/operations.md#derivation--what-a-click-means: the button added a
+    // 3-axis cut-out to a job cut on the trunnion -- a contour round the dowel
+    // from its top to its bottom. A setup that already cuts on the 4th axis
+    // gets a pass that does too.
     ctx->SetRef("//##MainMenuBar");
     CamPart()->AddFeature(std::make_unique<CylinderFeature>(
         "Bar", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 12.0, 30.0));
@@ -1223,11 +1225,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "cam", "surfacing_runs_off_the_frame");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/ui/long-operations.md, phase 5. `GenerateContext`'s comment called
-    // adaptive clearing "the one expensive step"; that stopped being true at
-    // v118, and a finishing pass ran INLINE until this. The rotary rolling
-    // pin took seventeen minutes with the app stopped -- single `ui` frames
-    // of 10 s and 72 s on the frame HUD.
+    // docs/ui/long-operations.md#cam-toolpath-passes. `GenerateContext`'s
+    // comment called adaptive clearing "the one expensive step"; that stopped
+    // being true at v118, and a finishing pass ran INLINE until this. The
+    // rotary rolling pin took seventeen minutes with the app stopped -- single
+    // `ui` frames of 10 s and 72 s on the frame HUD.
     //
     // The twin of adaptive_clears_off_the_frame, and deliberately so: the
     // properties that matter are the same three, and a second mechanism that
@@ -1342,8 +1344,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "cam", "a_rotary_op_spirals_from_the_panel");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/cam/rotary-continuous-plan.md. The pattern is a radio pair on a
-    // rotary op's Advanced row, offered because the capability table says
+    // docs/cam/rotary.md#patterns-rotary_pattern. The pattern is a radio pair
+    // on a rotary op's Advanced row, offered because the capability table says
     // the type has it -- and choosing "spiral" there has to turn a raster
     // whose part turns only BETWEEN passes into one that turns while it cuts.
     ctx->SetRef("//##MainMenuBar");
@@ -1415,7 +1417,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "cam", "a_rotary_part_turns_as_it_plays");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/cam/rotary-plan.md, "The picture". A program whose A moves used to
+    // docs/cam/rotary.md#the-rotary-picture. A program whose A moves used to
     // be REFUSED by the simulator -- honestly, while its only stock was a
     // height map. It plays now, and the part TURNS: one matrix, R_x(A) at the
     // cursor, on the ghosted bodies, their outlines and the stock, while the
@@ -1709,8 +1711,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "cam", "generate_is_a_tool_with_a_window");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/ui/cam-panel-tidy-plan.md. The toolbar's gears used to generate
-    // SILENTLY, with the verdict landing in the docked panel below the
+    // docs/ui/panels.md#cam-job-tab-the-cam-panel. The toolbar's gears used to
+    // generate SILENTLY, with the verdict landing in the docked panel below the
     // operations; now they open the run where they were pressed -- the
     // verdict, the output options and Save G-code -- like Simulate.
     ctx->SetRef("//##MainMenuBar");
@@ -1758,10 +1760,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
              !ImGui::FindWindowByName("###CamGenerate")->Active);
   };
 
-  // Workholding by clicking (docs/cam/workholding-plan.md): a keep-out box
-  // from the panel, placed from the stock; its row checks, moves and edits
-  // it; and Verify names the clamp the profile runs into.
-  // docs/cam/fixture-gizmo-plan.md: a fixture moves with the arrows parts
+  // Workholding by clicking (docs/cam/setup.md#workholding-fixtures): a
+  // keep-out box from the panel, placed from the stock; its row checks, moves
+  // and edits it; and Verify names the clamp the profile runs into.
+  // docs/cam/gui.md#gizmos: a fixture moves with the arrows parts
   // move with, its own faces snap to the stock's, and one put down on the
   // stock's top RESTS there -- seated, following the stock. Rays are handed
   // to HandleGizmoInput, as a_placement_is_dragged_in_the_viewport does.
@@ -2089,8 +2091,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // Generate: toolpaths exist, and the backplot draws them.
     // Generate is a toolbar tool with its own window now
-    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
-    // clicks of what follows.
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel); closed again so it cannot
+    // take the clicks of what follows.
     ToolbarClick(ctx, "###tb_job_generate");
     ctx->Yield(2);
     IM_CHECK(s_App->camGenerateOpen);
@@ -2121,10 +2123,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::AppendCamToolpathOverlay(*s_App, prims);
     IM_CHECK(!prims.empty());
     // The tool is drawn to scale where it enters — the "will my cutter fit"
-    // picture (docs/cam/gui.md). Its circle sits INSIDE the path's extent, so
-    // the check is its geometry: vertices one tool radius from the entry
-    // point. (A bounding-box check passed for the wrong reason and was
-    // replaced.)
+    // picture (docs/cam/gui.md#what-the-viewport-draws). Its circle sits INSIDE
+    // the path's extent, so the check is its geometry: vertices one tool radius
+    // from the entry point. (A bounding-box check passed for the wrong reason
+    // and was replaced.)
     glm::dvec3 entry(0.0);
     for (const cam::Move& m : s_App->camToolpaths[0].moves)
       if (m.kind == cam::Move::Kind::Cut) {
@@ -2204,8 +2206,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
     // Generate is a toolbar tool with its own window now
-    // (docs/ui/cam-panel-tidy-plan.md); closed again so it cannot take the
-    // clicks of what follows.
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel); closed again so it cannot
+    // take the clicks of what follows.
     ToolbarClick(ctx, "###tb_job_generate");
     ctx->Yield(2);
     IM_CHECK(s_App->camGenerateOpen);
@@ -2332,7 +2334,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!after.empty());
   };
 
-  // docs/cam/job-panel-add-menus-plan.md: one Add menu per section, and
+  // docs/cam/gui.md#the-cam-panel: one Add menu per section, and
   // each offers what it should. The part menu lists the project parts the
   // job does not hold; the fixture menu lists the box and the same parts,
   // and says when nothing holds the stock.
@@ -2800,7 +2802,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->camShowToolpath);
     // What the renderer HOLDS is the backplot, not just what the contributor
     // would produce if asked. It lives in the renderer's cached channel
-    // (docs/cam/backplot-frame-cost-plan.md), so that is where to look.
+    // (docs/cam/gui.md#what-the-viewport-draws), so that is where to look.
     const ui::CamBackplotRef backplot = ui::CamBackplot(*s_App);
     IM_CHECK(backplot.verts != nullptr && !backplot.verts->empty());
     IM_CHECK_EQ(s_App->sketchRenderer->CachedPrimitiveCount(),
@@ -2815,7 +2817,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
-  // docs/cam/backplot-frame-cost-plan.md: the backplot was cached and then
+  // docs/cam/gui.md#what-the-viewport-draws: the backplot was cached and then
   // copied twice per frame -- into the primitive list, and into the frame's
   // vertex buffer -- which on the rolling pin was 93% of an idle frame. An
   // idle frame now copies nothing: the renderer holds the SAME list the
@@ -2924,7 +2926,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemOpen("###cam_tools");
     ctx->Yield(2);
     // A tool's fields are edited in the tool window, from its row
-    // (docs/ui/consistency-round-plan.md).
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
     ctx->ItemDoubleClick("tools/###cam_tool_1");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->camEditTool, 1);
@@ -2944,7 +2946,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camToolOpen);
   };
 
-  // The 3D finishing verbs (docs/cam/surface-verbs-plan.md) were written with
+  // The 3D finishing verbs (docs/cam/gui.md#the-job-toolbar) were written with
   // their picks and derivations and never given a button. Clicked here, on a
   // curved face that every other verb refuses.
   t = IM_REGISTER_TEST(engine, "cam", "the_surface_verbs_take_a_curved_face");
@@ -3053,8 +3055,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   };
 
   // Rough, finish, clean up from the toolbar
-  // (docs/cam/rough-rest-range-plan.md): a dome on a plate, whose ring where
-  // they meet a 6 mm ball cannot reach.
+  // (docs/cam/operations.md#rough-a-surface-and-rest-machining): a dome on a
+  // plate, whose ring where they meet a 6 mm ball cannot reach.
   t = IM_REGISTER_TEST(engine, "cam",
                        "rough_finish_and_clean_up_from_the_toolbar");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -3336,10 +3338,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->measure = ui::MeasureState{};
   };
 
-  // Preferences > Machines is the store (docs/cam/job-document.md, round
-  // two): New writes a file, a rename moves it, an edit rewrites it, Delete
-  // removes it. The GUI runner points XDG_CONFIG_HOME at a scratch dir, so
-  // this is a scratch store; the test still cleans up by name.
+  // Preferences > Machines is the store
+  // (docs/cam/setup.md#machine-profiles): New writes a file, a rename moves it,
+  // an edit rewrites it, Delete removes it. The GUI runner points
+  // XDG_CONFIG_HOME at a scratch dir, so this is a scratch store; the test
+  // still cleans up by name.
   t = IM_REGISTER_TEST(engine, "cam", "machines_are_kept_in_preferences");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -3394,7 +3397,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   // A setup names a machine and EMBEDS a copy; the panel says when the copy
   // and the store disagree, and offers both directions. Every reference
-  // surveyed reconciles this quietly (docs/cam/job-document.md, round two).
+  // surveyed reconciles this quietly (docs/cam/setup.md#machine-profiles).
   t = IM_REGISTER_TEST(engine, "cam",
                        "a_setup_names_a_machine_and_says_when_it_differs");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -3848,7 +3851,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - safeBefore) < 1e-6);
   };
 
-  // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
+  // The terminal panel (docs/ui/terminal.md). Off by default, docked
   // right when on, and — the part that decides whether it feels safe — the
   // keyboard goes to it ONLY while the pointer is over it.
 #endif

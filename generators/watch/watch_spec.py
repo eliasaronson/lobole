@@ -234,7 +234,7 @@ def _derive(g):
                            P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
     # The second reverser wheel: a wheel's pitch distance from the first
     # (wheel to wheel, so it turns the other way) and its pinion's from the
-    # ratchet, which both pinions drive (docs/reverser-plan.md). The other
+    # ratchet, which both pinions drive (generators/watch/README.md). The other
     # intersection is 3.0 from the crown wheel, which needs 4.26.
     P["reverser"] = _meet(P["reduction"], m * Z_REDUCTION_W + bl,
                           P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
@@ -754,7 +754,7 @@ def _is_dimension(name, value):
 
 def declare(app):
     """Declare every dimension here as a project variable and return the
-    namespace rebound to Params (docs/peer-survey-plan.md, W1)."""
+    namespace rebound to Params (docs/scripting/sdk.md#parameters-carry-their-expression)."""
     base = {k: v for k, v in globals().items() if _is_dimension(k, v)}
     declared = app.params({k.lower(): v for k, v in sorted(base.items())},
                           comment="watch_spec")
@@ -764,7 +764,7 @@ def declare(app):
 
 
 # --- the escapement's action -------------------------------------------------
-# Two cams from the escape wheel animate it (docs/rotating-cam-follower-plan.md).
+# Two cams from the escape wheel animate it (generators/watch/README.md).
 # One full oscillation of the balance lets one tooth pass, so it swings once
 # per tooth pitch: the escape wheel turns 12 times a minute, 15 teeth, 3 Hz —
 # 21,600 beats an hour. The fork points at the impulse pin while the pin is in

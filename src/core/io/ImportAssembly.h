@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-// Assembly STEP import (interchange I2, docs/interchange/import-plan.md):
+// Assembly STEP import (docs/interchange/README.md#importing-an-assembly):
 // turn a structured STEP into a *plan* the app materializes as part documents
 // plus an assembly. Pure core logic — file extraction and transform math live
 // here so they are testable without AppState; the ui wrapper only creates

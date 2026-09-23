@@ -76,7 +76,7 @@ extern ui::AppState* s_App;
 
 Document* Doc();
 
-// --- CAM tests: the job tab (docs/cam/job-document.md) ---------------------
+// --- CAM tests: the job tab (docs/cam/README.md#the-model) ---------------
 //
 // CAM setups moved off the part Document onto a job document of their own, so
 // a CAM test now builds a part and then MACHINES it: two tabs, not one.

@@ -37,7 +37,7 @@
 // cut in, the reach window, and clipping a path to the travel.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 
@@ -595,8 +595,8 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
   // so an op carrying one from any other route (a loaded file, a test, the
   // in-process API) quietly grew a second full-depth pass of a strategy that
   // has no wall to finish. Found by the capability gate on its first run
-  // (docs/cam/operation-shape-plan.md), which is the whole argument for
-  // having one.
+  // (docs/cam/operations.md#the-capability-table-and-the-field-table), which is
+  // the whole argument for having one.
   if (op.finishTool == 0 || !OpTypeHas(op.type, OpField::Finish)) {
     out.push_back(GenerateFramed(setup, op, framed, ctx));
     return out;

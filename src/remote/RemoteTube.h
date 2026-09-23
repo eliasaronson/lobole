@@ -12,7 +12,7 @@ namespace ui {
 struct AppState;
 }
 
-// Tube-bending RPC handlers (docs/tube/plan.md), a domain module like the
+// Tube-bending RPC handlers (docs/tube/README.md), a domain module like the
 // sheet-metal one and for the same reason: the rules are a document-level
 // object rather than a feature, so they need verbs.
 namespace remote {

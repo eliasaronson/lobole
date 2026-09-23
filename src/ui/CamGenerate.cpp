@@ -73,7 +73,7 @@ void DrawCamGenerateWindow(AppState& state) {
   bool optionsChanged = false;
 
   // Adaptive passes in flight: the row owns the progress, not a modal — the
-  // rest of the job stays editable (docs/ui/long-operations.md, phase 1).
+  // rest of the job stays editable (docs/ui/long-operations.md#the-registry).
   if (const CamPassProgress progress = CamPassProgressOf(state);
       progress.running) {
     // The same widget the STEP import draws (ui/Widgets.h). It used to be a
@@ -221,7 +221,7 @@ void DrawCamGenerateWindow(AppState& state) {
       // With no project there is no "beside", and the fallback was a bare
       // "job.nc" written into whatever directory the app was launched from.
       // Refuse and say where it would go instead of leaving G-code somewhere
-      // nobody will look for it (docs/cam/dogfood-round.md).
+      // nobody will look for it (docs/cam/post.md#files).
       if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
         // A file written now would carry the PREVIOUS toolpath where a pass
         // is still cutting.

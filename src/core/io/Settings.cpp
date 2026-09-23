@@ -27,7 +27,7 @@ constexpr int kFormat = 1;
 constexpr const char* kFormatKey = "settings_format";
 // The keymap is one nested object rather than a `Field`, because a chord is
 // not a scalar with a range or a fixed choice list. It gets its own handling
-// in every function that walks kFields (docs/ui/u12-keybindings.md).
+// in every function that walks kFields (docs/ui/keybindings.md).
 constexpr const char* kKeysKey = "keys";
 // Remembered window rect. Like kKeysKey, outside the kFields table: it is
 // state, not a preference, and must not show up in Preferences.

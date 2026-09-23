@@ -283,7 +283,7 @@ def _innermost(scopes, pos):
 # in exactly the way it can: `ApplyOpFields` gained four fields, its
 # annotation did not, the gate compared the row to the stale annotation and
 # passed, and the generated SDK refused all four
-# (docs/cam/op-field-table-plan.md, docs/cam/friction-after-helical-plan.md).
+# (docs/cam/operations.md#the-capability-table-and-the-field-table).
 #
 # A helper that loops over a TABLE of keys reads the table's keys too. Named
 # here, because a loop over rows is not a string the scanner can see.

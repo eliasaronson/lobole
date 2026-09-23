@@ -17,12 +17,13 @@ class Mesh;
 class ExactContactCache;
 } // namespace collide
 
-// Running a MotionStudy (docs/agent-scale-plan.md, G2): the driver DOF set to
-// each sample value, the assembly solved there, every top-level occurrence's
-// placement recorded, and — when the study asks — every occurrence pair
-// checked for a clash. The result is the collision table the plan calls the
-// kinematic gate: "rotate the crank through 720 degrees at 15-degree steps
-// and confirm zero collision at every step. Print the table."
+// Running a MotionStudy (docs/assemblies/README.md#motion-studies): the
+// driver DOF set to each sample value, the assembly solved there, every
+// top-level occurrence's placement recorded, and — when the study asks —
+// every occurrence pair checked for a clash. The result is the collision
+// table that is the kinematic gate: "rotate the crank through 720 degrees
+// at 15-degree steps and confirm zero collision at every step. Print the
+// table."
 //
 // A sample whose loops do not close is reported with its residual and
 // marked unsolved. It is NEVER drawn in the last good pose's place: an

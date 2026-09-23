@@ -1,4 +1,4 @@
-// STEP export (X4, docs/interchange/step-export-plan.md): what another CAD
+// STEP export (docs/interchange/README.md#exporting-step): what another CAD
 // system finds when it opens our file. Every case here writes a real file
 // and reads it back through XCAF — the same reader another OCC-based system
 // uses — so what is asserted is the FILE, not the model we meant to write.

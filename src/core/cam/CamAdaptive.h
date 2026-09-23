@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-// Adaptive clearing (docs/cam/plan.md, C8).
+// Adaptive clearing (docs/cam/operations.md#pocket-and-adaptive).
 //
 // Kresimir Tusek's `Adaptive2d`, vendored at deps/libarea/ from FreeCAD
 // b2da06bf. Concentric offsetting takes the full width of the cutter on the
@@ -51,7 +51,7 @@ AdaptiveClear(const Setup& setup, const Operation& op, const Tool& tool,
 
 [[nodiscard]] bool AdaptiveAvailable();
 
-// --- Off the frame (docs/ui/long-operations.md, phase 1) --------------------
+// --- Off the frame (docs/ui/long-operations.md#cam-toolpath-passes) ----------
 //
 // One pass of adaptive clearing costs seconds and libarea's `Execute` has no
 // interruption points, so the pass is the unit of background work. What a

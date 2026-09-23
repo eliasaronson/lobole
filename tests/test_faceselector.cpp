@@ -436,7 +436,8 @@ TEST_CASE("the bounds prune never loses a hit", "[picking][placement]") {
   CHECK_FALSE(selector.PickFace(miss).hit);
 }
 
-// ---- Picking through a section view (docs/ui/section-pick-plan.md) --------
+// ---- Picking through a section view
+// (docs/ui/selection.md#picking-through-a-section) --------
 //
 // A section is a fragment discard, so without these the pick answers about
 // material nobody can see: you section an assembly to reach a part inside,

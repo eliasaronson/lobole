@@ -23,8 +23,8 @@ namespace {
 // Countersunk is excluded on purpose and not silently — `FitFastenerToHole`
 // refuses it by name, because the rim you pick on a plain bore is the bore's
 // and the head would end up inside solid material. It comes back when a hole
-// carries its countersink (docs/modeling/hole-standards.md). A nut and a
-// washer are not here either: they do not pass through a hole, they are the
+// carries its countersink (docs/modeling/holes-and-threads.md#hole). A nut and
+// a washer are not here either: they do not pass through a hole, they are the
 // far side of one, which is what the checkboxes below are.
 std::vector<const parts::Profile*> OfferedStandards() {
   std::vector<const parts::Profile*> out;
@@ -238,7 +238,7 @@ void DrawFastenerToolWindow(AppState& state) {
   // the case the derivation cannot see: an axis that carries on past the
   // joint into material the fastener was never meant to span, which is what
   // an alternator's bolt circle running into a cast rib looks like
-  // (docs/dogfooding.md). Not shown before the rim, because a control that
+  // (docs/parts/README.md). Not shown before the rim, because a control that
   // cannot do anything yet is the defect this suite exists to catch (U10).
   if (havePick) {
     if (ImGui::Button(tool.farElement.IsSet() ? "Re-pick far end###fastener_far"

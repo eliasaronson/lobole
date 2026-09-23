@@ -1,220 +1,210 @@
 # generators
 
-Parts that other CADs grow a workbench or a scripted-feature language for,
-done here as ordinary Python against the API. Each is a program that makes
-an ordinary parametric document: the dimensions a user adjusts afterwards
-are project variables driving expressions, and anything computed (a tooth
-profile) is frozen — change those inputs and run again.
+Parts, assemblies and whole products written as ordinary Python against the
+app's API. Each is a program that makes an ordinary parametric document: the
+dimensions a user adjusts afterwards are project variables driving
+expressions, and anything computed (a tooth profile, a cam table) is frozen —
+change those inputs and run again. A generator can loop and branch in a real
+language, while the app's regeneration stays deterministic and free of an
+embedded interpreter.
 
-Why this and not a scripting engine inside the app:
-[../docs/capability-review-2026-08-31.md](../docs/capability-review-2026-08-31.md),
-"scripted features" (2026-09-03). Short version: the regeneration loop
-stays deterministic and free of interpreters, and a generator can loop and
-branch in a real language with no sandbox.
-
-**Layout.** A generator that is one file sits here; one that spans several
-sits in its own directory beside them — `om615/`, `pes_pump/`, `fpv_drone/`,
-`cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/`, `bike/`,
-`grill/`, `chassis/` — with the same file names inside. Every
-file adds BOTH its own directory and this one to `sys.path`, so a group's
-modules import each other by bare name and still reach `_lib` and `gear`.
-
-| generator | what | live afterwards | frozen |
-|---|---|---|---|
-| `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore; `--backlash` thins the flanks (a nominal pair at nominal centres has none), `--phase` turns the pattern (what makes two mirrored sectors mesh instead of jamming tip to tip), `--sector` keeps teeth over a wedge and a hub elsewhere | thickness, bore | module, teeth, pressure angle, backlash, phase, sector |
-| `pes_pump/` | Bosch PES4M inline injection pump (OM615): camshaft, roller tappets, helix plungers turned by a toothed rack, delivery valves, feed pump, pneumatic governor, timing device; four exact-checked motion studies (docs/modeling/pes-pump.md) | rack position (Stop / Idle / Full load configurations) | every dimension, in `pes_spec.py` |
-| `gear_train.py` | two of them on a carrier, mated by their bores, coupled by a gear relation (docs/assemblies/relations-plan.md), checked for tooth clash over a pitch | the relation's ratio and phase | the gears |
-
-Run one against the running app (it finds the one announced instance, or
-takes `--port`; it never guesses):
+Run one against a running instance — your own scratch one
+(`tools/headless-preview.sh --start <port>`), never the human's. Most find
+the one announced instance or take `--port`; they never guess:
 
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6
 
-`smart_speaker/` is a two-way floorstanding loudspeaker PORTED from Onshape:
-six MDF panels, four plywood coverings, two braces, a flared port, and the
-drivers and amplifier as bought STEP. It is the one generator here that
-started as somebody else's document, and most of what it is worth reading
-for comes from that.
+## Index
 
-The parameter table arrived SIX times — a part-scoped copy in every wall —
-and had already drifted, so it is declared once at project scope. The panels
-each drilled their own dowels and the holes did not meet (side walls at
-+/-126, the top wall at +/-110, the baffle none), so `joinery.py` makes the
-JOINT the unit and both panels of one ask the same function where their
-holes go; the carcass is then fastened along a tree by those holes rather
-than placed at coordinates. The coverings are their own parts carrying a
-`Derived` reference to the wall they cover, and take its outline from the
-same `walls.silhouette()`, mitred 45 degrees where they meet.
+| generator | what | notes |
+|---|---|---|
+| `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore | below |
+| `gear_train.py` | three gears on a carrier and a rack on a rail, coupled by relations, checked for tooth clash over a pitch | below |
+| `slider_crank.py` | block, crank, rod and piston closing a loop; a 360° study checks the stroke is 2R with no clash | `--crank`, `--rod` |
+| `single_cylinder.py`, `aircooled_engine.py`, `carburettor.py` | a single-cylinder four-stroke on primitives, the same engine from sketches only, and its carburettor as a subassembly | [below](#single-cylinder-and-air-cooled-engines) |
+| `toolmakers_clamp.py` | an eight-part toolmaker's clamp from a published drawing | [below](#toolmakers-clamp) |
+| `waveguide.py`, `waveguide_job.py` | a constant-directivity waveguide for the Alpair 7MS, and its 3-axis surfacing job on the 6090 | CAM |
+| `rotary/` | a file handle and a barley-twist rolling pin, and their 4-axis jobs | CAM |
+| `bike/` | a roadster bicycle modelled from photographs | [README](bike/README.md) |
+| `chassis/` | the FS chassis: a Formula Student space frame read from the team's SolidWorks CAD, and its shop order | [README](chassis/README.md) |
+| `cncest6090/` | provisional layout and Z-axis fixture of a CNC router | [README](cncest6090/README.md) |
+| `fpv_drone/` | a 5-inch FPV quadcopter, with sheets, loads and G-code | [README](fpv_drone/README.md) |
+| `grill/` | a three-burner gas grill in brake-formed sheet | [README](grill/README.md) |
+| `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
+| `pes_pump/` | the Bosch PES4M injection pump for the OM615 | [README](pes_pump/README.md) |
+| `smart_speaker/` | a two-way floorstanding loudspeaker cabinet | [README](smart_speaker/README.md) |
+| `so101_gripper/` | a parallel-jaw wrist gripper for the SO-101 arm | [README](so101_gripper/README.md) |
+| `watch/` | an automatic mechanical watch | [README](watch/README.md) |
 
-**A frame built on ONE face has no meaningful X, and a fastened mate on it
-has eight outcomes the solver picks between arbitrarily.** Bolting the
-amplifier to the bay floor got, in turn, a case sunk 8 mm into its own floor
-(the frame was at the bores' midpoint, which is mid-thickness of a 16 mm
-panel), a case hanging under the floor (the base's normal points DOWN at it,
-not up), and a case standing on edge 72 mm tall (the bought STEP's own
-downward face was a 92 x 37 edge). The fix is to stop guessing which turn and
-ask the app, which can see both frames: `asm.join` (`add_mate derive:"twist"`)
-gives an exact joint turned the way the part is already placed, and refuses
-rather than rounding when the two anchors are not square to one axis. What is
-left in the generator is the ASSERTION each search used as its acceptance
-test — the box is above the floor, inside the bay, lengthways — which now
-fails loudly instead of being searched around. Where the bought geometry has
-real mounting holes, use them at both ends: the amp's four are the pattern the
-floor is drilled to, and the mate refuses if the case stops matching it.
+## Layout and shared code
 
-`extract_bought.py` slices the 48 MB Onshape export into the ~2 MB actually
-used, once; the output lives in `scratch/` and is regenerable, which is why
-neither it nor the project is tracked. `--stage carcass` builds everything
-that does not need those slices, and is what `tests/generators_smoke.py`
-runs. What the run refuses to save without is in `verify.py`.
+A generator that is one file sits here; one that spans several has its own
+directory. Each file in a group puts its own directory on `sys.path`, so a
+group's modules import each other by bare name; those that use `_lib` or
+`gear` add `generators/` too, and `tools/` for the SDK.
 
-**Check an assembly with `asm.check()`, not by hand.** It gates the three
-things that matter at once — nothing clashing, nothing FLOATING (one connected
-component), and no near miss under a millimetre, which is almost always an
-arithmetic slip. Contacts that are meant to happen go in its `allow` map
-rather than into a loosened tolerance:
+`_lib.py` holds what scripts would otherwise each copy: sketch planes that
+spell out the V axis, entity builders, an arc through three points, a
+`check` that raises on a failed regeneration, and `connect`. Most newer
+generators use the SDK (`tools/designer_sdk.py`) directly.
 
-    asm.check(allow={("port tube", "port flare"): 80.0})
+Conventions every generator here keeps:
 
-Written out by hand instead, a whole round shipped with eight T-nuts floating
-in mid-air and a clash reader that returned `[]` because it asked
-`interference` for a key that method did not have. `check_clashes()` is the
-same gate without the contact distances.
+- **The run refuses to save what it has not checked**, and gates on a
+  check's RECEIPT, not its `ok`.
+- **A part is finished when `check_geometry` says `verified`.** An invalid
+  body poisons every later question, phantom clashes included.
+- **Check an assembly with `asm.check()`**: nothing clashing, nothing
+  floating (one connected component), no near miss under a millimetre, with
+  contacts that are meant to happen in its `allow` map by exact pair and
+  volume — `asm.check(allow={("port tube", "port flare"): 80.0})`. An
+  allowance that matches nothing is itself an error. `asm.check_clashes()` is
+  the same gate without contact distances.
+- **Place by mates between named frames**, not by transcribed coordinates.
+  Two frames mated need `flipped=False` (the RPC defaults to `true`), and a
+  frame built on one face has no meaningful X — `asm.join` (`add_mate
+  derive: "twist"`) takes the turn from the placement instead of guessing.
+- **Dimensions carry their provenance**: sourced, read off a photograph,
+  assumed, or a design choice, said on the line that holds them.
 
-`_lib.py` is the block every scratch script used to copy: sketch planes
-that spell out the V axis, entity builders, an arc through three points, a
-`check` that raises on a failed regeneration, and `connect`.
+## gear.py and gear_train.py
 
-Gated: `tests/generators_smoke.py` (headless, in `ctest -LE gui`) builds the
-default gear and checks it by volume, extents, entity count and that the
-thickness still follows its variable.
-
-Measured 2026-09-03, headless: m2 z24 (192 entities) 209 ms end to end; m1
-z60 (360 entities) 449 ms, of which the sketch is 115 ms. Heavy sketches
-are not a problem at gear sizes.
+`gear.py` makes a spur gear: involute flanks as arcs, tip and root arcs, a
+bore. `--backlash` thins the flanks (a nominal pair at nominal centres has
+none), `--phase` turns the tooth pattern (what makes two mirrored sectors
+mesh instead of jamming tip to tip), and `--sector` keeps teeth over a wedge
+and a hub elsewhere. Thickness and bore stay live variables; module, teeth,
+pressure angle, backlash, phase and sector are frozen. `involute_profile()`
+is importable, and other generators compose it into multi-level parts.
 
 Not drawn: root fillets; undercut correction (below ~17 teeth at 20° the
 flank runs radially from the base circle to the root, as an uncorrected
-cutter would); helical, bevel, internal and rack forms. Each is a few
-lines of the same arithmetic when a part needs it.
+cutter would); helical, bevel, internal and rack forms.
 
-`fpv_drone.py` is a complete 5-inch FPV freestyle quadcopter: five carbon
-parts to have cut, two to print, forty-two fasteners derived from the holes
-they go in, and every bought component at its catalogue dimensions. The run
-refuses to save what it has not checked — an empty exact interference sweep,
-`check_fasteners` clean, seven measured clearances, and a motion study that
-turns all four propellers through a blade pitch. It writes dimensioned
-sheets with hole tables, STEP, STL, a BOM and a mass budget. Building it
-found six app defects (five fixed, one worked around); see
-[the model notes](../docs/modeling/fpv-drone.md) and `scratch/fpv-drone/BUILD.md`.
+`gear_train.py` mates pinion z12 → idler z24 → wheel z36 (module 2) by their
+bores to a carrier, seats each on the plate by the mate's axial offset,
+chains them with gear relations (ratios from the tooth counts, the idler
+phased half a pitch), slides a rack by the wheel's pitch radius, and turns
+the pinion through a tooth pitch checking for clash.
 
-`watch/` is an automatic mechanical watch, time only with small seconds: a
-21,600 vph movement (barrel, centre, third, fourth and escape wheels, a Swiss
-lever escapement that swings — balance and fork driven by cams off the
-escape wheel — with a piped fit-spline hairspring, motion works under the
-dial, a rotor winding the barrel through a reduction wheel, and a keyless
-works — stem, clutch, winding pinion, setting wheel, setting lever and yoke —
-so the crown winds the mainspring and sets the hands) in a 40 mm case with a
-dial, applied indices and blued hands. It is built on this round's machinery
-from the start: 86 dimensions are document variables (`watch_spec.declare`),
-every one of its 37 occurrences is placed by a mate, 16 relations make one
-motion study turn every hand at its true rate and the crown drive the ratchet,
-and the clearances that decide whether it runs are DECLARED on the assembly.
-The crown's two positions are CONFIGURATIONS of the assembly ("Crown in",
-"Crown out"); the run gates on receipts, checks both, and refuses to save
-what it has not checked. A clean mesh sweep — most of a full run —
-is kept in `--out`'s `mesh-cache.json`, keyed on the generator's own files
-and the app's source revision, so a run that changed neither does not sweep
-the meshes again; `--recheck` forces it.
+`tests/generators_smoke.py` (headless, in `ctest -LE gui`) builds the default
+gear and checks it by volume, extents, entity count and that the thickness
+follows its variable; it also builds the smart speaker's carcass.
 
-Its teeth are **cycloidal** (`watch/watch_gearing.py`), not `gear.py`'s
-involute, and the gates are why: at 6–12 pinion leaves an involute train
-interferes, a topped wheel loses continuous contact (the escape mesh fell to a
-contact ratio of 0.92), and a profile shift that clears the 6-leaf escape
-pinion leaves it pointed. `watch_spec.py` refuses at import any layout where a
-wheel crosses a foreign arbor and any mesh below a contact ratio of 1.1. See
-[the model notes](../docs/modeling/watch.md).
+## Single-cylinder and air-cooled engines
 
-`cncest6090.py` starts a provisional CNC router layout and Z-axis fixture from
-owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
-remaining dimensions are editable project variables with recorded assumptions.
-See [the model notes](../docs/modeling/cncest6090.md) for scope, measurement
-priorities, JSON overrides and preview/local/full verification.
+```sh
+python3 generators/single_cylinder.py --port <port> [--out /tmp/single_cylinder] [--exact-drawing]
+python3 generators/aircooled_engine.py --port <port> [--out /tmp/aircooled]
+```
 
-`so101_gripper/` is a parallel-jaw wrist gripper with a wrist camera for the
-SO-ARM100/101 follower arm: eight printed parts, a 1:1 involute sector-gear
-pair coupling two parallelogram fingers, and a 32x32 UVC camera aimed at the
-grasp point. `so101_gripper.py` builds the parts, `_assembly.py` places them
-at any link angle, `_motion.py` mates them and drives the mechanism through a
-motion study, `_export.py` writes the deliverable. See
-[the friction it found](../docs/rpc-friction-plan.md).
+`single_cylinder.py` is a running engine on the SDK: bore and stroke 86 ×
+86, a 150 mm rod, block, crank, rod, piston, head, two valves and a camshaft,
+and four ISO 4762 head screws each derived from its hole. Every dimension is
+a variable and every mate is between named frames. A chain relation drives
+the camshaft at half crank speed and CAM relations lift the valves; a
+49-sample study over 720° (one full valve cycle) measures the stroke and
+lifts from the poses, re-checks with exact clash, and exports an animated
+GLB and a three-view PDF. The block and head are plain boxes; only the head
+is bolted.
 
-`bike/` is the opposite of every other generator here: a bicycle modelled
-from three photographs, with **no measurements at all**. `bike_spec.py` keeps
-what the pictures establish (a gents' diamond frame, 28" wheels, a 3-speed
-trigger shifter so an internal-gear hub, one chainring under a teardrop
-guard) strictly apart from what is assumed (every length and angle), and each
-assumption is a project variable, so correcting one is an edit. The run
-refuses to save what it has not checked, and what it checks is what decides
-whether something is a bicycle: positive trail, both axles at one height, a
-straight chainline, the crank clear of the ground and of the chainstay, and a
-motion study that turns the rear wheel 46/18 of a crank revolution through a
-chain relation. See [the model notes](../docs/modeling/bike.md).
+`aircooled_engine.py` is the same mechanism from SKETCHES ONLY — no Box,
+Sphere or Cylinder: a finned barrel (re-finned by changing `FIN_PITCH`), a
+crankcase with a sump, a crank with mains and webs, a chain between an
+18- and a 36-tooth sprocket, cam towers with open saddles and caps, valve
+gear whose lobes are drawn from the relation's own lift function, intake,
+exhaust and silencer, and `carburettor.py`'s carburettor placed as ONE
+occurrence. The carburettor (Solex H-type style: bell mouth, fixed venturi,
+butterfly, float bowl, jet, lever and return spring, plus a bellcrank and
+link rod closing a four-bar throttle linkage) is built around its own origin
+at the flange face, because a subassembly mates by its origin.
 
-Two things it found are worth carrying to the next frame-shaped part.
-**Weld tubes SOLID and drill the bores afterwards** (`bike_shop.Weldment`):
-hollow pipes unioned at an angle put an end cap inside another tube's void,
-and whether that builds is a tangency lottery — a seat stay 11 mm off the
-seat tube's axis failed where 10 and 12 passed. And **a part is not finished
-until `check_geometry` says `verified`**: the frame passed "no feature
-errored" and "one solid" carrying a body OpenCASCADE calls badly nested, and
-an invalid body poisons everything asked of it — the assembly sweep reported
-17 cm3 of the rear cog buried in a frame that does not reach it, and the hunt
-for that phantom cost more than the rear triangle did to build.
+What these engines rely on in the app, and what building on them needs to
+know:
 
-`chassis/` is a Formula Student space frame, and the first
-generator whose point is the ORDER rather than the model: 91 members, 86 of
-them coped or mitred to their neighbours, and out of it a cut list, a bend
-schedule and the number of six-metre sticks to buy. The FRAME is a team's
-own CAD: `sldprt_frame.py` reads a SolidWorks part without SolidWorks (its
-container is raw-deflate streams, two of which are Parasolid transmit files)
-and writes the node graph to `fs_chassis_frame.json`, which is what the generator
-builds; see [the CAD round](../docs/chassis-cad-plan.md). `--shop <dir>` writes the whole order —
-a STEP per member, a DXF per flat blank (floor, firewall, suspension tabs,
-and a notched plate for every jig station) and a manifest naming each file,
-what it is and what it is made of; `--save` keeps the project to look at. Each member is its own body — a member is what gets
-cut, bent, labelled and welded — and nothing is unioned, which is the
-opposite of `bike_shop.Weldment` below and possible because `Cope` cuts a
-member and leaves its neighbour standing. See [the tube system](../docs/tube/plan.md)
-and [the round](../docs/chassis-round-plan.md).
+- A closed loop HOLDS its driven DOF (`LoopPin`): a crank set to 90° stays at
+  90° instead of being traded away as one more least-squares unknown.
+- A cam table is interpolated by a periodic monotone cubic, which cannot
+  overshoot its data; a spline that dips below zero in the dwell would drive
+  a closed valve into the head.
+- A motion study skips pairs that are rigid to each other, so bolted joints
+  are not reported as clashes; a scrub walks to its target at the study's own
+  spacing, so a slider-crank cannot jump onto its mirror branch at 180°.
+- Reading a hole diameter backwards through the clearance table is ambiguous
+  for many sizes (11 mm is an M9 loose and an M10 normal), so it is refused
+  naming the candidates and `fit_fastener` takes a `size`; a `Hole` drilled
+  with a fit needs none.
+- Exact HLR is priced by surface complexity: swept valve springs dominate a
+  view, so the drawing is `quality: "fast"` unless `--exact-drawing`, and a
+  view can leave occurrences out (`hidden`). A `Pipe` with a wall is tubing;
+  a spring is solid bar.
+- Overlapping loops in one sketch are refused, so a silhouette of
+  overlapping shapes is one extrude per shape; the SDK's
+  `Part.extrude_shapes()` does that loop. A slot's end cap reaches half its
+  width past its end centre, and a sketch builder's `extent()` returns the
+  profile's box to check before extruding. A radius on a drawn profile is the
+  normal case, so the builder has `arc()` rather than leaving it to `slot`.
+  Extrudes from the base planes go `xy` +Z, `yz` +X, `xz` −Y.
+- `Part.islands()` counts the regions a section crosses — a boss hanging
+  off a flange or a float bowl clear of its barrel shows as an extra island —
+  and `Part.bored_through()` is its dual, a plane containing a passage's axis
+  cutting an open duct into two lumps. The engines assert both where they
+  matter.
+- A part can be one solid, clash-free in every pose and correctly bolted
+  and still be the wrong shape; looking is the check that sees it, so
+  `Part.render(path)` screenshots one part, fitted (it needs a renderer, and
+  a `--headless` instance refuses).
+- `Part.bbox()` is the measured extent from `mass_properties`. `get_state`'s
+  box is a cheap conservative bound that wraps a swept surface by its control
+  points (a helical spring reads about sixty per cent over): right for a
+  broad phase, wrong for a person.
+- `modify_feature` takes `feature_id` as well as `index`, since an id is what
+  every other call hands back; not `id`, which inside the spec already means
+  the feature's own identity. `list_parts` returns `active_id` beside the
+  `active` index, so a client caching the active tab can check it.
+- A mesh containment test must not use a bounding box's centre: a cap
+  straddling a shaft has its centre inside the shaft.
+- In a four-bar, the coupler is turned end for end relative to the crank it
+  drives, so its closing mate usually wants `flipped=True`; a loop that will
+  not close is a geometry error, and seeding poses with `at=` only moves the
+  start away from the answer.
 
-Three things it found are worth carrying to the next frame:
+## Toolmaker's clamp
 
-**Rank the members by what runs THROUGH.** A member a node sits in the
-MIDDLE of is tacked before one that ENDS there: the hoops carry the bracing,
-the bracing carries the rest. Coping in that order is how a frame is tacked
-up, and it is what stops two members eating each other — and it is read off
-the node graph, so every member gets its own rank and every pair that meets
-is resolved by exactly one cope or mitre.
+```sh
+python3 generators/toolmakers_clamp.py --port <port> [--out /tmp/toolmakers-clamp] [--preview]
+```
 
-**A joint is not where the lines cross.** A hoop turns SHORT of its corner —
-with a 152 mm former the metal is 63 mm away from it — so a brace attached to
-the corner it was drawn from is attached to air. Test joints against the
-centreline the metal follows, not the one that was typed.
+An eight-part toolmaker's clamp from the [Journeyman's Workshop
+drawing](https://journeymans-workshop.uk/images/projects/toolmkrs/toolmkrs.pdf)
+and its [author's construction
+account](https://journeymans-workshop.uk/toolclamps.php) (linked, not
+vendored). Source dimensions: 75 × 12 × 12 mm jaws, a 30 mm taper to a 2.5 mm
+nose, screw axes 8 and 38 mm from the heel, M6 × 1 studding 75 mm long, 11 ×
+15 mm knobs and the captive knob's 8.2 mm groove. `D` in the script holds the
+source dimensions, `CHOICES` ours, `SPACER` the author's prose; the written
+`dimension-register.json` says which is which, and a null tolerance means
+UNSPECIFIED.
 
-**An equal-diameter joint drawn to its node is TANGENT**, and a boolean
-answers a tangent cut by handing back what it was given. A cope wants a root
-gap for the weld anyway, and 0.05 mm is enough to make the surfaces cross.
+Interpretations: the captive knob's blind bore goes through the flange end
+(the detail appears to show it opposite, which conflicts with the assembly);
+the author's salvaged M3 washer-head screw is replaced by an explicitly
+dimensioned custom part; rod insertion (11 mm), the baseline 18 mm jaw
+opening and the flat 5 mm rear tip are our choices; blind depths include a
+118° drill point. Threads are cosmetic `Thread` features on tap-drill bores
+(M6 on 5 mm, M3 on 2.5 mm) with bounded engagement, and five named
+engagement gates check the intended threaded connections exist. Knurl and
+chamfers are callouts only; steel generic, brass spacer.
 
-**A weld jig plate is LOW.** Cut to the full height of the tubes it crosses,
-a station plate is a sheet with full-length slots and the tubes thread
-through fingers instead of dropping into seats; holding only the members
-within a band of the lowest took one station from 645 x 1053 mm to
-645 x 143. And a member lying IN the station's plane is not crossing it —
-without a transversality test its whole length is cut out and the plate is
-sawn in half.
-
-`toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
-on an author's published plan, with screw-driven closed assembly loops, exact
-checks, STEP round-trip coverage, BOM and eight part sheets. See
-[the source audit and workflow](../docs/modeling/toolmakers-clamp.md).
+The mechanism is PARALLEL ADJUSTMENT: a jaw slider keeps the jaws parallel,
+and two closed loops with M6 screw relations (each referencing its `Thread`
+feature, whose specification is authoritative) turn both screws as the
+opening changes. A 41-sample study covers ten turns at quarter-turn steps,
+18 to 28 mm. The full run writes the project, `toolmakers-clamp.step`,
+`bom.csv`, eight SVG part sheets with associative dimensions and machining
+notes, `dimension-register.json` and `report.json`; `--preview` skips
+drawings and verification. `tests/toolmakers_clamp_smoke.py` re-imports the
+STEP (eight solids, volume conserved), reopens the project and edits jaw
+length and opening without re-running the generator, and computes both jaw
+volumes independently from stock minus cutters. The checks are nominal
+geometry, not tolerance stacks or loads.

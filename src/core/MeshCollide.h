@@ -11,7 +11,7 @@
 #include <vector>
 
 // Do two placed solids overlap? Asked of TRIANGLES, not of the B-Rep
-// (agent-scale plan G3, docs/agent-scale-plan.md).
+// (docs/inspect/README.md#mesh-mode).
 //
 // The exact answer is a boolean, and a boolean is what `interference` and
 // `contact_report` do: correct, and the reason a 253-occurrence arm takes

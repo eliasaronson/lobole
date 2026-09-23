@@ -337,7 +337,7 @@ size_t BufferLineOfRow(const Session& t, int r, int sb) {
 }
 
 // Keyboard, but only while the pointer is over the panel. See the header and
-// docs/ui/terminal-panel.md: hover, not focus, is what decides — an invisible
+// docs/ui/terminal.md: hover, not focus, is what decides — an invisible
 // focus state deciding whether Ctrl+Z undoes a feature or suspends a job is
 // the thing that makes an embedded terminal feel dangerous.
 TabRequest HandleInput(Session& t) {

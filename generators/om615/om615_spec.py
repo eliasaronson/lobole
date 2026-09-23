@@ -18,12 +18,12 @@ rather than a petrol four with a diesel label on it.
 Everything with a unit is derived from the four numbers a person would
 actually quote for an engine (bore, stroke, rod, bore pitch) wherever the
 derivation is real. Other values include design estimates; sourced dimensions
-are identified separately in docs/modeling/om615-sources.md.
+are identified separately in generators/om615/README.md#sources.
 """
 import math
 
 # Reference target: early 200 D/8, OM615.913 (21:1), not the later 615.940.
-# Verified dimensions and remaining approximations: docs/modeling/om615-sources.md.
+# Verified dimensions and remaining approximations: generators/om615/README.md#sources.
 # ---- the four numbers ------------------------------------------------------
 BORE = 87.0
 STROKE = 83.6

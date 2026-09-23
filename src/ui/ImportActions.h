@@ -27,7 +27,7 @@ struct Ray;          // defined in FaceSelector.h
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 #include "core/Units.h"
 
@@ -58,7 +58,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
 // (p1 fixed; alignAxis also rotates p1->p2 onto the U axis); Delete removes it.
 // All commit one undoable ModifyFeatureCommand. See
-// docs/sketching/reference-image-plan.md.
+// docs/sketching/README.md#reference-images-underlays.
 uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path);
 
 void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,

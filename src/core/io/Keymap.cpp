@@ -319,13 +319,13 @@ const Binding kDefaults[] = {
     {"assembly.fastener", Context::Assembly, "Fastener (pick a hole's rim)",
      "Standard parts", "F"},
 
-    // The two viewport modes (docs/ui/u15-assembly-panel.md). "X" for the
-    // explode, "M" for motion; both open the floating tool window, and each
-    // closes the other because both place the occurrences.
+    // The two viewport modes (docs/ui/panels.md#assembly-tab-the-model-panel).
+    // "X" for the explode, "M" for motion; both open the floating tool window,
+    // and each closes the other because both place the occurrences.
     {"assembly.explode", Context::Assembly, "Exploded view", "Tools", "X"},
     {"assembly.motion", Context::Assembly, "Motion study", "Tools", "M"},
     // The bill of materials, a floating window with real columns
-    // (docs/ui/assembly-panel-tidy-plan.md).
+    // (docs/ui/panels.md#assembly-tab-the-model-panel).
     {"assembly.bom", Context::Assembly, "Bill of materials", "Tools", "B"},
     // The third floating mode (S1): a study on the assembly, on the part
     // tab's simulation key.

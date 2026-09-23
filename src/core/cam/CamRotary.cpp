@@ -531,7 +531,7 @@ double RotaryBlankRadius(const Setup& setup, double partRadius) {
   // A box's margins are the only ones a `Stock` can state and a cylinder has
   // one radius, so the radial margin is the larger of the two across the
   // axis. Named here rather than silently chosen: a round stock MODE is the
-  // honest fix (docs/cam/rotary-plan.md, D3).
+  // honest fix (docs/cam/rotary.md#limits).
   return partRadius + std::max(setup.stock.margin.y, setup.stock.margin.z);
 }
 

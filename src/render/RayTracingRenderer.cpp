@@ -776,8 +776,8 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   // coverage with 17 levels, not a hard 1 px staircase, and it is traced in
   // STRIPS of rows so its memory does not grow with the still: a whole-image
   // G-buffer is 16 bytes a ray, which is why this used to be 2x2 up to ~2 Mpx
-  // and 1x1 above (docs/rendering/still-quality-plan.md). The scale drops
-  // only if 4 x the width passes the device's largest image.
+  // and 1x1 above (docs/rendering/still-render.md#outlines-on-a-traced-still).
+  // The scale drops only if 4 x the width passes the device's largest image.
   {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(m_physicalDevice, &props);

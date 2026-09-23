@@ -1,7 +1,7 @@
 #ifdef HAVE_CAM
 
 // The rotary stock: r(x, theta) instead of z(x, y)
-// (docs/cam/rotary-plan.md, D1).
+// (docs/cam/rotary.md#verifying-a-turning-part).
 //
 // Every number here is one a machinist could check by hand, because the
 // failure this model exists to prevent is a verdict about a program nobody
@@ -750,7 +750,7 @@ TEST_CASE("cam rotary: carving a rolling-pin-sized program", "[cam][.bench]") {
 TEST_CASE(
     "cam rotary: leftover says whether it is on the surface or an end face",
     "[cam]") {
-  // docs/cam/friction-after-helical-plan.md, 1. A rotary answer used to say
+  // docs/cam/rotary.md#verifying-a-turning-part. A rotary answer used to say
   // "0 regions" beside its leftover area, and its one worst cell was an end
   // face on every job -- so a band of passes left out altogether read the
   // same as a correct program.
@@ -811,10 +811,11 @@ TEST_CASE(
 
 TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
           "[cam]") {
-  // docs/cam/surface-verbs-plan.md: Rough on the rotary is the finish's
-  // derivation with layers of half the cutter and a skin of a tenth of it.
-  // Cut from a blank 4 mm proud of the part, it must not gouge, must leave
-  // material for the finish, and must take more than one layer to get there.
+  // docs/cam/rotary.md#layers-rest-and-the-rough-verb: Rough on the rotary is
+  // the finish's derivation with layers of half the cutter and a skin of a
+  // tenth of it. Cut from a blank 4 mm proud of the part, it must not gouge,
+  // must leave material for the finish, and must take more than one layer to
+  // get there.
   auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
   cam::Setup setup = BasicSetup();
   setup.machine.hasRotaryAxis = true;

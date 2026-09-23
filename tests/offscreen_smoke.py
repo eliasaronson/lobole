@@ -153,11 +153,11 @@ def main():
         # No frame loop here, so no fps and no CPU phase split — and this is
         # the one place a PASS can be measured honestly: with no swapchain
         # there is no image to wait for, so `main` is shading rather than the
-        # display stalling inside it (docs/rendering/
-        # offscreen-gpu-timing-plan.md).
-        # Earlier phases have already rendered, so start a fresh window and
-        # check that a window with nothing in it says so rather than
-        # answering with stale numbers.
+        # display stalling inside it
+        # (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen). Earlier
+        # phases have already rendered, so start a fresh window and check that a
+        # window with nothing in it says so rather than answering with stale
+        # numbers.
         d.request("frame_stats", {"reset": True})
         expect_error(d, "frame_stats", "nothing rendered yet")
         for i in range(4):
@@ -302,7 +302,7 @@ def main():
             # process with SIGSEGV from the day the 12 Hz remesh cap landed until
             # the rotary picture made somebody take that screenshot. And the
             # picture itself: a program whose A moves plays now, on a radius
-            # field, instead of being refused (docs/cam/rotary-plan.md).
+            # field, instead of being refused (docs/cam/rotary.md#the-rotary-picture).
             d.call("new_project")
             d.call("add_feature", feature={
                 "type": "Cylinder", "name": "Bar", "center": [0, 0, 0],

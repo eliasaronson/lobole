@@ -3,7 +3,7 @@
 // The verifier: read the posted G-code back, cut it into the stock, and
 // report gouge, leftover and the verdict in words.
 // One of five files split from test_cam.cpp
-// (docs/architecture-review-2026-09-06.md, stage 1).
+// (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
 
@@ -386,7 +386,7 @@ TEST_CASE("cam verify: a job with tabs is SAFE without being COMPLETE",
   // both: tabs are material deliberately left standing, so a job that cuts
   // the part correctly reports leftover forever. Gating on one boolean meant
   // gating on a boolean no real job could ever set
-  // (docs/cam/dogfood-round.md).
+  // (docs/cam/simulation.md#verdict).
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
   setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());

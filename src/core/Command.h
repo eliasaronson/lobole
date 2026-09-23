@@ -228,7 +228,7 @@ private:
   nlohmann::json m_before, m_after;
 };
 
-// ---- Tolerances (docs/tolerances/plan.md) ---------------------------------
+// ---- Tolerances (docs/tolerances/README.md) ---------------------------------
 
 // Sets or replaces the tolerance on one element. Upsert, because a face
 // cannot be two sizes at once: Undo restores whatever was on that element
@@ -265,7 +265,7 @@ private:
   bool m_had = false;
 };
 
-// ---- Sheet metal (docs/sheetmetal/plan.md) --------------------------------
+// ---- Sheet metal (docs/sheetmetal/README.md) --------------------------------
 
 // Sets (or clears, with nullopt) the document's sheet-metal rules. One
 // command for the whole object rather than one per field: the gauge, the

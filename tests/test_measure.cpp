@@ -1132,9 +1132,10 @@ TEST_CASE("Sections work on a body far from the origin", "[measure][section]") {
 TEST_CASE("A section says how many ISLANDS the cut crosses",
           "[measure][section]") {
   using Catch::Matchers::WithinRel;
-  // docs/dogfood-friction-plan.md, F1. The total area cannot say whether the
-  // material is where you think it is: two boxes side by side and one box of
-  // the same total area section identically. The regions can.
+  // generators/README.md#single-cylinder-and-air-cooled-engines. The total area
+  // cannot say whether the material is where you think it is: two boxes side by
+  // side and one box of the same total area section identically. The regions
+  // can.
   Document doc;
   doc.AddFeature(
       std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2, 3, 4));
@@ -1275,7 +1276,7 @@ TEST_CASE("Comparing two sets without the overlap measures everything else",
   // toroidal fillets that is SECONDS — 13.2 s for one brace of the smart
   // speaker against 0.03 s for a tube with none. A caller reading
   // volume_ratio was paying for four metrics it never read
-  // (docs/inspect/compare-metrics-plan.md).
+  // (docs/inspect/README.md#comparing-against-a-reference).
   CADShape a = CADKernel::Instance().CreateBox(40.0, 30.0, 20.0);
   CADShape b = CADKernel::Instance().CreateBox(40.0, 30.0, 22.0);
   REQUIRE(a.IsValid());

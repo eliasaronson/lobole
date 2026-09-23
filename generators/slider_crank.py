@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A slider-crank on the SDK — the engine's atom, and the motion study's
-acceptance rig (docs/agent-scale-plan.md, G2).
+acceptance rig (docs/assemblies/README.md#motion-studies).
 
 A block with a bore, a crank disc on a revolute at the origin with a pin
 boss at radius R, a connecting rod, and a piston that slides in the bore:

@@ -27,7 +27,7 @@ struct Ray;          // defined in FaceSelector.h
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 
@@ -88,7 +88,7 @@ void CreateDraft(AppState& state);
 
 void CreateSplit(AppState& state);
 
-// Sheet metal (docs/sheetmetal/plan.md). Each opens the normal preview; the
+// Sheet metal (docs/sheetmetal/README.md). Each opens the normal preview; the
 // defaults come from the document's sheet-metal rules, so none of them
 // carries a literal millimetre of its own.
 void CreateBaseFlange(AppState& state);

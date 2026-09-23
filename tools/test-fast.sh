@@ -15,7 +15,7 @@
 # listed the topology and FEM gates, never learned about the CAM ones that
 # arrived later, and the inner loop had silently gone from 8 s to 49 s while
 # every doc still quoted the old number
-# (docs/capability-review-2026-08-31.md T1).
+# (docs/architecture.md#tests).
 #
 # Measured 2026-08-31 on this machine, `ctest -j$(nproc)`:
 #

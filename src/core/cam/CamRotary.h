@@ -10,12 +10,12 @@
 #include <string>
 #include <vector>
 
-// The stock for a job whose A axis MOVES (docs/cam/rotary-plan.md, D1).
+// The stock for a job whose A axis MOVES
+// (docs/cam/rotary.md#verifying-a-turning-part).
 //
 // A height map is z(x, y): the stock as a surface seen from the spindle. It
-// cannot represent a part that turns, which is why `docs/cam/simulation.md`
-// excluded continuous 4-axis by name, and why a file whose A moves is routed
-// here rather than verified as though the part stood still.
+// cannot represent a part that turns, which is why a file whose A moves is
+// routed here rather than verified as though the part stood still.
 //
 // This is the same idea in the coordinates a rotary job actually works in:
 // r(x, theta), the stock as a RADIUS field about the rotary axis. Everything
@@ -169,7 +169,7 @@ struct RotaryInspection {
 // one taken as the larger of the Y and Z margins, because a box's margins
 // are the only ones a `Stock` can state and a cylinder has one radius. A
 // round stock MODE is the honest fix and is a format change
-// (docs/cam/rotary-plan.md, D3).
+// (docs/cam/rotary.md#limits).
 [[nodiscard]] RotaryInspection InspectRotary(const std::string& gcode,
                                              const Setup& setup,
                                              const std::vector<Body>& bodies,

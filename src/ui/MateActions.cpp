@@ -88,8 +88,8 @@
 // Creating a mate: picking the two connectors, previewing the result live,
 // and accepting or cancelling. The face pick that starts it lives here too,
 // because what a connector IS is a face plus its occurrence.
-// Split out of AssemblyActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 6). AssemblyActions.h still declares everything it declared.
+// Split out of AssemblyActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AssemblyActions.h still declares everything it declared.
 
 namespace ui {
 
@@ -145,7 +145,8 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // FaceCircleCenters, and EdgeSnapPoint once per edge — each of which mapped
   // every edge of the whole body, so a hover on a drilled face cost
   // O(face edges x body edges) every frame: 10 ms on a 144-hole plate,
-  // 88 ms on a 400-hole one (docs/known-bugs.md).
+  // 88 ms on a 400-hole one
+  // (docs/assemblies/README.md#snap-points-while-hovering).
   std::vector<CADShape::FaceSnap> snaps;
   body.shape.FaceSnapPoints(static_cast<int>(hit.faceIndex), snaps);
   // ...and the face's CORNERS (phase 4c), which join the same ranking. A

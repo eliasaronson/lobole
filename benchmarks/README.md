@@ -265,8 +265,8 @@ another, and T5 is the smallest that cannot be answered without moving it.
 Writing them found a capability gap on the first run: `export_step` refused
 on an assembly tab ("switch to a part tab"), so the one document kind a
 customer asks for could not be exported to the interchange format at all.
-Since X4 (docs/interchange/step-export-plan.md) the file is structured — one
-named product per part, placed per occurrence, sub-assemblies nested. The
+The file is now structured (docs/interchange/README.md#exporting-step) —
+one named product per part, placed per occurrence, sub-assemblies nested. The
 oracle still reads it flat (`STEPControl_Reader`, `OneShape`), which visits
 the placed instances, so its solid counts, volumes and per-solid centres are
 unchanged: `reference.py`, `negative_controls.py` and `villain.py` were rerun

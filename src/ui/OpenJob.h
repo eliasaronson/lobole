@@ -9,7 +9,8 @@ namespace ui {
 
 struct AppState;
 
-// Opening a project off the frame (docs/ui/project-open-progress-plan.md).
+// Opening a project off the frame
+// (docs/ui/long-operations.md#opening-a-project).
 //
 // A project whose baked geometry cannot be used -- written by an older build,
 // git-ignored, or out of date with its recipe -- is rebuilt part by part, and

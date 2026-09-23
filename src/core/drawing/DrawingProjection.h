@@ -79,7 +79,7 @@ struct SourceRef {
 // a pipe, a loft — is orders of magnitude dearer to intersect than a plane or
 // a cylinder. So an assembly of prismatic parts draws instantly however many
 // there are, and one spring does not
-// (docs/agent-scale-followup-plan.md, W3).
+// (docs/drawings/README.md#projection-hlr).
 //
 // Poly runs the same algorithm over the shapes' TRIANGULATIONS. It is orders
 // of magnitude cheaper and it is a LOOK: the curves come back as polylines
@@ -138,7 +138,7 @@ struct ProjectionResult {
     // answers is "what would leaving this one out save", and leaving out
     // either member avoids that pair's work. So these overlap and their sum
     // exceeds selfMs + pairMs; a reader who normalises them is lying to
-    // themselves (docs/drawings/view-cost-report-plan.md).
+    // themselves (docs/drawings/README.md#what-a-view-costs).
     struct BodyCost {
       uint64_t sourceId = 0; // the group's id
       double ms = 0.0;

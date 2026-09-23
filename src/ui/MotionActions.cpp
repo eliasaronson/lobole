@@ -155,8 +155,8 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
   // The copies exist so the worker shares nothing with the tab, and are made
   // only for a run that leaves the main thread — a synchronous run reads the
   // live documents it is blocking anyway. They are cheap now
-  // (docs/performance/motion-prep-copy.md); they were not, and a plain
-  // Document copy still is not.
+  // (docs/assemblies/README.md#background-motion-copies-without-regenerating);
+  // they were not, and a plain Document copy still is not.
   if (copyDocs) {
     CopySubtree(state, run);
     PrebuildMeshes(run);
@@ -380,8 +380,7 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
   return true;
 }
 
-// --- playback (docs/ui/motion-panel-plan.md)
-// ----------------------------------
+// --- playback (docs/ui/panels.md#assembly-tab-the-model-panel) ---------------
 
 namespace {
 // Samples per second: the rate the GLB export plays at, so the panel and the

@@ -11,9 +11,9 @@ namespace DocumentIO {
 //
 // A .dsgn directory is a recipe — a feature list that is re-executed on every
 // open. That is honest and diffable, and on a 148-feature part it cost 259 s
-// against 0.4 s to save it (docs/performance/scale-round.md). Every commercial
-// CAD file stores the resulting B-Rep alongside the history for exactly this
-// reason, and so does this:
+// against 0.4 s to save it (docs/versioning/README.md#baked-geometry). Every
+// commercial CAD file stores the resulting B-Rep alongside the history for
+// exactly this reason, and so does this:
 //
 //   <project>.dsgn/geometry/
 //     index.json    format version, the document's tip chain hash, the OCC
@@ -30,7 +30,7 @@ namespace DocumentIO {
 // Only the TIP is stored — not the bodies after every feature. That is what
 // would make the first edit after opening fast too, but it is N whole B-Reps
 // on disk for a benefit only the current editor sees. See
-// docs/versioning/baked-geometry.md.
+// docs/versioning/README.md#baked-geometry.
 
 // Writes `doc`'s current bodies into <dir>/geometry/. Skips silently (and
 // returns true) when the document has no bodies, when any feature carries an
@@ -47,9 +47,9 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
 bool LoadGeometry(Document& doc, const std::string& dir);
 
 // What <dir>/geometry/ holds, without reading the bodies: so an open that had
-// to rebuild can say WHY (docs/ui/project-open-progress-plan.md). Present
-// means this build can read it; whether it still matches the recipe is only
-// known after the regeneration.
+// to rebuild can say WHY (docs/ui/long-operations.md#opening-a-project).
+// Present means this build can read it; whether it still matches the recipe is
+// only known after the regeneration.
 enum class BakedGeometryOnDisk { None, OlderFormat, NewerFormat, Present };
 BakedGeometryOnDisk InspectGeometry(const std::string& dir);
 

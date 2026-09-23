@@ -151,8 +151,8 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
   // expression — and worse, ImGui's own Ctrl+click text entry runs a bare
   // sscanf on whatever is typed. "10/2" reads as 10 and commits, silently:
   // the same plausible-wrong-value shape as the enum parsers above, in the
-  // GUI instead of a parser. Thirty-two fields were like this until U14
-  // (docs/ui/u14-numeric-input.md), CAM's entire panel among them.
+  // GUI instead of a parser. Thirty-two fields were like this
+  // (docs/ui/numeric-input.md#the-widgets), CAM's entire panel among them.
   //
   // ui::ExprInput's wrappers are drop-ins with the same signatures, so the
   // fix for anything this catches is to add the Expr prefix and pass state.
@@ -268,13 +268,14 @@ TEST_CASE("the RPC's op-type list matches the table", "[convention]") {
 
 TEST_CASE("the adaptive key covers every field the pass reads",
           "[convention]") {
-  // docs/ui/long-operations.md, phase 1: an adaptive pass runs on a worker
-  // from a COPY of its inputs and its result is cached by a hash of them.
-  // The one drift that design is exposed to is a new `setup.`/`op.`/`tool.`
-  // read inside CamAdaptive.cpp that the key does not know about — the
-  // cache would then answer a changed pass with the old moves, which is a
-  // wrong toolpath that looks right. Invisible in review, so checked here:
-  // every such field read anywhere in the file appears inside AdaptiveKey.
+  // docs/ui/long-operations.md#cam-toolpath-passes: an adaptive pass runs on a
+  // worker from a COPY of its inputs and its result is cached by a hash of
+  // them. The one drift that design is exposed to is a new
+  // `setup.`/`op.`/`tool.` read inside CamAdaptive.cpp that the key does not
+  // know about — the cache would then answer a changed pass with the old moves,
+  // which is a wrong toolpath that looks right. Invisible in review, so checked
+  // here: every such field read anywhere in the file appears inside
+  // AdaptiveKey.
   const fs::path path =
       fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamAdaptive.cpp";
   std::ifstream f(path);
@@ -395,7 +396,7 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
 TEST_CASE("a background job is polled by the loop, never by a panel",
           "[convention]") {
   // Whether a long-running operation can FINISH must not depend on which
-  // panel is open. It used to, twice (docs/ui/long-operations.md):
+  // panel is open. It used to, twice (docs/ui/long-operations.md#the-registry):
   //
   //   PollSync was called inside `if (ImGui::TreeNode("Sharing"))`, so
   //   collapsing that section during a push meant nothing ever joined the
@@ -832,7 +833,7 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
 // pairs that share a body then write to the same edge at once, which cost
 // about one run in five of tests/cncest6090_smoke.py as a heap corruption
 // with no visible connection to any of this (see Measure.cpp's note above
-// BuildQuery, and docs/performance/query-booleans.md).
+// BuildQuery, and docs/inspect/README.md#query-booleans-are-non-destructive).
 //
 // The check is deliberately shallow: it does not try to see whether
 // SetNonDestructive was called, only that no boolean is built the other way.
@@ -930,7 +931,7 @@ TEST_CASE("nothing in src/ is named `near` or `far`", "[convention]") {
 
 TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
           "[convention]") {
-  // docs/ui/consistency-round-plan.md. The toolbars had grown five glyphs
+  // docs/ui/README.md#icons. The toolbars had grown five glyphs
   // that meant two different things each (Unfold and Fit, Loft and the arcs,
   // Thread and the sketch Circle, Derive and Offset, "more constraints" and
   // "pattern callout") and more beside, and the feature tree drew some
@@ -938,7 +939,7 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
   // (Revolve, Hole, Draft, Split). A glyph is how a person finds a tool
   // without reading, so neither kind of drift is cosmetic.
   //
-  // Both now come from ONE table, ui/Icons.cpp (docs/ui/icons-plan.md): the
+  // Both now come from ONE table, ui/Icons.cpp (docs/ui/README.md#icons): the
   // tree answers through CommandIcon, so it cannot disagree with the button,
   // and what is left to check is the table itself.
   auto read = [](const char* rel) {
@@ -1036,7 +1037,7 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
 TEST_CASE("a command's icon comes from ui/Icons.cpp alone", "[convention]") {
   // Four hand-kept copies of "which glyph is this" had drifted: the mate list
   // disagreed with the assembly bar on four of six mates, and OpGlyph claimed
-  // the job bar's glyphs while showing others (docs/ui/icons-plan.md). The
+  // the job bar's glyphs while showing others (docs/ui/README.md#icons). The
   // glyph is now CommandIcon's, and nothing else may name one for a command:
   // not a toolbar button, a flyout variant, or the three tree-row tables.
   const auto read = [](const char* rel) {
@@ -1080,4 +1081,150 @@ TEST_CASE("a command's icon comes from ui/Icons.cpp alone", "[convention]") {
     return s;
   }());
   CHECK(named.empty());
+}
+
+// A doc cited from the code, a test, a tool or another doc must exist, and
+// so must the heading an `#anchor` names. 1,129 such references explain WHY
+// the code is shaped the way it is, and nothing checked them: a doc that was
+// renamed or folded into another left every comment citing it pointing at
+// nothing (docs/README.md says how the docs are organised).
+TEST_CASE("every doc a file cites exists, down to its heading",
+          "[convention][docs]") {
+  const fs::path repo(DESIGNER_SOURCE_DIR);
+  const auto slurp = [](const fs::path& p) {
+    std::ifstream f(p);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  // GitHub's heading anchor: lower case, punctuation dropped (hyphens and
+  // underscores kept), spaces to hyphens.
+  const auto anchorsOf = [&](const fs::path& md) {
+    std::set<std::string> out;
+    std::istringstream in(slurp(md));
+    std::map<std::string, int> seen;
+    bool fence = false;
+    for (std::string line; std::getline(in, line);) {
+      if (line.rfind("```", 0) == 0)
+        fence = !fence;
+      if (fence || line.empty() || line[0] != '#')
+        continue;
+      size_t i = line.find_first_not_of('#');
+      std::string slug;
+      for (char c : line.substr(i)) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (std::isalnum(u) || u >= 0x80)
+          slug += static_cast<char>(std::tolower(u));
+        else if (c == ' ' || c == '-')
+          slug += '-';
+        else if (c == '_')
+          slug += '_';
+      }
+      while (!slug.empty() && slug.front() == '-')
+        slug.erase(slug.begin());
+      // Non-ASCII punctuation (dashes, ›, quotes, …, ×) is dropped by
+      // GitHub; the bytes were kept above only so letters like "ö" survive.
+      for (const std::string dash :
+           {"\xe2\x80\x94", "\xe2\x80\x93", "\xe2\x80\xba", "\xe2\x80\xb9",
+            "\xc2\xbb", "\xc2\xab", "\xe2\x80\x9c", "\xe2\x80\x9d",
+            "\xe2\x80\x98", "\xe2\x80\x99", "\xe2\x80\xa6", "\xc3\x97"})
+        for (size_t at; (at = slug.find(dash)) != std::string::npos;)
+          slug.erase(at, dash.size());
+      const int n = seen[slug]++;
+      out.insert(n == 0 ? slug : slug + "-" + std::to_string(n));
+    }
+    return out;
+  };
+
+  std::vector<std::string> broken;
+  const auto check = [&](const std::string& from, const fs::path& target,
+                         const std::string& anchor, const std::string& as) {
+    std::error_code ec;
+    if (!fs::exists(target, ec)) {
+      broken.push_back(from + ": " + as + " does not exist");
+      return;
+    }
+    if (!anchor.empty() && target.extension() == ".md" &&
+        !anchorsOf(target).contains(anchor))
+      broken.push_back(from + ": " + as + " has no heading #" + anchor);
+  };
+
+  // Repo-rooted citations, anywhere: a path under docs/ or generators/
+  // ending in .md, optionally followed by `#anchor`.
+  // Optionally written relative to the citing file (`../../docs/...`).
+  const std::regex cited(
+      R"((?:^|[^A-Za-z0-9_./-])((?:\.\./)*)((?:docs|generators)/[A-Za-z0-9_./-]+\.md)(#[a-z0-9_-]+)?)");
+  // Relative links inside markdown: [text](target).
+  const std::regex link(R"(\]\(([^)\s]+)\))");
+
+  const std::set<std::string> exts = {
+      ".cpp",  ".h",     ".py",    ".md",   ".sh",    ".txt",  ".yml",
+      ".rgen", ".rchit", ".frag",  ".vert", ".glsl",  ".json", ".csv",
+      ".comp", ".rmiss", ".rahit", ".rint", ".rcall", ".nix",  ".toml"};
+  std::vector<fs::path> files;
+  for (const char* top : {"src", "tests", "tools", "benchmarks", "generators",
+                          "docs", ".github", "assets"}) {
+    const fs::path root = repo / top;
+    if (!fs::exists(root))
+      continue;
+    for (const auto& e : fs::recursive_directory_iterator(root)) {
+      const std::string s = e.path().string();
+      if (!e.is_regular_file() || !exts.contains(e.path().extension()) ||
+          s.find("thirdparty") != std::string::npos ||
+          s.find("/golden/") != std::string::npos ||
+          s.find("/results/") != std::string::npos)
+        continue;
+      files.push_back(e.path());
+    }
+  }
+  for (const char* top : {"CLAUDE.md", "README.md", "CONTRIBUTING.md",
+                          "CMakeLists.txt", "THIRD_PARTY.md", "shell.nix"})
+    files.push_back(repo / top);
+
+  // A path broken across two comment lines is invisible to the check above
+  // (and to any search for the page), so it is refused outright.
+  const std::regex split(
+      R"(((?:docs|generators)/[A-Za-z0-9_/-]*)[ \t]*\n[ \t]*(?://|#)[ \t]*([A-Za-z0-9_./-]*\.md))");
+
+  for (const fs::path& file : files) {
+    const std::string text = slurp(file);
+    const std::string from = Relative(file);
+    for (std::sregex_iterator it(text.begin(), text.end(), split), end;
+         it != end; ++it)
+      broken.push_back(from + ": " + (*it)[1].str() + (*it)[2].str() +
+                       " is split across two lines; keep a path on one");
+    for (std::sregex_iterator it(text.begin(), text.end(), cited), end;
+         it != end; ++it) {
+      const std::string up = (*it)[1].str(), path = (*it)[2].str();
+      const std::string anchor =
+          (*it)[3].matched ? (*it)[3].str().substr(1) : std::string();
+      const fs::path target =
+          up.empty() ? repo / path
+                     : (file.parent_path() / up / path).lexically_normal();
+      check(from, target, anchor, up + path + (*it)[3].str());
+    }
+    if (file.extension() != ".md")
+      continue;
+    for (std::sregex_iterator it(text.begin(), text.end(), link), end;
+         it != end; ++it) {
+      std::string target = (*it)[1].str();
+      if (target.rfind("http", 0) == 0 || target.rfind("mailto:", 0) == 0)
+        continue;
+      std::string anchor;
+      if (const size_t hash = target.find('#'); hash != std::string::npos) {
+        anchor = target.substr(hash + 1);
+        target = target.substr(0, hash);
+      }
+      const fs::path resolved =
+          target.empty() ? file : (file.parent_path() / target);
+      check(from, resolved.lexically_normal(), anchor, (*it)[1].str());
+    }
+  }
+  INFO([&] {
+    std::string s = "Broken doc references:\n";
+    for (const std::string& b : broken)
+      s += "  " + b + "\n";
+    return s;
+  }());
+  CHECK(broken.empty());
 }

@@ -302,10 +302,10 @@ void DrawTolerancesSection(AppState& state) {
   uint64_t drop = 0;
   for (const Tolerance& t : doc.GetTolerances()) {
     // No PushID: an INTEGER scope is not addressable as a path segment, so a
-    // row wrapped in one can never be clicked by a test (docs/ui/
-    // gui-coverage.md — it is why the Variables and Configurations panels went
-    // untested for months). The ids below already carry the tolerance's own
-    // id, which is what makes them unique.
+    // row wrapped in one can never be clicked by a test
+    // (docs/ui/testing.md#making-a-widget-addressable — it is why the Variables
+    // and Configurations panels went untested for months). The ids below
+    // already carry the tolerance's own id, which is what makes them unique.
     if (ImGui::SmallButton(("x###tol_del_" + std::to_string(t.id)).c_str()))
       drop = t.id;
     ImGui::SameLine();

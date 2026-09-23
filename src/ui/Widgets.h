@@ -37,7 +37,7 @@ struct JobProgress {
 // Draws it. Returns true on the frame the cancel button is pressed.
 bool DrawJobProgress(const JobProgress& job);
 
-// A section that opens and closes (docs/ui/assembly-panel-tidy-plan.md): a
+// A section that opens and closes (docs/ui/panels.md#shared-widgets): a
 // chevron pointing right when closed and down when open, the label, an
 // optional count after it ("Occurrences 22"), and a hover highlight across
 // the whole row. ImGui's CollapsingHeader -- a filled bar with a small

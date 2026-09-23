@@ -1,4 +1,4 @@
-// The world-up gate (docs/up-axis.md, Z1).
+// The world-up gate (docs/conventions.md#world-axes).
 //
 // Four subsystems independently got the up axis wrong (simulation gravity,
 // every named drawing view, CAM's spindle, the cutting simulation) because
@@ -80,9 +80,9 @@ TEST_CASE("the named views derive from the world basis", "[world_up]") {
 }
 
 TEST_CASE("drawings' OrientationAxes IS the named-view table", "[world_up]") {
-  // The drawings bug that started docs/up-axis.md: a second, hand-written
-  // copy of this table shipped every named view wrong. There is no second
-  // copy now, and this proves it stays that way.
+  // The drawings bug behind docs/conventions.md#world-axes: a second,
+  // hand-written copy of this table shipped every named view wrong. There is no
+  // second copy now, and this proves it stays that way.
   const ViewOrientation all[] = {
       ViewOrientation::Front, ViewOrientation::Back, ViewOrientation::Left,
       ViewOrientation::Right, ViewOrientation::Top,  ViewOrientation::Bottom,
@@ -146,8 +146,8 @@ TEST_CASE("CAM's setup frame agrees with the world frame", "[world_up]") {
   // Setup space is Z-up-spindle by machine-tool convention (ISO 841). For a
   // plain 3-axis job (rotationA = 0) it must be the IDENTITY on the world:
   // this disagreement — spindle +Z in a world that called +Y up — was the
-  // fourth axis bug and the one docs/up-axis.md exists for. If this fails,
-  // either the world flipped without CAM's knowledge or someone added a
+  // fourth axis bug and one docs/conventions.md#world-axes rules out. If this
+  // fails, either the world flipped without CAM's knowledge or someone added a
   // compensating rotation that must not exist.
   cam::Setup setup;
   const glm::dmat3 m = cam::SetupToModel(setup);

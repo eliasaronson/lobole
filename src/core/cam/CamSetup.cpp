@@ -40,7 +40,7 @@
 // the fixture frame, and turning a picked face up to the spindle.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 
@@ -87,7 +87,7 @@ bool ModelBoundsFramed(const std::vector<Body>& bodies, glm::dvec3& min,
     // stock, because stock is the size of material a person buys and clamps.
     // A 200 mm revolved waveguide reported +-108.24 mm, so the blank came out
     // 16 mm oversize across and the facing and profile passes cut air to
-    // reach it (docs/cam/dogfood-waveguide.md). CADKernel.h says which answer
+    // reach it (docs/cam/README.md#invariants). CADKernel.h says which answer
     // is for which purpose; this is the "what a PERSON or a script wants"
     // case, and it is also what sets the work origin.
     b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
@@ -356,8 +356,8 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
     // Where the part sits in the stock composes HERE and nowhere else, after
     // the fixture frame and in setup space -- which is what makes "where on
     // the sheet" an in-plane statement rather than a fourth way to tilt a
-    // part (docs/cam/job-document.md). setup-frame.md learned what a second
-    // copy of this transform costs.
+    // part (docs/cam/setup.md#parts-and-placements). A second copy of this
+    // transform is a bug (docs/cam/README.md#invariants).
     const Placement* place = PlacementForBody(setup, b);
     if (place != nullptr && !place->enabled)
       continue; // on the sheet, not cut this run
@@ -393,7 +393,7 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
   return out;
 }
 
-// --- seats (docs/cam/fixture-seat-plan.md) --------------------------------
+// --- seats (docs/cam/setup.md#seats) --------------------------------
 
 bool ParseStockEdge(const std::string& text, StockEdge& out) {
   static const std::pair<const char*, StockEdge> kEdges[] = {

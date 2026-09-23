@@ -27,7 +27,7 @@ struct Ray;          // defined in FaceSelector.h
 // Split out of ui/AppActions.h, which declared 170 functions across every
 // domain in the app and was included by 64 files -- so a change to any one
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
-// docs/architecture-review-2026-09-06.md, stage 4.
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 
@@ -51,7 +51,7 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
 // helical spring takes 6.4 s and the single-cylinder engine took 85 s that
 // fell to 0.0 when its two valve springs were hidden. A three-view sheet of it
 // had not finished after 21 minutes, with no way to interrupt it and the RPC
-// server blocked behind it (docs/agent-scale-followup-plan.md, W3).
+// server blocked behind it (docs/drawings/README.md#projection-hlr).
 void UpdateDrawingRenders(AppState& state, double budgetSeconds = 0.0);
 
 // Adds a view to the active drawing, choosing the two things a human should

@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-// DXF out (docs/sheetmetal/plan.md, S6): the first file this project produces
-// that a shop can cut.
+// DXF out (docs/sheetmetal/README.md#dxf-and-drawings): the first file this
+// project produces that a shop can cut.
 //
 // R12 ASCII, and only LINE / ARC / CIRCLE. Every consumer reads those — a
 // laser's nesting software, a router post, a quoting portal — while
@@ -26,9 +26,9 @@
 // and the viewer looks at the blank from the side its first flange was picked
 // on, so a part whose flanges were all picked on one face is all UP. A bend
 // TABLE on a drawing answers the same question from its own view's side
-// instead (docs/drawings/guide.md), so the two can disagree about one crease
-// — they are answering "up from where?" differently, which is why neither
-// stores an answer.
+// instead (docs/drawings/README.md#dimensions-and-annotation), so the two can
+// disagree about one crease — they are answering "up from where?" differently,
+// which is why neither stores an answer.
 namespace dxf {
 
 // What a flat pattern hands the writer.

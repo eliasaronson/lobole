@@ -172,13 +172,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "clutch engages where it is made, so adding one moves nothing) unless "
      "{lead} says otherwise, and is saved with the document and undone "
      "with the pose; a freewheel "
-     "inside a mate loop is reported, not held (docs/freewheel-plan.md). "
+     "inside a mate loop is reported, not held "
+     "(docs/assemblies/relations.md#freewheel). "
      "With {teeth} it re-engages only where teeth meet, so the input travels "
      "up to a pitch before driving again, and {ride_mate, ride_dof, ride_mm "
      "| ride_deg} is what riding over them LIFTS: nothing seated in a "
      "notch, the whole of it off one (solid dogs cannot stand part way over "
      "each other), ADDED to whatever else drives that DOF "
-     "(docs/click-and-breguet-plan.md). CLICK is a pawl — ONE mate's "
+     "(generators/watch/README.md#keyless-works-and-winding). CLICK is a "
+     "pawl — ONE mate's "
      "rotation (pass the same id as a and b) free the way it {drives} and "
      "held at its mark the other way, where the relation that pushed it "
      "reports; what rides over the teeth it holds is a cam, which follows "
@@ -192,7 +194,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotational DOF — its `rotation` is authored, not free), and "
      "for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
-     "degrees off parallel (docs/assemblies/relations-plan.md).",
+     "degrees off parallel (docs/assemblies/relations.md).",
      "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lead, "
      "lift, name, ride_deg, ride_dof, ride_mate, ride_mm, teeth, "
      "phase, pitch, pitch_radius, ratio, "
@@ -224,7 +226,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "assembly has no loop to report on, so read them with a default.",
      ""},
     {"add_fastener",
-     "Place a standard fastener in the active assembly (docs/parts/plan.md). "
+     "Place a standard fastener in the active assembly (docs/parts/README.md). "
      "Every dimension but the length is READ from the vendored table for that "
      "standard, so an unstocked size is refused naming the nearest that are. "
      "One generated part per distinct spec, named as its BOM designation "
@@ -240,7 +242,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "drive, length, orientation, position, size, standard"},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "
-     "(docs/parts/plan.md). `rim` is a circular EDGE — the one the head sits "
+     "(docs/parts/README.md). `rim` is a circular EDGE — the one the head sits "
      "against; a cylindrical face has an axis but no direction and cannot say "
      "which end it goes in from. `rim` is {feature_id, element, occurrence?} "
      "— the occurrence is needed whenever more than one placement answers to "
@@ -292,7 +294,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      ""},
     {"check_fasteners",
      "Every placed fastener re-derived against the stack it is IN, and what "
-     "is wrong with it (docs/parts/plan.md). A length derived from other "
+     "is wrong with it (docs/parts/README.md). A length derived from other "
      "documents' geometry cannot be a live binding (A2), so a stack that "
      "changed under a screw has to be REPORTED — this is that report: too "
      "short, bottoming out in a blind hole, or spanning nothing at all. "
@@ -353,7 +355,7 @@ std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
 namespace {
 
-// --- Declared clearances (v97, docs/peer-survey-plan.md W3) ---------------
+// --- Declared clearances (v97, docs/assemblies/README.md#clearance-assertions)
 //
 // The drone's verify() says "prop tip to arm is at least 2 mm" in a python
 // script; so do the engine's and the clamp's. That is design intent living
@@ -609,7 +611,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // Optional, and only optional because a part placed ONCE has nothing to
     // disambiguate. Placed twice, the same element name is on both, and
     // leaving it out is refused rather than resolved to whichever comes
-    // first (docs/parts/gui-plan.md).
+    // first (docs/parts/README.md).
     rim.occurrence = r.value("occurrence", uint64_t{0});
     ui::FastenerRequest request;
     request.standard = p.value("standard", std::string("iso4762"));
@@ -1130,7 +1132,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // `derive` reads the numbers off where the two parts already lie, which
     // only the app can do: it can see both frames, and the caller is
     // otherwise reduced to trying the eight ways round and testing the
-    // result (docs/porting-friction-plan.md, C).
+    // result (docs/assemblies/README.md#deriving-a-mate-from-the-placement).
     if (p.contains("derive")) {
       if (mate.type != MateType::Fastened)
         throw std::runtime_error(
@@ -1379,9 +1381,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       }
       break;
     case RelationKind::Freewheel:
-      // A one-way clutch (docs/freewheel-plan.md). Its direction is the
-      // whole of it, so it is required: a default would be a plausible wrong
-      // answer, and it is exactly the one mistake a freewheel exists for.
+      // A one-way clutch (docs/assemblies/relations.md#freewheel). Its
+      // direction is the whole of it, so it is required: a default would be a
+      // plausible wrong answer, and it is exactly the one mistake a freewheel
+      // exists for.
       r.dofA = r.dofB = MateDof::Rotation;
       if (!p.contains("drives"))
         throw std::runtime_error(

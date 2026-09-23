@@ -162,7 +162,7 @@ def main():
                "end_mode": "through_all", "reversed": True})
         d.call("create_drawing", name="r2-dwg", sheet={"size": "a4"})
         # Top view: the holes are drilled along Z (up), so the plan view is
-        # the one that shows them as circles (Z-up world, docs/up-axis.md).
+        # the one that shows them as circles (Z-up world, docs/conventions.md#world-axes).
         v2 = d.call("add_drawing_view", source="r2plate",
                     orientation="top")
         g2 = d.call("list_drawing_geometry", view=v2["id"])["geometry"]
@@ -251,7 +251,7 @@ def main():
         # driver was 16 s of an 18 s assembly view and nothing said which
         # occupant to leave out of `hidden`; the clocks the hide loop already
         # keeps are attributed per source now
-        # (docs/drawings/view-cost-report-plan.md). Asserted on an ordinary
+        # (docs/drawings/README.md#what-a-view-costs). Asserted on an ordinary
         # view: the field exists without needing pathological geometry, and
         # only the WARNING waits for a slow one.
         cost = views[0]["cost"]
@@ -498,7 +498,7 @@ def main():
         expect(callout["text"] == "\u00d83.2 THRU, M3 CLOSE CLEARANCE",
                f"the callout names the fit the hole recorded: {callout}")
         # A DIAMETER dim on the same bore picks up the tolerance the model
-        # records (docs/tolerances/plan.md T4b) — provenance, not a new
+        # records (docs/tolerances/README.md#drawings) — provenance, not a new
         # authored field: the feature ids in the projected circle's mapped
         # name narrow the candidates and the radius cross-checks them.
         d.call("set_active_part", name="callout-plate")

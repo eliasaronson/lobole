@@ -39,7 +39,7 @@ struct Refinement {
   uint64_t occurrenceId = 0; // assembly studies: whose face (0 on a part)
 };
 
-// Assembly studies (S1, docs/simulation/assembly-studies-plan.md): a study on
+// Assembly studies (docs/simulation/README.md#assembly-studies): a study on
 // an AssemblyDocument names OCCURRENCES, each in one role. Absent and rigid
 // bracket the truth — a part left out is a lower bound on stiffness, the same
 // part rigid an upper bound, and meshed the number between them.
@@ -182,8 +182,8 @@ bool ResolveFace(const Document& doc, const ElementRef& ref,
 // The direction a force placed on `face` should push: INTO the part, i.e.
 // the negated outward normal of that face. A force default is a direction
 // with a unit attached, so it has to come from what it acts on rather than
-// from a world literal (docs/ui/u10-defaults-and-refusals.md) — the GUI
-// placement and add_load without an explicit `direction` both call this, so
+// from a world literal (docs/ui/tool-sessions.md#defaults-and-refusals) — the
+// GUI placement and add_load without an explicit `direction` both call this, so
 // clicking and scripting cannot drift apart. nullopt when the ref does not
 // resolve or the surface has no usable normal.
 std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
@@ -204,12 +204,13 @@ struct StudyBodyMesh {
 bool MeshStudy(const Document& doc, Study& study,
                std::vector<StudyBodyMesh>& out, std::string* error);
 
-// MeshStudy split at the thread boundary (docs/ui/long-operations.md, phase
-// 3): PlanStudyMesh does everything that needs the Document — expressions,
-// refs, per-body settings — and DEEP-COPIES each shape, so MeshPlanned can
-// run on a worker with nothing shared: Netgen attaches triangulation to the
-// faces it meshes, which on the document's own shape would be a write under
-// the renderer's reads. MeshStudy == PlanStudyMesh + MeshPlanned.
+// MeshStudy split at the thread boundary
+// (docs/ui/long-operations.md#fem-meshing-and-solving): PlanStudyMesh does
+// everything that needs the Document — expressions, refs, per-body settings —
+// and DEEP-COPIES each shape, so MeshPlanned can run on a worker with nothing
+// shared: Netgen attaches triangulation to the faces it meshes, which on the
+// document's own shape would be a write under the renderer's reads. MeshStudy
+// == PlanStudyMesh + MeshPlanned.
 struct MeshBodyPlan {
   int bodyIndex = -1;
   std::string bodyName;

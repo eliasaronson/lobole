@@ -3,7 +3,7 @@
 
 `render_still {mode: "quick"}` draws the model with the raster renderers into
 an image of W x H (supersampled k times and averaged down), not the window's
-framebuffer (docs/rendering/r4-offline-render.md). What must hold:
+framebuffer (docs/rendering/still-render.md#quick-mode). What must hold:
 
   - the PNG is exactly W x H, whatever k was;
   - a still of the model is not one colour, and a still of nothing says so;

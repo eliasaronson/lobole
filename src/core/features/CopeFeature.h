@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-// Cuts a frame member to fit the members it MEETS (docs/tube/plan.md, T2).
+// Cuts a frame member to fit the members it MEETS
+// (docs/tube/README.md#cope-and-mitre).
 //
 // At a node every member is coped to every other and they all survive, which
 // is exactly what a Boolean cannot do: a boolean consumes both its operands,

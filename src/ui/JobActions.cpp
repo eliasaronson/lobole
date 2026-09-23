@@ -138,7 +138,7 @@ uint64_t JobRenderVersion(AppState& state) {
     }
     // A seated fixture follows the STOCK, and editing the stock bumps no
     // version: without its definition here, a clamp would stay drawn where
-    // the old stock put it (docs/cam/fixture-seat-plan.md).
+    // the old stock put it (docs/cam/setup.md#seats).
     key = (key ^ static_cast<uint64_t>(setup.stock.mode)) * 1099511628211ull;
     mix(setup.stock.margin.x);
     mix(setup.stock.margin.y);
@@ -208,7 +208,7 @@ glm::dmat4 FixtureBedTransform(AppState& state, const cam::Setup& setup,
     return cam::FixtureTransform(f);
   // Re-solved against the stock as it is NOW, on every read: that is the
   // point of a seat. A clamp placed on the board stays on the board when a
-  // margin or the parts change the stock (docs/cam/fixture-seat-plan.md).
+  // margin or the parts change the stock (docs/cam/setup.md#seats).
   glm::dvec3 lo(0.0), hi(0.0);
   std::string reason = "there is no stock to rest it on";
   cam::Fixture solved = f;

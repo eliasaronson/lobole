@@ -10,7 +10,8 @@
 #include <vector>
 
 // The CUTTER-LOCATION surface: for each (x, y), the lowest Z at which this
-// tool can sit without cutting into the model (docs/cam/surfacing.md).
+// tool can sit without cutting into the model
+// (docs/cam/operations.md#3-axis-surfacing).
 //
 // Everything in the 2.5D pipeline answers "what is the part's outline at this
 // level". A finishing pass asks the other question -- "how low may the tool go
@@ -75,7 +76,7 @@ struct DropRequest {
   // difference between reusing this file and writing a second one. FreeCAD's
   // continuous-rotary layer cost 28% of its 3-axis surfacing precisely
   // because its generators took plain arrays and no world assumptions
-  // (docs/cam/surfacing.md, "Leaving room for the rotary axis").
+  // (docs/cam/operations.md#3-axis-surfacing).
   glm::dquat frame{1.0, 0.0, 0.0, 0.0};
 };
 

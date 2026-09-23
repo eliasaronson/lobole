@@ -1,8 +1,8 @@
 # HDRI environments
 
 Studio environment maps used for image-based lighting (see
-[docs/rendering/showcase-v1.md](../../docs/rendering/showcase-v1.md), phase R3,
-and [r4-offline-render.md](../../docs/rendering/r4-offline-render.md) for the
+[docs/rendering/README.md#lighting](../../docs/rendering/README.md#lighting), phase R3,
+and [r4-offline-render.md](../../docs/rendering/still-render.md) for the
 path-traced still).
 
 The filename lives in ONE place per language — `RuntimePaths::

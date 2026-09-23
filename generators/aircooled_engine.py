@@ -15,7 +15,7 @@ change FIN_PITCH and the barrel re-fins itself.
 
     python3 generators/aircooled_engine.py --port <port> [--out DIR]
 
-Findings from the round go in docs/modeling/aircooled-dogfood.md.
+Findings from the round go in generators/README.md#single-cylinder-and-air-cooled-engines.
 """
 import argparse
 import math

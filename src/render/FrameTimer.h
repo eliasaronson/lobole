@@ -7,7 +7,8 @@
 #include <cstdint>
 #include <vector>
 
-// Wall-clock accounting for the main loop (docs/rendering/frame-timing.md).
+// Wall-clock accounting for the main loop
+// (docs/rendering/frame-pacing.md#the-frame-time-instrument).
 //
 // Header-only and clock-free — every entry point takes the timestamp — so the
 // statistics can be unit-tested against a synthetic frame sequence instead of
@@ -79,9 +80,10 @@ public:
   }
 
   // This iteration ran idle-paced (the loop waited for events before it —
-  // docs/rendering/idle-throttle.md). The wait itself is NOT in the frame's
-  // time (it happens before BeginFrame); the flag is what lets frame_stats
-  // and the HUD say "10 fps because idle", not "10 fps because slow".
+  // docs/rendering/frame-pacing.md#idle-throttle). The wait itself is NOT in
+  // the frame's time (it happens before BeginFrame); the flag is what lets
+  // frame_stats and the HUD say "10 fps because idle", not "10 fps because
+  // slow".
   void SetIdlePaced(bool idle) {
     if (m_inFrame)
       m_pending.idle = idle;

@@ -54,8 +54,8 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
       "which study? pass `id` (or `study`, which means the same here)");
 }
 
-// Where the studies live: the active PART, or the active ASSEMBLY (S1,
-// docs/simulation/assembly-studies-plan.md). One handler, two homes — the
+// Where the studies live: the active PART, or the active ASSEMBLY
+// (docs/simulation/README.md#assembly-studies). One handler, two homes — the
 // study record is the same, and the verbs are the same; what differs is how
 // an edit becomes an undo step (a command on a part, a full-state snapshot
 // on an assembly) and where a result's staleness is measured.
@@ -700,9 +700,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                      p.contains("study"), p.value("study", uint64_t{0}));
     fem::Study* s = &host.Require(id);
     if (p.value("async", false)) {
-      // Off the frame (docs/ui/long-operations.md, phase 3): the plan is
-      // made here, the mesh on a worker; study_status says `meshing: true`
-      // until it lands and then carries the same `bodies` this returns.
+      // Off the frame (docs/ui/long-operations.md#fem-meshing-and-solving): the
+      // plan is made here, the mesh on a worker; study_status says `meshing:
+      // true` until it lands and then carries the same `bodies` this returns.
       if (host.IsAssembly())
         throw std::runtime_error(
             "an assembly study meshes synchronously (run_study async: true "

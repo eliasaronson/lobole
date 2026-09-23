@@ -6,7 +6,7 @@
 // The traced still's outlines, from its primary-ray G-buffer: pure CPU (no
 // Vulkan) so it compiles into designer_core and the tests can cover it.
 // RayTracingRenderer traces the G-buffer and hands it here strip by strip
-// (docs/rendering/still-quality-plan.md).
+// (docs/rendering/still-render.md#outlines-on-a-traced-still).
 //
 // The viewport gets its edges from mesh adjacency; the still finds the same
 // three things as discontinuities between neighbouring G-buffer texels:

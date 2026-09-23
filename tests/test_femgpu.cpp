@@ -18,10 +18,10 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
-// GPU0 — the GPU solver gate (docs/topopt/gpu-plan.md). Proves the one real
-// correctness risk of the matrix-free CG: an element-wise K(rho)·p with float
-// atomicAdd scatter matches the CPU assembly, before any CG is built on it.
-// Every case self-SKIPs when no usable compute device exists (the fem_gpu
+// The GPU solver gate (docs/topopt/README.md#the-gpu-solver). Proves the one
+// real correctness risk of the matrix-free CG: an element-wise K(rho)·p with
+// float atomicAdd scatter matches the CPU assembly, before any CG is built on
+// it. Every case self-SKIPs when no usable compute device exists (the fem_gpu
 // requirement is a compute queue + VK_EXT_shader_atomic_float), so the suite
 // stays green on machines without Vulkan.
 
@@ -474,10 +474,12 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
 // ---- Where the fp32 solver stops working (diagnostics, not gates) ---------
 //
 // The 2026-08-23 round found the GPU path returning a ZERO displacement field
-// on a beam-shaped part (docs/topopt/plan.md). `TopologyOptimize` falls back
-// to the CPU when that happens, so this is a performance limit rather than a
-// correctness one — but fixing the numerics needs to start from measurements,
-// and these two are them. Hidden ([.]) : run with `femgpu_tests [fp32floor]`.
+// on a beam-shaped part
+// (docs/topopt/README.md#the-fp32-limit-on-slender-parts). `TopologyOptimize`
+// falls back to the CPU when that happens, so this is a performance limit
+// rather than a correctness one — but fixing the numerics needs to start from
+// measurements, and these two are them. Hidden ([.]) : run with `femgpu_tests
+// [fp32floor]`.
 //
 // Measured on an RTX 4060 Laptop, tolerance 1e-5, uniform stiffness, all
 // meshes built from 10 mm CUBIC cells so element SHAPE is held constant:
@@ -669,10 +671,10 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
 // Symmetric diagonal scaling (what a Jacobi preconditioner does, but applied
 // to the matrix itself so the fp32 recurrence sees unit diagonals) is worth
 // only 2-5x. It is not the fix. Dropping the contrast is worth 8.5x, and
-// mixed precision is worth ~9 decimal digits — see docs/topopt/plan.md.
-// GPU5.0 — the gate for docs/topopt/gpu5-plan.md. No production code: this
-// exists to answer one question cheaply, and to KILL the plan if the answer
-// is no.
+// mixed precision is worth ~9 decimal digits — see
+// docs/plans/topopt-gpu-mixed-precision.md. The gate for
+// docs/plans/topopt-gpu-mixed-precision.md. No production code: this exists to
+// answer one question cheaply, and to KILL the plan if the answer is no.
 //
 // The plan proposes fp64 iterative refinement around the fp32 solve:
 //
@@ -1339,9 +1341,9 @@ TEST_CASE("femgpu MG0: rigid-body coarse space accelerates PCG",
 
 TEST_CASE("femgpu MG0 gate: bulky cube, uniform / harsh / real SIMP fields",
           "[.][mg0gate]") {
-  // THE GPU3 GATE (docs/topopt/gpu3-plan.md): on the 45k-DOF bench cube the
-  // coarse space must cut outer iterations >=10x vs Jacobi-PCG in fp64 —
-  // including on a REAL late-iteration SIMP field (crisp void/solid
+  // THE MULTIGRID GATE (docs/topopt/README.md#the-gpu-solver): on the 45k-DOF
+  // bench cube the coarse space must cut outer iterations >=10x vs Jacobi-PCG
+  // in fp64 — including on a REAL late-iteration SIMP field (crisp void/solid
   // contrast), the case that defeated Chebyshev. Manual: femgpu_tests
   // "[mg0gate]" (runs minutes — it optimizes the cube on the CPU first).
   const double L = 80.0;

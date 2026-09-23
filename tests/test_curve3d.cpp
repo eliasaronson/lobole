@@ -155,7 +155,7 @@ TEST_CASE("A bent path is straights and arcs, exactly", "[curve3d][bent]") {
   // of that — it bows between the points on the straights, its radius is an
   // approximation nothing can read back, and it took twenty-nine generated
   // points to say what four and a radius say here
-  // (docs/grill-friction-plan.md).
+  // (docs/tube/README.md#members-and-their-paths).
   Document doc;
   auto cv = std::make_unique<CurveFeature>("Handle", Curve3DKind::BentPath);
   cv->points = {{-200, 0, 0}, {-200, 0, 90}, {200, 0, 90}, {200, 0, 0}};

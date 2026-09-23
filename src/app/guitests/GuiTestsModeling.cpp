@@ -162,12 +162,12 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 5.0);
   };
 
-  // U14 phase 0 (docs/ui/u14-numeric-input.md). Ctrl+click a dimension and
-  // type an expression — the whole point of ui::ExprInput, offered on every
-  // ExprDrag* field since the variables workstream, and never once tested.
-  // The sketch expression tests go through the inline dimension editor's own
-  // InputText and the assembly one through "##expr" after fx; this path had
-  // no coverage at all, which is how the drop below survived.
+  // Expression entry (docs/ui/numeric-input.md#the-widgets). Ctrl+click a
+  // dimension and type an expression — the whole point of ui::ExprInput,
+  // offered on every ExprDrag* field since the variables workstream, and never
+  // once tested. The sketch expression tests go through the inline dimension
+  // editor's own InputText and the assembly one through "##expr" after fx; this
+  // path had no coverage at all, which is how the drop below survived.
   //
   // ItemInputValue IS the gesture: MouseMove, Ctrl down, click, type, Enter
   // (imgui_te_context.cpp, ImGuiTestAction_Input).
@@ -1241,7 +1241,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - volume) < 1e-3);
   };
 
-  // Direct-manipulation preview handles (docs/ui/direct-manipulation.md):
+  // Direct-manipulation preview handles (docs/ui/viewport-handles.md):
   // drag the viewport arrow to set the pending extrude's distance.
   t = IM_REGISTER_TEST(engine, "rib", "menu_rib_previews_and_adds_volume");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -1536,7 +1536,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // The gate for the two-table split (docs/ui/u12-keybindings.md): the
+  // The gate for the two-table split (docs/ui/keybindings.md): the
   // metadata lives in core (keymap::Defaults) and the behaviour in ui
   // (ui::Commands), keyed by the same id. A row in one and not the other is a
   // command with no key, or a key that runs nothing — both silent.
@@ -1826,7 +1826,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     IM_CHECK_SILENT(s_App->drawing != nullptr);
     // Add view is a tool window, opened from the toolbar
-    // (docs/ui/consistency-round-plan.md).
+    // (docs/ui/panels.md#drawing-tab-the-drawing-panel).
     ToolbarClick(ctx, "###tb_dwg_add_view");
     ctx->Yield(2);
     ctx->SetRef("//###ToolWindow");
@@ -1857,7 +1857,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(part->ActiveConfiguration(), (uint64_t)0);
 
     // A bend table is in the view row's menu
-    // (docs/ui/consistency-round-plan.md).
+    // (docs/ui/panels.md#drawing-tab-the-drawing-panel).
     ctx->ItemClick(
         ("//###Model/**/###dwg_view_" + std::to_string(viewId)).c_str(),
         ImGuiMouseButton_Right);
@@ -1930,7 +1930,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // earlier sibling must not move it (the old int-index selection pointed at
   // whatever feature slid into the vacated slot).
 
-  // ---- Tolerances (docs/tolerances/plan.md T3) ----------------------------
+  // ---- Tolerances (docs/tolerances/README.md#gui) --------------------------
   //
   // The editor lives in the Measure tool window, because measuring a face and
   // saying what it may vary by are the same gesture on the same pick. These

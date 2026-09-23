@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-// Is this frame a TRUSS? (docs/frame-friction-plan.md, F4)
+// Is this frame a TRUSS? (docs/tube/README.md#checks)
 //
 // Every other check in this build is per-PROCESS — check_sheet_metal,
 // check_tube, check_fasteners, check_fits — and none of them is structural.

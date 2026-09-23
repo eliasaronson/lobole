@@ -22,7 +22,7 @@
 #include <vector>
 
 // A permitted variation of one measured feature of the part: "this bore is
-// H7". Design intent, not geometry — see docs/tolerances/plan.md.
+// H7". Design intent, not geometry — see docs/tolerances/README.md.
 //
 // It stores the CLASS, not the deviations it implies, for the reason the hole
 // fit stores "M6 normal" rather than 6.6: one source of truth, so a correction
@@ -219,7 +219,7 @@ public:
   // (local shadows project), so downstream reads are unchanged by Phase V.
   const SymbolTable& Symbols() const { return m_symbols; }
 
-  // Project-wide variables (Phase V, docs/dogfooding.md, caster round). A
+  // Project-wide variables (docs/variables/README.md#concepts). A
   // Document keeps its own m_parameters as the PART-LOCAL scope and borrows a
   // non-owning pointer to the project scope's evaluated symbols; regeneration
   // resolves expressions local-first, then project. AppState owns the project
@@ -274,10 +274,10 @@ public:
   // configuration persists. Edits do NOT auto-regenerate (a study is inert
   // until explicitly meshed/solved).
 
-  // CAM setups (v58, docs/cam/plan.md). Document-level objects like studies:
-  // they describe how to cut the model, and change nothing about it — so they
-  // are deliberately OUTSIDE the regen chain hash (a new setup must not
-  // rebuild the geometry).
+  // CAM setups (v58, docs/cam/README.md#invariants). Document-level objects
+  // like studies: they describe how to cut the model, and change nothing about
+  // it — so they are deliberately OUTSIDE the regen chain hash (a new setup
+  // must not rebuild the geometry).
 
   const std::vector<fem::Study>& GetStudies() const { return m_studies; }
   std::vector<fem::Study>& GetStudies() { return m_studies; }
@@ -319,7 +319,7 @@ public:
                                       : it->second.solvedAtVersion != m_version;
   }
 
-  // ---- Tolerances (docs/tolerances/plan.md) ------------------------------
+  // ---- Tolerances (docs/tolerances/README.md) ------------------------------
   // Permitted variation of measured features, keyed by element. Like studies
   // and CAM setups these are document-level objects OUTSIDE the regen chain
   // hash, and here that is not merely an optimisation but the whole claim: a
@@ -361,7 +361,7 @@ public:
   const units::System& Units() const { return m_units; }
   void SetUnits(const units::System& u) { m_units = u; }
 
-  // ---- Sheet metal (docs/sheetmetal/plan.md) -----------------------------
+  // ---- Sheet metal (docs/sheetmetal/README.md) -----------------------------
   // The stock this part is made from and how it bends: one per document,
   // read by every sheet feature during regeneration. Unset until a sheet
   // feature needs it, and then required — a flange cannot guess its own
@@ -402,7 +402,7 @@ public:
   // (0 = base, the model as authored) is applied during regeneration by
   // overlaying its overrides onto the symbol table and composing its
   // suppression set; no stored parameter/feature state is mutated. See
-  // docs/configurations/plan.md.
+  // docs/configurations/README.md.
 
   const std::vector<Configuration>& GetConfigurations() const {
     return m_configurations;
@@ -490,8 +490,8 @@ public:
 
   const std::vector<Body>& GetBodies() const { return m_bodies; }
 
-  // Baked geometry (docs/versioning/baked-geometry.md): bodies read from the
-  // saved project, to be used INSTEAD of executing the feature list — but
+  // Baked geometry (docs/versioning/README.md#baked-geometry): bodies read from
+  // the saved project, to be used INSTEAD of executing the feature list — but
   // only if they still describe it. The next Regenerate compares `tipHash`
   // against the chain hash it computes and either installs these bodies
   // (executing nothing) or ignores them and rebuilds. Loaders adopt inside a
@@ -515,12 +515,12 @@ public:
 
   // ---- Reference-image assets (v49) -------------------------------------
   // Raw pixel bytes for sketch reference images (see
-  // docs/sketching/reference-image-plan.md), keyed by asset name. Kept at
-  // document scope — NOT on the sketch feature — so they survive undo/redo
-  // (which rebuilds features from JSON, and JSON never carries the bytes) and
-  // so the renderer decodes each asset into a texture once no matter how many
-  // images reference it. Serialization persists only the assets an image
-  // actually references.
+  // docs/sketching/README.md#reference-images-underlays), keyed by asset name.
+  // Kept at document scope — NOT on the sketch feature — so they survive
+  // undo/redo (which rebuilds features from JSON, and JSON never carries the
+  // bytes) and so the renderer decodes each asset into a texture once no matter
+  // how many images reference it. Serialization persists only the assets an
+  // image actually references.
   void SetAsset(const std::string& name, std::vector<unsigned char> bytes) {
     m_assets[name] = std::move(bytes);
   }

@@ -104,8 +104,8 @@
 // Opening, saving, autosaving and recovering a PROJECT: the multi-slot save
 // and load, sidecars, the on-disk stamp that catches an external edit, git
 // remotes, and comparing a version's geometry against the working tree.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3). AppActions.h still declares everything, so no caller changed.
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still declares everything, so no caller changed.
 
 namespace ui {
 

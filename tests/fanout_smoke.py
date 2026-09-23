@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fan-out: several instances, several parts, one project
-(docs/scripting/fanout.md, agent-scale plan G5).
+(docs/scripting/README.md#fan-out-several-agents-several-parts-one-project).
 
 Three claims, none of them new machinery and none of them previously run
 together:

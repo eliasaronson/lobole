@@ -1,11 +1,12 @@
 #ifdef HAVE_CAM
 
-// Rough, finish, clean up (docs/cam/rough-rest-range-plan.md): a 3D part
-// roughed in layers, a smaller ball re-cutting only what a larger one could
-// not reach -- over the bed and on the rotary -- and a rotary pass bounded
-// along the axis by a picked face. Every generator case goes out through the
-// real post and comes back through the real verifier, which shares nothing
-// with the generators but the tool's shape.
+// Rough, finish, clean up
+// (docs/cam/operations.md#rough-a-surface-and-rest-machining): a 3D part
+// roughed in layers, a smaller ball re-cutting only what a larger one could not
+// reach -- over the bed and on the rotary -- and a rotary pass bounded along
+// the axis by a picked face. Every generator case goes out through the real
+// post and comes back through the real verifier, which shares nothing with the
+// generators but the tool's shape.
 
 #include "cad/CADKernel.h"
 #include "cam_fixtures.h"

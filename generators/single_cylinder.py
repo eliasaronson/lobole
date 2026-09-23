@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A single-cylinder engine, on the SDK — the agent-scale plan's acceptance
-test (docs/agent-scale-plan.md).
+"""A single-cylinder engine, on the SDK — the SDK's acceptance
+test (generators/README.md#single-cylinder-and-air-cooled-engines).
 
     python3 generators/single_cylinder.py --port <port>
 
@@ -11,7 +11,7 @@ driving the camshaft at half crank speed, cam relations lifting two valves,
 and a motion study over 720 degrees that checks every pose.
 
 The engine: bore 86, stroke 86 (crank radius 43, rod 150), which is the W16's
-own cylinder. Findings go in docs/modeling/single-cylinder-dogfood.md.
+own cylinder. Findings go in generators/README.md#single-cylinder-and-air-cooled-engines.
 """
 import argparse
 import math
@@ -290,7 +290,7 @@ def top_end(app, rig, occ, main_mate):
     # the LENGTH comes from the stack the axis passes through and nothing
     # here says a length. The size is said outright, because 11 mm is a
     # clearance for two threads (M9 Loose and M10 Normal) and the app refuses
-    # to pick for us — see docs/modeling/single-cylinder-dogfood.md. Drilling
+    # to pick for us — see generators/README.md#single-cylinder-and-air-cooled-engines. Drilling
     # these with a Hole feature would record the fit and need no `size`.
     top = h.body().edges(circular=True, radius=5.5,
                          where=lambda e: e.center.z > 59.0)

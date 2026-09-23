@@ -212,9 +212,9 @@ uint32_t SketchFeature::MintEntityId() const {
   // nothing asserts a particular entity id (the tests capture what AddEntity
   // returns), and the goldens compare counts and volumes rather than bytes.
   // One engine PER THREAD: a project's parts rebuild side by side when it
-  // opens (docs/ui/project-open-progress-plan.md), and a sketch that grows a
-  // projected or patterned entity mints one during that rebuild -- a shared
-  // engine was a data race.
+  // opens (docs/ui/long-operations.md#opening-a-project), and a sketch that
+  // grows a projected or patterned entity mints one during that rebuild -- a
+  // shared engine was a data race.
   thread_local std::mt19937 rng(std::random_device{}());
   std::uniform_int_distribution<uint32_t> pick(1, UINT32_MAX); // 0 = "none"
   for (;;) {

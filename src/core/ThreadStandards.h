@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-// ISO metric thread series (docs/modeling/thread-rib.md Part A): designation
-// -> pitch, with the derived basic diameters. Pure static data — unit tested,
-// no I/O. UNC/UNF later; the table is just rows.
+// ISO metric thread series (docs/modeling/holes-and-threads.md#thread):
+// designation -> pitch, with the derived basic diameters. Pure static data —
+// unit tested, no I/O. UNC/UNF later; the table is just rows.
 namespace threads {
 
 struct Standard {

@@ -163,7 +163,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       // word before this. Downstream you get "no bodies" from
       // mass_properties with no clue which feature did it, which cost two
       // rounds of bisecting a twelve-groove helix chain by hand
-      // (docs/cam/dogfood-rotary.md).
+      // (docs/modeling/README.md#features).
       *warning = "this cut consumed EVERY body — nothing is left of the "
                  "part. A tool that swallows the whole model is usually one "
                  "the wrong way round, or a boolean the kernel could not do";

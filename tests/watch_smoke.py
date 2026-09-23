@@ -2,7 +2,7 @@
 """The watch generator builds a watch that keeps time, headless.
 
 generators/watch/ is a 21,600 vph automatic with small seconds
-(docs/modeling/automatic-watch-plan.md). This builds its parts and its
+(generators/watch/README.md). This builds its parts and its
 assembly against a headless app and checks the things that make it a watch:
 
 - every part builds, on its check_geometry RECEIPT (an empty part's `valid`

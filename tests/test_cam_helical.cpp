@@ -1,8 +1,9 @@
 #ifdef HAVE_CAM
 
-// Rotary passes that FOLLOW a twist (docs/cam/rotary-helical-plan.md):
-// helices at the part's own lead, stepped round one from the next, and the
-// twist they follow measured from the surface rather than typed.
+// Rotary passes that FOLLOW a twist
+// (docs/cam/rotary.md#patterns-rotary_pattern): helices at the part's own lead,
+// stepped round one from the next, and the twist they follow measured from the
+// surface rather than typed.
 
 #include "cam_fixtures.h"
 #include "core/cam/CamRotary.h"

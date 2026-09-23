@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <string>
 
-// A jog (docs/sheetmetal/plan.md, S7): a step in a panel — two opposing bends
-// across it along a sketch line, the far side carried up by `height` and
+// A jog (docs/sheetmetal/README.md#features): a step in a panel — two opposing
+// bends across it along a sketch line, the far side carried up by `height` and
 // otherwise untouched.
 //
 // The line only LOCATES the step. The bends run the full width of the panel

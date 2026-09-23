@@ -91,8 +91,8 @@
 // shared TShape made switching to a 197-body part cost 2.2 s once instead of
 // every time. The prewarm groups work BY TSHAPE so two threads can never
 // mesh shapes that share one.
-// Split out of AssemblyActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 6). AssemblyActions.h still declares everything it declared.
+// Split out of AssemblyActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AssemblyActions.h still declares everything it declared.
 
 namespace ui {
 

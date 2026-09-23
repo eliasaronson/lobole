@@ -213,7 +213,7 @@ void HandleViewportInput(AppState& state) {
   // the one command table — ui::DispatchShortcuts, called from DrawUI. The
   // arrow-key navigation above stays here: it is a held-modifier gesture
   // against the camera, not a command, and it is not rebindable
-  // (docs/ui/u12-keybindings.md).
+  // (docs/ui/keybindings.md).
 
   // Sketch plane-picking / drawing consumes the viewport when active
   if (HandleSketchViewport(state, glm::vec2(io.MousePos.x, io.MousePos.y),
@@ -339,7 +339,7 @@ void HandleViewportInput(AppState& state) {
   }
 
   // A JOB tab's one handle is the placement gizmo on the selected part
-  // (docs/cam/job-document.md, M5): first shot at clicks, like the assembly's
+  // (docs/cam/gui.md#gizmos): first shot at clicks, like the assembly's
   // above, and a miss falls through to picking.
   if (state.job) {
     UpdateHandleHover(state, overViewport);

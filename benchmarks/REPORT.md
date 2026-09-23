@@ -1,6 +1,6 @@
 # Second result — 2026-09-04, sonnet, 72 runs
 
-Run after the agent-scale round (docs/agent-scale-plan.md): named datum
+Run after the agent-scale round (docs/scripting/benchmark.md): named datum
 frames (G0), the `batch` RPC (G1a) and the SDK (G1b). All three changed the
 agent-facing surface — the `Frame` dialect in `add_feature`'s description and
 a sentence about `batch` in the scripting guidance — so CLAUDE.md's "no
@@ -51,7 +51,7 @@ G6 in the agent-scale plan: a task with an assembly and a mate (T4), and one
 with motion (T5). Until those exist, a claim that frames or batches make an
 agent faster has no instrument behind it, and the measurement that DOES
 exist for this round is the gripper rebuild — 652 lines to 228, twelve
-transcribed coordinates to none (docs/agent-scale-plan.md, G1b).
+transcribed coordinates to none (docs/scripting/benchmark.md, G1b).
 
 # First result — 2026-08-27, sonnet, 72 runs
 
@@ -155,7 +155,7 @@ point of the directory, and it costs about $17 and 40 minutes at this size.
 
 ## 2026-09-04: T4/T5 added, and this round left UNMEASURED
 
-The agent-scale round (docs/agent-scale-plan.md) added two mechanism tasks —
+The agent-scale round (docs/scripting/benchmark.md) added two mechanism tasks —
 `t4-slider-crank` and `t5-crank-motion` — which are the first here that grade
 anything but a single static part: a closed loop, a driven DOF, and a swept
 pose. `benchmarks/runners/reference.py` builds all ten by hand and scores
@@ -166,7 +166,7 @@ reps = 90 runs with a $180 ceiling, and the decision was to hold rather than
 spend it. So nothing in this round — the batch RPC, the SDK, datum frames, the
 motion study, mesh collision — has a benchmark number behind it, and none is
 claimed. What it does have is the acceptance test
-(docs/modeling/single-cylinder-dogfood.md), which is a different kind of
+(generators/README.md#single-cylinder-and-air-cooled-engines), which is a different kind of
 evidence: one engine, built by a script, with six defects the gates caught.
 
 The sweep is still the thing to run before and after the next change to the

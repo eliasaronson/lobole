@@ -103,9 +103,9 @@
 // Every default here is derived from what it acts on -- the document's
 // reach, the newest body's bbox, the last closed sketch -- never a literal.
 // The defaults/* GUI suite enforces exactly that, so this file is what that
-// suite is about (docs/ui/u10-defaults-and-refusals.md).
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3, second wave). AppActions.h still declares everything, so no
+// suite is about (docs/ui/tool-sessions.md#defaults-and-refusals).
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still declares everything, so no
 // caller changed.
 
 namespace ui {
@@ -465,7 +465,8 @@ void CreateBaseFlange(AppState& state) {
     return;
   // No thickness argument: the wall is one gauge, and the gauge is the
   // document's. With no rules set the feature refuses visibly rather than
-  // inventing a millimetre (U10 / docs/sheetmetal/plan.md).
+  // inventing a millimetre
+  // (docs/conventions.md#defaults-derive-from-what-they-act-on).
   BeginPreviewFeature(state, std::make_unique<BaseFlangeFeature>(
                                  NextName(state, "Base flange"), sk->GetId()));
 }

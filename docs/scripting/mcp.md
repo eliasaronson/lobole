@@ -1,198 +1,165 @@
-# Driving Designer over MCP
+# The MCP server
 
 `tools/designer_mcp.py` exposes a running Designer instance to any MCP client
-(Claude Code, Claude Desktop, custom agents). Design: [s1-mcp.md](s1-mcp.md).
+(Claude Code, Claude Desktop, a custom agent). It is a stdio server built on
+the official MCP Python SDK's `FastMCP`, a thin layer over
+`tools/designer_remote.py`: every tool ends in an RPC ([rpc.md](rpc.md)).
 
 ## Setup
 
-1. Start the app with the remote interface — three modes:
-
-   | mode | window | display server | renders | ui_action |
-   |---|---|---|---|---|
-   | `designer --remote 8437` | yes | needed | all | yes (per build) |
-   | `designer --offscreen --remote 8437` | none | not needed | all (`screenshot`, `render_still`, `render_sheet`, `set_render_options`, face selection) | no — nothing draws a GUI |
-   | `designer --headless --remote 8437` | none | not needed | none (each errors with the remedy) | no |
-
-   `--offscreen` needs a Vulkan device but no display — the mode for agents
-   and CI on machines where nothing owns a screen (software Vulkan like
-   lavapipe is enough; CI runs the offscreen smoke on it). `--headless` needs
-   no GPU at all: full modeling + `mass_properties`/`list_elements`.
-2. Register the server with your client. Claude Code sessions started in this
-   repo pick it up automatically from the checked-in **`.mcp.json`**
-   (approve the project server when prompted; `python3` must have the `mcp`
-   SDK — run Claude Code from inside `nix-shell`, or `pip install mcp`).
-   For other clients:
-
-   ```
-   claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py
-   ```
-
-   No port is needed (instances announce themselves — next section); pin one
-   with `--port` or `$DESIGNER_PORT` (the flag wins) only to drive a specific
-   instance.
-
-The server connects lazily — registering before the app is running is fine;
-tools error with the remedy until it is reachable.
-
-## Installing the server without the checkout
-
-The repo root `pyproject.toml` packages `designer_mcp` + `designer_remote`
-(sources stay in `tools/`; nothing in-repo changes) with two console entry
-points, so a machine that has the app but not the source tree can get the
-agent surface as a tool:
+Claude Code sessions started in this repo pick the server up from the
+checked-in `.mcp.json`, which runs it inside `nix-shell` (the `mcp` package
+comes from `shell.nix`). For other clients:
 
 ```
-uv tool install /path/to/Designer          # or: uvx --from git+ssh://<remote> designer-mcp
+claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py
+```
+
+No port is needed; see "Finding the app" below. `--port` or `$DESIGNER_PORT`
+(the flag wins) pins one instance.
+
+### Installing without the checkout
+
+The repo root `pyproject.toml` packages `designer_mcp` and `designer_remote`
+from `tools/` with two console scripts, `designer-mcp` (the server) and
+`designer-remote` (the CLI client):
+
+```
+uv tool install /path/to/Designer       # or: uvx --from git+ssh://<remote> designer-mcp
 claude mcp add designer -- designer-mcp
 ```
 
-`designer-remote <port> <method> [json]` comes along as the CLI. Two caveats,
-both deliberate:
+The package name `designer-mcp` is a placeholder and is not on PyPI; install
+from a path or a git URL. `mcp` is pinned `<2`: mcp 2.x renamed `FastMCP` and
+changed other APIs, and the pin is lifted by migrating the server, not by
+loosening it. `packaging_smoke` checks that every `py-modules` entry exists
+and every console script resolves to a real callable.
 
-- **The name `designer-mcp` is a placeholder** and the package is not on
-  PyPI; install from a path or a git URL (private remotes work over ssh).
-  Publishing waits on the real project name, and moves the modules into a
-  proper package namespace at the same time.
-- **`mcp` is pinned `<2`**: mcp 2.x renamed FastMCP to MCPServer and changed
-  other APIs. The server is 1.x code and nixpkgs pins 1.x; the pin is lifted
-  by migrating, not loosened.
+## Finding the app
 
-`packaging_smoke` (headless suite) keeps the metadata honest: every
-`py-modules` entry must exist and every console script must resolve to a real
-callable, so a renamed `main()` fails here instead of on a user's machine.
+The server resolves which instance to talk to, in this order:
 
-## Finding the app (no port to guess)
+1. **`--port` / `$DESIGNER_PORT`** — a pin. It never falls back to
+   discovery, so a client told to drive one app cannot drift onto another.
+2. **Exactly one running instance** in the registry
+   ([README.md](README.md#the-instance-registry)) — attach to it.
+3. **Several** — refuse, listing them with their modes. Guessing would answer
+   questions about a document the user is not looking at.
+4. **None** — autostart (below), or, with autostart off, refuse naming the
+   exact start command for a Designer that is actually installed here.
 
-Every instance that opens a remote port announces itself in
-`$XDG_STATE_HOME/designer/instances/<port>.json` (`pid`, `port`, `mode`,
-`started` — see `src/remote/InstanceRegistry.h`) and withdraws on exit. A
-crash leaves the file, so the **pid is the truth**: readers skip entries whose
-process is gone and delete them as they pass.
+It connects lazily on the first tool call and reconnects once across a
+dropped connection, so registering it before the app is running is fine.
+`describe` and `execute_script` report what they attached to (`attached`:
+"Designer on port 9090: bracket.dsgn (unsaved changes), gui"), and the
+`instances` tool lists what is running. That line comes from `ping`, live.
 
-The MCP server resolves what to talk to in that order:
+### Autostart
 
-1. **`--port` / `$DESIGNER_PORT`** — a pin. It never falls back to discovery,
-   so a client told to drive one app cannot drift onto another.
-2. **Exactly one running instance** → attach to it.
-3. **Several** → refuse and list them. Guessing would answer questions about
-   a document you are not looking at.
-4. **None** → **autostart**: spawn `designer --offscreen --remote 0` (the
-   binary is probed — dev-tree `build/designer` beside the server, `designer`
-   on PATH, then the flatpak), attach to the port the child announces, and
-   kill it when the server exits. The child gets a scratch
-   `XDG_CONFIG_HOME` seeded from the real one — settings and the MACHINE
-   store, by name, never the whole directory (which holds `onshape.env`) — so
-   `set_settings` can never rewrite the human's preferences and a CAM setup
-   can still find the machine it names. Disable with `--no-autostart` /
-   `DESIGNER_AUTOSTART=0`; with autostart off or no binary found, the error
-   names the exact start command (or what was probed).
+With nothing running, the server spawns `designer --offscreen --remote 0`,
+waits for the child to announce its kernel-chosen port under its pid, attaches
+to it, and kills it when the server exits. The binary is probed, not assumed:
+`build/designer` beside the server, then `designer` on `PATH`, then the
+flatpak `io.github.eliasaronson.Designer`. The conditions are what make it
+safe:
 
-`describe` reports what it attached to (`attached`: *"Designer on port 8799:
-bracket.dsgn (unsaved changes), gui"*), and the `instances` tool lists what is
-running. That line comes from `ping`, live, not from the file — the file
-carries only what does not change while the app runs.
+- It triggers only when discovery finds nothing — a pinned port or any live
+  instance always wins.
+- The child is offscreen: there is no window to stand beside the user's own,
+  and it still renders.
+- The child gets a scratch `XDG_CONFIG_HOME` seeded with the real
+  `settings.json` and `machines/` directory by name — never the whole
+  directory, which holds `onshape.env` — so `set_settings` cannot rewrite the
+  human's preferences and a CAM setup still finds its machine.
+- It dies with the server. A spawn that exits or never announces raises with
+  the tail of the child's own log.
 
-Before this, the server assumed 8437 and reported "Designer is not reachable"
-whenever the app was on another port; this repo's own `.mcp.json` hardcoded
-8799 to work around it. It no longer passes a port at all.
+`--no-autostart` or `DESIGNER_AUTOSTART=0` turns it off.
+`mcp_autostart_smoke` pins that no process or registry entry outlives the
+server.
 
-`ui_action` (through `rpc`) needs the ImGui Test Engine, which is optional:
-a build configured with `-DENABLE_TEST_ENGINE=OFF` refuses those calls naming
-that reason, and `ping`/`describe` report `ui_actions: false` up front. Every
-other tool, screenshots included, works there.
+## The tool surface
 
-**Autostart: rejected 2026-08-17, reversed 2026-08-26 — because the two
-objections died.** The rejection reasoned: spawning a *window* would create a
-second instance beside the user's open one (the agent then silently inspects
-a different document), and a *headless* spawn cannot screenshot, which is the
-main reason to use MCP over a script. `--offscreen` invalidates both — no
-window exists to shadow anything, and it renders. What survived from the
-rejection are its conditions, now enforced: autostart triggers **only when
-discovery finds nothing running** (a pinned port or any live instance always
-wins), the spawn is **offscreen-only**, and the child is **tied to the
-server's lifetime** (killed at exit; `tests/mcp_autostart_smoke.py` pins
-that no process or registry entry outlives it).
+The announced tools are what a person asks an assistant for in a
+conversation, plus two doors to everything else. The `@mcp.tool`
+functions in `designer_mcp.py` are the authority; grouped:
 
-## What's exposed (revised 2026-08-17)
-
-**Two dozen tools, plus a door to everything else.** Until August 2026 every
-RPC was its own tool: 118 of them, ~34k characters of descriptions that every
-client loaded before asking a single question (~8.5k tokens, before parameter
-schemas). Most were one-line wrappers, and the ones that earn their place in a
-*conversation* are far fewer — the rest are authoring calls that a script does
-better, because a loop with logic between the steps is not expressible as one
-tool call per step.
-
-**2026-08-26: `execute_script` closes the scripting gap for MCP-only
-agents.** The "a script does it better" advice above assumed a local shell;
-an agent living purely in MCP (claude.ai, Claude Desktop) had no way to run
-one. `execute_script` runs a python snippet in a subprocess with the client
-pre-bound as `d` (DESIGNER_PORT pinned to the attached instance,
-`designer_remote` importable, stdout/stderr returned capped, relative paths
-landing in a returned scratch cwd, `timeout` for long solves). Same trust
-domain as `rpc` — it drives the same instance with the same powers, and the
-MCP host's tool approval gates it.
-
-The exposed set is what a person asks an assistant for:
-
-| Group | Tools |
+| group | tools |
 |---|---|
-| Meta | `describe`, `help`, `rpc` |
-| Inspect | `get_state`, `check_geometry`, `measure`, `mass_properties`, `list_elements` |
-| Variables | `list_variables`, `set_variable` |
-| Look at it | `screenshot`, `render_still`, `view`, `set_camera`, `set_section` (and `add/list/update/remove_section` via `rpc`), `set_render_options` |
-| Project | `new_project`, `open_project`, `save_project`, `export_stl`, `export_step` |
-| Author | `add_feature`, `modify_feature`, `delete_feature`, `undo` |
+| meta | `describe`, `help`, `rpc`, `execute_script`, `instances` |
+| inspect | `get_state`, `check_geometry`, `measure`, `mass_properties`, `list_elements` |
+| variables | `list_variables`, `set_variable` |
+| look at it | `screenshot`, `render_still`, `view`, `set_camera`, `set_section`, `set_render_options` |
+| project | `new_project`, `open_project`, `save_project`, `export_stl`, `export_step` |
+| author | `add_feature`, `modify_feature`, `delete_feature`, `undo` |
 
-Everything else — assemblies (mates, and since v83 the gear/rack/screw
-relations between them), drawings, studies, configurations, sketch
-constraints and ops, checkpoints, topology, tolerances and fits, reference
-images, the raw GUI
-actions — is reached through **`rpc(method, params)`**, and documented through
-**`help(method)`**, which returns the same prose that used to sit in that
-tool's description plus the wrapper's signature. Nothing was removed: the
-wrappers still exist and `rpc` routes through them, so their argument shaping
-and defaults are unchanged. A mistyped method suggests near matches.
+Everything else — assemblies and mates, relations, motion studies, drawings,
+FEM and topology studies, configurations, sketch constraints and ops,
+checkpoints and history, tolerances, sections, CAM, the raw GUI actions — is
+reached with **`rpc(method, params)`** and documented by **`help(method)`**.
 
-`mass_properties` and `list_elements` remain the geometry oracles;
-`screenshot`/`render_still` return inline images; `view` snaps standard views
-and `set_camera` gives direct control. Topology `study_status`/`study_results`
-(via `rpc`) report the solve's provenance (`solver`: `gpu: <device>` or
-`cpu (...)`, plus elapsed seconds).
+- `rpc` routes through a kept wrapper when the server has one (so its
+  argument shaping and defaults still apply), and otherwise passes the call
+  straight to the app, so an RPC newer than this file still works. An unknown
+  name comes back with close matches.
+- `help(method)` returns the wrapper's prose and signature, or, for an RPC
+  the server does not wrap, the app's own `describe` row.
+- `screenshot` and `render_still` return the image inline.
 
-**When to use which.** MCP is for conversation: look at the model, measure it,
-change one thing, show the user. For *building* a part — a parametric grid of
-holes, a swept profile, anything with a loop or a computed argument — write a
-Python script against `tools/designer_remote.py` and run it. The same RPCs,
-one round trip, and arithmetic between the calls.
+Keeping most RPCs behind `rpc`/`help` keeps the schema bulk every client loads
+up front small; the `rpc-only` benchmark arm measures that trade
+([benchmark.md](benchmark.md)).
 
-The remote server accepts several concurrent clients (e.g. the MCP server
-plus a hand-driven `tools/designer_remote.py` shell); requests interleave
-through the app's main thread and responses route back per connection.
+`ui_action` (through `rpc`) needs the ImGui Test Engine. `ping` reports
+`ui_actions` separately from `mode`, because they are two
+questions: `mode` says whether a rendered frame exists, `ui_actions` whether
+this build can drive its GUI.
 
-The `modeling-workflow` prompt teaches the loop that works: variables first,
-constrain fully, verify with `get_state` + `screenshot` after every step.
+### `execute_script`
 
-The feature/entity/constraint JSON dialects are documented in the tool
-descriptions; the source of truth is `SerializeFeatures.cpp`
-(`FeatureFromJson`), served at runtime by the `describe` RPC. Standing rule
-(a feature an LLM can't drive is half-shipped), now test-enforced: a new
-feature type must be added to the describe table beside the dispatch chain
-(remote_smoke fails otherwise) and to `FEATURE_FORMATS` in
-`designer_mcp.py` — cross-checked against describe by `mcp_formats_gate`,
-which is HEADLESS and on the default `ctest -LE gui` path (mcp_smoke checks
-it too, but opens a window and so sits behind the `gui` label: the Fastener
-feature shipped without a row on 2026-09-01 and was red there for two days
-with nothing on the default path to say so).
+Runs a Python snippet in a subprocess with `d` pre-bound to a connected
+`designer_remote.Designer` on the attached instance. `DESIGNER_PORT` is set,
+`tools/` is on `sys.path` (so `designer_sdk` imports), stdout and stderr come
+back capped at 20000 characters each, relative paths land in a returned
+scratch `cwd`, and `timeout` (default 120 s) bounds long solves. This is the
+path for building a part with loops or computed arguments — one round trip
+instead of a tool call per step — for an agent that has no shell of its own.
+It is the same trust domain as `rpc`: the same instance, the same powers,
+gated by the MCP host's tool approval.
+
+### The workflow prompt
+
+One MCP prompt, `modeling-workflow`, teaches the loop: variables first,
+constrain fully, read each mutating response's `regen` and `digest`, verify
+with `mass_properties` and `render_sheet`, gate assemblies on
+`contact_report`, and run [the review checklist](../inspect/review-checklist.md)
+before delivery. Changing it changes what the benchmark measures.
+
+## Format documentation
+
+An agent can only use `add_feature` if the feature, entity and constraint
+dialects are in front of it. `FEATURE_FORMATS` and `MATERIAL_SLUGS` in
+`designer_mcp.py` carry them as prose in the tool descriptions; the source of
+truth is `SerializeFeatures.cpp` (`FeatureFromJson`, `EntityFromJson`), served
+at runtime by `describe`. `mcp_formats_gate` (headless, on the default path)
+fails when a feature type, sketch entity type or material slug in `describe`
+is missing from the prose, so a new feature type needs a row in both places.
 
 ## Testing
 
-`ctest -R mcp_smoke` models a dimensioned bracket end-to-end through the MCP
-layer (skips if the `mcp` SDK is missing). `remote_smoke` covers the RPC
-underneath.
+- `mcp_formats_gate` — the prose against `describe`, headless.
+- `mcp_server_compiles`, `py_client_compiles` — `py_compile` the server and
+  client on the default path, with no display and no SDK. `mcp_smoke` is
+  GUI-labelled, so without these a syntax error in the server would pass
+  every default run.
+- `mcp_autostart_smoke` — the autostart lifecycle (skips without the `mcp`
+  SDK or a Vulkan device).
+- `mcp_smoke` (GUI) — models a dimensioned bracket end to end through the
+  SDK's stdio client, so the MCP layer itself is exercised; skips without the
+  `mcp` SDK.
+- `packaging_smoke` — the `pyproject.toml` metadata.
 
-`mcp_smoke` is **gui-labeled**, so neither CI nor `ctest -LE gui` runs it —
-which is how a plain syntax error in `designer_mcp.py` shipped on 2026-08-13
-and went unnoticed for four days, with the server unloadable the whole time.
-`mcp_server_compiles` and `py_client_compiles` now `py_compile` both files on
-the default test path: milliseconds, no display, no SDK.
+`--only-tools a,b,c` serves only the named tools and refuses loudly if it
+cannot (an unknown name, or FastMCP's registry having moved), because a
+restriction that silently served the full surface would make a benchmark arm
+a duplicate of another.

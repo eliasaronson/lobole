@@ -13,10 +13,10 @@
 
 // The finishing generators -- a raster or waterline over the bed, and the
 // rotary patterns round the 4th axis -- and the cache-or-worker step every
-// surfacing operation goes through (docs/cam/surfacing.md,
-// docs/cam/rotary-plan.md, docs/cam/rotary-continuous-plan.md).
+// surfacing operation goes through (docs/cam/operations.md#3-axis-surfacing,
+// docs/cam/rotary.md#continuous-surface_rotary).
 //
-// Split from CamStrategies.cpp (docs/cam/cleanup-after-spiral-plan.md): these
+// Split from CamStrategies.cpp (docs/cam/README.md#where-the-code-is): these
 // share nothing with the Clipper-based 2.5D strategies there. Each reads a
 // cutter-location surface and lays a pattern over it.
 
@@ -44,7 +44,7 @@ namespace {
 // ball's rim in the strip beside it: climbing vertically out of a groove on
 // a steep surface, the uncut neighbour stands above the tool's own profile.
 // On the waveguide that was 121 rapids through material, worst 0.787 mm, all
-// of them at the steep throat end (docs/cam/hardening-round.md).
+// of them at the steep throat end (docs/cam/operations.md#3-axis-surfacing).
 //
 // The link is a CUT move straight across. Over one stepover that is safe on
 // either curvature: concave, the chord runs above the surface; convex, it
@@ -295,10 +295,10 @@ RestMask(int nx, int ny, double resX, SpanY spanY, bool wrapY, BigTip bigTip,
   return out;
 }
 
-// 4-axis finishing (docs/cam/rotary-plan.md), by the op's pattern: parallel
-// passes, each at one A with the part turning between them, or one spiral
-// per layer with A turning WHILE the tool cuts -- continuous 4-axis
-// (docs/cam/rotary-continuous-plan.md).
+// 4-axis finishing (docs/cam/rotary.md#continuous-surface_rotary), by the op's
+// pattern: parallel passes, each at one A with the part turning between them,
+// or one spiral per layer with A turning WHILE the tool cuts -- continuous
+// 4-axis (docs/cam/rotary.md#patterns-rotary_pattern).
 //
 // The same shape as `GenerateSurface` and deliberately so: a contact surface,
 // a pattern over it, and a link between the passes. What changes is the
@@ -349,8 +349,8 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
 
   RadiusMap cl = RotaryCL(model, tool);
 
-  // Part of the part (docs/cam/rough-rest-range-plan.md): a picked face
-  // bounds the pass ALONG the axis to its own extent -- round the axis it
+  // Part of the part (docs/cam/rotary.md#continuous-surface_rotary): a picked
+  // face bounds the pass ALONG the axis to its own extent -- round the axis it
   // cannot, the part turns. Cells outside it are unreached, which every
   // pattern already treats as "break the pass, or fly over".
   if (!op.targets.empty()) {
@@ -581,11 +581,11 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
 
-  // A ROUGH (v125, docs/cam/rough-rest-range-plan.md): the raster in layers
-  // from the stock top. Over the whole part its region is the part's outline
-  // plus a ring one cutter wide, cut down to the op's bottom, so the
-  // finishing ball can reach the part's edges -- and no further, so the rest
-  // of the block stays to hold the part.
+  // A ROUGH (v125, docs/cam/operations.md#rough-a-surface-and-rest-machining):
+  // the raster in layers from the stock top. Over the whole part its region is
+  // the part's outline plus a ring one cutter wide, cut down to the op's
+  // bottom, so the finishing ball can reach the part's edges -- and no further,
+  // so the rest of the block stays to hold the part.
   const bool rough = op.type == OpType::SurfaceParallel && op.stepdown > 0.0;
   if (rough && op.targets.empty()) {
     std::vector<Loop> outer;
@@ -816,9 +816,9 @@ namespace detail {
 
 // A surfacing operation, from the cache, from a worker later, or right here
 // -- the same three-way the adaptive pass has, one level up
-// (docs/ui/long-operations.md, phase 5). The unit is the whole OPERATION
-// because a finishing pass is one computation from the cutter-location
-// surface outward, with no interior seam to stop at.
+// (docs/ui/long-operations.md#cam-toolpath-passes). The unit is the whole
+// OPERATION because a finishing pass is one computation from the
+// cutter-location surface outward, with no interior seam to stop at.
 void SurfaceThroughCache(const Setup& setup, const Operation& op,
                          const Tool& tool, const std::vector<Body>& bodies,
                          Toolpath& tp, GenerateContext* ctx) {

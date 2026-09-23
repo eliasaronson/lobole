@@ -1,5 +1,5 @@
 // The roll-up rules are the whole point of a receipt, so they are gated
-// (core/Receipt.h, docs/peer-survey-plan.md W2).
+// (core/Receipt.h, docs/conventions.md#a-verdict-says-how-it-knows).
 //
 // Every one of these is a case where the old shape — a bare `ok` flag, or an
 // empty list of problems — would have read as a clean result.

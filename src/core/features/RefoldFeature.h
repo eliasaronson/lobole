@@ -5,9 +5,10 @@
 #include <cstdint>
 #include <string>
 
-// Folds back up the bends an Unfold laid flat (docs/sheetmetal/plan.md, S9),
-// carrying every through-thickness cut made across a crease onto the bend.
-// See UnfoldFeature.h for the pair.
+// Folds back up the bends an Unfold laid flat
+// (docs/sheetmetal/README.md#how-the-unfolder-works), carrying every
+// through-thickness cut made across a crease onto the bend. See UnfoldFeature.h
+// for the pair.
 class RefoldFeature : public Feature {
 public:
   RefoldFeature(const std::string& name, uint64_t unfoldId);

@@ -8,7 +8,7 @@
 #include <vector>
 
 // Building flanges: a bend plus a wall, swept along a straight panel edge
-// (docs/sheetmetal/plan.md, S3 and S7). One builder for every feature that
+// (docs/sheetmetal/README.md#features). One builder for every feature that
 // bends a wall up from an edge — the edge flange, the hem — so they cannot
 // disagree about where a bend line is or what a bend records.
 namespace sheet {

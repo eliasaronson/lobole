@@ -1,12 +1,12 @@
 #pragma once
 
-// Where the active tab's studies live (S1, docs/simulation/
-// assembly-studies-plan.md): on the PART, or on the ASSEMBLY. The record is
-// the same fem::Study; what differs is who owns it, how an edit becomes an
-// undo step (a command on a part, a full-state snapshot on an assembly), and
-// what a result's staleness is measured against. The panel, the glyphs, the
-// legend and the field overlay all read through this so there is one set of
-// drawing code for both tabs.
+// Where the active tab's studies live
+// (docs/simulation/README.md#assembly-studies): on the PART, or on the
+// ASSEMBLY. The record is the same fem::Study; what differs is who owns it, how
+// an edit becomes an undo step (a command on a part, a full-state snapshot on
+// an assembly), and what a result's staleness is measured against. The panel,
+// the glyphs, the legend and the field overlay all read through this so there
+// is one set of drawing code for both tabs.
 
 #include "core/Document.h"
 #include "core/Occurrence.h"

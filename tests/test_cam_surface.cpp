@@ -6,7 +6,7 @@
 #include "core/cam/CamDropCutter.h"
 #include "core/cam/CamSurface.h"
 
-// The cutter-location surface (docs/cam/surfacing.md, phase 1).
+// The cutter-location surface (docs/cam/operations.md#3-axis-surfacing).
 //
 // Every case here has an answer a machinist could work out on paper, because
 // the failure this file exists to prevent is a finishing pass that gouges: a

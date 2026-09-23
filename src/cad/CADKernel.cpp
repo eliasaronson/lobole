@@ -114,7 +114,7 @@ namespace {
 // part twice (before and after), and the digest is the volume; a part that
 // holds a Derived snapshot of a 197-body PCB spent 14 s per sketch add in
 // BRepGProp::VolumeProperties on bodies that had not changed (the SO-101
-// gripper dogfood, docs/modeling/derived-plan.md). A shape moved by a rigid
+// gripper, docs/modeling/README.md#the-model). A shape moved by a rigid
 // placement shares its TShape, so keying on the TShape (plus the location's
 // scale, the one part of a location that changes a volume) makes the second
 // and every later pass a lookup. The handle in the entry keeps the TShape

@@ -3,8 +3,8 @@
 
 `handle.py` makes the part; this makes the program. It is the first
 continuous 4-axis job this app has produced, so what it is really for is
-finding out what is missing -- see docs/cam/dogfood-rotary.md for what it
-found.
+finding out what is missing -- see docs/cam/rotary.md#limits for what is
+still missing.
 
 The whole program:
 

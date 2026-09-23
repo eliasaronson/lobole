@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-// Expression evaluation for variables & dimensions (docs/variables/plan.md).
+// Expression evaluation for variables & dimensions (docs/variables/README.md).
 //
 // The document model only ever talks to the ExpressionEngine interface below:
 // it hands over expression *text* and gets back values, dependency sets, and

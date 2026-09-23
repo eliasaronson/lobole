@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-// Unfold / Refold (docs/sheetmetal/plan.md, S9): the pair that lets a cut be
-// authored FLAT across a bend — a slot that has to be a straight slot in the
-// blank, a vent pattern that runs over a fold.
+// Unfold / Refold (docs/sheetmetal/README.md#how-the-unfolder-works): the pair
+// that lets a cut be authored FLAT across a bend — a slot that has to be a
+// straight slot in the blank, a vent pattern that runs over a fold.
 //
 // Unfold lays some or all of a sheet body's bends flat, in place; whatever is
 // drawn and cut after it is cut in the flat; Refold folds those same bends back

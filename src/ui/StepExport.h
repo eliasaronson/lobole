@@ -1,6 +1,6 @@
 #pragma once
 
-// STEP export (X4, docs/interchange/step-export-plan.md): the one place that
+// STEP export (docs/interchange/README.md#exporting-step): the one place that
 // turns a document into what CADKernel::SaveSTEPModel writes. The RPC and
 // the Export dialog both come through here, so a file carries the same
 // names, colours and structure whichever way it was asked for. (The tube

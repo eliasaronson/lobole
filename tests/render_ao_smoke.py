@@ -182,7 +182,7 @@ def main():
                f"{occ_top - wall_top} px below the walls' top)")
 
         # --- Half tier = half-res AO + joint-bilateral upsample
-        # (docs/rendering/ssao-upsample.md). Two contracts: it must look LIKE
+        # (docs/rendering/README.md#ssao). Two contracts: it must look LIKE
         # native full (a regression bound on the mean difference), and its
         # occlusion must still land ON the geometry — a wrong upsample UV or
         # a dead depth guide displaces AO exactly like the mapping bug this

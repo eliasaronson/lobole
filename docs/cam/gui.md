@@ -1,515 +1,238 @@
-# CAM for someone who has never done CAM
-
-> Status: **BUILT** (2026-08-21), G1–G4. From: *"make the GUI more intuitive —
-> selecting the top face visually, immediately understandable for someone who
-> has never done CAM, as few clicks, settings and writes as possible."*
->
-> The engine ([plan.md](plan.md)) was built and tested first. This was only
-> about how a person reaches it. What follows is the design as written, with
-> an [as-built section](#as-built) at the end recording what changed and what
-> the first screenshots caught.
-
-## What is wrong with the panel today
-
-It is a parameter editor: a setup combo, a tool table, and per-operation rows
-of `top / bottom / stepdown` drag fields. Everything it asks for is a number
-about geometry the app can already see — and it asked the user for `2.00 →
--0.00`, which produced no toolpath and a refusal reading *"check its depths
-against the model"*. That is the whole problem in one line: **the app knew the
-answer and asked anyway.**
-
-A CAM beginner does not have depths. They have a part, and an intent: *clear
-that pocket, cut this out, face the top.*
-
-## The shape: verbs, not fields
-
-A toolbar button opens **one Tool-window session** (the U7/U8 pattern the
-Section tool uses), and the session offers verbs. Each verb arms a face pick;
-one click on the model completes it.
-
-```
-Zero:  [ Pick top face ]        ← Z zero, stock top, work origin
-────────────────────────────
-  [ Clear a pocket ]  → click the pocket floor
-  [ Cut it out ]      → click the outline, or nothing = the whole part
-  [ Break an edge ]   → click the wall whose top edge to round/chamfer
-  [ Face the top ]    → no pick
-```
-
-The CAM dock tab stays, holding the **list** of setups and operations — a
-list belongs in a panel. Editing a number stays possible; it stops being the
-way in.
-
-**Two clicks to a pocket, nothing typed.** Picking the floor gives the
-operation its boundary (the face's outer wire), its `bottomZ` (the face's own
-Z), its `topZ` (the stock top), and its stepdown (from the tool). The
-`2 → -0` failure cannot be expressed.
-
-### Why a tool session and not a mode
-
-Simulation is a mode because it takes the viewport over — bodies hidden, a
-field overlay, BC picking that means something other than selection. CAM
-needs none of that: the backplot coexists with the model, and a picked face
-means "that face".
-
-And modes have a **known failure class in this codebase** — U11 spent a round
-on simulation mode exiting when it should not (`File > New` left it), because
-transitions were scattered across call sites. A tool session has a far
-smaller surface, and the Section tool has needed no exit fixes. Choosing the
-session *is* choosing to avoid that class.
-
-If CAM ever earns a mode (stock rendering, machine limits, toolpath
-playback), the rule to carry from U11 is: **one `EnterCam`/`ExitCam` pair, the
-mode owned by the active part tab, and a test per transition** — new project,
-open project, switch tab, delete the setup, undo.
-
-## The visualisation ladder
-
-For a beginner the picture *is* the interface. Ranked by confusion removed:
-
-1. **The tool, to scale, at the moment of the pick.** A translucent cylinder
-   of the real diameter in the pocket corner. It answers the question a
-   first-timer does not know to ask — *will my cutter fit, and what radius
-   will it leave?* Highest value of anything here.
-2. **The material that will disappear.** Ghost the volume removed: the pocket
-   void from stock top down to the picked face. Confirms the pick better than
-   any number.
-3. **Hover preview before the click** — highlight the region that *would* be
-   cleared. The pick pipeline already hovers faces; this is wiring.
-4. **Depth as a label on the part** ("3.0 mm"), so the derived number is
-   visible without reading a field.
-5. **Stock as a translucent box**, because where Z zero is and how much
-   material sits above the part are otherwise invisible — and Z zero is the
-   expensive mistake.
-6. **Leftover painted on the part** after Generate. The verifier already
-   computes a height-map difference, so tinting what the tool cannot reach
-   (inside corners) is nearly free, and most hobby CAM makes you infer it
-   from a backplot.
-
-**The discipline that keeps this from becoming noise:** show only the
-consequence of the decision being made, and drop it when the decision is
-made. Hover → candidate region. Picked → removed volume + tool + depth label.
-Generated → backplot + leftover. Session closed → everything but the backplot
-goes away.
-
-Most of it is assembly, not new rendering: ghosts exist (in-context edit,
-topo overlay), dimension labels exist (measure/drawings), line overlays exist
-(backplot).
-
-## Numbers become derived, and stay visible
-
-Stepdown = 0.5 × tool diameter · stepover 0.45 · ramp 3° · tabs on any profile
-that cuts through. Shown as one sentence — *"6 mm tool, 3 mm deep in 6 passes,
-climb"* — with an **Advanced** disclosure holding today's drag fields. Not
-deleted; not the first thing you meet.
-
-The one number that is genuinely the user's: **feeds and speeds**. The app
-does not know the machine's rigidity, and a wrong guess breaks tools
-([plan.md](plan.md)). The tool table keeps asking, and says why.
-
-## The verdict, in words
-
-After Generate, replace "1725 mm of cutting" with what the verifier already
-knows:
-
-> ✓ **Machines the part.** No gouges, nothing left over. ~4 min at these feeds.
-> ⚠ **Rapid through material at line 42** — raise Safe Z, or start higher.
-
-`cam_verify` produces exactly these numbers; the panel simply does not call it
-yet. Verification stops being a thing you remember to run.
-
-## Phases
-
-| | scope | size | |
-|---|---|---|---|
-| **G1** | `Pick top face` → Z zero / stock top / work origin, and the tool drawn to scale at the pick | ~1 session — *the two mistakes that break tools* | **done** `6ca9351` `6bf67a4` |
-| **G2** | The verbs (`Clear a pocket`, `Cut it out`, `Face the top`) on the Tool-window pattern, with derived depths | ~1 session | **done** `8d71991` `43ef325` |
-| **G3** | Removed-volume ghost, hover preview, depth label, stock box | ~1 session | **done** `43ef325` |
-| **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
-| later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
-
-**`Over openings` passes over HOLES, never over material (2026-08-30).**
-Asked as "that sounds like it could be dangerous — what happens if the holes
-are smaller than the cutter?", and the sub-cutter hole turned out to be the
-safe half: the tool cannot enter a 3 mm circle whatever it does, so crossing
-it is harmless and going around it is pure waste. The danger is the opposite
-category. A BOSS standing up from the floor has the same kind of inner wire
-as a hole and the opposite meaning, and driving over one is a full-width cut
-at full depth into material nobody asked to remove. The first cut of this
-feature dropped every inner wire, and its own test asserted the cutter driving
-through a boss.
-
-The generator tells them apart by sectioning 0.05 mm above the floor: an
-inner wire with something standing in it is KEPT whatever the option says. No
-flag may point the cutter at material. This is where FreeCAD's `UseOutline`
-differs — `Part.Face(element.OuterWire)` loses the bosses with the holes.
-
-Measured, dropping a true island makes the path SHORTER as well as complete:
-weaving around one is extra contour on every depth pass, and the sliver it
-leaves is not cut by any of it.
-
-**…and an opening the cutter FITS INTO is still an island (2026-08-31).**
-`Over openings` crossed every opening, which is right for one the tool cannot
-enter — the detour only leaves a sliver — and wasteful for one it can. On a
-speaker baffle the flange recess is Ø187.3 with the Ø146.4 driver cutout
-through its middle: clearing across that middle is minutes of cutting over a
-hole the job removes anyway. Size decides now. On the real part it took the
-front side from 26.0 m of cutting to 10.8 m, with the same verdict.
-
-**A hole is not an island — `Over openings` (2026-08-30).** A pocket takes its
-boundary from the picked face's wires: the outer one is where to stop, every
-inner one an island to go around. Right for material standing in the pocket,
-wrong for a HOLE — the cutter detours around thin air, and where a hole nearly
-touches the pocket wall it leaves an uncut sliver too narrow for the tool to
-come back to. Drilling the holes first does not help: the cut still routes
-around where they are. `Over openings` clears the outline and passes straight
-across them. FreeCAD spells the same idea `UseOutline` ("uses the outline of
-the base geometry", `Path/Op/PocketShape.py`) and implements it the same way —
-`Part.Face(element.OuterWire)`, keep the outer wire and drop the rest.
-
-**`Cut it out` on a level FACE, with `side: inside` (2026-09-09).** Cutting
-inside a face means cutting the OPENINGS in it — every one, in one operation.
-It is the only thing the words can mean: offsetting the face's own outline
-inward carves a trench a whisker inside the part, full depth, all the way
-round, which is what a face pick silently did until this landed. A boss is
-not an opening (the standing-material test `use_outline` already had decides
-it), an opening too narrow for the cutter is named in `skipped` while the
-others are cut, and `drilled_bores` leaves the round ones up to that
-diameter to the drill — which cannot be a width, since a milled slot is
-often narrower than a drilled hole (docs/modeling/fpv-drone.md, finding 7).
-
-**`Drill a hole` (2026-08-30).** `OpType::Drill` has been in the engine since
-C1, derived from a picked cylindrical face, and reachable only by script. It
-is a verb now — and since a verb stays armed, a bolt circle is one click per
-hole. Its refusal for a hole that does not face the spindle now says "lay a
-face up", which has been the answer since v67.
-
-**The tool glyph is matte (2026-08-30).** It was metallic 0.9 / roughness 0.25
-— a near-mirror, so most of what showed on the holder was the environment map
-reflected in it, and a reflection slides across a curved surface at its own
-rate as the camera orbits. Reported as "the upper part almost follows the
-camera but not completely", which is exactly what that looks like; the flute
-is thin and mostly buried in material, so it did not show the effect and
-"behaved correctly". The glyph is an instrument for reading where the cutter
-is, and a mirror finish costs that reading to gain nothing.
-
-**Save G-code wrote into the project (FIXED 2026-08-30).** The comment said
-"beside the project"; the code said `projectPath + "/" + name + ".nc"`, and
-`projectPath` IS the `.dsgn` bundle — so the G-code landed inside it.
-`StampProject` walks every regular file in the project, so the job's own
-output changed the project's disk stamp and the next save refused with "the
-project changed on disk since you opened it": the app fighting itself over a
-file it had just written. It goes in the bundle's PARENT now, named for the
-project and the setup (`smart_speaker - Setup 1.nc`) so several parts' jobs
-can share a directory.
-
-**`Leave` on an operation (2026-08-30).** `stockToLeave` has been in the
-engine since C1 and reachable only by script. It is the roughing/finishing
-split: rough at 0.2-0.4 mm, then a second operation at 0 cuts the wall once,
-at full depth, in one pass — the difference between a flange a driver seats
-flat on and a stack of stepdown terraces.
-
-**Picking, after the fixture frame (2026-08-30).** Three changes, all from
-one dogfooding round on a baffle.
-
-*"Pick top face" clamps.* Calling a face the top IS the statement that the
-part is held with it up, so the pick lays it up and then takes Z zero from it.
-For a face already level `SolveFaceUp` returns the frame it was given, so
-nothing moves — the two were only ever separate steps for the faces that used
-to be **refused**, and making the user translate a refusal into two more
-clicks is not a design. "Lay a face up" stays for the other case: re-clamping
-*without* re-answering Z zero, which is what a flip job needs.
-
-*Re-clamping re-derives depths.* `topZ`/`bottomZ` are heights in setup space,
-so turning the part left every existing operation measuring from a box that
-had moved — a cut that went through the panel became a cut through air. They
-follow the frame now, and the count is stated (`state.camNote`) rather than
-left to be noticed in the backplot. Same channel says when a Z zero was lost
-because the face it came from is no longer level, which used to happen in
-complete silence and read as "laying a face flat is broken".
-
-*A verb stays armed.* One verb is almost never one face — a part has six holes
-to clear — and disarming on success cost a verb press per hole. The slot
-survives the pick; Escape or pressing the verb again puts it away. Pick
-buttons are no longer greyed out while another is armed, because a sticky mode
-that greys its neighbours means Escape between every change of verb. The
-floating window also gained a `Tool` row: every number a verb derives is a
-fraction of the cutter, so choosing it afterwards means re-deriving.
-
-**Cutter shape reaches the toolpath (2026-08-31).** It used to stop at the
-simulation: `TipHeight` decides what a tool removes, so the verdict and the
-picture both knew a ball from a flat mill, and GENERATION did not. Measured on
-one pocket, a ball nose and a flat mill produced byte-identical paths — same
-5036.75 mm — and the ball left 160 mm² of scallop that only the verifier ever
-mentioned. Two things follow from the tip now:
-
-- **Stepover.** A flat mill's floor is flat whatever the step, so 45% of the
-  cutter stands. A ball's is not: it leaves a cusp, and the cusp decides the
-  step — `s = 2·sqrt(2·r·cusp − cusp²)`, with the cusp target 2% of the tool's
-  RADIUS so it stays right for a 1 mm ball and a 12 mm one. On a 6 mm ball
-  that is 1.7 mm against a flat mill's 2.7.
-- **A cone is refused a floor.** A V-bit or a drill point run along a floor
-  ploughs a groove as deep as the pass. There is no stepover that fixes that,
-  so pocket, face and adaptive refuse them by name and say what to use instead.
-
-**Concentric rings link at depth (2026-08-31).** Every ring of a clearing
-pass used to get a full entry — lift to safe Z, fly back along the circle,
-descend, ramp in, cut a lap — so a flange recess did that a dozen times over.
-A ring's neighbour starts one step-over away, through the band it is about to
-cut anyway, so there is nothing to lift over. `EmitRing` keeps the tool down
-when the next ring starts within one and a half step-overs, rotating that ring
-to begin where the tool already is; further than that (two disjoint regions at
-the same inset) it still lifts, because linking those at depth would drag the
-cutter across whatever lies between. On the real job: **121 retracts to 21**,
-same verdict.
-
-Two things the change needed that are worth knowing. A lap must be able to end
-WITHOUT retracting, or the next ring never finds the tool at depth — and once
-laps end down, the next entry's lateral rapid starts at the bottom of a cut,
-so it has to climb straight up before it travels. Both were caught by the
-existing gates rather than by looking (`cam: a pass never rapids to a depth
-nothing cleared` went to 14 the moment the retract came out).
-
-**A profile follows the part's projection, not its section (2026-08-31).**
-A cutter at depth z removes the whole column above it, so it may only travel
-where every height between the operation's top and z is waste. The contour is
-therefore the part's projection over [z, topZ] — the union of its sections —
-and not the section at z, which is a different shape wherever a feature opens
-part-way down. A cross-dowel bore opening onto a panel's side face notches the
-section at its own height and nowhere else; following that notch cut the
-bore's 8 mm plus the solid above and below it, an 8.00 mm gouge on the real
-part. `ProjectedOutlines` accumulates it down the passes; a picked wall is
-re-resolved against it per pass rather than named once at the wall's own
-mid-height. One rule serves both sides — the sweepable region is the
-complement of the projection — and it accumulates from the OPERATION's top,
-not the stock's, since that is the declaration that what is above is already
-clear. Gated in both directions: a notch under solid material is never
-entered, and a notch open from the top still is.
-
-**Backplot contrast (2026-08-31).** Pale blue on a light grey workpiece is a
-hair off the surface it is drawn on. Cut moves are amber now, plunges red,
-rapids stay muted grey — amber reads against both the part and the dark
-ground, and is clear of the blues selection and sketches use.
-
-**Stock and Zero (2026-08-30, v68).** "Stock and safety" gained the two
-things a Fusion setup has and this one did not. *What the workpiece is*:
-"Around the part" (the model box plus margins — what every job had, still the
-default) or "A fixed sheet" with its real size and where the part sits in it.
-A sheet smaller than the part is refused, naming the axis and the shortfall,
-because "get a bigger board" and "draw something" used to arrive as the same
-sentence. *Where zero is*: the corner the operator touches off on — stock
-corner, stock centre or part corner — with the derived triple printed beside
-it. The post SUBTRACTS it, so the file's zero is that corner at the height of
-the picked top face. Both are scripted by `set_cam_setup {origin_at, stock}`.
-
-**The operation row (2026-08-30).** Two things it could not say. *Which
-cutter*: `op.toolNumber` was read to print a diameter and never written, so
-"this opening is 5.46 mm across and tool 1 is 6 mm — use a cutter of 5.46 mm
-or less" was a refusal naming a remedy the panel could not perform, with the
-smaller tool already defined in the setup. It is a row of `T1 T2 …` buttons
-under Advanced — buttons rather than a combo because a setup has a handful of
-tools, so one click beats two, and because a combo gathers with an empty
-label and could not be gated. Retooling carries the stepdown: half the new
-cutter, unless you typed your own. *Which order*: the operations list had no
-reordering at all, though the order IS the cutting sequence — the generator
-and the post both walk the vector, so it decides what is roughed before what
-is finished and where the tool changes and their `M0` pauses fall. Drag the
-grip handle. Scripted twin: `move_cam_op {id, to}`.
-
-G1 first: picking the top face is the highest-value single click in CAM, and
-the tool-to-scale drawing prevents the most common beginner surprise.
-
-## What this subsumes
-
-Two papercuts already owed from using the panel, both of which evaporate:
-
-- the pocket refusal that says *"check its depths against the model"* instead
-  of naming the model's Z span — with a picked floor there is nothing to
-  refuse;
-- pocket defaults derived from the stock box (what produced `2 → -0`) — the
-  picked face supplies them.
-
-## Verification
-
-- Headless: picking a face yields an operation whose depths match that face
-  and the stock — no field is read from the panel.
-- GUI: two clicks (verb, face) produce a pocket op with a non-empty toolpath;
-  a pick on a curved face refuses visibly; closing the session drops the
-  ghosts but keeps the backplot; **and the id-conflict guard stays** (two
-  tools + two operations, after `3c873a7`). R15 adds the same pair for the
-  edge break (`cam/verbs_two_clicks_to_an_edge_break`): with the setup's
-  default FLAT tool the pick refuses and makes no operation; with a ball nose
-  it derives the round from the wall and the tool.
-- The verdict text is asserted against a job with a known gouge, so the words
-  cannot drift from what the verifier reports.
-
-*As built:* `tests/test_cam.cpp` holds the derivation tests (a clicked floor
-gives every depth; an island in that floor is machined around; each verb that
-cannot apply says why; leftover means unreachable, not unprogrammed) and
-`GuiTests.cpp` `cam/verbs_two_clicks_to_a_pocket` walks the whole path
-including the ghost's Z span and the session close.
-
-## As-built
-
-Everything above shipped. What the design did not anticipate:
-
-**Three defects the first screenshot found**, none of which a test was
-looking for:
-
-1. **Safe Z was a bare 5 mm** — an absolute Z, so it sat *inside* any stock
-   taller than 5 mm, and the first job made by clicking rapided straight
-   through the block. The verifier reported it ("rapid through material at
-   line 11") the moment G4 started running automatically, which is the whole
-   argument for G4 in one line. Now `cam::DeriveSafeZ` puts it above the
-   stock top, and picking the top face re-derives it because the stock just
-   changed shape.
-2. **Leftover was measured over the whole stock.** A job that clears one
-   pocket in a block leaves the rest of the block untouched *correctly*, and
-   the verdict called all of it "22 mm of material left" and painted the part
-   solid red. Leftover is now measured only where the tool actually went
-   (`Inspection::touched`); the separate signal — a program that machines
-   nothing at all — moved to `Verdict::untouchedFraction`.
-3. **The UI font stopped at Latin-1.** Every em-dash and ellipsis in the
-   app's own prose rendered as `?`, in CAM's refusals and equally in the
-   section tool's "source missing — this cut is off". Fixed in `Theme.cpp`
-   for the whole app rather than by policing strings; verdict ticks use the
-   already-merged icon font, which the text font still has no glyph for.
-
-**One the GUI suite found:** the CAM panel was the only panel tabbed into the
-left dock node without `NoFocusOnAppearing`, so on first launch it took the
-tab from the model tree. Three unrelated tests had been failing on it
-("unable to hover Model"); a user would have said their tree was gone.
-
-**A convention that used to be worth knowing, resolved:** CAM's Z is the
-spindle axis, and the app's world is Z-up since docs/up-axis.md (2026-08-28)
-— the plan view for a 3-axis job simply IS the Top view, and picking "the
-top face" from the Top view derives an operation instead of being refused as
-a wall. "Look down the spindle" remains for any setup whose spindle is not
-the world's up — an indexed one, and since v67 a part clamped flat that is
-not modelled that way (docs/cam/setup-frame.md).
-
-Deliberately still open at v1, and **two of the three have since shipped**
-(CAM phase 2, 2026-08-21): helix entry for pockets too small to ramp into is
-**C6** (`b00cbf9`), and arcs in the posted file instead of polygonised curves
-are **C7** (`6c73990`, flat arcs; helical deferred). Still open: the ~0.4 %
-cut-length overcount at the ramp seam.
-
-### The verbs became the toolbar (2026-09-02)
-
-The design above put the verbs in **one floating window** opened by a
-toolbar button, because CAM lived on the part and a part's toolbar was full.
-Since the job became its own document kind ([job-document.md](job-document.md))
-that reads wrong on both sides: a job tab was drawing the *part* bar — thirty
-modelling tools, every one disabled — and the way into CAM was a button that
-opened a list of buttons.
-
-Now a job tab has **its own toolbar**, and the verbs are its tools, one
-button each, the way the part bar has one per feature:
-
-```
-[Z zero] [Lay face up] [Turn face up*] [Look down spindle] |
-[Clear a pocket] [Cut it out] [Drill a hole] [Break an edge] [Whole part] [Face top] |
-[Rough a surface] [Finish a surface] [Finish walls] [Rough on the rotary*] [Finish on the rotary*] [Clean up what's left] |
-[Generate] [Simulate] | [Fit] [Measure]        * only on a setup with a rotary axis
-```
-
-The finishing verbs (docs/cam/surface-verbs-plan.md): Finish a surface (R) and
-Finish walls (W) take a face, curved or tilted, and differ in the pattern, a
-raster or constant-depth laps. Rough on the rotary (Shift+O) and Finish on the
-rotary (Shift+R) take no pick: the whole part turns under the cutter. The
-rough goes down in layers of half the cutter and leaves a tenth of it, and
-the finish's pattern (parallel, spiral, helical) is in its settings. Their
-window's **Limit to a face** bounds the pass along the axis to a picked
-face's length, and **Whole length** undoes it.
-
-Rough a surface (Shift+S) roughs a 3D part in layers from the stock top,
-over its outline and a ring one cutter wide, leaving a skin for the finish.
-Clean up what's left (Shift+E) follows the last surface finish with the
-smaller ball chosen in its window, cutting only where the finish's ball
-could not reach (docs/cam/rough-rest-range-plan.md).
-
-Every button is a command (`job.*`, keymap context **`job`**), so the keys,
-the palette and the tooltips agree with the bar. Pressing a verb opens **that
-verb's window** — its sentence, its prompt, and **the tool it derives for**,
-with the operation it made under it — and lights the button while the pick
-is armed; pressing it again puts it away. The two no-pick verbs make the cut
-at once and open their window so the tool can still be changed: choosing
-another tool **re-derives the cut just made** rather than asking for a
-remove-and-redo.
-
-**The tool defaults to the last one used** (`ui::VerbTool`): the one chosen
-this session, else the setup's newest operation's, else the first. It is
-read from the job's operations, so it holds across sessions.
-
-The CAM panel keeps the **list** — setups, parts, stock, tools, operations,
-the transport — and now exists **only on a job tab**; the "Pick top face"
-row and the "Verbs" button left it for the bar. On a part the way in is
-still the part bar's own CAM button ("machine this part"), which opens the
-job tab.
-
-**One the change found:** the cutting simulation was drawn in *model* space
-— the stock and the cutter multiplied by setup-to-model — in a viewport that
-draws *setup* space. Invisible while a setup had one frame, permanent once
-fixturing became per part (v76): the block stood upright through a part
-lying flat. Same bug the backplot had the same week; the transform is
-deleted rather than corrected, and `backplot_lands_on_a_clamped_part` now
-asserts the cutter is drawn exactly at the timeline's cursor.
-
-**2026-09-02, later:** the part bar's CAM button is gone. A job is made from
-the tab bar's `+` and set up in the panel — machine, stock, parts — the way
-an assembly is made and then filled ([job-document.md](job-document.md),
-round two, M3).
-
-The panel is the job's STRUCTURE now, and the run is a tool
-([cam-panel-tidy-plan.md](../ui/cam-panel-tidy-plan.md)). Operations are rows
-in the feature list's style: double-click opens an op's settings in the CAM
-tool window, and right-click offers Edit, Enable/Disable, show what it
-removes, and Delete. Generate, the verdict, the output options and Save G-code
-are the Generate window, which the toolbar's gears open. The panel keeps one
-status line that opens it.
-
-**2026-09-22:** a **Fixtures** section under Parts lists the active setup's
-clamps and keep-out boxes in the same row style — its place as a dim tail,
-greyed when not checked; right-click Edit, Check, Move to and Remove — with
-an add button per part the job does not cut and one for a keep-out box. The
-job viewport draws them ghosted grey, and Simulate marks the worst hit
-([workholding-plan.md](workholding-plan.md)).
-
-
-**2026-09-22, later:** the panel's **Add operation** follows the setup
-([add-operation-plan.md](add-operation-plan.md)). A setup that already cuts
-on the 4th axis (it holds a rotary finish) gets another rotary pass. Every
-other setup gets the whole-part cut-out, as before. It used to add the
-cut-out everywhere, and on the helical rolling pin that meant a 3-axis
-contour round the dowel, sectioned inline, which held the frame for two
-minutes. The sectioning itself now runs off the frame as well
-([long-operations.md](../ui/long-operations.md), phase 6).
-
-**2026-09-22, later still:** Parts and Fixtures each add through **one**
-menu ([job-panel-add-menus-plan.md](job-panel-add-menus-plan.md)). They
-used to have a button per project part: a column under Parts, and a row
-under Fixtures that ran off the panel, offering the same parts again with
-nothing to tell cutting a part from clamping with it. "+ Add fixture" puts
-the keep-out box first and then "Hold it with a part:". An empty Fixtures
-section says that verify checks no clamps. A placed part's verbs (Cut,
-Remove) sit on its name line, and its X, Y and turn share the next line,
-named inside the fields.
-
-**2026-09-22, v127 / 2026-09-23:** a fixture moves with **arrows**, and a
-fixture made from a part can **rest on the stock**
-([fixture-gizmo-plan.md](fixture-gizmo-plan.md),
-[fixture-seat-plan.md](fixture-seat-plan.md)).
-- **The handles.** While its editor is open, the fixture gets the job tab's
-  gizmo: X, Y and Z arrows and a spin about Z.
-- **Snapping.** Its own flat faces snap to the stock's sides, top and bed,
-  and the editor names the snap ("Pad's underside on the stock top"). Hold
-  Ctrl to move freely.
-- **Resting on the stock.** Put down with a face on the stock's top, it
-  rests there and follows the stock. The editor then shows the edge it
-  reaches over, Along, Over the stock and Spin, all measured from the stock,
-  and Unseat.
-- **Lifting off.** Lifting it off the top stands it on its own again.
-- **The row** reads "over the -X edge", or "its seat is gone: …".
-
-The first version seated a clamp by two clicks (a face, then a spot). The
-person it was for could not tell how to use it, and the arrows replaced it.
+# CAM in the GUI
+
+The design rule: **the app knows the answer, so it does not ask.** A CAM
+beginner has a part and an intent — clear that pocket, cut this out, face the
+top — not depths. So the way in is a verb and a click on the model, every
+number is derived ([operations.md](operations.md#derivation--what-a-click-means))
+and stays visible and editable, and the verdict is in words. Two clicks make a
+pocket and nothing is typed.
+
+Code: `src/ui/Toolbar.cpp` (`DrawJobToolbar`), `Commands.cpp` and
+`core/io/Keymap.cpp` (`job.*`), `CamTool.{h,cpp}` (the verb session, its
+windows and what it draws), `CamPanel.{h,cpp}`, `CamGenerate.{h,cpp}`,
+`CamPlayback.{h,cpp}`, `GizmoInput.cpp`, `SettingsWindow.cpp`.
+
+## Making a job
+
+A job is made the way an assembly is: **New Job** on the tab bar's `+`,
+beside Part, Assembly and Drawing. On a job with no setup, the CAM panel is
+the setup step:
+
+1. **Machine** — chosen for you when there is one; with none, a refusal
+   pointing at Preferences › Machines.
+2. **Stock** — *Around the parts* (the parts' box plus margins) or *A sheet
+   you own*, whose size defaults to the machine's bed and whose thickness
+   follows the parts. No literal anywhere.
+3. **Parts** — the project's parts, added with the same buttons the Parts
+   section has.
+4. **Create setup.**
+
+`machine_part` is the RPC composite of making a job and adding a part.
+
+## The job toolbar
+
+A job tab has its own toolbar; every button is a command (`job.*`, keymap
+context `job`), so keys, the command palette, tooltips and the bar agree.
+Button ids are `###tb_job_*`.
+
+| group | verb | command | key | pick |
+|---|---|---|---|---|
+| Set up | Pick the top face (Z zero; also lays the part flat on it) | `job.top_face` | Z | a level-able face |
+| | Lay a face up (how the part is clamped) | `job.lay_face_up` | L | a planar face |
+| | Turn a face up (rotary table) * | `job.index_face` | A | a face |
+| | Look down the spindle | `job.look_down_spindle` | T | — |
+| Machine | Clear a pocket | `job.pocket` | P | its floor |
+| | Cut it out | `job.profile` | C | the wall to follow |
+| | Drill a hole | `job.drill` | D | inside the hole |
+| | Break an edge | `job.edge` | B | the wall whose top edge to break |
+| | Cut out the whole part | `job.whole` | Shift+C | none |
+| | Face the top | `job.face` | Shift+T | none |
+| | Rough a surface | `job.surface_rough` | Shift+S | none |
+| | Finish a surface | `job.surface` | R | a curved or sloped face |
+| | Finish walls | `job.walls` | W | a face (constant-depth laps) |
+| | Rough on the rotary * | `job.rotary_rough` | Shift+O | none |
+| | Finish on the rotary * | `job.rotary_finish` | Shift+R | none |
+| | Clean up what's left | `job.rest` | Shift+E | none |
+| Output | Generate toolpaths and verify | `job.generate` | G | — |
+| | Simulate the cut | `job.simulate` | S | — |
+| | Fit, Measure | `view.fit`, `view.measure` | | |
+
+\* Only on a setup whose machine has a rotary axis: a disabled button for an
+axis you do not own is a question with no answer, and offering the index
+unconditionally is how a 3-axis job could be handed `G0 A90`.
+
+**Look down the spindle** gives the plan view of this setup framed on the
+stock — the view down the spindle in the frame this setup cuts in, which is
+the world's Top only when the part is clamped as modelled and the table is
+square.
+
+## Verb windows
+
+Pressing a verb opens **that verb's window** — its sentence, its prompt, the
+**tool** it derives for, and the operation it made — and lights the button
+while its pick is armed.
+
+- **A verb stays armed.** One verb is rarely one face (six holes to clear), so
+  the pick survives a success; Escape or pressing the verb again puts it
+  away. Other verbs' buttons are not greyed while one is armed.
+- **The no-pick verbs** make the cut at once and open their window so the tool
+  can still be changed.
+- **Changing the tool re-derives the cut just made** — every derived number is
+  a fraction of the cutter — rather than asking for a remove and redo. The
+  tool defaults to the last one used (`ui::VerbTool`): the one chosen this
+  session, else the setup's newest operation's, else the first. It is read
+  from the job, so it holds across sessions.
+- **The rotary verbs** add **Limit to a face** (arms a surface pick and
+  bounds the pass along the axis to that face) and **Whole length**.
+- **The window lists the setup's operations** with the panel's own row
+  (`CamOperationRow`), so an operation is removed (right-click Delete) where
+  it was made, without switching to the docked panel.
+- **Refusals** are wrapped text that says what to click instead, and the
+  prompt pill names the pick that is actually armed; a pick that hits nothing
+  says "Nothing there".
+- **Pick the top face** lays the face up (for a face already level nothing
+  moves), takes Z zero from it and re-derives safe Z; re-clamping re-derives
+  every targeted operation's depths and says how many moved. It says nothing
+  about how much material sits above the part: the stock's Z margin (default
+  1 mm, the rough board a facing pass exists for) is kept, so Face the top
+  works right after the pick. A pick on a job with no setup makes the setup.
+- **Session state belongs to the job.** A new document, an opened project or
+  a closed job tab ends every CAM session with it — an armed pick, an open
+  verb window, a playback — so none is left pointing at a job that is gone.
+- The window follows the viewport and re-anchors when it reopens; fitting the
+  camera keeps the model in the band the window leaves.
+
+## What the viewport draws
+
+Show only the consequence of the decision being made, and drop it when the
+decision is made.
+
+- **Always, on a job tab:** the parts laid out in setup space; the stock as a
+  translucent box; the machine's work area as a dimmer box (red when the job
+  does not fit it; never resized); the fixtures, ghosted grey (outside the
+  document's body list, so picking and selection indices are untouched); the
+  backplot of the generated toolpaths — cuts amber, plunges red, rapids muted
+  grey — handed to the renderer's cached channel
+  (`SketchRenderer::SetCachedPrimitives`, a shared immutable list uploaded
+  only when it changes, never copied per frame).
+- **While a verb is armed:** a hover preview of the region the click would
+  clear.
+- **At the pick:** the tool to scale where it first enters the material (will
+  my cutter fit, and what radius will it leave?), the material that will be
+  removed as a ghost from the operation's top to its floor, and the depth as a
+  label on the part.
+- **After Generate:** the leftover painted on the part as points (not for a
+  rotary job).
+- An operation row's **Show what it removes** ghosts that operation's removed
+  volume on demand.
+
+## The CAM panel
+
+The panel is the job's STRUCTURE and exists only on a job tab; the run is a
+tool.
+
+- **Setup row:** the setup combo, `+` (new setup), **Flip** (the other side,
+  derived), `x` (delete). The machine combo, and under it the reconciliation
+  line when the embedded machine differs from yours or is not one of yours
+  (*Use mine*, *Save as mine* / *Save it*; [setup.md](setup.md#machine-profiles)).
+- **Parts:** each job part with its verbs on the name line (Remove, or Place
+  for a part without a placement) and its X, Y and turn on the next line,
+  named inside the fields; a part whose source is gone says so. **+ Add part**
+  opens a menu of the project parts the job does not hold (disabled, saying
+  why, when there are none).
+- **Fixtures:** one row per fixture of the active setup — a glyph, its name,
+  where it sits as a dim tail ("−X side", "over the −X edge", or "its seat is
+  gone: …"), greyed when not checked; right-click Edit, Check, Move to (−X, +X,
+  −Y, +Y, Centre, Top) and Remove. **+ Add fixture** offers the keep-out box
+  first, then "Hold it with a part:" and the project parts the job does not
+  cut; each item's tooltip says what the choice does, so cutting a part and
+  clamping with it are not confused. An empty section says that verify checks
+  no clamps.
+- **Stock and safety:** safe Z; the stock mode (Around the part / A fixed
+  sheet) with margins or size and place; where zero is (Stock corner, Stock
+  centre, Part corner) with the resulting origin printed beside it; and the
+  job's copy of the machine's post, arcs, 4th axis and A index.
+- **Tools:** rows in the list style (right-click Edit), **Add tool** offering
+  the machine's library first. Feeds and speeds are asked for, and the panel
+  says why: they are the one number that is genuinely the user's.
+- **Operations:** rows in the feature list's style, reorderable by the grip
+  (the order is the cutting sequence); double-click opens the op's settings in
+  the CAM tool window; right-click Edit, Enable/Disable, Show what it removes,
+  Delete. The settings show only the fields the type has (the capability
+  table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
+  corner relief, finish tool, Over openings, the rotary pattern as a radio
+  pair, and so on. **Add operation** adds what the setup calls for
+  (`cam::AddOperationType`: another rotary pass on a setup that already cuts
+  on the 4th axis, else the whole-part cut-out) through `DeriveOperation`, and
+  shows a refusal instead of adding a dead operation.
+- A one-line **status** that opens the Generate window.
+
+Combos with an empty label cannot be addressed by the GUI test engine, so
+choices a test must make (add menus, the rotary pattern, tool buttons) are
+popups, buttons or radio pairs. No two visible widgets may share an ImGui id:
+ImGui reports a collision in a popup no test sees, so
+`cam/panel_widgets_have_distinct_ids` draws the whole panel and fails on one.
+
+## Generate window
+
+The toolbar's Generate (and the panel's status line) opens a tool window with the run and what it
+found: generate and verify, the verdict sentences (Good/Warn/Bad, the same
+text `cam_verify` returns as `says`) with the cutter findings and machine
+lines, the output options — cutting order (`Cut`: authored/tool/part) and
+**One file per tool** — **Show path**, and **Save G-code**
+([post.md](post.md#files)). A generate on a job tab defers the slow passes to
+the background ([README.md](README.md#background-work)); the toolpaths fill in
+as they land and a progress row shows the batch. The "N mm of cutting" total is
+cached on the toolpaths' key.
+
+## Simulate
+
+`job.simulate` opens the transport window along the bottom of the viewport
+([simulation.md](simulation.md#transport)). With nothing generated it refuses
+in a popup at the click.
+
+## Gizmos
+
+- **Placement.** Selecting a job part gives it the job tab's gizmo at its top
+  centre: X and Y arrows move its placement in the stock, the Z arc spins it.
+  Nothing out of plane — which face is up is a face pick. A part without a
+  placement gets one on grab. Unless Ctrl is held, its edges snap to the
+  sheet's edges and centre and to other parts' edges, and the spin snaps to
+  multiples of 45° within 5° (`ui::SnapAngleDeg`). The drag redraws each
+  frame; the drop regenerates and re-verifies; one undo step per drag.
+- **Fixture.** While a fixture's editor is open it gets X, Y and Z arrows and
+  a spin about Z (it never tilts). Unless Ctrl is held, its own flat faces
+  square to the dragged axis (gathered once at grab: a step clamp's pad, bar
+  and stud undersides are separate candidates) snap to the stock's planes on
+  that axis — both sides in X and Y, top and bed in Z — within a screen-sized
+  threshold, and the editor names the snap ("Pad's underside on the stock
+  top"). Released with a flat, named, downward face on the stock's top and
+  over it, the fixture is **seated** (`cam::SeatFromPose`) and follows the
+  stock from then on; dragged off the top in Z it unseats. A seated fixture's
+  editor shows the edge, Along, Over the stock and Spin, measured from the
+  stock, and Unseat; an unseated one shows its bed position and the
+  placement buttons.
+
+## Preferences › Machines
+
+The machine store's editor: New / Duplicate / Delete, a list, and an editor
+whose every edit writes the file (a rename moves it): name, work area X, Y, Z
+(a partly typed area is kept), post, arcs, 4th axis, rapid feed, the A axis's
+top speed, and the tool library. Numeric fields go through `ui::ExprInput`.
+
+## Tests
+
+`src/app/guitests/GuiTestsCam.cpp`, e.g. `cam/verbs_two_clicks_to_a_pocket`
+(verb, face, a derived pocket with a toolpath; the ghost's Z span; the session
+closing), `cam/verbs_two_clicks_to_an_edge_break`, `cam/upright_panel_lays_flat`
+(a panel standing on edge: Z zero refuses its big face, laying it up makes it
+pickable, no A word is posted), `cam/job_tab_has_its_own_toolbar` (the row
+fits, no two verbs share a glyph), `cam/a_job_is_made_from_the_tab_bar`,
+`cam/a_placement_is_dragged_in_the_viewport`,
+`cam/a_clamp_is_dragged_onto_the_stock`, `cam/add_menus_offer_the_right_parts`,
+`cam/the_surface_verbs_take_a_curved_face`,
+`cam/the_rotary_verbs_rough_then_finish`, `cam/a_rotary_pass_limits_to_a_face`,
+`cam/backplot_is_not_copied_per_frame`, `cam/a_job_edit_undoes`. A test that
+leaves a CAM window open, or a docked tab switched, breaks later tests' clicks,
+so cleanup that matters to other tests comes right after the last interaction
+that needs it.

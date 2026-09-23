@@ -47,7 +47,7 @@ public:
   double diameter = 1.0;
   std::string diameterExpr;
 
-  // What the hole is FOR (docs/modeling/hole-standards.md).
+  // What the hole is FOR (docs/modeling/holes-and-threads.md#hole).
   //
   // Empty means the same hole this feature has always cut: a raw diameter,
   // and nothing downstream knows whether 6.6 is a clearance hole for an M6 or

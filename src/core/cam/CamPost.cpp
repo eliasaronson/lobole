@@ -43,7 +43,7 @@ struct Emitter {
   // engine works in setup space throughout, and the file is the one artifact
   // that has to speak the operator's numbers. Without it the panel's "Z zero
   // at 16.000" was a claim no line of the file honoured
-  // (docs/cam/stock-and-origin.md W1).
+  // (docs/cam/post.md#work-origin-in-the-file).
   glm::dvec3 origin{0.0, 0.0, 0.0};
   [[nodiscard]] glm::dvec3 Work(const glm::dvec3& p) const {
     return p - origin;
@@ -164,7 +164,7 @@ struct Emitter {
 // Mach3 and LinuxCNC agree on the motion words this generator emits; they
 // differ in the preamble, the tool change, and how a program ends. Keeping
 // the difference to those three places is why the interface is this small.
-// How a controller takes a tool change (docs/cam/router-round.md, R1):
+// How a controller takes a tool change (docs/cam/post.md#dialects):
 //   Table  -- T then M6, and the controller's tool table does the rest
 //             (LinuxCNC).
 //   Manual -- T M6, then M0 with a message: the operator changes the tool,
@@ -571,7 +571,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       // changed. A manual tool change is done with the spindle stopped, and
       // the line after M0 was a cutting move: two tools at the same rpm
       // produced a file that never turned the spindle back on. Found by
-      // reading the coupon's file (docs/cam/dogfood-round.md).
+      // reading the coupon's file (docs/cam/post.md#what-the-file-says).
       if (rpm > 0.0 &&
           (paused || currentRpm < 0.0 || std::abs(rpm - currentRpm) > 1e-9)) {
         std::ostringstream s;

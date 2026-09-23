@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The SDK (docs/agent-scale-plan.md, G1b), headless.
+"""The SDK (docs/scripting/sdk.md), headless.
 
 Two things are under test. First the ANTI-DUPLICATION rule that decides the
 whole design: the RPC surface is generated from `describe`, so this asserts
@@ -275,7 +275,7 @@ def check_angle_units():
     """Every hand-written angle keyword names its unit, as every RPC one does
     (tests/rpc_units_gate.py). A bare angle meant degrees in `revolve` and
     radians in `bolt_circle`; this catches the next helper, not only those
-    (docs/sdk-units-plan.md)."""
+    (docs/scripting/sdk.md#angles-name-their-unit)."""
     def bare(angle=0.0, start_angle=0.0, rotate_deg=0.0, pitch=1.0):
         pass
     expect(angle_params_without_unit(bare) == ["angle", "start_angle"],
@@ -432,7 +432,7 @@ def main():
         bores = plate.body().faces(kind="cylinder")
         expect(len(bores) == 6, f"six holes were drilled: {len(bores)}")
 
-        # ---- Angles name their unit (docs/sdk-units-plan.md) -------------
+        # ---- Angles name their unit (docs/scripting/sdk.md#angles-name-their-unit) -------------
         # An old spelling is refused naming the new one, before anything
         # reaches the app: `start_angle` was RADIANS, and read as degrees it
         # would be a plausible wrong part.
@@ -612,7 +612,7 @@ def main():
         # ---- What the friction round added -------------------------------
         # arc(): the entity type always existed (slot emits two) but there was
         # no way to draw one, so every rounded corner in the air-cooled engine
-        # is a slot or a polygon (docs/dogfood-friction-plan.md, F2).
+        # is a slot or a polygon (generators/README.md#single-cylinder-and-air-cooled-engines).
         d = app.part("arcs")
         sk = d.sketch(sdk.Plane.xy(0), name="D")
         sk.arc((0, 0), 20.0, 0, 180)

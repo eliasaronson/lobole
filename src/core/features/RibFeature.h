@@ -2,7 +2,7 @@
 
 #include "core/Feature.h"
 
-// Rib (modeling M8 tail, docs/modeling/thread-rib.md): a thin stiffener wall
+// Rib (docs/modeling/README.md#rib): a thin stiffener wall
 // grown from an OPEN sketch profile toward a body. The open profile is
 // thickened in-plane (symmetric offset by thickness/2 → closed slab contour),
 // prismed along the sketch normal far enough to pass through the target, then

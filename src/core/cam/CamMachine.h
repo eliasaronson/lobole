@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-// The MACHINE, as one physical thing (docs/cam/job-document.md, round two).
+// The MACHINE, as one physical thing (docs/cam/setup.md#machine-profiles).
 //
 // Post dialect, arc fitting and the rotary axis lived on `cam::Setup` because
 // there was nowhere else, and every new job re-answered "which machine" with

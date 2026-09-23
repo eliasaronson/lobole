@@ -3,7 +3,7 @@
 # upstream also carries 53 imperial rows whose drill columns are fractional
 # and number designations ("3/64", "#55") rather than millimetres, which is
 # also why bd_warehouse ships drill_sizes.csv and we do not need it.
-# See THIRD_PARTY.md and docs/modeling/hole-standards.md.
+# See THIRD_PARTY.md and docs/modeling/holes-and-threads.md#hole.
 Size,Soft,Hard
 M1.5-0.35,1.15,1.25
 M1.6-0.35,1.25,1.35

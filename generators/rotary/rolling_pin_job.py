@@ -12,8 +12,8 @@ more. Nothing here asks a finishing pass to take a big bite.
 
 That is the parallel job, the default. `--spiral` and `--helical` cut the same
 pin continuously -- one helix per layer, or passes that follow the flutes --
-roughing in 2 mm layers first (docs/cam/rotary-continuous-plan.md,
-docs/cam/rotary-helical-plan.md, docs/cam/dogfood-rotary.md).
+roughing in 2 mm layers first (docs/cam/rotary.md#patterns-rotary_pattern,
+docs/cam/rotary.md#layers-rest-and-the-rough-verb).
 """
 import argparse
 import os
@@ -100,7 +100,7 @@ def build_job(d, spiral=False, helical=False):
     d.call("set_cam_setup", id=sid, origin_at="stock_centre")
 
     if helical:
-        # Passes that FOLLOW the flutes (docs/cam/rotary-helical-plan.md):
+        # Passes that FOLLOW the flutes (docs/cam/rotary.md#patterns-rotary_pattern):
         # helices at the twist's own lead -- measured from the surface, so
         # lead_mm stays 0 -- stepped round the pin. EXACTLY the parallel
         # job's operations with only the pattern changed, so the two compare
@@ -115,7 +115,7 @@ def build_job(d, spiral=False, helical=False):
                stepover=0.10)
         return sid
     if spiral:
-        # Continuous 4-axis (docs/cam/rotary-continuous-plan.md): one helix
+        # Continuous 4-axis (docs/cam/rotary.md#patterns-rotary_pattern): one helix
         # per layer, the part turning while it cuts. The rough comes down in
         # 2 mm layers from the dowel and leaves half a millimetre; the finish
         # follows the flutes' surface in turns 0.6 mm apart.

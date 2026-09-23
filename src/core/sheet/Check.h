@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// Manufacturability as a query (docs/sheetmetal/plan.md, S6).
+// Manufacturability as a query (docs/sheetmetal/README.md#checks-and-data).
 //
 // Every one of these is valid B-Rep and comes back from the shop as a
 // question, which is the whole argument for checking it where the geometry

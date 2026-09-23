@@ -11,7 +11,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-// SSAO (S2, docs/rendering/ssao-soft-shadows.md): three passes recorded
+// SSAO (docs/rendering/README.md#ssao): three passes recorded
 // before the main render pass each frame —
 //   1. depth+normal prepass (full-res, non-MSAA): the opaque scene into a
 //      D32 depth + RGBA8 view-space-normal target (same instance set and
@@ -20,7 +20,7 @@
 //      noise, fullscreen-triangle fragment pass;
 //   3. depth-aware 4x4 bilateral blur (half-res R8);
 //   4. half mode only: joint-bilateral upsample to a full-res R8 target,
-//      guided by the full-res prepass depth (docs/rendering/ssao-upsample.md)
+//      guided by the full-res prepass depth (docs/rendering/README.md#ssao)
 //      — so the half tier stops bleeding AO across silhouettes. AOView()
 //      returns the upsampled target in half mode, the native blur target in
 //      full mode; mesh.frag multiplies it into the ambient/IBL term either

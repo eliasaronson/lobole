@@ -858,12 +858,12 @@ glm::dvec2 FaceExtent(const SketchFeature& sketch) {
   return any ? hi - lo : glm::dvec2(0.0);
 }
 
-// A first diameter for a hole in this face. The rule (docs/ui/
-// u10-defaults-and-refusals.md): a default carrying millimetres is derived
-// from what it acts on, never a literal. It used to be a literal 0.5 mm,
-// which on an 80 x 60 plate drills something you cannot see and on a 5 m
-// dock does not exist — "correct in the abstract and wrong against any real
-// part" is exactly the failure that rule names.
+// A first diameter for a hole in this face. The rule
+// (docs/ui/tool-sessions.md#defaults-and-refusals): a default carrying
+// millimetres is derived from what it acts on, never a literal. It used to be a
+// literal 0.5 mm, which on an 80 x 60 plate drills something you cannot see and
+// on a 5 m dock does not exist — "correct in the abstract and wrong against any
+// real part" is exactly the failure that rule names.
 //
 // A tenth of the narrower side of the face lands on ~6 mm for a 60 mm-wide
 // plate, which is a bolt hole. The fallback only applies when the face

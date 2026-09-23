@@ -7,7 +7,8 @@
 #include <string>
 #include <vector>
 
-// Worst case along a STATED chain of tolerances (docs/tolerances/plan.md T5b).
+// Worst case along a STATED chain of tolerances
+// (docs/tolerances/README.md#checks).
 //
 // The chain is stated, not inferred, and that is a deliberate retreat from
 // what the plan first proposed. A mate names the two faces that TOUCH, but a

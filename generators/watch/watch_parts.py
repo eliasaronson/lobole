@@ -875,7 +875,7 @@ def reduction_wheel(app, name="Reduction wheel"):
     staff — a one-way reduction wheel, as automatics have: a freewheel
     relation between the two lets the crown wind the barrel while the rotor
     stays put, and the rotor turned the wrong way winds nothing
-    (docs/freewheel-plan.md). Its bore clears the staff it turns on."""
+    (generators/watch/README.md). Its bore clears the staff it turns on."""
     part = app.part(name)
     key, d, t = "reduction_w", REDUCTION_D, 0.20
     slab(app, teeth(key), d, d + t, "new_body", "wheel")
@@ -901,7 +901,7 @@ def reduction_pinion(app, name="Reduction pinion"):
 def reverser_wheel(app):
     """The second reverser wheel: driven by the first, wheel to wheel, so it
     turns the other way. Its own one-way clutch onto its own pinion is what
-    makes the rotor wind whichever way it swings (docs/reverser-plan.md)."""
+    makes the rotor wind whichever way it swings (generators/watch/README.md)."""
     return reduction_wheel(app, "Reverser wheel")
 
 
@@ -914,7 +914,7 @@ def click_pawl(app):
     """The click: a pawl on the barrel bridge, its tip in a gap between two
     ratchet teeth. The `click` relation holds the ratchet through it, and
     rides the pawl over each tooth as the wheel winds
-    (docs/click-and-breguet-plan.md). Drawn in its own frame — the pivot at
+    (generators/watch/README.md#keyless-works-and-winding). Drawn in its own frame — the pivot at
     the origin, axes the world's — with the tip where it sits DROPPED IN, so
     the relation's lift is what takes it out."""
     part = app.part("Click")

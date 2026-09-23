@@ -13,7 +13,8 @@
 
 class Document;
 
-// How much of a member's path still has metal on it (docs/tube/plan.md, T3).
+// How much of a member's path still has metal on it
+// (docs/tube/README.md#the-cut-list-and-the-bend-schedule).
 //
 // A tube is cut to the DEVELOPED length of its centreline — but a member that
 // has been coped is shorter than the path it was swept along, by the depth of

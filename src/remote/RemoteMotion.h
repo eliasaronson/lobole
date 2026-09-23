@@ -11,9 +11,9 @@ namespace ui {
 struct AppState;
 }
 
-// Motion study RPCs (docs/agent-scale-plan.md, G2): define a study on the
-// active assembly, run it (synchronously or as a background job), read the
-// collision table, scrub a pose, export the animation. Returns the result
+// Motion study RPCs (docs/assemblies/README.md#motion-studies): define a study
+// on the active assembly, run it (synchronously or as a background job), read
+// the collision table, scrub a pose, export the animation. Returns the result
 // json when `method` is one of them, std::nullopt otherwise.
 namespace remote {
 

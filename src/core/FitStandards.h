@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-// ISO 286-1 limits and fits (docs/tolerances/plan.md, T1): a tolerance CLASS
+// ISO 286-1 limits and fits
+// (docs/tolerances/README.md#iso-286-limits-and-fits): a tolerance CLASS
 // ("H7", "g6", "js6") plus a nominal size gives the band that size may vary
 // in, and a hole class paired with a shaft class gives the fit between them.
 //

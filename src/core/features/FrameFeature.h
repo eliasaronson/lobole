@@ -19,14 +19,14 @@
 //               by a translation and an XYZ rotation, both expression-driven.
 enum class FrameKind { Explicit, FromElement, Offset };
 
-// A named datum frame as a history feature (agent-scale plan G0,
-// docs/agent-scale-plan.md). It is the thing a mate connector anchors to by
-// NAME — the mate as designed, instead of the centroid of whatever face
-// happened to be nearby — and the thing a script positions against without
-// ever transcribing a coordinate. Contributes no body. A definition that
-// does not resolve (an element gone, a parent missing, a bolt circle whose
-// axes disagree) fails Execute and stops regeneration there, the datum
-// contract, so nothing downstream silently mates to a stale frame.
+// A named datum frame as a history feature
+// (docs/assemblies/solver.md#connector-frames). It is the thing a mate
+// connector anchors to by NAME — the mate as designed, instead of the centroid
+// of whatever face happened to be nearby — and the thing a script positions
+// against without ever transcribing a coordinate. Contributes no body. A
+// definition that does not resolve (an element gone, a parent missing, a bolt
+// circle whose axes disagree) fails Execute and stops regeneration there, the
+// datum contract, so nothing downstream silently mates to a stale frame.
 class FrameFeature : public Feature {
 public:
   FrameFeature(const std::string& name, FrameKind kind = FrameKind::Explicit);

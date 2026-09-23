@@ -5,10 +5,10 @@
 #include <cstdint>
 #include <string>
 
-// Corner relief (docs/sheetmetal/plan.md, S8): where two bends of a sheet meet
-// at a corner, the metal of both is trying to move into the same place. A
-// relief cut there — round or square, centred where the two bend lines cross
-// — gives it somewhere to go instead of tearing or buckling the corner.
+// Corner relief (docs/sheetmetal/README.md#features): where two bends of a
+// sheet meet at a corner, the metal of both is trying to move into the same
+// place. A relief cut there — round or square, centred where the two bend lines
+// cross — gives it somewhere to go instead of tearing or buckling the corner.
 //
 // It applies to EVERY such corner of the body: a part with one relieved
 // corner and three that tear is not a part anybody wants. Corners where three

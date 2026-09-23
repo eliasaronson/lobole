@@ -18,7 +18,7 @@ Outputs, both committed so a build needs no Python:
 
 Run through nix: nix-shell -p "python3.withPackages(p: [p.fonttools
 p.shapely p.pillow])" --run "python3 tools/icons/build_icon_font.py"
-(docs/ui/icons-plan.md).
+(docs/ui/README.md#icons).
 """
 
 import argparse

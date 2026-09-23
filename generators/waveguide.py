@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A constant-directivity waveguide for the Alpair 7MS, to cut in 3D.
 
-The dogfood for 3-axis surfacing (docs/cam/surfacing.md). It is a real part
+The dogfood for 3-axis surfacing (docs/cam/operations.md#3-axis-surfacing). It is a real part
 -- it bolts to the smart_speaker baffle on the driver's own bolt circle and
 tightens the Alpair's directivity -- and it is chosen because ONE part
 exercises everything the workstream added:

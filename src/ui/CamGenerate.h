@@ -2,9 +2,9 @@
 
 #include "ui/AppState.h"
 
-// The Generate window (docs/ui/cam-panel-tidy-plan.md): the run -- generate,
-// verify, what the verifier found, the cut order, one file per tool, Save
-// G-code -- as a floating tool opened by the job toolbar's gears, like
+// The Generate window (docs/ui/panels.md#cam-job-tab-the-cam-panel): the run --
+// generate, verify, what the verifier found, the cut order, one file per tool,
+// Save G-code -- as a floating tool opened by the job toolbar's gears, like
 // Simulate. It used to be a block of the docked CAM panel, above an operations
 // list that pushed it off the bottom as the job grew.
 namespace ui {

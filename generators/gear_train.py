@@ -14,7 +14,7 @@ pitch radius per radian. Then the pinion is turned through a tooth pitch
 and the interference check says whether the teeth ever clash — the static
 tooth check that stands in for "contact".
 
-What this is: docs/assemblies/relations-plan.md, the demo.
+What this is: docs/assemblies/relations.md, the demo.
 """
 import argparse
 import math

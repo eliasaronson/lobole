@@ -317,7 +317,7 @@ def _bolts_below(occurrence, frame_name):
     """That a flare came to rest mouth-down: its bolt lugs below its middle.
 
     This used to be a search — turn the mate over, look, turn it back — for
-    the reason the whole of docs/porting-friction-plan.md C is about: which
+    the reason docs/assemblies/README.md#deriving-a-mate-from-the-placement gives: which
     way round a fastened mate takes a part was not predictable and was not
     the same for two mates written alike. `asm.join` decides it from the
     placement now, and this is the assertion that is left. It is worth

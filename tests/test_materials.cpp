@@ -189,7 +189,7 @@ TEST_CASE("Wood materials are physically usable", "[materials]") {
 
 TEST_CASE("Glass, and only glass, transmits light", "[materials]") {
   // The still refracts through a transmissive body and the viewport draws it
-  // see-through (docs/rendering/glass-plan.md). A metal that picked up a
+  // see-through (docs/rendering/materials.md#glass). A metal that picked up a
   // transmission by accident would vanish from every render, so the
   // partition is exact.
   for (MaterialType t : MaterialLibrary::AllTypes()) {

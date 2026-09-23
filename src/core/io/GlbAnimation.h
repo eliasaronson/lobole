@@ -7,13 +7,13 @@
 #include <string>
 #include <vector>
 
-// A GLB with a glTF ANIMATION (docs/agent-scale-plan.md, G2): one node per
-// moving thing, its mesh once, and a translation + rotation channel sampled
-// at the study's keyframes. OpenCASCADE's RWGltf_CafWriter writes a static
-// scene and nothing else, so this is a writer of our own — small, because
-// glTF 2.0 is a JSON index over one binary buffer and the whole animation
-// is three accessors per node (times, translations, rotations) with LINEAR
-// interpolation, which for a rigid mechanism is exactly right.
+// A GLB with a glTF ANIMATION (docs/assemblies/README.md#motion-studies): one
+// node per moving thing, its mesh once, and a translation + rotation channel
+// sampled at the study's keyframes. OpenCASCADE's RWGltf_CafWriter writes a
+// static scene and nothing else, so this is a writer of our own — small,
+// because glTF 2.0 is a JSON index over one binary buffer and the whole
+// animation is three accessors per node (times, translations, rotations) with
+// LINEAR interpolation, which for a rigid mechanism is exactly right.
 //
 // Z-up in, Y-up out: glTF is Y-up by spec, so the scene root carries the
 // one rotation that converts and every node below it stays in the world

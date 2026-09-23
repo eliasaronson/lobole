@@ -52,7 +52,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // files in it, and every job reported `machine_match: missing` against a
   // machine plainly on disk. Which meant no travel limits and no rapid-feed
   // ceiling on exactly the surface an agent drives
-  // (docs/cam/dogfood-waveguide.md).
+  // (docs/cam/setup.md#machine-profiles).
   ui::ReloadMachines(state);
   // All renderer/selector pointers stay null: SyncDocumentRenderers no-ops,
   // and RemoteServer degrades the GUI-dependent methods with specific errors.

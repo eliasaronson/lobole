@@ -74,7 +74,7 @@ namespace {
 // would read as "this operation produces nothing", which is a real state
 // the panel already has to express — so it keeps what the previous generate
 // drew, and `pending` is what tells post, verify and simulate not to use it
-// (docs/ui/long-operations.md, "R2 and R6").
+// (docs/ui/long-operations.md#cam-toolpath-passes).
 void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
   if (!fresh.pending || !fresh.moves.empty())
     return;
@@ -198,7 +198,8 @@ void DropCamToolpath(AppState& state, uint64_t opId) {
 
 namespace {
 
-// The tool, to scale, where it first enters the material (docs/cam/gui.md).
+// The tool, to scale, where it first enters the material
+// (docs/cam/gui.md#what-the-viewport-draws).
 // This is the picture that answers the question a first-time CAM user does
 // not know to ask: will my cutter fit, and what radius will it leave in the
 // corners? A circle of the real diameter plus a short shank says both.
@@ -262,8 +263,8 @@ namespace {
 //
 // The vertices are a pure function of the toolpaths, so build them once.
 // Shared with the renderer, which draws them from its own cached channel
-// (docs/cam/backplot-frame-cost-plan.md): a rebuild makes a NEW list, and the
-// one the renderer may still hold is never touched.
+// (docs/cam/gui.md#what-the-viewport-draws): a rebuild makes a NEW list, and
+// the one the renderer may still hold is never touched.
 std::shared_ptr<const std::vector<PrimVertex>> g_backplot;
 uint64_t g_backplotKey = 0;
 
@@ -392,7 +393,7 @@ void AppendCamToolpathExtras(AppState& state, std::vector<PrimVertex>& out) {
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
   // The whole picture in one list -- for a test. The frame hands the backplot
   // to the renderer's cached channel instead of copying it here
-  // (docs/cam/backplot-frame-cost-plan.md).
+  // (docs/cam/gui.md#what-the-viewport-draws).
   if (const CamBackplotRef bp = CamBackplot(state); bp.verts != nullptr)
     out.insert(out.end(), bp.verts->begin(), bp.verts->end());
   AppendCamToolpathExtras(state, out);
@@ -529,8 +530,8 @@ void DrawCamPanel(AppState& state) {
                           "the thickness comes from the parts.");
     const std::vector<Body>& bodies = ui::JobBodies(state);
     if (ns.fixedSheet) {
-      // Derived, not literal (docs/ui/u10-defaults-and-refusals.md): the
-      // sheet defaults to the machine's bed in X and Y, and to the parts'
+      // Derived, not literal (docs/ui/tool-sessions.md#defaults-and-refusals):
+      // the sheet defaults to the machine's bed in X and Y, and to the parts'
       // height in Z -- a sheet is as thick as what it is cut into. With no
       // parts there is no thickness to derive, so the fields wait.
       const cam::Machine* mc = cam::FindMachine(state.machines, ns.machine);
@@ -572,7 +573,7 @@ void DrawCamPanel(AppState& state) {
       state.camActiveSetup = fresh.id;
       (void)cam::RecomputeOrigin(fresh, bodies);
       // Safe Z clear of the stock, not the struct's bare 5 mm — which sits
-      // inside anything taller than that (docs/cam/gui.md).
+      // inside anything taller than that (docs/cam/setup.md#safe-z).
       fresh.safeZ = cam::DeriveSafeZ(fresh, bodies);
       state.camSafeZEdit = static_cast<float>(fresh.safeZ);
       // CAM edits live in the document but bump no document version (the
@@ -616,8 +617,9 @@ void DrawCamPanel(AppState& state) {
   // WHICH operation changed, so only that one is regenerated. One adaptive
   // pocket takes seconds to generate; regenerating the whole setup on every
   // widget touch made the app freeze for as long as its slowest operation,
-  // once per edit (docs/known-bugs.md). 0 = nothing yet; kAllOps = something
-  // setup-wide (the stock, a tool, the frame), which every operation reads.
+  // once per edit (docs/cam/README.md#background-work). 0 = nothing yet;
+  // kAllOps = something setup-wide (the stock, a tool, the frame), which every
+  // operation reads.
   constexpr uint64_t kAllOps = ~uint64_t{0};
   uint64_t changed = 0;
   const auto touched = [&](uint64_t opId) {
@@ -654,7 +656,7 @@ void DrawCamPanel(AppState& state) {
   // The other side of the same part. A flip job is two setups on ONE part —
   // the alternative people reach for is a rotated COPY of the part, which
   // then has to be kept in step with the original by hand
-  // (docs/cam/setup-frame.md S4).
+  // (docs/cam/setup.md#setups).
   if (ImGui::SmallButton("Flip###cam_flip_setup")) {
     cam::Setup& other = state.job->AddSetup(setup->name + " (back)");
     // Carry the MACHINE and the material across — they did not change when
@@ -803,8 +805,7 @@ void DrawCamPanel(AppState& state) {
       }
       // The row's verbs sit on the NAME line and its numbers get a line of
       // their own: in one row they ran past a 220 px panel, and Cut and
-      // Remove were the part that fell off (docs/cam/job-panel-add-menus-
-      // plan.md).
+      // Remove were the part that fell off (docs/cam/gui.md#the-cam-panel).
       const auto removeButton = [&] {
         ImGui::SameLine();
         if (ImGui::SmallButton("Remove###cam_part_remove"))
@@ -905,9 +906,9 @@ void DrawCamPanel(AppState& state) {
     // Every part of the project this job does not already hold, behind ONE
     // button. A button per part was a column as long as the project, and
     // Fixtures offered the same parts again for a different purpose with
-    // nothing to tell the two apart (docs/cam/job-panel-add-menus-plan.md).
+    // nothing to tell the two apart (docs/cam/gui.md#the-cam-panel).
     // A popup, not a combo: an ImGui combo gathers with an empty label and
-    // cannot be gated by a GUI test (docs/cam/stock-and-origin.md W6).
+    // cannot be gated by a GUI test (docs/cam/gui.md#the-cam-panel).
     std::vector<const ui::PartSlot*> addable;
     for (const ui::PartSlot& slot : state.parts) {
       if (slot.kind != ui::DocKind::Part)
@@ -944,9 +945,9 @@ void DrawCamPanel(AppState& state) {
 
   // What HOLDS the stock in this setup: clamps, a vise, a fixture plate --
   // a part, or a keep-out box with no part at all
-  // (docs/cam/workholding-plan.md). Verify reports every move into one. Per
-  // setup, because re-clamping is what a second setup is. Rows in the list
-  // style the tools use (docs/ui/consistency-round-plan.md): the numbers are
+  // (docs/cam/setup.md#workholding-fixtures). Verify reports every move into
+  // one. Per setup, because re-clamping is what a second setup is. Rows in the
+  // list style the tools use (docs/ui/panels.md): the numbers are
   // in the tool window, the verbs in the row's menu.
   if (setup != nullptr && SectionHeader("Fixtures###cam_fixtures")) {
     ImGui::PushID("fixtures"); // PushID(int) below shares an id space
@@ -968,7 +969,7 @@ void DrawCamPanel(AppState& state) {
       row.selected = state.camEditFixture == f.id;
       row.dimmed = !f.enabled || missing;
       // A seated one is placed by the stock, and says which edge -- or why it
-      // no longer can (docs/cam/fixture-seat-plan.md).
+      // no longer can (docs/cam/setup.md#seats).
       const auto seatGone = state.camSeatRefusals.find(f.id);
       const std::string place =
           missing ? std::string("its part is gone")
@@ -1048,7 +1049,7 @@ void DrawCamPanel(AppState& state) {
     };
     // One button and a menu, as Parts has: a SameLine button per part ran
     // off the panel on a project of any size, and read as rows of fixtures
-    // that did not exist (docs/cam/job-panel-add-menus-plan.md).
+    // that did not exist (docs/cam/gui.md#the-cam-panel).
     if (ImGui::SmallButton(ICON_FA_PLUS " Add fixture###cam_fixture_add_menu"))
       ImGui::OpenPopup(kFixtureAddPopup);
     ImGui::SetItemTooltip("What holds the stock. Verify reports every move of "
@@ -1216,7 +1217,8 @@ void DrawCamPanel(AppState& state) {
     // Does this machine HAVE a 4th axis? A property of the machine, like the
     // post and whether it fits arcs. Until it is ticked no file can carry an
     // A word — which is the whole point: laying a part flat on the bed used
-    // to post `G0 A90` at routers that have no A (docs/cam/setup-frame.md).
+    // to post `G0 A90` at routers that have no A
+    // (docs/cam/setup.md#fixturing-frame-and-rotary-index).
     if (ImGui::Checkbox("Has a 4th axis (A)###cam_has_rotary",
                         &setup->machine.hasRotaryAxis)) {
       dirty = true;
@@ -1256,7 +1258,8 @@ void DrawCamPanel(AppState& state) {
     // One row each, in the feature list's style (ui::ListRow): the fields
     // are edited in the tool window (double-click, or Edit), the way an
     // operation's are, and Delete is in the row's menu -- refused while an
-    // operation cuts with the tool (docs/ui/consistency-round-plan.md).
+    // operation cuts with the tool
+    // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
     ImGui::PushID("tools");
     int deleteTool = 0;
     for (const cam::Tool& t : setup->tools) {
@@ -1340,8 +1343,9 @@ void DrawCamPanel(AppState& state) {
   // Generate, the verdict, the output options and Save G-code are the
   // Generate window's now (CamGenerate.cpp), opened by the toolbar's gears
   // like Simulate: a verb with a result, not a block of this panel that the
-  // operations list pushed off the bottom (docs/ui/cam-panel-tidy-plan.md).
-  // What stays is one line saying how the run stands, which opens it.
+  // operations list pushed off the bottom
+  // (docs/ui/panels.md#cam-job-tab-the-cam-panel). What stays is one line
+  // saying how the run stands, which opens it.
   ImGui::Separator();
   {
     int warns = 0, bads = 0;
@@ -1443,14 +1447,15 @@ void DrawCamPanel(AppState& state) {
 
   if (ImGui::SmallButton("Add operation###cam_add_op")) {
     // ONE derivation, two entry points: the same engine call the verbs use
-    // (docs/cam/gui.md). This path used to start the cut at the MODEL top,
+    // (docs/cam/operations.md#derivation--what-a-click-means). This path used
+    // to start the cut at the MODEL top,
     // which leaves the stock above it uncut and was the last residue of the
     // `2 -> -0` default — and it derived a stepdown from the depth rather
     // than from the cutter. A refusal is shown rather than an operation that
     // cannot cut (the u10 rule).
     // Which operation follows the setup: a job cut on the trunnion gets a
     // rotary pass, not a 3-axis contour round the dowel
-    // (docs/cam/add-operation-plan.md).
+    // (docs/cam/operations.md#derivation--what-a-click-means).
     const cam::DerivedOp derived = cam::DeriveOperation(
         *setup, ui::JobBodies(state), cam::AddOperationType(*setup), {});
     if (derived.ok) {
@@ -1491,7 +1496,7 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
                        cam::Operation& op) {
   // What the docked panel's "Advanced" tree held, moved rather than
   // rewritten: the CAM tool window draws it for the operation being edited
-  // (docs/ui/cam-panel-tidy-plan.md).
+  // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
   cam::Setup* setup = &setupRef;
   bool changed = false;
   const auto touched = [&](uint64_t) { changed = true; };

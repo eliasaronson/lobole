@@ -1,0 +1,225 @@
+# Panels and floating windows
+
+The app's patterns, which every panel follows:
+
+- **A docked panel holds the document's structure** — lists of the things
+  the document is made of, read, selected from and edited in place.
+- **A list is rows** in the feature list's style: a type glyph, the name,
+  a dim tail; click selects (Ctrl/Shift extend, [selection.md](selection.md#lists-one-gesture-one-delete)),
+  double-click edits, right-click offers the rest.
+- **Editing happens in the floating tool window**, not inline under the list,
+  so the list does not change length under the cursor
+  ([tool-sessions.md](tool-sessions.md)).
+- **A viewport mode floats.** Something driven in the viewport while you
+  watch the model (exploded views, motion, simulation) is a tool window
+  opened from the toolbar, not a docked section.
+- **A verb with a result is a toolbar button that opens a window** (Generate,
+  the BOM), and long work shows the shared progress bar
+  ([long-operations.md](long-operations.md)).
+- **Words.** A window that creates something says **Accept** / **Cancel**
+  (`###tw_accept` / `###tw_cancel`); a window that applies as you go says
+  **Close**. One trash glyph (`ICON_FA_TRASH_CAN`). One glyph per command,
+  the same on every toolbar and in every list ([README.md](README.md#icons)).
+
+## Shared widgets
+
+- **`ui::ListRow`** (`src/ui/Widgets.h`): glyph, label, tail, dimmed state,
+  a tail glyph, and an eye that appears on hover (always shown, struck
+  through, when the row is hidden). It elides a name that does not fit and
+  gives it back on hover.
+- **`ui::SectionHeader(label, count, defaultOpen)`**: the one disclosure
+  header — a chevron that points right when closed and down when open, an
+  optional count ("Occurrences 22"), a hover highlight across the row, drawn
+  as a row rather than a filled bar. Its open state is stored as
+  `CollapsingHeader`'s was. There is no `ImGui::CollapsingHeader` left in
+  `src/ui`.
+- **`TextFit.h`** (`TextEllipsis`, `SelectableEllipsis`, …): text that might
+  not fit is elided with `…` and the full string appears in a tooltip, using
+  ImGui's own `RenderTextEllipsis`. Text never clips silently.
+- **`ui::WrapRow`** (`src/ui/PanelLayout.h`): call `Next(width)` before each
+  widget of a row and it breaks the line when the next one will not fit.
+  `SameLine()` never wraps; a button past the panel edge cannot be seen or
+  clicked.
+- **Tables adapt, never clip digits.** A table cell clips rather than elides,
+  and a number that loses its trailing digits still looks like a number. The
+  Variables table drops to two rows per item when narrow; the BOM is a
+  floating window so its columns get the width they need.
+
+## Floating windows
+
+`ui::BeginFloatingWindow` (`src/ui/FloatingWindow.{h,cpp}`) places every
+floating window the same way: anchored to a viewport corner (`TopRight`,
+`BelowToolWindow`, `BottomCenter`), re-anchored when the viewport moves or the
+window reappears, clamped inside the app every frame, with the elevated
+border and a drawn shadow (`DrawWindowShadow`; ImGui has no shadow
+primitive), and `NoSavedSettings`. A window anchored `BelowToolWindow` stacks
+under the tool window (`state.toolWindowRect`) instead of opening on top of
+it. Users: the tool window itself, the Generate window, the BOM window and
+the CAM playback transport (bottom-centre).
+
+## Part tab: the Model panel
+
+The feature tree (`src/ui/FeatureTreePanel.cpp`):
+
+- One row per feature with its command's glyph (`FeatureIcon`, from the one
+  icon table), and a badge glyph per state — failed, warned, suppressed,
+  rolled past (`FeatureRowBadge`) — because two of those are dimmed and were
+  otherwise indistinguishable. A failed row is red with the reason.
+- The base planes and datum planes are rows too: a click fills an armed
+  plane pick, a double-click starts a sketch on that plane.
+- Double-click opens the feature's editor in the tool window (a sketch's
+  double-click enters the sketch). Right-click: Edit, Rename, Suppress,
+  Rollback to here / Roll to end, the derived-part verbs, re-pick verbs,
+  Delete (counted).
+- Drag a row onto another to reorder, validated on drop: a move that would
+  dangle a reference is refused with a message.
+- The rollback bar (`##RollbackBar`) is a draggable divider where
+  regeneration stops.
+- Body rows: an eye toggles visibility; the context menu has Hide/Show,
+  Material and Appearance.
+- Sections below: Mass properties (with a centre-of-gravity marker),
+  and, while a sketch is edited, its Operations and Constraints.
+
+## Assembly tab: the Model panel
+
+`src/ui/OccurrencePanel.cpp`. The panel lists what the assembly **is**:
+
+- **Occurrences** — a glyph (part or sub-assembly), the name, an anchor
+  tail glyph when fixed, dimmed when hidden, the hover eye for visibility.
+- **Mates** — a glyph per type, then the mate's name or "A – B" (the two
+  occurrences it joins), the type as a dim tail; red with the reason in the
+  tooltip when it failed to solve. The mate list uses `clickClears`.
+- **Relations**.
+
+Editors float. A double-click (or Edit) opens an occurrence's or a relation's
+properties in `DrawAssemblyEditWindow`, and a mate's (name, flip, rotate, its
+DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
+(`DrawMateToolWindow`). Each field edit is one undo step per drag.
+
+Floating from the assembly toolbar, one at a time through the tool-window
+slot (an exploded view and a motion study both place occurrences, so holding
+both open means nothing):
+
+- **Exploded views** (`###tb_asm_explode`, `assembly.explode`, X) —
+  `DrawExplodeToolWindow`: the list, Add, the name, the factor slider,
+  auto-explode, Delete. Close does not clear the view:
+  `activeExplodedView` stays applied, because the explode is a display state
+  and a person who closes the window is done editing, not done looking.
+- **Motion** (`###tb_asm_motion`, `assembly.motion`, M) —
+  `DrawMotionToolWindow`: the study list, the driver, the range, the Pose
+  scrub (`###motion_t`), and:
+  - **Preview motion** and **Validate motion** are *runs*, not edits: each
+    passes a `RunOverride {checkClash, clashMode}` to `StartMotionRun`
+    applied to the run's copy of the study, so the stored study (and
+    therefore what `run_motion_study` does) is untouched and no undo step is
+    pushed.
+  - The verdict is `motion::Verdict(result, study, stale)`
+    (`core/MotionStudy.h`), which asks whether the samples **solved** before
+    it asks about collisions ("Does not solve at sample 19 …" / "Moves
+    through all 73 samples; collisions not checked" / the clashing pair).
+  - **Play/Pause** animates the viewport through the run's stored poses,
+    display-only (`DisplayMatrix` interpolates; `TickMotionPlayback` runs
+    beside the CAM playback tick in both main loops). Play is refused, with
+    the reason, without a fresh solved result. Stopping restores the
+    document transforms; anything that invalidates the result stops
+    playback.
+  - **Export animation…** saves the animated GLB (`ExportMotionGlb`), and a
+    refusal is shown in the panel.
+- **Simulation** (`###tb_asm_simulation`) — `DrawSimulationToolWindow` (in
+  `StudyPanel.cpp`): the studies over `ui::StudyHost`, plus a participants
+  table (each top-level occurrence's role: Ignored, Rigid, Meshed or Bonded;
+  "Clamp here" on a rigid row). Close leaves simulation mode.
+- **Bill of materials** (`###tb_asm_bom`, `assembly.bom`, B) —
+  `DrawBomWindow`, floating below the tool window: name, quantity, material,
+  mass and total as sortable columns with the total mass in the header, plus
+  Check fasteners and Check fits.
+
+An assembly's configurations are in the Configurations dock tab
+(`DrawConfigurationsPanel` calls `DrawAssemblyConfigs` on an assembly tab),
+browsed and switched as a part's are.
+
+## CAM job tab: the CAM panel
+
+`src/ui/CamPanel.cpp` holds the job's structure: the setup and machine, then
+Parts, Fixtures, Stock and safety, Tools, and the operations.
+
+- **Operations** are rows (`CamOperationRow`) with the feature list's
+  gestures: click selects, drag reorders, double-click opens the operation's
+  settings (`DrawCamOpSettings`) in the tool window, right-click offers Edit,
+  Enable/Disable, "Show what it removes" and Delete. A disabled operation is
+  dimmed. The summary is type-aware (a rotary operation states its pattern,
+  lead and stepover).
+- **Tools** are `ListRow`s (number and type glyph, description, diameter as
+  the tail); double-click edits in the tool window. Delete is disabled while
+  an operation uses the tool, with those operations named, and
+  `RemoveCamTool` refuses with the same sentence.
+- **Generate** is a window, not a panel block (`src/ui/CamGenerate.cpp`):
+  the toolbar's gears (`job.generate`, G) always regenerate and open it; it
+  shows progress, the verdict, the cut order, one-file-per-tool, Show path
+  and Save G-code. The panel keeps one status line under the operations
+  (`###cam_run_status`) that opens the window as it stands.
+
+The CAM verbs themselves (docs/cam) run in the tool window. Starting a verb
+closes an open operation or tool editor.
+
+## Simulation: the Study panel and window
+
+On a part tab the studies are listed in the dock as `ListRow`s (a glyph for
+static, modal or topology, the name, and the state — solved, stale, failed —
+as the tail). A double-click, or the toolbar's Run (`###tb_sim_run`), opens
+the study in the floating Simulation window, where it is edited, run and read
+with the solve in the shared progress bar. Loads and kept faces are rows with
+Remove in their menu.
+
+What the setup draws in the viewport (`src/ui/StudyPanel.cpp`):
+
+- Every boundary-condition face is tinted through the mesh renderer's
+  face-highlight channel in its family's colour (fixtures, loads, keep
+  faces; `MeshRenderer::HighlightTint`), by `AppendSimulationFaceTints`,
+  which is part of the selection projection because that projection clears
+  first.
+- A pressure is drawn as a field: `SampleFace` lays sample points over the
+  face and each gets a short arrow along its own triangle's normal; a fixed
+  support repeats its anchor hatch on the same grid. A force keeps one arrow,
+  which is its drag handle ([viewport-handles.md](viewport-handles.md)).
+- Gravity is an arrow from the centre of mass.
+- Each boundary condition carries a label with its value and unit
+  (`SimulationLoadLabel`: "1.2 kN", "20 kPa"), switchable with "Labels in
+  viewport".
+
+Defaults come from the part: a force's direction is the negated outward
+normal of the face it is placed on (`fem::DefaultForceDirection`, shared with
+`add_load` when no direction is given; "Custom direction" restores an
+explicit vector), and its magnitude starts at the part's own weight. A body
+still on the default material (which has no stiffness data, deliberately) is
+flagged in the panel before Run, with the material combo in place
+(`###material_<body creator id>`). The load list shows each load's magnitude
+and direction. The `--offscreen` instance builds no overlays, so a study's
+picture needs a windowed instance.
+
+## Drawing tab: the Drawing panel
+
+`src/ui/DrawingPanel.cpp`. Views and dimensions are `ListRow`s (a view's tail
+is its scale, a dimension's its value). A view's menu sets its **Scale**,
+adds a bend table (when the view has bends) and deletes; a dimension's menu
+deletes. Rows have the menu gestures but no selection: a click highlights
+nothing on the sheet. **Add view** is one path: the toolbar opens it in the
+tool window (`DrawAddViewToolWindow`, `drawingAddViewOpen`) with the source,
+configuration, all seven orientations and the scale. Dimensions, Update
+views, the part note (`###tb_dwg_part_note`, L) are on the drawing toolbar;
+the panel keeps the count of stale views as a line pointing at the toolbar.
+
+## Other dock panels
+
+Variables (with the document's Units section), Configurations, History,
+Conflicts, the CAM panel on a job tab, and the Terminal (right-hand node,
+[terminal.md](terminal.md)). Their titles and ids are in
+`src/ui/PanelTitles.h`.
+
+## Not built
+
+The Configurations panel's checkbox columns and the History panel's row
+buttons do not yet follow the row pattern; a shared radio row for 2–4 choices
+(the feature editor, CAM, Settings) is not built; Delete does not reach
+assembly relations; a placed simulation load cannot be edited in place, only
+removed and replaced.

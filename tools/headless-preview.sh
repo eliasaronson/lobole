@@ -79,7 +79,7 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   # ...and the MACHINE store. A setup names its machine by name, so a preview
   # without one refuses every CAM job with "no machine called '6090'" against
   # a machine plainly on disk -- the same trap the headless RPC path fell into
-  # (docs/cam/dogfood-waveguide.md), arriving from the other side. Copied, so
+  # (docs/cam/setup.md#machine-profiles), arriving from the other side. Copied, so
   # an agent editing a machine here cannot touch the shop's.
   #
   # settings.json and machines/ only, explicitly. `cp -r` of the whole

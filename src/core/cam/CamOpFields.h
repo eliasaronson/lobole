@@ -10,7 +10,8 @@
 #include <variant>
 #include <vector>
 
-// An operation's fields, as ONE table (docs/cam/op-field-table-plan.md).
+// An operation's fields, as ONE table
+// (docs/cam/operations.md#the-capability-table-and-the-field-table).
 //
 // A field used to be written out by hand in about ten places -- the save
 // file's writer and reader, the RPC's owned list, apply step and answer, its

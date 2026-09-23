@@ -763,8 +763,8 @@ void DrawPartTabs(AppState& state) {
                     "Assembly " + std::to_string(state.parts.size() + 1));
       if (ImGui::MenuItem("New Drawing##adddwg"))
         AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
-      // A job is made the way an assembly is (docs/cam/job-document.md,
-      // round two): here, then a machine, a stock and parts -- not from a
+      // A job is made the way an assembly is (docs/cam/gui.md#making-a-job):
+      // here, then a machine, a stock and parts -- not from a
       // button on the part bar that built one around a single part.
       if (ImGui::MenuItem("New CAM Job##addjob"))
         AddJob(state, "Job " + std::to_string(state.parts.size() + 1));
@@ -849,7 +849,8 @@ void DrawUI(AppState& state) {
   // assembly browse and switch theirs the same way. This was part-only, and
   // that is the whole reason an assembly's configurations were re-implemented
   // as a section of the occurrence panel while this tab sat empty beside it
-  // (docs/ui/u15-assembly-panel.md). The panel itself picks the arm.
+  // (docs/ui/panels.md#assembly-tab-the-model-panel). The panel itself picks
+  // the arm.
   DrawConfigurationsPanel(state);
   // Variables spans the whole project, so it is drawn on every kind of tab.
   // It was inside the part-only branch above until 2026-09-01, and that is
@@ -886,7 +887,7 @@ void DrawUI(AppState& state) {
   // what makes io.WantTextInput accurate for this frame, so a bare `1` typed
   // into an occurrence's position field cannot also arm a mate tool. Before
   // this the bindings lived in four places at three different points in the
-  // frame (docs/ui/u12-keybindings.md).
+  // frame (docs/ui/keybindings.md).
   DispatchShortcuts(state);
 
   HandleViewportInput(state);
@@ -962,11 +963,11 @@ void DrawUI(AppState& state) {
     AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
-    // CAM's decision-time drawings (docs/cam/gui.md G3): the stock box and
-    // the removed-volume ghost are translucent surfaces, so they have to go
-    // into `quads` before it is handed over — but their outlines are
-    // primitives, which are built further down. Collect them here and splice
-    // them in below.
+    // CAM's decision-time drawings (docs/cam/gui.md#what-the-viewport-draws):
+    // the stock box and the removed-volume ghost are translucent surfaces, so
+    // they have to go into `quads` before it is handed over — but their
+    // outlines are primitives, which are built further down. Collect them here
+    // and splice them in below.
     // On a JOB tab too: a job has no `document`, and this gate was
     // `state.document` alone, so a job tab -- the one kind of tab CAM is
     // drawn on since v73 -- drew no backplot, no stock box and no ghost.
@@ -1011,8 +1012,9 @@ void DrawUI(AppState& state) {
       AppendSimulationBCGlyphs(state, prims); // FEM load/fixed/keep glyphs
     // The CAM backplot goes to the renderer's CACHED channel, shared: it is
     // hundreds of thousands of vertices on a surfacing job, and copied into
-    // `prims` it was 93% of an idle frame (docs/cam/backplot-frame-cost-
-    // plan.md). Null on every tab that has none, so it never outlives one.
+    // `prims` it was 93% of an idle frame
+    // (docs/cam/gui.md#what-the-viewport-draws). Null on every tab that has
+    // none, so it never outlives one.
     CamBackplotRef backplot;
     if (state.document || state.job) {
       backplot = CamBackplot(state);

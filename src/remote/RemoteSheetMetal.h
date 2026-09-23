@@ -12,7 +12,7 @@ namespace ui {
 struct AppState;
 }
 
-// Sheet-metal RPC handlers (docs/sheetmetal/plan.md), a domain module of its
+// Sheet-metal RPC handlers (docs/sheetmetal/README.md), a domain module of its
 // own like the configuration one: the rules are a document-level object, not
 // a feature, so they need verbs rather than an add_feature dialect.
 namespace remote {

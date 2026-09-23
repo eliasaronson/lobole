@@ -1,0 +1,273 @@
+# Versioning: projects on disk
+
+How a project is stored, how the app keeps memory and disk honest with each
+other, and how work survives a crash. The git-backed history, merging and
+sharing are in [history.md](history.md); the document format's contract and
+version history are in [format.md](format.md).
+
+## A project on disk
+
+A project has one of three shapes, chosen by `ui::SaveProject`
+(`src/ui/ProjectActions.cpp`):
+
+| shape | when | layout |
+|---|---|---|
+| single file `.json` | one part saved to a `.json` path (`save_project`, scripts); the GUI's Save As always writes `.dsgn` | one JSON document, assets base64 inside it |
+| flat `.dsgn` directory | one part, no part-local variables, no tab folders, no section cuts | `index.json` + `features/` + … (see [format.md](format.md#the-directory-form)) |
+| project container `.dsgn` | anything else: several documents, or an assembly, drawing or job | `project.json` + `parts/<name>/`, `assemblies/<name>/`, `drawings/<name>/`, `jobs/<name>/`, each a document directory |
+
+The GUI's Save As turns any other name into `<name>.dsgn`
+(`DocumentIO::ProjectSaveTarget`: `.json` is replaced, anything else
+appended). `.json` is the
+single-document interchange form only: saving a multi-document project to a
+`.json` path is refused, naming the `.dsgn` path to use instead, because the
+container would otherwise be a directory named `.json` without the git
+history, which keys on `.dsgn`. Open dispatches on the path: a `.dsgn` or
+any directory opens as a project (`project.json` present means the container
+form), a file as a single document. Picking an `index.json` inside a `.dsgn`
+opens the project.
+
+In the flat form the one part's file carries the project-scope variables; in
+the container they live in `project.json` and each part's `index.json`
+`parameters` are that part's local scope.
+
+### Serialization modules
+
+| file | holds |
+|---|---|
+| `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` and its per-version comments, shared JSON helpers |
+| `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, load refusals |
+| `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
+| `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, assertions |
+| `src/core/io/SerializeStudies.cpp` | FEM and topology studies |
+| `src/core/io/SerializeConfigurations.cpp` | part and assembly configurations |
+| `src/core/io/SerializeCam.cpp` | CAM setups, tools, operations |
+| `src/core/io/AtomicWrite.cpp` | `WriteTextAtomic`: temp + rename, skips identical content |
+| `src/ui/ProjectActions.cpp` | the project container, open/save/recover, staged-import adoption |
+
+A format change bumps `kVersion`, adds a golden at the new version and a row
+in [format.md](format.md#version-history). All three are gated by
+`tests/test_golden.cpp`.
+
+### What a load refuses
+
+The loader says what is wrong rather than guessing:
+
+- a file holding git conflict markers (`<<<<<<<`), named;
+- two files claiming one id (`15-box.json` and `15-hole.json`), and an index
+  listing an id twice — per collection: features, studies, study results,
+  configurations, occurrences, mates, relations, assertions, motion studies,
+  drawing views and dimensions;
+- a sketch with two entities sharing an id;
+- a document of another kind, or a version newer than `kVersion`.
+
+A save refuses an item with id 0 (see [format.md](format.md#stability-guarantees)).
+
+## Baked geometry
+
+A `.dsgn` part is a recipe: a feature list re-executed on open. To make
+opening a load rather than a rebuild, a save also writes the built bodies
+beside it (`src/core/io/GeometryCache.{h,cpp}`):
+
+```
+<part>.dsgn/geometry/
+  index.json    geometry_format, chain_hash, occ_version, and per body its
+                name, material, producing feature and element map
+  0.brep …      one binary B-Rep per body (BinTools)
+```
+
+The element map travels because face and edge names are transient in memory,
+and a drawing dimension or a mate referencing a face must still resolve after
+a load that executed nothing.
+
+**The blob is only an accelerator.** On load the recipe is read first and
+the blob is offered to the document (`Document::AdoptBakedGeometry`). The one
+regeneration that follows compares the chain hash it computes
+(`Document::TipChainHash`, the same hash the regeneration prefix cache keys
+on, over every feature's JSON plus the active configuration's suppression)
+with the blob's:
+
+- match: the bodies are installed and nothing executes;
+- anything else (absent, truncated, a different `geometry_format`, a hash
+  from another recipe, a feature file edited by hand or by a merge): the
+  blob is ignored and the document rebuilds.
+
+A stale blob can make an open slower, never wrong. Consequences:
+
+- **A model with a failed feature is not baked**, and neither is one with no
+  bodies. A blob is a claim that this is what the recipe produces.
+- **An unchanged save rewrites nothing**: when the blob already carries the
+  current hash it is left alone, so repeated saves add nothing to git.
+- **Datums still execute on a baked open.** A datum plane, axis, frame or
+  curve (`Feature::IsDatum`) produces state rather than a body, and the blob
+  carries only bodies; skipping them would leave a mate anchored to a Frame
+  at the identity. They run against the installed bodies, in list order.
+  Feature warnings recorded at bake time are restored.
+- **A different OCC version loads the blob anyway**, with a log line.
+  Rebuilding could reorder faces and move the element names that dimensions
+  and mates reference; the geometry the author saw is the geometry loaded.
+- **Only the tip is stored.** The prefix cache is seeded with hash-only
+  placeholder entries (`RegenCacheEntry::bodiesValid == false`) plus the tip,
+  so a later regeneration with no edit is free, but the first edit rebuilds
+  from the start.
+
+`Document::CopyWithGeometry` uses the same mechanism for an in-memory copy
+(a motion study's snapshot of an assembly): the copy is offered the source's
+bodies and keeps them only if the hash agrees, otherwise it rebuilds. It
+returns a pointer on purpose: `make_unique<Document>(CopyWithGeometry(d))`
+on a by-value return would bind the copy constructor and regenerate anyway.
+
+When a project's parts cannot use their blobs, the open rebuilds them side by
+side, the menu bar shows "Geometry rebuilt" until a save re-bakes, and
+`open_project` reports `rebuilt_parts` and `rebuild_reason`
+("no saved geometry", "from an older build", "from a newer build", or "the
+recipe changed since the geometry was saved"; `DocumentIO::InspectGeometry`
+reads the first three without loading the bodies).
+
+**In git.** Geometry is committed by default, so a clone or an old checkout
+opens fast and the geometry is pinned against kernel drift. Every save writes
+`.gitattributes` marking `geometry/*.brep binary -merge -diff`: a conflict
+on derived data is resolved by taking either side, and the hash decides
+whether it survives. `commit_geometry: false` in a part's `index.json` turns
+it off: `geometry/` is deleted and a `.gitignore` keeps it out. Adding a git
+remote sets this on every part (see [history.md](history.md#sharing-through-a-remote)).
+
+## Dirty tracking
+
+`Document::Version()` increments on every mutation. Each document slot
+remembers the version it was saved at (`AppState::lastSavedVersion` for the
+active tab, `PartSlot::lastSavedVersion` for the rest), and
+`ui::ProjectDirty` is true when any slot's version differs or
+`projectMetaDirty` is set: project-level changes (adding, deleting or
+renaming a document, folders, catalogs, display units, CAM machine edits) do
+not move any document's version, and without the flag closing would lose
+them without a prompt. The window title shows `*`
+when dirty. `MarkProjectSaved` / `MarkProjectOpened` re-stamp every slot.
+
+A version number is not an identity: versions restart at 0 whenever a
+document is replaced, so anything that tracks "this document at this
+version" also keys on `Document::InstanceId()`.
+
+## Autosave and recovery
+
+`Autosaver` (`src/core/io/Autosaver.{h,cpp}`) is pumped from both the GUI
+frame loop and the headless loop; `--autosave <seconds>` sets the interval
+(default 60, 0 = off). A document is written when the interval has elapsed,
+it is dirty, and it changed since its last autosave.
+
+Where it goes:
+
+| project | sidecar |
+|---|---|
+| one document | `<project>.autosave`, a single file |
+| several documents | `<project>.autosave.d/<dir>.json`, one file per DIRTY document, mirroring `project.json`'s `dir` (`parts/Stand.json`) |
+| never saved | `unsaved.autosave.json` / `unsaved.autosave.d/` in the user state dir |
+
+The user state dir is `RuntimePaths::UserStateDir()`: `$XDG_STATE_HOME/designer`
+or `~/.local/state/designer`, and `%LOCALAPPDATA%\Designer\state` on Windows.
+
+Every sidecar file is written temp + rename, so each is complete or absent:
+a tool whose job is surviving a crash must never offer a half-written
+recovery. That is why a multi-document project gets a directory of
+per-document files rather than one sidecar written like a project tree.
+Unchanged documents are not rewritten. `ui::AutosaveProject` owns the loop
+over documents, because only the UI layer knows what documents a project has;
+assemblies, drawings and jobs autosave as well as parts.
+
+A clean save clears every sidecar (and the unsaved slot). Recovery:
+
+- GUI: on open, a "Recover autosave?" modal names how many documents have
+  newer work; accepting lays every recovered document over the project
+  (`ui::RecoverProject`). All or nothing — half from one session and half
+  from another is a state nobody can reason about. The project stays dirty.
+- RPC: `open_project` returns `autosave_available` and `autosave_path`;
+  `autosave_status` lists the documents with recoverable work;
+  `autosave_now` writes every dirty document immediately.
+
+The sidecars sit beside the project, outside its directory, so they are
+outside its git repository and outside the disk stamp below.
+
+## Changes made outside the app
+
+The app holds documents in memory and the project is a directory, so
+something else can write it: a `git` command in the app's own terminal panel,
+another editor, a second instance. `DocumentIO::StampProject`
+(`src/core/io/ProjectStamp.{h,cpp}`) records `{fileCount, maxMtime,
+totalSize}` over the project directory — rsync's quick check, not a content
+hash. Git writes files with the current mtime on checkout, merge, restore and
+pull, so even putting an older tree on disk moves it. It skips two
+directories: `.git/` (not the document, and it churns on its own) and
+`geometry/` (derived data; the chain hash decides at load). The stamp covers
+the recipe. An invalid stamp never matches anything, including itself.
+
+What it cannot catch: a write in the same mtime tick that preserves the exact
+byte count. Coarse mtimes or clock skew on a network filesystem widen that
+window; the check degrades to "usually notices", never to "wrong".
+
+The stamp is taken in `ui::OpenProject` itself (both of its success paths:
+a single-part `.dsgn` returns early), in `SaveProject` after the write, and
+in `MarkProjectSaved` after the git commit so the app's own commit is not
+mistaken for an external write.
+
+- **The guard.** Every save goes through `ui::SaveProject` — Ctrl+S, Save As,
+  naming a version, `save_project`. When the target is the opened path and
+  the disk moved, it refuses. The GUI offers **Reload from disk**, **Save
+  anyway** and Cancel; `save_project {force: true}` saves over it.
+- **The poll.** `PollDiskState` (`src/ui/HistoryPanel.cpp`) runs once a
+  frame from the top of the UI, not inside a panel (a panel behind another
+  tab does not run). It checks when the window regains focus and on a slow
+  timer, since a headless agent can write while the window keeps focus. With
+  git it first compares HEAD, one `git` call instead of a walk.
+- **The notice.** A "Changed on disk" label in the main menu bar — text, not
+  a button, since both actions discard something — and a banner with Reload
+  at the top of the History panel, above its git checks so projects without
+  history are warned too. When the change left merge conflicts, the Conflicts
+  panel speaks instead.
+- `project_changed_on_disk` lets a script ask before it saves.
+
+Merging in-memory edits against a moved disk is not done: "reload or
+overwrite" is the choice.
+
+## Imported geometry inside a project
+
+An assembly import extracts one `.brep` per unique product. Before the
+project has a folder these land in `<user state dir>/import-staging/`; the
+first save into a directory copies them to `<project>/imported/` and
+repoints the Import features (`AdoptStagedImports` in `ProjectActions.cpp`),
+so a saved project is self-contained. See
+[../interchange/README.md](../interchange/README.md#importing-an-assembly).
+
+## RPCs
+
+| RPC | does |
+|---|---|
+| `new_project` | reset to one empty part, discarding what is open |
+| `open_project {path}` | open; returns `autosave_available`, `autosave_path`, `rebuilt_parts`, `rebuild_reason`, regen |
+| `save_project {path, message?, force?}` | save; `message` is the git commit message; refuses when the disk moved unless `force` |
+| `autosave_now`, `autosave_status` | force an autosave; list recoverable documents |
+| `project_changed_on_disk` | the stamp check |
+
+History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
+
+## Tests
+
+| where | covers |
+|---|---|
+| `tests/test_golden.cpp` `[golden]` | the corpus loads, regenerates and round-trips; newest golden and this history reach `kVersion` |
+| `tests/test_serialization.cpp` `[io]` | round trips, directory form; duplicate id files, duplicate index ids and conflict markers refused; unknown feature, entity and mate types refused by name |
+| `tests/test_baked_geometry.cpp` `[baked]` | a baked open executes nothing; a recipe edited behind the app's back and a broken blob rebuild; a failed model is not baked; datums, warnings and bends survive a baked open; `commit_geometry` off |
+| `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves |
+| `tests/test_projectstamp.cpp` `[stamp]` | stability, external edits, `.git/` and `geometry/` ignored at every depth, invalid never matching |
+| `tests/test_command_modify.cpp` | a modified feature keeps its id; no id-0 item is written |
+| `tests/headless_smoke.py` | autosave across a SIGKILL, the disk guard end to end with `force` and Save As |
+| GUI `autosave/recovers_every_document` | a multi-document project autosaves each dirty document and recovers all of them |
+| GUI `disk/*` | the moved-project modal and the History banner (the menu-bar notice itself is not asserted: a disabled main-menu `MenuItem` does not resolve through the test engine; the flag behind it is) |
+
+## Not done
+
+- A real file watcher (inotify and friends): focus plus a slow timer plus the
+  save-time guard covers the workflow.
+- Baking a regeneration history (per-feature snapshots), so the first edit
+  after opening is fast too.
+- Git LFS for the baked blobs; `commit_geometry: false` is the size opt-out.
+- Baking drawing projections.

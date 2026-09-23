@@ -38,7 +38,8 @@ namespace {
 // so a saved pocket reloaded as "clear OUTSIDE its boundary" — where there is
 // nothing — and produced no toolpath. v60-cam-arcs.json is a real pre-fix
 // file whose pocket and adaptive ops carry no `side` key, which makes it the
-// document the migration has to repair (docs/cam/dogfood-round.md).
+// document the `side` load default has to repair
+// (docs/cam/operations.md#the-capability-table-and-the-field-table).
 void AssertCamSides(const std::vector<cam::Setup>& setups,
                     const nlohmann::json& expect) {
   if (!expect.contains("cam_op_sides"))
@@ -147,8 +148,9 @@ void AssertCamStock(const std::vector<cam::Setup>& setups,
 // The frame decides the coordinates of every cut, so a setup that reloads
 // "as modelled" cuts a laid-flat job in the orientation it was NOT clamped
 // in. And the rotary flag is what keeps an A word out of a 3-axis file: the
-// two were one number until docs/cam/setup-frame.md separated them, and a
-// golden is how the separation stays separated.
+// two were one number until they were separated
+// (docs/cam/setup.md#fixturing-frame-and-rotary-index), and a golden is how the
+// separation stays separated.
 void AssertCamFrames(const std::vector<cam::Setup>& setups,
                      const nlohmann::json& expect) {
   if (expect.contains("cam_setup_frames")) {
@@ -529,9 +531,9 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
     }
   }
   if (expect.contains("cam_fixtures")) {
-    // v126: what holds the stock (docs/cam/workholding-plan.md). A fixture
-    // that loses its place or its size stops being where the clamp is, and
-    // the verifier then signs off a path through the real one.
+    // v126: what holds the stock (docs/cam/setup.md#workholding-fixtures). A
+    // fixture that loses its place or its size stops being where the clamp is,
+    // and the verifier then signs off a path through the real one.
     const auto& want = expect.at("cam_fixtures");
     std::vector<const cam::Fixture*> got;
     for (const cam::Setup& s : setups)
@@ -555,7 +557,7 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
       CHECK_THAT(f.rotZdeg,
                  Catch::Matchers::WithinAbs(w.value("rot_z", 0.0), 1e-12));
       CHECK(f.enabled == w.value("enabled", true));
-      // v127: resting on the stock (docs/cam/fixture-seat-plan.md). A seat
+      // v127: resting on the stock (docs/cam/setup.md#seats). A seat
       // that loses its edge or its distances puts the clamp somewhere else
       // on the board, and the verifier then checks the wrong place.
       CHECK(f.seat.has_value() == w.contains("seat"));
@@ -795,7 +797,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 // the assembly-schema ones in tests/golden/assembly/, and forgetting the
 // second is not hypothetical: the audit that produced this test first
 // reported v65's golden MISSING because it looked only in the first.
-// The JOB corpus (v73, docs/cam/job-document.md). CAM setups left the part
+// The JOB corpus (v73, docs/cam/README.md#the-model). CAM setups left the part
 // document, so the assertions that used to ride on a part golden ride here.
 //
 // A job owns no geometry, and two of the assertions -- the stock box and the
@@ -806,8 +808,9 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 //
 // The setups inside these files are the historical ones, verbatim, including
 // the key shapes that predate their own repairs: v73-cam-arcs.json still has
-// a pocket with no `side` key, which is the exact document
-// docs/cam/dogfood-round.md's migration exists for.
+// a pocket with no `side` key, which is the exact document the `side` load
+// default (docs/cam/operations.md#the-capability-table-and-the-field-table)
+// exists for.
 TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
   const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
   const fs::path dir = root / "job";
@@ -1082,7 +1085,7 @@ TEST_CASE("Directory format: editing one feature touches one file",
 
   // A save that changes nothing must touch nothing at all — including the
   // megabytes of baked geometry, which would otherwise churn git history on
-  // every Ctrl+S (docs/versioning/baked-geometry.md).
+  // every Ctrl+S (docs/versioning/README.md#baked-geometry).
   const auto idleRecipe = mtimes(false);
   const auto idleGeometry = mtimes(true);
   REQUIRE(testio::Save(doc, proj.string()));

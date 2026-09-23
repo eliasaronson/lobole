@@ -11,7 +11,7 @@ The mechanism is four slider-crank loops off one crankshaft, a
 chain relation halving crank speed to the camshaft, and per valve a cam
 relation for its lift and a rack relation that makes its rocker follow.
 
-Findings go in docs/modeling/om615-dogfood.md.
+Findings go in generators/om615/README.md.
 """
 import argparse
 import hashlib

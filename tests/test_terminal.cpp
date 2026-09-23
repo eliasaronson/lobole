@@ -8,7 +8,7 @@
 #include <chrono>
 #include <thread>
 
-// The terminal's testable half (docs/ui/terminal-panel.md): bytes in, grid
+// The terminal's testable half (docs/ui/terminal.md): bytes in, grid
 // out, with no ImGui and no display. Everything Claude Code needs of a
 // terminal is asserted here rather than by looking at a panel.
 using term::PtySession;

@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-// A cut normal to the sheet (docs/sheetmetal/plan.md, S10): a closed sketch
-// profile, carried along the sketch's normal onto a sheet body and cut
+// A cut normal to the sheet (docs/sheetmetal/README.md#features): a closed
+// sketch profile, carried along the sketch's normal onto a sheet body and cut
 // straight through the sheet WHEREVER it lands — square to a panel, radially
 // through a bend, square to a wall that leans.
 //

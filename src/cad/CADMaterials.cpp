@@ -223,7 +223,7 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
   materials[MaterialType::RUBY].density = 3980.0f;
-  // Glass transmits (docs/rendering/glass-plan.md); soda-lime's index.
+  // Glass transmits (docs/rendering/materials.md#glass); soda-lime's index.
   materials[MaterialType::GLASS].transmission = 1.0f;
   materials[MaterialType::GLASS].ior = 1.52f;
   materials[MaterialType::CONCRETE].density = 2400.0f;

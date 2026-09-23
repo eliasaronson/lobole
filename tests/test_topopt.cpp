@@ -32,7 +32,7 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
-// TO0 — the SIMP spike gate (docs/topopt/plan.md). Proves the compliance-
+// The SIMP gate (docs/topopt/README.md#the-method). Proves the compliance-
 // minimization loop converges on tet10 before any Study/RPC/GUI surface exists.
 // The primary case runs on a deterministic, Netgen-free structured mesh so the
 // gate's metrics can't drift with mesher versions; a second case cross-checks

@@ -143,7 +143,7 @@ target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 #
 # It is also what pays for splitting a big test file: five files re-parse the
 # same headers five times, so test_cam.cpp's split cost 21 s of duplicated
-# parsing before this line existed (docs/architecture-review-2026-09-06.md, §2
+# parsing before this line existed (docs/architecture.md#precompiled-headers
 # — split first, PCH second, and never one without the other).
 target_precompile_headers(designer_tests PRIVATE
     <catch2/catch_test_macros.hpp>
@@ -242,7 +242,7 @@ set(XVFB_EXEC ${CMAKE_CURRENT_SOURCE_DIR}/../tools/xvfb-exec.sh)
 # headless run (`ctest -LE gui`) still excludes it — but the four python tests
 # below also carry `pygui`, so "the python gui ones" is `ctest -L pygui`
 # rather than `ctest -L gui -E gui_smoke`. Excluding it by NAME every time was
-# knowledge where a label would do (docs/capability-review-2026-08-31.md T3).
+# knowledge where a label would do (docs/architecture.md#tests).
 add_test(NAME gui_smoke COMMAND ${XVFB_EXEC} $<TARGET_FILE:designer> --gui-tests)
 set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
 
@@ -410,7 +410,7 @@ add_test(NAME motion_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(motion_smoke PROPERTIES TIMEOUT 300)
 
-# The PES pump round's fixes (docs/pes-friction-plan.md): custom axes, a
+# What the PES pump relies on (generators/pes_pump/README.md#how-it-moves): custom axes, a
 # helix's start, a study's configuration and mate values, one clash
 # vocabulary, the section's kept half, and the Python verbs.
 add_test(NAME api_friction_smoke
@@ -513,7 +513,7 @@ add_test(NAME measure_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(measure_smoke PROPERTIES TIMEOUT 120)
 
-# Tolerances and fits (docs/tolerances/plan.md): a tolerance as design intent
+# Tolerances and fits (docs/tolerances/README.md): a tolerance as design intent
 # over RPC, and check_fits pairing faces off the assembly's own mates —
 # including a sub-assembly, where reaching the part behind an anchor is a walk
 # through three documents. Headless (no display).
@@ -625,7 +625,7 @@ set_tests_properties(render_still_reach_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 # Glass is see-through in a still: a red block behind a pane shows red
-# through `glass` and not through `steel` (docs/rendering/glass-plan.md).
+# through `glass` and not through `steel` (docs/rendering/materials.md#glass).
 add_test(NAME render_glass_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_glass_smoke.py
                  $<TARGET_FILE:designer>)
@@ -634,7 +634,7 @@ set_tests_properties(render_glass_smoke PROPERTIES LABELS "gui;pygui"
 
 # The quick still: the raster renderers into an image of exactly W x H, path
 # parameters refused, the viewport left as it was
-# (docs/rendering/quick-render-plan.md). A renderer, not ray tracing.
+# (docs/rendering/still-render.md#quick-mode). A renderer, not ray tracing.
 add_test(NAME render_quick_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_quick_smoke.py
                  $<TARGET_FILE:designer>)
@@ -669,7 +669,7 @@ add_test(NAME rpc_names_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_names_gate.py)
 set_tests_properties(rpc_names_gate PROPERTIES TIMEOUT 60)
 
-# The committed icon font is what its script draws (docs/ui/icons-plan.md).
+# The committed icon font is what its script draws (docs/ui/README.md#icons).
 add_test(NAME icon_font_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/icon_font_gate.py)
 set_tests_properties(icon_font_gate PROPERTIES TIMEOUT 30)
@@ -760,7 +760,7 @@ set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
 # runs one against a headless app and checks the part by numbers. It is the
 # standing answer to "do we need scripted features for X" — so it stays on
 # the default path.
-# The watch generator (docs/modeling/automatic-watch-plan.md): every part on
+# The watch generator (generators/watch/README.md): every part on
 # its receipt, every occurrence placed by a mate, the going train and motion
 # works keeping time EXACTLY, and the declared clearances holding.
 add_test(NAME watch_smoke

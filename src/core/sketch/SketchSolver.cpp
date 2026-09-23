@@ -233,8 +233,8 @@ void Solver::Load(const SketchFeature& sketch) {
     } else if (auto* el = std::get_if<Ellipse>(&e)) {
       // v1: only the centre is a solver point (so coincident/distance/fixed on
       // the centre work and the ellipse translates with it); the radii and
-      // rotation are rigid — see docs/sketching/phase-l.md for the full-rules
-      // TODO.
+      // rotation are rigid — see docs/plans/sketch-curve-solving.md for the
+      // full-rules TODO.
       (void)el;
       addPoint(id, 0, el->center);
     } else if (auto* ea = std::get_if<EllipseArc>(&e)) {
@@ -477,8 +477,8 @@ void Solver::Load(const SketchFeature& sketch) {
   im.dragTag = tag;
 
   // Linked-copy outputs are solver-FIXED anchors: their position is owned by
-  // the sync (docs/sketching/copy-links.md), so the solver may reference but
-  // never move them.
+  // the sync (docs/sketching/README.md#linked-copies), so the solver may
+  // reference but never move them.
   for (const auto& op : sketch.derived) {
     if (op.kind != DerivedKind::LinkedCopy)
       continue;

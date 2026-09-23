@@ -1,827 +1,264 @@
 # Known bugs
 
-A running list of confirmed defects not yet fixed, most-recently-found first.
-Each entry: symptom, root cause (if known), impact, and the likely fix. Delete
-an entry when it lands a fix + regression test.
-
----
-
-
-## `set_mate`'s `rotation` named no unit, and everyone read it as degrees — FIXED 2026-09-06
-
-Found 2026-09-05 building the carburettor's throttle linkage, misdiagnosed
-twice as a loop-solver branch problem, and measured on 09-06.
-
-A mate's rotational DOF is radians (`Occurrence.h`). `set_mate` took a
-parameter called `rotation` and wrote it straight in, and its `describe`
-entry was `"Edit a mate's parameters."` — no unit anywhere. Every other
-angle in the same file names its own: `transform.rotate.angle_deg`,
-`duration_deg` and `start_deg` on a cam relation, and a motion study's
-from/to, which are degrees and convert at this boundary.
-
-So `set_mate(rotation=60)` reads as 60 degrees and pins the mate to 60
-RADIANS: 3437.7 degrees, 197.7 once folded. Walking a linkage 10, 20, 30,
-40, 50, 60 really asked for 213, 66, 279, 132, 345, 198, and the poses that
-came back looked random — a clean solve every step, a different
-configuration each time, the coupler lying across its own pivot at one of
-them. It was written up here as the loop solver picking arbitrary branches.
-It was not: the solver answered exactly what it was asked.
-
-The measurement that settled it, on the carburettor's cable mate:
-
-    set_mate rotation=0.0000  -> bore 2999.6 mm2
-    set_mate rotation=6.2832  -> bore 2999.6 mm2     (2*pi: the same pose)
-
-`rotation` had NO test coverage anywhere in the suite — only `offset` was
-exercised — which is how a parameter with an unstated unit survived.
-
-**Fixed by naming it, not by changing it.** `rotation_deg` now sits beside
-`rotation` on `add_mate`/`set_mate`, passing both is refused, and every mate
-in a response carries both. Converting `rotation` itself to degrees was
-tried first and reverted: relations speak radians on purpose (`phase` is
-documented "in b's unit (rad or mm)" and a rack's ratio is mm per radian),
-so degrees on the mate would have made `dof_b = ratio * dof_a + phase`
-incoherent — a worse trap than the one being fixed. `assembly_relations_
-smoke` and `motion_smoke` both failed on the conversion and are what showed
-this.
-
-`tests/headless_smoke.py` now covers it: the two spellings are one pose, a
-360 round-trip returns to 0, and passing both at once is refused.
-
-The lesson worth keeping is not about units. Two consecutive diagnoses —
-"the solver picks branches", then "a parallelogram is doubly-solvable" —
-were built on the reading rather than on the reading's units, and both were
-plausible enough to act on; one of them redesigned the linkage. The check
-that cost nothing was setting the input to a full turn and asking whether
-the output came back.
-
-Four days later the same shape turned up in three more parameters
-(`pattern.angle`, `set_reference_image.rotation`, `add_constraint.value`), so
-the answer stopped being per-parameter: `core/Angles.h` states the factor
-once, `tests/test_conventions.cpp` bans a new bare one, and
-`tests/rpc_units_gate.py` fails a dimensional RPC parameter that does not say
-what unit it is in. See docs/units-plan.md.
-
-
----
-
-
-## A running instance keeps serving the binary it started with — FIXED 2026-09-06
-
-Cost two diagnosis detours on 2026-09-06 alone. A rebuild REPLACES
-`build/designer`; a process already running holds the old inode and carries
-on answering, correctly, for code that is no longer on disk. Once that
-looked like a feature added ten minutes earlier not working — the field was
-simply absent from a `ping` served by an older build. Once an instance that
-had failed to bind the port left an OLDER one answering on it, so a restart
-appeared to do nothing.
-
-It is indistinguishable from a missing feature or a regression, and there
-was nothing to ask. The `conventions` test added the same day covers the
-TEST binary; it says nothing about a long-running app.
-
-**Fixed:** `ping` returns `binary_replaced`, and the SDK's `connect()` warns
-on stderr when it is true. On Linux `/proc/self/exe` still resolves after
-the file is replaced and the kernel appends " (deleted)", so this needs no
-build stamp and nothing to keep in step. Other platforms report false — the
-mechanism is Linux-specific; a portable version would need a stamp compiled
-in.
-
-Not covered: an instance started from a DIFFERENT tree (a worktree's
-`build/designer`) is not stale, it is simply another build, and `ping`'s
-`port`/`project` are what say which.
-
-
----
-
-
-## Scrubbing a motion study with a section on — 5.4x FASTER 2026-09-06
-
-Measured 2026-09-05 on the air-cooled engine, offscreen, and re-measured on
-09-06 after the engine had grown to 27 parts:
-
-    scrub, no section       9.5 ms/step
-    scrub, SECTION on     913.6 ms/step   (96x)
-    ...with cap caching   168.5 ms/step   (26x, 5.4x faster)
-
-It is not rendering. Every scrub step rebuilds the scene, and with a section
-active that recomputes each body's CUT FACE through an OCC boolean — per
-body, every step.
-
-**The original entry named the wrong function**, which is worth keeping
-because it cost an hour: `AppendSectionCaps` (ViewActions.cpp, was AppActions.cpp) is the PART
-tab's path and is never called on an assembly. An instrumented build logged
-nothing at all during an assembly scrub. The assembly's caps come from
-`SyncAssemblyRenderers` (AssemblyActions.cpp), which does something better
-already: it puts the section plane into each PART's own space rather than
-transforming the bodies, so a part that has not moved between two poses asks
-for the same cap, of the same bodies, about the same plane.
-
-That is exactly a cache key, and it is now `Measure::SectionCapCache` on
-AppState — `CADShape::PlacementId()` (geometry AND placement) plus the
-planes. On this engine 23 of 27 parts hit every step.
-
-**Why an entry holds the source shape as well as the answer.** PlacementId
-mixes the TShape's address, and a freed TShape's address is reused by the
-next allocation; a cache keeping only the answer would serve it for a
-different shape. That is precisely how an earlier bbox cache came to fail a
-determinism test in parallel and pass alone (and was removed). Holding the
-source keeps the address reserved for as long as the key naming it exists,
-and the cache is cleared WHOLESALE at 512 entries rather than evicting one
-at a time, so no key ever outlives its shape.
-
-What is left is real work: the four parts that actually move — crank, rod,
-piston, valves — need a new cap at every pose, and they are the shapes with
-the most faces. Removing that needs a cheaper cut than an OCC boolean, not a
-better cache.
-
-
----
-
-
-## An exact drawing view costs ~2.2 s per SWEPT surface it has to hide behind
-
-Found 2026-09-04 drawing the single-cylinder engine. Exact HLR is priced by
-surface complexity, not part count: 16 bored boxes project in 3.1 ms, but one
-four-turn helical spring is 2.5 s and the engine is 47 s a view.
-
-Traced per pair (`HLRBRep_InternalAlgo::Hide(i, j)`, which the projection now
-drives itself):
-
-    self-hiding, all 19 shapes      5.5 s   (2.8 + 2.7 — the two springs)
-    occluder pairs                 41.8 s
-
-Every expensive pair is `something x spring` at **~2.2 s each whatever the
-other shape is** — hiding a bolt behind a spring costs what hiding the whole
-block behind it costs. So the cost is the spring's own B-spline surface being
-re-examined for every pair, not the interaction between the two shapes.
-
-**What has already been tried, so nobody repeats it** (numbers in
-docs/agent-scale-followup-plan.md, W3):
-
-* the sweep's own knobs are worth nothing — `SetTolerance` 1e-2 buys 8%,
-  `BRepOffsetAPI_MakePipe` is slower, and capping the spine's approximation
-  degree makes it WORSE (degree 3 doubles it: OCC would rather intersect a few
-  high-degree spans than many low-degree ones);
-* skipping occluder pairs whose screen rectangles are disjoint is provably
-  safe and was implemented, measured and reverted — it removes 72-91% of the
-  pairs and saves nothing, because those pairs were already free.
-
-Impact: any model carrying a swept surface — a spring, a pipe, a loft — is
-expensive to draw exactly, and the cost is invisible until export. Mitigated,
-not fixed: `quality: "fast"` (polygonal HLR, ~24x, a look rather than a
-dimensionable deliverable) and `update_drawing {budget_s}` bound it.
-
-The fix worth building is a view that can EXCLUDE named occurrences. This
-engine's other seventeen bodies project exactly and instantly; leaving the two
-springs off the sheet would give a real, dimensionable drawing in near-zero
-time. Everything else here is tuning that has already been measured and does
-not pay.
-
-
----
-
-
-## `thread/face_pick_fills_the_slot` fails in one shuffled order
-
-Found 2026-09-04 by the standing GUI suite, seed 36636 on shard 2. The Thread
-tool's viewport click resolves no face: `th->face.name` is empty at
-GuiTestsModeling.cpp:1287, so the tool reports no cylindrical face where the
-click landed on one. It passes alone, and it passes in most orders — the same
-binary, the same test, a different neighbour.
-
-**Order-dependent, and reproducible.** Replaying the archived order and seed
-fails every time, and it fails identically with the tree at that commit and
-with three workstreams' worth of uncommitted changes stashed away, so it is
-not new and is nothing to do with relations, motion studies or the benchmark.
-The archive is written for exactly this:
-
-    ~/.local/state/designer/gui-failures/20260904-183459-shard2/reproduce.sh
-
-Impact: one test, intermittently red in CI depending on the shuffle. The
-mechanism is unknown; the shape of it — a viewport pick that resolves nothing
-after some other test has run — points at leftover camera or selection state
-rather than at threads, which is what the shuffle was introduced to surface
-(docs/ui/gui-test-isolation.md). The fix starts by bisecting the recorded
-order: the neighbour that precedes it is the suspect, not the test itself.
-
----
-
-
-## `interference` reports a phantom whole-tooth clash at one exactly symmetric pose
-
-Found 2026-09-03 driving the three-gear train (`scratch/gear_train3.py`, m2
-gears 12:24:36 on relations). Sweeping the pinion through a tooth pitch, the
-idler–wheel pair reads *touching* (volume 0) at every pose except pinion =
-π/12 exactly, where it reads *clash, 162 mm³* — about one whole tooth — and
-reads touching again 0.005 rad either side. A real overlap is continuous in
-the pose; a spike at the one pose where a tooth sits exactly centred in a
-gap, flanks tangent and symmetric, is the boolean producing a solid out of
-coincident faces.
-
-**Impact:** a false positive at a measure-zero pose. The pinion–idler pair
-never shows it, and the same wheel pair at zero backlash reads 0.02 mm³ over
-the whole pitch in `generators/gear_train.py`. Nobody would act on it, but a
-script sweeping poses and taking the max would.
-
-**Likely fix:** the checker's *touching* tolerance should apply to the common
-volume too — a common solid whose every face lies within `touch_tol` of a
-face of both inputs is a touch, not a clash — or run the boolean with the
-fuzzy value the contact report already uses for its touching band.
-
----
-
-## `set_occurrence_transform` demanded an orientation `add_occurrence` does not — FIXED 2026-09-06
-
-Found 2026-09-01 while driving the fastener check from a script. Both RPCs take
-a `transform`, and `add_occurrence` treats its `orientation` as optional
-(`{position: [...]}` alone places a part), but `set_occurrence_transform`
-throws the raw nlohmann error — `key 'orientation' not found` — which names
-neither the RPC nor the field that is optional three lines away in the same
-document.
-
-**Impact:** small, but it is the shape of error this project's conventions are
-about: a message with no correction in it, on a surface where the sibling call
-accepts the same object. Moving a part along one axis is the common case.
-
-**FIXED 2026-09-06.** Either half may be omitted and keeps its current
-value, so sliding a part along one axis needs no quaternion; omitting BOTH
-is refused, naming the three keys it accepts. `tests/assembly_smoke.py`
-covers all three cases. `describe` says so.
-
-
-## The viewport tears on the external monitor (environment, not the app)
-
-Reported 2026-08-31 while reviewing the 30-degree lens, and worth recording
-because the obvious suspect — the swapchain — is the wrong one. Outside
-`--gui-tests` the app requests `VK_PRESENT_MODE_FIFO_KHR` and nothing else
-(main.cpp:884; `g_DisableVSync = args.runGuiTests`), which is vsync.
-
-**Root cause is the path AFTER the app hands the frame over.** This machine
-renders Designer on the discrete GPU (`Selected GPU: NVIDIA GeForce RTX 4060
-Laptop GPU`, the deliberate preference — RT needs it) while X drives the
-display through `modesetting` on the Intel Arc iGPU. So every frame crosses
-GPUs by PRIME offload and is then blitted to scanout by X, with no compositor
-running (i3 on bare X11) and no `TearFree`. FIFO governs the first handoff;
-nothing syncs the last one. `nvidia_drm` is not even loaded, so there is no
-PRIME sync either.
-
-**Impact:** a tear line while orbiting, on the EXTERNAL monitor only — with
-two outputs and no compositor, X syncs to one CRTC and the other tears
-whatever it does. The internal panel also sits at 60 Hz while its mode list
-offers 165, which makes the artifact three times longer-lived than it needs
-to be. The 30-degree lens did not cause this: it made it more visible, by
-filling more of the screen and so putting the part's edges — where a tear
-line is easiest to see — further out.
-
-**Fix is environment-side, and the user has chosen to leave it:**
-`Option "TearFree" "true"` on the modesetting device section (NixOS:
-`services.xserver.deviceSection`), or picom with `vSync`, or eDP-1 at 165 Hz,
-or Preferences > Graphics device > Intel Arc to drop the cross-GPU hop (costs
-the 4060's speed and ray tracing — a diagnostic, not a home). Nothing to
-change in the renderer; do not go looking at present modes again.
-
-
-## Generating an adaptive pocket takes ~7 s on the UI thread — FIXED 2026-09-02
-
-**Fixed** by [ui/long-operations.md](ui/long-operations.md) phase 1: the
-adaptive passes run on a `cam` background job, one pass at a time, and land
-in a content-keyed cache; the row says "clearing…", the backplot keeps the
-previous toolpath, and post/verify/simulate refuse until the last pass is
-in. Measured in `cam/adaptive_clears_off_the_frame`: the pick returns in
-0.5 ms and 193 frames run while the passes cut, the worst 31 ms. The
-caching half also landed, so an undo or a re-open of the same operation is
-a hit rather than seven more seconds. Left as written below for the record.
-
-Measured 2026-08-26 on the saved baffle job (`scratch/w170s-alto`, a
-300 x 190 mm pocket, 6 mm cutter): the same pocket cut concentrically takes
-**30 ms** and cut adaptively takes **7 127 ms** — 26 253 moves out of
-libarea. It runs inside the frame, so the app is frozen for those seven
-seconds with nothing on screen to say why.
-
-This is the residue of the add/delete freeze fixed the same day (the panel
-no longer regenerates the whole job on every edit — one operation at a time,
-`cam/incremental_toolpaths_never_go_stale`). What is left is honest cost:
-the FIRST generation of an adaptive operation, and any edit to that
-operation, still pay it in one blocking lump. A pocket deep enough to want
-adaptive clearing is exactly the pocket a person adds and then adjusts.
-
-**Impact:** seven seconds of frozen window per adaptive-pocket edit, on a
-job of one operation. Nothing is lost and the result is right — it is the
-one big cost in CAM that is not incremental.
-
-**Likely fix:** generate off the frame. The verb already knows the answer
-takes a while, so the shape is a worker plus a "cutting…" state on that
-operation's row — the pattern the FEM studies already use — with the
-backplot showing the previous toolpath until the new one lands. Cheaper
-half-measures first if the worker is too much: cache by operation
-parameters + document version so a re-open or an unrelated edit never
-re-runs libarea, and time the verification pass (207 ms at the panel's
-0.4 mm grid) while there.
-
----
-
-## mesh_study/run_study are synchronous past the client's default timeout — FIXED 2026-09-02
-
-**Fixed** by [ui/long-operations.md](ui/long-operations.md) phase 3:
-`mesh_study {async: true}` runs the mesh on a "mesh" background job and
-`study_status` reports `meshing: true` until it lands, then `mesh: {bodies…}`.
-`run_study {async: true}` now meshes off the frame as well (it used to mesh on
-the main thread before handing the solve to its worker), and both land their
-results in the part they were started from whichever tab is active. The
-synchronous forms remain for callers who want them; the describe rows say
-which to use. Left as written below for the record.
-
-Found 2026-08-26: a modal study on a baffle with six Ø3 pilot holes meshed
-to 41k tets; the blocking `run_study` outlived designer_remote's 60 s
-default socket timeout, the client died mid-call, and the server finished
-anyway — the results were there on reconnect, which LOOKS like a hang
-followed by a mystery. `run_study` has `async` + `study_status` polling,
-but nothing steers a caller there, and `mesh_study` has no async at all.
-**Partially fixed 2026-08-26** (friction round): `designer_remote.request`
-takes a per-call timeout and mesh_study's describe doc names the trap.
-Remaining: an async path for `mesh_study` itself, and/or a server-side
-hint when a synchronous solve exceeds ~10 s.
-
----
-
-## An assembly resync re-tessellates every part it draws — FIXED 2026-08-30
-
-Was: "hiding a subassembly costs ~300 ms". Measured properly 2026-08-26 on
-the Marsliden dock (98 instances, 17 distinct parts), by timing the phases of
-the rebuild a visibility toggle runs:
-
-| phase | before | after |
-|---|---|---|
-| outline `AddMesh` x98 (upload + adjacency, per instance) | 394 ms | ~0 (one asset per part) |
-| outline `RemoveMesh` x98 (a device wait EACH) | 81-191 ms | ~5 ms |
-| mesh `RemoveInstance` (a device wait per asset destroyed) | 18-56 ms | ~2 ms |
-| **tessellation, 17 parts (OCC mesh + edge polylines)** | **177 ms** | **177 ms — still there** |
-| `AddInstance` x98 | 0.0 ms | 0.0 ms |
-| face selector x98 | 2.4 ms | 2.4 ms |
-
-The two renderer costs are fixed (`assembly/outlines_are_instanced_per_part`
-gates the sharing and its refcount): a toggle round trip on the dock went
-1395-1608 ms to 701-804 ms, measured the same way.
-
-**FIXED 2026-08-30** (`c3c5169`, `3b5391b`), by the cache this entry
-predicted. `AppState::partRenderCache` keys the per-part tessellation and both
-renderer assets on (part slot id, part document version);
-`MeshRenderer::RetainAsset` / `OutlineRenderer::RetainAsset` are the reference
-the lifetime needed, so the assets survive the instance teardown at the head of
-every resync.
-
-The real numbers came from a much bigger part than the dock — a 299-part,
-314-occurrence STEP import, where the same defect cost 5.9 s rather than
-177 ms:
-
-| | before | after |
-|---|---|---|
-| resync (tab switch) | 5900 ms | **30 ms** |
-| visibility toggle | 5890 ms | **39 ms** |
-| two assemblies alternating | 4157 ms | **41 ms** |
-
-Two things the fix taught that the plan above did not anticipate:
-
-- **The eviction rule matters as much as the cache.** A strict "release
-  anything not drawn this sync" made two assembly tabs THRASH — alternating
-  between two 299-part assemblies re-tessellated all 299 every switch. It is
-  an LRU against a device-memory budget now
-  (`kPartRenderCacheBudgetBytes`), never evicting what the current sync draws.
-- **The palette was order-dependent.** The fallback body colour was a counter
-  over encounter order, so hiding one occurrence recoloured unrelated parts —
-  invisible until a cached colour disagreed with a freshly built one. Seeded
-  from the part now.
-
-**Still not doing:** the "visibility-only fast path" this entry used to
-propose (route a hide onto `SetInstanceVisible` and skip the rebuild). At
-39 ms the remaining win is nil, and it would put a second, differently-shaped
-code path through the sync — which is where staleness bugs live.
-
-**Still there:** a COLD build (first view of an import) is ~6.7 s, of which
-~4 s is OCC tessellating 299 parts serially. See the follow-ups in
-docs/interchange/import-plan.md.
-
-## `fem_async_smoke` fails rarely, and has never been diagnosed
-
-Twice on 2026-08-26 while the GUI shards and `ctest -j$(nproc)` ran
-CONCURRENTLY (one invocation launched both), and **once more on 2026-09-01**
-in a plain `-j8` run. It passes immediately alone and in normally-loaded full
-runs. Async solve polled against a wall clock + a saturated machine is the
-familiar shape.
-
-**Investigated 2026-09-01 and NOT reproduced.** Three runs under 22 CPU
-burners (`tools/with-cpu-load.sh`) took it from 1.5 s to 3.6-4.9 s — a 3x
-slowdown against wall-clock cliffs that sit 60-200x away. Pure CPU saturation
-is not the mechanism; the two original failures shared the machine with the
-GUI shards, which add GPU contention, four Xvfb servers and real memory
-pressure, and that storm was not recreated.
-
-**Why it has never been diagnosed, which is the actual finding.** ctest writes
-a test's output to `Testing/Temporary/LastTest.log` and the NEXT run overwrites
-it. So the natural response to an intermittent failure — run it again — deletes
-the only record. That happened again on 2026-09-01: the failure was seen, the
-suite was re-run to check, and the text was gone. The GUI suite hit this exact
-wall and fixed it by archiving a failing shard; the python smokes had no
-equivalent.
-
-**They do now.** `smoke_app.py` writes the app's log, the traceback and a
-`reproduce.sh` to `$XDG_STATE_HOME/designer/smoke-failures/<stamp>-<test>/` on
-any failure, capped at 20, in a directory no later run touches. The next
-occurrence is diagnosable instead of another round of inference.
-
-**One exposure removed while looking**, justified on its own merits: the test's
-reference solve called blocking `run_study` with no timeout override, so it
-rode the client's 60 s default — the exact trap `designer_remote.request`'s
-docstring warns about, and a failure there would have read as "the async test
-is flaky" while being in the half that is not under test. It passes 600 now.
-
-**Not split**, deliberately: it is already the slow half, split out of
-`fem_smoke` on 2026-08-25, and splitting further would multiply app launches
-rather than reduce exposure.
-
----
-
-The order-dependent GUI failure recorded here on 2026-08-25 —
-`terminal/off_by_default_docks_right_on` failing behind
-`cam/tool_window_follows_the_viewport` — **does not reproduce and the entry
-was withdrawn the same day.** Verified three ways: the full GUI suite passes
-**211/211 under `--serial`** (the check the original note said was the real
-one), the documented two-test reproduction passes, and the interaction is
-still genuinely there — the CAM test continues to toggle the terminal
-preference and rebuild the dock layout twice.
-
-**The fixing commit was not identified**, and that is worth saying rather than
-implying. `b1f0330`'s dock-flag change was the obvious candidate and is not it
-(reverting that hunk on top of HEAD does not bring the failure back), and a
-bisect back to 2026-08-21 found the pair passing at every commit sampled. So
-it was fixed somewhere in the 08-22..08-24 window by something that did not
-announce itself.
-
-What that leaves behind, in [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
-L3: the behaviour is now NAMED by
-`terminal/survives_a_dock_layout_rebuild` instead of being an accident of a
-CAM test, so a return fails for the right reason — though that test is a
-characterization test, not a verified regression test, because no sabotage
-reproduces the original.
-
-## The GUI suite has order-dependent failures nobody has caught in the act
-
-**Three different tests did this on 2026-08-25 alone**, each failing once in a
-sharded run and passing on the next run of the same binary:
-
-| test | how it failed |
-|---|---|
-| `terminal/off_by_default_docks_right_on` | the panel docked but `Hidden` (diagnosed, then stopped reproducing — see below) |
-| `conflicts/resolve_a_merge_in_the_panel` | `panel != nullptr` — the Conflicts panel not found |
-| `compare/compare_shape_against_a_version` | in the final verification run of this round |
-
-One is an incident. Three in a day is a property of the suite. The shape is
-always the same — a test that fails only in company, where the 4-shard
-partition decides who its company is — and machine load is a plausible
-accelerant: the run that failed shared the machine with a full headless suite,
-and the clean rerun of the same binary took 610 s against 205 s.
-
-The first (`terminal/off_by_default_docks_right_on`) was diagnosed to a window
-left `Hidden` after a dock-layout rebuild, went away without anyone
-identifying the fix, and is withdrawn below. This one is not diagnosed at all.
-
-**Made findable 2026-09-01** (`24857e9`): `gui-tests-xvfb.sh` now shuffles by
-DEFAULT and prints one base seed that replays the whole run. Every hunt for
-this stalled at the same place — the failure is reproducible only from its
-seed, CI has shuffled since `d1396b5`, and nobody ran shuffled locally, so no
-seed was ever generated where the failures were actually being seen. The cost
-is that a bare re-run is now a different order, which is the point: that re-run
-is what destroyed the evidence three times.
-
-**Hunted 2026-08-25, and not caught.** Five shuffled runs — three idle, two
-under a concurrent headless suite, seeds recorded — all passed 215/215. The
-class did not reproduce on demand, so it stays open and undiagnosed. What the
-hunt DID find is below; it is a real defect of the same family (a shared
-global that makes concurrent shards affect each other) but **there is no
-evidence it caused these failures**, and saying otherwise would be the
-plausible-and-wrong answer this file exists to avoid.
-
-> **Found and fixed while hunting:** the terminal panel opened its remote
-> interface by walking a FIXED range, 8437..8456, one bind at a time — making
-> a 20-port window a resource shared by every process on the machine.
-> Measured with four concurrent GUI shards: they collided, walked to 8438 and
-> 8440, and logged an `error` per failed bind — up to 19 socket/bind/close
-> syscalls **on the UI thread, mid-frame**, in a suite whose tests wait fixed
-> frame counts. It now tries the documented default 8437 once (so a client
-> configured for it still finds a lone instance) and otherwise asks the
-> kernel, which is one syscall and cannot collide. Same class as the
-> `free_port()` race in the smoke scripts, one layer up.
-
-**What would actually help**, in order: `--gui-test-shuffle` exists and CI runs
-it (`d1396b5`), so the cheap move is running the suite shuffled a few times
-and **keeping the seed of a failure** — failures are reproducible per seed,
-which is the whole point of the flag. Chasing one from a single observation is
-what the terminal case shows does not pay: it was diagnosed to a window left
-`Hidden` after a dock-layout rebuild, four fixes were tried and rejected, and
-then it stopped reproducing without anyone identifying what fixed it.
-
-~~A second, cheaper move given the load correlation: capture the shard logs on
-failure rather than leaving them in `/tmp` to be overwritten by the next
-run.~~ **Done 2026-08-25.** A failing shard is archived under
-`$XDG_STATE_HOME/designer/gui-failures/<stamp>-shard<N>/` — which no later run
-touches — with its full log, its exact filter, and a runnable `reproduce.sh`
-carrying that filter and the seed. The fixed `/tmp` copies are still cleared
-each run, so nothing stale can be read as current; the two behaviours were in
-tension and the archive resolves it.
-
-The tension is worth stating, because it is why three failures in a row went
-undiagnosed: **the natural response to an order-dependent failure is to
-re-run it, and the re-run destroyed the evidence.** The next one will leave a
-directory behind that names which tests shared its process and in what order
-— the two facts that make this class reproducible at all.
-
----
-
-The orbit-lag + stale-silhouette pair in the outline renderer was fixed by
-the [rendering/outline-perf.md](rendering/outline-perf.md) work (precomputed
-edge adjacency, per-frame-in-flight edge buffers, settle-pass policy),
-covered by `tests/test_outline_edges.cpp`.
-
-The preview-handle miss regression was fixed in `PreviewHandles.cpp` and is
-covered by the `fillet_body_edge_via_click` GUI test.
-
----
-
-## `item_click` does not leave a text field focused (ui_action, 2026-08-27)
-
-Every remote UI action is queued, run and unwound before the RPC returns, so
-the widget it touched is not active by the time the next call arrives. On a
-button that is irrelevant; on an `InputText` it means **no remote script can
-drive a multi-step text interaction** — click the field, then send keys, and
-the keys go nowhere. Verified by clicking a dimension's expression field and
-sending `Left`, `Delete`, `Enter`: the text was unchanged.
-
-`item_input` sidesteps it by doing the whole thing in one action (click, type,
-Enter), which is why every existing script and test uses it and nobody noticed.
-
-Two consequences worth knowing before reaching for the remote:
-
-- A **transient popup cannot be screenshotted** — anything that only exists
-  while a field is focused (the u14 variable-completion popup, an in-progress
-  tool prompt) is gone by the time `screenshot` runs. This was found trying to
-  photograph exactly that.
-- A field cannot be left mid-edit for a human to look at.
-
-The fix would be either an action that leaves focus in place, or a `key_chars`
-action to pair with `item_click`. Neither is needed by anything today, which is
-why this is filed rather than fixed.
-
-
-## The verifier called every through cut a gouge — FIXED 2026-09-01
-
-`cam_verify` reported **0.50 mm of gouge** on the smart_speaker front_wall, in
-both setups, and said of it:
-
-> "Cuts 0.50 mm INTO the part at X-106.4 Y-518.9 — **that is scrap.** Check the
-> depths and the tool diameter."
-
-The G-code was correct. 0.50 is the `bottom_z: -0.5` its profile ops carry —
-a through cut ends BELOW the workpiece on purpose, in the spoilboard, so no web
-holds the part in the sheet. The setup's stock has `bottom_margin: 0.0`, so the
-stock floor is the part's own bottom face, and `SampleModel` uses that floor as
-the designed height wherever the part has no material. Comparing cell to cell,
-0.5 mm past it is 0.5 mm of "gouge", necessarily, on **every through cut in
-every job**.
-
-Found while checking an unrelated number, which is how it had survived: the
-line is easy to read as "some quantisation, the mesh is coarse". It is not
-noise — it is exactly the sacrificial depth, and it scales with whatever the
-operator typed.
-
-**Impact is trust, not correctness.** Nothing was cut wrong. But `ok` was false
-on every through-cutting job, and the one line a verifier exists to make
-unmissable was firing on the jobs that were fine — which teaches an operator to
-skip it. `Verdict::Complete()` already documented this hazard for *leftover*
-("a correct job routinely reports material left over"); the gouge side never
-got the same treatment.
-
-**Fixed** by giving the spoilboard its own number rather than dropping it.
-`Compare` takes the stock floor; depth past it lands in `Verdict::belowStock`
-(and `below_stock_mm` over RPC) and is clamped out of the gouge test. Below the
-stock there is no part left to scrap. Discarding it silently would have been
-the substitution this codebase refuses — it is a real fact about the program,
-just not a fact about the part.
-
-On the real job: gouge **0.50 -> 0.0** (Front) and **0.50 -> 0.005** (Back,
-quantisation), and both verdicts now say only what is true — that the job
-leaves material in the corners a round cutter cannot reach.
-
-Gated by `cam verify: a through cut is not a gouge`, which checks both
-directions: the through cut is clean AND its overcut is still reported, and a
-plunge straight into the part still reports a gouge and fails `Safe()`.
-
----
-
-## CAM: two defects found machining the smart_speaker front_wall — BOTH FIXED
-
-Both found by the verifier on a real 2-sided job, both reproducible. **The
-rapid was fixed 2026-08-31 and the profile contour on the same day** (`286ef6b`
-— a profile follows the part's projection, not its section); a third defect
-found while confirming those, the verifier calling every through cut a gouge,
-is the entry above. `tools/` has the job script that reproduces them:
-`front_wall - Front.ngc` / `- Back.ngc`.
-
-### A rapid plunged to the previous depth at the RAMP ENTRY (FIXED 2026-08-31)
-
-Between depth passes a clearing operation retracted to safe Z, repositioned,
-and then `G0` straight down to the height it was about to start cutting at —
-on the reasoning, written at the ramp entry, that that height "is either the
-stock top or the depth the previous pass already cut here, so it is air".
-
-True of a closed contour, which returns to its own entry at full depth. False
-of a POCKET, whose entry sits mid-spiral where the previous pass was still
-ramping, and false of ANY pass told to start below the stock top — a finishing
-skim after a roughing pass is exactly that. On the front_wall job it was 3 mm
-of G0 into MDF; in the golden program it was `G0 Z12` with the stock top at
-21.
-
-Fixed by `RapidFloor`: a rapid never goes below the STOCK TOP, above which
-there can be no material. Everything under that is left to the ramp, whose
-moves are feeds — which also keeps the rule a profile depends on, that it
-never plunges (a non-centre-cutting end mill rubs). The golden programs show
-the change as `G0 Z12` becoming a fed `G1 ... Z11.92 F200`.
-
-Gated by `cam: a pass never rapids to a depth nothing cleared`, which checks
-`rapids_through_stock == 0` for both shapes: a pocket deep enough for two
-passes, and a skim starting below the stock top.
-
-### A profile cut ONE contour at every depth — FIXED 2026-08-31
-
-Front_wall's cross-dowel bores are cut 22 mm deep from the x = ±105 side
-plane (`19-sketch.json` + `20-extrude.json`: two Ø8 circles at sketch
-(-8, ±461), `distance: 22.0`, `mode: cut`). 22 mm from a face 105 out means
-they OPEN ONTO that face — measured, the side face loses 100.53 mm² to them,
-which is exactly two Ø8 circles (2 · π · 4² = 100.53).
-
-So at the bores' own height the panel's outline genuinely has two 8 mm slots
-running 22 mm in from each edge, and above and below that height it does not.
-`PickedWallContour` takes ONE contour and cuts it at every depth — the
-behaviour is documented ("a wall names one contour at every depth", which is
-right for a through opening that has no floor to click) — so the slot contour
-gets cut through the whole 16 mm thickness, removing the 4 mm of material
-above the bore and the 4 mm below it.
-
-That is the gouge, and the arithmetic matches: `cam_verify` reports **8.00 mm**,
-which is 4 + 4. A targetless "cut out the whole part" reports the same 8 mm,
-so it is not the wall pick.
-
-Bisected on the real part, rebuilding the job for each case:
-
-    everything present            gouge 8.00 at (-104.2, -464.6)
-    cross-dowels 19/20 out        gouge 8.00 at (-104.2, -464.6)
-    cross-dowels 21/22 out        gouge 8.00 at ( 103.8, -464.6)   <- other edge
-    ALL FOUR cross-dowels out     gouge 0.00
-    chamfer 42 out                gouge 8.00
-    blind dowels 17/18 out        gouge 8.00
-
-So: the cross-dowels alone, neither the chamfer nor the blind holes, and not
-their intersection. Two earlier diagnoses were wrong and are struck: it is not
-the section merging a hole with the boundary (a lone hole 1.7 mm beneath a
-face sections cleanly — 2 loops, outer extent unchanged), and it is not the
-two holes intersecting (built as a fixture, also clean). The section is right
-throughout; what is wrong is using one section for every depth.
-
-**Attempted and reverted, 2026-08-31.** Sectioning per depth is the right
-rule — FreeCAD does exactly that, and `Profile.areaOpUseProjection` returns
-True where `PocketBase`'s returns False, so a profile is meant to use the
-projection down the depths and a pocket is not. `PickedWallContour` gained an
-`atZ` and the profile asked for the contour at each pass; measured on the real
-part, that DID narrow the damage — the notch is entered at one depth instead
-of all four — and the verdict did not move, because a height-map verifier
-counts the whole column the tool sweeps to reach that depth. Accumulating the
-reachable outline down the passes (union outside, intersection inside) is the
-next step and did not work either.
-
-It was reverted rather than left in, for a reason worth recording: **four
-attempts at a synthetic reproduction all failed.** A lone blind hole 1.7 mm
-beneath a face sections cleanly. Two intersecting holes section cleanly. A
-bore modelled to open onto an edge reports `maxX = 210` at every height — no
-slot at all. Whatever the real part does, it is not what any of those
-fixtures do, and changing generation with no test that fails before and passes
-after is how this codebase gets a silent regression. The bisect stands (the
-cross-dowels, alone, 8.00 mm = 4 above the bore + 4 below); the mechanism does
-not, yet.
-
-### The section was dumped, and the fixtures were never the problem (2026-08-31)
-
-That is what the paragraph above asked for, and the answer is the first of the
-two it offered: **the outer loop has the notch.** `tests/test_cam.cpp`,
-hidden, `designer_tests "[frontwall]"` (the real part is not in the repo;
-`DESIGNER_FRONT_WALL` points it elsewhere).
-
-Sectioning the real front_wall in the Back setup, outer loop, in path order at
-setup z = -8:
-
-    [3] 105.000 -465.000    <- on the edge
-    [4]  97.000 -465.000
-    [5]  83.000 -465.000    <- 22 mm in, the extrude distance
-    [6]  83.000 -457.000    <-  8 mm across, the bore diameter
-    [7]  97.000 -457.000
-    [8] 105.000 -457.000    <- back onto the edge
-
-Four of those, one per cross-dowel. They exist for z in (-12, -4) — the bore's
-own extent — and nowhere else: 24 outer vertices at z = -8, 8 at z = -2. The
-control settles it, since it is the bisect's second row run as code: with the
-job's own configuration 43 (cross-dowels suppressed) the outer loop is 8
-points with **zero** vertices anywhere near y = -461. The areas agree to the
-square millimetre — 218259.70 without the bores, 217555.70 with them, a
-difference of 704.00 = 4 x 22 x 8.
-
-So the section is right, the diagnosis above is right, and the depth
-arithmetic closes exactly: the bore spans 8 mm of a 16 mm panel, the profile
-cuts its contour over the full thickness, and 16 - 8 = the 8.00 mm `cam_verify`
-reports.
-
-**The four fixtures did not fail. The check used to judge them was blind.**
-`maxX` cannot see this defect — a slot cut INTO an edge does not move the
-bounding box, and the real part reports the same 210 mm width at every height,
-notch and all. Rebuilt as its own fixture (a 210 x 100 x 16 panel, one 8 mm
-bore 22 mm in from the side face, no setup frame), the synthetic case
-reproduces immediately:
-
-    z  -8.000: outer  8 points, area 20824.000, maxX 105.000 (width 210.000)
-    z  -2.000: outer  4 points, area 21000.000, maxX 105.000 (width 210.000)
-    z -14.000: outer  4 points, area 21000.000, maxX 105.000 (width 210.000)
-
-21000 - 20824 = 176 = 22 x 8, and the width the reverted round measured is
-210.000 on all three lines. That fixture is the failing test the revert said
-was missing, and it costs no external file.
-
-### The fix: a profile follows the projection, not the section
-
-**Reading the generator moved the diagnosis.** The op that gouges — op 87,
-"Cut out", `side: outside` — has NO targets, and the targetless branch of
-`GenerateProfile` was *already* sectioning per depth
-(`SectionLoops(bodies, z + 1e-3)`, one section per pass). So "one contour at
-every depth" described the wall-pick path but not the path that actually
-failed, and that is why the reverted change did not move the verdict: it made
-the picked path do what the failing path was already doing. **Sectioning at
-the right depth was never the fix.**
-
-The rule that is:
-
-> The contour at depth z is the part's PROJECTION from `op.topZ` down to z —
-> the union of its sections over that interval — not its section at z.
-
-A flat end mill at depth z removes the whole column above it at its footprint,
-so it may only travel where every height in [z, topZ] is waste. Two things
-made this smaller than the reverted attempt:
-
-- **It is one rule, not two.** "Union outside, intersection inside" are the
-  same statement seen from either side — the sweepable region is the
-  complement of the projection — so `ProjectedOutlines` carries its holes and
-  an outside cut follows its outer boundaries while an opening follows the
-  hole it was picked in. Implementing it twice is how one of them goes wrong.
-- **It accumulates from `op.topZ`, not the stock top.** An operation's top is
-  the declaration that everything above it is already clear, which is what
-  lets an opening that starts below the stock top be profiled at all.
-
-`ProjectedOutlines` (CamGeometry.cpp, was CamToolpath.cpp) walks the passes unioning as it goes.
-Below the model it adds nothing and the last projection stands, which is what
-a through cut needs and what the old `lastFound` was for — except that
-`lastFound` carried the last *section*, so it propagated the notch to every
-pass under the part. Three sites changed, all in `GenerateProfile`: the
-targetless branch, the wall pick (re-resolved per pass against the projection
-by proximity to `WallContour::at`, which the pick now reports), and the
-through-cut carry.
-
-**Measured, before and after, on the real front_wall with the cross-dowels
-present:**
-
-| | before | after |
-|---|---|---|
-| Back setup, `cam_verify` gouge | **8.000 mm** at (-104.3, -464.9) | **0.005 mm** at (-55.8, -506.9) |
-
-0.005 is grid quantisation, and it is somewhere else entirely.
-
-Gated by three tests in `test_cam.cpp`, and the second one is the point:
-
-- `cam: a profile never follows a notch it cannot reach` — the fixture above.
-  Before: 4 moves inside the notch, gouge 11.0 mm. After: none, gouge < 0.5.
-- `cam: a profile DOES follow a notch open from the top` — the same notch
-  reached from the top face instead, where nothing stands over it. It passes
-  before AND after, which is what stops the rule degenerating into "never cut
-  a notch".
-- `cam: a picked wall is re-resolved at every depth` — the same defect through
-  the wall pick, whose contour came from the wall's own mid-height: for a
-  16 mm panel that is z = -8, the one height whose section is notched. Before:
-  10 moves in the notch. After: none.
-
-The whole headless suite passes (925/925), CAM goldens included — the change
-is a no-op on a prismatic part and bites only where the outline moves with
-depth.
-
-**Not changed, and worth naming:** the floor-region pick (`PickedFaceRegion`,
-which pockets use) still takes one region at its own height. The same column
-argument applies to it in principle; there is no reproduction, and this file's
-own history says what changing generation without one costs.
-
-The job may now keep the cross-dowels, though suppressing them remains
-reasonable: the machine does not make those holes — they are drilled by hand.
-
+Defects present in the code now. Each entry gives the symptom, the cause (or
+what is known of it), where it lives, and the likely fix. Delete an entry in
+the commit that fixes it, with a regression test. Missing features are not
+bugs: they go in [roadmap.md](roadmap.md) or the area README's "does not do
+yet".
+
+Entries are grouped by area. Add a new one under its area's heading, creating
+the heading if it is not here yet.
+
+## Modeling
+
+### Three loaders substitute a default for a value they do not know
+
+- **Symptom:** a document loads and looks right while meaning something else.
+- **Cases:**
+  - a sketch derived op with an unknown `kind` loads as a linear pattern
+    (`DerivedOpFromJson`, `src/core/io/SerializeFeatures.cpp`);
+  - a sketch external reference whose `kind` is not `edge` loads as a face
+    (the `external` loop in the Sketch branch, same file);
+  - `set_result_display` turns an unknown `field` into `von_mises`
+    (`src/remote/RemoteSimulation.cpp`).
+- **Likely fix:** refuse, naming the accepted values
+  ([conventions.md](conventions.md#refuse-dont-substitute)).
+
+### The datum-plane refusal does not say what is accepted
+
+- `DatumPlaneKindFromString` accepts `offset|angled|through_points` and
+  refuses anything else with "Unknown datum plane kind: X", without naming
+  them; the DatumPlane `describe` row says `offset|angle`
+  (`src/core/io/SerializeFeatures.cpp`).
+
+### `JogFeature` asks for a non-destructive boolean too late
+
+- `BRepAlgoAPI_Common op(a, b)` builds in its constructor, so the
+  `SetNonDestructive` call after it does nothing and the boolean may write
+  p-curves onto its input's edges (`src/core/features/JogFeature.cpp`). Build
+  it default-constructed, as `BuildQuery` does in `Measure.cpp`.
+
+### A sketch entity id can land in the reserved datum block
+
+- `SketchFeature::MintEntityId` draws from 1..UINT32_MAX and checks only the
+  sketch's own entities, so it can mint an id ≥ `0xFFFFFF00`, which
+  `IsDatum()` reads as the origin or an axis (about 6e-8 per mint). Cap the
+  range below `kDatumBase` (`src/core/features/SketchFeature.cpp`).
+
+### An unknown `hole_kind` becomes a simple hole
+
+- **Symptom:** a Hole feature whose `hole_kind` is misspelled
+  (`"counterbored"`) loads and builds as a plain drilled hole, with no error.
+  Counterbore and countersink fields (`cb_*`, `cs_*`) given to a kind that
+  does not use them are accepted and silently dropped.
+- **Cause:** the loader maps `counterbore` and `countersink` and sends every
+  other string to `HoleKind::Simple`; the RPC's unknown-field check accepts
+  any key the Hole row documents, whichever kind it belongs to, and
+  serialization writes `cb_*` only for counterbores.
+- **Where:** `FeatureFromJson`'s `Hole` branch in
+  `src/core/io/SerializeFeatures.cpp`; `RejectUnknownFeatureFields` in
+  `src/remote/RemoteModeling.cpp`.
+- **Likely fix:** refuse an unknown `hole_kind`, naming `simple`,
+  `counterbore` and `countersink`; refuse `cb_*`/`cs_*` on a kind that does
+  not take them, naming the kind that does
+  ([conventions.md](conventions.md#refuse-dont-substitute)).
+
+## Sheet metal
+
+### A flat pattern made in the GUI is always flat
+
+- **Symptom:** after Create › Flat pattern the part is flat in every
+  configuration, and the Sheet Metal panel's "Show the blank" toggle cannot
+  bring the folded part back.
+- **Cause:** `CreateFlatPattern` does not suppress the FlatPattern feature it
+  adds, and nothing else does; the toggle's `Flat` configuration only
+  unsuppresses it. The GUI test `sheetmetal/flat_view_on_a_sheet` suppresses
+  it by hand, and scripts suppress it explicitly, which hides this.
+- **Where:** `src/ui/CreateActions.cpp` (`CreateFlatPattern`),
+  `src/ui/SheetMetalPanel.cpp`.
+- **Likely fix:** create the feature suppressed in the base configuration.
+
+### A circular corner relief on a fold that is not square leaves the flat pattern thick
+
+- **Symptom:** at a 60° fold the flat blank comes out 1.67 mm thick on 1 mm
+  sheet (2.27 mm at 45°); a rectangular relief is fine. The part passes
+  `check_sheet_metal` and cannot be cut.
+- **Cause:** the circular relief tool is an upright cylinder of height
+  `t + radius` along the panel normal. Only the plan angle between the two
+  bend lines is checked (and refused when not square); the fold angle is not.
+- **Where:** `src/core/features/CornerReliefFeature.cpp`.
+- **Likely fix:** refuse the circular style when a bend's fold angle is not
+  90°, or size and place the tool from the bend region's real extent (or cut
+  it in the flat state).
+
+## Inspection
+
+### `interference` reports a phantom clash at an exactly symmetric pose
+
+- **Symptom:** two meshing gears read *touching* at every pose of a tooth
+  pitch except the one where a tooth sits exactly centred in the gap, flanks
+  tangent, where they read *clash* with about a whole tooth's volume
+  (162 mm³ on an m2 pair); 0.005 rad either side they read touching again. A
+  script that sweeps poses and takes the worst case reports a clash.
+- **Cause:** the common boolean already runs with the contact fuzz
+  (`kContactFuzz`), but at coincident tangent faces it still returns a solid;
+  `ContactState` calls any common volume above 1e-9 a clash, and `touch_tol`
+  is compared only against distances, never against the common solid.
+- **Where:** `InterferenceVolume` and `ContactBetween` in
+  `src/core/Measure.cpp`; `ContactState` in `src/remote/RemoteInspection.cpp`.
+- **Likely fix:** before calling a common solid a clash, check it is real:
+  every face of it within `touch_tol` of a face of both inputs is a touch; or
+  re-run with the pose nudged by ±ε and treat a volume that vanishes as
+  touching.
+
+## CAM
+
+### The rapid-feed setting never produces a capped G1
+
+- Preferences › Machines labels the field "Rapid feed (mm/min, 0 = G0)", and
+  `Setup::rapidFeed` says some machines want a capped G1, but `CamPost.cpp`
+  always writes rapids as G0; the value only clocks rapids and caps axis
+  speed on turning cuts (`src/ui/SettingsWindow.cpp`,
+  `src/core/cam/CamJob.h`, `src/core/cam/CamPost.cpp`). Either emit the
+  capped G1 or relabel the field.
+
+### A Z-travel overrun is reported "first at line 0"
+
+- **Symptom:** when a program's Z span exceeds the machine's Z travel,
+  `cam_verify` reports it as outside travel but says "first at line 0".
+- **Cause:** the Z check is a span over the whole program (deepest point to
+  highest retract), and it never sets `firstOutsideLine`; the explanation
+  prints that field regardless.
+- **Where:** the travel check and `Explain` in `src/core/cam/CamVerify.cpp`.
+- **Likely fix:** record the line of the move that set the extreme (or say
+  "over the whole program") for a Z-only overrun.
+
+## Simulation
+
+### Static and modal results name the wrong solver
+
+- Results are labelled `cpu (Eigen CG-IC)`, but the solve is a direct
+  `SimplicialLDLT` (modal: LDLT shift-invert). The label reaches
+  `study_status`, `study_results` and the receipt's oracle version
+  (`src/ui/SimulationActions.cpp`).
+
+### `fem_async_smoke` fails when a solve finishes between the poll and the cancel
+
+- **Symptom:** the smoke fails intermittently with `AssertionError: a static
+  solve must refuse to cancel`; every archived failure is this assertion.
+- **Cause:** the test polls `study_status`, sees `running: true`, then calls
+  `cancel_study`. If the solve finishes in between, `cancel_study` finds
+  nothing running and answers `{"cancelled": false}` instead of refusing. It
+  also checks only the solve's status, not the mesh job's.
+- **Where:** `tests/fem_async_smoke.py`; `cancel_study` in
+  `src/remote/RemoteSimulation.cpp`.
+- **Likely fix:** have `cancel_study` say plainly when nothing is running
+  (and consider the mesh phase), and let the test accept that answer when the
+  study has since finished.
+
+## Scripting
+
+### A remote `item_click` does not leave a text field focused
+
+- **Symptom:** a script cannot click a text field and then send keys: the
+  keys go nowhere. A transient popup that exists only while a field is
+  focused (expression completion, an in-progress tool prompt) cannot be
+  screenshotted.
+- **Cause:** every `ui_action` is queued, run and unwound before the RPC
+  returns, so focus does not survive to the next call. `key_press` sends one
+  chord; `item_input` (click, type, Enter in one action) is the only way to
+  type.
+- **Where:** `src/remote/RemoteUiActions.cpp`.
+- **Likely fix:** a `key_chars` action (the test engine's
+  `KeyCharsAppend`), or an `item_click` variant that keeps the field active.
+
+`describe` is what an agent reads instead of the code, so a stale row is a
+wrong contract.
+
+### `describe` rows that say something the handler does not do
+
+- `fit_fastener`: says one mate per interface and an empty `mates` when the
+  interface is already joined; placement adds a fastened mate per bolt per
+  interface and the solver reports the extras as `redundant_mates`
+  (`src/remote/RemoteAssembly.cpp`, `src/ui/FastenerActions.cpp`).
+- `add_reference_image` says "path or base64 bytes" (only `path` is read);
+  `set_reference_image` mentions a lock that does not exist
+  (`src/remote/RemoteModeling.cpp`).
+- `remove_configuration` says "by name"; it takes `id`
+  (`src/remote/RemoteConfigurations.cpp`).
+- `study_results` says there is no bonded contact between parts, which is
+  untrue for an assembly study (`src/remote/RemoteSimulation.cpp`).
+- `background_jobs` says the kinds are `cam`; the registry also has
+  cam-verify, sync, topo, study, mesh, import, motion and open
+  (`src/remote/RemoteDispatch.cpp`).
+- The `feature_types` rows omit Pattern `mirror`, Extrude `thin`, Loft
+  `path_id` and Rib `body_id` (`src/core/io/SerializeFeatures.cpp`).
+- `import_step` on a part does not return `recentred_by`, which
+  `add_feature` with an Import does.
+
+### The Python tools
+
+- `help('execute_script')` answers "no such method": `_EXPOSED` in
+  `tools/designer_mcp.py` leaves it out. The MCP `describe` tool description
+  hard-codes a method count.
+- `designer_sdk.connect()` lists every instance as "(no project)": it reads a
+  `project` field the instance registry never writes (`tools/designer_sdk.py`,
+  `src/remote/InstanceRegistry.h`).
+- SDK `Occurrence.frame()` does not activate its assembly, and the `frame` RPC
+  resolves occurrences against the active one (`tools/designer_sdk.py`).
+
+## GUI suite
+
+### Viewport picks resolve nothing after some neighbours in a shuffled run
+
+- **Symptom:** `thread/face_pick_fills_the_slot` fails in some shuffled
+  orders at `!th->face.name.empty()`: the click lands on the cylinder and
+  resolves no face. `assembly/a_fastener_is_placed_by_picking_a_rim` fails the
+  same way (`rimElement.IsSet()`). Both pass alone and in most orders.
+- **Cause:** unknown. The shape — a viewport pick that resolves nothing
+  after some other test has run — points at state the per-test reset does not
+  cover (the viewport rectangle or projection), not at threads or fasteners.
+- **Where:** `src/app/guitests/GuiTestsModeling.cpp`,
+  `src/app/guitests/GuiTestsAssembly.cpp`; the per-test reset
+  (`ResetAppForTest`).
+- **Likely fix:** replay an archived failing order
+  (`$XDG_STATE_HOME/designer/gui-failures/<run>/reproduce.sh`) and bisect
+  it; the test that precedes the failure is the suspect.
+
+### `ResetAppForTest` leaves some windows open
+
+- It does not reset `simulationToolOpen`, `bomWindowOpen`, `camGenerateOpen`,
+  `drawingAddViewOpen` or the `asmEdit*` fields, so a window left floating by
+  one test can eat the viewport clicks of the next
+  (`src/app/guitests/GuiTestsCommon.cpp`;
+  [testing.md](ui/testing.md#independence-any-partition-is-valid)).
+- `tools/coverage_matrix.py`'s registration regex has drifted: the generated
+  matrix reports three tests listed but not scanned.
+
+## Rendering
+
+### Four overlay renderers alias frames on a three-image swapchain
+
+- `SketchRenderer`, `StockRenderer`, `FieldRenderer` and `UnderlayRenderer`
+  keep `kFramesInFlight = 2` and index `currentFrame % 2`, while the app
+  requests three swapchain images (`g_MinImageCount = 3`). Images 0 and 2
+  share a UBO and vertex slot, so the CPU can overwrite one the GPU is still
+  reading: sketch, stock, field and underlay overlays can draw with another
+  frame's camera while the view moves. Only Mesh, Outline, SSAO and GpuTimer
+  use `render::FrameSlot`; move the other four onto it
+  ([frame-pacing.md](rendering/frame-pacing.md#frames-in-flight)).
+
+## Configurations
+
+### The feature tree does not dim a feature the configuration suppresses
+
+- `FeatureTreePanel.cpp` checks only the feature's own suppressed flag, so a
+  feature suppressed by the active configuration looks live.
+
+## Versioning
+
+### `pull` into a duplicate id reports the loader's raw refusal
+
+- The merge succeeds, then `OpenProject` throws the loader's refusal instead
+  of reporting a conflict (`src/remote/RemoteProject.cpp`, the pull handler);
+  `conflict_list` still answers.

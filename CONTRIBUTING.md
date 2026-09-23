@@ -5,8 +5,9 @@ OpenCASCADE, PlaneGCS, Dear ImGui) with an unusual design goal: **an AI
 assistant drives it through the same command layer a human does**. That shapes
 most of the conventions below.
 
-Start with [`docs/roadmap.md`](docs/roadmap.md) for what exists and what is
-planned; each workstream has its own plan document under `docs/`.
+Start with [`docs/README.md`](docs/README.md): each area of the program has a
+`README.md` under `docs/` describing how it works now, and
+[`docs/roadmap.md`](docs/roadmap.md) lists what is not built yet.
 
 ## Getting a build
 
@@ -170,7 +171,7 @@ These are the ones a newcomer trips over. Most have a test behind them.
   direction from the picked face — never a literal. Every creation tool must
   either change the document with its defaults or refuse visibly; the
   `defaults/*` GUI suite is the gate. See
-  [`docs/ui/u10-defaults-and-refusals.md`](docs/ui/u10-defaults-and-refusals.md).
+  [`docs/ui/tool-sessions.md#defaults-and-refusals`](docs/ui/tool-sessions.md#defaults-and-refusals).
 - **A feature an assistant cannot drive is half-shipped.** A new feature type
   needs its row in the `describe` table (`remote_smoke` fails otherwise) and
   in `FEATURE_FORMATS` in `tools/designer_mcp.py` (`mcp_smoke` cross-checks
@@ -180,7 +181,7 @@ These are the ones a newcomer trips over. Most have a test behind them.
   resulting geometry — not just that a feature appeared. Hidden labels
   (`##Name`) and `ImGui::PushID` scopes make a widget unaddressable to tests
   and scripts; use `###Name`. See
-  [`docs/ui/gui-coverage.md`](docs/ui/gui-coverage.md).
+  [`docs/ui/testing.md`](docs/ui/testing.md).
 - **A serialization change bumps `kVersion`** (`src/core/io/SerializationInternal.h`)
   **and adds a golden pair** under `tests/golden/`. One bump, one golden.
 - **Edit the domain module, not the monolith.** RPCs live in

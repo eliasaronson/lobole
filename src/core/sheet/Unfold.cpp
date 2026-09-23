@@ -1243,8 +1243,8 @@ std::optional<gp_Pnt> ToFlat(const Placement& pl, const gp_Pnt& p,
 // the sheet the sketch LOOKS AT when it looks at one, else the nearest.
 //
 // A normal cut carries each point of its outline along the sketch's normal
-// (docs/sheetmetal/plan.md, S10), so a panel IN FRONT of the plane wins over
-// a nearer one behind it. Taking the nearest either way put the firebox's
+// (docs/sheetmetal/README.md#features), so a panel IN FRONT of the plane wins
+// over a nearer one behind it. Taking the nearest either way put the firebox's
 // burner ports — sketched inside the box, facing its front wall — through
 // the BACK wall, which happened to be a millimetre and a half nearer the
 // plane, and nothing anywhere said so. A plane with sheet on one side only
@@ -1277,7 +1277,8 @@ Hit(IntCurvesFace_ShapeIntersector& inter, const gp_Pnt& p, const gp_Dir& dir) {
 // to pay for one of each PER HOLE, times one ray cast per 0.25 mm of every
 // outline. The firebox's thirteen holes unfolded the firebox thirteen times
 // and loaded ~2,300 face trees to do it, which was 73% of the whole grill's
-// build (docs/grill-friction-plan.md).
+// build
+// (docs/sheetmetal/README.md#normalcut-shares-its-ray-tree-and-unfolds-only-when-it-must).
 //
 // The unfold is built on demand and only if some outline needs it: it
 // answers "which panel, or which bend, does this land on", and a hole square

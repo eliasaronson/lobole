@@ -9,13 +9,13 @@ struct Ray; // FaceSelector.h
 
 namespace ui {
 
-// Direct manipulation on the pending preview feature (docs/ui/
-// direct-manipulation.md): one accent-colored viewport handle that drags the
-// feature's headline scalar — extrude distance (Blind/Symmetric), fillet/
-// chamfer radius, revolve angle. The handle mutates the same field the
-// preview dialog's widget edits (mutate + Regenerate, no undo entry), so the
-// dialog stays live and accept still commits one AddFeatureCommand. No handle
-// when the parameter is expression-driven.
+// Direct manipulation on the pending preview feature
+// (docs/ui/viewport-handles.md): one accent-colored viewport handle that drags
+// the feature's headline scalar — extrude distance (Blind/Symmetric), fillet/
+// chamfer radius, revolve angle. The handle mutates the same field the preview
+// dialog's widget edits (mutate + Regenerate, no undo entry), so the dialog
+// stays live and accept still commits one AddFeatureCommand. No handle when the
+// parameter is expression-driven.
 
 // Publishes the pending feature's (or the active section's) handle for the
 // shared hit test and drawer (ui/ViewportHandleDraw.h), and appends its

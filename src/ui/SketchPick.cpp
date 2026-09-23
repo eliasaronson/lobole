@@ -33,10 +33,10 @@
 
 // Turning a screen position into a sketch entity: the projections both ways,
 // and the candidate ranking that decides what a click at 4 px landed on.
-// Split out of SketchInteraction.cpp (docs/architecture-review-2026-09-06.md,
-// stage 7a). The 843-line viewport router stays there; these are the blocks
-// it calls into, and SketchInteractionInternal.h is that interface written
-// down.
+// Split out of SketchInteraction.cpp
+// (docs/architecture.md#the-ui-actions-layer). The 843-line viewport router
+// stays there; these are the blocks it calls into, and
+// SketchInteractionInternal.h is that interface written down.
 
 namespace ui {
 

@@ -79,8 +79,8 @@ using nlohmann::json;
 // The screenshot handshake is here too, because it belongs to the session
 // rather than to any one RPC -- the frame loop asks whether a capture is
 // wanted and reports back when it lands.
-// Split out of RemoteServer.cpp (docs/architecture-review-2026-09-06.md,
-// stage 8a). RemoteServer.h is unchanged: these are the same class's members,
+// Split out of RemoteServer.cpp (docs/architecture.md#the-remote-json-rpc).
+// RemoteServer.h is unchanged: these are the same class's members,
 // defined across three translation units instead of one.
 
 // --- Sockets: BSD on Linux/mac, Winsock on Windows (loopback JSON-RPC only)
@@ -322,7 +322,7 @@ void RemoteServer::ClientThread(int client) {
       }
       // Outside the lock: wake a throttled frame loop so the request is
       // pumped now, not after the idle timeout
-      // (docs/rendering/idle-throttle.md).
+      // (docs/rendering/frame-pacing.md#idle-throttle).
       if (m_wake)
         m_wake();
     }
@@ -369,10 +369,10 @@ bool RemoteServer::WantsScreenshot(std::string& path) {
   // second, so a capture taken straight after one shows a frame part way
   // through the turn — a view nobody asked for, and one that reads as a bug in
   // whatever was being looked at. Two false findings in one dogfooding session
-  // came from exactly this (docs/cam/dogfood-round.md). The `view` RPC already
-  // dodges it by snapping instead of animating; every other route into a
-  // camera move — menu_click, the view cube, AlignToFace — does not, so the
-  // wait belongs here, where all of them pass through.
+  // came from exactly this (docs/rendering/README.md#screenshots). The `view`
+  // RPC already dodges it by snapping instead of animating; every other route
+  // into a camera move — menu_click, the view cube, AlignToFace — does not, so
+  // the wait belongs here, where all of them pass through.
   //
   // Capped, because "wait for a condition" and "wait forever" are one bug
   // apart: 300 frames is several times the longest animation, and after it the

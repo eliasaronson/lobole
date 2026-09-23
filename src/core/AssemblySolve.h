@@ -21,7 +21,7 @@ class AssemblyDocument;
 // relative to the other (given its stored DOF pose), so placement is a
 // closed-form transform propagated sequentially from the `fixed` anchors
 // through the mate graph. Mate *trees* are solved; genuine loops are detected
-// and reported (per-mate error), not solved. See docs/assemblies/a3-design.md.
+// and reported (per-mate error), not solved. See docs/assemblies/solver.md.
 namespace assembly {
 
 // Resolves an occurrence's part_id to its already-regenerated part Document
@@ -78,7 +78,7 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // sub-assembly; omit it and those mates report that they cannot resolve.
 // Re-seat everything that RIDES on something else: an occurrence with
 // `attachedTo` gets its placement recomputed from its parent's, so a screw
-// follows the plate it is bolted to (docs/parts/f1-loose-ends.md).
+// follows the plate it is bolted to (docs/parts/README.md#attached-and-mated).
 //
 // Composition, not constraint — it runs AFTER the solve rather than inside
 // it, because there is nothing to solve: a zero-DOF leaf's pose is a matrix
@@ -89,7 +89,7 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // own UI, and inventing one here would be building for a case nobody has.
 int ApplyAttachments(AssemblyDocument& asmDoc);
 
-// Relations (docs/assemblies/relations-plan.md): make every relation hold
+// Relations (docs/assemblies/relations.md): make every relation hold
 // by setting the dependent mate's DOF from the driving one. `drivenMateId`
 // names the mate that was just changed (a drag, set_mate) and the walk goes
 // outward from it, so dragging either gear turns the other; 0 means an

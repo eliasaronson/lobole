@@ -1,13 +1,14 @@
 #pragma once
 
-// Headless Vulkan compute for the topology solver (docs/topopt/gpu-plan.md).
-// Lives in fem_gpu, a library separate from designer_core, which must stay
-// GPU-free so it can be unit-tested and scripted headlessly. No window, no
-// swapchain: instance -> best compute-capable device -> queue, plus the small
-// set of primitives the solver kernels need (host-visible storage buffers,
-// SPIR-V compute pipelines, dispatch + wait). Everything is synchronous and
-// host-visible in GPU0 — correctness first; the on-device CG loop (GPU1)
-// restructures for persistence and device-local memory.
+// Headless Vulkan compute for the topology solver
+// (docs/topopt/README.md#the-gpu-solver). Lives in fem_gpu, a library separate
+// from designer_core, which must stay GPU-free so it can be unit-tested and
+// scripted headlessly. No window, no swapchain: instance -> best
+// compute-capable device -> queue, plus the small set of primitives the solver
+// kernels need (host-visible storage buffers, SPIR-V compute pipelines,
+// dispatch + wait). Everything is synchronous and host-visible in GPU0 —
+// correctness first; the on-device CG loop (GPU1) restructures for persistence
+// and device-local memory.
 
 #include <vulkan/vulkan.h>
 

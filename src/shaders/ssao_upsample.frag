@@ -1,7 +1,7 @@
 #version 450
 
 // Joint-bilateral upsample of the blurred half-res AO to full resolution
-// (docs/rendering/ssao-upsample.md). Each full-res pixel blends the four
+// (docs/rendering/README.md#ssao). Each full-res pixel blends the four
 // surrounding half-res AO texels weighted by bilinear proximity x depth
 // similarity — so AO comes only from THIS pixel's surface, which is exactly
 // what plain bilinear gets wrong at silhouettes (halos, contact smear).

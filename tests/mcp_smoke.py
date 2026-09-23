@@ -95,7 +95,7 @@ async def run(port):
 
             # Drift gate: every feature type the app accepts must be
             # documented in FEATURE_FORMATS (the standing rule from
-            # docs/scripting/mcp.md, enforced). `describe` is the app-side
+            # docs/scripting/mcp.md#format-documentation, enforced). `describe` is the app-side
             # truth; the module constant is the MCP-side prose.
             import designer_mcp
             desc = await call("describe")

@@ -13,8 +13,8 @@
 class TopoDS_Face;
 class gp_Dir;
 
-// Flattening a sheet body, and folding it back (docs/sheetmetal/plan.md, S4
-// and S9).
+// Flattening a sheet body, and folding it back
+// (docs/sheetmetal/README.md#how-the-unfolder-works).
 //
 // The flat pattern does NOT come from developing the cylindrical faces of the
 // finished solid. It comes from the bends the features RECORDED as they made
@@ -105,7 +105,8 @@ Unfold(const Body& body, const SheetMetalRules& rules,
 // cut is per BODY, not per hole: the ray tree the outlines are traced
 // against, and — only when one of them lands across a bend — the part laid
 // flat. Cut one at a time, a thirteen-hole sketch unfolded the part thirteen
-// times (docs/grill-friction-plan.md).
+// times
+// (docs/sheetmetal/README.md#normalcut-shares-its-ray-tree-and-unfolds-only-when-it-must).
 [[nodiscard]] std::optional<FlatResult>
 NormalCut(const Body& body, const SheetMetalRules& rules,
           const std::vector<TopoDS_Face>& profiles, const gp_Dir& along,

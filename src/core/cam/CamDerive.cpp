@@ -43,7 +43,7 @@
 // edge break a tool can make, and reordering.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 
@@ -246,7 +246,8 @@ DerivedOp DeriveOperation(const Setup& setup,
       // where that is when nothing stands around it. Click the floor of a
       // pocket and this used to route a full-depth contour around the pocket
       // — a slot through the middle of the board, 22 mm into a 20 mm plate,
-      // reported by the verifier as scrap (docs/cam/dogfood-round.md). The
+      // reported by the verifier as scrap
+      // (docs/cam/operations.md#derivation--what-a-click-means). The
       // mirror of this mistake was already guarded: a pocket asked for on a
       // WALL says "click the pocket's FLOOR".
       //
@@ -483,8 +484,8 @@ DerivedOp DeriveOperation(const Setup& setup,
     // A rotary pass turns the whole part under the cutter, so a picked face
     // cannot bound it AROUND the axis. It bounds it ALONG the axis: the pass
     // runs the face's extent in X and all the way round
-    // (docs/cam/rough-rest-range-plan.md), so one journal or the handle alone
-    // can be finished. No pick: the whole length.
+    // (docs/cam/rotary.md#continuous-surface_rotary), so one journal or the
+    // handle alone can be finished. No pick: the whole length.
     if (target.ref.IsSet())
       op.targets = {target};
     // Depths are not what a rotary pass is bounded by: it runs the length of
@@ -596,7 +597,8 @@ OpType AddOperationType(const Setup& setup) {
   // the bed of a 4th-axis machine is a 3-axis job, and handing it a rotary
   // pass would be this bug turned round. A 3-axis "cut out" on a part held
   // on the trunnion contours the dowel from its top to its bottom -- a
-  // plausible operation and a wrong one (docs/cam/add-operation-plan.md).
+  // plausible operation and a wrong one
+  // (docs/cam/operations.md#derivation--what-a-click-means).
   if (setup.machine.hasRotaryAxis)
     for (const Operation& o : setup.operations)
       if (o.type == OpType::SurfaceRotary)

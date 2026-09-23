@@ -36,7 +36,7 @@
 // behind it, and the contour that comes out.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 

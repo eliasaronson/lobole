@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-// Tube-bending rules and bend arithmetic (docs/tube/plan.md, T1).
+// Tube-bending rules and bend arithmetic (docs/tube/README.md#tube-rules).
 //
 // A bent tube is a length of round stock pulled round a former of some radius
 // through some angle, rotated about its own axis between bends. Everything a

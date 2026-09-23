@@ -1,6 +1,6 @@
 # Vendored from FreeCAD_FastenersWB (github.com/shaise/FreeCAD_FastenersWB),
 # GPL-2.0-or-later. Upstream file: FsData/iso888length.csv, unmodified below this header.
-# See THIRD_PARTY.md and docs/parts/plan.md.
+# See THIRD_PARTY.md and docs/parts/README.md.
 "Nominal","Min","Max"
 "2",1.80,2.20
 "2.5",2.30,2.70

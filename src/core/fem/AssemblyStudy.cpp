@@ -1,4 +1,4 @@
-// A study on an assembly (S1, docs/simulation/assembly-studies-plan.md): one
+// A study on an assembly (docs/simulation/README.md#assembly-studies): one
 // occurrence meshed, its rigid neighbours clamped where they touch it. The
 // technique is P0's (tests/test_fem.cpp, "a mesh spans two solids only when
 // they SHARE the face"): a fuzzy general fuse imprints the contact patch as
@@ -435,7 +435,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
 
     // The fuse never touches the documents' shapes: copies in, and
     // NonDestructive besides — a boolean WRITES onto its arguments
-    // (docs/performance/query-booleans.md).
+    // (docs/inspect/README.md#query-booleans-are-non-destructive).
     const TopoDS_Shape original =
         BRepBuilderAPI_Copy(body.shape.GetShape()).Shape();
     std::vector<TopoDS_Shape> rigidOriginals;

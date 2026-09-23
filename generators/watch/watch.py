@@ -8,7 +8,7 @@
 A 21,600 vph self-winding movement in a 40 mm case: barrel, centre, third,
 fourth and escape wheels, a Swiss lever escapement with a hairspring, motion
 works under the dial, a rotor winding the barrel through a reduction wheel,
-and a dial, hands and case to put it in (docs/modeling/automatic-watch-plan.md).
+and a dial, hands and case to put it in (generators/watch/README.md).
 
 Every dimension is a document variable (watch_spec.declare). The going train
 and the motion works are coupled by gear relations, so one motion study turns
@@ -205,7 +205,7 @@ def build_assembly(app, P):
              "reduction", "barrel"),
             # The reverser: the second wheel takes its turn from the first,
             # wheel to wheel, and its pinion drives the ratchet beside the
-            # first one's (docs/reverser-plan.md).
+            # first one's (generators/watch/README.md).
             ("reduction", "reverser", Z_REDUCTION_W, Z_REDUCTION_W,
              "reduction", "reverser"),
             ("reverser_pinion", "barrel_arbor", Z_REDUCTION_P, Z_RATCHET,
@@ -272,7 +272,7 @@ def escapement_relations(app, m, rel):
     swings the balance, harmonically and once per tooth pitch, and another
     points the pallet fork at the impulse pin while the pin is in its notch
     (watch_spec.escapement_tables). Approximate in one way, said in
-    docs/modeling/watch.md: the wheel turns continuously, not in steps."""
+    generators/watch/README.md: the wheel turns continuously, not in steps."""
     from watch_spec import escapement_tables
     bal, fork = escapement_tables()
     relate(app, m, rel, "balance swing", "cam", "escape", "balance", lift=bal)
@@ -280,7 +280,7 @@ def escapement_relations(app, m, rel):
 
 
 def winding_relations(app, m, rel):
-    """The one-way reduction wheel (docs/freewheel-plan.md): the wheel the
+    """The one-way reduction wheel (generators/watch/README.md): the wheel the
     rotor drives turns the pinion only in the WINDING direction. Crown
     winding turns the ratchet positive, which through its mesh turns the
     pinion negative — so the freewheel drives negative, and the crown's
@@ -453,7 +453,7 @@ def keyless_relations(app, m, rel):
            pitch_radius=float(YOKE_ARM))
     # The dogs LAST, and Breguet: sawteeth that drive one way and ride over
     # the other, which they can only because the clutch LIFTS along the stem
-    # as they do (docs/click-and-breguet-plan.md). The crown turned back
+    # as they do (generators/watch/README.md#keyless-works-and-winding). The crown turned back
     # then slips here instead of unwinding the barrel, and the rotor winding
     # runs the winding pinion on ahead of a still clutch.
     #
@@ -738,7 +738,7 @@ def check_meshes(app, occ, m, samples=9, meshes=None):
         pitch_deg = 360.0 / z_small / turns
         # Forward from where the driver stands, and LEFT there: turning one
         # back would drive the winding train backwards, which the reverser's
-        # clutches hold against rather than unwind (docs/reverser-plan.md).
+        # clutches hold against rather than unwind (generators/watch/README.md).
         start = math.degrees(_mates(app)[m[driver]].get("rotation", 0.0))
         v_max = 0.0
         for i in range(samples):
@@ -926,7 +926,7 @@ def set_time(app, m, h, mi, s):
 
 def renders(app, occ, out):
     """The stills, each naming what it hides. Glass is see-through in a still
-    (docs/rendering/glass-plan.md), so the crystal and the caseback window
+    (docs/rendering/materials.md#glass), so the crystal and the caseback window
     stay in; the movement shot takes the case, the caseback and the rotor
     off, as a watchmaker would, and the keyless shot the dial and hands."""
     os.makedirs(out, exist_ok=True)

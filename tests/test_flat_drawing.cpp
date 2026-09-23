@@ -26,9 +26,9 @@
 
 using Catch::Matchers::WithinAbs;
 
-// A flat pattern on a drawing (docs/sheetmetal/plan.md, S11): a view names
-// the configuration it draws, a flat blank's creases draw as bend lines, and
-// a bend table lists them.
+// A flat pattern on a drawing (docs/sheetmetal/README.md#dxf-and-drawings): a
+// view names the configuration it draws, a flat blank's creases draw as bend
+// lines, and a bend table lists them.
 
 namespace {
 

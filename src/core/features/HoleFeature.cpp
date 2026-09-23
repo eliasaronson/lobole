@@ -73,11 +73,11 @@ bool HoleFeature::Execute(RegenContext& ctx) {
         "hole needs a sketch of points or circles (missing or suppressed)");
     return false;
   }
-  // A recorded fit DERIVES the diameter (docs/modeling/hole-standards.md).
-  // Done here rather than at the call site so it survives everything that
-  // rebuilds a feature — undo, a reload, a configuration override, an
-  // expression on the thread — instead of being a number somebody typed once
-  // from a table and never re-derived.
+  // A recorded fit DERIVES the diameter
+  // (docs/modeling/holes-and-threads.md#hole). Done here rather than at the
+  // call site so it survives everything that rebuilds a feature — undo, a
+  // reload, a configuration override, an expression on the thread — instead of
+  // being a number somebody typed once from a table and never re-derived.
   if (!fitThread.empty()) {
     const std::optional<parts::Fit> fit = parts::FitFromName(fitKind);
     if (!fit) {
@@ -210,7 +210,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // regen.ok, no warning, and a body that looks drilled from the outside.
   // That silence is how a sketch whose plane origin already carried the
   // pattern's offset — so every centre landed 7.6 mm off the part — passed
-  // two rounds of "it built fine" (docs/modeling/derived-gripper-dogfood.md).
+  // two rounds of "it built fine" (docs/modeling/holes-and-threads.md#hole).
   //
   // The test is a CLASSIFICATION of points down the bore, not a ray cast.
   // The first version reused the fastener stack's ray bundle, whose rays are
@@ -219,8 +219,8 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // a boss breaks it: the offset rays begin inside the boss, every one is
   // discarded as "started inside", and four holes that had visibly drilled
   // four standoffs were reported as drilling air (the SO-101 gripper rebuilt
-  // on the SDK, docs/agent-scale-plan.md G1b). A false warning is worse than
-  // none, so this asks the question directly instead.
+  // on the SDK; docs/modeling/holes-and-threads.md#hole). A false warning is
+  // worse than none, so this asks the question directly instead.
   {
     std::vector<std::string> empty;
     for (const glm::vec3& c : centers) {
@@ -285,7 +285,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 // correctly declared tapped hole came back as 40 mm3 of CLASH, with
 // `engaged_thread_pairs: 0` the only hint and no refusal anywhere: the
 // clearance check relieves an engaged length only between threads it was
-// told about (docs/grill-friction-plan.md).
+// told about (docs/modeling/holes-and-threads.md#hole).
 //
 // Every bore this feature cut, by its own name prefix and its radius — a
 // counterbore or a countersink on the same hole is a different radius and is

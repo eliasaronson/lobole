@@ -63,8 +63,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // test below: a click toggles, an ImGui collapsing header remembers, and
     // whichever of the two runs second used to close what the first opened.
     // The BOM is a floating window from the toolbar
-    // (docs/ui/assembly-panel-tidy-plan.md). Opened only if it is not: the
-    // button toggles, and a predecessor may have left it up.
+    // (docs/ui/panels.md#assembly-tab-the-model-panel). Opened only if it is
+    // not: the button toggles, and a predecessor may have left it up.
     if (!s_App->bomWindowOpen)
       ToolbarClick(ctx, "###tb_asm_bom");
     ctx->Yield(2);
@@ -327,7 +327,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       before.push_back(o.position);
 
     // The explode controls are a floating tool window now, opened from the
-    // assembly toolbar (docs/ui/u15-assembly-panel.md).
+    // assembly toolbar (docs/ui/panels.md#assembly-tab-the-model-panel).
     ToolbarClick(ctx, "###tb_asm_explode");
     ctx->Yield(2);
     IM_CHECK(s_App->explodeToolOpen);
@@ -462,7 +462,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Assembly configurations share the Configurations tab with a part's,
     // rather than being a section of the occurrence panel
-    // (docs/ui/u15-assembly-panel.md).
+    // (docs/ui/panels.md#assembly-tab-the-model-panel).
     {
       ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelConfigurations);
       IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
@@ -561,7 +561,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
 
     // Motion is a floating tool window now, opened from the assembly toolbar
-    // (docs/ui/u15-assembly-panel.md).
+    // (docs/ui/panels.md#assembly-tab-the-model-panel).
     ToolbarClick(ctx, "###tb_asm_motion");
     ctx->Yield(2);
     IM_CHECK(s_App->motionToolOpen);
@@ -1101,8 +1101,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const std::string row = "//###Model/###mate_row_" + std::to_string(mateId);
 
     // Click: selected. The editor is no longer inline under the list
-    // (docs/ui/assembly-panel-tidy-plan.md) -- a click selects and nothing
-    // grows under the cursor.
+    // (docs/ui/panels.md#assembly-tab-the-model-panel) -- a click selects and
+    // nothing grows under the cursor.
     ctx->ItemClick(row.c_str());
     ctx->Yield(2);
     IM_CHECK_EQ(ui::SelectedMateId(*s_App), mateId);
@@ -1660,9 +1660,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly",
                        "the_panel_lists_and_the_editors_float");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    // docs/ui/assembly-panel-tidy-plan.md: sections open and close on a
-    // header that says it can, a double-click edits in the tool window, and
-    // the bill of materials is a window of its own.
+    // docs/ui/panels.md#assembly-tab-the-model-panel: sections open and close
+    // on a header that says it can, a double-click edits in the tool window,
+    // and the bill of materials is a window of its own.
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
@@ -1980,7 +1980,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->assembly->FindById(ids[2]) != nullptr);
   };
 
-  // A fastener is placed by clicking a hole's rim (docs/parts/gui-plan.md).
+  // A fastener is placed by clicking a hole's rim (docs/parts/README.md).
   //
   // The whole verb: arm from the toolbar, click the rim in the viewport, and
   // the size and the length derive from what was clicked. Clicked all the way
@@ -2155,8 +2155,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // often enough — the click closed it instead, and everything inside went
     // out of reach ("Unable to locate item ###bom_check_fasteners").
     // The BOM is a floating window from the toolbar
-    // (docs/ui/assembly-panel-tidy-plan.md). Opened only if it is not: the
-    // button toggles, and a predecessor may have left it up.
+    // (docs/ui/panels.md#assembly-tab-the-model-panel). Opened only if it is
+    // not: the button toggles, and a predecessor may have left it up.
     if (!s_App->bomWindowOpen)
       ToolbarClick(ctx, "###tb_asm_bom");
     ctx->Yield(2);
@@ -2250,7 +2250,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // These panels share a dock node with Model, so bring each to the front
     // before clicking in it — and put Model back at the end, or the next
-    // test starts on the wrong tab (docs/ui/gui-coverage.md).
+    // test starts on the wrong tab
+    // (docs/ui/testing.md#independence-any-partition-is-valid).
     const auto showPanel = [&](const char* title) {
       ImGuiWindow* w = ImGui::FindWindowByName(title);
       IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);

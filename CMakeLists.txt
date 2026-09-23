@@ -63,7 +63,7 @@ endif()
 # its own thread. The meshing work reasoned carefully about which TShapes are
 # shared and grouped so a race is impossible rather than merely absent — TSan
 # is the tool that CHECKS that reasoning instead of trusting it
-# (docs/capability-review-2026-08-31.md, P3).
+# (docs/architecture.md#tests, P3).
 option(ENABLE_TSAN "Build with ThreadSanitizer" OFF)
 if(ENABLE_TSAN AND ENABLE_SANITIZERS)
   message(FATAL_ERROR
@@ -443,7 +443,7 @@ option(ENABLE_TERMINAL "Embedded terminal panel (libvterm)" ON)
 option(ENABLE_CAM_ADAPTIVE "Adaptive clearing (LGPL libarea, linked as a shared library)" ON)
 
 # Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
-# (docs/cam/plan.md). Vendored rather than found: it is packaged in nixpkgs
+# (docs/cam/README.md). Vendored rather than found: it is packaged in nixpkgs
 # but not in Ubuntu, and three .cpp files are cheaper than an optional
 # dependency that silently drops a workstream on half the CI matrix.
 set(CLIPPER2_DIR ${CMAKE_SOURCE_DIR}/deps/clipper2/CPP/Clipper2Lib)
@@ -517,7 +517,7 @@ else()
     message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")
 endif()
 
-# libvterm: the terminal panel's VT emulation (docs/ui/terminal-panel.md).
+# libvterm: the terminal panel's VT emulation (docs/ui/terminal.md).
 # Optional — without it the panel compiles out and the preference hides,
 # because a CAD app must still build on a machine that has no terminal
 # library. Ubuntu: libvterm-dev; nix: libvterm-neovim (in shell.nix).
@@ -773,11 +773,11 @@ file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 # Designer's own icon font is REGENERATED (tools/icons/build_icon_font.py), so
 # it is copied with configure_file: file(COPY) runs only at configure time, and
-# a rebuilt font never reached the build tree (docs/ui/icons-plan.md).
+# a rebuilt font never reached the build tree (docs/ui/README.md#icons).
 configure_file(${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf
                ${CMAKE_BINARY_DIR}/assets/fonts/designer-icons.ttf COPYONLY)
 # Monospace for the terminal panel: the UI font has no box-drawing glyphs, and
-# a TUI drawn in a proportional font is unreadable (docs/ui/terminal-panel.md).
+# a TUI drawn in a proportional font is unreadable (docs/ui/terminal.md).
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 # The MCP server and its client, beside the assets: the terminal panel points
@@ -795,7 +795,7 @@ include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 set(DESIGNER_HDRI "brown_photostudio_02_2k.hdr")
 file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
-# The vendored standard-parts tables (docs/parts/plan.md). Staged beside the
+# The vendored standard-parts tables (docs/parts/README.md). Staged beside the
 # executable for a development build; installed under share/designer below.
 file(COPY ${CMAKE_SOURCE_DIR}/assets/parts
      DESTINATION ${CMAKE_BINARY_DIR}/assets)
@@ -821,7 +821,7 @@ endif()
 # designer_app: everything the app is EXCEPT its entry points (ui/, render/,
 # remote/ and the GUI suite). It exists so designer_tests can link the actions
 # layer and exercise it headlessly — see tests/test_actions.cpp for the
-# pattern and docs/architecture-review-2026-08-24.md for why this beats an
+# pattern and docs/architecture.md#the-ui-actions-layer for why this beats an
 # abstract renderer interface.
 #
 # No renderer seam is needed, and none was added: the actions layer already
@@ -875,7 +875,7 @@ set_source_files_properties(
 # translation units re-parse what one used to parse once, so the split alone
 # raises total CPU while it lowers the critical path; the PCH is what pays that
 # back. Do not remove one without the other
-# (docs/architecture-review-2026-09-06.md, section 2).
+# (docs/architecture.md#precompiled-headers, section 2).
 #
 # PRIVATE, like designer_core's: it applies to this target's own sources, not
 # to everything that links it.
@@ -940,7 +940,7 @@ if(WIN32)
 endif()
 
 # fem_gpu: headless Vulkan compute for the topology solver
-# (docs/topopt/gpu-plan.md). Deliberately a separate library — designer_core
+# (docs/topopt/README.md#the-gpu-solver). Deliberately a separate library — designer_core
 # must stay GPU-free. Compute shaders are compiled here (glslc is found early;
 # the same cache variable satisfies the graphics-shader section below) and
 # embedded as byte arrays so the library and its tests need no runtime shader

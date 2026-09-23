@@ -10,7 +10,7 @@
 
 namespace ui {
 
-// The CAM panel (docs/cam/plan.md): setups, tools, operations, and the two
+// The CAM panel (docs/cam/README.md): setups, tools, operations, and the two
 // buttons that matter — generate and post. A dock tab beside Model, because a
 // job belongs to the part the way a study does.
 void DrawCamPanel(AppState& state);
@@ -22,7 +22,7 @@ void DrawCamPanel(AppState& state);
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out);
 
 // The same backplot split for the renderer's cached channel
-// (docs/cam/backplot-frame-cost-plan.md). `CamBackplot` is the cached vertex
+// (docs/cam/gui.md#what-the-viewport-draws). `CamBackplot` is the cached vertex
 // list, SHARED rather than copied, with the key that changes when it does --
 // null when nothing is drawn this way (the path hidden, no toolpath, or a
 // simulation playing its own). `AppendCamToolpathExtras` is everything else
@@ -45,7 +45,7 @@ void AppendCamToolpathExtras(AppState& state, std::vector<PrimVertex>& out);
 // when something setup-wide changed (the stock, a tool, the frame); for an
 // edit to one operation use RefreshCamToolpath below, because "all of them"
 // is not cheap: one adaptive pocket on a real part measured 7.1 s, and every
-// edit used to pay it again (docs/known-bugs.md).
+// edit used to pay it again (docs/cam/README.md#background-work).
 void RefreshCamToolpaths(AppState& state);
 
 // Regenerates ONE operation's toolpath in place (appending if it is new), and
@@ -73,14 +73,14 @@ void DropCamToolpath(AppState& state, uint64_t opId);
 int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids);
 
 // The row every operation list draws for one operation, in the part feature
-// list's style (docs/ui/cam-panel-tidy-plan.md): the type's glyph, the name as
-// a full-width Selectable, the tool as a dim tail, dimmed when disabled, a red
-// mark when it cut nothing. Click selects (Ctrl/Shift extend over `order`, the
-// ids as listed), double-click edits, drag reorders, right-click offers Edit,
-// Enable/Disable, show what it removes, and Delete for the selection. The
-// tooltip is the op's summary and what its toolpath came to. Inside the
-// caller's PushID(op.id). The caller applies what it asks for, because it is
-// walking the list those would change.
+// list's style (docs/ui/panels.md#cam-job-tab-the-cam-panel): the type's glyph,
+// the name as a full-width Selectable, the tool as a dim tail, dimmed when
+// disabled, a red mark when it cut nothing. Click selects (Ctrl/Shift extend
+// over `order`, the ids as listed), double-click edits, drag reorders,
+// right-click offers Edit, Enable/Disable, show what it removes, and Delete for
+// the selection. The tooltip is the op's summary and what its toolpath came to.
+// Inside the caller's PushID(op.id). The caller applies what it asks for,
+// because it is walking the list those would change.
 struct CamOpRowResult {
   bool deleteSelection = false; // the menu's Delete
   bool edit = false;            // double-click, or the menu's Edit

@@ -282,7 +282,7 @@ json DocumentEnvelope(const Document& doc) {
 // An assembly shares the document format string + version, discriminated by
 // `kind: "assembly"`. OccurrenceToJson/FromJson are public (defined near
 // FeatureToJson); these are the internal file-layout helpers. See
-// docs/assemblies/a2-design.md.
+// docs/assemblies/README.md#the-assembly-document.
 
 json AssemblyEnvelope(const AssemblyDocument& asmDoc) {
   json j;
@@ -513,7 +513,7 @@ std::set<std::string> ReferencedAssets(const Document& doc) {
   return names;
 }
 
-// Directory format (F3, docs/versioning/f3-directory-format.md): one file
+// Directory format (docs/versioning/format.md#the-directory-form): one file
 // per feature named by stable id, an ordered index written LAST (a torn
 // save leaves a stale-but-loadable index), document-level parameters file.
 namespace {
@@ -571,9 +571,10 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           !wanted.contains(entry.path().filename().string()))
         fs::remove(entry.path(), ec);
     }
-    // Baked geometry (docs/versioning/baked-geometry.md): the built bodies
-    // beside the recipe, so the next open is a load. Best-effort — a project
-    // that cannot bake is still a valid project, just a slower one to open.
+    // Baked geometry (docs/versioning/README.md#baked-geometry): the built
+    // bodies beside the recipe, so the next open is a load. Best-effort — a
+    // project that cannot bake is still a valid project, just a slower one to
+    // open.
     if (doc.CommitGeometry()) {
       std::string bakeError;
       if (!SaveGeometry(doc, dirPath, &bakeError))
@@ -2151,7 +2152,7 @@ LoadDrawing(const std::string& path) {
   return std::unexpected(error);
 }
 
-// ---- Jobs (docs/cam/job-document.md) --------------------------------------
+// ---- Jobs (docs/cam/README.md#the-model) ------------------------------
 
 namespace {
 
@@ -2206,7 +2207,7 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
     // The same move for the raster at v125, and for the same reason: it
     // reads `stepdown` as roughing layers now, the derivation stored one on
     // every raster before, and honouring it would turn every saved finish
-    // into a rough (docs/cam/rough-rest-range-plan.md).
+    // into a rough (docs/cam/operations.md#rough-a-surface-and-rest-machining).
     if (version < 125)
       for (cam::Operation& op : setup.operations)
         if (op.type == cam::OpType::SurfaceParallel)

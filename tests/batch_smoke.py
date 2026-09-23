@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`batch` — one transaction, one regeneration, one undo step
-(docs/agent-scale-plan.md, G1a).
+(docs/scripting/rpc.md#batch).
 
 The gripper dogfood spent 86 calls on two parts and an assembly, each paying
 a full regeneration. This pins what a batch promises instead: N features

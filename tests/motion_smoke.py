@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Motion studies over the RPC, headless (docs/agent-scale-plan.md, G2).
+"""Motion studies over the RPC, headless (docs/assemblies/README.md#motion-studies).
 
 A carrier, an arm on a revolute axle, and a stop fixed on the arm's circle:
 the study turns the arm through 360 degrees and the collision table must

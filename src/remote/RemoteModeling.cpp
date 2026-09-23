@@ -235,7 +235,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "the active part whose source is loaded. Refuses a source that is not "
      "in the project or a broken link. Returns {updated: [ids], regen, "
      "digest}. Never automatic: get_state's `stale` says when to call it "
-     "(docs/modeling/derived-plan.md).",
+     "(docs/modeling/derived.md).",
      "all, feature_id, index", remote::NeedsPart},
     {"derive_occurrence",
      "In an in-context edit (edit_in_context): add a Derived copy of a "
@@ -430,7 +430,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // A Derived arrives without its snapshot (the request names a source;
     // the copy is taken here, through the project): refuses a part that is
     // not loaded, the part itself, and a cycle — in words naming the parts
-    // that ARE there (docs/modeling/derived-plan.md).
+    // that ARE there (docs/modeling/derived.md).
     if (auto* d = dynamic_cast<DerivedFeature*>(feature.get())) {
       ui::DerivedSource src;
       src.slotId = d->sourcePart;
@@ -560,7 +560,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // hands you and turning one into a position cost a get_state round trip.
     // NOT `id`: `feature.id` inside the spec already means the feature's own
     // IDENTITY, and two readings of one word beside each other would be worse
-    // than the round trip (docs/dogfood-friction-plan.md, F3).
+    // than the round trip
+    // (generators/README.md#single-cylinder-and-air-cooled-engines).
     size_t index = 0;
     if (p.contains("feature_id")) {
       const uint64_t fid = p.at("feature_id").get<uint64_t>();
@@ -670,11 +671,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "set_appearance") {
     // V-appearance: a visual override on a body's creating feature, separate
-    // from the physical material (docs/rendering/appearance-plan.md). Same
-    // addressing as set_material: {feature_id | body}. Optional fields
-    // color [r,g,b] (LINEAR 0..1), roughness, metallic; passing none clears
-    // the override. Appearance is stripped from the regen chain hash, so
-    // this never rebuilds geometry — just restamps and resyncs.
+    // from the physical material
+    // (docs/rendering/materials.md#appearance-override). Same addressing as
+    // set_material: {feature_id | body}. Optional fields color [r,g,b] (LINEAR
+    // 0..1), roughness, metallic; passing none clears the override. Appearance
+    // is stripped from the regen chain hash, so this never rebuilds geometry —
+    // just restamps and resyncs.
     const bool byId = p.contains("feature_id");
     const bool byBody = p.contains("body");
     if (byId == byBody)
@@ -1031,7 +1033,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_reference_image" || m == "calibrate_reference_image" ||
       m == "set_reference_image" || m == "delete_reference_image") {
-    // Sketch reference underlays (v49, docs/sketching/reference-image-plan.md).
+    // Sketch reference underlays
+    // (v49, docs/sketching/README.md#reference-images-underlays).
     // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity]}
     // calibrate: {sketch_id, image_id, p1:[u,v], p2:[u,v], distance,
     //             [align:"none"|"horizontal"|"vertical"]}

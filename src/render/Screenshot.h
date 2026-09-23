@@ -40,7 +40,7 @@ struct FrameStats {
 // no FrameStats. That is the measuring shape: the encode between renders is
 // CPU work that leaves the GPU idle, and an idle GPU on a laptop drops to its
 // lowest clock, so a burst that saves nothing measures the card as it
-// actually runs (docs/rendering/offscreen-gpu-timing-plan.md).
+// actually runs (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen).
 //
 // `repeat` renders the same scene that many times into the same target — one
 // submit each, each waited on, only the last reading back. `afterEachSubmit`

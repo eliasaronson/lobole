@@ -252,7 +252,8 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   // its reach above: a screw's head sits at -z and its shank runs +z, a nut
   // and a washer sit entirely at -z. That single convention is what lets the
   // placement layer point one along a hole's axis without knowing which of the
-  // three it is holding (docs/parts/plan.md, phase 4).
+  // three it is holding
+  // (docs/parts/README.md#the-model-a-fastener-is-a-part-placed-as-an-occurrence).
   CADShape solid;
   double headHeight = 0.0;
   ElementRef threadOn; // the shank face, once it exists and is named

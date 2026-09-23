@@ -3,7 +3,7 @@
 // What the CUTTER's own geometry does: tool shapes, edge breaks, drilling
 // and pecking, corner relief, lead arcs, and roughing then finishing.
 // One of five files split from test_cam.cpp
-// (docs/architecture-review-2026-09-06.md, stage 1).
+// (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
 

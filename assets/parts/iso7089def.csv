@@ -1,6 +1,6 @@
 # Vendored from FreeCAD_FastenersWB (github.com/shaise/FreeCAD_FastenersWB),
 # GPL-2.0-or-later. Upstream file: FsData/iso7089def.csv, unmodified below this header.
-# See THIRD_PARTY.md and docs/parts/plan.md.
+# See THIRD_PARTY.md and docs/parts/README.md.
 "ISO7089def"
 "Dia","d1_min","d2_max","h","h_max"
 "M1.6",1.7,4.0,0.3,0.35

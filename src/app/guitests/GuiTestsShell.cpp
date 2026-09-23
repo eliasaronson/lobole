@@ -153,7 +153,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   // the menu, the view cube, the Shift+1..7 shortcuts, the command palette —
   // passed the world origin as the point to look at, so fitting the view on a
   // part modelled away from the origin and then pressing Front left you
-  // looking at empty space beside it (docs/cam/dogfood-round.md).
+  // looking at empty space beside it (docs/ui/README.md#viewport).
 #endif
   t = IM_REGISTER_TEST(engine, "frametime",
                        "frame_stats_measure_hud_stays_hidden");
@@ -475,7 +475,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   // visibility here and glyph visibility there); the convention test
   // "a toolbar glyph means one thing" holds that rule over the icon table.
   // This checks what is DRAWN, on every bar and in every flyout, and that no
-  // button fell through to the unknown-command glyph (docs/ui/icons-plan.md).
+  // button fell through to the unknown-command glyph (docs/ui/README.md#icons).
   t = IM_REGISTER_TEST(engine, "toolbar", "no_duplicate_glyph");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     using Seen = std::unordered_map<uint32_t, std::string>;
@@ -624,10 +624,10 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));
   };
 
-  // Idle throttle (docs/rendering/idle-throttle.md). Three contracts in one
-  // sitting: the suite itself never idles (the engine drives frames, so the
-  // pacer is bypassed under --gui-tests), a force-enabled pacer rests after
-  // the cooldown, and input restores full rate.
+  // Idle throttle (docs/rendering/frame-pacing.md#idle-throttle). Three
+  // contracts in one sitting: the suite itself never idles (the engine drives
+  // frames, so the pacer is bypassed under --gui-tests), a force-enabled pacer
+  // rests after the cooldown, and input restores full rate.
   t = IM_REGISTER_TEST(engine, "shell", "idle_throttle_rests_and_input_wakes");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // Bypassed in test mode: frames must never slow under the engine.

@@ -15,9 +15,9 @@
 #include <vector>
 
 // A visual override SEPARATE from the physical material
-// (docs/rendering/appearance-plan.md): every unset field inherits from the
-// material, so physics (density, FEM, BOM) never sees this. Persisted on the
-// creating feature (v54), stamped onto its bodies each regeneration, and
+// (docs/rendering/materials.md#appearance-override): every unset field inherits
+// from the material, so physics (density, FEM, BOM) never sees this. Persisted
+// on the creating feature (v54), stamped onto its bodies each regeneration, and
 // STRIPPED from the regen chain hash — recoloring never rebuilds B-Rep.
 struct Appearance {
   // LINEAR base colour: the shaders light it as linear and the STEP/GLB
@@ -43,8 +43,9 @@ struct ThreadRegion {
 };
 
 // A bend a sheet feature MADE, written down rather than measured back off the
-// cylindrical faces afterwards (docs/sheetmetal/plan.md). Unfolding is then
-// arithmetic over a graph of these — BA = angle * (R + K*t) — instead of
+// cylindrical faces afterwards
+// (docs/sheetmetal/README.md#bends-are-recorded-never-recognised). Unfolding is
+// then arithmetic over a graph of these — BA = angle * (R + K*t) — instead of
 // surface development, which is what makes refold(unfold(x)) == x a property
 // a test can assert rather than a tolerance to hope about.
 //
@@ -144,7 +145,7 @@ struct Body {
   // assembles its body list (ui::JobBodies). Transient like the shape, and 0
   // everywhere else -- a job is the only thing that puts several parts'
   // bodies in one vector, which is exactly when an ElementRef alone stops
-  // naming one face (docs/cam/job-document.md).
+  // naming one face (docs/cam/README.md#the-model).
   uint64_t jobPartId = 0;
 
   // User appearance override, stamped from the creating feature after each
@@ -153,10 +154,10 @@ struct Body {
   Appearance appearance;
 
   // A ghost, not this part (a Derived feature with `reference: true`,
-  // docs/modeling/derived-plan.md): here to be drawn on — sketch-on-face,
-  // external geometry, hole centres, a mate connector — and absent from
-  // everything that treats a body as matter: mass and BOM, export, CAM,
-  // the FEM mesh, Add/Cut and Boolean operands, the assembly's placed
+  // docs/modeling/derived.md#reference-bodies-ghosts): here to be drawn on —
+  // sketch-on-face, external geometry, hole centres, a mate connector — and
+  // absent from everything that treats a body as matter: mass and BOM, export,
+  // CAM, the FEM mesh, Add/Cut and Boolean operands, the assembly's placed
   // bodies. Transient like the shape, stamped by the creating feature.
   bool reference = false;
   std::vector<ThreadRegion> threadRegions; // derived opt-in contact semantics
@@ -300,7 +301,7 @@ public:
   // frame, a curve — but state computed in Execute and read afterwards (by
   // the overlays, by a mate connector, by the `frame` query).
   //
-  // Baked geometry (docs/versioning/baked-geometry.md) replaces the BODY
+  // Baked geometry (docs/versioning/README.md#baked-geometry) replaces the BODY
   // list and executes nothing, which leaves that state at its default: a
   // datum plane draws at the origin, and a mate anchored to a Frame silently
   // resolves to the identity — the model loads, looks plausible and is

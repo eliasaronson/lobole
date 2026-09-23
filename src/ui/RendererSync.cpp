@@ -102,8 +102,8 @@
 // No unit test covers this file. It is verified by rendering a fixed scene
 // through the real GPU and diffing the PNG -- which is how the 2026-08-24
 // round pinned the same code when it moved the renderer helpers.
-// Split out of AppActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 3). AppActions.h still declares everything, so no caller changed.
+// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AppActions.h still declares everything, so no caller changed.
 
 namespace ui {
 
@@ -205,9 +205,9 @@ void SyncDocumentRenderers(AppState& state) {
   // gates below: the cut is a fragment discard, so without them a pick lands
   // on the material it removed — you section an assembly to reach a part
   // inside and every hover answers with the housing you just cut open
-  // (docs/ui/section-pick-plan.md). Ahead of the gates because the planes
-  // move live while the cap GEOMETRY deliberately settles on release, and a
-  // picture and a pick that disagree is the bug itself.
+  // (docs/ui/selection.md#picking-through-a-section). Ahead of the gates
+  // because the planes move live while the cap GEOMETRY deliberately settles on
+  // release, and a picture and a pick that disagree is the bug itself.
   if (state.faceSelector)
     state.faceSelector->SetClipPlanes(SectionPlanes(state));
   if (!state.meshRenderer)
@@ -377,8 +377,8 @@ void SyncDocumentRenderers(AppState& state) {
   if (state.job)
     if (cam::Setup* setup = ActiveCamSetup(state)) {
       // A seat is solved against the stock as it is now, and the pose kept
-      // on the fixture for the per-frame readers (docs/cam/fixture-seat-
-      // plan.md). This sync is keyed on the stock's definition, so it runs
+      // on the fixture for the per-frame readers (docs/cam/setup.md#seats).
+      // This sync is keyed on the stock's definition, so it runs
       // whenever the stock can have moved.
       RefreshFixtureSeats(state, *setup);
       for (const cam::Fixture& f : setup->fixtures) {
@@ -647,7 +647,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     rtm.emissive = glm::vec3(0.0f);
     rtm.specular = glm::vec3(mat.specular);
     // Glass: closesthit.rchit refracts through it, and section.rahit lets a
-    // shadow ray through it tinted (docs/rendering/glass-plan.md).
+    // shadow ray through it tinted (docs/rendering/materials.md#glass).
     rtm.transmission = mat.transmission;
     rtm.optics = glm::vec4(mat.ior, 0.0f, 0.0f, 0.0f);
     if (mat.pattern != CADMaterials::SurfacePattern::Flat) {
@@ -974,10 +974,10 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
 }
 
 // A quick render's second half, on a worker: average the supersampled frame
-// down and write the PNG (docs/rendering/still-quality-plan.md). The capture
-// before it needs the renderers and runs on the frame; this needs nothing but
-// the pixels, so the app keeps drawing, the dialog shows the progress, and
-// Cancel stops it before the file is written.
+// down and write the PNG (docs/rendering/still-render.md#the-dialog). The
+// capture before it needs the renderers and runs on the frame; this needs
+// nothing but the pixels, so the app keeps drawing, the dialog shows the
+// progress, and Cancel stops it before the file is written.
 struct QuickEncode {
   RasterFrame frame;
   std::string path;
@@ -1127,7 +1127,7 @@ void PumpRenderJob(AppState& state) {
 
 // ---------------------------------------------------------------------------
 // The ASSEMBLY tab's renderer sync, from AssemblyActions.cpp
-// (docs/architecture-review-2026-09-06.md, stage 6). It is the same job as
+// (docs/architecture.md#the-ui-actions-layer). It is the same job as
 // SyncDocumentRenderers above -- push what the tab shows at the renderers --
 // for a different kind of tab, and the two were in different files only
 // because the monolith they came from was split by document kind first.

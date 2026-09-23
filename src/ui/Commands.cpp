@@ -249,7 +249,7 @@ static const std::array<std::string, std::size(conv::kNamedViews)>
 
 void StandardView(AppState& s, const conv::NamedView& v) {
   // The camera's OWN pivot, not the world origin: a standard view is an
-  // orientation, not a place (docs/cam/dogfood-round.md). The table's up
+  // orientation, not a place (docs/ui/README.md#viewport). The table's up
   // matters for top/bottom: before it was passed through, the GUI's top view
   // and the RPC's were rolled 180 degrees from each other.
   if (s.camera)
@@ -472,7 +472,7 @@ const std::vector<Command>& Table() {
     add("part.datum_plane", Idle, [](AppState& s) { CreateDatumPlane(s); });
     add("part.datum_axis", Idle, [](AppState& s) { CreateDatumAxis(s); });
     add("part.frame", Idle, [](AppState& s) { CreateFrame(s); });
-    // A copy of another part to draw on (docs/modeling/derived-plan.md).
+    // A copy of another part to draw on (docs/modeling/derived.md).
     // Enabled on any part tab: with nothing to derive from the window says
     // so and Accept stays disabled (U10), the same rule as the fastener.
     add("part.derive", Idle, [](AppState& s) { CreateDerived(s); });
@@ -498,7 +498,7 @@ const std::vector<Command>& Table() {
     add("part.split", IdleBody, [](AppState& s) { CreateSplit(s); });
     add("part.refine", IdleBody, [](AppState& s) { CreateRefine(s); });
 
-    // Sheet metal (docs/sheetmetal/plan.md). The base flange needs a closed
+    // Sheet metal (docs/sheetmetal/README.md). The base flange needs a closed
     // profile like an extrude does; the other two need a body to grow off or
     // to lay flat. None of them needs the rules to be SET — each refuses
     // visibly and names set_sheet_metal_rules, which is more use than a
@@ -530,7 +530,8 @@ const std::vector<Command>& Table() {
     verb("job.lay_face_up", AppState::CamVerb::LayFaceUp);
     // The ROTARY index is a different claim and only true of a machine that
     // has the axis. Offering it unconditionally is what let a 3-axis job be
-    // handed `G0 A90` for wanting a panel flat (docs/cam/setup-frame.md).
+    // handed `G0 A90` for wanting a panel flat
+    // (docs/cam/setup.md#fixturing-frame-and-rotary-index).
     verb("job.index_face", AppState::CamVerb::IndexFace, HasRotaryAxis);
     add("job.look_down_spindle", HasJob,
         [](AppState& s) { LookDownTheSpindle(s); });
@@ -540,7 +541,7 @@ const std::vector<Command>& Table() {
     verb("job.edge", AppState::CamVerb::Edge);
     verb("job.whole", AppState::CamVerb::Whole);
     verb("job.face", AppState::CamVerb::Face);
-    // 3D and 4D finishing (docs/cam/surface-verbs-plan.md). The two surface
+    // 3D and 4D finishing (docs/cam/gui.md#the-job-toolbar). The two surface
     // verbs were written, with their picks and derivations, and never given
     // a command; the rotary ones only mean something with the axis.
     verb("job.surface", AppState::CamVerb::Surface);
@@ -548,7 +549,7 @@ const std::vector<Command>& Table() {
     verb("job.rotary_finish", AppState::CamVerb::RotaryFinish, HasRotaryAxis);
     verb("job.rotary_rough", AppState::CamVerb::RotaryRough, HasRotaryAxis);
     // Rough a 3D part, and clean up after the finish with a smaller ball
-    // (docs/cam/rough-rest-range-plan.md).
+    // (docs/cam/operations.md#rough-a-surface-and-rest-machining).
     verb("job.surface_rough", AppState::CamVerb::SurfaceRough);
     verb("job.rest", AppState::CamVerb::Rest);
     // A tool with a window, like Simulate: the run and what it found, where
@@ -689,7 +690,7 @@ const std::vector<Command>& Table() {
     mate("assembly.mate_cylindrical", MateType::Cylindrical);
     mate("assembly.mate_planar", MateType::Planar);
     mate("assembly.mate_ball", MateType::Ball);
-    // Standard parts (docs/parts/gui-plan.md). Enabled on any assembly tab,
+    // Standard parts (docs/parts/README.md). Enabled on any assembly tab,
     // including an empty one: opening it with nothing to pick is not a
     // mistake to prevent, it is the tool asking for its one input, and the
     // window says so with Place disabled (U10).
@@ -697,9 +698,10 @@ const std::vector<Command>& Table() {
         "assembly.fastener", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) { OpenFastenerTool(s); });
 
-    // The two viewport modes (docs/ui/u15-assembly-panel.md). Each replaces
-    // the other rather than stacking: they both place the occurrences, so the
-    // tool window's one-at-a-time slot is the behaviour, not a limitation.
+    // The two viewport modes (docs/ui/panels.md#assembly-tab-the-model-panel).
+    // Each replaces the other rather than stacking: they both place the
+    // occurrences, so the tool window's one-at-a-time slot is the behaviour,
+    // not a limitation.
     add(
         "assembly.explode", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) {
@@ -890,7 +892,7 @@ void DispatchShortcuts(AppState& state) {
     return;
 
   // The terminal owns the keyboard while the pointer is over it
-  // (docs/ui/terminal-panel.md). Without this gate Ctrl+Z would mean two
+  // (docs/ui/terminal.md). Without this gate Ctrl+Z would mean two
   // things at once — undo a feature AND suspend the job — and which one you
   // got would depend on invisible focus state.
   if (TerminalCapturesKeys(state))

@@ -38,10 +38,11 @@ struct Settings {
   bool shadows = true;
   std::string ssao = "half"; // off | half | full
   int shadowMap = 2048;      // 1024 | 2048
-  // Idle throttle (docs/rendering/idle-throttle.md): with nothing happening
-  // — no input, animation, solve, or remote traffic — the frame loop waits
-  // for events at a ~10 Hz floor instead of re-rendering the unchanged scene
-  // at vsync rate. Quality-neutral; battery, fans, and iGPU turbo headroom.
+  // Idle throttle (docs/rendering/frame-pacing.md#idle-throttle): with nothing
+  // happening — no input, animation, solve, or remote traffic — the frame loop
+  // waits for events at a ~10 Hz floor instead of re-rendering the unchanged
+  // scene at vsync rate. Quality-neutral; battery, fans, and iGPU turbo
+  // headroom.
   bool idleThrottle = true;
 
   // Sharing — who a commit is BY. Empty means "whatever git is configured
@@ -53,14 +54,14 @@ struct Settings {
   // General
   double autosaveInterval = 60.0; // seconds; 0 disables
   // Off by default: a CAD app should not open with a shell in it, and the
-  // panel costs a process the moment it is used (docs/ui/terminal-panel.md).
+  // panel costs a process the moment it is used (docs/ui/terminal.md).
   bool terminalPanel = false;
 
   // Keyboard bindings the user changed, as command id -> chord text. Only
   // the DIFFERENCES from keymap::Defaults() are stored, so a later change to
   // a default still reaches anyone who never touched that row. Not a `Field`:
   // the table above is one scalar per row with a slider or a combo, and a
-  // keymap is neither (docs/ui/u12-keybindings.md).
+  // keymap is neither (docs/ui/keybindings.md).
   keymap::Keymap keys;
 
   // Where the main window was last time. Remembered state, not a preference:

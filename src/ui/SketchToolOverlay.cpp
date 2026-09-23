@@ -37,10 +37,10 @@
 //
 // Distinct from SketchOverlay.cpp, which turns the finished sketch into
 // vertices: this is the transient half, and most of it draws through ImGui.
-// Split out of SketchInteraction.cpp (docs/architecture-review-2026-09-06.md,
-// stage 7a). The 843-line viewport router stays there; these are the blocks
-// it calls into, and SketchInteractionInternal.h is that interface written
-// down.
+// Split out of SketchInteraction.cpp
+// (docs/architecture.md#the-ui-actions-layer). The 843-line viewport router
+// stays there; these are the blocks it calls into, and
+// SketchInteractionInternal.h is that interface written down.
 
 namespace ui {
 

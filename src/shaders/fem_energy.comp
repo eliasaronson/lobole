@@ -1,6 +1,6 @@
 #version 450
-// Per-element strain energies at full modulus (GPU4 —
-// docs/topopt/gpu4-plan.md): se[e] = ue^T Ke0 ue, the SIMP sensitivity
+// Per-element strain energies at full modulus
+// (docs/topopt/README.md#the-gpu-solver): se[e] = ue^T Ke0 ue, the SIMP sensitivity
 // kernel. Same workgroup-per-element shape as fem_spmv.comp: the element's
 // 30 DOF of u staged in shared memory (fixed slots read 0, the CPU
 // convention), thread t computes ue[t] * (Ke0 row t . ue), tree-reduce,

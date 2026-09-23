@@ -14,7 +14,7 @@
 #include <vector>
 
 // CAM: milling setups, operations and the toolpaths they produce
-// (docs/cam/plan.md).
+// (docs/cam/README.md).
 //
 // A Setup is a document-level object, like fem::Study — not a Feature. It
 // does not change the model; it describes how to cut it. Toolpaths are
@@ -84,7 +84,7 @@ struct Tool {
   bool operator==(const Tool&) const = default;
 };
 
-// The MACHINE, as one physical thing (docs/cam/job-document.md, round two;
+// The MACHINE, as one physical thing (docs/cam/setup.md#machine-profiles;
 // core/cam/CamMachine.h for what is asked about it). Post dialect, arc
 // fitting and the rotary axis lived on `Setup` because there was nowhere
 // else; they are claims about the machine in the shop, and a setup EMBEDS a
@@ -176,7 +176,7 @@ struct Machine {
 //
 // FreeCAD reached the same shape from the other end -- its operation Base is
 // an (object, subelement) pair, and Path/Op/Base.py:520 MIGRATES from the
-// scope-limited link it shipped first (docs/cam/job-document.md).
+// scope-limited link it shipped first (docs/cam/README.md#the-model).
 struct Target {
   uint64_t jobPartId = 0;
   ElementRef ref;
@@ -203,10 +203,10 @@ enum class OpType {
   // roundover with a ball nose. The tool decides which; a flat mill is
   // refused rather than run as a square step nobody asked for.
   EdgeRound,
-  // Finishing passes (docs/cam/surfacing.md). Neither is a stack of levels:
-  // the Z varies continuously WITHIN a pass, which is what the 2.5D pipeline
-  // cannot express and why these are two more types rather than a flag on an
-  // existing one.
+  // Finishing passes (docs/cam/operations.md#3-axis-surfacing). Neither is a
+  // stack of levels: the Z varies continuously WITHIN a pass, which is what the
+  // 2.5D pipeline cannot express and why these are two more types rather than a
+  // flag on an existing one.
   //
   // Two and not one, because they answer opposite questions -- a raster is
   // good on shallow surfaces and poor on steep ones, a waterline the reverse
@@ -216,8 +216,7 @@ enum class OpType {
   SurfaceWaterline,
   // 4-axis finishing: parallel passes ALONG the rotary axis, the part turning
   // between them, or one spiral with A turning while the tool cuts -- by the
-  // op's `rotaryPattern` (docs/cam/rotary-plan.md,
-  // docs/cam/rotary-continuous-plan.md).
+  // op's `rotaryPattern` (docs/cam/rotary.md#patterns-rotary_pattern).
   SurfaceRotary,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
@@ -232,7 +231,7 @@ enum class OpType {
 // (inside); for a profile it is the difference between a part and a hole.
 enum class Side { Outside, Inside, On };
 
-// Corner relief on profiles and pockets (docs/cam/router-round.md, R4). A
+// Corner relief on profiles and pockets (docs/cam/operations.md#profile). A
 // round cutter leaves a radius in every inside corner of the material; a
 // joint that has to take a square tenon needs the corner cleared. Dogbone:
 // out along the corner's bisector and back, the tool's RADIUS -- FreeCAD's
@@ -242,12 +241,13 @@ enum class Side { Outside, Inside, On };
 // the joint, not a fact about the part.
 enum class CornerRelief { None, Dogbone, TBone };
 
-// How a rotary finish covers the part (docs/cam/rotary-continuous-plan.md).
-// Parallel: passes ALONG the axis, each at one A, the part turning between
-// them -- a rotary raster. Spiral: one helix from end to end, A turning WHILE
-// the tool cuts, one revolution per stepover -- continuous 4-axis. Helical:
-// passes that FOLLOW a twist, helices at the part's own lead stepped round
-// one from the next (docs/cam/rotary-helical-plan.md) -- continuous too.
+// How a rotary finish covers the part
+// (docs/cam/rotary.md#patterns-rotary_pattern). Parallel: passes ALONG the
+// axis, each at one A, the part turning between them -- a rotary raster.
+// Spiral: one helix from end to end, A turning WHILE the tool cuts, one
+// revolution per stepover -- continuous 4-axis. Helical: passes that FOLLOW a
+// twist, helices at the part's own lead stepped round one from the next
+// (docs/cam/rotary.md#patterns-rotary_pattern) -- continuous too.
 enum class RotaryPattern { Parallel, Spiral, Helical };
 
 struct Operation {
@@ -273,7 +273,8 @@ struct Operation {
   // two operations that must agree about a boundary. 0 = no finishing pass.
   int finishTool = 0;
   double finishStock = 0.0; // derived: the roughing tool's diameter / 10
-  // Rest machining (v125, docs/cam/rough-rest-range-plan.md): the number of
+  // Rest machining (v125,
+  // docs/cam/operations.md#rough-a-surface-and-rest-machining): the number of
   // the LARGER cutter that finished before this one. A surface op with it set
   // cuts only where that cutter could not reach -- where this tool's tip goes
   // measurably deeper than its did. 0 = cut the whole region.
@@ -303,7 +304,7 @@ struct Operation {
   // material. Applied to the wall pass -- the loop one tool radius off the
   // wall -- at every sharp corner where the cutter cannot reach.
   CornerRelief cornerRelief = CornerRelief::None;
-  // Drill only (docs/cam/router-round.md, R3): retract fully between pecks
+  // Drill only (docs/cam/operations.md#drill): retract fully between pecks
   // of this depth so the chips clear -- the G83 reading, as plain moves,
   // since neither GRBL nor our post speaks canned cycles. 0 = one plunge.
   // Derived: the tool's diameter once the hole is deeper than three of them.
@@ -420,7 +421,7 @@ enum class OrderOutputBy {
 // How the workpiece is described. Relative is the default and the right one
 // for a part cut from oversize material; Fixed is the sheet you actually own,
 // which a shrink-wrap around one part cannot express
-// (docs/cam/stock-and-origin.md W3).
+// (docs/cam/setup.md#stock).
 enum class StockMode { Relative, Fixed };
 
 struct Stock {
@@ -449,8 +450,8 @@ enum class OriginAt { StockMin, StockCentre, ModelMin, StockMax };
 //
 // In-plane only -- a position on the bed and a spin under the spindle --
 // because anything out of plane is what the fixturing frame already says, and
-// two ways to tilt a part is the mistake docs/cam/setup-frame.md just finished
-// paying for.
+// two ways to tilt a part is one too many
+// (docs/cam/setup.md#parts-and-placements).
 //
 // SEVERAL placements may name one `jobPartId`: that is four of the same
 // bracket nested in one sheet, which is how every slicer models it
@@ -475,12 +476,13 @@ struct Placement {
   // one board, so they need three different frames and one stock. Optional
   // rather than defaulted, because a default of identity would silently
   // un-clamp a part the moment you gave it a position
-  // (docs/cam/job-document.md; the split it refines is setup-frame.md's).
+  // (docs/cam/setup.md#fixturing-frame-and-rotary-index).
   std::optional<glm::dquat> frame;
 };
 
 // What HOLDS the stock: a clamp, a vise, a fixture plate -- an ordinary part
-// document, placed on the bed of one setup (docs/cam/workholding-plan.md).
+// document, placed on the bed of one setup
+// (docs/cam/setup.md#workholding-fixtures).
 //
 // Not a Placement and not a JobPart: those are WORKPIECES, which get stock,
 // targets and toolpaths. A fixture gets none of that; it is only somewhere
@@ -500,7 +502,7 @@ enum class StockEdge : uint8_t { MinusX, PlusX, MinusY, PlusY };
 
 // A fixture that RESTS ON the stock rather than standing at a bed position:
 // one face of it on the stock's top, reaching in over one edge
-// (docs/cam/fixture-seat-plan.md). A face-to-face relation, stored and
+// (docs/cam/setup.md#seats). A face-to-face relation, stored and
 // re-solved against the stock as it is now -- so a clamp placed on a board
 // stays on the board when the stock grows, where a bed position floats.
 // Every number is measured from the stock, not the bed.
@@ -572,7 +574,8 @@ struct Setup {
   // A part is modelled where it belongs in the assembly — a speaker baffle
   // stands upright — and clamping it flat on the bed is a statement about the
   // job, not about the model. Saying it here is what lets one part be cut on
-  // several sides without a rotated copy per side (docs/cam/setup-frame.md).
+  // several sides without a rotated copy per side
+  // (docs/cam/setup.md#fixturing-frame-and-rotary-index).
   //
   // It says NOTHING about the machine. `rotationA` below is the other half of
   // what used to be one number, and the conflation is what made laying a
@@ -583,7 +586,7 @@ struct Setup {
   // origin it had saved and was using, because the panel asked a field that
   // lives as long as the window does. It is also per-setup, which the session
   // field was not — two setups in one document shared one answer between
-  // them (docs/cam/dogfood-round.md). Empty = nobody has picked one; the
+  // them (docs/cam/setup.md#work-origin). Empty = nobody has picked one; the
   // origin is then whatever it defaults to.
   Target topFace;
   // The MACHINE's rotary index: rotation about X in degrees, emitted as an A
@@ -594,7 +597,7 @@ struct Setup {
 
   // The machine this setup was set up on: the post, arc fitting, the rotary
   // axis, the work area. An EMBEDDED COPY of a globally stored profile, named
-  // by `machine.name` (docs/cam/job-document.md, round two); `post`,
+  // by `machine.name` (docs/cam/setup.md#machine-profiles); `post`,
   // `fitArcs` and `hasRotaryAxis` used to be fields here, which is how every
   // new job re-answered "which machine". Unnamed = the job's own.
   Machine machine;
@@ -612,7 +615,7 @@ struct Setup {
   // In what order the operations cut, and whether the post writes one file
   // per group. Properties of the JOB, unlike the machine above.
   OrderOutputBy order = OrderOutputBy::Authored;
-  // One program per tool (docs/cam/router-round.md, R2): most hobby
+  // One program per tool (docs/cam/post.md#files): most hobby
   // controllers cannot take a tool change mid-file, so the operator runs
   // T1's file, changes the tool, runs T2's. Forces tool order, since a file
   // per tool that is not in tool order is a contradiction.
@@ -699,7 +702,7 @@ struct Toolpath {
   // not yet in the cache: the moves are whatever the caller chose to keep
   // (the previous toolpath, or nothing) and nothing downstream may treat
   // them as the job — post, verify and simulate refuse while any is pending
-  // (docs/ui/long-operations.md, phase 1).
+  // (docs/ui/long-operations.md#cam-toolpath-passes).
   bool pending = false;
   // Non-empty when the operation was cut by a DIFFERENT strategy than its
   // type says — adaptive falling back to concentric clearing. Silence about

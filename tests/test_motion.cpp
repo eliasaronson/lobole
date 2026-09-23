@@ -1,6 +1,6 @@
-// Motion studies (docs/agent-scale-plan.md, G2): one mate DOF driven over a
-// range, the assembly solved at every sample, every pair checked. The gate
-// the plan asked for: "rotate through the range, confirm zero collision at
+// Motion studies (docs/assemblies/README.md#motion-studies): one mate DOF
+// driven over a range, the assembly solved at every sample, every pair checked.
+// The gate: "rotate through the range, confirm zero collision at
 // every step, print the table" — and the honesty the table owes: a sample
 // that does not solve is reported unsolved, never drawn as the last good
 // pose.

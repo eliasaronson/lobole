@@ -309,8 +309,9 @@ struct SketchEditState {
   // live cosmetic edit with no undo entry at all — which is wrong for a
   // persisted field, and worse than it sounds: the slider writes every frame,
   // so a naive fix pushes one command per frame of the drag. Baseline at
-  // grab, one ModifyFeatureCommand on release (the HandleEdit recipe from
-  // docs/ui/direct-manipulation.md). Empty when no drag is in progress.
+  // grab, one ModifyFeatureCommand on release (the recipe
+  // docs/ui/viewport-handles.md#not-built gives for a committed feature). Empty
+  // when no drag is in progress.
   nlohmann::json imageEditBaseline;
 
   // What the cursor is over in the Select tool (for hover highlighting),
@@ -580,8 +581,8 @@ struct SimulationState {
   // because a direction is a default with a unit and belongs to the face, not
   // to the world. The magnitude is seeded from the part's own weight when the
   // tool is armed (SimulationArmTool): a 0 N force is a load that silently
-  // does nothing, which is the class docs/ui/u10-defaults-and-refusals.md
-  // exists to stop.
+  // does nothing, which is the class
+  // docs/ui/tool-sessions.md#defaults-and-refusals exists to stop.
   double pendingMagnitude = 0.0;
   // ...and the expression that produced it, when one was typed, so a load
   // placed from "part_weight*2" stays driven by the variable instead of
@@ -686,7 +687,7 @@ struct RenderJob {
 // a feature list that builds bodies; an assembly is an occurrence list that
 // places other parts; a drawing projects a part or assembly onto a 2D sheet;
 // a job says how parts are cut out of a piece of stock
-// (docs/cam/job-document.md).
+// (docs/cam/README.md#the-model).
 enum class DocKind { Part, Assembly, Drawing, Job };
 
 // One document of a project (assemblies A1/A2). The ACTIVE tab's
@@ -789,12 +790,12 @@ struct PartSlot {
   std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
 };
 
-// THE selection (U1, docs/ui/u1-selection.md): one typed, ordered set that
-// every context reads and writes. Items are stable across regeneration —
-// features/occurrences/mates by id, geometry by stable element name — never
+// THE selection (docs/ui/selection.md#one-selection-set): one typed, ordered
+// set that every context reads and writes. Items are stable across regeneration
+// — features/occurrences/mates by id, geometry by stable element name — never
 // by mesh/face index (mesh ids change on every regen). Renderer highlights
 // are a per-frame projection of this set, not parallel state.
-// One piece of a fastener joint and where it goes (docs/parts/preview-plan.md).
+// One piece of a fastener joint and where it goes (docs/parts/README.md).
 //
 // Here rather than in AssemblyActions.h — which is where it belongs by
 // subject — because the TOOL's own state holds a plan and the ghost draws it,
@@ -811,7 +812,7 @@ struct PlannedPart {
   glm::vec3 position{0.0f};
   glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
   // Which occurrence this piece RIDES ON, so it follows when that part moves
-  // (docs/parts/f1-loose-ends.md). The fit decides it rather than the
+  // (docs/parts/README.md). The fit decides it rather than the
   // placement guessing after the fact: the screw and the washer under its
   // head bear on the part the head sits against, the nut and its washer on
   // the LAST part in the stack. Attaching the far side to the near part would
@@ -921,7 +922,7 @@ struct AppState {
   std::unique_ptr<DrawingDocument> drawing;
   DrawingHistory drawingHistory;
   // Active job tab: the CAM setups used to live on the part Document, which
-  // made every job about one part (docs/cam/job-document.md).
+  // made every job about one part (docs/cam/README.md#the-model).
   std::unique_ptr<cam::JobDocument> job;
   JobHistory jobHistory;
   // The active job's assembled bodies and the key they were built at
@@ -953,7 +954,7 @@ struct AppState {
   // load/import; only Dissolve removes an entry. Persisted in project.json.
   std::vector<std::string> tabFolders;
 
-  // Project-wide variables (Phase V, docs/dogfooding.md, caster round). THE
+  // Project-wide variables (docs/variables/README.md#concepts). THE
   // project scope: an ordered parameter table shared by every part, and its
   // evaluated symbols. Every slot's Document borrows &projectSymbols
   // (SetProjectSymbols); a feature expression resolves local-first then here.
@@ -969,7 +970,7 @@ struct AppState {
   // ImGui::IsAnyItemActive() sampled once per frame by the frame loop, right
   // before SyncDocumentRenderers reads it. The field exists so the actions
   // layer can gate on "a widget is being dragged" without including ImGui —
-  // see ui/Overlays.h and docs/architecture-review-2026-08-24.md.
+  // see ui/Overlays.h and docs/architecture.md#the-ui-actions-layer.
   bool anyWidgetActive = false;
 
   // Non-owning
@@ -982,8 +983,8 @@ struct AppState {
   FieldRenderer* fieldRenderer = nullptr;       // FEM result overlay
   StockRenderer* stockRenderer = nullptr;       // CAM cutting simulation
   // Every renderer that draws into the 3D scene, in DRAW ORDER — the same
-  // list main.cpp renders from (docs/rendering/renderer-wiring.md). The typed
-  // pointers above stay because the ui/ layer drives CONTENT through them
+  // list main.cpp renders from (docs/rendering/README.md#scene-renderers). The
+  // typed pointers above stay because the ui/ layer drives CONTENT through them
   // (AddMesh, SetInstanceGhost, SetMesh, SetStaticLines); this one exists so
   // the per-frame contract is a loop instead of a list nobody can forget to
   // add to.
@@ -1056,7 +1057,7 @@ struct AppState {
     glm::dvec2 startPlace{0.0, 0.0};
     double startRotZ = 0.0;
     glm::vec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
-    // A FIXTURE on a job tab (docs/cam/fixture-gizmo-plan.md): non-zero ->
+    // A FIXTURE on a job tab (docs/cam/gui.md#gizmos): non-zero ->
     // the drag moves this fixture, X/Y/Z and a spin about Z, snapping its
     // own flat faces to the stock's planes. `facePlanes[axis]` are those
     // faces square to each axis at grab, as (coordinate, what it is) in bed
@@ -1072,8 +1073,8 @@ struct AppState {
     std::string snapLabel;
   };
 
-  // Direct-manipulation handle on the pending preview feature (docs/ui/
-  // direct-manipulation.md): drags the feature's headline scalar (extrude
+  // Direct-manipulation handle on the pending preview feature
+  // (docs/ui/viewport-handles.md): drags the feature's headline scalar (extrude
   // distance / blend radius / revolve angle) along a grab-time axis. Preview
   // only, so no undo bookkeeping — accept commits the whole feature.
   struct HandleDrag {
@@ -1111,20 +1112,20 @@ struct AppState {
   // Section tool's cuts do: closing the window means done EDITING the
   // explode, not done looking at it, so activeExplodedView is left alone.
   bool explodeToolOpen = false;
-  // The assembly panel's editors, floating (docs/ui/assembly-panel-tidy-
-  // plan.md): the occurrence or the relation whose properties the tool window
-  // shows, from a double-click on its row. 0 = none. They were "Selected
-  // occurrence" / relation fields inline under the lists, which changed the
-  // panel's length under the cursor. (A mate edits in the mate tool's own
-  // Edit Mate mode.)
+  // The assembly panel's editors, floating
+  // (docs/ui/panels.md#assembly-tab-the-model-panel): the occurrence or the
+  // relation whose properties the tool window shows, from a double-click on its
+  // row. 0 = none. They were "Selected occurrence" / relation fields inline
+  // under the lists, which changed the panel's length under the cursor. (A mate
+  // edits in the mate tool's own Edit Mate mode.)
   uint64_t asmEditOccurrence = 0;
   uint64_t asmEditRelation = 0;
   // The bill of materials, as a floating window with real columns; it was a
   // two-column table under a collapsing header in the narrow dock.
   bool bomWindowOpen = false;
 
-  // The Simulation tool window on an ASSEMBLY tab is open (S1,
-  // docs/simulation/assembly-studies-plan.md): the third of the floating
+  // The Simulation tool window on an ASSEMBLY tab is open
+  // (docs/simulation/README.md#assembly-studies): the third of the floating
   // viewport modes beside explode and motion, since the Model dock there is
   // the occurrence panel. Its studies live on the AssemblyDocument.
   bool simulationToolOpen = false;
@@ -1142,19 +1143,20 @@ struct AppState {
   std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
-  // Playback of a stored result (docs/ui/motion-panel-plan.md): display-only,
-  // read by DisplayMatrix and the renderer sync. 0 = not showing one.
+  // Playback of a stored result
+  // (docs/ui/panels.md#assembly-tab-the-model-panel): display-only, read by
+  // DisplayMatrix and the renderer sync. 0 = not showing one.
   uint64_t motionPlaybackStudy = 0;
   bool motionPlaying = false;     // advancing; false = paused on a frame
   double motionPlaybackPos = 0.0; // in samples, 0 .. n-1 (fractional)
   double motionPlaybackLastTick = 0.0;
 
   // UI state
-  // The tolerance editor in the Measure tool window (docs/tolerances/plan.md
-  // T3). The class is assembled from two pickers rather than typed, so what
-  // is offered IS what fits::Limits accepts — except the handful of
-  // letter/grade pairs the standard leaves undefined, which refuse in the
-  // window rather than being hidden from the list.
+  // The tolerance editor in the Measure tool window
+  // (docs/tolerances/README.md#gui). The class is assembled from two pickers
+  // rather than typed, so what is offered IS what fits::Limits accepts — except
+  // the handful of letter/grade pairs the standard leaves undefined, which
+  // refuse in the window rather than being hidden from the list.
   //
   // `toleranceLetter` starts EMPTY on purpose: there is no honest default
   // class for a face nobody has said is a bore or a shaft, so the editor
@@ -1320,7 +1322,7 @@ struct AppState {
   // faces with the rest of it. Without that the biggest surface you see of a
   // sectioned part — the cap you are pointing at — stayed unlit while its
   // walls highlighted, which reads as the highlight landing on the wrong
-  // thing (docs/ui/section-pick-plan.md).
+  // thing (docs/ui/selection.md#picking-through-a-section).
   struct SectionCapMesh {
     uint32_t meshId = 0;
     uint64_t occurrenceId = 0; // 0 on a part tab
@@ -1334,10 +1336,11 @@ struct AppState {
   // resync, like the section caps).
   uint64_t topoGhostStudyId = 0;
   uint32_t topoGhostInstance = 0;
-  // A job tab's FIXTURES (docs/cam/workholding-plan.md), drawn ghosted at
-  // their bed placement. Apart from documentMeshes for the same reason as
-  // the section caps: they are not the document's bodies, and must not shift
-  // the body<->index alignment picking relies on. Rebuilt every resync.
+  // A job tab's FIXTURES (docs/cam/gui.md#what-the-viewport-draws), drawn
+  // ghosted at their bed placement. Apart from documentMeshes for the same
+  // reason as the section caps: they are not the document's bodies, and must
+  // not shift the body<->index alignment picking relies on. Rebuilt every
+  // resync.
   std::vector<uint32_t> fixtureInstances;
   // Geometry-delta overlay (compare_geometry's `materialize`, and F11's
   // "Compare shape"): the two boolean-diff solids drawn over the part, so
@@ -1451,10 +1454,10 @@ struct AppState {
   // orientation and scale, opened by the toolbar's Add view. It was a form
   // inline in the docked panel AND a thinner popup on the toolbar (four of
   // the seven orientations, no configuration, no scale) -- two paths that
-  // disagreed (docs/ui/consistency-round-plan.md).
+  // disagreed (docs/ui/panels.md#drawing-tab-the-drawing-panel).
   bool drawingAddViewOpen = false;
 
-  // The fastener session (F1 p6, docs/parts/gui-plan.md). One pick and one
+  // The fastener session (docs/parts/README.md#gui). One pick and one
   // choice: the rim says which hole and which way round, the standard says
   // what kind of screw, and the size and length derive from the geometry.
   //
@@ -1507,7 +1510,7 @@ struct AppState {
   // SEEN is the wrong pair of properties.
   std::vector<std::string> fastenerChecks;
   bool fastenerChecked = false;
-  // The same on-demand shape for fits (docs/tolerances/plan.md T3): the walk
+  // The same on-demand shape for fits (docs/tolerances/README.md#gui): the walk
   // resolves geometry per mate, so it is asked for rather than run per frame.
   std::vector<std::string> fitChecks;
   std::string fitSummary;
@@ -1584,7 +1587,7 @@ struct AppState {
   bool sidePanelWidthChecked = false;
   bool runGuiTests = false;
 
-  // The machine store (docs/cam/job-document.md, round two):
+  // The machine store (docs/cam/setup.md#machine-profiles):
   // ~/.config/designer/machines/*.json, mirrored here by
   // ui::ReloadMachines. A setup embeds a COPY of one of these, named; the
   // panel compares the two by name every frame and says when they differ.
@@ -1600,28 +1603,30 @@ struct AppState {
   };
   CamNewSetup camNewSetup;
 
-  // CAM (docs/cam/plan.md). Toolpaths are CACHED, not regenerated per frame:
-  // the backplot overlay and the panel read the same vector the post
+  // CAM (docs/cam/README.md#invariants). Toolpaths are CACHED, not regenerated
+  // per frame: the backplot overlay and the panel read the same vector the post
   // consumes, so the picture cannot disagree with the file.
   std::vector<cam::Toolpath> camToolpaths;
   uint64_t camActiveSetup = 0;
-  // Adaptive clearing off the frame (docs/ui/long-operations.md, phase 1).
-  // Results by content key, so a re-open, an undo and a switch of tab all
-  // find what was already paid for; the queue is what a deferred generate
-  // still owes, one pass per entry, consumed one at a time by a "cam"
-  // BackgroundJob. `camDeferPasses` is the panel's default and what a
-  // synchronous RPC turns off for the length of its answer.
+  // Adaptive clearing off the frame
+  // (docs/ui/long-operations.md#cam-toolpath-passes). Results by content key,
+  // so a re-open, an undo and a switch of tab all find what was already paid
+  // for; the queue is what a deferred generate still owes, one pass per entry,
+  // consumed one at a time by a "cam" BackgroundJob. `camDeferPasses` is the
+  // panel's default and what a synchronous RPC turns off for the length of its
+  // answer.
   cam::AdaptiveCache camAdaptiveCache;
   std::deque<cam::AdaptiveRequest> camAdaptiveQueue;
   uint64_t camAdaptiveInFlight = 0; // key of the pass now cutting, or 0
   // The other expensive step, deferred the same way and onto the same
-  // worker (docs/ui/long-operations.md, phase 5). A whole OPERATION per
-  // entry, not a Z level: a finishing pass has no interior seam.
+  // worker (docs/ui/long-operations.md#cam-toolpath-passes). A whole OPERATION
+  // per entry, not a Z level: a finishing pass has no interior seam.
   cam::SurfaceCache camSurfaceCache;
   std::deque<cam::SurfaceRequest> camSurfaceQueue;
   uint64_t camSurfaceInFlight = 0;
-  // A profile's projected outlines, the third (docs/cam/add-operation-
-  // plan.md): one section per depth pass, seconds each on a curved part.
+  // A profile's projected outlines, the third
+  // (docs/cam/README.md#background-work): one section per depth pass, seconds
+  // each on a curved part.
   cam::OutlineCache camOutlineCache;
   std::deque<cam::OutlineRequest> camOutlineQueue;
   uint64_t camOutlineInFlight = 0;
@@ -1668,9 +1673,9 @@ struct AppState {
     Face,
     Surface,
     Walls,
-    RotaryFinish, // docs/cam/surface-verbs-plan.md
+    RotaryFinish, // docs/cam/gui.md#the-job-toolbar
     RotaryRough,
-    SurfaceRough, // docs/cam/rough-rest-range-plan.md
+    SurfaceRough, // docs/cam/operations.md#rough-a-surface-and-rest-machining
     Rest,
   };
   CamVerb camVerb = CamVerb::None;
@@ -1682,7 +1687,7 @@ struct AppState {
   // Where the floating tool window was last anchored: the top-right corner of
   // the 3D viewport at the time. Kept so the window can FOLLOW the viewport —
   // anchoring once left it stranded over the model whenever the layout
-  // changed (docs/cam/dogfood-round.md, round 2).
+  // changed (docs/cam/gui.md#verb-windows).
   glm::vec2 toolWindowAnchor{-1.0f, -1.0f};
   int toolWindowAnchorFrames = 0;
   int toolWindowLastFrame = -2; // the frame it last drew, to spot a reopen
@@ -1701,15 +1706,16 @@ struct AppState {
   // The operation whose settings the CAM tool window is editing (a double-
   // click on its row, or Edit in its menu); 0 = none. Settings used to be an
   // "Advanced" tree inline in every row of the docked panel
-  // (docs/ui/cam-panel-tidy-plan.md).
+  // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
   uint64_t camEditOp = 0;
   // The setup tool (by number) whose fields the CAM tool window is editing,
   // the same way; 0 = none. The fields used to sit inline in every tool row
   // of the docked panel, with no way to delete a tool at all
-  // (docs/ui/consistency-round-plan.md).
+  // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
   int camEditTool = 0;
-  // The fixture the tool window is editing (docs/cam/workholding-plan.md),
-  // 0 = none; like camEditTool, one editor holds the window at a time.
+  // The fixture the tool window is editing
+  // (docs/cam/setup.md#workholding-fixtures), 0 = none; like camEditTool, one
+  // editor holds the window at a time.
   uint64_t camEditFixture = 0;
   // Why a seated fixture could not solve, by fixture id: its face gone, the
   // stock gone. Filled by RefreshFixtureSeats, read by the row.
@@ -1774,7 +1780,7 @@ struct AppState {
   cam::StockSim camStockSim;
   // The same, for a program whose part TURNS: a radius field, carved by the
   // verifier's own `CarveSweepRotary`, with snapshots for scrubbing back
-  // (docs/cam/rotary-plan.md, "The picture"). Exactly one of the two is armed
+  // (docs/cam/rotary.md#the-rotary-picture). Exactly one of the two is armed
   // while a playback is open, chosen by `camTimeline.rotary`.
   cam::RotaryStockSim camRotarySim;
   cam::SimCursor camCursor;
@@ -1805,7 +1811,7 @@ struct AppState {
   uint32_t camToolInstance = 0;
   int camToolInstanceFor = -1;
 
-  // The terminal panel (docs/ui/terminal-panel.md). Off by default via
+  // The terminal panel (docs/ui/terminal.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so
   // an app that never opens it never allocates a terminal.
   std::shared_ptr<TerminalState> terminal;
@@ -1819,7 +1825,8 @@ struct AppState {
   // many ran. Installed by main.cpp in --offscreen ONLY, where there is no
   // swapchain to wait on and no window to be covered — the one place a PASS
   // can be timed for what it shades. Null elsewhere, and frame_stats says so
-  // rather than pretending (docs/rendering/offscreen-gpu-timing-plan.md).
+  // rather than pretending
+  // (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen).
   //
   // A burst is its own measurement window: it clears the samples first, so
   // what comes back describes THESE renders. And it saves nothing — the PNG
@@ -1828,14 +1835,14 @@ struct AppState {
   // of its speed.
   std::function<size_t(size_t)> renderBurst;
 
-  // QUICK render (docs/rendering/quick-render-plan.md): the scene as the
+  // QUICK render (docs/rendering/still-render.md#quick-mode): the scene as the
   // viewport rasterizes it — materials, lights, shadow map, SSAO, outlines —
   // captured k x the requested size, without the overlays drawn on top of
   // the model. Installed by main.cpp in the windowed and --offscreen loops
   // (only they own the renderers); null under --headless. Synchronous, main
   // thread, a few hundred ms; averaging the frame down and writing the PNG is
   // DownsampleToPng's, which the Render dialog runs on a worker
-  // (docs/rendering/still-quality-plan.md). `supersample` is lowered, and
+  // (docs/rendering/still-render.md#the-dialog). `supersample` is lowered, and
   // `warning` says so, if the device cannot hold the supersampled image.
   struct RasterStill {
     uint32_t width = 1920, height = 1080;
@@ -1846,8 +1853,9 @@ struct AppState {
                      std::string* warning)>
       captureRaster;
 
-  // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
-  // it costs five clock reads a frame — but the HUD is off unless asked for
+  // Frame-time accounting
+  // (docs/rendering/frame-pacing.md#the-frame-time-instrument). Always measured
+  // — it costs five clock reads a frame — but the HUD is off unless asked for
   // by --perf-hud, Ctrl+Shift+F, or the frame_stats RPC. Deliberately session
   // state and not a preference: it belongs to the debugging session, and a
   // preference would have to be either visible in the Preferences window or a
@@ -1874,24 +1882,27 @@ struct AppState {
   // frame_stats {reset:true} asks for a fresh measurement window. Set here
   // and consumed by whichever loop owns the timer (main.cpp), because a
   // rolling 120-sample ring answers the wrong question when you are
-  // MEASURING rather than watching (docs/rendering/
-  // offscreen-gpu-timing-plan.md). Plain bool: the RPC handlers run on the
-  // main thread, inside the same loop that consumes it.
+  // MEASURING rather than watching
+  // (docs/rendering/frame-pacing.md#measuring-a-pass-offscreen). Plain bool:
+  // the RPC handlers run on the main thread, inside the same loop that consumes
+  // it.
   bool gpuStatsReset = false;
   // The swapchain's shape, as the driver actually gave it — pure data here,
   // set by main.cpp at creation and on every resize. It belongs in the
   // instrument because it is INVISIBLE otherwise and it decides the frame
   // rate: two images with FIFO quantises every overrun to a whole refresh
-  // period (docs/performance/present-stall.md). 0 = no swapchain (headless,
-  // offscreen), which frame_stats reports rather than guessing.
+  // period (docs/rendering/frame-pacing.md#swapchain-and-present). 0 = no
+  // swapchain (headless, offscreen), which frame_stats reports rather than
+  // guessing.
   uint32_t swapchainImages = 0;
   std::string presentMode; // "fifo" | "mailbox" | "immediate" | ...
   bool perfHudOpen = false;
-  // Idle throttle (docs/rendering/idle-throttle.md). The pacer itself lives
-  // in main.cpp; these are its test/observability seams: `pacerForceEnable`
-  // lets the pacer's own GUI test opt back in under --gui-tests (where the
-  // pacer is otherwise bypassed — the engine drives frames), and
-  // `pacerIdleFrames` mirrors how many iterations ran idle-paced.
+  // Idle throttle (docs/rendering/frame-pacing.md#idle-throttle). The pacer
+  // itself lives in main.cpp; these are its test/observability seams:
+  // `pacerForceEnable` lets the pacer's own GUI test opt back in under
+  // --gui-tests (where the pacer is otherwise bypassed — the engine drives
+  // frames), and `pacerIdleFrames` mirrors how many iterations ran
+  // idle-paced.
   bool pacerForceEnable = false;
   uint64_t pacerIdleFrames = 0;
   // The last wake signal's name (FramePacer::WakeName) and its age — the

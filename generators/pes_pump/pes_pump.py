@@ -10,7 +10,7 @@ sprocket.
     tools/headless-preview.sh --start <port>
     python3 generators/pes_pump/pes_pump.py --port <port> [--out scratch/pes_pump]
 
-Plan and limits: docs/modeling/pes-pump-plan.md.
+What it models and its limits: generators/pes_pump/README.md.
 """
 import argparse
 import json

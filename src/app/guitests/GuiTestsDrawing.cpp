@@ -30,9 +30,10 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->drawing != nullptr);
 
     // Two views, by clicking: the orientation combo then Add view.
-    // ComboClick wants a ref RELATIVE to the window (docs/ui/gui-coverage.md).
-    // Add view is a tool window, opened from the toolbar
-    // (docs/ui/consistency-round-plan.md).
+    // ComboClick wants a ref RELATIVE to the window
+    // (docs/ui/testing.md#making-a-widget-addressable). Add view is a tool
+    // window, opened from the toolbar
+    // (docs/ui/panels.md#drawing-tab-the-drawing-panel).
     ToolbarClick(ctx, "###tb_dwg_add_view");
     ctx->Yield(2);
     ctx->SetRef("//###ToolWindow");
@@ -52,7 +53,7 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     // What each named view actually SHOWS: the front of a plate 80 wide and
     // 8 thick is 80 x 8, and looking down on it gives the 80 x 60 face —
     // the axis-swap that a mangled orientation table produces is exactly
-    // what this catches (docs/up-axis.md).
+    // what this catches (docs/conventions.md#world-axes).
     // No IM_CHECK in here: its failure path returns void, which makes the
     // lambda's return type ambiguous. An unprojected view comes back as
     // zero and fails the size checks below just as loudly.
@@ -83,9 +84,9 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
       ctx->LogWarning("%s", issue.detail.c_str());
     IM_CHECK(issues.empty());
 
-    // A view is a row (docs/ui/consistency-round-plan.md): its menu sets the
-    // scale, which only the add form could before, and deletes it -- where a
-    // bare "x" button was.
+    // A view is a row (docs/ui/panels.md#drawing-tab-the-drawing-panel): its
+    // menu sets the scale, which only the add form could before, and deletes it
+    // -- where a bare "x" button was.
     const uint64_t firstId = views[0].id;
     const std::string row =
         "//###Model/**/###dwg_view_" + std::to_string(firstId);

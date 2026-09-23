@@ -4,8 +4,8 @@
 
 #include <glm/glm.hpp>
 
-// Cosmetic thread (docs/modeling/thread-rib.md Part A): an annotation on a
-// cylindrical face — external boss or hole wall — that leaves the geometry
+// Cosmetic thread (docs/modeling/holes-and-threads.md#thread): an annotation on
+// a cylindrical face — external boss or hole wall — that leaves the geometry
 // untouched and draws the drafting convention instead (dashed thread-depth
 // circles + crest lines, rendered by the UI from the session `overlay` this
 // feature computes each regeneration). The designation drives pitch via the

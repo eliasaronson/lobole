@@ -5,7 +5,7 @@
 #include <cstdint>
 
 // How many sets of per-frame GPU resources a renderer keeps, and how to index
-// them. See docs/rendering/frames-in-flight.md.
+// them. See docs/rendering/frame-pacing.md#frames-in-flight.
 //
 // The app hands every renderer the SWAPCHAIN IMAGE INDEX (`wd->FrameIndex`,
 // 0..ImageCount-1), because that is the granularity the app's fences protect:

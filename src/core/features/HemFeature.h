@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-// A hem (docs/sheetmetal/plan.md, S7): the edge of a panel folded right back
-// on itself — to stiffen it, and to take the cut edge away from a hand.
+// A hem (docs/sheetmetal/README.md#features): the edge of a panel folded right
+// back on itself — to stiffen it, and to take the cut edge away from a hand.
 //
 // It is the edge flange's builder at 180 degrees, with the radius set by the
 // GAP the return leaves rather than by the material: a hem is crushed, not

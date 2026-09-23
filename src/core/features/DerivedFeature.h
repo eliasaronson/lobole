@@ -1,6 +1,6 @@
 #pragma once
 
-// Derived (A2, docs/modeling/derived-plan.md): a COPY of another part's
+// Derived (docs/modeling/derived.md): a COPY of another part's
 // bodies carried inside this part's file, the way the Import feature carries
 // a STEP's, updated on request the way a drawing is.
 //

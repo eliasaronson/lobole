@@ -3,7 +3,7 @@
 // The setup and the job document: fixture frames, the indexed 4th axis,
 // the workpiece and where zero is on it, and N parts placed in one sheet.
 // One of five files split from test_cam.cpp
-// (docs/architecture-review-2026-09-06.md, stage 1).
+// (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
 #include "core/features/RevolveFeature.h"
@@ -15,7 +15,7 @@ TEST_CASE("cam stock: the blank is the part's REAL size, not its control "
   // OCC bounds a B-spline by its CONTROL POINTS, which lie outside the
   // surface. Stock used to take that bound, so a 200 mm revolved waveguide
   // asked for a 216 mm blank and the facing and profile passes cut air to
-  // reach it (docs/cam/dogfood-waveguide.md). Stock is the material a person
+  // reach it (docs/cam/README.md#invariants). Stock is the material a person
   // buys and clamps -- and it is what sets the work origin -- so it takes the
   // TIGHT bound.
   //
@@ -66,7 +66,7 @@ TEST_CASE("cam stock: the blank is the part's REAL size, not its control "
 
 TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   // Setups are document objects (v58), and since v73 they are objects of a
-  // JOB document rather than of the part (docs/cam/job-document.md). They
+  // JOB document rather than of the part (docs/cam/README.md#invariants). They
   // describe how to cut the model and change nothing about it, so they must
   // NOT touch the regen chain hash — a new operation rebuilding the geometry
   // would be a bug with a long tail. Structural now that the setups live
@@ -487,7 +487,7 @@ TEST_CASE("cam: any flat face can be laid up, and twice is once", "[cam]") {
 
   // Every direction works, including the two `SolveIndexA` must refuse: a
   // clamp is not a trunnion, and a panel standing on its edge is the case
-  // that started this (docs/cam/setup-frame.md).
+  // that started this (docs/cam/setup.md#fixturing-frame-and-rotary-index).
   const std::vector<glm::dvec3> normals = {
       {0.0, 1.0, 0.0},  {0.0, -1.0, 0.0}, {1.0, 0.0, 0.0},
       {-1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.6, -0.48, 0.64}};
@@ -732,7 +732,7 @@ TEST_CASE("cam: every origin corner is where it says it is", "[cam]") {
 TEST_CASE("cam job: two parts in one setup, placed apart", "[cam][job]") {
   // The case the whole job document exists for: two brackets cut from one
   // sheet. Before v73 a cam::Setup lived in Document::m_camSetups, so this
-  // could not be said at all (docs/cam/job-document.md).
+  // could not be said at all (docs/cam/README.md#the-model).
   //
   // The bodies arrive already stamped with the job part they came from --
   // that is what ui::JobBodies does -- so this exercises the core rule
@@ -962,7 +962,7 @@ TEST_CASE("cam job: what order it cuts in", "[cam][job]") {
   // never have been noticed. With four it is the difference between one tool
   // change per tool and one per part per tool -- CamPost emits a change on
   // every change of tool number, so the natural authoring order (per part)
-  // is the expensive one (docs/cam/job-document.md J5).
+  // is the expensive one (docs/cam/setup.md#cutting-order-and-split-output).
   cam::JobDocument job;
   const uint64_t pa = job.AddPart(1, "A");
   const uint64_t pb = job.AddPart(2, "B");
@@ -1042,11 +1042,11 @@ TEST_CASE("cam job: an unknown cutting order is refused", "[cam][job]") {
 }
 
 TEST_CASE("cam job: two parts, clamped differently, one sheet", "[cam][job]") {
-  // The case the whole per-part frame exists for, and the one this plan
-  // argued hardest for: a speaker cabinet's baffle and a rail, each modelled
-  // in the orientation it has in the assembly, both cut from one board. They
-  // need two fixture frames and one stock, which a per-SETUP frame cannot
-  // say (docs/cam/job-document.md, docs/cam/setup-frame.md).
+  // The case the whole per-part frame exists for: a speaker cabinet's baffle
+  // and a rail, each modelled in the orientation it has in the assembly, both
+  // cut from one board. They need two fixture frames and one stock, which a
+  // per-SETUP frame cannot say
+  // (docs/cam/setup.md#fixturing-frame-and-rotary-index).
   Document baffle, rail;
   // 210 wide, 16 thick, 400 tall: standing upright, like a real baffle.
   baffle.AddFeature(
@@ -1434,7 +1434,7 @@ TEST_CASE("cam: an unknown operation type in a job file is REFUSED", "[cam]") {
   // came back as a different strategy against a different region, and was
   // posted and cut without a word. Same class as the mate type that loaded as
   // Fastened and solved perfectly well with the wrong degrees of freedom
-  // (docs/architecture-review-2026-08-24.md, follow-up E).
+  // (docs/conventions.md#refuse-dont-substitute).
   cam::JobDocument job;
   cam::Setup& setup = job.AddSetup("Side A");
   cam::Operation op;

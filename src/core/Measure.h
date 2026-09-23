@@ -73,7 +73,8 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 // format. What it means for a CALLER is worth knowing either way: a position
 // filter needs a tolerance suited to the magnitude, because a 1e-6 window
 // matches NOTHING at cabinet scale — silently, since an empty pick list
-// looks exactly like nothing to do (docs/porting-friction-plan.md).
+// looks exactly like nothing to do
+// (docs/inspect/README.md#positions-are-float32).
 struct FaceInfo {
   std::string kind; // "plane"|"cylinder"|"cone"|"sphere"|"torus"|"other"
   double area = 0.0;
@@ -179,7 +180,7 @@ struct SetCompare {
   // Three OCC booleans is what they cost, and on a part carrying toroidal
   // fillets that is seconds — 13.2 s for one brace of the smart speaker,
   // against 30 ms for a tube with no fillets
-  // (docs/inspect/compare-metrics-plan.md).
+  // (docs/inspect/README.md#comparing-against-a-reference).
   bool hasOverlap = true;
   double volumeA = 0.0, volumeB = 0.0;
   double common = 0.0, missing = 0.0, extra = 0.0;
@@ -482,7 +483,8 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
 // barrel with four bolt bosses hanging off its deck flange sections at
 // 3293.76 mm^2 where the sound one sections at 2586.90 — the difference is
 // 706.9, exactly pi*15^2, the boss standing as its OWN island in a number
-// that cannot say so (docs/dogfood-friction-plan.md, F1).
+// that cannot say so
+// (generators/README.md#single-cylinder-and-air-cooled-engines).
 //
 // It is not a verdict: real parts have islands in section, and a fork has two
 // tines. It makes "is this feature actually joined to the rest here?" a

@@ -482,7 +482,7 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
     // — and Hide(i, j) — one shape against another. That IS the decomposition
     // Hide() performs internally, so driving it here changes nothing about
     // the result and makes the loop ours: it reports where it is and it can
-    // be asked to stop (docs/agent-scale-followup-plan.md, W3).
+    // be asked to stop (docs/drawings/README.md#projection-hlr).
     const int nbShapes = algo->NbShapes();
     const auto stopped = [&] {
       return options.cancelled && options.cancelled();

@@ -323,8 +323,8 @@ bool Document::Regenerate() {
   // Baked geometry: if the blob the loader adopted describes exactly this
   // feature list, install it and execute nothing. The prefix cache stays
   // empty, so the first edit rebuilds from the start — the trade recorded in
-  // docs/versioning/baked-geometry.md. Either way the hand-off is consumed
-  // here, so a later edit can never resurrect it.
+  // docs/versioning/README.md#baked-geometry. Either way the hand-off is
+  // consumed here, so a later edit can never resurrect it.
   if (!m_bakedBodies.empty()) {
     std::vector<Body> baked = std::move(m_bakedBodies);
     const size_t bakedHash = m_bakedHash;

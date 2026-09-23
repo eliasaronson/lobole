@@ -280,7 +280,7 @@ def footprints(app, setup, placed):
     a part is on the sheet. The rotation that lays a part flat is the app's
     (`lay_face_up`), and working the same rotation out again here to nest
     against is how two copies of a transform come to disagree
-    (docs/cam/setup-frame.md).
+    (docs/cam/README.md#invariants).
     """
     boxes = {}
     for s in app.check_layout(setup=setup)["setups"]:

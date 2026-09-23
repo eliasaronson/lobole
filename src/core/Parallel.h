@@ -24,8 +24,8 @@
 // A-with-B and A-with-C agree about what belongs on A's edges. That one
 // corrupts the HEAP rather than an answer, so the byte-diff above does not
 // see it either; it cost three runs in ten of one smoke for a day
-// (docs/performance/query-booleans.md). Anything a worker here calls must
-// leave the shapes alone, not merely find them warm.
+// (docs/inspect/README.md#query-booleans-are-non-destructive). Anything a
+// worker here calls must leave the shapes alone, not merely find them warm.
 
 #include <algorithm>
 #include <atomic>

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-// A drawing document (workstream 13, docs/drawings/plan.md): one sheet holding
+// A drawing document (docs/drawings/README.md): one sheet holding
 // projected views of a source part or assembly, plus driven dimensions
 // measured off the projected geometry. A third DocKind alongside the part
 // feature-list Document and the AssemblyDocument — a drawing neither executes
@@ -94,7 +94,7 @@ struct DrawingView {
   // "exact" (the default, and the deliverable) or "fast" — polygonal HLR, a
   // LOOK at a sheet that would otherwise take a minute and a half a view.
   // A string rather than the enum so it serializes and refuses by name like
-  // every other enum on the wire (docs/agent-scale-followup-plan.md, W3).
+  // every other enum on the wire (docs/drawings/README.md#projection-hlr).
   std::string quality = "exact";
   // Occurrences to leave OFF this view, by id. Empty = draw everything.
   //
@@ -102,7 +102,7 @@ struct DrawingView {
   // 47 s a view, and 0.0 s with its two valve springs hidden — seventeen of
   // its nineteen bodies project instantly. Leaving the sweeps off a sheet is
   // the difference between a real dimensionable drawing and no drawing at all
-  // (docs/dogfood-friction-plan.md, F4).
+  // (generators/README.md#single-cylinder-and-air-cooled-engines).
   //
   // Only meaningful for an assembly source; a part has no occurrences.
   std::vector<uint64_t> hidden;
@@ -110,7 +110,7 @@ struct DrawingView {
   // part has active. A sheet names its configuration so a flat-pattern view
   // shows the blank whichever variant the model tab is on — the drawing of
   // the blank and the drawing of the folded part are two views of one part
-  // (docs/sheetmetal/plan.md, S11).
+  // (docs/sheetmetal/README.md#dxf-and-drawings).
   uint64_t configuration = 0;
 };
 

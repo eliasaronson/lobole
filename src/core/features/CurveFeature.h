@@ -17,7 +17,7 @@ enum class Curve3DKind {
   // on a former of `radius`. Exactly what a bender is programmed with, and
   // exactly line-arc-line — where a fitted spline through sampled arc points
   // is neither, has no radius anything can read back, and bows between the
-  // points on the straights (docs/grill-friction-plan.md).
+  // points on the straights (docs/tube/README.md#members-and-their-paths).
   BentPath,
 };
 

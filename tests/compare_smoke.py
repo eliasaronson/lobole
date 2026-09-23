@@ -63,7 +63,7 @@ def main():
         # that do are ABSENT rather than zero — an iou of 0 means "these do
         # not overlap at all", which is the opposite of "not measured".
         # Three booleans on a filleted part is seconds
-        # (docs/inspect/compare-metrics-plan.md).
+        # (docs/inspect/README.md#comparing-against-a-reference).
         v = d.call("compare_geometry", a=0, b=1, metrics="volume")
         expect(v.get("metrics") == "volume", f"the mode is named: {v}")
         for absent in ("iou", "dice", "precision", "recall", "volume_common",

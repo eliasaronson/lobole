@@ -74,7 +74,7 @@ inline constexpr uint64_t kSectionToolSlot = ~1ull;
 // objects, not features, so its picks need a sentinel too.
 inline constexpr uint64_t kCamToolSlot = ~2ull;
 
-// And the fastener session (docs/parts/gui-plan.md). A fastener is an
+// And the fastener session (docs/parts/README.md). A fastener is an
 // OCCURRENCE in the assembly, not a feature in any document, so it needs the
 // same treatment. SlotPickClicked routes these to FastenerRimPicked.
 inline constexpr uint64_t kFastenerToolSlot = ~3ull;
@@ -98,7 +98,7 @@ inline constexpr uint64_t kFastenerToolSlot = ~3ull;
 // every click, which reads as a broken picker rather than a missing row. That
 // cost a debugging round on the fastener session, and it is the third list in
 // this codebase to have been the thing that was forgotten (see
-// docs/rendering/renderer-wiring.md for the last one).
+// docs/rendering/README.md#scene-renderers for the last one).
 //
 // One row here answers both, and test_conventions.cpp asserts every `k*Slot`
 // constant above appears in the table — so a half-registered session is a

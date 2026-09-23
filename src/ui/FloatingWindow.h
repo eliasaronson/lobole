@@ -12,7 +12,7 @@ struct AppState;
 
 // A window that floats over the 3D viewport: the tool window, the CAM
 // Generate window, the BOM, the CAM transport
-// (docs/ui/consistency-round-plan.md).
+// (docs/ui/panels.md#floating-windows).
 //
 // Each of those placed itself its own way, and they disagreed. The tool window
 // re-anchored when the viewport moved, clamped itself inside the app and drew

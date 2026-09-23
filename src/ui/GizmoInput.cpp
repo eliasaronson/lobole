@@ -87,8 +87,8 @@
 // and the same gizmo on a job tab moving a placement instead. Exploded
 // views are here as well -- an explode is a transform per occurrence, which
 // is what this file is about.
-// Split out of AssemblyActions.cpp (docs/architecture-review-2026-09-06.md,
-// stage 6). AssemblyActions.h still declares everything it declared.
+// Split out of AssemblyActions.cpp (docs/architecture.md#the-ui-actions-layer).
+// AssemblyActions.h still declares everything it declared.
 
 namespace ui {
 
@@ -121,7 +121,7 @@ Occurrence* GizmoOccurrence(AppState& state) {
   // Something that RIDES on another part has a DERIVED pose: dragging it
   // would be overwritten by the next ApplyAttachments, which is the shape of
   // a control that appears to work and does not. This is why a placed
-  // fastener could be pulled out of its hole (docs/parts/f1-loose-ends.md).
+  // fastener could be pulled out of its hole (docs/parts/README.md).
   if (o->attachedTo != 0)
     return nullptr;
   return !o->fixed ? o : nullptr;
@@ -312,7 +312,7 @@ void PublishGizmoHandles(AppState& state, const GizmoSpec& spec, float L) {
 }
 } // namespace
 
-// ---- The placement gizmo on a JOB tab (docs/cam/job-document.md, M5) ----
+// ---- The placement gizmo on a JOB tab (docs/cam/gui.md#gizmos) ----
 //
 // The same handles, on the selected job part: X and Y arrows move its
 // placement in the stock, the Z arc spins it. Nothing out of plane -- which
@@ -503,7 +503,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
   return true;
 }
 
-// ---- The fixture gizmo on a JOB tab (docs/cam/fixture-gizmo-plan.md) ----
+// ---- The fixture gizmo on a JOB tab (docs/cam/gui.md#gizmos) ----
 //
 // The fixture whose editor is open gets the handles a part gets: X, Y and Z
 // arrows and a spin about Z (a fixture never tilts). It snaps its OWN flat

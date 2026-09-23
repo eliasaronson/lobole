@@ -32,7 +32,7 @@ jobs:
   # SHUFFLED because three order-dependent failures in one week were each
   # invisible until the shard partition moved, and each surfaced as an
   # unrelated test going red. The seed is printed; --shuffle <seed> replays a
-  # failure exactly. See docs/ui/gui-test-isolation.md.
+  # failure exactly. See docs/ui/testing.md#independence-any-partition-is-valid.
   gui-suite:
     runs-on: ubuntu-24.04
     steps:

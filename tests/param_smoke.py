@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A parameter must survive the script boundary (docs/peer-survey-plan.md, W1).
+"""A parameter must survive the script boundary (docs/scripting/sdk.md#parameters-carry-their-expression).
 
 Thirteen of sixteen generators declared no document variables at all, so their
 dimensions reached the document as literals and the parts opened with nothing

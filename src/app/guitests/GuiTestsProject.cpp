@@ -913,7 +913,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   // now, ZERO gui-test contact of any kind. That was not an oversight — the
   // panels could not be clicked. Every row sat in an ImGui::PushID(int)
   // scope, which leaves a widget reachable only by numeric id
-  // (docs/ui/gui-coverage.md), so no test and no agent could name a cell.
+  // (docs/ui/testing.md#making-a-widget-addressable), so no test and no agent
+  // could name a cell.
   //
   // Behind that, the flow was broken end to end: the Variables panel creates
   // every variable at PROJECT scope, and the Configurations panel listed
@@ -960,7 +961,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
 
     buildPart();
     // Add view is a tool window, opened from the toolbar
-    // (docs/ui/consistency-round-plan.md).
+    // (docs/ui/panels.md#drawing-tab-the-drawing-panel).
     ToolbarClick(ctx, "###tb_dwg_add_view");
     ctx->Yield(2);
     ctx->SetRef("//###ToolWindow");
@@ -1498,7 +1499,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   // every control addressable, and a change reaching the renderer's own
   // fields — the "it reverted when I opened a second project" class of bug
   // starts with two copies of a preference.
-  // Derived (docs/modeling/derived-plan.md, D2): the tool copies the one
+  // Derived (docs/modeling/derived.md#verbs): the tool copies the one
   // other part as a ghost — translucent, tinted, weightless, still there to
   // be drawn on — and the tree verb retakes the copy once the source moves.
   t = IM_REGISTER_TEST(engine, "derived",
@@ -1664,11 +1665,12 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
   };
 
-  // Opening a project off the frame (docs/ui/project-open-progress-plan.md):
-  // a slow open puts the shared progress bar up, Cancel leaves the project
-  // that was open exactly as it was, and an open that had to rebuild parts
-  // says so until the project is saved. The per-document delay makes "slow"
-  // true on any machine; the real cause is baked geometry that cannot be used.
+  // Opening a project off the frame
+  // (docs/ui/long-operations.md#opening-a-project): a slow open puts the shared
+  // progress bar up, Cancel leaves the project that was open exactly as it was,
+  // and an open that had to rebuild parts says so until the project is saved.
+  // The per-document delay makes "slow" true on any machine; the real cause is
+  // baked geometry that cannot be used.
   t = IM_REGISTER_TEST(engine, "file",
                        "a_slow_open_shows_progress_and_cancels");
   t->TestFunc = [](ImGuiTestContext* ctx) {

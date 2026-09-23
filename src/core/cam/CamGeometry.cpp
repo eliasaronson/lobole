@@ -40,7 +40,7 @@
 // every strategy is built from.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 
@@ -83,11 +83,11 @@ double InscribedRadius(const Clipper2Lib::Paths64& region) {
   return lo;
 }
 
-// A helix down to depth, for a loop too short to hold the ramp (C6,
-// docs/cam/plan.md). Descending on the toolpath itself is right when the
-// path is long; on a small pocket that lap is short and the descent gets
-// Down to where a pass starts cutting, from safe height. ONLY the part above
-// the stock is a rapid; below it the tool FEEDS.
+// A helix down to depth, for a loop too short to hold the ramp
+// (docs/cam/operations.md#depth-passes-and-entries). Descending on the toolpath
+// itself is right when the path is long; on a small pocket that lap is short
+// and the descent gets Down to where a pass starts cutting, from safe height.
+// ONLY the part above the stock is a rapid; below it the tool FEEDS.
 //
 // The old form rapided the whole way, on the reasoning (written at the ramp
 // entry) that the height it enters at "is either the stock top or the depth
@@ -96,7 +96,8 @@ double InscribedRadius(const Clipper2Lib::Paths64& region) {
 // a POCKET: the entry sits mid-spiral, and the pass that was meant to clear
 // it was still ramping when it went past — so the rapid went through whatever
 // that ramp had not yet removed. On the real baffle job that was 3 mm of G0
-// into MDF, which is a broken cutter (docs/known-bugs.md).
+// into MDF, which is a broken cutter
+// (docs/cam/README.md#rapids-profile-outlines-and-through-cuts).
 //
 // Nothing above the stock can be material, so rapiding to the stock top is
 // always safe and costs nothing on the first pass, where the two are equal.
@@ -111,7 +112,7 @@ double InscribedRadius(const Clipper2Lib::Paths64& region) {
 // POCKET, whose entry sits mid-spiral where the previous pass was still
 // ramping, and false of any pass told to start below the stock top — a
 // finishing skim after a roughing pass. On the real baffle job that was 3 mm
-// of G0 into MDF (docs/known-bugs.md).
+// of G0 into MDF (docs/cam/README.md#rapids-profile-outlines-and-through-cuts).
 //
 // Raising the start lengthens the descent, which the ramp already bounds by
 // the loop's own perimeter — steeper than asked, still never a plunge, and a

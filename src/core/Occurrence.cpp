@@ -140,8 +140,8 @@ namespace {
 // spline dip 1.86 mm below zero between the lobe's close and its reopening,
 // so a CLOSED valve travelled backwards into the head, and the motion study
 // reported a 10.86 mm lift on a 9 mm cam
-// (docs/modeling/single-cylinder-dogfood.md). A lift table is data, not a
-// curve to be smoothed past its own values.
+// (generators/README.md#single-cylinder-and-air-cooled-engines). A lift table
+// is data, not a curve to be smoothed past its own values.
 double CamAt(const std::vector<std::pair<double, double>>& t, double deg,
              double* slope) {
   const size_t n = t.size();

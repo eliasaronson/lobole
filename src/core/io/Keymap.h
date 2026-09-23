@@ -10,7 +10,7 @@
 #include <vector>
 
 // Keyboard bindings: which chord runs which command, in which context
-// (docs/ui/u12-keybindings.md). The metadata lives here — in core, with no
+// (docs/ui/keybindings.md). The metadata lives here — in core, with no
 // ImGui and no AppState — for the same reason Settings does: designer_tests
 // links designer_core alone, so the defaults table, the chord parser and the
 // conflict check are unit-testable without a renderer.
@@ -39,7 +39,7 @@ enum class Context : uint8_t {
   Sketch,
   Assembly,
   Drawing,
-  Job, // a CAM job tab (docs/cam/job-document.md)
+  Job, // a CAM job tab (docs/cam/gui.md#the-job-toolbar)
   Simulation,
 };
 

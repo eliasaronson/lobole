@@ -14,7 +14,7 @@
 #include <string>
 
 // The surfacing PICK: a face of any orientation, as the XY region under it
-// (docs/cam/surfacing.md).
+// (docs/cam/operations.md#3-axis-surfacing).
 //
 // Its two siblings live in CamPicks.cpp, and this one cannot: that file is
 // built whether or not CAM is enabled, because a job document has to load and

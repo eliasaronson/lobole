@@ -1,276 +1,268 @@
-# The Designer document format — contract & migration policy
+# The document format: contract and version history
 
-This documents the **contract**: what a `.json` project file may rely on
-across versions. Field-by-field truth lives in `src/core/Serialization.cpp`
-(`FeatureToJson` / `FeatureFromJson`) — this spec deliberately does not
-duplicate it.
+This page is the **contract**: what a saved document may rely on across
+versions, and what changed at each version. The field-by-field truth is the
+code — `src/core/io/SerializeFeatures.cpp` (`FeatureToJson` /
+`FeatureFromJson`), `SerializeAssembly.cpp`, `SerializeStudies.cpp`,
+`SerializeConfigurations.cpp`, `SerializeCam.cpp`, and the envelope and
+directory layout in `Serialization.cpp`. How a project is laid out on disk,
+baked geometry and autosave are in [README.md](README.md).
 
 ## Envelope
 
 ```json
 {
   "format": "designer-document",
-  "version": 17,
+  "version": 128,
   "parameters": [ {"name": "width", "expression": "40", "comment": "…"} ],
   "features":   [ {"type": "Box", "id": 1, "name": "Box 1", "…": "…"} ]
 }
 ```
 
 - `format` must be exactly `designer-document`; anything else refuses to load.
-- `version` newer than the build's `kVersion` refuses to load (no forward
-  compatibility). Older versions always load via migrations (see policy).
-- `parameters` (v11+) precede features: expressions evaluate against them
-  during the regeneration each feature triggers on load.
-- `features` is ordered — it IS the regeneration history.
+- `version` newer than the build's `kVersion`
+  (`src/core/io/SerializationInternal.h`) refuses to load ("Document version
+  is newer than this build supports"). There is no forward compatibility.
+  Older versions load through the loader's migrations.
+- `kind` discriminates the document: absent or `part`, `assembly`, `drawing`,
+  `job`. Each loader refuses a document of another kind, naming it.
+- `parameters` precede features: expressions evaluate against them during
+  the regeneration that follows the load.
+- `features` is ordered: it IS the regeneration history.
+- Optional envelope keys, each written only off its default so older
+  documents re-save byte-identically: `rollback`, `commit_geometry: false`,
+  `generator`, `catalogs`, `sheet_metal`, `tube`, `units`, `tolerances`,
+  `active_configuration`, and
+  `assets` (base64 blobs, single-file form only).
 
 ## Stability guarantees
 
-Files may rely on exactly these invariants:
+A file may rely on exactly these:
 
 1. **Feature ids** (`id`, uint64) are unique within a document and never
-   reused, including across delete/undo. Cross-feature references
-   (`sketch_id`, `target_id`, `source_id`, `parent_id`, `plane_ref`, …)
-   are by feature id, never by index. Files without ids (v1) get them
-   assigned on load, in list order.
-2. **Sketch entity ids** (uint32) are unique within their sketch, grow from
-   1, and survive entity deletion. The datum block (`0xFFFFFF00` origin,
-   `+1` X axis, `+2` Y axis) is reserved and never assigned. Constraint refs
-   are `[entity_id, which]`; pre-v4 files used indices and are migrated.
-3. **Element names** (topological naming) are *derived* state — they are
-   never serialized as a body property. Features that consume them
-   (`Fillet`/`Chamfer` `edges`, sketch `face_ref`) store the
-   `{feature_id, element}` pair; the name re-resolves against the element
-   map rebuilt on every regeneration.
-4. **Expressions**: every dimension field `x` that supports expressions has
-   an optional twin `x_expr`; when present it re-evaluates each
-   regeneration and wins over the stored literal (which is kept as the last
-   evaluated value, so files load meaningfully even if a variable is
-   removed). Angle expressions are in degrees; bare numbers are in the
-   document's base units (mm). Since **v28** a numeric literal may carry a
-   **unit suffix** (`10mm` `1.5in` `2cm` `1m` `1ft`, `45deg` `1rad`) that
-   converts it to the base unit at parse — additive syntax with no structural
-   change, so the version bump exists only so a pre-v28 build refuses a
-   unit-bearing file cleanly rather than erroring each expression. Unit names
-   are reserved and cannot be parameter names.
-5. JSON key order is not significant; writers emit stable ordering
-   (nlohmann sorts keys) so diffs stay readable.
+   reused, including across delete and undo. Cross-feature references
+   (`sketch_id`, `target_id`, `source_id`, `parent_id`, `plane_ref`, …) are
+   by id, never by index. Files without ids (v1) get them assigned on load,
+   in list order. Every id space starts at 1; saving an item whose id is 0
+   refuses (`IdForFile` in `Serialization.cpp`), because in the directory
+   form the id is the filename and a `0-…` file reads back as "no id".
+2. **Sketch entity ids** (uint32) are unique within their sketch and survive
+   entity deletion. New entities get a random id
+   (`SketchFeature::MintEntityId`), not the next integer, so two people
+   editing one sketch on two branches do not mint the same id; older files
+   keep the small ids they have. The loader refuses a sketch with two
+   entities sharing an id. The datum block (`0xFFFFFF00` origin, `+1` X axis,
+   `+2` Y axis) is reserved. Constraint refs are `[entity_id, which]`; pre-v4
+   files used indices and are migrated.
+3. **Element names** (topological naming) are derived: they are not part of
+   the recipe. Features that consume them (`Fillet`/`Chamfer` `edges`, a
+   sketch `face_ref`, mates, drawing dimensions) store a
+   `{feature_id, element}` pair, and the name re-resolves against the element
+   map rebuilt on every regeneration. The baked-geometry cache stores element
+   maps beside its bodies, as derived data keyed by the chain hash.
+4. **Expressions.** Every dimension field `x` that takes an expression has an
+   optional twin `x_expr`. When present it re-evaluates on each regeneration
+   and wins over the stored literal, which is kept as the last evaluated value
+   so a file loads meaningfully even when a variable is gone. Angles are in
+   degrees; bare numbers are in base units (mm). A numeric literal may carry a
+   unit suffix (`10mm`, `2cm`, `1m`, `1.5in`, `1ft`, `45deg`, `1rad`),
+   converted at parse (`UnitFactor` in `src/core/Expression.cpp`). Unit names
+   cannot be parameter names.
+5. JSON key order is not significant; writers emit sorted keys (nlohmann's
+   default object) so diffs stay readable.
 
-## Migration policy (codified)
+## Migration policy
 
-Every `kVersion` bump MUST ship, in the same commit:
+Every `kVersion` bump ships, in the same commit:
 
-1. a **loader migration** in `FeatureFromJson`/`Load` (never a save-side
-   compatibility mode — the writer always writes current-version files);
-2. a **golden file** for the era being superseded, under `tests/golden/`
-   (frozen — golden files are never regenerated by tooling);
-3. a **round-trip test**: the golden loads, saves at the current version,
-   reloads, and produces identical geometry.
+1. a **loader migration** in the `…FromJson` / `Load` path. There is never a
+   save-side compatibility mode: the writer always writes the current version.
+2. a **golden file AT the new version**, frozen: `tests/golden/` for a part
+   document, `tests/golden/assembly/`, `tests/golden/job/` or
+   `tests/golden/drawing/` for those kinds. Each `NAME.json` pairs with
+   `NAME.expect.json` (`{features, bodies, volumes}`, volumes to 1e-3
+   relative). Goldens are never regenerated by tooling: a failing golden is a
+   broken migration, not a file to update.
+3. a **row in the version history below**.
 
-`tests/test_golden.cpp` enforces 2–3 mechanically for every corpus file:
-load → regenerate → assert feature/body counts and volumes against the
-sidecar `.expect.json`, then round-trip through the current writer.
+`tests/test_golden.cpp` enforces all three:
 
-...and a **row in the table below**, which is item 4. Nothing enforced that
-until 2026-08-25, and the table had quietly stopped at v60 while the code
-reached v65 — five bumps of documentation rot, each of which shipped its
-golden correctly. `The version history covers every kVersion` (also in
-test_golden.cpp) now reads the table and fails when it does not reach
-`kVersion`, because a policy nobody checks is a wish.
+- `Golden corpus loads, regenerates, and round-trips`: every golden loads,
+  regenerates to its `.expect.json`, saves at the current version and
+  reloads to the same geometry.
+- `The golden corpus reaches the current kVersion`: the newest golden across
+  all four directories is at `kVersion`.
+- `The version history covers every kVersion`: parses this page. A row whose
+  first cell is an integer counts, and the highest must equal `kVersion`.
+  Keep the first cell a bare version number.
 
-**The golden's existence is gated too, and the rule is narrower than this
-prose used to imply.** `The golden corpus reaches the current kVersion`
-asserts that the NEWEST golden — across `tests/golden/` and
-`tests/golden/assembly/`, both of which count — is at `kVersion`. Not "one
-per bump": measured on 2026-08-25, **11 of the 35 bumps below have no
-golden**, nearly all of them v2–v16 from before the practice settled, and the
-two modern gaps (v27 exploded views, v53 drawing dim kinds) were plain
-misses. A strict per-bump gate would have failed on arrival and been deleted,
-which is how a gate teaches people to ignore gates. The narrow one passes
-today with no backfill and fails the moment a bump ships without an
-artifact — which is the drift worth catching. Treat the table below as the
-record of bumps and the corpus as a sample of them, not a mirror.
+The corpus is a sample of eras, not one file per bump: many early versions
+have no golden. Read the table as the record of bumps.
 
 ## Version history
 
-| v | Commit | Change |
-|---|--------|--------|
-| 1 | `ddea5f8` | First JSON format: Box/Sphere/Cylinder/Import, no ids |
-| 2 | `9c8c2c2` | Stable feature ids; Sketch + Extrude (by `sketch_id`) |
-| 3 | `b2e743c` | Sketch constraints (PlaneGCS) |
-| 4 | `34236f9` | Stable sketch entity ids (pre-v4 constraint refs were indices) |
-| 5 | `b932e1a` | Rectangles become four lines (rigid `rect` entity removed; loader expands) |
-| 6 | `bf96eb2` | Construction geometry + extra constraint kinds |
-| 7 | `5daade2` | Arcs + trim |
-| 8 | `9adb0bf` | Sketch derived ops (linear/circular pattern, `derived_ops`) |
-| 9 | `13a84d1` | Ellipses |
-| 10 | `d206a26` | Per-feature `material` slug. An unrecognised non-empty slug is REFUSED on load, naming the accepted set — it used to resolve to DEFAULT, an aluminium appearance carrying density 0, so a file naming a material the build lacks looked machined while reporting no mass. Safe at a fixed version because a file newer than `kVersion` is already refused. |
-| 11 | `7723829` | Document `parameters` + `*_expr` expression twins |
-| 12 | `5b75a0f` | `DatumPlane` feature; sketch `plane_ref` |
-| 13 | `6feb6c0` | `Revolve` + `DatumAxis` (+ `AxisRef`) |
-| 14 | `2d5290a` | `Boolean` feature (`target_id`/`tool_id`) |
-| 15 | `7343eef` | 3D `Pattern` feature |
-| 16 | `3020d0e` | Sketch `face_ref` (ElementRef, toponaming) |
-| 17 | `48dab10` | `Fillet`/`Chamfer` on ElementRef edges |
-| … | | (v18–v22: end-conditions, shell, loft/sweep, hole, draft — see golden corpus) |
-| 23 | `0949554` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
-| 24 | (A3) | Assembly `mates` list (connector frames + type; fastened/revolute/slider) |
-| 25 | (A3) | Cylindrical/planar/ball mates (+ optional `dx`/`dy`/`ball_rotation`) |
-| 26 | (A2.5) | Connector inference snap (`anchor.snap_edge` → a hole-center frame) |
-| 27 | (A4) | Assembly `exploded` views (named per-occurrence offset sets) |
-| 28 | (C2) | Unit-suffixed expression literals (`10mm`, `1in`, `45deg`) |
-| … | | (v29–v33: FEM studies, drawings, configurations, modal/gravity, topology studies — see golden corpus) |
-| 34 | (U2) | Extrude/Revolve `regions` (selected profile loops by boundary entity-id sets; absent = whole sketch) |
-| … | | (v35–v37: linked copies, thread/rib, point-line distance dims — see golden corpus) |
-| 38 | (2A) | Sketch entity coordinate expressions (`<field>_expr` keys on entity JSON: line `ax/ay/bx/by`, circle+arc `cx/cy/r`, point `x/y`) |
-| … | | (v39–v51: split, curves/sweep/pipe, images, refine, XCAF import, patterns/mirror — see golden corpus) |
-| 52 | | Extrude `end_mode: "through_all"` (cut only; sweeps past every body along ±normal per `reversed`, `distance` ignored) |
-| 53 | | Drawing dim kinds `hole_callout` (text derived from the drilling HoleFeature) and `pattern_callout` (N× + uniform pitch over picked circles) |
-| … | | (v54–v57: sub-assemblies, reference images — see golden corpus) |
-| 58 | (CAM C1) | `cam` setups: stock, work origin, `rotation_a`, tools, operations (inline in both formats — a setup is parameters, not a mesh) |
-| 59 | (CAM C8) | Operation `type: "adaptive"` (constant-engagement clearing) |
-| 60 | (CAM C7) | Setup `fit_arcs` (default true; false posts curves as line moves, for a controller that mishandles G2/G3) |
-| 61 | `0b73883` | Expression-driven Box/Sphere/Cylinder dimensions (`*_expr` on the primitives) |
-| 62 | `0edb0f5` | CAM operation `side` written for clearing ops too (it was profile-only, so a saved pocket reloaded broken) |
-| 63 | `5b7ae4f` | CAM setup remembers the face its Z zero was picked from |
-| 64 | `4774803` | Document display units (`units`: length/mass/angle) travel with the document |
-| 65 | `027809c` | Mate connector corner snap (`anchor.snap_edge2`) — a corner named by the two edges meeting there |
-| 66 | (R13/R15) | Drawing `notes` (text + optional leader, per sheet); CAM tool `tool_type`/`tip_angle` and the `edge_round` operation (`edge_size`) |
-| 67 | (S1–S5) | The CAM setup's fixture `frame` (how the part is clamped) and `has_rotary_axis` — split out of `rotation_a`, which had been answering both questions (docs/cam/setup-frame.md) |
-| 68 | (W1–W6) | The CAM work origin is DERIVED from a named corner (`origin_at`) and the post SUBTRACTS it, so a file's zero is where the operator touches off; fixed-size stock (`stock.mode`/`size`/`place`) for sheet goods (docs/cam/stock-and-origin.md) |
-| 84 | (derived) | The `Derived` feature (docs/modeling/derived-plan.md): a copy of another part's bodies inside this part. `source_part` (slot id) + `source_name`, `bodies?` (created_by filter), `placement {position, orientation}`, `reference` (a ghost to draw on, absent from mass/BOM/export/CAM/booleans, vs. an ordinary body), and `snapshot {source_chain_hash, bodies: [{asset, name, material, source_created_by, element_map, display_color?}]}`. Each body's B-Rep is a document asset `derived-<hash>.brep` (binary BinTools, content-addressed; `assets/` in the directory form, base64 under `assets` in the single file), so regeneration never resolves the source and a file loads with no source part present. Element names on the copy are `<derived id>/<source created_by>/<source name>` |
-| 92 | (cam) | A CAM tool's `chipload_min`/`chipload_max` — mm per tooth that CUTTER wants in the material the setup cuts. Absent (the default, and written only when stated so an uncharted job re-saves byte-identically) falls back to a scaling rule off the diameter, and every finding CITES which of the two it used. It lives on the tool rather than in a table of ours because there is no standard to vendor: fastener geometry is ISO because parts must interchange, while cutting data is empirical, machine-dependent and published as vendor copyright — so the conservative rule ships and the real numbers are typed beside the feed they belong to, with a machine's tool library carrying them into every new setup for free. Refused as a half pair or reversed, never repaired: a backwards band passes every feed silently |
-| 93 | (catalogs) | Project engineering catalogs with pinned revision/content fingerprints, explicit provenance and reference-only or embedded records. Reference-only saves omit data rows and reopen unresolved. Flat documents carry `catalogs`; multi-document projects carry it in `project.json`. |
-| 96 | (cam) | A CAM profile's `min_opening`. Cutting INSIDE a level face now means cutting the OPENINGS in that face — every one of them, in one operation — which is the only thing an inside cut on a face can mean: offsetting the face's own outline inward carves a trench a whisker inside the part, full depth, all the way round, and that is what the pick used to do in silence. `drilled_bores` is the diameter up to which a ROUND opening is left to the drill: on a carbon frame the slots are milled and the M2/M3 fastener holes are drilled, and without a word for it the two operations cut the same hole — minutes of a 2 mm cutter orbiting air in a hole that is already gone. A bore and not a width, because width cannot say it: this frame's narrowest milled opening is a 2.2 mm slot and its widest drilled hole is 3.2 mm across, so any threshold that keeps the slot keeps the holes too — what separates them is that one IS a hole (a wire of one circular edge, asked of the geometry). The caller's statement of intent rather than a guess the app can make, since a hole drilled undersize and finished to size is the same pick and the opposite answer. Absent (0) cuts every opening |
-| 96 | (cam) | A CAM profile's `drilled_bores`. Cutting INSIDE a level face now means cutting the OPENINGS in that face — every one of them, in one operation — which is the only thing an inside cut on a face can mean: offsetting the face's own outline inward carves a trench a whisker inside the part, full depth, all the way round, and that is what the pick used to do in silence. `drilled_bores` is the diameter up to which a ROUND opening is left to the drill: on a carbon frame the slots are milled and the M2/M3 fastener holes are drilled, and without a word for it the two operations cut the same hole — minutes of a 2 mm cutter orbiting air in a hole that is already gone. A bore and not a width, because width cannot say it: this frame's narrowest milled opening is a 2.2 mm slot and its widest drilled hole is 3.2 mm across, so any threshold that keeps the slot keeps the holes too — what separates them is that one IS a hole (a wire of one circular edge, asked of the geometry). The caller's statement of intent rather than a guess the app can make, since a hole drilled undersize and finished to size is the same pick and the opposite answer. Absent (0) cuts every opening (docs/modeling/fpv-drone.md, finding 7) |
-| 97 | (modeling) | An `Import` may keep the file's own coordinates: `keep_origin`. Every import before this was translated so its combined bounding box sat at the origin, and nothing said so — not the feature doc, not the result. That default is right for a part you are about to look at and wrong for every import whose coordinates MEAN something: a neighbour part from the same assembly, a fixture baked into a shared frame, a re-import of geometry this app just exported. Placing such an import by its file coordinates silently compared two things that were not where the caller thought, and the symptom — every distance coming back 0.00 mm — reads as an interference, not as a placement error. Absent = centred, which is what every older file did |
-| 98 | (tolerances) | `tolerances` — a permitted variation recorded ON a measured element: `{id, ref:{feature_id, element}, class}` — or `{lower, upper}` in mm for limits no class expresses — plus an optional `comment`. The CLASS is what is stored, not the deviations it implies, for the reason a hole stores "M6 normal" rather than 6.6: one source of truth, so a correction to the ISO 286 table reaches every document. One per element, because a face cannot be two sizes at once — setting a tolerance on a face that has one replaces it. It is design intent and nothing else: a size tolerance moves no surface, so tolerances sit OUTSIDE the regen chain hash like studies and CAM setups, and a tolerance-only edit rebuilds exactly zero features (asserted, not assumed). A ref whose element no longer resolves is KEPT and reported unresolved when something looks, rather than dropped at load — the intent outlives the topology that happened to carry it. Absent when empty, so every earlier document re-saves byte-identically |
-| 99 | (tolerances) | A tolerance's `ref2`. With it the tolerance is on the DISTANCE between two elements — a shoulder-to-seat length, a slot width, a boss height — rather than on one face's own size, and the nominal is measured the same way (`Measure::DistanceDetailed`). It takes an explicit `lower`/`upper` pair and REFUSES an ISO class: a class states how a shaft or a bore may vary and says nothing about the gap between two arbitrary faces, so accepting one would store a band meaning something else. The uniqueness key widens with it — one tolerance per SUBJECT, which is a face for a size and an ordered PAIR of faces for a distance, so a bore can carry its own size and any number of distances measured from it. Written only for a distance, so every v98 size tolerance re-saves byte-identically |
-| 100 | (assembly) | An assembly holds the CLEARANCES its designer declared, and re-checks them. `assertions`: `{name, a, b (top-level occurrence ids), min_mm, mode: mesh\|exact, why?}` plus the last answer — `verdict` (holds \| violated \| unverifiable), `measured_mm`, `checked_key` and a `note` for the ones that could not be checked. "prop tip to arm is at least 2 mm" lived in a python `verify()`: nobody who opened the document could see it, the GUI could not break it, and thickening a plate re-checked nothing. Subjects are occurrence IDS and not names, the same key a mate stores and for the same reason — a name repoints silently on rename and an id that no longer resolves is honestly UNVERIFIABLE. `checked_key` is a hash of the two subtrees' placed geometry rather than a document version: fifteen mutators bump the version and a post-load placement pass is one of them, so a counter would read stale on open and after every unrelated edit. Absent when there are none |
-| 101 | (assembly) | An assembly configuration takes MATES and RELATIONS out of the solve and HOLDS mate DOFs: `suppressed_mates`, `suppressed_relations` (ids) and `mate_overrides` (`{mate, rotation? (radians), offset? (mm)}`), beside the occurrence ids it already suppressed. An OVERLAY the solve applies — a held DOF stands in for the mate's value for the whole solve and the authored value goes back — so leaving the configuration restores every mate, and "a watch's crown pulled out" is a configuration rather than a script. A mate or relation touching a suppressed occurrence now sits out with it (it used to go on driving the hidden part). Absent when empty, so every earlier document re-saves byte-identically |
-| 102 | (assembly) | A cam relation's follower may TURN: `dof_b` is `rotation` (a rocker, a pallet fork) and the lift table's second column is then in DEGREES, as its first column is — mm for a sliding follower, as before. No field is new and `dof_b` was always written; the bump is so a v101 build REFUSES such a file instead of reading its degrees as radians. Every earlier document re-saves unchanged apart from the version |
-| 103 | (import) | An Import's `units`: the length unit an STL or BREP file was drawn in (`mm` \| `cm` \| `m` \| `in`). Neither format carries one — STL has no unit field at all and BREP is OpenCASCADE's unitless native form — so a mesh exported in metres arrived 1000x too small and looked fine. The shape is scaled once as it is read; storage stays mm. REFUSED on a STEP import, which declares its own unit, and an unrecognised string is refused naming the accepted ones rather than read as mm. Absent for mm, so every earlier document re-saves byte-identically; bumped so a v102 build refuses such a file instead of importing at 1:1 |
-| 104 | (assembly) | A FREEWHEEL relation, a one-way clutch: `kind` `freewheel`, rotation to rotation, with `drives` (`positive` \| `negative` — the direction b is driven in; required, a default would be the one plausible wrong answer) and `lead`, how far b has run ahead of a's drive line in b's unit. A freewheel's pose depends on history and `lead` is all of it: it only grows in the `drives` direction, and propagation keeps b = ratio × a + phase + lead exact, so re-solving changes nothing and the document and its undo snapshots carry the history with the mates. Absent on every other kind ([freewheel-plan.md](../freewheel-plan.md)) |
-| 118 | (job) | Two finishing **`OpType`**s, `surface_parallel` and `surface_waterline`, whose Z varies continuously WITHIN a pass -- which the 2.5D pipeline cannot express, since every existing strategy is a contour at a level. With them the three quantities a finishing pass needs, each named for what it is rather than all spelled "stepover": `cut_angle_deg` (the raster direction), `sample_step_mm` (spacing ALONG a pass, where the cutter-location surface is read) and `z_step_mm` (the Z between waterline laps, which an XY fraction of tool diameter cannot express). An unknown op type already refuses the file by name, so a v117 build refuses this one -- which is what the bump is for, since no earlier document changes ([cam/surfacing.md](../cam/surfacing.md)) |
-| 117 | (part) | A **`Curve3D`** of kind **`bent_path`**: `points` are the CORNERS of a centreline in order and `radius` (+`_expr`) is the former it is bent round, measured to the centreline. It builds line-arc-line — straights between the corners, a tangent arc at each — which is what a tube bender is programmed with, and what lets a bend's angle and radius be READ BACK (`tube_schedule`); a centreline fitted as a spline through sampled arc points is a tube nothing can quote a former for. An unknown kind already refuses the file, so a v116 build refuses this one by name — which is what the bump is for, since no earlier document changes ([modeling/curves-3d-plan.md](../modeling/curves-3d-plan.md)) |
-| 119 | (part) | A **`Cope`** feature — `member_id`, `against: [feature ids]`, `gap` (+`_expr`) — which cuts the member with each neighbour's OUTER solid and LEAVES the neighbours standing. A Boolean consumes both operands, so coping with one needs a throwaway copy of the neighbour per joint, and every throwaway is a tube in the cut list nobody ordered; at a node every member is coped to every other and they all survive. A v118 build refuses an unknown feature type by name. In the same version: **`tube`**, the SHOP a part is bent in — the `material` every member is made of, and the bender (`former_radii`, the die set, empty = any radius; `min_straight`; `tail_length`; `max_thinning`), each written only when overridden. Deliberately NO size, which is the one place it parts company with `sheet_metal`: a sheet part is cut from one blank, and a tube frame is several sizes at once (a Formula Student chassis is 25.4x2.4 in its hoops and 19.05 in its tertiary members), so each member's Pipe carries its own and `check_tube` judges each against it. It drives no geometry, so a tube-rules edit rebuilds zero features; what it changes is what `check_tube` may say. A v118 build reads the key as nothing and checks a frame against no rule at all, which is what the bump is for ([tube/plan.md](../tube/plan.md)) |
-| 122 | (job) | An **`OpType`** of **`surface_rotary`**: 4-axis finishing by a rotary RASTER (not continuous 4-axis -- that is v123's spiral). Passes run ALONG the rotary axis and step round it, and the part turns to present each one to the spindle -- so the A word holds WITHIN a pass and changes BETWEEN them, which is what keeps arcs fittable and the feed answerable at one radius. It takes no side, no stepdown, no tabs, no lead arcs and no cut angle: a rotary raster's direction IS the axis. An unknown op type already refuses the file by name, so a v121 build refuses this one -- which is what the bump is for, since no earlier document changes ([cam/rotary-plan.md](../cam/rotary-plan.md)) |
-| 123 | (job) | A `surface_rotary` op's **`rotary_pattern`**: `parallel` (the v122 raster, and what a missing key means) or `spiral` -- one helix end to end with A turning WHILE the tool cuts, which is continuous 4-axis. And the op reads `stepdown` now: with one it cuts in layers from the blank inward, the last layer the finish. A v122 file's stepdown on a rotary op is DROPPED on load, because the derivation stored one on every op and v122 never read it, so honouring it would re-cut every v122 rotary job in layers nobody asked for. The machine gains `a_max_deg_min`, the A axis's top speed, which a cut that turns the part is held to. Unknown patterns are refused by name. A v122 build would read a spiral as parallel passes -- a different cut from the same file -- so it is a bump ([cam/rotary-continuous-plan.md](../cam/rotary-continuous-plan.md)) |
-| 124 | (job) | A third `rotary_pattern`, **`helical`**: passes that FOLLOW a twist, helices at the part's own lead stepped round it, where parallel passes cross a barley twist's flutes and a spiral densifies on every one. And **`lead_mm`**, the passes' axial advance per turn, signed for the hand, with 0 meaning derive it from the part's own twist. A v123 build refuses the pattern name by name, which is what the bump is for ([cam/rotary-helical-plan.md](../cam/rotary-helical-plan.md)) |
-| 125 | (job) | A `surface_parallel` op reads **`stepdown`**: with one it ROUGHS, in layers from the stock top down to the surface plus its stock to leave, over the part's outline and a ring one cutter wide. A v124 file's stepdown on one is DROPPED on load, because the derivation stored one on every raster and v124 never read it, so honouring it would turn every saved finish into a rough. And surface ops (`surface_parallel`, `surface_rotary`) gain **`rest_from_tool`**: the number of the larger cutter that finished before, and with it the pass cuts only where that cutter could not reach. A v124 build would read a rough as a finish and a rest pass as a full one, so it is a bump ([cam/rough-rest-range-plan.md](../cam/rough-rest-range-plan.md)) |
-| 126 | (job) | A CAM setup's **`fixtures`**: what holds the stock, each `{id, part | box, name, pos, rot_z, enabled}` -- a part placed on the bed in its own coordinates (Z up), spun and moved, or a keep-out `box` of that size with no part at all. Never cut; the verifier reports every move of the cutter or holder into one, and safe Z is derived to clear them. Written only when a setup has any and each key only off its default, so every older job re-saves byte-identically. The job's id counter now also counts placement and fixture ids on load: placements were left out, so a placement made after a reload could reuse an id ([cam/workholding-plan.md](../cam/workholding-plan.md)) |
-| 127 | (job) | A fixture's optional **`seat`**: one of its faces resting on the stock's top, reaching in over an edge, `{face: {feature, name}, edge: -x|+x|-y|+y, along_mm, over_mm, spin_deg}`. Every number is measured from the stock. The seat is re-solved against the stock on every read, so a clamp stays on the board when the stock grows. `pos` and `rot_z` keep the pose it last solved to. An unknown `edge` is refused, naming the four. Written only when a fixture has a seat, so every older job re-saves byte-identically ([cam/fixture-seat-plan.md](../cam/fixture-seat-plan.md)) |
-| 128 | (part, assembly) | Three fields a script could not reach. An axis reference's kind **`custom`** — `{origin: [x,y,z], direction: [x,y,z]}` in mm — so a revolve, a circular pattern or an angled datum plane can turn about ANY axis; before it, a turned bore off the origin needed a datum axis or a sketch line whose entity id is random. A Curve3D helix's **`start_deg`** (+`_expr`), where it starts round its axis, right-handed from a reference that is now named (+X for a +Z axis, +Z for +X or +Y, and so on — the direction OpenCASCADE always picked, so no existing helix moves). A motion study's **`configuration`**: the assembly configuration it runs, is judged and is scrubbed under — an id, or 0 for the BASE with nothing held; absent = whichever is active — a study that measures full load now says so instead of measuring whatever was left switched on. Each written only off its default, so every older document re-saves byte-identically; a v127 build refuses the axis kind by name, and would silently start every helix at 0 and run every study under the active configuration, which is what the bump is for ([pes-friction-plan.md](../pes-friction-plan.md)) |
-| 121 | (job) | A **`Tool`**'s **`overall_length`** and **`collar_diameter`**, mm: how far the cutter stands out of the collet, measured from the tip, and how wide the nut is at its widest. Given as a PAIR they turn on the holder check in `cam_verify`, which reports the collar driven through material the cutter never touched -- a clamp, a boss beside a pocket, a tall neighbour on the same sheet. That is the one failure the finished part cannot show, because the part comes out right and the nut still hits. Written only when stated, so a job of undimensioned tools re-saves byte-identically and a v120 build reading a job WITH them simply checks no holder -- which is the same thing as not having typed them ([cam/simulation.md](../cam/simulation.md) S6) |
-| 120 | (part) | A **`Cope`**'s **`mitre`** list: the members it meets END TO END, cut on the plane that bisects them. A fishmouth needs a round side to cut into and a corner has none, so every corner in a frame came out SQUARE — 27 of a chassis's 47 members — which is a tube that does not sit down on its neighbour. Which cut a joint wants is TOPOLOGY the caller holds, not geometry the feature can read: members are drawn LONG past their nodes (a plane through the very end of a tube shaves a wedge off it instead of mitring it), and once they are, a corner and a tee look alike. A v119 build reads the key as absent and leaves every corner square, which is what the bump is for ([mitre-plan.md](../mitre-plan.md)) |
-| 116 | (part) | A **`Hem`**'s `offset_start` / `offset_end` (+`_expr`), mm: insets from the ends of the picked edge, the same field an `EdgeFlange` has. A hem that runs the full length of a pan's wall meets the wall beside it at the corner and fuses to it — the corner is then continuous metal and the part flattens from no blank, which is the shape every hemmed tray has. A hem is crushed flat, so unlike a flange's the inset cuts no relief ([sheetmetal/plan.md](../sheetmetal/plan.md), S7) |
-| 115 | (drawing) | A drawing view's **`configuration`** (a configuration id of its SOURCE part; omitted or 0 = whatever the part has active) draws the part in that variant, so a sheet of the `Flat` configuration shows the blank whichever variant the model tab is on; a view of an assembly refuses one. A note's **`table`** `none` (default) \| `bends` makes it a bend table of its view's part — rows generated from the part at every resolve, `text` the caption — and an unknown table name refuses the file. Flat creases draw as chain-line **bend lines** in a view square onto the blank; they are derived, not stored ([sheetmetal/plan.md](../sheetmetal/plan.md), S11) |
-| 114 | (part) | **`NormalCut`** `{sketch_id, body_id?, regions?}`: a closed profile carried along its sketch's normal onto a sheet body and cut through the sheet SQUARE TO THE METAL wherever it lands — straight through a panel, radially through a bend. Made by unfolding, laying the outline down on the blank, cutting there and folding back, which is the cut a laser and a brake actually produce; an extrude cut through a bend comes out slanted to the metal. An outline that lands on two separate parts of the sheet from its sketch's direction is refused rather than strung across the part ([sheetmetal/plan.md](../sheetmetal/plan.md), S10) |
-| 113 | (part) | **`CornerRelief`** `{body_id, style? circular\|rectangular, size? (+_expr)}` cuts a relief at EVERY corner of a sheet body where two bends cross, centred where their bend lines meet and one bend radius plus a thickness across unless sized; three bends at one corner, or two meeting at other than a right angle, are refused by name rather than given a relief shaped for a square two-bend corner. And an EdgeFlange's **`corners`** `open` (default) \| `closed`: closed carries two flanges that only touch at a square corner past it, each as far as the other sticks out, and mitres them shut. Both enums refuse an unknown name ([sheetmetal/plan.md](../sheetmetal/plan.md), S8) |
-| 112 | (part) | **`Hem`** `{edges, length (+_expr), kind? closed\|open, gap? (+_expr), outside?}` folds a panel edge right back on itself — the edge flange's builder at 180 degrees, its radius set by the gap the return leaves (a tenth of the sheet when closed, since touching walls would fuse) and so exempt from the minimum bend radius. **`Jog`** `{sketch_id, height (+_expr), angle_deg? (+_expr), flip?}` steps a panel along a one-line sketch drawn on it: two opposing bends the full width of the panel, the far side carried up by `height` face to face and otherwise untouched; a height under what the two bends alone climb, `(2R + t)(1 − cos angle)`, is refused. And an **`EdgeFlange`** whose picked edges meet at a corner now MITRES flanges that would overlap, each trimmed back from the corner's bisector by half a tenth of the sheet — no new field, but a v111 build fuses the two into one block. An unknown hem `kind` is refused by name ([sheetmetal/plan.md](../sheetmetal/plan.md), S7) |
-| 111 | (part) | **`Unfold`** `{body_id, fixed_face?, bends?}` lays the bends made by the listed flange features (all, when omitted) flat IN PLACE, so whatever follows is drawn and cut in the flat; **`Refold`** `{unfold_id}` folds exactly those bends back up. A cut made between the two that crosses a crease is WRAPPED onto the bend by the same neutral-axis map the allowance comes from; a cut that does not go through the sheet, and material added across a crease, are refused by name rather than approximated. Bends are named by the FEATURE that made them, not by index, because an index renumbers when an earlier flange gains an edge. The same map now carries a through-cut on a bend INTO the flat pattern, where v110 silently dropped it ([sheetmetal/plan.md](../sheetmetal/plan.md), S9) |
-| 110 | (part) | The BLANK, in two halves. **`FlatPattern`** `{body_id, fixed_face?}` lays a sheet body flat, REPLACING its shape rather than adding a second body — a folded part and its blank occupy the same space, so two bodies would sit inside each other and every measurement would double. It flattens from the bends the earlier features recorded (not by developing the cylinders), so it must sit after everything that reshapes the sheet, and flattening a blank a second time is refused by name. **And a part configuration's `unsuppressed_features`** `[ids]`: features the authored model keeps OFF that this configuration turns on, and the LAST WORD over both suppression lists (effective = (authored OR suppressed here) AND NOT here). Switching folded/flat is then an ordinary configuration switch, with one undo stack. Before it a configuration could only ever remove, so a feature that is off in the authored model could not be what a configuration is for. Absent when empty, so every earlier configuration re-saves byte-identically ([sheetmetal/plan.md](../sheetmetal/plan.md), S4) |
-| 109 | (part) | The first two sheet-metal features. **`BaseFlange`** `{sketch_id, reversed?, regions?}` — a closed sketch profile thickened by the document's sheet-metal thickness, the feature that declares a part to be sheet metal. **`EdgeFlange`** `{edges [{feature_id, element}], length (+_expr), angle_deg (+_expr), radius? (+_expr), position?, length_mode?, offset_start? (+_expr), offset_end? (+_expr), relief?}` — a wall bent up from each picked STRAIGHT edge of a panel. Neither carries a thickness of its own: a blank is cut from one sheet, so both read v108's rules and REFUSE when there are none. `position` (`material_inside` default \| `material_outside` \| `bend_outside`) is which mold line the picked edge marks and `length_mode` (`flat` default \| `outside` \| `inside`) which dimension `length` states — a drawing dimensions to a mold line, so reading one as the other is a wall wrong by a radius plus a thickness. Each of the three enums is refused by name rather than defaulted. Every optional field is absent at its default, so a flange written with none of them re-reads identically ([sheetmetal/plan.md](../sheetmetal/plan.md), S2+S3) |
-| 108 | (part) | Sheet-metal rules: `sheet_metal` `{material, gauge, thickness, bend_radius?, k_factor?, relief?, relief_width?, relief_depth?}`, the stock a part is cut from and how it bends — read by every sheet feature during regeneration, so unlike a tolerance this one IS geometry and seeds the regen chain hash. `gauge` is a stocked designation (`16ga`, `1.5mm`) and resolves to `thickness` THROUGH THE MATERIAL, because one gauge number means three thicknesses: 16ga is 1.519 mm in steel, 1.587 mm in stainless and 1.291 mm in aluminum. The four optional fields are DERIVED from material and thickness when absent — minimum bend radius, the R/t band of the K chart, 1.5t relief width, R+t relief depth — and written only when overridden, so a correction to the tables reaches every part that did not pin them. An unknown relief style is refused naming the accepted ones. Absent when the part is not sheet metal, so every earlier document re-saves byte-identically ([sheetmetal/plan.md](../sheetmetal/plan.md), S1) |
-| 107 | (assembly) | A participant `role` may be `bonded` (S2): meshed AND glued to the meshed occurrence where the two touch — one mesh spans them, and each member keeps its own material by mesh domain. A v106 build refuses the file rather than reading the role as something else ([simulation/assembly-studies-plan.md](../simulation/assembly-studies-plan.md), S2) |
-| 106 | (assembly) | FEM studies on an ASSEMBLY: `studies`, absent when none, each the part study's shape plus `participants` `[{occurrence, role: meshed|rigid|ignored, mesh_size?}]`; a load or refinement on one carries `occurrence`, and a fixed load may anchor on a CONTACT — `contact_with` (a rigid occurrence) in place of `face`, clamped where the two touch, the patch re-derived at mesh time ([simulation/assembly-studies-plan.md](../simulation/assembly-studies-plan.md), S1) |
-| 105 | (assembly) | A CLICK relation — a pawl: ONE mate's rotation (`mate_a` = `mate_b`) free the way it `drives` and HELD at `lead`, its mark, the other way; whatever pushed it against the click is left disagreeing and says so. And a freewheel's `teeth` (it re-engages only where teeth meet, so its drive line is the notch at or behind `lead` and the input travels up to a pitch before driving again) with `ride`: `{amount, mate, dof}`, what riding over them LIFTS — zero at a notch, full just before the next, added after the walk to whatever else drives that DOF, which is how a watch's clutch rises along its stem as sawtooth dogs slip ([click-and-breguet-plan.md](../click-and-breguet-plan.md)). Absent on every other kind |
-| 95 | (clamp workflow) | Explicit bounded thread engagement (`allow_engagement`, `minimum_engagement`) and screw relations referencing their authoritative thread feature (`thread_part`, `thread_feature`). |
-| 94 | `27d9fed6` | Part-local generated component ownership: namespace, key, input fingerprint and last generated recipe hash. Preserved by save/load and copy; staged recipe updates remain undoable. |
-| 91 | (cam) | A CAM setup's `reach_offset` — WHERE THE BED IS ON THE SHEET, in setup space from the stock's near corner — and `stock_max` as a fourth `origin_at`. The machine's reach box has always been travel-sized with its corner nailed to the stock's, which is right for a sheet that fits the bed and an ASSUMPTION for one that does not: a 1122 mm speaker baffle on a 900 mm router is slid through and clamped wherever the work is. The assumption had teeth, because the box decides what `ClipToMachine` throws away AND it moves with the part — turning that baffle end-for-end dropped seven operations off a machine that could reach every one of them, while the cutting itself spans only 461 mm. Zero is the old behaviour, so nothing that fits changes; `DeriveReachOffset` (RPC `reach_offset: "auto"`) places the window on the toolpaths and refuses when the CUTTING is wider than the travel, which is genuinely two setups. `stock_max` exists because the near corner of a slid sheet is the end hanging in the air, and a datum nobody can touch off on is not a datum |
-| 90 | (drawings) | A drawing view's `hidden`: occurrence ids left OFF that view. Empty (and absent) means draw everything, and it is meaningful only for an assembly source. A per-SHEET choice rather than a model change — one sheet can drop a part another keeps — which is why it lives on the view and not on the occurrence. It exists because exact HLR is priced by SURFACE complexity, so a single swept part can dominate a whole sheet: the single-cylinder engine is 47 s a view, and 0.0 s with its two valve springs left off, while the other seventeen bodies still project exactly. Named occurrences are resolved at the RPC boundary and refused if the source assembly has no such name (docs/dogfood-friction-plan.md, F4) |
-| 89 | (drawings) | A drawing view's `quality`: `exact` (the default and the deliverable — OCC's curve HLR, where every projected curve carries a SourceRef back to the 3D edge that made it, which is what a drawing dimension attaches to) or `fast` (polygonal HLR over the shapes' triangulations). The two are not a quality knob but different answers: `fast` returns POLYLINES with no source refs, so nothing can be dimensioned against them and a circle is a many-sided polygon. It exists because exact HLR's cost is driven by SURFACE COMPLEXITY, not part count: 16 boxes with a bore project in 3.1 ms, one box plus a four-turn helical spring takes 6.4 s, and the single-cylinder engine takes 85.1 s that fall to 0.0 s when its two valve springs are hidden. `Hide()` intersects every projected edge against every face, and a swept B-spline is far dearer to intersect than a plane. `show_hidden: false` does not help — it only filters the output. Refused by name if it is neither; absent views read as `exact` (docs/agent-scale-followup-plan.md, W3) |
-| 88 | (relations) | Two more `RelationKind`s. `chain`: rotation to rotation like a gear, but the ratio KEEPS its sign — a chain or a belt does not reverse, and expressing one as a gear with a negated tooth count made the sign a thing to remember rather than a thing to say. `cam`: rotation to offset through a periodic LIFT TABLE (`lift`: `[[angle_deg, lift_mm], ...]`) instead of a ratio, interpolated by a Catmull-Rom spline so the loop solver's numeric Jacobian sees a continuous slope. A cam is the one relation that is not invertible — many angles give one lift — so propagation runs forward only and the reverse is refused rather than picking a branch. `lift` is absent for every other kind (docs/agent-scale-plan.md, G4) |
-| 87 | (motion) | Assembly `motion` — a `MotionStudy`: `driver_mate` + `driver_dof` (`rotation`/`offset`), `from`/`to` in the DOF's own unit (radians or mm — what `set_mate` takes; the RPC converts degrees at the boundary), `samples`, `check_clash`, `clash_mode` (`mesh`/`exact`). The DEFINITION only: running it solves the assembly at every sample and checks every occurrence pair, and that result is transient like a FEM result. Absent when none; `motion/` in the directory form (docs/agent-scale-plan.md, G2) |
-| 86 | (frames) | The `Frame` feature (docs/agent-scale-plan.md, G0) and the mate connector anchor `{frame: <id>}` that names one. A frame is a NAMED origin + axes, so a mate is authored as the relationship it is — this bolt circle to that seat — instead of the centroid of whatever face was nearest, and a script positions against it without transcribing a coordinate. `kind: explicit` (`origin` + `origin_expr` + `z_axis`/`x_axis`), `from_element` (`elements`: one planar face = centroid + outward normal, one cylindrical face or circular edge = centre + axis, SEVERAL circular = a bolt circle centred on the pattern with X toward the first; `flip?` negates Z), or `offset` (`parent_id` — another Frame, 0 = the part origin — plus `offset`/`rotation_deg` and their `_expr` twins). Contributes no body; a definition that does not resolve fails regeneration like any datum, and a mate onto it then refuses rather than reusing the last good pose |
-| 85 | (derived) | `Derived.body_names?`: pick the source's bodies by NAME as well as by their `created_by` id. One Import feature creates every body of a STEP — a Raspberry Pi camera module arrives as 197, from pads to lens — so a created_by filter cannot pick one of them out. The two filters narrow together when both are given, and a filter that selects nothing is refused saying so (docs/modeling/derived-followup-plan.md, I3) |
-| 83 | (relations) | Assembly `relations` — a `gear`, `rack`, `screw` or `linear` coupling between two mates' degrees of freedom, `dof_b = ratio * dof_a + phase` (`mate_a`/`mate_b`, `dof_a`/`dof_b` as `rotation`/`offset`). Enforced by propagation in a mate tree and as a residual row inside a loop. An unknown kind or DOF is refused naming the accepted ones. Absent when none (docs/assemblies/relations-plan.md) |
-| 82 | (router round) | `cam[].operations[].finish_tool` + `finish_stock` on a profile or pocket — the operation roughs with its own tool leaving `finish_stock` on the wall (derived as a tenth of the roughing tool's diameter), then the finishing tool takes it in one full-depth pass along the final boundary: two toolpaths from one operation, so the two cannot disagree about the boundary. Tool order sorts toolpaths, not operations, so a file per tool still splits cleanly. Omitted when there is no finishing pass (docs/cam/router-round.md, R6) |
-| 81 | (router round) | `cam[].operations[].lead_arcs` on a profile — leave the wall on a tangent arc of the tool's radius at the end of every pass, curving away from the material, instead of stopping against the wall and lifting (the stop is the dwell mark). The ramp is the entry, so there is no lead in. Refused, in words, inside an opening with no room for the arc. Omitted when off (docs/cam/router-round.md, R5) |
-| 80 | (router round) | `cam[].operations[].corner_relief` on a profile or pocket — `dogbone` (out along the corner's bisector and back) or `tbone` (along the longer wall), each by the tool's RADIUS, at the inside corners of the material the round cutter cannot reach. Omitted when none; an unknown value is refused naming the three. The verifier is told where the bites are, so a relief reads as "corner relieved" and not as the gouge it would otherwise be (docs/cam/router-round.md, R4) |
-| 79 | (router round) | `cam[].operations[].peck` on a drill — retract fully between pecks of this depth so the chips clear, posted as plain moves since neither GRBL nor the post speaks canned cycles; derived as the tool's diameter once a hole is deeper than three of them. Omitted when 0. A hole wider than the tool is now BORED (a helix at the ramp angle, rings outward, the wall last) instead of refused; that needs no key — the tool decides (docs/cam/router-round.md, R3) |
-| 78 | (router round) | `cam[].split_output` — one program per tool, written beside the project as `<project> - <setup>-T<n>.nc`, each complete and starting by loading its tool; forces tool order (`CuttingOrder`). Omitted when off, so a v77 job re-saves byte-identically (docs/cam/router-round.md, R2) |
-| 77 | (machine profile) | A setup EMBEDS its machine: `cam[].machine` — `{name, travel: {min, max}?, post, fit_arcs?, has_rotary_axis?, rapid_feed?, tools?}` — replaces the setup's own `post`, `fit_arcs` and `has_rotary_axis`, which a reader still accepts from a file without the block. The block is a COPY of a globally stored profile (`~/.config/designer/machines/<slug>.json`, one file per machine, same JSON) named by `name`, so a job opens on a machine that has never seen the profile, and the panel says which copy it is using when the global of that name differs. An unknown post is refused naming the accepted ids (docs/cam/job-document.md, round two) |
-| 76 | (job document) | Fixturing is per PART: a `placements[]` entry can carry its own `frame` (a quaternion, doubles), and a part without one is clamped the way the setup says. This is the claim setup-frame.md's split implies and could not express — `frame` is about A PART IN A FIXTURE, so with several parts in one stock it belongs to each of them; `rotationA` stays on the setup because it is a claim about the MACHINE. The case that proves it is a speaker cabinet: baffle, sides and back are each modelled in their assembly orientation and all cut from one board, so they need three frames and one sheet. Optional rather than defaulted to identity, because a default would silently un-clamp a part the moment it was given a position; unset re-saves byte-identically (docs/cam/job-document.md) |
-| 75 | (job document) | A setup says in what ORDER its operations cut: `order` is `authored` (the default and what this app always did), `tool` (group by tool number -- one tool change per tool) or `part` (finish each part before starting the next, for when a part may break free and you would rather lose one than four). With one part authoring order IS cutting order, which is why this never came up; with four, authoring per part means a tool change per part per tool. FreeCAD carries the same field for the same reason (`OrderOutputBy`, whose tool-major builder says "to minimize tool changes" in its own docstring). Applied in `GenerateAll`, so the backplot, the simulation, the verifier and the file all walk one list. An unknown string is REFUSED naming the three. Omitted at `authored`, so existing jobs re-save byte-identically (docs/cam/job-document.md) |
-| 74 | (job document) | A job holds MORE THAN ONE part. A machining selection names the part it is on -- `part` beside `feature_id`/`element` on an operation target and on `top_face` -- because two parts in one job can own the same feature id and the same element name, and a bare ElementRef stops being an answer. A setup gains `placements`: `{id, part, pos?, rot_z?, enabled?}`, where each part sits in the stock, in-plane only (out-of-plane is what the fixturing frame already says). Both omitted at their defaults, so a one-part job re-saves byte-identically; the bump is for reading, where a v73 build would drop a qualifier and machine the wrong part. A part placed twice is REFUSED by `cam::PlacementRefusal` rather than half-cut -- the model holds instances, the generator does not cut them yet (docs/cam/job-document.md) |
-| 73 | (job document) | **BREAKING.** CAM setups are no longer part of the part. They live in a JOB document of their own (`kind: "job"` — a `parts` list naming source documents by stable project id, plus the `cam` setups that cut them), which is what makes a job about more than one part: four brackets out of one sheet of ply used to be inexpressible because a `cam::Setup` lived in `Document::m_camSetups`. A part document no longer reads or writes `cam`, and a v72 document carrying setups loses them — not migrated, because the job they belong in is a document that did not exist to migrate into. Goldens moved with the data: `tests/golden/job/` holds the CAM eras, each `.expect.json` naming the part golden whose bodies its setups cut (docs/cam/job-document.md) |
-| 72 | (F1 loose ends) | An occurrence can RIDE ON another — `attached_to` plus its placement in that occurrence's frame — so a fastener travels with the part it is bolted to and cannot be dragged out of its hole on its own. Composition rather than a mate: a fastener is a zero-DOF leaf, so no solver sees it, and `ApplyAttachments` re-seats riders after the solve. Omitted when free, so every existing assembly serializes byte-identically (docs/parts/f1-loose-ends.md) |
-| 71 | (hole-standards) | A `Hole` records what it is FOR — `fit: {thread, kind: close/normal/loose/tapped, pitch?}` — and DERIVES its diameter from it, so a clearance hole stops being 6.6 that somebody looked up once and typed. Additive and optional: a hole without a fit serializes exactly as before, and the diameter is still written either way so a reader that knows nothing about fits gets a correct hole (docs/modeling/hole-standards.md) |
-| 70 | (F1 p4-5) | Seven fastener standards instead of one — nuts, washers, hex/countersunk/button heads and a hexalobular drive — with `drive` DEFAULTED to the one its standard is made with rather than to `hex`; and the `fastener_callout` drawing dimension, a leader naming the standard part it points at. All three widen what a loader must accept, which is what the bump is for. The corpus holds no drawing documents, so the new dim kind is gated by `test_drawing.cpp` rather than by a golden (docs/parts/plan.md) |
-| 69 | (F1 p2) | The `Fastener` feature: a standard part built from a vendored dimension table rather than typed numbers. It carries only what the table cannot give it — `standard`, `size`, `length` — and every other dimension is READ, so an unstocked size is refused naming the nearest that are (docs/parts/plan.md) |
+Rows marked "…" summarise a range whose individual changes were not recorded
+here; the golden corpus and git history cover them.
 
-## The directory format (F3, default for new saves)
+| v | Change |
+|---|--------|
+| 1 | First JSON format: Box/Sphere/Cylinder/Import, no ids |
+| 2 | Stable feature ids; Sketch + Extrude (by `sketch_id`) |
+| 3 | Sketch constraints (PlaneGCS) |
+| 4 | Stable sketch entity ids (earlier constraint refs were indices; migrated) |
+| 5 | Rectangles become four lines (the rigid `rect` entity is expanded on load) |
+| 6 | Construction geometry; more constraint kinds |
+| 7 | Arcs; trim |
+| 8 | Sketch derived ops (linear/circular pattern, `derived_ops`) |
+| 9 | Ellipses |
+| 10 | Per-feature `material` slug. An unrecognised non-empty slug is refused on load, naming the accepted set |
+| 11 | Document `parameters`; `*_expr` expression twins |
+| 12 | `DatumPlane` feature; sketch `plane_ref` |
+| 13 | `Revolve`, `DatumAxis`, `AxisRef` |
+| 14 | `Boolean` feature (`target_id` / `tool_id`) |
+| 15 | 3D `Pattern` feature |
+| 16 | Sketch `face_ref` (an ElementRef) |
+| 17 | `Fillet` / `Chamfer` on ElementRef edges |
+| … | v18–v22: extrude end conditions, suppression, shell, loft/sweep, hole, draft |
+| 23 | Assembly documents: `kind: "assembly"` and an `occurrences` list |
+| 24 | Assembly `mates` (connector frames + type: fastened / revolute / slider) |
+| 25 | Cylindrical, planar and ball mates (optional `dx` / `dy` / `ball_rotation`) |
+| 26 | Mate connector `anchor.snap_edge` (a hole-centre frame) |
+| 27 | Assembly `exploded` views |
+| 28 | Unit-suffixed expression literals. No structural change; the bump makes an older build refuse such a file instead of failing each expression |
+| … | v29–v33: FEM studies, drawings, configurations, modal and gravity studies, topology studies |
+| 34 | Extrude / Revolve `regions` (profile loops selected by boundary entity-id sets; absent = the whole sketch) |
+| … | v35–v37: linked copies, thread and rib, point–line distance dimensions |
+| 38 | Sketch entity coordinate expressions (`<field>_expr` on line `ax/ay/bx/by`, circle and arc `cx/cy/r`, point `x/y`) |
+| … | v39–v51: split, sketch B-splines, 3D curves, sweep along a curve, pipe, reference images, refine, structured import, patterns and mirror |
+| 52 | Extrude `end_mode: "through_all"` (cut only; past every body along ±normal per `reversed`; `distance` ignored) |
+| 53 | Drawing dimension kinds `hole_callout` and `pattern_callout` |
+| … | v54–v57: sub-assemblies, reference-image changes |
+| 58 | CAM setups: stock, work origin, `rotation_a`, tools, operations |
+| 59 | CAM operation `type: "adaptive"` |
+| 60 | CAM setup `fit_arcs` (default true; false posts curves as line moves) |
+| 61 | Expression-driven Box/Sphere/Cylinder dimensions |
+| 62 | CAM operation `side` written for clearing operations too |
+| 63 | CAM setup remembers the face its Z zero was picked from |
+| 64 | Document display `units` (length / mass / angle) |
+| 65 | Mate connector `anchor.snap_edge2`: a corner named by the two edges meeting there |
+| 66 | Drawing `notes` (text, optional leader, per sheet); CAM tool `tool_type` / `tip_angle`; the `edge_round` operation (`edge_size`) |
+| 67 | CAM setup fixture `frame` and `has_rotary_axis`, split out of `rotation_a` |
+| 68 | CAM work origin derived from a named corner (`origin_at`) and subtracted by the post; fixed-size stock (`stock.mode` / `size` / `place`) |
+| 69 | `Fastener` feature: `standard`, `size`, `length`; every other dimension read from the vendored table; an unstocked size is refused |
+| 70 | Seven fastener standards; `drive` defaults to the one its standard uses; drawing dimension `fastener_callout` |
+| 71 | `Hole` `fit: {thread, kind: close/normal/loose/tapped, pitch?}`; the diameter is derived from it and still written |
+| 72 | Occurrence `attached_to` + placement in that occurrence's frame (a rider re-seated after the solve) |
+| 73 | CAM setups move out of the part into a job document (`kind: "job"`, a `parts` list by stable project id, plus `cam`). A part no longer reads or writes `cam`; a v72 part's setups are not migrated. CAM goldens live in `tests/golden/job/` |
+| 74 | A job holds several parts: a machining selection names its `part`; a setup's `placements: [{id, part, pos?, rot_z?, enabled?}]`. A part placed twice is refused (`cam::PlacementRefusal`) |
+| 75 | Setup `order`: `authored` (default) \| `tool` \| `part`; unknown values refused |
+| 76 | A placement may carry its own fixturing `frame` (quaternion) |
+| 77 | A setup embeds its machine: `cam[].machine` `{name, travel?, post, fit_arcs?, has_rotary_axis?, rapid_feed?, tools?}`, a copy of a profile under `~/.config/designer/machines/<slug>.json`. The old per-setup `post` / `fit_arcs` / `has_rotary_axis` are still read. Unknown posts refused |
+| 78 | Setup `split_output`: one program per tool, `<project> - <setup>-T<n>.nc`; forces tool order |
+| 79 | Drill `peck` depth |
+| 80 | Profile / pocket `corner_relief`: `dogbone` \| `tbone` |
+| 81 | Profile `lead_arcs` |
+| 82 | Profile / pocket `finish_tool` + `finish_stock`: rough and finish from one operation |
+| 83 | Assembly `relations`: `gear` / `rack` / `screw` / `linear` couplings between two mates' DOFs, `dof_b = ratio * dof_a + phase`. Unknown kinds or DOFs refused |
+| 84 | The `Derived` feature: `source_part`, `source_name`, `bodies?`, `placement`, `reference`, and a `snapshot` whose bodies are content-addressed document assets `derived-<hash>.brep`. Element names on the copy are `<derived id>/<source created_by>/<source name>` |
+| 85 | `Derived.body_names?`: pick source bodies by name as well as by `created_by`; a filter that selects nothing is refused |
+| 86 | The `Frame` feature (`kind: explicit` \| `from_element` \| `offset`) and the mate anchor `{frame: <id>}` |
+| 87 | Assembly `motion` studies: `driver_mate`, `driver_dof`, `from` / `to` in the DOF's unit (radians or mm), `samples`, `check_clash`, `clash_mode`. The result is transient; `motion/` in the directory form |
+| 88 | Relation kinds `chain` (ratio keeps its sign) and `cam` (a periodic `lift` table `[[angle_deg, lift_mm], …]`, forward-only) |
+| 89 | Drawing view `quality`: `exact` (default) \| `fast` (polygonal HLR, no source refs, cannot be dimensioned). Anything else refused |
+| 90 | Drawing view `hidden`: occurrence ids left off that view |
+| 91 | CAM setup `reach_offset` (where the bed is on the sheet; `"auto"` over RPC derives it) and `stock_max` as a fourth `origin_at` |
+| 92 | CAM tool `chipload_min` / `chipload_max` (mm per tooth); absent falls back to a diameter rule. A half pair or reversed band is refused |
+| 93 | Engineering `catalogs` with pinned revision / content fingerprints; reference-only records omit data rows. In `project.json` for a multi-document project |
+| 94 | Part-local generated component ownership: namespace, key, input fingerprint, last recipe hash |
+| 95 | Bounded thread engagement (`allow_engagement`, `minimum_engagement`); screw relations reference their thread (`thread_part`, `thread_feature`) |
+| 96 | CAM profile `drilled_bores`: an inside cut on a level face cuts every opening in it, leaving round openings up to this diameter to the drill. Absent (0) cuts every opening |
+| 97 | Import `keep_origin`: keep the file's own coordinates. Absent = centred on the combined bounding box |
+| 98 | `tolerances`: `{id, ref: {feature_id, element}, class}` or `{lower, upper}` in mm, plus `comment`. Outside the regen chain hash; one per element. A ref that no longer resolves is kept and reported unresolved |
+| 99 | Tolerance `ref2`: the tolerance is on the distance between two elements; takes `lower` / `upper` and refuses an ISO class |
+| 100 | Assembly `assertions` (declared clearances): `{name, a, b, min_mm, mode: mesh\|exact, why?}` plus the last `verdict`, `measured_mm`, `checked_key`, `note` |
+| 101 | Assembly configurations: `suppressed_mates`, `suppressed_relations`, `mate_overrides` `{mate, rotation? (radians), offset? (mm)}` |
+| 102 | A cam relation's follower may turn: `dof_b: rotation`, lift column then in degrees. No new field; the bump makes a v101 build refuse the file |
+| 103 | Import `units` (`mm` \| `cm` \| `m` \| `in`) for STL and BREP; refused on STEP; unknown strings refused |
+| 104 | Relation kind `freewheel`: `drives` (`positive` \| `negative`, required) and `lead` |
+| 105 | Relation kind `click` (a pawl on one mate); freewheel `teeth` and `ride: {amount, mate, dof}` |
+| 106 | FEM studies on an assembly: `studies` with `participants [{occurrence, role: meshed\|rigid\|ignored, mesh_size?}]`; loads carry `occurrence`; a fixed load may anchor on `contact_with` |
+| 107 | Participant role `bonded` |
+| 108 | Sheet-metal rules `sheet_metal` `{material, gauge, thickness, bend_radius?, k_factor?, relief?, relief_width?, relief_depth?}`; part of the regen chain hash |
+| 109 | `BaseFlange` and `EdgeFlange` (`position`, `length_mode`, `relief`; each enum refused by name) |
+| 110 | `FlatPattern` `{body_id, fixed_face?}` (replaces the body's shape); part configuration `unsuppressed_features` |
+| 111 | `Unfold` `{body_id, fixed_face?, bends?}` and `Refold` `{unfold_id}` |
+| 112 | `Hem` `{edges, length, kind? closed\|open, gap?, outside?}` and `Jog` `{sketch_id, height, angle_deg?, flip?}`; edge flanges meeting at a corner are mitred |
+| 113 | `CornerRelief` `{body_id, style? circular\|rectangular, size?}`; EdgeFlange `corners: open\|closed` |
+| 114 | `NormalCut` `{sketch_id, body_id?, regions?}` |
+| 115 | Drawing view `configuration`; note `table: none\|bends` |
+| 116 | Hem `offset_start` / `offset_end` |
+| 117 | `Curve3D` kind `bent_path`: corner `points` and a bend `radius` |
+| 118 | CAM op types `surface_parallel` and `surface_waterline`, with `cut_angle_deg`, `sample_step_mm`, `z_step_mm` |
+| 119 | `Cope` feature `{member_id, against, gap}`; the part's `tube` shop rules (material, `former_radii`, `min_straight`, `tail_length`, `max_thinning`) |
+| 120 | Cope `mitre` list |
+| 121 | CAM tool `overall_length` and `collar_diameter` (the holder check) |
+| 122 | CAM op type `surface_rotary` (4-axis rotary raster) |
+| 123 | Rotary op `rotary_pattern`: `parallel` (default) \| `spiral`; rotary ops read `stepdown` (a v122 file's is dropped on load); machine `a_max_deg_min` |
+| 124 | Rotary pattern `helical` and `lead_mm` |
+| 125 | `surface_parallel` reads `stepdown` (roughing; a v124 file's is dropped on load); surface ops' `rest_from_tool` |
+| 126 | CAM setup `fixtures`: `{id, part \| box, name, pos, rot_z, enabled}`; placement and fixture ids count toward the job's id counter on load |
+| 127 | Fixture `seat`: `{face: {feature, name}, edge: -x\|+x\|-y\|+y, along_mm, over_mm, spin_deg}`, re-solved against the stock on every read |
+| 128 | AxisRef kind `custom` `{origin, direction}`; helix `start_deg` (+`_expr`); motion study `configuration` |
 
-`part.dsgn/` = `index.json` (envelope: format/version/rollback/parameters +
-the ordered feature-id list) + `features/<id>-<kebab-type>.json`, one file
-per feature named by stable id (the type suffix is cosmetic). The single
-`.json` file remains the interchange form **for a single document only**:
-a multi-document project always writes the container directory, and saving
-one to a `.json` path is REFUSED (2026-08-26) — it used to mint a directory
-*named* `.json` without the git vault, which keys on `.dsgn`.
-`Save`/`Load` dispatch on the
-path (`.dsgn` or an existing directory; picking an `index.json` inside a
-`.dsgn` opens the project). Feature files with unchanged content are not
-rewritten, and deleted features' files are removed on save — a git diff
-shows exactly the edited features.
+## The directory form
 
-## Assemblies (v23+)
+A part saved to a `.dsgn` directory (the default for a new save) is:
 
-An **assembly** shares this same `designer-document` format string and version
-number, discriminated by `"kind": "assembly"` in the envelope (a part has no
-`kind`, defaulting to `"part"`). Its body is an ordered `occurrences` list
-instead of `features`; each occurrence is `{id, name, part_id, part_version,
-transform:{position, orientation}, visible, fixed}` where `orientation` is a
-quaternion `[x,y,z,w]`. Occurrences reference parts by **stable id**
-(`part_id`), never by name, so renaming a part cannot break an assembly — the
-same rule features follow for cross-references. The occurrence `transform` is
-always the last solved placement (loadable standalone); A3 mates re-solve
-over non-`fixed` occurrences on load, mirroring the literal-plus-`_expr` rule
-(guarantee 4). Directory form: `index.json` (`kind` + occurrence-id order) +
-`occurrences/<id>-<label>.json`. See `docs/assemblies/a2-design.md`.
+```
+part.dsgn/
+  index.json                 envelope + the ordered feature-id list
+  features/<id>-<type>.json  one file per feature (the type suffix is cosmetic)
+  studies/  configurations/  assets/   per-kind files, absent when empty
+  geometry/                  baked bodies (derived; see README.md)
+  .gitattributes             geometry/*.brep binary -merge -diff
+```
 
-**Mates (v24, A3):** the envelope gains a `mates` id list beside
-`occurrences`, and the directory form a `mates/<id>-<label>.json` file per
-mate (the `mates/` dir is absent when there are none, so a v23 assembly is
-byte-identical). A mate is `{id, name, mate_type, a, b, flipped, rotation,
-offset}`; `a`/`b` are connectors `{occurrence, anchor}` where `anchor` is
-`{origin:true}` or `{face:{feature_id, element}}` (the same inline
-`ElementRef` shape features use). Mate ids share the occurrence id counter
-(one never-reused space per assembly). Occurrences still store their last
-solved transform, so a mates-stripped file still opens at sane positions. See
-`docs/assemblies/a3-design.md`.
+The id alone is identity: renaming a feature never renames its file. Files
+are written temp + rename, identical content is not rewritten, deleted
+items' files are removed, and `index.json` is written last so a torn save
+leaves a stale but loadable index. The same feature JSON, version number and
+migrations apply as in the single file.
 
-**Wider mate set (v25):** `mate_type` adds `cylindrical` (rotation + offset
-both free), `planar` (in-plane slide + spin), and `ball` (free rotation).
-Planar's in-plane DOF are optional `dx`/`dy` floats; ball's rotation is an
-optional `ball_rotation` quaternion `[x,y,z,w]`. All three are omitted when
-zero/identity, so fastened/revolute/slider mates are byte-identical to v24.
+## Assemblies
 
-**Connector inference snap (v26, A2.5):** a face anchor may carry an optional
-`snap_edge` (an inline `ElementRef`) — the frame origin is then that edge's
-characteristic point (a circular edge's center, else its midpoint) instead of
-the face centroid, e.g. a mate snapped to a hole center. The face still gives
-the Z normal. Omitted when unset, so v25 mates are byte-identical.
+An assembly uses the same `designer-document` format and version number,
+with `"kind": "assembly"`. Its body is an ordered `occurrences` list; each
+occurrence is `{id, name, part_id, part_version, transform: {position,
+orientation}, visible, fixed}` plus optional `ref_kind` (a sub-assembly),
+`configuration_id` and `attached_to`. `orientation` is a quaternion
+`[x, y, z, w]`. Occurrences reference parts by **stable id**, never by name,
+so renaming a part cannot break an assembly. The stored `transform` is always
+the last solved placement, so a file opens at sane positions even with its
+mates stripped; mates re-solve over non-`fixed` occurrences on load.
 
-**Exploded views (v27, A4):** the envelope gains an `exploded` id list and
-the directory form an `exploded/<id>-<label>.json` file per view (both absent
-when there are none, so a v26 assembly is byte-identical). A view is `{id,
-name, steps:[{occurrence, offset:[x,y,z]}]}` — per-occurrence world offsets
-at explode factor 1; ids share the assembly's never-reused counter. Pure view
-state: the applied view and factor are transient (never serialized), and the
-offset composes into rendered transforms only — occurrences keep storing
-their solved placements, so exploding can never corrupt them.
+A mate is `{id, name, mate_type, a, b, flipped, rotation, offset}` plus
+`dx` / `dy` / `ball_rotation` where its type uses them; `a` and `b` are
+connectors `{occurrence, anchor}`. An exploded view is `{id, name, steps:
+[{occurrence, offset}]}` and is view state only: the applied view and factor
+are never serialized. Mates, exploded views, relations, assertions, motion
+studies and FEM studies share the assembly's one never-reused id counter.
 
-The multi-document **project** envelope is separate (`"format":
-"designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,
-where `type` is `"part"` or `"assembly"` and `id` is a stable per-document id.
+Directory form: `index.json` (kind + id lists) plus `occurrences/`, `mates/`,
+`exploded/`, `relations/`, `assertions/`, `motion/` and `studies/`, one file
+per item, each directory absent when it would be empty.
 
-## The golden corpus (`tests/golden/`)
+## The project envelope
 
-One file per era, each **hand-derived from the loader branch it exercises**
-(historical writer output does not exist for most versions), plus a
-current-version kitchen-sink written by the app itself. Each `NN-name.json`
-pairs with `NN-name.expect.json`: `{features, bodies, volumes: [..]}`
-(volumes to 1e-3 relative). Files are frozen: a failing golden test means a
-broken migration, not a file to update — the single exception is adding
-*new* goldens at a version bump.
+A multi-document project is a directory with `project.json`:
+
+```json
+{"format": "designer-project", "version": 2, "active": 0,
+ "documents": [{"id": 3, "name": "Stand", "dir": "parts/Stand", "type": "part"}]}
+```
+
+`type` is `part`, `assembly`, `drawing` or `job`, stored under `parts/`,
+`assemblies/`, `drawings/` or `jobs/`; `id` is the stable per-document id and
+`folder` an optional tab-bar folder. Optional keys: project-scope
+`parameters`, `folders`, `sections`, `catalogs`. The envelope stays at
+version 2 because every later key is additive and ignorable.

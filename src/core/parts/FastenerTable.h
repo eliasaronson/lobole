@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// The vendored standard-parts dimension tables (docs/parts/plan.md, phase 1).
+// The vendored standard-parts dimension tables (docs/parts/README.md#the-data).
 //
 // A fastener's geometry is not invented here — it is READ. `assets/parts/`
 // carries one CSV per standard, vendored from FreeCAD_FastenersWB with a
@@ -169,7 +169,7 @@ ThreadForClearance(double diameter, std::string* error);
                                                    const std::string& column,
                                                    std::string* error);
 
-// --- what a hole is FOR (docs/modeling/hole-standards.md) -------------------
+// --- what a hole is FOR (docs/modeling/holes-and-threads.md#hole) ------------
 //
 // The other direction from ThreadForClearance: given the intent, the number.
 // "A clearance hole for an M6, normal fit" is 6.6, and a person should not

@@ -918,10 +918,10 @@ def outputs(app, out, name="Quadcopter"):
     with phase("exports"):
         _exports(app, out)
 
-    # The build guide travels with the files somebody builds from.
-    guide = HERE.parent.parent / "docs" / "modeling" / "fpv-drone-build.md"
-    if guide.exists():
-        shutil.copy(guide, os.path.join(out, "BUILD.md"))
+    # The build guide travels with the files somebody builds from. It is a
+    # section of this generator's README, which is copied whole; no guard, so
+    # a moved README fails here instead of silently shipping no guide.
+    shutil.copy(HERE / "README.md", os.path.join(out, "BUILD.md"))
 
     # Re-running the sheets against a project that already has them would
     # collide on the tab name, so clear ours first. (A drawing IS a tab:
@@ -991,7 +991,7 @@ def main():
     # names — here and in the parts module, whose `import *` took its own copy.
     # After this, every dimension the builders use is a Param, so the document
     # receives the FORMULA rather than the arithmetic's answer
-    # (docs/peer-survey-plan.md, W1).
+    # (docs/scripting/sdk.md#parameters-carry-their-expression).
     _dims = spec.declare(app)
     globals().update(_dims)
     parts_module.__dict__.update(_dims)

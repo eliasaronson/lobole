@@ -265,7 +265,7 @@ constexpr Verb kVerbs[] = {
      "of Finish a surface and for the opposite shape: good where the wall is "
      "steep, poor where it is shallow, because the laps spread out as the "
      "surface flattens."},
-    // The rotary verbs (docs/cam/surface-verbs-plan.md) take no pick: the part
+    // The rotary verbs (docs/cam/gui.md#the-job-toolbar) take no pick: the part
     // turns under the cutter, so a face would name a patch the axis rotates
     // away. Only offered on a machine with a 4th axis.
     {CamVerb::RotaryFinish, "Finish on the rotary", cam::OpType::SurfaceRotary,
@@ -280,9 +280,10 @@ constexpr Verb kVerbs[] = {
      "it all the way round, and leave a skin of a tenth of the cutter for "
      "Finish on the rotary to take off evenly.",
      Verb::Derive::RotaryRough},
-    // Rough, finish, clean up (docs/cam/rough-rest-range-plan.md). Neither
-    // takes a pick: the rough is the whole part, the clean-up follows the
-    // last finish.
+    // Rough, finish, clean up
+    // (docs/cam/operations.md#rough-a-surface-and-rest-machining). Neither
+    // takes a pick: the rough is the whole part, the clean-up follows the last
+    // finish.
     {CamVerb::SurfaceRough, "Rough a surface", cam::OpType::SurfaceParallel,
      PickSlot::CamSurfaceRegion, false, true, "",
      "Take the stock down to a curved part in layers of half the cutter, "
@@ -573,8 +574,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   JobUndoGuard undoGuard(state); // one step per pick (R7)
 
   // A rotary verb's "Limit to a face": the pick bounds the operation the
-  // verb already made ALONG the axis (docs/cam/rough-rest-range-plan.md),
-  // rather than making another one.
+  // verb already made ALONG the axis
+  // (docs/cam/rotary.md#continuous-surface_rotary), rather than making another
+  // one.
   if (slot == PickSlot::CamSurfaceRegion &&
       (state.camVerb == CamVerb::RotaryFinish ||
        state.camVerb == CamVerb::RotaryRough) &&
@@ -633,7 +635,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // typed, and it made "Face the top" refuse immediately after the pick
     // that is meant to set the job up: the first operation on a rough board
     // needed a detour into Advanced to undo what this had just done
-    // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
+    // (docs/cam/gui.md#verb-windows). The default 1 mm is the rough
     // board every facing pass exists for; a board already flat is one number.
     setup->topFace = ui::TargetFor(state, item.element, item.jobPartId);
     // Through the ONE derivation, so a Z zero picked here and a work origin
@@ -1028,7 +1030,7 @@ bool DrawOperationEditor(AppState& state) {
 
   ImGui::PopTextWrapPos();
   ImGui::Separator();
-  // Close: the edits are already applied (docs/ui/consistency-round-plan.md).
+  // Close: the edits are already applied (docs/ui/panels.md).
   if (ImGui::Button("Close###cam_edit_done")) {
     state.camEditOp = 0;
     state.camToolOpen = false;
@@ -1090,9 +1092,9 @@ bool DrawToolEditor(AppState& state) {
   return true;
 }
 
-// One fixture's numbers (docs/cam/workholding-plan.md): where it sits, its
-// spin, a box's size, and the derived placements as buttons. Applies as you
-// go, like the tool editor, so it says Close.
+// One fixture's numbers (docs/cam/setup.md#workholding-fixtures): where it
+// sits, its spin, a box's size, and the derived placements as buttons. Applies
+// as you go, like the tool editor, so it says Close.
 bool DrawFixtureEditor(AppState& state) {
   cam::Setup* setup = ActiveCamSetup(state);
   cam::Fixture* f =
@@ -1103,8 +1105,8 @@ bool DrawFixtureEditor(AppState& state) {
   }
   BeginToolWindowFrame(state, "Fixture: " + f->name);
   bool changed = false;
-  // How it moves: the arrows in the viewport (docs/cam/fixture-gizmo-
-  // plan.md). Said here because this window is where a person looks for it,
+  // How it moves: the arrows in the viewport (docs/cam/gui.md#gizmos). Said
+  // here because this window is where a person looks for it,
   // and while a drag snaps, WHAT it snapped to replaces the sentence.
   const bool dragging =
       state.gizmoDrag.active && state.gizmoDrag.fixtureId == f->id;
@@ -1119,7 +1121,7 @@ bool DrawFixtureEditor(AppState& state) {
                         "the stock.");
   ImGui::PopTextWrapPos();
   if (f->seat) {
-    // RESTING ON the stock (docs/cam/fixture-seat-plan.md): every number is
+    // RESTING ON the stock (docs/cam/setup.md#seats): every number is
     // measured from the stock, and the pose follows it. The bed position and
     // the side buttons are for a fixture that stands on its own.
     ImGui::SeparatorText("Resting on the stock");
@@ -1358,7 +1360,7 @@ void DrawCamToolWindow(AppState& state) {
   // Why the last pick did not take. This window never drew it, so a refused
   // click looked exactly like a click that did nothing — and one of them
   // ("add a setup first") was reachable on any fresh part
-  // (docs/cam/dogfood-round.md). The docked panel printed it all along.
+  // (docs/cam/gui.md#verb-windows). The docked panel printed it all along.
   if (armed && !state.slotPick.miss.empty())
     RefusalText(state.slotPick.miss);
   // …and what the last action DID, when it did more than was asked. Laying
@@ -1640,7 +1642,7 @@ void InspectWork(VerifyWork& w) {
     w.verdict.fixturesSkippedRotary = !w.fixtures.empty();
     w.tolerance = kRotaryVerifyRes * 1.5;
     // No overlay: the leftover is painted from a HEIGHT MAP, and a radius
-    // field has no renderer yet (docs/cam/rotary-plan.md).
+    // field has no renderer yet (docs/cam/rotary.md#the-rotary-picture).
     return;
   }
   const cam::Inspection insp = cam::Inspect(

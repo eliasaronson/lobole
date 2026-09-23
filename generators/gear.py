@@ -4,7 +4,7 @@
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6
     python3 generators/gear.py --port 8799 ...   # into a specific instance
 
-What this is (docs/capability-review-2026-08-31.md, "scripted features"):
+What this is (docs/roadmap.md#6-the-agent-interface, "scripted features"):
 the kind of thing other CADs grow a workbench or a FeatureScript for, done
 as an ordinary script against the API. The result is an ordinary part:
 thickness and bore stay LIVE as project variables driving expressions; the
@@ -159,7 +159,7 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name,
             # (v38). This said `radius_expr`, which is not a field of any
             # entity, so it was DROPPED — and the bore this file advertises
             # as a live variable was the literal it happened to start at
-            # (docs/agent-scale-plan.md, G1b; the app now refuses an
+            # (docs/variables/README.md#concepts; the app now refuses an
             # expression field the entity does not have).
             "entities": [circle((0, 0), bore / 2.0, "gear_bore / 2")]}),
             "bore sketch")

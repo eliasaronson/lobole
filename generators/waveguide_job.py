@@ -129,7 +129,7 @@ def build_job(d):
     # have no machine store at all -- RunHeadless builds its own AppState and
     # main() had loaded the machines into the GUI's -- so this refused, and
     # every job reported `machine_match: missing` against a machine plainly on
-    # disk (docs/cam/dogfood-waveguide.md).
+    # disk (docs/cam/setup.md#machine-profiles).
     d.call("set_cam_setup", id=sid, machine="6090")
     tools(d, sid)
     # The blank: the part plus a hand's-width of margin, and NO bottom margin

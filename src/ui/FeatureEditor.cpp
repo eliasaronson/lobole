@@ -1395,7 +1395,7 @@ void SlotPickClicked(AppState& state, const SelectionItem& item,
     ArmNextUnfilledSlot(state, *f);
 }
 
-// The Derived editor (docs/modeling/derived-plan.md): which part (or, in an
+// The Derived editor (docs/modeling/derived.md): which part (or, in an
 // in-context edit, which neighbour) the copy is taken from, as one button
 // per candidate — a combo gathers with an empty label and cannot be gated —
 // plus the reference flag. Choosing a source TAKES the snapshot, so the
@@ -1701,11 +1701,11 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
       CommitDiscrete(state, feature, before, index, commit);
     }
-    // What the hole is FOR (docs/modeling/hole-standards.md). Chosen from the
-    // vendored table's own list, so the picker cannot offer a size the lookup
-    // would refuse — and picking one DERIVES the diameter, which is why the
-    // diameter row goes read-only rather than staying an editable number that
-    // the next regeneration would silently overwrite.
+    // What the hole is FOR (docs/modeling/holes-and-threads.md#hole). Chosen
+    // from the vendored table's own list, so the picker cannot offer a size the
+    // lookup would refuse — and picking one DERIVES the diameter, which is why
+    // the diameter row goes read-only rather than staying an editable number
+    // that the next regeneration would silently overwrite.
     {
       static std::vector<std::string> sizes; // the table is immutable
       if (sizes.empty()) {

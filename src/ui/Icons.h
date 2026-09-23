@@ -8,7 +8,8 @@ namespace ui {
 // The glyph a command shows wherever it appears: its toolbar button, its row
 // in a flyout, and the tree row of whatever it made (the feature tree, the
 // mate list, the CAM operation list). One table, so a row cannot drift from
-// the button that made it — four hand-kept copies had (docs/ui/icons-plan.md).
+// the button that made it — four hand-kept copies had
+// (docs/ui/README.md#icons).
 //
 // Glyphs are Font Awesome's (ICON_FA_*) where it has the word, and Designer's
 // own (ICON_DS_*, tools/icons/build_icon_font.py) for the CAD vocabulary it

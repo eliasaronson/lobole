@@ -65,7 +65,7 @@ void DrawRenderModal(AppState& state) {
   // QUICK is the default: the model as the viewport draws it, at this size,
   // in about a second — which at anything short of the tracer's top settings
   // usually looks as good, and needs no ray tracing
-  // (docs/rendering/quick-render-plan.md).
+  // (docs/rendering/still-render.md#quick-mode).
   static bool quick = true;
   static int supersample = 2;
 
@@ -339,7 +339,7 @@ bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
 // that carries the command's LIVE chord — "Fit view (F)" is generated, not
 // typed. Enablement comes from the command's own gate, so the button and the
 // key can never disagree about whether the action is available, and the
-// palette agrees with both (docs/ui/u12-keybindings.md).
+// palette agrees with both (docs/ui/keybindings.md).
 //
 // Every button on every toolbar goes through this. A new button without a
 // command id fails the keys/every_toolbar_button_is_a_command GUI test.
@@ -590,7 +590,7 @@ void DrawModelToolbar(AppState& state) {
   btn("###tb_simulation", "part.simulation", "Simulation (FEM stress study)");
 
 #ifdef HAVE_CAM
-  // CAM left the part bar (docs/cam/job-document.md, round two, M3): a job
+  // CAM left the part bar (docs/cam/gui.md#making-a-job): a job
   // is made from the tab bar's "+" the way an assembly is, then given a
   // machine, a stock and parts. The one-click "machine this part" built a
   // job around one part, which is the shape of "cut this" and not of "set
@@ -628,7 +628,7 @@ void DrawSketchModeToolbar(AppState& state) {
   // Finish (accept) the sketch. Escape is a MODAL VERB, not a command — it
   // resolves against the armed tool, then the selection, then the session —
   // so it is deliberately not in the keymap and its hint stays a literal
-  // (docs/ui/u12-keybindings.md).
+  // (docs/ui/keybindings.md).
   const bool holeSession = edit.purpose == SketchPurpose::Hole;
   if (ToolButton(ICON_FA_CHECK "###tb_sk_finish",
                  holeSession ? "Hole options (Enter) - Esc cancels the hole"
@@ -1021,14 +1021,14 @@ void DrawAssemblyToolbar(AppState& state) {
           MateType::Ball);
   Divider();
   // A standard part is placed the way a mate is made: pick geometry, and the
-  // numbers derive from it (docs/parts/gui-plan.md).
+  // numbers derive from it (docs/parts/README.md).
   CommandButton(state, "###tb_fastener", "assembly.fastener",
                 "Fastener (pick a hole's rim; size and length derive)",
                 state.fastenerTool.open);
   Divider();
   // The two viewport modes. They open the floating tool window rather than a
   // panel section, so they belong on the bar with the other tools that do
-  // (docs/ui/u15-assembly-panel.md).
+  // (docs/ui/panels.md#assembly-tab-the-model-panel).
   CommandButton(state, "###tb_asm_explode", "assembly.explode",
                 "Exploded view (slide the parts apart)", state.explodeToolOpen);
   CommandButton(state, "###tb_asm_motion", "assembly.motion",
@@ -1115,7 +1115,7 @@ void DrawSimulationToolbar(AppState& state) {
   Divider();
 
   // Escape is a fixed modal verb, not a binding — the same rule the sketch
-  // session's check mark follows (docs/ui/u12-keybindings.md).
+  // session's check mark follows (docs/ui/keybindings.md).
   if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET "###tb_sim_exit",
                  "Exit Simulation (Esc)"))
     ExitSimulation(state);
@@ -1209,7 +1209,7 @@ void DrawDrawingToolbar(AppState& state) {
 }
 
 // The JOB toolbar: the CAM verbs, one button each, the way the part bar has
-// one button per feature (docs/cam/gui.md, docs/cam/job-document.md). A job
+// one button per feature (docs/cam/gui.md#the-job-toolbar). A job
 // tab used to draw the PART bar -- thirty modelling tools, every one of them
 // disabled, and the way into CAM a floating window listing the verbs. The
 // verbs ARE the tools of this document kind; this is where a person looks
@@ -1270,9 +1270,10 @@ void DrawJobToolbar(AppState& state) {
 
   Divider();
 
-  // Rough, finish, clean up (docs/cam/surface-verbs-plan.md,
-  // docs/cam/rough-rest-range-plan.md): a curved or tilted face, which every
-  // verb above refuses, and -- with a 4th axis -- the whole part turned.
+  // Rough, finish, clean up (docs/cam/gui.md#the-job-toolbar,
+  // docs/cam/operations.md#rough-a-surface-and-rest-machining): a curved or
+  // tilted face, which every verb above refuses, and -- with a 4th axis -- the
+  // whole part turned.
   btn("###tb_job_surface_rough", "job.surface_rough",
       "Rough a surface: the stock down to a curved part in layers, leaving a "
       "skin (no pick)");

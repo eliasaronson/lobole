@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-// Toolpath generation for 2.5D milling (docs/cam/plan.md).
+// Toolpath generation for 2.5D milling (docs/cam/README.md).
 //
 // The pipeline, and where each piece comes from:
 //
@@ -40,11 +40,11 @@ namespace cam {
 [[nodiscard]] std::vector<double> DepthPasses(const Operation& op);
 
 // How a generate treats the one expensive step, adaptive clearing
-// (docs/ui/long-operations.md, phase 1). With no context (the default) every
-// pass runs inline, as it always did. With a cache, a pass whose key is in
-// it is not run again — an undo, a re-open, an unrelated edit. With `defer`
-// as well, a pass that is NOT cached is not run either: it is appended to
-// `pending` for a worker, and the toolpath comes back `Toolpath::pending`.
+// (docs/ui/long-operations.md#cam-toolpath-passes). With no context (the
+// default) every pass runs inline, as it always did. With a cache, a pass whose
+// key is in it is not run again — an undo, a re-open, an unrelated edit. With
+// `defer` as well, a pass that is NOT cached is not run either: it is appended
+// to `pending` for a worker, and the toolpath comes back `Toolpath::pending`.
 // The caller owns the cache and the worker; this file only says what it
 // would have computed.
 struct GenerateContext {
@@ -53,9 +53,10 @@ struct GenerateContext {
   std::vector<AdaptiveRequest> pending; // out
   // ...and the other expensive step, which the comment above used to call
   // "the one". A finishing pass is MINUTES, not seconds, and it ran on the
-  // frame until phase 5 (docs/ui/long-operations.md). Deferred whole, per
-  // OPERATION, because a finishing pass has no interior seam the way a
-  // stack of adaptive levels does.
+  // frame until it was deferred too
+  // (docs/ui/long-operations.md#cam-toolpath-passes). Deferred whole, per
+  // OPERATION, because a finishing pass has no interior seam the way a stack of
+  // adaptive levels does.
   SurfaceCache* surfaceCache = nullptr;
   // The caller's fingerprint of the geometry these toolpaths are cut from.
   // The core cannot take one cheaply; the UI already keeps exactly this in
@@ -64,8 +65,9 @@ struct GenerateContext {
   // silently reads a result cut from other geometry.
   uint64_t bodiesKey = 0;
   std::vector<SurfaceRequest> pendingSurface; // out
-  // ...and a profile's projected outlines, the third (docs/cam/
-  // add-operation-plan.md). Keyed on `bodiesKey` too, so zero turns it off.
+  // ...and a profile's projected outlines, the third
+  // (docs/cam/README.md#background-work). Keyed on `bodiesKey` too, so zero
+  // turns it off.
   OutlineCache* outlineCache = nullptr;
   std::vector<OutlineRequest> pendingOutline; // out
 };
@@ -181,15 +183,15 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
                                         OpType type, const Target& target,
                                         int toolNumber = 0);
 
-// A rotary ROUGH (docs/cam/surface-verbs-plan.md): the rotary finish's
-// derivation and refusals, then layers of half the cutter from the blank
-// inward and a stock to leave of DefaultFinishStock(tool), so the finish that
-// follows takes an even skin. The rotary finish deliberately derives no
-// stepdown -- a finish is not a choice about the stock -- and this is the
-// verb that makes that choice.
+// A rotary ROUGH (docs/cam/rotary.md#layers-rest-and-the-rough-verb): the
+// rotary finish's derivation and refusals, then layers of half the cutter from
+// the blank inward and a stock to leave of DefaultFinishStock(tool), so the
+// finish that follows takes an even skin. The rotary finish deliberately
+// derives no stepdown -- a finish is not a choice about the stock -- and this
+// is the verb that makes that choice.
 // A 3-axis ROUGH: the whole-part raster finish's derivation, then layers of
 // half the cutter from the stock top and a skin of DefaultFinishStock(tool)
-// (docs/cam/rough-rest-range-plan.md).
+// (docs/cam/operations.md#rough-a-surface-and-rest-machining).
 [[nodiscard]] DerivedOp DeriveSurfaceRough(const Setup& setup,
                                            const std::vector<Body>& bodies,
                                            int toolNumber = 0);
@@ -201,7 +203,7 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 // when the setup already cuts on the 4th axis, the whole-part cut-out
 // otherwise. Read from what the setup HOLDS, not from the machine alone -- a
 // plate clamped to the bed of a 4th-axis machine is still a 3-axis job
-// (docs/cam/add-operation-plan.md).
+// (docs/cam/operations.md#derivation--what-a-click-means).
 [[nodiscard]] OpType AddOperationType(const Setup& setup);
 
 [[nodiscard]] DerivedOp DeriveRest(const Setup& setup,
@@ -444,7 +446,7 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
                                  const std::vector<Body>& bodies);
 // ...and clear of every FIXTURE too (bodies in setup space): a toe clamp
 // standing above the stock puts every rapid at the stock's safe Z through it
-// (docs/cam/workholding-plan.md). The same clearance rule, over the taller of
+// (docs/cam/setup.md#safe-z). The same clearance rule, over the taller of
 // the two.
 [[nodiscard]] double DeriveSafeZ(const Setup& setup,
                                  const std::vector<Body>& bodies,
@@ -484,7 +486,7 @@ FixturePlaceName(const Setup& setup, const std::vector<Body>& bodies,
                                 double rotZdeg, FixtureSide side,
                                 glm::dvec3& pos);
 
-// --- seats (docs/cam/fixture-seat-plan.md) ------------------------------
+// --- seats (docs/cam/setup.md#seats) ------------------------------
 // Built with CAM off too (CamSetup.cpp): fixtures are drawn in any build.
 [[nodiscard]] bool ParseStockEdge(const std::string& text, StockEdge& out);
 [[nodiscard]] std::string StockEdgeName(StockEdge edge);
@@ -503,7 +505,7 @@ FixturePlaceName(const Setup& setup, const std::vector<Body>& bodies,
 // The inverse: the seat that `face` resting at bed pose (pos, rotZdeg) IS --
 // the edge its nose points in across, the spin left over, and how far over
 // and along it sits. Solving the result gives the pose back. For a fixture
-// dragged onto the stock (docs/cam/fixture-gizmo-plan.md): the seat comes
+// dragged onto the stock (docs/cam/gui.md#gizmos): the seat comes
 // from where it was put.
 [[nodiscard]] bool SeatFromPose(const glm::dvec3& stockLo,
                                 const glm::dvec3& stockHi,
@@ -526,7 +528,7 @@ AxisFacePlanes(const std::vector<Body>& bodies);
 // The named, flat, downward face of the fixture -- its bodies in their OWN
 // coordinates, placed at (pos, rotZdeg) -- that lies ON the stock's top and
 // over it: the largest by overlap, or unset when none does. A fixture put
-// down there rests on that face (docs/cam/fixture-gizmo-plan.md).
+// down there rests on that face (docs/cam/gui.md#gizmos).
 [[nodiscard]] ElementRef FaceOnStockTop(const glm::dvec3& stockLo,
                                         const glm::dvec3& stockHi,
                                         const std::vector<Body>& fixtureModel,

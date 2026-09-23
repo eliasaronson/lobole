@@ -108,7 +108,8 @@ constexpr MethodDoc kCamMethods[] = {
      "enabled?, lay_face_up?: {feature_id, element}}. Position and spin are "
      "IN-PLANE: anything out of plane is fixturing, and two ways to tilt a "
      "part is a mistake this project already paid for once "
-     "(docs/cam/setup-frame.md). `lay_face_up` is the out-of-plane half and "
+     "(docs/cam/setup.md#parts-and-placements). `lay_face_up` is the "
+     "out-of-plane half and "
      "clamps THIS part with that face at the spindle -- so one sheet can hold "
      "a baffle on its face beside a rail on its edge. It says nothing about "
      "the machine: no A word is posted.",
@@ -1168,7 +1169,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (pos && side)
       throw std::runtime_error(
           "pos and side both say where the fixture goes; pass one");
-    // A seat (docs/cam/fixture-seat-plan.md): validated whole -- the face, the
+    // A seat (docs/cam/setup.md#seats): validated whole -- the face, the
     // edge, and that it SOLVES against the stock -- before anything changes.
     std::optional<std::optional<cam::FixtureSeat>> seat; // outer: given
     const bool placing = pos || side || p.contains("rot_z");
@@ -1545,7 +1546,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // success, which is how a 6 mm ball asked for as tool 2 became a
       // rename of the 6 mm flat with nothing said. The row's wording invites
       // exactly that call, so the substitution had to go
-      // (docs/cam/dogfood-waveguide.md).
+      // (docs/cam/README.md#invariants).
       if (!tj.contains("number"))
         throw std::runtime_error(
             "a tool needs a `number`: it is which tool of the setup to add or "
@@ -1744,7 +1745,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     // Synchronous, like every reader here: the pass in flight is joined and
     // the rest is computed now, through the same cache the panel fills
-    // (docs/ui/long-operations.md, "RPC semantics").
+    // (docs/ui/long-operations.md#cam-toolpath-passes).
     const std::vector<cam::Toolpath> paths =
         ui::GenerateCamToolpathsNow(state, setup);
     std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
@@ -1836,7 +1837,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
              {"worst_holder_line", v.worstHolderLine},
              // The cutter or the holder into a fixture (a clamp, a vise):
-             // docs/cam/workholding-plan.md.
+             // docs/cam/simulation.md#fixture-collisions.
              {"fixture_collisions", v.fixtureCollisions},
              {"fixtures_checked", v.fixturesChecked},
              {"worst_fixture_depth_mm", v.worstFixtureDepth},
@@ -2066,7 +2067,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // the message then read "top_z 25 is below the stock top (Z25)" because
       // %.4g prints the difference it is complaining about as nothing. A
       // micron is still a thousand times finer than any router cares about
-      // (docs/cam/dogfood-waveguide.md).
+      // (docs/cam/README.md#invariants).
       constexpr double kTopSlack = 1e-3;
       for (const cam::Operation& op : setup.operations) {
         if (op.enabled && op.topZ < stockHi.z - kTopSlack)

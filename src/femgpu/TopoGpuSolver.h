@@ -1,8 +1,8 @@
 #pragma once
 
 // The fem::TopoLinearSolver implementation backed by the Vulkan matrix-free
-// CG (docs/topopt/gpu-plan.md): the bridge between designer_core's GPU-free
-// topology loop and fem_gpu's TopoCgSolver. Owns a private headless
+// CG (docs/topopt/README.md#the-gpu-solver): the bridge between designer_core's
+// GPU-free topology loop and fem_gpu's TopoCgSolver. Owns a private headless
 // ComputeContext; Setup packs the element matrices once per run, Solve
 // converts fp64<->fp32 and runs the on-device PCG warm-started from the
 // previous SIMP displacement. Built only when Eigen is available (it uses the

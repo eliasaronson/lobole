@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A drawing of an assembly is affordable, or it says why not
-(docs/agent-scale-followup-plan.md, W3).
+(docs/drawings/README.md#what-a-view-costs).
 
 Exact HLR is priced by SURFACE COMPLEXITY, not by part count, and that is
 worth stating carefully because the obvious reading is the wrong one:

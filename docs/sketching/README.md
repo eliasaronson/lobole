@@ -1,0 +1,450 @@
+# Sketching
+
+A sketch is a 2D constraint-solved drawing on a plane. Extrude, revolve and
+loft consume its closed profiles, sweep its open paths, and the Hole tool its
+points. It is a
+`Feature` in the history (`SketchFeature`), contributes no bodies itself, and
+is solved by a vendored copy of FreeCAD's PlaneGCS (`deps/planegcs/`).
+Coordinates are plane-UV millimetres. Angles are radians in the model and
+in the file; the UI and expressions show degrees.
+
+## Where the code is
+
+| what | where |
+|---|---|
+| data model, entity ops (add/delete/split/trim/mirror/fillet/pattern/offset, derived ops, images) | `src/core/features/SketchFeature.{h,cpp}` |
+| PlaneGCS adapter, drag sessions, DOF diagnosis | `src/core/sketch/SketchSolver.{h,cpp}` |
+| loops, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
+| snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
+| box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
+| serialization | `src/core/io/SerializeFeatures.cpp` (`EntityFromJson`, `ConstraintToJson`, `DerivedOpToJson`, the sketch arm of `FeatureToJson/FromJson`) |
+| viewport interaction, Escape ladder | `src/ui/SketchInteraction.cpp` (`HandleSketchViewport`) |
+| drawing tools, commits, drag sessions, copy/paste | `src/ui/SketchTools.cpp` |
+| picking | `src/ui/SketchPick.cpp` |
+| constraint/construction/delete ops, DOF status | `src/ui/SketchOps.cpp` |
+| dimension tool, dimension drawing and inline editor, glyphs | `src/ui/SketchDimensions.cpp`, `src/ui/SketchDimensionDraw.cpp` |
+| entity colours and line primitives | `src/ui/SketchOverlay.cpp` (`BuildActiveSketchPrimitives`) |
+| prompt pills | `src/ui/SketchToolOverlay.cpp` (`DrawToolPrompt`, `SketchToolPrompt`) |
+| tool-window sessions, Operations list | `src/ui/SketchToolbar.cpp` |
+| key bindings | `src/core/io/Keymap.cpp` (`kDefaults`), `src/ui/Commands.cpp` |
+| RPCs | `src/remote/RemoteModeling.cpp` |
+| reference-image import/actions, renderer | `src/ui/ImportActions.{h,cpp}`, `src/render/UnderlayRenderer.{h,cpp}`, `src/shaders/underlay.{vert,frag}` |
+
+## Data model
+
+### Plane
+
+`SketchFeature::plane` is stored as a baked value. When `faceRef` is set the
+sketch is attached to a body face and `Execute` re-derives the plane from the
+resolved face every regeneration; when `planeRef` names a datum plane
+earlier in the history the plane is refreshed from it. Either failing to
+resolve is a regeneration error.
+
+### Entities
+
+`sketch::Entity` is a variant of:
+
+| type | fields | JSON `type` | solver treatment |
+|---|---|---|---|
+| `Point` | `p` | `point` | one free point |
+| `Line` | `a, b` | `line` | two free points |
+| `Circle` | `center, radius` | `circle` | centre point + radius |
+| `Arc` | `center, radius, startAngle, endAngle` | `arc` | centre, start, end points + radius + angles, tied by `addConstraintArcRules` |
+| `Ellipse` | `center, rMajor, rMinor, rotation` | `ellipse` | centre only; radii and rotation rigid |
+| `EllipseArc` | ellipse + `startParam, endParam` | `ellipse_arc` | centre only; rigid |
+| `BSpline` | `poles, degree` | `spline` | each pole a free point; no inter-pole rules |
+
+Every entity also has `id` and `construction`. Rules that hold everywhere:
+
+- **Arcs (and elliptical arcs) are counter-clockwise always.** `endAngle` is
+  normalized so the CCW sweep lies in (0, 2π). OCC's form is produced only
+  when a wire is built, so no CW flag exists anywhere in the model; every
+  transform (`ReflectEntity`, which flips winding and swaps the ends) keeps
+  the invariant.
+- **A B-spline is non-rational, clamped and uniform.** Weights and knots are
+  not stored — `BSplineKnots` produces exactly the knot vector OCC builds for
+  the same poles, so the header evaluator (`BSplineEvalUV`) and the OCC
+  profile edge agree. Degree is cubic, reduced to poles−1 for short splines.
+  Poles are capped at 255 because `PointRef::which` is a `uint8_t`.
+- **Rectangles are not a primitive.** `AddRectangle` emits four lines, four
+  corner coincidents, two horizontal and two vertical constraints, so every
+  side is editable and trimmable. `AddRectangleCentered` adds a centre point.
+  A legacy `rect` entity in an old file is expanded the same way on load.
+- **Construction** geometry drives constraints and snapping but is excluded
+  from profiles and paths, and draws dashed.
+
+### Entity ids
+
+Every entity carries a stable **id**; constraints, derived ops and selections
+refer to ids, never list indices (which shift on insert/delete).
+`AddEntity` mints the id with `MintEntityId`: random, non-zero, and retried
+against the sketch's own entities. Random rather than a per-sketch counter
+because a face's stable name is `<feature>/g<entityId>` (see
+`BuildPrismNamed`): two people editing one sketch separately would both mint
+the next counter value, and a duplicated id makes a face name — and every
+fillet, mate or drawing dimension keyed on it — ambiguous while the document
+rebuilds without complaint. A sketch that arrives with two entities sharing
+an id is **refused on load**. `IndexOfEntity(id)` is a linear scan (sketches
+are small, and a cached map is a desync risk).
+
+`PointRef {entity, which}` addresses a point: Line 0 = `a`, 1 = `b`; Circle
+and Ellipse 0 = centre; Arc and EllipseArc 0 = centre, 1 = start, 2 = end;
+BSpline k = pole k. `kWholeEntity` (0xFF) marks a *selection* of the whole
+entity; constraints never use it.
+
+### Datum geometry
+
+The origin and the two axes are always available as references without being
+entities: `kOrigin`, `kAxisX`, `kAxisY` live in a reserved id block
+(`kDatumBase` = 0xFFFFFF00) above any minted id. The solver registers them as
+fixed points and lines on every load, so a constraint to a datum id (coincident
+to origin, point on an axis, symmetric about an axis, two-point H/V to origin)
+needs no special case, and they serialize as ordinary ids. `IndexOfEntity`
+returns `SIZE_MAX` for them, so **any code resolving a ref by index must test
+`IsDatum` first** and use `DatumPointUV` / `DatumAxisEndpoints`.
+
+### Constraints
+
+`sketch::Constraint {kind, a, b, c, value, labelOffset, valueExpr}`. Kinds
+(JSON strings in brackets):
+
+- Relations: Coincident [`coincident`], Horizontal [`horizontal`], Vertical
+  [`vertical`], Parallel [`parallel`], Perpendicular [`perpendicular`], Equal
+  [`equal`], Tangent [`tangent`], PointOnLine [`point_on_line`], Symmetric
+  [`symmetric`], Midpoint [`midpoint`], Fixed [`fixed`], Concentric
+  [`concentric`], Collinear [`collinear`].
+- Dimensions (`IsDimension`; carry `value`, an optional expression, and a
+  label position): Distance [`distance`], DistanceX [`distance_x`], DistanceY
+  [`distance_y`], DistancePL [`distance_pl`, point-to-line], Radius
+  [`radius`], Diameter [`diameter`], Angle [`angle`].
+
+Notes on how they map to PlaneGCS (`Solver::Load`):
+
+- Horizontal/Vertical take either one line, or two points (`a`, `b`) — the
+  two-point form is what alignment inference emits.
+- PointOnLine also accepts a circle or arc as `b` (point on curve).
+- Symmetric uses `c` as the symmetry line (or a point).
+- Fixed holds a point's parameters out of the unknowns; it adds no equation.
+- Concentric is a coincident of the two centres; Collinear is Parallel plus
+  a point-on-line.
+- Tangent's side (which side of the line the curve sits on) is taken from the
+  current geometry at load, so a solve never flips a circle across its line.
+- Angle is stored in **radians**; its expression is written in degrees
+  (`VisitExprs` converts).
+- Radius/Diameter/Equal/Tangent accept circles and arcs.
+
+An unknown kind string is refused on load (`ConstraintKindFromString`), never
+read as some default kind.
+
+### Derived ops (linked generative geometry)
+
+`SketchFeature::derived` holds `DerivedOp`s that regenerate their outputs
+from their sources. `instances` maps each `(sourceId, k)` to the id of the
+generated entity, and `RegenerateDerived` **reuses that entity in place**
+rather than recreating it, so ids — and constraints and downstream face names
+that reference them — survive every replay; growing a count adds entities,
+shrinking deletes the surplus. Kinds:
+
+| kind | JSON | parameters |
+|---|---|---|
+| `LinearPattern` | `linear_pattern` | `vec` step, `count`; optional second direction `vec2`, `count2` (row-major grid) |
+| `CircularPattern` | `circular_pattern` | `vec` centre, `scalar` **per-step** angle (radians), `count`; optional `centerEntity`/`centerWhich` to track an entity point |
+| `Mirror` | `mirror` | `axisEntity` (a line or `kAxisX`/`kAxisY`), resolved fresh each replay |
+| `LinkedCopy` | `linked_copy` | `vec` paste offset, `sourceSketchId` (0 = same sketch) |
+
+`count` includes the seed. A vanished source prunes its instances (for a
+same-sketch op); an unresolvable mirror axis prunes all of them. The replay
+runs after every edit commit, and after `Execute` re-solves an
+expression-driven sketch.
+
+Baked (unlinked) mirrors and patterns leave no op — just plain entities.
+Fillet and offset always bake.
+
+### Linked copies
+
+`Ctrl+C` in a sketch copies the selection; `Ctrl+V` pastes plain copies with
+fresh ids; `Ctrl+Shift+V` pastes **linked** copies — a `LinkedCopy` op whose
+outputs re-sync from the source until the link is broken.
+
+- The sync **rewrites geometry at regeneration**; it is not a constraint.
+  PlaneGCS solves one sketch at a time, so constraints cannot span sketches.
+- Outputs are **solver-fixed**: their parameters are held out of the unknowns
+  (`Solver::Load`), so the target sketch's constraints may reference them but
+  never move them — the sync owns their position. They draw violet.
+- A same-sketch source replays in `RegenerateDerived`. A cross-sketch source
+  must be **earlier in the history** (so regeneration stays one forward pass)
+  and replays in `Execute` (`ReplayLinkedCopyFrom`), after the source has
+  executed. A vanished source sketch or source entity **fails the sketch's
+  regeneration** with a break-link hint; it never desyncs silently.
+- `BreakLink(opIndex)` removes the op and keeps its outputs as ordinary
+  geometry with ids intact, so profile regions and constraints on them survive.
+- Paste-linked falls back to a plain paste, with a message saying why, when
+  the source is in another part, is not earlier in the history, or has lost
+  one of the copied entities.
+
+The same solver-fixed mechanism holds **expression-driven coordinates**
+(`entityExprs`, see [../variables/README.md](../variables/README.md)) and
+**external geometry** (below) in place: the parameter table or the source
+body owns them, not the solver.
+
+### External (projected) geometry
+
+`AddExternalGeometry(ElementRef, Face|Edge)` references a face or edge of a
+body earlier in the history. `Execute` re-projects it onto the plane every
+regeneration (`ProjectElement`) as solver-fixed construction entities with
+stable ids (`ExternalGeom::genIds`), so geometry constrained to it follows the
+source. A reference that no longer resolves fails the sketch. Planar curves
+parallel to the sketch keep their type; anything else is sampled into a spline.
+
+### Reference images (underlays)
+
+A `sketch::ReferenceImage` is a raster placed on the plane to trace over. It is
+**not an entity**: it has no curve and takes no part in the profile, the solve
+or the regeneration hash (`Document.cpp` erases `images` before hashing, so
+toggling one never rebuilds downstream features). Placement is a rigid 2D
+affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`.
+
+- **Bytes live on the document, not the feature** (`Document::SetAsset/
+  GetAsset`, keyed by `asset`). Undo rebuilds features from JSON, which never
+  carries the bytes, so storing them on the feature would lose them; and the
+  renderer decodes each asset into one texture however many images use it.
+  Only referenced assets are saved: as `assets/<name>` in a directory
+  project, as base64 under a root `"assets"` map in a single-file document.
+- `widthPx`/`heightPx` are cached so sizing and calibration never need a
+  decoder (headless builds have none).
+- **Calibration** (`CalibrateImage(id, p1, p2, distance, alignAxis)`) rescales
+  so two picked plane points are `distance` apart, holding `p1` fixed; an
+  `alignAxis` of 0/1 also rotates the p1→p2 line onto the U/V axis.
+- `UnderlayRenderer` draws only the active sketch's visible images as
+  textured quads **before** the sketch lines (depth test on, write off). It
+  owns persistent device-local textures, which is why it is separate from
+  `SketchRenderer`; `ReleaseTextures` waits for the device to idle before
+  freeing, since a frame in flight may still sample them.
+
+## Operations on the entity list
+
+All are `SketchFeature` methods; UI and RPC commits wrap them in one
+`ModifyFeatureCommand` (one undo step).
+
+- **DeleteEntity(id)** — collects the survivors directly coincident with each
+  dying point and re-links them pairwise (A~B~C, delete B ⇒ A~C), drops every
+  constraint that reads the dead id, and returns how many *non-trivial*
+  constraints (anything but Coincident/Horizontal/Vertical) were dropped, for
+  a warning. Dimensions on the dead entity are dropped, not transferred.
+- **SplitEntity(lineId, P)** — piece 1 keeps the id (`a`→P), piece 2 is new
+  (P→`b`); refs to the old far end move to piece 2 (so a whole-edge distance
+  re-anchors to span both pieces); H/V/Parallel/Perpendicular are copied onto
+  piece 2; a coincident joins the pieces. No collinear is added.
+- **TrimLineAt / TrimCurveAt(id, click)** — remove the span between the
+  crossings (with lines and circles) that bracket the click (via split + delete). With no bracketing
+  crossing the whole entity goes. A trimmed circle becomes the complementary
+  arc (keeping the id); a trimmed arc becomes up to two arcs. `TrimSpanAt`
+  gives the span for the hover preview.
+- **MirrorEntities(sources, axis, link)** — bake: reflected copies. Linked: a
+  `Mirror` derived op.
+- **FilletCorner(line1, line2, r, whyNot)** — trims both lines to the tangent
+  points and inserts the arc, with two Coincident and two Tangent constraints.
+  The old corner becomes a **construction point**: constraints that held the
+  corner are re-pointed onto it, and a point-on-line from each line to it
+  keeps both lines aimed as before. If that web over-determines the corner, one
+  constraint *added by the fillet* that is redundant (same DOF without it) is
+  dropped, so a good fillet does not read as conflicting; user constraints are
+  never removed. Failure reasons go to `whyNot`.
+- **AddLinearPattern / AddCircularPattern(..., link)** — bake or a derived op.
+  The circular angle is the per-step angle.
+- **OffsetChain(chain, distance, joinArc)** — offsets one closed loop through
+  OCC `BRepOffsetAPI_MakeOffset` (arc or intersection joins) and converts the
+  result back to entities. Always baked.
+
+## Solving
+
+`sketch::Solver` (`SketchSolver.h`) loads a sketch into PlaneGCS, solves with
+DogLeg, and writes positions back. `SolveResult` carries `dof` and the
+conflicting/redundant constraints mapped back to **indices into
+`constraints`** (each constraint records the tags it used; the arc rules use
+tag 0 so they are never reported as a user constraint).
+`UnderDefinedEntities()` maps PlaneGCS's dependent-parameter diagnosis back to
+entity ids.
+
+Held out of the unknowns (fixed): datum geometry, `Fixed` points, linked-copy
+outputs, external geometry, and expression-driven coordinates.
+
+**Dragging** builds the solver once per drag: `BeginDrag(points)` (or
+`BeginRadiusDrag(circleId)`) pins the dragged points to targets with a
+temporary coincident **down-weighted by `rescaleConstraint(…, 0.01)`**, so real
+constraints dominate and a heavily constrained sketch does not oscillate; each
+frame `SetDragTargets`/`SetRadiusTarget` then `SolveDrag` — no rebuild.
+`Begin*` returns false when the sketch is already conflicting and the UI
+refuses the drag. UI modes (`SketchDragSession::Mode`): `Point`, `LineBody`
+(both endpoints, rigid delta), `CircleRim` (radius), and `SketchTranslate`
+(dragging a line that carries a driving dimension moves the whole sketch
+instead of fighting the dimension).
+
+`SketchFeature::Execute` re-solves only when a dimension or coordinate is
+expression-driven or external geometry exists (after `VisitExprs` has
+refreshed the values). A failed solve there keeps the last good positions and
+logs a warning rather than failing the history.
+
+## Profiles
+
+`BuildLoops` (`SketchProfile.cpp`) turns non-construction entities into closed
+`Loop`s: circles and ellipses are loops on their own; lines, arcs, elliptical
+arcs and splines chain by endpoint proximity (1e-4) into ordered `LoopEdge`
+lists; open chains are discarded with a warning. Every wire goes through
+`ShapeFix_Wire` (reorder, reconnect, close) before face building. The largest
+loop is the outer boundary, the rest holes. Side faces are named
+`<feature>/g<entityId>` after the generating entity.
+
+A **region** is referenced by the sorted entity ids of its outer loop
+(`LoopEntityIds`). `SiblingRegions` expands a picked loop that belongs to a
+linked pattern or mirror to every member, since a cut through one hole of a
+bolt circle but not its copies is almost never the intent.
+`BuildOpenPathWire` gives open chains for sweep paths.
+
+## GUI
+
+Sketch editing is a mode of the part tab. `SketchEditState` (`AppState.h`)
+holds the session; a new session starts in **Select** (a Hole sketch starts
+in Point). While a sketch is edited, the document's view rollback is set at
+the sketch's first consumer so solids built from it are out of the way
+(`SyncSketchViewRollback`, `ProjectActions.cpp`) — transient, never saved,
+never dirties the document.
+
+**Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
+RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
+Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles,
+Enter/double-click finishes), Trim, Mirror, Fillet, Pattern, Offset,
+Dimension, Project (live external geometry), CalibrateImage, Image.
+
+**Default keys** (sketch context; the global binding of the same chord is
+shadowed while sketching; rebindable — `src/core/io/Keymap.cpp`):
+
+| draw | modify | constrain | other |
+|---|---|---|---|
+| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, X project, Shift+I reference image | M trim, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
+
+Point-on-line, symmetric, midpoint, fixed and collinear are commands with no
+default key.
+
+**Escape** backs out one level per press: an open dimension field → dimension
+placement → spline poles → pending clicks or a box → mirror axis phase →
+op re-pick → op edit session → dimension targets → the tool (back to Select)
+→ the selected constraint → the entity selection → a Hole session → leave the
+sketch.
+
+**Selection**: click picks the nearest endpoint first, then an entity body;
+Ctrl adds; repeated clicks on one spot cycle candidates. A drag from empty
+space box-selects (`sketch::BoxSelect`): left→right is window (entity wholly
+inside), right→left is crossing (any sample inside or any edge through the
+box); Ctrl adds. Datum hits rank below real geometry.
+
+**Auto-constraints while drawing** (`sketch::InferPoint`, on by default,
+Shift+S toggles, Ctrl suppresses for one click): the point snaps and, on
+commit, gains the implied constraint — coincident (10 px, including the
+origin), point-on-line (8 px), X/Y alignment with another vertex or the origin
+(8 px, a two-point Vertical/Horizontal, drawn as a dashed guide), and for a
+line segment horizontal/vertical or parallel/perpendicular to a nearby line
+(2°). Geometry is placed at the snapped position first so the solve starts
+satisfied; an inferred constraint that makes the sketch conflict or removes
+no DOF is dropped.
+
+**Status and colour** (`UpdateSketchStatus`, `BuildActiveSketchPrimitives`):
+blue = under-defined, green = fully defined entity (all neutral when
+`dof == 0`), violet = solver-fixed (linked copy, expression-driven), red =
+touched by a conflicting/redundant constraint, dashed grey = construction.
+A prompt pill shows "Fully defined" or the DOF count plus the active tool's
+step (`SketchToolPrompt`: "Name (Step k/n): …"). Constraint glyphs (Y) mark
+committed constraints; the Model panel's Constraints section lists them,
+flags conflicts, and deletes one.
+
+**Dimensions**: the Dimension tool accumulates targets and infers the kind;
+while placing, the cursor zone picks horizontal/vertical/aligned. Typing a
+digit right after drawing opens a dimension on the new entity
+(`DrawDimensionOnCreate`). Double-click a label to edit it inline
+(`ApplyDimensionEdit`); anything that is not a plain number is an expression,
+with variable completion; angles are typed in degrees; a negative value flips
+direction. Labels drag to reposition (`labelOffset`).
+
+**Generative tools** open a session in the floating Tool window
+(`DrawSketchToolWindow`): Mirror collects geometry then an axis (a line,
+construction line, or X/Y datum axis) with a live preview; Pattern and Offset
+show a ghost preview with their parameters; the Linked toggle chooses bake or
+linked. The Model panel's **Operations** section (`DrawSketchModelSections`)
+lists images, patterns, mirrors and linked copies; double-click opens the op's
+edit session (pattern parameters, sources/axis re-pick, Break link for a
+linked copy).
+
+**Reference images**: File > Reference Image… or Shift+I opens a file dialog
+and inserts one. Its session (Tool window) has opacity, hide, Calibrate… and
+Delete; the image drags to move. Opacity and hide are persisted fields and
+are undoable — the opacity baseline is taken when the slider is grabbed and
+one command pushed on release, never one per frame. Calibration picks two
+points (markers show them and the span), then takes the real distance and an
+optional axis alignment.
+
+## RPCs
+
+In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
+`constraint_kinds`, `constraint_value_units`):
+
+| method | params | notes |
+|---|---|---|
+| `add_feature` | `feature` | a Sketch with `plane`, `entities`, `constraints`; returns `entity_ids` |
+| `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON |
+| `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm, or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. One solve, one undo step |
+| `add_constraints` | `sketch_id, constraints[]` | many at once: one solve, regen, undo step |
+| `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
+| `fillet` | `sketch_id, line1, line2, radius` | returns `arc_id`; failures say why |
+| `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
+| `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
+| `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
+| `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
+| `add_reference_image` | `sketch_id, path, at?, opacity?, units_per_pixel?` | returns `image_id` |
+| `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, origin?, units_per_pixel?, rotation \| rotation_deg` | |
+| `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
+| `delete_reference_image` | `sketch_id, image_id` | |
+
+In entity JSON an arc's angles are `start_angle`/`end_angle` (radians) or the
+`_deg` pair; `ellipse` takes `rotation` or `rotation_deg`; an `ellipse_arc`'s
+`start_param`/`end_param` are ellipse parameters, not angles, so they have no
+`_deg` twin. An arc sweeping more than a full turn is refused (almost always
+degrees in a radian field). Any entity may carry `construction` and
+`<field>_expr`.
+
+There is no RPC to delete a single constraint, trim, split, paste or break a
+link; `modify_feature` with an edited sketch JSON covers them.
+
+## Tests
+
+- `tests/test_sketch_solver.cpp` `[solver]` `[arc]` `[drag]` `[delete]` —
+  constraint kinds, arcs, datum references, drag sessions, conflict mapping,
+  delete-time coincidence repair.
+- `tests/test_sketch_feature.cpp` `[sketch]` `[ids]` `[io]` `[pattern]`
+  `[undo]` — id stability, split/trim, mirror, fillet, pattern replay and id
+  stability, linked copies (sync, break link, vanished source), legacy-rect
+  migration, serialization. Offset profiles are in `tests/test_extrude.cpp`.
+- `tests/test_sketch_inference.cpp` `[inference]` `[datum]`,
+  `tests/test_sketch_selection.cpp` `[selection]` — the pure passes.
+- `tests/test_spline.cpp` `[spline]` `[profile]` — evaluator vs OCC, profiles.
+- `tests/test_reference_image.cpp` — placement, calibration, asset storage in
+  both formats, regen-hash exclusion.
+- GUI: `src/app/guitests/GuiTestsSketch.cpp` (`sketch/*`, `constraints/*`,
+  `trim/*`, `mirror/*`, `infer/*`, `drag/*`, `region/*`, `dims/*`, reference
+  image panel and drag), `GuiTestsViewport.cpp` (`pick/*`, `select/*`),
+  `GuiTestsShell.cpp` (`keys/*`), `GuiTestsModeling.cpp` (`fillet/*`,
+  `pattern/*`).
+- Goldens: `tests/golden/v03-legacy-sketch` (index refs and rigid rects
+  migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
+  `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
+  `v51-mirror-and-center-ref`.
+
+## Not built
+
+- Ellipses, elliptical arcs and splines are only partly solved (centre /
+  poles as points; radii, rotation and shape rigid; no tangent or
+  point-on-curve to them) — [../plans/sketch-curve-solving.md](../plans/sketch-curve-solving.md).
+- Linked copies across parts: a cross-part paste is always a plain copy.
+- Offset as a regenerating op (it bakes).
+- Transferring a dimension from a deleted entity onto a coincident survivor.
+- Extend tool, numeric move/rotate/scale of a selection, slot and polygon
+  primitives, sketch text.

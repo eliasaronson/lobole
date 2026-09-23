@@ -31,7 +31,7 @@ enum class SplitKnifeKind {
 // Fine when Split is terminal (the common splitPart case) and for
 // export/mass-props, which are per-body. Distinguishing the pieces for
 // downstream ops is a follow-up (a body sub-ordinal); see
-// docs/interchange/feature-gaps-plan.md. Faces are still individually named
+// docs/modeling/README.md#not-built. Faces are still individually named
 // per-piece ("<id>/bN/...") so each piece stays selectable.
 //
 // Regeneration fails when the target body is missing, the knife plane does not

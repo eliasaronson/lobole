@@ -11,7 +11,8 @@ namespace ui {
 
 struct AppState;
 
-// Motion studies on the active assembly tab (docs/agent-scale-plan.md, G2).
+// Motion studies on the active assembly tab
+// (docs/assemblies/README.md#motion-studies).
 //
 // A run is a job (kind "motion") on the A3 registry: the worker solves a COPY
 // of the assembly against COPIES of its parts, with every collision mesh

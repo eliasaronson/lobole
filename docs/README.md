@@ -1,152 +1,93 @@
 # Designer docs
 
-A map of what lives where. **[roadmap.md](roadmap.md) is authoritative for
-status** — it holds the vision, the numbered workstream table and the
-sequencing. This file says where to look; it deliberately does not repeat the
-statuses, because two lists of the same thing drift apart.
+The current description of the program: how each part of it works, the rules
+it follows, and what it does not do yet. The history of how it got here is in
+git, not here.
 
-Each area directory has a `plan.md` (the design and its decisions) plus
-per-milestone designs beside it. A plan is written before the work and updated
-after it with what actually happened — including what was tried and rejected,
-which is usually the part worth reading later.
+## Start here
 
-**Update the status banner in the same commit as the work.** A doc audit on
-2026-08-25 found three banners contradicting the roadmap — SSAO listed as
-"remaining" six weeks after it shipped, the C++23 work as "not started" below
-its own table of completed rows, and the roadmap naming git branching as the
-last unbuilt thing four days after F7 shipped it. One of those cost something
-real: `interchange/import-plan.md` still described 3D splines as a gap, so
-nobody re-read the Onshape importer's `fitSpline` skip, which had been dead
-code since format v42. A stale line does not just misinform — it makes the
-thing behind it invisible to the next person who looks.
+- [architecture.md](architecture.md) — how the code is organised: the source
+  layout, the libraries, the regeneration model, the actions layer, the RPC
+  dispatcher, threading, tests and C++ usage.
+- [conventions.md](conventions.md) — the rules every subsystem follows (world
+  axes, units and angles, derived defaults, refuse-don't-substitute, honest
+  responses and receipts) and the gate that enforces each.
+- [known-bugs.md](known-bugs.md) — defects that are present now.
+- [roadmap.md](roadmap.md) — what is not built yet, and in what order.
 
-## Workstreams
+## Areas
 
-| Area | Start at | Also inside |
-|---|---|---|
-| [sketching/](sketching/plan.md) | the 2D constraint sketcher | `phase-*.md` per phase; `copy-links.md`, `reference-image-plan.md` |
-| [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md`, `hole-standards.md` (**shipped 2026-09-01**, v71 — a hole that knows it is an M6 clearance, from 46 rows across one table, not the 298 estimated; a TAPPED fit also threads the bore it cuts), `derived-plan.md` (**D1–D4 done 2026-09-03**, v84 — A2 as a binder feature: another part's geometry copied into this one as a snapshot, a ghost to draw on, updated on request), `derived-gripper-dogfood.md` (the SO-101 gripper built on ghosts of the real servo and camera STEP: 19 findings, 8 fixed) |
-| [variables/](variables/plan.md) | parameters + expressions | |
-| [sheetmetal/](sheetmetal/plan.md) | bends, flanges, flat patterns, DXF | S1-S11 shipped 2026-09-17 (v108-v116): base flange, edge flange, hem, jog, corner relief, normal cut, `check_sheet_metal` + `list_bends`, flat pattern as a configuration, bend tables and bend lines on a drawing. The dogfood that drove it is [grill-dogfood-plan.md](grill-dogfood-plan.md) and [grill-friction-plan.md](grill-friction-plan.md) |
-| [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent), `fanout.md` (several agents, several parts, one project — and why each needs its own worktree) |
-| [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `f9-collaboration.md`, `f10-autosave-the-project.md`, `f11-seeing-what-changed.md`, `f7-handoff.md`, `collab-dogfood.md`, `baked-geometry.md`, `format.md` |
-| [ui/](ui/plan.md) | selection, tools, layout | `u1`, `u7`–`u16` rounds (`u12` keybindings, `u13` chrome + units, `u16` mate rotate + angle snap), `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `direct-manipulation.md` (preview drag handles), `terminal-panel.md` (an embedded terminal for Claude Code), `gui-coverage.md`, `coverage-matrix.md` (**generated** — interactive tools x tab kinds, the asymmetry that keeps costing bugs), `gui-test-isolation.md` (why any shard partition must be valid), `dims-and-assembly-measure.md`, `long-operations.md` (**step 0 + phase 1 shipped 2026-09-01/02** — one poll entry point for the five long operations, then a job registry with `background_jobs`/`cancel_background_job` and the adaptive pocket cleared off the frame through a content-keyed cache; phases 2-4 moved the sync job, the FEM solves (with `mesh_study {async}`) and the STEP import onto it — **complete**) |
-| [inspect/](inspect/plan.md) | measure, mass properties, sections | `measure-v2.md` (measure reopened, in flight), `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
-| [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
-| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md`, `gpu-debugging.md` (validation layers vs. a frame capture — which question each answers), `renderer-wiring.md` |
-| [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs, `a6` loop solver, `relations-plan.md` (gear/rack/screw couplings between mates, v83) |
-| [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
-| [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |
-| [tolerances/](tolerances/plan.md) | ISO 286 limits and fits, and what a face may vary by | the fit checks read the assembly's own mates |
-| [configurations/](configurations/plan.md) | part + assembly families | |
-| [topopt/](topopt/plan.md) | topology optimization | `guide.md`, `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md`, `gpu5-plan.md` (**designed, not built** — the fp32 slender-part limit) |
-| [parts/](parts/plan.md) | standard parts (fasteners) | `gui-plan.md` (placing one by clicking — **built**), `preview-plan.md` (seeing what you are about to place — **built**), `f1-loose-ends.md` (attachment, the countersunk case, the pick-slot registry — **built**). **complete v1 (2026-09-01)** — seven vendored ISO standards, a fastener as a PART placed as an occurrence, size and length derived from the hole you pick (washers and nut included), a BOM that tells bought from made, `check_fasteners` for a stack that changed under a screw |
-| [packaging/](packaging/plan.md) | shipping it to other machines | |
-| [cam/](cam/plan.md) | milling toolpaths + G-code (built) | `gui.md` (verbs, the picture of the cut, the verdict — built), `job-document.md` (a job holds N parts, each placed in the stock), `setup-frame.md` (how a part is CLAMPED vs a 4th axis), `stock-and-origin.md` (fixed sheets, and the corner a file's zero is), `router-round.md` (grbl, split output, helical bores, dogbones, lead arcs), `simulation.md` (the cutting simulation), `workholding-plan.md` (clamps and keep-out boxes the verifier checks — built), `dogfood-round.md` (three rounds on one real coupon; ends with what to watch on the first actual cut). The findings from cutting a whole aircraft are in [modeling/fpv-drone.md](modeling/fpv-drone.md) |
+Each area has a `README.md` that describes how it works now. A topic page
+sits beside it only where the README would be too long.
 
-## Cross-cutting
+| area | covers |
+|---|---|
+| [sketching](sketching/README.md) | the 2D constraint sketcher |
+| [modeling](modeling/README.md) | 3D features, topological naming, regeneration |
+| [variables](variables/README.md) | parameters and expressions |
+| [configurations](configurations/README.md) | part and assembly families |
+| [parts](parts/README.md) | standard parts (fasteners) |
+| [tolerances](tolerances/README.md) | limits and fits, stack-ups |
+| [tube](tube/README.md) | bent tube, copes, cut lists |
+| [sheetmetal](sheetmetal/README.md) | flanges, bends, flat patterns, DXF |
+| [assemblies](assemblies/README.md) | occurrences, mates, relations, sub-assemblies |
+| [cam](cam/README.md) | milling toolpaths, posting, verification, simulation |
+| [ui](ui/README.md) | selection, tools, panels, preferences, the GUI suite |
+| [rendering](rendering/README.md) | the renderers, offscreen mode, stills |
+| [versioning](versioning/README.md) | the file format, autosave, checkpoints, git |
+| [interchange](interchange/README.md) | import and export |
+| [packaging](packaging/README.md) | building for other machines |
+| [scripting](scripting/README.md) | the RPC, MCP server, Python SDK |
+| [inspect](inspect/README.md) | measure, mass properties, sections, checks |
+| [simulation](simulation/README.md) | FEM studies |
+| [topopt](topopt/README.md) | topology optimization |
+| [drawings](drawings/README.md) | 2D drafting |
 
-- **[known-bugs.md](known-bugs.md)** — confirmed, unfixed defects (symptom +
-  root cause + likely fix). Cleared as fixes land.
-- **[up-axis.md](up-axis.md)** and **[units-plan.md](units-plan.md)** — the two
-  conventions every subsystem had quietly assumed for itself, and the same
-  cure both times: one header of named constants (`core/Conventions.h`,
-  `core/Angles.h`) plus a gate that fails when a consumer drifts. units-plan
-  also argues why a full unit engine is the wrong answer here — the bugs are
-  all at the JSON boundary, where a quantity type has nothing to check.
-- **[dogfooding.md](dogfooding.md)** — every self-driven round that built a
-  real object end-to-end, what each found, and what was done about it. The
-  richest source of real bugs in this repo.
-- **[performance/scale-round.md](performance/scale-round.md)** — the
-  measured-at-size round (open 259 s → 0.04 s, and what was slow and why).
-  `performance/` holds one note per round of this kind; the newest is
-  [normal-cut-one-pass.md](performance/normal-cut-one-pass.md) (a sheet-metal
-  hole that unfolded the whole part, 117 s → 23.6 s on the grill).
-- **[tier1-closeout.md](tier1-closeout.md)** — the 2026-07-14 sign-off that
-  closed out five workstreams' remainders at once.
-- **[loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)** — the same idea a
-  month on: an audit of all 105 docs against the source, the six items it
-  found that were started and never finished, and what a stale status line
-  cost. **Complete.** Three of the seven turned out to be already fixed and
-  still listed as open; two "polish" items were user-facing bugs.
-- **[ui/coverage-matrix.md](ui/coverage-matrix.md)** — **generated** by
-  `tools/coverage_matrix.py`: interactive tools × tab kinds, the asymmetry
-  that has cost three bugs. Re-run it after adding GUI tests.
+Plans for work that is not built yet live in [plans/](plans/), one file per
+plan. Each generated model has its own page beside its code, indexed in
+[generators/README.md](../generators/README.md): what it is, how to run it,
+and where its numbers come from.
 
-### Test-harness conventions worth knowing before writing one
+## Writing docs
 
-- `tests/smoke_app.py` is the **only** way a test launches the app
-  (`launch_app()`): it binds a kernel-chosen port in the process that keeps
-  it, so there is no pick-then-hand-off race, and it keeps the app's log and
-  prints it on failure. `config_isolation_lint.py` fails any script that
-  spawns the binary directly. On a failure it also **archives** the log, the
-  traceback and a `reproduce.sh` to
-  `$XDG_STATE_HOME/designer/smoke-failures/<stamp>-<test>/` — ctest's own
-  `LastTest.log` is overwritten by the next run, so re-running an intermittent
-  failure used to destroy the only record of it.
-- `tests/rpc_params_gate.py` keeps `describe`'s parameter schema honest
-  against what each handler actually reads (`tools/rpc_params_scan.py`), and
-  `tests/rpc_units_gate.py` asks the other question of the same rows: does a
-  dimensional parameter say what UNIT it is in. They share one MethodDoc
-  parser, `tools/method_doc_scan.py`.
-- `tests/test_actions.cpp` is where UI *logic* is pinned headlessly — read its
-  header before adding to it. Anything about widgets belongs in the GUI suite.
-- **[architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)** —
-  a structural pass over the whole tree (layering, duplication, unit sizes,
-  dead code), measured rather than estimated. All five stages shipped; the
-  follow-ups at the bottom include one struck because its premise was wrong,
-  which is the part worth reading.
-- **[agent-scale-plan.md](agent-scale-plan.md)** — **all seven shipped
-  2026-09-04**:
-  what a text-to-cad W16 exposed. Seven workstreams — datum frames a mate can name, a `batch` RPC and an SDK
-  that speaks geometry, a motion study (driver, samples, scrub, animated GLB),
-  mesh-BVH interference for sweeps, cam and chain relations, a fan-out test,
-  and benchmark tasks above T3 — with a single-cylinder engine as the
-  acceptance test.
-- **[benchmark-construction-plan.md](benchmark-construction-plan.md)** — the
-  benchmark grades *what* was built and never *how*, so a revolve faked with a
-  stack of extrudes scores full marks. Prompted by BenchCAD
-  (arXiv:2605.10865), whose headline finding is exactly that substitution. Six
-  stages, most of them wiring: the oracle already reports a surface-type census
-  nothing reads, and the app-reported check machinery is called by no task.
-- **[peer-survey-plan.md](peer-survey-plan.md)** — what four peer projects
-  (vcad, forgent3d, CADAM, NURBGen) are worth to us. Six workstreams, and
-  none outstanding: W1 (parameters surviving the script boundary), W2 (verdict
-  receipts on every verdict RPC), W3 (clearances declared IN the document,
-  v100), W4 (the villain arm, a direct-emission arm, pass^k, and a Fit task
-  graded against a host the agent never sees) and W5 all shipped; W6 (a DFM
-  check) was investigated and DECLINED, with the evidence and the two
-  conditions that would reverse it.
-  Overlaps `benchmark-construction-plan.md` on one finding — both rounds
-  independently spotted that `faces_by_kind` is emitted and unread.
-- **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the
-  outward-facing counterpart: capability walls, absent feature families, and
-  what we do worse (and better) than FreeCAD and Onshape. The three that were
-  architecture rather than backlog: the assembly solve had no numeric 3D
-  solver so closed loops were unassemblable (**closed 2026-09-01 by A6**),
-  regeneration cannot cross a document boundary (a finding, unscheduled), and
-  there is no general mechanism for running a long operation off the frame
-  (**step 0 and phase 1 shipped 2026-09-01/02**, `ui/long-operations.md`:
-  the registry exists, the adaptive pocket clears off the frame, and phases
-  2-4 moved the sync job, the FEM solves with an async `mesh_study`, and the
-  STEP import onto it — **A3 complete**). Its second
-  half is **a pass over the testing system** — what the harness does unusually
-  well, and seven gaps, of which the loudest is that `tools/test-fast.sh` now
-  takes 48.7 s against the ~8 s its own header claims (a by-name exclusion
-  list that never learned about the CAM gates).
-- **`generators/`** (top level, not under docs) — parts written as programs
-  against the API, a spur gear first; the standing answer to "do we need a
-  scripted-feature language for X" (capability review, "scripted features").
-- **[coverage-2026-08-31.md](coverage-2026-08-31.md)** — the first recorded
-  `tools/coverage.sh` run: 75% of `src/core`, and the 133 functions nothing
-  executed — including the no-git checkpoint fallback, which no test machine
-  reaches. (A caveat about gcov never flushing was attached and retracted on
-  2026-09-01; the numbers are accurate.)
-- **[cpp23-modernization.md](cpp23-modernization.md)** — the toolchain bump
-  and what it bought.
-- **[ai-cad-survey-2026-08-18.md](ai-cad-survey-2026-08-18.md)** — how other
-  AI-facing CAD tools and the research literature approach this.
+**A doc describes the program as it is.** Write it for a developer or an agent
+opening the area cold.
 
-Project-level files (`README.md`, `CONTRIBUTING.md`, `THIRD_PARTY.md`) stay at
-the repo root, as does `CLAUDE.md` — the working notes loaded into every
-assistant session.
+An area README holds: the model and its concepts; the invariants and the
+reasons for them, as present-tense facts ("an OpenCASCADE boolean modifies its
+arguments, so every query boolean runs non-destructive"); where the code is;
+the RPCs and GUI entry points; how it is tested; and what it does not do yet.
+
+It does not hold: dates, status or "shipped" banners, milestone numbers used
+as status, who decided what and when, approval notes, rejected alternatives,
+measurements of what something used to cost, or bug stories. A number stays
+only if someone needs it now (a budget, a limit).
+
+**Keep the docs true in the same commit as the code.** When a change alters
+behaviour, update every page that describes it, the RPC `describe` rows, and
+the version history in [versioning/format.md](versioning/format.md) if the
+format moved. A
+stale line does not just misinform: it makes the thing behind it invisible to
+the next person who looks.
+
+**Every statement is checked against the code.** One that cannot be confirmed
+is fixed or dropped, never kept to be safe.
+
+**Plans.** Anything multi-step starts with a plan in `docs/plans/`: the
+problem, the shape of the fix, the files it touches and how it is verified —
+no dates, no decision log, no status. When the work lands, what is still
+true moves into the area docs and the plan is deleted.
+
+**Known bugs** are defects present now, each with its symptom, cause, where it
+lives and the likely fix. An entry is deleted when its fix lands with a
+regression test.
+
+**References.** Code comments cite docs to explain why the code is shaped the
+way it is (`docs/<area>/README.md#heading`). The cited page must state that
+reason. `tests/test_conventions.cpp` fails on a cited `docs/` or
+`generators/` path that does not exist, on an `#anchor` with no matching
+heading, and on a relative link inside `docs/` that does not resolve — so
+renaming a heading means updating what cites it.
+
+Project-level files (`README.md`, `CONTRIBUTING.md`, `THIRD_PARTY.md`,
+`CLAUDE.md`) stay at the repository root.

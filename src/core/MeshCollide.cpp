@@ -21,7 +21,7 @@ namespace {
 // a pin whose end cap is flush with the face it passes through is the normal
 // way parts are drawn, and the slider-crank rig found it as a 0.5 mm
 // clearance hole reported as a clash at a 0.17 mm deflection
-// (docs/agent-scale-plan.md, G2). The in-plane edge normals are the 2D
+// (docs/inspect/README.md#mesh-mode). The in-plane edge normals are the 2D
 // separating axes within that plane, and they decide it.
 
 bool Separated(const glm::dvec3& axis, const glm::dvec3* A,
@@ -503,7 +503,7 @@ bool Mesh::Overlaps(const glm::dmat4& xfA, const Mesh& other,
   // nests inside the camshaft's, its box centre sits 7 mm off the shaft axis
   // and therefore inside a 13 mm shaft, and the cap was reported as buried in
   // a camshaft it merely sits over. Exact booleans called the same pose
-  // clear (docs/known-bugs.md).
+  // clear (docs/inspect/README.md#mesh-mode).
   const auto pointOf = [](const Mesh& m, const glm::dmat4& into) {
     const Tri& t = m.m_tris.front();
     const glm::dvec3 c = (t.a + t.b + t.c) / 3.0;

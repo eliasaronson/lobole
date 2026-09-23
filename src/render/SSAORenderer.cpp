@@ -301,7 +301,7 @@ void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
   }
 
   // 4. Half mode only: joint-bilateral upsample to full res, depth-guided
-  // (docs/rendering/ssao-upsample.md) — this is the target mesh.frag samples
+  // (docs/rendering/README.md#ssao) — this is the target mesh.frag samples
   // in half mode. In full mode the blur target is already full-res and is
   // sampled directly; the same r8 render pass carries the write->sample
   // dependency, exactly as between the AO and blur passes above.

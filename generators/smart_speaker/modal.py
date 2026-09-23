@@ -169,7 +169,7 @@ def study(app, name, axis, mesh_mm, braced, modes=6):
 
 
 # The supports of the left side wall, by occurrence name, for the ASSEMBLY
-# study (S1, docs/simulation/assembly-studies-plan.md): the parts that touch
+# study (docs/simulation/README.md#assembly-studies): the parts that touch
 # it, each clamped where it does. The braces are the two the part study could
 # not use — they butt against a continuous face.
 SIDE_WALL = "side_wall L"

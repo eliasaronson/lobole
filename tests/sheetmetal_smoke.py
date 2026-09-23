@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sheet metal over the RPC, headless (docs/sheetmetal/plan.md, S1-S3).
+"""Sheet metal over the RPC, headless (docs/sheetmetal/README.md#rules-the-stock-a-part-is-cut-from).
 
 The rules first (a gauge is a thickness PER MATERIAL, and an unstocked one is
 refused naming what is stocked), then a blank, then a wall bent up from an

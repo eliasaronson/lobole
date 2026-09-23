@@ -52,9 +52,9 @@ fs::path TempProject(const char* name) {
 } // namespace
 
 // Opening a project used to re-execute its whole feature list: 259 s for a
-// 148-feature part against 0.4 s to save it (docs/performance/scale-round.md).
-// The built bodies are stored beside the recipe, and a load that still matches
-// executes nothing.
+// 148-feature part against 0.4 s to save it
+// (docs/versioning/README.md#baked-geometry). The built bodies are stored
+// beside the recipe, and a load that still matches executes nothing.
 TEST_CASE("Baked geometry loads instead of rebuilding", "[baked]") {
   const fs::path proj = TempProject("baked-basic.dsgn");
   auto doc = MakePart();

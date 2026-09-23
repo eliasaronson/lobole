@@ -820,7 +820,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   // window LEAVES. The pan was the wrong way round — it pushed the model
   // under the very window the branch exists to clear — and nothing noticed,
   // because "the model moved sideways" looks the same either way until you
-  // ask which side (docs/cam/dogfood-round.md).
+  // ask which side (docs/ui/README.md#viewport).
 #endif
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -936,7 +936,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   // A cut is a fragment discard, so the PICK has to be told about it too:
   // without that, hovering and clicking through a section answer with the
   // material the cut removed — which on an assembly is the housing you
-  // sectioned to see past (docs/ui/section-pick-plan.md).
+  // sectioned to see past (docs/ui/selection.md#picking-through-a-section).
   // N ("look straight at the selected face") with the cursor on the CUT.
   // The cap is not a B-Rep face, so N used to find no hovered face on a part
   // (and did nothing) and the wall the ray entered through on an assembly

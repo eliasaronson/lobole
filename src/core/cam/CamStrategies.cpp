@@ -45,7 +45,7 @@
 // passes (planar and rotary) are in CamSurfaceStrategies.cpp.
 
 // One of six files split from CamToolpath.cpp
-// (docs/architecture-review-2026-09-06.md, stage 2).
+// (docs/architecture.md#source-layout).
 
 namespace cam {
 
@@ -193,9 +193,9 @@ std::vector<glm::dvec2> AddCornerRelief(const std::vector<glm::dvec2>& pts,
                                         std::vector<glm::dvec2>* corners);
 
 // ProjectedOutlines, from the context's cache, from a worker later, or right
-// here -- the same three-way surfacing has (docs/cam/add-operation-plan.md).
-// Empty when deferred, and `tp` is then pending: a profile has nothing to
-// follow until its outlines land.
+// here -- the same three-way surfacing has
+// (docs/cam/README.md#background-work). Empty when deferred, and `tp` is then
+// pending: a profile has nothing to follow until its outlines land.
 std::optional<std::vector<std::vector<Loop>>>
 OutlinesThroughCache(const std::vector<Body>& bodies, double topZ,
                      const std::vector<double>& passes, Toolpath& tp,
@@ -325,7 +325,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   }
   // The outline the cutter may follow at each depth: the part's projection
   // from the operation's top down to that pass, NOT its cross-section there
-  // (ProjectedOutlines, and docs/known-bugs.md for the gouge that is).
+  // (ProjectedOutlines, and docs/cam/operations.md#profile for the gouge that
+  // is).
   const std::optional<std::vector<std::vector<Loop>>> projectedOr =
       OutlinesThroughCache(bodies, op.topZ, passes, tp, ctx);
   if (!projectedOr)
@@ -553,7 +554,8 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
   const double radius = tool.diameter * 0.5;
   const double step = std::max(0.05, op.stepover) * tool.diameter;
   // A clicked floor face IS the region to clear, at every depth: its outer
-  // wire is the pocket wall and its inner wires are islands (docs/cam/gui.md).
+  // wire is the pocket wall and its inner wires are islands
+  // (docs/cam/operations.md#pocket-and-adaptive).
   std::string why;
   const Clipper2Lib::Paths64 picked =
       TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5, why);
@@ -783,9 +785,9 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       // right here and cuts the same region: falling back is what the
       // no-library branch above already does, and giving up instead left the
       // user clicking "Clear a pocket" at a face that never changed
-      // (docs/cam/dogfood-round.md). Which strategy cut it is REPORTED, not
-      // hidden — a job that quietly changed strategy is a job whose feeds
-      // were chosen for the other one.
+      // (docs/cam/operations.md#pocket-and-adaptive). Which strategy cut it is
+      // REPORTED, not hidden — a job that quietly changed strategy is a job
+      // whose feeds were chosen for the other one.
       tp.moves.clear();
       GeneratePocket(setup, op, tool, bodies, tp);
       tp.strategy =

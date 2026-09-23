@@ -34,10 +34,10 @@
 // Placing a dimension: which pair of things a click meant, where the label
 // goes, and committing it as a driving constraint. Also the two tools that
 // collect a selection before they act -- project and mirror.
-// Split out of SketchInteraction.cpp (docs/architecture-review-2026-09-06.md,
-// stage 7a). The 843-line viewport router stays there; these are the blocks
-// it calls into, and SketchInteractionInternal.h is that interface written
-// down.
+// Split out of SketchInteraction.cpp
+// (docs/architecture.md#the-ui-actions-layer). The 843-line viewport router
+// stays there; these are the blocks it calls into, and
+// SketchInteractionInternal.h is that interface written down.
 
 namespace ui {
 

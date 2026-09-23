@@ -20,10 +20,10 @@
 
 namespace ui {
 
-// The FEM jobs' payloads (docs/ui/long-operations.md, phase 3). The thread,
-// `done` and `cancel` live on the registry's BackgroundJob; these are what
-// the worker reads and writes and what the panel's status reads while it
-// runs. Each remembers the PART SLOT it was started from, so the result is
+// The FEM jobs' payloads (docs/ui/long-operations.md#fem-meshing-and-solving).
+// The thread, `done` and `cancel` live on the registry's BackgroundJob; these
+// are what the worker reads and writes and what the panel's status reads while
+// it runs. Each remembers the PART SLOT it was started from, so the result is
 // stored into that document even if another tab is active when it lands —
 // the case step 0 could not fix while the polls took "the active document".
 struct TopoJob {

@@ -1,151 +1,150 @@
 # Drawings — workflow guide
 
-How to make a 2D drawing of a part or assembly, in the GUI and over the
-RPC/MCP interface. For the design rationale see [plan.md](plan.md).
+How to make a 2D drawing of a part or assembly, in the GUI and over RPC/MCP.
+How it works underneath is in [README.md](README.md).
 
-A **drawing** is a third document kind (alongside parts and assemblies): one
-sheet holding hidden-line-removed **views** projected from a source part or
-assembly, plus driven **dimensions** measured off the projected geometry.
-Projected geometry and measured values are *derived* — they are recomputed on
-demand, never stored — so a drawing file is just the setup (sheet, view list,
-dimension list).
+A **drawing** is its own document kind beside parts and assemblies: one sheet
+of hidden-line **views** projected from a source part or assembly, plus
+driven **dimensions** measured off the projected geometry. Projected geometry
+and measured values are recomputed, never stored, so a drawing file is only
+its setup (sheet, views, dimensions, notes).
 
 ## Concepts
 
-- **View** — a projection of a source document in a named orientation
+- **View**: a projection of a source document in a named orientation
   (`front` / `back` / `left` / `right` / `top` / `bottom` / `iso`), placed on
   the sheet at a scale and position. Visible edges draw solid, hidden edges
-  dashed. A **projected child** view folds from a base view and stays aligned
-  to it along the shared sheet axis (a `top` child sits directly below its
-  `front` base; a `right` child beside it).
-- **Dimension** — a *driven* (read-only) value measured from projected
+  dashed. A **projected child** folds from a base view and stays aligned to
+  it along the shared sheet axis (a `top` child shares its `front` base's X,
+  a `right` child its Y).
+- **Quality**: `exact` (the default) traces every curve to the model edge
+  that made it, which is what dimensions attach to. `fast` is a polygonal
+  look at a sheet that would otherwise take long to project; nothing on a
+  fast view can be dimensioned.
+- **Hidden occurrences**: an assembly view can leave occurrences off. Exact
+  projection is priced by surface complexity, so one spring or imported part
+  can be most of a view's time; the view's cost report names it.
+- **Dimension**: a *driven*, read-only value measured from projected
   geometry: `distance` / `distance_x` / `distance_y` between two edges,
-  `radius` / `diameter` of a circle, or `angle` between two edges. Editing
-  geometry happens in the part — a drawing measures, it does not drive.
-  A `diameter` dim also carries the band the MODEL records for that bore
-  (`Ø20 H7`, or `Ø20 +0.05/-0.02` for an explicit one), read from the part's
-  tolerance rather than authored on the sheet — so it follows an edit and
-  needs no field of its own. A `radius` dim does not: an ISO class states how
-  a DIAMETER may vary. See [../tolerances/plan.md](../tolerances/plan.md).
-- **Explicit update** — projection is hidden-line removal, which is expensive,
-  so it never runs automatically. A view whose source changed reads **stale**
-  until you update the drawing. (The first view of a drawing tab, and an
-  opened drawing, project once automatically.)
-- **Note** — a line of text placed on the sheet, optionally with a leader to
-  a piece of projected geometry. The annotation class no dimension kind
-  covers ("6× Ø4.4 on Ø175.8 PCD", "break all sharp edges").
-- **Configuration** — a view of a PART can name one of its configurations and
-  draws the part in that variant, whatever the model tab has active. That is
-  how a sheet shows a sheet-metal part's `Flat` blank beside its folded
-  views. Left unset, a view draws whatever the part has active.
-- **Bend line** — a flat sheet-metal blank's crease, drawn as a chain line
-  (long dash, dot) in a view that looks square onto the blank. It comes from
-  the bend the feature recorded, not from projected geometry, so it cannot be
-  dimensioned to yet.
-- **Bend table** — a note whose rows are its view's part's bends: angle,
-  inside radius, K, the allowance a flat crease eats, and UP or DOWN as seen
-  from that view (edge-on, a crease has neither). UP is a question about a
-  SIDE, so a bottom view calls the same crease DOWN — and the DXF, which is
-  read from the side the part's first flange was picked on, can label it
-  differently again. Regenerated from the part
-  at every resolve; its own text is only the caption. Rows are numbered in
-  the part's body order, and the bend lines are not labelled with those
-  numbers yet.
-- **Centre mark** — the little cross at the centre of every visible circle,
-  drawn automatically (sized from the circle) in the GUI, the SVG and the PDF.
-  Nothing to add and nothing to place.
-- **Dangling** — a dimension whose referenced edge was consumed upstream (a
-  fillet ate it, a feature was deleted) resolves as dangling and is flagged;
-  it is never silently rebound to a different edge.
+  `radius` / `diameter` of a circle, `angle` between two edges, and callouts
+  (`hole_callout` from the hole feature, `pattern_callout` over two or more
+  circles, `fastener_callout` naming a standard part on an assembly view).
+  Editing geometry happens in the part. A `diameter` also shows the tolerance
+  the part records for that bore (`Ø20 H7`, or `Ø20 +0.05/-0.02`); see
+  [../tolerances/README.md](../tolerances/README.md).
+- **Explicit update**: projection is expensive, so it does not run on every
+  change. A view whose source changed reads **stale** until the drawing is
+  updated. Entering a drawing tab projects it.
+- **Note**: a line of text on the sheet, optionally with a leader to
+  projected geometry ("6× Ø4.4 on Ø175.8 PCD", "break all sharp edges").
+  `{{expression}}` in the text is replaced by a variable's value.
+- **Configuration**: a view of a part can name one of its configurations and
+  draws the part in that variant, whatever the model tab has active — a
+  sheet-metal part's `Flat` blank beside its folded views. Unset, it draws
+  whatever the part has active.
+- **Bend line**: a flat blank's crease, drawn as a chain line in a view that
+  looks square onto the blank. It comes from the recorded bend, not from
+  projected geometry, so it cannot be dimensioned to.
+- **Bend table**: a note whose rows are its view's part's bends (angle,
+  inside radius, K, bend allowance, and UP or DOWN as seen from that view),
+  regenerated from the part at every update. A bottom view calls the same
+  crease DOWN that a top view calls UP; the flat-pattern DXF answers from the
+  side the first flange was picked on and may differ.
+- **Centre mark**: drawn automatically on every visible circle.
+- **Dangling**: a dimension whose edge was consumed upstream (a fillet ate
+  it, a feature was deleted) is flagged and left out of the export; it is
+  never rebound to a different edge.
 
 ## In the GUI
 
-1. **`+Dwg`** on the tab bar adds a drawing tab. The Model panel becomes the
-   drawing panel, listing the sheet, the views and the dimensions; the
-   viewport becomes a 2D sheet (scroll to zoom about the cursor, middle-drag
-   to pan, the toolbar's **Fit** to recentre). The drawing toolbar holds the
-   verbs: Add view, Update views, the dimension tools, Fit and Export.
-2. **Sheet** — pick the paper size (A4–A0 / Letter), orientation, and fill the
-   **Title block** fields (project / document / author / date). A fifth row,
-   UNITS, is filled in for you and cannot be typed: it states what the sheet's
-   dimensions are in.
+1. **+ → New Drawing** on the tab bar adds a drawing tab. The Model panel
+   becomes the drawing panel (Sheet, Title block, Views, Dimensions); the
+   viewport becomes the sheet: scroll zooms about the cursor, middle-drag (or
+   Alt+left-drag, Shift+scroll) pans, the toolbar's **Fit** recentres. The
+   drawing toolbar holds Add view, Update views, the dimension tools, Fit and
+   Export.
+2. **Sheet**: paper size (A4–A0, Letter), landscape, and the title block
+   fields (project, document, author, date). The UNITS row is filled in from
+   the source document and cannot be typed. Dimension lengths carry no unit
+   suffix, as drafting practice wants, which is why that row exists; angles
+   keep their `°`.
+3. **Views**: **Add view** opens a tool window: source (part or assembly),
+   orientation, scale (0 picks a standard scale that fits), and for a part
+   with configurations, which **Configuration** to draw. The view is placed
+   clear of the views already there. Each view is a row in the panel;
+   right-click it to change the **Scale**, **Add bend table** beside a view
+   of a part with bends, or **Delete** it. **Update views** re-projects; the
+   panel says when views are stale.
+4. **Dimensions**: pick a tool on the toolbar (Distance, Dist X, Dist Y,
+   Radius, Diameter, Angle, Hole callout, Pattern callout — Enter finishes
+   the pick — or Part note), then click projected edges or circles on the
+   sheet. The dimension places itself clear of the views, the title block and
+   other labels; drag its value label to move it. Right-click a dimension's
+   row to delete it.
+5. **Export** writes the sheet as SVG or PDF. It needs a system file dialog;
+   without one, use `export_drawing`.
 
-   Dimension text is in the SOURCE document's units, not the reader's — a
-   drawing of an inch part is an inch drawing wherever it is opened. Lengths
-   carry no suffix, as drafting practice wants, which is exactly why the UNITS
-   row exists; angles keep their `°` (or three decimals and `rad` on a
-   document that asked for radians).
-3. **Views** — the toolbar's **Add view** opens a tool window: choose a
-   source (part or assembly), the orientation (any of the seven), a scale (0
-   picks a standard one that fits), and, for a part with configurations,
-   which **Configuration** to draw, then **Add view**. Each view is a row in
-   the panel, with its orientation and scale; right-click it to change the
-   **Scale**, add a **Bend table** beside a view of a part with bends, or
-   **Delete** it. Set a view's `base_view` to fold it from another. The
-   toolbar's **Update views** (re)projects; the panel says when views are
-   stale.
-4. **Dimensions** — click a dimension tool on the toolbar (Distance, Dist X/Y,
-   Radius, Diameter, Angle, Hole callout, Pattern callout, Part note), then
-   click the projected edges/circles on the sheet; the dimension appears once
-   enough are picked. It **places itself** clear of the views, the title block
-   and the labels already on the sheet; drag its value label to move it. Each
-   dimension is a row in the panel, with its value; right-click to delete it.
-5. **File → Export…** writes the sheet as **SVG** or **PDF**.
-
-Notes are drawn on the sheet (and exported) but are **added over the RPC**
-today — `add_drawing_note` below; a view row's Add bend table is the only
-note the GUI adds.
+Folding a child from a base view, hiding occurrences, choosing `fast`, and
+free notes are set over RPC.
 
 ## Over RPC / MCP
 
-The same workflow headless (snake_case RPCs; the MCP tools mirror them 1:1):
-
 ```
-create_drawing {name?, sheet?: {size, landscape, title_block:{...}}}
+create_drawing {name?, sheet?: {size, landscape, title_block: {project, document, author, date}}}
+set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
-                  configuration?}   # a part's configuration, by name or id
-update_drawing            # the explicit HLR re-projection; returns per-view counts
-list_drawing_geometry {view}   # discover a view's edges/circles + the ref to dimension
-add_drawing_dim {view, kind, refs:[{edge|sil_face:{feature_id, element},
+                  configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names]}
+set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
+                  base_view?, configuration?, hidden?}
+update_drawing {budget_s?}     # re-project; per-view curve counts and errors
+list_drawing_views             # placement, stale, and what each projection cost
+list_drawing_geometry {view}   # a view's curves, with the ref to dimension each
+add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},
                                      occurrence?, end?}], offset?}
-add_drawing_note {text, position:[x,y], view?, ref?:{feature_id, element},
-                  table?: "bends"}  # a bend table of `view`'s part
+list_drawing_dims / remove_drawing_dim {id}
+add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element},
+                  table?: "bends"}
 list_drawing_notes / remove_drawing_note {id}
-check_drawing            # views stale/dangling refs/labels that collide
-export_drawing {path}     # .svg or .pdf by extension
+check_drawing {drawing?}       # stale views, dangling refs, overlapping labels
+export_drawing {path}          # .svg or .pdf
 ```
 
-`offset` on a dimension is OPTIONAL: left out, the label is placed outside the
-nearest view edge, skipping the other views, the title block and the labels
-already placed. `check_drawing` reports what is left overlapping, so a sheet
-that needs hand-placing says so instead of exporting unreadable.
+`source` is the source document's name. Omit both `scale` and `position` on
+`add_drawing_view` and it is placed the way the Add view button places it,
+projected, and the response carries its cost. `offset` on a dimension is in
+sheet millimetres and optional; left out, the label is placed clear of the
+views, the title block and existing labels. `check_drawing` reports anything
+left overlapping.
 
-`refs` are toponaming references: `list_drawing_geometry` returns, for each
-projected edge/circle, the `ref` (`{feature_id, element}`) and its
-`source_id` (pass as `occurrence`) to hand straight back to `add_drawing_dim`.
-`end` selects a vertex: `0` whole edge (its midpoint), `1`/`2` an endpoint.
+`list_drawing_geometry` returns, for each projected edge or circle, its `ref`
+(`{feature_id, element}`) and `source_id` (pass as `occurrence`) to hand
+straight to `add_drawing_dim`. `end` selects a vertex: `0` the whole edge,
+`1`/`2` an endpoint.
 
-End-to-end example (a dimensioned drawing of a part, fully headless):
+A dimensioned drawing of a part, headless:
 
 ```python
-create_drawing(name="bracket", sheet={"size":"a3","landscape":True,
-    "title_block":{"project":"Gearbox","document":"Bracket"}})
-front = add_drawing_view(source="bracket-part", orientation="front", position=[130,210])["id"]
-add_drawing_view(source="bracket-part", orientation="top", base_view=front, position=[0,120])
+create_drawing(name="bracket", sheet={"size": "a3", "landscape": True,
+    "title_block": {"project": "Gearbox", "document": "Bracket"}})
+front = add_drawing_view(source="bracket-part", orientation="front",
+                         position=[130, 210])["id"]
+add_drawing_view(source="bracket-part", orientation="top", base_view=front,
+                 position=[0, 120])
 update_drawing()
 g = list_drawing_geometry(view=front)["geometry"]
-vlines = sorted([e for e in g if e["type"]=="line" and abs(e["p1"][1]-e["p2"][1])>5],
+vlines = sorted([e for e in g if e["type"] == "line"
+                 and abs(e["p1"][1] - e["p2"][1]) > 5],
                 key=lambda e: e["p1"][0])
 add_drawing_dim(view=front, kind="distance_x",
-    refs=[{"edge":vlines[0]["ref"], "occurrence":vlines[0]["source_id"]},
-          {"edge":vlines[-1]["ref"],"occurrence":vlines[-1]["source_id"]}], offset=[0,-14])
+    refs=[{"edge": vlines[0]["ref"], "occurrence": vlines[0]["source_id"]},
+          {"edge": vlines[-1]["ref"], "occurrence": vlines[-1]["source_id"]}],
+    offset=[0, -14])
 export_drawing(path="bracket.pdf")
 ```
 
-## Not in v1
+A slow assembly view: read `list_drawing_views` → `cost.by_occurrence`, then
+either `set_drawing_view {id, hidden: [...]}` to leave the dear occupant off,
+or `quality: "fast"` for a look. `update_drawing {budget_s}` bounds how long
+an update may run.
 
-Section / detail / broken / crop views, balloons + BOM tables on the sheet,
-exploded drawing views, multi-sheet drawings, GD&T / weld / surface symbols,
-templates/styles, and DXF output are deferred (see plan.md). Driving
-dimensions from the sheet is refused by design — a drawing measures; the part
-edits.
+What drawings do not do yet is listed in [README.md](README.md#not-done).

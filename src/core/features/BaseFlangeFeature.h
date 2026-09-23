@@ -7,7 +7,7 @@
 #include <vector>
 
 // The first wall of a sheet part: a closed sketch profile thickened by the
-// document's sheet-metal thickness (docs/sheetmetal/plan.md, S2).
+// document's sheet-metal thickness (docs/sheetmetal/README.md#features).
 //
 // Geometrically it is the cheapest feature in the workstream — a prism one
 // gauge deep. What it actually does is DECLARE the part to be sheet metal:

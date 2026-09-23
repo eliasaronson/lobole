@@ -982,7 +982,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::vector<Body> placed;
     const std::vector<Body>* bodies = nullptr;
     // A read, so it reaches another part by reference rather than by
-    // switching to it (docs/agent-scale-followup-plan.md, W2).
+    // switching to it (docs/scripting/rpc.md#reads-name-their-part).
     Document* sectionDoc = doc;
     if (p.contains("part"))
       sectionDoc = ResolvePartParam(state, p.at("part"));
@@ -1609,7 +1609,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // carrying toroidal fillets is SECONDS (13.2 s for one brace of the
     // smart speaker, 0.03 s for a tube with none). A caller reading
     // volume_ratio should not pay for them
-    // (docs/inspect/compare-metrics-plan.md).
+    // (docs/inspect/README.md#comparing-against-a-reference).
     const std::string metrics = p.value("metrics", std::string("all"));
     if (metrics != "all" && metrics != "volume")
       throw std::runtime_error("unknown metrics '" + metrics +
@@ -1674,10 +1674,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (!wantOverlap) {
       // The census is stated, not judged. It separates a shape faked at the
       // right volume (a frustum of stacked discs is cylinder:6 plane:7
-      // against cone:1 plane:2 — docs/benchmark-construction-plan.md), but
-      // a difference is not by itself a difference of SHAPE: a STEP
-      // round-trip splits faces, and this project's ring brace comes back
-      // 95/223 against the export's 45/171 at an IoU of 0.991.
+      // against cone:1 plane:2 —
+      // docs/inspect/README.md#comparing-against-a-reference), but a difference
+      // is not by itself a difference of SHAPE: a STEP round-trip splits faces,
+      // and this project's ring brace comes back 95/223 against the export's
+      // 45/171 at an IoU of 0.991.
       snprintf(buf, sizeof buf,
                "size and placement only (metrics \"volume\"): census "
                "%d faces / %d edges against %d / %d%s — ask for metrics "
@@ -2325,9 +2326,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return out;
   }
   if (m == "check_fit") {
-    // ISO 286 limits and fits (docs/tolerances/plan.md, T1). Two jobs in one
-    // method because they are one question asked at two depths: `hole` alone
-    // is "what may this bore be", `hole` + `shaft` is "will they go
+    // ISO 286 limits and fits (docs/tolerances/README.md#checks). Two jobs in
+    // one method because they are one question asked at two depths: `hole`
+    // alone is "what may this bore be", `hole` + `shaft` is "will they go
     // together".
     //
     // Nothing here touches geometry. A size tolerance leaves nominal alone —
@@ -2473,8 +2474,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
   }
   if (m == "set_tolerance") {
     // What a face's SIZE is allowed to vary by, or — with `b` — what the
-    // DISTANCE between two faces is (docs/tolerances/plan.md, T2 and T5a).
-    // params: {feature_id, element, b?: {feature_id, element},
+    // DISTANCE between two faces is
+    // (docs/tolerances/README.md#the-stored-tolerance). params: {feature_id,
+    // element, b?: {feature_id, element},
     //          class? | lower?+upper?, comment?}
     Document& part = RequirePartDoc(doc, "set_tolerance");
     const ElementRef ref{p.at("feature_id").get<uint64_t>(),
@@ -2809,9 +2811,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     //
     // NOTE: `interference` has a near-twin of the occurrence resolution
     // below. They are not yet one function; that is a recorded follow-up in
-    // docs/inspect/measure-v2.md rather than a refactor smuggled into this
-    // change, because interference's version is load-bearing for the
-    // contact sweep and shares a prefetched body map with it.
+    // docs/inspect/README.md#what-it-does-not-do-yet rather than a refactor
+    // smuggled into this change, because interference's version is load-bearing
+    // for the contact sweep and shares a prefetched body map with it.
     struct Side {
       std::vector<Body> owned; // world-placed bodies, for an occurrence
       const std::vector<Body>* bodies = nullptr;
@@ -3372,7 +3374,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           j["radius_over_diameter"] = b.radius / row.outerDiameter;
           // Against the declared stock where there is some, and only against
           // a bare ratio where there is not — the literal was the complaint
-          // (docs/tube/plan.md).
+          // (docs/tube/README.md#the-cut-list-and-the-bend-schedule).
           if (src.Tube()) {
             const double minR = tube::MinBendRadius(
                 src.Tube()->material, row.outerDiameter, row.wallThickness);
@@ -3502,7 +3504,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       // filleted or fitted, and the listing looks complete. A bore drilled
       // in one end of a handle came back with no cylinder at all while the
       // hole was plainly in the solid, and the only clue anywhere was that a
-      // screw in it read as interference (docs/grill-friction-plan.md).
+      // screw in it read as interference
+      // (docs/modeling/toponaming.md#how-each-operation-names-its-output).
       //
       // Faces only: an EDGE is named when something needs it, so a plain box
       // has six named faces and no named edges, and counting those would be

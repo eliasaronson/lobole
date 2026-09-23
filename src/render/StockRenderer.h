@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-// Draws the CAM cutting simulation's stock (docs/cam/simulation.md, S3).
+// Draws the CAM cutting simulation's stock (docs/cam/simulation.md#stock).
 //
 // Its own pipeline and vertex format, for one reason: the mesh changes EVERY
 // FRAME during playback, and `MeshRenderer::UpdateAsset` cannot do that — it

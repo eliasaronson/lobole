@@ -626,11 +626,11 @@ bool ViewHasBends(AppState& state, const DrawingView& view) {
 }
 
 // The views, as rows in the feature list's style (ui::ListRow,
-// docs/ui/consistency-round-plan.md): a glyph, the name, the orientation and
-// scale as the tail, red when it failed to project. The row's menu sets the
-// scale, adds a bend table and deletes it. Adding a view is the toolbar's
-// (the Add view tool window), and so is Update views; this says whether one
-// is needed.
+// docs/ui/panels.md#drawing-tab-the-drawing-panel): a glyph, the name, the
+// orientation and scale as the tail, red when it failed to project. The row's
+// menu sets the scale, adds a bend table and deletes it. Adding a view is the
+// toolbar's (the Add view tool window), and so is Update views; this says
+// whether one is needed.
 void DrawViewsSection(AppState& state) {
   ImGui::SeparatorText("Views");
 
@@ -809,10 +809,11 @@ void DrawAddViewToolWindow(AppState& state) {
     state.drawingAddViewOpen = false;
     return;
   }
-  // The one way to add a view by hand (docs/ui/consistency-round-plan.md):
-  // what the toolbar's popup offered (a source and four orientations) and
-  // what the panel's form offered (all seven, a configuration and a scale),
-  // in the tool window the toolbar's Add view opens.
+  // The one way to add a view by hand
+  // (docs/ui/panels.md#drawing-tab-the-drawing-panel): what the toolbar's popup
+  // offered (a source and four orientations) and what the panel's form offered
+  // (all seven, a configuration and a scale), in the tool window the toolbar's
+  // Add view opens.
   BeginToolWindowFrame(state, "Add view");
   static int srcIdx = 0, orientIdx = 0;
   static float addScale = 1.0f;
