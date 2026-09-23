@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -499,13 +500,37 @@ FixturePlaceName(const Setup& setup, const std::vector<Body>& bodies,
                                     const std::vector<Body>& fixtureModel,
                                     const FixtureSeat& seat, glm::dvec3& pos,
                                     double& rotZdeg, std::string* why);
-// A click on the stock's top as a seat: the nearest edge, `overMm` the
-// click's distance in from it (so the face's innermost point lands where
-// you clicked), `alongMm` its place along it. `seat.face` is kept.
-[[nodiscard]] bool SeatAtPoint(const glm::dvec3& stockLo,
-                               const glm::dvec3& stockHi,
-                               const glm::dvec3& point, FixtureSeat& seat,
-                               std::string* why);
+// The inverse: the seat that `face` resting at bed pose (pos, rotZdeg) IS --
+// the edge its nose points in across, the spin left over, and how far over
+// and along it sits. Solving the result gives the pose back. For a fixture
+// dragged onto the stock (docs/cam/fixture-gizmo-plan.md): the seat comes
+// from where it was put.
+[[nodiscard]] bool SeatFromPose(const glm::dvec3& stockLo,
+                                const glm::dvec3& stockHi,
+                                const std::vector<Body>& fixtureModel,
+                                const ElementRef& face, const glm::dvec3& pos,
+                                double rotZdeg, FixtureSeat& seat,
+                                std::string* why);
+// The flat faces of `bodies` square to X, Y and Z, by axis: where each lies on
+// that axis and which way it faces. What a dragged fixture snaps with -- its
+// real faces, so a step clamp's pad, bar and stud undersides are three
+// candidates, where its bounding box would offer one.
+struct AxisFacePlane {
+  double at = 0.0;
+  int facing = 1;  // +1 faces +axis, -1 faces -axis
+  size_t body = 0; // index into `bodies`
+  int face = 0;    // explorer index within that body
+};
+[[nodiscard]] std::array<std::vector<AxisFacePlane>, 3>
+AxisFacePlanes(const std::vector<Body>& bodies);
+// The named, flat, downward face of the fixture -- its bodies in their OWN
+// coordinates, placed at (pos, rotZdeg) -- that lies ON the stock's top and
+// over it: the largest by overlap, or unset when none does. A fixture put
+// down there rests on that face (docs/cam/fixture-gizmo-plan.md).
+[[nodiscard]] ElementRef FaceOnStockTop(const glm::dvec3& stockLo,
+                                        const glm::dvec3& stockHi,
+                                        const std::vector<Body>& fixtureModel,
+                                        const glm::dvec3& pos, double rotZdeg);
 // Why `face` (in the fixture's own model) cannot be a seat, or empty.
 [[nodiscard]] std::string SeatFaceRefusal(const std::vector<Body>& fixtureModel,
                                           const ElementRef& face);

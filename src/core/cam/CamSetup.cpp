@@ -22,6 +22,7 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
@@ -498,6 +499,66 @@ std::string SeatFaceRefusal(const std::vector<Body>& fixtureModel,
   return FindSeatFace(fixtureModel, face, sf, why) ? std::string() : why;
 }
 
+namespace {
+
+// Which way the NOSE points, in the fixture's own XY: from the middle of the
+// whole fixture to the face it rests on. A step clamp's pad is at one end and
+// its studs at the other, so this is the direction it reaches; a face in the
+// middle has no direction of its own and takes +X.
+glm::dvec2 NoseOf(const std::vector<Body>& model, const SeatFace& sf) {
+  glm::dvec3 lo(1e30), hi(-1e30);
+  for (const Body& b : model) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 blo(0.0f), bhi(0.0f);
+    b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
+    lo = glm::min(lo, glm::dvec3(blo));
+    hi = glm::max(hi, glm::dvec3(bhi));
+  }
+  const glm::dvec2 nose(sf.centroid.x - (lo.x + hi.x) * 0.5,
+                        sf.centroid.y - (lo.y + hi.y) * 0.5);
+  return glm::length(nose) < 1e-6 ? glm::dvec2(1.0, 0.0) : glm::normalize(nose);
+}
+
+// The face turned by `turn` (radians about Z, before any move): how far it
+// reaches along `in`, and where its centroid goes. Shared by the solve and its
+// inverse, so the two cannot disagree about what "over" measures.
+bool TurnedFace(const SeatFace& sf, double turn, const glm::dvec2& in,
+                double& reach, glm::dvec2& centroid) {
+  gp_Trsf spin;
+  spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), turn);
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(sf.face.Moved(TopLoc_Location(spin)), box, false,
+                         false);
+  if (box.IsVoid())
+    return false;
+  double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+  box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  reach = in.x > 0.5 ? xmax : in.x < -0.5 ? -xmin : in.y > 0.5 ? ymax : -ymin;
+  const double c = std::cos(turn), s = std::sin(turn);
+  centroid = {c * sf.centroid.x - s * sf.centroid.y,
+              s * sf.centroid.x + c * sf.centroid.y};
+  return true;
+}
+
+// The edge's own coordinate along its inward direction (so larger is further
+// in), and the low end of the coordinate running along it.
+double EdgeIn(StockEdge edge, const glm::dvec3& lo, const glm::dvec3& hi) {
+  switch (edge) {
+  case StockEdge::MinusX:
+    return lo.x;
+  case StockEdge::PlusX:
+    return -hi.x;
+  case StockEdge::MinusY:
+    return lo.y;
+  case StockEdge::PlusY:
+    return -hi.y;
+  }
+  return lo.x;
+}
+
+} // namespace
+
 bool SolveFixtureSeat(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
                       const std::vector<Body>& fixtureModel,
                       const FixtureSeat& seat, glm::dvec3& pos, double& rotZdeg,
@@ -513,88 +574,148 @@ bool SolveFixtureSeat(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
   SeatFace sf;
   if (!FindSeatFace(fixtureModel, seat.face, sf, reason))
     return refuse(reason);
-
-  // Which way the NOSE points: from the middle of the whole fixture to the
-  // face it rests on. A step clamp's pad is at one end and its studs at the
-  // other, so this is the direction it reaches; a face in the middle has no
-  // direction of its own and takes +X.
-  glm::dvec3 lo(1e30), hi(-1e30);
-  for (const Body& b : fixtureModel) {
-    if (!b.shape.IsValid())
-      continue;
-    glm::vec3 blo(0.0f), bhi(0.0f);
-    b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
-    lo = glm::min(lo, glm::dvec3(blo));
-    hi = glm::max(hi, glm::dvec3(bhi));
-  }
-  glm::dvec2 nose(sf.centroid.x - (lo.x + hi.x) * 0.5,
-                  sf.centroid.y - (lo.y + hi.y) * 0.5);
-  nose = glm::length(nose) < 1e-6 ? glm::dvec2(1.0, 0.0) : glm::normalize(nose);
-
+  const glm::dvec2 nose = NoseOf(fixtureModel, sf);
   const glm::dvec2 in = InwardOf(seat.edge);
   const double turn = std::atan2(in.y, in.x) - std::atan2(nose.y, nose.x) +
                       glm::radians(seat.spinDeg);
-  const double c = std::cos(turn), s = std::sin(turn);
-
-  // The face, turned, as a box: its far side along `in` is how far it
-  // reaches in, which is what `overMm` measures.
-  gp_Trsf spin;
-  spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), turn);
-  Bnd_Box box;
-  BRepBndLib::AddOptimal(sf.face.Moved(TopLoc_Location(spin)), box, false,
-                         false);
-  if (box.IsVoid())
+  double reach = 0.0;
+  glm::dvec2 turned(0.0);
+  if (!TurnedFace(sf, turn, in, reach, turned))
     return refuse("the face it rests on has no extent");
-  double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
-  box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-  const double reach = in.x > 0.5    ? xmax
-                       : in.x < -0.5 ? -xmin
-                       : in.y > 0.5  ? ymax
-                                     : -ymin;
-  // The edge's own coordinate along `in`, the same way round.
-  const double edgeIn = in.x > 0.5    ? stockLo.x
-                        : in.x < -0.5 ? -stockHi.x
-                        : in.y > 0.5  ? stockLo.y
-                                      : -stockHi.y;
-  const double posIn = edgeIn + seat.overMm - reach;
-
-  const glm::dvec2 turned(c * sf.centroid.x - s * sf.centroid.y,
-                          s * sf.centroid.x + c * sf.centroid.y);
+  const double posIn =
+      EdgeIn(seat.edge, stockLo, stockHi) + seat.overMm - reach;
   const bool alongX = AlongX(seat.edge);
   const double low = alongX ? stockLo.x : stockLo.y;
   const double posAlong = low + seat.alongMm - (alongX ? turned.x : turned.y);
-
   const glm::dvec2 t = alongX ? glm::dvec2(1.0, 0.0) : glm::dvec2(0.0, 1.0);
   const glm::dvec2 xy = in * posIn + t * posAlong;
   pos = glm::dvec3(xy.x, xy.y, stockHi.z - sf.centroid.z);
-  double deg = glm::degrees(turn);
-  deg = std::remainder(deg, 360.0);
+  const double deg = std::remainder(glm::degrees(turn), 360.0);
   rotZdeg = std::abs(deg) < 1e-9 ? 0.0 : deg;
   return true;
 }
 
-bool SeatAtPoint(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
-                 const glm::dvec3& point, FixtureSeat& seat, std::string* why) {
-  constexpr double kEps = 1e-6;
-  if (point.x < stockLo.x - kEps || point.x > stockHi.x + kEps ||
-      point.y < stockLo.y - kEps || point.y > stockHi.y + kEps) {
+bool SeatFromPose(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
+                  const std::vector<Body>& fixtureModel, const ElementRef& face,
+                  const glm::dvec3& pos, double rotZdeg, FixtureSeat& seat,
+                  std::string* why) {
+  std::string reason;
+  SeatFace sf;
+  if (!FindSeatFace(fixtureModel, face, sf, reason)) {
     if (why != nullptr)
-      *why = "that is off the stock -- click on its top, where the clamp "
-             "should press";
+      *why = reason;
     return false;
   }
-  const std::pair<double, StockEdge> gaps[] = {
-      {point.x - stockLo.x, StockEdge::MinusX},
-      {stockHi.x - point.x, StockEdge::PlusX},
-      {point.y - stockLo.y, StockEdge::MinusY},
-      {stockHi.y - point.y, StockEdge::PlusY}};
-  const auto nearest = std::min_element(
-      std::begin(gaps), std::end(gaps),
-      [](const auto& a, const auto& b) { return a.first < b.first; });
-  seat.edge = nearest->second;
-  seat.overMm = std::max(0.0, nearest->first);
-  seat.alongMm = AlongX(seat.edge) ? point.x - stockLo.x : point.y - stockLo.y;
+  // The edge it comes in over is the one its nose points INTO the stock
+  // across; the spin is whatever is left of the pose after pointing that way.
+  const glm::dvec2 nose = NoseOf(fixtureModel, sf);
+  const double turn = glm::radians(rotZdeg);
+  const glm::dvec2 bedNose(std::cos(turn) * nose.x - std::sin(turn) * nose.y,
+                           std::sin(turn) * nose.x + std::cos(turn) * nose.y);
+  StockEdge best = StockEdge::MinusX;
+  double most = -2.0;
+  for (const StockEdge e : {StockEdge::MinusX, StockEdge::PlusX,
+                            StockEdge::MinusY, StockEdge::PlusY}) {
+    const double d = glm::dot(bedNose, InwardOf(e));
+    if (d > most + 1e-9) {
+      most = d;
+      best = e;
+    }
+  }
+  const glm::dvec2 in = InwardOf(best);
+  double reach = 0.0;
+  glm::dvec2 turned(0.0);
+  if (!TurnedFace(sf, turn, in, reach, turned)) {
+    if (why != nullptr)
+      *why = "the face it rests on has no extent";
+    return false;
+  }
+  seat.face = face;
+  seat.edge = best;
+  const double base = std::atan2(in.y, in.x) - std::atan2(nose.y, nose.x);
+  const double spin = std::remainder(rotZdeg - glm::degrees(base), 360.0);
+  seat.spinDeg = std::abs(spin) < 1e-9 ? 0.0 : spin;
+  seat.overMm =
+      glm::dot(glm::dvec2(pos), in) + reach - EdgeIn(best, stockLo, stockHi);
+  const bool alongX = AlongX(best);
+  seat.alongMm =
+      alongX ? pos.x + turned.x - stockLo.x : pos.y + turned.y - stockLo.y;
   return true;
+}
+
+std::array<std::vector<AxisFacePlane>, 3>
+AxisFacePlanes(const std::vector<Body>& bodies) {
+  std::array<std::vector<AxisFacePlane>, 3> out;
+  for (size_t bi = 0; bi < bodies.size(); bi++) {
+    if (!bodies[bi].shape.IsValid())
+      continue;
+    // One walk of the faces: FacePlane walks to its index every call, and an
+    // imported vise has thousands.
+    int index = 0;
+    for (TopExp_Explorer e(bodies[bi].shape.GetShape(), TopAbs_FACE); e.More();
+         e.Next(), index++) {
+      const TopoDS_Face face = TopoDS::Face(e.Current());
+      BRepAdaptor_Surface surf(face);
+      if (surf.GetType() != GeomAbs_Plane)
+        continue;
+      const gp_Pln pln = surf.Plane();
+      gp_Dir n = pln.Axis().Direction();
+      if (face.Orientation() == TopAbs_REVERSED)
+        n.Reverse();
+      const double c[3] = {n.X(), n.Y(), n.Z()};
+      const gp_Pnt o = pln.Location();
+      const double at[3] = {o.X(), o.Y(), o.Z()};
+      for (int a = 0; a < 3; a++)
+        if (std::abs(c[a]) > 0.999)
+          out[a].push_back({at[a], c[a] > 0.0 ? 1 : -1, bi, index});
+    }
+  }
+  return out;
+}
+
+ElementRef FaceOnStockTop(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
+                          const std::vector<Body>& fixtureModel,
+                          const glm::dvec3& pos, double rotZdeg) {
+  Fixture placed;
+  placed.pos = pos;
+  placed.rotZdeg = rotZdeg;
+  const glm::mat4 m(FixtureTransform(placed));
+  constexpr double kOn = 1e-3; // a snapped face lands exactly; this is float
+  ElementRef best;
+  double most = 0.0;
+  for (const Body& b : fixtureModel) {
+    if (!b.shape.IsValid())
+      continue;
+    const CADShape at = b.shape.Transformed(m);
+    int index = 0;
+    for (TopExp_Explorer e(at.GetShape(), TopAbs_FACE); e.More();
+         e.Next(), index++) {
+      const std::string* name = b.elementMap.NameOf(index);
+      if (name == nullptr)
+        continue;
+      const TopoDS_Face face = TopoDS::Face(e.Current());
+      BRepAdaptor_Surface surf(face);
+      if (surf.GetType() != GeomAbs_Plane)
+        continue;
+      gp_Dir n = surf.Plane().Axis().Direction();
+      if (face.Orientation() == TopAbs_REVERSED)
+        n.Reverse();
+      if (n.Z() > -0.999 ||
+          std::abs(surf.Plane().Location().Z() - stockHi.z) > kOn)
+        continue;
+      Bnd_Box box;
+      BRepBndLib::Add(face, box);
+      double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+      box.Get(x0, y0, z0, x1, y1, z1);
+      const double ox = std::min(x1, stockHi.x) - std::max(x0, stockLo.x);
+      const double oy = std::min(y1, stockHi.y) - std::max(y0, stockLo.y);
+      if (ox <= 0.0 || oy <= 0.0 || ox * oy <= most)
+        continue;
+      most = ox * oy;
+      best = ElementRef{b.createdBy, *name};
+    }
+  }
+  return best;
 }
 
 } // namespace cam

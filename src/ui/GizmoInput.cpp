@@ -503,10 +503,218 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
   return true;
 }
 
+// ---- The fixture gizmo on a JOB tab (docs/cam/fixture-gizmo-plan.md) ----
+//
+// The fixture whose editor is open gets the handles a part gets: X, Y and Z
+// arrows and a spin about Z (a fixture never tilts). It snaps its OWN flat
+// faces to the stock's planes, and a fixture put down with a face on the
+// stock's top RESTS there -- the seat is read from where it was put, which is
+// the assembly mate idea without a separate tool to make one.
+
+cam::Fixture* EditedFixture(AppState& state) {
+  if (!state.job || !state.camToolOpen || state.camEditFixture == 0 ||
+      state.slotPick.Active() || state.measure.active)
+    return nullptr;
+  cam::Setup* setup = ActiveCamSetup(state);
+  return setup != nullptr ? setup->FindFixture(state.camEditFixture) : nullptr;
+}
+
+// The fixture as drawn, as a box: the model's own box (memoized on its shape)
+// with the fixture's transform applied to its corners.
+bool FixtureDrawnBox(AppState& state, const cam::Fixture& f, glm::vec3& lo,
+                     glm::vec3& hi) {
+  const glm::mat4 m(cam::FixtureTransform(f));
+  lo = glm::vec3(FLT_MAX);
+  hi = glm::vec3(-FLT_MAX);
+  bool any = false;
+  for (const Body& b : FixtureModelBodies(state, f)) {
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    for (int c = 0; c < 8; c++) {
+      const glm::vec3 p((c & 1) ? bmax.x : bmin.x, (c & 2) ? bmax.y : bmin.y,
+                        (c & 4) ? bmax.z : bmin.z);
+      const glm::vec3 w(m * glm::vec4(p, 1.0f));
+      lo = glm::min(lo, w);
+      hi = glm::max(hi, w);
+    }
+    any = true;
+  }
+  return any;
+}
+
+bool BuildFixtureGizmoSpec(AppState& state, const cam::Fixture& f,
+                           GizmoSpec& spec) {
+  glm::vec3 lo, hi;
+  if (!FixtureDrawnBox(state, f, lo, hi))
+    return false;
+  spec.origin = glm::vec3((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, hi.z);
+  spec.axis[0] = {1, 0, 0};
+  spec.axis[1] = {0, 1, 0};
+  spec.axis[2] = {0, 0, 1};
+  spec.trans[0] = spec.trans[1] = spec.trans[2] = true;
+  spec.rot[0] = spec.rot[1] = false;
+  spec.rot[2] = true;
+  return true;
+}
+
+// "Pad's underside", "Bar's +X face": what the snap label calls a face.
+std::string FaceWords(const Body& b, int axis, int facing) {
+  static const char* const kSide[3][2] = {
+      {"-X face", "+X face"}, {"-Y face", "+Y face"}, {"underside", "top"}};
+  const std::string whose = b.name.empty() ? std::string("its") : b.name + "'s";
+  return whose + " " + kSide[axis][facing > 0 ? 1 : 0];
+}
+
+bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
+                        bool down, bool released) {
+  auto& g = state.gizmoDrag;
+  if (g.active && g.fixtureId == 0)
+    return false; // a placement drag, not ours
+  cam::Setup* setup = ActiveCamSetup(state);
+  if (g.active) {
+    cam::Fixture* f =
+        setup != nullptr ? setup->FindFixture(g.fixtureId) : nullptr;
+    if (released || !down || f == nullptr || !state.job) {
+      if (f != nullptr && setup != nullptr) {
+        // Put down: resting on the stock's top by a face, it is SEATED there
+        // and follows the stock; anywhere else it stands on its own.
+        glm::dvec3 lo(0.0), hi(0.0);
+        const std::vector<Body> model = FixtureModelBodies(state, *f);
+        f->seat.reset();
+        if (!f->IsBox() && cam::StockBounds(*setup, JobBodies(state), lo, hi)) {
+          const ElementRef face =
+              cam::FaceOnStockTop(lo, hi, model, f->pos, f->rotZdeg);
+          cam::FixtureSeat seat;
+          if (face.IsSet() && cam::SeatFromPose(lo, hi, model, face, f->pos,
+                                                f->rotZdeg, seat, nullptr))
+            f->seat = seat;
+        }
+        CamFixturesChanged(state, *setup);
+      }
+      g.active = false;
+      g.fixtureId = 0;
+      g.snapLabel.clear();
+      for (auto& planes : g.facePlanes)
+        planes.clear();
+      return true;
+    }
+    const glm::vec3 A = g.frameAxis[g.axis];
+    const bool snap = !ImGui::GetIO().KeyCtrl;
+    g.snapLabel.clear();
+    if (!g.rotate) {
+      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      double d = static_cast<double>(t - g.startParam);
+      glm::dvec3 slo(0.0), shi(0.0);
+      if (snap && cam::StockBounds(*setup, JobBodies(state), slo, shi)) {
+        // Its faces square to this axis against the stock's planes on it:
+        // contact or flush, whichever is nearer -- a clamp's pad onto the
+        // top, a stop against a side. Same on screen at any zoom, and never
+        // less than a percent of the stock, as the placement snap.
+        const int ax = g.axis;
+        const double threshold =
+            std::max(0.15 * GizmoScale(state),
+                     0.01 * std::max(shi.x - slo.x, shi.y - slo.y));
+        static const char* const kPlane[3][2] = {
+            {"the stock's -X side", "the stock's +X side"},
+            {"the stock's -Y side", "the stock's +Y side"},
+            {"the bed", "the stock top"}};
+        const double planes[2] = {slo[ax], shi[ax]};
+        double best = threshold, shift = 0.0;
+        std::string label;
+        for (const auto& fp : g.facePlanes[ax])
+          for (int k = 0; k < 2; k++) {
+            const double gap = planes[k] - (fp.at + d);
+            if (std::abs(gap) < best) {
+              best = std::abs(gap);
+              shift = gap;
+              label = fp.what + " on " + kPlane[ax][k];
+            }
+          }
+        d += shift;
+        g.snapLabel = label;
+      }
+      f->pos = g.startFixturePos + glm::dvec3(A) * d;
+    } else {
+      float ang;
+      if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
+        const double deg = SnapAngleDeg(
+            g.startRotZ +
+                glm::degrees(static_cast<double>(UnwrappedTurn(g, ang))),
+            snap);
+        // About the handle, not the model's origin: the fixture turns where
+        // the arc is drawn, so its origin swings round that point.
+        const double delta = glm::radians(deg - g.startRotZ);
+        const glm::dvec2 c(g.frameOrigin.x, g.frameOrigin.y);
+        const glm::dvec2 r(g.startFixturePos.x - c.x,
+                           g.startFixturePos.y - c.y);
+        const double cs = std::cos(delta), sn = std::sin(delta);
+        f->pos = glm::dvec3(c.x + cs * r.x - sn * r.y,
+                            c.y + sn * r.x + cs * r.y, g.startFixturePos.z);
+        f->rotZdeg = deg;
+      }
+    }
+    // Drawn from its pose on the next sync: JobRenderVersion keys on it.
+    state.job->BumpVersion();
+    return true;
+  }
+
+  cam::Fixture* f = EditedFixture(state);
+  if (f == nullptr || !clicked)
+    return false;
+  GizmoSpec spec;
+  if (!BuildFixtureGizmoSpec(state, *f, spec))
+    return false;
+  int axis = 0;
+  bool rotate = false;
+  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+    return false;
+  SnapshotJob(state); // one undo step per drag (R7)
+  // Free while it moves: a seat would re-solve it back every sync. Where it is
+  // put down decides whether it rests on the stock again.
+  f->seat.reset();
+  g = {};
+  g.active = true;
+  g.axis = axis;
+  g.rotate = rotate;
+  g.frameOrigin = spec.origin;
+  for (int i = 0; i < 3; i++)
+    g.frameAxis[i] = spec.axis[i];
+  g.fixtureId = f->id;
+  g.startFixturePos = f->pos;
+  g.startRotZ = f->rotZdeg;
+  // Its flat faces as placed, once: the snap reads them every frame.
+  std::vector<Body> placed = FixtureModelBodies(state, *f);
+  const glm::mat4 m(cam::FixtureTransform(*f));
+  for (Body& b : placed)
+    b.shape = b.shape.Transformed(m);
+  const auto planes = cam::AxisFacePlanes(placed);
+  for (int a = 0; a < 3; a++)
+    for (const cam::AxisFacePlane& p : planes[a])
+      g.facePlanes[a].push_back({p.at, FaceWords(placed[p.body], a, p.facing)});
+  const glm::vec3 A = spec.axis[axis];
+  if (!rotate) {
+    g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
+  } else {
+    float ang = 0.0f;
+    (void)RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
+    g.startParam = ang;
+    g.lastAngle = ang;
+    g.turned = 0.0f;
+  }
+  return true;
+}
+
 } // namespace
 
 void PublishGizmoHandles(AppState& state) {
   if (state.job) {
+    // The fixture being edited takes the handles; otherwise a picked part.
+    if (const cam::Fixture* f = EditedFixture(state)) {
+      GizmoSpec spec;
+      if (BuildFixtureGizmoSpec(state, *f, spec))
+        PublishGizmoHandles(state, spec, GizmoScale(state));
+      return;
+    }
     const uint64_t part = PlacementGizmoPart(state);
     GizmoSpec spec;
     if (part != 0 && BuildPlacementGizmoSpec(state, part, spec))
@@ -526,7 +734,8 @@ void PublishGizmoHandles(AppState& state) {
 bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                       bool released) {
   if (state.job)
-    return HandlePlacementGizmo(state, ray, clicked, down, released);
+    return HandleFixtureGizmo(state, ray, clicked, down, released) ||
+           HandlePlacementGizmo(state, ray, clicked, down, released);
   auto& g = state.gizmoDrag;
 
   if (g.active) {

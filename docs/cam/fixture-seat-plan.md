@@ -1,5 +1,10 @@
 # A clamp sits ON the stock: fixture seats
 
+> The two-click gesture in section 4 was replaced by the fixture gizmo: a
+> fixture dragged onto the stock's top rests there
+> ([fixture-gizmo-plan.md](fixture-gizmo-plan.md)). The seat, its solve,
+> the format and the RPC below are unchanged.
+
 ## The problem
 
 A step clamp's job is to rest its nose on the top of the stock and press it
