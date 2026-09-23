@@ -34,15 +34,14 @@ class Designer:
         self.file = self.sock.makefile("rw")
         self._id = 0
 
-    def call(self, method, **params):
+    # `method` is POSITIONAL-ONLY, so an RPC with a parameter of that name —
+    # `describe {method}` — is reachable as call("describe", method="x"). It
+    # used to be an ordinary argument, the keyword collided with it, and the
+    # workaround was to know to use request() instead.
+    def call(self, method, /, **params):
         return self.request(method, params)
 
-    # Params as a DICT rather than keywords. `help` takes a parameter called
-    # "method", which collides with call()'s own argument — so help was the
-    # one RPC this client could not reach. `describe {method}` joined it in
-    # 2026-08 and hit the same wall, so: any RPC with a `method` parameter
-    # goes through request(), not call(). Keeping call() as it was matters
-    # too: callers pass whole request dicts as d.call(**{"method": …, …}).
+    # Params as a DICT rather than keywords.
     def request(self, method, params=None, timeout=None):
         """`timeout` (seconds) overrides the connection default for THIS
         call. A modal solve on a fine mesh outlived the 60 s default, the

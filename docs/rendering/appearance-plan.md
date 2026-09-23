@@ -46,7 +46,8 @@ the bodies it creates during regen):
 
 ```cpp
 struct Appearance {            // all fields optional = inherit from material
-  std::optional<glm::vec3> color;      // sRGB base color
+  std::optional<glm::vec3> color;      // LINEAR base colour (not sRGB;
+                                       // ~c^2.2 of an sRGB value)
   std::optional<float> roughness;      // 0..1
   std::optional<float> metallic;       // 0..1
 };

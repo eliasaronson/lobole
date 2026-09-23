@@ -13,7 +13,7 @@ stays deterministic and free of interpreters, and a generator can loop and
 branch in a real language with no sandbox.
 
 **Layout.** A generator that is one file sits here; one that spans several
-sits in its own directory beside them — `om615/`, `fpv_drone/`,
+sits in its own directory beside them — `om615/`, `pes_pump/`, `fpv_drone/`,
 `cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/`, `bike/`,
 `grill/`, `chassis/` — with the same file names inside. Every
 file adds BOTH its own directory and this one to `sys.path`, so a group's
@@ -22,6 +22,7 @@ modules import each other by bare name and still reach `_lib` and `gear`.
 | generator | what | live afterwards | frozen |
 |---|---|---|---|
 | `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore; `--backlash` thins the flanks (a nominal pair at nominal centres has none), `--phase` turns the pattern (what makes two mirrored sectors mesh instead of jamming tip to tip), `--sector` keeps teeth over a wedge and a hub elsewhere | thickness, bore | module, teeth, pressure angle, backlash, phase, sector |
+| `pes_pump/` | Bosch PES4M inline injection pump (OM615): camshaft, roller tappets, helix plungers turned by a toothed rack, delivery valves, feed pump, pneumatic governor, timing device; four exact-checked motion studies (docs/modeling/pes-pump.md) | rack position (Stop / Idle / Full load configurations) | every dimension, in `pes_spec.py` |
 | `gear_train.py` | two of them on a carrier, mated by their bores, coupled by a gear relation (docs/assemblies/relations-plan.md), checked for tooth clash over a pitch | the relation's ratio and phase | the gears |
 
 Run one against the running app (it finds the one announced instance, or

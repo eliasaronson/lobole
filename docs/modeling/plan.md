@@ -64,7 +64,8 @@ designed against it); the angled-datum sketch-line axis already exercises the
 
 ### M2 — Revolve (+ datum axes) — toponaming-free
 **Shipped (July 2026).** `RevolveFeature` revolves a sketch profile about an
-`AxisRef` axis (global axis, sketch construction line, or a `DatumAxisFeature`)
+`AxisRef` axis (global axis, sketch construction line, or a `DatumAxisFeature`;
+since v128 also `custom {origin, direction}`)
 through an angle — OCC `BRepPrimAPI_MakeRevol`, via a new
 `sketch::BuildRevolve` sharing `BuildProfileFace` with extrude. Angle is
 expression-driven (degrees); **symmetric** centers the sweep on the profile

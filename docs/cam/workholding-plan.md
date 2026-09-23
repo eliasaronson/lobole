@@ -187,6 +187,10 @@ collision, which is correct and useless.
 - **Dragging a fixture in the viewport.** It needs fixtures to be pickable,
   which means picking plumbing outside the body list. The numbers and the
   side buttons place a fixture exactly; the drag is convenience.
+  **Since v127** a clamp can instead REST on the stock: one of its faces on
+  the stock's top, reaching in over an edge. It is placed by two clicks and
+  re-solved whenever the stock changes. The bounding-box `top` placement
+  stood a step clamp's studs on the work ([fixture-seat-plan.md](fixture-seat-plan.md)).
 - **Generated vises and toe clamps.** Real clamps are modelled or imported
   first; generated ones follow if the modelled ones prove tedious.
 - **Planning around a fixture.** Operations are told they hit one, not

@@ -235,6 +235,215 @@ TEST_CASE("cam workholding: where a fixture goes is derived from the stock",
   CHECK_FALSE(cam::ParseFixtureSide("left", side));
 }
 
+namespace {
+
+// A step clamp in its own coordinates: a 100 mm bar, a nose PAD under one end
+// (its underside, z = 5, is what rests on the work) and a stud at the other
+// end reaching down to the bed. Three bodies, as a part with three solids is.
+std::unique_ptr<Document> StepClampDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 10), 100, 20, 8));
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Pad", glm::vec3(80, 0, 5), 20, 20, 5));
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Stud", glm::vec3(5, 5, -40), 10, 10, 50));
+  return doc;
+}
+
+// The named face of `body` whose outward normal is `n`.
+ElementRef FaceFacing(const Body& body, glm::vec3 n) {
+  for (const auto& [index, name] : body.elementMap.names) {
+    glm::vec3 c(0.0f), fn(0.0f), u(0.0f);
+    if (body.shape.FacePlane(index, c, fn, u) && glm::dot(fn, n) > 0.999f)
+      return ElementRef{body.createdBy, name};
+  }
+  return {};
+}
+
+struct Placed {
+  glm::dvec3 padLo{0.0}, padHi{0.0}, allLo{1e30}, allHi{-1e30};
+};
+
+// The clamp's bodies at a solved pose, as boxes.
+Placed PlaceClamp(const std::vector<Body>& model, const glm::dvec3& pos,
+                  double rotZdeg) {
+  cam::Fixture f;
+  f.pos = pos;
+  f.rotZdeg = rotZdeg;
+  const glm::mat4 m(cam::FixtureTransform(f));
+  Placed out;
+  for (size_t i = 0; i < model.size(); i++) {
+    glm::vec3 lo(0.0f), hi(0.0f);
+    model[i].shape.Transformed(m).GetBoundingBox(lo, hi, /*tight=*/true);
+    if (i == 1) {
+      out.padLo = glm::dvec3(lo);
+      out.padHi = glm::dvec3(hi);
+    }
+    out.allLo = glm::min(out.allLo, glm::dvec3(lo));
+    out.allHi = glm::max(out.allHi, glm::dvec3(hi));
+  }
+  return out;
+}
+
+} // namespace
+
+TEST_CASE("cam workholding: a clamp rests on the stock by its face",
+          "[cam][workholding]") {
+  // docs/cam/fixture-seat-plan.md. PlaceFixture's "top" rests the clamp's
+  // BOUNDING BOX on the stock -- the bottom of its stud -- with the nose in
+  // the air. A seat rests the named FACE there, reaching in over one edge.
+  Bench b;
+  auto clamp = StepClampDoc();
+  const std::vector<Body>& model = clamp->GetBodies();
+  REQUIRE(model.size() == 3);
+  cam::FixtureSeat seat;
+  seat.face = FaceFacing(model[1], {0, 0, -1}); // the pad's underside
+  REQUIRE(seat.face.IsSet());
+
+  SECTION("on the -X edge: face on the top, reaching in, stud off the edge") {
+    seat.edge = cam::StockEdge::MinusX;
+    seat.alongMm = 15.0;
+    seat.overMm = 12.0;
+    glm::dvec3 pos(0.0);
+    double rot = 0.0;
+    std::string why;
+    REQUIRE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, &why));
+    const Placed p = PlaceClamp(model, pos, rot);
+    CHECK_THAT(p.padLo.z, WithinAbs(b.hi.z, 1e-6)); // resting ON the top
+    CHECK_THAT(p.padHi.x, WithinAbs(b.lo.x + 12.0, 1e-6));
+    CHECK_THAT((p.padLo.y + p.padHi.y) * 0.5, WithinAbs(b.lo.y + 15.0, 1e-6));
+    CHECK(p.allLo.x < b.lo.x - 50.0); // the stud stands off the work
+  }
+
+  SECTION("every edge turns the nose to point in") {
+    for (const cam::StockEdge edge :
+         {cam::StockEdge::MinusX, cam::StockEdge::PlusX, cam::StockEdge::MinusY,
+          cam::StockEdge::PlusY}) {
+      INFO("edge " << cam::StockEdgeName(edge));
+      seat.edge = edge;
+      seat.alongMm = 10.0;
+      seat.overMm = 8.0;
+      glm::dvec3 pos(0.0);
+      double rot = 0.0;
+      REQUIRE(
+          cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
+      const Placed p = PlaceClamp(model, pos, rot);
+      const glm::dvec2 pad((p.padLo.x + p.padHi.x) * 0.5,
+                           (p.padLo.y + p.padHi.y) * 0.5);
+      const glm::dvec2 mid((p.allLo.x + p.allHi.x) * 0.5,
+                           (p.allLo.y + p.allHi.y) * 0.5);
+      const glm::dvec2 stock((b.lo.x + b.hi.x) * 0.5, (b.lo.y + b.hi.y) * 0.5);
+      // The pad is the end nearer the middle of the stock.
+      CHECK(glm::length(pad - stock) < glm::length(mid - stock));
+      CHECK_THAT(p.padLo.z, WithinAbs(b.hi.z, 1e-6));
+    }
+  }
+
+  SECTION("it follows the stock; a bed position does not") {
+    seat.edge = cam::StockEdge::MinusX;
+    seat.alongMm = 15.0;
+    seat.overMm = 12.0;
+    glm::dvec3 pos(0.0);
+    double rot = 0.0;
+    REQUIRE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
+    cam::Setup wider = b.setup;
+    wider.stock.margin = {7.0, 7.0, 4.0};
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(wider, b.part->GetBodies(), lo, hi));
+    glm::dvec3 moved(0.0);
+    REQUIRE(cam::SolveFixtureSeat(lo, hi, model, seat, moved, rot, nullptr));
+    const Placed p = PlaceClamp(model, moved, rot);
+    CHECK_THAT(p.padHi.x, WithinAbs(lo.x + 12.0, 1e-6));
+    CHECK_THAT(p.padLo.z, WithinAbs(hi.z, 1e-6));
+    CHECK(glm::length(moved - pos) > 1.0);
+  }
+
+  SECTION("a face that cannot rest on anything is refused, by why") {
+    seat.edge = cam::StockEdge::MinusX;
+    glm::dvec3 pos(0.0);
+    double rot = 0.0;
+    std::string why;
+    seat.face = FaceFacing(model[0], {0, 0, 1}); // the bar's top
+    REQUIRE(seat.face.IsSet());
+    CHECK_FALSE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, &why));
+    CHECK(why.find("does not face down") != std::string::npos);
+    CHECK_FALSE(cam::SeatFaceRefusal(model, seat.face).empty());
+    seat.face.name = "no such face";
+    CHECK_FALSE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, &why));
+    CHECK(why.find("no longer on the fixture") != std::string::npos);
+  }
+}
+
+TEST_CASE("cam workholding: the seat is read back from where it was put",
+          "[cam][workholding]") {
+  // docs/cam/fixture-gizmo-plan.md: a clamp dragged onto the stock rests
+  // there, so a seat is READ from a pose -- and must solve straight back to
+  // it, or a clamp put down would jump when the next sync re-solves it.
+  Bench b;
+  auto clamp = StepClampDoc();
+  const std::vector<Body>& model = clamp->GetBodies();
+  const ElementRef pad = FaceFacing(model[1], {0, 0, -1});
+  REQUIRE(pad.IsSet());
+  for (const cam::StockEdge edge :
+       {cam::StockEdge::MinusX, cam::StockEdge::PlusX, cam::StockEdge::MinusY,
+        cam::StockEdge::PlusY})
+    for (const double spin : {0.0, 17.5, -30.0}) {
+      INFO("edge " << cam::StockEdgeName(edge) << " spin " << spin);
+      cam::FixtureSeat seat;
+      seat.face = pad;
+      seat.edge = edge;
+      seat.alongMm = 11.0;
+      seat.overMm = 7.5;
+      seat.spinDeg = spin;
+      glm::dvec3 pos(0.0);
+      double rot = 0.0;
+      REQUIRE(
+          cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
+      // The face that lies on the top is the pad's underside...
+      const ElementRef on = cam::FaceOnStockTop(b.lo, b.hi, model, pos, rot);
+      CHECK(on.name == pad.name);
+      // ...and the seat read from the pose is the one it was solved from.
+      cam::FixtureSeat back;
+      REQUIRE(
+          cam::SeatFromPose(b.lo, b.hi, model, pad, pos, rot, back, nullptr));
+      CHECK(back.edge == edge);
+      CHECK_THAT(back.spinDeg, WithinAbs(spin, 1e-9));
+      CHECK_THAT(back.overMm, WithinAbs(7.5, 1e-6));
+      CHECK_THAT(back.alongMm, WithinAbs(11.0, 1e-6));
+    }
+
+  // Lifted off the top, nothing rests there.
+  cam::FixtureSeat seat;
+  seat.face = pad;
+  glm::dvec3 pos(0.0);
+  double rot = 0.0;
+  REQUIRE(cam::SolveFixtureSeat(b.lo, b.hi, model, seat, pos, rot, nullptr));
+  CHECK_FALSE(
+      cam::FaceOnStockTop(b.lo, b.hi, model, pos + glm::dvec3(0, 0, 5), rot)
+          .IsSet());
+  // Beside the stock at the top's height, nothing either: over the top only.
+  CHECK_FALSE(
+      cam::FaceOnStockTop(b.lo, b.hi, model, pos - glm::dvec3(60, 0, 0), rot)
+          .IsSet());
+
+  // A face square to each axis, by which way it faces: the pad's underside
+  // is one of the downward Z planes.
+  const auto planes = cam::AxisFacePlanes(model);
+  bool padUnder = false;
+  for (const cam::AxisFacePlane& p : planes[2])
+    padUnder = padUnder ||
+               (p.body == 1 && p.facing < 0 && std::abs(p.at - 5.0) < 1e-9);
+  CHECK(padUnder);
+  CHECK(planes[0].size() == 6); // two X faces on each of three boxes
+
+  // Edges by name, and one that is not refused.
+  cam::StockEdge edge{};
+  CHECK(cam::ParseStockEdge("+y", edge));
+  CHECK(edge == cam::StockEdge::PlusY);
+  CHECK_FALSE(cam::ParseStockEdge("left", edge));
+}
+
 TEST_CASE("cam workholding: fixtures survive a save, and ids stay fresh",
           "[cam][workholding]") {
   cam::JobDocument job;

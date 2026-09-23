@@ -555,6 +555,24 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
       CHECK_THAT(f.rotZdeg,
                  Catch::Matchers::WithinAbs(w.value("rot_z", 0.0), 1e-12));
       CHECK(f.enabled == w.value("enabled", true));
+      // v127: resting on the stock (docs/cam/fixture-seat-plan.md). A seat
+      // that loses its edge or its distances puts the clamp somewhere else
+      // on the board, and the verifier then checks the wrong place.
+      CHECK(f.seat.has_value() == w.contains("seat"));
+      if (f.seat && w.contains("seat")) {
+        const nlohmann::json& ws = w.at("seat");
+        CHECK(f.seat->face.featureId == ws.at("feature").get<uint64_t>());
+        CHECK(f.seat->face.name == ws.at("name").get<std::string>());
+        CHECK(cam::StockEdgeName(f.seat->edge) ==
+              ws.at("edge").get<std::string>());
+        CHECK_THAT(
+            f.seat->alongMm,
+            Catch::Matchers::WithinAbs(ws.at("along_mm").get<double>(), 1e-12));
+        CHECK_THAT(f.seat->overMm, Catch::Matchers::WithinAbs(
+                                       ws.at("over_mm").get<double>(), 1e-12));
+        CHECK_THAT(f.seat->spinDeg, Catch::Matchers::WithinAbs(
+                                        ws.value("spin_deg", 0.0), 1e-12));
+      }
     }
   }
   if (expect.contains("cam_reach_offsets")) {

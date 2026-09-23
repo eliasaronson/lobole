@@ -30,10 +30,18 @@ Session revision tokens are deliberately invalid after reopening a project.
 Empty construction-only parts currently require a separate workflow: the strict
 preview gate expects geometry in every project part.
 
-The motion panel offers **Preview motion** (kinematics only) and **Validate
-motion** (exact sampled collisions). These are motion controls, not substitutes
-for the standing assembly check. Older results are labeled stale after a model
-or study edit.
+The motion panel offers **Preview motion** (every sample solved, no collision
+checks) and **Validate motion** (exact sampled collisions). Both are RUNS: they
+do not edit the study, so a study a script defined with `check_clash` or a
+mesh `clash_mode` keeps them. The verdict asks whether the mechanism moved
+before it asks about collisions — a preview reads "Moves through all N
+samples" or "Does not solve at sample 19 (90 deg): residual …". Once a run has
+landed, **Play** walks the viewport through its poses (display-only: nothing is
+solved or edited; Stop returns to the document's pose) and **Export
+animation…** saves it as a GLB, the same file `export_motion` writes; both
+refuse with no result, a stale one, or an unsolved sample. These are motion
+controls, not substitutes for the standing assembly check. Older results are
+labeled stale after a model or study edit (docs/ui/motion-panel-plan.md).
 
 While a run is in flight those buttons are replaced by a `sample N / M` bar
 and a **Cancel**; the previous run's verdict stays visible beneath it, and its

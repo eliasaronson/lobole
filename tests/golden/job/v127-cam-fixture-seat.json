@@ -1,0 +1,110 @@
+{
+  "format": "designer-document",
+  "version": 127,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Bracket"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Clamped both ways",
+      "safe_z": 21.0,
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat, short stickout",
+          "diameter": 6.0,
+          "flute_length": 20.0,
+          "overall_length": 28.0,
+          "collar_diameter": 30.0
+        },
+        {
+          "number": 2,
+          "name": "3 mm flat",
+          "diameter": 3.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Pocket beside the boss",
+          "type": "pocket",
+          "tool": 1,
+          "top_z": 16.0,
+          "bottom_z": 6.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 1,
+              "element": "1/face0"
+            }
+          ]
+        }
+      ],
+      "machine": {
+        "name": "Shop router",
+        "post": "mach3"
+      },
+      "fixtures": [
+        {
+          "id": 11,
+          "part": 5,
+          "name": "Kurt vise",
+          "pos": [
+            20.0,
+            15.0,
+            -24.5
+          ],
+          "rot_z": 90.0
+        },
+        {
+          "id": 12,
+          "box": [
+            11.0,
+            8.0,
+            26.25
+          ],
+          "name": "Clamp 2",
+          "pos": [
+            -7.5,
+            11.0,
+            -1.0
+          ],
+          "enabled": false
+        },
+        {
+          "id": 13,
+          "part": 6,
+          "name": "Step clamp",
+          "pos": [
+            -40.0,
+            12.5,
+            16.0
+          ],
+          "rot_z": 180.0,
+          "seat": {
+            "face": {
+              "feature": 7,
+              "name": "7/face3"
+            },
+            "edge": "+x",
+            "along_mm": 12.5,
+            "over_mm": 15.0,
+            "spin_deg": -10.0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -60,6 +60,14 @@ struct Sample {
   std::vector<std::pair<uint64_t, glm::mat4>> worlds;
   std::vector<Clash> clashes;
   std::vector<UnknownContact> unknownContacts;
+  // Every moving mate's DOF values at this sample (radians, mm): what the
+  // study actually turned and slid, so a caller need not recover an angle
+  // from a quaternion.
+  struct MateValue {
+    uint64_t mate = 0;
+    double rotation = 0.0, offset = 0.0;
+  };
+  std::vector<MateValue> mates;
 };
 
 struct Result {
@@ -107,5 +115,16 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study);
 // The collision table as text, one line per sample: what the plan asked to
 // be PRINTED, and what an agent pastes into its report.
 std::string Table(const Result& result, const MotionStudy& study);
+
+// What a stored result SAYS, as one line and a severity — the panel's
+// verdict, kept here so it is tested without a GUI. Asks whether the
+// mechanism MOVED through every sample before it asks about collisions: a
+// preview that locks at 90 degrees must not read like one that works.
+struct Verdict {
+  enum class Level { Good, Neutral, Bad };
+  Level level = Level::Neutral;
+  std::string text;
+};
+Verdict Summarize(const Result& result, const MotionStudy& study, bool stale);
 
 } // namespace motion

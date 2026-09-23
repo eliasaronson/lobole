@@ -208,7 +208,8 @@ Two things an agent could not do at all, and now can:
 
 `tools/designer_remote.py` could not call any RPC with a parameter named
 `method` — `help` among them — because it collided with `call`'s own argument.
-`request(method, params_dict)` is the way in.
+`request(method, params_dict)` is the way in. (Fixed in the PES-pump round:
+`call`'s `method` is positional-only, docs/pes-friction-plan.md.)
 
 ### The papercuts, since fixed
 

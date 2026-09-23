@@ -580,12 +580,19 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(s_App->assembly->FindMateById(axle)->rotation -
                       3.14159265f) < 1e-3f);
 
+    // The buttons RUN the study; they do not rewrite it. It keeps the
+    // defaults it was made with (clash on, mesh) through both.
+    const std::string modeBefore =
+        s_App->assembly->FindMotionStudyById(study.id)->clashMode;
     ctx->ItemClick("//Motion###ToolWindow/###motion_preview");
     for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
          i++)
       ctx->Yield();
     IM_CHECK(ui::MotionResultFor(*s_App, study.id) != nullptr);
     IM_CHECK(!ui::MotionResultFor(*s_App, study.id)->checkedClashes);
+    IM_CHECK(s_App->assembly->FindMotionStudyById(study.id)->checkClash);
+    // A preview of an unchanged study is a fresh result, not a stale one.
+    IM_CHECK(!ui::MotionResultStale(*s_App, study.id));
 
     // Run: a job; wait for it to land (a two-body turn is milliseconds).
     ctx->ItemClick("//Motion###ToolWindow/###motion_run");
@@ -600,6 +607,33 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::MotionResultStale(*s_App, study.id));
     IM_CHECK_EQ(r->samples.size(), (size_t)48);
     IM_CHECK(r->clean); // nothing is in the arm's way
+    IM_CHECK(s_App->assembly->FindMotionStudyById(study.id)->clashMode ==
+             modeBefore); // Validate ran exact; the study still says mesh
+
+    // Playback: the viewport walks the run's poses; the DOCUMENT stays put.
+    const Occurrence* armNow = s_App->assembly->FindById(armOcc);
+    const glm::mat4 docBefore = ui::OccurrenceMatrix(*armNow);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_play");
+    IM_CHECK(s_App->motionPlaybackStudy == study.id && s_App->motionPlaying);
+    for (int i = 0; i < 600 && s_App->motionPlaybackPos < 5.0; i++)
+      ctx->Yield();
+    IM_CHECK(s_App->motionPlaybackPos >= 5.0); // it advances on its own
+    const glm::mat4 shown = ui::DisplayMatrixOf(*s_App, *armNow);
+    const glm::mat4 docNow = ui::OccurrenceMatrix(*armNow);
+    IM_CHECK(docNow == docBefore); // nothing solved, nothing edited
+    float moved = 0.0f;
+    for (int c = 0; c < 4; c++)
+      for (int k = 0; k < 4; k++)
+        moved = std::max(moved, std::abs(shown[c][k] - docNow[c][k]));
+    IM_CHECK(moved > 1e-3f); // ...but the arm is DRAWN elsewhere
+    ctx->ItemClick("//Motion###ToolWindow/###motion_play"); // pause
+    IM_CHECK(!s_App->motionPlaying && s_App->motionPlaybackStudy == study.id);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_stop");
+    IM_CHECK(s_App->motionPlaybackStudy == 0);
+    IM_CHECK(ui::DisplayMatrixOf(*s_App, *armNow) == docNow); // back home
+    // Export is a dialog, so only its presence is asserted: a portal dialog
+    // opens on the real desktop even under Xvfb.
+    IM_CHECK(ctx->ItemExists("//Motion###ToolWindow/###motion_export"));
 
     // While a run is in flight the panel says so. Driven by a SYNTHETIC
     // registry entry, not by a real run: this two-body turn finishes 20000

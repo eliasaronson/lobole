@@ -41,7 +41,11 @@ constexpr MethodDoc MotionMethods[] = {
      "mate must say which), from, to — DEGREES for a rotation, mm for an "
      "offset — samples? (default 48), check_clash? (default true), "
      "clash_mode?: mesh (default, ~10x faster) | exact (the boolean), "
-     "name?}. Returns the study and, if it cannot run, `why_not`. Nothing "
+     "configuration? (an assembly configuration id the study runs, is "
+     "judged and is scrubbed UNDER, whatever is active; 0 = the base, with "
+     "nothing held or suppressed; omitted = whichever is active when it "
+     "runs — so a study that measures one load or one variant should name "
+     "it), name?}. Returns the study and, if it cannot run, `why_not`. Nothing "
      "runs until run_motion_study. ONE driver moves the whole mechanism "
      "when the rest follows through mates and RELATIONS (add_relation): a "
      "geared pair turns because the relation propagates, not because two "
@@ -51,19 +55,22 @@ constexpr MethodDoc MotionMethods[] = {
      "from the previous sample and can come out of it on the other branch. "
      "The driver to choose is the DOF that cannot change on the branch you "
      "do not want; the clash check is what makes the jump visible.",
-     "check_clash, clash_mode, dof, driver, from, name, samples, to"},
+     "check_clash, clash_mode, configuration, dof, driver, from, name, "
+     "samples, to"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
-     "clash_mode?}; a stored result is dropped, since it described the old "
-     "definition.",
-     "check_clash, clash_mode, from, name, samples, study, to"},
+     "clash_mode?, configuration? (an id, 0 = the base, null = whichever "
+     "is active)}; a stored "
+     "result is dropped, since it described the old definition.",
+     "check_clash, clash_mode, configuration, from, name, samples, study, "
+     "to"},
     {"remove_motion_study", "Remove a study by id.", "study"},
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
      "", remote::NoFlags,
      "studies[]{type,id,name,driver_mate,driver_dof,from,to,samples,check_"
-     "clash,clash_mode,unit,has_result,running,why_not?,stale?,clean?,"
-     "collision_checked?}"},
+     "clash,clash_mode,configuration?,unit,has_result,running,why_not?,"
+     "stale?,clean?,collision_checked?}"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?}. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
@@ -77,7 +84,12 @@ constexpr MethodDoc MotionMethods[] = {
      "first sample are counted and the rest are listed), `worst_sample`, "
      "`table` (the same as text, for a report), "
      "`deflection_mm` for a mesh check, and `pairs_checked`. "
-     "include_poses adds every occurrence's placement per sample. "
+     "include_poses adds, per sample, every occurrence's placement "
+     "(`poses`: position mm, orientation quaternion [x,y,z,w]) and every "
+     "moving mate's value (`mates`: {mate, name, rotation_deg, offset} — "
+     "what the study actually turned and slid, so no angle has to be "
+     "recovered from a quaternion). A study that names a configuration runs "
+     "under it. "
      "{async: true} runs it as a background job ('motion' in "
      "background_jobs) and motion_status reads the result when it lands. A "
      "sample that does not solve is reported unsolved with its residual — "
@@ -94,7 +106,9 @@ constexpr MethodDoc MotionMethods[] = {
     {"set_motion_pose",
      "Scrub: drive the study's mate to {t} (0..1 along the range) and "
      "re-solve, so the viewport and every query show that pose. No undo "
-     "step, like the explode slider — a scrub is a look, not an edit.",
+     "step, like the explode slider — a scrub is a look, not an edit — "
+     "EXCEPT that a study naming a configuration first activates it (an "
+     "undo step), since its poses only exist under it.",
      "study, t"},
     {"export_motion",
      "Write the run as a GLB with a glTF animation {study, path}: one node "
@@ -119,8 +133,8 @@ json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
   return j;
 }
 
-json ResultJson(const motion::Result& r, const MotionStudy& s,
-                bool includePoses) {
+json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
+                const MotionStudy& s, bool includePoses) {
   json samples = json::array();
   const bool rot = s.driverDof == MateDof::Rotation;
   for (size_t i = 0; i < r.samples.size(); i++) {
@@ -159,6 +173,17 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
                          {"orientation", {q.x, q.y, q.z, q.w}}});
       }
       sj["poses"] = poses;
+      json mates = json::array();
+      for (const motion::Sample::MateValue& v : sm.mates) {
+        const Mate* mate = asmDoc.FindMateById(v.mate);
+        json mj{{"mate", v.mate}, {"name", mate ? mate->name : std::string{}}};
+        if (mate && assembly::MateHasDof(mate->type, MateDof::Rotation))
+          mj["rotation_deg"] = angles::ToDegrees(v.rotation);
+        if (mate && assembly::MateHasDof(mate->type, MateDof::Offset))
+          mj["offset"] = v.offset;
+        mates.push_back(std::move(mj));
+      }
+      sj["mates"] = std::move(mates);
     }
     samples.push_back(sj);
   }
@@ -347,6 +372,24 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (s.clashMode != "mesh" && s.clashMode != "exact")
       throw std::runtime_error("clash_mode '" + s.clashMode +
                                "' is not one of: mesh, exact");
+    if (p.contains("configuration")) {
+      // null clears it (whichever is active); 0 is the base; else an id.
+      if (p.at("configuration").is_null()) {
+        s.configuration.reset();
+      } else {
+        const uint64_t c = p.at("configuration").get<uint64_t>();
+        if (c != 0 && asmDoc.FindConfiguration(c) == nullptr) {
+          std::vector<std::string> have;
+          for (const Configuration& cfg : asmDoc.GetConfigurations())
+            have.push_back(std::to_string(cfg.id) + " (" + cfg.name + ")");
+          throw std::runtime_error(
+              "configuration: no configuration " + std::to_string(c) +
+              "; configurations: " + KnownList(have) +
+              " (0 = the base, null = whichever is active)");
+        }
+        s.configuration = c;
+      }
+    }
     s.name = p.value("name", std::string{});
     if (s.name.empty())
       s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
@@ -377,6 +420,24 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       if (s.clashMode != "mesh" && s.clashMode != "exact")
         throw std::runtime_error("clash_mode '" + s.clashMode +
                                  "' is not one of: mesh, exact");
+    }
+    if (p.contains("configuration")) {
+      // null clears it (whichever is active); 0 is the base; else an id.
+      if (p.at("configuration").is_null()) {
+        s.configuration.reset();
+      } else {
+        const uint64_t c = p.at("configuration").get<uint64_t>();
+        if (c != 0 && asmDoc.FindConfiguration(c) == nullptr) {
+          std::vector<std::string> have;
+          for (const Configuration& cfg : asmDoc.GetConfigurations())
+            have.push_back(std::to_string(cfg.id) + " (" + cfg.name + ")");
+          throw std::runtime_error(
+              "configuration: no configuration " + std::to_string(c) +
+              "; configurations: " + KnownList(have) +
+              " (0 = the base, null = whichever is active)");
+        }
+        s.configuration = c;
+      }
     }
     asmDoc.BumpVersion();
     state.motionResults.erase(s.id); // it described the old definition
@@ -422,7 +483,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const motion::Result r = ui::RunMotionNow(state, s.id);
     if (!r.error.empty())
       throw std::runtime_error(r.error);
-    json out = ResultJson(r, s, includePoses);
+    json out = ResultJson(NeedAssembly(state), r, s, includePoses);
     // A run happens on a COPY, so the assembly is left exactly where it was
     // — which means nothing about the far end of the travel can be measured
     // afterwards. `section` after a throttle study saw the shut throttle
@@ -467,7 +528,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const bool includePoses = p.value("include_poses", false);
     json out{{"running", ui::BackgroundJobRunning(state, "motion")}};
     if (const motion::Result* r = ui::MotionResultFor(state, s.id)) {
-      out["result"] = ResultJson(*r, s, includePoses);
+      out["result"] = ResultJson(asmDoc, *r, s, includePoses);
       out["stale"] = ui::MotionResultStale(state, s.id);
       if (out["stale"].get<bool>()) {
         out["result"]["last_clean"] = r->clean;

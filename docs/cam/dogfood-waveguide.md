@@ -119,7 +119,8 @@ that is already there for the same reason.
   `designer_remote.py:40-45` says `help` and `describe` take a parameter called
   `method`, which collides with `call`'s own argument, and that those two go
   through `request()` instead. The escape hatch exists and is explained where
-  a reader would look; this round simply did not read it.
+  a reader would look; this round simply did not read it. (Since fixed:
+  `method` is positional-only in both clients, docs/pes-friction-plan.md.)
 
 ## Verification
 

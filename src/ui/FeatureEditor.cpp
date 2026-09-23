@@ -400,6 +400,19 @@ void DrawAxisRefCombo(AppState& state, Feature& owner, AxisRef& axis,
     }
   }
 
+  // A custom axis (a point and a direction, set through the API) has no row
+  // to pick it from; list the one this feature has, so the combo names it
+  // instead of showing X, which it is not.
+  if (axis.kind == AxisRef::Kind::Custom) {
+    char buf[160];
+    std::snprintf(buf, sizeof buf,
+                  "Custom (%.3g, %.3g, %.3g) along (%.3g, %.3g, %.3g)",
+                  axis.origin.x, axis.origin.y, axis.origin.z, axis.direction.x,
+                  axis.direction.y, axis.direction.z);
+    labels.push_back(buf);
+    refs.push_back(axis);
+  }
+
   if (sketchIdForLines != 0) {
     if (auto* sk = dynamic_cast<SketchFeature*>(
             state.document->FindFeatureById(sketchIdForLines))) {

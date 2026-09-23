@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 
 #include "ui/BackgroundJobs.h"
@@ -966,9 +967,21 @@ void DrawCamPanel(AppState& state) {
       row.label = f.name + "###cam_fixture_" + std::to_string(f.id);
       row.selected = state.camEditFixture == f.id;
       row.dimmed = !f.enabled || missing;
+      // A seated one is placed by the stock, and says which edge -- or why it
+      // no longer can (docs/cam/fixture-seat-plan.md).
+      const auto seatGone = state.camSeatRefusals.find(f.id);
       const std::string place =
-          missing
-              ? std::string("its part is gone")
+          missing ? std::string("its part is gone")
+          : f.seat && seatGone != state.camSeatRefusals.end()
+              ? "its seat is gone: " + seatGone->second
+          : f.seat
+              ? "over the " +
+                    [&] {
+                      std::string e = cam::StockEdgeName(f.seat->edge);
+                      e[1] = static_cast<char>(std::toupper(e[1]));
+                      return e;
+                    }() +
+                    " edge"
               : cam::FixturePlaceName(*setup, ui::JobBodies(state), model, f);
       row.tail = !place.empty() ? place : std::string("placed");
       if (!f.enabled && !missing)

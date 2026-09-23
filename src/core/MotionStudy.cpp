@@ -22,6 +22,26 @@ double ValueAt(const MotionStudy& study, double t) {
 }
 
 std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
+  // A study that names its configuration is judged UNDER it: its holds and
+  // suppressions are the ones the run will see, whatever the tab has active.
+  if (study.configuration) {
+    const uint64_t want = *study.configuration;
+    if (want != 0 && asmDoc.FindConfiguration(want) == nullptr) {
+      std::string names;
+      for (const Configuration& c : asmDoc.GetConfigurations())
+        names += (names.empty() ? "" : ", ") + std::to_string(c.id) + " (" +
+                 c.name + ")";
+      return "the study runs under configuration " + std::to_string(want) +
+             ", which no longer exists; configurations: " +
+             (names.empty() ? std::string("none") : names) +
+             " (0 = the base, unset = whichever is active)";
+    }
+    if (asmDoc.ActiveConfiguration() != want) {
+      AssemblyDocument under = asmDoc;
+      under.SetActiveConfigurationRaw(want);
+      return WhyNot(under, study);
+    }
+  }
   const Mate* m = asmDoc.FindMateById(study.driverMate);
   if (m == nullptr) {
     std::string mates;
@@ -105,8 +125,11 @@ Result Run(const AssemblyDocument& asmDocIn,
     return out;
 
   // A COPY: the run drives a mate through its whole range and the document
-  // on the tab must not be left at the last sample.
+  // on the tab must not be left at the last sample. It carries the study's
+  // own configuration when it names one, which the solve then applies.
   AssemblyDocument asmDoc = asmDocIn;
+  if (study.configuration)
+    asmDoc.SetActiveConfigurationRaw(*study.configuration);
   Mate* driver = asmDoc.FindMateById(study.driverMate);
 
   MeshCache own;
@@ -176,6 +199,19 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;
+    for (const Mate& m : asmDoc.GetMates()) {
+      const bool turns = assembly::MateHasDof(m.type, MateDof::Rotation);
+      const bool slides = assembly::MateHasDof(m.type, MateDof::Offset);
+      if (!turns && !slides)
+        continue; // fastened: nothing to report
+      Sample::MateValue v;
+      v.mate = m.id;
+      if (turns)
+        v.rotation = assembly::MateDofValue(m, MateDof::Rotation);
+      if (slides)
+        v.offset = assembly::MateDofValue(m, MateDof::Offset);
+      s.mates.push_back(v);
+    }
 
     auto flat = assembly::Flatten(asmDoc, parts, assemblies);
     if (!flat) {
@@ -401,6 +437,96 @@ std::string Table(const Result& result, const MotionStudy& study) {
     out += std::to_string(result.pairsUnknown) +
            " exact pair checks could not be verified.\n";
   return out;
+}
+
+} // namespace motion
+
+namespace motion {
+
+Verdict Summarize(const Result& r, const MotionStudy& study, bool stale) {
+  const bool deg = study.driverDof == MateDof::Rotation;
+  const char* unit = deg ? "deg" : "mm";
+  const auto shown = [&](const Sample& s) {
+    return deg ? angles::ToDegrees(s.value) : s.value;
+  };
+  char line[512];
+  Verdict v;
+  if (stale) {
+    v.text = "Stale: the model or the study changed since this run. Run "
+             "again to see this revision.";
+    return v;
+  }
+  if (!r.error.empty()) {
+    v.level = Verdict::Level::Bad;
+    v.text = "Could not run: " + r.error;
+    return v;
+  }
+  if (r.cancelled) {
+    std::snprintf(line, sizeof line,
+                  "Cancelled: %zu of %d samples done, the rest not looked "
+                  "at.",
+                  r.samples.size(), study.samples);
+    v.text = line;
+    return v;
+  }
+  // Did it MOVE? Asked first, for a preview and a validation alike: a sample
+  // that did not solve is a mechanism that locks or jumps there, and no
+  // collision verdict means anything past it.
+  size_t unsolved = 0;
+  const Sample* first = nullptr;
+  for (const Sample& s : r.samples)
+    if (!s.solved) {
+      ++unsolved;
+      if (first == nullptr)
+        first = &s;
+    }
+  if (first != nullptr) {
+    const size_t idx = static_cast<size_t>(first - r.samples.data());
+    std::snprintf(line, sizeof line,
+                  "Does not solve at sample %zu (%.4g %s): residual %.3g mm, "
+                  "%d errored mate%s; %zu of %zu samples unsolved.",
+                  idx, shown(*first), unit, first->residualMm,
+                  first->erroredMates, first->erroredMates == 1 ? "" : "s",
+                  unsolved, r.samples.size());
+    v.level = Verdict::Level::Bad;
+    v.text = line;
+    return v;
+  }
+  if (!r.checkedClashes) {
+    std::snprintf(line, sizeof line,
+                  "Moves through all %zu samples. Collisions not checked "
+                  "(a preview): Validate to check them.",
+                  r.samples.size());
+    v.text = line;
+    return v;
+  }
+  if (r.pairsUnknown) {
+    std::snprintf(line, sizeof line,
+                  "Incomplete: %zu pairs could not be checked.",
+                  r.pairsUnknown);
+    v.level = Verdict::Level::Bad;
+    v.text = line;
+    return v;
+  }
+  if (r.clean) {
+    std::snprintf(line, sizeof line,
+                  "Clean: moves through %zu samples, %zu pair checks, %.1f s.",
+                  r.samples.size(), r.pairsChecked, r.seconds);
+    v.level = Verdict::Level::Good;
+    v.text = line;
+    return v;
+  }
+  // Not clean, every sample solved: name the pair at the worst sample.
+  const Sample& worst = r.samples.at(r.worstSample);
+  std::string pair = "a clash";
+  if (!worst.clashes.empty())
+    pair = worst.clashes.front().aName + " x " + worst.clashes.front().bName;
+  std::snprintf(line, sizeof line, "NOT clean: %s at sample %zu (%.4g %s)%s.",
+                pair.c_str(), r.worstSample, shown(worst), unit,
+                worst.clashes.size() > 1 ? ", and more there" : "");
+  v.level = Verdict::Level::Bad;
+  v.text = line;
+  return v;
 }
 
 } // namespace motion

@@ -17,7 +17,16 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    126; // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
+    128; // v128: an AxisRef kind `custom` {origin, direction} (revolve,
+         //      pattern and datum planes about any axis); a helix's
+         //      `start_deg` (+_expr); a motion study's `configuration`
+         //      (docs/pes-friction-plan.md).
+         // v127: a fixture's optional `seat` -- one of its faces resting on
+         //      the stock's top, reaching in over an edge ({face: {feature,
+         //      name}, edge: -x|+x|-y|+y, along_mm, over_mm, spin_deg}),
+         //      re-solved against the stock on every read
+         //      (docs/cam/fixture-seat-plan.md).
+         // v126: a CAM setup's `fixtures` -- clamps and vises, each a part
          //      placed on the bed ({id, part, name, pos, rot_z, enabled}),
          //      which the verifier treats as somewhere the tool must never
          //      go (docs/cam/workholding-plan.md).

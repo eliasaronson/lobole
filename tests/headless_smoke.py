@@ -1903,6 +1903,40 @@ def main():
                            side="top")
             expect(abs(moved["pos"][2] - 21.0) < 1e-6,
                    f"`top` lays it on the stock: {moved}")
+            # A seat RESTS it on the stock by one of its faces
+            # (docs/cam/fixture-seat-plan.md): the jaw's underside on the
+            # top, 6 mm in over the +Y edge, 10 mm along from -X.
+            jels = d.call("list_elements", part="Clamp")["bodies"][0]
+            under = next(f["name"] for f in jels["faces"]
+                         if f["normal"][2] < -0.999)
+            top = next(f["name"] for f in jels["faces"]
+                       if f["normal"][2] > 0.999)
+            seat = {"feature_id": jels["created_by"], "element": under,
+                    "edge": "+y", "along_mm": 10.0, "over_mm": 6.0}
+            expect_error(d, "set_job_fixture", "without pos", setup=sid,
+                         fixture=jaw["id"], seat=seat, pos=[0, 0, 0])
+            expect_error(d, "set_job_fixture", "does not face down",
+                         setup=sid, fixture=jaw["id"],
+                         seat=dict(seat, element=top))
+            expect_error(d, "set_job_fixture", "-x, +x, -y or +y",
+                         setup=sid, fixture=jaw["id"],
+                         seat=dict(seat, edge="left"))
+            expect_error(d, "set_job_fixture", "no faces", setup=sid,
+                         fixture=box["id"], seat=seat)
+            seated = d.call("set_job_fixture", setup=sid, fixture=jaw["id"],
+                            seat=seat)
+            expect(seated.get("seat", {}).get("edge") == "+y" and
+                   abs(seated["pos"][2] - 21.0) < 1e-6,
+                   f"the seat rests its underside on the stock top: {seated}")
+            expect_error(d, "set_job_fixture", "rests on the stock",
+                         setup=sid, fixture=jaw["id"], side="top")
+            unseated = d.call("set_job_fixture", setup=sid,
+                              fixture=jaw["id"], seat=None)
+            expect("seat" not in unseated and
+                   unseated["pos"] == seated["pos"],
+                   f"seat: null stands it where it was: {unseated}")
+            moved = d.call("set_job_fixture", setup=sid, fixture=jaw["id"],
+                           side="top")
             listed = d.call("list_cam_setups")["setups"][0]["fixtures"]
             expect(len(listed) == 2 and "box" in listed[0] and
                    "part" in listed[1], f"the setup lists both: {listed}")

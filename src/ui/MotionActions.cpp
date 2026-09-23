@@ -13,7 +13,12 @@
 
 #include <OSD.hxx>
 
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <thread>
@@ -112,7 +117,8 @@ void PrebuildMeshes(MotionRun& run) {
 }
 
 bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
-             std::string* error, bool copyDocs) {
+             std::string* error, bool copyDocs,
+             const RunOverride* override = nullptr) {
   if (!state.assembly) {
     if (error)
       *error = "the active document is not an assembly";
@@ -137,6 +143,13 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
   run.studyId = studyId;
   run.ranAgainst = state.assembly.get();
   run.study = *s;
+  // What THIS run checks. Applied to the copy only, after the revision was
+  // taken from the stored study — so the study is not edited and a preview
+  // of an unchanged study is not stale. Before PrebuildMeshes, which reads it.
+  if (override) {
+    run.study.checkClash = override->checkClash;
+    run.study.clashMode = override->clashMode;
+  }
   run.asmCopy = *state.assembly;
   run.started = std::chrono::steady_clock::now();
   // The copies exist so the worker shares nothing with the tab, and are made
@@ -153,7 +166,8 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
 
 } // namespace
 
-bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error) {
+bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
+                    const RunOverride* override) {
   if (BackgroundJobRunning(state, "motion")) {
     if (error)
       *error = "a motion study is already running (background_jobs lists "
@@ -161,7 +175,7 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error) {
     return false;
   }
   auto run = std::make_shared<MotionRun>();
-  if (!Prepare(state, studyId, *run, error, /*copyDocs=*/true))
+  if (!Prepare(state, studyId, *run, error, /*copyDocs=*/true, override))
     return false;
   // Keep the previous result visible, with its revision, while running.
 
@@ -183,6 +197,9 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error) {
     // Only for the document it was run against: a tab switched underneath
     // a run does not receive somebody else's collision table.
     if (s.assembly.get() == run->ranAgainst) {
+      // The poses being played are about to be replaced.
+      if (s.motionPlaybackStudy == run->studyId)
+        StopMotionPlayback(s);
       s.motionResults[run->studyId] = std::move(run->result);
       s.motionResultRevisions[run->studyId] = run->revision;
     }
@@ -203,6 +220,8 @@ motion::Result RunMotionNow(AppState& state, uint64_t studyId) {
   motion::Result r = motion::Run(run.asmCopy, PartResolverFor(state),
                                  AssemblyResolverFor(state), run.study, nullptr,
                                  nullptr, &run.meshes, run.contacts.get());
+  if (state.motionPlaybackStudy == studyId)
+    StopMotionPlayback(state);
   state.motionResults[studyId] = r;
   state.motionResultRevisions[studyId] = run.revision;
   return r;
@@ -237,6 +256,15 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
     if (error)
       *error = why;
     return false;
+  }
+  // A study that names its configuration is posed under it: a pose of the
+  // "full load" study with the rack at idle would be a pose the study never
+  // made. Switching is a document change, so it is an undo step.
+  if (s->configuration &&
+      state.assembly->ActiveConfiguration() != *s->configuration) {
+    SnapshotAssembly(state);
+    state.assembly->SetActiveConfiguration(*s->configuration);
+    SolveActiveAssembly(state);
   }
   Mate* driver = state.assembly->FindMateById(s->driverMate);
   const double target = motion::ValueAt(*s, t);
@@ -349,6 +377,130 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
     *nodesOut = out.size();
   if (framesOut)
     *framesOut = times.size();
+  return true;
+}
+
+// --- playback (docs/ui/motion-panel-plan.md)
+// ----------------------------------
+
+namespace {
+// Samples per second: the rate the GLB export plays at, so the panel and the
+// exported file show a study at the same speed.
+constexpr double kPlaybackSamplesPerSecond = 24.0;
+constexpr double kMaxPlaybackStep = 0.25; // s: a stalled frame does not skip
+
+bool FindWorld(const motion::Sample& s, uint64_t occId, glm::mat4& out) {
+  for (const auto& [id, m] : s.worlds)
+    if (id == occId) {
+      out = m;
+      return true;
+    }
+  return false;
+}
+
+void PushAllLive(AppState& state) {
+  if (!state.assembly)
+    return;
+  for (const Occurrence& o : state.assembly->GetOccurrences())
+    PushOccurrenceLive(state, o.id);
+}
+} // namespace
+
+std::string MotionPlaybackRefusal(AppState& state, uint64_t studyId) {
+  if (!state.assembly)
+    return "the active document is not an assembly";
+  if (!state.assembly->FindMotionStudyById(studyId))
+    return "no motion study with id " + std::to_string(studyId);
+  const motion::Result* r = MotionResultFor(state, studyId);
+  if (!r || r->samples.size() < 2)
+    return "run it first (Preview or Validate): playback shows the poses a "
+           "run made";
+  if (r->cancelled)
+    return "the last run was cancelled; run it again";
+  if (MotionResultStale(state, studyId))
+    return "the result is stale (the model or the study changed); run it "
+           "again";
+  for (size_t i = 0; i < r->samples.size(); i++)
+    if (!r->samples[i].solved)
+      return "sample " + std::to_string(i) +
+             " did not solve, so there is no pose to show there";
+  return {};
+}
+
+bool StartMotionPlayback(AppState& state, uint64_t studyId, std::string* why) {
+  const std::string no = MotionPlaybackRefusal(state, studyId);
+  if (!no.empty()) {
+    if (why)
+      *why = no;
+    return false;
+  }
+  if (state.motionPlaybackStudy != studyId)
+    state.motionPlaybackPos = 0.0; // a new study starts at its beginning
+  state.motionPlaybackStudy = studyId;
+  state.motionPlaying = true;
+  state.motionPlaybackLastTick = -1.0;      // the first tick sets the clock
+  state.syncedDocumentVersion = UINT64_MAX; // pickers follow the pose
+  return true;
+}
+
+void StopMotionPlayback(AppState& state) {
+  if (state.motionPlaybackStudy == 0)
+    return;
+  state.motionPlaybackStudy = 0;
+  state.motionPlaying = false;
+  state.motionPlaybackPos = 0.0;
+  // Back to the document's own placements, and picking with them.
+  state.syncedDocumentVersion = UINT64_MAX;
+}
+
+void TickMotionPlayback(AppState& state, double now) {
+  if (state.motionPlaybackStudy == 0)
+    return;
+  // Anything that invalidated the result — an edit, a new run, a tab
+  // switch — ends playback rather than showing poses of something else.
+  if (!MotionPlaybackRefusal(state, state.motionPlaybackStudy).empty()) {
+    StopMotionPlayback(state);
+    return;
+  }
+  if (!state.motionPlaying) {
+    state.motionPlaybackLastTick = -1.0;
+    return;
+  }
+  const motion::Result* r = MotionResultFor(state, state.motionPlaybackStudy);
+  const double last = static_cast<double>(r->samples.size() - 1);
+  if (state.motionPlaybackLastTick >= 0.0) {
+    const double dt =
+        std::clamp(now - state.motionPlaybackLastTick, 0.0, kMaxPlaybackStep);
+    state.motionPlaybackPos += dt * kPlaybackSamplesPerSecond;
+    if (state.motionPlaybackPos > last) // loop: a mechanism runs round
+      state.motionPlaybackPos = std::fmod(state.motionPlaybackPos, last);
+  }
+  state.motionPlaybackLastTick = now;
+  PushAllLive(state); // matrices only: no solve, no re-tessellation
+}
+
+bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
+                         glm::mat4& world) {
+  if (state.motionPlaybackStudy == 0)
+    return false;
+  const motion::Result* r = MotionResultFor(state, state.motionPlaybackStudy);
+  if (!r || r->samples.size() < 2)
+    return false;
+  const size_t n = r->samples.size();
+  const double pos = std::clamp(state.motionPlaybackPos, 0.0, double(n - 1));
+  const size_t i = std::min(static_cast<size_t>(pos), n - 2);
+  const float f = static_cast<float>(pos - double(i));
+  glm::mat4 a, b;
+  if (!FindWorld(r->samples[i], occurrenceId, a) ||
+      !FindWorld(r->samples[i + 1], occurrenceId, b))
+    return false;
+  // Rigid placements: position lerped, orientation slerped, between the two
+  // samples either side.
+  const glm::quat qa = glm::normalize(glm::quat_cast(glm::mat3(a)));
+  const glm::quat qb = glm::normalize(glm::quat_cast(glm::mat3(b)));
+  const glm::vec3 p = glm::mix(glm::vec3(a[3]), glm::vec3(b[3]), f);
+  world = glm::translate(glm::mat4(1.0f), p) *
+          glm::mat4_cast(glm::slerp(qa, qb, f));
   return true;
 }
 

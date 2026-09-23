@@ -1,0 +1,218 @@
+{
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            873148729,
+            1
+          ],
+          "b": [
+            601629911,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            601629911,
+            1
+          ],
+          "b": [
+            1695068234,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            1695068234,
+            1
+          ],
+          "b": [
+            3085620081,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3085620081,
+            1
+          ],
+          "b": [
+            873148729,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            873148729,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            1695068234,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            601629911,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3085620081,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        }
+      ],
+      "entities": [
+        {
+          "a": [
+            11.0,
+            0.0
+          ],
+          "b": [
+            13.0,
+            0.0
+          ],
+          "id": 873148729,
+          "type": "line"
+        },
+        {
+          "a": [
+            13.0,
+            0.0
+          ],
+          "b": [
+            13.0,
+            3.0
+          ],
+          "id": 601629911,
+          "type": "line"
+        },
+        {
+          "a": [
+            13.0,
+            3.0
+          ],
+          "b": [
+            11.0,
+            3.0
+          ],
+          "id": 1695068234,
+          "type": "line"
+        },
+        {
+          "a": [
+            11.0,
+            3.0
+          ],
+          "b": [
+            11.0,
+            0.0
+          ],
+          "id": 3085620081,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Profile",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "angle_deg": 360.0,
+      "axis": {
+        "direction": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "kind": "custom",
+        "origin": [
+          10.0,
+          0.0,
+          0.0
+        ]
+      },
+      "id": 2,
+      "mode": "new_body",
+      "name": "Rev",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Revolve"
+    },
+    {
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "id": 3,
+      "kind": "helix",
+      "name": "Coil",
+      "origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "pitch": 1.0,
+      "radius": 2.0,
+      "start_deg": 90.0,
+      "turns": 1.0,
+      "type": "Curve3D"
+    }
+  ],
+  "format": "designer-document",
+  "version": 128
+}

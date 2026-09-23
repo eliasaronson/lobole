@@ -494,3 +494,22 @@ the keep-out box first and then "Hold it with a part:". An empty Fixtures
 section says that verify checks no clamps. A placed part's verbs (Cut,
 Remove) sit on its name line, and its X, Y and turn share the next line,
 named inside the fields.
+
+**2026-09-22, v127 / 2026-09-23:** a fixture moves with **arrows**, and a
+fixture made from a part can **rest on the stock**
+([fixture-gizmo-plan.md](fixture-gizmo-plan.md),
+[fixture-seat-plan.md](fixture-seat-plan.md)).
+- **The handles.** While its editor is open, the fixture gets the job tab's
+  gizmo: X, Y and Z arrows and a spin about Z.
+- **Snapping.** Its own flat faces snap to the stock's sides, top and bed,
+  and the editor names the snap ("Pad's underside on the stock top"). Hold
+  Ctrl to move freely.
+- **Resting on the stock.** Put down with a face on the stock's top, it
+  rests there and follows the stock. The editor then shows the edge it
+  reaches over, Along, Over the stock and Spin, all measured from the stock,
+  and Unseat.
+- **Lifting off.** Lifting it off the top stands it on its own again.
+- **The row** reads "over the -X edge", or "its seat is gone: …".
+
+The first version seated a clamp by two clicks (a face, then a spot). The
+person it was for could not tell how to use it, and the arrows replaced it.

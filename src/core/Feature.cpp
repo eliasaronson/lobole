@@ -26,6 +26,7 @@ void VisitRefs(const AxisRef& ref, const Feature::RefVisitor& visit) {
   case AxisRef::Kind::X:
   case AxisRef::Kind::Y:
   case AxisRef::Kind::Z:
+  case AxisRef::Kind::Custom: // written out in full: it depends on nothing
     break;
   }
 }

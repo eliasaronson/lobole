@@ -34,6 +34,10 @@ bool ExportActiveDocument(AppState& state, const std::string& path,
 // NFD or an active assembly.
 void ExportBomDialog(AppState& state);
 
+// Save a motion study's run as an animated GLB (ExportMotionGlb). The refusal
+// lands in `state.motionAddRefusal`, shown in the panel. No-op without NFD.
+void ExportMotionDialog(AppState& state, uint64_t studyId);
+
 // Whether a native file dialog can actually open here (NFD compiled in AND a
 // usable backend — on Linux the XDG desktop portal). False in a bare session
 // or a container, where Export used to click into silence: callers gate their

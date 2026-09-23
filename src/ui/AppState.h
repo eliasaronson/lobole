@@ -1041,6 +1041,20 @@ struct AppState {
     glm::dvec2 startPlace{0.0, 0.0};
     double startRotZ = 0.0;
     glm::vec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
+    // A FIXTURE on a job tab (docs/cam/fixture-gizmo-plan.md): non-zero ->
+    // the drag moves this fixture, X/Y/Z and a spin about Z, snapping its
+    // own flat faces to the stock's planes. `facePlanes[axis]` are those
+    // faces square to each axis at grab, as (coordinate, what it is) in bed
+    // space; `snapLabel` says what the drag is snapped to now, for the
+    // editor to show while it moves.
+    uint64_t fixtureId = 0;
+    glm::dvec3 startFixturePos{0.0};
+    struct FacePlane {
+      double at = 0.0;
+      std::string what;
+    };
+    std::vector<FacePlane> facePlanes[3];
+    std::string snapLabel;
   };
 
   // Direct-manipulation handle on the pending preview feature (docs/ui/
@@ -1113,6 +1127,12 @@ struct AppState {
   std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
+  // Playback of a stored result (docs/ui/motion-panel-plan.md): display-only,
+  // read by DisplayMatrix and the renderer sync. 0 = not showing one.
+  uint64_t motionPlaybackStudy = 0;
+  bool motionPlaying = false;     // advancing; false = paused on a frame
+  double motionPlaybackPos = 0.0; // in samples, 0 .. n-1 (fractional)
+  double motionPlaybackLastTick = 0.0;
 
   // UI state
   // The tolerance editor in the Measure tool window (docs/tolerances/plan.md
@@ -1669,6 +1689,9 @@ struct AppState {
   // The fixture the tool window is editing (docs/cam/workholding-plan.md),
   // 0 = none; like camEditTool, one editor holds the window at a time.
   uint64_t camEditFixture = 0;
+  // Why a seated fixture could not solve, by fixture id: its face gone, the
+  // stock gone. Filled by RefreshFixtureSeats, read by the row.
+  std::map<uint64_t, std::string> camSeatRefusals;
   // Where the worst fixture hit of the last verdict was, setup space, for a
   // marker in the viewport and in Simulate. Drawn only while there IS a
   // verdict, so every place that drops the verdict drops the marker too.

@@ -2,6 +2,8 @@
 
 #include "core/MotionStudy.h"
 
+#include <glm/glm.hpp>
+
 #include <cstdint>
 #include <string>
 
@@ -18,9 +20,20 @@ struct AppState;
 // finish and is keyed by the study AND the document it was run against —
 // a result never outlives a tab switch to a different assembly.
 
+// What ONE run checks, instead of what the study says: the panel's Preview
+// (no collisions) and Validate (exact) are runs, not edits. The stored study
+// is never touched, and the result's staleness is still judged against it —
+// so a preview of an unchanged study is fresh.
+struct RunOverride {
+  bool checkClash = true;
+  std::string clashMode = "exact"; // "mesh" | "exact"
+};
+
 // Start an async run. False (with `error`) if one is already running or
-// the study cannot run (WhyNot).
-bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error);
+// the study cannot run (WhyNot). `override` (may be null) changes what this
+// run checks without editing the study.
+bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
+                    const RunOverride* override = nullptr);
 
 // Run on the main thread, now. The same result as the job, for a caller
 // that would rather wait than poll.
@@ -43,5 +56,19 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
 bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
                      std::string* error, size_t* nodesOut = nullptr,
                      size_t* framesOut = nullptr);
+
+// PLAYBACK: the poses a run made, shown in the viewport without solving and
+// without editing the document — display-only, like an exploded view. Refused
+// (false, with why) with no result, a stale one, or an unsolved sample: the
+// rule the GLB export has, for the same reason.
+bool StartMotionPlayback(AppState& state, uint64_t studyId, std::string* why);
+void StopMotionPlayback(AppState& state);
+// Why playback (and the export) cannot use this study's result, or empty.
+std::string MotionPlaybackRefusal(AppState& state, uint64_t studyId);
+// Advance by wall clock (seconds); called once per frame from the main loop.
+void TickMotionPlayback(AppState& state, double now);
+// The playback pose of a TOP-LEVEL occurrence, if playback is showing one.
+bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
+                         glm::mat4& world);
 
 } // namespace ui

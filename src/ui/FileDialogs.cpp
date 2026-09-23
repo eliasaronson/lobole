@@ -1,6 +1,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/AssemblyActions.h"
 #include "ui/ImportJob.h"
+#include "ui/MotionActions.h"
 #include "ui/OpenJob.h"
 #include "ui/StepExport.h"
 
@@ -535,6 +536,40 @@ void ExportBomDialog(AppState& state) {
   LOG_INFO("BOM exported to {}", path);
 }
 
+void ExportMotionDialog(AppState& state, uint64_t studyId) {
+  if (!state.assembly || !NativeDialogsSafe())
+    return;
+  const MotionStudy* s = state.assembly->FindMotionStudyById(studyId);
+  if (!s)
+    return;
+  // A name from the study, filesystem-safe: "camshaft, one turn" is a
+  // perfectly good study name and a poor file name.
+  std::string name = s->name.empty() ? "motion" : s->name;
+  for (char& c : name)
+    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-')
+      c = '_';
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"glTF binary", "glb"}};
+  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr,
+                       (name + ".glb").c_str()) != NFD_OKAY)
+    return;
+  std::string path(outPath);
+  NFD_FreePathU8(outPath);
+  if (!path.ends_with(".glb"))
+    path += ".glb";
+  std::string error;
+  size_t nodes = 0, frames = 0;
+  if (ExportMotionGlb(state, studyId, path, &error, &nodes, &frames)) {
+    state.motionAddRefusal.clear();
+    LOG_INFO("Motion exported to {} ({} nodes, {} frames)", path, nodes,
+             frames);
+  } else {
+    // Shown in the panel, not only logged: a click that silently did
+    // nothing is the thing this button replaces.
+    state.motionAddRefusal = "Export failed: " + error;
+  }
+}
+
 #else // no nativefiledialog: the ImGui browser is the only picker
 
 void ImportFileDialog(AppState& state) { OpenBrowserFallback(state); }
@@ -556,6 +591,10 @@ void ExportDialog(AppState&) { LOG_WARN("Export requires nativefiledialog"); }
 
 void ExportBomDialog(AppState&) {
   LOG_WARN("BOM export requires nativefiledialog");
+}
+
+void ExportMotionDialog(AppState&, uint64_t) {
+  LOG_WARN("Motion export requires nativefiledialog");
 }
 
 #endif

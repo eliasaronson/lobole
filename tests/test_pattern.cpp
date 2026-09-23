@@ -300,3 +300,27 @@ TEST_CASE("Mirroring a cut mirrors the hole", "[pattern]") {
   const double hole = 3.1415926535897932 * 9.0 * 5.0;
   CHECK_THAT(TotalVolume(doc), WithinRel(6000.0 - 2.0 * hole, 1e-3));
 }
+
+TEST_CASE("Circular pattern about a custom axis off the origin", "[pattern]") {
+  // A unit box beside the axis x = 10, y = 0 (parallel to Z): four copies at
+  // 90 degrees land round (10, 0), disjoint, all within 3 mm of it.
+  Document doc;
+  uint64_t box = AddBox(doc, "A", {12, -0.5, -0.5}, 1.0);
+  auto pat =
+      std::make_unique<PatternFeature>("Arr", PatternKind::Circular, box);
+  pat->axis.kind = AxisRef::Kind::Custom;
+  pat->axis.origin = {10.0, 0.0, 0.0};
+  pat->axis.direction = {0.0, 0.0, 1.0};
+  pat->count = 4;
+  pat->angleDeg = 90.0;
+  doc.AddFeature(std::move(pat));
+
+  REQUIRE(doc.GetBodies().size() == 4);
+  CHECK_THAT(TotalVolume(doc), WithinRel(4.0, 1e-4));
+  for (const Body& b : doc.GetBodies()) {
+    glm::vec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    CHECK(std::abs((lo.x + hi.x) / 2 - 10.0) < 3.0);
+    CHECK(std::abs((lo.y + hi.y) / 2) < 3.0);
+  }
+}

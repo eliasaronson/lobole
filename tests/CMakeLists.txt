@@ -409,6 +409,14 @@ add_test(NAME motion_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(motion_smoke PROPERTIES TIMEOUT 300)
 
+# The PES pump round's fixes (docs/pes-friction-plan.md): custom axes, a
+# helix's start, a study's configuration and mate values, one clash
+# vocabulary, the section's kept half, and the Python verbs.
+add_test(NAME api_friction_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/api_friction_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(api_friction_smoke PROPERTIES TIMEOUT 180)
+
 # A scrub lands on the branch the run walked, not the mirror image of it.
 add_test(NAME scrub_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scrub_smoke.py
