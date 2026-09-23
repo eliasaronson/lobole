@@ -428,7 +428,10 @@ const std::vector<Command>& Table() {
     add(
         "view.render",
         [](AppState& s) {
-          const bool ready = s.rayTracer && s.rayTracer->IsInitialized();
+          // A quick render needs a renderer, not ray tracing, so the dialog
+          // opens wherever either kind of still can be made.
+          const bool ready = (s.rayTracer && s.rayTracer->IsInitialized()) ||
+                             s.renderRaster != nullptr;
           return ready &&
                  (HasBody(s) || (s.assembly && s.assembly->OccurrenceCount()));
         },

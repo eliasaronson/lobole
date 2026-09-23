@@ -631,6 +631,15 @@ add_test(NAME render_glass_smoke
 set_tests_properties(render_glass_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# The quick still: the raster renderers into an image of exactly W x H, path
+# parameters refused, the viewport left as it was
+# (docs/rendering/quick-render-plan.md). A renderer, not ray tracing.
+add_test(NAME render_quick_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_quick_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_quick_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300)
+
 add_test(NAME visual_export_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
                  $<TARGET_FILE:designer>)

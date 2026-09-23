@@ -152,8 +152,8 @@ const Binding kDefaults[] = {
     // bindings can never shadow them.
     {"view.measure", Context::Global, "Measure", "Tools", "Ctrl+Shift+M"},
     {"view.section", Context::Global, "Section view", "Tools", "Ctrl+Shift+X"},
-    {"view.render", Context::Global, "Render (offline raytrace)", "Tools",
-     "Ctrl+Shift+R"},
+    {"view.render", Context::Global, "Render a still (quick or path traced)",
+     "Tools", "Ctrl+Shift+R"},
     // Deliberately undocumented (PerfHud.h): kept out of Preferences and the
     // shortcuts window, but it is a binding like any other.
     {"view.perf_hud", Context::Global, "Frame timing HUD", "Tools",

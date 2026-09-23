@@ -62,6 +62,12 @@ void DrawRenderModal(AppState& state) {
   static int samples = 512;
   static bool ground = true;
   static bool studio = true;
+  // QUICK is the default: the model as the viewport draws it, at this size,
+  // in about a second — which at anything short of the tracer's top settings
+  // usually looks as good, and needs no ray tracing
+  // (docs/rendering/quick-render-plan.md).
+  static bool quick = true;
+  static int supersample = 2;
 
   ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Render Still", nullptr,
@@ -104,6 +110,22 @@ void DrawRenderModal(AppState& state) {
       ImGui::Separator();
     }
 
+    const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
+    if (ImGui::RadioButton("Quick###render_mode_quick", quick))
+      quick = true;
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The model as the viewport draws it — materials, "
+                        "lights, shadows, ambient occlusion, outlines — "
+                        "without sketches, gizmos or selection. About a "
+                        "second.");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!rtReady);
+    if (ImGui::RadioButton("Path traced###render_mode_path", !quick))
+      quick = false;
+    ImGui::EndDisabled();
+    if (!rtReady)
+      quick = true;
+
     ImGui::TextUnformatted("Resolution");
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::BeginCombo("##res", kRes[resIdx].label)) {
@@ -112,17 +134,30 @@ void DrawRenderModal(AppState& state) {
           resIdx = i;
       ImGui::EndCombo();
     }
-    ImGui::TextUnformatted("Samples");
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::SliderInt("##spp", &samples, 16, 1024);
-    ImGui::Checkbox("Ground shadows", &ground);
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Catch soft shadows on an invisible floor plane");
-    ImGui::Checkbox("Studio backdrop", &studio);
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("A neutral sweep behind the model. Off shows the "
-                        "environment photograph itself, which is a 1k HDRI "
-                        "and reads as a blur at this size.");
+    if (quick) {
+      static const char* kSs[] = {"1x (as drawn)", "2x", "3x", "4x"};
+      ImGui::TextUnformatted("Supersampling");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      int ssIdx = supersample - 1;
+      if (ImGui::Combo("###render_ss", &ssIdx, kSs, IM_ARRAYSIZE(kSs)))
+        supersample = ssIdx + 1;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Draw the picture this many times wider and taller "
+                          "and average it down: smoother edges and lines.");
+    }
+    if (!quick) {
+      ImGui::TextUnformatted("Samples");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      ImGui::SliderInt("##spp", &samples, 16, 1024);
+      ImGui::Checkbox("Ground shadows", &ground);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Catch soft shadows on an invisible floor plane");
+      ImGui::Checkbox("Studio backdrop", &studio);
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("A neutral sweep behind the model. Off shows the "
+                          "environment photograph itself, which is a 1k HDRI "
+                          "and reads as a blur at this size.");
+      }
     }
 
     // What the ray tracer will actually be given: a part's bodies, or — on an
@@ -132,14 +167,31 @@ void DrawRenderModal(AppState& state) {
         state.assembly
             ? state.assembly->OccurrenceCount() > 0
             : (state.document && !state.document->GetBodies().empty());
-    const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
-    const bool canRender = hasBodies && rtReady;
+    const bool canRender =
+        hasBodies && (quick ? state.renderRaster != nullptr : rtReady);
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!canRender);
     // "###" ids: the visible label starts with an icon glyph, which no test
     // or script should have to spell in a ref.
-    if (ImGui::Button(ICON_FA_CAMERA " Render###render_go", ImVec2(150, 0))) {
+    const bool clicked =
+        ImGui::Button(ICON_FA_CAMERA " Render###render_go", ImVec2(150, 0));
+    if (clicked && quick) {
+      // Synchronous: seconds even at 4x, and the result lands in the
+      // same fields a traced still reports through.
+      AppState::RasterStill req;
+      req.width = kRes[resIdx].w;
+      req.height = kRes[resIdx].h;
+      req.supersample = static_cast<uint32_t>(supersample);
+      req.path = "render.png";
+      SyncRenderersToDocument(state);
+      job = RenderJob{};
+      job.width = req.width;
+      job.height = req.height;
+      job.success = state.renderRaster(req, &job.error, &job.warning);
+      job.resultPath = req.path;
+      job.finished = true;
+    } else if (clicked) {
       job = RenderJob{};
       job.active = true;
       job.width = kRes[resIdx].w;
@@ -156,8 +208,9 @@ void DrawRenderModal(AppState& state) {
       ImGui::CloseCurrentPopup();
 
     if (!rtReady)
-      ImGui::TextDisabled("Ray tracing not available on this GPU.");
-    else if (!hasBodies)
+      ImGui::TextDisabled("Path tracing needs ray tracing, which this GPU "
+                          "does not have; quick renders still work.");
+    if (!hasBodies)
       ImGui::TextDisabled(state.assembly ? "Insert a part to render."
                                          : "Add a body to render.");
   }
@@ -556,7 +609,7 @@ void DrawModelToolbar(AppState& state) {
   // Offline path-traced still (KeyShot-style). Opens the render dialog — the
   // command records the request rather than calling OpenPopup, because the
   // same command runs from a key press outside any window (Commands.h).
-  btn("###tb_render", "view.render", "Render (offline raytrace)");
+  btn("###tb_render", "view.render", "Render a still (quick or path traced)");
   if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);
@@ -1006,7 +1059,7 @@ void DrawAssemblyToolbar(AppState& state) {
   // landed; only the buttons and the RPC guard said otherwise, so an assembly
   // could be modelled, mated and exploded but never rendered.
   CommandButton(state, "###tb_asm_render", "view.render",
-                "Render (offline raytrace)");
+                "Render a still (quick or path traced)");
   if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);

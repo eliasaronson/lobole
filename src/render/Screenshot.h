@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 // Captures the current frame to a PNG by re-rendering it into an offscreen
 // image (the swapchain lacks TRANSFER_SRC usage, so it can't be read back
@@ -53,4 +54,16 @@ bool CaptureScreenshot(
     const std::function<void(VkCommandBuffer)>& recordPrepass = {},
     FrameStats* stats = nullptr,
     VkImageLayout colorFinalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-    uint32_t repeat = 1, const std::function<void()>& afterEachSubmit = {});
+    uint32_t repeat = 1, const std::function<void()>& afterEachSubmit = {},
+    std::vector<uint8_t>* pixelsOut = nullptr);
+
+// `pixelsOut` (above) receives the frame as tightly packed RGB8 when given;
+// with an empty `outputPath` nothing is written to disk.
+
+// Average a k x k supersampled RGB8 frame down to (w / k) x (h / k) and write
+// it as a PNG. The average is taken in LINEAR light (sRGB decoded, averaged,
+// re-encoded): averaging the encoded values darkens every edge between a
+// light and a dark surface, which is the one place supersampling shows.
+bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
+                     uint32_t height, uint32_t factor, const std::string& path,
+                     std::string* error = nullptr);

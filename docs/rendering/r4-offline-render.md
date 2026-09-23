@@ -73,6 +73,14 @@ The `RayTracingRenderer` scaffold is ~40% real:
     `PumpRenderJob` in the main loop. The `render_still(width,height,samples,
     seed,path)` RPC runs the blocking variant (`RenderStillBlocking`) on the
     main thread. Fixed seed + sample count ⇒ byte-identical PNG.
+  - **Quick mode** (the dialog's default; `render_still {mode: "quick"}`):
+    the viewport's raster renderers — mesh, FEM field, outlines, no overlays
+    or selection tints — drawn into an image of exactly W x H, supersampled
+    1-4x (default 2) and averaged down in linear light. Seconds, not minutes,
+    and needs a renderer rather than ray tracing, so the dialog opens on a
+    GPU without RT offering quick only. Path-tracer parameters (`samples`,
+    `seed`, `ground`, `backdrop`, `outlines`) are refused in quick mode.
+    docs/rendering/quick-render-plan.md; `tests/render_quick_smoke.py`.
   - **Fixed en route**: the scaffold shadow ray (`isShadowed` was never
     initialized to `true`; `sbtRecordOffset` was `1`, past the 1-entry hit
     region) → now `true` + offset `0`, miss index `1`.

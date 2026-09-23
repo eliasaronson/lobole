@@ -2187,6 +2187,19 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
       // model for being empty.
       IM_CHECK(ctx->ItemExists("//Render Still/###render_close"));
     }
+
+    // A quick still needs a renderer, not ray tracing, so it renders on
+    // every GPU — and it is synchronous, so the file is there on return.
+    std::error_code ec;
+    std::filesystem::remove("render.png", ec);
+    ctx->ItemClick("//Render Still/###render_mode_quick");
+    IM_CHECK((ctx->ItemInfo("//Render Still/###render_go").ItemFlags &
+              ImGuiItemFlags_Disabled) == 0);
+    ctx->ItemClick("//Render Still/###render_go");
+    ctx->Yield(2);
+    IM_CHECK(std::filesystem::exists("render.png"));
+    IM_CHECK(std::filesystem::file_size("render.png", ec) > 0);
+    std::filesystem::remove("render.png", ec);
     ctx->ItemClick("//Render Still/###render_close");
     ctx->Yield();
   };

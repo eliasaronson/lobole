@@ -1740,18 +1740,25 @@ def orient_to_face() -> dict:
     return _call("orient_to_face")
 
 
-@mcp.tool(description="Offline path-traced render (soft shadows, materials, "
-          "environment lighting) returned as an image. Works on part AND "
-          "assembly tabs (occurrences render at their solved placements). "
-          "Frame with view/fit_view first. The app freezes for the duration "
-          "— samples=64 is a fast preview, 512+ presentation quality. ground "
-          "adds a shadow-catcher plane. Requires a ray-tracing GPU (errors "
-          "otherwise). Optional path also keeps the PNG.")
-def render_still(width: int = 1920, height: int = 1080, samples: int = 512,
-                 seed: int = 1, ground: bool = True, path: str = "") -> Image:
+@mcp.tool(description="A rendered still of the model, returned as an image. "
+          "Works on part AND assembly tabs. Frame with view/fit_view first. "
+          "mode='quick' (the default) is the model as the VIEWPORT draws it "
+          "— materials, lights, shadows, ambient occlusion, outlines, without "
+          "sketches, gizmos or selection — in about a second, supersampled "
+          "`supersample` (1-4) times. mode='path' is the offline path tracer "
+          "(needs a ray-tracing GPU; the app freezes for the duration): "
+          "samples=64 is a fast preview, 512+ presentation quality, ground "
+          "adds a shadow-catcher plane. Optional path also keeps the PNG.")
+def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
+                 supersample: int = 2, samples: int = 512, seed: int = 1,
+                 ground: bool = True, path: str = "") -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
-    r = _call("render_still", width=width, height=height, samples=samples,
-              seed=seed, ground=ground, path=out)
+    if mode == "quick":
+        r = _call("render_still", width=width, height=height, mode="quick",
+                  supersample=supersample, path=out)
+    else:
+        r = _call("render_still", width=width, height=height, mode=mode,
+                  samples=samples, seed=seed, ground=ground, path=out)
     if not r.get("ok"):
         raise RuntimeError("render failed: " + str(r.get("error", "unknown")))
     return Image(path=out)

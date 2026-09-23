@@ -1048,6 +1048,130 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
   // (stale) maps and the image layouts stay read-only.
 }
 
+// Where a quick render (RenderRasterStill) draws and what it must put back:
+// the render pass and format of the loop it runs in, an idle frame slot, the
+// SSAO targets' size and the viewport rect the next frame expects.
+struct RasterTarget {
+  VkRenderPass pass = VK_NULL_HANDLE;
+  VkFormat format = VK_FORMAT_B8G8R8A8_UNORM;
+  VkImageLayout finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  uint32_t frame = 0;
+  VkClearValue clear{};
+  uint32_t aoW = 0, aoH = 0; // the SSAO targets, restored
+  int32_t vpX = 0, vpY = 0;  // the scene viewport, restored
+  uint32_t vpW = 0, vpH = 0;
+};
+
+// QUICK render (docs/rendering/quick-render-plan.md): the model as the
+// viewport rasterizes it, at the requested size, supersampled. Synchronous;
+// every size it changes is put back before it returns, so the next frame is
+// the frame it would have been.
+static bool RenderRasterStill(const RasterTarget& t,
+                              const ui::AppState::RasterStill& req,
+                              std::string* error, std::string* warning) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (!g_MeshRenderer || !g_Camera)
+    return fail("no renderer: a quick render needs a GPU (not --headless)");
+  if (req.width == 0 || req.height == 0)
+    return fail("width and height must be positive");
+  // The supersampled image has to fit the device.
+  VkPhysicalDeviceProperties props{};
+  vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+  const uint32_t limit = std::min(props.limits.maxImageDimension2D,
+                                  props.limits.maxFramebufferWidth);
+  uint32_t k = std::clamp(req.supersample, 1u, 4u);
+  while (k > 1 && (req.width * k > limit || req.height * k > limit))
+    --k;
+  if (req.width > limit || req.height > limit)
+    return fail("the device's largest image is " + std::to_string(limit) +
+                " px on a side");
+  if (k != std::clamp(req.supersample, 1u, 4u) && warning)
+    *warning = "supersampled " + std::to_string(k) + "x, not " +
+               std::to_string(req.supersample) +
+               "x: the device's largest "
+               "image is " +
+               std::to_string(limit) + " px on a side";
+  const uint32_t W = req.width * k, H = req.height * k;
+
+  vkDeviceWaitIdle(g_Device);
+  // Only the model: no selection or hover tint on it (the GUI re-applies
+  // both next frame), and none of the overlay renderers below.
+  g_MeshRenderer->ClearFaceHighlight();
+  g_MeshRenderer->ClearFaceHover();
+  // Everything that is sized in pixels, pointed at the big image.
+  for (SceneRenderer* r : g_Scene)
+    r->SetViewport(0, 0, W, H);
+  if (g_SSAORenderer) {
+    g_SSAORenderer->Resize(W, H);
+    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+  }
+  OutlineSettings outline{};
+  if (g_OutlineRenderer) {
+    outline = g_OutlineRenderer->GetOutlineSettings();
+    OutlineSettings wide = outline;
+    wide.lineWidth *= float(k); // the viewport's width once averaged down
+    wide.outlineWidth *= float(k);
+    g_OutlineRenderer->SetOutlineSettings(wide);
+  }
+  const glm::mat4 view = g_Camera->GetViewMatrix();
+  const glm::mat4 proj = g_Camera->GetProjectionMatrixForAspect(
+      static_cast<float>(req.width) / static_cast<float>(req.height));
+  for (SceneRenderer* r : g_Scene)
+    r->UpdateCamera(view, proj);
+
+  std::vector<uint8_t> pixels;
+  std::string captureError;
+  FrameStats stats; // whole frame: there is no chrome in it
+  const bool captured = CaptureScreenshot(
+      g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, t.pass, t.format, W,
+      H, t.clear,
+      [&](VkCommandBuffer cb) {
+        // The model's renderers only: the sketch, underlay and CAM stock
+        // renderers carry the overlays (sketches, datums, gizmos, handles).
+        g_MeshRenderer->Render(cb, t.frame);
+        if (g_FieldRenderer)
+          g_FieldRenderer->Render(cb, t.frame);
+        if (g_OutlineRenderer)
+          g_OutlineRenderer->Render(cb, t.frame);
+      },
+      /*outputPath=*/"", &captureError, g_MSAASamples,
+      [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, t.frame); }, &stats,
+      t.finalLayout, 1, {}, &pixels);
+
+  // Put back everything the next frame reads.
+  vkDeviceWaitIdle(g_Device);
+  if (g_OutlineRenderer)
+    g_OutlineRenderer->SetOutlineSettings(outline);
+  if (g_SSAORenderer) {
+    g_SSAORenderer->Resize(t.aoW, t.aoH);
+    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+  }
+  for (SceneRenderer* r : g_Scene)
+    r->SetViewport(t.vpX, t.vpY, t.vpW, t.vpH);
+  const glm::mat4 liveProj = g_Camera->GetProjectionMatrix();
+  for (SceneRenderer* r : g_Scene)
+    r->UpdateCamera(view, liveProj);
+
+  if (!captured)
+    return fail(captureError.empty() ? "the capture failed" : captureError);
+  std::string writeError;
+  if (!DownsampleToPng(pixels, W, H, k, req.path, &writeError))
+    return fail(writeError);
+  // Saved is not the same as good, as for a traced still: a picture that is
+  // all one colour framed nothing.
+  if (stats.dominantFraction > 0.995f && warning) {
+    if (!warning->empty())
+      *warning += "; ";
+    *warning += "the picture is one colour: the camera frames nothing "
+                "(fit the view first, or pass fit: true)";
+  }
+  return true;
+}
+
 static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   VkSemaphore image_acquired_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
@@ -1627,6 +1751,23 @@ static int RunOffscreen(const CommandLineArgs& args) {
     g_App.gpuStats.mainP50Ms = gs.mainP50Ms;
     g_App.gpuStats.totalP50Ms = gs.totalP50Ms;
     return ok ? count : 0;
+  };
+
+  // Quick render (docs/rendering/quick-render-plan.md). Synchronous like the
+  // burst; the lazy projection is brought up to date first, as a capture is.
+  g_App.renderRaster = [&](const ui::AppState::RasterStill& req,
+                           std::string* error, std::string* warning) {
+    SyncOffscreenScene();
+    RasterTarget t;
+    t.pass = offscreenPass;
+    t.format = kOffFormat;
+    t.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    t.frame = 0;
+    const ui::ClearColor vp = ui::ViewportClearColor();
+    t.clear.color = {{vp.r, vp.g, vp.b, 1.0f}};
+    t.aoW = t.vpW = kOffW;
+    t.aoH = t.vpH = kOffH;
+    return RenderRasterStill(t, req, error, warning);
   };
 
   std::signal(SIGINT, HandleOffscreenStop);
@@ -2237,6 +2378,35 @@ int main(int argc, char** argv) {
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
+
+  // Quick render (docs/rendering/quick-render-plan.md), from the dialog or
+  // render_still. Both run on this thread between frames, so after a wait the
+  // current frame slot is idle; the viewport rect it restores is the one
+  // UI.cpp sets every frame (the dock between the panels, in framebuffer px).
+  g_App.renderRaster = [](const ui::AppState::RasterStill& req,
+                          std::string* error, std::string* warning) {
+    ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+    RasterTarget t;
+    t.pass = wd->RenderPass;
+    t.format = wd->SurfaceFormat.format;
+    t.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    t.frame = wd->FrameIndex;
+    const ui::ClearColor vp = ui::ViewportClearColor();
+    t.clear.color = {{vp.r, vp.g, vp.b, 1.0f}};
+    t.aoW = static_cast<uint32_t>(wd->Width);
+    t.aoH = static_cast<uint32_t>(wd->Height);
+    const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
+    if (g_App.viewportSize.x > 0 && g_App.viewportSize.y > 0) {
+      t.vpX = static_cast<int32_t>(g_App.viewportPos.x * scale.x);
+      t.vpY = static_cast<int32_t>(g_App.viewportPos.y * scale.y);
+      t.vpW = static_cast<uint32_t>(g_App.viewportSize.x * scale.x);
+      t.vpH = static_cast<uint32_t>(g_App.viewportSize.y * scale.y);
+    } else {
+      t.vpW = t.aoW;
+      t.vpH = t.aoH;
+    }
+    return RenderRasterStill(t, req, error, warning);
+  };
 
   // Load startup file if specified
   if (!args.fileToLoad.empty()) {

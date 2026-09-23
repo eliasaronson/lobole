@@ -7,6 +7,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "thirdparty/stb_image_write.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -19,7 +21,8 @@ bool CaptureScreenshot(
     VkSampleCountFlagBits samples,
     const std::function<void(VkCommandBuffer)>& recordPrepass,
     FrameStats* stats, VkImageLayout colorFinalLayout, uint32_t repeat,
-    const std::function<void()>& afterEachSubmit) {
+    const std::function<void()>& afterEachSubmit,
+    std::vector<uint8_t>* pixelsOut) {
   auto fail = [&](const char* what) {
     if (error)
       *error = what;
@@ -141,7 +144,9 @@ bool CaptureScreenshot(
   // An empty path means MEASURE, not save: nothing is copied out and nothing
   // is encoded, so the loop below is render-submit-render and the GPU keeps
   // its clocks up.
-  const bool write = !outputPath.empty();
+  // Read back when there is somewhere for the pixels to go: a file, or the
+  // caller's buffer (a quick render supersamples and writes its own PNG).
+  const bool write = !outputPath.empty() || pixelsOut != nullptr;
 
   // Host-visible readback buffer
   const VkDeviceSize bufferSize = VkDeviceSize(width) * height * 4;
@@ -291,8 +296,11 @@ bool CaptureScreenshot(
     stats->hash = h;
   }
 
-  const bool ok = stbi_write_png(outputPath.c_str(), (int)width, (int)height, 3,
+  const bool ok = outputPath.empty() ||
+                  stbi_write_png(outputPath.c_str(), (int)width, (int)height, 3,
                                  rgb.data(), (int)width * 3) != 0;
+  if (pixelsOut != nullptr)
+    *pixelsOut = std::move(rgb);
 
   vkFreeCommandBuffers(device, commandPool, 1, &cb);
   vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -313,6 +321,57 @@ bool CaptureScreenshot(
 
   if (!ok)
     return fail("PNG encode/write");
-  LOG_INFO("Screenshot written to {}", outputPath);
+  if (!outputPath.empty())
+    LOG_INFO("Screenshot written to {}", outputPath);
+  return true;
+}
+
+bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
+                     uint32_t height, uint32_t factor, const std::string& path,
+                     std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (factor == 0 || width % factor != 0 || height % factor != 0 ||
+      rgb.size() != size_t(width) * height * 3)
+    return fail("downsample: the frame is not a whole number of " +
+                std::to_string(factor) + "x" + std::to_string(factor) +
+                " blocks");
+  // sRGB <-> linear, exactly (the piecewise curve, not a 2.2 power): a
+  // table for the decode, the formula for the encode.
+  float toLinear[256];
+  for (int i = 0; i < 256; i++) {
+    const float c = i / 255.0f;
+    toLinear[i] =
+        c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+  }
+  const auto toSrgb = [](float l) {
+    l = std::clamp(l, 0.0f, 1.0f);
+    const float c = l <= 0.0031308f
+                        ? l * 12.92f
+                        : 1.055f * std::pow(l, 1.0f / 2.4f) - 0.055f;
+    return static_cast<uint8_t>(std::lround(c * 255.0f));
+  };
+  const uint32_t w = width / factor, h = height / factor;
+  const float inv = 1.0f / float(factor * factor);
+  std::vector<uint8_t> out(size_t(w) * h * 3);
+  for (uint32_t y = 0; y < h; y++)
+    for (uint32_t x = 0; x < w; x++)
+      for (int c = 0; c < 3; c++) {
+        float sum = 0.0f;
+        for (uint32_t dy = 0; dy < factor; dy++)
+          for (uint32_t dx = 0; dx < factor; dx++)
+            sum += toLinear
+                [rgb[(size_t(y * factor + dy) * width + x * factor + dx) * 3 +
+                     c]];
+        out[(size_t(y) * w + x) * 3 + c] = toSrgb(sum * inv);
+      }
+  if (stbi_write_png(path.c_str(), int(w), int(h), 3, out.data(), int(w) * 3) ==
+      0)
+    return fail("could not write " + path);
+  LOG_INFO("Render written to {} ({}x{}, {}x supersampled)", path, w, h,
+           factor);
   return true;
 }

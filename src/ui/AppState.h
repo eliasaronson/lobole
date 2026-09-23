@@ -1813,6 +1813,22 @@ struct AppState {
   // of its speed.
   std::function<size_t(size_t)> renderBurst;
 
+  // QUICK render (docs/rendering/quick-render-plan.md): the scene as the
+  // viewport rasterizes it — materials, lights, shadow map, SSAO, outlines —
+  // into an image of the requested size, without the overlays drawn on top
+  // of the model. Installed by main.cpp in the windowed and --offscreen
+  // loops (only they own the renderers); null under --headless. Synchronous,
+  // main thread. `supersample` is lowered, and `warning` says so, if the
+  // device cannot hold the supersampled image.
+  struct RasterStill {
+    uint32_t width = 1920, height = 1080;
+    uint32_t supersample = 2; // render k x the size, average down
+    std::string path = "render.png";
+  };
+  std::function<bool(const RasterStill&, std::string* error,
+                     std::string* warning)>
+      renderRaster;
+
   // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
   // it costs five clock reads a frame — but the HUD is off unless asked for
   // by --perf-hud, Ctrl+Shift+F, or the frame_stats RPC. Deliberately session

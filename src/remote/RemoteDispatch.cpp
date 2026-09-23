@@ -61,6 +61,7 @@
 #include "ui/ViewActions.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -336,8 +337,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "first: the still projects at width/height, while a plain `fit_view` "
      "solves for the viewport, so fit-then-render crops whenever the two "
      "differ — and offscreen the viewport is whatever the framebuffer "
-     "happens to be.",
-     "backdrop, fit, ground, height, outlines, path, samples, seed, width",
+     "happens to be. `mode`: path (default, the path tracer) or quick — the "
+     "model as the VIEWPORT draws it (materials, lights, shadow map, SSAO, "
+     "outlines; no sketches, gizmos or selection tints) at this size in "
+     "about a second, `supersample` 1-4 (default 2) times wider and taller "
+     "and averaged down. The path tracer's samples/seed/ground/backdrop/"
+     "outlines are refused in quick mode.",
+     "backdrop, fit, ground, height, mode, outlines, path, samples, seed, "
+     "supersample, width",
      remote::NotInBatch},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
@@ -1246,6 +1253,57 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (state.assembly && state.assembly->OccurrenceCount() == 0)
       throw std::runtime_error(
           "this assembly has no occurrences — there is nothing to render");
+    const std::string mode = p.value("mode", std::string("path"));
+    if (mode != "path" && mode != "quick")
+      throw std::runtime_error("unknown mode: " + mode +
+                               "; modes: path (the path tracer), quick (what "
+                               "the viewport draws)");
+    if (mode == "quick") {
+      // What the viewport rasterizes, at this size
+      // (docs/rendering/quick-render-plan.md). The path tracer's parameters
+      // mean nothing here, and are refused rather than dropped: a caller
+      // asking for 4096 samples of a raster image has the wrong idea about
+      // what came back.
+      for (const char* k :
+           {"samples", "seed", "ground", "backdrop", "outlines"})
+        if (p.contains(k))
+          throw std::runtime_error(
+              std::string("`") + k +
+              "` is a path-tracer setting; a quick render draws what the "
+              "viewport draws (supersample sets its smoothness). Drop it, or "
+              "use mode: path");
+      if (!state.renderRaster)
+        throw std::runtime_error(
+            "a quick render needs a renderer: this instance is --headless");
+      ui::AppState::RasterStill req;
+      req.width = p.value("width", 1920u);
+      req.height = p.value("height", 1080u);
+      req.supersample = p.value("supersample", 2u);
+      if (req.supersample < 1 || req.supersample > 4)
+        throw std::runtime_error("supersample is 1 to 4 (the image is drawn "
+                                 "that many times wider and taller)");
+      req.path = p.value("path", std::string("render.png"));
+      if (p.value("fit", false))
+        ui::FitCameraToDocument(state, static_cast<float>(req.width) /
+                                           static_cast<float>(req.height));
+      ui::SyncRenderersToDocument(state);
+      std::string error, warning;
+      const auto t0 = std::chrono::steady_clock::now();
+      const bool ok = state.renderRaster(req, &error, &warning);
+      json result = {{"ok", ok},
+                     {"mode", "quick"},
+                     {"path", req.path},
+                     {"width", req.width},
+                     {"height", req.height},
+                     {"supersample", req.supersample},
+                     {"error", error},
+                     {"seconds", std::chrono::duration<double>(
+                                     std::chrono::steady_clock::now() - t0)
+                                     .count()}};
+      if (!warning.empty())
+        result["warnings"] = json::array({warning});
+      return result;
+    }
     // Offline path-traced still to a PNG. Runs synchronously on the main thread
     // (ProcessPending) using the same idle-queue one-shot submits as the AS
     // build, so it needs no swapchain interaction.
