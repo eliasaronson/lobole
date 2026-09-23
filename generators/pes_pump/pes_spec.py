@@ -157,8 +157,9 @@ def lobe_profile(el, steps=180):
     return pts
 
 
-# The plunger's own frame is turned so its vanes and its helix sit where the
-# mate expects them: frame X is local angle PLUNGER_FRAME_DEG.
+# The control helix: the land between the plunger's top edge and the helix
+# grows from LAND_MIN beside the vertical groove to LAND_MAX HELIX_SPAN round.
+# The plunger part places it with the helix's own start_deg.
 HELIX_SPAN = 100.0                  # degrees of plunger turn the helix covers
 LAND_MIN, LAND_MAX = 2.0, 4.5       # land height at the groove / far end
 
