@@ -227,18 +227,7 @@ def _block_rest(p, length):
     # galleries — goes through it too. Added after them, it would fill their
     # mouths back in: one pump thread breaks out 2 mm from the panel.
     _block_castings(p)
-    # A longitudinal pump register and three blind mounting holes. The pump
-    # is deliberately absent, but its machined interface is part of the block.
-    x,y,z=PUMP_MOUNT
-    sk=p.sketch(axis_plane((x,y-55,z),(0,1,0)),name="Pump mounting boss")
-    sk.circle((0,0),d=PUMP_MOUNT_D)
-    p.extrude(sk.add(),55,mode="add",name="Pump mounting boss")
-    bore(p,(x,y+1,z),(x,y-11,z),PUMP_REGISTER_D,"Pump register",over=0)
-    for angle in (90,210,330):
-        a=math.radians(angle)
-        bx,bz=x+PUMP_BOLT_PCD/2*math.cos(a),z+PUMP_BOLT_PCD/2*math.sin(a)
-        bore(p,(bx,y+1,bz),(bx,y-18,bz),8+TAP_FIT,"Pump mounting thread",over=0)
-    p.frame("injection_pump_mount",origin=PUMP_MOUNT,z=(0,1,0),x=(1,0,0))
+    _pump_seat(p)
 
     for i in range(len(MAIN_Y) - 1):
         y0 = MAIN_Y[i] + BULKHEAD_T / 2.0
@@ -366,8 +355,8 @@ def _block_rest(p, length):
         for sx in (-1, 1):
             rib = p.sketch(Plane.xz(y + BLOCK_RIB_W / 2.0), name=f"Rib {i}{sx}")
             rib.polyline([(sx * CASE_X, PAN_RAIL + 10.0),
-                          (sx * (CASE_X + 7.0), PAN_RAIL + 24.0),
-                          (sx * (CASE_X + 7.0), BLOCK_STEP - 16.0),
+                          (sx * (CASE_X + BLOCK_RIB_PROUD), PAN_RAIL + 24.0),
+                          (sx * (CASE_X + BLOCK_RIB_PROUD), BLOCK_STEP - 16.0),
                           (sx * CASE_X, BLOCK_STEP - 2.0)])
             p.extrude(rib.add(), BLOCK_RIB_W, mode="add", name=f"Rib {i}{sx}")
 
@@ -565,6 +554,63 @@ def _block_castings(p):
          over=0.0)
     p.frame("oil_filter", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
     p.frame("dipstick", origin=DIPSTICK_BOSS, z=(0, 0, 1), x=(1, 0, 0))
+
+
+def _pump_seat(p):
+    """What the injection pump's flange seats on: a ring standing out of the
+    block's front beside the chain case, on a web from the crankcase. Its
+    back face is the seat, with the register and the three tapped M8 on the
+    pump's own bolt circle and clocking; the ring runs forward through the
+    timing cover's drum, bored round the pump's timing device, to just
+    behind the sprocket."""
+    x, y, z = PUMP_MOUNT
+    front = BLOCK_Y0
+    # The web: from inside the crankcase (below the step) and the upper
+    # block (above it) out to the ring, between the block's front face and
+    # the seat — never ahead of the front face, where the gasket is.
+    w = PUMP_SEAT_R * 0.6
+    web = p.sketch(Plane.xz(y), name="Pump seat web")
+    rounded_polygon(web, [(PUMP_SIDE * (CASE_X - 15.0), z - w), (x, z - w),
+                          (x, z + w), (PUMP_SIDE * (DECK_X - 15.0), z + w)],
+                    [0, 0, 0, 0])
+    p.extrude(web.add(), y - front, mode="add", name="Pump seat web")
+    ring = p.sketch(Plane.xz(y), name="Pump seat ring")
+    ring.circle((x, z), r=PUMP_SEAT_R)
+    p.extrude(ring.add(), y - PUMP_RING_FRONT, mode="add",
+              name="Pump seat ring")
+    # The register the pump's spigot locates in, and behind it the bore its
+    # timing device turns in. The pump's register is SMALLER than its hub,
+    # so the bore steps out ahead of the register (README).
+    bore(p, (x, y + 1.0, z), (x, y - PUMP_REGISTER_H, z), PUMP_REGISTER_D,
+         "Pump register", over=0)
+    bore(p, (x, y - PUMP_REGISTER_H, z), (x, PUMP_RING_FRONT - 1.0, z),
+         2.0 * PUMP_TIMING_BORE_R, "Timing device bore", over=0)
+    for ex, ez in pump_bolt_centres():
+        bore(p, (ex, y + 1.0, ez), (ex, y - PUMP_TAP_DEPTH, ez),
+             PUMP_BOLT_D + TAP_FIT, "Pump mounting thread", over=0)
+    # The flange frame's twin: z along the camshaft toward the governor
+    # (rear), x straight up.
+    p.frame("injection_pump_mount", origin=PUMP_MOUNT, z=(0, 1, 0),
+            x=(0, 0, 1))
+
+
+def pump_to_engine(px, py, pz):
+    """A point of the pump (its own frame) in the engine: pump +X is engine
+    +Y, pump +Z engine +Z, and so pump +Y, the rack side, is engine -X."""
+    x, _, z = PUMP_MOUNT
+    return (x - py, pump_y(px), z + pz)
+
+
+def pump_bolt_centres():
+    """The flange bolts' (x, z) in the engine, from the pump's clocking
+    (measured from its +Y toward +Z)."""
+    r = PUMP_BOLT_PCD / 2.0
+    out = []
+    for a in PUMP_BOLT_ANGLES:
+        ex, _, ez = pump_to_engine(0.0, r * math.cos(math.radians(a)),
+                                   r * math.sin(math.radians(a)))
+        out.append((ex, ez))
+    return out
 
 
 def _pan_bolt_y():
@@ -1628,10 +1674,38 @@ def _cover_points(inset=0.0, open_floor=False):
     return pts, radii
 
 
+def _pump_x():
+    """How far out the injection pump's axis is: its sprocket, in the chain's
+    plane, has to stand clear of everything in the chain case — the chain,
+    both rails, the oil pump's drive — and all of that is inside the case's
+    cavity. So the sprocket's tips clear the cavity's wall, at every height
+    they span, by PUMP_SPROCKET_CLEAR."""
+    tip = PUMP_SPROCKET_TIP_R
+    need = 0.0
+    for i in range(-200, 201):
+        dz = tip * i / 200.0
+        need = max(need, cover_inner_x(PUMP_Z + dz)
+                   + math.sqrt(max(0.0, tip * tip - dz * dz)))
+    return PUMP_SIDE * (need + PUMP_SPROCKET_CLEAR)
+
+
 def _cover_outline(sk,inset=0.0,open_floor=False):
     """Lower chain housing, split at the head-cover gasket datum."""
     pts, radii = _cover_points(inset, open_floor)
     rounded_polygon(sk, pts, radii)
+
+
+PUMP_X = _pump_x()
+PUMP_MOUNT = (PUMP_X, PUMP_FLANGE_Y, PUMP_Z)
+# The seat ring and the drum round the sprocket in the timing cover. The
+# ring clears the timing device by half a millimetre and carries the tapped
+# holes outside it; the drum's cavity clears the sprocket's tips; the ring
+# ends a millimetre short of that cavity.
+PUMP_TIMING_BORE_R = PUMP_TIMING_R + 0.5
+PUMP_SEAT_R = PUMP_BOLT_PCD / 2.0 + PUMP_BOLT_D + 3.0
+PUMP_CAVITY_R = PUMP_SPROCKET_TIP_R + PUMP_SPROCKET_CLEAR
+PUMP_CAVITY_REAR = pump_y(PUMP_SPROCKET_X1) + PUMP_SPROCKET_CLEAR
+PUMP_RING_FRONT = PUMP_CAVITY_REAR + 1.0
 
 
 def timing_cover(app):
@@ -1806,7 +1880,6 @@ def vee_pulley(app, name, d, bore_d, width=16.0):
 
 
 # --------------------------------------------------------- how it is held
-MOUNT_W = 52.0            # the bracket's width along the engine
 MOUNT_REACH = 52.0        # how far its foot sticks out past the block
 MOUNT_PLATE_T = 9.0       # the plate against the crankcase pad
 MOUNT_FOOT_T = 10.0       # ...and the foot the rubber mount bolts through

@@ -44,7 +44,7 @@ def main():
             occ, main = om615.bottom_end(app, rig)
             om615.front_and_rear(app, rig, occ, main)
             measured = A.check_mountings(app, rig, hanging=False)
-            assert len(measured["contacts"]) == 28, measured
+            assert len(measured["contacts"]) == 27, measured
             stator = app.assembly("alternator stator assembly", create=False)
             assert (
                 len(

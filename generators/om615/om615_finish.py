@@ -6,9 +6,11 @@ cam cover, intake manifold, vacuum pump and alternator castings bare
 aluminium, the exhaust manifold dark cast iron, belts, hoses and seals black
 rubber, the fan and the pulleys painted black. Fasteners, internals and
 anything not listed keep their material's own look. What hangs on it: the
-oil filter housing and the fuel filter bracket painted with the block, the
-fuel filter canister black, the heater pipe and dipstick tube bare steel,
-and the dipstick's handle yellow.
+oil filter housing, the fuel filter bracket and the injection pump's
+bracket painted with the block, the spin-on oil filter dark blue-black, the
+fuel filter canister black, the heater pipe, dipstick tube and injection
+lines bare steel, and the dipstick's handle yellow. The injection pump
+brings its own finish (generators/pes_pump).
 
 `set_appearance` is visual only — mass, the BOM and FEM keep the material —
 and recolouring rebuilds no geometry. Colours are LINEAR, as the renderer
@@ -36,6 +38,10 @@ FINISHES = {
     "steel": dict(color=[0.42, 0.42, 0.43], roughness=0.35, metallic=1.0),
     # The dipstick's moulded handle, so it is the part a hand finds.
     "yellow": dict(color=[0.80, 0.52, 0.02], roughness=0.45, metallic=0.0),
+    # The spin-on oil filter's can: a dark blue-black enamel, glossier than
+    # the block's paint.
+    "filter blue": dict(color=[0.010, 0.013, 0.030], roughness=0.3,
+                        metallic=0.0),
 }
 
 # Part name -> finish. Exact names, so a renamed part falls back to its
@@ -59,6 +65,8 @@ PART_FINISH = {
     "alternator rear casting": "aluminium",
     "thermostat housing": "aluminium",
     "oil filter housing": "paint",
+    "oil filter": "filter blue",
+    "injection pump bracket": "paint",
     "fuel filter bracket": "paint",
     "exhaust manifold": "cast iron",
     "fan belt": "rubber",
@@ -75,6 +83,10 @@ PART_FINISH = {
     "fuel filter": "black",
     "heater pipe": "steel",
     "dipstick tube": "steel",
+    "injection line 1": "steel",
+    "injection line 2": "steel",
+    "injection line 3": "steel",
+    "injection line 4": "steel",
     "dipstick": "yellow",
 }
 

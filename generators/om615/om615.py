@@ -37,6 +37,11 @@ import om615_bottom as B  # noqa: E402
 import om615_top as T  # noqa: E402
 import om615_accessories as A
 import om615_finish as F  # noqa: E402
+# The injection pump is its own generator, built into this engine's rig.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "pes_pump"))
+import pes_pump  # noqa: E402
+import pes_spec as PS  # noqa: E402
 
 
 def _solved(what, rig):
@@ -233,7 +238,7 @@ def front_and_rear(app, rig, occ, main):
                      ratio=A.PULLEYS[0][2] / A.PULLEYS[2][2],
                      name="fan belt")
     accessories = A.install(app, rig, bo, sho, wp_mate, main)
-    accessories["vacuum"] = A.install_vacuum(app, rig, cv, main)
+    accessories["vacuum"] = A.install_vacuum(app, rig, cv)
     # The mounts it hangs on.
     for side, nm in (("left", "mount_left"), ("right", "mount_right")):
         mb = B.engine_mount(app, side)
@@ -311,14 +316,17 @@ def top_end(app, rig, occ, main):
         sh = rig.place(rshaft, at=(sx * ROCKER_PIVOT_X, 0, ROCKER_Z))
         rig.fasten((ho, f"rocker_shaft_{nm}"), (sh, "seat"), flipped=False)
 
-    lifts = []
+    lifts, injectors = [], []
     for k, cy in enumerate(CYL_Y):
         po = rig.place(pre)
         rig.fasten((ho, f"pre_{k}"), (po, "seat"), flipped=False)
         rig.fasten((po, "nozzle_seat"), (rig.place(heat_shield), "seat"), flipped=False)
-        for part, frame in ((glow, f"glow_plug_{k}"), (inj, f"injector_{k}")):
-            o = rig.place(part)
-            rig.fasten((ho, frame), (o, "face"), flipped=False)
+        go = rig.place(glow)
+        rig.fasten((ho, f"glow_plug_{k}"), (go, "face"), flipped=False)
+        # Named, because a line is measured against ITS injector.
+        io = rig.place(inj, name=f"injector {k + 1}")
+        rig.fasten((ho, f"injector_{k}"), (io, "face"), flipped=False)
+        injectors.append(io)
         for kind in VALVE:
             so = rig.place(seats[kind])
             rig.fasten((ho, f"seat_{k}_{kind}"), (so, "bottom"), flipped=False)
@@ -372,7 +380,83 @@ def top_end(app, rig, occ, main):
     rig.fasten((cvo, "filler"), (rig.place(filler), "seat"), flipped=False)
     _solved("top end", rig)
     return {"head": ho, "camshaft": cam_occ, "valves": lifts,
-            "cam cover": cvo, "thermostat": tso}, cam_mate
+            "cam cover": cvo, "thermostat": tso, "injectors": injectors}, cam_mate
+
+
+# Start of delivery at the pump — element 1's port closing — this many crank
+# degrees before cylinder 1's compression TDC. An ESTIMATE for an OM615 at
+# the pump, not a sourced figure (README).
+SPILL_ADVANCE_DEG = 24.0
+
+
+def compression_tdc(k, cam_phase_deg=0.0):
+    """Cylinder k's (0-based) compression TDC in crank degrees, read off the
+    engine's own valve timing: its exhaust lobe starts EXHAUST_OPEN_CAM cam
+    degrees after that TDC. `cam_phase_deg` is the camshaft's angle at crank
+    zero (the timing chain's phase: measured, or 0 as drawn)."""
+    lobe = T.lobe_start(k, "exhaust")
+    return (2.0 * (lobe - EXHAUST_OPEN_CAM - cam_phase_deg)) % 720.0
+
+
+def pump_phase_deg():
+    """The pump camshaft's angle at crank zero that puts element 1's port
+    closing SPILL_ADVANCE_DEG before cylinder 1's compression TDC. The
+    chain relation turns the pump CRANK_TEETH / SPROCKET_TEETH of the crank,
+    so this is its phase."""
+    ratio = CRANK_TEETH / PS.SPROCKET_TEETH
+    closing = PS.valve_window(1)[0]
+    return closing - ratio * (compression_tdc(0) - SPILL_ADVANCE_DEG)
+
+
+def injection_pump(app, rig, occ, top, front, main):
+    """The Bosch PES4M built into the engine: its parts (generators/pes_pump)
+    assembled flat into this rig — a sub-assembly would be rigid — with its
+    flange fastened to the block's seat, its rack held at full load, its
+    camshaft chained to the crank at 22:44 and phased for the injection
+    timing, the vacuum pump driven off it, a bracket under its rear lugs,
+    and the four injection lines to the injectors."""
+    parts, _ = pes_pump.build_parts(app)
+    rig.activate()
+    rig, mates, ids = pes_pump.assemble(
+        app, parts, rig=rig, mount=(occ["block"], "injection_pump_mount"),
+        rack_offset=PS.RACK_TRAVEL)
+    phase = pump_phase_deg()
+    rig.chain(main, mates["cam"], teeth_a=CRANK_TEETH,
+              teeth_b=PS.SPROCKET_TEETH, phase=math.radians(phase),
+              name="injection pump chain")
+    A.drive_vacuum(rig, front["accessories"]["vacuum"], mates["cam"])
+    bracket = A.pump_bracket(app)
+    rig.activate()
+    bo = rig.place(bracket, name="injection pump bracket")
+    rig.fasten((occ["block"], "pump_bracket"), (bo, "block"), flipped=False)
+    _solved("injection pump", rig)
+    by_name = {o.name: o for o in rig.occurrences()}
+    lines = []
+    for k in range(1, PS.N_EL + 1):
+        holder = by_name[f"delivery valve holder {k}"]
+        outlet = holder.frame("outlet")
+        inlet = top["injectors"][k - 1].frame("fuel_inlet")
+        part = A.injection_line(app, k, outlet, inlet)
+        rig.activate()
+        lo = rig.place(part, name=f"injection line {k}")
+        rig.fasten((holder, "outlet"), (lo, "seat"), flipped=False)
+        lines.append((lo, outlet))
+    clamps = []
+    for i, (a, b) in enumerate(((0, 1), (2, 3))):
+        part = A.line_clamp(app, f"injection line clamp {i + 1}",
+                            (lines[a][1], lines[b][1]), A.LINE_BEND / 2.0)
+        rig.activate()
+        co = rig.place(part, name=part.name)
+        rig.fasten((lines[a][0], "seat"), (co, "seat"), flipped=False)
+        clamps.append(part.name)
+    _solved("injection lines", rig)
+    names = sorted({p.name for p in parts.values()}
+                   | {bracket.name} | {f"injection line {k}" for k in
+                                       range(1, PS.N_EL + 1)} | set(clamps))
+    print(f"  injection pump: {len(parts)} parts, phase {phase:.3f} deg "
+          f"(port closing {SPILL_ADVANCE_DEG} deg before TDC)")
+    return dict(mates=mates, ids=ids, housing=by_name["pump housing"],
+                bracket=bo, part_names=names, phase_deg=phase)
 
 
 # Two dozen tabs in one strip is a list you scroll rather than read, so the
@@ -384,7 +468,8 @@ FOLDERS = [
                "centre main cap", "sump", "sump gasket", "drain plug",
                "rear seal carrier", "timing cover", "timing cover gasket",
                "cam cover", "cam cover gasket", "oil filler cap",
-               "oil filter housing", "dipstick tube", "dipstick"]),
+               "oil filter housing", "oil filter", "dipstick tube",
+               "dipstick"]),
     ("Crank train", ["crankshaft", "con rod", "rod cap", "piston",
                      "gudgeon pin", "gudgeon circlip", "top ring",
                      "second ring", "oil ring", "flywheel", "ring gear",
@@ -418,14 +503,14 @@ FOLDERS = [
     ("Vacuum pump", ["vacuum pump casting", "vacuum pump valve cover",
                      "vacuum pump diaphragm rim", "vacuum pump diaphragm centre",
                      "vacuum pump rocker yoke", "vacuum pump follower roller",
-                     "vacuum pump face cam", "vacuum timer shaft bush"]),
+                     "vacuum pump face cam"]),
     ("Mounts", ["engine mount left", "engine mount right"]),
 ]
 
 
-def organise(app):
+def organise(app, extra=()):
     named = set()
-    for folder, parts in FOLDERS:
+    for folder, parts in list(FOLDERS) + list(extra):
         known = {x["name"] for x in app.parts()}
         have = [n for n in parts if n in known]
         if not have:
@@ -440,7 +525,7 @@ def organise(app):
     if rest:
         app.create_folder(folder="Fasteners")
         app.move_to_folder(folder="Fasteners", part=rest)
-    print(f"  tabs: {len(FOLDERS) + bool(rest)} folders, "
+    print(f"  tabs: {len(FOLDERS) + len(extra) + bool(rest)} folders, "
           f"{len(named) + len(rest)} parts")
 
 
@@ -530,11 +615,11 @@ def reference_dimensions(app):
                                              bounds_mm=[list(lo),list(hi)])
     block = app.part("block")
     registers = block.body().edges(circular=True, radius=PUMP_REGISTER_D/2,
-        where=lambda e: (e.center-V(PUMP_MOUNT)).length()<0.02)
+        where=lambda e: (e.center-V(B.PUMP_MOUNT)).length()<0.02)
     if not registers:
         raise SdkError("injection-pump mounting register is missing")
     measured["pump mounting register"] = dict(diameter_mm=2*registers[0].radius,
-        status="estimated interface; pump and drive not fitted")
+        status="the pump's own register (pes_spec), with the pump fitted to it")
 
     print("  measured piston height, pin size and valve head diameters match "
           "the reference dimensions; head height, injector flats and pump register checked")
@@ -587,6 +672,8 @@ COMPONENTS = {
     "injector": ("injector", T.injector), "prechamber": ("pre-chamber", T.prechamber),
     "thermostat": ("thermostat housing", T.thermostat_housing),
     "oil-filter": ("oil filter housing", A.oil_filter_housing),
+    "oil-filter-can": ("oil filter", A.oil_filter),
+    "pump-bracket": ("injection pump bracket", A.pump_bracket),
     "fuel-filter": ("fuel filter", A.fuel_filter),
     "fuel-filter-bracket": ("fuel filter bracket", A.fuel_filter_bracket),
     "upper-hose": ("upper coolant hose", A.upper_hose),
@@ -723,7 +810,10 @@ def main():
     _solved("what hangs on it", rig)
     timings["hanging_s"] = time.perf_counter() - stage
     stage = time.perf_counter()
-    fasteners(app, rig, occ, top, front)
+    pump = injection_pump(app, rig, occ, top, front, main_mate)
+    timings["injection_pump_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
+    fasteners(app, rig, occ, top, front, pump)
     timings["fasteners_s"] = time.perf_counter() - stage
     stage = time.perf_counter()
     F.apply_all(app)
@@ -737,7 +827,7 @@ def main():
     rig.activate()
     rig.motion(main_mate, dof='rotation', **{'from': 0}, to=720,
                samples=a.samples, clash_mode='exact', name='two revolutions')
-    organise(app)
+    organise(app, [("Injection pump", pump["part_names"])])
     timings["build_s"] = time.perf_counter() - t0
     print(f"  built {len(rig.occurrences())} occurrences from "
           f"{len(app.parts())} parts in {timings['build_s']:.1f}s")
@@ -829,6 +919,8 @@ def main():
               f"(design {'-'.join(str(n) for n in FIRING_ORDER)})")
         if order != "-".join(str(n) for n in FIRING_ORDER):
             raise SdkError("the camshaft does not fire in the design order")
+        pump_report = check_pump(r, main_mate, cam_mate, pump)
+        write_report(a.out, "pump-motion-report.json", pump_report)
         print(f"  clean={r['clean']} ({'mesh' if a.mesh else 'exact'}), "
               f"{r['pairs_checked']} pair checks "
               f"({r.get('pairs_rigid', 0)} skipped as rigid to each other) "
@@ -861,6 +953,75 @@ def main():
     return 0
 
 
+def _mate_track(r, mate):
+    """A mate's rotation over the study, unwrapped, from the study's own
+    mate values (not recovered from a quaternion)."""
+    vals = [next(m["rotation_deg"] for m in s["mates"] if m["mate"] == mate["id"])
+            for s in r["samples"]]
+    out = [vals[0]]
+    for v in vals[1:]:
+        out.append(out[-1] + math.remainder(v - out[-1], 360.0))
+    return out
+
+
+def check_pump(r, main_mate, cam_mate, pump):
+    """The injection pump, measured from the study: its camshaft turns once
+    per two crank turns; every plunger strokes the cam's lift; they peak in
+    the firing order; and each element's port closes SPILL_ADVANCE_DEG
+    before its own cylinder's compression TDC. The timing is computed from
+    the MEASURED phases of the pump's and the engine's camshafts, which are
+    exact, and the pump's own port-closing law — not by interpolating
+    samples a quarter of a pump turn apart."""
+    crank = _mate_track(r, main_mate)
+    pcam = _mate_track(r, pump["mates"]["cam"])
+    ecam = _mate_track(r, cam_mate)
+    ratio = CRANK_TEETH / PS.SPROCKET_TEETH
+    out, failures = {}, []
+    turns = (pcam[-1] - pcam[0]) / 360.0 / ((crank[-1] - crank[0]) / 720.0)
+    out["pump camshaft turns per 720 crank"] = round(turns, 6)
+    if abs(turns - 1.0) > 1e-4:
+        failures.append(f"pump camshaft turns {turns:.6f} per 720")
+    phase = sum(p - ratio * c for p, c in zip(pcam, crank)) / len(crank)
+    spread = max(abs(p - ratio * c - phase) for p, c in zip(pcam, crank))
+    cam_phase = sum(e - 0.5 * c for e, c in zip(ecam, crank)) / len(crank)
+    out["pump phase at crank 0 (deg)"] = round(math.remainder(phase, 360.0), 4)
+    out["pump phase spread (deg)"] = spread
+    out["camshaft phase at crank 0 (deg)"] = round(
+        math.remainder(cam_phase, 360.0), 4)
+    peaks = {}
+    for k in range(1, PS.N_EL + 1):
+        oid = pump["ids"][f"plunger{k}"]
+        zs = [next(p["position"][2] for p in s["poses"] if p["occurrence"] == oid)
+              for s in r["samples"]]
+        stroke = max(zs) - min(zs)
+        out[f"plunger {k} stroke"] = round(stroke, 4)
+        if abs(stroke - PS.STROKE) > 0.01:
+            failures.append(f"plunger {k} strokes {stroke:.4f}, not {PS.STROKE}")
+        peaks[k] = r["samples"][max(range(len(zs)), key=lambda i: zs[i])]["value"]
+        closing = PS.valve_window(k)[0]
+        at = ((closing - phase) / ratio) % 720.0
+        tdc = compression_tdc(k - 1, cam_phase)
+        advance = (tdc - at) % 720.0
+        out[f"element {k} port closing (crank deg)"] = round(at, 3)
+        out[f"cylinder {k} compression TDC (crank deg)"] = round(tdc, 3)
+        out[f"element {k} spill advance (deg BTDC)"] = round(advance, 3)
+        if abs(advance - SPILL_ADVANCE_DEG) > 0.5:
+            failures.append(f"element {k} closes {advance:.2f} deg before TDC, "
+                            f"not {SPILL_ADVANCE_DEG}")
+    order = [k for k, _ in sorted(peaks.items(), key=lambda kv: kv[1])]
+    i = order.index(1)
+    order = "-".join(str(k) for k in order[i:] + order[:i])
+    out["plunger order"] = order
+    out["plunger peaks (crank deg)"] = peaks
+    if order != "-".join(str(n) for n in FIRING_ORDER):
+        failures.append(f"plungers peak {order}")
+    for key, v in out.items():
+        print(f"  {key}: {v}")
+    if failures:
+        raise SdkError(f"injection pump check failed: {failures}")
+    return out
+
+
 def _firing_order(r, valves):
     """The firing order, measured: each cylinder's exhaust lobe peaks
     2 * (EXHAUST_OPEN_CAM + DURATION_CAM / 2) crank degrees after that
@@ -885,7 +1046,7 @@ def _firing_order(r, valves):
 
 def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
              size, n, what, centres=None, rim_key=None, far_key=None,
-             centre_key=None, *, snapshots):
+             centre_key=None, *, snapshots, standard="iso4762"):
     """Fit `n` real fasteners, each derived from the hole it goes in.
 
     A blind hole needs its FAR END said outright — the probe follows the
@@ -948,7 +1109,7 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
                     + (fk(e)[1] - a1) ** 2)
         # A generous timeout: fitting probes the whole assembly along the
         # bolt's axis, and by the fortieth fastener there is a lot of it.
-        fitted.append(rig.bolt(rim, occ, standard="iso4762", size=size,
+        fitted.append(rig.bolt(rim, occ, standard=standard, size=size,
                                far_end={**floor.ref,
                                         "occurrence": far_occ.id},
                                _timeout=600))
@@ -957,7 +1118,7 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
     return fitted
 
 
-def fasteners(app, rig, occ, top, front):
+def fasteners(app, rig, occ, top, front, pump):
     """The bolts that actually hold it together — head, mains, sump and
     flywheel. Each is DERIVED from its hole: nothing here says a length."""
     snapshots = {}
@@ -1039,6 +1200,36 @@ def fasteners(app, rig, occ, top, front):
                  f"main cap {i + 1} bolts",
                  centres=[(-CAP_BOLT_X, 0.0), (CAP_BOLT_X, 0.0)],
                  rim_key=lambda e, y=MAIN_Y[i]: (e.center.x, e.center.y + y))
+
+    # The injection pump's flange, into the block's seat: three low-head M8
+    # (their heads sit in the pump's own pockets behind the flange), each
+    # from its rim on the flange's back face to its thread's floor. The rims
+    # are in the PUMP's coordinates; matching them to the block's floors is
+    # in the engine's, through the one map the seat was drawn with.
+    def pump_xz(e):
+        x, _, z = B.pump_to_engine(e.center.x, e.center.y, e.center.z)
+        return (x, z)
+    r = PUMP_BOLT_PCD / 2.0
+    bolt_up(rig, pump["housing"], app.part("pump housing"),
+            PS.FLANGE_BOLT_D / 2.0, lambda e: e.center.x - PS.FLANGE_BOLT_SEAT_X,
+            occ["block"], blk, (PUMP_BOLT_D + TAP_FIT) / 2.0,
+            lambda e: e.center.y - (PUMP_FLANGE_Y - PUMP_TAP_DEPTH), "M8", 3,
+            "injection pump flange bolts",
+            centres=[(r * math.cos(math.radians(a)), r * math.sin(math.radians(a)))
+                     for a in PUMP_BOLT_ANGLES],
+            centre_key=lambda e: (e.center.y, e.center.z),
+            rim_key=pump_xz, far_key=lambda e: (e.center.x, e.center.z),
+            standard="iso7380")
+    # ...and its rear bracket, into the rib: drilled along x.
+    face = A.pump_bracket_face()
+    bolt_up(rig, pump["bracket"], app.part("injection pump bracket"),
+            (A.PUMP_BRACKET_BOLT_D + 1.0) / 2.0,
+            lambda e: e.center.x - (face + PUMP_SIDE * A.PUMP_BRACKET_T),
+            occ["block"], blk, (A.PUMP_BRACKET_BOLT_D + TAP_FIT) / 2.0,
+            lambda e: e.center.x - (face - PUMP_SIDE * A.PUMP_BRACKET_TAP_DEPTH),
+            "M8", 2, "injection pump bracket bolts",
+            centres=A.pump_bracket_bolts(), rim_key=yz, far_key=yz,
+            centre_key=yz)
 
     for snapshot in snapshots.values():
         snapshot.validate()

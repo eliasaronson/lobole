@@ -25,6 +25,14 @@ derivation is real. Other values include design estimates; sourced dimensions
 are identified separately in generators/om615/README.md#sources.
 """
 import math
+import os
+import sys
+
+# The injection pump's interface is the PUMP's to state (generators/pes_pump/
+# pes_spec.py); the block is machined to it. Read it from there, not copied.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "pes_pump"))
+import pes_spec as _pes  # noqa: E402
 
 # Which side of the engine the injection equipment is on, as the sign of x.
 # +1 is +X, the car's LEFT (front -Y, up +Z), where the OM615 has its pump,
@@ -498,6 +506,40 @@ COVER_FRONT_T = 10.0      # thicker, because the front seal lives in it
 REAR_SEAL_D = 75.0
 REAR_SEAL_Y = 224.0
 
+# ---- the injection pump: where it sits and what it seats on -----------------
+# The flange, register, bolt circle and clocking are the pump's own numbers
+# (pes_spec), stated once; the block's seat is drawn from them. The pump's
+# frame maps onto the engine's as: pump +X (toward the governor) is engine +Y
+# (rear), pump +Z is engine +Z, so pump +Y, the rack side, faces the block.
+PUMP_REGISTER_D, PUMP_REGISTER_H = _pes.REGISTER_D, _pes.REGISTER_H
+PUMP_BOLT_PCD = _pes.FLANGE_BOLT_PCD
+PUMP_BOLT_D = 8.0                  # the flange's holes are M8 clearance
+PUMP_BOLT_ANGLES = _pes.FLANGE_BOLT_ANGLES
+PUMP_FLANGE_D = _pes.FLANGE_D
+PUMP_SPROCKET_TIP_R = _pes.SPROCKET_TIP_R
+PUMP_TIMING_R = _pes.TIMING_DEVICE_R
+PUMP_SPROCKET_X1 = _pes.SPROCKET_X1      # the sprocket's rear face, pump x
+PUMP_CASE_X0 = _pes.H_X0                 # the housing's drive-end wall
+# The pump sprocket runs in the timing chain's plane, so the flange face is
+# where that puts it: the pump's own distance from chain plane to flange.
+PUMP_FLANGE_Y = DRIVE_Y + (_pes.FLANGE_FACE_X - _pes.CHAIN_PLANE_X)
+
+
+def pump_y(pump_x):
+    """Engine y of a station along the pump's camshaft (pump x)."""
+    return PUMP_FLANGE_Y + (pump_x - _pes.FLANGE_FACE_X)
+
+
+# The pump's element deck lies level with the block's deck: the pump along
+# the upper block, its delivery valves beside the lower head, as the
+# photographs show it. Its x is the chain case's business (om615_bottom:
+# the sprocket stands outside the case's cavity), not a number here.
+PUMP_Z = DECK - _pes.H_TOP
+PUMP_UNDERSIDE = PUMP_Z + _pes.H_Z0      # the housing's lugs, below
+PUMP_SPROCKET_CLEAR = 4.0          # sprocket tips to the case's cavity wall
+PUMP_TAP_DEPTH = 14.0              # the seat's three blind M8 threads
+
+
 # ---- oiling ----------------------------------------------------------------
 SUMP_DEPTH = 105.0        # below the pan rail
 SUMP_Z = PAN_RAIL - SUMP_DEPTH
@@ -535,42 +577,56 @@ MOUNT_Y = -60.0
 MOUNT_BOLT_DEPTH = 12.0
 MOUNT_BOLTS = [(-15.0, 10.0), (15.0, 10.0), (0.0, 48.0)]   # (dy, z)
 MOUNT_BOLT_D = 11.0
+MOUNT_W = 52.0            # the bracket's width along the engine
 MOUNT_ARM_T = 7.0         # the cast arm's two side webs
 
 # ---- the outside of the block ------------------------------------------------
 # Casting form read off the photographs (scaled against the 87 mm bore), not
 # a drawing. The ribs are the ones over each main web.
 BLOCK_RIB_W = 16.0
+BLOCK_RIB_PROUD = 7.0      # how far a rib stands off the crankcase wall
 JACKET_PANEL_T = 3.0      # the raised panel over the water jacket
 CORE_PLUG_D = 34.0        # three a side, between the bores
 CORE_PLUG_Z = (JACKET_Z0 + JACKET_Z1) / 2.0
 FLANGE_BAND_H = 12.0      # the ledge along the pan rail
 FLANGE_BAND_T = 3.0
-# Where the oil filter housing bolts on: a flat round pad on the pump side
-# (PUMP_SIDE), low and toward the rear, in the bay between the ribs over mains 3
-# and 4, at the main gallery's own height so its port drills straight in.
+# The dipstick's tube rises AHEAD of the injection pump: between the timing
+# cover's back face and the pump housing's drive-end wall, in the pump's
+# flange plane. Its socket is at the foot of that run, leaning out of the
+# crankcase wall and FORWARD, because the bore has to break into the first
+# bay (behind the front main's bulkhead) 20 mm above the rail while the tube
+# leaves the socket clear ahead of the oil filter.
+DIPSTICK_BOSS_D = 22.0
+DIPSTICK_BORE_D = 10.0
+DIPSTICK_WALL = 1.5
+DIPSTICK_TUBE_OD = DIPSTICK_BORE_D + 2.0 * DIPSTICK_WALL
+DIPSTICK_RUN_Y = (BLOCK_Y0 - COVER_GASKET_T + pump_y(PUMP_CASE_X0)) / 2.0
+DIPSTICK_TILT_DEG = 25.0            # outward from vertical, across the engine
+_DIPSTICK_FOOT = (PUMP_SIDE * (CASE_X - 18.0),
+                  MAIN_Y[0] + BULKHEAD_T / 2.0 + DIPSTICK_BORE_D / 2.0 + 2.0,
+                  PAN_RAIL + 20.0)   # where the bore breaks into the bay
+_dx = 12.0 + 2.0 + 18.0             # socket top, out from the bore's foot
+DIPSTICK_BOSS = (_DIPSTICK_FOOT[0] + PUMP_SIDE * _dx, DIPSTICK_RUN_Y,
+                 _DIPSTICK_FOOT[2]
+                 + _dx / math.tan(math.radians(DIPSTICK_TILT_DEG)))
+_d = [DIPSTICK_BOSS[i] - _DIPSTICK_FOOT[i] for i in range(3)]
+DIPSTICK_AXIS = tuple(c / math.sqrt(sum(q * q for q in _d)) for c in _d)
+# The oil filter hangs BELOW the pump, a spin-on canister on a cast housing,
+# down and outward. Its pad is on the crankcase wall at the main gallery's
+# height (the port drills straight in), in y between the dipstick's run
+# ahead of it and the engine mount behind: the canister has that gap and
+# no more.
 OIL_FILTER_BOSS_D = 70.0
 OIL_FILTER_BOSS_H = 12.0  # proud of the crankcase wall; clears the ribs
-OIL_FILTER_BOSS = (PUMP_SIDE * (CASE_X + OIL_FILTER_BOSS_H),
-                   (MAIN_Y[2] + MAIN_Y[3]) / 2.0, GALLERY_Z)
+OIL_FILTER_Y = ((DIPSTICK_RUN_Y + DIPSTICK_TUBE_OD / 2.0)
+                + (MOUNT_Y - MOUNT_W / 2.0)) / 2.0
+OIL_FILTER_BOSS = (PUMP_SIDE * (CASE_X + OIL_FILTER_BOSS_H), OIL_FILTER_Y,
+                   GALLERY_Z)
 OIL_FILTER_AXIS = (PUMP_SIDE, 0.0, 0.0)      # outward, the pad's normal
 OIL_FILTER_BOLT_D = 8.0                     # four M8, tapped
 OIL_FILTER_BOLT_PCD = 52.0
 OIL_FILTER_PORT_D = 12.0                    # into the main gallery
-# The dipstick enters the crankcase through the same wall, in the next bay
-# aft, leaning outward so its tube clears the pad. Its socket's top face and
-# axis are the tube's seat.
-DIPSTICK_TILT_DEG = 15.0
-DIPSTICK_AXIS = (PUMP_SIDE * math.sin(math.radians(DIPSTICK_TILT_DEG)), 0.0,
-                 math.cos(math.radians(DIPSTICK_TILT_DEG)))
-DIPSTICK_BOSS_D = 22.0
-DIPSTICK_BORE_D = 10.0
-# High enough that the bore breaks into the crankcase 20 mm above the rail,
-# not through the rail's gasket face.
-DIPSTICK_BOSS = (PUMP_SIDE * (CASE_X + OIL_FILTER_BOSS_H + 2.0),
-                 (MAIN_Y[3] + MAIN_Y[4]) / 2.0,
-                 PAN_RAIL + 20.0 + (OIL_FILTER_BOSS_H + 2.0 + 14.0)
-                 / math.tan(math.radians(DIPSTICK_TILT_DEG)))
+OIL_FILTER_TILT_DEG = 30.0                  # the canister, from vertical
 
 # ---- cooling ---------------------------------------------------------------
 WATER_PUMP_Y = -272.0
@@ -606,12 +662,6 @@ def lobe_lift(cam_deg, start_deg, rise=CAM_LIFT, duration=DURATION_CAM):
 def cam_phase(cylinder):
     """How far this cylinder's lobes are round the camshaft from number 1's."""
     return FIRING_TDC[cylinder] / 2.0
-
-# Visual-reference mounting envelope. Not a sourced pump bolt pattern.
-PUMP_MOUNT = (PUMP_SIDE * 108.0, BLOCK_Y0 + 80.0, 174.0)
-PUMP_REGISTER_D = 60.0
-PUMP_BOLT_PCD = 78.0
-PUMP_MOUNT_D = 96.0
 
 COVER_BASE = HEAD_TOP
 COVER_LEFT = 42.0         # the cam cover's half-width on the PUMP side
@@ -691,15 +741,13 @@ TSTAT_WEB_T = 6.0                    # the web under the ear's front edge
 # flange as thick as the pad stands proud; the pad's four M8 are blind.
 OIL_FILTER_FLANGE_T = OIL_FILTER_BOSS_H
 OIL_FILTER_TAP_DEPTH = 16.0
-# The fuel filter hangs from a bracket on a boss on the head's pump side,
-# between cylinders 1 and 2 (the glow plugs and injectors are ON the
-# cylinders' centres), high enough that its canister clears the injection
-# pump's flange below it.
-FUEL_FILTER_Y = MAIN_Y[1]
+# The fuel filter stands high at the FRONT, above the vacuum pump: its
+# bracket bolts to a boss on the head's pump side at the head's front end.
+FUEL_FILTER_BOSS_HALF = (14.0, 22.0)         # (y, z) half-size of the pad
+FUEL_FILTER_Y = BLOCK_Y0 + FUEL_FILTER_BOSS_HALF[0] + 6.0
 FUEL_FILTER_BOSS_H = 14.0                    # proud of the head's side wall
 FUEL_FILTER_BOSS = (PUMP_SIDE * (HEAD_X + FUEL_FILTER_BOSS_H), FUEL_FILTER_Y,
                     HEAD_TOP - 24.0)         # the boss's FACE centre
-FUEL_FILTER_BOSS_HALF = (14.0, 22.0)         # (y, z) half-size of the pad
 FUEL_FILTER_BOLT_DZ = 12.0                   # two M8, above and below centre
 FUEL_FILTER_BOLT_D = PAN_BOLT_D
 FUEL_FILTER_TAP_DEPTH = 16.0                 # ends inside the boss's root

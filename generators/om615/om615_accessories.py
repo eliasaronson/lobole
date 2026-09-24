@@ -13,14 +13,17 @@ import om615_bottom as B
 import om615_top as T
 from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z
 from om615_spec import CASE_X, MANIFOLD_SIDE, PUMP_SIDE
+from om615_spec import (BLOCK_RIB_PROUD, BLOCK_RIB_W, MAIN_Y, pump_y,
+                        _pes)
 from om615_spec import (
-    BLOCK_Y1, BORE, BORE_PITCH, COOLANT_HOSE_OD, COOLANT_HOSE_WALL,
-    DIPSTICK_AXIS, DIPSTICK_BORE_D, DIPSTICK_BOSS, FUEL_FILTER_BOLT_D,
+    BLOCK_Y0, BLOCK_Y1, BORE, BORE_PITCH, COOLANT_HOSE_OD, COOLANT_HOSE_WALL,
+    COVER_Y0, DIPSTICK_AXIS, DIPSTICK_BORE_D, DIPSTICK_BOSS, DIPSTICK_RUN_Y,
+    DIPSTICK_TUBE_OD, DIPSTICK_WALL, FUEL_FILTER_BOLT_D,
     FUEL_FILTER_BOLT_DZ, FUEL_FILTER_BOSS, FUEL_FILTER_BOSS_HALF, HEAD_TOP,
     HEATER_PIPE, INT_LOG, MANIFOLD_PAD_HZ, OIL_FILTER_BOLT_D,
     OIL_FILTER_BOLT_PCD, OIL_FILTER_BOSS, OIL_FILTER_BOSS_D,
-    OIL_FILTER_FLANGE_T, OIL_FILTER_PORT_D, PLENUM, PORT_Z, PUMP_MOUNT,
-    PUMP_MOUNT_D, TSTAT_X, WP_INLET, WP_INLET_Y)
+    OIL_FILTER_FLANGE_T, OIL_FILTER_PORT_D, OIL_FILTER_TILT_DEG, PLENUM,
+    PORT_Z, PUMP_Z, TSTAT_X, WP_INLET, WP_INLET_Y)
 
 ALT_X, ALT_Z, ALT_D = MANIFOLD_SIDE * 176.0, 75.0, 76.0
 ALT_LUG = 80.0
@@ -392,13 +395,18 @@ def install(app, rig, block, wp_shaft, wp_mate, crank_mate):
 
 
 # Diaphragm pump envelope and linkage dimensions are photo estimates, not OEM
-# manufacturing dimensions. Two face-cam lobes per half-speed timer revolution.
-# The pump is the same unit on either side, TRANSLATED to it, not turned or
-# mirrored: its own frame keeps +x along +X, so its timer shaft (CAM_CENTER,
-# in the pump's frame) is 16 mm toward +X of the pump's centre on either side.
-VAC_X, VAC_Z, VAC_DEPTH = PUMP_SIDE * 118.0, 160.0, 70.0
+# manufacturing dimensions. Two face-cam lobes per half-speed revolution.
+# The vacuum pump sits on the timing cover in FRONT of the injection pump,
+# and on the real engine is driven off the injection pump's timing device:
+# so its face cam (CAM_CENTER, in the vacuum pump's own frame) is on the
+# injection pump's camshaft axis and turns with it, 1:1. The pump is the
+# same unit on either side, TRANSLATED to it, not turned or mirrored: its
+# own frame keeps +x along +X and its y along +Z.
 ROCKER_ANGLE, LEVER_ARM = 0.12, 20.0
 CAM_CENTER = (16.0, -16.0)
+VAC_X, VAC_Z, VAC_DEPTH = B.PUMP_X - CAM_CENTER[0], PUMP_Z - CAM_CENTER[1], 70.0
+VAC_FLANGE_R = 59.0          # the casting's mounting flange, outside
+VAC_CAM_R = 24.0             # the face cam's plate
 
 
 def cam_height(x, y):
@@ -425,7 +433,7 @@ def cam_height(x, y):
 
 def pump_housing(app):
     p = app.part("vacuum pump casting")
-    annulus(p, "Engine mounting flange", 59, 49, 0, 5)
+    annulus(p, "Engine mounting flange", VAC_FLANGE_R, 49, 0, 5)
     sections = []
     for z, r, y in ((4, 53, 0), (18, 52, 2), (36, 47, 7), (49, 43, 10)):
         sk = p.sketch(Plane.xy(z), name="Casting station")
@@ -550,8 +558,9 @@ def vacuum_parts(app):
     roller = B.ring(app, "vacuum pump follower roller", 14, 6.4, 17, material="steel")
     # Two-lobe axial track, derived from the moving roller's swept envelope.
     cam = app.part("vacuum pump face cam")
-    annulus(cam, "Timer face plate", 24, 0, -3, 3)
-    annulus(cam, "Timer shaft", 6, 0, -58, 56, mode="add")
+    # Only the plate: it is driven off the injection pump's camshaft on the
+    # same axis, which is behind it inside the timing cover's drum.
+    annulus(cam, "Timer face plate", VAC_CAM_R, 0, -3, 3)
     # Ruled triangular sectors avoid OCC's unorientable periodic pipe seam.
     # Adjacent triangles share exact vertices; finite base overlap joins them.
     n = 32
@@ -590,7 +599,10 @@ def vacuum_parts(app):
     return housing, lid, membrane, diaphragm, rocker, roller, cam
 
 
-def install_vacuum(app, rig, cover_occ, crank_mate):
+def install_vacuum(app, rig, cover_occ):
+    """The vacuum pump on the timing cover. Its face cam's revolute is left
+    for the injection pump to drive (`drive_vacuum`): it turns with the
+    injection pump's camshaft, which is fitted later."""
     housing, lid, membrane, diaphragm, rocker, roller, cam = vacuum_parts(app)
     ho = rig.place(housing, name="vacuum pump casting")
     rig.fasten((cover_occ, "vacuum_pump"), (ho, "mount"), flipped=False)
@@ -617,19 +629,8 @@ def install_vacuum(app, rig, cover_occ, crank_mate):
                     dict(occurrence=screw["occurrence"], origin=True),
                     flipped=False,
                 )
-    bearing = app.part("vacuum timer shaft bush")
-    annulus(bearing, "Shaft bearing", 9, 6.2, 0, 10)
-    annulus(bearing, "Bearing locating flange", 12, 6.2, -2, 2, mode="add")
-    bearing.material("brass")
-    bearing.frame("seat", origin=(0, 0, 0))
-    verify(bearing)
-    bearing_occ = rig.place(bearing, name=bearing.name)
-    rig.fasten((cover_occ, "vacuum_bearing"), (bearing_occ, "seat"), flipped=False)
     co = rig.place(cam, name="vacuum pump face cam")
     cm = rig.revolute((ho, "cam"), (co, "shaft"), flipped=False)
-    rig.chain(
-        crank_mate, cm, teeth_a=1, teeth_b=2, name="injection timer half-speed drive"
-    )
     ro = rig.place(rocker, name="vacuum pump rocker")
     rm = rig.revolute((ho, "pivot"), (ro, "pivot"), flipped=False)
     roller.frame("centre", origin=(0, 0, 0))
@@ -654,6 +655,14 @@ def install_vacuum(app, rig, cover_occ, crank_mate):
         name="vacuum rocker leverage",
     )
     return dict(cam=co, rocker=ro, diaphragm=do, cam_mate=cm, slide=dm)
+
+
+def drive_vacuum(rig, vacuum, pump_cam_mate):
+    """The vacuum pump's face cam turns with the injection pump's camshaft,
+    one to one, on the same axis: half crank speed, as the stand-in's own
+    half-speed drive did."""
+    return rig.chain(pump_cam_mate, vacuum["cam_mate"], teeth_a=1, teeth_b=1,
+                     name="vacuum pump drive")
 
 
 def mount_fastener(app, rig, occ, frame, standard, size, length=0):
@@ -785,6 +794,14 @@ def alternator_upper_bracket(app):
 
 
 def prepare_block(block):
+    # The injection pump's support bracket bolts to the rib over the second
+    # main, under the pump's rear lugs: two blind M8.
+    for y, z in pump_bracket_bolts():
+        B.bore(block, (pump_bracket_face() + PUMP_SIDE * 1.0, y, z),
+               (pump_bracket_face() - PUMP_SIDE * PUMP_BRACKET_TAP_DEPTH, y, z),
+               PUMP_BRACKET_BOLT_D + B.TAP_FIT, "Pump bracket thread", over=0)
+    block.frame("pump_bracket", origin=pump_bracket_origin(), z=(0, 0, 1),
+                x=(1, 0, 0))
     # The upper block narrows: a real cast boss reaches the bracket face.
     ms = MANIFOLD_SIDE
     B.axis_solid(
@@ -813,36 +830,34 @@ def prepare_block(block):
 
 
 def prepare_cover(cover):
-    from om615_spec import COVER_Y0
+    """The drum the timing cover grows round the injection pump's sprocket,
+    as on the real engine: out of the chain case on the pump side, its
+    cavity open to the chain case and clear of the sprocket's tips, its back
+    wall bored for the block's seat ring, and its front face carrying the
+    vacuum pump. Big enough both to house the sprocket and to seat the
+    vacuum pump's flange whole."""
+    from om615_spec import COVER_GASKET_T, COVER_WALL, COVER_FRONT_T
 
-    # A closed, cast side pocket bridges the whole flange into the chain case.
-    # The former 7 mm annulus left the back of the pump open to daylight.
-    sections = []
-    for y, r in ((COVER_Y0, 59), (-243, 58), (-217, 53), (-207, 48)):
-        sk = cover.sketch(Plane.xz(y), name="Vacuum pocket station")
-        sk.circle((VAC_X, VAC_Z), r=r)
-        sections.append(sk.add().id)
-    cover._add(
-        dict(type="Loft", name="Vacuum drive pocket", sketch_ids=sections, mode="add")
-    )
-    sections = []
-    for y, r in ((COVER_Y0 - 1, 49), (-243, 48), (-223, 43), (-217, 40)):
-        sk = cover.sketch(Plane.xz(y), name="Vacuum pocket core station")
-        sk.circle((VAC_X, VAC_Z), r=r)
-        sections.append(sk.add().id)
-    cover._add(
-        dict(
-            type="Loft",
-            name="Vacuum drive pocket core",
-            sketch_ids=sections,
-            mode="cut",
-        )
-    )
-    # The side pocket and main chain case share a core. Leaving the outer
-    # loft's inner wall here would put new metal across the chain guide rail.
-    from om615_spec import BLOCK_Y0, COVER_GASKET_T, COVER_WALL, COVER_FRONT_T
-
+    px, _, pz = B.PUMP_MOUNT
     back = BLOCK_Y0 - COVER_GASKET_T
+    drum_r = max(B.PUMP_CAVITY_R + COVER_WALL,
+                 math.hypot(*CAM_CENTER) + VAC_FLANGE_R + 2.0)
+    sk = cover.sketch(Plane.xz(back), name="Pump drive drum")
+    sk.circle((px, pz), r=drum_r)
+    cover.extrude(sk.add(), back - COVER_Y0, mode="add", name="Pump drive drum")
+    front = COVER_Y0 + COVER_FRONT_T
+    sk = cover.sketch(Plane.xz(B.PUMP_CAVITY_REAR), name="Pump sprocket cavity")
+    sk.circle((px, pz), r=B.PUMP_CAVITY_R)
+    cover.extrude(sk.add(), B.PUMP_CAVITY_REAR - front, mode="cut",
+                  name="Pump sprocket cavity")
+    # The block's seat ring passes through the drum's back wall.
+    sk = cover.sketch(Plane.xz(back + 1.0), name="Pump seat ring bore")
+    sk.circle((px, pz), r=B.PUMP_SEAT_R + 0.5)
+    cover.extrude(sk.add(), back + 2.0 - B.PUMP_CAVITY_REAR, mode="cut",
+                  name="Pump seat ring bore")
+    # The drum and the main chain case share a core: whatever of the drum's
+    # wall stands inside the chain case goes, or it is new metal across the
+    # chain's guide rail.
     sk = cover.sketch(Plane.xz(back), name="Shared timing case core")
     B._cover_outline(sk, inset=COVER_WALL, open_floor=True)
     cover.extrude(
@@ -851,11 +866,6 @@ def prepare_cover(cover):
         mode="cut",
         name="Shared timing case core",
     )
-    cx, cz = VAC_X + CAM_CENTER[0], VAC_Z + CAM_CENTER[1]
-    B.bore(
-        cover, (cx, -218, cz), (cx, -206, cz), 18.4, "Timer bearing register", over=0
-    )
-    cover.frame("vacuum_bearing", origin=(cx, -207, cz), z=(0, -1, 0), x=(1, 0, 0))
     sk = cover.sketch(Plane.xz(COVER_Y0 + 8), name="Vacuum pump mounting bolts")
     for i in range(6):
         a = math.tau * i / 6
@@ -871,23 +881,34 @@ def prepare_cover(cover):
 # that coincides with its holder's, so placing one is a translation of zero.
 # Proportions are read off the photographs against the 87 mm bore and the
 # 97 mm bore pitch; the interfaces they sit on are om615_spec's.
-OIL_FILTER_CAN = (1.03 * BORE, 1.55 * BORE_PITCH)   # canister: 90 x 150
-OIL_FILTER_COLLAR = 4.0      # the cast head and lid stand this proud of it
-# The neck from the flange to the canister's head: inside the bolt circle,
-# and long enough that the canister clears the bolt heads (an ISO 4762
-# head is as tall as the bolt is thick) by a spanner's lip.
-OIL_FILTER_NECK = (30.0, OIL_FILTER_BOLT_D + 8.0)
-FUEL_FILTER_CAN = (0.92 * BORE, 1.13 * BORE_PITCH)  # canister: 80 x 110
+# The oil filter: a spin-on canister, about 95 x 140, on a cast housing,
+# hanging down and outward below the injection pump.
+OIL_FILTER_CAN = (1.09 * BORE, 1.44 * BORE_PITCH)   # canister: 95 x 140
+OIL_FILTER_COLLAR = 2.0      # the housing's seat stands this proud of it
+OIL_FILTER_HEAD_T = 14.0     # the housing's seat, thick along the canister
+OIL_FILTER_CLEAR = 12.0      # air between the housing and the pump above
+# The neck from the flange to the housing's seat: inside the bolt circle.
+OIL_FILTER_NECK = 30.0
+PUMP_DRUM_R = max(B.PUMP_CAVITY_R + 6.0,
+                  math.hypot(*CAM_CENTER) + VAC_FLANGE_R + 2.0)
+FUEL_FILTER_CAN = (0.92 * BORE, 1.55 * BORE_PITCH)  # canister: 80 x 150
 FUEL_BRACKET_T = 8.0         # the steel bracket's plate and shelf
-# The shelf the fuel filter hangs from: its canister's bottom clears the
-# injection pump's mounting flange below by a hand's width of air.
-FUEL_SHELF_Z = (PUMP_MOUNT[2] + PUMP_MOUNT_D / 2.0 + 10.0
+FUEL_FILTER_CLEAR = 10.0     # canister bottom over what is below it
+# The shelf the fuel filter hangs from: over the vacuum pump, its canister's
+# drain screw a hand's width clear of the timing cover's drum and the
+# vacuum pump's lid below it.
+FUEL_FILTER_XY = (VAC_X, COVER_Y0 - VAC_DEPTH / 2.0)
+FUEL_SHELF_Z = (max(PUMP_Z + PUMP_DRUM_R, VAC_Z + 10.0 + 44.0)
+                + FUEL_FILTER_CLEAR + FUEL_FILTER_CAN[0] / 12.0
                 + FUEL_FILTER_CAN[1])
 # Where both radiator hoses end, in free air a hose's length ahead of the
 # fan's blades — about where a radiator's tanks would be.
 RADIATOR_Y = FAN_Y - 1.75 * COOLANT_HOSE_OD
-DIPSTICK_WALL = 1.5
-DIPSTICK_TUBE_OD = DIPSTICK_BORE_D + 2.0 * DIPSTICK_WALL
+# The dipstick tube's run up beside the pump: outboard of the pump's seat
+# ring and flange.
+DIPSTICK_CLEAR = 5.0
+DIPSTICK_RUN_X = B.PUMP_X + PUMP_SIDE * (B.PUMP_SEAT_R + DIPSTICK_TUBE_OD / 2.0
+                                         + DIPSTICK_CLEAR)
 
 
 def bent_tube(p, points, bend_r, od, wall, name, mode="new_body"):
@@ -903,29 +924,64 @@ def bent_tube(p, points, bend_r, od, wall, name, mode="new_body"):
     return p._add(f)
 
 
+def oil_filter_axes():
+    """The oil filter's canister axis (down and outward) and the direction
+    up its seat's face (outward and up), in engine xz."""
+    t = math.radians(OIL_FILTER_TILT_DEG)
+    d = V((PUMP_SIDE * math.sin(t), 0.0, -math.cos(t)))
+    e = V((PUMP_SIDE * math.cos(t), 0.0, math.sin(t)))
+    return d, e
+
+
+def oil_filter_seat():
+    """Where the canister's top sits on the housing: outboard of the pad
+    by the seat's own reach, and low enough that the housing's highest
+    edge is OIL_FILTER_CLEAR under the injection pump."""
+    fx, fy, fz = OIL_FILTER_BOSS
+    d, e = oil_filter_axes()
+    r = OIL_FILTER_CAN[0] / 2.0 + OIL_FILTER_COLLAR
+    t = OIL_FILTER_HEAD_T
+    x = fx + PUMP_SIDE * (OIL_FILTER_FLANGE_T / 2.0 + t * abs(d[0])
+                          + r * abs(e[0]))
+    # Low enough for the pump above...
+    z = B.PUMP_UNDERSIDE - OIL_FILTER_CLEAR - t * abs(d[2]) - r * e[2]
+    # ...and for the flange's own lower bolt heads beside it: the seat's
+    # inboard edge, where it is still as far in as the heads reach out,
+    # passes under them by a lip. (Seat points are s - tau d + rho e.)
+    head = OIL_FILTER_BOLT_D * 13.0 / 16.0        # ISO 4762 head radius
+    reach = abs(fx) + OIL_FILTER_FLANGE_T + OIL_FILTER_BOLT_D + 3.0
+    heads_low = (fz - OIL_FILTER_BOLT_PCD / 2.0 * math.sqrt(0.5) - head
+                 - 3.0)
+    top_in = (t * (abs(d[2]) + abs(d[0]) * e[2] / abs(e[0]))
+              + e[2] / abs(e[0]) * (reach - abs(x)))
+    z = min(z, heads_low - top_in)
+    return V((x, fy, z))
+
+
 def oil_filter_housing(app):
     """The oil filter housing on the block's pad: a round flange with its
-    four M8 clearance holes and the port, a neck out, and the vertical
-    canister standing beside the crankcase — cast head, bowl and lid with
-    its centre bolt — its top near the deck, as on the engine."""
+    four M8 clearance holes and the port, a neck down and out, and the seat
+    the spin-on canister screws to, facing down and outward."""
     p = app.part("oil filter housing")
     out = PUMP_SIDE                  # outward from the block, in x
     fx, fy, fz = OIL_FILTER_BOSS
     face = fx + out * OIL_FILTER_FLANGE_T
-    can_d, can_h = OIL_FILTER_CAN
-    neck_d, neck_l = OIL_FILTER_NECK
-    head_d = can_d + 2.0 * OIL_FILTER_COLLAR
-    xc = face + out * (neck_l + head_d / 2.0)
+    d, _ = oil_filter_axes()
+    seat = oil_filter_seat()
+    head_d = OIL_FILTER_CAN[0] + 2.0 * OIL_FILTER_COLLAR
+    back = seat - d * OIL_FILTER_HEAD_T
     B.axis_solid(p, (fx, fy, fz), (face, fy, fz), OIL_FILTER_BOSS_D,
                  "Flange", mode="new_body")
-    B.axis_solid(p, (face - out * 1.0, fy, fz), (xc, fy, fz), neck_d, "Neck")
-    base = fz - neck_d
-    top = fz + neck_d + can_h
-    B.disc(p, (xc, fy), head_d, base, fz + neck_d, "Filter head")
-    B.disc(p, (xc, fy), can_d, fz + neck_d - 1.0, top, "Canister")
-    B.disc(p, (xc, fy), head_d, top, top + 2.0 * OIL_FILTER_COLLAR, "Lid")
-    B.disc(p, (xc, fy), neck_d * 2.0 / 3.0, top + 2.0 * OIL_FILTER_COLLAR - 1.0,
-           top + 4.0 * OIL_FILTER_COLLAR, "Lid bolt")
+    # Straight out of the flange first, past the bolt heads (an ISO 4762
+    # head is as tall as the bolt is thick) by a spanner's lip, and only
+    # then down to the seat: turned down at once, it ran through the lower
+    # two heads.
+    stub = V((face + out * (OIL_FILTER_BOLT_D + 8.0), fy, fz))
+    B.axis_solid(p, (face - out * 1.0, fy, fz), tuple(stub), OIL_FILTER_NECK,
+                 "Neck")
+    B.axis_solid(p, tuple(stub - V((out * 1.0, 0, 0))), tuple(back + d * 1.0),
+                 OIL_FILTER_NECK, "Neck down")
+    B.axis_solid(p, tuple(back), tuple(seat), head_d, "Seat")
     for k in range(4):
         a = math.pi / 4 + k * math.pi / 2
         by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
@@ -933,34 +989,58 @@ def oil_filter_housing(app):
         # ISO 273 medium clearance for M8.
         B.bore(p, (face + out * 1.0, by, bz), (fx - out * 1.0, by, bz),
                OIL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
-    B.bore(p, (fx - out * 1.0, fy, fz), (xc, fy, fz), OIL_FILTER_PORT_D,
-           "Port", over=0.0)
+    B.bore(p, (fx - out * 1.0, fy, fz), tuple(back + d * 2.0),
+           OIL_FILTER_PORT_D, "Port", over=0.0)
     p.material("aluminum")
     p.frame("pad", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("filter", origin=tuple(seat), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def oil_filter(app):
+    """The spin-on canister: a pressed can with its rolled seam at the top
+    and the hex a filter wrench takes on its bottom."""
+    p = app.part("oil filter")
+    can_d, can_h = OIL_FILTER_CAN
+    d, _ = oil_filter_axes()
+    seat = oil_filter_seat()
+    seam = 5.0
+    B.axis_solid(p, tuple(seat), tuple(seat + d * seam), can_d + 1.5,
+                 "Seam", mode="new_body")
+    B.axis_solid(p, tuple(seat + d * (seam - 1.0)), tuple(seat + d * can_h),
+                 can_d, "Can")
+    B.axis_solid(p, tuple(seat + d * (can_h - 1.0)),
+                 tuple(seat + d * (can_h + can_d / 12.0)), can_d / 4.0,
+                 "Wrench boss")
+    p.material("steel")
+    p.frame("seat", origin=tuple(seat), z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
 
 
 def fuel_filter_bracket(app):
-    """A pressed-steel bracket: a plate bolted to the boss on the head's
-    pump side and, at its top, a shelf reaching out with a ring the fuel
-    filter's neck drops through."""
+    """A pressed-steel bracket: a plate bolted to the boss at the front of
+    the head's pump side and, at its top, a shelf reaching out and forward
+    to a ring over the vacuum pump that the fuel filter's neck drops
+    through."""
     p = app.part("fuel filter bracket")
     bx, by, bz = FUEL_FILTER_BOSS
     hy, hz = FUEL_FILTER_BOSS_HALF
     t = FUEL_BRACKET_T
     can_d, _ = FUEL_FILTER_CAN
     out = PUMP_SIDE                  # outward from the head, in x
-    cx = fuel_filter_x()
+    cx, cy = FUEL_FILTER_XY
     z0, z1 = bz - hz, FUEL_SHELF_Z + t
     plate = p.sketch(Plane.yz(min(bx, bx + out * t)), name="Plate")
     B.rounded_polygon(plate, [(by - hy, z0), (by + hy, z0), (by + hy, z1),
                               (by - hy, z1)], [hy / 2.0, hy / 2.0, 0, 0])
     p.extrude(plate.add(), t, mode="new_body", name="Plate")
     arm_x = bx + out * (t - 1.0)
-    B.slab(p, min(cx, arm_x), by - hy, FUEL_SHELF_Z, max(cx, arm_x), by + hy,
-           z1, "Arm", mode="add")
-    B.disc(p, (cx, by), can_d + 8.0, FUEL_SHELF_Z, z1, "Ring")
-    B.disc(p, (cx, by), can_d / 2.0 + 2.0, FUEL_SHELF_Z - 1.0, z1 + 1.0,
+    B.slab(p, min(cx + out * hy, arm_x), by - hy, FUEL_SHELF_Z,
+           max(cx + out * hy, arm_x), by + hy, z1, "Arm", mode="add")
+    B.slab(p, cx - hy, min(cy, by + hy), FUEL_SHELF_Z, cx + hy,
+           max(cy, by + hy), z1, "Arm forward", mode="add")
+    B.disc(p, (cx, cy), can_d + 8.0, FUEL_SHELF_Z, z1, "Ring")
+    B.disc(p, (cx, cy), can_d / 2.0 + 2.0, FUEL_SHELF_Z - 1.0, z1 + 1.0,
            "Ring hole", mode="cut")
     for s in (-1, 1):
         B.bore(p, (bx + out * (t + 1.0), by, bz + s * FUEL_FILTER_BOLT_DZ),
@@ -968,24 +1048,17 @@ def fuel_filter_bracket(app):
                FUEL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
     p.material("steel")
     p.frame("head", origin=FUEL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("filter", origin=(cx, by, z1), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("filter", origin=(cx, cy, z1), z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
-
-
-def fuel_filter_x():
-    """The fuel filter's axis: out from the bracket's plate by the bolt
-    heads' height and a spanner's lip, and its own radius."""
-    return FUEL_FILTER_BOSS[0] + PUMP_SIDE * (
-        FUEL_BRACKET_T + FUEL_FILTER_BOLT_D + 4.0 + FUEL_FILTER_CAN[0] / 2.0)
 
 
 def fuel_filter(app):
     """The fuel filter: a cast head sitting on the bracket's ring with its
-    inlet and outlet banjo bosses and bleed screw, and the canister hanging
-    below on a neck through the ring."""
+    inlet and outlet banjo bosses and bleed screw, and the tall canister
+    hanging below on a neck through the ring."""
     p = app.part("fuel filter")
     can_d, can_h = FUEL_FILTER_CAN
-    cx, cy = fuel_filter_x(), FUEL_FILTER_BOSS[1]
+    cx, cy = FUEL_FILTER_XY
     seat = FUEL_SHELF_Z + FUEL_BRACKET_T
     head_h = can_d / 4.0
     B.disc(p, (cx, cy), can_d + 4.0, seat, seat + head_h, "Head",
@@ -1064,23 +1137,26 @@ def heater_pipe(app):
     return verify(p)
 
 
-def _dipstick_top():
-    """Where the dipstick tube ends: out of its socket along the socket's
-    lean far enough to clear the rail's ledge, then straight up beside the
-    block to the head's top."""
+def _dipstick_path():
+    """The dipstick tube's corners: out of its socket along the socket's
+    lean, a short knee, then outward beside the pump's flange to its run
+    AHEAD of the pump — between the timing cover's back face and the pump's
+    drive end — and straight up it to the head's top."""
     t, d = V(DIPSTICK_BOSS), V(DIPSTICK_AXIS)
-    knee = t + d * (3.0 * DIPSTICK_TUBE_OD)
-    return t, knee, V((knee[0], t[1], HEAD_TOP))
+    knee = t + d * (2.0 * DIPSTICK_TUBE_OD)
+    run = V((DIPSTICK_RUN_X, DIPSTICK_RUN_Y, knee[2]))
+    top = V((DIPSTICK_RUN_X, DIPSTICK_RUN_Y, HEAD_TOP))
+    return [t, knee, run, top]
 
 
 def dipstick_tube(app):
     p = app.part("dipstick tube")
-    t, knee, top = _dipstick_top()
-    bent_tube(p, [t, knee, top], 3.0 * DIPSTICK_TUBE_OD, DIPSTICK_TUBE_OD,
+    path = _dipstick_path()
+    bent_tube(p, path, 1.5 * DIPSTICK_TUBE_OD, DIPSTICK_TUBE_OD,
               DIPSTICK_WALL, "Dipstick tube")
     p.material("steel")
-    p.frame("seat", origin=tuple(t), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("handle", origin=tuple(top), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("seat", origin=tuple(path[0]), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("handle", origin=tuple(path[-1]), z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
 
 
@@ -1089,8 +1165,7 @@ def dipstick(app):
     running down inside the tube, and a flat ring to pull it by, facing the
     pump side where a hand reaches it."""
     p = app.part("dipstick")
-    _, _, top = _dipstick_top()
-    x, y, z = top
+    x, y, z = _dipstick_path()[-1]
     cap = DIPSTICK_TUBE_OD + 4.0
     B.disc(p, (x, y), cap, z, z + cap / 3.0, "Cap", mode="new_body")
     B.disc(p, (x, y), DIPSTICK_BORE_D / 2.0, z - 5.0 * DIPSTICK_TUBE_OD,
@@ -1103,13 +1178,14 @@ def dipstick(app):
     sk.circle(centre, d=ring_id)
     p.extrude(sk.add(), ring_t, mode="add", name="Ring")
     p.material("plastic_white")
-    p.frame("seat", origin=tuple(top), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("seat", origin=(x, y, z), z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
 
 
 # (part builder, holder key, holder frame, the part's own frame)
 HANGING = (
     ("oil filter housing", oil_filter_housing, "block", "oil_filter", "pad"),
+    ("oil filter", oil_filter, "oil filter housing", "filter", "seat"),
     ("dipstick tube", dipstick_tube, "block", "dipstick", "seat"),
     ("fuel filter bracket", fuel_filter_bracket, "head", "fuel_filter",
      "head"),
@@ -1135,12 +1211,130 @@ def install_hanging(app, rig, holders):
     return {name: holders[name] for name, *_ in HANGING}
 
 
+# ------------------------------------------------- the injection pump's hardware
+# The pump itself is generators/pes_pump, built into the engine by om615.py.
+# What the ENGINE adds round it: a bracket under its rear lugs, the four
+# injection lines and the two clamps that hold them in pairs.
+PUMP_BRACKET_T = 8.0         # the bracket's foot and shelf
+PUMP_BRACKET_BOLT_D = 8.0    # two M8 into the rib
+PUMP_BRACKET_TAP_DEPTH = 16.0
+PUMP_BRACKET_REACH = 25.0    # how far the shelf runs in under the lug
+_PUMP_LUG_Y = _pes.H_Y1 + 10.0         # the lugs' reach off the axis (pes_parts)
+
+
+def pump_bracket_face():
+    """The rib over the second main, on the pump side: what the bracket's
+    foot bolts to, straight under the pump's rear lugs."""
+    return PUMP_SIDE * (CASE_X + BLOCK_RIB_PROUD)
+
+
+def pump_bracket_origin():
+    return (pump_bracket_face(), MAIN_Y[1], B.PUMP_UNDERSIDE)
+
+
+def pump_bracket_bolts():
+    """The two bolts' (y, z): on the rib's centreline, the upper one a
+    head's radius and a lip under the shelf, the lower one well down."""
+    head_r = PUMP_BRACKET_BOLT_D * 13.0 / 16.0
+    top = B.PUMP_UNDERSIDE - PUMP_BRACKET_T - head_r - 2.0
+    return [(MAIN_Y[1], top), (MAIN_Y[1], top - 30.0)]
+
+
+def pump_bracket(app):
+    """The injection pump's rear support: a foot bolted to the rib and a
+    shelf the pump's rear lug sits on, from the block's side."""
+    p = app.part("injection pump bracket")
+    out = PUMP_SIDE
+    face = pump_bracket_face()
+    t = PUMP_BRACKET_T
+    y0 = MAIN_Y[1] - BLOCK_RIB_W / 2.0 + 2.0
+    y1 = MAIN_Y[1] + BLOCK_RIB_W / 2.0 - 2.0
+    top = B.PUMP_UNDERSIDE
+    bolts = pump_bracket_bolts()
+    low = min(z for _, z in bolts) - 12.0
+    lug_in = B.PUMP_X - out * _PUMP_LUG_Y
+    lug_y1 = pump_y(_pes.H_X1 - 2.0)
+    B.slab(p, min(face, face + out * t), y0, low, max(face, face + out * t),
+           y1, top, "Foot", mode="new_body")
+    reach = lug_in + out * PUMP_BRACKET_REACH
+    B.slab(p, min(face, reach), y0, top - t, max(face, reach), lug_y1, top,
+           "Shelf", mode="add")
+    for y, z in bolts:
+        B.bore(p, (face + out * (t + 1.0), y, z), (face - out * 1.0, y, z),
+               PUMP_BRACKET_BOLT_D + 1.0, "Bolt hole", over=0.0)
+    p.material("steel")
+    p.frame("block", origin=pump_bracket_origin(), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+# The injection lines: steel, 6 x 2, one per element to its own cylinder
+# (element k feeds cylinder k: the pump's 1-3-4-2 is the engine's). Each
+# rises straight off its delivery-valve holder, runs in and up over the
+# head's side, and comes down into its injector along the injector's own
+# axis. A line runs over the risers of the lines behind it, so the order
+# of heights is 2 highest, then 3, then 4; 1 passes none.
+LINE_OD, LINE_WALL = 6.0, 2.0
+LINE_BEND = 2.5 * LINE_OD    # a pipe bender's radius for 6 mm tube
+LINE_APPROACH = 2.5 * LINE_BEND   # straight into the injector before the bend
+LINE_STEP = 10.0             # between one line's run and the next
+LINE_ORDER = (1, 3, 2, 0)    # steps above the lowest, lines 1..4
+CLAMP_T = 10.0               # a clamp block's height
+CLAMP_WALL = 4.0             # its wall round a line
+
+
+def line_rise(k):
+    """How far line k (1..4) rises off its holder before it turns in."""
+    return 2.5 * LINE_BEND + LINE_STEP * LINE_ORDER[k - 1]
+
+
+def line_path(outlet, inlet, k):
+    """Line k's corners: its holder's outlet, straight up, then to a point
+    LINE_APPROACH out along the injector's axis, and into the injector.
+    `outlet` and `inlet` are world frames (the holder's `outlet`, the
+    injector's `fuel_inlet`, whose z points out of the injector)."""
+    o, i = outlet.origin, inlet.origin
+    return [o, o + outlet.z * line_rise(k), i + inlet.z * LINE_APPROACH, i]
+
+
+def injection_line(app, k, outlet, inlet):
+    p = app.part(f"injection line {k}")
+    bent_tube(p, line_path(outlet, inlet, k), LINE_BEND, LINE_OD, LINE_WALL,
+              f"Injection line {k}")
+    p.material("steel")
+    p.frame("seat", origin=tuple(outlet.origin), z=tuple(outlet.z),
+            x=tuple(outlet.x))
+    return verify(p)
+
+
+def line_clamp(app, name, outlets, z):
+    """A clamp block holding two lines' risers, `z` above their outlets:
+    a block round both with a bore for each, a tenth of a millimetre over
+    the line's size (a clamp's bore at exactly the tube's diameter is two
+    coincident cylinders, which OCC's boolean does not survive)."""
+    p = app.part(name)
+    (a, b) = (o.origin for o in outlets)
+    up = outlets[0].z
+    lo, hi = a + up * z, b + up * z
+    r = LINE_OD / 2.0 + CLAMP_WALL
+    x0, x1 = min(lo[0], hi[0]) - r, max(lo[0], hi[0]) + r
+    y0, y1 = min(lo[1], hi[1]) - r, max(lo[1], hi[1]) + r
+    sk = p.sketch(Plane.xy(lo[2]), name="Block")
+    B.rounded_polygon(sk, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], r)
+    p.extrude(sk.add(), CLAMP_T, mode="new_body", name="Block")
+    for c in (lo, hi):
+        B.disc(p, (c[0], c[1]), LINE_OD + 0.1, lo[2] - 1.0,
+               lo[2] + CLAMP_T + 1.0, "Line bore", mode="cut")
+    p.material("aluminum")
+    p.frame("seat", origin=tuple(a), z=tuple(up), x=tuple(outlets[0].x))
+    return verify(p)
+
+
 def assembly_inputs():
     return dict(
         alternator=[ALT_X, ALT_Z, ALT_D, ALT_LUG, MOUNT_BOLT_Y, *MOUNT_BOLT_OFFSETS],
         pitch_offset=PITCH_OFFSET,
         fan=[FAN_BACK_OFFSET, FAN_R],
-        vacuum=[VAC_X, VAC_Z, VAC_DEPTH, *CAM_CENTER],
+        vacuum=[VAC_X, VAC_Z, VAC_DEPTH, *CAM_CENTER, VAC_FLANGE_R, VAC_CAM_R],
         rocker=[ROCKER_ANGLE, LEVER_ARM],
     )
 
@@ -1277,7 +1471,6 @@ def check_mountings(app, rig, hanging=True):
     rig.activate()
     pairs = [
         ("timing cover", "vacuum pump casting"),
-        ("timing cover", "vacuum timer shaft bush"),
     ]
     for name in ("alternator mounting bracket", "alternator adjustment bracket"):
         pairs.extend([("block", name), (name, "alternator stator")])
@@ -1308,6 +1501,15 @@ def check_mountings(app, rig, hanging=True):
     if hanging:
         pairs.extend((holders.get(holder, holder), name)
                      for name, _, holder, _, _ in HANGING)
+        # The injection pump: its flange on the block's seat, its rear lug
+        # on the bracket, the bracket on the block, and each line on its
+        # delivery-valve holder at one end and its injector at the other.
+        pairs.extend([("block", "pump housing"),
+                      ("block", "injection pump bracket"),
+                      ("pump housing", "injection pump bracket")])
+        for k in range(1, 5):
+            pairs.extend([(f"delivery valve holder {k}", f"injection line {k}"),
+                          (f"injection line {k}", f"injector {k}")])
     measured = []
     for a, b in pairs:
         r = app.measure(a=dict(occurrence=a), b=dict(occurrence=b))
