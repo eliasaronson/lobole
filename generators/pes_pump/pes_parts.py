@@ -294,6 +294,14 @@ def housing(app):
         sk.circle((r * math.cos(math.radians(a)),
                    -r * math.sin(math.radians(a))), d=FLANGE_BOLT_D)
     p.extrude(sk.add(), H_X0 - FLANGE_FACE_X, mode="cut", name="Flange holes")
+    # ...and room behind each for its bolt's head: a spot-faced pocket into
+    # the end wall, down to the flange's own back face. Without it the top
+    # bolt's head stands in the cam case and the lower two in the lugs.
+    hd, hh = FLANGE_BOLT_POCKET
+    for a in FLANGE_BOLT_ANGLES:
+        y, z = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
+        rod(p, (FLANGE_BOLT_SEAT_X, y, z), (H_X0 + hh, y, z), hd,
+            f"Flange bolt pocket {a:.0f}", mode="cut")
     p.frame("cam_axis", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("bearing_drive", origin=(H_X0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("bearing_governor", origin=(50.0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
@@ -614,7 +622,9 @@ def valve_holder(app):
 # The clamp plates, from the photographs: flat steel, one over each pair of
 # holders, on the deck under the hex bodies, a slotted screw between.
 CLAMP_T = 3.5
-CLAMP_W = 26.0
+# Narrow enough that the two plates, a holder pitch apart end to end, do not
+# meet in the middle: at 26 their round ends overlapped by a millimetre.
+CLAMP_W = 24.0
 CLAMP_HOLE_D = 18.6
 
 
@@ -637,7 +647,9 @@ def clamp_plate(app):
     return p
 
 
-SCREW_HEAD_D, SCREW_HEAD_H = 8.0, 3.0
+# Small enough to sit between two holders' shanks (half a pitch from each,
+# shank radius 9): at 8 across the clamp plates' screws were in them.
+SCREW_HEAD_D, SCREW_HEAD_H = 6.5, 3.0
 
 
 def slotted_screw(app):
@@ -771,7 +783,9 @@ FB_R = 18.0                   # body radius about the piston axis
 FB_Y1 = -66.0                 # its outer end
 FB_TOP = 26.0                 # the primer pillar's top
 PLUG_AF = 27.0
-INLET_BANJO = (19.0, -44.0, 18.0)      # its seat, on the boss's top
+# The inlet's eye stands clear of the primer's pillar beside it: at x = 19
+# the two were 2 mm into each other.
+INLET_BANJO = (22.0, -44.0, 18.0)      # its seat, on the boss's top
 OUTLET_BANJO = (-26.0, -44.0, 0.0)     # its seat, on the -X boss's face
 
 
@@ -985,7 +999,7 @@ CAP_D, CAP_H, CAP_RIBS = 38.0, 40.0, 20
 
 
 def filler_cap(app):
-    p = app.part("oil filler cap")
+    p = app.part("governor filler cap")
     r = CAP_D / 2.0
     turned(p, [(0, 0), (FILLER_BOSS_D / 2.0 - 1.0, 0),
                (FILLER_BOSS_D / 2.0 - 1.0, 2.0), (r, 2.0), (r, CAP_H - 4.0),
@@ -1086,8 +1100,8 @@ FLANGE_X0, FLANGE_X1 = SPROCKET_X0, SPROCKET_X1
 
 def timing_hub(app):
     p = app.part("timing device hub")
-    turned_x(p, [(HUB_X0, 8.7), (HUB_X0, 34.0), (HUB_X1, 34.0),
-                 (HUB_X1, 8.7)], "Hub")
+    turned_x(p, [(HUB_X0, 8.7), (HUB_X0, TIMING_DEVICE_R),
+                 (HUB_X1, TIMING_DEVICE_R), (HUB_X1, 8.7)], "Hub")
     for s in (1, -1):
         rod(p, (HUB_X0 + 0.5, 0, s * PIVOT_R), (WEIGHT_X0 - 1.5, 0, s * PIVOT_R),
             6.0, f"Pivot pin {s:+d}")
@@ -1145,15 +1159,14 @@ def drive_flange(app):
     """The chain-driven half: the duplex sprocket and the flange that the
     flyweights turn against."""
     p = app.part("timing device sprocket")
-    teeth, pitch = SPROCKET_TEETH, CHAIN_PITCH
-    rp = pitch / (2.0 * math.sin(math.pi / teeth))
+    teeth, rp = SPROCKET_TEETH, SPROCKET_PITCH_R
     turned_x(p, [(FLANGE_X0, 0), (FLANGE_X0, rp - 3.5), (FLANGE_X1, rp - 3.5),
                  (FLANGE_X1, 0)], "Flange")
     # Two rows of teeth: a disc at the tip circle with a roller seat cut on
     # the pitch circle between every pair of teeth (3/8" duplex chain).
     for row, x0 in enumerate((FLANGE_X0 + 0.5, FLANGE_X0 + 5.9)):
         sk = p.sketch(Plane.yz(x0), name=f"Sprocket row {row + 1}")
-        sk.circle((0, 0), r=rp + 2.6)
+        sk.circle((0, 0), r=SPROCKET_TIP_R)
         p.extrude(sk.add(), 4.6, mode="add", name=f"Sprocket row {row + 1}")
     sk = p.sketch(Plane.yz(FLANGE_X0 - 1.0), name="Roller seats")
     for k in range(teeth):

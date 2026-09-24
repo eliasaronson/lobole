@@ -167,7 +167,8 @@ def assemble(app, parts, rig=None, mount=None, rack_offset=None):
                       ("gov_spring", "governor spring")):
         o = fixed_to(ho, "governor", parts[key], name, "mount")
         if key == "gov_housing":
-            fixed_to(o, "filler", parts["filler_cap"], "oil filler cap", "seat")
+            fixed_to(o, "filler", parts["filler_cap"], "governor filler cap",
+                     "seat")
     fixed_to(rack, "governor", parts["plate"], "governor diaphragm", "mount")
 
     hub = fixed_to(cam, "axle", parts["hub"], "timing device hub")
@@ -374,6 +375,26 @@ def main():
         return
     report = {"build_s": round(t_build, 1), "part_s": times}
     failures = []
+
+    # The standing sweep: every pair, rigid ones included, which a motion
+    # study skips by design — the clamp plates, their screws and the
+    # holders are all fastened to the housing, and only this sees them.
+    rig.activate()
+    t = time.perf_counter()
+    st = app.interference(mode="exact", max_pairs=20000, deadline_s=300,
+                          _timeout=900)
+    stand = [(c.get("a_name"), c.get("b_name"), c.get("volume"))
+             for c in st.get("pairs", [])]
+    report["standing"] = dict(seconds=round(time.perf_counter() - t, 1),
+                              pairs_checked=st.get("pairs_checked"),
+                              truncated=bool(st.get("truncated")),
+                              clashes=stand)
+    print(f"  standing: {st.get('pairs_checked')} pairs, "
+          f"{len(stand)} clashes", flush=True)
+    for c in stand:
+        print(f"    CLASH {c[0]} x {c[1]} vol={c[2]}")
+    if st.get("truncated") or stand:
+        failures.append("standing: clashes or truncated")
 
     r, dt, cl, bad = run_study(app, sids["run"], "run (full load)")
     report["run"] = dict(check_run(r, ids), seconds=round(dt, 1),

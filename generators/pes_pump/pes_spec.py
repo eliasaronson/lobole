@@ -76,6 +76,14 @@ FLANGE_BOLT_PCD = 78.0
 FLANGE_BOLT_D = 9.0          # M8, medium clearance
 # Clocking about the camshaft, measured from +Y toward +Z: one bolt on top.
 FLANGE_BOLT_ANGLES = (90.0, 210.0, 330.0)
+# Behind each hole, the pocket its bolt's head sits in: (diameter, depth)
+# from the flange's back face, room for a low-head M8 (ISO 7380, 14 x 4.4),
+# its floor spot-faced FLANGE_SPOT_FACE into the flange so the seat is one
+# fresh face (the back face is where the case meets the flange, and a rim
+# drawn across that seam comes back in pieces).
+FLANGE_BOLT_POCKET = (16.0, 6.0)
+FLANGE_SPOT_FACE = 0.5
+FLANGE_BOLT_SEAT_X = H_X0 - FLANGE_SPOT_FACE   # where the bolt heads sit
 
 # ---- the drive ---------------------------------------------------------------
 # The engine's camshaft sprocket has 44 teeth on a 22-tooth crank sprocket;
@@ -84,6 +92,8 @@ SPROCKET_TEETH = 44
 CHAIN_PITCH = 9.525          # 3/8" duplex
 SPROCKET_X0, SPROCKET_X1 = -106.0, -95.0
 CHAIN_PLANE_X = SPROCKET_X0 + 5.5    # between the two rows of teeth
+SPROCKET_PITCH_R = CHAIN_PITCH / (2.0 * math.sin(math.pi / SPROCKET_TEETH))
+SPROCKET_TIP_R = SPROCKET_PITCH_R + 2.6    # how far its teeth reach
 
 # ---- element stack (heights at zero lift, pump coordinates) ----------------
 TAPPET_D = 20.0
@@ -144,6 +154,9 @@ GOV_D = 96.0
 
 # ---- timing device -----------------------------------------------------------
 ADVANCE_MAX = 8.0            # cam degrees
+# The hub, the largest thing between the flange and the sprocket: an engine
+# leaves this much room round the camshaft ahead of its register.
+TIMING_DEVICE_R = 34.0
 
 
 # ---- the laws the cams are cut to AND the relations follow ---------------------
