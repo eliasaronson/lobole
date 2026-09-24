@@ -228,7 +228,7 @@ builder. Colours are linear, as the renderer lights them. It is visual only
 
 | finish | what | parts |
 |---|---|---|
-| `paint` | grey paint over iron: colour 0.17–0.19, roughness 0.5, **metallic 0** | block, head, timing cover, sump, water pump, mounts, alternator brackets, rear seal carrier, oil filter housing, fuel filter bracket |
+| `paint` | grey paint over iron: colour 0.10–0.12, roughness 0.5, **metallic 0** | block, head, timing cover, sump, water pump, mounts, alternator brackets, rear seal carrier, oil filter housing, fuel filter bracket |
 | `aluminium` | bare sand-cast aluminium, light and dull | cam cover, intake, vacuum pump castings, alternator castings, thermostat housing |
 | `cast iron` | as-cast iron that has been hot, near black | exhaust manifold |
 | `rubber` | black, rough | fan belt, gaskets, both coolant hoses |

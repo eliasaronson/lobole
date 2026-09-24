@@ -19,7 +19,7 @@ FINISHES = {
     # Grey paint over iron. Paint is a DIELECTRIC: any metallic in it turns
     # the casting into a mirror of the lights, dark from one side and silver
     # from the other, where the photographs show one even satin grey.
-    "paint": dict(color=[0.17, 0.18, 0.19], roughness=0.5, metallic=0.0),
+    "paint": dict(color=[0.10, 0.11, 0.12], roughness=0.5, metallic=0.0),
     # Bare sand-cast aluminium: light, dull, metallic.
     "aluminium": dict(color=[0.52, 0.53, 0.54], roughness=0.5,
                       metallic=0.9),
