@@ -58,7 +58,7 @@ JACKET_X = (48.0, 70.0)
 COLUMN_X = (30.0, 50.0)
 COLUMN_HY = 12.0
 TRANSFER_TOP = FIRE_FACE + 18.0
-HEAD_GALLERY_X = -75.0
+HEAD_GALLERY_X = PUMP_SIDE * 75.0
 HEAD_GALLERY_Z = CHAMBER_FLOOR + 6.0
 OUTLET_Y = 150.0
 OUTLET_D = 28.0
@@ -76,8 +76,9 @@ POST_CORBEL_Z = HEAD_BOLT_SEAT + HEAD_BOLT_HEAD_H + 2.0
 def head(app):
     """An 85 mm head casting with separate raised cam/rocker supports.
 
-    Six external ports serve eight valves on +X. Four inclined prechambers
-    enter from -X. Coolant and oil routing are modeled, not factory core data.
+    Six external ports serve eight valves on the manifold side. Four
+    inclined prechambers enter from the pump side. Coolant and oil routing
+    are modeled, not factory core data.
     """
     p = app.part("cylinder head")
     p.var("bore", BORE).var("valve_lift", VALVE_LIFT)
@@ -94,7 +95,7 @@ def head(app):
     # Drafted walls end in local machined pads. Port and gasket datums are
     # on these faces; the surrounding casting has release taper.
     for kind, (_, dy) in VALVE.items():
-        sx = PORT_SIDE
+        sx = MANIFOLD_SIDE
         for k, py in enumerate(port_centers(kind)):
             pad = p.sketch(B.axis_plane((sx*(HEAD_X-5), py, PORT_Z),
                                         (sx, 0, 0)),
@@ -108,19 +109,21 @@ def head(app):
     # The manifold side is not a flat wall: a rib runs its length under the
     # cover rail, clear above the manifold flanges, drafted on its underside.
     proud, tall = HEAD_RIB
+    ms = MANIFOLD_SIDE
     rib = p.sketch(Plane.xz(BLOCK_Y1), name="Side rib")
-    rib.polyline([(HEAD_X - 1.0, HEAD_TOP - tall - proud),
-                  (HEAD_X + proud, HEAD_TOP - tall),
-                  (HEAD_X + proud, HEAD_TOP), (HEAD_X - 1.0, HEAD_TOP)])
+    rib.polyline([(ms * (HEAD_X - 1.0), HEAD_TOP - tall - proud),
+                  (ms * (HEAD_X + proud), HEAD_TOP - tall),
+                  (ms * (HEAD_X + proud), HEAD_TOP),
+                  (ms * (HEAD_X - 1.0), HEAD_TOP)])
     p.extrude(rib.add(), BLOCK_Y1 - BLOCK_Y0, mode="add", name="Side rib")
     # ...and at its front end, the ear the thermostat housing bolts to: out
     # over the first exhaust flange, and forward past the head's front face
     # only where the timing cover is not (outboard of it).
-    ear_x0 = HEAD_X - 1.0
-    ear_x1 = TSTAT_X + TSTAT_BODY_D / 2.0
+    ear_x0 = ms * (HEAD_X - 1.0)
+    ear_x1 = TSTAT_X + ms * TSTAT_BODY_D / 2.0
     ear_y0 = TSTAT_Y - TSTAT_BOLT_DY - TSTAT_BOLT_D - 2.0
     ear_y1 = TSTAT_Y + TSTAT_BOLT_DY + TSTAT_BOLT_D + 2.0
-    ear_front_x = HEAD_X + COVER_LIP + 1.0
+    ear_front_x = ms * (HEAD_X + COVER_LIP + 1.0)
     ear = p.sketch(Plane.xy(TSTAT_EAR_Z), name="Thermostat ear")
     B.rounded_polygon(ear, [(ear_x0, BLOCK_Y0), (ear_front_x, BLOCK_Y0),
                             (ear_front_x, ear_y0), (ear_x1, ear_y0),
@@ -131,14 +134,17 @@ def head(app):
     # A web under its front edge, down the head's side ahead of the flange.
     web = p.sketch(Plane.xz(BLOCK_Y0 + TSTAT_WEB_T), name="Thermostat web")
     # (Rooted INSIDE the drafted wall, which is 2.5 mm in at the chamfer.)
-    web.polyline([(HEAD_X - 4.0, TSTAT_EAR_Z - 2.0 * TSTAT_BOLT_DY),
-                  (ear_x1 - TSTAT_BODY_D / 2.0, TSTAT_EAR_Z + 1.0),
-                  (HEAD_X - 4.0, TSTAT_EAR_Z + 1.0)])
+    web.polyline([(ms * (HEAD_X - 4.0), TSTAT_EAR_Z - 2.0 * TSTAT_BOLT_DY),
+                  (ear_x1 - ms * TSTAT_BODY_D / 2.0, TSTAT_EAR_Z + 1.0),
+                  (ms * (HEAD_X - 4.0), TSTAT_EAR_Z + 1.0)])
     p.extrude(web.add(), TSTAT_WEB_T, mode="add", name="Thermostat web")
 
     # The chamber the springs, rockers and camshaft live in.
     ch = p.sketch(Plane.xy(CHAMBER_FLOOR), name="Rocker chamber")
-    ch.rect((-28.0, BLOCK_Y0 + 8.0), (CHAMBER_X, BLOCK_Y1 - 8.0))
+    # Off-centre: out to CHAMBER_X on the manifold side, where the rockers
+    # are, and only 28 mm onto the pump side, where the injectors come in.
+    ch.rect((PUMP_SIDE * 28.0, BLOCK_Y0 + 8.0),
+            (ms * CHAMBER_X, BLOCK_Y1 - 8.0))
     p.extrude(ch.add(), HEAD_H, mode="cut", name="Rocker chamber")
     for i, y in enumerate(CAM_BEARING_Y):
         ped = p.sketch(Plane.xy(CHAMBER_FLOOR), name=f"Cam saddle {i + 1}")
@@ -146,7 +152,7 @@ def head(app):
                  (CAM_PEDESTAL_X, y + CAM_BEARING_W / 2.0))
         p.extrude(ped.add(), CAM_Z - CHAMBER_FLOOR, mode="add",
                   name=f"Cam saddle {i + 1}")
-        for sx in (1,):
+        for sx in (MANIFOLD_SIDE,):
             # Out to the chamber wall, not past it: the posts stand above
             # the head's own top face, and 4 mm proud of the wall is 4 mm
             # into the cam cover. And in only as far as the head bolt under
@@ -215,7 +221,7 @@ def head(app):
         for sx in (-1, 1):
             cb.circle((sx * CAM_CAP_BOLT_X, y), d=CAM_CAP_BOLT_D - 1.5)
     p.extrude(cb.add(), 26.0, mode="cut", name="Cam cap bolt holes")
-    for sx in (1,):
+    for sx in (MANIFOLD_SIDE,):
         rb = p.sketch(Plane.xz(BLOCK_Y1 + 1.0), name=f"Rocker bore {sx}")
         rb.circle((sx * ROCKER_PIVOT_X, ROCKER_Z), d=ROCKER_SHAFT_D + FIT)
         p.extrude(rb.add(), BLOCK_Y1 - BLOCK_Y0 + 2.0, mode="cut",
@@ -244,7 +250,7 @@ def head(app):
             c.circle((vx, y), d=STEM_SEAL_D + 2.0)
             p.extrude(c.add(), CHAMBER_FLOOR + 1.0 - GUIDE_Z - GUIDE_LEN,
                       mode="cut", name=f"Stem bore {k}{kind}")
-            sx = PORT_SIDE
+            sx = MANIFOLD_SIDE
             B.bore(p, (sx * HEAD_X, port_y(k,kind), PORT_Z), (vx, y, GUIDE_Z - 4.0),
                    PORT_D[kind], f"{kind} port {k + 1}")
         axis=injection_axis()
@@ -272,7 +278,7 @@ def head(app):
                    hd + FIT, f"{nm} well {k + 1}", over=0.0)
 
     for y in port_centers("intake"):
-        B.bore(p,(HEAD_X+1,y,PORT_Z),(HEAD_X-12,y,PORT_Z),44,
+        B.bore(p,(ms*(HEAD_X+1),y,PORT_Z),(ms*(HEAD_X-12),y,PORT_Z),44,
                "Paired intake mouth",over=0)
 
     # Studs belong to the six external ports, not to eight valve seats.
@@ -280,7 +286,7 @@ def head(app):
         for y in port_centers(kind):
             for sign in (-1,1):
                 z=PORT_Z+sign*MANIFOLD_BOLT_DZ
-                B.bore(p,(HEAD_X,y,z),(HEAD_X-MANIFOLD_STUD_DEPTH,y,z),
+                B.bore(p,(ms*HEAD_X,y,z),(ms*(HEAD_X-MANIFOLD_STUD_DEPTH),y,z),
                        MANIFOLD_BOLT_D-1.5,f"{kind} stud {y}/{sign}",over=0)
 
     hb = p.sketch(Plane.xy(FIRE_FACE), name="Head bolt holes")
@@ -309,10 +315,11 @@ def head(app):
     for i, y in enumerate(CAM_BEARING_Y):
         B.bore(p, (HEAD_GALLERY_X, y, HEAD_GALLERY_Z), (0, y, CAM_Z), 5.0,
                f"Cam bearing feed {i + 1}", over=0.0)
-    # ...and the coolant's way out, on the intake side ahead of the chain
-    # case, which is the only face of this head that is not covered.
-    B.bore(p, (-HEAD_X, BLOCK_Y0 + OUTLET_Y, sum(JACKET_Z) / 2.0),
-           (-JACKET_X[1] + 4.0, BLOCK_Y0 + OUTLET_Y, sum(JACKET_Z) / 2.0),
+    # ...and the coolant's way out, on the pump side behind the chain case.
+    ps = PUMP_SIDE
+    B.bore(p, (ps * HEAD_X, BLOCK_Y0 + OUTLET_Y, sum(JACKET_Z) / 2.0),
+           (ps * (JACKET_X[1] - 4.0), BLOCK_Y0 + OUTLET_Y,
+            sum(JACKET_Z) / 2.0),
            OUTLET_D, "Coolant outlet", over=0.0)
 
     fr = p.sketch(Plane.xz(BLOCK_Y0 + 22.0), name="Cover bolt holes")
@@ -345,14 +352,16 @@ def head(app):
     # glow plugs, rooted inside the drafted wall; two blind M8 threads in it.
     fx, fy, fz = FUEL_FILTER_BOSS
     hy, hz = FUEL_FILTER_BOSS_HALF
-    root = -(HEAD_X - 6.0)
+    root = ps * (HEAD_X - 6.0)
     pad = p.sketch(Plane.yz(fx), name="Fuel filter boss")
     B.rounded_polygon(pad, [(fy - hy, fz - hz), (fy + hy, fz - hz),
                             (fy + hy, fz + hz), (fy - hy, fz + hz)], hy / 2.0)
+    # Plane.yz faces +X, so the signed distance runs inward on either side.
     p.extrude(pad.add(), root - fx, mode="add", name="Fuel filter boss")
     for s in (-1, 1):
-        B.bore(p, (fx - 1.0, fy, fz + s * FUEL_FILTER_BOLT_DZ),
-               (fx + FUEL_FILTER_TAP_DEPTH, fy, fz + s * FUEL_FILTER_BOLT_DZ),
+        B.bore(p, (fx + ps * 1.0, fy, fz + s * FUEL_FILTER_BOLT_DZ),
+               (fx - ps * FUEL_FILTER_TAP_DEPTH, fy,
+                fz + s * FUEL_FILTER_BOLT_DZ),
                FUEL_FILTER_BOLT_D + TAP_FIT, "Fuel filter thread", over=0.0)
 
     B.casting_finish(p, "steel", (0.36, 0.38, 0.39))
@@ -369,16 +378,18 @@ def head(app):
             x=(1, 0, 0))
     p.frame("fuel_filter", origin=FUEL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
     p.frame("cam_axis", origin=(0, 0, CAM_Z), z=(0, 1, 0), x=(1, 0, 0))
-    for sx, nm in ((PORT_SIDE, "intake_face"), (PORT_SIDE, "exhaust_face")):
+    for sx, nm in ((MANIFOLD_SIDE, "intake_face"),
+                   (MANIFOLD_SIDE, "exhaust_face")):
         p.frame(nm, origin=(sx * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
                 x=(1, 0, 0))
-    p.frame("outlet", origin=(-HEAD_X, BLOCK_Y0 + OUTLET_Y,
-                              sum(JACKET_Z) / 2.0), z=(-1, 0, 0),
+    p.frame("outlet", origin=(ps * HEAD_X, BLOCK_Y0 + OUTLET_Y,
+                              sum(JACKET_Z) / 2.0), z=(ps, 0, 0),
             x=(0, 1, 0))
     for i, y in enumerate(CAM_BEARING_Y):
         p.frame(f"cam_cap_{i}", origin=(0, y, CAM_Z), z=(0, 0, 1),
                 x=(1, 0, 0))
-    for sx, nm in ((1, "rocker_shaft_intake"), (1, "rocker_shaft_exhaust")):
+    for sx, nm in ((MANIFOLD_SIDE, "rocker_shaft_intake"),
+                   (MANIFOLD_SIDE, "rocker_shaft_exhaust")):
         p.frame(nm, origin=(sx * ROCKER_PIVOT_X, 0, ROCKER_Z), z=(0, 1, 0),
                 x=(1, 0, 0))
     for k, cy in enumerate(CYL_Y):
@@ -396,9 +407,12 @@ def head(app):
                     z=(0, 0, 1), x=(1, 0, 0))
             # The rocker's own pivot. The arm runs INBOARD from its shaft to
             # the cam, so the frame's x is -sx: the rocker is drawn once,
-            # pivot at the origin and arm along +x, and the exhaust side gets
-            # it turned about z rather than a second, mirrored part.
-            sx = 1
+            # pivot at the origin and arm along +x, and turned about z to
+            # the side it is on rather than mirrored. Its z is -sx*Y, which
+            # keeps the frame right-handed with the rocker's top up, and is
+            # why the rack relation's sign does not depend on the side: the
+            # rocker turns about its own axis, and that axis turns with it.
+            sx = MANIFOLD_SIDE
             p.frame(f"rocker_{k}_{kind}",
                     origin=(sx * ROCKER_PIVOT_X, y, ROCKER_Z),
                     z=(0, -sx, 0), x=(-sx, 0, 0))
@@ -798,10 +812,28 @@ def rocker_shaft(app):
     return p
 
 
+# The cam cover's section is worked out in `u`, the distance across the
+# engine toward the MANIFOLD side (u = MANIFOLD_SIDE * x): its narrow side,
+# `left`, is the pump side and its full width, `right`, the manifold side.
+# `_u_line` and `_u_arc` are the only places that turn u back into x.
+def _u_line(sk, a, b):
+    sk.line((MANIFOLD_SIDE * a[0], a[1]), (MANIFOLD_SIDE * b[0], b[1]))
+
+
+def _u_arc(sk, centre, r, a0, a1):
+    """An arc drawn counter-clockwise from a0 to a1 in u, drawn in x: the
+    same arc on the other side runs from 180 - a1 to 180 - a0."""
+    if MANIFOLD_SIDE > 0:
+        sk.arc(centre, r, a0, a1)
+    else:
+        sk.arc((-centre[0], centre[1]), r, 180.0 - a1, 180.0 - a0)
+
+
 def _crown(left, top):
     """The cover's roof across one section: two shoulder arcs and, between
     them, a shallow CROWN arc tangent to both — a cast lid is domed, and a
     flat roof between two quarter-rounds is what made it read as a box.
+    In u (above).
 
     Returns (shoulder centres cl, cr, their height cz, shoulder radius, the
     crown's centre x and z, its radius, and the angle where they meet)."""
@@ -825,16 +857,17 @@ def _cover_section(sk, left, top, inset=0):
     floor = COVER_BASE - 1 if inset else COVER_BASE
     cl, cr, cz, shoulder, xm, zc, rc, theta = _crown(left, top)
     r = shoulder - inset
-    sk.line((-left + inset, floor), (right - inset, floor))
-    sk.line((right - inset, floor), (right - inset, cz))
-    sk.arc((cr, cz), r, 0, theta)
-    sk.arc((xm, zc), rc - inset, theta, 180 - theta)
-    sk.arc((cl, cz), r, 180 - theta, 180)
-    sk.line((-left + inset, cz), (-left + inset, floor))
+    _u_line(sk, (-left + inset, floor), (right - inset, floor))
+    _u_line(sk, (right - inset, floor), (right - inset, cz))
+    _u_arc(sk, (cr, cz), r, 0, theta)
+    _u_arc(sk, (xm, zc), rc - inset, theta, 180 - theta)
+    _u_arc(sk, (cl, cz), r, 180 - theta, 180)
+    _u_line(sk, (-left + inset, cz), (-left + inset, floor))
 
 
 def cover_top_z(x, left=COVER_LEFT, top=CAM_COVER_TOP):
-    """The rocker section's outside height at x, in the cover's own frame."""
+    """The rocker section's outside height at u = x, in the cover's own
+    frame."""
     cl, cr, cz, shoulder, xm, zc, rc, theta = _crown(left, top)
     return zc + math.sqrt(rc * rc - (x - xm) ** 2)
 
@@ -909,21 +942,30 @@ def _offset_polygon(points, d):
     return out
 
 
+def _ccw(seq):
+    """A u-space corner list in x-space order. Taking u to x on the other
+    side mirrors the outline, which turns a counter-clockwise polygon
+    clockwise — and `_offset_polygon` grows a clockwise one INWARD — so the
+    order is reversed with it."""
+    return list(seq) if MANIFOLD_SIDE > 0 else list(reversed(seq))
+
+
 def _cover_plan():
     """The cover's footprint on the head and the chain case: the gasket's
-    outline, counter-clockwise from the front left."""
+    outline, counter-clockwise."""
     right = HEAD_X + COVER_LIP
-    return [(-right, COVER_Y0), (right, COVER_Y0), (right, BLOCK_Y1),
-            (-COVER_LEFT, BLOCK_Y1), (-COVER_LEFT, COVER_TRANSITION_Y),
-            (-right, COVER_DOME_END_Y)]
+    return _ccw([(MANIFOLD_SIDE * u, y) for u, y in (
+        (-right, COVER_Y0), (right, COVER_Y0), (right, BLOCK_Y1),
+        (-COVER_LEFT, BLOCK_Y1), (-COVER_LEFT, COVER_TRANSITION_Y),
+        (-right, COVER_DOME_END_Y))])
 
 
 def _plan_radii(extra):
     """Corner radii for `_cover_plan`, grown by `extra` — so a rim, a gasket
     and the cover's own rounded ends all turn about the same centres."""
     rear = cover_end_radius() + CAM_COVER_WALL
-    return [CAM_COVER_FRONT_R + extra, CAM_COVER_FRONT_R + extra,
-            rear + extra, rear + extra, 0, 0]
+    return _ccw([CAM_COVER_FRONT_R + extra, CAM_COVER_FRONT_R + extra,
+                 rear + extra, rear + extra, 0, 0])
 
 
 def _cover_shell(p, inset, name):
@@ -994,8 +1036,9 @@ def cam_cover(app):
 
     # The filler neck: a boss standing through the crown, bored into the
     # cavity. Its floor is inside the cover, above the lobes' reach.
-    xm = _crown(COVER_LEFT, CAM_COVER_TOP)[4]
-    seat = cover_top_z(xm) + CAM_COVER_WALL / 2.0
+    um = _crown(COVER_LEFT, CAM_COVER_TOP)[4]
+    xm = MANIFOLD_SIDE * um
+    seat = cover_top_z(um) + CAM_COVER_WALL / 2.0
     neck_floor = CAM_COVER_TOP - CAM_COVER_WALL + 1.0
     B.disc(p, (xm, FILLER_Y), FILLER_BOSS_D, neck_floor, seat, "Filler neck")
     B.disc(p, (xm, FILLER_Y), FILLER_BOSS_D - 12.0, neck_floor - 1.0,
@@ -1003,8 +1046,8 @@ def cam_cover(app):
 
     # The three-pointed star, raised on a medallion on the crown.
     star_y = CYL_Y[1] + BORE_PITCH / 2.0
-    disc_top = cover_top_z(xm) + STAR_RELIEF / 2.0
-    low = cover_top_z(xm + STAR_D / 2.0) - 1.0
+    disc_top = cover_top_z(um) + STAR_RELIEF / 2.0
+    low = cover_top_z(um + STAR_D / 2.0) - 1.0
     B.disc(p, (xm, star_y), STAR_D, low, disc_top, "Star medallion")
     ring = p.sketch(Plane.xy(disc_top - 0.5), name="Star ring")
     ring.circle((xm, star_y), d=STAR_D - 4.0)
@@ -1013,18 +1056,20 @@ def cam_cover(app):
     arm = (STAR_D - 10.0) / 2.0
     pts = []
     for i in range(6):
-        # Tips at 180 (toward the injection side, as on the engine), 300, 60.
+        # Tips at 180, 300 and 60 in u: one points to the injection side,
+        # as on the engine.
         a = math.radians(180.0 + 60.0 * i)
         r = arm + 0.5 if i % 2 == 0 else arm * 0.16
-        pts.append((xm + r * math.cos(a), star_y + r * math.sin(a)))
+        pts.append((xm + MANIFOLD_SIDE * r * math.cos(a),
+                    star_y + r * math.sin(a)))
     star = p.sketch(Plane.xy(disc_top - 0.5), name="Star")
     star.polyline(pts)
     p.extrude(star.add(), STAR_RELIEF + 0.5, mode="add", name="Star")
 
     # The breather: a stub out of the manifold-side shoulder, bored through.
     cl, cr, cz, shoulder = _crown(COVER_LEFT, CAM_COVER_TOP)[:4]
-    axis = V((1.0, 0.0, 1.0)).unit()
-    centre = V((cr, BREATHER_Y, cz))
+    axis = V((MANIFOLD_SIDE, 0.0, 1.0)).unit()
+    centre = V((MANIFOLD_SIDE * cr, BREATHER_Y, cz))
     B.axis_solid(p, tuple(centre + axis * (shoulder - CAM_COVER_WALL + 1.0)),
                  tuple(centre + axis * (shoulder + 22.0)), BREATHER[0],
                  "Breather stub")
@@ -1044,7 +1089,7 @@ def cam_cover(app):
 def _cover_mount_pad(p, side, y, bottom, top, name):
     # Low outboard ears leave vertical socket access beside the cover wall.
     x = cover_bolt_x(side)
-    inner = -COVER_LEFT + 6 if side < 0 else HEAD_X - 6
+    inner = side * (COVER_LEFT - 6 if side == PUMP_SIDE else HEAD_X - 6)
     lo, hi = min(x-8, inner), max(x+8, inner)
     sk = p.sketch(Plane.xy(bottom), name=name)
     B.rounded_polygon(sk, [(lo,y-8),(hi,y-8),(hi,y+8),(lo,y+8)], 6)
@@ -1102,7 +1147,7 @@ def thermostat_ports():
     reach = chamber / 2.0 + 24.0
     # Set forward of the chamber's centre, so the pipe passes ahead of the
     # plenum's front end.
-    heater = V((x + chamber / 2.0 + HEATER_STUB,
+    heater = V((x + MANIFOLD_SIDE * (chamber / 2.0 + HEATER_STUB),
                 y - chamber / 2.0 + HEATER_PIPE[0] / 2.0 + 2.0,
                 top + height / 2.0))
     return root, axis, reach, heater
@@ -1143,7 +1188,8 @@ def thermostat_housing(app):
     pipe_od, pipe_wall = HEATER_PIPE
     B.axis_solid(p, (x, heater[1], heater[2]), tuple(heater), pipe_od,
                  "Heater spigot")
-    B.bore(p, tuple(heater + V((1.0, 0.0, 0.0))), (x, heater[1], heater[2]),
+    B.bore(p, tuple(heater + V((MANIFOLD_SIDE, 0.0, 0.0))),
+           (x, heater[1], heater[2]),
            pipe_od - 2.0 * pipe_wall, "Heater bore", over=0.0)
     B.disc(p, (x, y), chamber - 10.0, z0 + 4.0, top + height + 4.0,
            "Chamber bore", mode="cut")
@@ -1187,10 +1233,11 @@ def _removes_at_most(p, what, room, step):
 
 def _port_flanges(p, kind):
     """A machined flange per external port, on the head's gasket face."""
-    face = PORT_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
+    face = MANIFOLD_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
     for k, y in enumerate(port_centers(kind)):
         def flange(k=k, y=y):
-            sk = p.sketch(B.axis_plane((face, y, PORT_Z), (1, 0, 0)),
+            sk = p.sketch(B.axis_plane((face, y, PORT_Z),
+                                       (MANIFOLD_SIDE, 0, 0)),
                           name=f"Flange {k + 1}")
             B.rounded_polygon(sk, [(-MANIFOLD_PAD_HY, -MANIFOLD_PAD_HZ),
                                    (MANIFOLD_PAD_HY, -MANIFOLD_PAD_HZ),
@@ -1202,8 +1249,8 @@ def _port_flanges(p, kind):
 
 
 def _stud_holes(p, kind):
-    face = PORT_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
-    pad = face + PORT_SIDE * MANIFOLD_PAD
+    face = MANIFOLD_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
+    pad = face + MANIFOLD_SIDE * MANIFOLD_PAD
     drill = math.pi * (MANIFOLD_BOLT_D / 2) ** 2 * (MANIFOLD_PAD + 1)
     for k, y in enumerate(port_centers(kind)):
         for s2 in (-1, 1):
@@ -1236,7 +1283,8 @@ def _stays_off_the_head(p):
     is placed relative to that plane, so one measurement covers every runner,
     pad and flange at once — and it is the one that caught the tilted end
     caps."""
-    reach = p.bbox()[0][0]
+    lo, hi = p.bbox()
+    reach = min(MANIFOLD_SIDE * lo[0], MANIFOLD_SIDE * hi[0])
     if reach < HEAD_X + MANIFOLD_GASKET_T - 1e-6:
         raise SdkError(
             f"{p.name} reaches {abs(reach):.2f} mm from the engine's centre "
@@ -1307,12 +1355,12 @@ def exhaust_manifold(app):
         plane = B.axis_plane((lx, 0.0, drop), down)
         p.extrude_shapes(plane, [lambda s: s.circle((0, 0), d=out_od + 16.0)] + [
             (lambda s, a=a: s.circle((stud_r * math.sin(a),
-                                      stud_r * math.cos(a)),
+                                      MANIFOLD_SIDE * stud_r * math.cos(a)),
                                      d=2.75 * stud_d)) for a in ears],
             EXH_OUTLET_T, name="Outlet flange", mode="add")
     _grows(p, "outlet flange", flange)
     for i, a in enumerate(ears):
-        c = (lx + stud_r * math.cos(a), stud_r * math.sin(a))
+        c = (lx + MANIFOLD_SIDE * stud_r * math.cos(a), stud_r * math.sin(a))
         _grows(p, f"outlet stud {i + 1}", lambda c=c, i=i: B.axis_solid(
             p, (c[0], c[1], drop - EXH_OUTLET_T + 1.0),
             (c[0], c[1], drop - EXH_OUTLET_T - stud_l), stud_d,
@@ -1339,7 +1387,7 @@ def exhaust_manifold(app):
            "Outlet bore", over=0)
     _stud_holes(p, "exhaust")
     B.casting_finish(p, "steel")
-    p.frame("face", origin=(PORT_SIDE * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
+    p.frame("face", origin=(MANIFOLD_SIDE * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
             x=(1, 0, 0))
     p.frame("outlet", origin=(lx, 0.0, drop - EXH_OUTLET_T), z=down,
             x=(1, 0, 0))
@@ -1370,8 +1418,9 @@ def intake_manifold(app):
     w, h, r = PLENUM
     wall = CAM_COVER_WALL
     y0, y1 = -PLENUM_HALF_L, PLENUM_HALF_L
-    face = PORT_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
-    pad = face + PORT_SIDE * MANIFOLD_PAD
+    ms = MANIFOLD_SIDE
+    face = ms * (HEAD_X + MANIFOLD_GASKET_T)
+    pad = face + ms * MANIFOLD_PAD
     b_od, b_bore = INT_BRANCH
 
     sk = p.sketch(Plane.xz(y1), name="Plenum")
@@ -1391,21 +1440,21 @@ def intake_manifold(app):
     _port_flanges(p, "intake")
 
     # The throttle body, on its neck, in the middle of the outer face.
-    outer = lx + w / 2.0
-    tb_x = outer + THROTTLE_NECK
-    tb_end = tb_x + THROTTLE_L
+    outer = lx + ms * w / 2.0
+    tb_x = outer + ms * THROTTLE_NECK
+    tb_end = tb_x + ms * THROTTLE_L
     neck_hy, neck_hz = THROTTLE_OD / 2.0 + 2.0, h / 2.0 - 4.0
 
     def neck():
-        sk = p.sketch(B.axis_plane((lx, 0.0, lz), (1, 0, 0)), name="Neck")
+        sk = p.sketch(B.axis_plane((lx, 0.0, lz), (ms, 0, 0)), name="Neck")
         B.rounded_polygon(sk, [(-neck_hy, -neck_hz), (neck_hy, -neck_hz),
                                (neck_hy, neck_hz), (-neck_hy, neck_hz)], 10)
-        p.extrude(sk.add(), tb_x - lx + 2.0, mode="add", name="Neck")
+        p.extrude(sk.add(), ms * (tb_x - lx) + 2.0, mode="add", name="Neck")
     _grows(p, "the throttle neck", neck)
     _grows(p, "the throttle body", lambda: B.axis_solid(
         p, (tb_x, 0.0, lz), (tb_end, 0.0, lz), THROTTLE_OD, "Throttle body"))
     _grows(p, "the inlet lip", lambda: B.axis_solid(
-        p, (tb_end - 4.0, 0.0, lz), (tb_end, 0.0, lz), THROTTLE_OD + 6.0,
+        p, (tb_end - ms * 4.0, 0.0, lz), (tb_end, 0.0, lz), THROTTLE_OD + 6.0,
         "Inlet lip"))
     shaft_x = (tb_x + tb_end) / 2.0
     boss_y = THROTTLE_OD / 2.0 + 8.0
@@ -1425,14 +1474,20 @@ def intake_manifold(app):
                          hollow.add(), y1 - y0 - 2 * r, mode="cut",
                          name="Plenum bore"))
     # Each paired port opens into BOTH of its branches: a slot through the
-    # flange, the branches' bores at its two ends.
+    # flange, the branches' bores at its two ends. It stops AT the pad face,
+    # where the branch bores begin: its round ends are those bores, and run
+    # on past the face they are the same cylinder as the bore for the last
+    # millimetre — a coincidence the boolean survived with the manifold on
+    # +X and, drawn on -X, either cut nothing or turned the branch bores
+    # inside out.
     for k, y in enumerate(port_centers("intake")):
-        sk = p.sketch(B.axis_plane((pad + 1.0, y, PORT_Z), (-1, 0, 0)),
+        sk = p.sketch(B.axis_plane((face - ms * 1.0, y, PORT_Z), (ms, 0, 0)),
                       name=f"Port {k + 1}")
         sk.slot((-INT_BRANCH_DY, 0), (INT_BRANCH_DY, 0), b_bore)
-        p.extrude(sk.add(), MANIFOLD_PAD + 2.0, mode="cut",
+        p.extrude(sk.add(), MANIFOLD_PAD + 1.0, mode="cut",
                   name=f"Port {k + 1}")
-    B.bore(p, (tb_end + 1.0, 0.0, lz), (outer - wall - 2.0, 0.0, lz),
+    B.bore(p, (tb_end + ms * 1.0, 0.0, lz),
+           (outer - ms * (wall + 2.0), 0.0, lz),
            THROTTLE_BORE, "Throttle bore", over=0)
     # ...and the butterfly shaft ACROSS the bore, which is what the bosses
     # are for, with the lever on its rear end.
@@ -1443,17 +1498,17 @@ def intake_manifold(app):
 
     def lever():
         sk = p.sketch(Plane.xz(lever_y + 4.0), name="Throttle lever")
-        sk.slot((shaft_x, lz), (shaft_x + 16.0, lz + 20.0), 14.0)
+        sk.slot((shaft_x, lz), (shaft_x + ms * 16.0, lz + 20.0), 14.0)
         p.extrude(sk.add(), 4.0, mode="add", name="Throttle lever")
     _grows(p, "the throttle lever", lever)
     _grows(p, "the lever pin", lambda: B.axis_solid(
-        p, (shaft_x + 16.0, lever_y + 2.0, lz + 20.0),
-        (shaft_x + 16.0, lever_y + 12.0, lz + 20.0), 6.0, "Lever pin"))
+        p, (shaft_x + ms * 16.0, lever_y + 2.0, lz + 20.0),
+        (shaft_x + ms * 16.0, lever_y + 12.0, lz + 20.0), 6.0, "Lever pin"))
     _stud_holes(p, "intake")
     B.casting_finish(p, "aluminum")
-    p.frame("face", origin=(PORT_SIDE * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
+    p.frame("face", origin=(ms * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
             x=(1, 0, 0))
-    p.frame("throttle", origin=(tb_end, 0.0, lz), z=(1, 0, 0), x=(0, 1, 0))
+    p.frame("throttle", origin=(tb_end, 0.0, lz), z=(ms, 0, 0), x=(0, 1, 0))
     p.check()
     _stays_off_the_head(p)
     return p
@@ -1480,7 +1535,7 @@ def _elbow(start, end, tube_od):
 def _runner_path(kind, y, log):
     """An exhaust runner: an elbow from the port, at the gasket face, to the
     log it drops into."""
-    x0 = PORT_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
+    x0 = MANIFOLD_SIDE * (HEAD_X + MANIFOLD_GASKET_T)
     return _elbow((x0, y, PORT_Z), (log[0], y, log[1]),
                   (INT_RUNNER if kind == "intake" else EXH_RUNNER)[0])
 
@@ -1496,7 +1551,7 @@ def _runner_pipe(p, path, diameter, name, mode):
 
 def manifold_gasket(app, kind):
     """Port gasket pads, using the same six-port layout as the head."""
-    sx = PORT_SIDE
+    sx = MANIFOLD_SIDE
     p = app.part(f"{kind} manifold gasket")
     face = sx * HEAD_X
     t = MANIFOLD_GASKET_T

@@ -65,14 +65,16 @@ def main():
             # A valid body can contain two disconnected solids. Then leave a
             # thin bridge: topology passes, but the minimum neck must not.
             bracket = app.part("alternator mounting bracket", create=False)
-            B.slab(bracket, 144, -300, -50, 146, -140, 50,
+            # The arm is on the manifold side: 144..146 out from the block.
+            ms = A.MANIFOLD_SIDE
+            B.slab(bracket, ms * 144, -300, -50, ms * 146, -140, 50,
                    "Sever support", mode="cut")
             refused(lambda: bracket.check(solids=1), "a severed support passed",
                     "expected 1 solid(s), got 2")
             app.undo()
-            B.slab(bracket, 144, -300, -50, 146, -140, -5.5,
+            B.slab(bracket, ms * 144, -300, -50, ms * 146, -140, -5.5,
                    "Thin support below", mode="cut")
-            B.slab(bracket, 144, -300, -4.5, 146, -140, 50,
+            B.slab(bracket, ms * 144, -300, -4.5, ms * 146, -140, 50,
                    "Thin support above", mode="cut")
             bracket.check(solids=1)
             refused(lambda: A.check_mounting_structure(app, rig),
@@ -91,8 +93,8 @@ def main():
             app.undo()
             app.undo()
             bracket.activate()
-            B.axis_solid(bracket, (99, A.MOUNT_BOLT_Y, A.BRACKET_Z + 20),
-                         (111, A.MOUNT_BOLT_Y, A.BRACKET_Z + 20), 9,
+            B.axis_solid(bracket, (ms * 99, A.MOUNT_BOLT_Y, A.BRACKET_Z + 20),
+                         (ms * 111, A.MOUNT_BOLT_Y, A.BRACKET_Z + 20), 9,
                          "Fill mounting hole")
             refused(lambda: A.check_mounting_structure(app, rig),
                     "a datum without a drilled hole passed", "not aligned with a drilled hole")

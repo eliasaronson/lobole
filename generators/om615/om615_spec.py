@@ -13,7 +13,11 @@ rather than a petrol four with a diesel label on it.
          is z = DECK, so a piston's height IS its z.
     +Y   the crank axis. FRONT (the timing chain) is -Y, REAR (the flywheel)
          is +Y. Cylinder 1 is the front one.
-    +X   across the engine. Both manifolds are on +X; injection equipment is on -X.
+    +X   across the engine: the car's LEFT, with the front at -Y and up +Z.
+         The PUMP SIDE (injection pump, injectors, filters, dipstick,
+         vacuum pump) is PUMP_SIDE, +X; both manifolds and the alternator
+         are on the other side, MANIFOLD_SIDE. Standing on the pump side,
+         the fan is on your left, as on the real engine.
 
 Everything with a unit is derived from the four numbers a person would
 actually quote for an engine (bore, stroke, rod, bore pitch) wherever the
@@ -21,6 +25,17 @@ derivation is real. Other values include design estimates; sourced dimensions
 are identified separately in generators/om615/README.md#sources.
 """
 import math
+
+# Which side of the engine the injection equipment is on, as the sign of x.
+# +1 is +X, the car's LEFT (front -Y, up +Z), where the OM615 has its pump,
+# injectors, filters, dipstick and vacuum pump; the manifolds and the
+# alternator are on MANIFOLD_SIDE. Every side-specific number and frame below
+# and in the builders is written with one of these two, so the side is one
+# choice and cannot drift piece by piece. It is a RE-LAYOUT, not a mirror:
+# threads, standard parts, frames and the direction the crank turns (+Y,
+# clockwise seen from the front) do not change with it.
+PUMP_SIDE = 1
+MANIFOLD_SIDE = -PUMP_SIDE
 
 # Reference target: early 200 D/8, OM615.913 (21:1), not the later 615.940.
 # Verified dimensions and remaining approximations: generators/om615/README.md#sources.
@@ -178,10 +193,10 @@ COOLANT_D = 14.0
 # the crankcase bays inboard of it are 172 mm wide and a drilling at 78
 # would be in fresh air. Cross-drillings feed each main; one riser feeds the
 # head, up the deck beside cylinder one.
-GALLERY_X = -93.0
+GALLERY_X = PUMP_SIDE * 93.0
 GALLERY_Z = 60.0
 GALLERY_D = 10.0
-OIL_RISER_X = -62.0
+OIL_RISER_X = PUMP_SIDE * 62.0
 OIL_RISER_D = 8.0
 COVER_GASKET_T = 2.0
 CAM_GASKET_T = 3.0
@@ -198,7 +213,8 @@ HEAD_H = 85.0             # Workshop 05.4-118/1: machined height 84.8–85.0.
 HEAD_TOP = FIRE_FACE + HEAD_H
 # Both valves are on the manifold side; their order alternates by cylinder.
 # Each valve, rocker and cam lobe shares one longitudinal station.
-VALVE_X = 8.0
+VALVE_INSET = 8.0         # how far the valves stand off the centreline
+VALVE_X = MANIFOLD_SIDE * VALVE_INSET
 VALVE_DY = 20.0
 VALVE = {"intake": (VALVE_X, -VALVE_DY), "exhaust": (VALVE_X, VALVE_DY)}
 STEM_D = 9.92            # within both diesel stem ranges, manual p.24
@@ -214,7 +230,6 @@ GUIDE_LEN = 35.0          # ends BELOW where the retainer comes down to
 GUIDE_Z = FIRE_FACE + 16.0           # where the guide's bore starts
 VALVE_LIFT = 8.0
 PORT_D = {"intake": 30.0, "exhaust": 28.0}
-PORT_SIDE = 1
 PORT_Z = FIRE_FACE + 39.0            # where a port leaves the side face
 # Modeled studs above and below each external port. The pads stop below
 # the cover's mounting ears; none of these coordinates is a factory pattern.
@@ -246,7 +261,7 @@ def port_y(k,kind):
 # The bend radius is computed from each port and collector position, with a
 # horizontal start tangent so the gasket face remains planar.
 # (x, z, outer, bore) for each log, and the outer/bore of its branches.
-INT_LOG = (145.0, FIRE_FACE + 135.0, 70.0, 56.0)   # high, like the real one
+INT_LOG = (MANIFOLD_SIDE * 145.0, FIRE_FACE + 135.0, 70.0, 56.0)   # high, like the real one
 INT_RUNNER = (54.0, 44.0)
 EXH_RUNNER = (44.0, 34.0)
 MANIFOLD_END_ALLOWANCE = 8.0
@@ -264,7 +279,8 @@ EXH_LOG_Y = collector_span("exhaust", EXH_RUNNER)
 
 
 # Collector standoff leaves room for the elbow and a core around its bore.
-EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD + 1.5*EXH_RUNNER[0],
+EXH_LOG = (MANIFOLD_SIDE * (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD
+                           + 1.5 * EXH_RUNNER[0]),
            FIRE_FACE - 5.0, 52.0, 40.0)
 # The spring sits in a POCKET sunk below the rocker chamber's floor. On the
 # floor itself there are only 20 mm between the seat and the retainer, which
@@ -297,7 +313,7 @@ STEM_SEAL_D = 18.0
 STEM_SEAL_H = 8.0
 # Inclined prechambers and injectors are opposite the manifolds. The manual
 # establishes the architecture; angle and stepped envelopes remain estimates.
-PRE_X = -22.0
+PRE_X = PUMP_SIDE * 22.0
 PRE_DY = 0.0
 INJ_D = 24.0
 INJ_REACH = 25.0
@@ -305,10 +321,10 @@ INJ_HEIGHT = 70.0
 INJ_BODY_D = 30.0
 INJ_HEX_AF = 27.0          # Workshop 07.1.4-230/1 specifies a 27 mm socket.
 GLOW_D = 10.0
-INJ_FACE = (-62.0, PRE_DY, HEAD_TOP)
+INJ_FACE = (PUMP_SIDE * 62.0, PRE_DY, HEAD_TOP)
 INJ_TARGET = (PRE_X, PRE_DY, FIRE_FACE + 13.0)
-GLOW_FACE = (-HEAD_X, PRE_DY, FIRE_FACE + 20.0)
-GLOW_TARGET = (-31.0, PRE_DY, FIRE_FACE + 38.0)
+GLOW_FACE = (PUMP_SIDE * HEAD_X, PRE_DY, FIRE_FACE + 20.0)
+GLOW_TARGET = (PUMP_SIDE * 31.0, PRE_DY, FIRE_FACE + 38.0)
 
 # ---- the valve gear --------------------------------------------------------
 CAM_Z = FIRE_FACE + 155.0   # Estimated cam datum, independent of machined head height.
@@ -325,7 +341,8 @@ CAM_LOBE_W = 16.0
 # The rocker shafts, outboard of both valves — but INBOARD enough that a
 # rocker's pivot boss stays inside the chamber wall. The boss is 16 mm in
 # radius and the chamber ends at 78, so 72 put every one of the eight into
-# the head's own side wall.
+# the head's own side wall. A distance from the centreline: the shaft is at
+# MANIFOLD_SIDE * ROCKER_PIVOT_X.
 ROCKER_PIVOT_X = 60.0
 ROCKER_SHAFT_D = 20.0
 LASH = 5.0                # drawn clearance at the lobe. A real cold lash is
@@ -338,7 +355,7 @@ LASH = 5.0                # drawn clearance at the lobe. A real cold lash is
 # the valve's are in the ratio of those two arms. Say the VALVE lift, which
 # is what an engine is specified by, and derive the lobe from it.
 ARM_CAM = ROCKER_PIVOT_X             # pivot to the pad under the cam
-ARM_VALVE = ROCKER_PIVOT_X - VALVE_X # pivot to the valve pad
+ARM_VALVE = ROCKER_PIVOT_X - VALVE_INSET  # pivot to the valve pad
 ROCKER_RATIO = ARM_VALVE / ARM_CAM
 CAM_LIFT = VALVE_LIFT / ROCKER_RATIO
 # Where the rocker sits, and therefore how long a valve is.
@@ -530,13 +547,13 @@ CORE_PLUG_Z = (JACKET_Z0 + JACKET_Z1) / 2.0
 FLANGE_BAND_H = 12.0      # the ledge along the pan rail
 FLANGE_BAND_T = 3.0
 # Where the oil filter housing bolts on: a flat round pad on the pump side
-# (-X), low and toward the rear, in the bay between the ribs over mains 3
+# (PUMP_SIDE), low and toward the rear, in the bay between the ribs over mains 3
 # and 4, at the main gallery's own height so its port drills straight in.
 OIL_FILTER_BOSS_D = 70.0
 OIL_FILTER_BOSS_H = 12.0  # proud of the crankcase wall; clears the ribs
-OIL_FILTER_BOSS = (-(CASE_X + OIL_FILTER_BOSS_H),
+OIL_FILTER_BOSS = (PUMP_SIDE * (CASE_X + OIL_FILTER_BOSS_H),
                    (MAIN_Y[2] + MAIN_Y[3]) / 2.0, GALLERY_Z)
-OIL_FILTER_AXIS = (-1.0, 0.0, 0.0)          # outward, the pad's normal
+OIL_FILTER_AXIS = (PUMP_SIDE, 0.0, 0.0)      # outward, the pad's normal
 OIL_FILTER_BOLT_D = 8.0                     # four M8, tapped
 OIL_FILTER_BOLT_PCD = 52.0
 OIL_FILTER_PORT_D = 12.0                    # into the main gallery
@@ -544,13 +561,13 @@ OIL_FILTER_PORT_D = 12.0                    # into the main gallery
 # aft, leaning outward so its tube clears the pad. Its socket's top face and
 # axis are the tube's seat.
 DIPSTICK_TILT_DEG = 15.0
-DIPSTICK_AXIS = (-math.sin(math.radians(DIPSTICK_TILT_DEG)), 0.0,
+DIPSTICK_AXIS = (PUMP_SIDE * math.sin(math.radians(DIPSTICK_TILT_DEG)), 0.0,
                  math.cos(math.radians(DIPSTICK_TILT_DEG)))
 DIPSTICK_BOSS_D = 22.0
 DIPSTICK_BORE_D = 10.0
 # High enough that the bore breaks into the crankcase 20 mm above the rail,
 # not through the rail's gasket face.
-DIPSTICK_BOSS = (-(CASE_X + OIL_FILTER_BOSS_H + 2.0),
+DIPSTICK_BOSS = (PUMP_SIDE * (CASE_X + OIL_FILTER_BOSS_H + 2.0),
                  (MAIN_Y[3] + MAIN_Y[4]) / 2.0,
                  PAN_RAIL + 20.0 + (OIL_FILTER_BOSS_H + 2.0 + 14.0)
                  / math.tan(math.radians(DIPSTICK_TILT_DEG)))
@@ -591,18 +608,21 @@ def cam_phase(cylinder):
     return FIRING_TDC[cylinder] / 2.0
 
 # Visual-reference mounting envelope. Not a sourced pump bolt pattern.
-PUMP_MOUNT = (-108.0, BLOCK_Y0 + 80.0, 174.0)
+PUMP_MOUNT = (PUMP_SIDE * 108.0, BLOCK_Y0 + 80.0, 174.0)
 PUMP_REGISTER_D = 60.0
 PUMP_BOLT_PCD = 78.0
 PUMP_MOUNT_D = 96.0
 
 COVER_BASE = HEAD_TOP
-COVER_LEFT = 42.0
+COVER_LEFT = 42.0         # the cam cover's half-width on the PUMP side
 COVER_TRANSITION_Y = -175.0
 COVER_DOME_END_Y = DRIVE_Y + CHAIN_W/2 + 8.0
 
 def cover_bolt_x(side):
-    return -54.0 if side < 0 else CAM_COVER_BOLT_X
+    """The cam cover bolts' x on the side whose sign is `side`: close in on
+    the pump side, where the cover is narrow, out past the head's edge on
+    the manifold side."""
+    return side * (54.0 if side == PUMP_SIDE else CAM_COVER_BOLT_X)
 
 
 # ---- the top end's castings: what they look like -------------------------
@@ -648,7 +668,7 @@ HEAD_RIB = (4.0, 12.0)               # (proud, tall), up to HEAD_TOP
 
 # The thermostat housing, on a cast ear at the head's front corner on the
 # manifold side, above the first exhaust flange and ahead of the plenum.
-TSTAT_X = HEAD_X + 34.0
+TSTAT_X = MANIFOLD_SIDE * (HEAD_X + 34.0)
 TSTAT_Y = BLOCK_Y0 + 22.0
 TSTAT_BOLT_DY = 28.0                 # two M8, fore and aft of the body
 TSTAT_BOLT_D = PAN_BOLT_D
@@ -677,7 +697,7 @@ OIL_FILTER_TAP_DEPTH = 16.0
 # pump's flange below it.
 FUEL_FILTER_Y = MAIN_Y[1]
 FUEL_FILTER_BOSS_H = 14.0                    # proud of the head's side wall
-FUEL_FILTER_BOSS = (-(HEAD_X + FUEL_FILTER_BOSS_H), FUEL_FILTER_Y,
+FUEL_FILTER_BOSS = (PUMP_SIDE * (HEAD_X + FUEL_FILTER_BOSS_H), FUEL_FILTER_Y,
                     HEAD_TOP - 24.0)         # the boss's FACE centre
 FUEL_FILTER_BOSS_HALF = (14.0, 22.0)         # (y, z) half-size of the pad
 FUEL_FILTER_BOLT_DZ = 12.0                   # two M8, above and below centre

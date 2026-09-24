@@ -69,9 +69,30 @@ arm and a short block screw are each refused for their own reason.
 | `om615.py` | assembly, fasteners, the component table, stages and checks |
 
 Frame: +Z up and the bore axis (crank centreline z = 0, so a piston's height
-is its z); +Y along the crank, FRONT (timing chain) at −Y; +X across, with
-both manifolds on +X and the injection equipment on −X. Cylinder 1 is at the
-front.
+is its z); +Y along the crank, FRONT (timing chain) at −Y; +X across, which
+with that front and up is the car's LEFT. Cylinder 1 is at the front.
+
+**Which way round.** The pump side — injection pump mount, injectors and
+glow plugs, both filters, the dipstick and the vacuum pump — is the car's
+left, +X; the manifolds, the thermostat housing, the heater pipe and the
+alternator are on the right, −X. Standing on the pump side the fan is on
+your left, as in the owner's photographs. The side is one constant,
+`PUMP_SIDE` in `om615_spec.py` (`MANIFOLD_SIDE` is its negative), and every
+side-specific number and frame in the builders is written with one of the
+two. Changing it is a re-layout, not a mirror image: fasteners stay
+right-handed standard parts, frames stay right-handed, a part that turns
+(the rockers, the engine mounts) is turned to its side about z rather than
+mirrored, and the parts whose handedness belongs to the ROTATION rather
+than to the side are the same parts either way — the camshaft's lobes, the
+fan's blade pitch, the valve springs. The crank turns +Y, clockwise seen
+from the front: from cylinder 1's TDC its pin moves toward +X, the pump
+side (measured: +7.26 mm in x at 10°). So the timing chain's run on the pump
+side is the tight one and carries the guide rail; the tensioner is on the
+slack run. The oil pump, inside the chain case and the sump, is not
+side-specific and does not move with it. The vacuum pump is the same unit
+translated to its side, so its timer shaft stays 16 mm toward +X of its
+centre. The belt is laid out counter-clockwise in XZ whichever side the
+alternator is on (`belt_order()`).
 
 **The mechanism** has one driving DOF, the crank: four slider-crank loops off
 one crankshaft; a chain relation at 1:2 to the camshaft; per valve a CAM
@@ -89,15 +110,15 @@ sweep checks top-level pairs only, so the children are swept on their own.
 and the factory section, not a drawing, and none of it touches a bore,
 gallery, bearing or mating face. The block carries a raised panel over the
 water jacket on each side with three core plugs in bosses between the bores,
-a ledge along the pan rail, and on the pump side (−X) the two interfaces the
+a ledge along the pan rail, and on the pump side (+X) the two interfaces the
 oil filter housing and the dipstick tube sit on:
 
-- **oil filter pad** — flat, round, Ø70, its face at (−112, 48.5, 60) with
-  normal −X: in the bay between the ribs over mains 3 and 4, at the main
+- **oil filter pad** — flat, round, Ø70, its face at (112, 48.5, 60) with
+  normal +X: in the bay between the ribs over mains 3 and 4, at the main
   gallery's height, with four tapped M8 holes on a 52 mm PCD at 45° and a
   Ø12 port drilled straight into the gallery. Frame `oil_filter` on the block.
-- **dipstick socket** — Ø22, its top face centred at (−114, 145.5, 32.5), axis
-  (−sin 15°, 0, cos 15°) leaning outward; a Ø10 bore runs down it into the
+- **dipstick socket** — Ø22, its top face centred at (114, 145.5, 32.5), axis
+  (sin 15°, 0, cos 15°) leaning outward; a Ø10 bore runs down it into the
   crankcase 20 mm above the rail, in the bay between mains 4 and 5. Frame
   `dipstick` (world-aligned, at the top face).
 
