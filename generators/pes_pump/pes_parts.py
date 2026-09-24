@@ -159,10 +159,12 @@ def housing(app):
     # The fuel inlet boss on -Y, cross-drilled into the gallery.
     rod(p, (UP_X1 - 12.0, UP_Y0 + 1.0, PORT_Z), (UP_X1 - 12.0, UP_Y0 - 5.0,
         PORT_Z), 15.0, "Inlet boss")
-    turned_x(p, [(H_X0 - 10.0, 0), (H_X0 - 10.0, 48.0), (H_X0, 48.0),
-                 (H_X0, 0)], "Drive flange", mode="add")
-    turned_x(p, [(H_X0 - 13.0, 0), (H_X0 - 13.0, 30.0), (H_X0 - 10.0, 30.0),
-                 (H_X0 - 10.0, 0)], "Register", mode="add")
+    turned_x(p, [(FLANGE_FACE_X, 0), (FLANGE_FACE_X, FLANGE_D / 2.0),
+                 (H_X0, FLANGE_D / 2.0), (H_X0, 0)], "Drive flange", mode="add")
+    turned_x(p, [(FLANGE_FACE_X - REGISTER_H, 0),
+                 (FLANGE_FACE_X - REGISTER_H, REGISTER_D / 2.0),
+                 (FLANGE_FACE_X, REGISTER_D / 2.0), (FLANGE_FACE_X, 0)],
+             "Register", mode="add")
     turned_x(p, [(H_X1, 0), (H_X1, 20.0), (H_X1 + 12.0, 20.0),
                  (H_X1 + 12.0, 0)], "Rear bearing cover", mode="add")
     y0, y1, z0, z1 = RACK_SLOT
@@ -213,12 +215,14 @@ def housing(app):
     rod(p, (ECC_X, H_Y0 - 1.0, 0), (ECC_X, -GALLERY + 1.0, 0), FEED_BORE_D,
         "Feed tappet bore", mode="cut")
     # Drive-flange bolt holes, and the bosses the window cover screws into.
+    # The sketch's V is normal x U = -Z, so a bolt at +Z is drawn at -v.
     sk = p.sketch(Plane((H_X0, 0, 0), (-1, 0, 0), (0, 1, 0)),
                   name="Flange holes")
-    for a in (90.0, 210.0, 330.0):
-        sk.circle((39.0 * math.cos(math.radians(a)),
-                   39.0 * math.sin(math.radians(a))), d=9.0)
-    p.extrude(sk.add(), 10.0, mode="cut", name="Flange holes")
+    r = FLANGE_BOLT_PCD / 2.0
+    for a in FLANGE_BOLT_ANGLES:
+        sk.circle((r * math.cos(math.radians(a)),
+                   -r * math.sin(math.radians(a))), d=FLANGE_BOLT_D)
+    p.extrude(sk.add(), H_X0 - FLANGE_FACE_X, mode="cut", name="Flange holes")
     p.frame("cam_axis", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("bearing_drive", origin=(H_X0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("bearing_governor", origin=(50.0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
@@ -228,6 +232,10 @@ def housing(app):
     p.frame("rack", origin=(0, 0, 0), z=(-1, 0, 0), x=(0, 1, 0))
     p.frame("feed", origin=(ECC_X, 0, 0), z=(0, -1, 0), x=(1, 0, 0))
     p.frame("governor", origin=(0, GOV_Y, GOV_Z), z=(1, 0, 0), x=(0, 1, 0))
+    # What an engine mounts it by, and where its fuel comes in.
+    p.frame("flange", origin=(FLANGE_FACE_X, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
+    p.frame("fuel_inlet", origin=(UP_X1 - 12.0, UP_Y0 - 5.0, PORT_Z),
+            z=(0, -1, 0), x=(1, 0, 0))
     finish(p, "aluminum", CASTING, roughness=0.7, metallic=0.6)
     p.check(solids=1)
     return p
@@ -263,7 +271,7 @@ def bearing(app):
 def camshaft(app):
     """Journals and lobes; each lobe is the roller envelope of the SAME lift
     law its tappet's cam relation is given."""
-    p = app.part("camshaft")
+    p = app.part("pump camshaft")
     r_j, r_s = JOURNAL_D / 2.0, SHAFT_D / 2.0
     turned_x(p, [(CAM_X0, 0), (CAM_X0, 5.0), (-84.0, 5.0), (-84.0, 6.5),
                  (-70.0, 8.5), (-50.0, r_j), (-49.0, r_j), (-49.0, r_s),
@@ -514,6 +522,8 @@ def valve_holder(app):
         turned(p, [(5.4, z), (6.1, z - 0.6), (6.1, z + 0.6)],
                f"Thread groove {k + 1}", mode="cut")
     p.frame("axis", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    # The injection line's union seats on the spigot's top.
+    p.frame("outlet", origin=(0, 0, HOLDER_TOP), z=(0, 0, 1), x=(1, 0, 0))
     finish(p, "steel", (0.5, 0.5, 0.52))
     p.check(solids=1)
     return p
@@ -701,7 +711,7 @@ def governor_spring(app):
 HUB_X0, HUB_X1 = -84.0, -72.0
 WEIGHT_X0, WEIGHT_X1 = -93.0, -85.0
 PIVOT_R = 21.0
-FLANGE_X0, FLANGE_X1 = -106.0, -95.0
+FLANGE_X0, FLANGE_X1 = SPROCKET_X0, SPROCKET_X1
 
 
 def timing_hub(app):
@@ -765,7 +775,7 @@ def drive_flange(app):
     """The chain-driven half: the duplex sprocket and the flange that the
     flyweights turn against."""
     p = app.part("timing device sprocket")
-    teeth, pitch = 26, 9.525
+    teeth, pitch = SPROCKET_TEETH, CHAIN_PITCH
     rp = pitch / (2.0 * math.sin(math.pi / teeth))
     turned_x(p, [(FLANGE_X0, 0), (FLANGE_X0, rp - 3.5), (FLANGE_X1, rp - 3.5),
                  (FLANGE_X1, 0)], "Flange")

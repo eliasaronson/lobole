@@ -57,6 +57,26 @@ UP_Y0, UP_Y1 = -19.0, 24.0   # element block, narrower than the cam case
 H_TOP = 122.0
 GALLERY = 24.0               # half-size of the cam gallery (lobe tip 21)
 
+# ---- the mounting flange: the engine's interface -----------------------------
+# The pump's to state and the engine's to be machined to: the OM615 block
+# reads these. The flange frame's z runs along the camshaft toward the
+# governor, its x straight up.
+FLANGE_FACE_X = H_X0 - 10.0  # the face that seats on the engine
+FLANGE_D = 96.0
+REGISTER_D, REGISTER_H = 60.0, 3.0
+FLANGE_BOLT_PCD = 78.0
+FLANGE_BOLT_D = 9.0          # M8, medium clearance
+# Clocking about the camshaft, measured from +Y toward +Z: one bolt on top.
+FLANGE_BOLT_ANGLES = (90.0, 210.0, 330.0)
+
+# ---- the drive ---------------------------------------------------------------
+# The engine's camshaft sprocket has 44 teeth on a 22-tooth crank sprocket;
+# the pump turns at camshaft speed off the same chain, so it has 44 too.
+SPROCKET_TEETH = 44
+CHAIN_PITCH = 9.525          # 3/8" duplex
+SPROCKET_X0, SPROCKET_X1 = -106.0, -95.0
+CHAIN_PLANE_X = SPROCKET_X0 + 5.5    # between the two rows of teeth
+
 # ---- element stack (heights at zero lift, pump coordinates) ----------------
 TAPPET_D = 20.0
 TAPPET_BORE_D = 20.2

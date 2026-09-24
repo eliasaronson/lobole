@@ -39,6 +39,25 @@ drive end), +Z up every element's axis (camshaft centreline z = 0), +Y across
 their own axis in pump heights, so a part's reported position is its travel.
 Every drawn cam sits `CAM_ALLOW` (0.05 mm) inside its law.
 
+**What an engine mounts it by** is stated in `pes_spec.py` and nowhere else,
+so the engine's block is machined to the pump's numbers:
+
+- **The flange.** The face is `FLANGE_FACE_X`, with a Ø60 register and three
+  M8 clearance holes on a 78 PCD, one at the top.
+- **The frames.** The housing's `flange` frame sits on that face, with z
+  along the camshaft toward the governor and x straight up. The housing has
+  a `fuel_inlet` frame at the gallery inlet. Each delivery valve holder has
+  an `outlet` frame on its union spigot.
+- **The sprocket.** It has 44 teeth for 3/8" duplex chain, the same as the
+  engine's camshaft, since both turn at half crank speed off one chain. Its
+  chain plane is `CHAIN_PLANE_X`.
+- **The rack.** `assemble(app, parts, rig, mount, rack_offset)` builds the
+  pump into another assembly's rig and fastens `flange` to `mount`. The load
+  configurations belong to the pump's own assembly, so in someone else's
+  assembly the rack is held with `rack_offset` instead.
+- **The camshaft part.** It is named "pump camshaft", so an engine's own
+  camshaft keeps its name.
+
 ## How it moves
 
 Two independent drivers, as in the real pump: engine speed turns the

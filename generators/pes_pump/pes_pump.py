@@ -61,11 +61,21 @@ def build_parts(app, only=None):
     return parts, times
 
 
-def assemble(app, parts):
-    rig = app.assembly(ASSEMBLY, create=True)
+def assemble(app, parts, rig=None, mount=None, rack_offset=None):
+    """The pump, mated and coupled, in `rig` — its own assembly when that is
+    left out, with the housing fixed. An engine passes its rig and `mount`,
+    the (occurrence, frame) the housing's `flange` fastens to, and holds the
+    control rack at `rack_offset` (mm from stop), since the pump's load
+    configurations belong to the pump's own assembly. Returns the rig, the
+    mates an engine drives or reads, and the occurrence ids the checks use."""
+    if rig is None:
+        rig = app.assembly(ASSEMBLY, create=True)
     rig.activate()
     ids = {}
-    ho = rig.place(parts["housing"], fixed=True, name="pump housing")
+    ho = rig.place(parts["housing"], fixed=mount is None, name="pump housing")
+    if mount is not None:
+        rig.fasten(mount, (ho, "flange"), name="injection pump flange")
+    ids["housing"] = ho.id
 
     def fixed_to(occ, frame, part, name, pframe=None):
         o = rig.place(part, name=name)
@@ -76,11 +86,13 @@ def assemble(app, parts):
     for n in ("drive", "governor"):
         o = rig.place(parts["bearing"], name=f"camshaft bearing, {n} end")
         rig.fasten((ho, f"bearing_{n}"), (o, "seat"))
-    cam = rig.place(parts["camshaft"], name="camshaft")
-    cam_m = rig.revolute((ho, "cam_axis"), (cam, "axle"), name="camshaft")
+    cam = rig.place(parts["camshaft"], name="pump camshaft")
+    cam_m = rig.revolute((ho, "cam_axis"), (cam, "axle"), name="pump camshaft")
     ids["camshaft"] = cam.id
     rack = rig.place(parts["rack"], name="control rack")
     rack_m = rig.slider((ho, "rack"), (rack, "slide"), name="control rack")
+    if rack_offset is not None:
+        app.call("set_mate", id=rack_m["id"], offset=rack_offset)
     ids["rack"] = rack.id
 
     rig.activate()
@@ -116,7 +128,9 @@ def assemble(app, parts):
         rig.cam(cam_m, dm, lift=table(lambda t: valve_lift(el, t)),
                 name=f"delivery valve {el} lift")
         fixed_to(ho, fr, parts["vspring"], f"delivery valve spring {el}", "axis")
-        fixed_to(ho, fr, parts["holder"], f"delivery valve holder {el}", "axis")
+        hd = fixed_to(ho, fr, parts["holder"], f"delivery valve holder {el}",
+                      "axis")
+        ids[f"holder{el}"] = hd.id
         ids[f"tappet{el}"], ids[f"plunger{el}"] = tp.id, pl.id
         ids[f"sleeve{el}"], ids[f"valve{el}"] = sl.id, dv.id
         ids[f"plunger_mate{el}"], ids[f"sleeve_mate{el}"] = pm["id"], sm["id"]
@@ -151,7 +165,8 @@ def assemble(app, parts):
                      ratio=-ADVANCE_MAX / WEIGHT_SWING,
                      name="flyweights advance the injection")
     ids["weightA"], ids["sprocket"], ids["hub"] = wa.id, sp.id, hub.id
-    mates = dict(cam=cam_m, rack=rack_m, prime=prime_m, weight=wam)
+    mates = dict(cam=cam_m, rack=rack_m, prime=prime_m, weight=wam,
+                 advance=spm)
     return rig, mates, ids
 
 
