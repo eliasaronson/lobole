@@ -41,6 +41,25 @@ def rounded_rect(sk, x0, y0, x1, y1, r):
     sk.arc((x0 + r, y0 + r), r, 180.0, 270.0)
 
 
+def bottom_rounded(sk, u0, v0, u1, v1, r):
+    """A rectangle with only its two -V corners rounded: a casting's
+    section, flat on top where the next body stands on it."""
+    sk.line((u0 + r, v0), (u1 - r, v0))
+    sk.arc((u1 - r, v0 + r), r, 270.0, 360.0)
+    sk.line((u1, v0 + r), (u1, v1))
+    sk.line((u1, v1), (u0, v1))
+    sk.line((u0, v1), (u0, v0 + r))
+    sk.arc((u0 + r, v0 + r), r, 180.0, 270.0)
+
+
+def stadium(sk, u0, u1, v, r):
+    """Two semicircles of radius r at u0 and u1 on the line v, joined."""
+    sk.line((u0, v - r), (u1, v - r))
+    sk.arc((u1, v), r, -90.0, 90.0)
+    sk.line((u1, v + r), (u0, v + r))
+    sk.arc((u0, v), r, 90.0, 270.0)
+
+
 def round_slab(p, x0, y0, z0, x1, y1, z1, r, name, mode="add"):
     """`slab` with its vertical edges rounded: how a casting is shaped."""
     sk = p.sketch(Plane.xy(z0), name=name)
@@ -106,12 +125,19 @@ def finish(p, material, color, roughness=0.45, metallic=0.9):
                          metallic=metallic)
 
 
-# Linear, not sRGB: the app's colours are linear, so 0.6 renders near white.
-CASTING = (0.17, 0.175, 0.17)
+# Linear, not sRGB: the app's colours are linear, so 0.6 renders near white
+# and a grey that reads 0.5 in sRGB is about 0.2. Paint is a dielectric
+# (metallic 0). From the owner's photographs of the pump on the engine and
+# on the bench.
+CASTING = (0.35, 0.355, 0.35)          # satin die-cast aluminium
+CASTING_FINISH = dict(roughness=0.5, metallic=0.8)
 STEEL = (0.22, 0.23, 0.25)
 BLACK = (0.012, 0.012, 0.014)
 BRASS = (0.45, 0.28, 0.07)
 RUBBER = (0.02, 0.02, 0.02)
+FEED_PAINT = (0.04, 0.04, 0.042)       # the feed pump's dark paint
+Z_OLIVE = (0.25, 0.2, 0.08)            # the "Z" cover's brass-olive
+CAP_RED = (0.5, 0.02, 0.02)            # the oil filler cap
 
 
 def hexagon(sk, af, centre=(0.0, 0.0), flats_on_u=True):
@@ -133,29 +159,73 @@ RACK_SLOT = (RACK_Y - MODULE - 0.5, RACK_BACK + 0.5,
 CAP_X0 = UP_X0 - 20.0                     # the rack's closed end cap
 FEED_BORE_D = 14.2
 PRIMER_Y = -50.0
+# From the photographs, scaled on the 25 mm element pitch: two lugs under
+# the ends carry the foot holes, a gusset rises from each lug, two
+# ribs stand on the +Y wall, and each clamp plate's screw goes into a pillar
+# midway between its pair of holders.
+LUG_X = 33.0                  # the lugs' inner ends, +-X
+RIB_X = 38.5                  # the gussets, +-X
+SIDE_RIB_X = 14.0
+CLAMP_X = ((EL_X[0] + EL_X[1]) / 2.0, (EL_X[2] + EL_X[3]) / 2.0)
+
+
+def _toes(p):
+    """The side-view prism: the cam case's bottom rounded into its ends."""
+    sk = p.sketch(Plane.xz(H_Y1 + 1.0), name="Case toes")
+    bottom_rounded(sk, H_X0, H_Z0, H_X1, 41.0, CASE_TOE_R)
+    p.extrude(sk.add(), H_Y1 - H_Y0 + 2.0, mode="new_body", name="Case toes")
 
 
 def housing(app):
     p = app.part("pump housing")
-    # Cam case, element block, drive flange with its register, rear cover.
-    round_slab(p, H_X0, H_Y0, H_Z0, H_X1, H_Y1, 40.0, 6.0, "Cam case",
-               mode="new_body")
-    round_slab(p, UP_X0, UP_Y0, 30.0, UP_X1, UP_Y1, H_TOP, 5.0,
+    # The cam case is the intersection of three prisms: its section, rounded
+    # along the bottom; its plan, rounded at the ends; its side view, rounded
+    # where the bottom meets the end walls.
+    sk = p.sketch(Plane.yz(H_X0), name="Cam case")
+    bottom_rounded(sk, H_Y0, H_Z0, H_Y1, 40.0, CASE_R)
+    p.extrude(sk.add(), H_X1 - H_X0, mode="new_body", name="Cam case")
+    case = p.state()["features"][-1]["id"]
+    for name, draw in (
+            ("Case ends", lambda: round_slab(
+                p, H_X0, H_Y0 - 1.0, H_Z0 - 1.0, H_X1, H_Y1 + 1.0, 41.0,
+                CASE_END_R, "Case ends", mode="new_body")),
+            ("Case toes", lambda: _toes(p))):
+        draw()
+        tool = p.state()["features"][-1]["id"]
+        p.app.add_feature(feature={"type": "Boolean", "name": f"{name} trim",
+                                   "target_id": case, "tool_id": tool,
+                                   "op": "intersect"})
+        case = p.state()["features"][-1]["id"]     # the trimmed body's maker
+    round_slab(p, UP_X0, UP_Y0, 30.0, UP_X1, UP_Y1, H_TOP, BLOCK_R,
                "Element block")
-    # Mounting foot along the bottom, and ribs from it up the cam case.
-    round_slab(p, H_X0 + 4.0, H_Y0 - 10.0, H_Z0, H_X1 - 4.0, H_Y1 + 10.0,
-               H_Z0 + 7.0, 4.0, "Mounting foot")
-    for x in (-24.0, 24.0):
-        slab(p, x - 3.0, H_Y1 - 1.0, H_Z0 + 7.0, x + 3.0, H_Y1 + 6.0,
-             H_Z0 + 32.0, f"Rib {x:+.0f}")
+    # Two mounting lugs under the ends, and a gusset from each up the side.
+    for x0, x1 in ((H_X0 + 2.0, -LUG_X), (LUG_X, H_X1 - 2.0)):
+        round_slab(p, x0, H_Y0 - 10.0, H_Z0, x1, H_Y1 + 10.0, H_Z0 + 7.0,
+                   4.0, f"Mounting lug {x0:+.0f}")
+    for x in (-RIB_X, RIB_X):
+        for s in (-1, 1):
+            sk = p.sketch(Plane.yz(x - 2.5), name=f"Gusset {x:+.0f} {s:+d}")
+            sk.polyline([(s * 38.0, H_Z0 + 7.0), (s * 22.0, H_Z0 + 7.0),
+                         (s * 30.0, 30.0)])
+            p.extrude(sk.add(), 5.0, mode="add", name=f"Gusset {x:+.0f} {s:+d}")
+    # Side ribs on the +Y wall between the gussets (the feed pump's flange
+    # has the -Y wall).
+    for x in (-SIDE_RIB_X, SIDE_RIB_X):
+        slab(p, x - 2.0, H_Y1 - 2.0, -8.0, x + 2.0, H_Y1 + 3.0, 38.0,
+             f"Rib {x:+.0f}")
     # The deck is machined down between the elements, leaving a boss round
-    # every delivery-valve holder.
+    # every delivery-valve holder and a pillar between each pair for the
+    # clamp plate's screw.
     slab(p, UP_X0 - 1.0, UP_Y0 - 1.0, H_TOP - 6.0, UP_X1 + 1.0, UP_Y1 + 1.0,
          H_TOP + 1.0, "Deck", mode="cut")
     sk = p.sketch(Plane.xy(H_TOP - 6.5), name="Holder bosses")
     for x in EL_X:
         sk.circle((x, 0), d=23.5)
     p.extrude(sk.add(), 6.5, mode="add", name="Holder bosses")
+    sk = p.sketch(Plane.xy(H_TOP - 6.5), name="Clamp pillars")
+    for x in CLAMP_X:
+        sk.circle((x, 0), d=10.0)
+    p.extrude(sk.add(), 6.5, mode="add", name="Clamp pillars")
     # The fuel inlet boss on -Y, cross-drilled into the gallery.
     rod(p, (UP_X1 - 12.0, UP_Y0 + 1.0, PORT_Z), (UP_X1 - 12.0, UP_Y0 - 5.0,
         PORT_Z), 15.0, "Inlet boss")
@@ -171,8 +241,9 @@ def housing(app):
     slab(p, CAP_X0, y0 - 3.0, z0 - 3.0, UP_X0 + 1.0, y1 + 3.0, z1 + 3.0,
          "Rack end cap")
     # Cavities.
-    slab(p, -50.0, -GALLERY, -GALLERY, 50.0, GALLERY, GALLERY, "Cam gallery",
-         mode="cut")
+    sk = p.sketch(Plane.yz(-50.0), name="Cam gallery")
+    bottom_rounded(sk, -GALLERY, -GALLERY, GALLERY, GALLERY, GALLERY_R)
+    p.extrude(sk.add(), 100.0, mode="cut", name="Cam gallery")
     for x0, x1 in ((H_X0 - 1.0, -50.0), (50.0, H_X1)):
         turned_x(p, [(x0, 0), (x0, BEARING_OD / 2.0), (x1, BEARING_OD / 2.0),
                      (x1, 0)], f"Bearing bore {x0:+.0f}", mode="cut")
@@ -236,7 +307,10 @@ def housing(app):
     p.frame("flange", origin=(FLANGE_FACE_X, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
     p.frame("fuel_inlet", origin=(UP_X1 - 12.0, UP_Y0 - 5.0, PORT_Z),
             z=(0, -1, 0), x=(1, 0, 0))
-    finish(p, "aluminum", CASTING, roughness=0.7, metallic=0.6)
+    for i, x in enumerate(CLAMP_X):
+        p.frame(f"clamp{i + 1}", origin=(x, 0, H_TOP), z=(0, 0, 1),
+                x=(1, 0, 0))
+    finish(p, "aluminum", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -250,7 +324,7 @@ def window_cover(app):
             (x, UP_Y1 + 6.0, (RACK_GALLERY_Z0 + RACK_GALLERY_Z1) / 2.0),
             8.0, f"Screw head {x:+.0f}")
     p.frame("origin", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    finish(p, "steel", CASTING, roughness=0.6, metallic=0.6)
+    finish(p, "aluminum", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -503,28 +577,123 @@ def valve_spring(app):
 
 
 def valve_holder(app):
+    """A plain shank above the deck (the clamp plate's), the hex body, a
+    neck, and the larger union nut whose top the injection line seats on."""
     p = app.part("delivery valve holder")
     turned(p, [(0, SEAT_BODY_Z1), (9.0, SEAT_BODY_Z1), (9.0, HOLDER_HEX_Z0),
-               (0, HOLDER_HEX_Z0)], "Thread")
+               (0, HOLDER_HEX_Z0)], "Shank")
     sk = p.sketch(Plane.xy(HOLDER_HEX_Z0), name="Hex")
-    hexagon(sk, 22.0)
+    hexagon(sk, HOLDER_HEX_AF)
     p.extrude(sk.add(), HOLDER_HEX_Z1 - HOLDER_HEX_Z0, mode="add", name="Hex")
-    turned(p, [(0, HOLDER_HEX_Z1), (6.0, HOLDER_HEX_Z1),
-               (6.0, HOLDER_TOP - 1.0), (5.0, HOLDER_TOP), (0, HOLDER_TOP)],
-           "Union spigot", mode="add")
+    turned(p, [(0, HOLDER_HEX_Z1 - 0.5), (7.5, HOLDER_HEX_Z1 - 0.5),
+               (7.5, UNION_NUT_Z0 + 0.5), (0, UNION_NUT_Z0 + 0.5)], "Neck",
+           mode="add")
+    sk = p.sketch(Plane.xy(UNION_NUT_Z0), name="Union nut")
+    hexagon(sk, UNION_NUT_AF)
+    p.extrude(sk.add(), HOLDER_TOP - UNION_NUT_Z0, mode="add",
+              name="Union nut")
+    # The nut's corners chamfered at both faces, as a turned nut is.
+    rc = UNION_NUT_AF / math.sqrt(3.0) + 0.5
+    for z, dz in ((HOLDER_TOP, -1.0), (UNION_NUT_Z0, 1.0)):
+        turned(p, [(UNION_NUT_AF / 2.0 - 0.3, z - 0.1 * dz), (rc, z - 0.1 * dz),
+                   (rc, z + dz * (rc - UNION_NUT_AF / 2.0 + 0.3))],
+               f"Nut chamfer {z:.0f}", mode="cut")
     turned(p, [(0, SEAT_BODY_Z1 - 1.0), (3.6, SEAT_BODY_Z1 - 1.0),
                (3.6, HOLDER_CAVITY_TOP), (1.0, HOLDER_CAVITY_TOP),
-               (1.0, HOLDER_TOP + 1.0), (0, HOLDER_TOP + 1.0)], "Bore",
+               (1.0, HOLDER_TOP - 3.0), (3.0, HOLDER_TOP - 1.0),
+               (3.0, HOLDER_TOP + 1.0), (0, HOLDER_TOP + 1.0)], "Bore",
            mode="cut")
-    # Thread grooves on the union spigot.
-    for k in range(5):
-        z = HOLDER_HEX_Z1 + 2.5 + 2.0 * k
-        turned(p, [(5.4, z), (6.1, z - 0.6), (6.1, z + 0.6)],
-               f"Thread groove {k + 1}", mode="cut")
     p.frame("axis", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    # The injection line's union seats on the spigot's top.
+    # The injection line's nipple seats on the union's top.
     p.frame("outlet", origin=(0, 0, HOLDER_TOP), z=(0, 0, 1), x=(1, 0, 0))
     finish(p, "steel", (0.5, 0.5, 0.52))
+    p.check(solids=1)
+    return p
+
+
+# The clamp plates, from the photographs: flat steel, one over each pair of
+# holders, on the deck under the hex bodies, a slotted screw between.
+CLAMP_T = 3.5
+CLAMP_W = 26.0
+CLAMP_HOLE_D = 18.6
+
+
+def clamp_plate(app):
+    """Drawn about its screw at the local origin, on the deck (z = 0)."""
+    p = app.part("holder clamp plate")
+    half = EL_PITCH / 2.0
+    sk = p.sketch(Plane.xy(0.0), name="Plate")
+    stadium(sk, -half, half, 0.0, CLAMP_W / 2.0)
+    p.extrude(sk.add(), CLAMP_T, mode="new_body", name="Plate")
+    sk = p.sketch(Plane.xy(-1.0), name="Holder holes")
+    for s in (-1, 1):
+        sk.circle((s * half, 0), d=CLAMP_HOLE_D)
+    p.extrude(sk.add(), CLAMP_T + 2.0, mode="cut", name="Holder holes")
+    rod(p, (0, 0, -1.0), (0, 0, CLAMP_T + 1.0), 5.5, "Screw hole", mode="cut")
+    p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("screw", origin=(0, 0, CLAMP_T), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "steel", (0.3, 0.31, 0.32), roughness=0.4)
+    p.check(solids=1)
+    return p
+
+
+SCREW_HEAD_D, SCREW_HEAD_H = 8.0, 3.0
+
+
+def slotted_screw(app):
+    """A cheese-head slotted screw's head, seated at its local origin; the
+    shank is left out, since it would have to be drilled for in every part
+    it holds."""
+    p = app.part("slotted screw")
+    turned(p, [(0, 0), (SCREW_HEAD_D / 2.0, 0),
+               (SCREW_HEAD_D / 2.0, SCREW_HEAD_H - 0.6),
+               (SCREW_HEAD_D / 2.0 - 0.6, SCREW_HEAD_H), (0, SCREW_HEAD_H)],
+           "Head")
+    slab(p, -SCREW_HEAD_D, -0.6, SCREW_HEAD_H - 1.2, SCREW_HEAD_D, 0.6,
+         SCREW_HEAD_H + 1.0, "Slot", mode="cut")
+    p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "steel", (0.35, 0.36, 0.37), roughness=0.35)
+    p.check(solids=1)
+    return p
+
+
+# --- the "Z" cover on the element block's -Y face -----------------------------
+# From the photographs: a large rectangular plate, most of the element
+# block's -Y face, held by a slotted screw at each corner, with a raised Z.
+# It stops short of the fuel inlet boss at the governor end.
+ZC_X0, ZC_X1 = UP_X0 + 5.0, UP_X1 - 23.0
+ZC_Z0, ZC_Z1 = 46.0, H_TOP - 9.0
+ZC_T, ZC_R = 3.0, 6.0
+ZC_SCREW_IN = 6.5
+Z_W, Z_H, Z_BAND, Z_T = 40.0, 44.0, 7.0, 1.5
+
+
+def z_cover(app):
+    p = app.part("Z cover")
+    y0 = UP_Y0
+    sk = p.sketch(Plane.xz(y0), name="Plate")
+    rounded_rect(sk, ZC_X0, ZC_Z0, ZC_X1, ZC_Z1, ZC_R)
+    p.extrude(sk.add(), ZC_T, mode="new_body", name="Plate")
+    cx, cz = (ZC_X0 + ZC_X1) / 2.0, (ZC_Z0 + ZC_Z1) / 2.0
+    x0, x1 = cx - Z_W / 2.0, cx + Z_W / 2.0
+    z0, z1 = cz - Z_H / 2.0, cz + Z_H / 2.0
+    w = Z_BAND
+    # The diagonal is offset so its band is as wide, square to itself, as
+    # the bars: w / sin of its slope.
+    d = w * math.hypot(x1 - x0, z1 - z0 - 2 * w) / (z1 - z0 - 2 * w)
+    sk = p.sketch(Plane.xz(y0 - ZC_T), name="Z")
+    sk.polyline([(x0, z1), (x1, z1), (x1, z1 - w), (x0 + d, z0 + w),
+                 (x1, z0 + w), (x1, z0), (x0, z0), (x0, z0 + w),
+                 (x1 - d, z1 - w), (x0, z1 - w)])
+    p.extrude(sk.add(), Z_T, mode="add", name="Z")
+    k = 0
+    for x in (ZC_X0 + ZC_SCREW_IN, ZC_X1 - ZC_SCREW_IN):
+        for z in (ZC_Z0 + ZC_SCREW_IN, ZC_Z1 - ZC_SCREW_IN):
+            k += 1
+            p.frame(f"screw{k}", origin=(x, y0 - ZC_T, z), z=(0, -1, 0),
+                    x=(1, 0, 0))
+    p.frame("origin", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "steel", Z_OLIVE, roughness=0.7, metallic=0.3)
     p.check(solids=1)
     return p
 
@@ -570,7 +739,6 @@ def control_rack(app):
 FEED_ROLLER_W = 5.8
 FEED_TAPPET_R = FEED_BORE_D / 2.0 - 0.1
 FEED_Y0 = -(ECC_R + FEED_ROLLER_R - ECC_E)       # roller centre, zero lift
-FEED_BODY_Y = (-68.0, H_Y0)
 
 
 def feed_tappet(app):
@@ -594,65 +762,195 @@ def feed_tappet(app):
     return p
 
 
+# The Bosch FP/K 22M, from the photographs (scaled on the 25 mm element
+# pitch): a dark cast body turned about the piston's axis, flanged to the
+# cam case, a pillar carrying the hand primer, a big hex plug underneath, an
+# oval nameplate boss on its outer end, and two banjo fittings: the inlet on
+# top beside the primer, the outlet on the drive-end side.
+FB_R = 18.0                   # body radius about the piston axis
+FB_Y1 = -66.0                 # its outer end
+FB_TOP = 26.0                 # the primer pillar's top
+PLUG_AF = 27.0
+INLET_BANJO = (19.0, -44.0, 18.0)      # its seat, on the boss's top
+OUTLET_BANJO = (-26.0, -44.0, 0.0)     # its seat, on the -X boss's face
+
+
 def feed_pump_body(app):
     p = app.part("feed pump body")
-    y0, y1 = FEED_BODY_Y
-    slab(p, -16.0, y0, -18.0, 16.0, y1, 16.0, "Body", mode="new_body")
-    rod(p, (0, PRIMER_Y, 16.0), (0, PRIMER_Y, 40.0), 16.0, "Primer barrel")
+    sk = p.sketch(Plane.xz(H_Y0), name="Flange")
+    stadium(sk, -15.0, 15.0, -1.0, 11.0)
+    p.extrude(sk.add(), 6.0, mode="new_body", name="Flange")
+    sk = p.sketch(Plane.xy(0.0), name="Body profile")
+    sk.polyline([(0, H_Y0 - 5.0), (FB_R, H_Y0 - 5.0), (FB_R, FB_Y1 + 4.0),
+                 (FB_R - 4.0, FB_Y1), (0, FB_Y1)])
+    p.revolve(sk.add(), axis="y", mode="add", name="Body")
+    rod(p, (0, PRIMER_Y, 0.0), (0, PRIMER_Y, FB_TOP - 2.0), 26.0,
+        "Primer pillar")
+    rod(p, (0, PRIMER_Y, FB_TOP - 2.0), (0, PRIMER_Y, FB_TOP), 22.0,
+        "Pillar top")
+    ix, iy, iz = INLET_BANJO
+    round_slab(p, ix - 8.0, iy - 8.0, 0.0, ix + 8.0, iy + 8.0, iz, 5.0,
+               "Inlet boss")
+    ox, oy, oz = OUTLET_BANJO
+    sk = p.sketch(Plane.yz(ox), name="Outlet boss")
+    rounded_rect(sk, oy - 8.0, oz - 8.0, oy + 8.0, oz + 8.0, 5.0)
+    p.extrude(sk.add(), -9.0 - ox, mode="add", name="Outlet boss")
+    # The flange's two nuts.
     for s in (-1, 1):
-        rod(p, (s * 16.0, -45.0, -6.0), (s * 24.0, -45.0, -6.0), 14.0,
-            f"Banjo boss {s:+d}")
-    # Mounting flange ears.
-    slab(p, -26.0, y1 - 6.0, -12.0, 26.0, y1, 10.0, "Flange")
-    rod(p, (0, y1 + 0.5, 0), (0, y0 + 4.0, 0), FEED_BORE_D, "Piston bore",
+        sk = p.sketch(Plane.xz(H_Y0 - 6.0), name=f"Flange nut {s:+d}")
+        hexagon(sk, 10.0, centre=(s * 20.0, -1.0))
+        p.extrude(sk.add(), 5.0, mode="add", name=f"Flange nut {s:+d}")
+    # The big hex plug underneath, flats across the pump.
+    sk = p.sketch(Plane.xy(-FB_R - 8.0), name="Plug")
+    hexagon(sk, PLUG_AF, centre=(0.0, PRIMER_Y), flats_on_u=False)
+    p.extrude(sk.add(), 10.0, mode="add", name="Plug")
+    rod(p, (0, PRIMER_Y, -FB_R - 8.0), (0, PRIMER_Y, -FB_R - 10.0), 20.0,
+        "Plug spigot")
+    # The oval nameplate boss on the outer end.
+    sk = p.sketch(Plane.xz(FB_Y1), name="Nameplate boss")
+    stadium(sk, -5.0, 5.0, 0.0, 7.0)
+    p.extrude(sk.add(), 1.5, mode="add", name="Nameplate boss")
+    rod(p, (0, H_Y0 + 0.5, 0), (0, FB_Y1 + 3.0, 0), FEED_BORE_D, "Piston bore",
         mode="cut")
-    rod(p, (0, PRIMER_Y, 41.0), (0, PRIMER_Y, 4.0), 10.4, "Primer bore",
-        mode="cut")
+    rod(p, (0, PRIMER_Y, FB_TOP + 1.0), (0, PRIMER_Y, 4.0), 10.4,
+        "Primer bore", mode="cut")
     p.frame("mount", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("primer", origin=(0, PRIMER_Y, 0), z=(0, 0, 1), x=(1, 0, 0))
-    finish(p, "steel", BLACK, roughness=0.6,
-           metallic=0.3)
+    p.frame("inlet", origin=INLET_BANJO, z=(0, 0, 1), x=(0, -1, 0))
+    p.frame("outlet", origin=OUTLET_BANJO, z=(-1, 0, 0), x=(0, 0, 1))
+    finish(p, "steel", FEED_PAINT, roughness=0.55, metallic=0.0)
     p.check(solids=1)
     return p
 
 
 PRIMER_STROKE = 15.0
+PRIMER_TUBE_TOP = 64.0        # the tube's top: the wheel's seat at rest
+PRIMER_WHEEL_D = 45.0         # from the photographs
+PRIMER_SPOKES = 6
+
+
+def primer_tube(app):
+    """The hand primer's steel cylinder, screwed into the pillar."""
+    p = app.part("hand primer tube")
+    sk = p.sketch(Plane.xy(FB_TOP), name="Hex")
+    hexagon(sk, 17.0, centre=(0.0, PRIMER_Y))
+    p.extrude(sk.add(), 5.0, mode="new_body", name="Hex")
+    rod(p, (0, PRIMER_Y, FB_TOP + 5.0), (0, PRIMER_Y, PRIMER_TUBE_TOP), 14.0,
+        "Tube")
+    rod(p, (0, PRIMER_Y, FB_TOP - 1.0), (0, PRIMER_Y, PRIMER_TUBE_TOP + 1.0),
+        10.4, "Bore", mode="cut")
+    p.frame("mount", origin=(0, PRIMER_Y, 0), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "steel", (0.45, 0.46, 0.48), roughness=0.3)
+    p.check(solids=1)
+    return p
 
 
 def primer(app):
+    """The plunger and its wheel: a thin knurled rim on six spokes."""
     p = app.part("hand primer")
-    rod(p, (0, PRIMER_Y, 20.0), (0, PRIMER_Y, 41.0), 10.0, "Stem",
+    z0 = PRIMER_TUBE_TOP + 0.5            # the hub's underside at rest
+    rod(p, (0, PRIMER_Y, 20.0), (0, PRIMER_Y, z0), 10.0, "Stem",
         mode="new_body")
-    rod(p, (0, PRIMER_Y, 41.0), (0, PRIMER_Y, 53.0), 24.0, "Knob")
-    sk = p.sketch(Plane.xy(49.0), name="Grip")
-    for k in range(12):
-        a = math.radians(30.0 * k)
-        sk.circle((12.3 * math.cos(a), PRIMER_Y + 12.3 * math.sin(a)), d=2.4)
-    p.extrude(sk.add(), 5.0, mode="cut", name="Grip")
+    rod(p, (0, PRIMER_Y, z0), (0, PRIMER_Y, z0 + 11.0), 15.0, "Hub")
+    r_out = PRIMER_WHEEL_D / 2.0
+    sk = p.sketch(Plane.xy(z0 + 1.5), name="Rim")
+    sk.circle((0, PRIMER_Y), r=r_out)
+    sk.circle((0, PRIMER_Y), r=r_out - 3.0)
+    p.extrude(sk.add(), 8.0, mode="add", name="Rim")
+    for k in range(PRIMER_SPOKES):
+        a = math.radians(360.0 * k / PRIMER_SPOKES)
+        c, s_ = math.cos(a), math.sin(a)
+        sk = p.sketch(Plane.xy(z0 + 3.0), name=f"Spoke {k + 1}")
+        pts = [(5.0 * c - 2.0 * s_, PRIMER_Y + 5.0 * s_ + 2.0 * c),
+               ((r_out - 1.5) * c - 2.0 * s_,
+                PRIMER_Y + (r_out - 1.5) * s_ + 2.0 * c),
+               ((r_out - 1.5) * c + 2.0 * s_,
+                PRIMER_Y + (r_out - 1.5) * s_ - 2.0 * c),
+               (5.0 * c + 2.0 * s_, PRIMER_Y + 5.0 * s_ - 2.0 * c)]
+        sk.polyline(pts)
+        p.extrude(sk.add(), 5.0, mode="add", name=f"Spoke {k + 1}")
+    sk = p.sketch(Plane.xy(z0), name="Knurl")
+    for k in range(36):
+        a = math.radians(10.0 * k)
+        sk.circle((r_out * math.cos(a), PRIMER_Y + r_out * math.sin(a)),
+                  d=1.6)
+    p.extrude(sk.add(), 12.0, mode="cut", name="Knurl")
     p.frame("slide", origin=(0, PRIMER_Y, 0), z=(0, 0, 1), x=(1, 0, 0))
-    finish(p, "rubber", BLACK, roughness=0.8, metallic=0.0)
+    finish(p, "plastic_black", BLACK, roughness=0.6, metallic=0.0)
+    p.check(solids=1)
+    return p
+
+
+BANJO_EYE_D, BANJO_EYE_H = 16.0, 10.0
+
+
+def banjo(app):
+    """A banjo fitting: the eye on its seat at the local origin, the bolt's
+    hex head above it, and the pipe stub along local +X."""
+    p = app.part("banjo fitting")
+    turned(p, [(4.5, 0), (BANJO_EYE_D / 2.0, 0),
+               (BANJO_EYE_D / 2.0, BANJO_EYE_H), (4.5, BANJO_EYE_H)], "Eye")
+    rod(p, (0, 0, 0.0), (0, 0, BANJO_EYE_H + 0.5), 9.0, "Bolt shank")
+    sk = p.sketch(Plane.xy(BANJO_EYE_H), name="Bolt head")
+    hexagon(sk, 12.0)
+    p.extrude(sk.add(), 5.0, mode="add", name="Bolt head")
+    rod(p, (BANJO_EYE_D / 2.0 - 1.0, 0, BANJO_EYE_H / 2.0),
+        (24.0, 0, BANJO_EYE_H / 2.0), 8.0, "Pipe")
+    rod(p, (BANJO_EYE_D / 2.0, 0, BANJO_EYE_H / 2.0),
+        (25.0, 0, BANJO_EYE_H / 2.0), 5.0, "Pipe bore", mode="cut")
+    p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "steel", (0.4, 0.41, 0.42), roughness=0.35)
     p.check(solids=1)
     return p
 
 
 # --- pneumatic governor (local: X = pump X, axis through the rack) -------------
+# The governor parts are drawn in the governor's frame: pump X, but Y and Z
+# measured from the governor's axis at (GOV_Y, GOV_Z).
 
 GOV_R = GOV_D / 2.0
 GOV_X_MEMBRANE = 82.0
 PLATE_T = 3.0
+# From the photographs: the housing flares out of the pump body to the
+# diaphragm chamber, whose rim the cover is screwed to with a ring of small
+# screws. The oil filler (a red cap) stands on a boss on top, a nameplate
+# on a pad on the -Y side, and the stop lever's bracket below it.
+GOV_NECK_R = 38.0             # where it leaves the pump body
+GOV_BODY_R = 46.0             # the chamber's outside, inside the rims
+GOV_RIM_X = 77.0              # the housing's rim, to the membrane
+COVER_RIM_X = 87.0            # the cover's rim
+GOV_SCREWS, GOV_SCREW_R, GOV_SCREW_D = 12, 46.2, 3.6
+FILLER_X, FILLER_Z = 70.0, 126.0      # the cap's seat, pump coordinates
+FILLER_BOSS_D = 24.0
+PLATE_PAD_Y = -47.0           # the nameplate pad's face, governor frame
+LEVER_PAD_Y = -44.0           # the stop-lever bracket's face
+LEVER_AT = (69.0, -31.0)      # its pivot, governor frame (x, z)
 
 
 def governor_housing(app):
     p = app.part("governor housing")
-    turned_x(p, [(H_X1, 0), (H_X1, GOV_R), (GOV_X_MEMBRANE, GOV_R),
+    turned_x(p, [(H_X1, 0), (H_X1, GOV_NECK_R), (H_X1 + 4.0, GOV_BODY_R - 2.5),
+                 (H_X1 + 8.0, GOV_BODY_R - 0.5), (GOV_RIM_X, GOV_BODY_R),
+                 (GOV_RIM_X, GOV_R), (GOV_X_MEMBRANE, GOV_R),
                  (GOV_X_MEMBRANE, 0)], "Bowl")
+    # The pads go on before the chamber is cut, so the cut clears them out
+    # of the chamber.
+    rod(p, (FILLER_X, -GOV_Y, 20.0), (FILLER_X, -GOV_Y, FILLER_Z - GOV_Z),
+        FILLER_BOSS_D, "Filler boss")
+    slab(p, H_X1 + 4.0, PLATE_PAD_Y, -14.0, GOV_RIM_X, -30.0, 14.0,
+         "Nameplate pad")
+    lx, lz = LEVER_AT
+    slab(p, lx - 5.0, LEVER_PAD_Y, lz - 5.0, lx + 5.0, -26.0, lz + 5.0,
+         "Stop lever bracket")
     turned_x(p, [(H_X1 + 4.0, 0), (H_X1 + 4.0, 40.0), (GOV_X_MEMBRANE + 1, 40.0),
                  (GOV_X_MEMBRANE + 1, 0)], "Chamber", mode="cut")
     ry = RACK_SLOT
     slab(p, H_X1 - 1.0, ry[0] - GOV_Y, ry[2] - GOV_Z, H_X1 + 5.0,
          ry[1] - GOV_Y, ry[3] - GOV_Z, "Rack slot", mode="cut")
     p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
-    finish(p, "aluminum", CASTING, roughness=0.7, metallic=0.6)
+    p.frame("filler", origin=(FILLER_X, -GOV_Y, FILLER_Z - GOV_Z),
+            z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "aluminum", CASTING, **CASTING_FINISH)
     p.check(solids=1)
     return p
 
@@ -660,14 +958,86 @@ def governor_housing(app):
 def governor_cover(app):
     p = app.part("governor cover")
     turned_x(p, [(GOV_X_MEMBRANE + 1.0, 0), (GOV_X_MEMBRANE + 1.0, GOV_R),
-                 (100.0, GOV_R), (106.0, GOV_R - 10.0), (106.0, 0)], "Cover")
+                 (COVER_RIM_X, GOV_R), (COVER_RIM_X, GOV_BODY_R - 1.0),
+                 (100.0, GOV_BODY_R - 1.0), (106.0, GOV_R - 10.0), (106.0, 0)],
+             "Cover")
     turned_x(p, [(GOV_X_MEMBRANE, 0), (GOV_X_MEMBRANE, 40.0), (102.0, 40.0),
                  (102.0, 0)], "Vacuum chamber", mode="cut")
     rod(p, (104.0, 22.0, 0), (118.0, 22.0, 0), 10.0, "Vacuum spigot")
     rod(p, (100.0, 22.0, 0), (119.0, 22.0, 0), 5.0, "Vacuum port",
         mode="cut")
+    # The ring of screws round the rim.
+    sk = p.sketch(Plane.yz(COVER_RIM_X), name="Rim screws")
+    for k in range(GOV_SCREWS):
+        a = 2.0 * math.pi * (k + 0.5) / GOV_SCREWS
+        sk.circle((GOV_SCREW_R * math.cos(a), GOV_SCREW_R * math.sin(a)),
+                  d=GOV_SCREW_D)
+    p.extrude(sk.add(), 2.0, mode="add", name="Rim screws")
     p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
-    finish(p, "aluminum", CASTING, roughness=0.7, metallic=0.6)
+    finish(p, "aluminum", CASTING, **CASTING_FINISH)
+    p.check(solids=1)
+    return p
+
+
+# The red oil filler cap, from the photographs: about 38 across and 40
+# tall, with ribbed sides. Drawn on its seat at the local origin.
+CAP_D, CAP_H, CAP_RIBS = 38.0, 40.0, 20
+
+
+def filler_cap(app):
+    p = app.part("oil filler cap")
+    r = CAP_D / 2.0
+    turned(p, [(0, 0), (FILLER_BOSS_D / 2.0 - 1.0, 0),
+               (FILLER_BOSS_D / 2.0 - 1.0, 2.0), (r, 2.0), (r, CAP_H - 4.0),
+               (r - 2.5, CAP_H - 0.5), (r - 5.0, CAP_H), (0, CAP_H)], "Cap")
+    sk = p.sketch(Plane.xy(5.0), name="Ribs")
+    for k in range(CAP_RIBS):
+        a = 2.0 * math.pi * k / CAP_RIBS
+        sk.circle(((r + 0.6) * math.cos(a), (r + 0.6) * math.sin(a)), d=3.0)
+    p.extrude(sk.add(), CAP_H - 11.0, mode="cut", name="Ribs")
+    p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    finish(p, "plastic_black", CAP_RED, roughness=0.45, metallic=0.0)
+    p.check(solids=1)
+    return p
+
+
+# The Bosch nameplate: a small riveted plate on the governor housing's -Y
+# pad, in the governor frame.
+NAMEPLATE_W, NAMEPLATE_H, NAMEPLATE_T = 13.0, 20.0, 0.8
+
+
+def nameplate(app):
+    p = app.part("nameplate")
+    cx = (H_X1 + 4.0 + GOV_RIM_X) / 2.0
+    sk = p.sketch(Plane((0, PLATE_PAD_Y, 0), (0, -1, 0), (1, 0, 0)),
+                  name="Plate")
+    rounded_rect(sk, cx - NAMEPLATE_W / 2.0, -NAMEPLATE_H / 2.0,
+                 cx + NAMEPLATE_W / 2.0, NAMEPLATE_H / 2.0, 1.0)
+    p.extrude(sk.add(), NAMEPLATE_T, mode="new_body", name="Plate")
+    for z in (-NAMEPLATE_H / 2.0 + 2.5, NAMEPLATE_H / 2.0 - 2.5):
+        rod(p, (cx, PLATE_PAD_Y - NAMEPLATE_T, z),
+            (cx, PLATE_PAD_Y - NAMEPLATE_T - 0.8, z), 2.2, f"Rivet {z:+.0f}")
+    p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
+    finish(p, "aluminum", (0.55, 0.55, 0.52), roughness=0.3, metallic=0.9)
+    p.check(solids=1)
+    return p
+
+
+def stop_lever(app):
+    """The stop lever on its bracket, in the governor frame: a pivot pin out
+    of the bracket and a flat arm reaching aft and down, parked."""
+    p = app.part("stop lever")
+    lx, lz = LEVER_AT
+    rod(p, (lx, LEVER_PAD_Y, lz), (lx, LEVER_PAD_Y - 9.0, lz), 8.0, "Pivot",
+        mode="new_body")
+    sk = p.sketch(Plane((0, LEVER_PAD_Y - 4.0, 0), (0, -1, 0), (1, 0, 0)),
+                  name="Arm")
+    sk.slot((lx, lz), (lx + 18.0, lz - 9.0), 9.0)
+    p.extrude(sk.add(), 3.0, mode="add", name="Arm")
+    rod(p, (lx + 18.0, LEVER_PAD_Y - 7.0, lz - 9.0),
+        (lx + 18.0, LEVER_PAD_Y - 11.0, lz - 9.0), 6.0, "Eye boss")
+    p.frame("mount", origin=(0, 0, 0), z=(1, 0, 0), x=(0, 1, 0))
+    finish(p, "steel", (0.3, 0.31, 0.32), roughness=0.45)
     p.check(solids=1)
     return p
 

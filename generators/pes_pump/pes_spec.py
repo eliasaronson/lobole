@@ -56,6 +56,14 @@ H_Z0 = -30.0
 UP_Y0, UP_Y1 = -19.0, 24.0   # element block, narrower than the cam case
 H_TOP = 122.0
 GALLERY = 24.0               # half-size of the cam gallery (lobe tip 21)
+# The casting's rounds, from the photographs: the cam case is rounded along
+# its bottom (CASE_R, in section) and at its ends (CASE_END_R in plan,
+# CASE_TOE_R where the bottom meets the end walls); the element block's
+# vertical edges are rounded too. The gallery's bottom corners follow the
+# outside so the wall stays even.
+CASE_R, CASE_END_R, CASE_TOE_R = 17.0, 12.0, 8.0
+GALLERY_R = 10.0
+BLOCK_R = 8.0
 
 # ---- the mounting flange: the engine's interface -----------------------------
 # The pump's to state and the engine's to be machined to: the OM615 block
@@ -100,7 +108,12 @@ PORT_Z, PORT_D = 96.0, 2.0         # inlet / spill port, on the -Y side
 PLUNGER_FOOT_Z = TAPPET_TOP + 0.05
 PLUNGER_TOP = 94.0                 # at bottom dead centre
 SEAT_BODY_Z1 = 113.0               # delivery-valve seat body 104..113
-HOLDER_HEX_Z0, HOLDER_HEX_Z1, HOLDER_TOP = H_TOP, 132.0, 146.0
+# The holder, from the photographs (scaled on the 25 mm element pitch): a
+# plain shank stands above the deck for the clamp plate, then a 19 AF hex
+# body, a neck, and the larger 22 AF union nut whose top the line seats on.
+HOLDER_HEX_Z0, HOLDER_HEX_Z1 = 129.0, 137.0
+UNION_NUT_Z0, HOLDER_TOP = 138.5, 146.0
+HOLDER_HEX_AF, UNION_NUT_AF = 19.0, 22.0
 VALVE_LIFT = 1.5
 FUEL_GALLERY = (-9.0, PORT_Z)      # (y, z) of the drilled gallery
 

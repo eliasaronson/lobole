@@ -44,8 +44,12 @@ def build_parts(app, only=None):
         ("valve", P.delivery_valve), ("vspring", P.valve_spring),
         ("holder", P.valve_holder), ("rack", P.control_rack),
         ("feed_tappet", P.feed_tappet), ("feed_body", P.feed_pump_body),
-        ("primer", P.primer), ("gov_housing", P.governor_housing),
-        ("gov_cover", P.governor_cover), ("membrane", P.membrane),
+        ("primer", P.primer), ("primer_tube", P.primer_tube),
+        ("banjo", P.banjo), ("z_cover", P.z_cover), ("clamp", P.clamp_plate),
+        ("screw", P.slotted_screw), ("gov_housing", P.governor_housing),
+        ("gov_cover", P.governor_cover), ("filler_cap", P.filler_cap),
+        ("nameplate", P.nameplate), ("stop_lever", P.stop_lever),
+        ("membrane", P.membrane),
         ("plate", P.diaphragm_plate), ("gov_spring", P.governor_spring),
         ("hub", P.timing_hub), ("nut", P.camshaft_nut),
         ("flyweight", P.flyweight), ("sprocket", P.drive_flange),
@@ -83,6 +87,15 @@ def assemble(app, parts, rig=None, mount=None, rack_offset=None):
         return o
 
     fixed_to(ho, "origin", parts["cover"], "inspection cover")
+    zc = fixed_to(ho, "origin", parts["z_cover"], "Z cover")
+    for k in range(4):
+        fixed_to(zc, f"screw{k + 1}", parts["screw"], f"Z cover screw {k + 1}",
+                 "seat")
+    for k in range(2):
+        cp = fixed_to(ho, f"clamp{k + 1}", parts["clamp"],
+                      f"holder clamp plate {k + 1}", "seat")
+        fixed_to(cp, "screw", parts["screw"], f"clamp plate screw {k + 1}",
+                 "seat")
     for n in ("drive", "governor"):
         o = rig.place(parts["bearing"], name=f"camshaft bearing, {n} end")
         rig.fasten((ho, f"bearing_{n}"), (o, "seat"))
@@ -140,15 +153,21 @@ def assemble(app, parts, rig=None, mount=None, rack_offset=None):
     rig.cam(cam_m, fm, lift=table(feed_lift), name="feed pump eccentric")
     ids["feed"] = ft.id
     fb = fixed_to(ho, "origin", parts["feed_body"], "feed pump body", "mount")
+    fixed_to(fb, "primer", parts["primer_tube"], "hand primer tube", "mount")
+    for n in ("inlet", "outlet"):
+        fixed_to(fb, n, parts["banjo"], f"feed pump {n} banjo", "seat")
     pr = rig.place(parts["primer"], name="hand primer")
     prime_m = rig.slider((fb, "primer"), (pr, "slide"), name="hand primer")
     ids["primer"] = pr.id
 
     for key, name in (("gov_housing", "governor housing"),
                       ("gov_cover", "governor cover"),
+                      ("nameplate", "nameplate"), ("stop_lever", "stop lever"),
                       ("membrane", "governor diaphragm rim"),
                       ("gov_spring", "governor spring")):
-        fixed_to(ho, "governor", parts[key], name, "mount")
+        o = fixed_to(ho, "governor", parts[key], name, "mount")
+        if key == "gov_housing":
+            fixed_to(o, "filler", parts["filler_cap"], "oil filler cap", "seat")
     fixed_to(rack, "governor", parts["plate"], "governor diaphragm", "mount")
 
     hub = fixed_to(cam, "axle", parts["hub"], "timing device hub")

@@ -30,7 +30,7 @@ inspect), `pes_pump.dsgn` (only once every check passes, left on Full load),
 | file | what |
 |---|---|
 | `pes_spec.py` | the few numbers an M-size pump is quoted by, the stations derived from them, and the motion laws that BOTH the drawn cams and the assembly's relations are made from |
-| `pes_parts.py` | one builder per part: housing (cam gallery, tappet and element bores, rack bore, fuel gallery, inspection window, feed-pump pad, governor flange) and window cover; camshaft (four lobes, feed-pump eccentric, journals, drive taper); tappet, pin and roller; barrel and plunger with its vertical groove and control helix cut in; control sleeve with a full involute tooth ring; spring and seat; toothed rack; delivery valve, seat, spring and holder; feed pump body, tappet and primer; governor housing, cover, diaphragm and spring; timing hub, flyweights, sprocket, nut |
+| `pes_parts.py` | one builder per part: housing (cam gallery, tappet and element bores, rack bore, fuel gallery, inspection window, feed-pump pad, governor flange) and window cover; the "Z" cover, the two holder clamp plates and the slotted screw that holds both; camshaft (four lobes, feed-pump eccentric, journals, drive taper); tappet, pin and roller; barrel and plunger with its vertical groove and control helix cut in; control sleeve with a full involute tooth ring; spring and seat; toothed rack; delivery valve, seat, spring and holder; feed pump body, tappet, banjo fitting, primer tube and primer; governor housing, cover, diaphragm and spring, oil filler cap, nameplate and stop lever; timing hub, flyweights, sprocket, nut |
 | `pes_pump.py` | assembly, configurations, studies, checks, renders |
 
 Frame: +X along the camshaft (drive end −X, governor +X; element 1 at the
@@ -47,7 +47,7 @@ so the engine's block is machined to the pump's numbers:
 - **The frames.** The housing's `flange` frame sits on that face, with z
   along the camshaft toward the governor and x straight up. The housing has
   a `fuel_inlet` frame at the gallery inlet. Each delivery valve holder has
-  an `outlet` frame on its union spigot.
+  an `outlet` frame on the top of its union nut.
 - **The sprocket.** It has 44 teeth for 3/8" duplex chain, the same as the
   engine's camshaft, since both turn at half crank speed off one chain. Its
   chain plane is `CHAIN_PLANE_X`.
@@ -57,6 +57,43 @@ so the engine's block is machined to the pump's numbers:
   assembly the rack is held with `rack_offset` instead.
 - **The camshaft part.** It is named "pump camshaft", so an engine's own
   camshaft keeps its name.
+
+## What it looks like
+
+The outside follows the owner's photographs: the pump on the engine, the
+bare pump on a bench, and a Bosch exploded diagram. None is dimensioned, so
+every size is scaled against the 25 mm element pitch and named where it is
+used (`pes_spec.py`, or the top of its builder).
+
+- **Casting.** Satin die-cast aluminium. The cam case is rounded along its
+  bottom and into its ends, stands on a lug under each end with a gusset
+  rising from each, and has two ribs on its +Y wall. The element block above
+  it has rounded vertical edges.
+- **Delivery valve holders.** Each is a plain shank above the deck, a 19 AF
+  hex body, and a larger 22 AF union nut on top. The `outlet` frame is on
+  the nut's top. Two flat steel clamp plates, each over a pair of holders,
+  are held to the deck by a slotted screw between the pair.
+- **The "Z" cover.** A large brass-olive plate on the element block's -Y
+  face, with a raised Z and a slotted screw at each corner. It stops short
+  of the fuel inlet boss.
+- **Feed pump.** A Bosch FP/K 22M: a dark painted body turned about its
+  piston's axis, with an oval nameplate boss on its outer end, a 27 AF plug
+  underneath, and two banjo fittings, the inlet on top beside the primer
+  and the outlet on the drive-end side. The hand primer is a steel tube
+  rising from the body with a black Ø45 wheel on top: a thin knurled rim on
+  six spokes.
+- **Governor end.** The housing flares out of the pump body to the
+  diaphragm chamber, whose cover is held round its rim by a ring of small
+  screws. A red ribbed oil filler cap stands on a boss on top, just behind
+  element 4. The Bosch nameplate is on a pad on the -Y side, and the stop
+  lever is on a bracket below it.
+- **Colours** are linear: casting 0.35 (metallic 0.8, roughness 0.5), feed
+  pump paint 0.04 and the filler cap (0.5, 0.02, 0.02), both dielectric, and
+  the Z cover (0.25, 0.2, 0.08).
+
+The +Y side faces the engine's block, so nothing on it reaches past the
+housing's lugs or the governor. Nothing new reaches ahead of the flange
+face.
 
 ## How it moves
 
@@ -126,5 +163,7 @@ Bosch M-size element pump, stated once in `pes_spec.py`:
   governor diaphragm is a rigid plate inside a fixed rubber rim.
 - The governor and flyweights are kinematic only: nothing links vacuum or
   engine speed to the rack or the advance.
-- The castings are simplified blocks, feet, ribs and bosses, not the real
-  pump's cored shapes.
+- The castings are rounded prisms, lugs, ribs and bosses, not the real
+  pump's cored shapes. Screws are heads only: no shank goes into the part
+  they hold. The feed pump sits on the camshaft's eccentric at mid-length,
+  where the real one is nearer the drive end.
