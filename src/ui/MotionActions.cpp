@@ -297,7 +297,8 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
     assembly::PropagateRelations(*state.assembly, driver->id, [&](uint64_t id) {
       return ui::PartDocById(state, id);
     });
-    SolveActiveAssemblyDriven(state, driver->id, s->driverDof);
+    SolveActiveAssemblyDriven(state, driver->id, s->driverDof,
+                              /*diagnose=*/false); // a motion sample
   }
   state.syncedDocumentVersion = UINT64_MAX; // the placements changed
   return true;

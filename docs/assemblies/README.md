@@ -391,7 +391,8 @@ one.
   serialization), `test_assembly_solve.cpp` (mate types, offset sign, the
   part-edit-moves-the-mate payoff, dangling refs), `test_assembly_loops.cpp`
   (four-bar DOF, branch keeping, redundant bolts, conflicting loops,
-  partitioning, driven DOF held), `test_assembly_relations.cpp` (every
+  partitioning, driven DOF held, which tilted connector keeps a loop open —
+  `-L diagnose`), `test_assembly_relations.cpp` (every
   relation kind, propagation order, freewheel/reverser/click, loop rows),
   `test_assembly_flatten.cpp`, `test_motion.cpp`. Goldens in
   `tests/golden/assembly/`.

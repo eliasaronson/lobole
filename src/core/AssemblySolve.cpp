@@ -341,6 +341,56 @@ std::string FormatMm(double mm) {
   return buf;
 }
 
+// "'crank pin' connector A (crank)": a mate by its name (or id), and which of
+// its connectors, by the occurrence that connector sits on.
+std::string SuspectLabel(const LoopTiltTrial& t,
+                         const AssemblyDocument& asmDoc) {
+  const Mate* m = asmDoc.FindMateById(t.mate);
+  std::string s = "mate ";
+  s += m != nullptr && !m->name.empty() ? "'" + m->name + "'"
+                                        : "#" + std::to_string(t.mate);
+  if (m == nullptr || t.connector == 0)
+    return s;
+  const Connector& c = t.connector == 'b' ? m->b : m->a;
+  s += t.connector == 'b' ? " connector B" : " connector A";
+  if (const Occurrence* o = asmDoc.FindById(c.occurrenceId))
+    s += " (" + o->name + ")";
+  return s;
+}
+
+std::string FormatDeg(double radians) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.1f", angles::ToDegrees(radians));
+  return std::string(buf) + "\xC2\xB0"; // degree sign, UTF-8
+}
+
+// What a failed loop's diagnosis adds to its cut mates' error, or nothing
+// when it found no single tilted connector. Several suspects are named
+// together and none is picked: the numbers do not say which.
+std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
+  if (d.suspects.empty())
+    return "";
+  if (d.suspects.size() == 1) {
+    const LoopTiltTrial& t = d.suspects.front();
+    return t.connector == 0
+               ? "; " + SuspectLabel(t, asmDoc) +
+                     " closes it if its axis tilts " + FormatDeg(t.tiltRad) +
+                     " at either connector - check both"
+               : "; " + SuspectLabel(t, asmDoc) + " closes it if its axis " +
+                     "tilts " + FormatDeg(t.tiltRad) +
+                     " - check that connector";
+  }
+  std::string s = "; any one of ";
+  for (size_t i = 0; i < d.suspects.size(); i++) {
+    if (i > 0)
+      s += i + 1 == d.suspects.size() ? " or " : ", ";
+    s += SuspectLabel(d.suspects[i], asmDoc) + " (" +
+         FormatDeg(d.suspects[i].tiltRad) + ")";
+  }
+  return s + " closes it with that tilt; the loop cannot say which - check "
+             "their connectors";
+}
+
 } // namespace
 
 std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
@@ -940,7 +990,8 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
 }
 
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
-                  const AssemblyResolver& asmById, const Driven& driven) {
+                  const AssemblyResolver& asmById, const Driven& driven,
+                  bool diagnose) {
   SolveReport report;
   // The active configuration's held DOFs (v101) stand in for the mates' own
   // values for the whole solve — placement, relations, the loop pass — and
@@ -991,6 +1042,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
     Mate& mate = asmDoc.GetMates()[i];
     mate.error.clear();
+    mate.residualMm = 0.0;
     // Out of the active configuration (v101): it sits out like an unusable
     // mate, without an error — so does one touching a hidden occurrence.
     if (asmDoc.MateSuppressed(mate.id))
@@ -1167,6 +1219,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
 
   // ---- A6: close the loops --------------------------------------------------
   report.loopMates = static_cast<int>(loop.cut.size());
+  loop.diagnose = diagnose;
   if (!loop.cut.empty()) {
     const LoopSolution closed = SolveLoops(loop);
     if (!closed.unavailable.empty()) {
@@ -1232,20 +1285,35 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       }
 
       // Only a loop that could NOT close is an error, and it says by how
-      // much. The old check reported 0.02 mm and 3 mm with the same words.
-      for (uint64_t id : closed.conflicting) {
-        if (Mate* m = asmDoc.FindMateById(id)) {
-          // A hint naming the mate whose connector axes were nowhere near
-          // coaxial belongs here in spirit and cannot be measured here: by
-          // the time any solve runs, every add_mate has already solved once
-          // and turned the part to align them. The hook that would work is
-          // mate CREATION, where the caller's own placement is still what it
-          // was — the same place add_relation warns about gear axles more
-          // than 5 degrees off parallel.
-          m->error = "loop does not close (off by " +
-                     FormatMm(closed.residualMm) + " mm)";
-          report.erroredMates++;
-        }
+      // much — its OWN residual, not the worst in the document. The mate
+      // that carries the error is only the one the tree walk happened to
+      // close the loop with, which depends on anchors and creation order,
+      // so when the diagnosis found the connector that is actually wrong
+      // the message names it.
+      //
+      // The diagnosis runs HERE, after the solve, and not when the mate is
+      // created: before the first solve, the angle between two connectors
+      // is wherever the parts happened to be dropped, so a check at
+      // add_mate would fire on nearly every correct mate. What does carry
+      // information is the failed loop itself — which single tilt would
+      // close it
+      // (docs/assemblies/solver.md#naming-the-mate-that-keeps-a-loop-open).
+      report.diagnoses = closed.diagnoses;
+      for (size_t k = 0; k < closed.conflicting.size(); k++) {
+        const uint64_t id = closed.conflicting[k];
+        Mate* m = asmDoc.FindMateById(id);
+        if (m == nullptr)
+          continue;
+        m->residualMm = k < closed.conflictingMm.size()
+                            ? closed.conflictingMm[k]
+                            : closed.residualMm;
+        m->error =
+            "loop does not close (off by " + FormatMm(m->residualMm) + " mm)";
+        for (const LoopDiagnosis& d : closed.diagnoses)
+          if (std::find(d.conflicting.begin(), d.conflicting.end(), id) !=
+              d.conflicting.end())
+            m->error += LoopHint(d, asmDoc);
+        report.erroredMates++;
       }
     }
   }

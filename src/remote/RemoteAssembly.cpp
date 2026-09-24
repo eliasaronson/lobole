@@ -139,10 +139,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"list_mates",
      "List mates with `status` (satisfied | redundant | error) and the "
      "error text when there is one. Each carries `rotation` in radians and "
-     "`rotation_deg` beside it.",
+     "`rotation_deg` beside it. A mate that closes a loop which did not "
+     "close carries `residual_mm`, its own closure error from the last "
+     "solve.",
      "", remote::NoFlags,
      "mates[]{type,id,name,mate_type,a,b,flipped,rotation,offset,rotation_deg,"
-     "status,dx?,dy?,ball_rotation?,error?,suppressed?,held?}"},
+     "status,dx?,dy?,ball_rotation?,error?,residual_mm?,suppressed?,held?}"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam|freewheel|click, a: mate id, b: "
@@ -223,8 +225,18 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "ALWAYS present: errored_mates, placed, occurrences, placed_by_mates, "
      "placed_by_transform, mates[]. ONLY when the assembly has mate loops: "
      "loop_mates, dof, loops_closed, residual_mm, redundant_mates — a tree "
-     "assembly has no loop to report on, so read them with a default.",
-     ""},
+     "assembly has no loop to report on, so read them with a default. A "
+     "mate whose loop did not close carries its OWN `residual_mm`. When a "
+     "loop did not close, `suspects` names the mates whose axis, tilted by "
+     "`tilt_deg` at `connector` (a|b; absent when either side does), would "
+     "close it: `closes` lists the loop's failing mates, and `sole` is false "
+     "when several suspects close the same loop equally well and none is "
+     "claimed. Empty when the fault is not a single tilted axis.",
+     "", remote::NoFlags,
+     "errored_mates,placed,occurrences,placed_by_mates,placed_by_transform,"
+     "mates[]{id,name,status,error?,residual_mm?},loop_mates?,dof?,"
+     "loops_closed?,residual_mm?,redundant_mates?,"
+     "suspects?[]{mate,name,tilt_deg,connector?,closes,sole}"},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/README.md). "
      "Every dimension but the length is READ from the vendored table for that "
@@ -1270,6 +1282,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       mj["status"] = mate.error.empty() ? "satisfied" : "error";
       if (!mate.error.empty())
         mj["error"] = mate.error;
+      if (mate.residualMm > 0.0) // a loop this mate closes did not close
+        mj["residual_mm"] = mate.residualMm;
       // The active configuration's overlay (v101). rotation/offset above
       // are the AUTHORED values; the part is placed at the held ones, and a
       // caller reading only the former saw a mate and a placement disagree.
@@ -1783,6 +1797,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       json mj = {{"id", mate.id}, {"name", mate.name}, {"status", status}};
       if (!mate.error.empty())
         mj["error"] = mate.error;
+      if (mate.residualMm > 0.0) // its OWN miss, not the document's worst
+        mj["residual_mm"] = mate.residualMm;
       arr.push_back(mj);
     }
     // A6: report what the loop pass found HERE, in the mutating call's own
@@ -1821,6 +1837,25 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       out["loops_closed"] = rep.loopsClosed;
       out["residual_mm"] = rep.residualMm;
       out["redundant_mates"] = rep.redundantMates;
+      // Which connector, tilted, would close a loop that did not close
+      // (docs/assemblies/solver.md#naming-the-mate-that-keeps-a-loop-open).
+      // `closes` groups them by loop; `sole` is false when that loop has
+      // several equally good suspects and the numbers do not pick one.
+      json suspects = json::array();
+      for (const assembly::LoopDiagnosis& d : rep.diagnoses)
+        for (const assembly::LoopTiltTrial& t : d.suspects) {
+          const Mate* sm = state.assembly->FindMateById(t.mate);
+          json sj = {{"mate", t.mate},
+                     {"name", sm != nullptr ? sm->name : std::string()},
+                     {"tilt_deg", angles::ToDegrees(t.tiltRad)},
+                     {"closes", d.conflicting},
+                     {"sole", d.suspects.size() == 1}};
+          if (t.connector != 0)
+            sj["connector"] = std::string(1, t.connector);
+          suspects.push_back(std::move(sj));
+        }
+      if (!rep.loopsClosed)
+        out["suspects"] = std::move(suspects);
     }
     return out;
   }

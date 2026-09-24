@@ -156,7 +156,7 @@ Result Run(const AssemblyDocument& asmDocIn,
       assembly::SetMateDof(*probeDriver, study.driverDof, ValueAt(study, t));
       assembly::PropagateRelations(probe, probeDriver->id, parts);
       assembly::Solve(probe, parts, assemblies,
-                      {probeDriver->id, study.driverDof});
+                      {probeDriver->id, study.driverDof}, /*diagnose=*/false);
       for (const Occurrence& o : probe.GetOccurrences())
         track[o.id].push_back(glm::translate(glm::mat4(1.0f), o.position) *
                               glm::mat4_cast(o.orientation));
@@ -195,7 +195,8 @@ Result Run(const AssemblyDocument& asmDocIn,
     assembly::SetMateDof(*driver, study.driverDof, s.value);
     assembly::PropagateRelations(asmDoc, driver->id, parts);
     const assembly::SolveReport rep = assembly::Solve(
-        asmDoc, parts, assemblies, {driver->id, study.driverDof});
+        asmDoc, parts, assemblies, {driver->id, study.driverDof},
+        /*diagnose=*/false);
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;

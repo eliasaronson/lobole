@@ -9,10 +9,11 @@ redundant BUT CONSISTENT.
 
 The mechanism maths (four-bar branches, rank-based DOF) lives in the C++
 test_assembly_loops.cpp; this exercises the RPC layer, so every connector is an
-origin anchor -- no toponaming knowledge needed.
+origin anchor or a named Frame -- no toponaming knowledge needed.
 
 Usage: assembly_loops_smoke.py <path-to-designer-binary>
 """
+import math
 import os
 import subprocess
 import sys
@@ -43,6 +44,88 @@ def origin_mate(d, kind, a, b, **kw):
                   a={"occurrence": a, "origin": True},
                   b={"occurrence": b, "origin": True},
                   flipped=False, **kw)["id"]
+
+
+def link_part(d, name, frames):
+    """A part holding nothing but named frames: {name: (origin, z, x)}."""
+    d.call("add_part", name=name)
+    for fname, (origin, z, x) in frames.items():
+        d.call("add_feature", feature={
+            "type": "Frame", "name": fname, "kind": "explicit",
+            "origin": origin, "z_axis": z, "x_axis": x})
+
+
+def four_bar(d):
+    z, x = [0, 0, 1], [1, 0, 0]
+    t = math.radians(30.0)
+    link_part(d, "ground", {"p0": ([0, 0, 0], z, x),
+                            "p1": ([100, 0, 0], z, x)})
+    link_part(d, "crank", {"p0": ([0, 0, 0], z, x),
+                           "p1": ([30, 0, 0], z, x)})
+    link_part(d, "crank_bent", {
+        "p0": ([0, 0, 0], z, x),
+        "p1": ([30, 0, 0], [math.sin(t), 0, math.cos(t)],
+               [math.cos(t), 0, -math.sin(t)])})
+    link_part(d, "coupler", {"p0": ([0, 0, 0], z, x),
+                             "p1": ([90, 0, 0], z, x)})
+    link_part(d, "rocker", {"p0": ([0, 0, 0], z, x),
+                            "p1": ([60, 0, 0], z, x)})
+
+    def build(crank_part):
+        d.call("add_assembly", name="linkage_" + crank_part)
+        g = d.call("add_occurrence", part="ground", fixed=True)["id"]
+        c = d.call("add_occurrence", part=crank_part)["id"]
+        k = d.call("add_occurrence", part="coupler")["id"]
+        r = d.call("add_occurrence", part="rocker")["id"]
+
+        def joint(name, a, fa, b, fb, rot):
+            return d.call("add_mate", type="revolute", name=name,
+                          a={"occurrence": a, "frame": fa},
+                          b={"occurrence": b, "frame": fb},
+                          flipped=False, rotation=rot)
+        joint("main bearing", g, "p0", c, "p0", 1.2)
+        pin = joint("crank pin", c, "p1", k, "p0", -0.8)["id"]
+        joint("rocker pin", k, "p1", r, "p1", 1.0)
+        last = joint("rocker pivot", g, "p1", r, "p0", 1.0)
+        return pin, last
+
+    pin, last = build("crank")
+    expect(last["errored_mates"] == 0, f"the correct linkage closes: {last}")
+    r = d.call("solve_assembly")
+    expect(r["loops_closed"] is True and r["dof"] == 1,
+           f"a four-bar with one DOF: {r}")
+    expect("suspects" not in r, f"nothing to suspect when it closes: {r}")
+
+    pin, last = build("crank_bent")
+    cut = last["id"]
+    # add_mate's own response already carries the diagnosis: the mate that
+    # broke the loop is reported, and its error names the one to fix.
+    errored = {e["id"]: e for e in last.get("errored", [])}
+    expect(cut in errored, f"the closing mate is the one flagged: {last}")
+    msg = errored[cut]["error"]
+    expect("does not close" in msg, f"the plain words stay: {msg}")
+    expect("'crank pin' connector A (crank_bent" in msg,
+           f"...and it names the tilted connector: {msg}")
+    print(f"  add_mate error: {msg}")
+
+    r = d.call("solve_assembly")
+    expect(r["loops_closed"] is False, f"it cannot close: {r}")
+    suspects = r["suspects"]
+    expect(len(suspects) == 1, f"one suspect: {suspects}")
+    s = suspects[0]
+    expect(s["mate"] == pin and s["name"] == "crank pin", f"the pin: {s}")
+    expect(s["connector"] == "a", f"its crank-side connector: {s}")
+    expect(abs(s["tilt_deg"] - 30.0) < 0.5, f"by 30 degrees: {s}")
+    expect(s["sole"] is True and s["closes"] == [cut], f"of that loop: {s}")
+    mates = {m["id"]: m for m in r["mates"]}
+    expect(abs(mates[cut]["residual_mm"] - r["residual_mm"]) < 1e-9,
+           f"the cut mate carries its own residual: {mates[cut]}")
+    expect("residual_mm" not in mates[pin],
+           f"a tree mate has no closure residual: {mates[pin]}")
+    listed = {m["id"]: m for m in d.call("list_mates")["mates"]}
+    expect(abs(listed[cut]["residual_mm"] - r["residual_mm"]) < 1e-9,
+           f"list_mates reports it too: {listed[cut]}")
+    print(f"  suspect: {s}, residual {r['residual_mm']:.3f} mm")
 
 
 def main():
@@ -132,6 +215,14 @@ def main():
                f"the message says what happened: {errored[0]}")
         expect("7" in errored[0]["error"],
                f"...and by how much: {errored[0]}")
+
+        # --- A tilted connector is named, not the mate that fails ----------
+        # A crank-rocker built from Frame features (ground pivots 100 apart,
+        # crank 30, coupler 90, rocker 60). Correct, it closes with nothing
+        # to suspect. With the crank pin's frame tilted 30 degrees, the loop
+        # fails on the LAST mate added -- the rocker pivot -- and the error
+        # names the crank pin, which is where the fault is.
+        four_bar(d)
 
         # --- A loop-free assembly says nothing about loops -----------------
         o1, o2 = two_parts(d, "tree")

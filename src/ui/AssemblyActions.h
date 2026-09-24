@@ -101,15 +101,18 @@ int SolveActiveAssembly(AppState& state);
 
 // The same, holding the DOF the caller just drove while a loop closes around
 // it (a drag, a set_mate, a motion sample). Without it the loop solver treats
-// that DOF as one more unknown and moves it.
-int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof);
+// that DOF as one more unknown and moves it. `diagnose` as assembly::Solve's:
+// a motion sample passes false.
+int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof,
+                              bool diagnose = true);
 
 // The SAME pass, reporting everything it learned rather than just the error
 // count: A6's loop closure, remaining degrees of freedom, and which mates were
 // redundant-but-consistent. Additive — SolveActiveAssembly is this narrowed to
 // `erroredMates`, which is all its existing callers ever wanted.
 assembly::SolveReport
-SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven = {});
+SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven = {},
+                          bool diagnose = true);
 
 // Part→assembly change propagation (A4): true when any part referenced by the
 // active assembly has regenerated since the assembly's last solve (compared
