@@ -266,6 +266,7 @@ def top_end(app, rig, occ, main):
     cover, cgask, filler = (T.cam_cover(app), T.cam_cover_gasket(app),
                             T.oil_filler_cap(app))
     exm, inm = T.exhaust_manifold(app), T.intake_manifold(app)
+    tstat = T.thermostat_housing(app)
     gaskets = {k: T.manifold_gasket(app, k) for k in VALVE}
     ms = B.sprocket(app, "cam sprocket", CAM_PCD / 2.0, 30.0, CAM_TEETH,
                     CHAIN_W, hub_d=60.0)
@@ -355,6 +356,9 @@ def top_end(app, rig, occ, main):
         rig.fasten((ho, f"{kind}_face"), (gk_, "face"), flipped=False)
         mo = rig.place(part)
         rig.fasten((ho, f"{kind}_face"), (mo, "face"), flipped=False)
+    # The thermostat housing sits on the head's front ear, manifold side.
+    tso = rig.place(tstat)
+    rig.fasten((ho, "thermostat"), (tso, "seat"), flipped=False)
 
     gk = rig.place(cgask)
     rig.fasten((ho, "top"), (gk, "rail"), flipped=False)
@@ -363,7 +367,7 @@ def top_end(app, rig, occ, main):
     rig.fasten((cvo, "filler"), (rig.place(filler), "seat"), flipped=False)
     _solved("top end", rig)
     return {"head": ho, "camshaft": cam_occ, "valves": lifts,
-            "cam cover": cvo}, cam_mate
+            "cam cover": cvo, "thermostat": tso}, cam_mate
 
 
 # Two dozen tabs in one strip is a list you scroll rather than read, so the
@@ -396,7 +400,8 @@ FOLDERS = [
                   "oil pump idler gear", "oil pickup", "oil drive sprocket",
                   "oil pump sprocket", "oil pump chain"]),
     ("Cooling", ["water pump", "water pump shaft", "impeller",
-                 "water pump pulley", "fan belt", "cooling fan", "fan hub spacer"]),
+                 "water pump pulley", "fan belt", "cooling fan", "fan hub spacer",
+                 "thermostat housing"]),
     ("Alternator", ["alternator front casting", "alternator rear casting",
                     "alternator stator", "alternator rotor and shaft",
                     "alternator pulley", "alternator cooling fan",
@@ -571,6 +576,7 @@ COMPONENTS = {
     "intake": ("intake manifold", T.intake_manifold),
     "exhaust": ("exhaust manifold", T.exhaust_manifold),
     "injector": ("injector", T.injector), "prechamber": ("pre-chamber", T.prechamber),
+    "thermostat": ("thermostat housing", T.thermostat_housing),
 }
 COMPONENTS = {k: (name, _finished(b)) for k, (name, b) in COMPONENTS.items()}
 
@@ -963,6 +969,13 @@ def fasteners(app, rig, occ, top, front):
              2 * len(T._cover_bolt_y()), "cam cover bolts",
              centres=[(cover_bolt_x(sx), y) for y in T._cover_bolt_y()
                       for sx in (-1, 1)])
+    bolt_up(rig, top["thermostat"], app.part("thermostat housing"),
+             (TSTAT_BOLT_D + 1.0) / 2.0,
+             lambda e: e.center.z - (HEAD_TOP + TSTAT_FLANGE_T),
+             top["head"], hd, (TSTAT_BOLT_D + TAP_FIT) / 2.0,
+             lambda e: e.center.z - (HEAD_TOP + 1.0 - TSTAT_TAP_DEPTH), "M8", 2,
+             "thermostat housing bolts",
+             centres=[(TSTAT_X, TSTAT_Y + s * TSTAT_BOLT_DY) for s in (-1, 1)])
     # A cap is drawn about ITS OWN origin and placed at its main's y, so its
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
     # block's hole floors are measured in. Both have to be said.

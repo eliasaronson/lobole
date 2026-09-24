@@ -35,7 +35,7 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   keeping part, feature and occurrence identities and reusing unchanged
   geometry. Keys: `belt`, `fan`, `vacuum-pump` (the casting), `block`, `head`,
   `sump`, `timing-cover`, `damper`, `engine-mount-left`, `engine-mount-right`,
-  `cam-cover`, `intake`, `exhaust`, `injector`, `prechamber`. A component's fingerprint covers the builder modules and the
+  `cam-cover`, `intake`, `exhaust`, `injector`, `prechamber`, `thermostat`. A component's fingerprint covers the builder modules and the
   SDK; a change to `om615_spec.py` or the shared accessory mounting inputs
   refuses a component update and asks for a full rebuild.
 - **Outputs** in `--out` (default `/tmp/om615`): the project, an animated
@@ -55,7 +55,7 @@ arm and a short block screw are each refused for their own reason.
 |---|---|
 | `om615_spec.py` | every shared number, derived from bore, stroke, rod (145) and bore pitch (97) where the derivation is real |
 | `om615_bottom.py` | block (with its casting exterior), crank, rods, pistons and rings, caps, shells, flywheel, damper, seals, sump, timing chain and cover, oil pump, water pump, pulleys, engine mounts |
-| `om615_top.py` | head, camshaft, rockers, valves, guides, seats and springs, cam cover, manifolds, injectors, pre-chambers, glow plugs |
+| `om615_top.py` | head, camshaft, rockers, valves, guides, seats and springs, cam cover, manifolds, thermostat housing, injectors, pre-chambers, glow plugs |
 | `om615_accessories.py` | belt, fan, alternator (stator and rotor subassemblies), vacuum pump and its timer cam, mounting brackets |
 | `om615.py` | assembly, fasteners, the component table, stages and checks |
 
@@ -118,7 +118,13 @@ Construction rules the builders keep:
   a ladder of channels and columns, not a slab crossing every port.
 - Manifolds are built solid and bored afterwards, runners leaving each port on
   its own axis along analytic elbows, and every addition is checked to add
-  volume (a fuse that loses material is a failure).
+  volume (a fuse that loses material is a failure) and every bore to remove
+  no more than its own tool.
+- A rounded casting is hollowed by SUBTRACTING a second body — its cavity,
+  drawn at the wall's inset and rounded about the same centres — not by
+  cutting a square cavity into a rounded outside, whose corner would break
+  through the wall. The cam cover's rear-end radius is derived from what
+  stands in the cavity's corners (the last rocker post, the last cam cap).
 - A rigid valve spring is drawn at its SHORTEST, so it never clashes.
 - Bolt holes are the standard's own clearances; a tapped hole's major diameter
   is the bolt's nominal. Mounting datums belong to the part builders, so
@@ -169,6 +175,33 @@ diaphragm stroke. The model does not demonstrate the 21:1 compression ratio.
 Bearing, piston and pin fits use exaggerated clearances. Materials are the
 library's steel/aluminium approximations.
 
+## The top end's castings
+
+What the top end looks like follows the photographs (front, both sides, top
+and the KTG 9810 sectional drawing), scaled against the bore and bore pitch;
+the numbers are in `om615_spec.py` under "the top end's castings" and none of
+them moves anything or any interface.
+
+- **Cam cover**: a crowned roof (an arc tangent to both shoulders), the rear
+  end rounded in plan and elevation, a rim at the gasket that the gasket
+  follows, the three-pointed star raised on a medallion, the oil filler near
+  the FRONT just behind the chain dome — where the top photograph and the
+  sectional drawing both have it — and a breather stub on the manifold-side
+  shoulder. No firing-order lettering: the SDK draws no text.
+- **Intake**: a rounded box plenum on the old log's axis, its ends rounded,
+  fed by a throttle body on a short neck in the middle of its outer face
+  (round bore, butterfly shaft across it in two bosses, lever and pin on the
+  rear end), and four curved runners — two into each paired port, joined at
+  the flange by a slot.
+- **Exhaust**: four runners into a log with rounded ends, one outlet straight
+  down from the middle on a three-ear flange with three studs.
+- **Head**: a drafted rib the length of the manifold side under the cover
+  rail, and at its front end the ear the thermostat housing bolts to (two M8,
+  derived like every other fastener), standing forward only outboard of the
+  timing cover.
+- **Thermostat housing**: flange, chamber, cover and an upper-hose outlet
+  pointing forward and up; its `hose` frame is where a hose would start.
+
 ## Not modelled
 
 The fuel lines and the pump's drive (the timing device, its intermediate
@@ -176,5 +209,7 @@ sprocket and the rerouted chain); the vacuum pump's membrane, spring, valves
 and pneumatics; the roller's own rotation; alternator terminals and field
 windings (the stator windings are twelve packs, not turns); belt material
 circulating; casting parting, cores, machining allowances and tolerances;
-water and oil routing beyond the jacket and galleries. A clean interference
+water and oil routing beyond the jacket and galleries (the thermostat
+housing has no drilled feed: its ear is outside the head's side wall, and
+the rocker chamber is behind that wall). A clean interference
 report proves clearance of the modelled parts, not completeness.
