@@ -39,10 +39,10 @@ def plane_span(z0, z1):
     return snap(z1) - snap(z0)
 
 
-def casting_finish(p, material="aluminum", color=(0.48, 0.49, 0.50)):
-    """A rough casting surface, separate from the physical material."""
+def casting_finish(p, material="aluminum", color=None):
+    """A casting's physical material. How it LOOKS is om615_finish.py's
+    table, applied once the engine is built; `color` is ignored."""
     p.material(material)
-    p.app.set_appearance(body=0, color=list(color), roughness=0.65, metallic=0.8)
 
 
 def rounded_polygon(sk, points, radius):

@@ -36,6 +36,7 @@ from om615_spec import *  # noqa: E402,F401,F403
 import om615_bottom as B  # noqa: E402
 import om615_top as T  # noqa: E402
 import om615_accessories as A
+import om615_finish as F  # noqa: E402
 
 
 def _solved(what, rig):
@@ -550,6 +551,12 @@ def profile_calls(app, out):
     atexit.register(save)
 
 
+def _finished(builder):
+    """A component builder whose part comes out with its finish, so a part
+    rebuilt on its own (--update-component) looks as it does in the engine."""
+    return lambda app: F.finish(builder(app))
+
+
 COMPONENTS = {
     "belt": ("fan belt", A.belt), "fan": ("cooling fan", A.fan),
     "vacuum-pump": ("vacuum pump casting", A.pump_housing),
@@ -560,6 +567,7 @@ COMPONENTS = {
     "exhaust": ("exhaust manifold", T.exhaust_manifold),
     "injector": ("injector", T.injector), "prechamber": ("pre-chamber", T.prechamber),
 }
+COMPONENTS = {k: (name, _finished(b)) for k, (name, b) in COMPONENTS.items()}
 
 
 def component_fingerprint(key):
@@ -569,7 +577,7 @@ def component_fingerprint(key):
     spec = hashlib.sha256((root / 'om615_spec.py').read_bytes() +
                           json.dumps(A.assembly_inputs(), sort_keys=True).encode()).hexdigest()
     inputs = [root / 'om615_top.py', root / 'om615_bottom.py',
-              root / 'om615_accessories.py',
+              root / 'om615_accessories.py', root / 'om615_finish.py',
               root.parent.parent / 'tools/designer_sdk.py',
               root.parent.parent / 'tools/designer_components.py']
     digest = hashlib.sha256(key.encode())
@@ -683,6 +691,9 @@ def main():
     stage = time.perf_counter()
     fasteners(app, rig, occ, top, front)
     timings["fasteners_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
+    F.apply_all(app)
+    timings["finish_s"] = time.perf_counter() - stage
     for part in app.list_parts()["parts"]:
         if part["name"] == "Part 1":
             app.delete_part(part=part["name"])
