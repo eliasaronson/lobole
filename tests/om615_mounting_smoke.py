@@ -43,7 +43,7 @@ def main():
             rig = app.assembly("engine")
             occ, main = om615.bottom_end(app, rig)
             om615.front_and_rear(app, rig, occ, main)
-            measured = A.check_mountings(app, rig)
+            measured = A.check_mountings(app, rig, hanging=False)
             assert len(measured["contacts"]) == 28, measured
             stator = app.assembly("alternator stator assembly", create=False)
             assert (
@@ -103,7 +103,7 @@ def main():
             missing = rig.occurrence("alternator mounting bracket pivot_bolt")
             app.remove_occurrence(id=missing.id)
             refused(
-                lambda: A.check_mountings(app, rig),
+                lambda: A.check_mountings(app, rig, hanging=False),
                 "a missing alternator pivot bolt passed the mounting check",
             )
             # Reproduce the previous thin-ring mount: it touches a pump flange
@@ -116,7 +116,7 @@ def main():
             cover.extrude(sk.add(), 7, name="Old thin mounting ring")
             rig = app.assembly("old mounting")
             refused(
-                lambda: A.check_mountings(app, rig),
+                lambda: A.check_mountings(app, rig, hanging=False),
                 "a thin flange ring passed as an enclosed pump pocket",
             )
             print(

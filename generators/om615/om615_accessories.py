@@ -7,7 +7,16 @@ local Z and located by named mounting/shaft datums, not by bounding boxes.
 import math
 from designer_sdk import Part, Plane, V, SdkError
 import om615_bottom as B
+import om615_top as T
 from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z
+from om615_spec import (
+    BLOCK_Y1, BORE, BORE_PITCH, COOLANT_HOSE_OD, COOLANT_HOSE_WALL,
+    DIPSTICK_AXIS, DIPSTICK_BORE_D, DIPSTICK_BOSS, FUEL_FILTER_BOLT_D,
+    FUEL_FILTER_BOLT_DZ, FUEL_FILTER_BOSS, FUEL_FILTER_BOSS_HALF, HEAD_TOP,
+    HEATER_PIPE, INT_LOG, MANIFOLD_PAD_HZ, OIL_FILTER_BOLT_D,
+    OIL_FILTER_BOLT_PCD, OIL_FILTER_BOSS, OIL_FILTER_BOSS_D,
+    OIL_FILTER_FLANGE_T, OIL_FILTER_PORT_D, PLENUM, PORT_Z, PUMP_MOUNT,
+    PUMP_MOUNT_D, TSTAT_X, WP_INLET, WP_INLET_Y)
 
 ALT_X, ALT_Z, ALT_D = 176.0, 75.0, 76.0
 ALT_LUG = 80.0
@@ -823,6 +832,271 @@ def prepare_cover(cover):
     )
 
 
+# ----------------------------------------------------------- what hangs on it
+# Static parts, each drawn in engine space and hung by a world-aligned frame
+# that coincides with its holder's, so placing one is a translation of zero.
+# Proportions are read off the photographs against the 87 mm bore and the
+# 97 mm bore pitch; the interfaces they sit on are om615_spec's.
+OIL_FILTER_CAN = (1.03 * BORE, 1.55 * BORE_PITCH)   # canister: 90 x 150
+OIL_FILTER_COLLAR = 4.0      # the cast head and lid stand this proud of it
+# The neck from the flange to the canister's head: inside the bolt circle,
+# and long enough that the canister clears the bolt heads (an ISO 4762
+# head is as tall as the bolt is thick) by a spanner's lip.
+OIL_FILTER_NECK = (30.0, OIL_FILTER_BOLT_D + 8.0)
+FUEL_FILTER_CAN = (0.92 * BORE, 1.13 * BORE_PITCH)  # canister: 80 x 110
+FUEL_BRACKET_T = 8.0         # the steel bracket's plate and shelf
+# The shelf the fuel filter hangs from: its canister's bottom clears the
+# injection pump's mounting flange below by a hand's width of air.
+FUEL_SHELF_Z = (PUMP_MOUNT[2] + PUMP_MOUNT_D / 2.0 + 10.0
+                + FUEL_FILTER_CAN[1])
+# Where both radiator hoses end, in free air a hose's length ahead of the
+# fan's blades — about where a radiator's tanks would be.
+RADIATOR_Y = FAN_Y - 1.75 * COOLANT_HOSE_OD
+DIPSTICK_WALL = 1.5
+DIPSTICK_TUBE_OD = DIPSTICK_BORE_D + 2.0 * DIPSTICK_WALL
+
+
+def bent_tube(p, points, bend_r, od, wall, name, mode="new_body"):
+    """A tube as a bender makes one: straight runs between `points` (the
+    CORNERS of its centreline), each corner bent round `bend_r`, swept to
+    `od` with `wall` (0 = solid)."""
+    path = p._add(dict(type="Curve3D", name=f"{name} path", kind="bent_path",
+                       points=[list(V(q)) for q in points], radius=bend_r))
+    f = dict(type="Pipe", name=name, path_id=path["id"], outer_diameter=od,
+             mode=mode)
+    if wall:
+        f["wall_thickness"] = wall
+    return p._add(f)
+
+
+def oil_filter_housing(app):
+    """The oil filter housing on the block's pad: a round flange with its
+    four M8 clearance holes and the port, a neck out, and the vertical
+    canister standing beside the crankcase — cast head, bowl and lid with
+    its centre bolt — its top near the deck, as on the engine."""
+    p = app.part("oil filter housing")
+    fx, fy, fz = OIL_FILTER_BOSS
+    face = fx - OIL_FILTER_FLANGE_T
+    can_d, can_h = OIL_FILTER_CAN
+    neck_d, neck_l = OIL_FILTER_NECK
+    head_d = can_d + 2.0 * OIL_FILTER_COLLAR
+    xc = face - neck_l - head_d / 2.0
+    B.axis_solid(p, (fx, fy, fz), (face, fy, fz), OIL_FILTER_BOSS_D,
+                 "Flange", mode="new_body")
+    B.axis_solid(p, (face + 1.0, fy, fz), (xc, fy, fz), neck_d, "Neck")
+    base = fz - neck_d
+    top = fz + neck_d + can_h
+    B.disc(p, (xc, fy), head_d, base, fz + neck_d, "Filter head")
+    B.disc(p, (xc, fy), can_d, fz + neck_d - 1.0, top, "Canister")
+    B.disc(p, (xc, fy), head_d, top, top + 2.0 * OIL_FILTER_COLLAR, "Lid")
+    B.disc(p, (xc, fy), neck_d * 2.0 / 3.0, top + 2.0 * OIL_FILTER_COLLAR - 1.0,
+           top + 4.0 * OIL_FILTER_COLLAR, "Lid bolt")
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
+        bz = fz + OIL_FILTER_BOLT_PCD / 2.0 * math.sin(a)
+        # ISO 273 medium clearance for M8.
+        B.bore(p, (face - 1.0, by, bz), (fx + 1.0, by, bz),
+               OIL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
+    B.bore(p, (fx + 1.0, fy, fz), (xc, fy, fz), OIL_FILTER_PORT_D, "Port",
+           over=0.0)
+    p.material("aluminum")
+    p.frame("pad", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def fuel_filter_bracket(app):
+    """A pressed-steel bracket: a plate bolted to the boss on the head's
+    pump side and, at its top, a shelf reaching out with a ring the fuel
+    filter's neck drops through."""
+    p = app.part("fuel filter bracket")
+    bx, by, bz = FUEL_FILTER_BOSS
+    hy, hz = FUEL_FILTER_BOSS_HALF
+    t = FUEL_BRACKET_T
+    can_d, _ = FUEL_FILTER_CAN
+    cx = fuel_filter_x()
+    z0, z1 = bz - hz, FUEL_SHELF_Z + t
+    plate = p.sketch(Plane.yz(bx - t), name="Plate")
+    B.rounded_polygon(plate, [(by - hy, z0), (by + hy, z0), (by + hy, z1),
+                              (by - hy, z1)], [hy / 2.0, hy / 2.0, 0, 0])
+    p.extrude(plate.add(), t, mode="new_body", name="Plate")
+    B.slab(p, cx, by - hy, FUEL_SHELF_Z, bx - t + 1.0, by + hy, z1, "Arm",
+           mode="add")
+    B.disc(p, (cx, by), can_d + 8.0, FUEL_SHELF_Z, z1, "Ring")
+    B.disc(p, (cx, by), can_d / 2.0 + 2.0, FUEL_SHELF_Z - 1.0, z1 + 1.0,
+           "Ring hole", mode="cut")
+    for s in (-1, 1):
+        B.bore(p, (bx - t - 1.0, by, bz + s * FUEL_FILTER_BOLT_DZ),
+               (bx + 1.0, by, bz + s * FUEL_FILTER_BOLT_DZ),
+               FUEL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
+    p.material("steel")
+    p.frame("head", origin=FUEL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("filter", origin=(cx, by, z1), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def fuel_filter_x():
+    """The fuel filter's axis: out from the bracket's plate by the bolt
+    heads' height and a spanner's lip, and its own radius."""
+    return (FUEL_FILTER_BOSS[0] - FUEL_BRACKET_T - FUEL_FILTER_BOLT_D - 4.0
+            - FUEL_FILTER_CAN[0] / 2.0)
+
+
+def fuel_filter(app):
+    """The fuel filter: a cast head sitting on the bracket's ring with its
+    inlet and outlet banjo bosses and bleed screw, and the canister hanging
+    below on a neck through the ring."""
+    p = app.part("fuel filter")
+    can_d, can_h = FUEL_FILTER_CAN
+    cx, cy = fuel_filter_x(), FUEL_FILTER_BOSS[1]
+    seat = FUEL_SHELF_Z + FUEL_BRACKET_T
+    head_h = can_d / 4.0
+    B.disc(p, (cx, cy), can_d + 4.0, seat, seat + head_h, "Head",
+           mode="new_body")
+    B.disc(p, (cx, cy), can_d / 2.0, FUEL_SHELF_Z - 1.0, seat + 1.0, "Neck")
+    B.disc(p, (cx, cy), can_d, FUEL_SHELF_Z - can_h, FUEL_SHELF_Z,
+           "Canister")
+    B.disc(p, (cx, cy), can_d / 6.0, FUEL_SHELF_Z - can_h - can_d / 12.0,
+           FUEL_SHELF_Z - can_h + 1.0, "Drain screw")
+    for s in (-1, 1):
+        B.axis_solid(p, (cx, cy, seat + head_h / 2.0),
+                     (cx, cy + s * (can_d / 2.0 + 12.0), seat + head_h / 2.0),
+                     can_d / 6.0, "Banjo boss")
+    B.disc(p, (cx, cy), can_d / 8.0, seat + head_h - 1.0,
+           seat + head_h + can_d / 10.0, "Bleed screw")
+    p.material("steel")
+    p.frame("seat", origin=(cx, cy, seat), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def upper_hose(app):
+    """The upper radiator hose: pushed onto the thermostat housing's outlet
+    stub (its bore IS the stub), on along the stub's axis, then forward over
+    the front of the engine to end ahead of the fan."""
+    p = app.part("upper coolant hose")
+    root, axis, reach, _ = T.thermostat_ports()
+    start = root + axis * reach
+    bend = COOLANT_HOSE_OD
+    turn = start + axis * bend
+    end = V((TSTAT_X, RADIATOR_Y, turn[2] - COOLANT_HOSE_OD))
+    bent_tube(p, [start, turn, end], bend, COOLANT_HOSE_OD,
+              COOLANT_HOSE_WALL, "Upper hose")
+    p.material("rubber")
+    p.frame("seat", origin=tuple(start), z=tuple(axis), x=(1, 0, 0))
+    return verify(p)
+
+
+def lower_hose(app):
+    """The lower radiator hose: up off the water pump's inlet neck, across
+    the front above the belt, forward outside the fan's sweep, and down to
+    where a radiator's bottom tank would be."""
+    p = app.part("lower coolant hose")
+    start = V((0.0, WP_INLET_Y, B.WP_INLET_Z0 + WP_INLET[0]))
+    bend = COOLANT_HOSE_OD
+    run_z = start[2] + bend + 5.0
+    # Out far enough that the forward run clears the fan's blade tips.
+    reach = FAN_R + COOLANT_HOSE_OD / 2.0 + 10.0
+    run_x = math.sqrt(reach ** 2 - (run_z - WATER_PUMP_Z) ** 2)
+    corners = [start, (0.0, WP_INLET_Y, run_z), (run_x, WP_INLET_Y, run_z),
+               (run_x, RADIATOR_Y, run_z),
+               (run_x, RADIATOR_Y, COOLANT_HOSE_OD)]
+    bent_tube(p, corners, bend, COOLANT_HOSE_OD, COOLANT_HOSE_WALL,
+              "Lower hose")
+    p.material("rubber")
+    p.frame("seat", origin=tuple(start), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def heater_pipe(app):
+    """The heater pipe: steel, off the thermostat housing's spigot, out past
+    the plenum and back along the manifold side at the height between the
+    exhaust flanges and the plenum's floor, to the bulkhead end."""
+    p = app.part("heater pipe")
+    _, _, _, start = T.thermostat_ports()
+    od, wall = HEATER_PIPE
+    run_x = INT_LOG[0] + PLENUM[0] / 2.0 + od
+    run_z = (PORT_Z + MANIFOLD_PAD_HZ + INT_LOG[1] - PLENUM[1] / 2.0) / 2.0
+    corners = [start, (run_x, start[1], start[2]),
+               (run_x, start[1] + 5.0 * od, run_z),
+               (run_x, BLOCK_Y1 + 2.0 * od, run_z)]
+    # A tube bender's tight bend: one and a half diameters.
+    bent_tube(p, corners, 1.5 * od, od, wall, "Heater pipe")
+    p.material("steel")
+    p.frame("seat", origin=tuple(start), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def _dipstick_top():
+    """Where the dipstick tube ends: out of its socket along the socket's
+    lean far enough to clear the rail's ledge, then straight up beside the
+    block to the head's top."""
+    t, d = V(DIPSTICK_BOSS), V(DIPSTICK_AXIS)
+    knee = t + d * (3.0 * DIPSTICK_TUBE_OD)
+    return t, knee, V((knee[0], t[1], HEAD_TOP))
+
+
+def dipstick_tube(app):
+    p = app.part("dipstick tube")
+    t, knee, top = _dipstick_top()
+    bent_tube(p, [t, knee, top], 3.0 * DIPSTICK_TUBE_OD, DIPSTICK_TUBE_OD,
+              DIPSTICK_WALL, "Dipstick tube")
+    p.material("steel")
+    p.frame("seat", origin=tuple(t), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("handle", origin=tuple(top), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+def dipstick(app):
+    """The dipstick's handle: a cap on the tube's mouth, the blade's top
+    running down inside the tube, and a flat ring to pull it by, facing the
+    pump side where a hand reaches it."""
+    p = app.part("dipstick")
+    _, _, top = _dipstick_top()
+    x, y, z = top
+    cap = DIPSTICK_TUBE_OD + 4.0
+    B.disc(p, (x, y), cap, z, z + cap / 3.0, "Cap", mode="new_body")
+    B.disc(p, (x, y), DIPSTICK_BORE_D / 2.0, z - 5.0 * DIPSTICK_TUBE_OD,
+           z + 1.0, "Blade")
+    ring_od, ring_id = 2.5 * DIPSTICK_TUBE_OD, 1.5 * DIPSTICK_TUBE_OD
+    ring_t = 5.0
+    centre = (y, z + cap / 3.0 + ring_od / 2.0 - 2.0)
+    sk = p.sketch(Plane.yz(x - ring_t / 2.0), name="Ring")
+    sk.circle(centre, d=ring_od)
+    sk.circle(centre, d=ring_id)
+    p.extrude(sk.add(), ring_t, mode="add", name="Ring")
+    p.material("plastic_white")
+    p.frame("seat", origin=tuple(top), z=(0, 0, 1), x=(1, 0, 0))
+    return verify(p)
+
+
+# (part builder, holder key, holder frame, the part's own frame)
+HANGING = (
+    ("oil filter housing", oil_filter_housing, "block", "oil_filter", "pad"),
+    ("dipstick tube", dipstick_tube, "block", "dipstick", "seat"),
+    ("fuel filter bracket", fuel_filter_bracket, "head", "fuel_filter",
+     "head"),
+    ("upper coolant hose", upper_hose, "thermostat", "hose", "seat"),
+    ("heater pipe", heater_pipe, "thermostat", "heater", "seat"),
+    ("lower coolant hose", lower_hose, "water pump", "inlet", "seat"),
+    ("fuel filter", fuel_filter, "fuel filter bracket", "filter", "seat"),
+    ("dipstick", dipstick, "dipstick tube", "handle", "seat"),
+)
+
+
+def install_hanging(app, rig, holders):
+    """Hang the static parts on their holders' frames. `holders` maps the
+    keys in HANGING to occurrences; each part hung here becomes a holder
+    too, so the filter goes on its bracket and the dipstick in its tube."""
+    holders = dict(holders)
+    for name, builder, holder, frame, own in HANGING:
+        part = builder(app)
+        rig.activate()
+        o = rig.place(part, name=name)
+        rig.fasten((holders[holder], frame), (o, own), flipped=False)
+        holders[name] = o
+    return {name: holders[name] for name, *_ in HANGING}
+
+
 def assembly_inputs():
     return dict(
         alternator=[ALT_X, ALT_Z, ALT_D, ALT_LUG, MOUNT_BOLT_Y, *MOUNT_BOLT_OFFSETS],
@@ -951,8 +1225,11 @@ def check_mounting_structure(app, rig):
     return dict(sections=sections, fasteners=fasteners)
 
 
-def check_mountings(app, rig):
-    """Check load-path contact and a closed pump pocket, not just non-overlap."""
+def check_mountings(app, rig, hanging=True):
+    """Check load-path contact and a closed pump pocket, not just non-overlap.
+
+    `hanging=False` leaves out what hangs on the head and block, for a
+    fixture built without them (tests/om615_mounting_smoke.py)."""
     structure = check_mounting_structure(app, rig)
     cover = app.part("timing cover", create=False)
     section = app.section(part=cover.id, base_plane="yz", offset=VAC_X, regions=True)
@@ -985,6 +1262,13 @@ def check_mountings(app, rig):
     pairs.extend(
         (f"vacuum mount screw {i + 1}", "vacuum pump casting") for i in range(6)
     )
+    # What hangs on it sits ON its holder: a flange on its pad, a hose on the
+    # end of its stub. Touching, not overlapping and not an air gap.
+    holders = {"block": "block", "head": "cylinder head",
+               "thermostat": "thermostat housing", "water pump": "water pump"}
+    if hanging:
+        pairs.extend((holders.get(holder, holder), name)
+                     for name, _, holder, _, _ in HANGING)
     measured = []
     for a, b in pairs:
         r = app.measure(a=dict(occurrence=a), b=dict(occurrence=b))

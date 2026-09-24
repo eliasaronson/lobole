@@ -4,8 +4,10 @@ An OM615-shaped Mercedes diesel — the early 200 D/8, OM615.913: 87 × 83.6 mm,
 1988 cc, five main bearings, a single overhead camshaft on a duplex chain
 working the valves through rocker arms, and an inclined pre-chamber per
 cylinder — built complete down to bearing shells, seals, oil galleries,
-water jacket, manifolds, fasteners derived from their holes, and the front
-drive: belt, fan, alternator and vacuum pump. It is a clearance-checked
+water jacket, manifolds, fasteners derived from their holes, the front
+drive — belt, fan, alternator and vacuum pump — and what hangs on the
+outside: oil and fuel filters, coolant hoses, the heater pipe and the
+dipstick, in a factory finish. It is a clearance-checked
 kinematic model, not factory or manufacturing geometry. The injection pump
 that fits it is `generators/pes_pump/`, built separately.
 
@@ -35,17 +37,23 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   keeping part, feature and occurrence identities and reusing unchanged
   geometry. Keys: `belt`, `fan`, `vacuum-pump` (the casting), `block`, `head`,
   `sump`, `timing-cover`, `damper`, `engine-mount-left`, `engine-mount-right`,
-  `cam-cover`, `intake`, `exhaust`, `injector`, `prechamber`, `thermostat`. A component's fingerprint covers the builder modules and the
-  SDK; a change to `om615_spec.py` or the shared accessory mounting inputs
-  refuses a component update and asks for a full rebuild.
+  `cam-cover`, `intake`, `exhaust`, `injector`, `prechamber`, `thermostat`,
+  and what hangs on it: `oil-filter`, `fuel-filter`, `fuel-filter-bracket`,
+  `upper-hose`, `lower-hose`, `heater-pipe`, `dipstick-tube`, `dipstick`. A
+  component comes out with its finish (below), so a part rebuilt on its own
+  looks as it does in the engine. A component's fingerprint covers the
+  builder modules, the finish table and the SDK; a change to `om615_spec.py`
+  or the shared accessory mounting inputs refuses a component update and asks
+  for a full rebuild.
 - **Outputs** in `--out` (default `/tmp/om615`): the project, an animated
   `om615.glb` (unless `--no-export`), `reference-dimensions.json` (measured
   B-Rep extents with their evidence status), `validation-report.json`,
   `standing-report.json`, `motion-report.json`, the accessory reports and
   `timings.json`.
 
-Tests: `om615_accessories_smoke` builds the real accessory B-Reps and checks
-belt tangency, validity and a staged fan update; `om615_mounting_smoke` checks
+Tests: `om615_accessories_smoke` builds the real accessory B-Reps — the
+front drive's and everything in `HANGING` — and checks belt tangency, strict
+single-solid validity and a staged fan update; `om615_mounting_smoke` checks
 the mounting fixture and that a missing pivot bolt, a severed or thin support
 arm and a short block screw are each refused for their own reason.
 
@@ -56,7 +64,8 @@ arm and a short block screw are each refused for their own reason.
 | `om615_spec.py` | every shared number, derived from bore, stroke, rod (145) and bore pitch (97) where the derivation is real |
 | `om615_bottom.py` | block (with its casting exterior), crank, rods, pistons and rings, caps, shells, flywheel, damper, seals, sump, timing chain and cover, oil pump, water pump, pulleys, engine mounts |
 | `om615_top.py` | head, camshaft, rockers, valves, guides, seats and springs, cam cover, manifolds, thermostat housing, injectors, pre-chambers, glow plugs |
-| `om615_accessories.py` | belt, fan, alternator (stator and rotor subassemblies), vacuum pump and its timer cam, mounting brackets |
+| `om615_accessories.py` | belt, fan, alternator (stator and rotor subassemblies), vacuum pump and its timer cam, mounting brackets; what hangs on it — oil filter housing, fuel filter and its bracket, the coolant hoses and heater pipe, the dipstick and its tube |
+| `om615_finish.py` | how each part looks: a table of finishes and the part each is given to |
 | `om615.py` | assembly, fasteners, the component table, stages and checks |
 
 Frame: +Z up and the bore axis (crank centreline z = 0, so a piston's height
@@ -80,8 +89,8 @@ sweep checks top-level pairs only, so the children are swept on their own.
 and the factory section, not a drawing, and none of it touches a bore,
 gallery, bearing or mating face. The block carries a raised panel over the
 water jacket on each side with three core plugs in bosses between the bores,
-a ledge along the pan rail, and on the pump side (−X) two interfaces for
-parts not yet fitted:
+a ledge along the pan rail, and on the pump side (−X) the two interfaces the
+oil filter housing and the dipstick tube sit on:
 
 - **oil filter pad** — flat, round, Ø70, its face at (−112, 48.5, 60) with
   normal −X: in the bay between the ribs over mains 3 and 4, at the main
@@ -163,7 +172,9 @@ and late 200 D / 220 D figures.
 
 Everything else is a modelling estimate: the casting exterior (panels, core
 plugs, ribs, ledges, the sump's well and ramp, the cover's outline, the mount
-arms), rod length, the 3.2 mm crown-to-deck
+arms), what hangs on it (both filters' sizes and places, the bracket, the
+hose and pipe routes, the water pump's inlet neck, the dipstick's lean and
+height), rod length, the 3.2 mm crown-to-deck
 gap, bowl and pre-chamber shape and volume, port routing, rocker and retainer
 construction (the manual shows cap and lock nuts; the model uses collets),
 seat insert diameters, skirt reliefs, the cam-cover bolt pattern and towers,
@@ -199,8 +210,82 @@ them moves anything or any interface.
   rail, and at its front end the ear the thermostat housing bolts to (two M8,
   derived like every other fastener), standing forward only outboard of the
   timing cover.
-- **Thermostat housing**: flange, chamber, cover and an upper-hose outlet
-  pointing forward and up; its `hose` frame is where a hose would start.
+- **Thermostat housing**: flange, chamber, cover, an upper-hose outlet
+  pointing forward and up (frame `hose`) and a heater spigot out of the
+  chamber's outboard side (frame `heater`). `thermostat_ports()` in
+  `om615_top.py` says where both end; the housing and the hose and pipe on
+  them are drawn from it.
+- **Fuel filter boss**: a pad on the head's pump side between cylinders 1 and
+  2 with two blind M8 threads, its face at `FUEL_FILTER_BOSS`; frame
+  `fuel_filter` on the head.
+
+## Finish
+
+`om615_finish.py` is one table of finishes and a second naming the part each
+is given to, applied once the engine is built and by every component
+builder. Colours are linear, as the renderer lights them. It is visual only
+(`set_appearance`): mass, the BOM and FEM keep the material.
+
+| finish | what | parts |
+|---|---|---|
+| `paint` | grey paint over iron: colour 0.17–0.19, roughness 0.5, **metallic 0** | block, head, timing cover, sump, water pump, mounts, alternator brackets, rear seal carrier, oil filter housing, fuel filter bracket |
+| `aluminium` | bare sand-cast aluminium, light and dull | cam cover, intake, vacuum pump castings, alternator castings, thermostat housing |
+| `cast iron` | as-cast iron that has been hot, near black | exhaust manifold |
+| `rubber` | black, rough | fan belt, gaskets, both coolant hoses |
+| `black` | black paint on pressed steel | fan and its spacer, pulleys, damper, filler cap, fuel filter |
+| `steel` | bare drawn tube | heater pipe, dipstick tube |
+| `yellow` | moulded plastic | the dipstick's handle |
+
+Paint is a dielectric. With any metallic in it the painted castings mirror the
+lights — dark from one side and silver from the other — where the photographs
+show one even satin grey. Fasteners, internals and anything the table does
+not name keep their material's own look; the names are exact, so a renamed
+part falls back to its material rather than picking up a stranger's finish.
+
+## What hangs on it
+
+Static parts, in `om615_accessories.py`, each drawn in engine space and hung
+by a world-aligned frame that coincides with its holder's (`HANGING` lists
+part, holder and both frames). The interfaces they sit on are in
+`om615_spec.py` under "what hangs on it"; their own proportions are read off
+the photographs against the 87 mm bore and 97 mm bore pitch. Each touches
+its holder and nothing else: the `local` stage measures every one of those
+contacts (distance zero, no overlap), and the standing sweep and the motion
+study cover them like any other part.
+
+- **Oil filter housing** (paint), on the block's pad: a flange as thick as
+  the pad stands proud with four M8 clearance holes and the Ø12 port, bolted
+  by four derived M8; a Ø30 neck inside the bolt circle, long enough that the
+  canister clears the bolt heads; and the canister standing beside the
+  crankcase — cast head, a Ø90 × 150 bowl (1.03 bores × 1.55 bore pitches),
+  lid and centre bolt — its top near the deck.
+- **Fuel filter** (black) on its **bracket** (paint): a plate on the head's
+  boss held by two derived M8, and a shelf reaching out with a ring the
+  filter's neck drops through. The filter head sits on the ring with its two
+  banjo bosses and bleed screw; the Ø80 × 110 canister (0.92 bores × 1.13
+  bore pitches) hangs below it, its bottom 10 mm above the injection pump's
+  mounting flange (`FUEL_SHELF_Z` is derived from that flange).
+- **Upper coolant hose** (rubber): its bore is the thermostat outlet stub's
+  outside and it starts at the stub's end; on along the stub's axis, then
+  forward over the front of the engine to end in free air ahead of the fan
+  (`RADIATOR_Y`), where a radiator's top tank would be.
+- **Lower coolant hose** (rubber): off an inlet neck on top of the water pump
+  housing (`WP_INLET`, the same hose size), which stands above the pulley and
+  belt and ahead of the timing cover by the hose's radius. Up, across the
+  front above the belt, forward at the radius that clears the fan's blade
+  tips, and down to where a radiator's bottom tank would be.
+- **Heater pipe** (steel, 16 × 1.5): off the thermostat housing's spigot, out
+  past the plenum, and back along the manifold side at the height between
+  the exhaust flanges and the plenum's floor, to past the head's rear face.
+- **Dipstick tube** (steel) and **dipstick** (yellow handle): the tube's bore
+  is the socket's; it leaves the socket along its 15° lean far enough to
+  clear the rail's ledge, bends upright and runs beside the block, clear of
+  the fourth glow plug, to the head's top. The dipstick is a cap on its
+  mouth, the blade's top inside it, and a flat ring facing the pump side.
+
+Hoses and pipes are `bent_path` tubes: corners and one bend radius, as a
+bender or a moulded hose has them (a hose bends round its own diameter, the
+heater pipe round one and a half).
 
 ## Not modelled
 
@@ -211,5 +296,11 @@ windings (the stator windings are twelve packs, not turns); belt material
 circulating; casting parting, cores, machining allowances and tolerances;
 water and oil routing beyond the jacket and galleries (the thermostat
 housing has no drilled feed: its ear is outside the head's side wall, and
-the rocker chamber is behind that wall). A clean interference
-report proves clearance of the modelled parts, not completeness.
+the rocker chamber is behind that wall; the water pump's inlet neck stands
+ahead of the volute and is not drilled into it); the radiator, the heater
+valve and the hose clips (the hoses and the heater pipe end in free air);
+the filters' elements and the dipstick's blade below the tube's mouth. The
+injection pump is not fitted here (it is `generators/pes_pump/`), so nothing
+checks the oil filter canister, which stands where the pump's rear end
+would, against it. A clean interference report proves clearance of the
+modelled parts, not completeness.

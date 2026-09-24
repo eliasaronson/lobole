@@ -545,7 +545,7 @@ def _block_castings(p):
         a = math.pi / 4 + k * math.pi / 2
         by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
         bz = fz + OIL_FILTER_BOLT_PCD / 2.0 * math.sin(a)
-        bore(p, (fx - 1.0, by, bz), (fx + 16.0, by, bz),
+        bore(p, (fx - 1.0, by, bz), (fx + OIL_FILTER_TAP_DEPTH, by, bz),
              OIL_FILTER_BOLT_D + TAP_FIT, "Oil filter pad thread", over=0.0)
     bore(p, (fx - 1.0, fy, fz), (GALLERY_X, fy, fz), OIL_FILTER_PORT_D,
          "Oil filter port", over=0.0)
@@ -1684,6 +1684,10 @@ def timing_cover_gasket(app):
 
 
 WP_BODY_Y = (-274.0, COVER_Y0)
+WP_HOUSING_D = 110.0
+# The inlet neck's root: a few mm down inside the housing's round top.
+WP_INLET_Z0 = WATER_PUMP_Z - 3.0 + math.sqrt((WP_HOUSING_D / 2.0) ** 2
+                                             - (WP_INLET[0] / 2.0) ** 2)
 WP_SHAFT_Y = (-292.0, -262.0)
 WP_SHAFT_D = 18.0
 
@@ -1694,19 +1698,30 @@ def water_pump(app):
     p = app.part("water pump")
     y0, y1 = WP_BODY_Y
     b = p.sketch(Plane.xz(y1), name="Housing")
-    b.circle((0, WATER_PUMP_Z), d=110.0)
+    b.circle((0, WATER_PUMP_Z), d=WP_HOUSING_D)
     p.extrude(b.add(), y1 - y0, mode="new_body", name="Housing")
     snout = p.sketch(Plane.xz(y1), name="Outlet")
     snout.rect((-24.0, WATER_PUMP_Z - 50.0), (24.0, WATER_PUMP_Z))
     p.extrude(snout.add(), y1 - y0, mode="add", name="Outlet")
+    # The inlet neck the lower hose pushes onto: on top of the housing, above
+    # the pulley and the belt, standing forward of the timing cover by the
+    # hose's radius. Not drilled through to the volute: it stands ahead of it.
+    od, bore_d = WP_INLET
+    neck_z = WP_INLET_Z0
+    axis_solid(p, (0, WP_INLET_Y, neck_z), (0, WP_INLET_Y, neck_z + od), od,
+               "Inlet neck")
+    bore(p, (0, WP_INLET_Y, neck_z + od + 1.0),
+         (0, WP_INLET_Y, neck_z + 6.0), bore_d, "Inlet bore", over=0.0)
     vol = p.sketch(Plane.xz(y1 - 1.0), name="Volute")
     vol.circle((0, WATER_PUMP_Z), d=IMPELLER_D + 8.0)
     p.extrude(vol.add(), y1 - y0 - 2.0, mode="cut", name="Volute")
-    bore = p.sketch(Plane.xz(y1 + 1.0), name="Shaft bore")
-    bore.circle((0, WATER_PUMP_Z), d=WP_SHAFT_D + FIT)
-    p.extrude(bore.add(), y1 - y0 + 2.0, mode="cut", name="Shaft bore")
+    shaft = p.sketch(Plane.xz(y1 + 1.0), name="Shaft bore")
+    shaft.circle((0, WATER_PUMP_Z), d=WP_SHAFT_D + FIT)
+    p.extrude(shaft.add(), y1 - y0 + 2.0, mode="cut", name="Shaft bore")
     p.material("aluminum")
     p.frame("face", origin=(0, y1, WATER_PUMP_Z), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("inlet", origin=(0, WP_INLET_Y, neck_z + od), z=(0, 0, 1),
+            x=(1, 0, 0))
     p.frame("shaft", origin=(0, sum(WP_SHAFT_Y) / 2.0, WATER_PUMP_Z),
             z=(0, 1, 0), x=(1, 0, 0))
     p.check()

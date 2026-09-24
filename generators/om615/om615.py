@@ -242,7 +242,8 @@ def front_and_rear(app, rig, occ, main):
         rig.fasten((bo, nm), (mo, "pad"), flipped=False)
     _solved("front and rear", rig)
     return {"crank_sprocket": cso, "cover": cv, "flywheel": fo,
-            "sump": pn, "crank": co, "accessories": accessories}
+            "sump": pn, "crank": co, "water pump": wpo,
+            "accessories": accessories}
 
 
 def top_end(app, rig, occ, main):
@@ -378,7 +379,8 @@ FOLDERS = [
     ("Block", ["block", "cylinder head", "head gasket", "main cap",
                "centre main cap", "sump", "sump gasket", "drain plug",
                "rear seal carrier", "timing cover", "timing cover gasket",
-               "cam cover", "cam cover gasket", "oil filler cap"]),
+               "cam cover", "cam cover gasket", "oil filler cap",
+               "oil filter housing", "dipstick tube", "dipstick"]),
     ("Crank train", ["crankshaft", "con rod", "rod cap", "piston",
                      "gudgeon pin", "gudgeon circlip", "top ring",
                      "second ring", "oil ring", "flywheel", "ring gear",
@@ -391,7 +393,8 @@ FOLDERS = [
     ("Valve gear", ["camshaft", "cam bearing cap", "rocker arm",
                     "rocker shaft", "intake valve", "exhaust valve",
                     "valve spring", "spring retainer", "valve collet"]),
-    ("Combustion", ["pre-chamber", "glow plug", "injector", "injector heat shield"]),
+    ("Combustion", ["pre-chamber", "glow plug", "injector", "injector heat shield",
+                    "fuel filter", "fuel filter bracket"]),
     ("Manifolds", ["intake manifold", "exhaust manifold",
                    "intake manifold gasket", "exhaust manifold gasket"]),
     ("Timing drive", ["crank sprocket", "cam sprocket", "timing chain",
@@ -401,7 +404,8 @@ FOLDERS = [
                   "oil pump sprocket", "oil pump chain"]),
     ("Cooling", ["water pump", "water pump shaft", "impeller",
                  "water pump pulley", "fan belt", "cooling fan", "fan hub spacer",
-                 "thermostat housing"]),
+                 "thermostat housing", "upper coolant hose",
+                 "lower coolant hose", "heater pipe"]),
     ("Alternator", ["alternator front casting", "alternator rear casting",
                     "alternator stator", "alternator rotor and shaft",
                     "alternator pulley", "alternator cooling fan",
@@ -577,6 +581,14 @@ COMPONENTS = {
     "exhaust": ("exhaust manifold", T.exhaust_manifold),
     "injector": ("injector", T.injector), "prechamber": ("pre-chamber", T.prechamber),
     "thermostat": ("thermostat housing", T.thermostat_housing),
+    "oil-filter": ("oil filter housing", A.oil_filter_housing),
+    "fuel-filter": ("fuel filter", A.fuel_filter),
+    "fuel-filter-bracket": ("fuel filter bracket", A.fuel_filter_bracket),
+    "upper-hose": ("upper coolant hose", A.upper_hose),
+    "lower-hose": ("lower coolant hose", A.lower_hose),
+    "heater-pipe": ("heater pipe", A.heater_pipe),
+    "dipstick-tube": ("dipstick tube", A.dipstick_tube),
+    "dipstick": ("dipstick", A.dipstick),
 }
 COMPONENTS = {k: (name, _finished(b)) for k, (name, b) in COMPONENTS.items()}
 
@@ -699,6 +711,12 @@ def main():
     stage = time.perf_counter()
     top, cam_mate = top_end(app, rig, occ, main_mate)
     timings["top_end_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
+    top["hanging"] = A.install_hanging(app, rig, {
+        "block": occ["block"], "head": top["head"],
+        "thermostat": top["thermostat"], "water pump": front["water pump"]})
+    _solved("what hangs on it", rig)
+    timings["hanging_s"] = time.perf_counter() - stage
     stage = time.perf_counter()
     fasteners(app, rig, occ, top, front)
     timings["fasteners_s"] = time.perf_counter() - stage
@@ -862,7 +880,7 @@ def _firing_order(r, valves):
 
 def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
              size, n, what, centres=None, rim_key=None, far_key=None,
-             *, snapshots):
+             centre_key=None, *, snapshots):
     """Fit `n` real fasteners, each derived from the hole it goes in.
 
     A blind hole needs its FAR END said outright — the probe follows the
@@ -891,6 +909,9 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
     # the same radius at the same height — matching the two lists by order
     # is how a bolt ends up in the wrong hole.
     if centres:
+        # `centres` are in the rim's own (x, y) unless `centre_key` says
+        # otherwise: a hole drilled along x has its centres in (y, z).
+        ck = centre_key or (lambda e: (e.center.x, e.center.y))
         near = []
         for c in centres:
             # A rim can come back SPLIT into two arcs (the element name then
@@ -898,7 +919,7 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
             # take: "a cylindrical face has an axis but no direction". Prefer
             # the whole one at that centre.
             at = [e for e in rims
-                  if (e.center.x - c[0]) ** 2 + (e.center.y - c[1]) ** 2 < 1.0]
+                  if (ck(e)[0] - c[0]) ** 2 + (ck(e)[1] - c[1]) ** 2 < 1.0]
             if not at:
                 raise SdkError(f"{what}: no rim at {c}")
             # Prefer an element the toponamer did not have to disambiguate:
@@ -976,6 +997,29 @@ def fasteners(app, rig, occ, top, front):
              lambda e: e.center.z - (HEAD_TOP + 1.0 - TSTAT_TAP_DEPTH), "M8", 2,
              "thermostat housing bolts",
              centres=[(TSTAT_X, TSTAT_Y + s * TSTAT_BOLT_DY) for s in (-1, 1)])
+    # What hangs on it: drilled along x, so every centre is a (y, z).
+    yz = lambda e: (e.center.y, e.center.z)  # noqa: E731
+    hang = top["hanging"]
+    fx, fy, fz = OIL_FILTER_BOSS
+    r = OIL_FILTER_BOLT_PCD / 2.0 / math.sqrt(2.0)
+    bolt_up(rig, hang["oil filter housing"], app.part("oil filter housing"),
+             (OIL_FILTER_BOLT_D + 1.0) / 2.0,
+             lambda e: e.center.x - (fx - OIL_FILTER_FLANGE_T),
+             occ["block"], blk, (OIL_FILTER_BOLT_D + TAP_FIT) / 2.0,
+             lambda e: e.center.x - (fx + OIL_FILTER_TAP_DEPTH), "M8", 4,
+             "oil filter housing bolts",
+             centres=[(fy + sy * r, fz + sz * r) for sy in (-1, 1)
+                      for sz in (-1, 1)],
+             rim_key=yz, far_key=yz, centre_key=yz)
+    bx, by, bz = FUEL_FILTER_BOSS
+    bolt_up(rig, hang["fuel filter bracket"], app.part("fuel filter bracket"),
+             (FUEL_FILTER_BOLT_D + 1.0) / 2.0,
+             lambda e: e.center.x - (bx - A.FUEL_BRACKET_T),
+             top["head"], hd, (FUEL_FILTER_BOLT_D + TAP_FIT) / 2.0,
+             lambda e: e.center.x - (bx + FUEL_FILTER_TAP_DEPTH), "M8", 2,
+             "fuel filter bracket bolts",
+             centres=[(by, bz + s * FUEL_FILTER_BOLT_DZ) for s in (-1, 1)],
+             rim_key=yz, far_key=yz, centre_key=yz)
     # A cap is drawn about ITS OWN origin and placed at its main's y, so its
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
     # block's hole floors are measured in. Both have to be said.

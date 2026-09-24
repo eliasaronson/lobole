@@ -49,6 +49,18 @@ def main():
             belt = A.belt(app)
             fan = A.fan(app)
             A.vacuum_parts(app)
+            # What hangs on it: each builder refuses anything but one valid
+            # solid (A.verify), and a hose is a bored tube, not a rod.
+            hanging = {name: build(app) for name, build, *_ in A.HANGING}
+            bores = {"upper coolant hose": A.COOLANT_HOSE_OD / 2.0
+                     - A.COOLANT_HOSE_WALL,
+                     "lower coolant hose": A.COOLANT_HOSE_OD / 2.0
+                     - A.COOLANT_HOSE_WALL,
+                     "heater pipe": A.HEATER_PIPE[0] / 2.0 - A.HEATER_PIPE[1],
+                     "dipstick tube": A.DIPSTICK_BORE_D / 2.0}
+            for name, radius in bores.items():
+                assert hanging[name].faces(kind="cylinder", radius=radius,
+                                           radius_tol=0.001), name
             app.delete_part(part="Part 1")
             print(f"accessory build: {time.perf_counter() - started:.3f}s", flush=True)
             lo, hi = belt.bbox()

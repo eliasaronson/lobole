@@ -5,7 +5,10 @@ iron block and head and the covers bolted to them painted a dark grey, the
 cam cover, intake manifold, vacuum pump and alternator castings bare
 aluminium, the exhaust manifold dark cast iron, belts, hoses and seals black
 rubber, the fan and the pulleys painted black. Fasteners, internals and
-anything not listed keep their material's own look.
+anything not listed keep their material's own look. What hangs on it: the
+oil filter housing and the fuel filter bracket painted with the block, the
+fuel filter canister black, the heater pipe and dipstick tube bare steel,
+and the dipstick's handle yellow.
 
 `set_appearance` is visual only — mass, the BOM and FEM keep the material —
 and recolouring rebuilds no geometry. Colours are LINEAR, as the renderer
@@ -28,6 +31,11 @@ FINISHES = {
     # Black paint on steel parts that are not cast: fan, pulleys.
     "black": dict(color=[0.025, 0.025, 0.028], roughness=0.45,
                   metallic=0.3),
+    # Bare drawn steel tube, lightly oiled: the heater pipe, the dipstick
+    # tube.
+    "steel": dict(color=[0.42, 0.42, 0.43], roughness=0.35, metallic=1.0),
+    # The dipstick's moulded handle, so it is the part a hand finds.
+    "yellow": dict(color=[0.80, 0.52, 0.02], roughness=0.45, metallic=0.0),
 }
 
 # Part name -> finish. Exact names, so a renamed part falls back to its
@@ -50,16 +58,24 @@ PART_FINISH = {
     "alternator front casting": "aluminium",
     "alternator rear casting": "aluminium",
     "thermostat housing": "aluminium",
+    "oil filter housing": "paint",
+    "fuel filter bracket": "paint",
     "exhaust manifold": "cast iron",
     "fan belt": "rubber",
     "timing cover gasket": "rubber",
     "sump gasket": "rubber",
+    "upper coolant hose": "rubber",
+    "lower coolant hose": "rubber",
     "cooling fan": "black",
     "fan hub spacer": "black",
     "water pump pulley": "black",
     "alternator pulley": "black",
     "crank damper": "black",
     "oil filler cap": "black",
+    "fuel filter": "black",
+    "heater pipe": "steel",
+    "dipstick tube": "steel",
+    "dipstick": "yellow",
 }
 
 

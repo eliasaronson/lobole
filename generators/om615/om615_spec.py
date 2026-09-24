@@ -659,3 +659,39 @@ TSTAT_OUTLET = (30.0, 22.0)          # the upper-hose stub outside / bore
 TSTAT_EAR_Z = PORT_Z + MANIFOLD_PAD_HZ + 3.0   # the ear's underside, clear
                                      # above the first exhaust flange
 TSTAT_WEB_T = 6.0                    # the web under the ear's front edge
+
+
+# ---- what hangs on it: the static parts outside ------------------------------
+# Read off the pump-side, manifold-side and front photographs against the
+# 87 mm bore and the 97 mm bore pitch. None of it moves anything. The
+# interfaces the parts bolt or push onto are said here; each part's own shape
+# is in om615_accessories.
+#
+# The oil filter housing bolts to the block's pad (OIL_FILTER_BOSS) through a
+# flange as thick as the pad stands proud; the pad's four M8 are blind.
+OIL_FILTER_FLANGE_T = OIL_FILTER_BOSS_H
+OIL_FILTER_TAP_DEPTH = 16.0
+# The fuel filter hangs from a bracket on a boss on the head's pump side,
+# between cylinders 1 and 2 (the glow plugs and injectors are ON the
+# cylinders' centres), high enough that its canister clears the injection
+# pump's flange below it.
+FUEL_FILTER_Y = MAIN_Y[1]
+FUEL_FILTER_BOSS_H = 14.0                    # proud of the head's side wall
+FUEL_FILTER_BOSS = (-(HEAD_X + FUEL_FILTER_BOSS_H), FUEL_FILTER_Y,
+                    HEAD_TOP - 24.0)         # the boss's FACE centre
+FUEL_FILTER_BOSS_HALF = (14.0, 22.0)         # (y, z) half-size of the pad
+FUEL_FILTER_BOLT_DZ = 12.0                   # two M8, above and below centre
+FUEL_FILTER_BOLT_D = PAN_BOLT_D
+FUEL_FILTER_TAP_DEPTH = 16.0                 # ends inside the boss's root
+# Coolant hose: the thermostat's outlet stub is the hose's bore, and the
+# water pump's inlet neck is the same hose at the radiator's other end.
+COOLANT_HOSE_WALL = 5.0
+COOLANT_HOSE_OD = TSTAT_OUTLET[0] + 2.0 * COOLANT_HOSE_WALL
+WP_INLET = TSTAT_OUTLET                      # (outside, bore) of the neck
+# The neck stands on top of the pump housing, ahead of the timing cover by
+# the hose's own radius, so the hose leaving it runs clear of the cover.
+WP_INLET_Y = COVER_Y0 - COOLANT_HOSE_OD / 2.0 - 5.0
+# The heater pipe: a steel tube off the thermostat housing's outboard side,
+# back along the manifold side between the exhaust flanges and the plenum.
+HEATER_PIPE = (16.0, 1.5)                    # (outside diameter, wall)
+HEATER_STUB = 12.0                           # the spigot it pushes onto

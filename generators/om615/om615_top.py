@@ -341,6 +341,19 @@ def head(app):
                   d=TSTAT_BOLT_D + TAP_FIT)
     p.extrude(tt.add(), -TSTAT_TAP_DEPTH, mode="cut",
               name="Thermostat threads")
+    # The fuel filter bracket's boss on the pump side, between the first two
+    # glow plugs, rooted inside the drafted wall; two blind M8 threads in it.
+    fx, fy, fz = FUEL_FILTER_BOSS
+    hy, hz = FUEL_FILTER_BOSS_HALF
+    root = -(HEAD_X - 6.0)
+    pad = p.sketch(Plane.yz(fx), name="Fuel filter boss")
+    B.rounded_polygon(pad, [(fy - hy, fz - hz), (fy + hy, fz - hz),
+                            (fy + hy, fz + hz), (fy - hy, fz + hz)], hy / 2.0)
+    p.extrude(pad.add(), root - fx, mode="add", name="Fuel filter boss")
+    for s in (-1, 1):
+        B.bore(p, (fx - 1.0, fy, fz + s * FUEL_FILTER_BOLT_DZ),
+               (fx + FUEL_FILTER_TAP_DEPTH, fy, fz + s * FUEL_FILTER_BOLT_DZ),
+               FUEL_FILTER_BOLT_D + TAP_FIT, "Fuel filter thread", over=0.0)
 
     B.casting_finish(p, "steel", (0.36, 0.38, 0.39))
     p.frame("deck", origin=(0, 0, FIRE_FACE), z=(0, 0, 1), x=(1, 0, 0))
@@ -354,6 +367,7 @@ def head(app):
     p.frame("front_face", origin=(0, BLOCK_Y0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("thermostat", origin=(TSTAT_X, TSTAT_Y, HEAD_TOP), z=(0, 0, 1),
             x=(1, 0, 0))
+    p.frame("fuel_filter", origin=FUEL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
     p.frame("cam_axis", origin=(0, 0, CAM_Z), z=(0, 1, 0), x=(1, 0, 0))
     for sx, nm in ((PORT_SIDE, "intake_face"), (PORT_SIDE, "exhaust_face")):
         p.frame(nm, origin=(sx * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
@@ -1074,6 +1088,26 @@ def oil_filler_cap(app):
     return p
 
 
+def thermostat_ports():
+    """Where the thermostat housing's two outlets are, in engine space: the
+    upper-hose stub (its root on the cover, its axis forward and up, and how
+    far it reaches) and the END of the heater spigot on the chamber's
+    outboard side. The housing is drawn from these and the hose and the
+    heater pipe start at them."""
+    x, y = TSTAT_X, TSTAT_Y
+    top = HEAD_TOP + TSTAT_FLANGE_T
+    chamber = height = TSTAT_BODY_D
+    axis = V((0.0, -0.6, 0.8)).unit()
+    root = V((x, y, top + height + 4.0))
+    reach = chamber / 2.0 + 24.0
+    # Set forward of the chamber's centre, so the pipe passes ahead of the
+    # plenum's front end.
+    heater = V((x + chamber / 2.0 + HEATER_STUB,
+                y - chamber / 2.0 + HEATER_PIPE[0] / 2.0 + 2.0,
+                top + height / 2.0))
+    return root, axis, reach, heater
+
+
 def thermostat_housing(app):
     """The thermostat housing: a flange on the head's front ear, the round
     chamber the thermostat sits in, its cover, and the upper-hose outlet
@@ -1097,9 +1131,7 @@ def thermostat_housing(app):
     B.disc(p, (x, y), chamber + 8.0, top + height, top + height + 8.0,
            "Thermostat cover")
     # The outlet leaves the cover forward and up.
-    axis = V((0.0, -0.6, 0.8)).unit()
-    root = V((x, y, top + height + 4.0))
-    reach = chamber / 2.0 + 24.0
+    root, axis, reach, heater = thermostat_ports()
     B.axis_solid(p, tuple(root), tuple(root + axis * reach), TSTAT_OUTLET[0],
                  "Hose outlet")
     B.axis_solid(p, tuple(root + axis * (reach - 8.0)),
@@ -1107,6 +1139,12 @@ def thermostat_housing(app):
                  "Hose bead")
     B.bore(p, tuple(root + axis * (reach + 1.0)), tuple(root), TSTAT_OUTLET[1],
            "Outlet bore", over=0.0)
+    # The heater feed: a spigot out of the chamber's outboard side.
+    pipe_od, pipe_wall = HEATER_PIPE
+    B.axis_solid(p, (x, heater[1], heater[2]), tuple(heater), pipe_od,
+                 "Heater spigot")
+    B.bore(p, tuple(heater + V((1.0, 0.0, 0.0))), (x, heater[1], heater[2]),
+           pipe_od - 2.0 * pipe_wall, "Heater bore", over=0.0)
     B.disc(p, (x, y), chamber - 10.0, z0 + 4.0, top + height + 4.0,
            "Chamber bore", mode="cut")
     holes = p.sketch(Plane.xy(z0 - 1.0), name="Bolt holes")
@@ -1118,6 +1156,7 @@ def thermostat_housing(app):
     p.frame("seat", origin=(x, y, z0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("hose", origin=tuple(root + axis * reach), z=tuple(axis),
             x=(1, 0, 0))
+    p.frame("heater", origin=tuple(heater), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
