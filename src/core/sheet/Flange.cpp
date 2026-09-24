@@ -1,4 +1,5 @@
 #include "core/sheet/Flange.h"
+#include "cad/NonDestructiveBoolean.h"
 
 #include "core/ElementHistory.h"
 
@@ -276,15 +277,15 @@ CADShape KeepSide(const CADShape& s, const gp_Pnt& at, const gp_Dir& n,
           BRepBuilderAPI_MakeFace(wire.Wire(), Standard_True).Face(),
           gp_Vec(n) * size)
           .Shape());
-  BRepAlgoAPI_Common op(s.GetShape(), half.GetShape());
-  op.SetNonDestructive(Standard_True);
-  return op.IsDone() ? CADShape(op.Shape()) : CADShape{};
+  BRepAlgoAPI_Common op;
+  return cad::BuildNonDestructive(op, s.GetShape(), half.GetShape())
+             ? CADShape(op.Shape())
+             : CADShape{};
 }
 
 double OverlapVolume(const CADShape& a, const CADShape& b) {
-  BRepAlgoAPI_Common op(a.GetShape(), b.GetShape());
-  op.SetNonDestructive(Standard_True);
-  if (!op.IsDone())
+  BRepAlgoAPI_Common op;
+  if (!cad::BuildNonDestructive(op, a.GetShape(), b.GetShape()))
     return 0.0;
   const CADShape c(op.Shape());
   return c.IsValid() ? c.Volume() : 0.0;

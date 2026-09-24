@@ -371,10 +371,10 @@ struct FastenerFit {
   // first, then the washers, then the nut. The commit path walks this rather
   // than recomputing the same arithmetic a second time.
   std::vector<PlannedPart> plan;
-  // The mates the joint became: one per INTERFACE it spans that nothing
-  // already held together — two for a bolt through three parts. Empty is the
-  // ordinary case for a second bolt through a stack the first one already
-  // joined, and is not a failure (docs/parts/README.md).
+  // The mates the joint became: one per INTERFACE it spans — two for a bolt
+  // through three parts — made for every bolt, so a second bolt through a
+  // stack the first already joined adds its own (redundant but consistent;
+  // docs/assemblies/solver.md#closing-loops).
   std::vector<uint64_t> mates;
 };
 

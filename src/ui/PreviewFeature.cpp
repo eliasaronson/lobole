@@ -17,6 +17,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
+#include "core/io/Serialization.h"       // ConfigurationToJson
 #include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h"
@@ -86,6 +87,35 @@ Feature* ResolvePendingFeature(AppState& state, size_t* outIndex) {
   return state.document->FindFeatureById(state.pendingFeatureId, outIndex);
 }
 
+namespace {
+// A flat pattern REPLACES the folded shape rather than adding a body, so it is
+// authored suppressed and a configuration switches it on
+// (docs/sheetmetal/README.md#features): the base configuration stays the
+// folded part. Accepting leaves the blank on screen, as it was previewed, by
+// making a `Flat` configuration that unsuppresses it and activating it — all
+// one undo step with the feature itself. The Sheet Metal panel's "Show the
+// blank" toggle then switches between the two.
+void ShowTheBlank(AppState& state, uint64_t flatId, size_t mark) {
+  Document& doc = *state.document;
+  auto add = std::make_unique<AddConfigurationCommand>("Flat");
+  AddConfigurationCommand* added = add.get();
+  if (!state.commands->Execute(std::move(add), doc))
+    return;
+  const Configuration* cfg = doc.FindConfiguration(added->ConfigurationId());
+  if (cfg == nullptr)
+    return;
+  const nlohmann::json before = DocumentIO::ConfigurationToJson(*cfg);
+  nlohmann::json after = before;
+  after["unsuppressed_features"] = std::vector<uint64_t>{flatId};
+  state.commands->Execute(std::make_unique<ModifyConfigurationCommand>(
+                              "Show the flat pattern", before, after),
+                          doc);
+  state.commands->Execute(
+      std::make_unique<SetActiveConfigurationCommand>(cfg->id), doc);
+  state.commands->CoalesceSince(mark, "Add flat pattern");
+}
+} // namespace
+
 void AcceptPendingFeature(AppState& state) {
   size_t idx = 0;
   Feature* f = ResolvePendingFeature(state, &idx);
@@ -103,8 +133,14 @@ void AcceptPendingFeature(AppState& state) {
   const uint64_t id = f->GetId();
   std::unique_ptr<Feature> owned = state.document->RemoveFeature(idx);
   state.pendingFeatureId = 0;
+  const bool blank = owned->TypeName() == "FlatPattern";
+  if (blank) // authored off; ShowTheBlank switches it on in a configuration
+    owned->SetSuppressed(true);
+  const size_t mark = state.commands->UndoDepth();
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(owned)),
                           *state.document);
+  if (blank)
+    ShowTheBlank(state, id, mark);
   SelectFeature(state, id);
   state.slotPick = {}; // armed slots end with the session
 }

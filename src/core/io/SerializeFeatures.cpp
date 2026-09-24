@@ -383,13 +383,35 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
   return j;
 }
 
+// Refused, naming the kinds, rather than read as a linear pattern: a
+// misspelled kind would load, draw a plausible grid and be wrong
+// (docs/conventions.md#refuse-dont-substitute).
+sketch::DerivedKind DerivedKindFromString(const std::string& kind) {
+  if (kind == "linear_pattern")
+    return sketch::DerivedKind::LinearPattern;
+  if (kind == "circular_pattern")
+    return sketch::DerivedKind::CircularPattern;
+  if (kind == "linked_copy") // v35
+    return sketch::DerivedKind::LinkedCopy;
+  if (kind == "mirror") // v51
+    return sketch::DerivedKind::Mirror;
+  throw std::runtime_error("unknown sketch derived op kind: " + kind +
+                           "; kinds: linear_pattern, circular_pattern, "
+                           "mirror, linked_copy");
+}
+
+sketch::ExternalKind ExternalKindFromString(const std::string& kind) {
+  if (kind == "face")
+    return sketch::ExternalKind::Face;
+  if (kind == "edge")
+    return sketch::ExternalKind::Edge;
+  throw std::runtime_error("unknown sketch external reference kind: " + kind +
+                           "; kinds: face, edge");
+}
+
 sketch::DerivedOp DerivedOpFromJson(const json& j) {
   sketch::DerivedOp op;
-  const std::string kind = j.at("kind").get<std::string>();
-  op.kind = kind == "circular_pattern" ? sketch::DerivedKind::CircularPattern
-            : kind == "linked_copy"    ? sketch::DerivedKind::LinkedCopy
-            : kind == "mirror"         ? sketch::DerivedKind::Mirror // v51
-                                       : sketch::DerivedKind::LinearPattern;
+  op.kind = DerivedKindFromString(j.at("kind").get<std::string>());
   op.sourceSketchId = j.value("source_sketch_id", uint64_t{0});
   for (const auto& s : j.at("source_ids"))
     op.sourceIds.push_back(s.get<uint32_t>());
@@ -472,7 +494,8 @@ PatternKind PatternKindFromString(const std::string& s) {
     return PatternKind::Linear;
   if (s == "circular")
     return PatternKind::Circular;
-  throw std::runtime_error("Unknown pattern kind: " + s);
+  throw std::runtime_error("unknown pattern kind: " + s +
+                           "; kinds: linear, circular, mirror");
 }
 
 const char* DatumPlaneKindToString(DatumPlaneKind kind) {
@@ -494,7 +517,8 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
     return DatumPlaneKind::Angled;
   if (s == "through_points")
     return DatumPlaneKind::ThroughPoints;
-  throw std::runtime_error("Unknown datum plane kind: " + s);
+  throw std::runtime_error("unknown datum plane kind: " + s +
+                           "; kinds: offset, angled, through_points");
 }
 
 const char* FrameKindToString(FrameKind kind) {
@@ -1301,7 +1325,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Extrude", 1,
      "sketch_id, distance (+_expr), mode: new_body|add|cut, end_mode?: "
      "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "
-     "reversed?, regions?, end_target?; extrudes along +plane normal"},
+     "reversed?, regions?, end_target?, thin? {thickness (+_expr), side: "
+     "out|in|both} (a wall of that thickness along the profile instead of a "
+     "filled face); extrudes along +plane normal"},
     {"Box", 1,
      "position [x,y,z] = MIN corner, width/height/depth = X/Y/Z extents mm "
      "(each +_expr, so a variable can drive it)"},
@@ -1406,9 +1432,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "the source, and get_state reports `stale` when the source has moved "
      "(docs/modeling/derived.md)"},
     {"DatumPlane", 1,
-     "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
-     "flip?, axis? {kind: x|y|z|sketch_line|datum_axis|custom}, the same as "
-     "Revolve's, angle_deg? (+_expr)"},
+     "kind: offset|angled|through_points; offset and angled take base_plane: "
+     "xy|xz|yz or parent_id; offset: offset (+_expr), flip?; angled: axis "
+     "{kind: x|y|z|sketch_line|datum_axis|custom}, the same as Revolve's, "
+     "angle_deg (+_expr); through_points: points [[x,y,z] x3] (mm)"},
     {"Revolve", 1,
      "sketch_id, axis {kind: x|y|z (world axes THROUGH THE WORLD ORIGIN)|"
      "sketch_line {sketch_id, entity_id}|datum_axis {datum_axis_id}|custom "
@@ -1453,14 +1480,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "edges [{feature_id, element}], radius (+_expr) = "
      "setback distance"},
     {"Shell", 20, "open_faces [{feature_id, element}], thickness (+_expr)"},
-    {"Loft", 20, "sketch_ids [id...] (section order), mode, guide_id?"},
+    {"Loft", 20,
+     "sketch_ids [id...] (section order), mode, path_id? (a spine the sections "
+     "are carried along: a sketch or a curve), guide_id?"},
     {"Sweep", 20,
      "profile_id (sketch), path_id (sketch or curve), mode, "
      "guide_id?, frame?"},
     {"Pipe", 43,
      "path_id (curve), outer_diameter (+_expr), wall_thickness "
      "(+_expr), mode"},
-    {"Rib", 36, "sketch_id (open profile), thickness (+_expr), flip?"},
+    {"Rib", 36,
+     "sketch_id (open profile), thickness (+_expr), flip?, body_id? (the body "
+     "it joins; default the nearest one the rib's slab overlaps, else the "
+     "newest)"},
     {"Thread", 36,
      "face {feature_id, element} (cylindrical), designation (e.g. \"M8\"), "
      "pitch?, thread_class?, length (+_expr), modeled?, allow_engagement?, "
@@ -1490,10 +1522,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "Every neighbour SURVIVES either cut. gap (+_expr): a cope opens on the "
      "radius, a mitre moves its plane back along the member"},
     {"Pattern", 1,
-     "kind: linear|circular, source_id (feature to repeat), count (+_expr), "
-     "linear: base_plane/axis + spacing (+_expr); circular: axis + angle_deg "
-     "(+_expr). axis is the same {kind: x|y|z|sketch_line|datum_axis|custom} "
-     "as Revolve's"},
+     "kind: linear|circular|mirror, source_id (feature to repeat); linear and "
+     "circular: axis, count (+_expr), then linear: spacing (+_expr), "
+     "circular: angle_deg (+_expr); mirror: the plane, base_plane: xy|xz|yz "
+     "or parent_id (a datum plane). axis is the same {kind: x|y|z|"
+     "sketch_line|datum_axis|custom} as Revolve's"},
 };
 std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
 
@@ -1748,9 +1781,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sketch::ExternalGeom eg;
       eg.ref = ElementRef{ej.value("feature_id", uint64_t{0}),
                           ej.value("element", std::string{})};
-      eg.kind = ej.value("kind", std::string("face")) == "edge"
-                    ? sketch::ExternalKind::Edge
-                    : sketch::ExternalKind::Face;
+      eg.kind = ExternalKindFromString(ej.value("kind", std::string("face")));
       eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
       sk->external.push_back(std::move(eg));
     }
@@ -1817,9 +1848,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ext->thinThickness = t.value("thickness", 1.0);
       ext->thinThicknessExpr = t.value("thickness_expr", std::string{});
       const std::string side = t.value("side", "out");
-      ext->thinSide = side == "in"     ? sketch::ThinSide::In
-                      : side == "both" ? sketch::ThinSide::Both
-                                       : sketch::ThinSide::Out;
+      if (side == "out")
+        ext->thinSide = sketch::ThinSide::Out;
+      else if (side == "in")
+        ext->thinSide = sketch::ThinSide::In;
+      else if (side == "both")
+        ext->thinSide = sketch::ThinSide::Both;
+      else
+        throw std::runtime_error("unknown thin side: " + side +
+                                 "; sides: out, in, both");
     }
     out = std::move(ext);
   } else if (type == "Box") {

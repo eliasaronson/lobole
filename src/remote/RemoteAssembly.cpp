@@ -292,10 +292,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Placing also MATES the parts the bolt clamps (returned as `mates`), so "
      "dragging one carries the rest instead of tearing the joint in half. One "
      "per INTERFACE it spans — a bolt through three parts makes two, chained, "
-     "so the one in the middle is held too — and once per interface, since a "
-     "second bolt across one already joined would close a loop the solver "
-     "reports as over-constrained. `mates` is empty when there was nothing "
-     "new to join.",
+     "so the one in the middle is held too — and one per BOLT: each bolt of "
+     "a pattern mates at its own hole, so deleting one leaves the parts held "
+     "by the others. The extra mates across an interface already joined are "
+     "consistent, and solve_assembly lists them in `redundant_mates` rather "
+     "than as errors.",
      "drive, dry_run, far_end, nut, rim, size, standard, washer, "
      "washer_under_head, washer_under_nut"},
     {"bom",

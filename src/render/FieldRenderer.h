@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/ClipPlanes.h"
+#include "render/FramesInFlight.h"
 #include "render/SceneRenderer.h"
 
 #include <glm/glm.hpp>
@@ -61,7 +62,10 @@ public:
   bool IsInitialized() const { return m_initialized; }
 
 private:
-  static constexpr int kFramesInFlight = 2;
+  // One slot per swapchain image (render/FramesInFlight.h): with two, a
+  // three-image swapchain rewrote a buffer the GPU was still reading.
+  static constexpr int kFramesInFlight =
+      static_cast<int>(render::kMaxFramesInFlight);
   struct DynamicBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -94,8 +98,7 @@ private:
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
-  VkDescriptorSet m_descriptorSets[kFramesInFlight] = {VK_NULL_HANDLE,
-                                                       VK_NULL_HANDLE};
+  VkDescriptorSet m_descriptorSets[kFramesInFlight] = {};
   DynamicBuffer m_vertexBuffers[kFramesInFlight];
   DynamicBuffer m_indexBuffers[kFramesInFlight];
 

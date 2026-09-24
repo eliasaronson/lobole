@@ -25,15 +25,14 @@ with the window size.
   capacity it warns once and wraps — degraded rather than an out-of-bounds
   write.
 
-`MeshRenderer`, `OutlineRenderer`, `SSAORenderer` and `GpuTimer` index
-through `FrameSlot`. `OutlineRenderer` creates its per-mesh edge buffers per
-slot on demand, so capacity costs nothing for slots a swapchain never uses.
-
-`SketchRenderer`, `StockRenderer`, `FieldRenderer` and `UnderlayRenderer` do
-**not**: each keeps `kFramesInFlight = 2` and indexes
-`currentFrame % kFramesInFlight`, which aliases images 0 and 2 on the
-3-image swapchain the app requests — an open defect: their overlays can
-draw with another frame's camera or geometry while the view moves.
+Every scene renderer — `MeshRenderer`, `OutlineRenderer`, `SSAORenderer`,
+`SketchRenderer`, `StockRenderer`, `FieldRenderer`, `UnderlayRenderer` — and
+`GpuTimer` sizes its per-frame resources by `kMaxFramesInFlight` and indexes
+them through `FrameSlot`. `OutlineRenderer` creates its per-mesh edge buffers
+per slot on demand, so capacity costs nothing for slots a swapchain never
+uses. A renderer that wrapped the index into fewer slots would alias images
+0 and 2 on the 3-image swapchain the app requests, and draw with another
+frame's camera or geometry while the view moves.
 
 Synchronization validation cannot see this class of bug: the UBO slots are
 persistently mapped, and sync validation does not track CPU writes through a

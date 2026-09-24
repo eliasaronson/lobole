@@ -135,6 +135,15 @@ def main():
         disp = d.call("set_result_display", study=study, field="density")
         expect(disp["field"] == "density", "density display echoed")
         d.call("set_result_display", study=study, field="none")
+        # A field it does not know is refused, naming the fields — never
+        # drawn as von Mises (docs/conventions.md#refuse-dont-substitute).
+        try:
+            d.call("set_result_display", study=study, field="displacment")
+            refused = ""
+        except Exception as e:  # noqa: BLE001 - the refusal is the point
+            refused = str(e)
+        expect("displacment" in refused and "von_mises" in refused,
+               f"an unknown field is refused by name ({refused})")
 
         # --- STL export of the optimized shape ------------------------------
         stl = os.path.join(tmp, "shape.stl")

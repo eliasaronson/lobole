@@ -86,7 +86,9 @@ class Designer:
     def instances():
         """Running instances that announced themselves, newest first.
 
-        Each is {"pid", "port", "mode": "gui"|"headless", "started"}. The app
+        Each is {"pid", "port", "mode": "gui"|"headless"|"offscreen",
+        "started"}. The open project is not here — it changes while the
+        instance runs; `ping` reports it. The app
         writes one file per open remote port under
         $XDG_STATE_HOME/designer/instances (see src/remote/InstanceRegistry.h);
         a crash leaves the file behind, so the pid is the truth. Entries whose

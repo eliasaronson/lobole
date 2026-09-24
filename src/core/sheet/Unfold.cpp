@@ -1,4 +1,5 @@
 #include "core/sheet/Unfold.h"
+#include "cad/NonDestructiveBoolean.h"
 
 #include "core/ElementHistory.h"
 
@@ -107,9 +108,8 @@ CADShape Cut(const CADShape& a, const CADShape& b) {
     return {};
   if (!b.IsValid())
     return a;
-  BRepAlgoAPI_Cut op(a.GetShape(), b.GetShape());
-  op.SetNonDestructive(Standard_True);
-  if (!op.IsDone())
+  BRepAlgoAPI_Cut op;
+  if (!cad::BuildNonDestructive(op, a.GetShape(), b.GetShape()))
     return {};
   CADShape out(op.Shape());
   return Volume(out) > 1e-12 ? out : CADShape{};
@@ -118,9 +118,8 @@ CADShape Cut(const CADShape& a, const CADShape& b) {
 CADShape Common(const CADShape& a, const CADShape& b) {
   if (!a.IsValid() || !b.IsValid())
     return {};
-  BRepAlgoAPI_Common op(a.GetShape(), b.GetShape());
-  op.SetNonDestructive(Standard_True);
-  if (!op.IsDone())
+  BRepAlgoAPI_Common op;
+  if (!cad::BuildNonDestructive(op, a.GetShape(), b.GetShape()))
     return {};
   CADShape out(op.Shape());
   return Volume(out) > 1e-12 ? out : CADShape{};

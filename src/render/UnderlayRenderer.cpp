@@ -86,8 +86,8 @@ bool UnderlayRenderer::CreateDescriptors() {
   if (vkCreateDescriptorPool(m_device, &uboPool, nullptr, &m_uboPool) !=
       VK_SUCCESS)
     return false;
-  std::array<VkDescriptorSetLayout, kFramesInFlight> uboLayouts{m_uboSetLayout,
-                                                                m_uboSetLayout};
+  std::array<VkDescriptorSetLayout, kFramesInFlight> uboLayouts;
+  uboLayouts.fill(m_uboSetLayout);
   VkDescriptorSetAllocateInfo uboAlloc{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   uboAlloc.descriptorPool = m_uboPool;
@@ -453,7 +453,7 @@ void UnderlayRenderer::Render(VkCommandBuffer commandBuffer,
                               uint32_t currentFrame) {
   if (!m_initialized || m_draws.empty())
     return;
-  const uint32_t frame = currentFrame % kFramesInFlight;
+  const uint32_t frame = render::FrameSlot(currentFrame, "UnderlayRenderer");
 
   Ubo ubo{m_view, m_proj};
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));

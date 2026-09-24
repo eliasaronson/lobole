@@ -76,6 +76,15 @@ async def run(port):
 
             # Everything else is still reachable, and still documented.
             index = result(await session.call_tool("help", {}))
+            # help()'s list of exposed tools is kept by hand; every tool the
+            # server announces must be on it, or help('<tool>') answers "no
+            # such method" about a tool the client can see.
+            expect(names <= set(index["exposed_as_tools"]),
+                   "help() lists every announced tool "
+                   f"({sorted(names - set(index['exposed_as_tools']))})")
+            ex = result(await session.call_tool("help",
+                                                {"method": "execute_script"}))
+            expect("tool" in ex["doc"], "help('execute_script') answers")
             expect("add_mate" in index["methods"], "help indexes add_mate")
             doc = result(await session.call_tool("help", {"method":
                                                           "add_mate"}))

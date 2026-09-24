@@ -1787,6 +1787,76 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // The flat pattern tool keeps the part FOLDED in the base configuration.
+  // A flat pattern replaces the folded shape, so it is authored suppressed
+  // and a `Flat` configuration shows it; the tool used to add it live, which
+  // left the part flat in every configuration with no way back. Accepting
+  // now leaves the blank on screen through that configuration, and the Sheet
+  // Metal panel's "Show the blank" switches between the two.
+  t = IM_REGISTER_TEST(engine, "sheetmetal", "flat_pattern_keeps_the_fold");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+    SetupFor(ctx, Needs::SheetFlanged);
+    Document* part = Doc();
+    // The smallest side of the box: the sheet's thickness when it is flat,
+    // the flange's height when it is folded.
+    const auto thinnest = [&] {
+      double lo = 1e300;
+      for (const Body& b : part->GetBodies()) {
+        glm::vec3 mn, mx;
+        b.shape.GetBoundingBox(mn, mx, /*tight=*/true);
+        const glm::vec3 size = mx - mn;
+        lo = std::min({lo, double(size.x), double(size.y), double(size.z)});
+      }
+      return lo;
+    };
+    const double t0 = Doc()->SheetMetal()->thickness;
+    IM_CHECK(thinnest() > 2.0 * t0); // folded
+    const size_t undoBefore = s_App->commands->UndoDepth();
+
+    ToolbarCreateAccept(ctx, "###tb_flat_pattern");
+    ctx->Yield(2);
+    const Feature* flat = part->GetFeature(part->FeatureCount() - 1);
+    IM_CHECK_EQ(flat->TypeName(), std::string("FlatPattern"));
+    IM_CHECK(flat->IsSuppressed()); // off in the base configuration
+    IM_CHECK(part->ActiveConfiguration() != 0);
+    IM_CHECK(thinnest() < 1.5 * t0); // the blank, as previewed
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoBefore + 1); // one step
+
+    // Unticking "Show the blank" is the folded part again.
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    if (ctx->ItemInfo("//###Variables/###sm_flat", ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Sheet metal");
+      ctx->Yield(2);
+    }
+    ctx->ItemClick("//###Variables/###sm_flat");
+    ctx->Yield(3);
+    IM_CHECK(part->ActiveConfiguration() == 0);
+    IM_CHECK(thinnest() > 2.0 * t0);
+    ctx->ItemClick("//###Variables/###sm_flat");
+    ctx->Yield(3);
+    IM_CHECK(thinnest() < 1.5 * t0);
+
+    // Undo takes the feature and its configuration away together. (The
+    // panel's toggle is a view switch, not an undo step.)
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+    const size_t features = part->FeatureCount();
+    const size_t configs = part->GetConfigurations().size();
+    s_App->commands->Undo(*part);
+    ctx->Yield(2);
+    IM_CHECK_EQ(part->FeatureCount(), features - 1);
+    IM_CHECK_EQ(part->GetConfigurations().size(), configs - 1);
+    IM_CHECK(part->ActiveConfiguration() == 0);
+    IM_CHECK(thinnest() > 2.0 * t0);
+  };
+
   // A flat pattern on a drawing, by clicking (S11): the Add-view form's
   // configuration combo draws the Flat blank beside the folded part — with
   // its crease as a bend line — and the view's Bend table button lists it.

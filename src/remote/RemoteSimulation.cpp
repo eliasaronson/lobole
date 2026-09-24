@@ -280,8 +280,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "id, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
-     "array, one entry PER BODY, because a study meshes and solves each body "
-     "separately (there is no bonded contact between them). A body carries "
+     "array, one entry PER BODY, because a part study meshes and solves each "
+     "body separately (a part's bodies share no bonded contact); an assembly "
+     "study bonds its participants "
+     "(docs/simulation/README.md#assembly-studies). A body carries "
      "max_displacement_mm: {value, at}, max_von_mises_mpa: {value, at} and "
      "factor_of_safety for a static study, `frequencies_hz` for a modal one, "
      "and the optimization summary for a topology one; the static maxima are "
@@ -1058,13 +1060,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       host.Require(id);
       state.simulation.activeStudyId = id;
     }
+    // An unknown field is refused, not drawn as von Mises: a misspelled
+    // "displacment" would otherwise show a plausible stress plot.
     const std::string f = p.value("field", std::string("von_mises"));
-    state.simulation.field =
-        f == "displacement" ? ui::SimulationState::Field::Displacement
-        : f == "shape"      ? ui::SimulationState::Field::Shape
-        : f == "density"    ? ui::SimulationState::Field::Density
-        : f == "none"       ? ui::SimulationState::Field::None
-                            : ui::SimulationState::Field::VonMises;
+    if (f == "von_mises")
+      state.simulation.field = ui::SimulationState::Field::VonMises;
+    else if (f == "displacement")
+      state.simulation.field = ui::SimulationState::Field::Displacement;
+    else if (f == "shape")
+      state.simulation.field = ui::SimulationState::Field::Shape;
+    else if (f == "density")
+      state.simulation.field = ui::SimulationState::Field::Density;
+    else if (f == "none")
+      state.simulation.field = ui::SimulationState::Field::None;
+    else
+      throw std::runtime_error("unknown field: " + f +
+                               "; fields: von_mises, displacement, shape, "
+                               "density, none");
     if (p.contains("deform_scale"))
       state.simulation.deformScale =
           static_cast<float>(p.at("deform_scale").get<double>());

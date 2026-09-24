@@ -330,7 +330,11 @@ The convention is scoped to Measure.cpp. `core/ElementHistory.cpp` and feature
 execution (`core/features/*.cpp`) build destructive booleans, and neither runs
 on a worker thread. A sweep that calls into anything else has to carry the
 rule with it. `AssemblyStudy`'s fuse copies its shapes and runs
-`BOPAlgo_Builder` non-destructive for the same reason.
+`BOPAlgo_Builder` non-destructive for the same reason. Anywhere else in `src/`, a boolean that must not write to its inputs is
+built with `cad::BuildNonDestructive` (`src/cad/NonDestructiveBoolean.h`),
+which sets the flag before the build; a second convention test fails on the
+two-shape constructor followed by `SetNonDestructive`, where the flag comes
+too late to do anything.
 
 `tests/sweep_parallel_smoke.py` diffs a one-thread report
 (`DESIGNER_SWEEP_THREADS=1`) against an all-thread one byte for byte; it cannot

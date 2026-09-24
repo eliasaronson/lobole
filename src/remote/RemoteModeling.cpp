@@ -291,11 +291,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "a sketch as live locked construction geometry.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
-     "Attach an image underlay to a sketch (path or "
-     "base64 bytes); returns image_id.",
+     "Attach an image underlay to a sketch from an image file (`path`); "
+     "returns image_id.",
      "at, opacity, path, sketch_id, units_per_pixel", remote::NeedsPart},
     {"set_reference_image",
-     "Update an underlay's placement/opacity/lock by {sketch_id, image_id}. "
+     "Update an underlay's placement, opacity or visibility (`hidden`) by "
+     "{sketch_id, image_id}. "
      "origin is [u, v] sketch mm, units_per_pixel is sketch mm per image "
      "pixel, and the tilt is `rotation` (RADIANS, CCW about origin) or "
      "`rotation_deg`, never both.",

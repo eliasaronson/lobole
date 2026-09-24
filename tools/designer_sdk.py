@@ -500,8 +500,15 @@ def connect(port=None, host="127.0.0.1"):
                 "no running Designer instance announced itself; start one "
                 "(tools/headless-preview.sh <port>, or the app) or pass port=")
         else:
-            listed = ", ".join(f"{i['port']} ({i.get('project') or 'no project'})"
-                               for i in found)
+            # The registry says which ports; only the instance knows what it
+            # has open NOW, so ask it (briefly: a stalled one is not waited on).
+            def what(i):
+                try:
+                    r = _Remote(i["port"], timeout=2.0).call("ping")
+                    return r.get("project") or "no project"
+                except Exception:  # noqa: BLE001 - listing, not operating
+                    return f"{i.get('mode', '?')}, not answering"
+            listed = ", ".join(f"{i['port']} ({what(i)})" for i in found)
             raise SdkError(f"several instances are running, pass port=: "
                            f"{listed}")
     app = App(_Remote.wait_for(int(port)))
@@ -1853,6 +1860,10 @@ class Occurrence:
         axes as the assembly has them placed, so "which way does this grow"
         and "did that pin land on the coupler's plane" are one call each.
         """
+        # The `frame` RPC resolves an occurrence against the ACTIVE assembly,
+        # so make this one active first — as bbox() does — or the id is
+        # looked up in whatever tab a previous call left open.
+        self.asm.activate()
         kw = {"occurrence": self.id}
         if name is not None:
             kw["frame"] = name

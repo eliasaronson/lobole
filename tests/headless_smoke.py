@@ -1536,9 +1536,21 @@ def main():
             expect(not fh.read(5).startswith(b"solid") or
                    os.path.getsize(stl) > 84, "stl is binary")
         d.call("new_project")
-        d.call("import_step", path=step)
+        rep = d.call("import_step", path=step)
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STEP has the original volume")
+        # Centred on import, and the reply says by how much — as add_feature
+        # does for an Import. The box is 2x3x4 from the origin, so its centre
+        # moved by half of that.
+        shift = rep.get("recentred_by")
+        expect(shift is not None and
+               abs(sum(c * c for c in shift) ** 0.5 -
+                   (1.0 + 2.25 + 4.0) ** 0.5) < 1e-3,
+               f"import_step reports recentred_by ({rep})")
+        d.call("new_project")
+        kept = d.call("import_step", path=step, keep_origin=True)
+        expect("recentred_by" not in kept,
+               "keep_origin imports report no shift")
         # STL import: the watertight mesh comes back as a closed SOLID (the
         # sewn shell is promoted), so volume works; a box tessellates exactly.
         d.call("new_project")

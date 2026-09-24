@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/FramesInFlight.h"
 #include "render/SceneRenderer.h"
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -63,7 +64,10 @@ public:
   bool IsInitialized() const { return m_initialized; }
 
 private:
-  static constexpr int kFramesInFlight = 2;
+  // One slot per swapchain image (render/FramesInFlight.h): with two, a
+  // three-image swapchain rewrote a buffer the GPU was still reading.
+  static constexpr int kFramesInFlight =
+      static_cast<int>(render::kMaxFramesInFlight);
   static constexpr uint32_t kMaxTextures = 64; // reference images per sketch
 
   struct Ubo {
@@ -122,7 +126,7 @@ private:
   VkSampler m_sampler = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
-  VkDescriptorSet m_uboSets[kFramesInFlight] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkDescriptorSet m_uboSets[kFramesInFlight] = {};
   DynamicBuffer m_vertexBuffers[kFramesInFlight];
 
   std::map<std::string, Texture> m_textures;

@@ -67,8 +67,8 @@ bool FieldRenderer::CreateDescriptors() {
       VK_SUCCESS)
     return false;
 
-  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{
-      m_descriptorSetLayout, m_descriptorSetLayout};
+  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts;
+  layouts.fill(m_descriptorSetLayout);
   VkDescriptorSetAllocateInfo alloc{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   alloc.descriptorPool = m_descriptorPool;
@@ -222,7 +222,7 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer,
                            uint32_t currentFrame) {
   if (!m_initialized || m_indices.empty())
     return;
-  const uint32_t frame = currentFrame % kFramesInFlight;
+  const uint32_t frame = render::FrameSlot(currentFrame, "FieldRenderer");
 
   Ubo ubo{m_view, m_proj, {}};
   for (int i = 0; i < kMaxClipPlanes; i++)

@@ -90,7 +90,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      "format carries one; refused for STEP, which declares its own. "
      "`keep_origin` keeps the file's OWN coordinates; without it the import "
      "is centred on its bounding box, which loses the placement a bought "
-     "part was exported at and stacks every one of them on the origin.",
+     "part was exported at and stacks every one of them on the origin — and "
+     "the reply's `recentred_by` [x, y, z] (mm) says by how much.",
      "as_assembly, keep_origin, path, units",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
@@ -1403,9 +1404,19 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), nullptr,
                              &error, unit, p.value("keep_origin", false)))
       throw std::runtime_error(error);
-    return json{{"bodies", doc->GetBodies().size() - before},
+    json out = {{"bodies", doc->GetBodies().size() - before},
                 {"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
+    // Centred unless told otherwise: say by how much, as add_feature does for
+    // an Import, so a caller who expected file coordinates is not left to
+    // find the move by measuring.
+    if (doc->FeatureCount() > 0)
+      if (const auto* imp = dynamic_cast<const ImportFeature*>(
+              doc->GetFeature(doc->FeatureCount() - 1));
+          imp != nullptr && imp->Shift() != glm::vec3(0.0f))
+        out["recentred_by"] =
+            json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+    return out;
   }
   return std::nullopt;
 }

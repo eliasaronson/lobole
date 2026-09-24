@@ -190,7 +190,11 @@ GUI: the nine tools are one toolbar group (`###tb_base_flange` …
 section (`src/ui/SheetMetalPanel.cpp`) shows the stock with each derived number
 labelled by its source, a "Show the blank" toggle that activates a `Flat`
 configuration unsuppressing the flat pattern (creating it if absent), and one
-row per bend.
+row per bend. Accepting the Flat pattern tool does the authoring above in one
+undo step: the feature goes in suppressed, and a `Flat` configuration that
+shows it is added and made active, so the blank stays on screen as previewed
+and the base configuration stays folded (`ShowTheBlank`,
+`src/ui/PreviewFeature.cpp`).
 
 ## Tests
 

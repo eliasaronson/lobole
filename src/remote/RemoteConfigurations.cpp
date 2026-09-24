@@ -23,7 +23,7 @@ static constexpr MethodDoc ConfigurationMethods[] = {
      "Add a configuration to the active part (parameter overrides + feature "
      "suppression) or assembly (occurrence suppression).",
      "name"},
-    {"remove_configuration", "Remove a configuration by name.", "id"},
+    {"remove_configuration", "Remove a configuration by `id`.", "id"},
     {"list_configurations", "List configurations and the active one.", "",
      remote::NoFlags,
      "configurations[]{id, name, and then the tab's own: on a PART "

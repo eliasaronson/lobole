@@ -841,6 +841,31 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
 // so it is exactly the form that cannot be corrected afterwards — and the
 // form someone reaches for, because it is the short one. Default-construct
 // and hand it to BuildQuery.
+// Anywhere in src/: a boolean built by its two-shape constructor and THEN
+// told to be non-destructive is destructive — the constructor has already
+// built, and the flag is ignored. JogFeature and four sheet-metal helpers did
+// exactly this; cad::BuildNonDestructive (cad/NonDestructiveBoolean.h) sets
+// the flag before the build.
+TEST_CASE("no boolean asks to be non-destructive after it has built",
+          "[convention]") {
+  const std::regex late(
+      R"(BRepAlgoAPI_[A-Za-z]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\);\s*\n[^\n]*\b\1\.SetNonDestructive)");
+  std::vector<std::string> offenders;
+  for (const char* ext : {".cpp", ".h"})
+    for (const SourceFile& f : SourcesUnder("src", ext))
+      for (std::sregex_iterator it(f.text.begin(), f.text.end(), late), end;
+           it != end; ++it)
+        offenders.push_back(Relative(f.path) + ": " +
+                            it->str().substr(0, it->str().find('\n')));
+  INFO([&] {
+    std::string s = "Build through cad::BuildNonDestructive instead:\n";
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("every boolean in Measure.cpp is built through BuildQuery",
           "[convention]") {
   const fs::path path =

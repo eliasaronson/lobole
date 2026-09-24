@@ -743,7 +743,7 @@ _EXPOSED = {
     "render_still", "view", "set_camera", "set_section", "set_render_options",
     "new_project", "open_project", "save_project", "export_stl", "export_step",
     "add_feature", "modify_feature", "delete_feature", "undo", "rpc", "help",
-    "instances",
+    "instances", "execute_script",
 }
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
@@ -755,7 +755,7 @@ _EXPOSED = {
           "extrude_modes, extrude_end_modes, axis_kinds, material_slugs, "
           "drawing_dim_kinds, inspection_contract, "
           "document_format_version. Pass `method` to get just that one "
-          "instead of all 242 — the params list is what to read before "
+          "instead of every method — the params list is what to read before "
           "guessing a key name, since an unrecognised key is REFUSED, not "
           "ignored. A method with params_free_form: true reads its params "
           "object opaquely, so the prose is the only guide there. The "

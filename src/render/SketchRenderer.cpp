@@ -72,8 +72,8 @@ bool SketchRenderer::CreateDescriptors() {
       VK_SUCCESS)
     return false;
 
-  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{
-      m_descriptorSetLayout, m_descriptorSetLayout};
+  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts;
+  layouts.fill(m_descriptorSetLayout);
   VkDescriptorSetAllocateInfo alloc{};
   alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   alloc.descriptorPool = m_descriptorPool;
@@ -334,7 +334,7 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
                             uint32_t currentFrame) {
   if (!m_initialized)
     return;
-  const uint32_t frame = currentFrame % kFramesInFlight;
+  const uint32_t frame = render::FrameSlot(currentFrame, "SketchRenderer");
 
   Ubo ubo{m_view, m_proj,
           glm::vec4(static_cast<float>(m_viewportWidth),

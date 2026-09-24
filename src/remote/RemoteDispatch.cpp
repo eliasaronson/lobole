@@ -80,15 +80,11 @@ using nlohmann::json;
 #include "remote/RemoteServerInternal.h"
 
 // Deciding what an RPC MEANS: the server's own methods, the part-tab gate, and
-// the routing to the nine domain modules that own everything else.
+// the routing to the domain modules that own everything else.
 //
-// A method's name is a key into four separate string sets, none of them next
-// to its handler -- docs/architecture.md#the-remote-json-rpc.
-// Collapsing those into MethodDoc columns is the next stage; this one only
-// gets the code out of a 2,947-line file.
-// Split out of RemoteServer.cpp (docs/architecture.md#the-remote-json-rpc).
-// RemoteServer.h is unchanged: these are the same class's members,
-// defined across three translation units instead of one.
+// What gates a method is the `flags` column of its MethodDoc row, next to its
+// handler -- docs/architecture.md#the-remote-json-rpc. These are members of
+// RemoteServer, defined across several translation units.
 
 // RemoteHelpers.h already has this one. Defining a second, non-inline copy at
 // global scope made a STRONG symbol that collides with the inline one in
@@ -262,8 +258,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
-     "job cannot say. Kinds today: `cam` (an adaptive clearing pass; see "
-     "cam_toolpath's `async`). Empty when nothing is running. Not the CAM "
+     "job cannot say. Kinds: `cam` (an adaptive clearing pass; see "
+     "cam_toolpath's `async`), `cam-verify`, `sync` (git fetch/push/clone), "
+     "`topo`, `study` (a FEM solve), `mesh`, `import`, `motion`, `open` (a "
+     "project opening). Empty when nothing is running. Not the CAM "
      "job document -- that is list_job_parts.",
      ""},
     {"cancel_background_job",

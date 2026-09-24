@@ -1,4 +1,5 @@
 #include "core/features/JogFeature.h"
+#include "cad/NonDestructiveBoolean.h"
 
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
@@ -47,9 +48,8 @@ CADShape Side(const CADShape& s, const gp_Pnt& at, const gp_Dir& n,
                gp_Vec(a) * (2.0 * size), gp_Vec(b) * (2.0 * size)),
           gp_Vec(n) * size)
           .Shape());
-  BRepAlgoAPI_Common op(s.GetShape(), half.GetShape());
-  op.SetNonDestructive(Standard_True);
-  if (!op.IsDone())
+  BRepAlgoAPI_Common op;
+  if (!cad::BuildNonDestructive(op, s.GetShape(), half.GetShape()))
     return {};
   CADShape out(op.Shape());
   return out.IsValid() && out.Volume() > 1e-12 ? out : CADShape{};

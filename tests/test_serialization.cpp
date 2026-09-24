@@ -666,6 +666,41 @@ TEST_CASE("a sketch entity outside the table is refused by name",
           Catch::Matchers::ContainsSubstring("arc"));
 }
 
+TEST_CASE("unknown sketch op, reference and datum kinds are refused by name",
+          "[serialization]") {
+  // Each used to be read as a default: a misspelled derived-op kind became a
+  // linear pattern, an external reference that was not "edge" became a face.
+  nlohmann::json sketch =
+      SketchWith({{"type", "point"}, {"id", 1}, {"p", {0.0, 0.0}}});
+  sketch["derived_ops"] =
+      nlohmann::json::array({{{"kind", "linear_patern"},
+                              {"source_ids", {1}},
+                              {"vec", {1.0, 0.0}},
+                              {"scalar", 0.0},
+                              {"count", 2},
+                              {"instances", nlohmann::json::array()}}});
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson(sketch),
+      Catch::Matchers::ContainsSubstring("linear_patern") &&
+          Catch::Matchers::ContainsSubstring("circular_pattern"));
+
+  nlohmann::json ext =
+      SketchWith({{"type", "point"}, {"id", 1}, {"p", {0.0, 0.0}}});
+  ext["external"] = nlohmann::json::array(
+      {{{"feature_id", 1}, {"element", "Face1"}, {"kind", "edges"}}});
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(ext),
+                      Catch::Matchers::ContainsSubstring("edges") &&
+                          Catch::Matchers::ContainsSubstring("face, edge"));
+
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson({{"type", "DatumPlane"},
+                                   {"name", "d"},
+                                   {"kind", "angle"},
+                                   {"base_plane", "xy"}}),
+      Catch::Matchers::ContainsSubstring("angle") &&
+          Catch::Matchers::ContainsSubstring("offset, angled, through_points"));
+}
+
 TEST_CASE("a sketch arc takes degrees or radians, never both",
           "[serialization]") {
   const auto arc = [](nlohmann::json extra) {

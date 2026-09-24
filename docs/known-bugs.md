@@ -11,33 +11,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### Three loaders substitute a default for a value they do not know
-
-- **Symptom:** a document loads and looks right while meaning something else.
-- **Cases:**
-  - a sketch derived op with an unknown `kind` loads as a linear pattern
-    (`DerivedOpFromJson`, `src/core/io/SerializeFeatures.cpp`);
-  - a sketch external reference whose `kind` is not `edge` loads as a face
-    (the `external` loop in the Sketch branch, same file);
-  - `set_result_display` turns an unknown `field` into `von_mises`
-    (`src/remote/RemoteSimulation.cpp`).
-- **Likely fix:** refuse, naming the accepted values
-  ([conventions.md](conventions.md#refuse-dont-substitute)).
-
-### The datum-plane refusal does not say what is accepted
-
-- `DatumPlaneKindFromString` accepts `offset|angled|through_points` and
-  refuses anything else with "Unknown datum plane kind: X", without naming
-  them; the DatumPlane `describe` row says `offset|angle`
-  (`src/core/io/SerializeFeatures.cpp`).
-
-### `JogFeature` asks for a non-destructive boolean too late
-
-- `BRepAlgoAPI_Common op(a, b)` builds in its constructor, so the
-  `SetNonDestructive` call after it does nothing and the boolean may write
-  p-curves onto its input's edges (`src/core/features/JogFeature.cpp`). Build
-  it default-constructed, as `BuildQuery` does in `Measure.cpp`.
-
 ### A sketch entity id can land in the reserved datum block
 
 - `SketchFeature::MintEntityId` draws from 1..UINT32_MAX and checks only the
@@ -64,19 +37,6 @@ the heading if it is not here yet.
   ([conventions.md](conventions.md#refuse-dont-substitute)).
 
 ## Sheet metal
-
-### A flat pattern made in the GUI is always flat
-
-- **Symptom:** after Create › Flat pattern the part is flat in every
-  configuration, and the Sheet Metal panel's "Show the blank" toggle cannot
-  bring the folded part back.
-- **Cause:** `CreateFlatPattern` does not suppress the FlatPattern feature it
-  adds, and nothing else does; the toggle's `Flat` configuration only
-  unsuppresses it. The GUI test `sheetmetal/flat_view_on_a_sheet` suppresses
-  it by hand, and scripts suppress it explicitly, which hides this.
-- **Where:** `src/ui/CreateActions.cpp` (`CreateFlatPattern`),
-  `src/ui/SheetMetalPanel.cpp`.
-- **Likely fix:** create the feature suppressed in the base configuration.
 
 ### A circular corner relief on a fold that is not square leaves the flat pattern thick
 
@@ -175,38 +135,6 @@ the heading if it is not here yet.
 `describe` is what an agent reads instead of the code, so a stale row is a
 wrong contract.
 
-### `describe` rows that say something the handler does not do
-
-- `fit_fastener`: says one mate per interface and an empty `mates` when the
-  interface is already joined; placement adds a fastened mate per bolt per
-  interface and the solver reports the extras as `redundant_mates`
-  (`src/remote/RemoteAssembly.cpp`, `src/ui/FastenerActions.cpp`).
-- `add_reference_image` says "path or base64 bytes" (only `path` is read);
-  `set_reference_image` mentions a lock that does not exist
-  (`src/remote/RemoteModeling.cpp`).
-- `remove_configuration` says "by name"; it takes `id`
-  (`src/remote/RemoteConfigurations.cpp`).
-- `study_results` says there is no bonded contact between parts, which is
-  untrue for an assembly study (`src/remote/RemoteSimulation.cpp`).
-- `background_jobs` says the kinds are `cam`; the registry also has
-  cam-verify, sync, topo, study, mesh, import, motion and open
-  (`src/remote/RemoteDispatch.cpp`).
-- The `feature_types` rows omit Pattern `mirror`, Extrude `thin`, Loft
-  `path_id` and Rib `body_id` (`src/core/io/SerializeFeatures.cpp`).
-- `import_step` on a part does not return `recentred_by`, which
-  `add_feature` with an Import does.
-
-### The Python tools
-
-- `help('execute_script')` answers "no such method": `_EXPOSED` in
-  `tools/designer_mcp.py` leaves it out. The MCP `describe` tool description
-  hard-codes a method count.
-- `designer_sdk.connect()` lists every instance as "(no project)": it reads a
-  `project` field the instance registry never writes (`tools/designer_sdk.py`,
-  `src/remote/InstanceRegistry.h`).
-- SDK `Occurrence.frame()` does not activate its assembly, and the `frame` RPC
-  resolves occurrences against the active one (`tools/designer_sdk.py`).
-
 ## GUI suite
 
 ### Viewport picks resolve nothing after some neighbours in a shuffled run
@@ -232,19 +160,6 @@ wrong contract.
   one test can eat the viewport clicks of the next
   (`src/app/guitests/GuiTestsCommon.cpp`;
   [testing.md](ui/testing.md#independence-any-partition-is-valid)).
-
-## Rendering
-
-### Four overlay renderers alias frames on a three-image swapchain
-
-- `SketchRenderer`, `StockRenderer`, `FieldRenderer` and `UnderlayRenderer`
-  keep `kFramesInFlight = 2` and index `currentFrame % 2`, while the app
-  requests three swapchain images (`g_MinImageCount = 3`). Images 0 and 2
-  share a UBO and vertex slot, so the CPU can overwrite one the GPU is still
-  reading: sketch, stock, field and underlay overlays can draw with another
-  frame's camera while the view moves. Only Mesh, Outline, SSAO and GpuTimer
-  use `render::FrameSlot`; move the other four onto it
-  ([frame-pacing.md](rendering/frame-pacing.md#frames-in-flight)).
 
 ## Configurations
 
