@@ -87,6 +87,7 @@
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
@@ -1416,16 +1417,31 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
 }
 
 namespace {
-// A rigid glm placement as OCC's. gp_Trsf refuses a matrix that is not a
-// similarity, which is what a sheared (or degenerate) placement would be.
+// A rigid glm placement as OCC's, or nullopt for one that is not rigid
+// (sheared, scaled, degenerate or mirrored).
 std::optional<gp_Trsf> RigidTrsf(const glm::mat4& m) {
-  gp_Trsf t;
-  try {
-    t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
-                m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
-  } catch (const Standard_Failure&) {
+  // A placement is a float matrix, so its rotation is orthonormal only to
+  // float precision. Handing that to gp_Trsf::SetValues reads the determinant's
+  // rounding as a SCALE of 1 ± 1e-7, and OpenCASCADE 7.6 refuses to move a
+  // shape by a scaling location ("Moving with scaling transformation is
+  // forbidden") where 7.9 lets it pass. So check the axes are unit and
+  // orthogonal to float precision, refuse a mirror, and rebuild the rotation
+  // from a normalized quaternion: its scale is then exactly 1.
+  const gp_XYZ x(m[0][0], m[0][1], m[0][2]);
+  const gp_XYZ y(m[1][0], m[1][1], m[1][2]);
+  const gp_XYZ z(m[2][0], m[2][1], m[2][2]);
+  constexpr double kTol = 1e-4;
+  for (const gp_XYZ* a : {&x, &y, &z})
+    if (std::abs(a->Modulus() - 1.0) > kTol)
+      return std::nullopt;
+  if (std::abs(x.Dot(y)) > kTol || std::abs(y.Dot(z)) > kTol ||
+      std::abs(z.Dot(x)) > kTol || x.Crossed(y).Dot(z) < 0.0)
     return std::nullopt;
-  }
+  gp_Quaternion q;
+  q.SetMatrix(gp_Mat(x, y, z)); // columns
+  q.Normalize();
+  gp_Trsf t;
+  t.SetTransformation(q, gp_Vec(m[3][0], m[3][1], m[3][2]));
   return t;
 }
 } // namespace

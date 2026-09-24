@@ -349,7 +349,9 @@ TEST_CASE("Export on an assembly tab writes STEP and refuses STL by name",
   Rig rig;
   const std::string step = TempPath("designer_step_export_active.step");
   std::string error;
-  REQUIRE(ui::ExportActiveDocument(rig.state, step, &error));
+  const bool exported = ui::ExportActiveDocument(rig.state, step, &error);
+  INFO("export error: " << error);
+  REQUIRE(exported);
   CHECK(ReadStepTree(step)->name == "Rig");
   std::filesystem::remove(step);
 
