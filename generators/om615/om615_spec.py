@@ -557,3 +557,59 @@ COVER_DOME_END_Y = DRIVE_Y + CHAIN_W/2 + 8.0
 
 def cover_bolt_x(side):
     return -54.0 if side < 0 else CAM_COVER_BOLT_X
+
+
+# ---- the top end's castings: what they look like -------------------------
+# Shape only: nothing below moves anything, and every interface the
+# mechanism or a mate uses is named above. Read off the photographs (top,
+# manifold side, the KTG 9810 sectional drawing) against the 87 mm bore and
+# the 97 mm bore pitch, so each is said in those terms where it can be.
+CAM_COVER_WALL = 6.0                 # the cavity is the outside, inset by it
+CAM_COVER_CROWN = CAM_COVER_WALL     # the top rises this much between its
+                                     # shoulders: a dome, not a flat roof
+CAM_COVER_RIM = (CAM_COVER_WALL / 2.0, CAM_COVER_BOSS_H * 0.6)
+                                     # (proud, tall): the lip at the gasket
+CAM_COVER_FRONT_R = 2.0 * CAM_COVER_WALL   # the chain dome's front corners
+STAR_D = 0.7 * BORE                  # the three-pointed star's medallion
+STAR_RELIEF = 2.0                    # how far the star stands off its disc
+FILLER_BOSS_D = 56.0                 # the cap is 52 across; its neck stands
+FILLER_Y = COVER_TRANSITION_Y + FILLER_BOSS_D / 2.0 + 2.0 * CAM_COVER_WALL
+                                     # near the FRONT, just behind the chain
+                                     # dome, where the photographs have it
+BREATHER = (18.0, 11.0)              # breather stub outside / bore
+BREATHER_Y = CAM_BEARING_Y[1] + CAM_BEARING_W   # clear of a rocker post
+
+# The intake: a cast box on the INT_LOG axis, not a tube, with two branches
+# per paired port — four runners, as the real one has.
+PLENUM = (INT_LOG[2] + 6.0, INT_LOG[2] - 6.0, INT_LOG[2] / 4.0)
+                                     # (width x, height z, corner radius)
+PLENUM_HALF_L = 1.5 * BORE_PITCH     # it spans the outer cylinders' centres
+INT_BRANCH = (PORT_D["intake"] + 4.0, PORT_D["intake"] - 4.0)
+INT_BRANCH_DY = PORT_D["intake"] / 2.0     # each branch off its port's axis
+THROTTLE_BORE = 1.5 * PORT_D["intake"]
+THROTTLE_OD = THROTTLE_BORE + 16.0
+THROTTLE_NECK = 14.0                 # the neck between plenum and body
+THROTTLE_L = 2.0 * THROTTLE_OD / 3.0
+
+# The exhaust: one outlet, straight DOWN from the middle of the log, on a
+# three-stud flange.
+EXH_OUTLET_DROP = 16.0               # tube below the log before the flange
+EXH_OUTLET_T = MANIFOLD_PAD - 2.0
+EXH_OUTLET_STUD = (8.0, 36.0, 18.0)  # (diameter, radius from the axis, length)
+
+# The head's side: a rib under the cover rail, proud of the drafted wall.
+HEAD_RIB = (4.0, 12.0)               # (proud, tall), up to HEAD_TOP
+
+# The thermostat housing, on a cast ear at the head's front corner on the
+# manifold side, above the first exhaust flange and ahead of the plenum.
+TSTAT_X = HEAD_X + 34.0
+TSTAT_Y = BLOCK_Y0 + 22.0
+TSTAT_BOLT_DY = 28.0                 # two M8, fore and aft of the body
+TSTAT_BOLT_D = PAN_BOLT_D
+TSTAT_BODY_D = 36.0
+TSTAT_FLANGE_T = 10.0
+TSTAT_TAP_DEPTH = 12.0
+TSTAT_OUTLET = (30.0, 22.0)          # the upper-hose stub outside / bore
+TSTAT_EAR_Z = PORT_Z + MANIFOLD_PAD_HZ + 3.0   # the ear's underside, clear
+                                     # above the first exhaust flange
+TSTAT_WEB_T = 6.0                    # the web under the ear's front edge

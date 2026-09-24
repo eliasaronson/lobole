@@ -47,6 +47,7 @@ PART_FINISH = {
     "vacuum pump valve cover": "aluminium",
     "alternator front casting": "aluminium",
     "alternator rear casting": "aluminium",
+    "thermostat housing": "aluminium",
     "exhaust manifold": "cast iron",
     "fan belt": "rubber",
     "timing cover gasket": "rubber",
