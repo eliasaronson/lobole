@@ -57,35 +57,40 @@ do not fit:
    seen from the front (from cylinder 1's TDC, the pin moves toward the pump
    side). Every check keeps its numbers: strokes, lifts, and firing order
    1-3-4-2.
-1. **One interface, stated once.** Put the pump flange (face, register, bolt
-   circle and hole clocking) in `om615_spec.py`. The pump spec reads the same
-   numbers, and the block boss and the pump flange are both drawn from them.
-   Add a `flange` frame on the pump housing. Place the mount where the
+1. **The pump looks like the pump.** It gets the Z cover, the clamp plates
+   on the delivery valves, the primer wheel, the FP/K feed pump, the red
+   filler cap and the governor chamber, as the owner's pump has them. Its
+   motion and its interface do not change.
+2. **One interface, stated once.** The pump flange (face, register, bolt
+   circle and hole clocking) lives in `pes_spec.py`, because it is the pump's
+   design and the block is machined to fit it. `om615_spec.py` reads those
+   numbers, so the block boss and the pump flange are drawn from the same
+   values. Add a `flange` frame on the pump housing. Place the mount where the
    pump's sprocket lies in the chain plane and the feed pump stands clear of
    the block wall. That puts it on the front of the block, beside the chain
    case, as on the real engine. The block boss moves with it.
-2. **The pump builds into any assembly.** `pes_pump.assemble` takes the rig
+3. **The pump builds into any assembly.** `pes_pump.assemble` takes the rig
    and a placement. The standalone generator passes its own rig and fixes the
    housing; the engine fastens the housing's `flange` to the block's
    `injection_pump_mount`. The pump's parts are renamed so none collides with
    an engine part. The standalone generator keeps its four studies and still
    passes them.
-3. **The drive.** Give the pump sprocket the camshaft sprocket's 44 teeth, and
+4. **The drive.** Give the pump sprocket the camshaft sprocket's 44 teeth, and
    add a chain relation crank to pump camshaft at 22:44, like the camshaft's.
    The vacuum pump's stand-in "injection timer" at the timing cover is now
    the real pump's job: drive the vacuum pump's face cam from the pump
    camshaft and delete the stand-in. The control rack is held at full load
    in the engine.
-4. **Make room, as the photographs show.** Move the fuel filter to the front
+5. **Make room, as the photographs show.** Move the fuel filter to the front
    of the head. Rebuild the oil filter as a housing below the pump with a
    spin-on canister hanging down and outward. Move the dipstick ahead of the
    pump. Take positions from the pump's envelope and the block, not from
    fixed numbers. The mounting checks already cover all three.
-5. **Fuel lines.** Add an `outlet` frame on each delivery-valve holder.
+6. **Fuel lines.** Add an `outlet` frame on each delivery-valve holder.
    Build four steel injection lines, `bent_tube` Ø6 × 2, each running from
    element k's outlet to cylinder k's injector `fuel_inlet` frame. Pump
    element k feeds cylinder k, so the pump's 1-3-4-2 matches the engine's.
-6. **The checks.** The engine's `--stage full` motion study now moves the
+7. **The checks.** The engine's `--stage full` motion study now moves the
    pump, and these become part of the gate:
    - The pump camshaft makes one turn per 720° of crank.
    - Every plunger strokes 7.0 mm.
