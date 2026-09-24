@@ -27,12 +27,15 @@ def main():
     spans, wraps, length = A.belt_geometry()
     assert 800 < length < 825
     assert abs(sum(w["angle"] for w in wraps) - math.tau) < 1e-10
-    for i, span in enumerate(spans):
+    # Each span leaves one pulley for the next one round, and together they
+    # visit all three whichever side the alternator is on.
+    assert sorted(span["a"] for span in spans) == [0, 1, 2]
+    for span in spans:
         dx = span["end"][0] - span["start"][0]
         dz = span["end"][1] - span["start"][1]
         for point, circle in (
-            (span["start"], A.PULLEYS[i]),
-            (span["end"], A.PULLEYS[(i + 1) % 3]),
+            (span["start"], A.PULLEYS[span["a"]]),
+            (span["end"], A.PULLEYS[span["b"]]),
         ):
             rx, rz = point[0] - circle[0], point[1] - circle[1]
             assert abs(math.hypot(rx, rz) - circle[2]) < 1e-10

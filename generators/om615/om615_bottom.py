@@ -435,10 +435,12 @@ def _block_rest(p, length):
             x=(1, 0, 0))
     from om615_accessories import BRACKET_Z
 
-    p.frame("alternator_bracket", origin=(100, -175, BRACKET_Z),
-            z=(1, 0, 0), x=(0, 1, 0))
+    # The alternator is on the manifold side; its bracket's face looks out.
+    p.frame("alternator_bracket", origin=(MANIFOLD_SIDE * CASE_X, -175, BRACKET_Z),
+            z=(MANIFOLD_SIDE, 0, 0), x=(0, 1, 0))
     p.frame("belt", origin=(0, BELT_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
-    for sx, nm in ((-1, "mount_left"), (1, "mount_right")):
+    # Left and right as the car has them: the car's left is the pump side.
+    for sx, nm in ((PUMP_SIDE, "mount_left"), (MANIFOLD_SIDE, "mount_right")):
         p.frame(nm, origin=(sx * CASE_X, MOUNT_Y, 0), z=(0, 0, 1),
                 x=(sx, 0, 0))
     for sy, nm in ((-1, "thrust_f"), (1, "thrust_r")):
@@ -539,15 +541,17 @@ def _block_castings(p):
     # side of it, with four tapped holes and a port straight into the main
     # gallery behind it.
     fx, fy, fz = OIL_FILTER_BOSS
-    axis_solid(p, (-(CASE_X - 6.0), fy, fz), (fx, fy, fz), OIL_FILTER_BOSS_D,
-               "Oil filter pad")
+    out = PUMP_SIDE                     # the pad's outward direction in x
+    axis_solid(p, (out * (CASE_X - 6.0), fy, fz), (fx, fy, fz),
+               OIL_FILTER_BOSS_D, "Oil filter pad")
     for k in range(4):
         a = math.pi / 4 + k * math.pi / 2
         by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
         bz = fz + OIL_FILTER_BOLT_PCD / 2.0 * math.sin(a)
-        bore(p, (fx - 1.0, by, bz), (fx + OIL_FILTER_TAP_DEPTH, by, bz),
+        bore(p, (fx + out * 1.0, by, bz),
+             (fx - out * OIL_FILTER_TAP_DEPTH, by, bz),
              OIL_FILTER_BOLT_D + TAP_FIT, "Oil filter pad thread", over=0.0)
-    bore(p, (fx - 1.0, fy, fz), (GALLERY_X, fy, fz), OIL_FILTER_PORT_D,
+    bore(p, (fx + out * 1.0, fy, fz), (GALLERY_X, fy, fz), OIL_FILTER_PORT_D,
          "Oil filter port", over=0.0)
     # The dipstick socket, leaning out of the wall, and its bore down into
     # the crankcase — it breaks in above the rail, not through its face.

@@ -274,11 +274,15 @@ def top_end(app, rig, occ, main):
     tips = (tooth_tip(CRANK_PCD / 2.0, CRANK_TEETH),
             tooth_tip(CAM_PCD / 2.0, CAM_TEETH))
     tchain = B.chain(app, "timing chain", CAM_Z, *tips, CHAIN_W)
+    # The crank turns +Y (clockwise from the front), so the run on the pump
+    # side is the one the crank sprocket pulls down: the tight side, on the
+    # guide. The tensioner takes the slack run, on the manifold side.
     guide_rail = B.chain_rail(app, "chain guide rail", 40.0, CAM_Z - 90.0,
-                              -1, CAM_Z, *tips, bow=10.0, width=CHAIN_W)
+                              PUMP_SIDE, CAM_Z, *tips, bow=10.0,
+                              width=CHAIN_W)
     tension_rail = B.chain_rail(app, "chain tensioner rail", 40.0,
-                                CAM_Z - 90.0, 1, CAM_Z, *tips, bow=14.0,
-                                width=CHAIN_W)
+                                CAM_Z - 90.0, MANIFOLD_SIDE, CAM_Z, *tips,
+                                bow=14.0, width=CHAIN_W)
 
     rig.activate()
     bo = occ["block"]
@@ -303,7 +307,7 @@ def top_end(app, rig, occ, main):
     rig.chain(main, cam_mate, teeth_a=CRANK_TEETH, teeth_b=CAM_TEETH,
               name="timing chain")
 
-    for sx, nm in ((1, "exhaust"),):
+    for sx, nm in ((MANIFOLD_SIDE, "exhaust"),):
         sh = rig.place(rshaft, at=(sx * ROCKER_PIVOT_X, 0, ROCKER_Z))
         rig.fasten((ho, f"rocker_shaft_{nm}"), (sh, "seat"), flipped=False)
 
@@ -519,9 +523,10 @@ def reference_dimensions(app):
     for kind in ("intake", "exhaust"):
         part = app.part(f"{kind} manifold")
         lo,hi = part.bbox()
-        if lo.x < HEAD_X+MANIFOLD_GASKET_T-0.01:
+        if min(MANIFOLD_SIDE*lo.x, MANIFOLD_SIDE*hi.x) < HEAD_X+MANIFOLD_GASKET_T-0.01:
             raise SdkError(f"{kind} crosses the shared manifold-side gasket face")
-        measured[f"{kind} manifold"] = dict(side="+X", external_ports=len(port_centers(kind)),
+        measured[f"{kind} manifold"] = dict(side="+X" if MANIFOLD_SIDE > 0 else "-X",
+                                             external_ports=len(port_centers(kind)),
                                              bounds_mm=[list(lo),list(hi)])
     block = app.part("block")
     registers = block.body().edges(circular=True, radius=PUMP_REGISTER_D/2,
@@ -1000,13 +1005,15 @@ def fasteners(app, rig, occ, top, front):
     # What hangs on it: drilled along x, so every centre is a (y, z).
     yz = lambda e: (e.center.y, e.center.z)  # noqa: E731
     hang = top["hanging"]
+    # Both are on the pump side: outward is PUMP_SIDE in x.
+    out = PUMP_SIDE
     fx, fy, fz = OIL_FILTER_BOSS
     r = OIL_FILTER_BOLT_PCD / 2.0 / math.sqrt(2.0)
     bolt_up(rig, hang["oil filter housing"], app.part("oil filter housing"),
              (OIL_FILTER_BOLT_D + 1.0) / 2.0,
-             lambda e: e.center.x - (fx - OIL_FILTER_FLANGE_T),
+             lambda e: e.center.x - (fx + out * OIL_FILTER_FLANGE_T),
              occ["block"], blk, (OIL_FILTER_BOLT_D + TAP_FIT) / 2.0,
-             lambda e: e.center.x - (fx + OIL_FILTER_TAP_DEPTH), "M8", 4,
+             lambda e: e.center.x - (fx - out * OIL_FILTER_TAP_DEPTH), "M8", 4,
              "oil filter housing bolts",
              centres=[(fy + sy * r, fz + sz * r) for sy in (-1, 1)
                       for sz in (-1, 1)],
@@ -1014,9 +1021,9 @@ def fasteners(app, rig, occ, top, front):
     bx, by, bz = FUEL_FILTER_BOSS
     bolt_up(rig, hang["fuel filter bracket"], app.part("fuel filter bracket"),
              (FUEL_FILTER_BOLT_D + 1.0) / 2.0,
-             lambda e: e.center.x - (bx - A.FUEL_BRACKET_T),
+             lambda e: e.center.x - (bx + out * A.FUEL_BRACKET_T),
              top["head"], hd, (FUEL_FILTER_BOLT_D + TAP_FIT) / 2.0,
-             lambda e: e.center.x - (bx + FUEL_FILTER_TAP_DEPTH), "M8", 2,
+             lambda e: e.center.x - (bx - out * FUEL_FILTER_TAP_DEPTH), "M8", 2,
              "fuel filter bracket bolts",
              centres=[(by, bz + s * FUEL_FILTER_BOLT_DZ) for s in (-1, 1)],
              rim_key=yz, far_key=yz, centre_key=yz)

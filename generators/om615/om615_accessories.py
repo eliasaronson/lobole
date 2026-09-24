@@ -2,6 +2,9 @@
 
 Coordinates follow the engine (+Y rearward). Revolving hardware is built about
 local Z and located by named mounting/shaft datums, not by bounding boxes.
+The alternator and its brackets are on the manifold side (MANIFOLD_SIDE), the
+vacuum pump and what hangs on the block and head on the pump side
+(PUMP_SIDE); every x here that belongs to a side is written with its sign.
 """
 
 import math
@@ -9,6 +12,7 @@ from designer_sdk import Part, Plane, V, SdkError
 import om615_bottom as B
 import om615_top as T
 from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z
+from om615_spec import CASE_X, MANIFOLD_SIDE, PUMP_SIDE
 from om615_spec import (
     BLOCK_Y1, BORE, BORE_PITCH, COOLANT_HOSE_OD, COOLANT_HOSE_WALL,
     DIPSTICK_AXIS, DIPSTICK_BORE_D, DIPSTICK_BOSS, FUEL_FILTER_BOLT_D,
@@ -18,7 +22,7 @@ from om615_spec import (
     OIL_FILTER_FLANGE_T, OIL_FILTER_PORT_D, PLENUM, PORT_Z, PUMP_MOUNT,
     PUMP_MOUNT_D, TSTAT_X, WP_INLET, WP_INLET_Y)
 
-ALT_X, ALT_Z, ALT_D = 176.0, 75.0, 76.0
+ALT_X, ALT_Z, ALT_D = MANIFOLD_SIDE * 176.0, 75.0, 76.0
 ALT_LUG = 80.0
 BRACKET_Z = ALT_Z - ALT_LUG
 UPPER_BRACKET_Z = ALT_Z + ALT_LUG
@@ -43,11 +47,25 @@ def verify(part):
     return part
 
 
+def belt_order():
+    """The pulleys in the order the belt passes them COUNTER-clockwise in
+    engine XZ (x right, z up), which is what the tangents below assume: the
+    alternator's side decides whether that is crank, alternator, water pump
+    or crank, water pump, alternator."""
+    (x0, z0, _), (x1, z1, _), (x2, z2, _) = PULLEYS
+    turn = (x1 - x0) * (z2 - z1) - (z1 - z0) * (x2 - x1)
+    return (0, 1, 2) if turn > 0 else (0, 2, 1)
+
+
 def belt_geometry():
-    """CCW convex external tangents and wrap angles in engine XZ space."""
+    """CCW convex external tangents and wrap angles in engine XZ space.
+    Span i runs from pulley `a` to pulley `b` (indices into PULLEYS), in
+    `belt_order()`."""
+    order = belt_order()
+    ring = [PULLEYS[j] for j in order]
     spans = []
-    for i, (x, z, r) in enumerate(PULLEYS):
-        xx, zz, rr = PULLEYS[(i + 1) % 3]
+    for i, (x, z, r) in enumerate(ring):
+        xx, zz, rr = ring[(i + 1) % 3]
         dx, dz = xx - x, zz - z
         d = math.hypot(dx, dz)
         a = (r - rr) / d
@@ -59,10 +77,12 @@ def belt_geometry():
                 end=(xx + rr * nx, zz + rr * nz),
                 normal=(nx, nz),
                 length=math.sqrt(d * d - (r - rr) ** 2),
+                a=order[i],
+                b=order[(i + 1) % 3],
             )
         )
     wraps = []
-    for i, (x, z, r) in enumerate(PULLEYS):
+    for i, (x, z, r) in enumerate(ring):
         n0 = spans[(i - 1) % 3]["normal"]
         n1 = spans[i]["normal"]
         start = math.atan2(n0[1], n0[0])
@@ -373,7 +393,10 @@ def install(app, rig, block, wp_shaft, wp_mate, crank_mate):
 
 # Diaphragm pump envelope and linkage dimensions are photo estimates, not OEM
 # manufacturing dimensions. Two face-cam lobes per half-speed timer revolution.
-VAC_X, VAC_Z, VAC_DEPTH = -118.0, 160.0, 70.0
+# The pump is the same unit on either side, TRANSLATED to it, not turned or
+# mirrored: its own frame keeps +x along +X, so its timer shaft (CAM_CENTER,
+# in the pump's frame) is 16 mm toward +X of the pump's centre on either side.
+VAC_X, VAC_Z, VAC_DEPTH = PUMP_SIDE * 118.0, 160.0, 70.0
 ROCKER_ANGLE, LEVER_ARM = 0.12, 20.0
 CAM_CENTER = (16.0, -16.0)
 
@@ -644,7 +667,11 @@ def mount_fastener(app, rig, occ, frame, standard, size, length=0):
 
 
 def bracket_foot(p, z):
-    sk = p.sketch(Plane.yz(100), name="Block mounting foot")
+    """The foot on the block's side face, on the manifold side: 10 mm thick
+    outboard of x = +-CASE_X, bolted through along x."""
+    ms = MANIFOLD_SIDE
+    face = ms * CASE_X
+    sk = p.sketch(Plane.yz(min(face, face + ms * 10)), name="Block mounting foot")
     B.rounded_polygon(
         sk, [(-182, z - 28), (-155, z - 28), (-155, z + 28), (-182, z + 28)], 4
     )
@@ -652,25 +679,25 @@ def bracket_foot(p, z):
     for i, dz in enumerate(MOUNT_BOLT_OFFSETS):
         B.bore(
             p,
-            (99, MOUNT_BOLT_Y, z + dz),
-            (111, MOUNT_BOLT_Y, z + dz),
+            (face - ms * 1, MOUNT_BOLT_Y, z + dz),
+            (face + ms * 11, MOUNT_BOLT_Y, z + dz),
             8.8,
             "Block attachment bore",
             over=0,
         )
         p.frame(
             f"foot_washer_{i}",
-            origin=(110, MOUNT_BOLT_Y, z + dz),
-            z=(-1, 0, 0),
+            origin=(face + ms * 10, MOUNT_BOLT_Y, z + dz),
+            z=(-ms, 0, 0),
             x=(0, 1, 0),
         )
         p.frame(
             f"foot_bolt_{i}",
-            origin=(111.6, MOUNT_BOLT_Y, z + dz),
-            z=(-1, 0, 0),
+            origin=(face + ms * 11.6, MOUNT_BOLT_Y, z + dz),
+            z=(-ms, 0, 0),
             x=(0, 1, 0),
         )
-    p.frame("block", origin=(100, -175, z), z=(1, 0, 0), x=(0, 1, 0))
+    p.frame("block", origin=(face, -175, z), z=(ms, 0, 0), x=(0, 1, 0))
 
 
 def pivot_stack_frames(p, z, head_seat, rear_seat):
@@ -688,13 +715,15 @@ def alternator_bracket(app):
     p = app.part("alternator mounting bracket")
     z = BRACKET_Z
     bracket_foot(p, z)
-    B.axis_solid(p, (108, -165, z), (ALT_X - 12, -254, z), 16, "Cast support arm")
+    ms = MANIFOLD_SIDE
+    B.axis_solid(p, (ms * 108, -165, z), (ALT_X - ms * 12, -254, z), 16,
+                 "Cast support arm")
     sk = p.sketch(Plane.xz(-250), name="Alternator pivot eye")
     sk.circle((ALT_X, z), r=14)
     p.extrude(sk.add(), 8, mode="add", name="Alternator pivot eye")
     # Trim only the lug envelope: extending this cut inboard severs the arm.
     B.slab(
-        p, ALT_X - 14, -250, z - 22, ALT_X + 30, -210, z + 23,
+        p, ALT_X - ms * 14, -250, z - 22, ALT_X + ms * 30, -210, z + 23,
         "Lug seating face", mode="cut"
     )
     B.bore(p, (ALT_X, -260, z), (ALT_X, -249, z), 10.5, "Pivot bolt", over=0)
@@ -710,37 +739,41 @@ def alternator_upper_bracket(app):
     p = app.part("alternator adjustment bracket")
     z = UPPER_BRACKET_Z
     bracket_foot(p, z)
-    B.axis_solid(p, (108, -165, z), (133, -229, 177), 14, "Upper support arm")
+    ms = MANIFOLD_SIDE
+    B.axis_solid(p, (ms * 108, -165, z), (ms * 133, -229, 177), 14,
+                 "Upper support arm")
     sk = p.sketch(Plane.xz(-227), name="Adjustment strap")
     # Material must surround both ends of the adjustment slot below.
     B.rounded_polygon(
-        sk, [(125, 140), (125, 177), (135, 184), (214, 180), (214, 140)], 5
+        sk, [(ms * x, zz) for x, zz in
+             ((125, 140), (125, 177), (135, 184), (214, 180), (214, 140))], 5
     )
     p.extrude(sk.add(), 6, mode="add", name="Adjustment strap")
     sk = p.sketch(Plane.xz(-226), name="Pivot concentric adjustment slot")
     radius = 2 * ALT_LUG
     half = 5.25
 
-    def pt(r, a):
-        return (ALT_X + r * math.cos(a), BRACKET_Z + r * math.sin(a))
+    # In the alternator's own sense: x measured outward, toward the manifold
+    # side, from its pivot.
+    def pt(r, a, du=0.0, dz=0.0):
+        return (ALT_X + ms * (r * math.cos(a) + du),
+                BRACKET_Z + r * math.sin(a) + dz)
 
     a, b = math.radians(100), math.radians(80)
     sk.arc_through(
         pt(radius + half, a), pt(radius + half, math.pi / 2), pt(radius + half, b)
     )
-    x, y = pt(radius, b)
     sk.arc_through(
         pt(radius + half, b),
-        (x + half * math.sin(b), y - half * math.cos(b)),
+        pt(radius, b, half * math.sin(b), -half * math.cos(b)),
         pt(radius - half, b),
     )
     sk.arc_through(
         pt(radius - half, b), pt(radius - half, math.pi / 2), pt(radius - half, a)
     )
-    x, y = pt(radius, a)
     sk.arc_through(
         pt(radius - half, a),
-        (x - half * math.sin(a), y + half * math.cos(a)),
+        pt(radius, a, -half * math.sin(a), half * math.cos(a)),
         pt(radius + half, a),
     )
     p.extrude(sk.add(), 8, mode="cut", name="Adjustment slot")
@@ -753,10 +786,11 @@ def alternator_upper_bracket(app):
 
 def prepare_block(block):
     # The upper block narrows: a real cast boss reaches the bracket face.
+    ms = MANIFOLD_SIDE
     B.axis_solid(
         block,
-        (68, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
-        (100, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
+        (ms * 68, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
+        (ms * CASE_X, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
         64,
         "Alternator upper mounting boss",
     )
@@ -764,16 +798,16 @@ def prepare_block(block):
         for dz in MOUNT_BOLT_OFFSETS:
             B.bore(
                 block,
-                (85, MOUNT_BOLT_Y, z + dz),
-                (101, MOUNT_BOLT_Y, z + dz),
+                (ms * 85, MOUNT_BOLT_Y, z + dz),
+                (ms * (CASE_X + 1), MOUNT_BOLT_Y, z + dz),
                 8.8,
                 "Alternator mounting bore",
                 over=0,
             )
     block.frame(
         "alternator_adjustment",
-        origin=(100, -175, UPPER_BRACKET_Z),
-        z=(1, 0, 0),
+        origin=(ms * CASE_X, -175, UPPER_BRACKET_Z),
+        z=(ms, 0, 0),
         x=(0, 1, 0),
     )
 
@@ -875,15 +909,16 @@ def oil_filter_housing(app):
     canister standing beside the crankcase — cast head, bowl and lid with
     its centre bolt — its top near the deck, as on the engine."""
     p = app.part("oil filter housing")
+    out = PUMP_SIDE                  # outward from the block, in x
     fx, fy, fz = OIL_FILTER_BOSS
-    face = fx - OIL_FILTER_FLANGE_T
+    face = fx + out * OIL_FILTER_FLANGE_T
     can_d, can_h = OIL_FILTER_CAN
     neck_d, neck_l = OIL_FILTER_NECK
     head_d = can_d + 2.0 * OIL_FILTER_COLLAR
-    xc = face - neck_l - head_d / 2.0
+    xc = face + out * (neck_l + head_d / 2.0)
     B.axis_solid(p, (fx, fy, fz), (face, fy, fz), OIL_FILTER_BOSS_D,
                  "Flange", mode="new_body")
-    B.axis_solid(p, (face + 1.0, fy, fz), (xc, fy, fz), neck_d, "Neck")
+    B.axis_solid(p, (face - out * 1.0, fy, fz), (xc, fy, fz), neck_d, "Neck")
     base = fz - neck_d
     top = fz + neck_d + can_h
     B.disc(p, (xc, fy), head_d, base, fz + neck_d, "Filter head")
@@ -896,10 +931,10 @@ def oil_filter_housing(app):
         by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
         bz = fz + OIL_FILTER_BOLT_PCD / 2.0 * math.sin(a)
         # ISO 273 medium clearance for M8.
-        B.bore(p, (face - 1.0, by, bz), (fx + 1.0, by, bz),
+        B.bore(p, (face + out * 1.0, by, bz), (fx - out * 1.0, by, bz),
                OIL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
-    B.bore(p, (fx + 1.0, fy, fz), (xc, fy, fz), OIL_FILTER_PORT_D, "Port",
-           over=0.0)
+    B.bore(p, (fx - out * 1.0, fy, fz), (xc, fy, fz), OIL_FILTER_PORT_D,
+           "Port", over=0.0)
     p.material("aluminum")
     p.frame("pad", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
     return verify(p)
@@ -914,20 +949,22 @@ def fuel_filter_bracket(app):
     hy, hz = FUEL_FILTER_BOSS_HALF
     t = FUEL_BRACKET_T
     can_d, _ = FUEL_FILTER_CAN
+    out = PUMP_SIDE                  # outward from the head, in x
     cx = fuel_filter_x()
     z0, z1 = bz - hz, FUEL_SHELF_Z + t
-    plate = p.sketch(Plane.yz(bx - t), name="Plate")
+    plate = p.sketch(Plane.yz(min(bx, bx + out * t)), name="Plate")
     B.rounded_polygon(plate, [(by - hy, z0), (by + hy, z0), (by + hy, z1),
                               (by - hy, z1)], [hy / 2.0, hy / 2.0, 0, 0])
     p.extrude(plate.add(), t, mode="new_body", name="Plate")
-    B.slab(p, cx, by - hy, FUEL_SHELF_Z, bx - t + 1.0, by + hy, z1, "Arm",
-           mode="add")
+    arm_x = bx + out * (t - 1.0)
+    B.slab(p, min(cx, arm_x), by - hy, FUEL_SHELF_Z, max(cx, arm_x), by + hy,
+           z1, "Arm", mode="add")
     B.disc(p, (cx, by), can_d + 8.0, FUEL_SHELF_Z, z1, "Ring")
     B.disc(p, (cx, by), can_d / 2.0 + 2.0, FUEL_SHELF_Z - 1.0, z1 + 1.0,
            "Ring hole", mode="cut")
     for s in (-1, 1):
-        B.bore(p, (bx - t - 1.0, by, bz + s * FUEL_FILTER_BOLT_DZ),
-               (bx + 1.0, by, bz + s * FUEL_FILTER_BOLT_DZ),
+        B.bore(p, (bx + out * (t + 1.0), by, bz + s * FUEL_FILTER_BOLT_DZ),
+               (bx - out * 1.0, by, bz + s * FUEL_FILTER_BOLT_DZ),
                FUEL_FILTER_BOLT_D + 1.0, "Bolt hole", over=0.0)
     p.material("steel")
     p.frame("head", origin=FUEL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
@@ -938,8 +975,8 @@ def fuel_filter_bracket(app):
 def fuel_filter_x():
     """The fuel filter's axis: out from the bracket's plate by the bolt
     heads' height and a spanner's lip, and its own radius."""
-    return (FUEL_FILTER_BOSS[0] - FUEL_BRACKET_T - FUEL_FILTER_BOLT_D - 4.0
-            - FUEL_FILTER_CAN[0] / 2.0)
+    return FUEL_FILTER_BOSS[0] + PUMP_SIDE * (
+        FUEL_BRACKET_T + FUEL_FILTER_BOLT_D + 4.0 + FUEL_FILTER_CAN[0] / 2.0)
 
 
 def fuel_filter(app):
@@ -996,7 +1033,8 @@ def lower_hose(app):
     run_z = start[2] + bend + 5.0
     # Out far enough that the forward run clears the fan's blade tips.
     reach = FAN_R + COOLANT_HOSE_OD / 2.0 + 10.0
-    run_x = math.sqrt(reach ** 2 - (run_z - WATER_PUMP_Z) ** 2)
+    # Across to the manifold side, over the alternator.
+    run_x = MANIFOLD_SIDE * math.sqrt(reach ** 2 - (run_z - WATER_PUMP_Z) ** 2)
     corners = [start, (0.0, WP_INLET_Y, run_z), (run_x, WP_INLET_Y, run_z),
                (run_x, RADIATOR_Y, run_z),
                (run_x, RADIATOR_Y, COOLANT_HOSE_OD)]
@@ -1014,7 +1052,7 @@ def heater_pipe(app):
     p = app.part("heater pipe")
     _, _, _, start = T.thermostat_ports()
     od, wall = HEATER_PIPE
-    run_x = INT_LOG[0] + PLENUM[0] / 2.0 + od
+    run_x = INT_LOG[0] + MANIFOLD_SIDE * (PLENUM[0] / 2.0 + od)
     run_z = (PORT_Z + MANIFOLD_PAD_HZ + INT_LOG[1] - PLENUM[1] / 2.0) / 2.0
     corners = [start, (run_x, start[1], start[2]),
                (run_x, start[1] + 5.0 * od, run_z),
@@ -1172,7 +1210,8 @@ def check_mounting_structure(app, rig):
     ):
         bracket = app.part(name, create=False)
         bracket.check(solids=1)
-        for x in samples:
+        # The sample stations are distances out on the manifold side.
+        for x in (MANIFOLD_SIDE * u for u in samples):
             section = app.section(part=bracket.id, base_plane="yz", offset=x,
                                   regions=True)
             if not section["regions"] or any(
@@ -1202,7 +1241,7 @@ def check_mounting_structure(app, rig):
             # Catalog bolts grow along local +Z from their under-head plane.
             _, tip = parts[bolt.part_id].bbox()
             if key.startswith("foot"):
-                # Block mounting face is local X=100, bore ends at X=85.
+                # Block mounting face is |x| = CASE_X, bore ends at |x| = 85.
                 entry = (mount.frame("block").origin - actual.origin).dot(actual.z)
                 engagement = tip.z - entry
                 if not 8 <= engagement <= 15:
