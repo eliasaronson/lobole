@@ -175,7 +175,7 @@ runs over the rows of J):
 |---|---|---|
 | ≤ 1e-3 mm | — | closed; `dof = columns − rank` |
 | ≤ 1e-3 mm | all six rows of a cut mate dependent | that mate is **redundant but consistent** — named in `redundant_mates`, status `redundant`, not an error (the extra bolts through a flange) |
-| > 1e-3 mm | — | the cut mate errors: `loop does not close (off by N mm)` |
+| > 1e-3 mm | — | the cut mate errors: `loop does not close (off by N mm)`, N being that mate's own residual, followed by the diagnosis below when it names a suspect |
 
 A mate is redundant only when **all six** of its rows are dependent: a planar
 four-bar's closing joint has three structurally-zero rows (a loop of parallel
@@ -185,6 +185,62 @@ linkage.
 DOF comes from the rank, not from a Grübler/Kutzbach count: a planar
 four-bar in 3D scores 6·3 − 5·4 = −2 ("over-constrained") by Grübler, while
 its rank gives 4 − 3 = 1. `dof` covers the looped components only.
+
+### Naming the mate that keeps a loop open
+
+The mate that carries a loop's error is the cut mate, and which mate is the
+cut depends on anchors and creation order, not on which mate is wrong. The
+common real fault is a revolute, cylindrical or slider connector whose axis is
+tilted — the joint values cannot express a tilt, so the whole mismatch lands
+on the cut, which may be three joints away. So when a component fails to
+close, `DiagnoseLoop` (`src/core/AssemblyLoopSolve.cpp`) asks which single
+connector, if its axis were allowed to tilt, would let the loop close:
+
+- **Trials.** For each connector of each axis-carrying mate in the failing
+  component — tree or cut, side A and side B — the component is re-solved
+  with two more unknowns: a rotation of that connector's frame about its own
+  X and Y, at its origin. A's tilt is composed before the joint motion (the
+  joint turns about, or slides along, the tilted axis); B's after it (the
+  part riding the joint is tilted). Both sides are tried because a wrong
+  frame on B cannot be written as one on A: for a revolute only at one joint
+  angle, for a slider not at all. Everything else — relations, pins, seed,
+  tolerance — is the normal solve.
+- **Closing is not enough.** Two extra unknowns give a planar loop as many
+  unknowns as equations, so a tilt at nearly any joint downstream of the
+  fault closes it too — as a rigid spatial linkage, at one isolated pose. A
+  tilt that undoes the fault gives back the mechanism's mobility (a planar
+  four-bar's one DOF). So each trial records, beside its residual and tilt,
+  the rank DOF of the joint columns with its tilt held (a pivot counts below
+  1e-4 of the largest, since a restored plane is restored only to the
+  closure tolerance).
+- **Suspects** are the trials that close (residual ≤ 1e-3 mm) with the
+  highest DOF among those that close, one entry per mate; if both of a
+  mate's connectors qualify, it is named without a side.
+
+What the message says follows the numbers:
+
+| suspects | the cut mates' error gains |
+|---|---|
+| one | `; mate 'crank pin' connector A (crank) closes it if its axis tilts 30.0° - check that connector` |
+| several | `; any one of mate 'a' connector B (…) (30.0°) or mate 'b' connector A (…) (30.0°) closes it with that tilt; the loop cannot say which - check their connectors` |
+| none | nothing: the fault is not a single tilted axis (a pin shifted along its axis, a wrong length) |
+
+Several suspects is a real tie, not a failure to decide: every joint of a
+loop that meets at one point absorbs a rotation equally, and a tilt about a
+link's own line is the same whichever of that link's two connectors carries
+it. Neither is ever resolved by picking one.
+
+It runs after the solve, on the failed loop, and not when a mate is created:
+before the first solve the angle between two connectors is wherever the parts
+were dropped, so a check at `add_mate` would fire on nearly every correct
+mate. Removing mates one at a time tells nothing either — removing any mate
+of a single loop leaves a tree, which always closes.
+
+A closed loop runs nothing extra. A failing one runs two extra solves per
+axis-carrying mate of the failing component, each with two more columns. A
+motion study's per-sample solve (`assembly::Solve(…, diagnose = false)`, from
+`MotionStudy.cpp` and the motion panel's playback) skips it: a sample that
+fails is reported with its residual, and nothing reads the text.
 
 ### Loop mates are outputs
 
@@ -211,11 +267,21 @@ are reported, not solved" rather than placing something plausible.
 `redundant`, `error`) and its error text, `errored_mates`, `placed`,
 `occurrences`,
 `placed_by_mates` / `placed_by_transform`, and — only when there are loops —
-`loop_mates`, `dof`, `loops_closed`, `residual_mm`, `redundant_mates`.
+`loop_mates`, `dof`, `loops_closed`, `residual_mm` (the worst),
+`redundant_mates`. A mate whose loop did not close carries its own
+`residual_mm`, in `solve_assembly`'s `mates[]` and in `list_mates` (the value
+from the last solve). When a loop did not close, `suspects[]` lists the
+diagnosis's suspects as `{mate, name, tilt_deg, connector?, closes, sole}`:
+`closes` is the ids of that loop's failing mates, `sole` is false when the
+loop has several equally good suspects, and `connector` (`a`/`b`) is absent
+when either side does. `add_mate` needs none of this to be useful: its
+`errored[]` carries each errored mate's text, diagnosis included, so the call
+that breaks a loop says which connector to look at.
 
 ## Cost
 
 The floor is one tree walk. A bolt pattern costs about the same as no loop
 (zero unknowns). A genuine mechanism costs one tree walk per unknown per LM
 iteration; analytic Jacobians (a revolute's column is a cross product) are the
-lever if that ever matters.
+lever if that ever matters. A loop that fails to close also pays for its
+diagnosis: two more solves per axis-carrying mate in that component.

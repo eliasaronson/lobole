@@ -168,6 +168,9 @@ struct Mate {
   // Transient solve status (mirrors Feature::m_error): stamped by the
   // placement pass, cleared on every solve, never serialized. Empty = ok.
   std::string error;
+  // Transient too: when this mate closes a loop that did not close, ITS OWN
+  // closure error in mm (0 otherwise) — the number its `error` quotes.
+  double residualMm = 0.0;
 };
 
 // One occurrence's displacement within an exploded view (A4): a world-space

@@ -376,16 +376,44 @@ EvaluateTree(const LoopProblem& problem, const std::vector<LoopMate>& mates) {
 
 namespace {
 
+// The diagnosis's extra unknowns: one connector of mate `mate` may tilt, by
+// the rotation vector (q[column], q[column + 1], 0) in that connector's own
+// frame, about its own origin. Connector A's tilt is composed BEFORE the
+// joint motion — a revolute then turns about the tilted axis, a slider
+// slides along it — and connector B's AFTER it, where it tilts the part that
+// rides the joint. Both are needed: a wrong frame on B cannot be expressed as
+// one on A (for a revolute, only at a single joint angle; for a slider, not
+// at all).
+struct Tilt {
+  int mate = -1; // index into LoopProblem::mates; -1 = no tilt (the solve)
+  bool onB = false;
+  int column = 0;
+  // Out: the tilt reached (radians) and the joint columns' own mobility with
+  // it held.
+  double angle = 0.0;
+  int jointDof = 0;
+};
+
+glm::dmat4 TiltAt(const std::vector<double>& q, int column) {
+  const size_t c = static_cast<size_t>(column);
+  return glm::mat4_cast(ExpSo3(glm::dvec3(q[c], q[c + 1], 0.0)));
+}
+
 // Solves ONE connected component. SolveLoops below partitions first, so this
-// never sees unknowns that cannot influence its residuals.
-LoopSolution SolveComponent(const LoopProblem& problem) {
+// never sees unknowns that cannot influence its residuals. With `tilt` set it
+// is the diagnosis's re-solve: two more columns, everything else identical.
+LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
   LoopSolution sol;
   if (problem.cut.empty())
     return sol; // loop-free: the caller keeps its closed-form path
   sol.ran = true;
 
   const Packing pack = PackDofs(problem.mates);
-  const int cols = pack.cols;
+  const bool tilting = tilt != nullptr && tilt->mate >= 0;
+  const int jointCols = pack.cols;
+  const int cols = jointCols + (tilting ? 2 : 0);
+  if (tilting)
+    tilt->column = jointCols;
   // Relations whose DOFs are both unknowns here are rows; one that names a
   // DOF the mate lacks was refused at creation and is skipped, not guessed.
   struct RelationRow {
@@ -427,6 +455,7 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
   const int rows = cutRows + static_cast<int>(relRows.size()) +
                    static_cast<int>(pinRows.size());
   std::vector<double> q = SeedQ(problem.mates, pack);
+  q.resize(static_cast<size_t>(cols), 0.0); // a tilt starts at zero
 
   const double charLen =
       CharacteristicLength(WalkTree(problem, AdjustsFrom(problem.mates)));
@@ -437,6 +466,11 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     std::vector<glm::dmat4> adjust(problem.mates.size());
     for (size_t i = 0; i < problem.mates.size(); i++)
       adjust[i] = AdjustAt(problem.mates[i], pack.columnOf[i], qq);
+    if (tilting) {
+      glm::dmat4& a = adjust[static_cast<size_t>(tilt->mate)];
+      a = tilt->onB ? a * TiltAt(qq, tilt->column)
+                    : TiltAt(qq, tilt->column) * a;
+    }
     auto w = WalkTree(problem, adjust);
     r.resize(rows);
     for (size_t k = 0; k < problem.cut.size(); k++) {
@@ -582,7 +616,8 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
   for (const auto& [id, m] : world)
     sol.world[id] = glm::mat4(m);
 
-  // Which cut mates could not close, by their own residual block.
+  // Which cut mates could not close, by their own residual block — and by
+  // how much, each its own: the component's worst belongs to one of them.
   std::vector<bool> conflicts(problem.cut.size(), false);
   for (size_t k = 0; k < problem.cut.size(); k++) {
     double worst = 0.0;
@@ -591,6 +626,7 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     if (worst > kCloseTolMm) {
       conflicts[k] = true;
       sol.conflicting.push_back(problem.mates[problem.cut[k]].id);
+      sol.conflictingMm.push_back(worst);
     }
   }
 
@@ -617,6 +653,24 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     const auto& perm = qr.colsPermutation().indices();
     for (int i = rank; i < static_cast<int>(perm.size()); i++)
       dependentRows[static_cast<size_t>(perm[i]) / 6]++;
+    if (tilting) {
+      // The mobility of the mechanism the tilt made, with the tilt HELD:
+      // only the joint columns count.
+      //
+      // Relative threshold, not Eigen's default near machine epsilon: a tilt
+      // that restores a planar linkage restores it only to the closure
+      // tolerance, so its structurally-zero rows come back as finite-
+      // difference noise around 1e-5 of the real pivots, and the default
+      // counts that noise as rank.
+      tilt->jointDof = 0;
+      if (jointCols > 0) {
+        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> jq(jac.leftCols(jointCols));
+        jq.setThreshold(1e-4);
+        tilt->jointDof = jointCols - static_cast<int>(jq.rank());
+      }
+      const size_t c = static_cast<size_t>(tilt->column);
+      tilt->angle = std::hypot(q[c], q[c + 1]);
+    }
   }
 
   // A mate is REDUNDANT only when ALL SIX of its rows are dependent: remove it
@@ -713,7 +767,66 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
   return out;
 }
 
+bool CarriesAxis(MateType type) {
+  return type == MateType::Revolute || type == MateType::Cylindrical ||
+         type == MateType::Slider;
+}
+
+// The diagnosis proper, for a component whose plain solve left `conflicting`.
+LoopDiagnosis Diagnose(const LoopProblem& problem,
+                       const std::vector<uint64_t>& conflicting) {
+  LoopDiagnosis d;
+  d.conflicting = conflicting;
+  if (conflicting.empty())
+    return d; // it closes: nothing to explain
+  for (size_t i = 0; i < problem.mates.size(); i++) {
+    if (!CarriesAxis(problem.mates[i].type))
+      continue;
+    for (const bool onB : {false, true}) {
+      Tilt tilt;
+      tilt.mate = static_cast<int>(i);
+      tilt.onB = onB;
+      const LoopSolution s = SolveComponent(problem, &tilt);
+      LoopTiltTrial t;
+      t.mate = problem.mates[i].id;
+      t.connector = onB ? 'b' : 'a';
+      t.tiltRad = tilt.angle;
+      t.residualMm = s.residualMm;
+      t.dof = tilt.jointDof;
+      t.closes = s.residualMm < kCloseTolMm;
+      d.trials.push_back(t);
+    }
+  }
+  // Closing is not enough to accuse a mate. A loop with a tilt allowed at
+  // one joint has as many unknowns as it has equations, so a tilt at almost
+  // ANY joint downstream of the fault closes it — at one isolated pose, as a
+  // rigid spatial linkage. Only a tilt that undoes the fault gives back the
+  // mechanism's mobility (a planar four-bar's one DOF), so the suspects are
+  // the closing trials of the HIGHEST mobility, and a tie is reported as a
+  // tie.
+  int best = -1;
+  for (const LoopTiltTrial& t : d.trials)
+    if (t.closes)
+      best = std::max(best, t.dof);
+  for (const LoopTiltTrial& t : d.trials) {
+    if (!t.closes || t.dof != best)
+      continue;
+    auto same =
+        std::find_if(d.suspects.begin(), d.suspects.end(),
+                     [&](const LoopTiltTrial& s) { return s.mate == t.mate; });
+    if (same == d.suspects.end())
+      d.suspects.push_back(t);
+    else
+      same->connector = 0; // both sides do: which one is wrong is unknown
+  }
+  return d;
+}
+
 } // namespace
+
+LoopDiagnosis DiagnoseLoop(const LoopProblem& problem) {
+  return Diagnose(problem, SolveComponent(problem).conflicting);
+}
 
 LoopSolution SolveLoops(const LoopProblem& problem) {
   LoopSolution sol;
@@ -742,6 +855,10 @@ LoopSolution SolveLoops(const LoopProblem& problem) {
       sol.redundant.push_back(id);
     for (uint64_t id : part.conflicting)
       sol.conflicting.push_back(id);
+    for (double mm : part.conflictingMm)
+      sol.conflictingMm.push_back(mm);
+    if (problem.diagnose && !part.conflicting.empty())
+      sol.diagnoses.push_back(Diagnose(c.sub, part.conflicting));
     for (size_t i = 0; i < part.solved.size(); i++)
       sol.solved[c.mateIndex[i]] = part.solved[i];
     for (const auto& [id, m] : part.world)
@@ -762,6 +879,8 @@ LoopSolution SolveLoops(const LoopProblem& problem) {
       "this build has no Eigen, so mate loops are reported, not solved";
   return sol;
 }
+
+LoopDiagnosis DiagnoseLoop(const LoopProblem&) { return {}; }
 
 #endif
 

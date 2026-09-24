@@ -124,12 +124,45 @@ struct LoopProblem {
   std::vector<std::pair<uint64_t, glm::mat4>> anchor; // pinned occ -> world
   std::vector<LoopRelation> relations;
   std::vector<LoopPin> pinned;
+  // Run the tilted-axis diagnosis (DiagnoseLoop) on every component that
+  // fails to close. Off by default: it costs one extra solve per
+  // axis-carrying mate of a failing component, which a motion study's
+  // per-sample solve has no use for.
+  bool diagnose = false;
 };
 
 // The column of one DOF of a mate in the solver's state vector, or -1 when
 // that mate type has no such DOF. `firstColumn` is the mate's first column
 // (PackDofs); shared with the residual code so the two cannot disagree.
 int DofColumn(MateType type, MateDof dof, int firstColumn);
+
+// One connector of an axis-carrying mate, as the diagnosis tried it: the loop
+// re-solved with that connector free to tilt (two extra unknowns, rotations
+// about the connector's own X and Y at its origin).
+struct LoopTiltTrial {
+  uint64_t mate = 0;
+  // 'a' or 'b': which connector tilted. In a suspect, 0 means either did
+  // equally well, so the diagnosis cannot say which side is wrong.
+  char connector = 'a';
+  double tiltRad = 0.0;    // how far the axis had to tilt, radians
+  double residualMm = 0.0; // the loop's closure error with that tilt, mm
+  // The mechanism's mobility with the tilt applied and then held: the joint
+  // columns' DOF. A tilt that restores the intended mechanism gives back its
+  // mobility; one that closes the loop only at an isolated pose does not.
+  int dof = 0;
+  bool closes = false; // residualMm within the closure tolerance
+};
+
+// What the diagnosis concluded about one component that failed to close.
+// `suspects` is what the numbers support: the mates with a closing trial of
+// the highest mobility, one entry per mate. One suspect names the mate;
+// several are named together and none is claimed; none means the fault is
+// not a single tilted axis.
+struct LoopDiagnosis {
+  std::vector<uint64_t> conflicting; // this component's cut mates that failed
+  std::vector<LoopTiltTrial> trials; // both connectors of every axis mate
+  std::vector<LoopTiltTrial> suspects;
+};
 
 struct LoopSolution {
   bool ran = false;       // false when there was nothing to close
@@ -139,6 +172,11 @@ struct LoopSolution {
   double residualMm = 0.0; // worst closure error, mm
   std::vector<uint64_t> redundant;   // mate ids: dependent but CONSISTENT
   std::vector<uint64_t> conflicting; // mate ids that could not close
+  // Each conflicting mate's OWN closure error (the largest entry of its six
+  // residual rows, mm), parallel to `conflicting`.
+  std::vector<double> conflictingMm;
+  // One per failing component, when the problem asked to `diagnose`.
+  std::vector<LoopDiagnosis> diagnoses;
   std::vector<LoopMate> solved;      // `mates` with their DOF updated
   std::unordered_map<uint64_t, glm::mat4> world; // solved placements
   // Non-empty when this build has no Eigen: the caller keeps A3 behaviour and
@@ -150,6 +188,13 @@ struct LoopSolution {
 // business — the caller keeps its closed-form path, so existing assemblies
 // never touch a solver.
 LoopSolution SolveLoops(const LoopProblem& problem);
+
+// For ONE component that failed to close (`problem` holds only it): which
+// single revolute, cylindrical or slider mate — tree or cut — would let the
+// loop close if its axis were allowed to tilt. SolveLoops calls this when
+// `problem.diagnose` is set; exposed so a test can read every trial.
+// docs/assemblies/solver.md#naming-the-mate-that-keeps-a-loop-open
+LoopDiagnosis DiagnoseLoop(const LoopProblem& problem);
 
 // Forward kinematics: walk the tree from the anchors at the given DOF values.
 // Exposed because it is the residual evaluation AND the write-back pass, and

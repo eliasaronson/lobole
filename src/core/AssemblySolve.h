@@ -50,6 +50,10 @@ struct SolveReport {
   // just say nothing new. Named rather than counted, because the point is to
   // let a human see WHICH.
   std::vector<uint64_t> redundantMates;
+  // One per looped component that did not close, when the solve ran the
+  // diagnosis: which single tilted connector would let it close
+  // (docs/assemblies/solver.md#naming-the-mate-that-keeps-a-loop-open).
+  std::vector<LoopDiagnosis> diagnoses;
 };
 
 // The connector's local frame in its part's coordinates (columns X, Y, Z,
@@ -118,9 +122,14 @@ struct Driven {
   MateDof dof = MateDof::Rotation;
 };
 
+// `diagnose`: when a loop does not close, look for the one tilted connector
+// that would close it and name it in the cut mates' errors. It costs a few
+// extra solves of the failing component, only on failure; a motion study's
+// per-sample solve turns it off, since a sample that fails is reported with
+// its residual and nothing reads the text.
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr,
-                  const Driven& driven = {});
+                  const Driven& driven = {}, bool diagnose = true);
 
 // ---- Flatten: the one tree walk (A5) --------------------------------------
 //

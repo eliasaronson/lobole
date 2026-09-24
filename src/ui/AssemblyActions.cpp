@@ -246,8 +246,9 @@ bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
   return true;
 }
 
-assembly::SolveReport
-SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven) {
+assembly::SolveReport SolveActiveAssemblyReport(AppState& state,
+                                                const assembly::Driven& driven,
+                                                bool diagnose) {
   if (!state.assembly)
     return {};
   const assembly::PartResolver resolve =
@@ -255,7 +256,7 @@ SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven) {
     return PartDocById(state, partId);
   };
   const assembly::SolveReport rep = assembly::Solve(
-      *state.assembly, resolve, AssemblyResolverFor(state), driven);
+      *state.assembly, resolve, AssemblyResolverFor(state), driven, diagnose);
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync
   // Stamp the referenced parts' versions (A4): AssemblyPartsStale compares
   // against these, so a later part edit re-solves on tab activation. Stamped
@@ -278,8 +279,9 @@ int SolveActiveAssembly(AppState& state) {
   return SolveActiveAssemblyReport(state).erroredMates;
 }
 
-int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof) {
-  return SolveActiveAssemblyReport(state, {mateId, dof}).erroredMates;
+int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof,
+                              bool diagnose) {
+  return SolveActiveAssemblyReport(state, {mateId, dof}, diagnose).erroredMates;
 }
 
 bool AssemblyPartsStale(AppState& state) {
