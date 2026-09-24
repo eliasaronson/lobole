@@ -3,6 +3,7 @@
 #include "ui/BackgroundJobs.h"
 
 #include "common/Logger.h"
+#include "common/Watchdog.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/io/Autosaver.h"
@@ -90,6 +91,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   autosaver.Prime(seconds());
 
   while (!g_stopRequested) {
+    watchdog::Beat();
     server.ProcessPending(state);
     // Every long-running operation, from one place (ui/BackgroundJobs.h). The
     // RPC handlers poll too — a handler must apply a finished result before it

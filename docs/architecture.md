@@ -261,6 +261,34 @@ by the same name drift apart without any test noticing:
   the open project, the build's optional `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
 
+## Crashes and stalls
+
+- **A crash** (SIGSEGV, SIGABRT, SIGBUS, SIGFPE) prints a symbolized stack
+  to stderr from `CrashHandler.cpp`, then dies as it would have.
+  `designer --crash-test` exercises it.
+- **A stall** — the main thread not coming round its loop — is reported by
+  the frame watchdog (`src/common/Watchdog.{h,cpp}`). Each loop (windowed,
+  `--offscreen`, `--headless`) beats it once per iteration; a monitor thread
+  that sees no beat for 3 s logs `main thread stalled 3.0 s (in <label>)`,
+  the main thread's stack, and later `main thread resumed after N s`, once
+  per stall. The label says what was running when that is known: the RPC
+  being handled, or a native file dialog (reported without a stack — the
+  wait is the user). Every RPC, `ping` included, runs on the main thread, so
+  a stall also silences the remote, and this log line is where it is
+  explained. Nothing is watched before the first beat, so start-up is not
+  reported.
+- **The stack of the stalled thread** comes from a SIGUSR2 sent to it. The
+  handler only captures return addresses into preallocated memory (a static
+  arena for `std::basic_stacktrace`), because the thread may be slow rather
+  than stuck — inside `malloc`, say — and a handler that allocated there
+  would deadlock it for good. The watchdog symbolizes the capture on its own
+  thread; a release build names functions but has no file:line.
+- `DESIGNER_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
+  debugger stopping the process is not a hang); a value that is not seconds
+  is refused at start-up. `designer --stall-test` stalls the loop for 4 s once,
+  and `tests/watchdog_smoke.py` checks the stall line, the label, the stack and
+  the resume.
+
 ## Tests
 
 | suite | where | runs |

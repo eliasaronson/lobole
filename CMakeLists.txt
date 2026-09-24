@@ -245,6 +245,7 @@ set(core_sources
     # core/parts, core/io/Autosaver and core/io/Settings all resolve paths
     # through it, and a test binary that links only core still needs them.
     src/common/RuntimePaths.cpp
+    src/common/Watchdog.cpp
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
     src/cad/CADKernel.cpp

@@ -279,7 +279,10 @@ pointers, so `--call-graph dwarf` is the only mode with a usable stack.
 
 `main()` installs a `std::stacktrace` handler (CrashHandler.cpp) — SIGSEGV/ABRT
 print a symbolized stack to stderr → the dev-watch log. `designer --crash-test`
-exercises it. `DEV_WATCH_VALIDATE=1 tools/dev-watch.sh` turns on Vulkan
+exercises it. A HANG is reported by the frame watchdog: `main thread stalled
+N s (in <RPC or dialog>)` plus the main thread's stack, then `resumed after`
+(docs/architecture.md#crashes-and-stalls); `DESIGNER_WATCHDOG_S=0` turns it off
+under a debugger. `DEV_WATCH_VALIDATE=1 tools/dev-watch.sh` turns on Vulkan
 sync/GPU-assisted validation (slow; for device-lost/OOB bugs).
 
 **GPU:** two different questions — "did we use Vulkan correctly" (validation

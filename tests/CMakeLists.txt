@@ -121,6 +121,7 @@ add_executable(designer_tests
     test_world_up.cpp
     test_outline_edges.cpp
     test_still_outlines.cpp
+    test_watchdog.cpp
     test_ibl.cpp
     test_fem.cpp
     test_topopt.cpp
@@ -631,6 +632,13 @@ add_test(NAME render_glass_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(render_glass_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# The frame watchdog: a stalled main thread is logged with its label and a
+# symbolized stack, and the app carries on (docs/architecture.md#crashes-and-stalls).
+add_test(NAME watchdog_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/watchdog_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(watchdog_smoke PROPERTIES TIMEOUT 120)
 
 # The quick still: the raster renderers into an image of exactly W x H, path
 # parameters refused, the viewport left as it was

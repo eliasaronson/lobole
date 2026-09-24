@@ -10,6 +10,7 @@
 #include "common/DevicePreference.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "common/Watchdog.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Settings.h"
 #include "imgui.h"
@@ -1419,6 +1420,10 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       // For containers: the port is useless on loopback when the network is
       // namespaced. Unauthenticated, so it is never the default.
       args.remoteBindAll = true;
+    } else if (arg == "--stall-test") {
+      // Hidden: exercise the frame watchdog end-to-end — one 4 s stall a few
+      // iterations in, reported with the main thread's stack.
+      watchdog::RequestSelfTest();
     } else if (arg == "--crash-test") {
       // Hidden: exercise the fatal-signal backtrace end-to-end (Phase 0
       // sanity). Installed handler prints the stack, then core-dumps.
@@ -1794,6 +1799,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   double last = seconds();
   double animatingSince = -1.0;
   while (!g_OffscreenStopRequested) {
+    watchdog::Beat();
     server.ProcessPending(g_App);
     if (g_App.gpuStatsReset) {
       g_App.gpuStatsReset = false;
@@ -1924,6 +1930,20 @@ static int RunOffscreen(const CommandLineArgs& args) {
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
+
+  // The frame watchdog (common/Watchdog.h): a stalled main thread is logged
+  // with what it was doing and its stack. Every loop below beats it.
+  double watchdogSeconds = 0.0;
+  std::string watchdogError;
+  if (!watchdog::ThresholdFromEnvironment(&watchdogSeconds, &watchdogError)) {
+    std::cerr << watchdogError << std::endl;
+    return 2;
+  }
+  InstallStallCapture(); // here: it records THIS thread as the one to ask
+  watchdog::Start(watchdogSeconds, [] { return CaptureMainThreadStack(1.0); });
+  struct WatchdogStop {
+    ~WatchdogStop() { watchdog::Stop(); }
+  } watchdogStop;
 
   // --gui-test-list: the suite's own inventory, for the sharding runner.
   // Registration only stores the AppState pointer and fills the engine's
@@ -2551,6 +2571,7 @@ int main(int argc, char** argv) {
     // runs still renders exactly as before.
     if (paceIdle)
       glfwWaitEventsTimeout(app::FramePacer::kIdleTimeoutSeconds);
+    watchdog::Beat(); // per iteration: a minimized window finishes no frame
     g_App.frameTimer.BeginFrame(glfwGetTime());
     g_App.frameTimer.SetIdlePaced(paceIdle);
     glfwPollEvents();

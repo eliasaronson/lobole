@@ -10,6 +10,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "common/Watchdog.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
 #include "core/MassProps.h"
@@ -816,6 +817,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
     remote::RpcParams params{request.params};
     try {
       bool handled = false;
+      // Named on the watchdog's stall line if it takes that long.
+      const watchdog::Label rpcLabel("RPC " + request.method);
       json result = HandleSemantic(request, state, handled, params);
       if (handled) {
         // Strict params: a recognized method that ran without touching a key

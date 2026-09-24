@@ -7,6 +7,7 @@
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
+#include "common/Watchdog.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 #include "ui/DocumentSlots.h"
@@ -25,6 +26,17 @@
 
 #ifdef HAVE_NATIVEFILEDIALOG
 #include <nfd.h>
+
+namespace {
+// A native dialog blocks the main thread for as long as the user keeps it
+// open. The watchdog names that wait instead of reporting it as a hang with a
+// stack; the label covers the dialog call only, not what is done with the
+// answer afterwards.
+template <class F> auto InDialog(F&& call) {
+  const watchdog::Label label("file dialog", /*wantStack=*/false);
+  return call();
+}
+} // namespace
 #endif
 
 namespace ui {
@@ -369,7 +381,8 @@ void ImportFileDialog(AppState& state) {
   // used to just defer the failure to regeneration).
   const nfdu8filteritem_t filters[] = {{"CAD files", "step,stp,stl,brep"}};
 
-  nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
+  nfdresult_t result =
+      InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });
   if (result == NFD_OKAY) {
     std::string filePath(outPath);
     NFD_FreePathU8(outPath);
@@ -393,7 +406,8 @@ void OpenReferenceImageDialog(AppState& state) {
   }
   nfdu8char_t* outPath = nullptr;
   const nfdu8filteritem_t filters[] = {{"Images", "png,jpg,jpeg,bmp,tga,gif"}};
-  nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
+  nfdresult_t result =
+      InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });
   if (result == NFD_OKAY) {
     std::string filePath(outPath);
     NFD_FreePathU8(outPath);
@@ -413,7 +427,8 @@ void OpenProjectDialog(AppState& state) {
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
-  if (NFD_PickFolderU8(&outPath, nullptr) == NFD_OKAY) {
+  if (InDialog([&] { return NFD_PickFolderU8(&outPath, nullptr); }) ==
+      NFD_OKAY) {
     const std::string path = NormalizeProjectPick(outPath);
     NFD_FreePathU8(outPath);
     if (Autosaver::HasNewerAutosave(path) ||
@@ -442,8 +457,9 @@ void SaveProjectDialog(AppState& state) {
   // only through Open Recent. ProjectSaveTarget enforces it for a name typed
   // by hand, which the filter alone does not.
   const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn"}};
-  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn") ==
-      NFD_OKAY) {
+  if (InDialog([&] {
+        return NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn");
+      }) == NFD_OKAY) {
     std::string path = DocumentIO::ProjectSaveTarget(outPath);
     NFD_FreePathU8(outPath);
     // SaveProject, not DocumentIO::Save: a multi-document project writes the
@@ -467,8 +483,9 @@ void ExportDialog(AppState& state) {
       return; // nothing projected to export yet
     nfdu8char_t* out = nullptr;
     const nfdu8filteritem_t sheetFilters[] = {{"SVG", "svg"}, {"PDF", "pdf"}};
-    if (NFD_SaveDialogU8(&out, sheetFilters, 2, nullptr, "sheet.pdf") !=
-        NFD_OKAY) {
+    if (InDialog([&] {
+          return NFD_SaveDialogU8(&out, sheetFilters, 2, nullptr, "sheet.pdf");
+        }) != NFD_OKAY) {
       return;
     }
     std::string path(out);
@@ -497,10 +514,12 @@ void ExportDialog(AppState& state) {
   const nfdu8filteritem_t partFilters[] = {
       {"CAD / mesh", "step,stp,stl,brep,glb,gltf,obj,ply"}};
   nfdu8char_t* outPath = nullptr;
-  if (NFD_SaveDialogU8(&outPath, haveAssembly ? asmFilters : partFilters,
-                       haveAssembly ? 2 : 1, nullptr,
-                       haveAssembly ? "assembly.step" : "part.step") !=
-      NFD_OKAY) {
+  if (InDialog([&] {
+        return NFD_SaveDialogU8(&outPath,
+                                haveAssembly ? asmFilters : partFilters,
+                                haveAssembly ? 2 : 1, nullptr,
+                                haveAssembly ? "assembly.step" : "part.step");
+      }) != NFD_OKAY) {
     return;
   }
   std::string path(outPath);
@@ -521,7 +540,9 @@ void ExportBomDialog(AppState& state) {
     return;
   nfdu8char_t* outPath = nullptr;
   const nfdu8filteritem_t filters[] = {{"CSV", "csv"}};
-  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "bom.csv") != NFD_OKAY)
+  if (InDialog([&] {
+        return NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "bom.csv");
+      }) != NFD_OKAY)
     return;
   std::string path(outPath);
   NFD_FreePathU8(outPath);
@@ -550,8 +571,10 @@ void ExportMotionDialog(AppState& state, uint64_t studyId) {
       c = '_';
   nfdu8char_t* outPath = nullptr;
   const nfdu8filteritem_t filters[] = {{"glTF binary", "glb"}};
-  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr,
-                       (name + ".glb").c_str()) != NFD_OKAY)
+  if (InDialog([&] {
+        return NFD_SaveDialogU8(&outPath, filters, 1, nullptr,
+                                (name + ".glb").c_str());
+      }) != NFD_OKAY)
     return;
   std::string path(outPath);
   NFD_FreePathU8(outPath);
