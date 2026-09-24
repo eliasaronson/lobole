@@ -45,12 +45,9 @@ def casting_finish(p, material="aluminum", color=None):
     p.material(material)
 
 
-def rounded_polygon(sk, points, radius):
-    """Tangent circular corners, kept inside each corner's adjacent edges.
-
-    Scalar or per-corner radii; zero preserves a machined/flange corner.
-    The profiles remain analytic B-Reps rather than faceted approximations.
-    """
+def _round_corners(points, radius):
+    """Each corner of a polygon as (start, arc midpoint or None, end, centre,
+    radius) — the tangent circular fillet `rounded_polygon` draws."""
     corners = []
     for i, pt in enumerate(points):
         v = V((*pt, 0))
@@ -61,18 +58,56 @@ def rounded_polygon(sk, points, radius):
         r = radius[i] if isinstance(radius, (list, tuple)) else radius
         t = min(r / math.tan(angle / 2), 0.45*a.length(), 0.45*b.length())
         if t < 1e-8:
-            corners.append((pt, None, pt))
+            corners.append((pt, None, pt, None, 0.0))
             continue
         r = t * math.tan(angle / 2)
         centre = v + (u + w).unit() * (r / math.sin(angle / 2))
         mid = centre + (v - centre).unit() * r
         corners.append((tuple(v[j]+u[j]*t for j in range(2)),
                         tuple(mid[j] for j in range(2)),
-                        tuple(v[j]+w[j]*t for j in range(2))))
-    for i, (a, mid, b) in enumerate(corners):
+                        tuple(v[j]+w[j]*t for j in range(2)),
+                        (centre[0], centre[1]), r))
+    return corners
+
+
+def rounded_polygon(sk, points, radius):
+    """Tangent circular corners, kept inside each corner's adjacent edges.
+
+    Scalar or per-corner radii; zero preserves a machined/flange corner.
+    The profiles remain analytic B-Reps rather than faceted approximations.
+    """
+    corners = _round_corners(points, radius)
+    for i, (a, mid, b, _, _) in enumerate(corners):
         sk.line(corners[i-1][2], a)
         if mid is not None:
             sk.arc_through(a, mid, b)
+
+
+def rounded_outline(points, radius, steps=16):
+    """The same outline `rounded_polygon` draws, as a dense polyline — for
+    asking where it is, not for drawing it."""
+    out = []
+    for a, mid, b, centre, r in _round_corners(points, radius):
+        if mid is None:
+            out.append(a)
+            continue
+        a0 = math.atan2(a[1] - centre[1], a[0] - centre[0])
+        a1 = math.atan2(b[1] - centre[1], b[0] - centre[0])
+        sweep = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+        for k in range(steps + 1):
+            t = a0 + sweep * k / steps
+            out.append((centre[0] + r * math.cos(t),
+                        centre[1] + r * math.sin(t)))
+    return out
+
+
+def outline_half_width(outline, z):
+    """How far right (+x) a closed outline reaches at height z."""
+    xs = []
+    for (x0, z0), (x1, z1) in zip(outline, outline[1:] + outline[:1]):
+        if (z0 - z) * (z1 - z) <= 0.0 and z0 != z1:
+            xs.append(x0 + (x1 - x0) * (z - z0) / (z1 - z0))
+    return max(xs)
 
 
 def slab(p, x0, y0, z0, x1, y1, z1, name, mode="new_body"):
@@ -187,6 +222,11 @@ def block(app):
 
 
 def _block_rest(p, length):
+    # The outside of the casting goes on FIRST, so every hole drilled after
+    # it — the pump's threads, cover bolts through the rail ledge, the
+    # galleries — goes through it too. Added after them, it would fill their
+    # mouths back in: one pump thread breaks out 2 mm from the panel.
+    _block_castings(p)
     # A longitudinal pump register and three blind mounting holes. The pump
     # is deliberately absent, but its machined interface is part of the block.
     x,y,z=PUMP_MOUNT
@@ -324,12 +364,12 @@ def _block_rest(p, length):
     # a casting rather than as a box.
     for i, y in enumerate(MAIN_Y):
         for sx in (-1, 1):
-            rib = p.sketch(Plane.xz(y + 8.0), name=f"Rib {i}{sx}")
+            rib = p.sketch(Plane.xz(y + BLOCK_RIB_W / 2.0), name=f"Rib {i}{sx}")
             rib.polyline([(sx * CASE_X, PAN_RAIL + 10.0),
                           (sx * (CASE_X + 7.0), PAN_RAIL + 24.0),
                           (sx * (CASE_X + 7.0), BLOCK_STEP - 16.0),
                           (sx * CASE_X, BLOCK_STEP - 2.0)])
-            p.extrude(rib.add(), 16.0, mode="add", name=f"Rib {i}{sx}")
+            p.extrude(rib.add(), BLOCK_RIB_W, mode="add", name=f"Rib {i}{sx}")
 
     # The engine's own mounting pads, one each side between the ribs.
     for sx in (-1, 1):
@@ -423,6 +463,104 @@ def _block_rest(p, length):
         p.frame(f"cap_{i}", origin=(0, y, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
+
+
+def _upper_face(sx):
+    """The upper block's drafted side face on side `sx`: a point on it at
+    height z, and its outward normal. The same line `block()` draws."""
+    run, rise = 4.0, DECK - BLOCK_STEP
+    n = V((sx * rise, 0.0, run)).unit()
+
+    def at(z):
+        return V((sx * (DECK_X + run * (DECK - z) / rise), 0.0, z))
+    return at, n
+
+
+def _face_plane(sx, y, z, n, depth=0.0):
+    """A sketch plane on a side face at (y, z), `depth` below it along -n,
+    with sketch v running UP the face on either side."""
+    at, _ = _upper_face(sx)
+    origin = V((at(z)[0], y, z)) - n * depth
+    return Plane(origin, tuple(n), (0, sx, 0))
+
+
+def _block_castings(p):
+    """What makes the block read as a casting: a raised panel over the water
+    jacket each side with three core plugs in it, a ledge along the pan
+    rail, and on the pump side the oil filter's pad and the dipstick's
+    socket. None of it reaches a bore, a gallery or the jacket."""
+    top, bot = DECK - 14.0, CRANKCASE_DECK + 45.0
+    y0, y1 = BLOCK_Y0 + 18.0, BLOCK_Y1 - 18.0
+    for sx in (-1, 1):
+        at, n = _upper_face(sx)
+        zc = (top + bot) / 2.0
+        # Drawn on the drafted face itself, so the panel stands the same
+        # height proud top and bottom; drawn upright it grew 4 mm up the face.
+        pl = _face_plane(sx, (y0 + y1) / 2.0, zc, n, depth=1.0)
+        hu, hv = (y1 - y0) / 2.0, (top - bot) / 2.0
+        sk = p.sketch(pl, name=f"Water jacket panel {sx}")
+        rounded_polygon(sk, [(-hu, -hv), (hu, -hv), (hu, hv), (-hu, hv)], 14.0)
+        p.extrude(sk.add(), 1.0 + JACKET_PANEL_T, mode="add",
+                  name=f"Water jacket panel {sx}")
+        # Core plugs between the bores, each pressed into a boss: the seam
+        # round the plug is a shallow ring cut, which is what reads as a
+        # plug sitting in its bore.
+        for i, y in enumerate(MAIN_Y[1:4]):
+            bp = _face_plane(sx, y, CORE_PLUG_Z, n, depth=1.0)
+            b = p.sketch(bp, name=f"Core plug boss {sx}{i}")
+            b.circle((0, 0), d=CORE_PLUG_D + 12.0)
+            p.extrude(b.add(), 1.0 + JACKET_PANEL_T + 3.0, mode="add",
+                      name=f"Core plug boss {sx}{i}")
+            face = V((at(CORE_PLUG_Z)[0], y, CORE_PLUG_Z)) + n * (
+                JACKET_PANEL_T + 3.0 + 1.0)
+            cp = Plane(face, tuple(n * -1.0), (0, sx, 0))
+            c = p.sketch(cp, name=f"Core plug seam {sx}{i}")
+            c.circle((0, 0), d=CORE_PLUG_D)
+            c.circle((0, 0), d=CORE_PLUG_D - 4.0)
+            p.extrude(c.add(), 3.0, mode="cut", name=f"Core plug seam {sx}{i}")
+            dish = p.sketch(cp, name=f"Core plug dish {sx}{i}")
+            dish.circle((0, 0), d=CORE_PLUG_D - 12.0)
+            p.extrude(dish.add(), 2.0, mode="cut",
+                      name=f"Core plug dish {sx}{i}")
+    # The ledge along the pan rail, filling the crankcase's chamfer: the
+    # line the eye reads as "where the pan starts".
+    c = CASE_CHAMFER
+    for sx in (-1, 1):
+        sk = p.sketch(Plane.xz(BLOCK_Y1), name=f"Rail ledge {sx}")
+        sk.polyline([(sx * (CASE_X - c), PAN_RAIL),
+                     (sx * (CASE_X + FLANGE_BAND_T), PAN_RAIL),
+                     (sx * (CASE_X + FLANGE_BAND_T),
+                      PAN_RAIL + FLANGE_BAND_H - FLANGE_BAND_T),
+                     (sx * (CASE_X - 1.0), PAN_RAIL + FLANGE_BAND_H + 2.0),
+                     (sx * (CASE_X - 1.0), PAN_RAIL + c)])
+        p.extrude(sk.add(), BLOCK_Y1 - BLOCK_Y0, mode="add",
+                  name=f"Rail ledge {sx}")
+    # The oil filter pad: flat, round, standing proud of the ribs either
+    # side of it, with four tapped holes and a port straight into the main
+    # gallery behind it.
+    fx, fy, fz = OIL_FILTER_BOSS
+    axis_solid(p, (-(CASE_X - 6.0), fy, fz), (fx, fy, fz), OIL_FILTER_BOSS_D,
+               "Oil filter pad")
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        by = fy + OIL_FILTER_BOLT_PCD / 2.0 * math.cos(a)
+        bz = fz + OIL_FILTER_BOLT_PCD / 2.0 * math.sin(a)
+        bore(p, (fx - 1.0, by, bz), (fx + 16.0, by, bz),
+             OIL_FILTER_BOLT_D + TAP_FIT, "Oil filter pad thread", over=0.0)
+    bore(p, (fx - 1.0, fy, fz), (GALLERY_X, fy, fz), OIL_FILTER_PORT_D,
+         "Oil filter port", over=0.0)
+    # The dipstick socket, leaning out of the wall, and its bore down into
+    # the crankcase — it breaks in above the rail, not through its face.
+    d = V(DIPSTICK_AXIS)
+    t = V(DIPSTICK_BOSS)
+    inner = CASE_X - 14.0
+    reach = (abs(t[0]) - (CASE_X - 10.0)) / abs(d[0])   # the void trims it
+    axis_solid(p, t - d * reach, t, DIPSTICK_BOSS_D, "Dipstick socket")
+    past = (abs(t[0]) - inner + 4.0) / abs(d[0])
+    bore(p, t + d * 1.0, t - d * past, DIPSTICK_BORE_D, "Dipstick bore",
+         over=0.0)
+    p.frame("oil_filter", origin=OIL_FILTER_BOSS, z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("dipstick", origin=DIPSTICK_BOSS, z=(0, 0, 1), x=(1, 0, 0))
 
 
 def _pan_bolt_y():
@@ -871,17 +1009,36 @@ def ring_gear(app):
     return p
 
 
+DAMPER_RING_W = 10.0      # the inertia ring's width along the crank
+DAMPER_RING_OD = PULLEY_D + 10.0   # it stands proud of the belt pulley
+DAMPER_BOLTS = 6
+
+
 def damper(app):
-    """Crank pulley and torsional damper in one: a hub on the nose, a rubber
-    ring, and two V-grooves for the water pump belt."""
+    """Crank pulley and torsional damper in one, as the photograph shows it:
+    the belt pulley at the front, behind it the damper's inertia ring on its
+    rubber, and a hub with its bolt heads and the nose bolt in the middle.
+
+    Its origin is the pulley's FRONT face and +z runs aft along the crank.
+    The V groove, and so the belt's pitch radius, is exactly where it was;
+    the rest is shape. One solid: the ring's rubber line is a groove cut
+    into it, not a separate part.
+    """
     p = app.part("crank damper")
-    p.revolve_profile([(NOSE_D / 2.0 + 0.2, 0), (46.0, 0), (46.0, DAMPER_T),
-                       (NOSE_D / 2.0 + 0.2, DAMPER_T)],
-                      plane=Plane.xz(), axis="z", name="Damper hub")
-    p.revolve_profile([(46.0, 2.0), (PULLEY_D / 2.0, 2.0),
-                       (PULLEY_D / 2.0, DAMPER_T - 2.0),
-                       (46.0, DAMPER_T - 2.0)],
-                      plane=Plane.xz(), axis="z", mode="add", name="Rim")
+    bore_r = NOSE_D / 2.0 + 0.2
+    hub_r = PULLEY_D / 2.0 - 26.0
+    groove_end = BELT_Y - DAMPER_Y + BELT_GROOVE_H + 2.0
+    ring_z = DAMPER_T - DAMPER_RING_W
+    # Hub, pulley web, belt rim, and behind it the ring — one turned profile.
+    p.revolve_profile([(bore_r, -6.0), (hub_r, -6.0), (hub_r, 0.0),
+                       (PULLEY_D / 2.0, 0.0),
+                       (PULLEY_D / 2.0, groove_end),
+                       (hub_r + 4.0, groove_end),
+                       (hub_r + 4.0, ring_z),
+                       (DAMPER_RING_OD / 2.0, ring_z),
+                       (DAMPER_RING_OD / 2.0, DAMPER_T),
+                       (bore_r, DAMPER_T)],
+                      plane=Plane.xz(), axis="z", name="Damper")
     # ONE groove, and a deep one: a belt has to sit INSIDE it. At 8 mm deep
     # and 10 wide the drawn belt was wider than the vee at the radius it
     # rides, so it stood on the pulley's rims instead of in the groove.
@@ -891,6 +1048,32 @@ def damper(app):
                 (PULLEY_D / 2.0 - BELT_GROOVE_D, z),
                 (PULLEY_D / 2.0 + 1.0, z + BELT_GROOVE_H)])
     p.revolve(g.add(), axis="z", mode="cut", name="V groove")
+    # The rubber between the inertia ring and its carrier: a ring groove in
+    # the ring's front face, which is how it reads from in front.
+    rub = p.sketch(Plane.xy(ring_z - 1.0), name="Damper rubber")
+    rub.circle((0, 0), r=hub_r + 10.0)
+    rub.circle((0, 0), r=hub_r + 8.0)
+    p.extrude(rub.add(), DAMPER_RING_W - 2.0, mode="cut",
+              name="Damper rubber")
+    # The hub's bolt heads, round its face, and the nose bolt's washer and
+    # head in the middle — standing off the crank's own nose.
+    heads = p.sketch(Plane.xy(-4.0), name="Hub bolt heads")
+    pcd = (hub_r + PULLEY_D / 2.0) / 2.0 - 4.0
+    for k in range(DAMPER_BOLTS):
+        a = 2 * math.pi * k / DAMPER_BOLTS
+        heads.circle((pcd * math.cos(a), pcd * math.sin(a)), d=11.0)
+    p.extrude(heads.add(), 4.0, mode="add", name="Hub bolt heads")
+    nose_gap = DAMPER_Y - NOSE_Y + 0.5
+    washer = p.sketch(Plane.xy(-6.0 - 3.0), name="Nose bolt washer")
+    washer.circle((0, 0), r=bore_r + 6.0)
+    p.extrude(washer.add(), 3.0 + 6.0 - nose_gap, mode="add",
+              name="Nose bolt washer")
+    head = p.sketch(Plane.xy(-6.0 - 3.0 - 10.0), name="Nose bolt head")
+    af = 27.0
+    head.polyline([(af / math.sqrt(3.0) * math.cos(math.pi / 3 * k),
+                    af / math.sqrt(3.0) * math.sin(math.pi / 3 * k))
+                   for k in range(6)])
+    p.extrude(head.add(), 10.0, mode="add", name="Nose bolt head")
     p.material("steel")
     p.frame("hub", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("belt", origin=(0, 0, BELT_Y - DAMPER_Y), z=(0, 0, 1),
@@ -966,10 +1149,30 @@ def pan_inner_half_width(z):
     return (floor - w) + (bx - floor) * f
 
 
+def _pan_side(depth_at_well=0.0):
+    """The pan's floor line seen from the side, (y, z): flat under the front
+    cylinders, a ramp, and the shallow rear. `depth_at_well` lowers the flat
+    part only, which is how a trim avoids lying ON the floor it trims."""
+    ramp = math.radians(SUMP_RAMP_DEG)
+    zs = PAN_RAIL - SUMP_SHALLOW_DEPTH
+    y2 = SUMP_WELL_Y + (zs - SUMP_Z) / math.tan(ramp)
+    y1 = SUMP_WELL_Y - depth_at_well / math.tan(ramp)
+    return (y1, SUMP_Z - depth_at_well), (y2, zs), ramp
+
+
+SUMP_DRAIN_Y = SUMP_WELL_Y - 40.0     # the lowest point: the well's floor
+
+
 def sump(app):
-    """A pressed steel pan, drawn as a SECTION and extruded along the engine:
-    wide at the rail, tapering to a narrower floor. A box is quicker and
-    looks like a box.
+    """A pressed steel pan: a deep well under the front cylinders, where the
+    pickup is, a ramp, and a shallow rear under the rest of the crank; a
+    flange with a turned-down lip, and ribs pressed into its flanks.
+
+    Its SECTION tapers, wide at the rail to a narrower floor, and its SIDE
+    view steps — so the pan is the one shape cut by the other. With no
+    intersect, that is five operations: the section extruded along the
+    engine, hollowed; the side view's floor put back across it; and both
+    outlines' complements cut away, which trims everything to the pan.
 
     The pan is narrower than the block and the flange reaches back out to it
     — draw the box at the block's own width and the bolt centres fall in the
@@ -978,22 +1181,66 @@ def sump(app):
     p = app.part("sump")
     bx, w = CASE_X - PAN_BOX_INSET, SUMP_WALL
     floor = bx - 26.0
+    y0, y1 = SUMP_Y0, SUMP_Y1
 
-    def section(sk, o):
+    def section(sk, o, top=PAN_RAIL):
         rounded_polygon(sk,
-                        [(-bx + o, PAN_RAIL), (bx - o, PAN_RAIL),
+                        [(-bx + o, top), (bx - o, top),
                          (bx - o, SUMP_Z + 44.0), (floor - o, SUMP_Z + o),
                          (-floor + o, SUMP_Z + o),
                          (-bx + o, SUMP_Z + 44.0)],
                         [0, 0, 18-o, 18-o, 18-o, 18-o])
 
-    outer = p.sketch(Plane.xz(SUMP_Y1), name="Pan")
+    outer = p.sketch(Plane.xz(y1), name="Pan")
     section(outer, 0.0)
-    p.extrude(outer.add(), SUMP_Y1 - SUMP_Y0, mode="new_body", name="Pan")
-    inner = p.sketch(Plane.xz(SUMP_Y1 - w), name="Pan inside")
+    p.extrude(outer.add(), y1 - y0, mode="new_body", name="Pan")
+    inner = p.sketch(Plane.xz(y1 - w), name="Pan inside")
     section(inner, w)
-    p.extrude(inner.add(), SUMP_Y1 - SUMP_Y0 - 2 * w, mode="cut",
-              name="Pan inside")
+    p.extrude(inner.add(), y1 - y0 - 2 * w, mode="cut", name="Pan inside")
+
+    # The floor behind the well, put back: everything OUTSIDE the cavity's
+    # side view, as one U drawn across the pan. Its edges sit half a
+    # millimetre inside the walls and floor it meets, never on them.
+    (wy, wz), (ry, rz), ramp = _pan_side()
+    c, sn = math.cos(ramp), math.sin(ramp)
+    lift = w - 0.5
+
+    def on_ramp(h):
+        """Where the ramp's inner face (offset w) is at height h."""
+        t = (h - SUMP_Z - w * c) / sn
+        return wy - w * sn + t * c
+
+    xu = bx + 5.0
+    u = p.sketch(Plane.yz(-xu), name="Floor behind the well")
+    rounded_polygon(u, [(y0 + 0.5, PAN_RAIL - 0.5), (y0 + 0.5, SUMP_Z + 0.5),
+                        (y1 - 0.5, SUMP_Z + 0.5), (y1 - 0.5, PAN_RAIL - 0.5),
+                        (y1 - w + 0.5, PAN_RAIL - 0.5),
+                        (y1 - w + 0.5, rz + w),
+                        (on_ramp(rz + w), rz + w),
+                        (on_ramp(SUMP_Z + lift), SUMP_Z + lift),
+                        (y0 + w - 0.5, SUMP_Z + lift),
+                        (y0 + w - 0.5, PAN_RAIL - 0.5)],
+                    [0, 0, 0, 0, 0, 0, 40.0 + w, 8.0, 0, 0])
+    p.extrude(u.add(), 2 * xu, mode="add", name="Floor behind the well")
+
+    # Trim to the section: its complement, cut along the engine. The loop
+    # runs ABOVE the rail so the ring does not share its top edge.
+    big = CASE_X + 20.0
+    ring = p.sketch(Plane.xz(y1 + 1.0), name="Section trim")
+    ring.rect((-big, SUMP_Z - 30.0), (big, PAN_RAIL + 30.0))
+    section(ring, 0.0, top=PAN_RAIL + 10.0)
+    p.extrude(ring.add(), y1 - y0 + 2.0, mode="cut", name="Section trim")
+    # ...and to the side view: its complement, cut across. The well's floor
+    # line is dropped a millimetre so this cut never lies on that floor.
+    (qy, qz), (ry, rz), _ = _pan_side(depth_at_well=1.0)
+    side = p.sketch(Plane.yz(-big), name="Side trim")
+    side.rect((y0 - 30.0, SUMP_Z - 30.0), (y1 + 30.0, PAN_RAIL + 30.0))
+    rounded_polygon(side, [(y0 - 10.0, PAN_RAIL + 10.0), (y0 - 10.0, qz),
+                           (qy, qz), (ry, rz), (y1 + 10.0, rz),
+                           (y1 + 10.0, PAN_RAIL + 10.0)],
+                    [0, 0, 0, 40.0, 0, 0])
+    p.extrude(side.add(), 2 * big, mode="cut", name="Side trim")
+
     # The chain case's floor is OPEN — it drains into the sump — so the pan's
     # flange has to run forward under it. Stopped at the block's front face,
     # the two left a slot straight into the crankcase.
@@ -1003,22 +1250,42 @@ def sump(app):
     flange.rect((-CASE_X, COVER_Y0), (CASE_X, BLOCK_Y1))
     flange.rect((-bx + w, COVER_Y0 + 14.0), (bx - w, BLOCK_Y1 - 14.0))  # rim
     p.extrude(flange.add(), 6.0, mode="add", name="Flange")
+    # The lip: the flange's edge turned down, which is what stiffens a
+    # pressed flange between its bolts — and it stays outboard of them.
+    h = SUMP_LIP / 2.0
+    lip = p.sketch(Plane.xy(PAN_RAIL - 6.0 - SUMP_LIP_H), name="Lip")
+    lip.rect((-CASE_X - h, COVER_Y0 - h), (CASE_X + h, BLOCK_Y1 + h))
+    lip.rect((-CASE_X + h, COVER_Y0 + h), (CASE_X - h, BLOCK_Y1 - h))
+    p.extrude(lip.add(), SUMP_LIP_H + 3.0, mode="add", name="Lip")
     holes = p.sketch(Plane.xy(PAN_RAIL - 7.0), name="Bolt holes")
     for y in _pan_bolt_y():
         for sx in (-1, 1):
             holes.circle((sx * PAN_BOLT_X, y), d=9.0)  # M8 Normal
     p.extrude(holes.add(), 8.0, mode="cut", name="Bolt holes")
-    # A drain boss at the deepest, rearmost corner, standing PROUD of the
-    # floor — inside it would be a lump in the oil.
+
+    # Ribs pressed into the flanks, between the bolts — a bolt head needs
+    # the flange's underside clear.
+    bolts = _pan_bolt_y()
+    gaps = [(a + b) / 2.0 for a, b in zip(bolts, bolts[1:])]
+    for i, y in enumerate(gaps):
+        low = (SUMP_Z + 50.0) if y < wy else (rz + 8.0)
+        for sx in (-1, 1):
+            r = p.sketch(Plane.xz(y + 4.0), name=f"Pan rib {i}{sx}")
+            r.polyline([(sx * (bx - 1.0), PAN_RAIL - 6.0),
+                        (sx * (bx + 8.0), PAN_RAIL - 6.0),
+                        (sx * (bx + 2.0), low), (sx * (bx - 1.0), low)])
+            p.extrude(r.add(), 8.0, mode="add", name=f"Pan rib {i}{sx}")
+    # A drain boss at the well's lowest point, standing PROUD of the floor —
+    # inside it would be a lump in the oil.
     boss = p.sketch(Plane.xy(SUMP_Z - 8.0), name="Drain boss")
-    boss.circle((0, SUMP_Y1 - 40.0), d=34.0)
+    boss.circle((0, SUMP_DRAIN_Y), d=34.0)
     p.extrude(boss.add(), 8.0 + w, mode="add", name="Drain boss")
     drain = p.sketch(Plane.xy(SUMP_Z - 9.0), name="Drain")
-    drain.circle((0, SUMP_Y1 - 40.0), d=DRAIN_D)
+    drain.circle((0, SUMP_DRAIN_Y), d=DRAIN_D)
     p.extrude(drain.add(), 16.0, mode="cut", name="Drain")
     casting_finish(p, "steel", (0.22, 0.23, 0.24))
     p.frame("rail", origin=(0, 0, PAN_RAIL), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("drain", origin=(0, SUMP_Y1 - 40.0, SUMP_Z - 8.0), z=(0, 0, -1),
+    p.frame("drain", origin=(0, SUMP_DRAIN_Y, SUMP_Z - 8.0), z=(0, 0, -1),
             x=(1, 0, 0))
     p.check()
     return p
@@ -1129,17 +1396,11 @@ def chain(app, name, span, tip_a, tip_b, width, thickness=CHAIN_T):
 def cover_inner_x(z):
     """Half-width of the chain case's CAVITY at height z — the same outline
     `_cover_outline` draws, offset by its own wall. Anything that lives
-    inside the case measures itself against this."""
-    k = COVER_WALL
-    rows = [(PAN_RAIL - 1.0, 100.0 - k), (110.0, 100.0 - k),
-            (130.0, 88.0 - k), (COVER_TOP - 30.0, 88.0 - k),
-            (COVER_TOP - k, 40.0)]
-    if z <= rows[0][0]:
-        return rows[0][1]
-    for (z0, x0), (z1, x1) in zip(rows, rows[1:]):
-        if z <= z1:
-            return x0 + (x1 - x0) * (z - z0) / (z1 - z0)
-    return rows[-1][1]
+    inside the case measures itself against this, and it is measured off
+    the drawn outline's own arcs: interpolated between its corners instead,
+    a rail would take the corner and the arc would take the rail."""
+    pts, radii = _cover_points(COVER_WALL, open_floor=True)
+    return outline_half_width(rounded_outline(pts, radii), z)
 
 
 RAIL_GAP = 1.5      # running clearance between a rail's shoe and the chain
@@ -1334,14 +1595,39 @@ def oil_pickup(app):
 
 
 # ------------------------------------------- the chain case and the cooling
+# The chain case's outline, right half, as (half-width, height, corner
+# radius). It follows what is inside: full width over the crank sprocket and
+# the oil pump, where the lower cover bolts are; in to a waist over the chain
+# runs; out again round the water pump; in, and out to the cam cover's width
+# at the head, where the upper bolts are. Read off the front photograph,
+# held by what it has to clear and to carry: the waist and neck leave the
+# guide rails their rib, and each bolt keeps its boss.
+COVER_SHAPE = (
+    (100.0, max(z for x, z in COVER_BOLTS if x > 80.0) + 16.0, 20.0),
+    (80.0, WATER_PUMP_Z - 54.0, 24.0),                      # waist
+    (92.0, WATER_PUMP_Z, 60.0),                             # round the pump
+    (84.0, WATER_PUMP_Z + 55.0, 24.0),                      # neck
+    (88.0, min(z for _, z in COVER_BOLTS_HEAD) - 12.0, 10.0),  # head bolts
+)
+
+
+def _cover_points(inset=0.0, open_floor=False):
+    """The chain case outline as a polygon and its corner radii."""
+    k = inset
+    floor = PAN_RAIL-1 if open_floor else PAN_RAIL+k
+    top = COVER_BASE+1 if open_floor else COVER_BASE-k
+    right = [(100.0-k, floor, 0.0)]
+    right += [(x-k, z, r) for x, z, r in COVER_SHAPE]
+    right += [(COVER_SHAPE[-1][0]-k, top, 0.0)]
+    pts = [(x, z) for x, z, _ in right] + [(-x, z) for x, z, _ in right[::-1]]
+    radii = [r for _, _, r in right] + [r for _, _, r in right[::-1]]
+    return pts, radii
+
+
 def _cover_outline(sk,inset=0.0,open_floor=False):
     """Lower chain housing, split at the head-cover gasket datum."""
-    k=inset
-    floor=PAN_RAIL-1 if open_floor else PAN_RAIL+k
-    top=COVER_BASE+1 if open_floor else COVER_BASE-k
-    rounded_polygon(sk,[(-100+k,floor),(100-k,floor),(100-k,110),
-                        (88-k,130),(88-k,top),(-88+k,top),
-                        (-88+k,130),(-100+k,110)], [0,0,8,8,0,0,8,8])
+    pts, radii = _cover_points(inset, open_floor)
+    rounded_polygon(sk, pts, radii)
 
 
 def timing_cover(app):
@@ -1503,28 +1789,61 @@ def vee_pulley(app, name, d, bore_d, width=16.0):
 # --------------------------------------------------------- how it is held
 MOUNT_W = 52.0            # the bracket's width along the engine
 MOUNT_REACH = 52.0        # how far its foot sticks out past the block
+MOUNT_PLATE_T = 9.0       # the plate against the crankcase pad
+MOUNT_FOOT_T = 10.0       # ...and the foot the rubber mount bolts through
 
 
 def engine_mount(app, side):
-    """A cast mounting bracket: a plate against the crankcase's own pad and a
-    foot standing out from it with the rubber mount's bolt through it.
+    """A cast engine support arm: a plate against the crankcase's own pad,
+    two triangular webs reaching out and down from it, and a foot with a
+    boss for the rubber mount's bolt — the arm the photographs show on both
+    sides of the block, not a bent plate.
 
-    Drawn once and placed twice — the frame it mates to is the mirror, which
-    is why its own x runs OUTWARD from the block rather than along +X.
+    The webs run along the plate's two EDGES, clear of the three bolt heads
+    between them. Drawn once and placed twice — the frame it mates to is the
+    mirror, which is why its own x runs OUTWARD from the block rather than
+    along +X.
     """
     p = app.part(f"engine mount {side}")
     x0 = CASE_X
-    sec = p.sketch(Plane.xz(MOUNT_Y + MOUNT_W / 2.0), name="Bracket")
-    sec.polyline([(x0, 62.0), (x0 + 9.0, 62.0), (x0 + 9.0, 8.0),
-                  (x0 + MOUNT_REACH, 8.0), (x0 + MOUNT_REACH, -14.0),
-                  (x0, -14.0)])
-    p.extrude(sec.add(), MOUNT_W, mode="new_body", name="Bracket")
+    top = max(z for _, z in MOUNT_BOLTS) + 14.0
+    low = min(z for _, z in MOUNT_BOLTS) - 24.0
+    foot_top = low + MOUNT_FOOT_T
+    hole_x = x0 + MOUNT_REACH - 18.0
+    ya, yb = MOUNT_Y - MOUNT_W / 2.0, MOUNT_Y + MOUNT_W / 2.0
+    plate = p.sketch(Plane.yz(x0), name="Plate")
+    rounded_polygon(plate, [(ya, low), (yb, low), (yb, top), (ya, top)],
+                    [0, 0, 10, 10])
+    p.extrude(plate.add(), MOUNT_PLATE_T, mode="new_body", name="Plate")
+    foot = p.sketch(Plane.xy(low), name="Foot")
+    rounded_polygon(foot, [(x0 + 1.0, ya), (x0 + MOUNT_REACH, ya),
+                           (x0 + MOUNT_REACH, yb), (x0 + 1.0, yb)],
+                    [0, 12, 12, 0])
+    p.extrude(foot.add(), MOUNT_FOOT_T, mode="add", name="Foot")
+    # Each web leaves the plate ABOVE the lower bolts and meets the foot
+    # outboard of their heads, so a spanner reaches them under the arch.
+    head = MOUNT_BOLT_D                  # a head's reach off the plate, and
+    low_bolt = min(z for _, z in MOUNT_BOLTS) + head    # ...its top
+    clear_x = x0 + MOUNT_PLATE_T + head
+    for i, y1 in enumerate((yb, ya + MOUNT_ARM_T)):
+        web = p.sketch(Plane.xz(y1), name=f"Web {i}")
+        rounded_polygon(web, [(x0 + 1.0, top - 4.0), (x0 + 1.0, low_bolt + 8.0),
+                              (clear_x, low_bolt), (clear_x, foot_top - 1.0),
+                              (x0 + MOUNT_REACH - 2.0, foot_top - 1.0),
+                              (x0 + MOUNT_PLATE_T + 2.0, top - 4.0)],
+                        [0, 6, 6, 4, 6, 8])
+        p.extrude(web.add(), MOUNT_ARM_T, mode="add", name=f"Web {i}")
+    # The boss the rubber mount's bolt passes through, under the foot.
+    boss = p.sketch(Plane.xy(low - 6.0), name="Mount boss")
+    boss.circle((hole_x, MOUNT_Y), d=36.0)
+    p.extrude(boss.add(), 6.0 + MOUNT_FOOT_T, mode="add", name="Mount boss")
     for dy, z in MOUNT_BOLTS:
-        bore(p, (x0 + 10.0, MOUNT_Y + dy, z), (x0 - 1.0, MOUNT_Y + dy, z),
+        bore(p, (x0 + MOUNT_PLATE_T + 1.0, MOUNT_Y + dy, z),
+             (x0 - 1.0, MOUNT_Y + dy, z),
              MOUNT_BOLT_D, f"Bolt hole {dy}", over=0.0)
-    m = p.sketch(Plane.xy(-16.0), name="Mount hole")
-    m.circle((x0 + MOUNT_REACH - 18.0, MOUNT_Y), d=20.0)
-    p.extrude(m.add(), 28.0, mode="cut", name="Mount hole")
+    m = p.sketch(Plane.xy(low - 8.0), name="Mount hole")
+    m.circle((hole_x, MOUNT_Y), d=20.0)
+    p.extrude(m.add(), MOUNT_FOOT_T + 10.0, mode="cut", name="Mount hole")
     p.material("steel")
     p.frame("pad", origin=(x0, MOUNT_Y, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()

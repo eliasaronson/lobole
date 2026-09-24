@@ -487,6 +487,16 @@ SUMP_Z = PAN_RAIL - SUMP_DEPTH
 SUMP_Y0 = -260.0          # the pan runs forward to the chain case's own
                           # front face, because the case's floor is open
 SUMP_Y1 = 205.0
+# The pan is DEEP only under the front cylinders, where the pickup is, and
+# shallow behind — the factory section (KTG 9810) shows the well ending under
+# the middle of the engine and a ramp up to a floor just below the rail. The
+# shallow floor still clears the crank: the rod caps reach 83.8 below the
+# axis and the rail is at 92.
+SUMP_WELL_Y = MAIN_Y[2]           # where the well's flat floor ends
+SUMP_SHALLOW_DEPTH = 45.0         # the rear floor, below the pan rail
+SUMP_RAMP_DEG = 40.0              # the ramp between them, from horizontal
+SUMP_LIP = 4.0                    # the pressed lip round the flange...
+SUMP_LIP_H = 7.0                  # ...and how far it turns down
 # The pump hangs off the block's front face inside the chain case. Its height
 # is squeezed from both ends: the chain has to be longer than the two
 # sprockets' tip radii together, and everything on it — body, gears, driven
@@ -508,6 +518,42 @@ MOUNT_Y = -60.0
 MOUNT_BOLT_DEPTH = 12.0
 MOUNT_BOLTS = [(-15.0, 10.0), (15.0, 10.0), (0.0, 48.0)]   # (dy, z)
 MOUNT_BOLT_D = 11.0
+MOUNT_ARM_T = 7.0         # the cast arm's two side webs
+
+# ---- the outside of the block ------------------------------------------------
+# Casting form read off the photographs (scaled against the 87 mm bore), not
+# a drawing. The ribs are the ones over each main web.
+BLOCK_RIB_W = 16.0
+JACKET_PANEL_T = 3.0      # the raised panel over the water jacket
+CORE_PLUG_D = 34.0        # three a side, between the bores
+CORE_PLUG_Z = (JACKET_Z0 + JACKET_Z1) / 2.0
+FLANGE_BAND_H = 12.0      # the ledge along the pan rail
+FLANGE_BAND_T = 3.0
+# Where the oil filter housing bolts on: a flat round pad on the pump side
+# (-X), low and toward the rear, in the bay between the ribs over mains 3
+# and 4, at the main gallery's own height so its port drills straight in.
+OIL_FILTER_BOSS_D = 70.0
+OIL_FILTER_BOSS_H = 12.0  # proud of the crankcase wall; clears the ribs
+OIL_FILTER_BOSS = (-(CASE_X + OIL_FILTER_BOSS_H),
+                   (MAIN_Y[2] + MAIN_Y[3]) / 2.0, GALLERY_Z)
+OIL_FILTER_AXIS = (-1.0, 0.0, 0.0)          # outward, the pad's normal
+OIL_FILTER_BOLT_D = 8.0                     # four M8, tapped
+OIL_FILTER_BOLT_PCD = 52.0
+OIL_FILTER_PORT_D = 12.0                    # into the main gallery
+# The dipstick enters the crankcase through the same wall, in the next bay
+# aft, leaning outward so its tube clears the pad. Its socket's top face and
+# axis are the tube's seat.
+DIPSTICK_TILT_DEG = 15.0
+DIPSTICK_AXIS = (-math.sin(math.radians(DIPSTICK_TILT_DEG)), 0.0,
+                 math.cos(math.radians(DIPSTICK_TILT_DEG)))
+DIPSTICK_BOSS_D = 22.0
+DIPSTICK_BORE_D = 10.0
+# High enough that the bore breaks into the crankcase 20 mm above the rail,
+# not through the rail's gasket face.
+DIPSTICK_BOSS = (-(CASE_X + OIL_FILTER_BOSS_H + 2.0),
+                 (MAIN_Y[3] + MAIN_Y[4]) / 2.0,
+                 PAN_RAIL + 20.0 + (OIL_FILTER_BOSS_H + 2.0 + 14.0)
+                 / math.tan(math.radians(DIPSTICK_TILT_DEG)))
 
 # ---- cooling ---------------------------------------------------------------
 WATER_PUMP_Y = -272.0

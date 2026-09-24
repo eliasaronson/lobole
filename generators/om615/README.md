@@ -34,8 +34,8 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   saved engine through the component staging layer (`tools/designer_components.py`),
   keeping part, feature and occurrence identities and reusing unchanged
   geometry. Keys: `belt`, `fan`, `vacuum-pump` (the casting), `block`, `head`,
-  `sump`, `timing-cover`, `cam-cover`, `intake`, `exhaust`, `injector`,
-  `prechamber`. A component's fingerprint covers the builder modules and the
+  `sump`, `timing-cover`, `damper`, `engine-mount-left`, `engine-mount-right`,
+  `cam-cover`, `intake`, `exhaust`, `injector`, `prechamber`. A component's fingerprint covers the builder modules and the
   SDK; a change to `om615_spec.py` or the shared accessory mounting inputs
   refuses a component update and asks for a full rebuild.
 - **Outputs** in `--out` (default `/tmp/om615`): the project, an animated
@@ -54,7 +54,7 @@ arm and a short block screw are each refused for their own reason.
 | file | what |
 |---|---|
 | `om615_spec.py` | every shared number, derived from bore, stroke, rod (145) and bore pitch (97) where the derivation is real |
-| `om615_bottom.py` | block, crank, rods, pistons and rings, caps, shells, flywheel, damper, seals, sump, timing chain and cover, oil pump, water pump, pulleys, engine mounts |
+| `om615_bottom.py` | block (with its casting exterior), crank, rods, pistons and rings, caps, shells, flywheel, damper, seals, sump, timing chain and cover, oil pump, water pump, pulleys, engine mounts |
 | `om615_top.py` | head, camshaft, rockers, valves, guides, seats and springs, cam cover, manifolds, injectors, pre-chambers, glow plugs |
 | `om615_accessories.py` | belt, fan, alternator (stator and rotor subassemblies), vacuum pump and its timer cam, mounting brackets |
 | `om615.py` | assembly, fasteners, the component table, stages and checks |
@@ -75,6 +75,35 @@ its running envelope and does not circulate.
 by a revolute in the engine, because a nested assembly is rigid in the solver
 and a turning rotor needs its DOF exposed in the parent. The whole-engine
 sweep checks top-level pairs only, so the children are swept on their own.
+
+**The bottom end's outside** is casting form read off the front photograph
+and the factory section, not a drawing, and none of it touches a bore,
+gallery, bearing or mating face. The block carries a raised panel over the
+water jacket on each side with three core plugs in bosses between the bores,
+a ledge along the pan rail, and on the pump side (−X) two interfaces for
+parts not yet fitted:
+
+- **oil filter pad** — flat, round, Ø70, its face at (−112, 48.5, 60) with
+  normal −X: in the bay between the ribs over mains 3 and 4, at the main
+  gallery's height, with four tapped M8 holes on a 52 mm PCD at 45° and a
+  Ø12 port drilled straight into the gallery. Frame `oil_filter` on the block.
+- **dipstick socket** — Ø22, its top face centred at (−114, 145.5, 32.5), axis
+  (−sin 15°, 0, cos 15°) leaning outward; a Ø10 bore runs down it into the
+  crankcase 20 mm above the rail, in the bay between mains 4 and 5. Frame
+  `dipstick` (world-aligned, at the top face).
+
+The numbers live in `om615_spec.py` (`OIL_FILTER_BOSS`, `DIPSTICK_BOSS`,
+`DIPSTICK_AXIS`). The sump is deep only under the front cylinders — a flat
+well to the centre main, a 40° ramp, a floor 45 mm under the rail behind —
+with the drain plug at the well's lowest point, a turned-down lip round its
+flange and ribs between the bolts. The timing cover's outline follows the
+case: full width over the crank and the lower bolts, a waist over the chain
+runs, out round the water pump, and back to the cam cover's width at the
+head (`COVER_SHAPE`; the rails measure their room off the drawn arcs). The
+crank pulley is pulley, damper ring and hub with its bolt heads, on the same
+groove, and the engine mounts are cast arms — a plate on the crankcase pad,
+two triangular webs arched clear of the bolt heads, and a foot with a boss
+for the rubber mount — on the same pad and mount hole as before.
 
 Construction rules the builders keep:
 
@@ -126,7 +155,9 @@ and late 200 D / 220 D figures.
 | same: 05-412, 07-200 | intermediate shaft, injection timer and pump installation (no dimensioned mounting pattern) |
 | owner's photographs, Daimler sectional drawing | external arrangement and casting form only; not scaled drawings |
 
-Everything else is a modelling estimate: rod length, the 3.2 mm crown-to-deck
+Everything else is a modelling estimate: the casting exterior (panels, core
+plugs, ribs, ledges, the sump's well and ramp, the cover's outline, the mount
+arms), rod length, the 3.2 mm crown-to-deck
 gap, bowl and pre-chamber shape and volume, port routing, rocker and retainer
 construction (the manual shows cap and lock nuts; the model uses collets),
 seat insert diameters, skirt reliefs, the cam-cover bolt pattern and towers,
