@@ -13,8 +13,10 @@ lights them: a grey that reads 0.5 in sRGB is about 0.2 here.
 """
 
 FINISHES = {
-    # Grey paint over iron: dark, semi-matte, a little metallic sheen.
-    "paint": dict(color=[0.13, 0.14, 0.15], roughness=0.55, metallic=0.25),
+    # Grey paint over iron. Paint is a DIELECTRIC: any metallic in it turns
+    # the casting into a mirror of the lights, dark from one side and silver
+    # from the other, where the photographs show one even satin grey.
+    "paint": dict(color=[0.17, 0.18, 0.19], roughness=0.5, metallic=0.0),
     # Bare sand-cast aluminium: light, dull, metallic.
     "aluminium": dict(color=[0.52, 0.53, 0.54], roughness=0.5,
                       metallic=0.9),
