@@ -124,8 +124,11 @@ names the fixture.
 ### Machine travel
 
 With a work area stated, `outsideTravel` counts moves past it: X and Y against
-the reach window ([setup.md](setup.md#the-machines-work-area)); Z as a span,
-the program's deepest point against its highest retract.
+the reach window ([setup.md](setup.md#the-machines-work-area)), each with the
+first line that crosses it; Z as a span, the program's deepest point against
+its highest retract. A span has no first line, so a Z overrun is reported with
+the lines of those two moves (`z_span_over_mm`, `z_deepest_line`,
+`z_highest_line` on `cam_verify`): no touch-off height makes it fit.
 
 ### Findings about the cutter
 

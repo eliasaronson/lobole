@@ -9,33 +9,6 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
-## Modeling
-
-### A sketch entity id can land in the reserved datum block
-
-- `SketchFeature::MintEntityId` draws from 1..UINT32_MAX and checks only the
-  sketch's own entities, so it can mint an id ≥ `0xFFFFFF00`, which
-  `IsDatum()` reads as the origin or an axis (about 6e-8 per mint). Cap the
-  range below `kDatumBase` (`src/core/features/SketchFeature.cpp`).
-
-### An unknown `hole_kind` becomes a simple hole
-
-- **Symptom:** a Hole feature whose `hole_kind` is misspelled
-  (`"counterbored"`) loads and builds as a plain drilled hole, with no error.
-  Counterbore and countersink fields (`cb_*`, `cs_*`) given to a kind that
-  does not use them are accepted and silently dropped.
-- **Cause:** the loader maps `counterbore` and `countersink` and sends every
-  other string to `HoleKind::Simple`; the RPC's unknown-field check accepts
-  any key the Hole row documents, whichever kind it belongs to, and
-  serialization writes `cb_*` only for counterbores.
-- **Where:** `FeatureFromJson`'s `Hole` branch in
-  `src/core/io/SerializeFeatures.cpp`; `RejectUnknownFeatureFields` in
-  `src/remote/RemoteModeling.cpp`.
-- **Likely fix:** refuse an unknown `hole_kind`, naming `simple`,
-  `counterbore` and `countersink`; refuse `cb_*`/`cs_*` on a kind that does
-  not take them, naming the kind that does
-  ([conventions.md](conventions.md#refuse-dont-substitute)).
-
 ## Sheet metal
 
 ### A circular corner relief on a fold that is not square leaves the flat pattern thick
@@ -71,36 +44,7 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
-## CAM
-
-### The rapid-feed setting never produces a capped G1
-
-- Preferences › Machines labels the field "Rapid feed (mm/min, 0 = G0)", and
-  `Setup::rapidFeed` says some machines want a capped G1, but `CamPost.cpp`
-  always writes rapids as G0; the value only clocks rapids and caps axis
-  speed on turning cuts (`src/ui/SettingsWindow.cpp`,
-  `src/core/cam/CamJob.h`, `src/core/cam/CamPost.cpp`). Either emit the
-  capped G1 or relabel the field.
-
-### A Z-travel overrun is reported "first at line 0"
-
-- **Symptom:** when a program's Z span exceeds the machine's Z travel,
-  `cam_verify` reports it as outside travel but says "first at line 0".
-- **Cause:** the Z check is a span over the whole program (deepest point to
-  highest retract), and it never sets `firstOutsideLine`; the explanation
-  prints that field regardless.
-- **Where:** the travel check and `Explain` in `src/core/cam/CamVerify.cpp`.
-- **Likely fix:** record the line of the move that set the extreme (or say
-  "over the whole program") for a Z-only overrun.
-
 ## Simulation
-
-### Static and modal results name the wrong solver
-
-- Results are labelled `cpu (Eigen CG-IC)`, but the solve is a direct
-  `SimplicialLDLT` (modal: LDLT shift-invert). The label reaches
-  `study_status`, `study_results` and the receipt's oracle version
-  (`src/ui/SimulationActions.cpp`).
 
 ### `fem_async_smoke` fails when a solve finishes between the poll and the cancel
 
@@ -152,26 +96,3 @@ wrong contract.
 - **Likely fix:** replay an archived failing order
   (`$XDG_STATE_HOME/designer/gui-failures/<run>/reproduce.sh`) and bisect
   it; the test that precedes the failure is the suspect.
-
-### `ResetAppForTest` leaves some windows open
-
-- It does not reset `simulationToolOpen`, `bomWindowOpen`, `camGenerateOpen`,
-  `drawingAddViewOpen` or the `asmEdit*` fields, so a window left floating by
-  one test can eat the viewport clicks of the next
-  (`src/app/guitests/GuiTestsCommon.cpp`;
-  [testing.md](ui/testing.md#independence-any-partition-is-valid)).
-
-## Configurations
-
-### The feature tree does not dim a feature the configuration suppresses
-
-- `FeatureTreePanel.cpp` checks only the feature's own suppressed flag, so a
-  feature suppressed by the active configuration looks live.
-
-## Versioning
-
-### `pull` into a duplicate id reports the loader's raw refusal
-
-- The merge succeeds, then `OpenProject` throws the loader's refusal instead
-  of reporting a conflict (`src/remote/RemoteProject.cpp`, the pull handler);
-  `conflict_list` still answers.

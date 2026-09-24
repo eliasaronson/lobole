@@ -753,15 +753,26 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
         if (over <= 1e-6)
           continue;
         out.verdict.outsideTravel++;
+        out.verdict.outsideXY++;
         if (over > out.verdict.worstOvershoot) {
           out.verdict.worstOvershoot = over;
           out.verdict.outsideAxis = axes[a];
         }
+        if (over > out.verdict.worstXYOvershoot) {
+          out.verdict.worstXYOvershoot = over;
+          out.verdict.xyAxis = axes[a];
+        }
         if (out.verdict.firstOutsideLine == 0)
           out.verdict.firstOutsideLine = mv.line;
       }
-      zLo = haveZ ? std::min(zLo, mv.to.z) : mv.to.z;
-      zHi = haveZ ? std::max(zHi, mv.to.z) : mv.to.z;
+      if (!haveZ || mv.to.z < zLo) {
+        zLo = mv.to.z;
+        out.verdict.zDeepestLine = mv.line;
+      }
+      if (!haveZ || mv.to.z > zHi) {
+        zHi = mv.to.z;
+        out.verdict.zHighestLine = mv.line;
+      }
       haveZ = true;
     }
     // Z is a SPAN, not a position, and that distinction is the whole of this
@@ -785,6 +796,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
     if (haveZ && zHi - zLo > zTravel + 1e-6) {
       out.verdict.outsideTravel++;
       const double over = (zHi - zLo) - zTravel;
+      out.verdict.zSpanOver = over;
+      out.verdict.zSpan = zHi - zLo;
+      out.verdict.zTravel = zTravel;
       if (over > out.verdict.worstOvershoot) {
         out.verdict.worstOvershoot = over;
         out.verdict.outsideAxis = 'Z';
@@ -995,14 +1009,25 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     out.push_back({VerdictLine::Level::Warn,
                    "Fixtures were not checked: this setup turns the part, and "
                    "a clamp on the bed has no place in its turning frame."});
-  if (v.outsideTravel > 0) {
+  if (v.outsideXY > 0) {
     std::snprintf(buf, sizeof(buf),
                   "%d move%s ask for somewhere the machine cannot go — %.1f mm "
                   "past its %c travel, first at line %d. The controller alarms "
                   "or hits a stop; say where the bed sits on the sheet "
                   "(reach_offset), or move the part.",
-                  v.outsideTravel, v.outsideTravel == 1 ? "" : "s",
-                  v.worstOvershoot, v.outsideAxis, v.firstOutsideLine);
+                  v.outsideXY, v.outsideXY == 1 ? "" : "s", v.worstXYOvershoot,
+                  v.xyAxis, v.firstOutsideLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.zSpanOver > 0.0) {
+    // A span, not a position: no touch-off height makes it fit, and it has
+    // no "first" line — the two ends of the span are what to look at.
+    std::snprintf(buf, sizeof(buf),
+                  "The program spans %.1f mm of Z (deepest at line %d, highest "
+                  "at line %d) and the machine has %.1f mm of Z travel, so it "
+                  "cannot run at any touch-off height. Lower the safe or "
+                  "clearance height, or split the depth across setups.",
+                  v.zSpan, v.zDeepestLine, v.zHighestLine, v.zTravel);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
   if (v.rotary && v.maxLeftover > tolerance &&

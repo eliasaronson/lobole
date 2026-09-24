@@ -1049,6 +1049,18 @@ TEST_CASE("cam verify: the POSTED FILE is checked against the travel",
   CHECK(sv.outsideTravel > 0);
   CHECK(sv.outsideAxis == 'Z');
   CHECK(sv.worstOvershoot > 15.0);
+  // A span has two ends, not a first line: the explanation names both, and
+  // never "first at line 0" (there is no XY overrun here to have a line).
+  CHECK(sv.outsideXY == 0);
+  CHECK(sv.zSpanOver > 15.0);
+  CHECK(sv.zDeepestLine > 0);
+  CHECK(sv.zHighestLine > 0);
+  bool spans = false;
+  for (const cam::VerdictLine& line : cam::Explain(sv, 0.25, 0.0)) {
+    CHECK(line.text.find("line 0") == std::string::npos);
+    spans = spans || line.text.find("spans") != std::string::npos;
+  }
+  CHECK(spans);
 
   // ...and on a part that is CLAMPED, not modelled flat. `Inspect` frames the
   // bodies before this check, so framing them again inside it applied the

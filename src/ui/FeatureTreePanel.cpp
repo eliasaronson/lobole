@@ -170,12 +170,13 @@ std::vector<uint64_t> FeaturesThatMadeThePick(const AppState& state) {
   return out;
 }
 
-const char* FeatureRowBadge(const Feature& feature, bool rolledPast) {
+const char* FeatureRowBadge(const Feature& feature, bool rolledPast,
+                            bool suppressed) {
   // Precedence matches the colour the row is already given, so the two
   // channels can never disagree: broken beats suppressed beats warned.
   // Suppressed and rolled-past are BOTH dimmed and were indistinguishable;
   // they get different glyphs, matching what their tooltips already said.
-  if (feature.IsSuppressed())
+  if (suppressed)
     return ICON_FA_BAN;
   if (rolledPast)
     return ICON_FA_CLOCK_ROTATE_LEFT;
@@ -305,10 +306,13 @@ void DrawFeatureTreePanel(AppState& state) {
       const ImGuiSelectableFlags flags = ImGuiSelectableFlags_AllowDoubleClick;
       // Features that failed to regenerate show red, with the reason on
       // hover; suppressed and rolled-past features show dimmed.
-      const bool suppressed = feature->IsSuppressed();
+      // Effective, not the feature's own flag: a feature the active
+      // configuration turns off is off, and one it turns on (a flat pattern)
+      // is on, whatever the authored model says.
+      const bool suppressed = doc->EffectiveSuppressed(i);
       const bool dimmed = suppressed || rolledPast;
       const bool errored = !dimmed && !feature->GetError().empty();
-      const char* badge = FeatureRowBadge(*feature, rolledPast);
+      const char* badge = FeatureRowBadge(*feature, rolledPast, suppressed);
       // A warning (built, but a likely-unintended no-op) tints amber — only
       // when the feature is neither broken nor dimmed, so error/dim win.
       const bool warned = !dimmed && !errored && !feature->GetWarning().empty();

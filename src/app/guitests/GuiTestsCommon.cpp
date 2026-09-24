@@ -86,6 +86,17 @@ void ResetAppForTest() {
   // test's "click the section button" into a click that CLOSES it.
   ui::ClearSections(*s_App);
   s_App->sectionToolOpen = false;
+  // Every other floating tool window, for the same reason: one left open by
+  // a test that stopped early covers the viewport, and the next test's clicks
+  // land on it (docs/ui/testing.md#independence-any-partition-is-valid).
+  s_App->simulationToolOpen = false;
+  s_App->bomWindowOpen = false;
+  s_App->camGenerateOpen = false;
+  s_App->camPlaybackOpen = false;
+  s_App->drawingAddViewOpen = false;
+  s_App->paletteOpen = false;
+  s_App->asmEditOccurrence = 0;
+  s_App->asmEditRelation = 0;
   // A pending bring-this-tab-forward request (EnterSimulation, focus_panel)
   // outlives a short test and then fights the NEXT test's item clicks: the
   // engine locates "**/" items by focusing windows, and a competing

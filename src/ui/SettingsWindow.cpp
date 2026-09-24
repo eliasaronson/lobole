@@ -337,11 +337,16 @@ void DrawMachinesSection(AppState& state) {
     edited = true;
   float rapid = static_cast<float>(m.rapidFeed);
   ImGui::SetNextItemWidth(ControlWidth());
-  if (ExprDragFloat(state, "Rapid feed (mm/min, 0 = G0)###mach_rapid", &rapid,
-                    10.0f, 0.0f, 100000.0f, "%.0f")) {
+  if (ExprDragFloat(state, "Rapid rate (mm/min, 0 = not stated)###mach_rapid",
+                    &rapid, 10.0f, 0.0f, 100000.0f, "%.0f")) {
     m.rapidFeed = rapid;
     edited = true;
   }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("How fast the machine traverses. It times rapids in the "
+                      "estimate, caps the axes on a turning cut, and is the "
+                      "ceiling the feed check compares against. Rapids are "
+                      "always written as G0.");
   if (m.hasRotaryAxis) {
     float amax = static_cast<float>(m.rotaryMaxFeed);
     ImGui::SetNextItemWidth(ControlWidth());

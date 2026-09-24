@@ -764,7 +764,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
       if (srs.running)
         return json{{"running", true},
-                    {"solver", "cpu (Eigen CG-IC)"},
+                    {"solver", srs.solver},
                     {"elapsed_seconds", srs.elapsedSeconds}};
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
       if (st.running)

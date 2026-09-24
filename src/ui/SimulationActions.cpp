@@ -170,7 +170,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   // hardware device exists, else the built-in Eigen CG-IC. The worker is the
   // only thread that touches it after launch. DESIGNER_TOPO_GPU=0 forces CPU;
   // =1 also admits a software (llvmpipe) device — for exercising the GPU path.
-  job->solverName = "cpu (Eigen CG-IC)";
+  job->solverName = fem::CpuSolverName(fem::AnalysisType::Topology);
 #ifdef HAVE_FEM_GPU
   {
     const char* pref = std::getenv("DESIGNER_TOPO_GPU");
@@ -294,7 +294,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
     if (Document* target = JobDocument(s, j.partSlotId, "study solve")) {
       if (j.error.empty()) {
         j.runtime.solvedAtVersion = target->Version();
-        j.runtime.solver = "cpu (Eigen CG-IC)";
+        j.runtime.solver = fem::CpuSolverName(j.input.type);
         j.runtime.solveSeconds = Elapsed(j.started);
         target->StoreStudyResults(j.studyId, std::move(j.runtime));
       } else if (fem::Study* st = target->FindStudy(j.studyId)) {
@@ -372,6 +372,7 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
     return st;
   st.running = true;
   st.elapsedSeconds = Elapsed(job->started);
+  st.solver = fem::CpuSolverName(job->input.type);
   return st;
 }
 
@@ -645,7 +646,7 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
   }
   rt.solvedAtVersion = asmDoc.Version();
   rt.solvedPartVersions = partVersions;
-  rt.solver = "cpu (Eigen CG-IC)";
+  rt.solver = fem::CpuSolverName(input.type);
   asmDoc.StoreStudyResults(studyId, std::move(rt));
   return true;
 }
@@ -692,7 +693,7 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
     } else if (j.error.empty()) {
       j.runtime.solvedAtVersion = target->Version();
       j.runtime.solvedPartVersions = j.partVersions;
-      j.runtime.solver = "cpu (Eigen CG-IC)";
+      j.runtime.solver = fem::CpuSolverName(j.input.type);
       j.runtime.solveSeconds = Elapsed(j.started);
       target->StoreStudyResults(j.studyId, std::move(j.runtime));
     } else if (fem::Study* st2 = target->FindStudy(j.studyId)) {

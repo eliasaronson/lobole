@@ -187,6 +187,15 @@ struct Verdict {
   int firstOutsideLine = 0;
   double worstOvershoot = 0.0; // mm past the limit, on `outsideAxis`
   char outsideAxis = 'X';
+  // The two travel checks, apart: moves past the bed in X/Y (positions, so
+  // each has a line), and a program whose Z span exceeds the Z travel (a
+  // span, so it has a deepest and a highest line rather than a first).
+  int outsideXY = 0;
+  double worstXYOvershoot = 0.0;
+  char xyAxis = 'X';
+  double zSpanOver = 0.0; // mm by which the Z span exceeds the Z travel
+  double zSpan = 0.0, zTravel = 0.0;
+  int zDeepestLine = 0, zHighestLine = 0;
   // Corners the program relieved on purpose (R4): cells inside a relief's
   // bite are not gouge, and the verdict says how many there were.
   int reliefs = 0;

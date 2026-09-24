@@ -386,6 +386,29 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
 // Refused, naming the kinds, rather than read as a linear pattern: a
 // misspelled kind would load, draw a plausible grid and be wrong
 // (docs/conventions.md#refuse-dont-substitute).
+HoleKind HoleKindFromString(const std::string& kind) {
+  if (kind == "simple")
+    return HoleKind::Simple;
+  if (kind == "counterbore")
+    return HoleKind::Counterbore;
+  if (kind == "countersink")
+    return HoleKind::Countersink;
+  throw std::runtime_error("unknown hole_kind: " + kind +
+                           "; kinds: simple, counterbore, countersink");
+}
+
+const char* HoleKindToString(HoleKind kind) {
+  switch (kind) {
+  case HoleKind::Counterbore:
+    return "counterbore";
+  case HoleKind::Countersink:
+    return "countersink";
+  case HoleKind::Simple:
+    break;
+  }
+  return "simple";
+}
+
 sketch::DerivedKind DerivedKindFromString(const std::string& kind) {
   if (kind == "linear_pattern")
     return sketch::DerivedKind::LinearPattern;
@@ -1227,9 +1250,7 @@ json FeatureToJson(const Feature& feature) {
       j["modeled"] = true;
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
-    j["hole_kind"] = ho->kind == HoleKind::Counterbore   ? "counterbore"
-                     : ho->kind == HoleKind::Countersink ? "countersink"
-                                                         : "simple";
+    j["hole_kind"] = HoleKindToString(ho->kind);
     // The diameter is written either way — it is what the kernel cut, and a
     // reader that knows nothing about fits still gets a correct hole. When a
     // fit is recorded it is ALSO the thing that derives it on the next
@@ -2314,10 +2335,23 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
   } else if (type == "Hole") { // v21
-    const std::string k = j.value("hole_kind", "simple");
-    HoleKind kind = k == "counterbore"   ? HoleKind::Counterbore
-                    : k == "countersink" ? HoleKind::Countersink
-                                         : HoleKind::Simple;
+    const HoleKind kind =
+        HoleKindFromString(j.value("hole_kind", std::string("simple")));
+    // A counterbore's fields on a hole that is not one (or a countersink's)
+    // would be read and silently dropped: refused, naming the kind that takes
+    // them. The writer only emits the fields of the hole's own kind.
+    const auto refuseOther = [&](const char* prefix, HoleKind owner,
+                                 const char* ownerName) {
+      if (kind == owner)
+        return;
+      for (const char* suffix : {"diameter", "depth"})
+        if (j.contains(std::string(prefix) + suffix))
+          throw std::runtime_error(
+              std::string(prefix) + suffix + " belongs to a " + ownerName +
+              " hole; this hole's hole_kind is " + HoleKindToString(kind));
+    };
+    refuseOther("cb_", HoleKind::Counterbore, "counterbore");
+    refuseOther("cs_", HoleKind::Countersink, "countersink");
     auto ho = std::make_unique<HoleFeature>(
         name, j.at("sketch_id").get<uint64_t>(), kind, j.value("diameter", 1.0),
         j.value("depth", 1.0));

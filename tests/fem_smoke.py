@@ -153,6 +153,11 @@ def assembly_study(d):
     expect(got == {"Upper": "meshed", "Lower": "rigid"},
            f"results carry the role table: {res['participants']}")
     expect("factor_of_safety" in res, "steel gives a FoS on the assembly too")
+    # A static solve factors K directly; it used to be labelled CG-IC, the
+    # topology solver's name (fem::CpuSolverName).
+    solver = d.call("study_status", study=study).get("solver")
+    expect(solver == "cpu (Eigen SimplicialLDLT)",
+           f"the static solver is named for what ran ({solver})")
 
     # Stale against EVERY document the study read: the assembly (a moved
     # occurrence), and a part (regenerated behind the assembly).
