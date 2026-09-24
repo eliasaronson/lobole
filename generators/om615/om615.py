@@ -689,7 +689,10 @@ def component_fingerprint(key):
     # Whole builder modules are conservative dependencies. Shared specification
     # changes require a complete rebuild: they also affect unowned mechanisms.
     root = Path(__file__).resolve().parent
+    # The spec reads the injection pump's interface from pes_spec, so that
+    # is shared specification too.
     spec = hashlib.sha256((root / 'om615_spec.py').read_bytes() +
+                          (root.parent / 'pes_pump' / 'pes_spec.py').read_bytes() +
                           json.dumps(A.assembly_inputs(), sort_keys=True).encode()).hexdigest()
     inputs = [root / 'om615_top.py', root / 'om615_bottom.py',
               root / 'om615_accessories.py', root / 'om615_finish.py',

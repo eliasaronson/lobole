@@ -7,9 +7,9 @@ rack turns every plunger's helix through its control sleeve, the delivery
 valves lift, the feed pump's tappet rides its eccentric, the governor
 diaphragm rides the rack, the hand primer strokes, and the timing device's
 flyweights advance the sprocket. It is a clearance-checked kinematic model;
-no dimension is sourced (see below). It is not yet mounted on
-`generators/om615/`, whose block carries an `injection_pump_mount` frame for
-it.
+no dimension is sourced (see below). It is also built into the OM615
+(generators/om615/README.md#the-injection-pump), chained to that engine's
+crank and timed; this generator is the pump on its own.
 
 ## Running it
 
@@ -43,20 +43,30 @@ Every drawn cam sits `CAM_ALLOW` (0.05 mm) inside its law.
 so the engine's block is machined to the pump's numbers:
 
 - **The flange.** The face is `FLANGE_FACE_X`, with a Ø60 register and three
-  M8 clearance holes on a 78 PCD, one at the top.
+  M8 clearance holes on a 78 PCD, one at the top. Behind each hole the
+  housing has a pocket for its bolt's head (`FLANGE_BOLT_POCKET`, room for a
+  low-head ISO 7380 M8), its floor spot-faced half a millimetre into the
+  flange (`FLANGE_BOLT_SEAT_X`): without the pockets the top head stood in
+  the cam case and the lower two in the lugs, and without the spot face the
+  rim lay across the seam where the case meets the flange and came back in
+  three arcs, which no fastener can be fitted to. The register is smaller
+  than the timing device's hub (`TIMING_DEVICE_R`, 34), so an engine's bore
+  has to step out ahead of it.
 - **The frames.** The housing's `flange` frame sits on that face, with z
   along the camshaft toward the governor and x straight up. The housing has
   a `fuel_inlet` frame at the gallery inlet. Each delivery valve holder has
   an `outlet` frame on the top of its union nut.
 - **The sprocket.** It has 44 teeth for 3/8" duplex chain, the same as the
   engine's camshaft, since both turn at half crank speed off one chain. Its
-  chain plane is `CHAIN_PLANE_X`.
+  chain plane is `CHAIN_PLANE_X` and its tips reach `SPROCKET_TIP_R`.
 - **The rack.** `assemble(app, parts, rig, mount, rack_offset)` builds the
   pump into another assembly's rig and fastens `flange` to `mount`. The load
   configurations belong to the pump's own assembly, so in someone else's
   assembly the rack is held with `rack_offset` instead.
-- **The camshaft part.** It is named "pump camshaft", so an engine's own
-  camshaft keeps its name.
+- **The part names.** The camshaft is "pump camshaft" and the governor's
+  filler cap "governor filler cap", so an engine's own camshaft and oil
+  filler cap keep theirs: `app.part(name)` opens a tab that already has the
+  name.
 
 ## What it looks like
 
@@ -84,7 +94,8 @@ used (`pes_spec.py`, or the top of its builder).
   six spokes.
 - **Governor end.** The housing flares out of the pump body to the
   diaphragm chamber, whose cover is held round its rim by a ring of small
-  screws. A red ribbed oil filler cap stands on a boss on top, just behind
+  screws. A red ribbed oil filler cap (the part "governor filler cap")
+  stands on a boss on top, just behind
   element 4. The Bosch nameplate is on a pad on the -Y side, and the stop
   lever is on a bracket below it.
 - **Colours** are linear: casting 0.35 (metallic 0.8, roughness 0.5), feed
@@ -130,7 +141,12 @@ that names its configuration.
 From the study poses: each plunger's stroke equals the cam lift (7 mm); the
 order the four reach top dead centre is 1-3-4-2; over the rack's 15 mm every
 plunger and every sleeve turns travel ÷ pitch radius (96°); every part is
-one valid solid; and the exact clash sweep of all four studies is clean. The
+one valid solid; the exact clash sweep of all four studies is clean; and so
+is an exact STANDING sweep of every pair. A motion study skips parts rigid
+to each other by design, so only the standing sweep looks at what is
+fastened to the housing — it found the clamp plates overlapping end to end,
+their screws in the holders' shanks and the inlet banjo in the primer's
+pillar, none of which the studies could see. The
 rack and sleeve teeth are real involutes, so a wrong relation sign shows as
 tooth clash. The effective stroke at each rack setting is computed from the
 same helix law the plunger is cut to.
