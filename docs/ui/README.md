@@ -245,6 +245,4 @@ tested without a renderer. The GUI tests are in `src/app/guitests/`.
 - A light theme; toolbar grouping with captions.
 - A separate scale for icons: toolbar icons are 14 px against 16 px text, so
   raising the font size scales both and the ratio stays; icons read as small.
-- A frame watchdog that names the phase a hung frame was in
-  ([../plans/frame-watchdog.md](../plans/frame-watchdog.md)).
 - Handles on committed features, and the others listed on each topic page.

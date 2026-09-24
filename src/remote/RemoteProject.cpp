@@ -548,8 +548,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       if (!depends)
         continue;
       AssemblyDocument candidate = *assembly;
+      // Only the counts are read, so skip naming the mate at fault.
       const auto solved =
-          assembly::Solve(candidate, parts, ui::AssemblyResolverFor(state));
+          assembly::Solve(candidate, parts, ui::AssemblyResolverFor(state), {},
+                          /*diagnose=*/false);
       if (solved.erroredMates || !solved.loopsClosed)
         throw std::runtime_error("staging component breaks mates in assembly " +
                                  slot.name);
