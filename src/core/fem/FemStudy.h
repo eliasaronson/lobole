@@ -153,6 +153,12 @@ struct Study {
 const char* LoadTypeToString(LoadType type);
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
+
+// The CPU solver a study of this type runs, as study_status, study_results and
+// the receipt name it: static and modal factor K directly (SimplicialLDLT;
+// modal inverts it for the shift-invert eigen solve), topology iterates
+// (conjugate gradients with an incomplete-Cholesky preconditioner).
+const char* CpuSolverName(AnalysisType type);
 [[nodiscard]] bool AnalysisTypeFromString(const std::string& s,
                                           AnalysisType& out);
 

@@ -31,6 +31,7 @@ struct TopoRunStatus {
 struct StudyRunStatus {
   bool running = false;
   double elapsedSeconds = 0.0;
+  const char* solver = ""; // fem::CpuSolverName of the running study's type
 };
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter

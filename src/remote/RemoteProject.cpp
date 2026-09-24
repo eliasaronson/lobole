@@ -193,7 +193,9 @@ static constexpr MethodDoc ProjectMethods[] = {
      "remote", remote::NotInBatch},
     {"pull",
      "Fetch {remote?:origin} and merge it in. A 'conflicted' status "
-     "is an outcome — see conflict_list.",
+     "is an outcome — see conflict_list. It is also the status of a merge "
+     "git calls clean that leaves a project which does not load (both sides "
+     "minted the same id); `open_error` then carries the loader's message.",
      "remote", remote::NotInBatch},
     {"push",
      "Send this branch to {remote?:origin}. 'rejected' means someone "
@@ -1010,11 +1012,22 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(error);
     static constexpr const char* kStatusName[] = {"up_to_date", "fast_forward",
                                                   "merged", "conflicted"};
+    std::string openError;
     if (status != GitVault::MergeStatus::Conflicted &&
-        status != GitVault::MergeStatus::UpToDate) {
-      std::string openError;
-      if (!ui::OpenProject(state, state.projectPath, &openError))
+        status != GitVault::MergeStatus::UpToDate &&
+        !ui::OpenProject(state, state.projectPath, &openError)) {
+      // A merge git calls clean can still leave a project that does not
+      // load — both sides minted the same feature id. That is a conflict to
+      // decide, and conflict_list names it; the loader's message alone reads
+      // like a corrupt file.
+      ui::InvalidateConflicts(state);
+      const auto report = ProjectMerge::Scan(state.projectPath);
+      if (report.conflicts.empty())
         throw std::runtime_error(openError);
+      return json{{"status", "conflicted"},
+                  {"conflicts", report.conflicts.size()},
+                  {"needs_decision", report.NeedsDecision()},
+                  {"open_error", openError}};
     }
     ui::InvalidateConflicts(state);
     const auto report = ProjectMerge::Scan(state.projectPath);

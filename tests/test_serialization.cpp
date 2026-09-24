@@ -701,6 +701,41 @@ TEST_CASE("unknown sketch op, reference and datum kinds are refused by name",
           Catch::Matchers::ContainsSubstring("offset, angled, through_points"));
 }
 
+TEST_CASE(
+    "a hole of an unknown kind, or with another kind's fields, is refused",
+    "[serialization]") {
+  const auto hole = [](nlohmann::json extra) {
+    nlohmann::json j = {{"type", "Hole"},
+                        {"name", "h"},
+                        {"sketch_id", 1},
+                        {"diameter", 6.0},
+                        {"depth", 10.0}};
+    j.update(extra);
+    return j;
+  };
+  // Misspelled: it used to build as a plain drilled hole.
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson(hole({{"hole_kind", "counterbored"}})),
+      Catch::Matchers::ContainsSubstring("counterbored") &&
+          Catch::Matchers::ContainsSubstring("simple, counterbore, "
+                                             "countersink"));
+  // A counterbore's size on a simple hole used to be read and dropped.
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(hole(
+                          {{"hole_kind", "simple"}, {"cb_diameter", 11.0}})),
+                      Catch::Matchers::ContainsSubstring("cb_diameter") &&
+                          Catch::Matchers::ContainsSubstring("counterbore"));
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(hole(
+                          {{"hole_kind", "counterbore"}, {"cs_depth", 1.0}})),
+                      Catch::Matchers::ContainsSubstring("cs_depth") &&
+                          Catch::Matchers::ContainsSubstring("countersink"));
+  // The right fields on the right kind, and no kind at all, still load.
+  REQUIRE_NOTHROW(
+      DocumentIO::FeatureFromJson(hole({{"hole_kind", "counterbore"},
+                                        {"cb_diameter", 11.0},
+                                        {"cb_depth", 6.0}})));
+  REQUIRE_NOTHROW(DocumentIO::FeatureFromJson(hole(nlohmann::json::object())));
+}
+
 TEST_CASE("a sketch arc takes degrees or radians, never both",
           "[serialization]") {
   const auto arc = [](nlohmann::json extra) {

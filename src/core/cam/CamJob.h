@@ -103,9 +103,11 @@ struct Machine {
   // Whether the machine has an A axis at all. False means the rotary controls
   // are not offered and no file can command an axis the shop does not own.
   bool hasRotaryAxis = false;
-  // Seeds Setup::rapidFeed; 0 = G0. Kept per job as well, because a capped
-  // rapid is a per-job choice on the controllers that need one (Kiri:Moto
-  // keeps it on the process, not the device).
+  // The machine's traverse rate, mm/min; 0 = not stated. It clocks rapids in
+  // the time estimate, caps the axes on a turning cut (CamRotaryFeed.h) and is
+  // the ceiling the feed check compares a tool's band against. Rapids are
+  // always posted as G0, the controller's own rapid; nothing emits a capped
+  // G1. Seeds Setup::rapidFeed.
   double rapidFeed = 0.0;
   // The A axis's top speed, in degrees per minute; 0 = not stated. A cut
   // that turns the part is held to it (CamRotaryFeed.h), and it is its own
@@ -602,7 +604,7 @@ struct Setup {
   // new job re-answered "which machine". Unnamed = the job's own.
   Machine machine;
   double safeZ = 5.0;     // rapid height above the stock top (mm)
-  double rapidFeed = 0.0; // 0 = G0; some machines want a capped G1
+  double rapidFeed = 0.0; // traverse rate, mm/min, 0 = not stated (Machine)
 
   // Where each part sits in the stock. Empty is a job that has parts but has
   // not been laid out -- everything at the origin, which is the honest

@@ -20,7 +20,10 @@ void DrawFeatureTreePanel(AppState& state);
 // Separated from the drawing because the CHOICE is the logic — precedence
 // between the four states, which the panel gets right and nothing checked.
 // See tests/test_actions.cpp.
-const char* FeatureRowBadge(const Feature& feature, bool rolledPast);
+// `suppressed` is the EFFECTIVE state (Document::EffectiveSuppressed): the
+// feature's own flag, or the active configuration turning it off or on.
+const char* FeatureRowBadge(const Feature& feature, bool rolledPast,
+                            bool suppressed);
 
 // The features that MADE what is picked: a face's stable name is minted by
 // the feature that created it (ElementMap — an extrude's side face is

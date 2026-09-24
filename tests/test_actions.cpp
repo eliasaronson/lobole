@@ -467,19 +467,19 @@ TEST_CASE("feature tree rows carry a badge, not just a colour",
   REQUIRE(f != nullptr);
 
   SECTION("a healthy row has no badge") {
-    CHECK(ui::FeatureRowBadge(*f, false) == nullptr);
+    CHECK(ui::FeatureRowBadge(*f, false, f->IsSuppressed()) == nullptr);
   }
 
   SECTION("every state has one, and they are all different") {
-    const char* rolled = ui::FeatureRowBadge(*f, true);
+    const char* rolled = ui::FeatureRowBadge(*f, true, f->IsSuppressed());
     f->SetSuppressed(true);
-    const char* supp = ui::FeatureRowBadge(*f, false);
+    const char* supp = ui::FeatureRowBadge(*f, false, f->IsSuppressed());
     f->SetSuppressed(false);
     f->SetError("boom");
-    const char* err = ui::FeatureRowBadge(*f, false);
+    const char* err = ui::FeatureRowBadge(*f, false, f->IsSuppressed());
     f->SetError("");
     f->SetWarning("removed no material");
-    const char* warn = ui::FeatureRowBadge(*f, false);
+    const char* warn = ui::FeatureRowBadge(*f, false, f->IsSuppressed());
 
     for (const char* b : {rolled, supp, err, warn})
       CHECK(b != nullptr);
@@ -490,15 +490,31 @@ TEST_CASE("feature tree rows carry a badge, not just a colour",
     CHECK(distinct.size() == 4);
   }
 
+  SECTION("a feature the active configuration suppresses is badged") {
+    // The row follows what regeneration does, not the authored flag alone.
+    Configuration& cfg = doc.AddConfiguration("Without");
+    cfg.suppressedFeatures = {f->GetId()};
+    doc.SetActiveConfiguration(cfg.id);
+    CHECK_FALSE(f->IsSuppressed());
+    CHECK(doc.EffectiveSuppressed(0));
+    const char* supp =
+        ui::FeatureRowBadge(*f, false, doc.EffectiveSuppressed(0));
+    f->SetSuppressed(true);
+    const char* own = ui::FeatureRowBadge(*f, false, true);
+    CHECK(std::string(supp) == std::string(own));
+  }
+
   SECTION("precedence matches the colour the row already gets") {
     // The panel dims a suppressed row whatever else is true of it, so the
     // badge must agree — two channels disagreeing about the same row is
     // worse than one channel saying too little.
     f->SetSuppressed(true);
     f->SetError("boom");
-    const std::string suppressedAndBroken = ui::FeatureRowBadge(*f, false);
+    const std::string suppressedAndBroken =
+        ui::FeatureRowBadge(*f, false, f->IsSuppressed());
     f->SetError("");
-    const std::string suppressedOnly = ui::FeatureRowBadge(*f, false);
+    const std::string suppressedOnly =
+        ui::FeatureRowBadge(*f, false, f->IsSuppressed());
     CHECK(suppressedAndBroken == suppressedOnly);
   }
 }

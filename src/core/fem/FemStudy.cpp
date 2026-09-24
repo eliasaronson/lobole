@@ -57,6 +57,18 @@ const char* AnalysisTypeToString(AnalysisType type) {
   return "static";
 }
 
+const char* CpuSolverName(AnalysisType type) {
+  switch (type) {
+  case AnalysisType::Modal:
+    return "cpu (Eigen SimplicialLDLT, shift-invert)";
+  case AnalysisType::Topology:
+    return "cpu (Eigen CG-IC)";
+  case AnalysisType::Static:
+    break;
+  }
+  return "cpu (Eigen SimplicialLDLT)";
+}
+
 bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
   if (s == "static") {
     out = AnalysisType::Static;

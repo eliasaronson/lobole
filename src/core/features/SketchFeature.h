@@ -552,10 +552,10 @@ inline constexpr uint8_t kWholeEntity = 0xFF;
 
 // Datum geometry: the sketch origin + X/Y axes. These are always available as
 // constraint / mirror / snap references but are NOT stored in the entity list —
-// they live in a reserved id block above any real entity id (which grow from
-// 1). `IndexOfEntity` returns SIZE_MAX for them, so every ref-by-index site
-// must check IsDatum first and use the helpers below for their (fixed)
-// geometry.
+// they live in a reserved id block above any real entity id (entities are
+// minted at random below kDatumBase, MintEntityId). `IndexOfEntity` returns
+// SIZE_MAX for them, so every ref-by-index site must check IsDatum first and
+// use the helpers below for their (fixed) geometry.
 constexpr uint32_t kDatumBase = 0xFFFFFF00u;
 constexpr uint32_t kOrigin = kDatumBase;    // point (0,0)
 constexpr uint32_t kAxisX = kDatumBase + 1; // line (0,0) -> (1,0)  (+U)

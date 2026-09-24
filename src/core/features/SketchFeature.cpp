@@ -216,7 +216,9 @@ uint32_t SketchFeature::MintEntityId() const {
   // grows a projected or patterned entity mints one during that rebuild -- a
   // shared engine was a data race.
   thread_local std::mt19937 rng(std::random_device{}());
-  std::uniform_int_distribution<uint32_t> pick(1, UINT32_MAX); // 0 = "none"
+  // 0 is "none", and ids from kDatumBase up are the origin and axes: a real
+  // entity minted there would be read as a datum.
+  std::uniform_int_distribution<uint32_t> pick(1, sketch::kDatumBase - 1);
   for (;;) {
     const uint32_t id = pick(rng);
     const bool taken = std::any_of(
