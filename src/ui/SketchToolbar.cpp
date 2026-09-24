@@ -596,13 +596,12 @@ void DrawSketchModelSections(AppState& state) {
   if (!sketch)
     return;
 
-  // Operations (U8 polish): the sketch's transform-like ops — reference
-  // images, patterns, linked copies — as tree-style rows; double-click
-  // opens the op's edit session in the Tool window (same grammar as the
-  // model feature tree). Inserting images lives on the sketch toolbar.
-  // Always shown while editing so the section is discoverable. NOTE:
-  // mirrors are symmetry CONSTRAINTS, not stored ops — they list under
-  // Constraints, not here.
+  // Operations: the sketch's transform-like ops — reference images,
+  // patterns, linked copies, linked mirrors — as tree-style rows;
+  // double-click opens the op's edit session in the Tool window (same
+  // grammar as the model feature tree). Inserting images lives on the
+  // sketch toolbar. Always shown while editing so the section is
+  // discoverable.
   {
     ImGui::SeparatorText("Operations");
     if (sketch->images.empty() && sketch->derived.empty())

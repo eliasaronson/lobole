@@ -27,7 +27,8 @@ namespace fem {
 enum class LoadType {
   Fixed,    // zero all three DOF on the face's nodes
   Force,    // a total force vector (N) spread as uniform traction
-  Pressure, // a scalar pressure (MPa) along the outward face normal
+  Pressure, // a scalar pressure (MPa) along the INWARD face normal: a
+            // positive value pushes into the face
 };
 
 // A per-face mesh size override (mm). size follows the value+expr convention:

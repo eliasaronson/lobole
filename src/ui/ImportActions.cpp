@@ -90,9 +90,8 @@
 
 // Bringing something in from outside: a mesh or STEP file as a feature, and
 // the reference images a sketch is traced over (insert, calibrate, delete).
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still
-// declares everything, so no caller changed.
+// Declared in ui/ImportActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

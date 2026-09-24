@@ -18,10 +18,11 @@ struct SolveResult {
   std::vector<size_t> redundantConstraints;
 };
 
-// Adapter around PlaneGCS: maps a SketchFeature's Point/Line/Circle entities
-// and constraints to the solver, solves, and writes solved coordinates back.
-// Rectangles are treated as rigid in v1 (not solved). Falls back to a no-op
-// when built without HAVE_PLANEGCS.
+// Adapter around PlaneGCS: maps a SketchFeature's entities (points, lines,
+// circles, arcs, ellipses, ellipse arcs, B-splines) and constraints to the
+// solver, solves, and writes solved coordinates back. A rectangle is four
+// ordinary lines, solved like any other. Falls back to a no-op when built
+// without HAVE_PLANEGCS.
 class Solver {
 public:
   Solver();

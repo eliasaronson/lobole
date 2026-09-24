@@ -83,43 +83,18 @@ double InscribedRadius(const Clipper2Lib::Paths64& region) {
   return lo;
 }
 
-// A helix down to depth, for a loop too short to hold the ramp
-// (docs/cam/operations.md#depth-passes-and-entries). Descending on the toolpath
-// itself is right when the path is long; on a small pocket that lap is short
-// and the descent gets Down to where a pass starts cutting, from safe height.
-// ONLY the part above the stock is a rapid; below it the tool FEEDS.
+// How far a pass may RAPID down before it starts cutting: to its entry
+// height, but never below the stock top. Above the stock there can be no
+// material, so that part is always safe and costs nothing on the first pass,
+// where the two are equal. The descent from there to the entry height is
+// left to the ramp (or helix), whose moves are feeds.
 //
-// The old form rapided the whole way, on the reasoning (written at the ramp
-// entry) that the height it enters at "is either the stock top or the depth
-// the previous pass already cut here, so it is air". That holds for a closed
-// contour, which returns to its own entry at full depth. It does not hold for
-// a POCKET: the entry sits mid-spiral, and the pass that was meant to clear
-// it was still ramping when it went past — so the rapid went through whatever
-// that ramp had not yet removed. On the real baffle job that was 3 mm of G0
-// into MDF, which is a broken cutter
+// The entry height is not assumed to be air. It is for a closed contour,
+// which returns to its own entry at full depth; it is not for a POCKET, whose
+// entry sits mid-spiral where the previous pass was still ramping, nor for a
+// pass told to start below the stock top — a finishing skim after a roughing
+// pass. Rapiding all the way down there put 3 mm of G0 into MDF on a real job
 // (docs/cam/README.md#rapids-profile-outlines-and-through-cuts).
-//
-// Nothing above the stock can be material, so rapiding to the stock top is
-// always safe and costs nothing on the first pass, where the two are equal.
-// Where a pass should BEGIN its descent, given where it was asked to. Never
-// below the stock top: above that there can be no material, so the ramp then
-// cuts its way in instead of arriving already buried.
-//
-// The entry used to start at the height it was asked for, on the reasoning
-// (written at the ramp entry) that that height "is either the stock top or
-// the depth the previous pass already cut here, so it is air". True of a
-// closed contour, which returns to its own entry at full depth. False of a
-// POCKET, whose entry sits mid-spiral where the previous pass was still
-// ramping, and false of any pass told to start below the stock top — a
-// finishing skim after a roughing pass. On the real baffle job that was 3 mm
-// of G0 into MDF (docs/cam/README.md#rapids-profile-outlines-and-through-cuts).
-//
-// Raising the start lengthens the descent, which the ramp already bounds by
-// the loop's own perimeter — steeper than asked, still never a plunge, and a
-// profile must not plunge at all: a non-centre-cutting end mill rubs.
-// How far a pass may RAPID down before it starts cutting. Never below the
-// stock top: above that there can be no material. The descent from there to
-// the entry height is left to the ramp, whose moves are feeds.
 double RapidFloor(double entry, double stockTop, double safeZ) {
   return std::clamp(std::max(entry, stockTop), entry, safeZ);
 }
@@ -278,8 +253,12 @@ std::vector<glm::dvec2> StartNearest(const std::vector<glm::dvec2>& pts,
   return out;
 }
 
-// steep, so instead the tool spirals down inside the region and the rings
-// are then cut from the middle outwards.
+// A helix down to depth, for a loop too short to hold the ramp
+// (docs/cam/operations.md#depth-passes-and-entries). Descending on the toolpath
+// itself is right when the path is long; on a small pocket that lap is short
+// and the descent gets steep, so instead the tool spirals down inside the
+// region and the rings are then cut from the middle outwards. Only the part
+// above the stock is a rapid (RapidFloor); below it the tool FEEDS.
 //
 // The circle it walks is the TOOL CENTRE's, so `radius` must already have the
 // cutter's own radius taken out of it — a helix sized from the wall instead

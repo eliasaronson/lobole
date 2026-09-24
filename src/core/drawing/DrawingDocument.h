@@ -14,10 +14,9 @@
 // feature-list Document and the AssemblyDocument — a drawing neither executes
 // features nor places occurrences; it projects other documents onto a sheet.
 //
-// The model below is the D1 spine. Views and dims are carried as first-class
-// lists (so serialization is stable across the milestones that fill them), but
-// projected geometry and measured dimension values are DERIVED, never stored —
-// opening a drawing re-projects on demand. See the design doc §2.
+// Views and dims are carried as first-class lists, but projected geometry
+// and measured dimension values are DERIVED, never stored — opening a drawing
+// re-projects on demand.
 
 // Sheet paper size. Landscape/portrait is a separate flag; these are the
 // portrait short×long extents in millimetres (ISO A-series + US Letter).

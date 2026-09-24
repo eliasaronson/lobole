@@ -1509,10 +1509,10 @@ static void RecordWindowGeometry(GLFWwindow* w) {
 
 // --offscreen: RunHeadless's document engine and remote server, plus a real
 // Vulkan renderer with no window, no surface and no display server — Vulkan
-// only needs a display to PRESENT, and this mode never presents. What renders
-// today: the path-traced still (render_still), which needs only the ray
-// tracer, the IBL maps and a camera. The raster capture handshake
-// (screenshot/render_sheet) stays refused until the offscreen tick fulfils it.
+// only needs a display to PRESENT, and this mode never presents. It serves
+// the path-traced still (render_still), the quick raster still, and the
+// raster capture handshake (screenshot, and render_sheet's tiles through it),
+// which the offscreen tick fulfils into an offscreen framebuffer.
 //
 // Lives here rather than beside RunHeadless because everything it drives —
 // SetupVulkan, the renderer globals, CleanupVulkan — is file-static in this

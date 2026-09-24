@@ -1,7 +1,7 @@
 # Cross-compile Designer for Windows (x86_64-w64-mingw32) from Linux, via nixpkgs
 # cross infrastructure. Scope: the windowed app + PlaneGCS sketch solver + Spectra
-# modal, minus Netgen (FEM meshing) and GPU-FEM (Vulkan compute) — deferred to
-# keep the build lighter. Shaders compile natively (glslc → arch-independent
+# modal + the GPU-FEM (Vulkan compute) topology solver, minus Netgen (FEM
+# meshing; see below). Shaders compile natively (glslc → arch-independent
 # SPIR-V). Build:  nix-build packaging/windows/cross-app.nix
 { }:
 let

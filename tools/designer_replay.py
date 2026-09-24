@@ -16,8 +16,8 @@ from designer_remote import Designer
 
 
 def replay(port, path):
-    # Close when done: the remote serves one client at a time, so a held
-    # connection would block whoever inspects the replayed document next.
+    # Close when done: the remote takes at most eight clients at once, and a
+    # held connection is one of them for as long as it stays open.
     d = Designer.wait_for(port)
     try:
         count = 0

@@ -93,9 +93,8 @@
 //
 // SketchInteraction.cpp owns what a click MEANS; this owns what the result
 // looks like to the renderer.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still
-// declares everything, so no caller changed.
+// Declared in ui/SketchOverlay.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

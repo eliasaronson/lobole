@@ -40,7 +40,7 @@ struct Occurrence {
   glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f}; // (w,x,y,z) identity
 
   bool visible = true;
-  bool fixed = false; // grounded flag; the anchor for the A3 solve
+  bool fixed = false; // grounded flag; an anchor for the placement pass
 
   // What this occurrence RIDES ON (docs/parts/README.md#attached-and-mated):
   // the id of another occurrence in the same assembly, with `attachOffset` /
@@ -236,10 +236,11 @@ struct Relation {
   // FOLLOWER's unit — mm for a slide, DEGREES for a turn, v102) rising by
   // angle and spanning one full turn. Stored as authored; the solve converts
   // a turn's degrees where it reads them (RelationValue, the loop row).
-  // Interpolated by a periodic Catmull-Rom spline, so the follower's motion has
-  // a continuous slope — the loop solver differentiates this numerically, and a
-  // table read as a polyline would hand it a Jacobian that jumps at every
-  // sample.
+  // Interpolated by a periodic monotone cubic (Hermite, Fritsch-Carlson
+  // limited tangents), so the follower's motion has a continuous slope and
+  // never overshoots the table — the loop solver differentiates this
+  // numerically, and a table read as a polyline would hand it a Jacobian
+  // that jumps at every sample.
   //
   // A cam is the one relation that is NOT invertible: many angles give the
   // same lift, so propagation runs forward only and the reverse direction is
@@ -257,10 +258,10 @@ struct Relation {
   // A freewheel's TEETH (v105): with a count, it re-engages only where teeth
   // meet, so the drive line stands at the notch at or behind `lead` and the
   // input travels up to a pitch before it drives again — a ratchet's dead
-  // band. `ride` is what riding over them lifts: while slipping, the named
-  // DOF is raised by `rideAmount * frac(lead / pitch)`, zero at a notch and
-  // full just before the next. It is applied after the walk, so it ADDS to
-  // whatever drove that DOF
+  // band. `ride` is what riding over them lifts: whenever the clutch stands
+  // off its notch the named DOF is raised by the whole `rideAmount`, and
+  // seated at a notch by nothing. It is applied after the walk, so it ADDS
+  // to whatever drove that DOF
   // (generators/watch/README.md#keyless-works-and-winding).
   int teeth = 0;
   double rideAmount = 0.0;
@@ -369,7 +370,7 @@ struct ClearanceAssertion {
 
 // An assembly document: an ordered list of occurrences that *place* the bodies
 // of other parts by explicit transform, plus the mates that constrain them
-// (A3 — re-solved over non-`fixed` occurrences by a placement pass). A
+// (re-solved over non-`fixed` occurrences by a placement pass). A
 // distinct document kind from a part's feature-list Document — an occurrence
 // references another part, which Feature/RegenContext (same-document only)
 // cannot reach, so an assembly regenerates by a placement pass, not by
@@ -497,12 +498,14 @@ public:
       uint64_t studyId,
       const std::function<uint64_t(uint64_t partId)>& partVersion) const;
 
-  // Configurations (workstream 13, C4): named assembly variants. Reuses the
-  // Configuration type — for an assembly, `suppressedFeatures` holds suppressed
-  // OCCURRENCE ids (a suppressed occurrence is hidden from render / solve /
-  // BOM). Parameter overrides are unused (an assembly has no parameters).
-  // Per-occurrence part-config selection is a planned follow-on. The active
-  // configuration (0 = base) is persisted.
+  // Configurations: named assembly variants. Reuses the Configuration type —
+  // for an assembly, `suppressedFeatures` holds suppressed OCCURRENCE ids (a
+  // suppressed occurrence is hidden from render / solve / BOM). Parameter
+  // overrides are unused (an assembly has no parameters). An occurrence of a
+  // sub-assembly picks one of ITS configurations (Occurrence::configurationId);
+  // per-occurrence PART configurations are not supported, and
+  // set_occurrence_configuration refuses them. The active configuration
+  // (0 = base) is persisted.
   const std::vector<Configuration>& GetConfigurations() const {
     return m_configurations;
   }

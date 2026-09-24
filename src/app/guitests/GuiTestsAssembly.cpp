@@ -2024,9 +2024,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(before, (size_t)2);
 
     // Look at the top rim from an ANGLE, not down the bore. Head-on, all four
-    // rims in the stack project onto the same circle and the picker can hand
-    // back the far one — which is a real ambiguity, recorded in
-    // known-bugs.md, and not what this test is about.
+    // rims in the stack project onto the same circle and only
+    // FaceSelector::PickEdge's nearest-wins tie-break picks the top one —
+    // that is not what this test is about.
     const glm::vec3 rim(3.3f, 0.0f, 10.0f); // a point ON the top rim circle
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(rim);

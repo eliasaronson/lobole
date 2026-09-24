@@ -102,8 +102,8 @@
 // No unit test covers this file. It is verified by rendering a fixed scene
 // through the real GPU and diffing the PNG -- which is how the 2026-08-24
 // round pinned the same code when it moved the renderer helpers.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no caller changed.
+// Declared in ui/RendererSync.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

@@ -97,9 +97,8 @@
 //
 // DrawingPanel.cpp is the other half -- the sheet as the user manipulates
 // it. This is what a view IS; that is how it is edited.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no
-// caller changed.
+// Declared in ui/DrawingActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

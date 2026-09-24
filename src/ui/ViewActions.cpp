@@ -90,9 +90,8 @@
 // What the camera looks at, and what is cut away: fitting to a document, a
 // selection or a box, and the section views -- their planes, their source
 // face picks, and the filled cap meshes a cut leaves behind.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no
-// caller changed.
+// Declared in ui/ViewActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

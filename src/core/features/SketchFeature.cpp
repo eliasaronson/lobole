@@ -725,8 +725,7 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
                               uint32_t axisLineId, bool link) {
   std::vector<uint32_t> generated;
   // Axis geometry comes from the datum helpers for the X/Y axes, else from the
-  // axis line entity. The linked Symmetric constraints reference axisLineId
-  // either way — the solver resolves a datum axis id via its registered line.
+  // axis line entity. A linked Mirror op references axisLineId either way.
   glm::vec2 a, b;
   if (sketch::IsDatum(axisLineId)) {
     const auto ep = sketch::DatumAxisEndpoints(axisLineId);

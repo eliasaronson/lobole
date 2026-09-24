@@ -38,7 +38,8 @@ namespace {
 
 // The offline-render dialog: resolution + sample count, a live progress bar
 // while a render is in flight, and the last result. Opened by the toolbar's
-// Render button; the actual tracing is pumped by main.cpp (PumpRenderJob).
+// Render button; the actual tracing is pumped once a frame by
+// PollBackgroundJobs (PumpRenderJob, ui/BackgroundJobs.cpp).
 void DrawRenderModal(AppState& state) {
   struct Res {
     const char* label;

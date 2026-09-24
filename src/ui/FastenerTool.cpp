@@ -20,12 +20,13 @@ namespace {
 // The standards this verb offers, from the profile table rather than a list
 // of its own: screws whose head stands proud of the surface.
 //
-// Countersunk is excluded on purpose and not silently — `FitFastenerToHole`
-// refuses it by name, because the rim you pick on a plain bore is the bore's
-// and the head would end up inside solid material. It comes back when a hole
-// carries its countersink (docs/modeling/holes-and-threads.md#hole). A nut and
-// a washer are not here either: they do not pass through a hole, they are the
-// far side of one, which is what the checkboxes below are.
+// Countersunk screws are not offered here. `FitFastenerToHole` accepts one
+// only on a countersunk hole with the countersink's rim picked, and refuses it
+// by name on a plain bore, where the head would end up inside solid material;
+// that path is reached through the fit_fastener RPC
+// (docs/modeling/holes-and-threads.md#hole). A nut and a washer are not here
+// either: they do not pass through a hole, they are the far side of one,
+// which is what the checkboxes below are.
 std::vector<const parts::Profile*> OfferedStandards() {
   std::vector<const parts::Profile*> out;
   for (const parts::Profile& p : parts::AllProfiles())

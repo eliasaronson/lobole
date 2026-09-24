@@ -10,11 +10,11 @@
 // Worst case along a STATED chain of tolerances
 // (docs/tolerances/README.md#checks).
 //
-// The chain is stated, not inferred, and that is a deliberate retreat from
-// what the plan first proposed. A mate names the two faces that TOUCH, but a
-// stack alternates a contact and a length inside a part, and nothing says
-// which of a part's distances lies along the axis. Deriving it would work
-// only when someone happened to tolerance exactly the right pairs.
+// The chain is stated, not inferred, and deliberately so. A mate names the
+// two faces that TOUCH, but a stack alternates a contact and a length inside
+// a part, and nothing says which of a part's distances lies along the axis.
+// Deriving it would work only when someone happened to tolerance exactly the
+// right pairs.
 //
 // So: the person chooses the terms, the tool does the addition, and the
 // result says outright what it does not account for. Which is a great deal —

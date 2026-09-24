@@ -47,9 +47,11 @@ struct Loop {
   double SignedArea() const;
 };
 
-// Extracts closed loops: circles and rectangles are loops by construction;
-// free Line entities are chained by endpoint proximity (tolerance 1e-4) into
-// closed loops. Open chains are discarded with a warning.
+// Extracts closed loops from the non-construction entities: circles,
+// ellipses and self-closed B-splines are loops by construction; lines, arcs,
+// ellipse arcs and open B-splines are chained by endpoint proximity
+// (tolerance 1e-4) into closed loops. Open chains are discarded with a
+// warning.
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
 
 // The outer boundary wire of a single-profile sketch, in world space on the

@@ -94,9 +94,8 @@
 // Ctrl+Z means the active tab or a project-var edit made on another one.
 //
 // VariablesPanel.cpp draws them; this is what editing one DOES.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still
-// declares everything, so no caller changed.
+// Declared in ui/VariableActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

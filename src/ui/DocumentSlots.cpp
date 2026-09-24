@@ -97,9 +97,8 @@
 // The four Slot* accessors at the end are the seam every other actions file
 // reaches a stashed document through; they are declared in
 // AppActionsInternal.h.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no
-// caller changed.
+// Declared in ui/DocumentSlots.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

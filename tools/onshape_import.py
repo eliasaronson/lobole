@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Onshape → Designer parametric importer (interchange I3).
+"""Onshape → Designer parametric importer.
 
 Rebuilds an Onshape part studio's feature history in a running Designer over
 the JSON-RPC remote, so the model arrives EDITABLE (variables drive
@@ -14,13 +14,14 @@ to mm happens in the mapping layer.
 
 Maps today: variables, sketches (lines/circles/arcs/points/splines + most
 constraints), extrude / revolve / loft / sweep / boolean, feature mirror
-(replayed), face-attached sketches (plane from the host cap face). Sketch
-B-splines import (Onshape interpolates its points; we solve for the control
-poles whose Designer curve passes through them). 3D fitSplines import as
-Curve3D, re-fitted through a dense sample of the curve Onshape built.
-Every unmapped feature
-(fillet, chamfer, splitPart, patterns) and every skipped
-constraint is REPORTED with a reason, never silently dropped.
+(replayed), fillet / chamfer (edges matched by a before/after geometry
+diff), shell / draft / external thread (faces matched the same way),
+face-attached sketches (plane from the host cap face). Sketch B-splines
+import (Onshape interpolates its points; we solve for the control poles whose
+Designer curve passes through them). 3D fitSplines import as Curve3D,
+re-fitted through a dense sample of the curve Onshape built. Every unmapped
+feature (splitPart, patterns, anything else) and every skipped constraint is
+REPORTED with a reason, never silently dropped.
 
 CLI:
     onshape_import.py info        <document-url>

@@ -294,8 +294,8 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
 // faces frozen solid; gravity ignored). Fills `rt` with the optimized per-tet
 // density + convergence summary (rt.topology = true); not stamped — the caller
 // sets solvedAtVersion. On any failure sets study.error and *error, returns
-// false. (Synchronous; TO2 adds the worker-thread path over an immutable
-// snapshot.)
+// false. Synchronous; the GUI's background run instead calls PrepareTopology
+// and TopologyOptimize on a worker thread (FemTopo.h).
 bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
                  std::string* error);
 

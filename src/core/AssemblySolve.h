@@ -15,13 +15,15 @@
 class Document;
 class AssemblyDocument;
 
-// The A3 assembly placement pass ("the solve"): given occurrences and mates,
+// The assembly placement pass ("the solve"): given occurrences and mates,
 // position each mated occurrence relative to its neighbours by direct frame
-// alignment — no numeric 3D solver. Each mate fully determines one occurrence
-// relative to the other (given its stored DOF pose), so placement is a
+// alignment. Each mate fully determines one occurrence relative to the other
+// (given its stored DOF pose), so placement over a mate *tree* is a
 // closed-form transform propagated sequentially from the `fixed` anchors
-// through the mate graph. Mate *trees* are solved; genuine loops are detected
-// and reported (per-mate error), not solved. See docs/assemblies/solver.md.
+// through the mate graph. Genuine loops are closed afterwards by the numeric
+// loop solver (AssemblyLoopSolve.h), which adjusts the mates' DOF fields; a
+// loop it cannot close leaves an error on its cut mates. See
+// docs/assemblies/solver.md.
 namespace assembly {
 
 // Resolves an occurrence's part_id to its already-regenerated part Document

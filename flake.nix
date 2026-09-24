@@ -171,13 +171,10 @@
           # No python inside: clients drive the port from OUTSIDE the
           # container, and it costs 200 MB.
           #
-          # KNOWN FAT: the image is ~4 GB because designer's runtime closure
-          # is 1.8 GiB, and the top contributors are not CAD at all — numpy
-          # (443 MiB) and gfortran (382 MiB), pulled in transitively by
-          # Netgen's MPI and python bindings. Overriding Netgen to drop them
-          # would shrink this and every `nix profile install` alike; it needs
-          # a netgen rebuild to find out, so it is a follow-up rather than a
-          # blocker.
+          # The image is designer's runtime closure. Netgen comes from
+          # nix/netgen-lean.nix, built without MPI, python bindings and its
+          # GUI, so numpy and gfortran are not in it (the closure measured
+          # 503 MiB there, against 1.8 GiB with stock netgen).
           config = {
             Entrypoint = [ "${designer}/bin/designer" ];
             Cmd = [ "--headless" "--remote" "8437" "--remote-bind-all" ];

@@ -6,9 +6,9 @@
 // loads/fixtures (the same inputs the static solver takes) and produces a
 // per-element density field that minimizes compliance at a target volume
 // fraction. No Netgen dependency, no Document access — plain data in, plain
-// data out — so it is unit-testable headless and, later, driveable from a
-// worker thread over an immutable snapshot (the progress/cancel callback is
-// that seam).
+// data out — so it is unit-testable headless and driven from a worker
+// thread over an immutable snapshot (the progress/cancel callback is that
+// seam).
 //
 // This is the numerics of topology optimization; the Study, serialization,
 // RPC and GUI surface are elsewhere (see docs/topopt/README.md).
@@ -115,13 +115,14 @@ public:
 // stiffness data, degenerate volume fraction) or when built without Eigen.
 //
 // `progress`, if set, is called after each iteration; returning false cancels
-// the run and returns the best-so-far densities with cancelled=true. This is
-// the hook TO2's worker thread drives; in the spike it is used by the
-// cancel test and for timing logs.
+// the run and returns the best-so-far densities with cancelled=true. The
+// background job drives it for progress and cancellation.
 // `keepNodes` are frozen solid in addition to the auto-frozen support/load
 // skin (user "keep" faces — bolt bosses, bearing seats that must not vanish).
 // `solver`, if set, replaces the built-in Eigen CG-IC for the per-iteration
-// linear solves (see TopoLinearSolver above); a Solve failure fails the run.
+// linear solves (see TopoLinearSolver above). A failed Setup fails the run;
+// a failed Solve drops the solver and finishes on the built-in CPU path,
+// recording why in TopoResult::solverFallback.
 std::optional<TopoResult> TopologyOptimize(
     const FemMesh& mesh, const Material& material,
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,

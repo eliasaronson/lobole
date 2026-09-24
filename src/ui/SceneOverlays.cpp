@@ -94,9 +94,8 @@
 // Overlays.cpp is the neighbouring half and says where the line was drawn:
 // text and pills go on ImGui's foreground draw list, and THIS is the vertex
 // geometry the renderers consume, which needs no ImGui at all.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still
-// declares everything, so no caller changed.
+// Declared in ui/SceneOverlays.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

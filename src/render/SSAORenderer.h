@@ -16,8 +16,8 @@
 //   1. depth+normal prepass (full-res, non-MSAA): the opaque scene into a
 //      D32 depth + RGBA8 view-space-normal target (same instance set and
 //      section-clip behavior as the main pass's opaque loop);
-//   2. AO (half-res R8): 16-sample hemisphere kernel + 4x4 tiled rotation
-//      noise, fullscreen-triangle fragment pass;
+//   2. AO (half-res R8): 16-sample hemisphere kernel rotated per pixel by
+//      interleaved gradient noise, fullscreen-triangle fragment pass;
 //   3. depth-aware 4x4 bilateral blur (half-res R8);
 //   4. half mode only: joint-bilateral upsample to a full-res R8 target,
 //      guided by the full-res prepass depth (docs/rendering/README.md#ssao)

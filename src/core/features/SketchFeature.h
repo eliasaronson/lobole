@@ -770,9 +770,10 @@ public:
   // Ordering matches LoopEntityIds so the results are valid `regions` rows.
   std::vector<std::vector<uint32_t>>
   SiblingRegions(const std::vector<uint32_t>& ids) const;
-  // Removes the entity with `id` and cleans up dependent constraints
-  // (transfer to a coincident survivor, transitive coincidence repair, orphan
-  // sweep). Returns the number of *non-trivial* constraints dropped (i.e. not
+  // Removes the entity with `id` and drops every constraint that references
+  // it; coincidences chained through it are repaired (A~B~C keeps A~C once B
+  // is gone). Nothing else is transferred to a surviving entity. Returns the
+  // number of *non-trivial* constraints dropped (i.e. not
   // Coincident/Horizontal/Vertical), for a user-facing warning; the entity is
   // still removed. Returns 0 and does nothing if `id` is unknown.
   size_t DeleteEntity(uint32_t id);
@@ -780,8 +781,7 @@ public:
   // Adds an axis-aligned rectangle as four real lines with shared corner
   // points: 4 lines + 4 corner coincidents + 2 horizontal + 2 vertical
   // constraints. Corners derive from the opposite corners c1, c2. Returns the
-  // four line ids (bottom, right, top, left). This is the modern replacement
-  // for the rigid `sketch::Rectangle` entity — each side is individually
+  // four line ids (bottom, right, top, left). Each side is individually
   // editable and trimmable.
   std::array<uint32_t, 4> AddRectangle(glm::vec2 c1, glm::vec2 c2);
 
@@ -803,8 +803,8 @@ public:
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
   // in, bounded by the line's intersections with other lines (via SplitEntity +
   // DeleteEntity). With no bracketing intersection the whole line is deleted.
-  // Returns true if anything changed. Lines only — circles are ignored here
-  // (trimming a circle produces an arc; deferred to the arcs milestone).
+  // Returns true if anything changed. Lines only — circles and arcs are
+  // trimmed by TrimCurveAt.
   bool TrimLineAt(uint32_t id, glm::vec2 clickUV);
 
   // Trims the circle or arc `id` at `clickUV`: removes the angular span the
@@ -824,11 +824,10 @@ public:
 
   // Mirrors `sourceIds` across the line entity `axisLineId`, appending the
   // reflected copies (fresh ids) and returning their ids. When `link` is true
-  // it also adds constraints tying each copy to its source so the mirror tracks
-  // edits (Symmetric on line/arc endpoints, Equal+Symmetric on circle/arc
-  // centres; a source point already on the axis gets a Coincident instead).
-  // `link=false` bakes an unlinked copy. No-op (empty) if the axis isn't a
-  // line.
+  // the copies come from a Mirror derived op, replayed on each regeneration,
+  // so they track edits to their sources and to the axis; no constraints are
+  // added. `link=false` bakes an unlinked copy. No-op (empty) if the axis
+  // isn't a line.
   std::vector<uint32_t> MirrorEntities(const std::vector<uint32_t>& sourceIds,
                                        uint32_t axisLineId, bool link);
 

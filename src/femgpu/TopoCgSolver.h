@@ -5,9 +5,11 @@
 // loop — SpMV, reductions, alpha/beta, vector updates — runs in compute shaders
 // recorded in chunks, so vectors never cross PCIe between iterations; the host
 // only reads one scalar (the residual norm) per chunk to decide convergence.
-// Jacobi (element-assembled diagonal) preconditioning, warm-started from the
-// previous SIMP iteration's displacement. fp32 throughout: the SIMP loop is
-// validated against the CPU fp64 path by the femgpu tests.
+// The preconditioner is chosen by CgOptions: Jacobi (element-assembled
+// diagonal) is this class's default, while TopoGpuSolver asks for multigrid
+// whenever its hierarchy builds and falls back to Jacobi otherwise. Warm-
+// started from the previous SIMP iteration's displacement. fp32 throughout:
+// the SIMP loop is validated against the CPU fp64 path by the femgpu tests.
 
 #include "femgpu/ComputeContext.h"
 #include "femgpu/TopoSpmv.h" // SpmvSystem (the packed element data)
@@ -26,7 +28,7 @@ struct CgStats {
   float lambdaMax = 0.0f;   // Chebyshev only: estimated lambda_max(D^-1 K)
 };
 
-// The multigrid hierarchy handed to the GPU cycle (GPU3), packed by the
+// The multigrid hierarchy handed to the GPU cycle, packed by the
 // caller (TopoGpuSolver via TopoMultigrid) so this header stays Vulkan-pure:
 // per-node aggregate membership + rigid-mode geometry for the restrict/
 // prolong kernels, and two CPU callbacks — the coarse solve that runs
@@ -42,7 +44,7 @@ struct MgGpuData {
   std::function<bool(const float* rc, float* ec, std::string*)> coarseSolve;
 };
 
-// Preconditioner selection (GPU2/GPU3). Chebyshev applies a degree-
+// Preconditioner selection. Chebyshev applies a degree-
 // `chebDegree` polynomial of the Jacobi-scaled operator per outer iteration
 // (each outer step then costs `chebDegree` SpMVs instead of 1).
 //

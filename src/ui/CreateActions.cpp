@@ -104,9 +104,8 @@
 // reach, the newest body's bbox, the last closed sketch -- never a literal.
 // The defaults/* GUI suite enforces exactly that, so this file is what that
 // suite is about (docs/ui/tool-sessions.md#defaults-and-refusals).
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no
-// caller changed.
+// Declared in ui/CreateActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

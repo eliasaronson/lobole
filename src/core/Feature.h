@@ -128,9 +128,9 @@ struct Body {
   // (BooleanFeature). 0 = unstamped.
   uint64_t createdBy = 0;
 
-  // Stable names for this body's faces (topological naming, T2). Transient,
-  // rebuilt each regeneration. Empty when the producing feature doesn't name
-  // its output yet (only extrude NewBody does so far).
+  // Stable names for this body's faces (topological naming). Transient,
+  // rebuilt each regeneration by the feature that produced or last modified
+  // the body — every solid feature names its output.
   ElementMap elementMap;
 
   // Optional display color carried in from interchange (XCAF import) — a

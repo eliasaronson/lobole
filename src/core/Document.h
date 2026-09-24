@@ -216,7 +216,7 @@ public:
   // Parameter values from the last regeneration; what feature expressions
   // (and UI previews) evaluate against. This is the EFFECTIVE scope: the
   // project symbols (if any) overlaid with this document's local parameters
-  // (local shadows project), so downstream reads are unchanged by Phase V.
+  // (local shadows project), so a downstream read sees one table.
   const SymbolTable& Symbols() const { return m_symbols; }
 
   // Project-wide variables (docs/variables/README.md#concepts). A

@@ -95,8 +95,8 @@
 // MeasureOverlay.cpp is the other half -- what a measurement LOOKS like. Both
 // read the same state.measure.dimension, so the picture and the readout are
 // one computation and cannot disagree; the split is meaning vs. appearance.
-// Split out of AppActions.cpp (docs/architecture.md#the-ui-actions-layer).
-// AppActions.h still declares everything, so no caller changed.
+// Declared in ui/MeasureActions.h; the layer is described in
+// docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
 

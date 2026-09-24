@@ -1,8 +1,8 @@
 #version 450
 
 // SSAO (docs/rendering/README.md#ssao): normal-oriented hemisphere
-// sampling in view space against the prepass depth, rotated per-pixel by a
-// 4x4 tiled noise texture. Output is half-res R8 occlusion, bilaterally
+// sampling in view space against the prepass depth, rotated per-pixel by
+// interleaved gradient noise. Output is half-res R8 occlusion, bilaterally
 // blurred by ssao_blur.frag before mesh.frag multiplies it into ambient/IBL.
 layout(binding = 0) uniform SSAOParams {
     mat4 proj;     // view -> clip (includes the Vulkan Y flip)
