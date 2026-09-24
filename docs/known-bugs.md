@@ -232,8 +232,6 @@ wrong contract.
   one test can eat the viewport clicks of the next
   (`src/app/guitests/GuiTestsCommon.cpp`;
   [testing.md](ui/testing.md#independence-any-partition-is-valid)).
-- `tools/coverage_matrix.py`'s registration regex has drifted: the generated
-  matrix reports three tests listed but not scanned.
 
 ## Rendering
 

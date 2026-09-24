@@ -255,5 +255,5 @@ diagnostics, including when the batch rolls back. Other RPCs' errors may
 carry no diagnostic.
 
 Snapshot semantics are in [sdk.md](sdk.md#measurement-snapshots). Extending
-contracts to the rest of the surface is
-[../plans/sdk-contracts.md](../plans/sdk-contracts.md).
+contracts to the rest of the surface is on the
+[roadmap](../roadmap.md#6-the-agent-interface).

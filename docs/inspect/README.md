@@ -378,4 +378,4 @@ GUI suite, and the measure parity phase in `remote_smoke`.
 - Hatched cut faces (drawings section independently).
 - Draft, wall-thickness or curvature analysis.
 - Persistent requirements with revision-bound evidence
-  ([../plans/design-requirements.md](../plans/design-requirements.md)).
+  ([../roadmap.md](../roadmap.md#6-the-agent-interface)).

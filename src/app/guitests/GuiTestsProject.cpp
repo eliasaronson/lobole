@@ -510,9 +510,9 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   // move docs in/out via the tab context menus, and drag-drop between the
   // bar and folder buttons. Folder edits mark the project dirty even though
   // no document version changes (they live only in project.json).
-  // Foldering an ASSEMBLY tab, which nothing tested. The coverage matrix
-  // (docs/ui/coverage-matrix.md) flagged the tab bar as covered five ways on
-  // part tabs and once on assembly tabs — and "once" was the kind glyphs,
+  // Foldering an ASSEMBLY tab. The coverage matrix
+  // (docs/ui/testing.md#the-tab-kind-coverage-matrix) flags the tab bar as
+  // thin on assembly tabs, and the tests there were about the kind glyphs,
   // not the folder machinery.
   //
   // The code says this cannot break: folders live on PartSlot, every tab kind

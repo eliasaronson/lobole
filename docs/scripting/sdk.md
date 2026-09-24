@@ -163,7 +163,7 @@ record of a body's edges in one RPC. Reading `edge.center`, `edge.radius`,
 - The existing `Edge.center` stays a live query.
 
 Faces, world space, pagination and guarded writes are not covered
-([../plans/sdk-contracts.md](../plans/sdk-contracts.md)).
+([../roadmap.md](../roadmap.md#6-the-agent-interface)).
 
 ## Validation stages
 

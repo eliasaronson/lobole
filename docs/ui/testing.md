@@ -199,9 +199,10 @@ clicking and over the script surface and compares them.
 
 ## The tab-kind coverage matrix
 
-[coverage-matrix.md](coverage-matrix.md) is **generated** by
-`tools/coverage_matrix.py`, which writes that path; do not hand-edit it, and
-re-run it after adding GUI tests. For each interactive tool (measure, section,
+`python3 tools/coverage_matrix.py` prints it (`--out FILE` writes it); it is
+not committed, because a copy in the tree goes stale with the next GUI test.
+It takes the test list from the binary (`designer --gui-test-list`) and
+credits tests by scanning their bodies. For each interactive tool (measure, section,
 mate, gizmo, preview handles, sketch dimensions and drawing, the CAM tool,
 simulation loads, the feature tree, the tab bar) it counts the tests that
 exercise it on each tab kind it claims to support (part, assembly, drawing),

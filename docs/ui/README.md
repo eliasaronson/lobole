@@ -16,7 +16,6 @@ is the map; the topic pages hold the detail.
 | [long-operations.md](long-operations.md) | the background job registry: CAM passes, FEM, import, opening a project, motion |
 | [terminal.md](terminal.md) | the embedded terminal panel |
 | [testing.md](testing.md) | the GUI test suite, isolation, addressing widgets, coverage |
-| [coverage-matrix.md](coverage-matrix.md) | generated: which tools are tested on which tab kinds |
 
 ## Layout
 
