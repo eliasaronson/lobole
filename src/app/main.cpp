@@ -132,6 +132,8 @@ static void ShowWindowNonBlocking(GLFWwindow* window) {
   }
 }
 #else
+// Wayland is a Linux display protocol; everywhere else windows have a position.
+static bool OnWayland() { return false; }
 static void ShowWindowNonBlocking(GLFWwindow* window) {
   glfwShowWindow(window);
 }

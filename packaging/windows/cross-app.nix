@@ -47,7 +47,20 @@ in
 cross.stdenv.mkDerivation {
   pname = "designer-win";
   version = "0.1.0";
-  src = ../..;
+  # The working tree, minus what is not source: the build trees (several GB
+  # each), the local CI's trees (with root-owned core dumps nix cannot read),
+  # scratch projects and tool state. Without this every build copied them all
+  # into the store.
+  src = pkgs.lib.cleanSourceWith {
+    src = pkgs.lib.cleanSource ../..;
+    filter = path: _type:
+      let
+        rel = pkgs.lib.removePrefix (toString ../.. + "/") (toString path);
+        top = builtins.head (pkgs.lib.splitString "/" rel);
+      in
+      !(builtins.elem top [ ".ci-local" "scratch" ".direnv" ".claude" "result" ])
+      && !(pkgs.lib.hasPrefix "build" top);
+  };
 
   # Build-platform tools (run on Linux): CMake/Ninja + glslc for SPIR-V.
   nativeBuildInputs = with pkgs.buildPackages; [ cmake ninja pkg-config shaderc ];
