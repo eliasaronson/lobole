@@ -127,7 +127,8 @@ both open means nothing):
     (`ExportMotionGlb`), and a refusal is shown in the panel.
   - **Export animation…** (`###motion_video`) films the study to mp4, webm,
     gif or png frames, the save dialog's file type picking which
-    ([motion video](../assemblies/README.md#motion-video)). It needs no run.
+    ([motion video](../assemblies/README.md#motion-video)): the study as Play
+    plays it, each frame the viewport's own picture. It needs no run.
     While the `motion-video` job runs it is the job's bar and Cancel
     (`###motion_video_cancel`); the last outcome is shown under it. GUI tests
     answer its dialog with `AppState::saveDialogAnswer` instead of opening
