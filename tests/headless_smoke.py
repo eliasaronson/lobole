@@ -1249,6 +1249,24 @@ def main():
         want = legs + 2 * (math.pi / 2.0) * former
         expect(abs(tube["length_mm"] - want) < 1e-6,
                f"cut length {tube['length_mm']:.3f} is the arc length {want:.3f}")
+        # A path whose straight is too short for its bends is refused where
+        # it is ADDED, with that one reason: committed broken, the pipe the
+        # caller added next failed with a second, false one ("must be an
+        # open sketch chain or a 3D curve").
+        before = len(d.call("get_state")["features"])
+        try:
+            d.call("add_feature", feature={
+                "type": "Curve3D", "name": "Too tight", "kind": "bent_path",
+                "radius": former,
+                "points": [[0, 0, 0], [0, 0, 20], [100, 0, 20], [100, 0, 0]]})
+            refused = None
+        except Exception as e:  # noqa: BLE001 - the refusal is the point
+            refused = str(e)
+        expect(refused is not None and "20 mm" in refused
+               and "open sketch chain" not in refused,
+               f"a bent path that cannot be bent is refused once: {refused}")
+        expect(len(d.call("get_state")["features"]) == before,
+               "and nothing was committed for a pipe to run on")
 
         phase("Cut list")
         # A cut list is a list of members that EXIST (v118). Three ways it

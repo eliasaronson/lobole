@@ -20,6 +20,16 @@ enum class SweepFrame { CorrectedFrenet, Frenet, Fixed };
 // Shared by SweepFeature and PipeFeature (curves-3d Phase 1/2).
 TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId);
 
+// Why `pathId` gave no spine, as the error a feature consuming it reports:
+// `role` is what the path is to it ("pipe path", "sweep guide"). A path
+// feature that is ITSELF broken has already said why, so the consumer names
+// it and defers to it rather than guessing at the kind of path it wanted —
+// a bent path refused for a short straight was followed by "must be an open
+// sketch chain or a 3D curve", which it was.
+[[nodiscard]] std::string SweepPathError(const RegenContext& ctx,
+                                         uint64_t pathId,
+                                         const std::string& role);
+
 // Skins one or more closed profile sections along an open spine into a solid
 // (MakePipeShell, rounded corners). With one section it's a plain sweep; with
 // several it's a multi-section "loft along a path". An optional `guide`

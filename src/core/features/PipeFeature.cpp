@@ -47,7 +47,7 @@ TopoDS_Wire StartSectionCircle(const TopoDS_Wire& spine, double radius) {
 CADShape PipeOuterSolid(const RegenContext& ctx, uint64_t pathId,
                         double outerDiameter, double extra,
                         std::string* error) {
-  const auto fail = [&](const char* why) {
+  const auto fail = [&](const std::string& why) {
     if (error != nullptr)
       *error = why;
     return CADShape();
@@ -57,7 +57,7 @@ CADShape PipeOuterSolid(const RegenContext& ctx, uint64_t pathId,
     return fail("a tube's outer diameter must be positive");
   const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathId);
   if (spine.IsNull())
-    return fail("the tube's path is not an open sketch chain or a 3D curve");
+    return fail(SweepPathError(ctx, pathId, "the tube's path"));
   const TopoDS_Wire section = StartSectionCircle(spine, r);
   if (section.IsNull())
     return fail("could not build a section at the tube path's start");
@@ -94,7 +94,7 @@ bool PipeFeature::Execute(RegenContext& ctx) {
 
   const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathId);
   if (spine.IsNull()) {
-    SetError("pipe path must be an open sketch chain or a 3D curve");
+    SetError(SweepPathError(ctx, pathId, "pipe path"));
     return false;
   }
 
