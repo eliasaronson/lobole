@@ -399,7 +399,7 @@ why the wait sits where every capture passes through.
 | `rt_build` | build the ray-tracing acceleration structures (`ok`, `geometry_count`, `has_tlas`) |
 | `set_render_options {shadows, ssao, shadow_map}` | session render quality |
 | `frame_stats {window, hud, reset, renders}` | frame and GPU pass timing ([frame-pacing.md](frame-pacing.md)) |
-| `view`, `fit_view {width?, height?}`, `set_camera` | camera; `get_state.camera` reports `fov_deg` and `aspect` |
+| `view`, `fit_view {width?, height?}`, `set_camera` | camera; `get_state.camera` reports `fov_deg` and `aspect`. `set_camera` refuses an `up` within 1° of the view direction (it would set no roll), naming the angle, and leaves the camera where it was; `up` alone re-rolls the current view |
 | `set_section` / `add_section` / `update_section` | section clip planes |
 | `set_material`, `set_appearance` | the look of a body ([materials.md](materials.md)) |
 

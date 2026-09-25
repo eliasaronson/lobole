@@ -1711,8 +1711,9 @@ def select_face(mesh: int = -1, face: int = -1, element: str = "") -> dict:
 @mcp.tool(description="Direct camera control (view/fit only snap to standard "
           "views): optional target [x,y,z], direction [x,y,z] (unit offset "
           "from target toward the camera), up [x,y,z], and distance (mm, "
-          "zoom). Each field optional, applied in that order. Returns the "
-          "resulting position/target/distance.")
+          "zoom). Each field optional, applied in that order. `up` sets "
+          "the roll and is refused within 1 degree of the view direction. "
+          "Returns the resulting position/target/distance.")
 def set_camera(target: list | None = None, direction: list | None = None,
                up: list | None = None, distance: float | None = None) -> dict:
     params = {}

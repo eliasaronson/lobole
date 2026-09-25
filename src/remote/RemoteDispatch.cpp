@@ -11,6 +11,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "core/Angles.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
 #include "core/MassProps.h"
@@ -336,7 +337,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
      "vector); passing eye [x,y,z] derives direction+distance instead. "
-     "`distance` and every point here are model MILLIMETRES.",
+     "`distance` and every point here are model MILLIMETRES. `up` sets "
+     "the roll, so it is refused within 1 degree of the view direction "
+     "(eye to target), where it would fix none.",
      "direction, distance, eye, target, up"},
     {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",
@@ -1902,6 +1905,38 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
                        a.at(2).get<float>());
     };
+    // An `up` within 1 degree of the line of sight fixes no roll: the view
+    // comes back at whatever roll the cross product's rounding picks. Checked
+    // against the direction this call ends up looking along, before anything
+    // moves, so a refused call leaves the camera where it was.
+    if (p.contains("up")) {
+      const glm::vec3 up = vec3(p["up"]);
+      if (glm::length(up) < 1e-9f)
+        throw std::runtime_error("up must be non-zero");
+      const glm::vec3 target =
+          p.contains("target") ? vec3(p["target"]) : cam.GetTarget();
+      // Toward the camera, as `direction` is: the last of eye/direction wins.
+      glm::vec3 back = -cam.GetForward();
+      if (p.contains("eye"))
+        back = vec3(p["eye"]) - target;
+      if (p.contains("direction"))
+        back = vec3(p["direction"]);
+      if (glm::length(back) > 1e-9f) {
+        const double c = std::abs(glm::dot(glm::normalize(glm::dvec3(up)),
+                                           glm::normalize(glm::dvec3(back))));
+        const double deg = angles::ToDegrees(std::acos(std::min(1.0, c)));
+        if (deg < 1.0) {
+          char buf[32];
+          std::snprintf(buf, sizeof buf, "%.3g", deg);
+          throw std::runtime_error(
+              std::string("up is ") + buf +
+              " degrees from the view direction (eye to target); it must be "
+              "at least 1 degree away to set the roll. Pass an up "
+              "perpendicular to the line of sight: world Y when looking "
+              "along Z, world Z otherwise");
+        }
+      }
+    }
     if (p.contains("target"))
       cam.SetTarget(vec3(p["target"]));
     if (p.contains("eye")) {
@@ -1923,6 +1958,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(dir), up);
     }
+    // `up` on its own re-rolls the current view. It used to be read only
+    // alongside eye/direction and dropped silently otherwise.
+    if (p.contains("up") && !p.contains("eye") && !p.contains("direction"))
+      cam.SnapToView(-cam.GetForward(), vec3(p["up"]));
     if (p.contains("distance")) {
       const float d = p.at("distance").get<float>();
       if (d <= 0.0f)
