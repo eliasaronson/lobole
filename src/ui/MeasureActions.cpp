@@ -768,6 +768,8 @@ void SeedMeasureFromSelection(AppState& state) {
       state.measure.picked.push_back(MeasureState::Element::OfBody(it.id));
       break;
     case SelectionItem::Kind::Occurrence:
+      if (!it.innerPath.empty())
+        break; // a moving part of a flexible unit is not the unit
       state.measure.picked.push_back(
           MeasureState::Element::OfOccurrence(it.id));
       break;

@@ -5,6 +5,7 @@
 #include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
 #include "ui/CamTool.h" // RunCamVerification
 #include "ui/DocumentSlots.h"
+#include "ui/FlexibleActions.h" // a moving part of a flexible unit
 #include "ui/JobActions.h" // JobPlacedBodies
 #include "ui/MotionActions.h" // MotionPlaybackLocal
 #include "ui/ProjectActions.h"
@@ -107,10 +108,22 @@ const glm::vec3 kGizmoColor[3] = {
 // drags share).
 
 // The gizmo-anchored occurrence: selected, non-fixed, mate tool idle. null
-// else.
-Occurrence* GizmoOccurrence(AppState& state) {
+// else. `inner` is set when the selection is a MOVING PART of a flexible
+// placement (the placement is returned): that part drags within its own mate
+// whether or not the unit is fixed, as a top-level part does.
+Occurrence* GizmoOccurrence(AppState& state, uint64_t& inner) {
+  inner = 0;
+  if (!state.assembly || state.mateTool.active)
+    return nullptr;
+  if (const auto [unit, part] = SelectedInnerOccurrence(state); unit != 0) {
+    Occurrence* F = state.assembly->FindById(unit);
+    if (F == nullptr || !IsMovingInner(state, *F, part))
+      return nullptr;
+    inner = part;
+    return F;
+  }
   const uint64_t occId = SelectedOccurrenceId(state);
-  if (!state.assembly || occId == 0 || state.mateTool.active)
+  if (occId == 0)
     return nullptr;
   Occurrence* o = state.assembly->FindById(occId);
   if (!o)
@@ -147,12 +160,66 @@ Mate* MateDrivingOccurrence(AssemblyDocument& asmDoc, uint64_t occId) {
   return nullptr;
 }
 
+// A moving part of a flexible placement (v129): the sub-assembly's mate that
+// places it gives the frame and the handles, at the placement's own pose of
+// it. Only what set_mate {path} can pose drags -- a turn and a slide; a
+// planar mate's in-plane slide and a ball are the sub-assembly's to edit on
+// its own tab.
+bool BuildInnerGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
+                         GizmoSpec& spec, const Mate*& mate) {
+  const AssemblyDocument* sub = FlexibleSub(state, *occ);
+  const Occurrence* part = sub ? sub->FindById(inner) : nullptr;
+  if (part == nullptr)
+    return false;
+  if (state.activeExplodedView) {
+    if (!state.assembly->FindExplodedViewById(state.activeExplodedView))
+      return false;
+    spec.origin = glm::vec3(InnerDisplayMatrix(state, *occ, *part)[3]);
+    for (int i = 0; i < 3; i++) {
+      spec.axis[i] = kGizmoAxis[i];
+      spec.trans[i] = true;
+    }
+    return true;
+  }
+  mate = InnerMateDriving(state, *occ, inner);
+  if (mate == nullptr)
+    return false; // rides on another moving part: drag that one
+  const auto Wa = MateConnectorWorldAt(state, {occ->id}, mate->a);
+  if (!Wa)
+    return false;
+  for (int i = 0; i < 3; i++)
+    spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
+  const double offset =
+      assembly::MateDofAt(*state.assembly, {occ->id}, mate->id, MateDof::Offset,
+                          AssemblyResolverFor(state))
+          .value_or(mate->offset);
+  spec.origin = glm::vec3((*Wa)[3]) + spec.axis[2] * static_cast<float>(offset);
+  switch (mate->type) {
+  case MateType::Revolute:
+  case MateType::Planar:
+    spec.rot[2] = true;
+    break;
+  case MateType::Slider:
+    spec.trans[2] = true;
+    break;
+  case MateType::Cylindrical:
+    spec.rot[2] = spec.trans[2] = true;
+    break;
+  case MateType::Ball:
+  case MateType::Fastened:
+    return false;
+  }
+  return true;
+}
+
 // Fills `spec` for the selected occurrence and reports the driving mate (null =
 // free 6-DOF). Returns false if no gizmo should show (fastened mate / dangling
 // connector).
-bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
-                    Mate*& mate) {
+bool BuildGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
+                    GizmoSpec& spec, const Mate*& mate) {
   mate = nullptr;
+  if (inner != 0)
+    return BuildInnerGizmoSpec(state, occ, inner, spec, mate);
   if (state.activeExplodedView) {
     // Explode authoring (A4): world-aligned translate arrows at the DISPLAYED
     // position; the drag writes the view's step offset. No rotation — an
@@ -284,6 +351,10 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
     if (!m.innerPath.empty() &&
         MotionPlaybackLocal(state, *occ, m.innerPath, m.localXf, played))
       xf = base * played;
+    // ...and an exploded view may displace it on its own (v130).
+    if (const glm::vec3 inner = ExplodeInnerOffset(state, occId, m.innerPath);
+        inner != glm::vec3(0.0f))
+      xf = glm::translate(glm::mat4(1.0f), inner) * xf;
     if (state.meshRenderer)
       state.meshRenderer->SetInstanceTransform(m.meshId, xf);
     if (state.outlineRenderer)
@@ -711,6 +782,80 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
   return true;
 }
 
+// A drag of a MOVING PART of a flexible placement (v129), in progress: the
+// same two modes as a top-level part -- an exploded view's step, or the
+// placement's own pose of the sub-assembly mate that places it, written
+// through SetMateDofAt (set_mate {id, path}'s write) and solved holding it,
+// so the unit's mechanism and whatever the parent chains to it follow.
+bool DragInnerPart(AppState& state, const Ray& ray, bool down, bool released) {
+  auto& g = state.gizmoDrag;
+  Occurrence* F =
+      state.assembly ? state.assembly->FindById(g.placement) : nullptr;
+  const AssemblyDocument* sub = F ? FlexibleSub(state, *F) : nullptr;
+  const Mate* mate = sub && g.mateId ? sub->FindMateById(g.mateId) : nullptr;
+  const std::vector<uint64_t> path{g.placement};
+  const MateDof dof = g.rotate ? MateDof::Rotation : MateDof::Offset;
+  if (released || !down || sub == nullptr || (!g.explodeView && !mate)) {
+    const bool explode = g.explodeView != 0;
+    g.active = false;
+    g.innerOcc = g.placement = 0;
+    if (state.assembly) {
+      if (explode)
+        state.assembly->BumpVersion(); // view edit: resync, nothing to solve
+      else if (mate)
+        (void)SolveActiveAssemblyReport(state, {mate->id, dof, path});
+      else
+        SolveActiveAssembly(state);
+    }
+    return true;
+  }
+  const glm::vec3 A = g.frameAxis[g.axis];
+  if (g.explodeView) {
+    ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
+    ExplodeStep* step = nullptr;
+    if (view)
+      for (ExplodeStep& s : view->steps)
+        if (s.occurrenceId == g.innerOcc && s.path == path) {
+          step = &s;
+          break;
+        }
+    if (!step) { // view or step vanished mid-drag (undo?) — abort cleanly
+      g.active = false;
+      g.innerOcc = g.placement = 0;
+      return true;
+    }
+    const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+    const float f = std::max(state.explodeFactor, 0.05f);
+    step->offset = g.startOffset + A * ((t - g.startParam) / f);
+    PushOccurrenceLive(state, F->id);
+    return true;
+  }
+  // A DOF the placement's configuration holds is left alone, as a top-level
+  // hold is: the drag would pose what that configuration pins.
+  if (const Configuration* c = sub->ConfigurationFor(F->configurationId))
+    if (const MateOverride* hold = c->OverrideForMate(mate->id);
+        hold != nullptr &&
+        (g.rotate ? hold->rotation.has_value() : hold->offset.has_value()))
+      return true;
+  const bool snap = !ImGui::GetIO().KeyCtrl;
+  double value = 0.0;
+  if (!g.rotate) {
+    const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+    value = g.startDof + (t - g.startParam);
+  } else {
+    float ang;
+    if (!RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
+      return true;
+    // The absolute value snaps, as a top-level joint's does: the mate's own
+    // frame is the zero.
+    value = SnapAngleRad(g.startDof + UnwrappedTurn(g, ang), snap);
+  }
+  assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
+                         AssemblyResolverFor(state));
+  (void)SolveActiveAssemblyReport(state, {mate->id, dof, path});
+  return true; // solve already repositioned + resynced
+}
+
 } // namespace
 
 void PublishGizmoHandles(AppState& state) {
@@ -728,12 +873,13 @@ void PublishGizmoHandles(AppState& state) {
       PublishGizmoHandles(state, spec, GizmoScale(state));
     return;
   }
-  Occurrence* occ = GizmoOccurrence(state);
+  uint64_t inner = 0;
+  Occurrence* occ = GizmoOccurrence(state, inner);
   if (!occ)
     return;
   GizmoSpec spec;
-  Mate* mate = nullptr;
-  if (!BuildGizmoSpec(state, occ, spec, mate))
+  const Mate* mate = nullptr;
+  if (!BuildGizmoSpec(state, occ, inner, spec, mate))
     return;
   PublishGizmoHandles(state, spec, GizmoScale(state));
 }
@@ -745,6 +891,8 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
            HandlePlacementGizmo(state, ray, clicked, down, released);
   auto& g = state.gizmoDrag;
 
+  if (g.active && g.innerOcc != 0)
+    return DragInnerPart(state, ray, down, released);
   if (g.active) {
     Occurrence* occ =
         state.assembly ? state.assembly->FindById(SelectedOccurrenceId(state))
@@ -768,7 +916,7 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       ExplodeStep* step = nullptr;
       if (view)
         for (ExplodeStep& s : view->steps)
-          if (s.occurrenceId == occ->id) {
+          if (s.path.empty() && s.occurrenceId == occ->id) {
             step = &s;
             break;
           }
@@ -864,12 +1012,13 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     return true;
   }
 
-  Occurrence* occ = GizmoOccurrence(state);
+  uint64_t inner = 0;
+  Occurrence* occ = GizmoOccurrence(state, inner);
   if (!occ || !clicked)
     return false;
   GizmoSpec spec;
-  Mate* mate = nullptr;
-  if (!BuildGizmoSpec(state, occ, spec, mate))
+  const Mate* mate = nullptr;
+  if (!BuildGizmoSpec(state, occ, inner, spec, mate))
     return false;
   int axis = 0;
   bool rotate = false;
@@ -884,19 +1033,25 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
   for (int i = 0; i < 3; i++)
     g.frameAxis[i] = spec.axis[i];
   g.mateId = mate ? mate->id : 0;
+  g.innerOcc = inner;
+  g.placement = inner != 0 ? occ->id : 0;
   g.explodeView = state.activeExplodedView;
   if (g.explodeView) {
     // Find-or-create this occurrence's step in the active view (after the
-    // snapshot, so the whole drag is one undo step).
+    // snapshot, so the whole drag is one undo step). A moving part of a
+    // flexible unit has its own, named by path (v130).
     ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
+    const std::vector<uint64_t> path =
+        inner != 0 ? std::vector<uint64_t>{occ->id} : std::vector<uint64_t>{};
+    const uint64_t stepOcc = inner != 0 ? inner : occ->id;
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : view->steps)
-      if (s.occurrenceId == occ->id) {
+      if (s.occurrenceId == stepOcc && s.path == path) {
         step = &s;
         break;
       }
     if (!step) {
-      view->steps.push_back({occ->id, glm::vec3(0.0f)});
+      view->steps.push_back({stepOcc, glm::vec3(0.0f), path});
       step = &view->steps.back();
     }
     g.startOffset = step->offset;
@@ -913,7 +1068,13 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     g.lastAngle = ang;
     g.turned = 0.0f;
   }
-  if (mate) { // capture the DOF value at grab
+  if (mate && inner != 0) { // this placement's pose of the inner mate
+    g.startDof = static_cast<float>(
+        assembly::MateDofAt(*state.assembly, {occ->id}, mate->id,
+                            rotate ? MateDof::Rotation : MateDof::Offset,
+                            AssemblyResolverFor(state))
+            .value_or(0.0));
+  } else if (mate) { // capture the DOF value at grab
     g.startDof = rotate ? mate->rotation
                         : (axis == 0   ? mate->dx
                            : axis == 1 ? mate->dy

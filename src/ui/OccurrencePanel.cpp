@@ -9,6 +9,7 @@
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/FlexibleActions.h"
 #include "ui/FloatingWindow.h"
 #include "ui/Icons.h"
 #include "ui/ListSelection.h"
@@ -175,6 +176,95 @@ const char* MateGlyph(MateType t) {
     return CommandIcon("assembly.mate_ball");
   }
   return kUnknownIcon;
+}
+
+// A FLEXIBLE placement's inside, under its row
+// (docs/assemblies/README.md#flexible-sub-assemblies): the occurrences that
+// move and the mates that move them, read-only and addressed by path. A part
+// row selects that part in the viewport -- where it drags within its mate --
+// and a mate row selects the part the mate moves. Editing them happens on the
+// sub-assembly's own tab; what is posed here is this placement's.
+void DrawFlexibleChildren(AppState& state, const Occurrence& F) {
+  const std::vector<const Occurrence*> moving =
+      MovingInnerOccurrences(state, F);
+  const std::vector<const Mate*> mates = InnerDofMates(state, F);
+  if (moving.empty() && mates.empty())
+    return;
+  const std::string fid = std::to_string(F.id);
+  ImGui::Indent();
+  // No tree push: the rows below keep the flat "###occ_in_<unit>_<part>" ids
+  // the rest of the panel uses.
+  const std::string head = std::to_string(moving.size()) + " moving, " +
+                           std::to_string(mates.size()) +
+                           (mates.size() == 1 ? " mate" : " mates") +
+                           "###occ_flex_" + fid;
+  const bool open =
+      ImGui::TreeNodeEx(head.c_str(), ImGuiTreeNodeFlags_DefaultOpen |
+                                          ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                                          ImGuiTreeNodeFlags_SpanAvailWidth);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("What moves inside '%s' in this assembly. Click a part "
+                      "to select it; drag it in the viewport to turn or slide "
+                      "it within its mate.",
+                      F.name.c_str());
+  if (open) {
+    ImGui::Indent();
+    for (const Occurrence* in : moving) {
+      const std::string iid = std::to_string(in->id);
+      ListRowSpec row;
+      row.glyph =
+          in->refKind == OccurrenceRef::Assembly ? ICON_FA_CUBES : ICON_FA_CUBE;
+      row.label = (in->name.empty() ? "occurrence " + iid : in->name) +
+                  "###occ_in_" + fid + "_" + iid;
+      row.selected = IsInnerOccurrenceSelected(state, F.id, in->id);
+      const Mate* by = InnerMateDriving(state, F, in->id);
+      row.tail = by != nullptr ? MateTypeLabel(by->type) : "rides";
+      row.tooltip =
+          "Moves inside '" + F.name + "' (path [" + fid + "], " + iid + ")" +
+          (by != nullptr ? "\nDrag it in the viewport to move it "
+                           "within its " +
+                               std::string(MateTypeLabel(by->type)) + " mate"
+                         : "\nRides on another moving part");
+      if (ListRow(row).clicked)
+        SelectInnerOccurrence(state, F.id, in->id);
+    }
+    for (const Mate* m : mates) {
+      const std::string mid = std::to_string(m->id);
+      ListRowSpec row;
+      row.glyph = MateGlyph(m->type);
+      row.label = (m->name.empty() ? "mate " + mid : m->name) +
+                  "###occ_inmate_" + fid + "_" + mid;
+      const bool rot = assembly::MateHasDof(m->type, MateDof::Rotation);
+      const std::optional<double> v =
+          assembly::MateDofAt(*state.assembly, {F.id}, m->id,
+                              rot ? MateDof::Rotation : MateDof::Offset,
+                              AssemblyResolverFor(state));
+      // What its configuration holds wins: that is where the part stands.
+      std::optional<double> held;
+      if (const AssemblyDocument* sub = FlexibleSub(state, F))
+        if (const Configuration* c = sub->ConfigurationFor(F.configurationId))
+          if (const MateOverride* h = c->OverrideForMate(m->id))
+            if (rot ? h->rotation.has_value() : h->offset.has_value())
+              held = rot ? *h->rotation : *h->offset;
+      if (held || v) {
+        const double show = held ? *held : *v;
+        char tail[48];
+        std::snprintf(tail, sizeof(tail), rot ? "%s%.1f deg" : "%s%.2f mm",
+                      held ? "held " : "",
+                      rot ? angles::ToDegrees(show) : show);
+        row.tail = tail;
+      }
+      row.selected = IsInnerOccurrenceSelected(state, F.id, m->b.occurrenceId);
+      row.tooltip = std::string(MateTypeLabel(m->type)) + " inside '" + F.name +
+                    "', as this placement has it posed (path [" + fid +
+                    "], mate " + mid +
+                    ").\nA motion study or a relation can drive it.";
+      if (ListRow(row).clicked && IsMovingInner(state, F, m->b.occurrenceId))
+        SelectInnerOccurrence(state, F.id, m->b.occurrenceId);
+    }
+    ImGui::Unindent();
+  }
+  ImGui::Unindent();
 }
 
 void DrawMatesSection(AppState& state) {
@@ -382,40 +472,52 @@ void DrawMotionBody(AppState& state) {
     }
   }
   if (ImGui::SmallButton("Add study###motion_add")) {
-    // The first mate that turns or slides. A rotation gets a full turn; a
+    // The first mate that turns or slides -- this assembly's own first, then
+    // one inside a flexible placement (v129). A rotation gets a full turn; a
     // slide gets a range derived from the placed part's own size, because a
     // "10 mm" default is right for a drawer and wrong for a dock.
-    const Mate* driver = nullptr;
-    for (const Mate& m : asmDoc.GetMates())
-      if (assembly::MateHasDof(m.type, MateDof::Rotation) ||
-          assembly::MateHasDof(m.type, MateDof::Offset)) {
-        driver = &m;
-        break;
-      }
+    const std::vector<DofMateChoice> choices = DofMateChoices(state);
+    const Mate* driver =
+        choices.empty() ? nullptr
+                        : assembly::MateAtPath(asmDoc, choices.front().path,
+                                               choices.front().mate,
+                                               AssemblyResolverFor(state));
     if (driver == nullptr) {
       state.motionAddRefusal =
           "no mate here turns or slides — a motion study drives a revolute, "
           "slider or cylindrical mate";
     } else {
       state.motionAddRefusal.clear();
+      const std::vector<uint64_t>& path = choices.front().path;
       MotionStudy s;
       s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
       s.driverMate = driver->id;
+      s.driverPath = path;
       if (assembly::MateHasDof(driver->type, MateDof::Rotation)) {
         s.driverDof = MateDof::Rotation;
         s.from = 0.0;
         s.to = 2.0 * 3.14159265358979323846;
       } else {
         s.driverDof = MateDof::Offset;
-        s.from = driver->offset;
+        const double from =
+            assembly::MateDofAt(asmDoc, path, driver->id, MateDof::Offset,
+                                AssemblyResolverFor(state))
+                .value_or(driver->offset);
+        s.from = from;
         double reach = 10.0;
-        if (const Occurrence* o = asmDoc.FindById(driver->b.occurrenceId))
+        // The placed part lives in the sub-assembly for an inner mate.
+        const AssemblyDocument* owner =
+            path.empty()
+                ? &asmDoc
+                : AssemblyDocById(state, asmDoc.FindById(path.front())->partId);
+        if (const Occurrence* o =
+                owner ? owner->FindById(driver->b.occurrenceId) : nullptr)
           if (const Document* pd = PartDocById(state, o->partId)) {
             glm::vec3 lo, hi;
             if (Measure::WorldBounds(pd->GetBodies(), glm::mat4(1.0f), lo, hi))
               reach = glm::length(hi - lo);
           }
-        s.to = driver->offset + reach;
+        s.to = from + reach;
       }
       SnapshotAssembly(state);
       state.activeMotionStudy = asmDoc.AddMotionStudy(std::move(s));
@@ -428,28 +530,24 @@ void DrawMotionBody(AppState& state) {
   MotionStudy* sel = asmDoc.FindMotionStudyById(state.activeMotionStudy);
   if (sel == nullptr)
     return;
-  // Driver: every mate with a degree of freedom, by name.
+  // Driver: every mate with a degree of freedom, by name -- this assembly's
+  // own, then those inside each flexible placement, by path ("Pump /
+  // camshaft"), which is how driver_path names them (v129).
   LeftLabel("Driver");
-  const Mate* cur = assembly::MateAtPath(
-      asmDoc, sel->driverPath, sel->driverMate, AssemblyResolverFor(state));
   const std::string curLabel =
-      cur ? (cur->name.empty() ? "mate " + std::to_string(cur->id) : cur->name)
-          : "(missing)";
+      MateLabelAt(state, sel->driverPath, sel->driverMate);
   if (ImGui::BeginCombo("###motion_driver", curLabel.c_str())) {
-    for (const Mate& m : asmDoc.GetMates()) {
-      const bool rot = assembly::MateHasDof(m.type, MateDof::Rotation);
-      const bool slide = assembly::MateHasDof(m.type, MateDof::Offset);
-      if (!rot && !slide)
-        continue;
-      const std::string item =
-          (m.name.empty() ? "mate " + std::to_string(m.id) : m.name) +
-          "###motion_driver_" + std::to_string(m.id);
-      if (ImGui::Selectable(item.c_str(), sel->driverPath.empty() &&
-                                              m.id == sel->driverMate)) {
+    for (const DofMateChoice& c : DofMateChoices(state)) {
+      std::string id = std::to_string(c.mate);
+      if (!c.path.empty())
+        id = std::to_string(c.path.front()) + "_" + id;
+      const std::string item = c.label + "###motion_driver_" + id;
+      if (ImGui::Selectable(item.c_str(), sel->driverPath == c.path &&
+                                              c.mate == sel->driverMate)) {
         SnapshotAssembly(state);
-        sel->driverMate = m.id;
-        sel->driverPath.clear();
-        sel->driverDof = rot ? MateDof::Rotation : MateDof::Offset;
+        sel->driverMate = c.mate;
+        sel->driverPath = c.path;
+        sel->driverDof = c.rotation ? MateDof::Rotation : MateDof::Offset;
         state.motionResults.erase(sel->id);
         asmDoc.BumpVersion();
       }
@@ -1079,8 +1177,11 @@ void DrawOccurrencePanel(AppState& state) {
         row.tailGlyph = ICON_FA_ANCHOR; // was "(fixed)" appended to the name
       if (o.attachedTo != 0)
         row.tail = "attached";
+      else if (o.flexible)
+        row.tail = "flexible";
       row.tooltip = std::string(isSub ? "Assembly: " : "Part: ") +
                     RefNameById(state, o) +
+                    (o.flexible ? "\nFlexible: its mechanism moves here" : "") +
                     (o.fixed ? "\nFixed (grounded)" : "") +
                     (o.visible ? "" : "\nHidden") + "\nDouble-click to edit";
       row.menuId = "###occ_ctx_" + suffix;
@@ -1132,6 +1233,8 @@ void DrawOccurrencePanel(AppState& state) {
         ImGui::SetScrollHereY(0.5f);
       if (after != After::None)
         break; // the list, or the document, is about to change
+      if (o.flexible)
+        DrawFlexibleChildren(state, o);
     }
     switch (after) {
     case After::Open:
@@ -1337,6 +1440,169 @@ void DrawMateToolWindow(AppState& state) {
     CancelMateTool(state);
 }
 
+namespace {
+// A relation's two sides, each a mate that turns or slides -- this
+// assembly's own or one inside a flexible placement, by path (v129), as
+// add_relation's a_path/b_path name them. Changing a side is one undo step
+// and a solve; a mate lacking the DOF the side reads is refused in place.
+// A screw is one mate's rotation to its own slide, so its sides move together.
+void DrawRelationSides(AppState& state, Relation& r) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  const std::vector<DofMateChoice> choices = DofMateChoices(state);
+  struct Side {
+    const char* label;
+    const char* id;
+    bool b;
+  };
+  for (const Side side : {Side{"Drives", "rel_side_a", false},
+                          Side{"Driven", "rel_side_b", true}}) {
+    if (r.kind == RelationKind::Screw && side.b)
+      continue; // one mate, both DOFs
+    const std::vector<uint64_t>& path = side.b ? r.mateBPath : r.mateAPath;
+    const uint64_t mate = side.b ? r.mateB : r.mateA;
+    const MateDof dof = side.b ? r.dofB : r.dofA;
+    LeftLabel(side.label);
+    const std::string combo = std::string("###") + side.id;
+    const DofMateChoice* pick = nullptr;
+    if (ImGui::BeginCombo(combo.c_str(),
+                          MateLabelAt(state, path, mate).c_str())) {
+      for (const DofMateChoice& c : choices) {
+        std::string cid = std::to_string(c.mate);
+        if (!c.path.empty())
+          cid = std::to_string(c.path.front()) + "_" + cid;
+        const std::string item = c.label + "###" + side.id + "_" + cid;
+        if (ImGui::Selectable(item.c_str(), c.path == path && c.mate == mate))
+          pick = &c;
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", side.b ? "The mate this relation moves."
+                                     : "The mate that drives it.");
+    if (pick == nullptr || (pick->path == path && pick->mate == mate))
+      continue;
+    state.asmEditRefusalFor = r.id;
+    const bool has = dof == MateDof::Rotation ? pick->rotation : pick->offset;
+    if (!has) {
+      state.asmEditRefusal = "'" + pick->label + "' has no " +
+                             (dof == MateDof::Rotation ? "rotation" : "slide") +
+                             " for the " + (side.b ? "driven" : "driving") +
+                             " side of a " +
+                             DocumentIO::RelationKindToString(r.kind) +
+                             " relation — pick a mate that " +
+                             (dof == MateDof::Rotation ? "turns" : "slides");
+      continue;
+    }
+    if (!pick->path.empty() &&
+        (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)) {
+      state.asmEditRefusal =
+          std::string("a ") + DocumentIO::RelationKindToString(r.kind) +
+          " keeps history (its lead), which would be per-placement state — "
+          "a relation into a flexible placement cannot be one";
+      continue;
+    }
+    state.asmEditRefusal.clear();
+    SnapshotAssembly(state);
+    if (side.b || r.kind == RelationKind::Screw) {
+      r.mateB = pick->mate;
+      r.mateBPath = pick->path;
+    }
+    if (!side.b) {
+      r.mateA = pick->mate;
+      r.mateAPath = pick->path;
+    }
+    asmDoc.BumpVersion();
+    SolveActiveAssembly(state);
+  }
+  if (state.asmEditRefusalFor == r.id && !state.asmEditRefusal.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
+}
+
+// A sub-assembly placement's two settings
+// (docs/assemblies/README.md#flexible-sub-assemblies): which of its
+// configurations it uses, and whether its own mechanism moves here. Both go
+// through the actions set_occurrence_configuration and
+// set_occurrence_flexible are (ui/FlexibleActions.h) -- one undo step each --
+// and a refusal is shown under the control that was clicked, in the app's
+// words.
+void DrawSubAssemblyPlacement(AppState& state, Occurrence& sel) {
+  const AssemblyDocument* sub = AssemblyDocById(state, sel.partId);
+  if (sub == nullptr)
+    return;
+  const uint64_t occId = sel.id;
+  const bool refusedHere =
+      state.asmEditRefusalFor == occId && !state.asmEditRefusal.empty();
+  ImGui::Separator();
+  LeftLabel("Configuration");
+  const auto cfgName = [&](uint64_t id) -> std::string {
+    if (id == 0) {
+      const Configuration* active = sub->ActiveConfig();
+      return std::string("Its active one (") +
+             (active ? active->name : std::string("base")) + ")";
+    }
+    const Configuration* c = sub->FindConfiguration(id);
+    return c ? c->name : "(missing " + std::to_string(id) + ")";
+  };
+  uint64_t pickCfg = UINT64_MAX;
+  if (ImGui::BeginCombo("###occ_config",
+                        cfgName(sel.configurationId).c_str())) {
+    if (ImGui::Selectable((cfgName(0) + "###occ_config_0").c_str(),
+                          sel.configurationId == 0))
+      pickCfg = 0;
+    for (const Configuration& c : sub->GetConfigurations())
+      if (ImGui::Selectable(
+              (c.name + "###occ_config_" + std::to_string(c.id)).c_str(),
+              sel.configurationId == c.id))
+        pickCfg = c.id;
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip(
+        "Which configuration of '%s' this placement uses. A flexible "
+        "placement's mechanism runs under it: what it holds stays held.",
+        RefNameById(state, sel).c_str());
+  if (pickCfg != UINT64_MAX && pickCfg != sel.configurationId) {
+    std::string why;
+    state.asmEditRefusalFor = occId;
+    if (SetOccurrenceConfiguration(state, occId, pickCfg, &why))
+      state.asmEditRefusal.clear();
+    else
+      state.asmEditRefusal = why;
+    return; // the document moved under `sel`; draw it again next frame
+  }
+  const Occurrence* live = state.assembly->FindById(occId);
+  bool flexible = live->flexible;
+  if (ImGui::Checkbox("Flexible###occ_flexible", &flexible)) {
+    std::string why;
+    state.asmEditRefusalFor = occId;
+    if (SetOccurrenceFlexible(state, occId, flexible, &why))
+      state.asmEditRefusal.clear();
+    else
+      state.asmEditRefusal = why;
+    return;
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Its own mechanism moves in this assembly: its mates "
+                      "join the solve and motion studies, posed for this "
+                      "placement only. Off, it is one rigid block.");
+  if (refusedHere) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+    ImGui::PopStyleColor();
+  } else if (live->flexible) {
+    const size_t moving = MovingInnerOccurrences(state, *live).size();
+    TextDisabledWrapped(
+        (std::to_string(moving) +
+         (moving == 1 ? " part moves" : " parts move") +
+         " inside it; drag one in the viewport to turn or slide it.")
+            .c_str());
+  }
+}
+} // namespace
+
 void EditAssemblyOccurrence(AppState& state, uint64_t occId) {
   if (!state.assembly)
     return;
@@ -1345,6 +1611,7 @@ void EditAssemblyOccurrence(AppState& state, uint64_t occId) {
     CancelMateTool(state);
   state.asmEditRelation = 0;
   state.asmEditOccurrence = occId;
+  state.asmEditRefusal.clear();
 }
 
 void EditAssemblyRelation(AppState& state, uint64_t relId) {
@@ -1354,6 +1621,7 @@ void EditAssemblyRelation(AppState& state, uint64_t relId) {
     CancelMateTool(state);
   state.asmEditOccurrence = 0;
   state.asmEditRelation = relId;
+  state.asmEditRefusal.clear();
 }
 
 void DrawAssemblyEditWindow(AppState& state) {
@@ -1419,6 +1687,8 @@ void DrawAssemblyEditWindow(AppState& state) {
     bool visible = sel->visible;
     if (ImGui::Checkbox("Visible###occ_visible", &visible))
       SetOccurrencesVisible(state, {sel->id}, visible);
+    if (isSub)
+      DrawSubAssemblyPlacement(state, *sel);
     ImGui::Separator();
     bool remove = false;
     if (ImGui::Button("Edit in context###occ_in_context")) {
@@ -1458,18 +1728,8 @@ void DrawAssemblyEditWindow(AppState& state) {
       return;
     }
     BeginToolWindowFrame(state, "Edit relation");
-    const Mate* a = assembly::MateAtPath(asmDoc, r->mateAPath, r->mateA,
-                                         AssemblyResolverFor(state));
-    const Mate* b = assembly::MateAtPath(asmDoc, r->mateBPath, r->mateB,
-                                         AssemblyResolverFor(state));
-    const auto mateName = [](const Mate* m) {
-      return m == nullptr      ? std::string("?")
-             : m->name.empty() ? "mate " + std::to_string(m->id)
-                               : m->name;
-    };
-    ImGui::TextDisabled("%s: %s -> %s",
-                        DocumentIO::RelationKindToString(r->kind),
-                        mateName(a).c_str(), mateName(b).c_str());
+    ImGui::TextDisabled("%s", DocumentIO::RelationKindToString(r->kind));
+    DrawRelationSides(state, *r);
     if (r->kind == RelationKind::Freewheel)
       ImGui::TextDisabled("drives %s, lead %.4g deg",
                           DocumentIO::FreewheelDrivesToString(r->drives),

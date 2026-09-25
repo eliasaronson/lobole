@@ -13,7 +13,7 @@ baked geometry and autosave are in [README.md](README.md).
 ```json
 {
   "format": "designer-document",
-  "version": 129,
+  "version": 130,
   "parameters": [ {"name": "width", "expression": "40", "comment": "…"} ],
   "features":   [ {"type": "Box", "id": 1, "name": "Box 1", "…": "…"} ]
 }
@@ -210,6 +210,7 @@ here; the golden corpus and git history cover them.
 | 127 | Fixture `seat`: `{face: {feature, name}, edge: -x\|+x\|-y\|+y, along_mm, over_mm, spin_deg}`, re-solved against the stock on every read |
 | 128 | AxisRef kind `custom` `{origin, direction}`; helix `start_deg` (+`_expr`); motion study `configuration` |
 | 129 | Occurrence `flexible`, `inner_poses` `[{occurrence, position, orientation}]`, `inner_mate_dofs` `[{mate, rotation, offset, dx?, dy?, ball_rotation?}]` (a flexible sub-assembly placement, [assemblies](../assemblies/README.md#flexible-sub-assemblies)); a mate named `{path, mate}`: relation `mate_a_path`/`mate_b_path`, motion study `driver_path` |
+| 130 | Explode step `path` `[placement]`: `occurrence` is then a moving part inside that flexible placement ([assemblies](../assemblies/README.md#flexible-sub-assemblies)) |
 
 ## The directory form
 

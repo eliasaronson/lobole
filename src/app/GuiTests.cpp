@@ -18,6 +18,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   RegisterSketchGuiTests(engine);
   RegisterViewportGuiTests(engine);
   RegisterAssemblyGuiTests(engine);
+  RegisterFlexibleGuiTests(engine);
   RegisterDrawingGuiTests(engine);
   RegisterCamGuiTests(engine);
   RegisterSimulationGuiTests(engine);

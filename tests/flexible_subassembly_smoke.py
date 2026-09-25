@@ -151,6 +151,23 @@ def main():
         refused(lambda: app.set_mate(id=crank_mate["id"], path=[unit.id],
                                      flipped=False),
                 "sub-assembly's to edit", "editing an inner mate's definition")
+        refused(lambda: app.set_occurrence_configuration(
+            occurrence=unit.id, configuration=987654),
+            "no configuration 987654", "a configuration id it does not have")
+
+        # An explode step may name the crank by path (v130), and only while
+        # the placement is flexible.
+        view = app.call("add_exploded_view", name="apart")["id"]
+        step = app.call("set_explode_step", view=view, occurrence=co.id,
+                        path=[unit.id], offset=[0, 0, 25])
+        expect(any(s.get("path") == [unit.id] and s["occurrence"] == co.id
+                   for s in step["steps"]),
+               "an explode step names a moving part by path")
+        refused(lambda: app.call("set_explode_step", view=view,
+                                 occurrence=co.id, path=[fo.id],
+                                 offset=[0, 0, 1]),
+                "not a flexible", "an explode step into a part")
+
         # Rigid again: the relation says so rather than driving nothing.
         app.set_occurrence_flexible(occurrence=unit.id, flexible=False)
         rel = next(x for x in app.list_relations()["relations"]

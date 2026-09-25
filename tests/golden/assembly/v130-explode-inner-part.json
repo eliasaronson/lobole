@@ -1,0 +1,188 @@
+{
+  "exploded": [
+    {
+      "id": 8,
+      "name": "the crank lifted out of its unit",
+      "steps": [
+        {
+          "occurrence": 3,
+          "offset": [
+            0.0,
+            0.0,
+            20.0
+          ]
+        },
+        {
+          "occurrence": 2,
+          "offset": [
+            0.0,
+            0.0,
+            15.0
+          ],
+          "path": [
+            3
+          ]
+        }
+      ],
+      "type": "ExplodedView"
+    }
+  ],
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 4,
+      "mate_type": "revolute",
+      "name": "drive",
+      "offset": 0.0,
+      "rotation": 0.5,
+      "type": "Mate"
+    }
+  ],
+  "motion": [
+    {
+      "check_clash": true,
+      "clash_mode": "mesh",
+      "driver_dof": "rotation",
+      "driver_mate": 7,
+      "driver_path": [
+        3
+      ],
+      "from": 0.0,
+      "id": 6,
+      "name": "the unit's crank, turned from the parent",
+      "samples": 13,
+      "to": 3.141592653589793,
+      "type": "MotionStudy"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Frame",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Drive",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 9,
+      "fixed": true,
+      "flexible": true,
+      "id": 3,
+      "inner_mate_dofs": [
+        {
+          "mate": 7,
+          "offset": 0.0,
+          "rotation": 0.5
+        }
+      ],
+      "inner_poses": [
+        {
+          "occurrence": 2,
+          "orientation": [
+            0.0,
+            0.0,
+            0.24740396,
+            0.96891242
+          ],
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "name": "Crank unit",
+      "part_id": 100,
+      "part_version": null,
+      "ref_kind": "assembly",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          100.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 5,
+      "kind": "chain",
+      "mate_a": 4,
+      "mate_b": 7,
+      "mate_b_path": [
+        3
+      ],
+      "name": "drive to the unit's crank",
+      "phase": 0.0,
+      "ratio": 1.0,
+      "type": "Relation"
+    }
+  ],
+  "version": 130
+}

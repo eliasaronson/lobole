@@ -225,6 +225,11 @@ struct Mate {
 struct ExplodeStep {
   uint64_t occurrenceId = 0;
   glm::vec3 offset{0.0f}; // world space, at factor 1.0
+  // v130: a moving part INSIDE a flexible placement, named as a mate is
+  // ({path, mate}, Relation::mateAPath): `path` is [the placement] and
+  // `occurrenceId` the sub-assembly's id for the part. Empty = an occurrence
+  // of this document. Its offset adds to the placement's own step.
+  std::vector<uint64_t> path;
 };
 
 // A named, persistent exploded view (A4). PURE VIEW STATE: applying it never
@@ -235,7 +240,7 @@ struct ExplodeStep {
 struct ExplodedView {
   uint64_t id = 0;                // stable, shares the assembly's id counter
   std::string name;               // display label (cosmetic)
-  std::vector<ExplodeStep> steps; // at most one per occurrence
+  std::vector<ExplodeStep> steps; // at most one per {path, occurrence}
 };
 
 // A relation couples two mates' degrees of freedom

@@ -299,8 +299,11 @@ json ExplodedViewToJson(const ExplodedView& v) {
   j["name"] = v.name;
   j["steps"] = json::array();
   for (const ExplodeStep& s : v.steps) {
-    j["steps"].push_back({{"occurrence", s.occurrenceId},
-                          {"offset", {s.offset.x, s.offset.y, s.offset.z}}});
+    json step{{"occurrence", s.occurrenceId},
+              {"offset", {s.offset.x, s.offset.y, s.offset.z}}};
+    if (!s.path.empty()) // v130: a moving part inside a flexible placement
+      step["path"] = s.path;
+    j["steps"].push_back(std::move(step));
   }
   return j;
 }
@@ -315,6 +318,14 @@ ExplodedView ExplodedViewFromJson(const json& j) {
     const auto& o = sj.at("offset");
     s.offset = glm::vec3(o.at(0).get<float>(), o.at(1).get<float>(),
                          o.at(2).get<float>());
+    if (sj.contains("path")) {
+      s.path = sj.at("path").get<std::vector<uint64_t>>();
+      if (s.path.size() > 1) // only one level moves; never half-applied
+        throw std::runtime_error(
+            "an explode step's path is one flexible placement, [occurrence]; "
+            "this one goes " +
+            std::to_string(s.path.size()) + " levels down");
+    }
     v.steps.push_back(std::move(s));
   }
   return v;

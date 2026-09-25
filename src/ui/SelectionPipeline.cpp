@@ -8,6 +8,7 @@
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureEditor.h" // SlotPickClicked (U3)
+#include "ui/FlexibleActions.h" // a moving part of a flexible unit
 #include "ui/JobActions.h"    // JobPlacedBodies (a job tab's bodies)
 #include "ui/MeasureActions.h"
 #include "ui/SketchInteraction.h" // FaceElementRef
@@ -27,6 +28,18 @@
 namespace ui {
 
 namespace {
+
+// Whether a render mesh belongs to an occurrence selection item: the whole
+// occurrence, or -- an item with an innerPath -- the one moving part of a
+// flexible placement it names (and whatever that part carries).
+bool MeshIsOf(const AppState&, const DocumentRenderMesh& m,
+              const SelectionItem& it) {
+  if (m.occurrenceId != it.id)
+    return false;
+  if (it.innerPath.empty())
+    return true;
+  return !m.innerPath.empty() && m.innerPath.front() == it.innerPath.front();
+}
 
 constexpr uint32_t KindBit(SelectionItem::Kind k) {
   return 1u << static_cast<int>(k);
@@ -162,6 +175,17 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
           Candidate c{{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
                       face.meshId,
                       face.faceIndex};
+          // A MOVING part of a flexible placement is picked on its own
+          // (docs/assemblies/README.md#flexible-sub-assemblies): it is what
+          // a drag moves within its mate, as a top-level part is. The rest
+          // of the unit -- its housing, what is bolted to it -- still picks
+          // the placement.
+          if (!m.innerPath.empty())
+            if (const Occurrence* F =
+                    state.assembly ? state.assembly->FindById(m.occurrenceId)
+                                   : nullptr;
+                F != nullptr && IsMovingInner(state, *F, m.innerPath.front()))
+              c.item.innerPath = {m.innerPath.front()};
           c.cap = face.cap;
           c.capPoint = face.point;
           c.capNormal = face.normal;
@@ -591,11 +615,12 @@ void HandleSelectionInput(AppState& state, bool overViewport,
         // face's range alone was a patch on a part and nothing at all on a
         // glass pane.
         for (const DocumentRenderMesh& m : state.documentMeshes)
-          if (m.occurrenceId == top.item.id)
+          if (MeshIsOf(state, m, top.item))
             state.meshRenderer->HoverInstance(m.meshId);
-        for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
-          if (cap.occurrenceId == top.item.id)
-            state.meshRenderer->HoverInstance(cap.meshId);
+        if (top.item.innerPath.empty())
+          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+            if (cap.occurrenceId == top.item.id)
+              state.meshRenderer->HoverInstance(cap.meshId);
       } else {
         uint32_t first = 0, count = 0;
         if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
@@ -653,7 +678,10 @@ void HandleSelectionInput(AppState& state, bool overViewport,
                 : 0;
     const SelectionItem& chosen =
         candidates[static_cast<size_t>(state.pick.cycle)].item;
-    if (chosen.kind == SelectionItem::Kind::Occurrence)
+    if (chosen.kind == SelectionItem::Kind::Occurrence &&
+        !chosen.innerPath.empty())
+      SelectInnerOccurrence(state, chosen.id, chosen.innerPath.front());
+    else if (chosen.kind == SelectionItem::Kind::Occurrence)
       SelectOccurrence(state, chosen.id); // kind-scoped: mate item survives
     else
       state.selection.Replace(chosen);
@@ -686,14 +714,15 @@ void SyncSelectionHighlights(AppState& state) {
       if (it.kind != SelectionItem::Kind::Occurrence)
         continue;
       for (const DocumentRenderMesh& m : state.documentMeshes)
-        if (m.occurrenceId == it.id)
+        if (MeshIsOf(state, m, it))
           state.meshRenderer->HighlightInstance(m.meshId);
       // Its section caps too: on a sectioned part the cut face is most of
       // what you can see of it, and leaving it unlit while the walls light
       // reads as the highlight landing on something else.
-      for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
-        if (cap.occurrenceId == it.id)
-          state.meshRenderer->HighlightInstance(cap.meshId);
+      if (it.innerPath.empty())
+        for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+          if (cap.occurrenceId == it.id)
+            state.meshRenderer->HighlightInstance(cap.meshId);
     }
     // Measured faces highlight on their occurrence's instance while the
     // tool is armed (the element's id carries the occurrence).
@@ -946,9 +975,13 @@ void SelectFeatureByIndex(AppState& state, size_t index) {
 }
 
 uint64_t SelectedOccurrenceId(const AppState& state) {
-  const SelectionItem* it =
-      state.selection.First(SelectionItem::Kind::Occurrence);
-  return it != nullptr ? it->id : 0;
+  // A moving part of a flexible placement (innerPath set) is not the
+  // placement: Delete, Hide and the unit's gizmo must not take the whole
+  // unit for a click on its crank (ui/FlexibleActions.h).
+  for (const SelectionItem& it : state.selection.items)
+    if (it.kind == SelectionItem::Kind::Occurrence && it.innerPath.empty())
+      return it.id;
+  return 0;
 }
 
 std::vector<uint64_t> SelectedOccurrenceIds(const AppState& state) {
@@ -958,7 +991,8 @@ std::vector<uint64_t> SelectedOccurrenceIds(const AppState& state) {
   // question asked without that narrowing.
   std::vector<uint64_t> out;
   for (const SelectionItem& it : state.selection.items)
-    if (it.kind == SelectionItem::Kind::Occurrence && it.id != 0)
+    if (it.kind == SelectionItem::Kind::Occurrence && it.id != 0 &&
+        it.innerPath.empty())
       out.push_back(it.id);
   return out;
 }
@@ -1006,9 +1040,16 @@ void PruneSelection(AppState& state) {
             case SelectionItem::Kind::Feature:
               return !state.document ||
                      state.document->FindFeatureById(it.id) == nullptr;
-            case SelectionItem::Kind::Occurrence:
-              return !state.assembly ||
-                     state.assembly->FindById(it.id) == nullptr;
+            case SelectionItem::Kind::Occurrence: {
+              const Occurrence* o =
+                  state.assembly ? state.assembly->FindById(it.id) : nullptr;
+              if (o == nullptr)
+                return true;
+              // A moving part stays selectable while it still moves: rigid
+              // again, or folded into the unit, and it is gone.
+              return !it.innerPath.empty() &&
+                     !IsMovingInner(state, *o, it.innerPath.front());
+            }
             case SelectionItem::Kind::Mate:
               return !state.assembly ||
                      state.assembly->FindMateById(it.id) == nullptr;

@@ -1261,6 +1261,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       json entry = {{"kind", kind}};
       if (it.id != 0)
         entry["id"] = it.id;
+      // A moving part of a flexible placement: id is the placement, path
+      // the part inside it (docs/assemblies/README.md#flexible-sub-assemblies).
+      if (it.kind == ui::SelectionItem::Kind::Occurrence &&
+          !it.innerPath.empty())
+        entry["path"] = it.innerPath;
       if (!it.element.name.empty())
         entry["element"] = {{"feature_id", it.element.featureId},
                             {"name", it.element.name}};

@@ -664,6 +664,7 @@ set(app_sources
     src/app/guitests/GuiTestsSketch.cpp
     src/app/guitests/GuiTestsViewport.cpp
     src/app/guitests/GuiTestsAssembly.cpp
+    src/app/guitests/GuiTestsFlexible.cpp
     src/app/guitests/GuiTestsDrawing.cpp
     src/app/guitests/GuiTestsCam.cpp
     src/app/guitests/GuiTestsSimulation.cpp
@@ -720,6 +721,7 @@ set(app_sources
     src/ui/Bom.cpp
     src/ui/MateActions.cpp
     src/ui/GizmoInput.cpp
+    src/ui/FlexibleActions.cpp
     src/ui/TessellationCache.cpp
     src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
@@ -816,6 +818,7 @@ if(NOT ENABLE_TEST_ENGINE)
        src/app/guitests/GuiTestsSketch.cpp
        src/app/guitests/GuiTestsViewport.cpp
        src/app/guitests/GuiTestsAssembly.cpp
+       src/app/guitests/GuiTestsFlexible.cpp
        src/app/guitests/GuiTestsDrawing.cpp
        src/app/guitests/GuiTestsCam.cpp
        src/app/guitests/GuiTestsSimulation.cpp

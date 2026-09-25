@@ -49,6 +49,11 @@ bool DatumPlanesVisible(const AppState& state);
 // extracted AssemblyActions.cpp TU. OccurrenceMatrix and PartDocById moved to
 // AppActions.h — the RPC layer resolves cross-part queries through them.
 glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId);
+// ...and a moving part INSIDE a flexible placement (v130): the step naming
+// {path: [occId], occurrence: innerPath[0]}, on top of the unit's own. Zero
+// for an empty path or no such step.
+glm::vec3 ExplodeInnerOffset(const AppState& state, uint64_t occId,
+                             const std::vector<uint64_t>& innerPath);
 glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o);
 extern const glm::vec3 kBodyPalette[5];
 

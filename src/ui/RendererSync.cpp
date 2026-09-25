@@ -1340,6 +1340,12 @@ void SyncAssemblyRenderers(AppState& state) {
       xf = glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
            played * local;
     }
+    // A moving part of a flexible unit may explode on its own (v130), on top
+    // of the unit's step. Only when it has one: the pixel gate is byte-exact.
+    if (const glm::vec3 inner =
+            ExplodeInnerOffset(state, occ.id, inst.innerIds);
+        inner != glm::vec3(0.0f))
+      xf = glm::translate(glm::mat4(1.0f), inner) * xf;
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
       const SharedBody& sb = it->second.bodies[bi];
       if (!sb.tess)

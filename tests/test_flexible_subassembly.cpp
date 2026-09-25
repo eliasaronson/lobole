@@ -462,3 +462,42 @@ TEST_CASE("The v129 golden: a flexible placement and mates named by path",
   CHECK_FALSE((*back)->FindById(1)->flexible);
   fs::remove(tmp);
 }
+
+TEST_CASE("The v130 golden: an explode step inside a flexible placement",
+          "[assembly][io]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/assembly/v130-explode-inner-part.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  const AssemblyDocument& doc = **g;
+  const ExplodedView* v = doc.FindExplodedViewById(8);
+  REQUIRE(v != nullptr);
+  REQUIRE(v->steps.size() == 2);
+  // The unit's own step names a top-level occurrence, with no path...
+  CHECK(v->steps[0].occurrenceId == 3);
+  CHECK(v->steps[0].path.empty());
+  // ...and the crank's names the sub-assembly's occurrence by path, as a
+  // mate inside a flexible placement is named.
+  CHECK(v->steps[1].occurrenceId == 2);
+  CHECK(v->steps[1].path == std::vector<uint64_t>{3});
+  CHECK_THAT(v->steps[1].offset.z, WithinAbs(15.0, 1e-6));
+
+  const fs::path tmp =
+      fs::temp_directory_path() / "designer-v130-roundtrip.json";
+  REQUIRE(testio::SaveAssembly(doc, tmp.string()));
+  auto back = DocumentIO::LoadAssembly(tmp.string());
+  REQUIRE(back.has_value());
+  const ExplodedView* w = (*back)->FindExplodedViewById(8);
+  REQUIRE(w != nullptr);
+  REQUIRE(w->steps.size() == 2);
+  CHECK(w->steps[0].path.empty());
+  CHECK(w->steps[1].path == std::vector<uint64_t>{3});
+  fs::remove(tmp);
+
+  // A path more than one level down is refused on load, not half-applied:
+  // only one level moves.
+  nlohmann::json j = DocumentIO::ExplodedViewToJson(*v);
+  j["steps"][1]["path"] = {3, 2};
+  CHECK_THROWS_WITH(DocumentIO::ExplodedViewFromJson(j),
+                    ContainsSubstring("one flexible placement"));
+}

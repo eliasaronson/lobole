@@ -175,6 +175,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs);
 void RegisterSketchGuiTests(ImGuiTestEngine* engine);
 void RegisterModelingGuiTests(ImGuiTestEngine* engine);
 void RegisterAssemblyGuiTests(ImGuiTestEngine* engine);
+void RegisterFlexibleGuiTests(ImGuiTestEngine* engine);
 void RegisterDrawingGuiTests(ImGuiTestEngine* engine);
 void RegisterCamGuiTests(ImGuiTestEngine* engine);
 void RegisterSimulationGuiTests(ImGuiTestEngine* engine);

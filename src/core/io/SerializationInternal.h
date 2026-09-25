@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    129; // v129: a FLEXIBLE sub-assembly occurrence (`flexible`,
+    130; // v130: an explode step's `path` -- [a flexible placement], with
+         //      `occurrence` the sub-assembly's id for a moving part inside
+         //      it, exploded on its own on top of the unit's step
+         //      (docs/assemblies/README.md#flexible-sub-assemblies).
+         // v129: a FLEXIBLE sub-assembly occurrence (`flexible`,
          //      `inner_poses` {occurrence, position, orientation},
          //      `inner_mate_dofs` {mate, rotation, offset, dx?, dy?,
          //      ball_rotation?}); a mate named by {path, mate} -- a

@@ -1049,6 +1049,12 @@ struct AppState {
     uint64_t mateId = 0;
     float startDof = 0.0f;
     glm::quat startBall{1, 0, 0, 0};
+    // A MOVING PART of a flexible placement (v129): non-zero -> the grabbed
+    // thing is this occurrence of the placement's sub-assembly, and `mateId`
+    // (when set) is the sub-assembly's mate that places it -- the drag writes
+    // the placement's own pose of that mate (SetMateDofAt, path [placement]).
+    uint64_t innerOcc = 0;
+    uint64_t placement = 0;
     // Explode authoring (A4): non-zero → the drag writes the occurrence's
     // ExplodeStep.offset in this exploded view (translate only; the solved
     // transform is untouched).
@@ -1124,6 +1130,12 @@ struct AppState {
   // edits in the mate tool's own Edit Mate mode.)
   uint64_t asmEditOccurrence = 0;
   uint64_t asmEditRelation = 0;
+  // A refused edit in that window -- Flexible, the configuration picker, a
+  // relation's side -- shown under the control that was clicked, with the
+  // app's reason, until the next edit there or another occurrence is edited
+  // (docs/ui/panels.md#assembly-tab-the-model-panel).
+  std::string asmEditRefusal;
+  uint64_t asmEditRefusalFor = 0; // the occurrence or relation it is about
   // The bill of materials, as a floating window with real columns; it was a
   // two-column table under a collapsing header in the narrow dock.
   bool bomWindowOpen = false;

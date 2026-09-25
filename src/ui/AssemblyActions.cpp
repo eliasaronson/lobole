@@ -476,7 +476,26 @@ glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
   if (!v)
     return glm::vec3(0.0f);
   for (const ExplodeStep& s : v->steps)
-    if (s.occurrenceId == occId)
+    if (s.path.empty() && s.occurrenceId == occId)
+      return s.offset * state.explodeFactor;
+  return glm::vec3(0.0f);
+}
+
+glm::vec3 ExplodeInnerOffset(const AppState& state, uint64_t occId,
+                             const std::vector<uint64_t>& innerPath) {
+  if (innerPath.empty() || !state.activeExplodedView || !state.assembly)
+    return glm::vec3(0.0f);
+  // Only a FLEXIBLE unit's parts explode one by one; a rigid one is a block.
+  const Occurrence* unit = state.assembly->FindById(occId);
+  if (unit == nullptr || !unit->flexible)
+    return glm::vec3(0.0f);
+  const ExplodedView* v =
+      state.assembly->FindExplodedViewById(state.activeExplodedView);
+  if (!v)
+    return glm::vec3(0.0f);
+  for (const ExplodeStep& s : v->steps)
+    if (s.path.size() == 1 && s.path.front() == occId &&
+        s.occurrenceId == innerPath.front())
       return s.offset * state.explodeFactor;
   return glm::vec3(0.0f);
 }

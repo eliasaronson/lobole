@@ -15,6 +15,7 @@
 
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/FlexibleActions.h"
 #include <map>
 #include <set>
 
@@ -375,8 +376,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"set_explode_step",
      "Add/edit an explode step (occurrence + offset). `offset` is a [x, y, z] "
      "displacement in MILLIMETRES, applied for display only — it never moves "
-     "the occurrence the mates solved.",
-     "occurrence, offset, view"},
+     "the occurrence the mates solved. With `path` [placement] the step "
+     "names a part INSIDE that flexible placement (occurrence = the "
+     "sub-assembly's id, as list_occurrences on its tab or solve_assembly's "
+     "flexible rows give it), which then moves on its own on top of the "
+     "unit's step; refused for a rigid placement, whose parts explode as one "
+     "block.",
+     "occurrence, offset, path, view"},
     {"auto_explode",
      "Generate explode steps automatically (creates and "
      "activates a view when none is given).",
@@ -676,36 +682,6 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 }
 } // namespace
 
-// Why `occ` cannot be made FLEXIBLE in the active assembly (v129), or empty:
-// the unit's own refusals, and one more only the project can see — the
-// active assembly is itself placed flexibly somewhere, and only one level
-// moves.
-std::string FlexibleRefusalHere(ui::AppState& state, const Occurrence& occ) {
-  std::string why =
-      assembly::FlexibleRefusal(occ, ui::AssemblyResolverFor(state));
-  if (!why.empty())
-    return why;
-  uint64_t hostId = 0;
-  for (const ui::PartSlot& slot : state.parts)
-    if (slot.kind == ui::DocKind::Assembly &&
-        ui::AssemblyDocById(state, slot.id) == state.assembly.get())
-      hostId = slot.id;
-  for (const ui::PartSlot& slot : state.parts) {
-    if (slot.kind != ui::DocKind::Assembly)
-      continue;
-    const AssemblyDocument* other = ui::AssemblyDocById(state, slot.id);
-    if (other == nullptr || other == state.assembly.get())
-      continue;
-    for (const Occurrence& o : other->GetOccurrences())
-      if (o.flexible && o.partId == hostId)
-        return "this assembly is placed FLEXIBLY in '" + slot.name + "' (as '" +
-               o.name +
-               "'), and only one level moves — a flexible placement inside "
-               "a flexible placement is refused";
-  }
-  return {};
-}
-
 // A mate named {path, mate} from a request: `path` is the key holding the
 // path ([occurrence id] of a flexible placement), `id` the mate. Refused
 // naming what is wrong with the path, or the mates that are there.
@@ -722,29 +698,6 @@ const Mate* MateFromRequest(ui::AppState& state, const RpcParams& p,
     throw std::runtime_error(path.empty() ? why
                                           : std::string(pathKey) + ": " + why);
   return mate;
-}
-
-// A connector's world frame for a mate named by path: an inner mate's
-// connector is in its sub-assembly's space, placed by the flexible
-// placement's own pose of the occurrence it is on.
-std::optional<glm::mat4> MateConnectorWorld(ui::AppState& state,
-                                            const std::vector<uint64_t>& path,
-                                            const Connector& c) {
-  if (path.empty())
-    return ui::ConnectorWorldFrame(state, c);
-  const Occurrence* F = state.assembly->FindById(path.front());
-  const AssemblyDocument* sub =
-      F ? ui::AssemblyDocById(state, F->partId) : nullptr;
-  const Occurrence* inner = sub ? sub->FindById(c.occurrenceId) : nullptr;
-  if (inner == nullptr)
-    return std::nullopt;
-  const auto local =
-      assembly::ConnectorLocalFrame(c, *sub, ui::PartResolverFor(state),
-                                    nullptr, ui::AssemblyResolverFor(state));
-  if (!local)
-    return std::nullopt;
-  return ui::OccurrenceMatrix(*F) * assembly::InnerPlacement(*F, *inner) *
-         *local;
 }
 
 // The mates inside every flexible placement, by path, as solve_assembly
@@ -974,7 +927,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // v129: placed FLEXIBLE, its sub-assembly's mechanism moves here.
     occ.flexible = p.value("flexible", false);
     if (occ.flexible) {
-      const std::string why = FlexibleRefusalHere(state, occ);
+      const std::string why = ui::FlexibleRefusalHere(state, occ);
       if (!why.empty())
         throw std::runtime_error("cannot place '" + refName +
                                  "' flexible: " + why);
@@ -1108,6 +1061,64 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "no occurrence with id " + std::to_string(occId) +
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
+    // The two a flexible placement is made of go through the SAME actions as
+    // the occurrence panel's checkbox and picker (ui/FlexibleActions.h), each
+    // its own undo step and solve.
+    if (m == "set_occurrence_flexible" || m == "set_occurrence_configuration") {
+      std::string why;
+      assembly::SolveReport rep;
+      bool solved = false;
+      if (m == "set_occurrence_flexible") {
+        const bool want = p.at("flexible").get<bool>();
+        if (!ui::SetOccurrenceFlexible(state, occId, want, &why, &rep))
+          throw std::runtime_error(why);
+        solved = true;
+      } else if (m == "set_occurrence_configuration") {
+        // A5/v56: which configuration of the REFERENCED document this
+        // placement uses. Named or by id; 0 / "" goes back to that
+        // document's active one.
+        uint64_t cfgId = 0;
+        if (p.contains("configuration") && !p.at("configuration").is_null()) {
+          const json& c = p.at("configuration");
+          if (c.is_number()) {
+            cfgId = c.get<uint64_t>();
+          } else if (const std::string want = c.get<std::string>();
+                     !want.empty()) {
+            const AssemblyDocument* sub =
+                occ->refKind == OccurrenceRef::Assembly
+                    ? ui::AssemblyDocById(state, occ->partId)
+                    : nullptr;
+            std::string known;
+            if (sub != nullptr)
+              for (const Configuration& cfg : sub->GetConfigurations()) {
+                known += (known.empty() ? "" : ", ") + cfg.name;
+                if (cfg.name == want)
+                  cfgId = cfg.id;
+              }
+            if (sub != nullptr && cfgId == 0)
+              throw std::runtime_error(
+                  "no configuration '" + want + "' in '" + occ->name +
+                  "'. Known: " + (known.empty() ? "(none)" : known));
+            if (sub == nullptr)
+              cfgId = UINT64_MAX; // the action refuses a part, naming why
+          }
+        }
+        if (!ui::SetOccurrenceConfiguration(state, occId, cfgId, &why, &rep,
+                                            &solved))
+          throw std::runtime_error(why);
+      }
+      occ = state.assembly->FindById(occId);
+      json out = DocumentIO::OccurrenceToJson(*occ);
+      if (solved) {
+        json regen{{"errored_mates", rep.erroredMates}};
+        if (occ->flexible)
+          for (const json& row : FlexibleRows(state, rep))
+            if (row.at("occurrence").get<uint64_t>() == occ->id)
+              regen["flexible"] = row;
+        out["solve"] = std::move(regen);
+      }
+      return out;
+    }
     ui::SnapshotAssembly(state);
     if (m == "set_occurrence_transform") {
       // EITHER HALF ALONE. `add_occurrence` treats `orientation` as optional
@@ -1139,71 +1150,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       occ->visible = p.at("visible").get<bool>();
     } else if (m == "set_occurrence_fixed") {
       occ->fixed = p.at("fixed").get<bool>();
-    } else if (m == "set_occurrence_flexible") {
-      const bool want = p.at("flexible").get<bool>();
-      if (want && !occ->flexible) {
-        const std::string why = FlexibleRefusalHere(state, *occ);
-        if (!why.empty()) {
-          state.assemblyHistory.undo.pop_back(); // nothing changed
-          throw std::runtime_error("'" + occ->name +
-                                   "' cannot be flexible: " + why);
-        }
-      }
-      if (!want) {
-        // Rigid again: the unit stands as its own document has it, and a
-        // relation into it reports that it is no longer flexible.
-        occ->innerPoses.clear();
-        occ->innerMateDofs.clear();
-      }
-      occ->flexible = want;
-    } else if (m == "set_occurrence_configuration") {
-      // A5/v56: which configuration of the REFERENCED document this
-      // placement uses. Named or by id; 0 / "" goes back to that document's
-      // active one.
-      uint64_t cfgId = 0;
-      if (p.contains("configuration") && !p.at("configuration").is_null()) {
-        const json& c = p.at("configuration");
-        if (c.is_number()) {
-          cfgId = c.get<uint64_t>();
-        } else {
-          const std::string want = c.get<std::string>();
-          const AssemblyDocument* sub =
-              occ->refKind == OccurrenceRef::Assembly
-                  ? ui::AssemblyDocById(state, occ->partId)
-                  : nullptr;
-          if (sub == nullptr)
-            throw std::runtime_error(
-                "'" + occ->name +
-                "' places a part, and per-occurrence PART configurations are "
-                "not supported (a part configuration changes geometry, which "
-                "would mean regenerating it per configuration) — configure "
-                "sub-assemblies, or set the part document's own active "
-                "configuration");
-          std::string known;
-          for (const Configuration& cfg : sub->GetConfigurations()) {
-            known += (known.empty() ? "" : ", ") + cfg.name;
-            if (cfg.name == want)
-              cfgId = cfg.id;
-          }
-          if (cfgId == 0)
-            throw std::runtime_error(
-                "no configuration '" + want + "' in '" + occ->name +
-                "'. Known: " + (known.empty() ? "(none)" : known));
-        }
-      }
-      occ->configurationId = cfgId;
     } else if (m == "rename_occurrence") {
       occ->name = p.at("name").get<std::string>();
     }
     state.assembly->BumpVersion();
     // Moving/grounding an occurrence can shift what the mates solve to (a fixed
     // anchor moved, or a mated occurrence was nudged and must be re-placed).
-    // A flexible unit moves under its configuration, so choosing another
-    // re-solves it too (v129).
     json regen;
-    if (m == "set_occurrence_transform" || m == "set_occurrence_fixed" ||
-        m == "set_occurrence_flexible" ||
-        (m == "set_occurrence_configuration" && occ->flexible)) {
+    if (m == "set_occurrence_transform" || m == "set_occurrence_fixed") {
       const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
       regen = json{{"errored_mates", rep.erroredMates}};
       if (occ->flexible)
@@ -1947,8 +1901,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // are unusual but real (bevel, crossed helical), so those get a warning.
     json warnings = json::array();
     {
-      const auto fa = MateConnectorWorld(state, r.mateAPath, a->a);
-      const auto fb = MateConnectorWorld(state, r.mateBPath, b->a);
+      const auto fa = ui::MateConnectorWorldAt(state, r.mateAPath, a->a);
+      const auto fb = ui::MateConnectorWorldAt(state, r.mateBPath, b->a);
       if (fa && fb) {
         const glm::vec3 za = glm::normalize(glm::vec3((*fa)[2]));
         const glm::vec3 zb = glm::normalize(glm::vec3((*fb)[2]));
@@ -2234,22 +2188,53 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (!v)
       throw std::runtime_error("no such exploded view");
     const uint64_t occId = p.at("occurrence").get<uint64_t>();
-    if (!state.assembly->FindById(occId))
+    std::vector<uint64_t> path;
+    if (p.contains("path") && !p.at("path").is_null())
+      path = p.at("path").get<std::vector<uint64_t>>();
+    if (!path.empty()) {
+      // v130: a moving part of a flexible placement, named as a mate is.
+      const Occurrence* F =
+          path.size() == 1 ? state.assembly->FindById(path.front()) : nullptr;
+      if (path.size() != 1)
+        throw std::runtime_error(
+            "path: only one level of sub-assembly is flexible, so a path is "
+            "one occurrence: [placement]");
+      if (F == nullptr)
+        throw std::runtime_error(
+            "path: no occurrence with id " + std::to_string(path.front()) +
+            ". Occurrences: " + OccurrenceCandidates(*state.assembly));
+      const AssemblyDocument* sub = ui::FlexibleSub(state, *F);
+      if (sub == nullptr)
+        throw std::runtime_error(
+            "path: '" + F->name +
+            "' is not a flexible sub-assembly placement, so its parts explode "
+            "as one block with it — set_occurrence_flexible first, or explode "
+            "the placement itself");
+      if (sub->FindById(occId) == nullptr) {
+        std::vector<std::string> known;
+        for (const Occurrence& o : sub->GetOccurrences())
+          known.push_back(std::to_string(o.id) + " (" + o.name + ")");
+        throw std::runtime_error("no occurrence " + std::to_string(occId) +
+                                 " inside '" + F->name +
+                                 "'. Its occurrences: " + KnownList(known));
+      }
+    } else if (!state.assembly->FindById(occId)) {
       throw std::runtime_error(
           "no occurrence with id " + std::to_string(occId) +
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
+    }
     const auto& o = p.at("offset");
     const glm::vec3 offset(o.at(0).get<float>(), o.at(1).get<float>(),
                            o.at(2).get<float>());
     ui::SnapshotAssembly(state);
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : v->steps)
-      if (s.occurrenceId == occId) {
+      if (s.occurrenceId == occId && s.path == path) {
         step = &s;
         break;
       }
     if (!step) {
-      v->steps.push_back({occId, offset});
+      v->steps.push_back({occId, offset, path});
     } else {
       step->offset = offset;
     }

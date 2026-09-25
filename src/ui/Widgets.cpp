@@ -113,7 +113,14 @@ ListRowResult ListRow(const ListRowSpec& row) {
   ImGui::AlignTextToFramePadding();
   ImGui::TextColored(row.glyphColor.w > 0.0f ? row.glyphColor : dim, "%s",
                      row.glyph != nullptr ? row.glyph : "");
-  ImGui::SameLine(fs * 1.8f);
+  // SameLine's offset is from the window's edge and ignores ImGui::Indent, so
+  // an indented row (a flexible unit's parts under it) drew its label under
+  // its own glyph. The indent is added back here.
+  const ImGuiWindow* win = ImGui::GetCurrentWindowRead();
+  const float indent =
+      win->DC.Indent.x - (win->DecoOuterSizeX1 + win->WindowPadding.x -
+                          win->Scroll.x); // 0 unindented
+  ImGui::SameLine(fs * 1.8f + indent);
 
   // The visible label elides into what the tail and the eye leave, keeping
   // its "###id" so the row's identity never changes with the panel's width

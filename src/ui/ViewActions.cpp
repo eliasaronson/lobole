@@ -261,7 +261,9 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
       // so exploded extents are bounded too.
       const glm::mat4 xf =
           glm::translate(glm::mat4(1.0f),
-                         ExplodeOffset(state, inst.rootOccurrenceId)) *
+                         ExplodeOffset(state, inst.rootOccurrenceId) +
+                             ExplodeInnerOffset(state, inst.rootOccurrenceId,
+                                                inst.innerIds)) *
           inst.world;
       for (const auto& body : part->GetBodies()) {
         glm::vec3 bmin, bmax;
