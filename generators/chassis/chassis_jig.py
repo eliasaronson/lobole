@@ -122,12 +122,12 @@ def plate(d, frame, name, mark, x, log=None):
         _cut(d, f"Notch {i}", seat)
 
         # The slot: from the tube's centre up past the top edge. NARROWER
-        # than the seat, by half the clearance a side: a slot exactly the
-        # seat's width has its walls tangent to the seat's cylinder along
-        # the very edge its floor sits on, and the kernel answered that cut
-        # by returning the plate UNCUT (the rear plate's slot for the right
-        # lower rail was simply missing from its DXF) until the app started
-        # checking booleans. The tube still drops through with 0.25 mm a side.
+        # than the seat, by half the clearance a side. A slot as wide as the
+        # seat or wider, floored on the seat's axis, meets the seat's
+        # cylinder exactly along the floor's edges, and the kernel answered
+        # that cut by returning the plate UNCUT (the rear plate had no slot
+        # over its right lower rail) until the app started checking
+        # booleans. The tube still drops through with 0.25 mm a side.
         slot_w = c["od"] / 2.0 + CLEARANCE / 2.0
         rise = top - c["at"][2] + 20.0
         box = d.call("add_feature", feature={

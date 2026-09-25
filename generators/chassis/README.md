@@ -113,9 +113,9 @@ root gap. Pickups sit on the nose's lower rails.
 
 **Jig.** A 5 mm plate at five stations (bulkhead, nose ring, front hoop, main
 hoop, rear), each notched from its top edge so a tube drops IN: a round seat
-0.5 mm clear of the tube, and above it a slot 0.25 mm clear a side, narrower
-than the seat so its walls are not tangent to the seat (a tangent slot came
-back from the kernel uncut). A plate seats
+0.5 mm clear of the tube, and above it a slot 0.25 mm clear a side. The slot
+is narrower than the seat on purpose: one as wide or wider, floored on the
+seat's axis, came back from the kernel uncut. A plate seats
 only members that CROSS its plane — at least a quarter of the member's
 direction across it, so a tube lying in the plane is not cut out of it — and
 only those within 220 mm of the lowest, so the plate stays low and its seats
