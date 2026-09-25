@@ -106,7 +106,10 @@ def main():
                f"slider offset moved the arm 25 along Z: {pos}")
 
         lm = d.call("list_mates")["mates"]
-        expect(len(lm) == 1 and lm[0]["mate_type"] == "slider", f"one slider: {lm}")
+        # `type` is the KIND, the word add_mate took — not a constant "Mate"
+        # beside a `mate_type` that held it.
+        expect(len(lm) == 1 and lm[0]["type"] == "slider", f"one slider: {lm}")
+        expect("mate_type" not in lm[0], f"one name for the kind: {lm[0]}")
         expect("error" not in lm[0], f"no error on the good mate: {lm[0]}")
 
         # --- derive: the app reads the joint off where the parts lie ------
@@ -228,7 +231,7 @@ def main():
 
         lm2 = d.call("list_mates")["mates"]
         expect(len(lm2) == 1, f"the slider mate reopened: {lm2}")
-        expect(lm2[0]["mate_type"] == "slider", "type survived")
+        expect(lm2[0]["type"] == "slider", "type survived")
         expect(abs(lm2[0]["offset"] - 25.0) < 1e-4, "offset survived")
         arm = [o for o in d.call("list_occurrences")["occurrences"]
                if o["id"] == o2][0]

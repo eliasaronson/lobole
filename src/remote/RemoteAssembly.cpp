@@ -138,12 +138,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates",
      "List mates with `status` (satisfied | redundant | error) and the "
-     "error text when there is one. Each carries `rotation` in radians and "
+     "error text when there is one. `type` is the mate's KIND — fastened, "
+     "revolute, slider, cylindrical, planar or ball, the word add_mate "
+     "takes. Each carries `rotation` in radians and "
      "`rotation_deg` beside it. A mate that closes a loop which did not "
      "close carries `residual_mm`, its own closure error from the last "
      "solve.",
      "", remote::NoFlags,
-     "mates[]{type,id,name,mate_type,a,b,flipped,rotation,offset,rotation_deg,"
+     "mates[]{type,id,name,a,b,flipped,rotation,offset,rotation_deg,"
      "status,dx?,dy?,ball_rotation?,error?,residual_mm?,suppressed?,held?}"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
@@ -600,6 +602,11 @@ float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
 
 json MateJson(const Mate& m) {
   json j = DocumentIO::MateToJson(m);
+  // On the wire `type` is the mate KIND — the word add_mate(type=…) takes.
+  // The file keeps `mate_type` beside a constant "Mate", and a list whose
+  // every row said type "Mate" read as if the kind had been lost.
+  j["type"] = j.at("mate_type");
+  j.erase("mate_type");
   j["rotation_deg"] = angles::ToDegrees(m.rotation);
   return j;
 }
