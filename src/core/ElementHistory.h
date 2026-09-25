@@ -29,10 +29,14 @@ namespace topo {
 // Returns an invalid CADShape on failure, with `out` cleared and, when OCC
 // reported a reason, a diagnostic in *error (may be null). Either input
 // map may be empty — the op still runs, the result just carries fewer names.
+// `fuzzy` > 0 runs it with OCC's fuzzy option at that tolerance and
+// NON-destructively (cad::BuildNonDestructive): the one retry a refused body
+// boolean gets (CheckedBooleanNamed, core/BodyMode.h).
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
-                      ElementMap& out, std::string* error = nullptr);
+                      ElementMap& out, std::string* error = nullptr,
+                      double fuzzy = 0.0);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named

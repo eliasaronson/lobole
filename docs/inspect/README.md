@@ -334,7 +334,10 @@ in Measure.cpp.
 
 The convention is scoped to Measure.cpp. `core/ElementHistory.cpp` and feature
 execution (`core/features/*.cpp`) build destructive booleans, and neither runs
-on a worker thread. A sweep that calls into anything else has to carry the
+on a worker thread. The exception is a refused body boolean's fuzzy retry
+(docs/modeling/README.md#a-refused-boolean-gets-one-fuzzy-retry), which runs
+on operands the document still owns and so goes through
+`cad::BuildNonDestructive`. A sweep that calls into anything else has to carry the
 rule with it. `AssemblyStudy`'s fuse copies its shapes and runs
 `BOPAlgo_Builder` non-destructive for the same reason. Anywhere else in `src/`, a boolean that must not write to its inputs is
 built with `cad::BuildNonDestructive` (`src/cad/NonDestructiveBoolean.h`),

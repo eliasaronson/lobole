@@ -1,5 +1,6 @@
 #include "core/ElementHistory.h"
 
+#include "cad/NonDestructiveBoolean.h"
 #include "common/Logger.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -228,7 +229,7 @@ void AppendSubshapeArgs(const TopoDS_Shape& shape, TopTools_ListOfShape& args) {
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
-                      ElementMap& out, std::string* error) {
+                      ElementMap& out, std::string* error, double fuzzy) {
   out = {};
   if (!target.IsValid() || !tool.IsValid()) {
     if (error)
@@ -237,19 +238,36 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
   }
   try {
     std::unique_ptr<BRepAlgoAPI_BooleanOperation> mk;
-    switch (op) {
-    case BooleanOp::Union:
-      mk = std::make_unique<BRepAlgoAPI_Fuse>(target.GetShape(),
-                                              tool.GetShape());
-      break;
-    case BooleanOp::Subtract:
-      mk =
-          std::make_unique<BRepAlgoAPI_Cut>(target.GetShape(), tool.GetShape());
-      break;
-    case BooleanOp::Intersect:
-      mk = std::make_unique<BRepAlgoAPI_Common>(target.GetShape(),
+    if (fuzzy > 0.0) {
+      // The retry: built by hand so the fuzzy value and the non-destructive
+      // flag are both set before it runs.
+      switch (op) {
+      case BooleanOp::Union:
+        mk = std::make_unique<BRepAlgoAPI_Fuse>();
+        break;
+      case BooleanOp::Subtract:
+        mk = std::make_unique<BRepAlgoAPI_Cut>();
+        break;
+      case BooleanOp::Intersect:
+        mk = std::make_unique<BRepAlgoAPI_Common>();
+        break;
+      }
+      cad::BuildNonDestructive(*mk, target.GetShape(), tool.GetShape(), fuzzy);
+    } else {
+      switch (op) {
+      case BooleanOp::Union:
+        mk = std::make_unique<BRepAlgoAPI_Fuse>(target.GetShape(),
                                                 tool.GetShape());
-      break;
+        break;
+      case BooleanOp::Subtract:
+        mk = std::make_unique<BRepAlgoAPI_Cut>(target.GetShape(),
+                                               tool.GetShape());
+        break;
+      case BooleanOp::Intersect:
+        mk = std::make_unique<BRepAlgoAPI_Common>(target.GetShape(),
+                                                  tool.GetShape());
+        break;
+      }
     }
     if (!mk->IsDone()) {
       if (error)

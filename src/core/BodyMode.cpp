@@ -290,6 +290,96 @@ std::string BooleanRefusal(const std::string& feature, BooleanOp op,
   return {};
 }
 
+namespace {
+// The retry's tolerance, as a fraction of the smaller operand's diagonal.
+// It has a window, and both edges of it pass the check while being WRONG,
+// so the number is measured, not guessed (tests/test_boolean_volume.cpp;
+// both operands about 290 mm across):
+//   - too small, and the kernel still misreads the near-coincidence: the
+//     chassis jig's slot, tangent to its seat, came out 50-70 mm3 heavy
+//     at 1e-5..1e-4 mm and right from 1e-3 mm up;
+//   - too large, and it merges geometry it should keep: the wheel's two
+//     spokes and flange came out right up to 0.01 mm and 14 mm3 light at
+//     0.029 mm (1e-4 of their size).
+// 1e-5 puts both at 0.0029 mm, inside the window with room either way, and
+// far under anything a drawing would dimension.
+constexpr double kFuzzyRel = 1e-5;
+
+std::string Mm(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.3g mm", v);
+  return buf;
+}
+} // namespace
+
+double FuzzyTolerance(const CADShape& target, const CADShape& tool) {
+  const auto diag = [](const CADShape& s) {
+    glm::vec3 lo, hi;
+    s.GetBoundingBox(lo, hi);
+    return static_cast<double>(glm::length(hi - lo));
+  };
+  const double small = std::min(diag(target), diag(tool));
+  return std::max(kFuzzyRel * small, 10.0 * Precision::Confusion());
+}
+
+CheckedBoolean
+CheckedBooleanNamed(const std::string& feature, BooleanOp op,
+                    const std::string& body, const CADShape& target,
+                    const ElementMap& targetMap, const CADShape& tool,
+                    const ElementMap& toolMap, uint64_t featureTag,
+                    const std::function<std::string(const CADShape&)>& extra) {
+  CheckedBoolean out;
+  const auto check = [&](const CADShape& result) {
+    if (extra)
+      if (std::string why = extra(result); !why.empty())
+        return why;
+    return BooleanRefusal(feature, op, body, target, tool, result);
+  };
+  out.shape = topo::BooleanNamed(op, target, targetMap, tool, toolMap,
+                                 featureTag, out.map, &out.error);
+  if (!out.shape.IsValid())
+    return out; // the kernel failed outright; the caller reports that
+  const std::string exact = check(out.shape);
+  if (exact.empty())
+    return out;
+
+  // Refused: once more, fuzzy, without touching the operands.
+  const double fuzzy = FuzzyTolerance(target, tool);
+  ElementMap map;
+  std::string err;
+  CADShape retry = topo::BooleanNamed(op, target, targetMap, tool, toolMap,
+                                      featureTag, map, &err, fuzzy);
+  const std::string again =
+      retry.IsValid() ? check(retry)
+                      : "the kernel could not build it" +
+                            (err.empty() ? std::string() : " (" + err + ")");
+  if (again.empty()) {
+    LOG_INFO("{} '{}': kept through the fuzzy retry at {} mm", OpNoun(op),
+             feature, fuzzy);
+    out.shape = std::move(retry);
+    out.map = std::move(map);
+    out.fuzzy = fuzzy;
+    out.warning = std::string(OpNoun(op)) + " on body '" + body +
+                  "' needed OpenCASCADE's fuzzy option at " + Mm(fuzzy) +
+                  " (geometry that close counts as coincident): the exact " +
+                  OpNoun(op) + " was refused. It usually means two surfaces " +
+                  "coincide or nearly do; the result is kept, and passed " +
+                  "the check. What the exact one got wrong: " + exact;
+    return out;
+  }
+  out.shape = CADShape();
+  out.map = {};
+  // The retry's own refusal repeats the advice; its first sentence is what
+  // differs (the volumes, the point).
+  char rel[16];
+  std::snprintf(rel, sizeof rel, "%g", kFuzzyRel);
+  out.refusal = exact + ". Retried with OpenCASCADE's fuzzy option at " +
+                Mm(fuzzy) + " (" + rel +
+                " of the smaller operand's size), and that was refused too: " +
+                again.substr(0, again.find(". "));
+  return out;
+}
+
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                    ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
@@ -331,37 +421,35 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       bodies.back().elementMap = std::move(shapeMap);
       return true;
     }
-    ElementMap fusedMap;
-    std::string boolErr;
-    CADShape fused = topo::BooleanNamed(BooleanOp::Union, bodies[target].shape,
-                                        bodies[target].elementMap, shape,
-                                        shapeMap, ownerId, fusedMap, &boolErr);
-    if (!fused.IsValid()) {
-      Fail(error, "add failed to fuse with body '" + bodies[target].name + "'" +
-                      (boolErr.empty() ? "" : ": " + boolErr));
-      return false;
-    }
     // A union can only ADD. OCC will occasionally hand back a shape that is
     // valid and smaller — an empty one, even — for a fuse it could not do,
     // and accepting it silently deletes the body: a swept tube whose end cap
     // lands inside the block it is being added to did exactly that, and the
     // manifold it belonged to came back as one flange with no log. That and
-    // the rest of what a boolean must keep are BooleanRefusal's.
-    if (std::string why =
-            BooleanRefusal(name, BooleanOp::Union, bodies[target].name,
-                           bodies[target].shape, shape, fused);
-        !why.empty()) {
-      Fail(error, std::move(why));
+    // the rest of what a boolean must keep are BooleanRefusal's, and
+    // CheckedBooleanNamed gives a refused fuse its one fuzzy retry.
+    CheckedBoolean fused = CheckedBooleanNamed(
+        name, BooleanOp::Union, bodies[target].name, bodies[target].shape,
+        bodies[target].elementMap, shape, shapeMap, ownerId);
+    if (!fused.refusal.empty()) {
+      Fail(error, std::move(fused.refusal));
+      return false;
+    }
+    if (!fused.shape.IsValid()) {
+      Fail(error, "add failed to fuse with body '" + bodies[target].name + "'" +
+                      (fused.error.empty() ? "" : ": " + fused.error));
       return false;
     }
     const double before = bodies[target].shape.Volume();
-    const double after = fused.Volume();
+    const double after = fused.shape.Volume();
     if (warning && VolumeUnchanged(before, after)) {
       *warning = "add merged no new material — the tool lies entirely inside "
                  "the target body (check the sketch plane and profile)";
+    } else if (warning && fused.fuzzy > 0.0) {
+      *warning = std::move(fused.warning);
     }
-    bodies[target].shape = std::move(fused);
-    bodies[target].elementMap = std::move(fusedMap); // propagated (T5)
+    bodies[target].shape = std::move(fused.shape);
+    bodies[target].elementMap = std::move(fused.map); // propagated (T5)
     return true;
   }
 
@@ -390,23 +478,23 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // leaves the bodies exactly as they were, which is what a broken feature
     // contributing nothing means.
     std::vector<std::pair<CADShape, ElementMap>> cuts(bodies.size());
+    std::string retried; // the fuzzy retries this cut needed, if any
     for (size_t i = 0; i < bodies.size(); i++) {
       Body& body = bodies[i];
       if (body.reference)
         continue;
-      ElementMap cutMap;
-      CADShape cut =
-          topo::BooleanNamed(BooleanOp::Subtract, body.shape, body.elementMap,
-                             shape, shapeMap, ownerId, cutMap);
-      if (!cut.IsValid())
-        continue;
-      if (std::string why = BooleanRefusal(name, BooleanOp::Subtract, body.name,
-                                           body.shape, shape, cut);
-          !why.empty()) {
-        Fail(error, std::move(why));
+      CheckedBoolean cut =
+          CheckedBooleanNamed(name, BooleanOp::Subtract, body.name, body.shape,
+                              body.elementMap, shape, shapeMap, ownerId);
+      if (!cut.refusal.empty()) {
+        Fail(error, std::move(cut.refusal));
         return false;
       }
-      cuts[i] = {std::move(cut), std::move(cutMap)};
+      if (!cut.shape.IsValid())
+        continue;
+      if (cut.fuzzy > 0.0)
+        retried += (retried.empty() ? "" : "; ") + cut.warning;
+      cuts[i] = {std::move(cut.shape), std::move(cut.map)};
     }
     for (size_t i = 0; i < bodies.size(); i++) {
       if (!cuts[i].first.IsValid())
@@ -442,6 +530,8 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       *warning = "cut removed no material — the tool profile does not "
                  "intersect any body (check the sketch plane orientation and "
                  "position)";
+    } else if (warning && !retried.empty()) {
+      *warning = std::move(retried);
     }
     return true;
   }

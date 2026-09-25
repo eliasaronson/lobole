@@ -4,13 +4,19 @@
 #include "cad/CADKernel.h"
 #include "core/BodyMode.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+
+#include "core/Measure.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_TEdge.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax2.hxx>
 
@@ -99,7 +105,192 @@ CADShape Box(double x, double y, double z, double dx, double dy, double dz) {
   return CADShape(BRepPrimAPI_MakeBox(gp_Pnt(x, y, z), dx, dy, dz).Shape());
 }
 
+// The chassis jig's rear plate, reduced (scratch/kernel-repros/jig_repro.py):
+// a 5 mm plate, a round seat for a lower rail notched through it, and a slot
+// from the seat's axis up past the top edge so the rail drops in. With the
+// slot `halfWidth` = the seat's radius its walls are tangent to the seat
+// along the edge its floor sits on, and the exact cut came back UNCUT. The
+// numbers are the generator's, rail direction and all.
+constexpr double kJigX = 1550.0, kJigY = -230.025, kJigZ = 128.797;
+constexpr double kSeatR = 13.0;
+
+void JigPlate(Document& doc, double halfWidth) {
+  const double u[3] = {1.0, -0.0025, 0.0001};
+  const nlohmann::json plate = {
+      {"type", "Box"},   {"id", 1},
+      {"name", "Plate"}, {"position", {kJigX, -330.0, 0.0}},
+      {"width", 5.0},    {"height", 660.0},
+      {"depth", 380.0}};
+  const nlohmann::json seat = {
+      {"type", "Cylinder"},
+      {"id", 2},
+      {"name", "Seat"},
+      {"center", {kJigX - 200 * u[0], kJigY - 200 * u[1], kJigZ - 200 * u[2]}},
+      {"direction", {u[0], u[1], u[2]}},
+      {"radius", kSeatR},
+      {"height", 400.0}};
+  const nlohmann::json notch = {{"type", "Boolean"}, {"id", 3},
+                                {"name", "Notch"},   {"op", "subtract"},
+                                {"target_id", 1},    {"tool_id", 2}};
+  const nlohmann::json slot = {
+      {"type", "Box"},
+      {"id", 4},
+      {"name", "Slot"},
+      {"position", {kJigX - 50.0, kJigY - halfWidth, kJigZ}},
+      {"width", 100.0},
+      {"height", 2 * halfWidth},
+      {"depth", 380.0 - kJigZ + 20}};
+  const nlohmann::json open = {{"type", "Boolean"}, {"id", 5},
+                               {"name", "Open"},    {"op", "subtract"},
+                               {"target_id", 3},    {"tool_id", 4}};
+  for (const nlohmann::json& f : {plate, seat, notch, slot, open})
+    doc.AddFeature(DocumentIO::FeatureFromJson(f));
+}
+
+// What the notched and slotted plate must weigh: the plate less its section
+// (the seat's disc and the slot above the axis, less the half disc they
+// share, for a slot at least as wide as the seat) through 5 mm. The rail's
+// tilt moves this by well under a cubic millimetre.
+double JigPlateVolume(double halfWidth) {
+  REQUIRE(halfWidth >= kSeatR);
+  const double pi = 3.14159265358979323846;
+  const double disc = pi * kSeatR * kSeatR;
+  const double slot = 2 * halfWidth * (380.0 - kJigZ);
+  return 5.0 * 660.0 * 380.0 - 5.0 * (disc + slot - disc / 2.0);
+}
+
+// The bicycle's rear wheel, reduced (scratch/kernel-repros/spoke_repro2.py):
+// one 70 mm flange and two 2 mm spokes, a leading and a trailing one, laced
+// from the flange's mid-plane to the rim. Their axes cross 8 um apart —
+// equal cylinders on all but intersecting axes — and the exact union kept
+// one spoke's skin inside the other, counting the overlap twice. The
+// planes are the SDK's, float32 as the document stores them.
+std::string SpokePath(int id, const char* name, const char* normal,
+                      const std::string& origin, const char* uAxis) {
+  return std::string(R"({"type": "Sketch", "id": )") + std::to_string(id) +
+         R"(, "name": ")" + name + R"(",
+    "plane": {"normal": )" +
+         normal + R"(, "origin": )" + origin + R"(, "uAxis": )" + uAxis + R"(},
+    "entities": [{"type": "line", "id": 1, "a": [0, 0],
+                  "b": [286.1747741699219, 0]}]})";
+}
+std::string SpokePipe(int id, int path, const char* name, const char* mode) {
+  return R"({"type": "Pipe", "id": )" + std::to_string(id) + R"(, "name": ")" +
+         name + R"(", "path_id": )" + std::to_string(path) +
+         R"(, "outer_diameter": 2.0, "mode": ")" + mode + R"("})";
+}
+
+// Flange (id 1), spoke 3 (id 3) and spoke 5 (id 5), each spoke a Pipe in
+// `mode`. `spoke5z` is where spoke 5 leaves the flange: -37 is as drawn.
+void FlangeAndSpokes(Document& doc, const char* spoke5z, const char* mode) {
+  Add(doc, R"({"type": "Cylinder", "id": 1, "name": "flange",
+    "center": [0, 0, -39], "direction": [0, 0, 1], "radius": 35.0,
+    "height": 4.0})");
+  Add(doc, SpokePath(2, "spoke 3 path",
+                     "[0.4081619679927826, -0.9110320806503296, "
+                     "0.05851771682500839]",
+                     "[1.8982025288627816e-15, 31.0, -37.0]",
+                     "[0.9018110632896423, 0.41233545541763306, "
+                     "0.1292916238307953]"));
+  Add(doc, SpokePipe(3, 2, "spoke 3", mode));
+  Add(doc, SpokePath(4, "spoke 5 path",
+                     "[0.795771062374115, -0.5773323774337769, "
+                     "0.18285444378852844]",
+                     "[30.529041290283203, -5.383093357086182, " +
+                         std::string(spoke5z) + "]",
+                     "[0.5626689791679382, 0.8165091872215271, "
+                     "0.1292916238307953]"));
+  Add(doc, SpokePipe(5, 4, "spoke 5", mode));
+}
+
 } // namespace
+
+TEST_CASE("A slot exactly as wide as its seat is cut by the fuzzy retry",
+          "[boolean]") {
+  // The exact cut came back UNCUT (1251345.3 mm3, the notched plate) with a
+  // face left inside the slot, and was refused. The retry cuts it, to the
+  // volume the section says, and the feature says it needed the retry.
+  Document doc;
+  JigPlate(doc, kSeatR);
+  REQUIRE(doc.Regenerate());
+  const Feature* open = doc.GetFeature(doc.FeatureCount() - 1);
+  INFO(open->GetError() << " / " << open->GetWarning());
+  CHECK(open->GetError().empty());
+  CHECK(open->GetWarning().find("needed OpenCASCADE's fuzzy option at") !=
+        std::string::npos);
+  CHECK(open->GetWarning().find("What the exact one got wrong: cut 'Open'") !=
+        std::string::npos);
+  REQUIRE(doc.GetBodies().size() == 1);
+  const CADShape& plate = doc.GetBodies().front().shape;
+  CHECK_THAT(plate.Volume(), WithinRel(JigPlateVolume(kSeatR), 1e-5));
+  CHECK(Measure::CheckGeometry(plate).valid);
+}
+
+TEST_CASE("Two spokes crossing 8 um apart are united by the fuzzy retry",
+          "[boolean]") {
+  // The same wheel section built twice: once as drawn, where the exact union
+  // of the second spoke is refused and the retry makes it, and once with
+  // that spoke moved 0.01 mm off the crossing, which the exact boolean gets
+  // right. The two must weigh the same. Both ways of adding a body are
+  // covered: a Boolean feature, and a Pipe in "add" mode (ApplyBodyMode).
+  const auto wheel = [](const char* spoke5z, bool asFeature) {
+    Document doc;
+    FlangeAndSpokes(doc, spoke5z, asFeature ? "new_body" : "add");
+    if (asFeature) {
+      Add(doc, R"({"type": "Boolean", "id": 6, "name": "u1", "op": "union",
+                   "target_id": 1, "tool_id": 3})");
+      Add(doc, R"({"type": "Boolean", "id": 7, "name": "u2", "op": "union",
+                   "target_id": 6, "tool_id": 5})");
+    }
+    REQUIRE(doc.Regenerate());
+    REQUIRE(doc.GetBodies().size() == 1);
+    const Feature* last = doc.GetFeature(doc.FeatureCount() - 1);
+    return std::pair{doc.GetBodies().front().shape.Volume(),
+                     last->GetWarning()};
+  };
+  for (const bool asFeature : {true, false}) {
+    INFO((asFeature ? "Boolean feature" : "Pipe mode add"));
+    const auto [nudged, clean] = wheel("-36.99", asFeature);
+    CHECK(clean.empty());
+    const auto [drawn, warning] = wheel("-37.0", asFeature);
+    INFO(warning);
+    CHECK(warning.find("needed OpenCASCADE's fuzzy option at 0.00") !=
+          std::string::npos);
+    CHECK_THAT(drawn, WithinRel(nudged, 1e-5));
+  }
+}
+
+TEST_CASE("The fuzzy retry leaves its operands as it found them", "[boolean]") {
+  // An OpenCASCADE boolean writes the p-curves it computes onto its
+  // arguments' edges unless it is built non-destructively, and the retry
+  // runs on the document's own bodies. Counted here as the curve
+  // representations on the operands' edges, which the exact (destructive)
+  // boolean is seen to add to — so the count can see a write.
+  const auto reps = [](const CADShape& s) {
+    int n = 0;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(s.GetShape(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); i++)
+      n += Handle(BRep_TEdge)::DownCast(edges(i).TShape())->Curves().Extent();
+    return n;
+  };
+  // Two blocks sharing a face: the exact union computes where each one's
+  // edges lie on the other's face, and writes it onto them.
+  const CADShape a = Box(0, 0, 0, 10, 10, 10);
+  const CADShape b = Box(10, 2, 2, 10, 6, 6);
+  const int before = reps(a) + reps(b);
+
+  ElementMap map;
+  const CADShape fuzzy = topo::BooleanNamed(BooleanOp::Union, a, {}, b, {}, 9,
+                                            map, nullptr, FuzzyTolerance(a, b));
+  REQUIRE(fuzzy.IsValid());
+  CHECK(reps(a) + reps(b) == before);
+
+  const CADShape exact =
+      topo::BooleanNamed(BooleanOp::Union, a, {}, b, {}, 9, map);
+  REQUIRE(exact.IsValid());
+  CHECK(reps(a) + reps(b) > before);
+}
 
 TEST_CASE("A cut that shares a bore's cylinder is refused, not kept wrong",
           "[boolean][extrude]") {
@@ -126,6 +317,13 @@ TEST_CASE("A cut that shares a bore's cylinder is refused, not kept wrong",
   CHECK(why.find("mm3 after") != std::string::npos);
   // ...and says what to do about it.
   CHECK(why.find("shares a surface") != std::string::npos);
+  // It is a case the fuzzy retry cannot save, and the refusal says the retry
+  // was made and at what tolerance
+  // (docs/modeling/README.md#a-refused-boolean-gets-one-fuzzy-retry).
+  CHECK(why.find("Retried with OpenCASCADE's fuzzy option at 0.000") !=
+        std::string::npos);
+  CHECK(why.find("1e-05 of the smaller operand's size), and that was "
+                 "refused too: cut 'Slot'") != std::string::npos);
   // A refused feature contributes nothing: the block is the bored block.
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies().front().shape.Volume(), WithinRel(bored, 1e-9));

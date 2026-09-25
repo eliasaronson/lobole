@@ -1564,10 +1564,14 @@ def oil_pump(app):
         pk = p.sketch(Plane.xz(y1), name=f"Gear pocket {i + 1}")
         pk.circle((x, OIL_PUMP_Z), d=2 * OIL_GEAR_TIP + 2 * FIT)
         p.extrude(pk.add(), y1 - y0, mode="cut", name=f"Gear pocket {i + 1}")
-    shafts = p.sketch(Plane.xz(y1 + 20.0), name="Shaft bores")
-    for x in OIL_GEAR_X:
-        shafts.circle((x, OIL_PUMP_Z), d=16.4)
-    p.extrude(shafts.add(), 60.0, mode="cut", name="Shaft bores")
+    # No shaft bores. There used to be a cut here, two 16.4 mm holes from
+    # the block face back through the body, and every build warned that it
+    # "removed no material". It was right: since the pockets run THROUGH the
+    # body, each bore lies inside its pocket (16.4 in 30.7), and in front of
+    # the body the idler's clears the right bracket arm's corner by 0.08 mm.
+    # Not the kernel's coincident-geometry class (the check found nothing
+    # wrong with the result, so nothing was retried) — a cut left behind by
+    # the change that made the pockets through.
     holes = p.sketch(Plane.xz(BLOCK_Y0), name="Mount holes")
     for sx in (-1, 1):
         holes.circle((sx * sum(OIL_ARM_X) / 2.0,
