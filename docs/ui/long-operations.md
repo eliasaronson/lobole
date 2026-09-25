@@ -12,14 +12,14 @@ registry, and the frame keeps drawing. The rule every job follows:
 
 | field | meaning |
 |---|---|
-| `kind` | `"cam"`, `"cam-verify"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"open"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
 | `cancellable` | whether cancel does anything; the UI and `background_jobs` read it |
 | `done` | set by the worker last |
 | `error`, `thread`, `started`, `reaped` | |
-| `finish` | runs on the **main** thread after the join; returns `false` to be called again next frame, which is how a sliced main-thread step (the import's materialize) fits without a second mechanism |
+| `finish` | runs on the **main** thread after the join; returns `false` to be called again next frame, which is how a sliced main-thread step (the import's materialize, the motion video's pose-and-capture) fits without a second mechanism |
 
 The destructor sets `cancel` and joins. The verbs are in
 `src/ui/BackgroundJobs.h`: `StartBackgroundJob`, `BackgroundJobRunning`,

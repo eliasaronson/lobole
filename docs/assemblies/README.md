@@ -262,6 +262,57 @@ omitted = whichever is active).
 Code: `src/core/MotionStudy.{h,cpp}`, `src/remote/RemoteMotion.cpp`,
 `src/ui/MotionActions.cpp`.
 
+### Motion video
+
+`export_motion_video {study, path, format?, width?, height?, fps?, frames?,
+quality?, async?}` films a study: the file to put in a README, send to
+someone or attach to an issue.
+
+- **Formats.** `mp4` (H.264), `webm` (VP9) and `gif` (one palette for the
+  whole animation, from ffmpeg's palette pass) are encoded by **ffmpeg**, run
+  as an external program found on PATH (`ffmpeg.exe` on Windows); `png`
+  writes `frame_0000.png`… into a FOLDER and needs nothing. Omitted, the
+  format is the path's extension.
+- **Refused, never substituted**: an unknown format or quality, a path whose
+  extension disagrees with `format`, `png` given a file rather than a folder,
+  an odd width or height for mp4/webm (4:2:0 colour), fewer than two frames,
+  a study that cannot pose (`why_not`), no renderer (`--headless`), and a
+  missing ffmpeg — "export_motion_video format mp4 needs ffmpeg on PATH;
+  install it, or use format png". `ping`'s `features.ffmpeg` says whether it
+  is there, so a test or an agent can gate on it. When ffmpeg itself fails,
+  the refusal carries the last lines it wrote on stderr.
+- **Frames.** Frame k poses the study at `t = k / (frames - 1)` through the
+  scrub (`set_motion_pose`), which walks sample to sample, so a slider-crank
+  stays on its branch. It needs no run: the frames are posed, not replayed,
+  and playback is stopped first so it cannot draw over them. Each frame is
+  captured by the quick render's raster path (the model's renderers only —
+  no sketches, handles, selection or panels — at `width` x `height`,
+  supersampled 2x and averaged in linear light) from the current camera, so
+  it is the 3D view in the windowed app and offscreen alike.
+- **Streaming.** A job of kind `motion-video` in `background_jobs`. Posing and
+  capturing need the documents and the renderers, so they are the job's
+  main-thread slice (its `finish`, one frame a call); an encoder thread
+  averages each frame down and writes it — raw RGB into ffmpeg's stdin, or a
+  PNG — behind a queue three frames deep. No temporary frames are written
+  for a video. Cancel stops after the frame in hand and deletes the partial
+  file. Synchronous by default (the answer is the file's `bytes`, `frames`,
+  `fps` and size); `async: true` returns at once and `motion_video_status`
+  reads the outcome.
+- **Defaults** come from what is exported: the size is the viewport's (rounded
+  down to even for mp4/webm), `frames` the study's samples, `fps` whatever
+  plays them in about four seconds, `quality` medium (`low|medium|high`: x264
+  and VP9 CRF, GIF palette size).
+- **Afterwards** the assembly is at the pose it had before: every placement,
+  mate value, relation state and the active configuration are put back whole.
+  An edit made to the assembly during an async export is overwritten by that.
+- **GUI.** "Export animation…" in the Motion window, under "Export GLB…",
+  opens a save dialog whose file type picks the format (a `.png` pick writes
+  the frames into a folder named after the file); while it runs the button is
+  its progress bar and Cancel.
+
+Code: `src/ui/MotionVideo.cpp`, `src/common/ChildProcess.{h,cpp}` (PATH
+lookup and a child fed on stdin: `posix_spawn`, or `_popen` on Windows).
+
 ## Exploded views
 
 Named, persistent explode states: one world-space offset per occurrence,
@@ -452,7 +503,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   `list_relations`.
 - Motion: `add_motion_study`, `set_motion_study`, `remove_motion_study`,
   `list_motion_studies`, `run_motion_study`, `motion_status`,
-  `set_motion_pose`, `export_motion`.
+  `set_motion_pose`, `export_motion`, `export_motion_video`,
+  `motion_video_status`.
 - Exploded views: `add_exploded_view`, `remove_exploded_view`,
   `list_exploded_views`, `set_explode_step`, `auto_explode`, `set_explode`.
 - BOM and hardware: `bom`, `export_bom`, `add_fastener`, `fit_fastener`,
@@ -479,7 +531,7 @@ one.
 | `src/core/MotionStudy.{h,cpp}` | running a motion study |
 | `src/core/io/SerializeAssembly.cpp`, `Serialization.cpp` | JSON and the directory layout |
 | `src/ui/AssemblyActions.{h,cpp}` | solve/undo/selection glue, staleness, in-context entry, explode |
-| `src/ui/MateActions.cpp`, `GizmoInput.cpp`, `OccurrencePanel.cpp`, `Bom.cpp`, `MotionActions.cpp`, `FastenerActions.cpp` | GUI tools |
+| `src/ui/MateActions.cpp`, `GizmoInput.cpp`, `OccurrencePanel.cpp`, `Bom.cpp`, `MotionActions.cpp`, `MotionVideo.cpp`, `FastenerActions.cpp` | GUI tools |
 | `src/ui/RendererSync.cpp` | instanced assembly render sync, in-context ghosts |
 | `src/remote/RemoteAssembly.cpp`, `RemoteMotion.cpp` | RPCs |
 
@@ -502,11 +554,14 @@ one.
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
   `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`,
-  `flexible_subassembly_smoke.py`.
+  `flexible_subassembly_smoke.py`. `motion_video_smoke.py` (renderer, label
+  `pygui`): every video format read back by ffprobe, the refusals including
+  a PATH without ffmpeg, the pose put back, an async cancel.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
-  scrub.
+  scrub, and `motion_video_frames_are_the_view` (a filmed frame is the
+  viewport, not the window).
 
 ## Not built
 

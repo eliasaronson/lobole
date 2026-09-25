@@ -123,8 +123,15 @@ both open means nothing):
     the reason, without a fresh solved result. Stopping restores the
     document transforms; anything that invalidates the result stops
     playback.
-  - **Export animation…** saves the animated GLB (`ExportMotionGlb`), and a
-    refusal is shown in the panel.
+  - **Export GLB…** (`###motion_export`) saves the run as an animated GLB
+    (`ExportMotionGlb`), and a refusal is shown in the panel.
+  - **Export animation…** (`###motion_video`) films the study to mp4, webm,
+    gif or png frames, the save dialog's file type picking which
+    ([motion video](../assemblies/README.md#motion-video)). It needs no run.
+    While the `motion-video` job runs it is the job's bar and Cancel
+    (`###motion_video_cancel`); the last outcome is shown under it. GUI tests
+    answer its dialog with `AppState::saveDialogAnswer` instead of opening
+    the desktop portal.
 - **Simulation** (`###tb_asm_simulation`) — `DrawSimulationToolWindow` (in
   `StudyPanel.cpp`): the studies over `ui::StudyHost`, plus a participants
   table (each top-level occurrence's role: Ignored, Rigid, Meshed or Bonded;

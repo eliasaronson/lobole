@@ -79,6 +79,12 @@ and reported by the `ping` RPC's `features`:
 - Netgen, Eigen and Spectra are detected: without Spectra modal analysis
   refuses, without Eigen the FEM solver and the mate-loop solver are absent.
 
+`features` also carries one thing that is not compiled in: `ffmpeg`, whether
+that program is on PATH now. It is run, never linked, by
+`export_motion_video` for its video formats
+([motion video](assemblies/README.md#motion-video)); a missing one refuses
+those formats by name.
+
 `src/core/cam/` is compiled with `-Werror=switch`: the CAM generator switch
 has no `default:`, so a new operation type without a generator fails the
 build. `-Werror` is otherwise off.

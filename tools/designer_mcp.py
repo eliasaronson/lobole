@@ -1333,6 +1333,32 @@ def export_visual(path: str, deflection: float = 0.1) -> dict:
     return _call("export_visual", path=path, deflection=deflection)
 
 
+@_reference(description="Film a motion study of the active assembly to a "
+          "video: format mp4, webm or gif (encoded by ffmpeg, which must be on "
+          "the app's PATH — ping's features.ffmpeg says; without it these are "
+          "REFUSED by name) or png (numbered frames into a FOLDER, no "
+          "ffmpeg). Omit format and the path's extension says it. Frames are "
+          "posed as set_motion_pose does and drawn as the viewport draws the "
+          "model, from the CURRENT camera — set_camera / fit_view {width, "
+          "height} first. width/height are PIXELS (default the viewport's; "
+          "mp4/webm need them even), fps frames per SECOND (default: the "
+          "study in about four seconds), frames defaults to the study's "
+          "samples, quality low|medium|high. No run needed; the assembly is "
+          "left as it was. Blocks until the file is written and answers its "
+          "bytes; rpc('export_motion_video', {..., 'async': True}) with "
+          "motion_video_status for a long one.")
+def export_motion_video(study: int, path: str, format: str = "",
+                        width: int = 0, height: int = 0, fps: float = 0.0,
+                        frames: int = 0, quality: str = "") -> dict:
+    params = {"study": study, "path": path}
+    for key, value in (("format", format), ("width", width),
+                       ("height", height), ("fps", fps), ("frames", frames),
+                       ("quality", quality)):
+        if value:
+            params[key] = value
+    return _call("export_motion_video", **params)
+
+
 @_reference(description="List the project's tabs (parts and assemblies) with "
           "each one's type and stable id, and which is active. Modeling tools "
           "act on the active part; assembly tools on the active assembly.")
