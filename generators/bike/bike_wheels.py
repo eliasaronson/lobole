@@ -26,6 +26,10 @@ from designer_sdk import V  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import axle_frame, cut, disc, revolved, tube, union  # noqa
 
+# How far either side of its flange's mid-plane a spoke leaves the flange:
+# inside the 4 mm flange, so its end stays buried in metal.
+SPOKE_STAGGER = 1.0
+
 
 def _ring(part, outer, inner, name):
     """A hollow solid of revolution: the outer profile less the inner one.
@@ -122,8 +126,15 @@ def _spokes(part, S, flange_r, flange_gap, name="Spoke"):
         lead = +1 if (k // 2) % 2 == 0 else -1  # and leading/trailing on each
         rim_a = k * (2 * math.pi / n)
         hub_a = rim_a - lead * span
+        # Leading and trailing spokes leave from opposite halves of the
+        # flange (heads in, heads out), which is what a laced wheel does. Out
+        # of one plane, two spokes of one flange CROSSED axis through axis,
+        # 8 um apart: equal cylinders on intersecting axes, whose
+        # intersection is singular, and the kernel's union kept a piece of
+        # one spoke's skin inside the other. A millimetre each way leaves
+        # them overlapping by 0.6 mm at the cross, which it solves cleanly.
         a = (flange_r * math.cos(hub_a), flange_r * math.sin(hub_a),
-             side * float(flange_gap) / 2.0)
+             side * (float(flange_gap) / 2.0 + lead * SPOKE_STAGGER))
         b = (rim_r * math.cos(rim_a), rim_r * math.sin(rim_a), 0.0)
         ids.append(tube(part, a, b, S["SPOKE_D"], 0.0, f"{name} {k}"))
     return ids
