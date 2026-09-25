@@ -23,6 +23,10 @@ pkgs.mkShell {
     # compares pixels and would otherwise skip itself into uselessness.
     (python3.withPackages (ps: [ ps.mcp ps.pillow ps.mypy ]))
     git # submodules
+    # export_motion_video encodes mp4/webm/gif by running ffmpeg (an external
+    # program, never linked); here so the smoke always has it. The headless
+    # build carries libx264, libvpx and the gif encoder without X or SDL.
+    ffmpeg-headless
 
     # Vulkan
     vulkan-headers

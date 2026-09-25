@@ -322,10 +322,10 @@ bool CaptureScreenshot(
   return true;
 }
 
-bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
-                     uint32_t height, uint32_t factor, const std::string& path,
-                     std::string* error, std::atomic<float>* progress,
-                     const std::atomic<bool>* cancel) {
+bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
+                   uint32_t height, uint32_t factor, std::vector<uint8_t>* out,
+                   std::string* error, std::atomic<float>* progress,
+                   const std::atomic<bool>* cancel, float progressShare) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -336,6 +336,10 @@ bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
     return fail("downsample: the frame is not a whole number of " +
                 std::to_string(factor) + "x" + std::to_string(factor) +
                 " blocks");
+  if (factor == 1) { // nothing to average
+    *out = rgb;
+    return true;
+  }
   // sRGB <-> linear, exactly (the piecewise curve, not a 2.2 power): a
   // table for the decode, the formula for the encode.
   float toLinear[256];
@@ -353,15 +357,12 @@ bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
   };
   const uint32_t w = width / factor, h = height / factor;
   const float inv = 1.0f / float(factor * factor);
-  std::vector<uint8_t> out(size_t(w) * h * 3);
-  // The average is most of the time until the encode, which reports nothing
-  // until it is done: call it 60/40.
-  constexpr float kAverageShare = 0.6f;
+  out->assign(size_t(w) * h * 3, 0);
   for (uint32_t y = 0; y < h; y++) {
     if (cancel != nullptr && cancel->load())
       return fail("cancelled");
     if (progress != nullptr)
-      progress->store(kAverageShare * float(y) / float(h));
+      progress->store(progressShare * float(y) / float(h));
     for (uint32_t x = 0; x < w; x++)
       for (int c = 0; c < 3; c++) {
         float sum = 0.0f;
@@ -370,16 +371,34 @@ bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
             sum += toLinear
                 [rgb[(size_t(y * factor + dy) * width + x * factor + dx) * 3 +
                      c]];
-        out[(size_t(y) * w + x) * 3 + c] = toSrgb(sum * inv);
+        (*out)[(size_t(y) * w + x) * 3 + c] = toSrgb(sum * inv);
       }
   }
   if (cancel != nullptr && cancel->load())
     return fail("cancelled");
   if (progress != nullptr)
-    progress->store(kAverageShare);
+    progress->store(progressShare);
+  return true;
+}
+
+bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,
+                     uint32_t height, uint32_t factor, const std::string& path,
+                     std::string* error, std::atomic<float>* progress,
+                     const std::atomic<bool>* cancel) {
+  // The average is most of the time until the encode, which reports nothing
+  // until it is done: call it 60/40.
+  constexpr float kAverageShare = 0.6f;
+  std::vector<uint8_t> out;
+  if (!DownsampleRgb(rgb, width, height, factor, &out, error, progress, cancel,
+                     kAverageShare))
+    return false;
+  const uint32_t w = width / factor, h = height / factor;
   if (stbi_write_png(path.c_str(), int(w), int(h), 3, out.data(), int(w) * 3) ==
-      0)
-    return fail("could not write " + path);
+      0) {
+    if (error)
+      *error = "could not write " + path;
+    return false;
+  }
   if (progress != nullptr)
     progress->store(1.0f);
   LOG_INFO("Render written to {} ({}x{}, {}x supersampled)", path, w, h,

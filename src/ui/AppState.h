@@ -41,6 +41,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -647,6 +648,9 @@ struct RasterFrame {
 // A quick render's downsample + encode, on its worker (RendererSync.cpp).
 struct QuickEncode;
 
+// A motion video export's outcome (MotionActions.h).
+struct MotionVideoResult;
+
 struct RenderJob {
   bool active = false;  // a render is in flight
   // QUICK (the raster capture, then an encode on a worker) or a path trace.
@@ -1150,6 +1154,16 @@ struct AppState {
   bool motionPlaying = false;     // advancing; false = paused on a frame
   double motionPlaybackPos = 0.0; // in samples, 0 .. n-1 (fractional)
   double motionPlaybackLastTick = 0.0;
+  // The last video export's outcome (export_motion_video,
+  // docs/assemblies/README.md#motion-video): what motion_video_status and the
+  // panel report once the job is gone. Null until one has finished.
+  std::shared_ptr<const MotionVideoResult> motionVideoLast;
+
+  // GUI tests: the answer the NEXT save dialog gives, without opening one. A
+  // native dialog goes through the desktop portal, which draws on the user's
+  // real screen even under Xvfb; this is how a test clicks a button that
+  // saves. Consumed by the dialog it answers.
+  std::optional<std::string> saveDialogAnswer;
 
   // UI state
   // The tolerance editor in the Measure tool window

@@ -61,6 +61,16 @@ bool CaptureScreenshot(
 // `pixelsOut` (above) receives the frame as tightly packed RGB8 when given;
 // with an empty `outputPath` nothing is written to disk.
 
+// The averaging alone, into `out` ((w / k) x (h / k) RGB8), for a caller
+// that encodes the frame itself — the motion video pipes it to ffmpeg. The
+// same linear-light average as below; `progress` runs 0..`progressShare`.
+bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
+                   uint32_t height, uint32_t factor, std::vector<uint8_t>* out,
+                   std::string* error = nullptr,
+                   std::atomic<float>* progress = nullptr,
+                   const std::atomic<bool>* cancel = nullptr,
+                   float progressShare = 1.0f);
+
 // Average a k x k supersampled RGB8 frame down to (w / k) x (h / k) and write
 // it as a PNG. The average is taken in LINEAR light (sRGB decoded, averaged,
 // re-encoded): averaging the encoded values darkens every edge between a

@@ -35,6 +35,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -573,7 +574,7 @@ void DrawMotionBody(AppState& state) {
         StopMotionPlayback(state);
     }
     const bool canSave = FileDialogsAvailable();
-    const char* exportLabel = "Export animation...###motion_export";
+    const char* exportLabel = "Export GLB...###motion_export";
     transport.Next(ButtonWidth(exportLabel));
     ImGui::BeginDisabled(!no.empty() || !canSave);
     if (ImGui::SmallButton(exportLabel))
@@ -584,7 +585,8 @@ void DrawMotionBody(AppState& state) {
                               : !canSave
                                   ? "No file dialog here; export_motion "
                                     "{study, path} writes the same file."
-                                  : "An animated GLB of this run, 24 samples "
+                                  : "An animated GLB of this run (for a 3D "
+                                    "viewer), 24 samples "
                                     "a second.");
     if (playingThis) {
       const size_t n = r->samples.size();
@@ -599,6 +601,52 @@ void DrawMotionBody(AppState& state) {
   } else {
     ImGui::TextWrapped("Not run yet: Preview solves every sample, Validate "
                        "also checks collisions.");
+  }
+
+  // A video of the study (docs/assemblies/README.md#motion-video). It needs
+  // no run — the frames are posed, not replayed — so it sits outside the
+  // result's block, under the GLB export. While one is being made the button
+  // becomes its bar and Cancel, as the run's buttons do.
+  if (BackgroundJob* job = FindBackgroundJob(state, "motion-video")) {
+    JobProgress bar;
+    bar.status = job->label;
+    bar.fraction = job->fraction.load();
+    bar.cancelAsked = job->cancel.load();
+    bar.cancelId = "###motion_video_cancel";
+    bar.cancelTip = "Stops after the frame being captured; no file is left "
+                    "behind.";
+    if (DrawJobProgress(bar))
+      job->cancel.store(true);
+  } else {
+    const std::string whyNot =
+        motion::WhyNot(asmDoc, *sel, AssemblyResolverFor(state));
+    const bool canSave =
+        FileDialogsAvailable() || state.saveDialogAnswer.has_value();
+    const char* videoLabel = "Export animation...###motion_video";
+    ImGui::BeginDisabled(!whyNot.empty() || !canSave);
+    if (ImGui::SmallButton(videoLabel))
+      ExportMotionVideoDialog(state, sel->id);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip(
+          "%s", !whyNot.empty() ? whyNot.c_str()
+                : !canSave
+                    ? "No file dialog here; export_motion_video {study, "
+                      "path} writes the same file."
+                    : "A video of the study from this view: MP4, WebM or "
+                      "GIF (ffmpeg), or PNG frames. The file type picks.");
+    if (const auto& last = state.motionVideoLast) {
+      if (last->ok)
+        TextDisabledWrapped(
+            ("Wrote " +
+             std::filesystem::path(last->plan.path).filename().string() + " (" +
+             std::to_string(last->framesWritten) + " frames, " +
+             std::to_string(last->plan.width) + "x" +
+             std::to_string(last->plan.height) + ")")
+                .c_str());
+      else
+        TextDisabledWrapped(("Video not written: " + last->error).c_str());
+    }
   }
 }
 

@@ -52,6 +52,7 @@
 #include "ui/Commands.h" // ActiveContext (get_keymap)
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/MotionActions.h" // FfmpegPath, for ping's features
 #include "ui/PreviewFeature.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
@@ -276,10 +277,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "method"},
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
-     "project, dirty, gpu, binary_replaced}. `pid` is this process's id, so "
+     "project, dirty, gpu, features, binary_replaced}. `pid` is this "
+     "process's id, so "
      "a launcher can tell its own instance from one already on the port. `gpu` "
      "is the device that answers "
-     "renders — empty under --headless, which has no renderer. "
+     "renders — empty under --headless, which has no renderer. `features` "
+     "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
+     "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
+     "and gif). "
      "`binary_replaced` is true when this process is running an executable "
      "that has since been rebuilt on disk: it will keep serving the OLD "
      "code, which is indistinguishable from a missing feature or a "
@@ -290,7 +295,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
      "job cannot say. Kinds: `cam` (an adaptive clearing pass; see "
      "cam_toolpath's `async`), `cam-verify`, `sync` (git fetch/push/clone), "
-     "`topo`, `study` (a FEM solve), `mesh`, `import`, `motion`, `open` (a "
+     "`topo`, `study` (a FEM solve), `mesh`, `import`, `motion`, "
+     "`motion-video` (export_motion_video), `open` (a "
      "project opening). Empty when nothing is running. Not the CAM "
      "job document -- that is list_job_parts.",
      ""},
@@ -1069,7 +1075,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 #else
                false
 #endif
-              }}},
+              },
+              // Not compiled in: an external program on PATH, looked for
+              // now, which export_motion_video needs for mp4/webm/gif.
+              {"ffmpeg", !ui::FfmpegPath().empty()}}},
             // Whether this instance is still running the binary that is on
             // disk. A rebuild REPLACES the file; a process already running
             // keeps the old inode, serves happily, and answers questions
