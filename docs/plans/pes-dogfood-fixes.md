@@ -90,11 +90,79 @@ And eight that cost time without making anything wrong:
    camshaft mate inside the pump occurrence. A flexible occurrence also names
    which of its assembly's configurations it runs under, so the pump comes
    with its rack held at full load. A rigid occurrence behaves as today. The
-   design detail — where the instancing lives, what the BOM, exploded views,
-   undo and motion export see — follows from the code survey and is written
-   here before it is built. The OM615 then places the pump as one flexible
-   occurrence instead of 70 flat ones. This is the proof, and every OM615
-   check must still pass.
+   OM615 then places the pump as one flexible occurrence instead of 70 flat
+   ones. This is the proof, and every OM615 check must still pass.
+
+   **The state lives on the parent's occurrence.** A sub-assembly document is
+   shared by every placement of it, and the resolvers hand it out `const`. If
+   the inner poses were written there, two pumps would fight over them and
+   the parent's undo would not see them. So `Occurrence` gains three things,
+   all saved in the file so it re-solves the same way:
+   - `flexible`;
+   - `innerPoses`: inner path to position and orientation;
+   - `innerMateDofs`: inner path and mate id to its rotation and offset.
+
+   `Flatten`'s placement of an inner occurrence (`PlacementOf`) reads
+   `innerPoses` when the root is flexible. Undo snapshots the parent, so it
+   covers them.
+
+   **The solver itself does not change. It is wrapped.**
+   `ExpandFlexible(parent)` copies the parent and, for each flexible
+   occurrence:
+   - adds the inner occurrences with synthetic ids from a range disjoint
+     from the document's counter, and maps each one to (root, inner path);
+   - copies the inner mates and relations, with their occurrence and mate
+     ids remapped;
+   - filters them by the occurrence's own `configurationId`, through new
+     `MateSuppressedIn`/`RelationSuppressedIn`, and pins that
+     configuration's mate overrides as held DOFs.
+
+   An inner occurrence that is fixed in its own assembly is not a new body.
+   It folds into the root, and a mate on it becomes a mate on the root with
+   that `innerPath`, which `ConnectorLocalFrame` already composes. A parent
+   connector whose path enters a flexible unit at a moving part is re-pointed
+   at that part's synthetic occurrence. `CollapseFlexible` writes the root
+   transforms, the inner poses, the inner mate DOFs and the errors back, with
+   errors reported by path. `Solve` skips all of this when nothing is
+   flexible. `motion::Run` expands once, on its copy, before its first
+   `PropagateRelations`, and runs every sample on the expanded document.
+
+   **Naming an inner mate.** A mate is named by `{path, mate}`. The empty
+   path means this document. That form is used by:
+   - `Relation`'s two sides;
+   - a motion study's driver;
+   - `set_mate`.
+
+   It is saved as `mate_a_path`/`mate_b_path`/`driver_path`, a format bump
+   with a golden. `add_relation` takes `a_path`/`b_path`, and
+   `add_motion_study` takes `driver_path`; both validate the walk the way
+   `add_mate` validates `inner_path`. Two cases are REFUSED, naming what is
+   accepted:
+   - a parent configuration that holds or suppresses an inner mate: the
+     sub's own configuration does that;
+   - a freewheel relation inside a flexible unit: its history would be
+     per-instance state.
+
+   Only one level is flexible. A flexible occurrence inside a flexible
+   sub-assembly is refused, following the precedent `ApplyAttachments` set.
+
+   **What sees the moving parts:**
+   - **A study's samples** carry a pose for each moving inner leaf, keyed
+     by path next to the top-level ids, and mate values keyed by path.
+   - **Clash checks** key bodies by leaf (root plus inner path) for
+     flexible units, so a plunger is checked against its barrel and the
+     rigid-pair rule compares leaf transforms. A plunger is never "rigid" to
+     the block just because the pump's root is bolted to it.
+   - **GLB motion export** writes one node per moving leaf.
+   - **Live playback** pushes per-leaf transforms.
+   - **A clearance assertion's `checkedKey`** hashes the inner poses.
+   - **`solve_assembly`'s `placed_by` counts** are reported per path.
+   - **Exploded views** still move the unit as one block. That is
+     documented, not changed.
+
+   **Found by the survey, fixed on the way:** an origin anchor with an
+   `inner_path` returns the unit's origin, because `ConnectorLocalFrame`
+   answers the origin case before walking the path.
 
 ### Friction
 
