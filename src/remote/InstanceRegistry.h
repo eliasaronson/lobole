@@ -54,4 +54,9 @@ std::vector<InstanceInfo> LiveInstances();
 // The directory the files live in (created on demand by AnnounceInstance).
 std::string InstancesDir();
 
+// This process's id, as announced and as `ping` reports it: a launcher checks
+// that the instance answering on a port is the one it started, not one that
+// already held the port.
+int CurrentPid();
+
 } // namespace remote

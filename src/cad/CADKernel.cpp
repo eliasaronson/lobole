@@ -138,7 +138,15 @@ struct VolumeCache {
     if (it == entries.end() ||
         it->second.scale != shape.Location().Transformation().ScaleFactor())
       return std::nullopt;
-    return it->second.volume;
+    return it->second.volume * Sign(shape);
+  }
+  // The same TShape the other way out encloses the negative of its volume,
+  // so the entry holds the FORWARD figure and a reversed shape reads it
+  // negated. Without this, a solid reversed in place — an inside-out result,
+  // the thing BooleanRefusal exists to catch — read as the positive volume
+  // cached for its forward twin.
+  static double Sign(const TopoDS_Shape& shape) {
+    return shape.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0;
   }
   void Store(const TopoDS_Shape& shape, double volume) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -151,7 +159,8 @@ struct VolumeCache {
       }
     }
     entries[key] = {shape.TShape(),
-                    shape.Location().Transformation().ScaleFactor(), volume};
+                    shape.Location().Transformation().ScaleFactor(),
+                    volume * Sign(shape)};
   }
 };
 

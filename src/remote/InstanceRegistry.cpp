@@ -21,7 +21,6 @@ namespace fs = std::filesystem;
 using nlohmann::json;
 
 namespace remote {
-namespace {
 
 int CurrentPid() {
 #ifndef _WIN32
@@ -30,6 +29,8 @@ int CurrentPid() {
   return static_cast<int>(::GetCurrentProcessId());
 #endif
 }
+
+namespace {
 
 // Is that process still there? The only honest liveness test for a file left
 // behind by a crash. A pid we cannot signal (another user's) counts as alive:

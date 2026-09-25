@@ -51,14 +51,14 @@ bool LoftFeature::Execute(RegenContext& ctx) {
   if (pathId != 0) {
     const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathId);
     if (spine.IsNull()) {
-      SetError("loft path must be an open sketch chain or a 3D curve");
+      SetError(SweepPathError(ctx, pathId, "loft path"));
       return false;
     }
     TopoDS_Wire guide;
     if (guideId != 0) {
       guide = ResolveSweepPathWire(ctx, guideId);
       if (guide.IsNull()) {
-        SetError("loft guide must be an open sketch chain or a 3D curve");
+        SetError(SweepPathError(ctx, guideId, "loft guide"));
         return false;
       }
     }

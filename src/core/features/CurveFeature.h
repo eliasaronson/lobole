@@ -68,6 +68,14 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // A bent path whose corners cannot be bent (a straight too short for the
+  // bends at its ends, a doubled-back corner) is refused when it is ADDED,
+  // not committed broken: it names nothing, so its geometry can only come
+  // out one way, and a broken path committed anyway went on to fail the pipe
+  // swept along it with a second, false message
+  // (docs/tube/README.md#members-and-their-paths).
+  [[nodiscard]] std::string WhyIncomplete() const override;
+
   // Names no other feature: a 3D curve is its own points.
   void VisitFeatureRefs(const RefVisitor&) const override {}
 

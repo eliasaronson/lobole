@@ -275,8 +275,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "(no type tables); an unknown method is refused naming close matches.",
      "method"},
     {"ping",
-     "Liveness check; returns {ok, app, port, mode, ui_actions, project, "
-     "dirty, gpu, binary_replaced}. `gpu` is the device that answers "
+     "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
+     "project, dirty, gpu, binary_replaced}. `pid` is this process's id, so "
+     "a launcher can tell its own instance from one already on the port. `gpu` "
+     "is the device that answers "
      "renders — empty under --headless, which has no renderer. "
      "`binary_replaced` is true when this process is running an executable "
      "that has since been rebuilt on disk: it will keep serving the OLD "
@@ -1019,6 +1021,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"ok", true},
             {"app", "designer"},
             {"port", m_port},
+            // Which PROCESS: two launches handed the same port cannot tell
+            // their own instance from one already listening there by the
+            // port alone (tools/headless-preview.sh --start checks this).
+            {"pid", remote::CurrentPid()},
             {"mode", ModeName(m_mode)},
             {"ui_actions", UiActionsAvailable()},
             {"project", project},

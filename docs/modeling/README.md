@@ -45,7 +45,8 @@ Topic pages:
   `CADShape::Volume` is cached by TShape identity (plus the location's scale),
   because every mutating RPC digests every body's volume before and after, and
   an unchanged body — a large Derived snapshot especially — must not be
-  re-measured each time.
+  re-measured each time. The cache holds the forward figure; a shape reversed
+  in place reads it negated, which is what an inside-out solid encloses.
 
 ## Regeneration
 
@@ -109,7 +110,7 @@ The authoritative list, with every field, is `kFeatureTypes` in
 | `DatumPlane` | `offset` from a plane, `angle` about an axis, or `through_points`; sketches that reference it move with it |
 | `DatumAxis` | two points, a sketch line, or a global axis |
 | `Frame` | a named datum frame that mates anchor to (assemblies area) |
-| `Boolean` | `union`, `subtract` or `intersect` of two bodies by `createdBy`; both operands consumed into one result, so booleans chain |
+| `Boolean` | `union`, `subtract` or `intersect` of two bodies by `createdBy`; both operands consumed into one result, so booleans chain. The result must pass BRepCheck and [the boolean check](#a-boolean-is-checked-before-it-is-kept) |
 | `Pattern` | `mirror` (about a base or datum plane), `linear`, `circular` of a source; see [Patterns](#patterns) |
 | `Fillet`, `Chamfer` | edges by `ElementRef`; blend faces named from the spine edge |
 | `Shell` | hollows a body, `open_faces` by `ElementRef` |
@@ -133,7 +134,9 @@ reference (ghost) body, and `cut` passes through one. A cut warns when it
 removes no material, and when it consumes EVERY body: a part left with
 nothing is a tool the wrong way round or a boolean the kernel could not do,
 and without the warning the first sign is "no bodies" from `mass_properties`
-with no feature named.
+with no feature named. Every add and cut result is checked before it is kept
+([below](#a-boolean-is-checked-before-it-is-kept)); a refused one leaves every
+body as it was.
 
 ### Extrude
 
@@ -210,7 +213,9 @@ checks: [holes-and-threads.md](holes-and-threads.md#thread).
   `left_handed`, `start_deg` measured from `HelixReference(axis)`), and
   `bent_path` (the corners of a tube's centreline and one bend `radius`, built
   line-arc-line with exact circular arcs; a straight too short for its two
-  arcs or a corner that doubles back is refused). A bent path reports its
+  arcs or a corner that doubles back is refused, and refused where it is
+  ADDED: `add_feature` asks `WhyIncomplete`, so nothing is committed for a
+  pipe to be swept along). A bent path reports its
   `Bends()` — angle, radius, straight before, roll — and its cut `Length()`.
   RPCs: `curve_points` (the polyline actually built, with arc length) and
   `tube_schedule` (cut list and bend schedule per tube member).
@@ -228,7 +233,53 @@ checks: [holes-and-threads.md](holes-and-threads.md#thread).
 - **`Pipe`** is a circle of `outer_diameter` (hollow when `wall_thickness` >
   0) swept along a path.
 
-All four share `SweepSectionsAlongSpine` (`SweepFeature.h`).
+All four share `SweepSectionsAlongSpine` (`SweepFeature.h`). A path or guide
+that gives no spine is reported by `SweepPathError`: when the path feature is
+itself broken (a bent path edited into one that cannot be bent) the consumer
+names it and defers to its error, instead of claiming the path is the wrong
+kind of thing.
+
+## A boolean is checked before it is kept
+
+OpenCASCADE can return a boolean result that is not null, passes
+`BRepCheck_Analyzer`, and is wrong. The case that found it: an intake flange's
+paired-port slot whose round ends were the same cylinders as the two branch
+bores (swept round elbows), drawn 1 mm on past the pad face. Drawn from one
+face the cut "removed no material"; drawn from the other it kept the bores'
+floors inside the slot and stood the slot's far end in the empty bores. That
+is the bores turned inside out: a section is solid where the holes are, and
+the part came out 13,800 mm3 lighter than any cut could have made it.
+
+`BooleanRefusal` (`src/core/BodyMode.{h,cpp}`) runs on the result of every
+`ApplyBodyMode` add and cut and every `Boolean` feature, before anything is
+kept:
+
+- **Volume.** Not negative; a cut no larger than its input; an intersection no
+  larger than either operand; a union no smaller than its input (the old
+  "add LOST material" refusal). Tolerances are relative to the volumes
+  compared. These read volumes the callers compute anyway.
+- **Shells.** Per solid, exactly one closed shell encloses positive volume and
+  every other (a void) negative. A single-shell solid is covered by the
+  total's sign; otherwise the shell with the most faces is inferred from the
+  total, and the rest go through the volume cache, so a void the boolean did
+  not touch costs nothing.
+- **Faces.** A cut or a union keeps no face strictly inside its tool, and an
+  intersection none outside it. Judged at one interior point
+  (`BOPTools_AlgoTools3D::PointInFace`) for every face the boolean made and
+  every face of the target it kept whole that has a vertex in the tool's box,
+  against the TOOL — a sound solid, and for a feature a small one.
+  Classifying against the target instead (hundreds of faces) cost 8% of the
+  OM615's build; this costs about 2%.
+
+The refusal is the feature's error, so it reaches the `regen` block of the
+call that made it. It names the feature, the operation, the body, both
+volumes and a point, and says what usually causes it: a tool that shares a
+surface with the body. Stop the tool at the face where the surfaces meet, or
+make it clearly larger or smaller than what it coincides with.
+
+The check is not a proof. It samples one point per face, and a target face the
+kernel should have split but did not is judged only if a vertex of it lies in
+the tool's box.
 
 ## Bounding boxes are memoized on the shape
 
@@ -303,7 +354,10 @@ Headless, one file per feature (`tests/test_extrude.cpp`, `test_revolve`,
 `test_datum`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
 `test_hole`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
-`test_derived`, `test_toponaming`); regeneration semantics (cache stats,
+`test_derived`, `test_toponaming`); the boolean check in
+`tests/test_boolean_volume.cpp`, with the intake flange reduced to a block,
+two swept bores and the slot, and the same case over the RPC in
+`tests/regen_honesty_smoke.py`; regeneration semantics (cache stats,
 suppression, rollback) in `tests/test_document.cpp`. `tests/test_golden.cpp`
 loads the golden corpus (`tests/golden/`), and `tests/test_determinism.cpp`
 checks that every golden regenerates to the same volumes and the same element

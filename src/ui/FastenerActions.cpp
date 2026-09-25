@@ -393,6 +393,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     double radius;
   };
   std::vector<RimOn> candidates;
+  std::optional<Measure::RimCircle> openRim; // a rim that does not close
   for (const assembly::FlatInstance& inst : flat) {
     if (inst.part == nullptr || !inst.visible)
       continue;
@@ -421,19 +422,37 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // The rim, in the frame the assembly puts it in. Described in the part's
     // own space and then placed, because that is where the ElementRef means
     // something.
-    const std::optional<Measure::Element> element =
-        Measure::Describe(inst.part->GetBodies(), rim.element);
-    if (!element || element->kind != "edge" || element->shape != "circle" ||
-        !element->hasRadius || !element->hasAxis)
+    //
+    // An ARC is a rim too. The faces round a hole split its rim wherever
+    // they meet it — a seat that was two faces before the hole was cut, a
+    // slot across it — and the pick lands on one piece. Every edge of the
+    // body on the same circle is gathered, and the fit is to the whole
+    // circle; only arcs that do not close it are refused, in those terms.
+    const std::optional<Measure::RimCircle> circle =
+        Measure::RimCircleOf(inst.part->GetBodies(), rim.element);
+    if (!circle)
       continue;
-    const std::optional<glm::vec3> local =
-        Measure::CentreOf(inst.part->GetBodies(), rim.element);
-    if (!local)
+    if (!circle->Closed()) {
+      openRim = *circle;
       continue;
+    }
     candidates.push_back(
-        {&inst, glm::vec3(inst.world * glm::vec4(*local, 1.0f)),
-         glm::normalize(glm::vec3(inst.world * glm::vec4(element->axis, 0.0f))),
-         element->radius});
+        {&inst,
+         glm::vec3(inst.world * glm::vec4(glm::vec3(circle->centre), 1.0f)),
+         glm::normalize(
+             glm::vec3(inst.world * glm::vec4(glm::vec3(circle->axis), 0.0f))),
+         circle->radius});
+  }
+  if (candidates.empty() && openRim) {
+    std::ostringstream why;
+    why.precision(4);
+    why << "this rim is " << openRim->arcs
+        << (openRim->arcs == 1 ? " arc" : " arcs") << " covering "
+        << openRim->coveredDeg
+        << "° of its circle, and a fastener seats on a whole one. Pick "
+           "the rim of a hole that goes all the way round — one circular "
+           "edge, or arcs of one circle that close it.";
+    return fail(why.str());
   }
   if (candidates.empty())
     return fail("pick the RIM of the hole — a circular edge, the one the head "

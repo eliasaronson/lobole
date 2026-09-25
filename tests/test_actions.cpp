@@ -922,6 +922,104 @@ TEST_CASE("A circular edge that is the end of a solid is not a hole",
   CHECK(fit.why.find("-0 mm") == std::string::npos);
 }
 
+TEST_CASE("A rim split into arcs is still the rim", "[actions][parts]") {
+  // From the PES-on-OM615 dogfood: the caller picked a circular edge, and
+  // was told to "pick the RIM ... a cylindrical face has an axis but no
+  // direction". It WAS the rim — split into arcs by the faces round it, so
+  // the edge picked was an arc and not a circle. Here the seat face was two
+  // coplanar faces (two blocks fused side by side) before the hole was cut
+  // across the seam between them.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const auto plate = [&](const std::string& name, bool groove) {
+    const size_t tab = ui::AddPart(state, name);
+    ui::SetActivePart(state, tab);
+    Document& doc = *state.document;
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        "West", glm::vec3(-30.0f, -30.0f, 0.0f), 30.0, 60.0, 12.0));
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        "East", glm::vec3(0.0f, -30.0f, 0.0f), 30.0, 60.0, 12.0));
+    doc.AddFeature(std::make_unique<BooleanFeature>(
+        "Join", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+        BooleanOp::Union));
+    uint64_t solid = doc.GetFeatures().back()->GetId();
+    doc.AddFeature(std::make_unique<CylinderFeature>(
+        "Bore", glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0, 0, 1), 3.3, 14.0));
+    doc.AddFeature(std::make_unique<BooleanFeature>(
+        "Drill", solid, doc.GetFeatures().back()->GetId(),
+        BooleanOp::Subtract));
+    solid = doc.GetFeatures().back()->GetId();
+    if (groove) {
+      // A groove across the seat, through the rim: what is left of it
+      // does not go all the way round.
+      doc.AddFeature(std::make_unique<BoxFeature>(
+          "Groove tool", glm::vec3(-1.0f, -30.0f, 10.0f), 2.0, 60.0, 3.0));
+      doc.AddFeature(std::make_unique<BooleanFeature>(
+          "Groove", solid, doc.GetFeatures().back()->GetId(),
+          BooleanOp::Subtract));
+    }
+    REQUIRE(doc.Regenerate());
+    // The highest ARC of radius 3.3: a piece of the rim, not all of it.
+    const Body& body = doc.GetBodies().front();
+    ElementRef piece;
+    double best = -1e9;
+    int circles = 0;
+    for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+      const std::optional<Measure::EdgeInfo> edge =
+          Measure::DescribeEdgeAt(body, index);
+      if (!edge || !edge->hasRadius || std::abs(edge->radius - 3.3) > 1e-6)
+        continue;
+      if (edge->kind == "circle" && edge->midpoint.z > 9.0)
+        circles++;
+      if (edge->kind == "arc" && edge->midpoint.z > best) {
+        best = edge->midpoint.z;
+        piece = ElementRef{body.createdBy, mapped};
+      }
+    }
+    // The case is only worth anything if the rim really IS in pieces.
+    REQUIRE(circles == 0);
+    REQUIRE(piece.IsSet());
+    return std::pair{state.parts[tab].id, piece};
+  };
+  const auto [splitId, splitArc] = plate("Split seat", false);
+  const auto [grooveId, grooveArc] = plate("Grooved seat", true);
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Rig"));
+  const auto place = [&](uint64_t partId, float x) {
+    Occurrence occ;
+    occ.partId = partId;
+    occ.name = "Plate";
+    occ.position = glm::vec3(x, 0.0f, 0.0f);
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t splitOcc = place(splitId, 0.0f);
+  const uint64_t grooveOcc = place(grooveId, 200.0f);
+
+  ui::FastenerRequest req;
+  req.dryRun = true;
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{splitOcc, splitArc}, req);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  // Fitted to the whole circle: an M6 by its 6.6 mm clearance, through the
+  // 12 mm plate — which an arc's own centroid would have got wrong.
+  CHECK(fit.size == "M6");
+  CHECK_THAT(fit.grip, WithinAbs(12.0, 1e-3));
+
+  // Arcs that do not close the circle are refused, in those terms.
+  fit = ui::FitFastenerToHole(state, ui::RimPick{grooveOcc, grooveArc}, req);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  // Three arcs: the seam splits one of the two the groove leaves. What they
+  // cover is the circle less the groove's two chords, 2 x 2 asin(1/3.3).
+  CHECK(fit.why.find("this rim is 3 arcs covering 289.4°") !=
+        std::string::npos);
+  CHECK(fit.why.find("all the way round") != std::string::npos);
+}
+
 TEST_CASE("A second pick says where the joint ends", "[actions][parts]") {
   // docs/parts/README.md#deriving-a-fastener-from-a-hole, the second pick. The
   // stack the axis passes through IS the joint — until the axis carries on into
