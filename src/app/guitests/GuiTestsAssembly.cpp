@@ -10,8 +10,12 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/ViewActions.h"
 
+#include "render/StockRenderer.h" // Viewport(): what the capture restores
+#include "thirdparty/stb_image.h"
 #include "ui/ImportJob.h"
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 
 // Assembly GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -692,6 +696,163 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//Motion###ToolWindow/###motion_close");
     ctx->Yield(2);
     IM_CHECK(!s_App->motionToolOpen);
+  };
+
+  // Export animation (docs/assemblies/README.md#motion-video): the button
+  // films the study, and each frame is the 3D VIEW — the model at the
+  // viewport's size and aim — not the window with its panels. Only a
+  // windowed run can tell: offscreen there are no panels, so the viewport IS
+  // the framebuffer and a capture of the whole window would look right
+  // (cam/simulation_plays_and_gives_it_back is the same trap). PNG frames,
+  // so the test needs no ffmpeg; the save dialog is answered by
+  // `saveDialogAnswer`, since a portal dialog opens on the real desktop.
+  t = IM_REGISTER_TEST(engine, "assembly", "motion_video_frames_are_the_view");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Filmed");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence base;
+    base.name = "Base";
+    base.partId = partId;
+    base.fixed = true;
+    const uint64_t baseOcc = s_App->assembly->AddOccurrence(base);
+    Occurrence arm;
+    arm.name = "Arm";
+    arm.partId = partId;
+    arm.position = glm::vec3(30.0f, 0.0f, 0.0f);
+    const uint64_t armOcc = s_App->assembly->AddOccurrence(arm);
+    Mate m;
+    m.type = MateType::Revolute;
+    m.name = "axle";
+    m.a.occurrenceId = baseOcc;
+    m.a.anchor.origin = true;
+    m.b.occurrenceId = armOcc;
+    m.b.anchor.origin = true;
+    {
+      glm::vec3 lo, hi;
+      ui::PartDocById(*s_App, partId)
+          ->GetBodies()[0]
+          .shape.GetBoundingBox(lo, hi);
+      m.offset = (hi.z - lo.z) + 1.0f;
+    }
+    s_App->assembly->AddMate(m);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+
+    ToolbarClick(ctx, "###tb_asm_motion");
+    ctx->Yield(2);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->GetMotionStudies().size(), (size_t)1);
+    MotionStudy& study = s_App->assembly->GetMotionStudies()[0];
+    study.samples = 6; // a short film: the frames, not the count, are tested
+    ui::FitCameraToDocument(*s_App);
+    ctx->Yield(3);
+    // Somewhere mid-turn, so "put back" is not also "at the start".
+    std::string err;
+    IM_CHECK(ui::ApplyMotionPose(*s_App, study.id, 0.3, &err));
+    ctx->Yield(2);
+    const glm::mat4 armBefore =
+        ui::OccurrenceMatrix(*s_App->assembly->FindById(armOcc));
+
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_motion_video_gui";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    // A .png pick is frames in a folder named after the file.
+    s_App->saveDialogAnswer = (dir / "clip.png").string();
+    ctx->ItemClick("//Motion###ToolWindow/###motion_video");
+    for (int i = 0;
+         i < 1200 && (ui::BackgroundJobRunning(*s_App, "motion-video") ||
+                      !s_App->motionVideoLast);
+         i++)
+      ctx->Yield();
+    IM_CHECK(!s_App->saveDialogAnswer); // consumed by the dialog it answered
+    IM_CHECK(s_App->motionVideoLast != nullptr);
+    const ui::MotionVideoResult& video = *s_App->motionVideoLast;
+    IM_CHECK_STR_EQ(video.error.c_str(), "");
+    IM_CHECK(video.ok);
+    IM_CHECK_EQ(video.plan.format, std::string("png"));
+    IM_CHECK_EQ(video.framesWritten, 6);
+
+    // The frame is the VIEWPORT's size — and the window is not, so a capture
+    // of the whole framebuffer could not pass this.
+    const ImGuiIO& io = ImGui::GetIO();
+    IM_CHECK(s_App->viewportSize.x < io.DisplaySize.x - 1.0f);
+    IM_CHECK_EQ(video.plan.width, (uint32_t)s_App->viewportSize.x);
+    IM_CHECK_EQ(video.plan.height, (uint32_t)s_App->viewportSize.y);
+    const auto load = [&](int k, int& w, int& h) {
+      char name[32];
+      std::snprintf(name, sizeof name, "frame_%04d.png", k);
+      int n = 0;
+      stbi_uc* px =
+          stbi_load((dir / "clip" / name).string().c_str(), &w, &h, &n, 3);
+      std::vector<uint8_t> out;
+      if (px != nullptr) {
+        out.assign(px, px + size_t(w) * h * 3);
+        stbi_image_free(px);
+      }
+      return out;
+    };
+    int w = 0, h = 0;
+    const std::vector<uint8_t> first = load(0, w, h);
+    IM_CHECK(!first.empty());
+    IM_CHECK_EQ(w, (int)video.plan.width);
+    IM_CHECK_EQ(h, (int)video.plan.height);
+    // ...and its CONTENT is the view: a border of nothing but background —
+    // no panel, no toolbar, no tool window drawn into it — around the model,
+    // centred where the fit put it.
+    const auto at = [&](const std::vector<uint8_t>& img, int x, int y) {
+      const size_t i = (size_t(y) * w + x) * 3;
+      return glm::ivec3(img[i], img[i + 1], img[i + 2]);
+    };
+    const glm::ivec3 bg = at(first, 0, 0);
+    const auto isBg = [&](glm::ivec3 c) {
+      const glm::ivec3 d = glm::abs(c - bg);
+      return d.x <= 3 && d.y <= 3 && d.z <= 3;
+    };
+    bool borderClean = true;
+    for (int x = 0; x < w; x++)
+      borderClean =
+          borderClean && isBg(at(first, x, 0)) && isBg(at(first, x, h - 1));
+    for (int y = 0; y < h; y++)
+      borderClean =
+          borderClean && isBg(at(first, 0, y)) && isBg(at(first, w - 1, y));
+    IM_CHECK(borderClean);
+    double sx = 0.0, sy = 0.0;
+    size_t model = 0;
+    for (int y = 0; y < h; y++)
+      for (int x = 0; x < w; x++)
+        if (!isBg(at(first, x, y))) {
+          sx += x;
+          sy += y;
+          model++;
+        }
+    IM_CHECK(model > size_t(w) * h / 100); // the model is in it
+    IM_CHECK(std::abs(sx / model - w * 0.5) < w * 0.2);
+    IM_CHECK(std::abs(sy / model - h * 0.5) < h * 0.2);
+    // It is a film: the arm turns between frames.
+    int w2 = 0, h2 = 0;
+    IM_CHECK(load(3, w2, h2) != first);
+
+    // Everything the capture resized is back: the scene renderers aim at the
+    // dock between the panels again, in framebuffer pixels.
+    const glm::vec2 scale(io.DisplayFramebufferScale.x,
+                          io.DisplayFramebufferScale.y);
+    const glm::ivec4 vp = s_App->stockRenderer->Viewport();
+    IM_CHECK_EQ(vp.x, (int)(s_App->viewportPos.x * scale.x));
+    IM_CHECK_EQ(vp.y, (int)(s_App->viewportPos.y * scale.y));
+    IM_CHECK_EQ(vp.z, (int)(s_App->viewportSize.x * scale.x));
+    IM_CHECK_EQ(vp.w, (int)(s_App->viewportSize.y * scale.y));
+    // And the assembly is where it was before the film.
+    IM_CHECK(ui::OccurrenceMatrix(*s_App->assembly->FindById(armOcc)) ==
+             armBefore);
+    std::filesystem::remove_all(dir);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_close");
+    ctx->Yield(2);
   };
 
   // U13d: a row too long for the dock elides and can still be READ. ImGui

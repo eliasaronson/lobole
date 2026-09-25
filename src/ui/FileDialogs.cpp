@@ -622,6 +622,60 @@ void ExportMotionDialog(AppState&, uint64_t) {
 
 #endif
 
+void ExportMotionVideoDialog(AppState& state, uint64_t studyId) {
+  if (!state.assembly)
+    return;
+  const MotionStudy* s = state.assembly->FindMotionStudyById(studyId);
+  if (!s)
+    return;
+  std::string path;
+  if (state.saveDialogAnswer) {
+    path = *state.saveDialogAnswer;
+    state.saveDialogAnswer.reset();
+  } else {
+#ifdef HAVE_NATIVEFILEDIALOG
+    if (!NativeDialogsSafe())
+      return;
+    std::string name = s->name.empty() ? "motion" : s->name;
+    for (char& c : name)
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-')
+        c = '_';
+    // The file type IS the format: the first is the default.
+    nfdu8char_t* outPath = nullptr;
+    const nfdu8filteritem_t filters[] = {{"MP4 video (H.264)", "mp4"},
+                                         {"WebM video (VP9)", "webm"},
+                                         {"GIF animation", "gif"},
+                                         {"PNG frames (a folder)", "png"}};
+    if (InDialog([&] {
+          return NFD_SaveDialogU8(&outPath, filters, 4, nullptr,
+                                  (name + ".mp4").c_str());
+        }) != NFD_OKAY)
+      return;
+    path = outPath;
+    NFD_FreePathU8(outPath);
+#else
+    return;
+#endif
+  }
+  MotionVideoRequest req;
+  req.studyId = studyId;
+  std::string ext = std::filesystem::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  if (ext == ".png") {
+    // Frames need a folder, and a save dialog names a file: the folder is
+    // the file's name without its extension, beside where it was chosen.
+    req.format = "png";
+    req.path = std::filesystem::path(path).replace_extension().string();
+  } else {
+    req.path = path; // the extension says the format, or it is refused
+  }
+  std::string error;
+  if (StartMotionVideo(state, req, &error))
+    state.motionAddRefusal.clear();
+  else
+    state.motionAddRefusal = "Export failed: " + error;
+}
+
 bool ExportActiveDocument(AppState& state, const std::string& path,
                           std::string* error) {
   const auto fail = [&](std::string why) {

@@ -38,6 +38,12 @@ void ExportBomDialog(AppState& state);
 // lands in `state.motionAddRefusal`, shown in the panel. No-op without NFD.
 void ExportMotionDialog(AppState& state, uint64_t studyId);
 
+// Film a motion study (StartMotionVideo): a save dialog whose file type picks
+// the format — .mp4, .webm, .gif, or .png for numbered frames in a folder
+// named after the file. A refusal lands in `state.motionAddRefusal`.
+// `state.saveDialogAnswer`, when set, answers instead of a dialog (tests).
+void ExportMotionVideoDialog(AppState& state, uint64_t studyId);
+
 // Whether a native file dialog can actually open here (NFD compiled in AND a
 // usable backend — on Linux the XDG desktop portal). False in a bare session
 // or a container, where Export used to click into silence: callers gate their
