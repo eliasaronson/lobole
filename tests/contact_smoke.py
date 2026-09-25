@@ -163,6 +163,31 @@ def main():
         comps = sorted(sorted(c) for c in rep["components"])
         expect(["P3", "P4"] in comps, f"clash unites: {comps}")
 
+        # WHERE: every clash says where its overlap is, in world mm. P3 spans
+        # x 70.5..105.5 and P4 100..135, so the overlap lies in x 100..105.5
+        # — in contact_report, the named pair and the standing sweep alike.
+        def inside_overlap(c, what):
+            lo, hi, mid = c["bbox_min_mm"], c["bbox_max_mm"], c["centroid_mm"]
+            expect(lo[0] > 100 - 1e-3 and hi[0] < 105.5 + 1e-3,
+                   f"{what}: the overlap's x bounds are P3's tail: {c}")
+            expect(all(lo[i] - 1e-6 <= mid[i] <= hi[i] + 1e-6
+                       for i in range(3)),
+                   f"{what}: the centroid lies in the bounds: {c}")
+        inside_overlap(rep["clashes"][0], "contact_report")
+        inside_overlap(d.call("interference", a="P3", b="P4"), "named pair")
+        sweep = d.call("interference")
+        expect(len(sweep["pairs"]) == 1, f"one standing clash: {sweep}")
+        inside_overlap(sweep["pairs"][0], "sweep")
+        # A mesh sweep knows only THAT, and says where it could be — the
+        # region both boxes share — rather than a site it does not know.
+        mesh = next(p for p in d.call("interference", mode="mesh")["pairs"]
+                    if {p["a"], p["b"]} == {"P3", "P4"})
+        expect("centroid_mm" not in mesh and "volume" not in mesh,
+               f"a mesh hit invents no site: {mesh}")
+        expect(abs(mesh["within_min_mm"][0] - 100) < 1e-3
+               and abs(mesh["within_max_mm"][0] - 105.5) < 1e-3,
+               f"the shared box is P3's tail: {mesh}")
+
         # A generous near_tol turns the 0.5 gap into a connection? No —
         # near_tol only widens REPORTING; connectivity stays touch_tol.
         rep = d.call("contact_report", near_tol=50.0)

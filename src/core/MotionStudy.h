@@ -35,13 +35,23 @@ namespace motion {
 struct Clash {
   uint64_t a = 0, b = 0; // top-level occurrence ids
   std::string aName, bName;
+  // The pair never moves relative to each other over the study (fastened,
+  // or both carried by the same moving part). Such a pair is checked ONCE,
+  // at the first sample, since no pose can change its answer — and a clash
+  // it finds is a standing clash, not one the motion made.
+  bool rigid = false;
   // WHERE the overlap is, for the same reason contact_report carries it: a
   // pair of names is a guessing game on an assembly with eight of each. An
   // exact check already builds the intersection to weigh it, so this is free
-  // there; a MESH check only answers yes, and leaves `known` false.
+  // there: its volume, centroid and world bounds. A MESH check only answers
+  // yes, and leaves `known` false.
   bool known = false;
   double volume = 0.0;
   glm::dvec3 centroid{0.0};
+  glm::dvec3 bboxMin{0.0}, bboxMax{0.0};
+  // What IS known either way: the region the two bodies' world boxes share.
+  // The overlap lies inside it; a mesh check cannot say where.
+  glm::dvec3 withinMin{0.0}, withinMax{0.0};
 };
 
 struct UnknownContact {
@@ -73,10 +83,16 @@ struct Sample {
 
 struct Result {
   std::vector<Sample> samples;
-  // Pairs skipped because they are rigid to each other over the whole study
-  // — bolted joints, a part and the frame it is fastened to. The motion
-  // cannot make them collide; `contact_report` says whether they already do.
+  // Pairs rigid to each other over the whole study — bolted joints, a part
+  // and the frame it is fastened to. The motion cannot change whether they
+  // collide, so they are checked once, at `rigidCheckedAt` (the first sample
+  // whose clashes were checked), and skipped at every later sample:
+  // `pairsRigidChecked` body pairs checked there, `pairsRigid` skips after.
+  // Checked EXACTLY whatever `clashMode` says: touching is what a fastened
+  // pair does, and a mesh check calls touching a clash.
   size_t pairsRigid = 0;
+  size_t pairsRigidChecked = 0;
+  int rigidCheckedAt = -1;   // -1: never (no clash check ran)
   bool clean = true;         // no clash at any sample, and every one solved
   size_t worstSample = 0;    // the sample with the most clashes (or the
                              // first unsolved one)

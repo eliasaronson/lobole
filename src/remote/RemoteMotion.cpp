@@ -14,7 +14,9 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <set>
 #include <span>
 
@@ -72,12 +74,22 @@ constexpr MethodDoc MotionMethods[] = {
      "clash,clash_mode,configuration?,unit,has_result,running,why_not?,"
      "stale?,clean?,collision_checked?}"},
     {"run_motion_study",
-     "Run it: {study, async?, include_poses?}. Synchronous by default and "
+     "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
+     "leave_at_mm?}. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
-     "it solved, the loop residual, and the clashing pairs (each with its "
-     "`volume` and `centroid` under an EXACT check, which is how a pair of "
-     "names becomes something to act on; a mesh check knows only THAT, and "
-     "says nothing rather than a zero that reads like a measurement) — plus "
+     "it solved, the loop residual, and the clashing pairs (each with "
+     "`rigid`, and under an EXACT check its `volume`, `centroid_mm` and "
+     "`bbox_min_mm`/`bbox_max_mm` — the overlap's centre and world bounds "
+     "in mm, which is how a pair of names becomes something to act on; a "
+     "mesh check knows only THAT, and gives `within_min_mm`/`within_max_mm`, "
+     "the region the two bodies' boxes share, rather than a zero that reads "
+     "like a measurement). Pairs RIGID to each other over the whole study "
+     "(fastened, or carried together) cannot be made to collide by the "
+     "motion, so they are checked ONCE, exactly whatever clash_mode says, "
+     "at `rigid_checked_at_sample` (the first sample), and skipped after "
+     "(`pairs_rigid` counts the skips, `pairs_rigid_checked` the checks); a "
+     "clash there is a STANDING clash, marked `rigid: true` and listed in "
+     "`rigid_clashes`, and the study is not clean. Plus "
      "`clean`, `seated_contacts` and `appeared` (what TURNING changed: a "
      "mesh check calls touching a clash, and at rest a propeller touches "
      "its motor and its screws, so the pairs already in contact at the "
@@ -95,10 +107,16 @@ constexpr MethodDoc MotionMethods[] = {
      "sample that does not solve is reported unsolved with its residual — "
      "never drawn in the last good pose's place. The run happens on a COPY, "
      "so the assembly is left where it was; `leave_at` (\"last\", "
-     "\"start\", or a sample index) scrubs it to one of the samples "
+     "\"start\", or a sample INDEX) scrubs it to one of the samples "
      "afterwards, which is how anything about the far end of the travel — a "
-     "section, a mass property, a measurement — can be asked at all.",
-     "async, include_poses, leave_at, study"},
+     "section, a mass property, a measurement — can be asked at all. To "
+     "leave it at a driver VALUE instead, `leave_at_deg` (a rotation "
+     "study, degrees) or `leave_at_mm` (an offset study, millimetres), "
+     "within the study's range: the pose is reached by walking to the "
+     "nearest sample and stepping from there, as the run steps, so a "
+     "slider-crank stays on the branch the run found. The reply says "
+     "`left_at` (the sample walked to) and `left_at_value`.",
+     "async, include_poses, leave_at, leave_at_deg, leave_at_mm, study"},
     {"motion_status",
      "{study}: whether a run is in progress, and the stored result if one "
      "has landed (the same shape run_motion_study returns).",
@@ -133,6 +151,24 @@ json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
   return j;
 }
 
+// One clash, in the vocabulary `interference` and `contact_report` use.
+json ClashJson(const motion::Clash& c) {
+  json j{{"a", c.a},
+         {"b", c.b},
+         {"a_name", c.aName},
+         {"b_name", c.bName},
+         {"rigid", c.rigid}};
+  // An exact check knows how much and where; a mesh one only knows THAT, and
+  // says where it COULD be rather than a zero that reads like a measurement.
+  if (c.known) {
+    j["volume"] = c.volume;
+    AddOverlapSite(j, c.centroid, c.bboxMin, c.bboxMax);
+  } else {
+    AddOverlapBound(j, c.withinMin, c.withinMax);
+  }
+  return j;
+}
+
 json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
                 const MotionStudy& s, bool includePoses) {
   json samples = json::array();
@@ -140,16 +176,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
   for (size_t i = 0; i < r.samples.size(); i++) {
     const motion::Sample& sm = r.samples[i];
     json clashes = json::array();
-    for (const motion::Clash& c : sm.clashes) {
-      json j{{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}};
-      // An exact check knows how much and where; a mesh one only knows THAT,
-      // and says nothing rather than a zero that reads like a measurement.
-      if (c.known) {
-        j["volume"] = c.volume;
-        j["centroid"] = {c.centroid.x, c.centroid.y, c.centroid.z};
-      }
-      clashes.push_back(std::move(j));
-    }
+    for (const motion::Clash& c : sm.clashes)
+      clashes.push_back(ClashJson(c));
     json sj{{"index", i},
             {"t", sm.t},
             {"value", rot ? angles::ToDegrees(sm.value) : sm.value},
@@ -192,17 +220,26 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
   // working machine is never "clean" and the caller has to work out which
   // contacts are news. That is this: the pairs in contact at the FIRST
   // sample are seated, and anything else that shows up appeared.
+  //
+  // A RIGID pair's clash is neither: the two never move relative to each
+  // other, so it is a standing clash, checked once, and listed on its own.
   std::set<std::pair<uint64_t, uint64_t>> seated;
   if (!r.samples.empty())
     for (const motion::Clash& c : r.samples.front().clashes)
-      seated.insert({std::min(c.a, c.b), std::max(c.a, c.b)});
+      if (!c.rigid)
+        seated.insert({std::min(c.a, c.b), std::max(c.a, c.b)});
+  json rigidClashes = json::array();
+  for (const motion::Sample& sm : r.samples)
+    for (const motion::Clash& c : sm.clashes)
+      if (c.rigid)
+        rigidClashes.push_back(ClashJson(c));
   std::set<std::pair<uint64_t, uint64_t>> appeared;
   json appearedJson = json::array();
   for (const motion::Sample& sm : r.samples)
     for (const motion::Clash& c : sm.clashes) {
       const std::pair<uint64_t, uint64_t> key{std::min(c.a, c.b),
                                               std::max(c.a, c.b)};
-      if (seated.count(key) || !appeared.insert(key).second)
+      if (c.rigid || seated.count(key) || !appeared.insert(key).second)
         continue;
       appearedJson.push_back(
           {{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}});
@@ -224,6 +261,10 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
                            : r.clean           ? "passed"
                                                : "failed"},
       {"pairs_rigid", r.pairsRigid},
+      {"pairs_rigid_checked", r.pairsRigidChecked},
+      {"rigid_checked_at_sample",
+       r.rigidCheckedAt >= 0 ? json(r.rigidCheckedAt) : json(nullptr)},
+      {"rigid_clashes", rigidClashes},
       {"seconds", r.seconds},
       {"unit", rot ? "deg" : "mm"},
       {"table", motion::Table(r, s)}};
@@ -251,7 +292,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
                                      : "designer/motion-exact-clash",
                                  "1"};
     const std::string claim =
-        "no pair comes into contact that was not touching at rest";
+        "no pair comes into contact that was not touching at rest, and no "
+        "pair rigid to each other overlaps";
     if (!r.error.empty()) {
       receipt.Unverifiable(claim, oracle, "the study errored: " + r.error);
     } else if (!s.checkClash) {
@@ -279,7 +321,10 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
       c.value = static_cast<double>(appearedJson.size());
       c.unit = "new contacts";
       c.note = std::to_string(r.pairsChecked) + " pair checks over " +
-               std::to_string(samples.size()) + " samples" +
+               std::to_string(samples.size()) + " samples, " +
+               std::to_string(rigidClashes.size()) +
+               " standing clashes between rigid pairs (checked once, "
+               "exactly)" +
                (s.clashMode == "mesh"
                     ? ", off the tessellations at " +
                           std::to_string(r.deflectionMm) + " mm deflection"
@@ -289,6 +334,51 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
     AttachReceipt(out, receipt);
   }
   return out;
+}
+
+// `leave_at_deg` / `leave_at_mm`: the live assembly left at a driver VALUE
+// rather than at a sample. Refused when it names the wrong unit for the
+// driver, falls outside the range the run walked, or comes with `leave_at`
+// as well — two answers to one question, and neither would be the other.
+json LeaveAtValue(ui::AppState& state, const MotionStudy& s,
+                  const RpcParams& p) {
+  const bool rot = s.driverDof == MateDof::Rotation;
+  const char* want = rot ? "leave_at_deg" : "leave_at_mm";
+  const char* other = rot ? "leave_at_mm" : "leave_at_deg";
+  if (p.contains(other))
+    throw std::runtime_error(
+        std::string(other) + ": this study drives " +
+        (rot ? "a rotation, in degrees — use leave_at_deg"
+             : "an offset, in millimetres — use leave_at_mm"));
+  if (p.contains("leave_at"))
+    throw std::runtime_error(
+        std::string("leave_at and ") + want +
+        " both say where to leave the assembly; pass one — leave_at is a "
+        "sample index, \"start\" or \"last\", " +
+        want + " a driver value");
+  const double wire = p.at(want).get<double>();
+  const double value = RotAwareAngle(wire, rot);
+  const double lo = std::min(s.from, s.to), hi = std::max(s.from, s.to);
+  const double slack = 1e-9 * std::max(1.0, hi - lo);
+  if (value < lo - slack || value > hi + slack) {
+    const double shownLo = rot ? angles::ToDegrees(lo) : lo;
+    const double shownHi = rot ? angles::ToDegrees(hi) : hi;
+    char range[128];
+    std::snprintf(range, sizeof range, "%.6g..%.6g %s", shownLo, shownHi,
+                  rot ? "deg" : "mm");
+    throw std::runtime_error(std::string(want) + ": " + p.at(want).dump() +
+                             " is outside the study's range " + range +
+                             " — the run never walked there, so it has no "
+                             "branch to keep; widen the study's from/to");
+  }
+  const int n = s.samples;
+  const double t = (value - s.from) / (s.to - s.from);
+  const int nearest =
+      std::clamp(static_cast<int>(std::lround(t * (n - 1))), 0, n - 1);
+  std::string err;
+  if (!ui::ApplyMotionValue(state, s.id, nearest, value, &err))
+    throw std::runtime_error(err);
+  return json{{"left_at", nearest}, {"left_at_value", wire}};
 }
 
 AssemblyDocument& NeedAssembly(ui::AppState& state) {
@@ -492,7 +582,11 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     // live assembly to one of the samples instead, through the same walk
     // the scrub uses, so it arrives on the branch the run found rather than
     // on whichever one a jump would have landed on.
-    if (p.contains("leave_at")) {
+    const bool atValue =
+        p.contains("leave_at_deg") || p.contains("leave_at_mm");
+    if (atValue)
+      out.update(LeaveAtValue(state, s, p));
+    if (p.contains("leave_at") && !atValue) {
       const json& at = p.at("leave_at");
       const int n = static_cast<int>(r.samples.size());
       int idx = 0;

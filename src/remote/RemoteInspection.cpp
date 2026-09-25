@@ -344,9 +344,7 @@ void AddOverlapSite(json& j, const Measure::SetContact& c) {
   j["thread_engagement_volume"] = c.threadEngagementVolume;
   if (!c.overlaps)
     return;
-  j["centroid"] = {c.centroid.x, c.centroid.y, c.centroid.z};
-  j["bbox_min"] = {c.overlapMin.x, c.overlapMin.y, c.overlapMin.z};
-  j["bbox_max"] = {c.overlapMax.x, c.overlapMax.y, c.overlapMax.z};
+  remote::AddOverlapSite(j, c.centroid, c.overlapMin, c.overlapMax);
 }
 const char* ContactState(const Measure::SetContact& c, double touchTol) {
   if (c.volume > 1e-9)
@@ -660,7 +658,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "anything that must be certain). On an assembly every pair names its "
      "sides `a_name`/`b_name` (and `a`/`b`, the same labels) plus "
      "`a_id`/`b_id` when both are occurrences of this assembly — the "
-     "vocabulary run_motion_study and contact_report use.",
+     "vocabulary run_motion_study and contact_report use. WHERE: an exact "
+     "clash (named pair or sweep) carries `centroid_mm` and "
+     "`bbox_min_mm`/`bbox_max_mm`, the overlap solid's centre and world "
+     "bounds in millimetres; a mesh check knows only THAT they overlap, so "
+     "its sweep entries carry `within_min_mm`/`within_max_mm` instead — the "
+     "region the two sides' boxes share, which holds the overlap somewhere.",
      "a, b, deadline_s, max_pairs, mode, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
@@ -674,8 +677,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "intended-vs-realized mate diffs when mates exist. Part tab: over the "
      "part's BODIES — catches a bracket floating inside one part, which "
      "the occurrence-level sweep cannot see. Each CLASH also carries "
-     "`centroid` and `bbox_min`/`bbox_max`: WHERE the solid-in-solid is, "
-     "so a pair of names and a volume is not the whole answer. A pair whose "
+     "`centroid_mm` and `bbox_min_mm`/`bbox_max_mm` (world millimetres): "
+     "WHERE the solid-in-solid is, so a pair of names and a volume is not "
+     "the whole answer. A pair whose "
      "two shapes carry more than `exact_face_budget` faces between them "
      "(default 20000 — an imported mesh is one face per TRIANGLE) is NOT "
      "checked and is listed in `not_checked` with its face count: the "
@@ -684,7 +688,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol",
      remote::NoFlags,
      "connected, components, pairs[]{a, b, state, distance, volume}, "
-     "near_misses[]{a, b, distance}, clashes[]{a, b, volume}, touch_tol, "
+     "near_misses[]{a, b, distance}, clashes[]{a, b, volume, centroid_mm, "
+     "bbox_min_mm, bbox_max_mm}, touch_tol, "
      "near_tol, scope?, bodies?"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
@@ -1191,12 +1196,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         return false;
       };
-      const auto pairVolume = [&](const Target& ta,
-                                  const Target& tb) -> double {
+      // The sweep's exact check: the overlap's volume AND where it is. The
+      // same boolean InterferenceVolume runs, which weighs the intersection
+      // it already built; the separation pass is not asked for.
+      const auto pairContact = [&](const Target& ta, const Target& tb) {
         if (ta.bodies.empty() || tb.bodies.empty())
           throw std::runtime_error(
               "'" + (ta.bodies.empty() ? ta.label : tb.label) +
               "' resolves to no geometry (missing, hidden or empty)");
+        if (const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
+                                                   tb.bodies, glm::mat4(1.0f),
+                                                   /*wantDistance=*/false))
+          return *c;
+        // ContactBetween gives up on the set when one body pair's boolean
+        // does not finish; InterferenceVolume skips that pair and weighs the
+        // rest, which is the answer this sweep has always given. The site
+        // is then not known, and is left out rather than guessed.
         const auto v = Measure::InterferenceVolume(ta.bodies, glm::mat4(1.0f),
                                                    tb.bodies, glm::mat4(1.0f));
         if (!v)
@@ -1204,7 +1219,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               "interference check failed — an OpenCASCADE boolean/extrema "
               "threw, usually on an invalid or empty body; run "
               "check_geometry on both sides");
-        return *v;
+        Measure::SetContact volumeOnly;
+        volumeOnly.volume = *v;
+        volumeOnly.distanceKnown = false;
+        return volumeOnly;
       };
       if (!p.contains("a") && !p.contains("b")) {
         // No pair named: sweep every visible, unsuppressed pair — the
@@ -1239,30 +1257,46 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         SweepPlan plan = PlanSweep(km, kx, 0.0, maxPairs);
         json pairs = json::array();
         bool any = false;
-        // -1 = clear. In mesh mode a hit carries no volume: a volume
-        // measured off triangles is the TESSELLATION's volume, and reporting
-        // one would invite exactly the false precision this method is not
-        // for — so mesh answers 0 and exact answers the volume it found.
+        // A pair's answer. In mesh mode a hit carries no volume and no
+        // site: a volume measured off triangles is the TESSELLATION's
+        // volume, and reporting one would invite exactly the false precision
+        // this method is not for. Exact carries the overlap solid's.
+        struct PairAnswer {
+          bool clash = false;
+          Measure::SetContact contact; // exact mode only
+        };
         RunSweep(
             plan, deadline,
-            [&](size_t ki, size_t kj) -> double {
+            [&](size_t ki, size_t kj) {
               const Target& ta = occs[keep[ki]];
               const Target& tb = occs[keep[kj]];
-              if (mode == "mesh")
-                return pairMesh(ta, tb) ? 0.0 : -1.0;
-              const double v = pairVolume(ta, tb);
-              return v > 1e-9 ? v : -1.0;
+              PairAnswer a;
+              if (mode == "mesh") {
+                a.clash = pairMesh(ta, tb);
+              } else {
+                a.contact = pairContact(ta, tb);
+                a.clash = a.contact.volume > 1e-9;
+              }
+              return a;
             },
-            [&](size_t ki, size_t kj, double v) {
-              if (v < 0.0)
+            [&](size_t ki, size_t kj, const PairAnswer& a) {
+              if (!a.clash)
                 return;
               any = true;
               json hit{{"a", occs[keep[ki]].label},
                        {"b", occs[keep[kj]].label},
                        {"clash", true}};
               nameSides(hit, occs[keep[ki]], occs[keep[kj]]);
-              if (mode != "mesh")
-                hit["volume"] = v;
+              if (mode == "mesh") {
+                AddOverlapBound(hit, glm::dvec3(glm::max(km[ki], km[kj])),
+                                glm::dvec3(glm::min(kx[ki], kx[kj])));
+              } else {
+                hit["volume"] = a.contact.volume;
+                if (a.contact.overlaps)
+                  remote::AddOverlapSite(hit, a.contact.centroid,
+                                         a.contact.overlapMin,
+                                         a.contact.overlapMax);
+              }
               pairs.push_back(std::move(hit));
             });
         // Under BOTH names, and the duplication is the point. This sweep

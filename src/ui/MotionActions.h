@@ -51,6 +51,13 @@ bool MotionResultStale(AppState& state, uint64_t studyId);
 bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
                      std::string* error);
 
+// Leave the live assembly at a driver VALUE (radians or mm) between the
+// samples: walk to sample `sample` exactly as the scrub does, then step from
+// it to `value` — less than one sample spacing away, so the last solve
+// starts where the run's own did and a slider-crank stays on its branch.
+bool ApplyMotionValue(AppState& state, uint64_t studyId, int sample,
+                      double value, std::string* error);
+
 // Write the run's animation as a GLB. Refuses without a result, and refuses
 // when any sample is unsolved: an animation that quietly holds a frame is
 // the substitution this project does not make.

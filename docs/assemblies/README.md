@@ -156,10 +156,33 @@ omitted = whichever is active).
 - Samples are walked in order, each solve starting from the last, so a closed
   loop stays on the branch it is on. A sample that does not solve is reported
   unsolved with its residual, never drawn in the last good pose.
+- Pairs rigid to each other over the whole study — fastened, or carried by
+  the same moving part — cannot be made to collide by the motion, so they are
+  checked once, at the first sample, and skipped at every later one. A
+  kinematics-only pass over the samples decides which pairs move (the
+  relative transform of two top-level occurrences changes at some sample).
+  The rigid check is always EXACT, whatever `clash_mode` says: touching is
+  what a bolted joint does, and a mesh check calls touching a clash. A clash
+  found there is a standing clash: reported at sample 0 with `rigid: true`,
+  listed again in `rigid_clashes`, left out of `seated_contacts` and
+  `appeared`, and the study is not clean. The result says where the rigid
+  pairs were checked (`rigid_checked_at_sample`), how many body pairs that
+  cost (`pairs_rigid_checked`) and how many later checks were skipped
+  (`pairs_rigid`); the table's last line says the same.
+- Every clash says where it is, in the names `interference` uses: an exact
+  check gives the overlap's `volume`, `centroid_mm` and
+  `bbox_min_mm`/`bbox_max_mm`; a mesh check knows only that two bodies
+  overlap and gives `within_min_mm`/`within_max_mm`, the region their boxes
+  share.
 - `run_motion_study` runs on a copy of the assembly, so the document is left
-  where it was; `leave_at` (`"start"`, `"last"` or an index) scrubs the live
-  assembly to a sample afterwards so the far end of the travel can be
-  measured. `set_motion_pose {t}` scrubs (no undo step). `include_poses`
+  where it was; `leave_at` (`"start"`, `"last"` or a sample index) scrubs the
+  live assembly to a sample afterwards so the far end of the travel can be
+  measured. `leave_at_deg` (a rotation study) or `leave_at_mm` (an offset
+  study) leaves it at a driver VALUE between samples instead: it walks to the
+  nearest sample as the scrub does and takes one step from there, so a
+  slider-crank lands on the branch the run found. A value outside the
+  study's range, the other unit, or `leave_at` beside it is refused.
+  `set_motion_pose {t}` scrubs (no undo step). `include_poses`
   returns every occurrence's placement and every moving mate's value per
   sample. `async: true` runs it as a background job.
 - `export_motion` writes an animated GLB (metres, Y-up, 24 fps) and refuses
@@ -244,7 +267,8 @@ stale).
   Shapes are warmed single-threaded first, and every query boolean is
   non-destructive ([inspect](../inspect/README.md#query-booleans-are-non-destructive)).
 - Pairs are box-pruned before the exact check, and pairs rigid to each other
-  across the motion are skipped (`pairsRigid`).
+  across the motion are checked once, at the first sample, then skipped
+  (`pairsRigidChecked`, `pairsRigid`).
 - Exact queries on spline-heavy bought parts (imported STEP motors, drivers)
   dominate sweep time.
 - SDK: `Asm.check_clashes()` (`tools/designer_sdk.py`) is the whole-assembly,
@@ -350,7 +374,9 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   `set_occurrence_configuration`, `select_occurrence`.
 - Mates: `add_mate` (`derive: twist|pose` reads a fastened mate's numbers
   off the current placement), `set_mate`, `remove_mate`, `list_mates`,
-  `select_mate`, `solve_assembly`.
+  `select_mate`, `solve_assembly`. On the wire a mate's `type` is its kind
+  (`revolute`, `slider`, …), the word `add_mate` takes; the file stores the
+  same kind as `mate_type` ([format](../versioning/format.md)).
 - Relations: `add_relation`, `set_relation`, `remove_relation`,
   `list_relations`.
 - Motion: `add_motion_study`, `set_motion_study`, `remove_motion_study`,

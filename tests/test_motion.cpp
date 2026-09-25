@@ -18,6 +18,7 @@
 #include "core/io/GlbAnimation.h"
 #include "core/io/Serialization.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -591,4 +592,131 @@ TEST_CASE("The verdict asks whether it moved before it asks about clashes",
   checked.cancelled = true;
   CHECK_THAT(motion::Summarize(checked, s, false).text,
              ContainsSubstring("Cancelled"));
+}
+
+namespace {
+
+// The rig, plus a standing fault it never moves: PLATE A fixed, PLATE B
+// fastened to it and overlapping it by 5 x 10 x 4 mm, and PLATE C fastened
+// to B face-to-face — touching, as a bolted joint does. None of the three
+// moves relative to the others while the arm turns, so the study used to
+// skip every pair among them; the pump's clamp plates overlapped that way
+// through four exact studies.
+struct PlatedRig {
+  Rig rig = MakeRig(90.0);
+  std::unique_ptr<Document> a = BoxPart({40, 40, -2}, {10, 10, 4});
+  std::unique_ptr<Document> b = BoxPart({45, 40, -2}, {10, 10, 4});
+  std::unique_ptr<Document> c = BoxPart({55, 40, -2}, {10, 10, 4});
+  assembly::PartResolver Parts() {
+    return [this](uint64_t id) -> const Document* {
+      if (id == 4)
+        return a.get();
+      if (id == 5)
+        return b.get();
+      if (id == 6)
+        return c.get();
+      return rig.Parts()(id);
+    };
+  }
+  PlatedRig() {
+    const auto place = [&](const char* name, uint64_t part, bool fixed) {
+      Occurrence o;
+      o.name = name;
+      o.partId = part;
+      o.fixed = fixed;
+      return rig.asmDoc.AddOccurrence(std::move(o));
+    };
+    const uint64_t oa = place("Plate A", 4, true);
+    const uint64_t ob = place("Plate B", 5, false);
+    const uint64_t oc = place("Plate C", 6, false);
+    for (const auto& [from, to] : {std::pair{oa, ob}, std::pair{ob, oc}}) {
+      Mate m;
+      m.type = MateType::Fastened;
+      m.a = Origin(from);
+      m.b = Origin(to);
+      m.flipped = false;
+      rig.asmDoc.AddMate(m);
+    }
+  }
+};
+
+bool IsPair(const motion::Clash& c, const char* x, const char* y) {
+  return (c.aName == x && c.bName == y) || (c.aName == y && c.bName == x);
+}
+
+} // namespace
+
+TEST_CASE("A study checks rigid pairs once, at the first sample, and reports "
+          "their clash",
+          "[motion]") {
+  for (const char* mode : {"exact", "mesh"}) {
+    PlatedRig p;
+    MotionStudy study = FullTurn(p.rig.axle, 13);
+    study.clashMode = mode;
+    const motion::Result res =
+        motion::Run(p.rig.asmDoc, p.Parts(), nullptr, study);
+    INFO(mode << "\n" << motion::Table(res, study));
+    REQUIRE(res.error.empty());
+    CHECK_FALSE(res.clean);
+    CHECK(res.rigidCheckedAt == 0);
+    CHECK(res.pairsRigidChecked > 0);
+    CHECK(res.pairsRigid > 0); // and skipped at every later sample
+
+    // Sample 0 names the fastened pair's overlap, marked rigid, and says
+    // where it is — exactly, even in mesh mode, since a rigid pair is
+    // always asked exactly.
+    const auto& first = res.samples[0].clashes;
+    const auto ab = std::find_if(first.begin(), first.end(), [](const auto& c) {
+      return IsPair(c, "Plate A", "Plate B");
+    });
+    REQUIRE(ab != first.end());
+    CHECK(ab->rigid);
+    REQUIRE(ab->known);
+    CHECK_THAT(ab->volume, WithinAbs(5.0 * 10.0 * 4.0, 1e-3));
+    CHECK_THAT(ab->centroid.x, WithinAbs(47.5, 1e-3));
+    CHECK_THAT(ab->centroid.y, WithinAbs(45.0, 1e-3));
+    CHECK_THAT(ab->centroid.z, WithinAbs(0.0, 1e-3));
+    CHECK_THAT(ab->bboxMin.x, WithinAbs(45.0, 1e-3));
+    CHECK_THAT(ab->bboxMax.x, WithinAbs(50.0, 1e-3));
+    CHECK_THAT(ab->bboxMin.z, WithinAbs(-2.0, 1e-3));
+    CHECK_THAT(ab->bboxMax.z, WithinAbs(2.0, 1e-3));
+
+    // B and C only touch: a bolted joint is not a clash — which in mesh
+    // mode it would be, had the rigid pair been asked by triangles.
+    for (const motion::Sample& s : res.samples)
+      for (const motion::Clash& c : s.clashes)
+        CHECK_FALSE(IsPair(c, "Plate B", "Plate C"));
+    // A standing clash is reported once, not at every sample.
+    for (size_t i = 1; i < res.samples.size(); i++)
+      for (const motion::Clash& c : res.samples[i].clashes)
+        CHECK_FALSE(c.rigid);
+    // The arm still hits the stop, as a moving clash.
+    bool armHit = false;
+    for (const motion::Sample& s : res.samples)
+      for (const motion::Clash& c : s.clashes)
+        armHit = armHit || (IsPair(c, "Arm", "Stop") && !c.rigid);
+    CHECK(armHit);
+
+    const std::string table = motion::Table(res, study);
+    CHECK_THAT(table, ContainsSubstring("(rigid)") &&
+                          ContainsSubstring("checked once, exactly, at "
+                                            "sample 0"));
+  }
+}
+
+TEST_CASE("The verdict calls a rigid pair's clash standing", "[motion]") {
+  const MotionStudy s = FullTurn(1, 3);
+  motion::Result r;
+  r.checkedClashes = true;
+  r.clean = false;
+  r.samples.resize(3);
+  motion::Clash c;
+  c.aName = "Plate A";
+  c.bName = "Plate B";
+  c.rigid = true;
+  r.samples[0].clashes.push_back(c);
+  r.worstSample = 0;
+  CHECK_THAT(motion::Summarize(r, s, false).text,
+             ContainsSubstring("Plate A x Plate B at sample 0") &&
+                 ContainsSubstring("standing"));
 }
