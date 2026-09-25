@@ -238,6 +238,21 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     if (p.contains("suppressed_occurrences"))
       next.suppressedFeatures =
           p.at("suppressed_occurrences").get<std::vector<uint64_t>>();
+    // v129: a mate INSIDE a flexible placement is the sub-assembly's to hold
+    // or suppress, through the configuration that placement runs under —
+    // two configurations, the parent's and the sub's, fighting over one
+    // mate is a model nobody can read.
+    for (const char* k : {"suppressed_mates", "mate_overrides"})
+      if (p.contains(k))
+        for (const json& e : p.at(k))
+          if (e.is_object() && e.contains("path"))
+            throw std::runtime_error(
+                std::string(k) +
+                ": a mate inside a flexible sub-assembly placement is held "
+                "or suppressed by the sub-assembly's OWN configuration — "
+                "give it one there, and choose it for this placement with "
+                "set_occurrence_configuration; this configuration takes "
+                "this assembly's mates");
     if (p.contains("suppressed_mates")) {
       next.suppressedMates =
           p.at("suppressed_mates").get<std::vector<uint64_t>>();

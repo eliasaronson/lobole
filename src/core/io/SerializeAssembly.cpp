@@ -36,6 +36,29 @@ json OccurrenceToJson(const Occurrence& o) {
   // v56: which configuration of the reference this placement uses; 0 (and
   // absent, in every older file) = that document's active one.
   j["configuration_id"] = o.configurationId;
+  // v129: a flexible placement and the poses it keeps for its sub-assembly.
+  // Omitted when rigid, so every earlier assembly serializes unchanged.
+  if (o.flexible) {
+    j["flexible"] = true;
+    json poses = json::array();
+    for (const InnerPose& p : o.innerPoses)
+      poses.push_back({{"occurrence", p.occurrence},
+                       {"position", Vec3ToJson(p.position)},
+                       {"orientation", QuatToJson(p.orientation)}});
+    j["inner_poses"] = std::move(poses);
+    json dofs = json::array();
+    for (const InnerMateDof& d : o.innerMateDofs) {
+      json dj{{"mate", d.mate}, {"rotation", d.rotation}, {"offset", d.offset}};
+      if (d.dx != 0.0f || d.dy != 0.0f) {
+        dj["dx"] = d.dx;
+        dj["dy"] = d.dy;
+      }
+      if (d.ballRotation != glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+        dj["ball_rotation"] = QuatToJson(d.ballRotation);
+      dofs.push_back(std::move(dj));
+    }
+    j["inner_mate_dofs"] = std::move(dofs);
+  }
   return j;
 }
 
@@ -73,6 +96,30 @@ Occurrence OccurrenceFromJson(const json& j) {
     o.attachRotation = glm::quat((*it)[3].get<float>(), (*it)[0].get<float>(),
                                  (*it)[1].get<float>(), (*it)[2].get<float>());
   }
+  o.flexible = j.value("flexible", false); // v129
+  for (const json& pj : j.value("inner_poses", json::array())) {
+    InnerPose p;
+    p.occurrence = pj.at("occurrence").get<uint64_t>();
+    p.position = Vec3FromJson(pj.at("position"));
+    p.orientation = QuatFromJson(pj.at("orientation"));
+    o.innerPoses.push_back(p);
+  }
+  for (const json& dj : j.value("inner_mate_dofs", json::array())) {
+    InnerMateDof d;
+    d.mate = dj.at("mate").get<uint64_t>();
+    d.rotation = dj.value("rotation", 0.0f);
+    d.offset = dj.value("offset", 0.0f);
+    d.dx = dj.value("dx", 0.0f);
+    d.dy = dj.value("dy", 0.0f);
+    if (dj.contains("ball_rotation"))
+      d.ballRotation = QuatFromJson(dj.at("ball_rotation"));
+    o.innerMateDofs.push_back(d);
+  }
+  if (!o.flexible && (!o.innerPoses.empty() || !o.innerMateDofs.empty()))
+    throw std::runtime_error("occurrence " + std::to_string(o.id) +
+                             " carries inner_poses or inner_mate_dofs but is "
+                             "not flexible — only a flexible placement moves "
+                             "its sub-assembly");
   return o;
 }
 
@@ -368,6 +415,12 @@ json RelationToJson(const Relation& r) {
   j["kind"] = RelationKindToString(r.kind);
   j["mate_a"] = r.mateA;
   j["mate_b"] = r.mateB;
+  // v129: a side inside a flexible placement names its path; absent = a
+  // mate of this document.
+  if (!r.mateAPath.empty())
+    j["mate_a_path"] = r.mateAPath;
+  if (!r.mateBPath.empty())
+    j["mate_b_path"] = r.mateBPath;
   j["dof_a"] = MateDofToString(r.dofA);
   j["dof_b"] = MateDofToString(r.dofB);
   j["ratio"] = r.ratio;
@@ -452,6 +505,8 @@ json MotionStudyToJson(const MotionStudy& s) {
   j["name"] = s.name;
   j["driver_mate"] = s.driverMate;
   j["driver_dof"] = MateDofToString(s.driverDof);
+  if (!s.driverPath.empty())
+    j["driver_path"] = s.driverPath; // v129
   j["from"] = s.from;
   j["to"] = s.to;
   j["samples"] = s.samples;
@@ -468,6 +523,8 @@ MotionStudy MotionStudyFromJson(const json& j) {
   s.name = j.value("name", std::string{});
   s.driverMate = j.at("driver_mate").get<uint64_t>();
   s.driverDof = MateDofFromString(j.at("driver_dof").get<std::string>());
+  if (j.contains("driver_path")) // v129
+    s.driverPath = j.at("driver_path").get<std::vector<uint64_t>>();
   s.from = j.at("from").get<double>();
   s.to = j.at("to").get<double>();
   s.samples = j.value("samples", 48);
@@ -490,6 +547,10 @@ Relation RelationFromJson(const json& j) {
   r.kind = RelationKindFromString(j.at("kind").get<std::string>());
   r.mateA = j.at("mate_a").get<uint64_t>();
   r.mateB = j.at("mate_b").get<uint64_t>();
+  if (j.contains("mate_a_path")) // v129
+    r.mateAPath = j.at("mate_a_path").get<std::vector<uint64_t>>();
+  if (j.contains("mate_b_path"))
+    r.mateBPath = j.at("mate_b_path").get<std::vector<uint64_t>>();
   r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
   r.ratio = j.at("ratio").get<double>();

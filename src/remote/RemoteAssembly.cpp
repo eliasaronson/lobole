@@ -47,8 +47,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"add_occurrence",
      "Place a part OR another assembly in the active assembly {part: name or "
      "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
-     "reference that would close a cycle is refused.",
-     "fixed, name, part, transform, visible"},
+     "reference that would close a cycle is refused. {flexible: true} places "
+     "a sub-assembly whose own mechanism MOVES here (see "
+     "set_occurrence_flexible), and answers with the solve's errored_mates.",
+     "fixed, flexible, name, part, transform, visible"},
     {"remove_occurrence",
      "Remove an occurrence. Takes `occurrence` as well as `id`.",
      "id, occurrence"},
@@ -74,6 +76,22 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "neighbours here spell that argument `occurrence`, and one method "
      "spelling it differently is a refusal in the middle of a loop.",
      "id, occurrence, visible"},
+    {"set_occurrence_flexible",
+     "Make a placed SUB-ASSEMBLY flexible or rigid {occurrence, flexible} "
+     "(docs/assemblies/README.md#flexible-sub-assemblies). Flexible: its "
+     "occurrences, mates and relations join this assembly's solve and "
+     "motion studies, instanced for THIS placement (two placements pose "
+     "independently; the sub-assembly's document is not touched), under the "
+     "configuration set_occurrence_configuration chose for it — which is "
+     "what holds or suppresses its mates, never this assembly's. A relation "
+     "or a study driver here then names one of its mates as {path: "
+     "[occurrence], mate}; set_mate {id, path} poses one. Refused, naming "
+     "why, for a part, a sub-assembly with nothing fixed, one holding a "
+     "freewheel or a click, one that places something flexible itself, or "
+     "when this assembly is itself placed flexibly — only one level moves. "
+     "Rigid again drops the poses it kept. Answers the occurrence and "
+     "`solve` {errored_mates, flexible: the solve_assembly row}.",
+     "flexible, id, occurrence"},
     {"set_occurrence_fixed",
      "Fix/free an occurrence for the solver. Takes `occurrence` as well as "
      "`id`.",
@@ -84,7 +102,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"set_occurrence_configuration",
      "Choose which configuration of a placed SUB-ASSEMBLY this occurrence "
      "uses {id, configuration: name|id|null}; null = that document's active "
-     "one. Two placements of one assembly can differ.",
+     "one. Two placements of one assembly can differ. A FLEXIBLE placement "
+     "runs its mechanism under this configuration (its holds and "
+     "suppressions), and is re-solved.",
      "configuration, id, occurrence"},
     {"select_occurrence",
      "Select an occurrence in the UI; nothing (or 0) clears it. Takes "
@@ -132,8 +152,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "the connector axis (the GUI's Rotate), not a pose. "
      "To sweep a range rather than jump to one pose use a motion study: it "
      "walks its samples in order, so each solve starts from the last and a "
-     "closed loop stays on the branch it is already on.",
-     "ball_rotation, dx, dy, flipped, id, name, offset, rotation, "
+     "closed loop stays on the branch it is already on. "
+     "With {path: [occurrence]} `id` is a mate INSIDE that flexible "
+     "sub-assembly placement (its own id there): only rotation, "
+     "rotation_deg or offset — THIS placement's pose of it, kept on the "
+     "occurrence; refused where the placement's configuration holds it.",
+     "ball_rotation, dx, dy, flipped, id, name, offset, path, rotation, "
      "rotation_deg"},
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates",
@@ -198,8 +222,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotational DOF — its `rotation` is authored, not free), and "
      "for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
-     "degrees off parallel (docs/assemblies/relations.md).",
-     "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lead, "
+     "degrees off parallel (docs/assemblies/relations.md). "
+     "a_path / b_path ([occurrence id] of a FLEXIBLE sub-assembly placement) "
+     "make that side a mate INSIDE it, by the sub-assembly's own mate id — "
+     "an engine's chain driving its pump's camshaft; refused for a "
+     "freewheel or a click, whose history would be per placement.",
+     "thread_part, thread_feature, a, a_path, b, b_path, dof_b, drives, "
+     "duration_deg, lead, "
      "lift, name, ride_deg, ride_dof, ride_mate, ride_mm, teeth, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
@@ -212,7 +241,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"list_relations", "List relations with status/errors.", "",
      remote::NoFlags,
      "relations[]{type,id,name,kind,mate_a,mate_b,dof_a,dof_b,ratio,phase,"
-     "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,error?}"},
+     "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,"
+     "mate_a_path?,mate_b_path?,error?}"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -233,12 +263,20 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "`tilt_deg` at `connector` (a|b; absent when either side does), would "
      "close it: `closes` lists the loop's failing mates, and `sole` is false "
      "when several suspects close the same loop equally well and none is "
-     "claimed. Empty when the fault is not a single tilted axis.",
+     "claimed. Empty when the fault is not a single tilted axis. "
+     "`flexible` (only when a sub-assembly is placed flexibly) reports each "
+     "such placement per path: {occurrence, name, configuration_id, "
+     "placed_by_mates, placed_by_transform, mates[]{path, id, name, status, "
+     "error?, residual_mm?, rotation_deg?, offset?}} or its `error` when it "
+     "could not move.",
      "", remote::NoFlags,
      "errored_mates,placed,occurrences,placed_by_mates,placed_by_transform,"
      "mates[]{id,name,status,error?,residual_mm?},loop_mates?,dof?,"
      "loops_closed?,residual_mm?,redundant_mates?,"
-     "suspects?[]{mate,name,tilt_deg,connector?,closes,sole}"},
+     "suspects?[]{mate,name,tilt_deg,connector?,closes,sole},"
+     "flexible?[]{occurrence,name,configuration_id,placed_by_mates?,"
+     "placed_by_transform?,mates?[]{path,id,name,status,error?,residual_mm?,"
+     "rotation_deg?,offset?},error?}"},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/README.md). "
      "Every dimension but the length is READ from the vendored table for that "
@@ -411,6 +449,19 @@ uint64_t AssertionKey(ui::AppState& state, const ClearanceAssertion& a) {
   mix(a.minMm);
   mix(a.mode == "mesh" ? 1.0 : 2.0);
   for (uint64_t occ : {a.a, a.b}) {
+    // A flexible placement's inner poses, explicitly (v129): a shaft that
+    // turned about its own axis moves no bounding box, and is still a
+    // different placement of the parts than the one that was checked.
+    if (const Occurrence* o = state.assembly->FindById(occ); o && o->flexible)
+      for (const InnerPose& ip : o->innerPoses) {
+        mix(static_cast<double>(ip.occurrence));
+        for (int k = 0; k < 3; k++)
+          mix(ip.position[k]);
+        mix(ip.orientation.w);
+        mix(ip.orientation.x);
+        mix(ip.orientation.y);
+        mix(ip.orientation.z);
+      }
     const std::vector<Body> bodies = ui::OccurrenceSubtreeBodies(state, occ);
     mix(static_cast<double>(bodies.size()));
     for (const Body& body : bodies) {
@@ -621,6 +672,134 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 }
 } // namespace
 
+// Why `occ` cannot be made FLEXIBLE in the active assembly (v129), or empty:
+// the unit's own refusals, and one more only the project can see — the
+// active assembly is itself placed flexibly somewhere, and only one level
+// moves.
+std::string FlexibleRefusalHere(ui::AppState& state, const Occurrence& occ) {
+  std::string why =
+      assembly::FlexibleRefusal(occ, ui::AssemblyResolverFor(state));
+  if (!why.empty())
+    return why;
+  uint64_t hostId = 0;
+  for (const ui::PartSlot& slot : state.parts)
+    if (slot.kind == ui::DocKind::Assembly &&
+        ui::AssemblyDocById(state, slot.id) == state.assembly.get())
+      hostId = slot.id;
+  for (const ui::PartSlot& slot : state.parts) {
+    if (slot.kind != ui::DocKind::Assembly)
+      continue;
+    const AssemblyDocument* other = ui::AssemblyDocById(state, slot.id);
+    if (other == nullptr || other == state.assembly.get())
+      continue;
+    for (const Occurrence& o : other->GetOccurrences())
+      if (o.flexible && o.partId == hostId)
+        return "this assembly is placed FLEXIBLY in '" + slot.name + "' (as '" +
+               o.name +
+               "'), and only one level moves — a flexible placement inside "
+               "a flexible placement is refused";
+  }
+  return {};
+}
+
+// A mate named {path, mate} from a request: `path` is the key holding the
+// path ([occurrence id] of a flexible placement), `id` the mate. Refused
+// naming what is wrong with the path, or the mates that are there.
+const Mate* MateFromRequest(ui::AppState& state, const RpcParams& p,
+                            const char* pathKey, uint64_t id,
+                            std::vector<uint64_t>& path) {
+  path.clear();
+  if (p.contains(pathKey) && !p.at(pathKey).is_null())
+    path = p.at(pathKey).get<std::vector<uint64_t>>();
+  std::string why;
+  const Mate* mate = assembly::MateAtPath(*state.assembly, path, id,
+                                          ui::AssemblyResolverFor(state), &why);
+  if (mate == nullptr)
+    throw std::runtime_error(path.empty() ? why
+                                          : std::string(pathKey) + ": " + why);
+  return mate;
+}
+
+// A connector's world frame for a mate named by path: an inner mate's
+// connector is in its sub-assembly's space, placed by the flexible
+// placement's own pose of the occurrence it is on.
+std::optional<glm::mat4> MateConnectorWorld(ui::AppState& state,
+                                            const std::vector<uint64_t>& path,
+                                            const Connector& c) {
+  if (path.empty())
+    return ui::ConnectorWorldFrame(state, c);
+  const Occurrence* F = state.assembly->FindById(path.front());
+  const AssemblyDocument* sub =
+      F ? ui::AssemblyDocById(state, F->partId) : nullptr;
+  const Occurrence* inner = sub ? sub->FindById(c.occurrenceId) : nullptr;
+  if (inner == nullptr)
+    return std::nullopt;
+  const auto local =
+      assembly::ConnectorLocalFrame(c, *sub, ui::PartResolverFor(state),
+                                    nullptr, ui::AssemblyResolverFor(state));
+  if (!local)
+    return std::nullopt;
+  return ui::OccurrenceMatrix(*F) * assembly::InnerPlacement(*F, *inner) *
+         *local;
+}
+
+// The mates inside every flexible placement, by path, as solve_assembly
+// reports them (v129): how many of its occurrences move and how many fold
+// into it, and every one of its mates with a status.
+json FlexibleRows(ui::AppState& state, const assembly::SolveReport& rep) {
+  json rows = json::array();
+  for (const Occurrence& F : state.assembly->GetOccurrences()) {
+    if (!F.flexible)
+      continue;
+    const AssemblyDocument* sub = ui::AssemblyDocById(state, F.partId);
+    json row{{"occurrence", F.id},
+             {"name", F.name},
+             {"configuration_id", F.configurationId}};
+    std::string unitError;
+    for (const assembly::SolveReport::InnerMate& im : rep.innerMates)
+      if (im.occurrence == F.id && im.mate == 0)
+        unitError = im.error;
+    if (!unitError.empty() || sub == nullptr) {
+      row["error"] =
+          unitError.empty() ? "its sub-assembly is not loaded" : unitError;
+      rows.push_back(std::move(row));
+      continue;
+    }
+    // Per path, as the top level reports its own: what the mates determine
+    // (moving) against what stays where the sub-assembly put it.
+    row["placed_by_mates"] = F.innerPoses.size();
+    row["placed_by_transform"] =
+        sub->GetOccurrences().size() - F.innerPoses.size();
+    json mates = json::array();
+    for (const Mate& m : sub->GetMates()) {
+      if (sub->MateSuppressedIn(F.configurationId, m.id))
+        continue;
+      json mj{{"path", {F.id}},
+              {"id", m.id},
+              {"name", m.name},
+              {"status", "satisfied"}};
+      for (const assembly::SolveReport::InnerMate& im : rep.innerMates)
+        if (im.occurrence == F.id && im.mate == m.id) {
+          mj["status"] = !im.error.empty() ? "error" : "redundant";
+          if (!im.error.empty())
+            mj["error"] = im.error;
+          if (im.residualMm > 0.0)
+            mj["residual_mm"] = im.residualMm;
+        }
+      if (const InnerMateDof* d = F.FindInnerMateDof(m.id)) {
+        if (assembly::MateHasDof(m.type, MateDof::Rotation))
+          mj["rotation_deg"] = angles::ToDegrees(d->rotation);
+        if (assembly::MateHasDof(m.type, MateDof::Offset))
+          mj["offset"] = d->offset;
+      }
+      mates.push_back(std::move(mj));
+    }
+    row["mates"] = std::move(mates);
+    rows.push_back(std::move(row));
+  }
+  return rows;
+}
+
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
   if (m == "fit_fastener") {
@@ -783,12 +962,25 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           NormalizeTransform(p.value("transform", identityTransform))},
          {"visible", p.value("visible", true)},
          {"fixed", p.value("fixed", false)}});
+    // v129: placed FLEXIBLE, its sub-assembly's mechanism moves here.
+    occ.flexible = p.value("flexible", false);
+    if (occ.flexible) {
+      const std::string why = FlexibleRefusalHere(state, occ);
+      if (!why.empty())
+        throw std::runtime_error("cannot place '" + refName +
+                                 "' flexible: " + why);
+    }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddOccurrence(occ);
-    return json{
+    json out{
         {"id", id},
         {"part_id", refId},
         {"ref_kind", refKind == OccurrenceRef::Assembly ? "assembly" : "part"}};
+    if (occ.flexible) {
+      out["flexible"] = true;
+      out["errored_mates"] = ui::SolveActiveAssembly(state);
+    }
+    return out;
   }
   if (m == "remove_occurrence") {
     if (!state.assembly)
@@ -888,7 +1080,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   // version so the renderer resyncs. `id` names the occurrence.
   if (m == "set_occurrence_transform" || m == "set_occurrence_visible" ||
       m == "set_occurrence_fixed" || m == "rename_occurrence" ||
-      m == "set_occurrence_configuration") {
+      m == "set_occurrence_configuration" || m == "set_occurrence_flexible") {
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
@@ -938,6 +1130,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       occ->visible = p.at("visible").get<bool>();
     } else if (m == "set_occurrence_fixed") {
       occ->fixed = p.at("fixed").get<bool>();
+    } else if (m == "set_occurrence_flexible") {
+      const bool want = p.at("flexible").get<bool>();
+      if (want && !occ->flexible) {
+        const std::string why = FlexibleRefusalHere(state, *occ);
+        if (!why.empty()) {
+          state.assemblyHistory.undo.pop_back(); // nothing changed
+          throw std::runtime_error("'" + occ->name +
+                                   "' cannot be flexible: " + why);
+        }
+      }
+      if (!want) {
+        // Rigid again: the unit stands as its own document has it, and a
+        // relation into it reports that it is no longer flexible.
+        occ->innerPoses.clear();
+        occ->innerMateDofs.clear();
+      }
+      occ->flexible = want;
     } else if (m == "set_occurrence_configuration") {
       // A5/v56: which configuration of the REFERENCED document this
       // placement uses. Named or by id; 0 / "" goes back to that document's
@@ -980,9 +1189,24 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     state.assembly->BumpVersion();
     // Moving/grounding an occurrence can shift what the mates solve to (a fixed
     // anchor moved, or a mated occurrence was nudged and must be re-placed).
-    if (m == "set_occurrence_transform" || m == "set_occurrence_fixed")
-      ui::SolveActiveAssembly(state);
-    return DocumentIO::OccurrenceToJson(*occ);
+    // A flexible unit moves under its configuration, so choosing another
+    // re-solves it too (v129).
+    json regen;
+    if (m == "set_occurrence_transform" || m == "set_occurrence_fixed" ||
+        m == "set_occurrence_flexible" ||
+        (m == "set_occurrence_configuration" && occ->flexible)) {
+      const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
+      regen = json{{"errored_mates", rep.erroredMates}};
+      if (occ->flexible)
+        for (const json& row : FlexibleRows(state, rep))
+          if (row.at("occurrence").get<uint64_t>() == occ->id)
+            regen["flexible"] = row;
+    }
+    occ = state.assembly->FindById(occId);
+    json out = DocumentIO::OccurrenceToJson(*occ);
+    if (!regen.is_null())
+      out["solve"] = std::move(regen);
+    return out;
   }
   // ---- Mates (A3) ---------------------------------------------------------
   // A connector spec is {occurrence, origin:true} or
@@ -1202,7 +1426,77 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       out["error"] = mm->error;
     return out;
   }
+  if (m == "set_mate" && p.contains("path") && !p.at("path").is_null() &&
+      !p.at("path").empty()) {
+    // v129: POSE a mate inside a flexible placement — this placement's own
+    // value, kept on its occurrence; the sub-assembly's document is shared
+    // by every placement of it and is not touched.
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    std::vector<uint64_t> path;
+    const Mate* mate =
+        MateFromRequest(state, p, "path", p.at("id").get<uint64_t>(), path);
+    for (const char* k : {"flipped", "name", "dx", "dy", "ball_rotation"})
+      if (p.contains(k))
+        throw std::runtime_error(
+            std::string(k) +
+            " is the sub-assembly's to edit, on its own tab; "
+            "a mate inside a flexible placement takes rotation, rotation_deg "
+            "or offset here — this placement's pose of it");
+    const bool turn = p.contains("rotation") || p.contains("rotation_deg");
+    const MateDof dof = turn ? MateDof::Rotation : MateDof::Offset;
+    if (!turn && !p.contains("offset"))
+      throw std::runtime_error("set_mate with a path poses the mate: give "
+                               "rotation, rotation_deg or offset");
+    if (!assembly::MateHasDof(mate->type, dof))
+      throw std::runtime_error("mate " + std::to_string(mate->id) + " (" +
+                               mate->name + ") has no " +
+                               DocumentIO::MateDofToString(dof) + " to set");
+    const Occurrence* F = state.assembly->FindById(path.front());
+    const AssemblyDocument* sub = ui::AssemblyDocById(state, F->partId);
+    if (const Configuration* c = sub->ConfigurationFor(F->configurationId))
+      if (const MateOverride* hold = c->OverrideForMate(mate->id))
+        if ((turn && hold->rotation) || (!turn && hold->offset))
+          throw std::runtime_error(
+              "mate " + std::to_string(mate->id) + "'s " +
+              (turn ? "rotation" : "offset") + " is held by '" + F->name +
+              "''s configuration '" + c->name +
+              "' — choose another with set_occurrence_configuration");
+    const double current =
+        assembly::MateDofAt(*state.assembly, path, mate->id, dof,
+                            ui::AssemblyResolverFor(state))
+            .value_or(0.0);
+    const double value = turn
+                             ? MateRotationRadians(p.contains("rotation"),
+                                                   p.value("rotation", 0.0),
+                                                   p.contains("rotation_deg"),
+                                                   p.value("rotation_deg", 0.0),
+                                                   static_cast<float>(current))
+                             : p.at("offset").get<double>();
+    ui::SnapshotAssembly(state);
+    assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
+                           ui::AssemblyResolverFor(state));
+    const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(
+        state, assembly::Driven{mate->id, dof, path});
+    json out{{"id", mate->id}, {"path", path}, {"name", mate->name}};
+    const Occurrence* after = state.assembly->FindById(path.front());
+    if (const InnerMateDof* d = after->FindInnerMateDof(mate->id)) {
+      out["rotation"] = d->rotation;
+      out["rotation_deg"] = angles::ToDegrees(d->rotation);
+      out["offset"] = d->offset;
+    }
+    out["errored_mates"] = rep.erroredMates;
+    for (const assembly::SolveReport::InnerMate& im : rep.innerMates)
+      if (im.occurrence == path.front() && im.mate == mate->id &&
+          !im.error.empty())
+        out["error"] = im.error;
+    return out;
+  }
   if (m == "set_mate") {
+    // The branch above takes a non-empty `path`; this one an empty one.
+    // rpc-params: path
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
@@ -1323,6 +1617,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         DocumentIO::RelationKindFromString(p.at("type").get<std::string>());
     r.mateA = p.at("a").get<uint64_t>();
     r.mateB = p.at("b").get<uint64_t>();
+    // rpc-params: a_path, b_path
+    // v129: either side may be a mate inside a flexible placement, named
+    // {a_path | b_path: [occurrence id], a | b: its sub-assembly's mate id}.
+    const Mate* a = MateFromRequest(state, p, "a_path", r.mateA, r.mateAPath);
+    const Mate* b = MateFromRequest(state, p, "b_path", r.mateB, r.mateBPath);
+    for (const std::vector<uint64_t>* path : {&r.mateAPath, &r.mateBPath})
+      if (!path->empty() &&
+          (DocumentIO::RelationKindFromString(
+               p.at("type").get<std::string>()) == RelationKind::Freewheel ||
+           DocumentIO::RelationKindFromString(
+               p.at("type").get<std::string>()) == RelationKind::Click))
+        throw std::runtime_error(
+            "a freewheel or a click into a flexible placement is refused: its "
+            "history (lead) would be per-placement state — gear, chain, "
+            "rack, screw, linear and cam relations can name an inner mate");
+    const bool samePath = r.mateAPath == r.mateBPath;
     r.name = p.value("name", std::string{});
     r.phase = p.value("phase", 0.0);
     if (p.contains("drives") && r.kind != RelationKind::Freewheel &&
@@ -1336,13 +1646,6 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if ((r.threadPart || r.threadFeature) && r.kind != RelationKind::Screw)
       throw std::runtime_error(
           "thread references are only valid on screw relations");
-    const Mate* a = state.assembly->FindMateById(r.mateA);
-    const Mate* b = state.assembly->FindMateById(r.mateB);
-    if (a == nullptr || b == nullptr)
-      throw std::runtime_error(
-          "no mate with id " +
-          std::to_string(a == nullptr ? r.mateA : r.mateB) +
-          "; list_mates shows the ones that exist");
     // The kind fixes which DOF of each mate is coupled, and how the ratio is
     // derived from the kind's own numbers.
     switch (r.kind) {
@@ -1368,7 +1671,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     case RelationKind::Screw:
       r.dofA = MateDof::Rotation;
       r.dofB = MateDof::Offset;
-      if (r.mateA != r.mateB)
+      if (r.mateA != r.mateB || !samePath)
         throw std::runtime_error(
             "a screw relation is one CYLINDRICAL mate's rotation driving its "
             "own offset: pass the same mate id as a and b");
@@ -1635,8 +1938,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // are unusual but real (bevel, crossed helical), so those get a warning.
     json warnings = json::array();
     {
-      const auto fa = ui::ConnectorWorldFrame(state, a->a);
-      const auto fb = ui::ConnectorWorldFrame(state, b->a);
+      const auto fa = MateConnectorWorld(state, r.mateAPath, a->a);
+      const auto fb = MateConnectorWorld(state, r.mateBPath, b->a);
       if (fa && fb) {
         const glm::vec3 za = glm::normalize(glm::vec3((*fa)[2]));
         const glm::vec3 zb = glm::normalize(glm::vec3((*fb)[2]));
@@ -1839,6 +2142,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               state.assembly->GetOccurrences().size() - byTransform},
              {"placed_by_transform", byTransform},
              {"mates", arr}};
+    // v129: every flexible placement, per path — its mates are the
+    // sub-assembly's and are not in `mates` above.
+    if (json rows = FlexibleRows(state, rep); !rows.empty())
+      out["flexible"] = std::move(rows);
     if (rep.loopMates > 0) {
       out["loop_mates"] = rep.loopMates;
       out["dof"] = rep.dof;

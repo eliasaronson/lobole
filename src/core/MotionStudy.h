@@ -34,6 +34,10 @@ namespace motion {
 
 struct Clash {
   uint64_t a = 0, b = 0; // top-level occurrence ids
+  // v129: inside a FLEXIBLE placement a clash is between its LEAVES, so
+  // each side also names the occurrence of that placement's sub-assembly it
+  // is (the path is {a, aInner}); 0 = the top-level occurrence as a whole.
+  uint64_t aInner = 0, bInner = 0;
   std::string aName, bName;
   // The pair never moves relative to each other over the study (fastened,
   // or both carried by the same moving part). Such a pair is checked ONCE,
@@ -58,6 +62,7 @@ struct UnknownContact {
   uint64_t a = 0, b = 0;
   std::string aName, bName;
   std::string reason = "exact contact calculation failed";
+  uint64_t aInner = 0, bInner = 0; // as Clash
 };
 
 struct Sample {
@@ -69,6 +74,14 @@ struct Sample {
   // Placement of every top-level occurrence at this sample, by id. The
   // export and the scrub read these; nothing else in the document does.
   std::vector<std::pair<uint64_t, glm::mat4>> worlds;
+  // v129: every MOVING occurrence inside a flexible placement, in world
+  // space, keyed by its path {root, occurrence}. What folds into the root
+  // is where the root is.
+  struct LeafWorld {
+    uint64_t root = 0, occurrence = 0;
+    glm::mat4 world{1.0f};
+  };
+  std::vector<LeafWorld> leaves;
   std::vector<Clash> clashes;
   std::vector<UnknownContact> unknownContacts;
   // Every moving mate's DOF values at this sample (radians, mm): what the
@@ -77,6 +90,12 @@ struct Sample {
   struct MateValue {
     uint64_t mate = 0;
     double rotation = 0.0, offset = 0.0;
+    // v129: the flexible placement an inner mate is in (empty = this
+    // document's), and what the mate is, since an inner one cannot be
+    // looked up in this document.
+    std::vector<uint64_t> path;
+    std::string name;
+    bool turns = false, slides = false;
   };
   std::vector<MateValue> mates;
 };
@@ -127,7 +146,9 @@ double ValueAt(const MotionStudy& study, double t);
 
 // Why this study cannot run — a driver mate that is gone or has no such
 // DOF — or empty when it can. The same message Run() puts in `error`.
-std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study);
+// `assemblies` is needed only for a driver inside a flexible placement.
+std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
+                   const assembly::AssemblyResolver& assemblies = nullptr);
 
 // The collision table as text, one line per sample: what the plan asked to
 // be PRINTED, and what an agent pastes into its report.

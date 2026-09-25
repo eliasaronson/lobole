@@ -1332,9 +1332,14 @@ void SyncAssemblyRenderers(AppState& state) {
         glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
         inst.world;
     glm::mat4 played;
-    if (MotionPlaybackWorld(state, occ.id, played))
+    if (MotionPlaybackWorld(state, occ.id, played)) {
+      glm::mat4 local = glm::inverse(OccurrenceMatrix(occ)) * inst.world;
+      glm::mat4 leaf; // a moving leaf of a flexible placement (v129)
+      if (MotionPlaybackLocal(state, occ, inst.innerIds, local, leaf))
+        local = leaf;
       xf = glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
-           played * glm::inverse(OccurrenceMatrix(occ)) * inst.world;
+           played * local;
+    }
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
       const SharedBody& sb = it->second.bodies[bi];
       if (!sb.tess)

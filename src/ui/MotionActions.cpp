@@ -21,6 +21,7 @@
 #include <cmath>
 #include <map>
 #include <memory>
+#include <set>
 #include <thread>
 
 namespace ui {
@@ -130,7 +131,8 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
       *error = "no motion study with id " + std::to_string(studyId);
     return false;
   }
-  const std::string why = motion::WhyNot(*state.assembly, *s);
+  const std::string why =
+      motion::WhyNot(*state.assembly, *s, AssemblyResolverFor(state));
   if (!why.empty()) {
     if (error)
       *error = why;
@@ -256,7 +258,8 @@ MotionStudy* StudyToPose(AppState& state, uint64_t studyId,
   MotionStudy* s = state.assembly->FindMotionStudyById(studyId);
   if (!s)
     return fail("no motion study with id " + std::to_string(studyId));
-  const std::string why = motion::WhyNot(*state.assembly, *s);
+  const std::string why =
+      motion::WhyNot(*state.assembly, *s, AssemblyResolverFor(state));
   if (!why.empty())
     return fail(why);
   if (s->configuration &&
@@ -284,8 +287,12 @@ MotionStudy* StudyToPose(AppState& state, uint64_t studyId,
 // the same spacing, so it costs what one run sample costs per step and is
 // bounded by the study's own sample count.
 void WalkDriver(AppState& state, const MotionStudy& s, double target) {
-  Mate* driver = state.assembly->FindMateById(s.driverMate);
-  const double current = assembly::MateDofValue(*driver, s.driverDof);
+  // The driver may be inside a flexible placement (v129): read and set
+  // through its path, which for this document's own mates is empty.
+  const assembly::AssemblyResolver subs = AssemblyResolverFor(state);
+  const double current = assembly::MateDofAt(*state.assembly, s.driverPath,
+                                             s.driverMate, s.driverDof, subs)
+                             .value_or(0.0);
   const double span = s.to - s.from;
   const int steps = std::max(s.samples - 1, 1);
   const double stride = std::abs(span) / steps;
@@ -295,12 +302,11 @@ void WalkDriver(AppState& state, const MotionStudy& s, double target) {
   walk = std::clamp(walk, 1, steps);
   for (int k = 1; k <= walk; k++) {
     const double v = current + (target - current) * (double(k) / walk);
-    assembly::SetMateDof(*driver, s.driverDof, v);
-    assembly::PropagateRelations(*state.assembly, driver->id, [&](uint64_t id) {
-      return ui::PartDocById(state, id);
-    });
-    SolveActiveAssemblyDriven(state, driver->id, s.driverDof,
-                              /*diagnose=*/false); // a motion sample
+    assembly::SetMateDofAt(*state.assembly, s.driverPath, s.driverMate,
+                           s.driverDof, v, subs);
+    SolveActiveAssemblyDriven(state, s.driverMate, s.driverDof,
+                              /*diagnose=*/false, // a motion sample
+                              s.driverPath);
   }
   state.syncedDocumentVersion = UINT64_MAX; // the placements changed
 }
@@ -354,31 +360,49 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
                   "a lie; fix the mechanism and run it again");
 
   // One node per top-level occurrence: its leaves' meshes in ITS frame, so
-  // the node's keyframes are the occurrence placements the run recorded.
+  // the node's keyframes are the occurrence placements the run recorded —
+  // and, inside a FLEXIBLE placement (v129), one per occurrence of it that
+  // moves, keyed {root, occurrence}; what does not move rides in the root's.
   auto flat = assembly::Flatten(*state.assembly, PartResolverFor(state),
                                 AssemblyResolverFor(state));
   if (!flat)
     return fail(flat.error());
-  std::map<uint64_t, glb::Node> nodes;
+  using Key = std::pair<uint64_t, uint64_t>;
+  std::set<Key> moving;
+  for (const motion::Sample::LeafWorld& l : r->samples.front().leaves)
+    moving.insert({l.root, l.occurrence});
+  std::map<Key, glb::Node> nodes;
   for (const Occurrence& o : state.assembly->GetOccurrences()) {
     if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
       continue;
-    glb::Node n;
-    n.name = o.name;
-    const glm::mat4 rootInv = glm::inverse(OccurrenceMatrix(o));
+    const glm::mat4 rootWorld = OccurrenceMatrix(o);
     for (const assembly::FlatInstance& inst : *flat) {
       if (inst.rootOccurrenceId != o.id || !inst.visible || !inst.part)
         continue;
+      Key key{o.id, 0};
+      glm::mat4 frame = rootWorld;
+      if (!inst.innerIds.empty() && moving.count({o.id, inst.innerIds[0]})) {
+        key.second = inst.innerIds[0];
+        frame = rootWorld *
+                (inst.levels.size() >= 2 ? inst.levels[1].local : inst.local);
+      }
+      glb::Node& n = nodes[key];
+      if (n.name.empty())
+        n.name = key.second == 0
+                     ? o.name
+                     : o.name + "/" +
+                           (inst.levels.size() >= 2 ? inst.levels[1].name
+                                                    : inst.name);
+      const glm::mat4 inv = glm::inverse(frame);
       for (const Body& b : inst.part->GetBodies()) {
         if (b.reference || !b.shape.IsValid())
           continue;
-        glb::AppendShape(n.mesh, b.shape, rootInv * inst.world);
+        glb::AppendShape(n.mesh, b.shape, inv * inst.world);
       }
     }
-    if (n.mesh.positions.empty())
-      continue;
-    nodes[o.id] = std::move(n);
   }
+  std::erase_if(
+      nodes, [](const auto& kv) { return kv.second.mesh.positions.empty(); });
   // Keyframes from the run. 24 frames per second, so a 49-sample study
   // plays in two seconds: derived from the sample count, not a duration
   // someone typed.
@@ -386,12 +410,18 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
   for (const motion::Sample& sample : r->samples)
     times.push_back(sample.t * (r->samples.size() - 1) / 24.0);
   std::vector<glb::Node> out;
-  for (auto& [id, n] : nodes) {
+  for (auto& [key, n] : nodes) {
     for (const motion::Sample& sample : r->samples) {
       glm::mat4 world(1.0f);
-      for (const auto& [occId, m] : sample.worlds)
-        if (occId == id)
-          world = m;
+      if (key.second == 0) {
+        for (const auto& [occId, m] : sample.worlds)
+          if (occId == key.first)
+            world = m;
+      } else {
+        for (const motion::Sample::LeafWorld& l : sample.leaves)
+          if (l.root == key.first && l.occurrence == key.second)
+            world = l.world;
+      }
       n.keyframes.push_back(world);
     }
     out.push_back(std::move(n));
@@ -420,6 +450,41 @@ bool FindWorld(const motion::Sample& s, uint64_t occId, glm::mat4& out) {
       return true;
     }
   return false;
+}
+
+bool FindLeaf(const motion::Sample& s, uint64_t root, uint64_t occ,
+              glm::mat4& out) {
+  for (const motion::Sample::LeafWorld& l : s.leaves)
+    if (l.root == root && l.occurrence == occ) {
+      out = l.world;
+      return true;
+    }
+  return false;
+}
+
+// Rigid placements: position lerped, orientation slerped, between the two
+// samples either side.
+glm::mat4 Blend(const glm::mat4& a, const glm::mat4& b, float f) {
+  const glm::quat qa = glm::normalize(glm::quat_cast(glm::mat3(a)));
+  const glm::quat qb = glm::normalize(glm::quat_cast(glm::mat3(b)));
+  const glm::vec3 p = glm::mix(glm::vec3(a[3]), glm::vec3(b[3]), f);
+  return glm::translate(glm::mat4(1.0f), p) *
+         glm::mat4_cast(glm::slerp(qa, qb, f));
+}
+
+// The two samples playback stands between, and how far along.
+bool PlaybackSpan(const AppState& state, const motion::Result*& r, size_t& i,
+                  float& f) {
+  if (state.motionPlaybackStudy == 0)
+    return false;
+  r = MotionResultFor(state, state.motionPlaybackStudy);
+  if (!r || r->samples.size() < 2)
+    return false;
+  const size_t n = r->samples.size();
+  const double pos = std::clamp(state.motionPlaybackPos, 0.0, double(n - 1));
+  i = std::min(static_cast<size_t>(pos), n - 2);
+  f = static_cast<float>(pos - double(i));
+  return true;
 }
 
 void PushAllLive(AppState& state) {
@@ -505,26 +570,44 @@ void TickMotionPlayback(AppState& state, double now) {
 
 bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
                          glm::mat4& world) {
-  if (state.motionPlaybackStudy == 0)
+  const motion::Result* r = nullptr;
+  size_t i = 0;
+  float f = 0.0f;
+  if (!PlaybackSpan(state, r, i, f))
     return false;
-  const motion::Result* r = MotionResultFor(state, state.motionPlaybackStudy);
-  if (!r || r->samples.size() < 2)
-    return false;
-  const size_t n = r->samples.size();
-  const double pos = std::clamp(state.motionPlaybackPos, 0.0, double(n - 1));
-  const size_t i = std::min(static_cast<size_t>(pos), n - 2);
-  const float f = static_cast<float>(pos - double(i));
   glm::mat4 a, b;
   if (!FindWorld(r->samples[i], occurrenceId, a) ||
       !FindWorld(r->samples[i + 1], occurrenceId, b))
     return false;
-  // Rigid placements: position lerped, orientation slerped, between the two
-  // samples either side.
-  const glm::quat qa = glm::normalize(glm::quat_cast(glm::mat3(a)));
-  const glm::quat qb = glm::normalize(glm::quat_cast(glm::mat3(b)));
-  const glm::vec3 p = glm::mix(glm::vec3(a[3]), glm::vec3(b[3]), f);
-  world = glm::translate(glm::mat4(1.0f), p) *
-          glm::mat4_cast(glm::slerp(qa, qb, f));
+  world = Blend(a, b, f);
+  return true;
+}
+
+bool MotionPlaybackLocal(AppState& state, const Occurrence& root,
+                         const std::vector<uint64_t>& innerPath,
+                         const glm::mat4& docLocal, glm::mat4& local) {
+  if (!root.flexible || innerPath.empty())
+    return false;
+  const motion::Result* r = nullptr;
+  size_t i = 0;
+  float f = 0.0f;
+  if (!PlaybackSpan(state, r, i, f))
+    return false;
+  glm::mat4 la, lb, ra, rb;
+  if (!FindLeaf(r->samples[i], root.id, innerPath[0], la) ||
+      !FindLeaf(r->samples[i + 1], root.id, innerPath[0], lb) ||
+      !FindWorld(r->samples[i], root.id, ra) ||
+      !FindWorld(r->samples[i + 1], root.id, rb))
+    return false;
+  const AssemblyDocument* sub = AssemblyDocById(state, root.partId);
+  const Occurrence* inner = sub ? sub->FindById(innerPath[0]) : nullptr;
+  if (inner == nullptr)
+    return false;
+  // docLocal = P * rest, with P where the document has that occurrence now;
+  // the played one stands at the leaf's recorded pose instead.
+  const glm::mat4 rest =
+      glm::inverse(assembly::InnerPlacement(root, *inner)) * docLocal;
+  local = glm::inverse(Blend(ra, rb, f)) * Blend(la, lb, f) * rest;
   return true;
 }
 

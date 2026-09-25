@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace motion {
 
@@ -21,7 +22,8 @@ double ValueAt(const MotionStudy& study, double t) {
   return study.from + t * (study.to - study.from);
 }
 
-std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
+std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
+                   const assembly::AssemblyResolver& assemblies) {
   // A study that names its configuration is judged UNDER it: its holds and
   // suppressions are the ones the run will see, whatever the tab has active.
   if (study.configuration) {
@@ -39,8 +41,40 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
     if (asmDoc.ActiveConfiguration() != want) {
       AssemblyDocument under = asmDoc;
       under.SetActiveConfigurationRaw(want);
-      return WhyNot(under, study);
+      return WhyNot(under, study, assemblies);
     }
+  }
+  // A driver inside a flexible placement (v129): the placement's own
+  // configuration holds and suppresses its mates, and says so.
+  if (!study.driverPath.empty()) {
+    std::string why;
+    const Mate* m = assembly::MateAtPath(asmDoc, study.driverPath,
+                                         study.driverMate, assemblies, &why);
+    if (m == nullptr)
+      return "driver: " + why;
+    if (!assembly::MateHasDof(m->type, study.driverDof))
+      return "driver mate " + std::to_string(m->id) + " (" + m->name +
+             ") has no " +
+             (study.driverDof == MateDof::Rotation ? "rotation" : "offset") +
+             " to drive";
+    const Occurrence* F = asmDoc.FindById(study.driverPath.front());
+    const std::string refusal = assembly::FlexibleRefusal(*F, assemblies);
+    if (!refusal.empty())
+      return "driver: '" + F->name + "' cannot move here: " + refusal;
+    const AssemblyDocument* sub = assemblies(F->partId);
+    if (sub->MateSuppressedIn(F->configurationId, m->id))
+      return "driver mate " + std::to_string(m->id) + " (" + m->name +
+             ") is out of the configuration '" + F->name + "' runs under";
+    if (const Configuration* c = sub->ConfigurationFor(F->configurationId))
+      if (const MateOverride* o = c->OverrideForMate(m->id))
+        if ((study.driverDof == MateDof::Rotation && o->rotation) ||
+            (study.driverDof == MateDof::Offset && o->offset))
+          return "driver mate " + std::to_string(m->id) + " (" + m->name +
+                 ") is held by configuration '" + c->name + "' of '" + F->name +
+                 "', so driving it would move nothing";
+    if (study.samples < 2)
+      return "a motion study needs at least 2 samples";
+    return {};
   }
   const Mate* m = asmDoc.FindMateById(study.driverMate);
   if (m == nullptr) {
@@ -85,8 +119,14 @@ glm::mat4 OccurrenceWorld(const Occurrence& o) {
          glm::mat4_cast(o.orientation);
 }
 
-// Which top-level occurrences move relative to each other over the study,
-// read off a kinematics-only pass through every sample.
+// What a clash check keys a body by: its top-level occurrence and, inside a
+// FLEXIBLE placement (v129), the occurrence of that placement's sub-assembly
+// it belongs to — a plunger and its barrel are two keys under one root, and
+// are checked against each other. {root, 0} everywhere else.
+using Key = std::pair<uint64_t, uint64_t>;
+
+// Which keys move relative to each other over the study, read off a
+// kinematics-only pass through every sample.
 //
 // Two parts bolted together touch — that is what a bolted joint is — and a
 // mesh check reports touching as a clash, so checking every fixed joint at
@@ -97,15 +137,21 @@ glm::mat4 OccurrenceWorld(const Occurrence& o) {
 // standing clashes in a pump that passed four exact studies.
 class RelativeMotion {
 public:
-  void Record(const AssemblyDocument& doc) {
-    for (const Occurrence& o : doc.GetOccurrences())
-      track_[o.id].push_back(OccurrenceWorld(o));
+  // The expanded document: a synthetic occurrence is recorded as the
+  // {root, inner} it stands for.
+  void Record(const assembly::FlexibleExpansion& ex) {
+    for (const Occurrence& o : ex.doc.GetOccurrences()) {
+      const auto it = ex.occOf.find(o.id);
+      const Key k = it != ex.occOf.end() ? it->second : Key{o.id, 0};
+      track_[k].push_back(OccurrenceWorld(o));
+    }
   }
   // True when the transform taking one into the other is not the same at
   // every sample — or when either was not tracked, which is checked rather
-  // than assumed still.
-  bool Moves(uint64_t a, uint64_t b) const {
-    const auto ia = track_.find(a), ib = track_.find(b);
+  // than assumed still. An inner key with no track of its own folds into
+  // its root and moves as the root does.
+  bool Moves(const Key& a, const Key& b) const {
+    const auto ia = Find(a), ib = Find(b);
     if (ia == track_.end() || ib == track_.end())
       return true;
     const size_t n = std::min(ia->second.size(), ib->second.size());
@@ -123,24 +169,29 @@ public:
   }
 
 private:
-  std::map<uint64_t, std::vector<glm::mat4>> track_;
+  std::map<Key, std::vector<glm::mat4>>::const_iterator
+  Find(const Key& k) const {
+    const auto it = track_.find(k);
+    return it != track_.end() ? it : track_.find(Key{k.first, 0});
+  }
+  std::map<Key, std::vector<glm::mat4>> track_;
 };
 
 // The kinematics-only pass: every sample solved on its own copy, in order,
 // placements recorded.
-RelativeMotion TrackMotion(const AssemblyDocument& asmDoc,
+RelativeMotion TrackMotion(const assembly::FlexibleExpansion& ex,
                            const assembly::PartResolver& parts,
                            const assembly::AssemblyResolver& assemblies,
-                           const MotionStudy& study) {
+                           const MotionStudy& study, uint64_t driverId) {
   RelativeMotion motion;
-  AssemblyDocument probe = asmDoc;
-  Mate* driver = probe.FindMateById(study.driverMate);
+  assembly::FlexibleExpansion probe = ex;
+  Mate* driver = probe.doc.FindMateById(driverId);
   for (int i = 0; i < study.samples; i++) {
     const double t =
         static_cast<double>(i) / static_cast<double>(study.samples - 1);
     assembly::SetMateDof(*driver, study.driverDof, ValueAt(study, t));
-    assembly::PropagateRelations(probe, driver->id, parts);
-    assembly::Solve(probe, parts, assemblies, {driver->id, study.driverDof},
+    assembly::PropagateRelations(probe.doc, driver->id, parts);
+    assembly::Solve(probe.doc, parts, assemblies, {driver->id, study.driverDof},
                     /*diagnose=*/false);
     motion.Record(probe);
   }
@@ -149,8 +200,8 @@ RelativeMotion TrackMotion(const AssemblyDocument& asmDoc,
 
 // One placed body at one sample, for the pair sweep.
 struct Placed {
-  uint64_t root = 0; // top-level occurrence
-  std::string rootName;
+  Key key; // {top-level occurrence, inner occurrence or 0}
+  std::string name;
   const Body* body = nullptr;
   glm::mat4 world{1.0f};
   glm::vec3 lo{0.0f}, hi{0.0f}; // world box
@@ -231,18 +282,27 @@ bool BoxesOverlap(const Placed& a, const Placed& b) {
 }
 
 // Every visible, non-reference body of the flattened assembly, placed.
-std::vector<Placed>
-PlaceBodies(const AssemblyDocument& asmDoc,
-            const std::vector<assembly::FlatInstance>& flat) {
+// `flexible` holds the roots whose insides are keyed per leaf.
+std::vector<Placed> PlaceBodies(const AssemblyDocument& asmDoc,
+                                const std::vector<assembly::FlatInstance>& flat,
+                                const std::set<uint64_t>& flexible) {
   std::vector<Placed> placed;
   for (const assembly::FlatInstance& inst : flat) {
     if (!inst.visible || inst.part == nullptr)
       continue;
     const Occurrence* root = asmDoc.FindById(inst.rootOccurrenceId);
+    Key key{inst.rootOccurrenceId, 0};
+    std::string name = root ? root->name : "";
+    if (flexible.count(inst.rootOccurrenceId) && !inst.innerIds.empty()) {
+      key.second = inst.innerIds.front();
+      // The occurrence of the unit this leaf belongs to: the leaf itself,
+      // or the rigid sub-assembly inside the unit that holds it.
+      name += "/" + (inst.levels.size() >= 2 ? inst.levels[1].name : inst.name);
+    }
     for (const Body& b : inst.part->GetBodies()) {
       if (b.reference || !b.shape.IsValid())
         continue;
-      Placed p{inst.rootOccurrenceId, root ? root->name : "", &b, inst.world};
+      Placed p{key, name, &b, inst.world};
       if (WorldBox(b, inst.world, p.lo, p.hi))
         placed.push_back(std::move(p));
     }
@@ -254,11 +314,11 @@ PlaceBodies(const AssemblyDocument& asmDoc,
 // `checkRigid` is true at the one sample the rigid pairs are checked at.
 void CheckClashes(const AssemblyDocument& asmDoc,
                   const std::vector<assembly::FlatInstance>& flat,
-                  const MotionStudy& study, const RelativeMotion& motion,
-                  bool checkRigid, MeshCache& meshes,
-                  collide::ExactContactCache* contacts, Sample& s,
-                  Result& out) {
-  const std::vector<Placed> placed = PlaceBodies(asmDoc, flat);
+                  const std::set<uint64_t>& flexible, const MotionStudy& study,
+                  const RelativeMotion& motion, bool checkRigid,
+                  MeshCache& meshes, collide::ExactContactCache* contacts,
+                  Sample& s, Result& out) {
+  const std::vector<Placed> placed = PlaceBodies(asmDoc, flat, flexible);
   const bool exact = study.clashMode == "exact";
   // Candidates first, then the booleans on every core. Only pairs whose
   // boxes overlap can clash, and that clears most of any assembly for
@@ -267,14 +327,14 @@ void CheckClashes(const AssemblyDocument& asmDoc,
   struct Cand {
     size_t a, b;
     bool rigid;
-    std::pair<uint64_t, uint64_t> key;
+    std::pair<Key, Key> key;
   };
   std::vector<Cand> cands;
   for (size_t a = 0; a < placed.size(); a++)
     for (size_t b = a + 1; b < placed.size(); b++) {
-      if (placed[a].root == placed[b].root)
+      if (placed[a].key == placed[b].key)
         continue; // a part does not clash with itself
-      const bool rigid = !motion.Moves(placed[a].root, placed[b].root);
+      const bool rigid = !motion.Moves(placed[a].key, placed[b].key);
       if (rigid && !checkRigid) {
         out.pairsRigid++;
         continue; // checked at the first sample; nothing since has changed
@@ -286,8 +346,8 @@ void CheckClashes(const AssemblyDocument& asmDoc,
       cands.push_back({a,
                        b,
                        rigid,
-                       {std::min(placed[a].root, placed[b].root),
-                        std::max(placed[a].root, placed[b].root)}});
+                       {std::min(placed[a].key, placed[b].key),
+                        std::max(placed[a].key, placed[b].key)}});
     }
 
   // Mesh mode caches per shape in a shared map, so every mesh it will want
@@ -307,20 +367,30 @@ void CheckClashes(const AssemblyDocument& asmDoc,
                                 : MeshHit(placed[cd.a], placed[cd.b], meshes);
   });
 
-  // The merge keeps the FIRST hit per root pair, in candidate order — a rule
+  // The merge keeps the FIRST hit per key pair, in candidate order — a rule
   // that is inherently sequential, so it lives here and not in the workers.
   // `pairsChecked` counts every boolean actually run.
-  std::map<std::pair<uint64_t, uint64_t>, Clash> found;
+  std::map<std::pair<Key, Key>, Clash> found;
   for (size_t k = 0; k < cands.size(); k++) {
     const Cand& cd = cands[k];
     const Hit& h = hits[k];
     const Placed& pa = placed[cd.a];
     const Placed& pb = placed[cd.b];
+    const bool aFirst = pa.key == cd.key.first;
+    const Placed& p1 = aFirst ? pa : pb;
+    const Placed& p2 = aFirst ? pb : pa;
     out.pairsChecked++;
     out.pairsCached += h.cached ? 1 : 0;
     if ((exact || cd.rigid) && !h.known) {
+      UnknownContact u;
+      u.a = p1.key.first;
+      u.aInner = p1.key.second;
+      u.b = p2.key.first;
+      u.bInner = p2.key.second;
+      u.aName = p1.name;
+      u.bName = p2.name;
+      s.unknownContacts.push_back(std::move(u));
       out.pairsUnknown++;
-      s.unknownContacts.push_back({pa.root, pb.root, pa.rootName, pb.rootName});
       out.clean = false;
     }
     out.deflectionMm = std::max(out.deflectionMm, h.deflection);
@@ -335,15 +405,38 @@ void CheckClashes(const AssemblyDocument& asmDoc,
     c.bboxMax = h.bboxMax;
     c.withinMin = glm::dvec3(glm::max(pa.lo, pb.lo));
     c.withinMax = glm::dvec3(glm::min(pa.hi, pb.hi));
-    const bool aFirst = pa.root == cd.key.first;
-    c.a = cd.key.first;
-    c.b = cd.key.second;
-    c.aName = aFirst ? pa.rootName : pb.rootName;
-    c.bName = aFirst ? pb.rootName : pa.rootName;
+    c.a = p1.key.first;
+    c.aInner = p1.key.second;
+    c.b = p2.key.first;
+    c.bInner = p2.key.second;
+    c.aName = p1.name;
+    c.bName = p2.name;
     found[cd.key] = c;
   }
   for (auto& [key, c] : found)
     s.clashes.push_back(c);
+}
+
+void RecordMates(const AssemblyDocument& doc, const std::vector<uint64_t>& path,
+                 const std::vector<const Mate*>& mates, Sample& s) {
+  for (const Mate* m : mates) {
+    const bool turns = assembly::MateHasDof(m->type, MateDof::Rotation);
+    const bool slides = assembly::MateHasDof(m->type, MateDof::Offset);
+    if (!turns && !slides)
+      continue; // fastened: nothing to report
+    Sample::MateValue v;
+    v.mate = m->id;
+    v.path = path;
+    v.name = m->name;
+    v.turns = turns;
+    v.slides = slides;
+    if (turns)
+      v.rotation = assembly::MateDofValue(*m, MateDof::Rotation);
+    if (slides)
+      v.offset = assembly::MateDofValue(*m, MateDof::Offset);
+    s.mates.push_back(std::move(v));
+  }
+  (void)doc;
 }
 
 } // namespace
@@ -357,7 +450,7 @@ Result Run(const AssemblyDocument& asmDocIn,
   const auto t0 = std::chrono::steady_clock::now();
   Result out;
   out.checkedClashes = study.checkClash;
-  out.error = WhyNot(asmDocIn, study);
+  out.error = WhyNot(asmDocIn, study, assemblies);
   if (!out.error.empty())
     return out;
 
@@ -367,7 +460,25 @@ Result Run(const AssemblyDocument& asmDocIn,
   AssemblyDocument asmDoc = asmDocIn;
   if (study.configuration)
     asmDoc.SetActiveConfigurationRaw(*study.configuration);
-  Mate* driver = asmDoc.FindMateById(study.driverMate);
+  // Flexible placements (v129) are expanded ONCE, and every sample runs on
+  // the expanded copy; each sample is collapsed back into `asmDoc`, which is
+  // what the clash check and the recorded poses read.
+  assembly::FlexibleExpansion ex =
+      assemblies ? assembly::ExpandFlexible(asmDoc, parts, assemblies)
+                 : assembly::FlexibleExpansion{asmDoc};
+  const uint64_t driverId = ex.MateId(study.driverPath, study.driverMate);
+  Mate* driver = ex.doc.FindMateById(driverId);
+  if (driver == nullptr) {
+    out.error = "the driver mate is not among the moving mates of '" +
+                std::to_string(
+                    study.driverPath.empty() ? 0 : study.driverPath.front()) +
+                "' this run expanded";
+    return out;
+  }
+  std::set<uint64_t> flexible;
+  for (const assembly::FlexibleUnit& u : ex.units)
+    if (u.error.empty())
+      flexible.insert(u.root);
 
   MeshCache own;
   MeshCache& meshes = meshesIn ? *meshesIn : own;
@@ -377,7 +488,7 @@ Result Run(const AssemblyDocument& asmDocIn,
   // Pass A: which pairs move relative to each other, so the clash pass
   // checks the rigid ones once instead of at every sample.
   const RelativeMotion motion =
-      study.checkClash ? TrackMotion(asmDoc, parts, assemblies, study)
+      study.checkClash ? TrackMotion(ex, parts, assemblies, study, driverId)
                        : RelativeMotion{};
 
   for (int i = 0; i < study.samples; i++) {
@@ -391,37 +502,55 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.value = ValueAt(study, s.t);
 
     assembly::SetMateDof(*driver, study.driverDof, s.value);
-    assembly::PropagateRelations(asmDoc, driver->id, parts);
-    const assembly::SolveReport rep = assembly::Solve(
-        asmDoc, parts, assemblies, {driver->id, study.driverDof},
-        /*diagnose=*/false);
+    assembly::PropagateRelations(ex.doc, driver->id, parts);
+    assembly::SolveReport rep = assembly::Solve(ex.doc, parts, assemblies,
+                                                {driver->id, study.driverDof},
+                                                /*diagnose=*/false);
+    // Collapsed whenever there were units at all, so one that could not
+    // move still reports why, sample by sample.
+    const bool collapse = !ex.units.empty();
+    if (collapse)
+      assembly::CollapseFlexible(ex, asmDoc, &rep);
+    const AssemblyDocument& solved = collapse ? asmDoc : ex.doc;
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;
-    for (const Mate& m : asmDoc.GetMates()) {
-      const bool turns = assembly::MateHasDof(m.type, MateDof::Rotation);
-      const bool slides = assembly::MateHasDof(m.type, MateDof::Offset);
-      if (!turns && !slides)
-        continue; // fastened: nothing to report
-      Sample::MateValue v;
-      v.mate = m.id;
-      if (turns)
-        v.rotation = assembly::MateDofValue(m, MateDof::Rotation);
-      if (slides)
-        v.offset = assembly::MateDofValue(m, MateDof::Offset);
-      s.mates.push_back(v);
+    {
+      std::vector<const Mate*> own;
+      for (const Mate& m : solved.GetMates())
+        own.push_back(&m);
+      RecordMates(solved, {}, own, s);
+      for (const assembly::FlexibleUnit& u : ex.units) {
+        if (!u.error.empty())
+          continue;
+        std::vector<const Mate*> inner;
+        for (uint64_t m : u.mates)
+          inner.push_back(ex.doc.FindMateById(ex.mateIdOf.at({u.root, m})));
+        const size_t before = s.mates.size();
+        RecordMates(ex.doc, {u.root}, inner, s);
+        // ...by the sub-assembly's own ids, which is how a caller names them.
+        for (size_t k = before; k < s.mates.size(); k++)
+          s.mates[k].mate = ex.mateOf.at(s.mates[k].mate).second;
+      }
     }
 
-    auto flat = assembly::Flatten(asmDoc, parts, assemblies);
+    auto flat = assembly::Flatten(solved, parts, assemblies);
     if (!flat) {
       s.solved = false;
       out.samples.push_back(std::move(s));
       out.clean = false;
       continue;
     }
-    // Placements: one per top-level occurrence, from the solved document.
-    for (const Occurrence& o : asmDoc.GetOccurrences())
+    // Placements: one per top-level occurrence, from the solved document,
+    // and one per moving occurrence inside a flexible placement.
+    for (const Occurrence& o : solved.GetOccurrences())
       s.worlds.emplace_back(o.id, OccurrenceWorld(o));
+    for (const assembly::FlexibleUnit& u : ex.units)
+      if (u.error.empty())
+        for (uint64_t k : u.moving)
+          s.leaves.push_back(
+              {u.root, k,
+               OccurrenceWorld(*ex.doc.FindById(ex.occIdOf.at({u.root, k})))});
 
     if (study.checkClash) {
       // The rigid pairs go at the first sample that is checked at all: the
@@ -429,8 +558,8 @@ Result Run(const AssemblyDocument& asmDocIn,
       const bool checkRigid = out.rigidCheckedAt < 0;
       if (checkRigid)
         out.rigidCheckedAt = i;
-      CheckClashes(asmDoc, *flat, study, motion, checkRigid, meshes, contacts,
-                   s, out);
+      CheckClashes(solved, *flat, flexible, study, motion, checkRigid, meshes,
+                   contacts, s, out);
     }
 
     const bool bad =

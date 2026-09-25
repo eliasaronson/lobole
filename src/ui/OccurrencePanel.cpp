@@ -109,8 +109,11 @@ void DrawRelationsSection(AppState& state) {
     relOrder.push_back(r.id);
   for (Relation& r : asmDoc.GetRelations()) {
     const std::string rid = std::to_string(r.id);
-    const Mate* a = asmDoc.FindMateById(r.mateA);
-    const Mate* b = asmDoc.FindMateById(r.mateB);
+    // A side may be a mate inside a flexible placement (v129).
+    const Mate* a = assembly::MateAtPath(asmDoc, r.mateAPath, r.mateA,
+                                         AssemblyResolverFor(state));
+    const Mate* b = assembly::MateAtPath(asmDoc, r.mateBPath, r.mateB,
+                                         AssemblyResolverFor(state));
     const auto mateName = [](const Mate* m) {
       return m == nullptr      ? std::string("?")
              : m->name.empty() ? "mate " + std::to_string(m->id)
@@ -426,7 +429,8 @@ void DrawMotionBody(AppState& state) {
     return;
   // Driver: every mate with a degree of freedom, by name.
   LeftLabel("Driver");
-  const Mate* cur = asmDoc.FindMateById(sel->driverMate);
+  const Mate* cur = assembly::MateAtPath(
+      asmDoc, sel->driverPath, sel->driverMate, AssemblyResolverFor(state));
   const std::string curLabel =
       cur ? (cur->name.empty() ? "mate " + std::to_string(cur->id) : cur->name)
           : "(missing)";
@@ -439,9 +443,11 @@ void DrawMotionBody(AppState& state) {
       const std::string item =
           (m.name.empty() ? "mate " + std::to_string(m.id) : m.name) +
           "###motion_driver_" + std::to_string(m.id);
-      if (ImGui::Selectable(item.c_str(), m.id == sel->driverMate)) {
+      if (ImGui::Selectable(item.c_str(), sel->driverPath.empty() &&
+                                              m.id == sel->driverMate)) {
         SnapshotAssembly(state);
         sel->driverMate = m.id;
+        sel->driverPath.clear();
         sel->driverDof = rot ? MateDof::Rotation : MateDof::Offset;
         state.motionResults.erase(sel->id);
         asmDoc.BumpVersion();
@@ -456,7 +462,8 @@ void DrawMotionBody(AppState& state) {
   // that does nothing.
   ImGui::Text("%.4g to %.4g %s in %d samples", sel->from * k, sel->to * k,
               rot ? "deg" : "mm", sel->samples);
-  const std::string why = motion::WhyNot(asmDoc, *sel);
+  const std::string why =
+      motion::WhyNot(asmDoc, *sel, AssemblyResolverFor(state));
   if (!why.empty())
     ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", why.c_str());
 
@@ -1403,8 +1410,10 @@ void DrawAssemblyEditWindow(AppState& state) {
       return;
     }
     BeginToolWindowFrame(state, "Edit relation");
-    const Mate* a = asmDoc.FindMateById(r->mateA);
-    const Mate* b = asmDoc.FindMateById(r->mateB);
+    const Mate* a = assembly::MateAtPath(asmDoc, r->mateAPath, r->mateA,
+                                         AssemblyResolverFor(state));
+    const Mate* b = assembly::MateAtPath(asmDoc, r->mateBPath, r->mateB,
+                                         AssemblyResolverFor(state));
     const auto mateName = [](const Mate* m) {
       return m == nullptr      ? std::string("?")
              : m->name.empty() ? "mate " + std::to_string(m->id)

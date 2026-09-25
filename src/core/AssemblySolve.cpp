@@ -43,13 +43,16 @@ struct FlattenCtx {
   std::string error;
 };
 
+// `owner` is the placement whose sub-assembly `asmDoc` is when that
+// placement is FLEXIBLE (v129): its own poses place what is inside.
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
                  const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
-                 bool parentVisible, int depth, uint64_t configurationId);
+                 bool parentVisible, int depth, uint64_t configurationId,
+                 const Occurrence* owner);
 
 bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
-                       const glm::mat4& world, uint64_t rootOccurrenceId,
-                       bool visible, int depth) {
+                       const glm::mat4& local, const glm::mat4& world,
+                       uint64_t rootOccurrenceId, bool visible, int depth) {
   const AssemblyDocument* sub = ctx.asmById(occ.partId);
   if (sub == nullptr)
     return true; // dangling: the tree still shows what remains
@@ -66,14 +69,15 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
   ctx.stack.push_back(occ.partId);
   ctx.names.push_back(occ.name);
   ctx.levels.push_back(
-      {occ.id, occ.partId, occ.configurationId, PlacementOf(occ), occ.name});
+      {occ.id, occ.partId, occ.configurationId, local, occ.name});
   // Not the root itself: the chain records what is INSIDE it.
   if (!ctx.names.empty() && ctx.names.size() > 1)
     ctx.ids.push_back(occ.id);
   // The placement chooses the sub-assembly's configuration (v56): two
   // Gangways, one "short", one "long", from one document.
-  const bool ok = FlattenInto(ctx, *sub, world, rootOccurrenceId, visible,
-                              depth + 1, occ.configurationId);
+  const bool ok =
+      FlattenInto(ctx, *sub, world, rootOccurrenceId, visible, depth + 1,
+                  occ.configurationId, occ.flexible ? &occ : nullptr);
   ctx.levels.pop_back();
   ctx.names.pop_back();
   ctx.stack.pop_back();
@@ -84,7 +88,8 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
 
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
                  const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
-                 bool parentVisible, int depth, uint64_t configurationId) {
+                 bool parentVisible, int depth, uint64_t configurationId,
+                 const Occurrence* owner) {
   if (depth > ctx.maxDepth) {
     ctx.error = "assemblies nested deeper than " +
                 std::to_string(ctx.maxDepth) + " levels";
@@ -98,7 +103,9 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     const bool visible =
         parentVisible && occ.visible &&
         !asmDoc.OccurrenceSuppressedIn(configurationId, occ.id);
-    const glm::mat4 world = parentWorld * PlacementOf(occ);
+    const glm::mat4 local =
+        owner != nullptr ? InnerPlacement(*owner, occ) : PlacementOf(occ);
+    const glm::mat4 world = parentWorld * local;
     // The TOP-LEVEL occurrence owns everything below it — that is what makes
     // a sub-assembly one contact node, one explode step, one drawing ref.
     const uint64_t root = rootOccurrenceId ? rootOccurrenceId : occ.id;
@@ -110,7 +117,7 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     }();
 
     if (occ.refKind == OccurrenceRef::Assembly) {
-      if (!DescendOccurrence(ctx, occ, world, root, visible, depth))
+      if (!DescendOccurrence(ctx, occ, local, world, root, visible, depth))
         return false;
       continue;
     }
@@ -129,7 +136,7 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     fi.visible = visible;
     fi.levels = ctx.levels;
     fi.occurrenceId = occ.id;
-    fi.local = PlacementOf(occ);
+    fi.local = local;
     fi.name = occ.name;
     ctx.out.push_back(std::move(fi));
   }
@@ -142,7 +149,7 @@ Flatten(const AssemblyDocument& top, const PartResolver& partById,
         const AssemblyResolver& asmById, int maxDepth) {
   FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}, {}, {}};
   // The top itself uses its own active configuration (nobody placed it).
-  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0, 0))
+  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0, 0, nullptr))
     return std::unexpected(ctx.error);
   return ctx.out;
 }
@@ -201,6 +208,7 @@ std::expected<PathHit, std::string> ResolvePath(const AssemblyDocument& top,
   const AssemblyDocument* doc = &top;
   PathHit hit;
   std::string canonical;
+  const Occurrence* owner = nullptr; // the placement `doc` is inside
   for (size_t i = 0; i < steps.size(); i++) {
     if (doc == nullptr)
       return std::unexpected("'" + steps[i - 1] +
@@ -216,7 +224,10 @@ std::expected<PathHit, std::string> ResolvePath(const AssemblyDocument& top,
                              (i ? " inside '" + steps[i - 1] + "'" : ""));
     hit.owner = doc;
     hit.occ = occ;
-    hit.world = hit.world * PlacementOf(*occ);
+    hit.world = hit.world * (owner != nullptr && owner->flexible
+                                 ? InnerPlacement(*owner, *occ)
+                                 : PlacementOf(*occ));
+    owner = occ;
     if (i == 0)
       hit.rootId = occ->id;
     canonical += (canonical.empty() ? "" : "/") + std::to_string(occ->id);
@@ -407,9 +418,6 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
   if (!occ)
     return fail("its occurrence no longer exists");
 
-  if (c.anchor.origin)
-    return glm::mat4(1.0f); // the part's coordinate origin
-
   // A5/v57: walk into the sub-assembly to the part the anchor means, keeping
   // the transform from the UNIT's frame down to that part. Everything below
   // then works on a part exactly as it always did, and the frame comes back
@@ -423,22 +431,34 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     if (doc == nullptr)
       return fail("its sub-assembly is not loaded");
     const Occurrence* inner = nullptr;
+    const Occurrence* owner = occ; // whose document `doc` is
     for (size_t i = 0; i < c.innerPath.size(); i++) {
       if (doc == nullptr)
         return fail("its path goes deeper than the assembly does");
       inner = doc->FindById(c.innerPath[i]);
       if (inner == nullptr)
         return fail("the part it points at inside the sub-assembly is gone");
-      innerXf = innerXf * OccMatrix(*inner);
+      // A flexible placement (v129) places what is inside it at its own
+      // poses, and a connector reads the unit as it stands.
+      innerXf = innerXf * (owner->flexible ? InnerPlacement(*owner, *inner)
+                                           : OccMatrix(*inner));
+      owner = inner;
       doc = inner->refKind == OccurrenceRef::Assembly && asmById
                 ? asmById(inner->partId)
                 : nullptr;
     }
+    // An ORIGIN anchor with a path is the origin of what the path names —
+    // a part inside the unit, or a sub-assembly inside it — not the unit's
+    // own origin, which it used to answer before walking the path at all.
+    if (c.anchor.origin)
+      return innerXf;
     const Document* innerPart = partById(inner->partId);
     if (innerPart == nullptr)
       return fail("the part inside the sub-assembly is not loaded");
     partForFace = innerPart; // resolve the face on the part the path names
   }
+  if (c.anchor.origin)
+    return glm::mat4(1.0f); // the part's coordinate origin
 
   const Document* part = partForFace ? partForFace : partById(occ->partId);
   if (!part) {
@@ -652,6 +672,26 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     // Out of the active configuration: not applied, and not an error.
     if (asmDoc.RelationSuppressed(r.id))
       continue;
+    // A side named by a path (v129) is a mate inside a flexible placement.
+    // Only the solve can apply it — it expands the placement first — so
+    // here it is checked for its path and otherwise left alone.
+    if (!r.mateAPath.empty() || !r.mateBPath.empty()) {
+      for (const std::vector<uint64_t>* path : {&r.mateAPath, &r.mateBPath}) {
+        if (path->empty())
+          continue;
+        const Occurrence* o = asmDoc.FindById(path->front());
+        if (o == nullptr)
+          r.error = "the placement its path names is gone";
+        else if (path->size() != 1)
+          r.error = "its path goes more than one level down, and only one "
+                    "level of sub-assembly is flexible";
+        else if (!o->flexible)
+          r.error = "it names a mate inside '" + o->name +
+                    "', which is not flexible — set_occurrence_flexible to "
+                    "let its mechanism move here";
+      }
+      continue;
+    }
     if (r.threadPart || r.threadFeature) {
       if (!partById) {
         r.error = "thread-backed relation needs a part resolver";
@@ -989,9 +1029,10 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   return wrote;
 }
 
-SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
-                  const AssemblyResolver& asmById, const Driven& driven,
-                  bool diagnose) {
+static SolveReport SolveCore(AssemblyDocument& asmDoc,
+                             const PartResolver& partById,
+                             const AssemblyResolver& asmById,
+                             const Driven& driven, bool diagnose) {
   SolveReport report;
   // The active configuration's held DOFs (v101) stand in for the mates' own
   // values for the whole solve — placement, relations, the loop pass — and
@@ -1395,6 +1436,30 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // The held DOFs go back to their authored values (see the top).
   for (const Held& h : held)
     SetMateDof(asmDoc.GetMates()[h.index], h.dof, h.authored);
+  return report;
+}
+
+SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
+                  const AssemblyResolver& asmById, const Driven& driven,
+                  bool diagnose) {
+  // Flexible sub-assemblies (v129) are solved by WRAPPING: the solve runs on
+  // a copy with every flexible placement's inside added, and the answer is
+  // written back. Nothing flexible, nothing to wrap.
+  bool flexible = false;
+  for (const Occurrence& o : asmDoc.GetOccurrences())
+    flexible = flexible || o.flexible;
+  if (!flexible || !asmById) {
+    Driven own = driven;
+    if (!driven.path.empty())
+      own.mate = 0; // a path with nothing to expand names no mate here
+    return SolveCore(asmDoc, partById, asmById, own, diagnose);
+  }
+  FlexibleExpansion ex = ExpandFlexible(asmDoc, partById, asmById);
+  Driven inner = driven;
+  inner.mate = ex.MateId(driven.path, driven.mate);
+  inner.path.clear();
+  SolveReport report = SolveCore(ex.doc, partById, asmById, inner, diagnose);
+  CollapseFlexible(ex, asmDoc, &report);
   return report;
 }
 

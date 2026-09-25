@@ -74,10 +74,12 @@ tessellation with its own transform.
 
 ## Sub-assemblies
 
-An occurrence may place another assembly. Sub-assemblies are **rigid**: a
-placed assembly is one solid unit at whatever placements its own document
-stores, and the parent's solve never recurses into it. Mates, exploded views
-and the drag gizmo operate between top-level occurrences.
+An occurrence may place another assembly. By default the placement is
+**rigid**: one solid unit at whatever placements its own document stores, and
+the parent's solve never recurses into it. A placement can instead be
+[flexible](#flexible-sub-assemblies), when the sub-assembly's own mechanism
+moves in the parent. Mates, exploded views and the drag gizmo operate between
+top-level occurrences either way.
 
 `assembly::Flatten` (`src/core/AssemblySolve.h`) is the one tree walk. Every
 consumer that wants geometry — render sync, BOM, mass, contact/interference,
@@ -95,9 +97,11 @@ skips a dangling reference rather than failing.
   supported (a part configuration changes geometry).
 - A top-level occurrence is one node for contact and interference, one
   explode step, one drawing reference.
-- A mate may anchor on a face *inside* a placed sub-assembly: the connector's
-  `inner_path` names the occurrence chain down to the part. The mate still
-  positions the top-level occurrence.
+- A mate may anchor on a face, a frame or the origin of something *inside* a
+  placed sub-assembly: the connector's `inner_path` names the occurrence chain
+  down to it. On a rigid placement the mate positions the top-level
+  occurrence; on a flexible one, a path that enters at a moving part mates
+  that part.
 - Paths are read-only. `assembly::ResolvePath` takes an id chain (`"12/47"`)
   or an unambiguous name path; `interference`, `measure` and `frame` accept
   one, so a question can cross the boundary. Editing a sub-assembly's contents
@@ -107,6 +111,73 @@ skips a dangling reference rather than failing.
   document.
 - Staleness is transitive: `SubtreeVersions` stamps every document version in
   the subtree, so an edit inside a sub-assembly re-solves and resyncs the top.
+
+### Flexible sub-assemblies
+
+A placement with `flexible` set (v129; `add_occurrence {flexible: true}` or
+`set_occurrence_flexible`) brings its sub-assembly's occurrences, mates and
+relations into the parent's solve and motion studies, instanced for that
+placement. An engine's chain then drives the injection pump's own camshaft
+mate, and the pump is one occurrence rather than seventy.
+
+**The state lives on the parent's occurrence.** A sub-assembly document is
+shared by every placement of it, so nothing is written into it. The
+occurrence keeps `inner_poses` (where each MOVING occurrence of the
+sub-assembly stands, in the placement's frame) and `inner_mate_dofs` (every
+inner mate's values as this placement has them). Two placements pose
+independently, the parent's undo covers both, and the file re-solves the same
+way. `Flatten`, `ResolvePath` and `ConnectorLocalFrame` place what is inside a
+flexible placement at those poses, so render, contact, export, measurement
+and mate connectors all see the unit as it stands.
+
+**The solver is wrapped, not changed** (`src/core/AssemblyFlexible.cpp`).
+`ExpandFlexible` copies the parent and, per flexible placement, adds:
+
+- its moving occurrences, under synthetic ids from a range no document
+  reaches. An occurrence moves when a mate chain reaches it from one that is
+  fixed in the sub-assembly, or it rides on one that does;
+- its mates and relations, remapped. A mate on anything else (the housing,
+  what is bolted to it) lands on the root with an `inner_path`: it cannot
+  move relative to the unit, so it folds in;
+- the holds of the configuration the placement runs under.
+
+`Solve` runs on that copy, and `CollapseFlexible` writes back the
+placements, the inner poses, the inner mate values and the errors.
+`Solve` skips all of this when nothing is flexible. `motion::Run` expands
+once and runs every sample on the expanded copy.
+
+**Naming an inner mate.** A mate is `{path, mate}`: the path is the flexible
+placement (one occurrence id), the id is the sub-assembly's. Empty means this
+document. A relation's sides (`add_relation {a_path, b_path}`, saved as
+`mate_a_path`/`mate_b_path`), a motion study's driver (`driver_path`) and
+`set_mate {id, path}` take it. `set_mate` with a path sets this placement's
+pose of the mate and nothing else. `solve_assembly` reports every flexible
+placement under `flexible`, with its mates by path.
+
+**Configurations.** A flexible placement runs its mechanism under its own
+`configuration_id` (0 = the sub-assembly's active one): that configuration
+holds and suppresses its mates. The parent's configuration cannot, and
+`set_configuration` refuses a `path` in `suppressed_mates` or
+`mate_overrides`. The pump arrives with its rack held at full load.
+
+**Refused, naming why.** A placement stays rigid, and says so on the solve
+(`flexible[].error`) and at `set_occurrence_flexible`, when:
+
+- its sub-assembly has nothing fixed to move against;
+- it holds a freewheel or a click, whose history (`lead`) would be
+  per-placement state. A relation into a flexible placement cannot be one
+  either;
+- it places something flexible itself, or the assembly is itself placed
+  flexibly somewhere. Only one level moves.
+
+**What sees the moving parts.** A motion study's samples carry a pose per
+moving inner occurrence, keyed by its path `[placement, occurrence]`, and
+inner mate values with their `path`. Clash checks key a flexible placement's
+bodies per inner occurrence, so a plunger is checked against its barrel and
+against the engine, and the rigid-pair rule compares those leaves' own
+transforms. The GLB export writes one node per moving inner occurrence, and
+live playback moves each one. A clearance assertion's key hashes the inner
+poses. An exploded view still moves the unit as one block.
 
 ## Mates and the solve
 

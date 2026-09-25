@@ -104,7 +104,8 @@ int SolveActiveAssembly(AppState& state);
 // that DOF as one more unknown and moves it. `diagnose` as assembly::Solve's:
 // a motion sample passes false.
 int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof,
-                              bool diagnose = true);
+                              bool diagnose = true,
+                              const std::vector<uint64_t>& path = {});
 
 // The SAME pass, reporting everything it learned rather than just the error
 // count: A6's loop closure, remaining degrees of freedom, and which mates were

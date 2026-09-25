@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    128; // v128: an AxisRef kind `custom` {origin, direction} (revolve,
+    129; // v129: a FLEXIBLE sub-assembly occurrence (`flexible`,
+         //      `inner_poses` {occurrence, position, orientation},
+         //      `inner_mate_dofs` {mate, rotation, offset, dx?, dy?,
+         //      ball_rotation?}); a mate named by {path, mate} -- a
+         //      relation's `mate_a_path`/`mate_b_path`, a motion study's
+         //      `driver_path`
+         //      (docs/assemblies/README.md#flexible-sub-assemblies).
+         // v128: an AxisRef kind `custom` {origin, direction} (revolve,
          //      pattern and datum planes about any axis); a helix's
          //      `start_deg` (+_expr); a motion study's `configuration`
          //      (generators/pes_pump/README.md#how-it-moves).

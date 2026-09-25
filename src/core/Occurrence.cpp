@@ -443,14 +443,46 @@ bool AssemblyDocument::MateSuppressed(uint64_t mateId) const {
 }
 
 bool AssemblyDocument::RelationSuppressed(uint64_t relationId) const {
-  const Configuration* c = ActiveConfig();
+  return RelationSuppressedIn(0, relationId);
+}
+
+const Configuration*
+AssemblyDocument::ConfigurationFor(uint64_t configurationId) const {
+  if (configurationId != 0)
+    if (const Configuration* c = FindConfiguration(configurationId))
+      return c;
+  return ActiveConfig();
+}
+
+bool AssemblyDocument::MateSuppressedIn(uint64_t configurationId,
+                                        uint64_t mateId) const {
+  const Configuration* c = ConfigurationFor(configurationId);
+  if (c == nullptr)
+    return false;
+  if (c->SuppressesMate(mateId))
+    return true;
+  for (const Mate& m : m_mates)
+    if (m.id == mateId)
+      return c->Suppresses(m.a.occurrenceId) || c->Suppresses(m.b.occurrenceId);
+  return false;
+}
+
+bool AssemblyDocument::RelationSuppressedIn(uint64_t configurationId,
+                                            uint64_t relationId) const {
+  const Configuration* c = ConfigurationFor(configurationId);
   if (c == nullptr)
     return false;
   if (c->SuppressesRelation(relationId))
     return true;
+  // A side named by a path (v129) is a mate of a sub-assembly: its id means
+  // nothing here, so the question is whether the placement it is in is out.
+  const auto sideOut = [&](uint64_t mate, const std::vector<uint64_t>& path) {
+    return path.empty() ? MateSuppressedIn(configurationId, mate)
+                        : c->Suppresses(path.front());
+  };
   for (const Relation& r : m_relations)
     if (r.id == relationId)
-      return MateSuppressed(r.mateA) || MateSuppressed(r.mateB);
+      return sideOut(r.mateA, r.mateAPath) || sideOut(r.mateB, r.mateBPath);
   return false;
 }
 

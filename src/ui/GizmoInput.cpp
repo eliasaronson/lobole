@@ -6,6 +6,7 @@
 #include "ui/CamTool.h" // RunCamVerification
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h" // JobPlacedBodies
+#include "ui/MotionActions.h" // MotionPlaybackLocal
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/ViewActions.h"
@@ -276,7 +277,13 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
     // matrix alone piled every part of a dragged sub-assembly onto its
     // origin mid-drag — they snapped back only because the resync on release
     // recomputed the composition.
-    const glm::mat4 xf = base * m.localXf;
+    glm::mat4 xf = base * m.localXf;
+    // Inside a flexible placement (v129) playback moves each moving leaf
+    // on its own, not just the unit.
+    glm::mat4 played;
+    if (!m.innerPath.empty() &&
+        MotionPlaybackLocal(state, *occ, m.innerPath, m.localXf, played))
+      xf = base * played;
     if (state.meshRenderer)
       state.meshRenderer->SetInstanceTransform(m.meshId, xf);
     if (state.outlineRenderer)

@@ -99,6 +99,7 @@ add_executable(designer_tests
     test_datum.cpp
     test_frame.cpp
     test_meshcollide.cpp
+    test_flexible_subassembly.cpp
     test_motion.cpp
     test_revolve.cpp
     test_boolean.cpp

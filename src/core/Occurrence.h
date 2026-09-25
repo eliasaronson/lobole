@@ -27,6 +27,28 @@
 // so a DANGLING reference still knows what it was looking for and can say so.
 enum class OccurrenceRef { Part, Assembly };
 
+// Where one occurrence of a FLEXIBLE placement's sub-assembly stands, in the
+// placement's own frame (v129,
+// docs/assemblies/README.md#flexible-sub-assemblies). Keyed by that
+// occurrence's id in the sub-assembly: only one level moves, so the id IS its
+// whole path below the placement.
+struct InnerPose {
+  uint64_t occurrence = 0;
+  glm::vec3 position{0.0f};
+  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+// A mate of a flexible placement's sub-assembly as THIS placement has it
+// posed (v129): every value a mate can move, by the mate's id there.
+struct InnerMateDof {
+  uint64_t mate = 0;
+  float rotation = 0.0f;
+  float offset = 0.0f;
+  float dx = 0.0f;
+  float dy = 0.0f;
+  glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct Occurrence {
   uint64_t id = 0;     // stable, unique within the assembly, never reused
   std::string name;    // display label (cosmetic)
@@ -73,6 +95,30 @@ struct Occurrence {
   // would mean regenerating that part once per configuration, and stays
   // deferred (it was already deferred in C0-C4).
   uint64_t configurationId = 0;
+
+  // FLEXIBLE (v129): a placed sub-assembly whose own mechanism moves in this
+  // assembly — its occurrences, mates and relations join the parent's solve
+  // and motion studies, instanced for this placement. A sub-assembly
+  // document is shared by every placement of it (and handed out const), so
+  // the poses live HERE, on the parent's occurrence: two placements never
+  // fight over them, the parent's undo sees them, and the file re-solves the
+  // same way. Rigid (false) is every file before v129.
+  bool flexible = false;
+  std::vector<InnerPose> innerPoses;       // the moving inner occurrences
+  std::vector<InnerMateDof> innerMateDofs; // every inner mate with a DOF
+
+  const InnerPose* FindInnerPose(uint64_t innerOccurrence) const {
+    for (const InnerPose& p : innerPoses)
+      if (p.occurrence == innerOccurrence)
+        return &p;
+    return nullptr;
+  }
+  const InnerMateDof* FindInnerMateDof(uint64_t innerMate) const {
+    for (const InnerMateDof& d : innerMateDofs)
+      if (d.mate == innerMate)
+        return &d;
+    return nullptr;
+  }
 };
 
 // Where on its part a connector frame is anchored
@@ -228,6 +274,12 @@ struct Relation {
   RelationKind kind = RelationKind::Gear;
   uint64_t mateA = 0;
   uint64_t mateB = 0; // may equal mateA (a screw)
+  // v129: a mate is named by {path, mate}. The path is the occurrence ids
+  // from this document down to the FLEXIBLE placement whose sub-assembly
+  // holds the mate, and the id is that sub-assembly's; empty = a mate of
+  // this document. An engine's chain drives the pump camshaft's own mate.
+  std::vector<uint64_t> mateAPath;
+  std::vector<uint64_t> mateBPath;
   MateDof dofA = MateDof::Rotation;
   MateDof dofB = MateDof::Rotation;
   double ratio = -1.0;
@@ -293,6 +345,9 @@ struct MotionStudy {
   uint64_t id = 0;         // stable, shares the assembly's id counter
   std::string name;        // display label (cosmetic)
   uint64_t driverMate = 0; // the mate whose DOF is driven
+  // v129: the flexible placement the driver mate is inside; empty = a mate
+  // of this document (Relation::mateAPath says how a path reads).
+  std::vector<uint64_t> driverPath;
   MateDof driverDof = MateDof::Rotation;
   // Range in the DOF's own unit: RADIANS for a rotation, mm for an offset —
   // the same unit `set_mate` takes, so nothing here converts. The RPC takes
@@ -534,6 +589,16 @@ public:
   // un-suppress half of it, but it must not break the model either.
   bool OccurrenceSuppressedIn(uint64_t configurationId,
                               uint64_t occurrenceId) const;
+
+  // The configuration a placement asked for (v129): 0 = the active one, and
+  // an id that no longer resolves falls back to it, as above. nullptr = the
+  // base.
+  const Configuration* ConfigurationFor(uint64_t configurationId) const;
+  // MateSuppressed / RelationSuppressed against a NAMED configuration, the
+  // way a flexible placement runs its sub-assembly (0 = active).
+  bool MateSuppressedIn(uint64_t configurationId, uint64_t mateId) const;
+  bool RelationSuppressedIn(uint64_t configurationId,
+                            uint64_t relationId) const;
 
   // Whether the active configuration takes a mate out of the solve: it
   // suppresses the mate, or an occurrence the mate connects (v101). A mate

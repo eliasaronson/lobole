@@ -38,7 +38,10 @@ constexpr MethodDoc MotionMethods[] = {
     {"add_motion_study",
      "Define a motion study on the active assembly: ONE mate's degree of "
      "freedom driven over a range, the assembly solved at every sample, and "
-     "every occurrence pair checked for a clash. {driver: mate id, dof?: "
+     "every occurrence pair checked for a clash. {driver: mate id, "
+     "driver_path? ([occurrence id] of a FLEXIBLE sub-assembly placement: "
+     "`driver` is then a mate of that sub-assembly, by its own id — an "
+     "engine turning its pump's camshaft), dof?: "
      "rotation|offset (inferred from a revolute or slider; a cylindrical "
      "mate must say which), from, to — DEGREES for a rotation, mm for an "
      "offset — samples? (default 48), check_clash? (default true), "
@@ -57,8 +60,8 @@ constexpr MethodDoc MotionMethods[] = {
      "from the previous sample and can come out of it on the other branch. "
      "The driver to choose is the DOF that cannot change on the branch you "
      "do not want; the clash check is what makes the jump visible.",
-     "check_clash, clash_mode, configuration, dof, driver, from, name, "
-     "samples, to"},
+     "check_clash, clash_mode, configuration, dof, driver, driver_path, "
+     "from, name, samples, to"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
      "clash_mode?, configuration? (an id, 0 = the base, null = whichever "
@@ -100,7 +103,13 @@ constexpr MethodDoc MotionMethods[] = {
      "(`poses`: position mm, orientation quaternion [x,y,z,w]) and every "
      "moving mate's value (`mates`: {mate, name, rotation_deg, offset} — "
      "what the study actually turned and slid, so no angle has to be "
-     "recovered from a quaternion). A study that names a configuration runs "
+     "recovered from a quaternion). Inside a FLEXIBLE sub-assembly "
+     "placement each moving occurrence is a pose of its own keyed by "
+     "`path` [placement, occurrence] (no `occurrence` key: that id is the "
+     "sub-assembly's), each of its mates carries `path` [placement], and "
+     "clashes are checked between its leaves — a plunger against its "
+     "barrel — with `a_path`/`b_path` naming which. A study that names a "
+     "configuration runs "
      "under it. "
      "{async: true} runs it as a background job ('motion' in "
      "background_jobs) and motion_status reads the result when it lands. A "
@@ -130,14 +139,16 @@ constexpr MethodDoc MotionMethods[] = {
      "study, t"},
     {"export_motion",
      "Write the run as a GLB with a glTF animation {study, path}: one node "
-     "per occurrence, translation + rotation keyframes at every sample, "
+     "per occurrence (and per moving occurrence inside a flexible "
+     "placement), translation + rotation keyframes at every sample, "
      "24 frames per second, in METRES and Y-up as glTF defines (one root "
      "node carries both). Refuses without a run, and refuses when any "
      "sample is unsolved.",
      "path, study"},
 };
 
-json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
+json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
+               const MotionStudy& s) {
   json j = DocumentIO::MotionStudyToJson(s);
   const bool rot = s.driverDof == MateDof::Rotation;
   // The document stores the DOF's own unit; the surface speaks degrees for
@@ -145,19 +156,31 @@ json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
   j["unit"] = rot ? "deg" : "mm";
   j["from"] = rot ? angles::ToDegrees(s.from) : s.from;
   j["to"] = rot ? angles::ToDegrees(s.to) : s.to;
-  const std::string why = motion::WhyNot(asmDoc, s);
+  const std::string why =
+      motion::WhyNot(asmDoc, s, ui::AssemblyResolverFor(state));
   if (!why.empty())
     j["why_not"] = why;
   return j;
 }
 
 // One clash, in the vocabulary `interference` and `contact_report` use.
+// A side inside a flexible placement (v129) also says its path, {root,
+// occurrence}: `a`/`b` stay the top-level ids every caller keys on.
+void AddSidePaths(json& j, uint64_t a, uint64_t aInner, uint64_t b,
+                  uint64_t bInner) {
+  if (aInner != 0)
+    j["a_path"] = {a, aInner};
+  if (bInner != 0)
+    j["b_path"] = {b, bInner};
+}
+
 json ClashJson(const motion::Clash& c) {
   json j{{"a", c.a},
          {"b", c.b},
          {"a_name", c.aName},
          {"b_name", c.bName},
          {"rigid", c.rigid}};
+  AddSidePaths(j, c.a, c.aInner, c.b, c.bInner);
   // An exact check knows how much and where; a mesh one only knows THAT, and
   // says where it COULD be rather than a zero that reads like a measurement.
   if (c.known) {
@@ -186,12 +209,15 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
             {"residual_mm", sm.residualMm},
             {"clashes", clashes}};
     sj["unknown_contacts"] = json::array();
-    for (const auto& c : sm.unknownContacts)
-      sj["unknown_contacts"].push_back({{"a", c.a},
-                                        {"b", c.b},
-                                        {"a_name", c.aName},
-                                        {"b_name", c.bName},
-                                        {"reason", c.reason}});
+    for (const auto& c : sm.unknownContacts) {
+      json uj{{"a", c.a},
+              {"b", c.b},
+              {"a_name", c.aName},
+              {"b_name", c.bName},
+              {"reason", c.reason}};
+      AddSidePaths(uj, c.a, c.aInner, c.b, c.bInner);
+      sj["unknown_contacts"].push_back(std::move(uj));
+    }
     if (includePoses) {
       json poses = json::array();
       for (const auto& [occId, m] : sm.worlds) {
@@ -200,14 +226,25 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
                          {"position", {m[3].x, m[3].y, m[3].z}},
                          {"orientation", {q.x, q.y, q.z, q.w}}});
       }
+      // Inside a flexible placement (v129): each moving occurrence by its
+      // PATH, and no `occurrence` key — its id is the sub-assembly's and
+      // would collide with this document's.
+      for (const motion::Sample::LeafWorld& l : sm.leaves) {
+        const glm::mat4& m = l.world;
+        const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
+        poses.push_back({{"path", {l.root, l.occurrence}},
+                         {"position", {m[3].x, m[3].y, m[3].z}},
+                         {"orientation", {q.x, q.y, q.z, q.w}}});
+      }
       sj["poses"] = poses;
       json mates = json::array();
       for (const motion::Sample::MateValue& v : sm.mates) {
-        const Mate* mate = asmDoc.FindMateById(v.mate);
-        json mj{{"mate", v.mate}, {"name", mate ? mate->name : std::string{}}};
-        if (mate && assembly::MateHasDof(mate->type, MateDof::Rotation))
+        json mj{{"mate", v.mate}, {"name", v.name}};
+        if (!v.path.empty())
+          mj["path"] = v.path; // a mate of that placement's sub-assembly
+        if (v.turns)
           mj["rotation_deg"] = angles::ToDegrees(v.rotation);
-        if (mate && assembly::MateHasDof(mate->type, MateDof::Offset))
+        if (v.slides)
           mj["offset"] = v.offset;
         mates.push_back(std::move(mj));
       }
@@ -223,26 +260,33 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
   //
   // A RIGID pair's clash is neither: the two never move relative to each
   // other, so it is a standing clash, checked once, and listed on its own.
-  std::set<std::pair<uint64_t, uint64_t>> seated;
+  // Keyed by both sides' paths: two leaves of one flexible placement share
+  // their top-level id.
+  using Side = std::pair<uint64_t, uint64_t>;
+  const auto pairKey = [](const motion::Clash& c) {
+    const Side a{c.a, c.aInner}, b{c.b, c.bInner};
+    return std::pair{std::min(a, b), std::max(a, b)};
+  };
+  std::set<std::pair<Side, Side>> seated;
   if (!r.samples.empty())
     for (const motion::Clash& c : r.samples.front().clashes)
       if (!c.rigid)
-        seated.insert({std::min(c.a, c.b), std::max(c.a, c.b)});
+        seated.insert(pairKey(c));
   json rigidClashes = json::array();
   for (const motion::Sample& sm : r.samples)
     for (const motion::Clash& c : sm.clashes)
       if (c.rigid)
         rigidClashes.push_back(ClashJson(c));
-  std::set<std::pair<uint64_t, uint64_t>> appeared;
+  std::set<std::pair<Side, Side>> appeared;
   json appearedJson = json::array();
   for (const motion::Sample& sm : r.samples)
     for (const motion::Clash& c : sm.clashes) {
-      const std::pair<uint64_t, uint64_t> key{std::min(c.a, c.b),
-                                              std::max(c.a, c.b)};
+      const auto key = pairKey(c);
       if (c.rigid || seated.count(key) || !appeared.insert(key).second)
         continue;
-      appearedJson.push_back(
-          {{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}});
+      json aj{{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}};
+      AddSidePaths(aj, c.a, c.aInner, c.b, c.bInner);
+      appearedJson.push_back(std::move(aj));
     }
   json out{
       {"clean", r.clean && r.checkedClashes && !r.cancelled && r.error.empty()},
@@ -412,7 +456,18 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy s;
     const uint64_t driver = p.at("driver").get<uint64_t>();
-    const Mate* mate = asmDoc.FindMateById(driver);
+    // v129: a driver inside a flexible placement, named {driver_path, driver}
+    // — the pump's camshaft, turned from the engine.
+    if (p.contains("driver_path"))
+      s.driverPath = p.at("driver_path").get<std::vector<uint64_t>>();
+    std::string pathWhy;
+    const Mate* mate =
+        s.driverPath.empty()
+            ? asmDoc.FindMateById(driver)
+            : assembly::MateAtPath(asmDoc, s.driverPath, driver,
+                                   ui::AssemblyResolverFor(state), &pathWhy);
+    if (!mate && !s.driverPath.empty())
+      throw std::runtime_error("driver_path: " + pathWhy);
     if (!mate) {
       std::vector<std::string> have;
       for (const Mate& cand : asmDoc.GetMates())
@@ -485,7 +540,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
     ui::SnapshotAssembly(state);
     const uint64_t id = asmDoc.AddMotionStudy(std::move(s));
-    return StudyJson(asmDoc, *asmDoc.FindMotionStudyById(id));
+    return StudyJson(state, asmDoc, *asmDoc.FindMotionStudyById(id));
   }
   if (m == "set_motion_study") {
     AssemblyDocument& asmDoc = NeedAssembly(state);
@@ -531,7 +586,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     }
     asmDoc.BumpVersion();
     state.motionResults.erase(s.id); // it described the old definition
-    return StudyJson(asmDoc, s);
+    return StudyJson(state, asmDoc, s);
   }
   if (m == "remove_motion_study") {
     AssemblyDocument& asmDoc = NeedAssembly(state);
@@ -547,7 +602,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     json out = json::array();
     const bool running = ui::BackgroundJobRunning(state, "motion");
     for (const MotionStudy& s : asmDoc.GetMotionStudies()) {
-      json j = StudyJson(asmDoc, s);
+      json j = StudyJson(state, asmDoc, s);
       const motion::Result* r = ui::MotionResultFor(state, s.id);
       j["has_result"] = r != nullptr;
       if (r) {

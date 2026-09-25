@@ -8,8 +8,11 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 class Document;
@@ -56,6 +59,20 @@ struct SolveReport {
   // diagnosis: which single tilted connector would let it close
   // (docs/assemblies/solver.md#naming-the-mate-that-keeps-a-loop-open).
   std::vector<LoopDiagnosis> diagnoses;
+
+  // v129: the mates INSIDE flexible placements, by path, since their ids
+  // are the sub-assembly's and mean nothing in this document's list. One row
+  // per mate that is not simply satisfied (an error, or redundant); `mate`
+  // 0 = the placement itself could not move, and `error` says why.
+  struct InnerMate {
+    uint64_t occurrence = 0; // the flexible placement (its path, one level)
+    uint64_t mate = 0;       // the sub-assembly's mate id; 0 = the unit
+    std::string name;
+    std::string error;
+    double residualMm = 0.0;
+    bool redundant = false;
+  };
+  std::vector<InnerMate> innerMates;
 };
 
 // The connector's local frame in its part's coordinates (columns X, Y, Z,
@@ -122,6 +139,9 @@ void SetMateDof(Mate& m, MateDof dof, double value);
 struct Driven {
   uint64_t mate = 0;
   MateDof dof = MateDof::Rotation;
+  // v129: the flexible placement the mate is inside (Relation::mateAPath);
+  // empty = a mate of the document being solved.
+  std::vector<uint64_t> path;
 };
 
 // `diagnose`: when a loop does not close, look for the one tilted connector
@@ -133,6 +153,84 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr,
                   const Driven& driven = {}, bool diagnose = true);
 
+// ---- Flexible sub-assemblies (v129) ----------------------------------------
+// (docs/assemblies/README.md#flexible-sub-assemblies)
+//
+// The solver does not know about them. It is WRAPPED: ExpandFlexible copies
+// the parent and adds, for each flexible placement, the sub-assembly's moving
+// occurrences, mates and relations under synthetic ids from a range no
+// document reaches; Solve runs on that copy; CollapseFlexible writes the
+// placements, the inner poses, the inner mate values and the errors back to
+// the parent. Solve() does all three itself when anything is flexible, and
+// a motion study expands ONCE and runs every sample on the expanded copy.
+
+// Where an occurrence of `owner`'s sub-assembly stands in owner's frame: the
+// pose the placement keeps for it when `owner` is flexible and has one, else
+// the one its own document stores.
+glm::mat4 InnerPlacement(const Occurrence& owner, const Occurrence& inner);
+
+// Why `owner` cannot move as a flexible placement, or empty when it can:
+// it places a part, its sub-assembly is not loaded, has nothing fixed to
+// move against, holds a freewheel or a click (their history would be
+// per-placement state), or places something flexible itself (one level).
+std::string FlexibleRefusal(const Occurrence& owner,
+                            const AssemblyResolver& asmById);
+
+struct FlexibleUnit {
+  uint64_t root = 0; // the flexible occurrence
+  const AssemblyDocument* sub = nullptr;
+  std::string error; // why it stays rigid this solve; empty = expanded
+  // Its occurrences that MOVE (reached through mates from a fixed one); the
+  // rest fold into the root — they cannot move relative to it.
+  std::vector<uint64_t> moving;
+  std::vector<uint64_t> mates; // its mates copied in (the sub's ids)
+};
+
+struct FlexibleExpansion {
+  AssemblyDocument doc; // the parent, with every unit's inside added
+  std::vector<FlexibleUnit> units;
+  bool any = false; // at least one unit expanded
+  // synthetic id <-> (root, the sub-assembly's id), for occurrences and mates
+  std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> occOf, mateOf;
+  std::map<std::pair<uint64_t, uint64_t>, uint64_t> occIdOf, mateIdOf;
+  // A parent relation whose path named no mate: its error, by relation id.
+  std::map<uint64_t, std::string> relationErrors;
+
+  // The expanded id of a mate named {path, mate}: the mate itself for an
+  // empty path, 0 when the path names no expanded unit or no mate in it.
+  uint64_t MateId(const std::vector<uint64_t>& path, uint64_t mate) const;
+  const FlexibleUnit* UnitFor(uint64_t root) const;
+};
+
+FlexibleExpansion ExpandFlexible(const AssemblyDocument& parent,
+                                 const PartResolver& partById,
+                                 const AssemblyResolver& asmById);
+// Writes the expanded solve back into `parent` (the document it was expanded
+// from): placements, mate values and errors, relation state, every unit's
+// inner poses and mate values; and translates `report` (optional) so it names
+// inner mates by path rather than by synthetic id.
+void CollapseFlexible(const FlexibleExpansion& ex, AssemblyDocument& parent,
+                      SolveReport* report);
+
+// A mate named {path, mate} (v129): the mate a relation, a study driver or
+// set_mate means, read from the sub-assembly the path's placement holds —
+// or this document's own for an empty path. nullptr with `why` filled when
+// the path is not one flexible placement, or names no mate there.
+const Mate* MateAtPath(const AssemblyDocument& doc,
+                       const std::vector<uint64_t>& path, uint64_t mate,
+                       const AssemblyResolver& asmById,
+                       std::string* why = nullptr);
+// Its DOF value as the document has it posed: a flexible placement's own
+// value for an inner mate (or the sub's authored one before the first solve).
+std::optional<double> MateDofAt(const AssemblyDocument& doc,
+                                const std::vector<uint64_t>& path,
+                                uint64_t mate, MateDof dof,
+                                const AssemblyResolver& asmById);
+// ...and set, into the placement's innerMateDofs for an inner mate.
+bool SetMateDofAt(AssemblyDocument& doc, const std::vector<uint64_t>& path,
+                  uint64_t mate, MateDof dof, double value,
+                  const AssemblyResolver& asmById);
+
 // ---- Flatten: the one tree walk (A5) --------------------------------------
 //
 // An assembly may place other assemblies. Every consumer that wants GEOMETRY
@@ -141,8 +239,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
 // transform. Flatten is that answer, and it exists so those consumers do not
 // each grow their own recursion (which is how they would drift apart).
 //
-// v1 sub-assemblies are RIGID: a placed assembly is one solid unit at
-// whatever placements its own document stores. Flatten never solves.
+// A placed assembly is one solid unit at whatever placements its own document
+// stores — unless the placement is FLEXIBLE (v129), when the poses it keeps
+// for its sub-assembly's occurrences place them instead. Flatten never
+// solves.
 struct FlatInstance {
   uint64_t partId = 0;            // always a PART: the leaves of the tree
   const Document* part = nullptr; // resolved, regenerated

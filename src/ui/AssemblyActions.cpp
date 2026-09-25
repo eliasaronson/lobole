@@ -280,8 +280,10 @@ int SolveActiveAssembly(AppState& state) {
 }
 
 int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof,
-                              bool diagnose) {
-  return SolveActiveAssemblyReport(state, {mateId, dof}, diagnose).erroredMates;
+                              bool diagnose,
+                              const std::vector<uint64_t>& path) {
+  return SolveActiveAssemblyReport(state, {mateId, dof, path}, diagnose)
+      .erroredMates;
 }
 
 bool AssemblyPartsStale(AppState& state) {
