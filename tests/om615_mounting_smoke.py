@@ -58,7 +58,7 @@ def main():
             )
             winding = app.part("alternator winding pack", create=False)
             assert winding.state()["bodies"][0]["material"] == "copper"
-            A.check_subassemblies(app)
+            A.check_subassemblies(app, pump=False)  # no pump in this build
             rig.activate()
             result = app.interference(mode="exact", max_pairs=20000, deadline_s=120)
             assert not result.get("truncated") and not result["clash"], result

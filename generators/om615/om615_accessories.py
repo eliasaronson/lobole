@@ -1339,11 +1339,18 @@ def assembly_inputs():
     )
 
 
-def check_subassemblies(app):
+def check_subassemblies(app, pump=True):
+    """Sweep each child assembly on its own tab: the engine's sweep sees a
+    placed sub-assembly whole. `pump`: the injection pump's too — one
+    flexible occurrence in the engine; a partial build has none."""
     reports = {}
-    for name in ("alternator stator assembly", "alternator rotor assembly"):
+    names = ["alternator stator assembly", "alternator rotor assembly"]
+    if pump:
+        names.append("PES4M injection pump")
+    for name in names:
         app.assembly(name, create=False).activate()
-        r = app.interference(mode="exact", max_pairs=1000, deadline_s=60)
+        r = app.interference(mode="exact", max_pairs=20000, deadline_s=300,
+                             _timeout=900)
         reports[name] = r
         if r.get("truncated") or r["clash"]:
             raise SdkError(f"{name}: incomplete or clashing internal assembly: {r}")
@@ -1504,11 +1511,14 @@ def check_mountings(app, rig, hanging=True):
         # The injection pump: its flange on the block's seat, its rear lug
         # on the bracket, the bracket on the block, and each line on its
         # delivery-valve holder at one end and its injector at the other.
-        pairs.extend([("block", "pump housing"),
+        # The pump is ONE flexible occurrence; its parts are named by path.
+        pump = "injection pump/"
+        pairs.extend([("block", pump + "pump housing"),
                       ("block", "injection pump bracket"),
-                      ("pump housing", "injection pump bracket")])
+                      (pump + "pump housing", "injection pump bracket")])
         for k in range(1, 5):
-            pairs.extend([(f"delivery valve holder {k}", f"injection line {k}"),
+            pairs.extend([(f"{pump}delivery valve holder {k}",
+                           f"injection line {k}"),
                           (f"injection line {k}", f"injector {k}")])
     measured = []
     for a, b in pairs:

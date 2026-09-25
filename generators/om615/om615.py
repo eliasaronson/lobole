@@ -54,7 +54,16 @@ def _solved(what, rig):
           f"residual {r.get('residual_mm', 0.0):.2e} mm, "
           f"{r['errored_mates']} errored")
     if r["errored_mates"]:
-        raise SdkError(f"{r['errored_mates']} mates could not be solved")
+        # A flexible sub-assembly's own mates are reported by path.
+        inner = [(f["name"], m["name"], m.get("error"))
+                 for f in r.get("flexible", []) for m in f.get("mates", [])
+                 if m["status"] == "error"]
+        inner += [(f["name"], None, f["error"]) for f in r.get("flexible", [])
+                  if "error" in f]
+        errs = [(m["name"], m.get("error")) for m in r["mates"]
+                if m["status"] == "error"]
+        raise SdkError(f"{r['errored_mates']} mates could not be solved: "
+                       f"{errs[:5]} {inner[:5]}")
     return r
 
 
@@ -408,32 +417,41 @@ def pump_phase_deg():
     return closing - ratio * (compression_tdc(0) - SPILL_ADVANCE_DEG)
 
 
+PUMP = "injection pump"  # the engine's one occurrence of the pump
+
+
 def injection_pump(app, rig, occ, top, front, main):
-    """The Bosch PES4M built into the engine: its parts (generators/pes_pump)
-    assembled flat into this rig — a sub-assembly would be rigid — with its
-    flange fastened to the block's seat, its rack held at full load, its
-    camshaft chained to the crank at 22:44 and phased for the injection
-    timing, the vacuum pump driven off it, a bracket under its rear lugs,
-    and the four injection lines to the injectors."""
+    """The Bosch PES4M built into the engine as ONE flexible occurrence of
+    the pump's own assembly (generators/pes_pump), run under that
+    assembly's "Full load" configuration, which holds its rack: its flange
+    fastened to the block's seat through its housing, its camshaft's own
+    mate chained to the crank at 22:44 and phased for the injection timing,
+    the vacuum pump driven off that mate, a bracket under its rear lugs,
+    and the four injection lines to its delivery-valve holders
+    (docs/assemblies/README.md#flexible-sub-assemblies)."""
     parts, _ = pes_pump.build_parts(app)
+    prig, mates, ids = pes_pump.assemble(app, parts)
+    cfg = pes_pump.configure(app, prig, mates)
     rig.activate()
-    rig, mates, ids = pes_pump.assemble(
-        app, parts, rig=rig, mount=(occ["block"], "injection_pump_mount"),
-        rack_offset=PS.RACK_TRAVEL)
+    po = rig.place(prig, flexible=True, configuration=cfg["Full load"],
+                   name=PUMP)
+    housing = po.inner(ids["housing"], "pump housing")
+    rig.fasten((occ["block"], "injection_pump_mount"), (housing, "flange"),
+               name="injection pump flange")
+    cam = po.mate(mates["cam"])
     phase = pump_phase_deg()
-    rig.chain(main, mates["cam"], teeth_a=CRANK_TEETH,
+    rig.chain(main, cam, teeth_a=CRANK_TEETH,
               teeth_b=PS.SPROCKET_TEETH, phase=math.radians(phase),
               name="injection pump chain")
-    A.drive_vacuum(rig, front["accessories"]["vacuum"], mates["cam"])
+    A.drive_vacuum(rig, front["accessories"]["vacuum"], cam)
     bracket = A.pump_bracket(app)
     rig.activate()
     bo = rig.place(bracket, name="injection pump bracket")
     rig.fasten((occ["block"], "pump_bracket"), (bo, "block"), flipped=False)
     _solved("injection pump", rig)
-    by_name = {o.name: o for o in rig.occurrences()}
     lines = []
     for k in range(1, PS.N_EL + 1):
-        holder = by_name[f"delivery valve holder {k}"]
+        holder = po.inner(ids[f"holder{k}"], f"delivery valve holder {k}")
         outlet = holder.frame("outlet")
         inlet = top["injectors"][k - 1].frame("fuel_inlet")
         part = A.injection_line(app, k, outlet, inlet)
@@ -451,11 +469,13 @@ def injection_pump(app, rig, occ, top, front, main):
         clamps.append(part.name)
     _solved("injection lines", rig)
     names = sorted({p.name for p in parts.values()}
-                   | {bracket.name} | {f"injection line {k}" for k in
-                                       range(1, PS.N_EL + 1)} | set(clamps))
-    print(f"  injection pump: {len(parts)} parts, phase {phase:.3f} deg "
+                   | {bracket.name, pes_pump.ASSEMBLY}
+                   | {f"injection line {k}" for k in range(1, PS.N_EL + 1)}
+                   | set(clamps))
+    print(f"  injection pump: {len(parts)} parts, one flexible occurrence, "
+          f"phase {phase:.3f} deg "
           f"(port closing {SPILL_ADVANCE_DEG} deg before TDC)")
-    return dict(mates=mates, ids=ids, housing=by_name["pump housing"],
+    return dict(occ=po, mates=mates, ids=ids, housing=housing,
                 bracket=bo, part_names=names, phase_deg=phase)
 
 
@@ -956,10 +976,12 @@ def main():
     return 0
 
 
-def _mate_track(r, mate):
+def _mate_track(r, mate, path=()):
     """A mate's rotation over the study, unwrapped, from the study's own
-    mate values (not recovered from a quaternion)."""
-    vals = [next(m["rotation_deg"] for m in s["mates"] if m["mate"] == mate["id"])
+    mate values (not recovered from a quaternion). `path` names the
+    flexible placement a mate of a sub-assembly is in."""
+    vals = [next(m["rotation_deg"] for m in s["mates"]
+                 if m["mate"] == mate["id"] and m.get("path", []) == list(path))
             for s in r["samples"]]
     out = [vals[0]]
     for v in vals[1:]:
@@ -976,7 +998,7 @@ def check_pump(r, main_mate, cam_mate, pump):
     exact, and the pump's own port-closing law — not by interpolating
     samples a quarter of a pump turn apart."""
     crank = _mate_track(r, main_mate)
-    pcam = _mate_track(r, pump["mates"]["cam"])
+    pcam = _mate_track(r, pump["mates"]["cam"], [pump["occ"].id])
     ecam = _mate_track(r, cam_mate)
     ratio = CRANK_TEETH / PS.SPROCKET_TEETH
     out, failures = {}, []
@@ -993,8 +1015,10 @@ def check_pump(r, main_mate, cam_mate, pump):
         math.remainder(cam_phase, 360.0), 4)
     peaks = {}
     for k in range(1, PS.N_EL + 1):
-        oid = pump["ids"][f"plunger{k}"]
-        zs = [next(p["position"][2] for p in s["poses"] if p["occurrence"] == oid)
+        # Inside the flexible pump each plunger is posed by its PATH.
+        path = [pump["occ"].id, pump["ids"][f"plunger{k}"]]
+        zs = [next(p["position"][2] for p in s["poses"]
+                   if p.get("path") == path)
               for s in r["samples"]]
         stroke = max(zs) - min(zs)
         out[f"plunger {k} stroke"] = round(stroke, 4)

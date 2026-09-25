@@ -116,9 +116,12 @@ rack, hand primer and flyweights are the other free DOFs; nothing drives
 them, and they stay at full load, rest and zero advance.
 
 **The alternator** is two rigid child assemblies — stator and rotor — joined
-by a revolute in the engine, because a nested assembly is rigid in the solver
-and a turning rotor needs its DOF exposed in the parent. The whole-engine
-sweep checks top-level pairs only, so the children are swept on their own.
+by a revolute in the engine: each child is rigid in itself, and the joint
+between them is the engine's. The whole-engine standing sweep checks
+top-level pairs only, so the children are swept on their own, and so is the
+injection pump's assembly on its tab; the motion study then checks the
+pump's leaves against each other and the engine at full load, since it takes
+a flexible placement leaf by leaf.
 
 **The bottom end's outside** is casting form read off the front photograph
 and the factory section, not a drawing, and none of it touches a bore,
@@ -183,10 +186,13 @@ Construction rules the builders keep:
 ## The injection pump
 
 The Bosch PES4M is `generators/pes_pump/`: its parts are built into this
-project (the tabs go in an "Injection pump" folder) by `pes_pump.build_parts`
-and assembled FLAT into the engine's rig by `pes_pump.assemble`, because a
-sub-assembly is rigid in its parent's solve and a relation cannot reach into
-one. Its frame maps onto the engine's by one turn: pump +X (toward the
+project (the tabs go in an "Injection pump" folder) by `pes_pump.build_parts`,
+assembled into the pump's own assembly ("PES4M injection pump") by
+`pes_pump.assemble` with its load configurations (`pes_pump.configure`), and
+placed in the engine as ONE **flexible** occurrence, "injection pump"
+([flexible sub-assemblies](../../docs/assemblies/README.md#flexible-sub-assemblies)):
+its mechanism moves in the engine's solve and studies, and the engine names
+its parts and mates by path (`po.inner(id)`, `po.mate(mate)`). Its frame maps onto the engine's by one turn: pump +X (toward the
 governor) is engine +Y, the rear; pump +Z is +Z; so pump +Y, the control
 rack's side, faces the block and the feed pump and hand primer face out, as
 in the photographs.
@@ -228,11 +234,12 @@ seat ring.
 on the flange's back face, in a pocket the pump's housing has for each head,
 to the thread's floor in the seat. A **bracket** (paint) on the rib over the
 second main, two derived M8, carries the pump's rear lug on a shelf. The
-control rack is held at full load (`rack_offset = RACK_TRAVEL`); the
-flyweights sit at zero advance.
+control rack is held at full load by the pump's own "Full load"
+configuration, which the placement runs under; the flyweights sit at zero
+advance.
 
 **The drive.** A chain relation from the crank's main mate to the pump
-camshaft's revolute, 22:44 (`CRANK_TEETH : SPROCKET_TEETH`), same sense, like
+camshaft's revolute INSIDE the pump occurrence (`{path: [pump], mate}`), 22:44 (`CRANK_TEETH : SPROCKET_TEETH`), same sense, like
 the camshaft's — and PHASED: the relation's `phase` (`pump_phase_deg()`,
 52.89 pump degrees at crank zero) puts element 1's port closing, the start of
 delivery (`pes_spec.valve_window(1)[0]`, where the plunger's top edge covers

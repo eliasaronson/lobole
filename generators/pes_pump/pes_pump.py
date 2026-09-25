@@ -65,20 +65,18 @@ def build_parts(app, only=None):
     return parts, times
 
 
-def assemble(app, parts, rig=None, mount=None, rack_offset=None):
-    """The pump, mated and coupled, in `rig` — its own assembly when that is
-    left out, with the housing fixed. An engine passes its rig and `mount`,
-    the (occurrence, frame) the housing's `flange` fastens to, and holds the
-    control rack at `rack_offset` (mm from stop), since the pump's load
-    configurations belong to the pump's own assembly. Returns the rig, the
-    mates an engine drives or reads, and the occurrence ids the checks use."""
-    if rig is None:
-        rig = app.assembly(ASSEMBLY, create=True)
+def assemble(app, parts):
+    """The pump, mated and coupled, in its own assembly, with the housing
+    fixed. An engine places that assembly as one FLEXIBLE occurrence
+    (docs/assemblies/README.md#flexible-sub-assemblies), fastens it by the
+    housing's `flange` and drives the camshaft's own mate; the rack is held
+    by the configuration it runs under (configure()). Returns the rig, the
+    mates an engine drives or reads, and the occurrence ids the checks
+    use — ids in THIS assembly, which the engine names by path."""
+    rig = app.assembly(ASSEMBLY, create=True)
     rig.activate()
     ids = {}
-    ho = rig.place(parts["housing"], fixed=mount is None, name="pump housing")
-    if mount is not None:
-        rig.fasten(mount, (ho, "flange"), name="injection pump flange")
+    ho = rig.place(parts["housing"], fixed=True, name="pump housing")
     ids["housing"] = ho.id
 
     def fixed_to(occ, frame, part, name, pframe=None):
@@ -104,8 +102,6 @@ def assemble(app, parts, rig=None, mount=None, rack_offset=None):
     ids["camshaft"] = cam.id
     rack = rig.place(parts["rack"], name="control rack")
     rack_m = rig.slider((ho, "rack"), (rack, "slide"), name="control rack")
-    if rack_offset is not None:
-        app.call("set_mate", id=rack_m["id"], offset=rack_offset)
     ids["rack"] = rack.id
 
     rig.activate()

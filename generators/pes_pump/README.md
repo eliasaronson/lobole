@@ -59,10 +59,12 @@ so the engine's block is machined to the pump's numbers:
 - **The sprocket.** It has 44 teeth for 3/8" duplex chain, the same as the
   engine's camshaft, since both turn at half crank speed off one chain. Its
   chain plane is `CHAIN_PLANE_X` and its tips reach `SPROCKET_TIP_R`.
-- **The rack.** `assemble(app, parts, rig, mount, rack_offset)` builds the
-  pump into another assembly's rig and fastens `flange` to `mount`. The load
-  configurations belong to the pump's own assembly, so in someone else's
-  assembly the rack is held with `rack_offset` instead.
+- **The rack.** `assemble(app, parts)` builds the pump into its own
+  assembly, housing fixed, and `configure` adds its load configurations. An
+  engine places that assembly as one FLEXIBLE occurrence
+  ([flexible sub-assemblies](../../docs/assemblies/README.md#flexible-sub-assemblies))
+  under the configuration it wants — the OM615 runs it at "Full load" — fastens
+  the housing's `flange` by path, and drives the camshaft's own mate.
 - **The part names.** The camshaft is "pump camshaft" and the governor's
   filler cap "governor filler cap", so an engine's own camshaft and oil
   filler cap keep theirs. `app.part(name)` now refuses a name another
