@@ -79,7 +79,8 @@ An occurrence may place another assembly. By default the placement is
 the parent's solve never recurses into it. A placement can instead be
 [flexible](#flexible-sub-assemblies), when the sub-assembly's own mechanism
 moves in the parent. Mates, exploded views and the drag gizmo operate between
-top-level occurrences either way.
+top-level occurrences either way, and on a flexible placement also reach its
+moving parts.
 
 `assembly::Flatten` (`src/core/AssemblySolve.h`) is the one tree walk. Every
 consumer that wants geometry — render sync, BOM, mass, contact/interference,
@@ -114,8 +115,8 @@ skips a dangling reference rather than failing.
 
 ### Flexible sub-assemblies
 
-A placement with `flexible` set (v129; `add_occurrence {flexible: true}` or
-`set_occurrence_flexible`) brings its sub-assembly's occurrences, mates and
+A placement with `flexible` set (v129; `add_occurrence {flexible: true}`,
+`set_occurrence_flexible`, or the Flexible checkbox in its editor) brings its sub-assembly's occurrences, mates and
 relations into the parent's solve and motion studies, instanced for that
 placement. An engine's chain then drives the injection pump's own camshaft
 mate, and the pump is one occurrence rather than seventy.
@@ -177,7 +178,42 @@ bodies per inner occurrence, so a plunger is checked against its barrel and
 against the engine, and the rigid-pair rule compares those leaves' own
 transforms. The GLB export writes one node per moving inner occurrence, and
 live playback moves each one. A clearance assertion's key hashes the inner
-poses. An exploded view still moves the unit as one block.
+poses. An exploded view moves the unit by its own step, and a moving part by
+a step of its own on top (below).
+
+**In the GUI** ([panels](../ui/panels.md#assembly-tab-the-model-panel)). The
+occurrence's editor has the Flexible checkbox and the configuration picker;
+both call `ui::SetOccurrenceFlexible` / `ui::SetOccurrenceConfiguration`
+(`src/ui/FlexibleActions.cpp`), which is also what the two RPCs are, so a
+refusal reads the same in the panel as over the socket, one undo step each.
+The tree lists a flexible placement's moving parts and its mates that turn
+or slide under its row, read-only. The study driver combo and the relation
+editor's sides list those mates as "Pump / camshaft" (`ui::DofMateChoices`),
+stored by path as the RPC stores them.
+
+A moving part is selected ON ITS OWN, from its tree row or by clicking it in
+the viewport: an occurrence selection item whose `id` is the placement and
+whose `innerPath` is `[part]` (`get_state` reports it as `{kind:
+"occurrence", id, path}`). The rest of the unit -- its housing, what is
+bolted to it -- still selects the placement. `SelectedOccurrenceId(s)` skip
+such an item, so Delete, Hide and the unit's gizmo never act on the whole
+unit for a click on its crank. The selected part's gizmo is the ring or arrow
+of the sub-assembly mate that places it (`ui::InnerMateDriving`): a drag
+writes this placement's pose of that mate (`SetMateDofAt`, the write
+`set_mate {id, path}` makes) and solves holding it, so the unit's mechanism
+and whatever the parent chains to it follow, one undo step per drag. A turn
+snaps as a top-level joint's does; a DOF the placement's configuration holds
+does not move. Only what `set_mate` with a path can pose drags -- a turn and
+a slide -- so a planar mate's in-plane slide and a ball show no handle.
+
+**Exploded views** (v130). An explode step may name a moving part inside a
+flexible placement as a mate is named: `{occurrence: <the sub-assembly's
+id>, path: [placement]}`. Its offset adds to the placement's own step, so a
+crank lifts out of a pump that has itself moved aside. `set_explode_step`
+takes `path`, refusing a placement that is not flexible; with such a part
+selected the explode gizmo writes that step. A path is ignored while the
+placement is rigid (its parts explode as one block), and auto-explode stays
+top-level.
 
 ## Mates and the solve
 
@@ -319,7 +355,9 @@ Named, persistent explode states: one world-space offset per occurrence,
 scaled by a transient factor (0..1). **Pure view state** — applied to the
 rendered instance transform only, never to occurrence transforms, mates or the
 solve, so a saved exploded view cannot corrupt placements. A top-level
-offset moves its whole subtree.
+offset moves its whole subtree; a moving part of a flexible placement may have
+a step of its own, by path (v130,
+[flexible sub-assemblies](#flexible-sub-assemblies)).
 
 With a view active the gizmo shows translate arrows at the displayed position
 and writes the step's offset (a fixed occurrence explodes too). Auto-explode
@@ -493,7 +531,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   (`bounds: true` adds world bboxes), `set_occurrence_transform` (orientation
   as a quaternion or `rotate {axis, angle_deg}`), `set_occurrence_visible`,
   `set_occurrence_fixed`, `rename_occurrence`,
-  `set_occurrence_configuration`, `select_occurrence`.
+  `set_occurrence_configuration`, `set_occurrence_flexible`,
+  `select_occurrence`.
 - Mates: `add_mate` (`derive: twist|pose` reads a fastened mate's numbers
   off the current placement), `set_mate`, `remove_mate`, `list_mates`,
   `select_mate`, `solve_assembly`. On the wire a mate's `type` is its kind
@@ -532,6 +571,7 @@ one.
 | `src/core/io/SerializeAssembly.cpp`, `Serialization.cpp` | JSON and the directory layout |
 | `src/ui/AssemblyActions.{h,cpp}` | solve/undo/selection glue, staleness, in-context entry, explode |
 | `src/ui/MateActions.cpp`, `GizmoInput.cpp`, `OccurrencePanel.cpp`, `Bom.cpp`, `MotionActions.cpp`, `MotionVideo.cpp`, `FastenerActions.cpp` | GUI tools |
+| `src/ui/FlexibleActions.{h,cpp}` | flexible placements from the panel and the RPC alike: Flexible, the configuration, inner mates as choices, a moving part as a selection |
 | `src/ui/RendererSync.cpp` | instanced assembly render sync, in-context ghosts |
 | `src/remote/RemoteAssembly.cpp`, `RemoteMotion.cpp` | RPCs |
 
@@ -561,7 +601,11 @@ one.
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
   scrub, and `motion_video_frames_are_the_view` (a filmed frame is the
-  viewport, not the window).
+  viewport, not the window). `GuiTestsFlexible.cpp` (category `flexible`):
+  tick Flexible (and the refusal for a unit with nothing fixed), pick a
+  configuration, a relation side and a study driver inside the unit and run
+  the study, click and drag the crank within its mate, explode it on its
+  own; each undone with Ctrl+Z.
 
 ## Not built
 
@@ -577,6 +621,6 @@ one.
 - Contact dynamics: gears and cams are kinematic relations, checked for
   clash statically and over motion studies.
 - A version pin on an occurrence's part (`part_version`).
-- More than one level of flexibility, and a GUI toggle for `flexible` (it is
-  set over RPC and the SDK); an exploded view of a flexible unit's parts one
-  by one.
+- More than one level of flexibility; a GUI drag of a flexible unit's
+  planar or ball mates (`set_mate` with a path poses a turn and a slide
+  only).

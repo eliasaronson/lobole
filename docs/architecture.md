@@ -156,9 +156,9 @@ actions layer headlessly.
 `MeasureActions`, `RendererSync`, `CreateActions`, `SceneOverlays`,
 `SketchOverlay`, `VariableActions`, `ImportActions`, `SelectionPipeline`; the
 assembly side as `AssemblyActions`, `MateActions`, `Bom`, `GizmoInput`,
-`TessellationCache`, `FastenerActions`; the sketch session as `SketchTools`,
-`SketchDimensions`, `SketchDimensionDraw`, `SketchPick`, `SketchOps`,
-`SketchToolOverlay`, with `SketchInteraction.cpp` keeping the viewport event
+`TessellationCache`, `FastenerActions`, `FlexibleActions`; the sketch session
+as `SketchTools`, `SketchDimensions`, `SketchDimensionDraw`, `SketchPick`,
+`SketchOps`, `SketchToolOverlay`, with `SketchInteraction.cpp` keeping the viewport event
 router. There is no umbrella header: a file includes the header of the
 subject it uses, so changing one declaration rebuilds only that subject's
 includers. Helpers shared between the action files live in

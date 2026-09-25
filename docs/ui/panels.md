@@ -86,6 +86,14 @@ The feature tree (`src/ui/FeatureTreePanel.cpp`):
 
 - **Occurrences** — a glyph (part or sub-assembly), the name, an anchor
   tail glyph when fixed, dimmed when hidden, the hover eye for visibility.
+  A [flexible](../assemblies/README.md#flexible-sub-assemblies) placement
+  reads "flexible" in its tail and expands (`###occ_flex_<id>`, open by
+  default) to its moving parts (`###occ_in_<placement>_<part>`, the mate
+  type that moves each as the tail) and the mates inside it that turn or
+  slide (`###occ_inmate_<placement>_<mate>`, the value this placement has,
+  "held" when its configuration holds it). They are read-only: a part row
+  selects that part, a mate row the part it moves, and the part then drags
+  in the viewport. The rest of the unit folds into its own row.
 - **Mates** — a glyph per type, then the mate's name or "A – B" (the two
   occurrences it joins), the type as a dim tail; red with the reason in the
   tooltip when it failed to solve. The mate list uses `clickClears`.
@@ -96,6 +104,20 @@ properties in `DrawAssemblyEditWindow`, and a mate's (name, flip, rotate, its
 DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
 (`DrawMateToolWindow`). Each field edit is one undo step per drag.
 
+- A sub-assembly placement's editor adds its **Configuration** picker
+  (`###occ_config`: "Its active one (…)" or one of the sub-assembly's
+  configurations) and **Flexible** (`###occ_flexible`). Both go through
+  `ui::SetOccurrenceConfiguration` / `ui::SetOccurrenceFlexible`
+  (`src/ui/FlexibleActions.h`), the same actions the RPC calls, one undo step
+  each. A refusal (nothing fixed inside, a freewheel or click, a second level
+  of flexibility) is shown in red under the controls
+  (`AppState::asmEditRefusal`) and changes nothing.
+- The relation editor has a **Drives** and a **Driven** combo
+  (`###rel_side_a`, `###rel_side_b`) listing every mate that turns or slides:
+  this assembly's own, then each flexible placement's as "Pump / camshaft"
+  (`ui::DofMateChoices`). A mate lacking the DOF the side reads is refused in
+  place; a screw's one mate is both sides.
+
 Floating from the assembly toolbar, one at a time through the tool-window
 slot (an exploded view and a motion study both place occurrences, so holding
 both open means nothing):
@@ -104,10 +126,16 @@ both open means nothing):
   `DrawExplodeToolWindow`: the list, Add, the name, the factor slider,
   auto-explode, Delete. Close does not clear the view:
   `activeExplodedView` stays applied, because the explode is a display state
-  and a person who closes the window is done editing, not done looking.
+  and a person who closes the window is done editing, not done looking. The
+  gizmo's arrows write the selected occurrence's step; with a moving part of
+  a flexible placement selected they write that part's own step, named by
+  path.
 - **Motion** (`###tb_asm_motion`, `assembly.motion`, M) —
   `DrawMotionToolWindow`: the study list, the driver, the range, the Pose
   scrub (`###motion_t`), and:
+  - The driver combo (`###motion_driver`) and Add study take their mates
+    from `ui::DofMateChoices`, so a study can be driven by a mate inside a
+    flexible placement (stored as `driver_path`).
   - **Preview motion** and **Validate motion** are *runs*, not edits: each
     passes a `RunOverride {checkClash, clashMode}` to `StartMotionRun`
     applied to the run's copy of the study, so the stored study (and
