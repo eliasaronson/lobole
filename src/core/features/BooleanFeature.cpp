@@ -1,5 +1,6 @@
 #include "core/features/BooleanFeature.h"
 
+#include "core/BodyMode.h" // BooleanRefusal
 #include "core/Measure.h"
 
 #include "common/Logger.h"
@@ -47,7 +48,7 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   CADShape result =
       topo::BooleanNamed(op, target->shape, target->elementMap, tool->shape,
                          tool->elementMap, GetId(), map, &boolErr);
-  if (!result.IsValid() || result.Volume() < 1e-9) {
+  if (!result.IsValid()) {
     SetError("operation produced an empty or invalid solid (are the bodies "
              "disjoint?)" +
              (boolErr.empty() ? "" : " — " + boolErr));
@@ -72,6 +73,23 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
              (why.empty() ? "" : " (" + why + ")") +
              " — it has volume and is not a well-formed B-Rep, so anything "
              "measured on it afterwards would be wrong");
+    return false;
+  }
+  // Well-formed is not the same as right: what a boolean must keep — volume
+  // the right way, no shell inside out, no face left inside the tool — is
+  // checked before "is it empty", so an inside-out result is called that
+  // and not "disjoint"
+  // (docs/modeling/README.md#a-boolean-is-checked-before-it-is-kept).
+  if (std::string why = BooleanRefusal(m_name, op, target->name, target->shape,
+                                       tool->shape, result);
+      !why.empty()) {
+    SetError(why);
+    return false;
+  }
+  if (result.Volume() < 1e-9) {
+    SetError("operation produced an empty or invalid solid (are the bodies "
+             "disjoint?)" +
+             (boolErr.empty() ? "" : " — " + boolErr));
     return false;
   }
   // A subtract/union whose result equals the target did nothing — the operands
