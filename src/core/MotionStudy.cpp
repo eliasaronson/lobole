@@ -177,6 +177,33 @@ private:
   std::map<Key, std::vector<glm::mat4>> track_;
 };
 
+// Walk the driver from wherever the document has it to the study's first
+// value, at no more than the study's own sample spacing, solving each step —
+// the way the scrub walks (ui::ApplyMotionPose). Setting the first sample
+// straight away was a JUMP from the document's pose: from a crank left at
+// 180 degrees, a jump to 0 can land a slider-crank on its mirrored branch,
+// and every later sample follows it there — the pistons of a whole run out
+// through the bottom of the crankcase, each one a clean solve.
+void WalkToStart(assembly::FlexibleExpansion& ex, Mate& driver,
+                 const assembly::PartResolver& parts,
+                 const assembly::AssemblyResolver& assemblies,
+                 const MotionStudy& study) {
+  const double from = assembly::MateDofValue(driver, study.driverDof);
+  const double to = ValueAt(study, 0.0);
+  const double stride =
+      std::abs(study.to - study.from) / std::max(study.samples - 1, 1);
+  if (!(stride > 1e-12) || std::abs(to - from) <= stride)
+    return; // within one step: sample 0's own solve is that step
+  const int steps = static_cast<int>(std::ceil(std::abs(to - from) / stride));
+  for (int k = 1; k < steps; k++) { // the last step is sample 0 itself
+    assembly::SetMateDof(driver, study.driverDof,
+                         from + (to - from) * double(k) / steps);
+    assembly::PropagateRelations(ex.doc, driver.id, parts);
+    assembly::Solve(ex.doc, parts, assemblies, {driver.id, study.driverDof},
+                    /*diagnose=*/false);
+  }
+}
+
 // The kinematics-only pass: every sample solved on its own copy, in order,
 // placements recorded.
 RelativeMotion TrackMotion(const assembly::FlexibleExpansion& ex,
@@ -475,6 +502,7 @@ Result Run(const AssemblyDocument& asmDocIn,
                 "' this run expanded";
     return out;
   }
+  WalkToStart(ex, *driver, parts, assemblies, study);
   std::set<uint64_t> flexible;
   for (const assembly::FlexibleUnit& u : ex.units)
     if (u.error.empty())

@@ -79,6 +79,21 @@ def main():
             expect(got > 0, f"crank {deg} deg: piston at {got:.4f} is behind "
                             f"the crank axis — the mirrored branch")
 
+        # A RUN started from a crank left at 180 walks back to its first
+        # sample the same way: it used to jump there, and a jump from the
+        # collinear pose landed the whole run on the mirrored branch.
+        a.set_motion_pose(study=study["id"], t=0.5)
+        r = a.run_motion_study(study=study["id"], include_poses=True)
+        for sample in r["samples"]:
+            deg = sample["t"] * 360.0
+            got = next(p["position"][0] for p in sample["poses"]
+                       if p["occurrence"] == piston.id)
+            expect(abs(got - (CRANK_R * math.cos(math.radians(deg)) + math.sqrt(
+                       ROD_L ** 2 - (CRANK_R * math.sin(math.radians(deg))) ** 2)))
+                   < 1e-3,
+                   f"a run from 180 deg: at {deg:.1f} deg the piston is at "
+                   f"{got:.4f}" + (" — the MIRRORED branch" if got < 0 else ""))
+
         # leave_at_deg: the run leaves the live crank at a driver VALUE
         # between two samples (7.5 degrees apart here), reached by walking
         # to the nearest sample and stepping from it. Posed from the far end
