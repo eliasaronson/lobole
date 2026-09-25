@@ -411,8 +411,13 @@ class App:
         """The documented method names, optionally filtered."""
         return sorted(n for n in self._methods if contains in n)
 
-    def help(self, method):
-        return self._methods[method].__doc__
+    def help(self, method=""):
+        """What `method` does, takes and returns — the one lookup every
+        client shares (designer_remote.method_help), so the SDK, the plain
+        client and the MCP server's help() give the same answer. With no
+        method, the index."""
+        from designer_remote import method_help
+        return method_help(self._remote.call, method)
 
     def close(self):
         self._remote.close()

@@ -68,8 +68,10 @@ the part document, or the test records why it is gated anyway).
 ## `describe`
 
 `describe` returns every method with its `doc`, `params` (or
-`params_free_form: true`), `requires_part_doc` and `returns`; `{method}`
-narrows to one row. It also publishes the vocabularies an agent otherwise has
+`params_free_form: true`), `requires_part_doc` and `returns`. `{method}`
+narrows the answer to that one row, with only `app` and
+`document_format_version` beside it, and refuses an unknown name naming the
+close matches. Without it, `describe` also publishes the vocabularies an agent otherwise has
 to guess: `feature_types` and `sketch_entity_types` (each with its field
 list), `constraint_kinds`, `constraint_value_units`, `mate_types`,
 `relation_kinds`, `extrude_modes`, `extrude_end_modes`, `axis_kinds`,

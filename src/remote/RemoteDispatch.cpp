@@ -109,6 +109,32 @@ size_t EditDistance(const std::string& a, const std::string& b) {
   return prev[b.size()];
 }
 
+// The names in `pool` a caller who typed `name` probably meant: a near miss
+// by edit distance, or one containing the other ("mate" -> add_mate,
+// list_mates). Best first, at most five.
+static std::vector<std::string>
+CloseNames(const std::string& name, const std::vector<std::string>& pool) {
+  std::vector<std::pair<size_t, std::string>> scored;
+  const size_t within = std::max<size_t>(2, name.size() / 3);
+  for (const std::string& k : pool) {
+    const size_t d = EditDistance(name, k);
+    const bool contains =
+        name.size() >= 3 && (k.find(name) != std::string::npos ||
+                             name.find(k) != std::string::npos);
+    if (d <= within || contains)
+      scored.emplace_back(contains ? std::min(d, within) : d, k);
+  }
+  std::sort(scored.begin(), scored.end());
+  std::vector<std::string> out;
+  for (const auto& [d, k] : scored) {
+    if (out.size() == 5)
+      break;
+    if (std::find(out.begin(), out.end(), k) == out.end())
+      out.push_back(k);
+  }
+  return out;
+}
+
 // The JSON type name a caller would recognise in their own request.
 const char* JsonTypeName(const json& v) {
   switch (v.type()) {
@@ -244,7 +270,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"describe",
      "This endpoint: methods (each with the parameter keys it accepts), "
      "feature/entity/constraint types, enums, and the document format "
-     "version. {method} narrows to one.",
+     "version. {method} narrows the answer to that method's row alone "
+     "(no type tables); an unknown method is refused naming close matches.",
      "method"},
     {"ping",
      "Liveness check; returns {ok, app, port, mode, ui_actions, project, "
@@ -863,23 +890,47 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         methods.push_back(std::move(entry));
       }
     };
-    addDocs(kServerMethods);
-    addDocs(remote::ModelingMethodDocs());
-    addDocs(remote::ProjectMethodDocs());
-    addDocs(remote::AssemblyMethodDocs());
-    addDocs(remote::MotionMethodDocs());
-    addDocs(remote::InspectionMethodDocs());
-    addDocs(remote::CatalogMethodDocs());
-    addDocs(remote::CamMethodDocs());
-    addDocs(remote::DrawingMethodDocs());
-    addDocs(remote::ConfigurationMethodDocs());
-    addDocs(remote::SheetMetalMethodDocs());
-    addDocs(remote::TubeMethodDocs());
-    addDocs(remote::SimulationMethodDocs());
-    if (!only.empty() && methods.empty())
-      throw std::runtime_error(
-          "unknown method '" + only +
-          "' — call describe with no arguments for the full list");
+    const std::span<const remote::MethodDoc> tables[] = {
+        kServerMethods,
+        remote::ModelingMethodDocs(),
+        remote::ProjectMethodDocs(),
+        remote::AssemblyMethodDocs(),
+        remote::MotionMethodDocs(),
+        remote::InspectionMethodDocs(),
+        remote::CatalogMethodDocs(),
+        remote::CamMethodDocs(),
+        remote::DrawingMethodDocs(),
+        remote::ConfigurationMethodDocs(),
+        remote::SheetMetalMethodDocs(),
+        remote::TubeMethodDocs(),
+        remote::SimulationMethodDocs()};
+    for (const auto& t : tables)
+      addDocs(t);
+    if (!only.empty() && methods.empty()) {
+      std::vector<std::string> names;
+      for (const auto& t : tables)
+        for (const auto& d : t)
+          names.emplace_back(d.name);
+      const std::vector<std::string> close = CloseNames(only, names);
+      std::string msg = "unknown method '" + only + "'";
+      if (!close.empty()) {
+        msg += "; close: ";
+        for (size_t i = 0; i < close.size(); i++)
+          msg += (i ? ", " : "") + close[i];
+      }
+      msg += ". describe with no arguments lists every method";
+      throw std::runtime_error(msg);
+    }
+    // Narrowed: that method's row, and not the catalogue around it. The
+    // type tables below are several times the size of any one row, and a
+    // caller asking about add_mate wants add_mate — the dogfood's
+    // describe(method=...) read as "the filter is ignored" because the
+    // one row came back buried under every feature type and enum.
+    if (!only.empty())
+      return json{
+          {"app", "designer"},
+          {"document_format_version", DocumentIO::DocumentFormatVersion()},
+          {"methods", std::move(methods)}};
     json featureTypes = json::array();
     for (const auto& ft : DocumentIO::FeatureTypes())
       featureTypes.push_back({{"type", ft.type},

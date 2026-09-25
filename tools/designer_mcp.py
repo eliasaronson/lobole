@@ -2289,34 +2289,27 @@ def help(method: str = "") -> dict:
                 "exposed_as_tools": sorted(_EXPOSED),
                 "hint": "help('add_mate') for one; describe() for the "
                         "app's own authoritative type tables."}
-    entry = _REFERENCE.get(method)
-    if entry is None:
-        if method in _EXPOSED:
-            return {"method": method,
-                    "doc": "Exposed directly as the MCP tool of the same "
-                           "name — see its tool description."}
-        # Not wrapped here, but it may still be an RPC — most are (motion
-        # studies, appearance, sections...), and "documented by help()" has
-        # to hold for them too. The app's own row is the authority.
-        try:
-            rows = _call("describe", method=method)
-            rows = rows.get("methods", rows) if isinstance(rows, dict) else rows
-            row = next((r for r in rows if r.get("name") == method), None)
-        except Exception:
-            row = None
-        if row is not None:
-            return {"method": method, "doc": row.get("doc", ""),
-                    "params": row.get("params", []),
-                    "source": "the app's describe row; reach it with "
-                              f"rpc('{method}', {{...}})"}
-        import difflib
-        near = difflib.get_close_matches(method, sorted(_REFERENCE), n=5)
-        raise ValueError(f"no such method {method!r}" +
-                         (f"; close: {', '.join(near)}" if near else ""))
+    if method in _EXPOSED and method not in _REFERENCE:
+        return {"method": method,
+                "doc": "Exposed directly as the MCP tool of the same "
+                       "name — see its tool description."}
+    # The lookup is designer_remote.method_help, which the python client's
+    # help() also is: this server adds only its own prose for the methods it
+    # wraps. Anything else — most RPCs (motion studies, appearance,
+    # sections...) — is answered from the app's describe row.
     import inspect
-    return {"method": method,
-            "doc": entry["doc"],
-            "arguments": str(inspect.signature(entry["fn"]))}
+    from designer_remote import method_help, RemoteError
+    reference = {name: {"doc": e["doc"],
+                        "arguments": str(inspect.signature(e["fn"]))}
+                 for name, e in _REFERENCE.items()}
+    try:
+        out = method_help(_call, method, reference)
+    except RemoteError as e:
+        raise ValueError(str(e)) from None
+    if method not in reference:
+        out["source"] = ("the app's describe row; reach it with "
+                         f"rpc('{method}', {{...}})")
+    return out
 
 @mcp.prompt(name="modeling-workflow",
             description="How to model a part in Designer with these tools")

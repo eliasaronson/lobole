@@ -41,6 +41,14 @@ class Designer:
     def call(self, method, /, **params):
         return self.request(method, params)
 
+    def help(self, method=""):
+        """What `method` does and takes — `method_help` below, the same
+        answer the MCP server's help() gives. With no method, the index.
+        `call("help", method=...)` and `request("help", ...)` reach it too:
+        the MCP instructions tell an agent to ask help(), and over this
+        client that used to be "unknown method"."""
+        return method_help(self.call, method)
+
     # Params as a DICT rather than keywords.
     def request(self, method, params=None, timeout=None):
         """`timeout` (seconds) overrides the connection default for THIS
@@ -48,6 +56,14 @@ class Designer:
         client died mid-call, and the server finished anyway — which reads
         as a hang followed by a mystery. mesh_study/run_study want a long
         one (or run_study {async: true} + study_status polling)."""
+        # `help` is answered here, from `describe`, rather than being a
+        # second copy of the method table in the app (method_help).
+        if method == "help":
+            extra = set(params or {}) - {"method"}
+            if extra:
+                raise RemoteError(f"unknown parameter(s) {sorted(extra)} for "
+                                  f"'help'. Accepted: method")
+            return self.help((params or {}).get("method", ""))
         self._id += 1
         request = {"id": self._id, "method": method, "params": {} if params is None else params}
         previous = self.sock.gettimeout()
@@ -129,6 +145,46 @@ class Designer:
                 last = e
                 time.sleep(0.3)
         raise TimeoutError(f"designer not reachable on port {port}: {last}")
+
+
+def method_help(call, method="", reference=None):
+    """help(method) for every client: what the method does, the parameter
+    keys it takes, and what it returns, from the app's own `describe` row.
+
+    Shared by this client and the MCP server (tools/designer_mcp.py), so the
+    two cannot drift into different answers. `call(name, **params)` reaches
+    the app. `reference` is a client's own prose for methods it wraps,
+    {method: {"doc": ..., ...}}: the MCP server passes the tool descriptions
+    it keeps out of the context, and they win over the app's one-liner. An
+    unknown method is refused naming close matches — the app's for its own
+    methods, plus the close ones among `reference`.
+    """
+    reference = reference or {}
+    if not method:
+        rows = call("describe")["methods"]
+        return {"methods": sorted({r["name"] for r in rows} | set(reference)),
+                "hint": "help('add_mate') for one method; describe() for "
+                        "the app's type tables and enums"}
+    if method in reference:
+        return {"method": method, **reference[method]}
+    try:
+        row = call("describe", method=method)["methods"][0]
+    except RemoteError as e:
+        import difflib
+        near = [n for n in difflib.get_close_matches(method, sorted(reference),
+                                                     n=5)
+                if n not in str(e)]
+        raise RemoteError(str(e) + (f"; also {', '.join(near)}" if near
+                                    else "")) from None
+    out = {"method": method, "doc": row.get("doc", "")}
+    if row.get("params_free_form"):
+        out["params_free_form"] = True
+    else:
+        out["params"] = row.get("params", [])
+    for key in ("returns", "requires_part_doc"):
+        if key in row:
+            out[key] = row[key]
+    return out
 
 
 def main():

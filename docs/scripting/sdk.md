@@ -37,7 +37,8 @@ fails by name, and the client cannot drift from the server.
 - A trailing underscore reaches a parameter that is a Python keyword:
   `add_motion_study(from_=0, to=360)`.
 - `app.call(method, **params)` is the raw escape hatch; `app.methods()` and
-  `app.help(method)` list and describe.
+  `app.help(method)` list and describe. `help` is the same lookup as the
+  plain client's and the MCP server's (`designer_remote.method_help`).
 - `app.transaction()` / `part.batch()` is a context manager over the `batch`
   RPC ([rpc.md](rpc.md#batch)); handles returned inside it are `$ref`s. On
   `App` it is `transaction` because `app.batch` is the generated RPC.
