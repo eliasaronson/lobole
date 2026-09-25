@@ -440,6 +440,25 @@ std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
 std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
                                   const ElementRef& ref);
 
+// The whole circle a circular EDGE lies on, read off every edge of the same
+// body that lies on it (same centre, axis and radius, to a tolerance relative
+// to the radius). A rim is often not one edge: the faces around a hole split
+// it into arcs — a seat face that was two faces before the hole was cut, a
+// slot crossing it — and each arc is still the rim. `arcs` is how many edges
+// were found and `coveredDeg` how much of the circle they cover together, so
+// a caller that needs a closed rim can refuse one that is not, in those
+// numbers. nullopt when `ref` does not resolve to a circular edge.
+struct RimCircle {
+  glm::dvec3 centre{0.0};
+  glm::dvec3 axis{0.0, 0.0, 1.0}; // the picked edge's circle axis
+  double radius = 0.0;
+  int arcs = 0;
+  double coveredDeg = 0.0;
+  [[nodiscard]] bool Closed() const { return coveredDeg >= 360.0 - 1e-3; }
+};
+std::optional<RimCircle> RimCircleOf(const std::vector<Body>& bodies,
+                                     const ElementRef& ref);
+
 // Where to attach a DIMENSION between two elements, as opposed to where the
 // minimum distance happens to be measured.
 //

@@ -1737,6 +1737,101 @@ std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
   }
 }
 
+std::optional<RimCircle> RimCircleOf(const std::vector<Body>& bodies,
+                                     const ElementRef& ref) {
+  const auto owner =
+      std::find_if(bodies.begin(), bodies.end(),
+                   [&](const Body& b) { return b.createdBy == ref.featureId; });
+  if (owner == bodies.end())
+    return std::nullopt;
+  std::string kind;
+  const TopoDS_Shape picked = ResolveShape(bodies, ref, kind);
+  if (picked.IsNull() || kind != "edge")
+    return std::nullopt;
+  try {
+    const BRepAdaptor_Curve pickedCurve(TopoDS::Edge(picked));
+    if (pickedCurve.GetType() != GeomAbs_Circle)
+      return std::nullopt;
+    const gp_Circ circle = pickedCurve.Circle();
+    const double r = circle.Radius();
+    // "The same circle" to a tolerance that scales with it: a rim is a rim
+    // whether it is 3 mm or 300 mm across.
+    const double tol = 1e-5 * r;
+    const gp_Dir axis = circle.Axis().Direction();
+
+    // Each arc as an angular interval on the PICKED circle's own frame. An
+    // edge's parameters are angles in ITS circle's frame, which may start
+    // elsewhere or run the other way round, so the interval is placed by
+    // where its ends and middle fall on this one.
+    constexpr double kTau = 2.0 * M_PI;
+    std::vector<std::pair<double, double>> spans;
+    int arcs = 0;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(owner->shape.GetShape(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); i++) {
+      const BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+      if (c.GetType() != GeomAbs_Circle)
+        continue;
+      const gp_Circ other = c.Circle();
+      if (std::abs(other.Radius() - r) > tol ||
+          other.Location().Distance(circle.Location()) > tol ||
+          std::abs(std::abs(other.Axis().Direction().Dot(axis)) - 1.0) >
+              tol / std::max(r, tol))
+        continue;
+      const double span =
+          std::min(kTau, std::abs(c.LastParameter() - c.FirstParameter()));
+      const double a0 = ElCLib::Parameter(circle, c.Value(c.FirstParameter()));
+      const double a1 = ElCLib::Parameter(circle, c.Value(c.LastParameter()));
+      const double am = ElCLib::Parameter(
+          circle, c.Value(0.5 * (c.FirstParameter() + c.LastParameter())));
+      const auto wrapped = [&](double a) {
+        a = std::fmod(a, kTau);
+        return a < 0.0 ? a + kTau : a;
+      };
+      // Whichever end the middle is half a span ahead of is the start.
+      const double gap0 = std::abs(wrapped(a0 + 0.5 * span - am + M_PI) - M_PI);
+      const double gap1 = std::abs(wrapped(a1 + 0.5 * span - am + M_PI) - M_PI);
+      const double start = wrapped(gap0 <= gap1 ? a0 : a1);
+      arcs++;
+      if (start + span <= kTau) {
+        spans.emplace_back(start, start + span);
+      } else {
+        spans.emplace_back(start, kTau);
+        spans.emplace_back(0.0, start + span - kTau);
+      }
+    }
+    std::sort(spans.begin(), spans.end());
+    double covered = 0.0, from = 0.0, to = -1.0;
+    for (const auto& [a, b] : spans) {
+      if (a > to) {
+        if (to > from)
+          covered += to - from;
+        from = a;
+        to = b;
+      } else {
+        to = std::max(to, b);
+      }
+    }
+    if (to > from)
+      covered += to - from;
+
+    RimCircle out;
+    const gp_Pnt c = circle.Location();
+    out.centre = {c.X(), c.Y(), c.Z()};
+    out.axis = {axis.X(), axis.Y(), axis.Z()};
+    out.radius = r;
+    out.arcs = arcs;
+    // Arc ends meet to within the edge tolerance, not exactly; a gap that
+    // small is not a gap in the rim.
+    out.coveredDeg = std::min(360.0, angles::ToDegrees(covered));
+    if (kTau - covered < tol / r * arcs)
+      out.coveredDeg = 360.0;
+    return out;
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
 std::optional<DistanceResult>
 DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
                  const glm::mat4& xfA, const std::vector<Body>& bodiesB,
