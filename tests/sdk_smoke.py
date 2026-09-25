@@ -372,6 +372,47 @@ def check_part_is_a_choice(app):
     refused(lambda: other.part("Part 1"), "already exists")
 
 
+def check_flipped_planes(app):
+    """`flip=True` faces a principal plane the other way, so a feature on
+    the far side extrudes a POSITIVE distance along the flipped normal. The
+    axes are the ones the docstring and
+    docs/scripting/sdk.md#the-principal-planes table."""
+    app.new()
+    axes = {"xy": (2, sdk.V(0, 0, -1), sdk.V(1, 0, 0), sdk.V(0, -1, 0)),
+            "xz": (1, sdk.V(0, 1, 0), sdk.V(-1, 0, 0), sdk.V(0, 0, 1)),
+            "yz": (0, sdk.V(-1, 0, 0), sdk.V(0, -1, 0), sdk.V(0, 0, 1))}
+    for name, (axis, normal, u, v) in axes.items():
+        plane = getattr(sdk.Plane, name)(10.0, flip=True)
+        expect((plane.normal - normal).length() < 1e-9
+               and (plane.u - u).length() < 1e-9
+               and (plane.v - v).length() < 1e-9,
+               f"{name} flipped: normal {plane.normal} U {plane.u} "
+               f"V {plane.v}, documented {normal} {u} {v}")
+        expect((plane.normal.cross(plane.u) - plane.v).length() < 1e-9,
+               f"{name} flipped: V is normal x U")
+        # A disc centred on a world point, placed through uv().
+        centre = [3.0, 7.0, -4.0]
+        centre[axis] = 10.0
+        part = app.part(f"flipped {name}")
+        part.extrude_shapes(plane, [
+            lambda s: s.circle(plane.uv(centre), d=4)], 5.0, name="Boss")
+        part.check(solids=1)
+        lo, hi = part.bbox()
+        # Along the flipped normal: xy and yz now face back toward the
+        # origin, xz (whose plain normal is -Y) away from it.
+        want = sorted((10.0, 10.0 + 5.0 * normal[axis]))
+        expect(abs(lo[axis] - want[0]) < 1e-6
+               and abs(hi[axis] - want[1]) < 1e-6,
+               f"{name}(10, flip=True) extrudes 5 along {normal}: "
+               f"{lo[axis]:.3f}..{hi[axis]:.3f} on axis {axis}, not {want}")
+        for k in range(3):
+            if k != axis:
+                mid = 0.5 * (lo[k] + hi[k])
+                expect(abs(mid - centre[k]) < 1e-6,
+                       f"{name} flipped: uv() put the disc at {mid:.3f} on "
+                       f"axis {k}, not {centre[k]}")
+
+
 def main():
     check_angle_units()
     binary = sys.argv[1]
@@ -703,6 +744,9 @@ def main():
         expect(f.volume() > 0, "still measurable after a material")
         # ---- part(name) creates; opening another's is asked for ---------
         check_part_is_a_choice(app)
+
+        # ---- A flipped plane extrudes the other way ---------------------
+        check_flipped_planes(app)
 
         # ---- Every CAM op field is reachable through the generated SDK ---
         # Last: it starts a new project, and everything above works in one.

@@ -62,6 +62,8 @@ Only what `describe` cannot express:
   `.plane()`, `plane.uv(world_point)` and `plane.world(u, v)`. Sketch UV is
   measured from the plane origin: `world = origin + u*U + v*V`. The sketch
   plane's V axis is normal x U, which is why `Plane.xz` has a normal of −Y.
+  See [the principal planes](#the-principal-planes) for each helper's axes
+  and `flip=True`.
 - **Compositions** of several RPCs: `revolve_profile`, `bolt_circle`,
   `polyline`, `slot`, `polygon`, `arc_through`, `project`, `pattern`,
   `fillet(edges=...)`, `hole`, `thread`, and a sketch builder that
@@ -80,6 +82,28 @@ returns the ids it made; a default with a unit is derived from what it acts
 on (CLAUDE.md, "Defaults"). A coordinate or radius given as a string rides
 on the entity as its `*_expr` field and the document evaluates it, so there
 is no second expression language in the client.
+
+### The principal planes
+
+A positive extrude distance runs along the sketch plane's normal. Each
+helper takes `flip=True` for the same plane facing the other way, so a
+feature on the far side of a part extrudes a positive distance instead of a
+negative one. Because V is normal x U, reversing the normal must reverse U or
+V as well; the vertical planes keep V pointing up (world +Z), so a flipped
+one is the sketch seen from behind, mirrored left to right:
+
+| helper | normal | U | V |
+|---|---|---|---|
+| `Plane.xy(z)` | +Z | +X | +Y |
+| `Plane.xy(z, flip=True)` | −Z | +X | −Y |
+| `Plane.xz(y)` | −Y | +X | +Z |
+| `Plane.xz(y, flip=True)` | +Y | −X | +Z |
+| `Plane.yz(x)` | +X | +Y | +Z |
+| `Plane.yz(x, flip=True)` | −X | −Y | +Z |
+
+Place sketch geometry with `plane.uv(world_point)` rather than by reading the
+table, and the mirroring never reaches the caller. `sdk_smoke` extrudes on
+each flipped plane and checks the solid lands on the far side.
 
 ### Opening a part is a choice
 

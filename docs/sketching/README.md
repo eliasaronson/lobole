@@ -40,6 +40,13 @@ resolved face every regeneration; when `planeRef` names a datum plane
 earlier in the history the plane is refreshed from it. Either failing to
 resolve is a regeneration error.
 
+The plane is an origin, a normal and a `uAxis`; V is normal × uAxis, and
+sketch UV is measured from the origin. A positive extrude runs along the
+normal, so which way the plane faces decides which way a feature grows. The
+SDK's `Plane.xy/xz/yz` helpers take `flip=True` for the opposite-facing plane;
+their axes are tabled in
+[the SDK guide](../scripting/sdk.md#the-principal-planes).
+
 ### Entities
 
 `sketch::Entity` is a variant of:

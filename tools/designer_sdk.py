@@ -595,17 +595,43 @@ class Plane:
         self.u = u.unit()
         self.v = self.normal.cross(self.u)
 
+    # The three principal planes, and `flip=True` for the same plane facing
+    # the other way — so a feature on the far side of a part extrudes a
+    # POSITIVE distance instead of a negative one. V is always normal x U, so
+    # flipping the normal must reverse U or V; each helper keeps the axis a
+    # caller reads the sketch by (vertical planes keep V = world +Z):
+    #
+    #   plane        normal  U    V
+    #   xy(z)          +Z    +X   +Y
+    #   xy(z, flip)    -Z    +X   -Y
+    #   xz(y)          -Y    +X   +Z
+    #   xz(y, flip)    +Y    -X   +Z
+    #   yz(x)          +X    +Y   +Z
+    #   yz(x, flip)    -X    -Y   +Z
+    #
+    # A flipped vertical plane is the sketch seen from behind: up is still up
+    # and left-right is mirrored. `world()` / `uv()` do the arithmetic.
+
     @staticmethod
     def xy(z=0.0, flip=False):
+        """The plane at height z. Normal +Z, U +X, V +Y; flipped, normal -Z
+        and V -Y (U stays +X)."""
         return Plane((0, 0, z), (0, 0, -1 if flip else 1), (1, 0, 0))
 
     @staticmethod
-    def xz(y=0.0):
-        """Normal -Y so v = world +Z (not -Z) — the V-axis trap, once."""
+    def xz(y=0.0, flip=False):
+        """The plane at y. Normal -Y so V = world +Z (not -Z) — the V-axis
+        trap, once — with U +X. Flipped, normal +Y and U -X (V stays +Z)."""
+        if flip:
+            return Plane((0, y, 0), (0, 1, 0), (-1, 0, 0))
         return Plane((0, y, 0), (0, -1, 0), (1, 0, 0))
 
     @staticmethod
-    def yz(x=0.0):
+    def yz(x=0.0, flip=False):
+        """The plane at x. Normal +X, U +Y, V +Z; flipped, normal -X and
+        U -Y (V stays +Z)."""
+        if flip:
+            return Plane((x, 0, 0), (-1, 0, 0), (0, -1, 0))
         return Plane((x, 0, 0), (1, 0, 0), (0, 1, 0))
 
     def world(self, u, v=None):
