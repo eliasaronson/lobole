@@ -145,6 +145,34 @@ constexpr MethodDoc MotionMethods[] = {
      "node carries both). Refuses without a run, and refuses when any "
      "sample is unsolved.",
      "path, study"},
+    {"export_motion_video",
+     "Film the study: {study, path, format?, width?, height?, fps?, frames?, "
+     "quality?, async?}. Frame k poses the assembly as set_motion_pose does "
+     "(walking sample to sample, so a slider-crank stays on its branch) and "
+     "captures the model as the viewport draws it, from the CURRENT camera, "
+     "at width x height PIXELS, with no overlays — so set the camera first. "
+     "It needs no run. `format`: mp4 (H.264), webm (VP9) or gif (one "
+     "palette for the whole animation) — encoded by ffmpeg, which must be "
+     "on PATH (ping's features.ffmpeg says) and is REFUSED by name when it "
+     "is not — or png, numbered frames written into a FOLDER (`path`), "
+     "needing nothing. Omitted, the format is the path's extension; a "
+     "format and an extension that disagree are refused. Defaults: width "
+     "and height the viewport's (pixels; mp4/webm need both even), `frames` "
+     "the study's samples, `fps` (frames per SECOND) whatever plays the "
+     "study in about four seconds, `quality` medium (low|medium|high; not "
+     "png). The assembly is left at the pose it had before. Synchronous by "
+     "default, answering {path, format, frames, width, height, fps, bytes, "
+     "seconds, warnings?}, and refusing with ffmpeg's own last lines when it "
+     "fails; {async: true} runs it as a background job ('motion-video' in "
+     "background_jobs, cancellable) and motion_video_status reads the "
+     "outcome.",
+     "async, format, fps, frames, height, path, quality, study, width",
+     remote::NotInBatch},
+    {"motion_video_status",
+     "The video export in progress, if any ({running, fraction}), and the "
+     "last one to finish (`last`: the same shape export_motion_video answers, "
+     "plus ok and error).",
+     ""},
 };
 
 json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
@@ -720,6 +748,98 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (!ui::ExportMotionGlb(state, s.id, path, &err, &nodes, &frames))
       throw std::runtime_error(err);
     return json{{"path", path}, {"nodes", nodes}, {"frames", frames}};
+  }
+  if (m == "export_motion_video") {
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    const MotionStudy& s = NeedStudy(asmDoc, p);
+    ui::MotionVideoRequest req;
+    req.studyId = s.id;
+    req.path = p.at("path").get<std::string>();
+    req.format = p.value("format", std::string{});
+    if (p.contains("width") || p.contains("height")) {
+      if (!p.contains("width") || !p.contains("height"))
+        throw std::runtime_error("width and height go together (pixels); "
+                                 "pass both, or neither for the viewport's "
+                                 "size");
+      const int w = p.at("width").get<int>(), h = p.at("height").get<int>();
+      if (w < 2 || h < 2)
+        throw std::runtime_error("width and height are pixels, at least 2 "
+                                 "each");
+      req.width = static_cast<uint32_t>(w);
+      req.height = static_cast<uint32_t>(h);
+    }
+    if (p.contains("fps")) {
+      req.fps = p.at("fps").get<double>();
+      if (!(req.fps > 0.0))
+        throw std::runtime_error("fps must be a positive number of frames "
+                                 "per second (omit it to play the study in "
+                                 "about four seconds)");
+    }
+    if (p.contains("frames")) {
+      req.frames = p.at("frames").get<int>();
+      if (req.frames < 2)
+        throw std::runtime_error("frames must be at least 2");
+    }
+    req.quality = p.value("quality", std::string{});
+    ui::MotionVideoPlan plan;
+    std::string err;
+    if (!ui::StartMotionVideo(state, req, &err, &plan))
+      throw std::runtime_error(err);
+    const auto planJson = [](const ui::MotionVideoPlan& pl) {
+      return json{
+          {"path", pl.path},
+          {"format", pl.format},
+          {"frames", pl.frames},
+          {"width", pl.width},
+          {"height", pl.height},
+          {"fps", pl.fps},
+          {"quality", pl.format == "png" ? json(nullptr) : json(pl.quality)}};
+    };
+    if (p.value("async", false)) {
+      json out = planJson(plan);
+      out["started"] = true;
+      out["job"] = "motion-video";
+      return out;
+    }
+    ui::JoinBackgroundJobs(state, "motion-video");
+    const auto last = state.motionVideoLast;
+    if (!last)
+      throw std::runtime_error("the export ended without an outcome");
+    if (!last->ok)
+      throw std::runtime_error("export_motion_video: " + last->error);
+    json out = planJson(last->plan);
+    out["bytes"] = last->bytes;
+    out["seconds"] = last->seconds;
+    if (!last->warnings.empty())
+      out["warnings"] = last->warnings;
+    return out;
+  }
+  if (m == "motion_video_status") {
+    ui::ReapBackgroundJobs(state);
+    json out{{"running", false}};
+    if (ui::BackgroundJob* job = ui::FindBackgroundJob(state, "motion-video")) {
+      out["running"] = true;
+      out["fraction"] = job->fraction.load();
+    }
+    if (const auto last = state.motionVideoLast) {
+      json l{{"ok", last->ok},
+             {"path", last->plan.path},
+             {"format", last->plan.format},
+             {"frames", last->framesWritten},
+             {"width", last->plan.width},
+             {"height", last->plan.height},
+             {"fps", last->plan.fps},
+             {"bytes", last->bytes},
+             {"seconds", last->seconds}};
+      if (!last->error.empty())
+        l["error"] = last->error;
+      if (last->cancelled)
+        l["cancelled"] = true;
+      if (!last->warnings.empty())
+        l["warnings"] = last->warnings;
+      out["last"] = std::move(l);
+    }
+    return out;
   }
   return std::nullopt;
 }

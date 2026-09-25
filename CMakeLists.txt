@@ -240,6 +240,8 @@ endif()
 set(core_sources
     src/render/Camera.cpp
     src/common/BuildInfo.cpp
+    # External programs fed on stdin (ffmpeg for the motion video export).
+    src/common/ChildProcess.cpp
     src/common/Logger.cpp
     # Per-user directories and the runtime data root. In CORE, not the app:
     # core/parts, core/io/Autosaver and core/io/Settings all resolve paths
@@ -721,6 +723,7 @@ set(app_sources
     src/ui/TessellationCache.cpp
     src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
+    src/ui/MotionVideo.cpp
     src/ui/JobActions.cpp
     src/ui/MachineActions.cpp
     src/ui/SimulationActions.cpp

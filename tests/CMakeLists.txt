@@ -651,6 +651,17 @@ add_test(NAME render_quick_smoke
 set_tests_properties(render_quick_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300)
 
+# A motion study filmed (docs/assemblies/README.md#motion-video): png frames,
+# and gif/mp4/webm through ffmpeg read back by ffprobe; the refusals,
+# including a PATH without ffmpeg; the pose put back; an async cancel. A
+# renderer, not ray tracing. Skips (77) the encoded formats when the machine
+# has no ffmpeg — shell.nix installs it, so a nix build never skips.
+add_test(NAME motion_video_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/motion_video_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(motion_video_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 add_test(NAME visual_export_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
                  $<TARGET_FILE:designer>)
