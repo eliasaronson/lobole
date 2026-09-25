@@ -183,6 +183,12 @@ def main():
     print("run:", json.dumps(keep)[:700])
     if run.get("table"):
         print(run["table"][:1500])
+    if not run.get("clean"):
+        raise SystemExit("the open-and-close study is not clean: "
+                         f"{json.dumps(run.get('rigid_clashes') or run.get('appeared'))[:400]}")
+    # A fresh checkout has no scratch/ tree yet; the export script makes its
+    # own directories, and this runs before it.
+    os.makedirs(os.path.join(OUT, "renders"), exist_ok=True)
     d.call("export_motion", study=sid, path=f"{OUT}/renders/gripper_cycle.glb")
     print("wrote", f"{OUT}/renders/gripper_cycle.glb")
     d.close()
