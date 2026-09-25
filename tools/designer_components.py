@@ -38,7 +38,13 @@ class _BuilderApp:
     def __init__(self, app, name, staging):
         self._app, self._name, self._staging = app, name, staging
 
-    def part(self, name):
+    def part(self, name, create=True, reuse=False):
+        # The staging part IS the builder's own part, whichever of create /
+        # reuse the builder says (a builder shared with a full build may say
+        # reuse=True); only opening someone else's is a different request.
+        if not create:
+            raise SdkError('a component builder builds its part; it cannot '
+                           f'open an existing one ({name!r}, create=False)')
         if name != self._name:
             raise SdkError('a component builder must create exactly its declared part')
         self._staging.activate()

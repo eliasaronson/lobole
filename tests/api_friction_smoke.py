@@ -148,6 +148,31 @@ def client_checks(port):
     app = connect(port)
     expect("add_mate" in str(app.describe(method="add_mate")),
            "describe(method=) via the SDK")
+    # Narrowed means narrowed: that one row, not the catalogue around it.
+    expect([r["name"] for r in row["methods"]] == ["add_mate"]
+           and "feature_types" not in row and "material_slugs" not in row,
+           f"describe(method=) returns the one row: {sorted(row)}")
+    full = d.call("describe")
+    expect(len(full["methods"]) > 100 and "feature_types" in full,
+           "describe() with no method is still the whole catalogue")
+    try:
+        d.call("describe", method="add_mat")
+        raise AssertionError("describe accepted an unknown method")
+    except RuntimeError as e:
+        expect("unknown method 'add_mat'" in str(e) and "add_mate" in str(e),
+               f"an unknown method is refused naming close matches: {e}")
+    # help() over the python client, the same lookup the MCP server's is.
+    h = d.help("add_mate")
+    expect(h["method"] == "add_mate" and h["doc"] and "type" in h["params"],
+           f"help(method) via designer_remote: {h}")
+    expect(d.call("help", method="add_mate") == h,
+           "call('help', method=) is the same answer")
+    expect("add_mate" in d.help()["methods"], "help() indexes the methods")
+    try:
+        d.help("list_mate")
+        raise AssertionError("help accepted an unknown method")
+    except RuntimeError as e:
+        expect("list_mates" in str(e), f"help names close matches: {e}")
 
     app.new()
     p = app.part("sdk verbs")

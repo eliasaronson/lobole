@@ -11,6 +11,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "core/Angles.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
 #include "core/MassProps.h"
@@ -107,6 +108,32 @@ size_t EditDistance(const std::string& a, const std::string& b) {
     std::swap(prev, cur);
   }
   return prev[b.size()];
+}
+
+// The names in `pool` a caller who typed `name` probably meant: a near miss
+// by edit distance, or one containing the other ("mate" -> add_mate,
+// list_mates). Best first, at most five.
+static std::vector<std::string>
+CloseNames(const std::string& name, const std::vector<std::string>& pool) {
+  std::vector<std::pair<size_t, std::string>> scored;
+  const size_t within = std::max<size_t>(2, name.size() / 3);
+  for (const std::string& k : pool) {
+    const size_t d = EditDistance(name, k);
+    const bool contains =
+        name.size() >= 3 && (k.find(name) != std::string::npos ||
+                             name.find(k) != std::string::npos);
+    if (d <= within || contains)
+      scored.emplace_back(contains ? std::min(d, within) : d, k);
+  }
+  std::sort(scored.begin(), scored.end());
+  std::vector<std::string> out;
+  for (const auto& [d, k] : scored) {
+    if (out.size() == 5)
+      break;
+    if (std::find(out.begin(), out.end(), k) == out.end())
+      out.push_back(k);
+  }
+  return out;
 }
 
 // The JSON type name a caller would recognise in their own request.
@@ -244,7 +271,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"describe",
      "This endpoint: methods (each with the parameter keys it accepts), "
      "feature/entity/constraint types, enums, and the document format "
-     "version. {method} narrows to one.",
+     "version. {method} narrows the answer to that method's row alone "
+     "(no type tables); an unknown method is refused naming close matches.",
      "method"},
     {"ping",
      "Liveness check; returns {ok, app, port, mode, ui_actions, project, "
@@ -309,7 +337,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
      "vector); passing eye [x,y,z] derives direction+distance instead. "
-     "`distance` and every point here are model MILLIMETRES.",
+     "`distance` and every point here are model MILLIMETRES. `up` sets "
+     "the roll, so it is refused within 1 degree of the view direction "
+     "(eye to target), where it would fix none.",
      "direction, distance, eye, target, up"},
     {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",
@@ -863,23 +893,47 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         methods.push_back(std::move(entry));
       }
     };
-    addDocs(kServerMethods);
-    addDocs(remote::ModelingMethodDocs());
-    addDocs(remote::ProjectMethodDocs());
-    addDocs(remote::AssemblyMethodDocs());
-    addDocs(remote::MotionMethodDocs());
-    addDocs(remote::InspectionMethodDocs());
-    addDocs(remote::CatalogMethodDocs());
-    addDocs(remote::CamMethodDocs());
-    addDocs(remote::DrawingMethodDocs());
-    addDocs(remote::ConfigurationMethodDocs());
-    addDocs(remote::SheetMetalMethodDocs());
-    addDocs(remote::TubeMethodDocs());
-    addDocs(remote::SimulationMethodDocs());
-    if (!only.empty() && methods.empty())
-      throw std::runtime_error(
-          "unknown method '" + only +
-          "' — call describe with no arguments for the full list");
+    const std::span<const remote::MethodDoc> tables[] = {
+        kServerMethods,
+        remote::ModelingMethodDocs(),
+        remote::ProjectMethodDocs(),
+        remote::AssemblyMethodDocs(),
+        remote::MotionMethodDocs(),
+        remote::InspectionMethodDocs(),
+        remote::CatalogMethodDocs(),
+        remote::CamMethodDocs(),
+        remote::DrawingMethodDocs(),
+        remote::ConfigurationMethodDocs(),
+        remote::SheetMetalMethodDocs(),
+        remote::TubeMethodDocs(),
+        remote::SimulationMethodDocs()};
+    for (const auto& t : tables)
+      addDocs(t);
+    if (!only.empty() && methods.empty()) {
+      std::vector<std::string> names;
+      for (const auto& t : tables)
+        for (const auto& d : t)
+          names.emplace_back(d.name);
+      const std::vector<std::string> close = CloseNames(only, names);
+      std::string msg = "unknown method '" + only + "'";
+      if (!close.empty()) {
+        msg += "; close: ";
+        for (size_t i = 0; i < close.size(); i++)
+          msg += (i ? ", " : "") + close[i];
+      }
+      msg += ". describe with no arguments lists every method";
+      throw std::runtime_error(msg);
+    }
+    // Narrowed: that method's row, and not the catalogue around it. The
+    // type tables below are several times the size of any one row, and a
+    // caller asking about add_mate wants add_mate — the dogfood's
+    // describe(method=...) read as "the filter is ignored" because the
+    // one row came back buried under every feature type and enum.
+    if (!only.empty())
+      return json{
+          {"app", "designer"},
+          {"document_format_version", DocumentIO::DocumentFormatVersion()},
+          {"methods", std::move(methods)}};
     json featureTypes = json::array();
     for (const auto& ft : DocumentIO::FeatureTypes())
       featureTypes.push_back({{"type", ft.type},
@@ -1851,6 +1905,38 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
                        a.at(2).get<float>());
     };
+    // An `up` within 1 degree of the line of sight fixes no roll: the view
+    // comes back at whatever roll the cross product's rounding picks. Checked
+    // against the direction this call ends up looking along, before anything
+    // moves, so a refused call leaves the camera where it was.
+    if (p.contains("up")) {
+      const glm::vec3 up = vec3(p["up"]);
+      if (glm::length(up) < 1e-9f)
+        throw std::runtime_error("up must be non-zero");
+      const glm::vec3 target =
+          p.contains("target") ? vec3(p["target"]) : cam.GetTarget();
+      // Toward the camera, as `direction` is: the last of eye/direction wins.
+      glm::vec3 back = -cam.GetForward();
+      if (p.contains("eye"))
+        back = vec3(p["eye"]) - target;
+      if (p.contains("direction"))
+        back = vec3(p["direction"]);
+      if (glm::length(back) > 1e-9f) {
+        const double c = std::abs(glm::dot(glm::normalize(glm::dvec3(up)),
+                                           glm::normalize(glm::dvec3(back))));
+        const double deg = angles::ToDegrees(std::acos(std::min(1.0, c)));
+        if (deg < 1.0) {
+          char buf[32];
+          std::snprintf(buf, sizeof buf, "%.3g", deg);
+          throw std::runtime_error(
+              std::string("up is ") + buf +
+              " degrees from the view direction (eye to target); it must be "
+              "at least 1 degree away to set the roll. Pass an up "
+              "perpendicular to the line of sight: world Y when looking "
+              "along Z, world Z otherwise");
+        }
+      }
+    }
     if (p.contains("target"))
       cam.SetTarget(vec3(p["target"]));
     if (p.contains("eye")) {
@@ -1872,6 +1958,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(dir), up);
     }
+    // `up` on its own re-rolls the current view. It used to be read only
+    // alongside eye/direction and dropped silently otherwise.
+    if (p.contains("up") && !p.contains("eye") && !p.contains("direction"))
+      cam.SnapToView(-cam.GetForward(), vec3(p["up"]));
     if (p.contains("distance")) {
       const float d = p.at("distance").get<float>();
       if (d <= 0.0f)

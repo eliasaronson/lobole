@@ -7,7 +7,7 @@ with. It has two layers, and the split is the design.
 from designer_sdk import connect
 
 app = connect()                         # the one announced instance, or port=
-part = app.part("piston")               # switch to (or create) a part tab
+part = app.part("piston")               # create a part tab (create=False opens one)
 bore = part.param("bore", 86)           # a variable, and a Param that knows it
 body = part.cylinder(d="bore", h=40)    # a Body
 part.fillet(body.edges(circular=True), r=2)
@@ -37,7 +37,8 @@ fails by name, and the client cannot drift from the server.
 - A trailing underscore reaches a parameter that is a Python keyword:
   `add_motion_study(from_=0, to=360)`.
 - `app.call(method, **params)` is the raw escape hatch; `app.methods()` and
-  `app.help(method)` list and describe.
+  `app.help(method)` list and describe. `help` is the same lookup as the
+  plain client's and the MCP server's (`designer_remote.method_help`).
 - `app.transaction()` / `part.batch()` is a context manager over the `batch`
   RPC ([rpc.md](rpc.md#batch)); handles returned inside it are `$ref`s. On
   `App` it is `transaction` because `app.batch` is the generated RPC.
@@ -62,6 +63,8 @@ Only what `describe` cannot express:
   `.plane()`, `plane.uv(world_point)` and `plane.world(u, v)`. Sketch UV is
   measured from the plane origin: `world = origin + u*U + v*V`. The sketch
   plane's V axis is normal x U, which is why `Plane.xz` has a normal of −Y.
+  See [the principal planes](#the-principal-planes) for each helper's axes
+  and `flip=True`.
 - **Compositions** of several RPCs: `revolve_profile`, `bolt_circle`,
   `polyline`, `slot`, `polygon`, `arc_through`, `project`, `pattern`,
   `fillet(edges=...)`, `hole`, `thread`, and a sketch builder that
@@ -80,6 +83,47 @@ returns the ids it made; a default with a unit is derived from what it acts
 on (CLAUDE.md, "Defaults"). A coordinate or radius given as a string rides
 on the entity as its `*_expr` field and the document evaluates it, so there
 is no second expression language in the client.
+
+### The principal planes
+
+A positive extrude distance runs along the sketch plane's normal. Each
+helper takes `flip=True` for the same plane facing the other way, so a
+feature on the far side of a part extrudes a positive distance instead of a
+negative one. Because V is normal x U, reversing the normal must reverse U or
+V as well; the vertical planes keep V pointing up (world +Z), so a flipped
+one is the sketch seen from behind, mirrored left to right:
+
+| helper | normal | U | V |
+|---|---|---|---|
+| `Plane.xy(z)` | +Z | +X | +Y |
+| `Plane.xy(z, flip=True)` | −Z | +X | −Y |
+| `Plane.xz(y)` | −Y | +X | +Z |
+| `Plane.xz(y, flip=True)` | +Y | −X | +Z |
+| `Plane.yz(x)` | +X | +Y | +Z |
+| `Plane.yz(x, flip=True)` | −X | −Y | +Z |
+
+Place sketch geometry with `plane.uv(world_point)` rather than by reading the
+table, and the mirroring never reaches the caller. `sdk_smoke` extrudes on
+each flipped plane and checks the solid lands on the far side.
+
+### Opening a part is a choice
+
+`app.part(name)` creates the part. When a tab of that name already exists it
+opens it only if this `App` object created it (a script switching back to a
+part it built earlier); any other is refused, naming the two ways to say what
+is meant:
+
+- `app.part(name, create=False)` opens an existing part, and refuses when
+  there is none — for a script that reads or edits a part it did not build.
+- `app.part(name, reuse=True)` opens the part if it exists and creates it if
+  not — for a generator that deliberately rebuilds its own part in place.
+
+`app.assembly(name, ...)` follows the same rule. A slot id (`app.part(7)`)
+and `app.part()` with no name always open. The rule exists because a pump
+generator building into an engine project wrote its camshaft into the
+engine's `camshaft` tab: the name matched, and the SDK opened it without
+saying so. `new_project` and `open_project` forget which tabs the client
+created, since ids are per project.
 
 ### Parameters carry their expression
 

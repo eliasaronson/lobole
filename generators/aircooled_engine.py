@@ -836,7 +836,7 @@ def top_end(app, rig, occ, main_mate):
     # throttle LINKAGE that closes a loop — placed here as one occurrence.
     carb, throttle, cable = carburettor(app)
     exh, muf = exhaust(app), muffler(app)
-    b = app.part("barrel")
+    b = app.part("barrel", create=False)
     ho = rig.place(h, at=(0, 0, DECK))
     rig.fasten((occ["barrel"], "deck"), (ho, "deck"), flipped=False)
     # Four ISO 4762 cap screws, each derived from the hole it goes in, and

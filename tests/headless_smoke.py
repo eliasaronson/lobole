@@ -266,6 +266,25 @@ def main():
         expect(abs(v["target"][1] - 2.0) < 1e-6, "set_camera target")
         v = d.call("set_camera", direction=[0, 0, 1])
         expect(v["position"][2] > v["target"][2], "set_camera direction")
+        # An `up` along the line of sight sets no roll; within 1 degree of
+        # it is refused, naming the angle, and the camera does not move.
+        before = d.call("set_camera")["position"]
+        for kw, angle in (
+                (dict(direction=[0, 0, 1], up=[0, 0, 1]), "0 degrees"),
+                (dict(direction=[0, 0, 1], up=[0.01, 0, 1]), "0.573 degrees"),
+                (dict(target=[0, 0, 0], eye=[0, 0, 80], up=[0, 0, -1]),
+                 "0 degrees"),
+                (dict(up=[0, 0, 1]), "degrees from the view")):  # current
+            try:
+                d.call("set_camera", **kw)
+                raise AssertionError(f"set_camera accepted {kw}")
+            except RuntimeError as e:
+                expect(angle in str(e) and "at least 1 degree" in str(e),
+                       f"set_camera {kw} names the angle and the need: {e}")
+        expect(d.call("set_camera")["position"] == before,
+               "a refused set_camera leaves the camera where it was")
+        v = d.call("set_camera", direction=[0, 0, 1], up=[0.03, 0, 1])
+        expect(v["position"][2] > v["target"][2], "1.7 degrees is enough")
         # ...and on an ASSEMBLY tab (viewport state, not part state).
         d.call("add_assembly", name="CamAsm")
         d.call("set_active_part", name="CamAsm")

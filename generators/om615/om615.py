@@ -559,7 +559,7 @@ def reference_dimensions(app):
             ("top ring", {2: RING_T[0]}),
             ("second ring", {2: RING_T[1]}),
             ("oil ring", {2: RING_T[2]})):
-        part = app.part(name)
+        part = app.part(name, create=False)
         lo, hi = part.bbox()
         volume = part.volume()
         if volume <= 0:
@@ -582,7 +582,7 @@ def reference_dimensions(app):
                 raise SdkError(f"{name}: no stem edge at the reference diameter")
             measured[name]["stem_diameter_mm"] = 2.0 * rims[0].radius
 
-    head = app.part("cylinder head")
+    head = app.part("cylinder head", create=False)
     faces = head.body().faces(kind="plane")
     lower = [f for f in faces if f.normal.z < -0.99
              and abs(f.centroid.z-FIRE_FACE) < 0.01 and f.area > 100]
@@ -596,7 +596,7 @@ def reference_dimensions(app):
         raise SdkError(f"head machined height {height:.3f} is outside 84.8–85.0 mm")
     measured["cylinder head"] = dict(machined_height_mm=height,
         source="Workshop 05.4-118/1 (PDF page 220)", limits_mm=[84.8,85.0])
-    injector = app.part("injector")
+    injector = app.part("injector", create=False)
     flats = injector.body().faces(kind="plane", where=lambda f:
         abs(f.normal.x)>0.99 and -35.01<f.centroid.z<-25.99)
     flat_x = [f.centroid.x for f in flats]
@@ -606,14 +606,14 @@ def reference_dimensions(app):
         source="Workshop 07.1.4-230/1 (PDF page 424)",
         envelope_status="photo-derived; not manufacturing dimensions")
     for kind in ("intake", "exhaust"):
-        part = app.part(f"{kind} manifold")
+        part = app.part(f"{kind} manifold", create=False)
         lo,hi = part.bbox()
         if min(MANIFOLD_SIDE*lo.x, MANIFOLD_SIDE*hi.x) < HEAD_X+MANIFOLD_GASKET_T-0.01:
             raise SdkError(f"{kind} crosses the shared manifold-side gasket face")
         measured[f"{kind} manifold"] = dict(side="+X" if MANIFOLD_SIDE > 0 else "-X",
                                              external_ports=len(port_centers(kind)),
                                              bounds_mm=[list(lo),list(hi)])
-    block = app.part("block")
+    block = app.part("block", create=False)
     registers = block.body().edges(circular=True, radius=PUMP_REGISTER_D/2,
         where=lambda e: (e.center-V(B.PUMP_MOUNT)).length()<0.02)
     if not registers:
@@ -1129,9 +1129,9 @@ def fasteners(app, rig, occ, top, front, pump):
     def bolt_up(*args, **kwargs):
         return _bolt_up(*args, **kwargs, snapshots=snapshots)
 
-    blk, hd = app.part("block"), app.part("cylinder head")
-    pan, fw = app.part("sump"), app.part("flywheel")
-    crk, cap = app.part("crankshaft"), app.part("main cap")
+    blk, hd = app.part("block", create=False), app.part("cylinder head", create=False)
+    pan, fw = app.part("sump", create=False), app.part("flywheel", create=False)
+    crk, cap = app.part("crankshaft", create=False), app.part("main cap", create=False)
     rig.activate()
     bolt_up(rig, top["head"], hd, (HEAD_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.z - T.HEAD_BOLT_SEAT,
@@ -1152,14 +1152,14 @@ def fasteners(app, rig, occ, top, front, pump):
              "M10", FLYWHEEL_BOLTS, "flywheel bolts",
              rim_key=lambda e: (e.center.x, -e.center.y),
              far_key=lambda e: (e.center.x, e.center.z))
-    bolt_up(rig, top["cam cover"], app.part("cam cover"), 3.3,
+    bolt_up(rig, top["cam cover"], app.part("cam cover", create=False), 3.3,
              lambda e: e.center.z - (COVER_BASE + CAM_COVER_BOSS_H),
              top["head"], hd, (6.0 + TAP_FIT) / 2.0,
              lambda e: e.center.z - (COVER_BASE - 11.0), "M6",
              2 * len(T._cover_bolt_y()), "cam cover bolts",
              centres=[(cover_bolt_x(sx), y) for y in T._cover_bolt_y()
                       for sx in (-1, 1)])
-    bolt_up(rig, top["thermostat"], app.part("thermostat housing"),
+    bolt_up(rig, top["thermostat"], app.part("thermostat housing", create=False),
              (TSTAT_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.z - (HEAD_TOP + TSTAT_FLANGE_T),
              top["head"], hd, (TSTAT_BOLT_D + TAP_FIT) / 2.0,
@@ -1173,7 +1173,7 @@ def fasteners(app, rig, occ, top, front, pump):
     out = PUMP_SIDE
     fx, fy, fz = OIL_FILTER_BOSS
     r = OIL_FILTER_BOLT_PCD / 2.0 / math.sqrt(2.0)
-    bolt_up(rig, hang["oil filter housing"], app.part("oil filter housing"),
+    bolt_up(rig, hang["oil filter housing"], app.part("oil filter housing", create=False),
              (OIL_FILTER_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.x - (fx + out * OIL_FILTER_FLANGE_T),
              occ["block"], blk, (OIL_FILTER_BOLT_D + TAP_FIT) / 2.0,
@@ -1183,7 +1183,7 @@ def fasteners(app, rig, occ, top, front, pump):
                       for sz in (-1, 1)],
              rim_key=yz, far_key=yz, centre_key=yz)
     bx, by, bz = FUEL_FILTER_BOSS
-    bolt_up(rig, hang["fuel filter bracket"], app.part("fuel filter bracket"),
+    bolt_up(rig, hang["fuel filter bracket"], app.part("fuel filter bracket", create=False),
              (FUEL_FILTER_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.x - (bx + out * A.FUEL_BRACKET_T),
              top["head"], hd, (FUEL_FILTER_BOLT_D + TAP_FIT) / 2.0,
@@ -1195,7 +1195,7 @@ def fasteners(app, rig, occ, top, front, pump):
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
     # block's hole floors are measured in. Both have to be said.
     for i, c in enumerate(occ["caps"]):
-        bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap"),
+        bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap", create=False),
                  B.CAP_CLEARANCE_D / 2.0,
                  lambda e: e.center.z + CAP_DEPTH,
                  occ["block"], blk, (CAP_BOLT_D + TAP_FIT) / 2.0,
@@ -1213,7 +1213,7 @@ def fasteners(app, rig, occ, top, front, pump):
         x, _, z = B.pump_to_engine(e.center.x, e.center.y, e.center.z)
         return (x, z)
     r = PUMP_BOLT_PCD / 2.0
-    bolt_up(rig, pump["housing"], app.part("pump housing"),
+    bolt_up(rig, pump["housing"], app.part("pump housing", create=False),
             PS.FLANGE_BOLT_D / 2.0, lambda e: e.center.x - PS.FLANGE_BOLT_SEAT_X,
             occ["block"], blk, (PUMP_BOLT_D + TAP_FIT) / 2.0,
             lambda e: e.center.y - (PUMP_FLANGE_Y - PUMP_TAP_DEPTH), "M8", 3,
@@ -1225,7 +1225,7 @@ def fasteners(app, rig, occ, top, front, pump):
             standard="iso7380")
     # ...and its rear bracket, into the rib: drilled along x.
     face = A.pump_bracket_face()
-    bolt_up(rig, pump["bracket"], app.part("injection pump bracket"),
+    bolt_up(rig, pump["bracket"], app.part("injection pump bracket", create=False),
             (A.PUMP_BRACKET_BOLT_D + 1.0) / 2.0,
             lambda e: e.center.x - (face + PUMP_SIDE * A.PUMP_BRACKET_T),
             occ["block"], blk, (A.PUMP_BRACKET_BOLT_D + TAP_FIT) / 2.0,

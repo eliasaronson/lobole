@@ -106,7 +106,7 @@ def build(app, p, part_name="front_wall"):
     print("cam:")
     app.save_machine(machine=MACHINE)
 
-    baffle = app.part(part_name)
+    baffle = app.part(part_name, create=False)
     baffle.activate()
     job = app.machine_part(part=baffle.id, name=f"{part_name} - face 1")
 

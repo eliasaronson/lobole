@@ -152,7 +152,11 @@ with no feature named.
   `up_to_face` (`end_target`, a **planar** face by `ElementRef`, followed
   across upstream edits), `through_all` (cut only; past every body's extent).
   Every variant builds one prism of the computed length, translated back along
-  the normal, so element names are the same as a blind extrude's.
+  the normal, so element names are the same as a blind extrude's. A positive
+  `distance` runs along the sketch plane's normal; for a feature on the far
+  side of a part, face the plane the other way (the SDK's
+  `Plane.yz(x, flip=True)`, [axes](../scripting/sdk.md#the-principal-planes))
+  rather than passing a negative distance.
 - **Thin** (`thin: {thickness, side: out|in|both}`): every loop becomes a wall
   ring (OCC `MakeOffset`), composing with any end condition.
 - A cut or add extrude keeps the prism it swept (`ToolShape()`), which is what

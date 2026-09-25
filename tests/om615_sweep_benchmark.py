@@ -15,7 +15,7 @@ from designer_sdk import connect
 
 def main():
     app = connect(int(sys.argv[1]))
-    rig = app.assembly("engine")
+    rig = app.assembly("engine", create=False)
     rig.activate()
     reports = {}
     # ABBA order reduces the influence of warming caches on the comparison.

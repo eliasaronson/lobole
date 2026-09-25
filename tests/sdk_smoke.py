@@ -331,6 +331,88 @@ def check_cam_op_fields(app):
     app.new()
 
 
+def check_part_is_a_choice(app):
+    """`app.part(name)` creates; opening a tab somebody else made is asked
+    for (create=False) or declared (reuse=True). The PES pump generator,
+    building into an engine project, wrote its camshaft INTO the engine's
+    because the name matched and the SDK opened it without a word."""
+    app.new()
+    mine = app.part("engine block")
+    mine.box(w=10, h=10, d=10)
+    expect(app.part("engine block").id == mine.id,
+           "a client switching back to a part it created gets that part")
+    rig = app.assembly("engine")
+    # `Part 1` came with the project, not from this client.
+    refused(lambda: app.part("Part 1"), "Part 1", "create=False",
+            "reuse=True")
+    # A second client — another generator on the same instance.
+    other = sdk.App(app._remote)
+    why = refused(lambda: other.part("engine block"),
+                  "already exists", "this script did not create it",
+                  "app.part('engine block', create=False)", "reuse=True")
+    expect("engine block" in why, why)
+    refused(lambda: other.assembly("engine"), "already exists",
+            "app.assembly('engine', create=False)")
+    expect(other.part("engine block", create=False).id == mine.id,
+           "create=False opens the existing part")
+    expect(other.part("engine block", reuse=True).id == mine.id,
+           "reuse=True opens the existing part")
+    expect(other.assembly("engine", create=False).id == rig.id,
+           "create=False opens the existing assembly")
+    fresh = other.part("pump camshaft", reuse=True)
+    expect(fresh.id != mine.id, "reuse=True creates when there is none")
+    expect(other.part("pump camshaft").id == fresh.id,
+           "and the part it created is its own afterwards")
+    refused(lambda: other.part("no such part", create=False),
+            "no part named 'no such part'")
+    refused(lambda: other.part("x", create=False, reuse=True),
+            "create=False", "reuse=True")
+    # Ids are per project: a new project forgets what the client created.
+    other.new()
+    refused(lambda: other.part("Part 1"), "already exists")
+
+
+def check_flipped_planes(app):
+    """`flip=True` faces a principal plane the other way, so a feature on
+    the far side extrudes a POSITIVE distance along the flipped normal. The
+    axes are the ones the docstring and
+    docs/scripting/sdk.md#the-principal-planes table."""
+    app.new()
+    axes = {"xy": (2, sdk.V(0, 0, -1), sdk.V(1, 0, 0), sdk.V(0, -1, 0)),
+            "xz": (1, sdk.V(0, 1, 0), sdk.V(-1, 0, 0), sdk.V(0, 0, 1)),
+            "yz": (0, sdk.V(-1, 0, 0), sdk.V(0, -1, 0), sdk.V(0, 0, 1))}
+    for name, (axis, normal, u, v) in axes.items():
+        plane = getattr(sdk.Plane, name)(10.0, flip=True)
+        expect((plane.normal - normal).length() < 1e-9
+               and (plane.u - u).length() < 1e-9
+               and (plane.v - v).length() < 1e-9,
+               f"{name} flipped: normal {plane.normal} U {plane.u} "
+               f"V {plane.v}, documented {normal} {u} {v}")
+        expect((plane.normal.cross(plane.u) - plane.v).length() < 1e-9,
+               f"{name} flipped: V is normal x U")
+        # A disc centred on a world point, placed through uv().
+        centre = [3.0, 7.0, -4.0]
+        centre[axis] = 10.0
+        part = app.part(f"flipped {name}")
+        part.extrude_shapes(plane, [
+            lambda s: s.circle(plane.uv(centre), d=4)], 5.0, name="Boss")
+        part.check(solids=1)
+        lo, hi = part.bbox()
+        # Along the flipped normal: xy and yz now face back toward the
+        # origin, xz (whose plain normal is -Y) away from it.
+        want = sorted((10.0, 10.0 + 5.0 * normal[axis]))
+        expect(abs(lo[axis] - want[0]) < 1e-6
+               and abs(hi[axis] - want[1]) < 1e-6,
+               f"{name}(10, flip=True) extrudes 5 along {normal}: "
+               f"{lo[axis]:.3f}..{hi[axis]:.3f} on axis {axis}, not {want}")
+        for k in range(3):
+            if k != axis:
+                mid = 0.5 * (lo[k] + hi[k])
+                expect(abs(mid - centre[k]) < 1e-6,
+                       f"{name} flipped: uv() put the disc at {mid:.3f} on "
+                       f"axis {k}, not {centre[k]}")
+
+
 def main():
     check_angle_units()
     binary = sys.argv[1]
@@ -660,6 +742,12 @@ def main():
         # material(): a part made of one thing, in one call.
         f.material("aluminum")
         expect(f.volume() > 0, "still measurable after a material")
+        # ---- part(name) creates; opening another's is asked for ---------
+        check_part_is_a_choice(app)
+
+        # ---- A flipped plane extrudes the other way ---------------------
+        check_flipped_planes(app)
+
         # ---- Every CAM op field is reachable through the generated SDK ---
         # Last: it starts a new project, and everything above works in one.
         check_cam_op_fields(app)

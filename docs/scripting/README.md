@@ -82,7 +82,12 @@ process started, so the instance is serving old code.
   params, timeout=)` for a dict and a per-call timeout; `wait_for(port)`;
   `instances()`. A refusal raises `RemoteError` (a `RuntimeError`) carrying
   the server's structured `.diagnostic` when there is one. `method` is
-  positional-only, so `call("describe", method="add_mate")` works. Also a CLI:
+  positional-only, so `call("describe", method="add_mate")` works, and
+  returns that method's row alone; an unknown name is refused with close
+  matches. `help(method)` (also `call("help", method=...)`, answered in the
+  client) is `method_help`, the lookup the SDK and the MCP server's `help`
+  share: the method's doc, params and returns from its `describe` row. Also
+  a CLI:
   `designer_remote.py <port> <method> ['<params-json>']`.
 - **`tools/designer_sdk.py`** — the SDK ([sdk.md](sdk.md)). Its RPC surface
   is generated from `describe` at connect time; the hand-written part is
