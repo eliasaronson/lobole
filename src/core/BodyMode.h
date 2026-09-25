@@ -5,6 +5,7 @@
 #include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/features/ExtrudeFeature.h" // ExtrudeMode
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -63,6 +64,38 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                                          const CADShape& target,
                                          const CADShape& tool,
                                          const CADShape& result);
+
+// A body boolean run through BooleanRefusal, with ONE retry when it is
+// refused (docs/modeling/README.md#a-refused-boolean-gets-one-fuzzy-retry).
+// Coincident geometry — a slot exactly as wide as the seat it opens, two equal
+// spokes whose axes cross microns apart — is what OpenCASCADE's exact booleans
+// get wrong, and its fuzzy option is what they have for it: the retry runs the
+// same boolean with SetFuzzyValue at FuzzyTolerance(target, tool),
+// non-destructively, and keeps its result only if it passes the same check.
+struct CheckedBoolean {
+  CADShape shape;      // the kept result; invalid on a failure or a refusal
+  ElementMap map;      // its names (toponaming T5)
+  std::string error;   // the kernel could not build it (shape invalid)
+  std::string refusal; // refused, retry included (shape invalid)
+  double fuzzy = 0.0;  // > 0: kept only through the retry, at this tolerance
+  std::string warning; // set with `fuzzy`: what the retry saved
+};
+// `extra` (optional) is a check of the caller's own that a result must also
+// pass, returning why not (the Boolean feature's BRepCheck); it runs before
+// BooleanRefusal on either attempt.
+CheckedBoolean CheckedBooleanNamed(
+    const std::string& feature, BooleanOp op, const std::string& body,
+    const CADShape& target, const ElementMap& targetMap, const CADShape& tool,
+    const ElementMap& toolMap, uint64_t featureTag,
+    const std::function<std::string(const CADShape&)>& extra = {});
+
+// The fuzzy retry's tolerance: 1e-5 of the SMALLER operand's bounding-box
+// diagonal, so it scales with the feature and never swallows a dimension of
+// it (a 2 mm spoke 290 mm long gets 0.0029 mm). The fraction is measured:
+// too small or too large a value each gave a result that passed the check
+// and was wrong (BodyMode.cpp, kFuzzyRel).
+[[nodiscard]] double FuzzyTolerance(const CADShape& target,
+                                    const CADShape& tool);
 
 // Convenience for the solid-producing features: run ApplyBodyMode and forward
 // any advisory onto `owner` (Feature::SetWarning) and any failure reason onto

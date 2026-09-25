@@ -281,6 +281,56 @@ The check is not a proof. It samples one point per face, and a target face the
 kernel should have split but did not is judged only if a vertex of it lies in
 the tool's box.
 
+### A refused boolean gets one fuzzy retry
+
+Most refusals are coincident geometry, which OpenCASCADE's exact booleans
+handle badly, and the model is usually reasonable: a slot exactly as wide as
+the seat it opens, with its floor on the seat's axis (the cut came back
+uncut), or two equal spokes whose axes cross 8 µm apart (the union counted
+their overlap twice). So a refused result is not the last word.
+`CheckedBooleanNamed` (`src/core/BodyMode.{h,cpp}`) runs the boolean, checks
+it, and on a refusal runs it ONCE more with OCC's fuzzy option
+(`SetFuzzyValue`), then checks that result the same way. It serves every path
+the check runs on: `ApplyBodyMode` add and cut, and the `Boolean` feature
+(union, subtract and intersect), where the retry must also pass the feature's
+BRepCheck, and a result that fails BRepCheck is retried too.
+
+- **Kept:** the feature carries a warning, so it reaches the `regen` block of
+  the call that made it: the operation "needed OpenCASCADE's fuzzy option at
+  0.0029 mm", followed by what the exact result got wrong.
+- **Refused again:** the refusal is the exact result's, followed by
+  "Retried with OpenCASCADE's fuzzy option at X mm (1e-05 of the smaller
+  operand's size), and that was refused too:" and the retry's own finding.
+
+**The tolerance** is 1e-5 of the smaller operand's bounding-box diagonal
+(`FuzzyTolerance`), so it scales with the feature and stays far below any
+dimension of it (0.0029 mm for a 290 mm spoke). The fraction was measured,
+because both ways of getting it wrong produce a result that PASSES the check:
+
+- too small, and the kernel still misreads the near-coincidence. The jig slot
+  came out 50-70 mm3 heavy at a fuzzy value of 1e-5 to 1e-4 mm, and right
+  from 1e-3 mm up;
+- too large, and it merges geometry it should keep. The flange and two spokes
+  came out right up to 0.01 mm and 14 mm3 light at 0.029 mm (1e-4 of their
+  size).
+
+Both operands in those cases are about 290 mm across, so 1e-5 sits inside the
+window with room either way. `tests/test_boolean_volume.cpp` pins both volumes
+against an independent answer: the jig's section, and the wheel with the spoke
+moved 0.01 mm off the crossing, built exactly.
+
+**The retry is non-destructive.** It goes through `cad::BuildNonDestructive`
+(`src/cad/NonDestructiveBoolean.h`), which sets the fuzzy value and
+`SetNonDestructive` before the build. A refused retry leaves the operands in
+the document, and a destructive fuzzy build would have written what it
+computed at the fuzzy tolerance onto their edges for every later feature to
+inherit.
+A test counts the curve representations on the operands' edges across a
+retry, and checks the same count sees the exact build's writes.
+
+A retry runs only after a refusal, so a document that builds cleanly pays
+nothing for it.
+
 ## Bounding boxes are memoized on the shape
 
 `CADShape::GetBoundingBox` is memoized on the `CADShape` itself, one slot per
