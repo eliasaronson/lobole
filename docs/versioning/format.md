@@ -241,7 +241,8 @@ so renaming a part cannot break an assembly. The stored `transform` is always
 the last solved placement, so a file opens at sane positions even with its
 mates stripped; mates re-solve over non-`fixed` occurrences on load.
 
-A mate is `{id, name, mate_type, a, b, flipped, rotation, offset}` plus
+A mate is `{id, name, mate_type, a, b, flipped, rotation, offset}` (the RPCs
+report the same kind as `type`) plus
 `dx` / `dy` / `ball_rotation` where its type uses them; `a` and `b` are
 connectors `{occurrence, anchor}`. An exploded view is `{id, name, steps:
 [{occurrence, offset}]}` and is view state only: the applied view and factor

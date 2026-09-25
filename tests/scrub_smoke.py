@@ -78,6 +78,44 @@ def main():
             # And never the mirror, which is what the failure looked like.
             expect(got > 0, f"crank {deg} deg: piston at {got:.4f} is behind "
                             f"the crank axis — the mirrored branch")
+
+        # leave_at_deg: the run leaves the live crank at a driver VALUE
+        # between two samples (7.5 degrees apart here), reached by walking
+        # to the nearest sample and stepping from it. Posed from the far end
+        # of the travel each time, and at the collinear 180 whose mirror is
+        # the failure this file exists for.
+        def slider_x(deg):
+            t = math.radians(deg)
+            return (CRANK_R * math.cos(t)
+                    + math.sqrt(ROD_L ** 2 - (CRANK_R * math.sin(t)) ** 2))
+        for deg, sample in ((183.0, 24), (93.3, 12), (358.9, 48),
+                            (180.0, 24)):
+            a.set_motion_pose(study=study["id"], t=0.0)
+            r = a.run_motion_study(study=study["id"], leave_at_deg=deg)
+            expect(r["left_at"] == sample and r["left_at_value"] == deg,
+                   f"leave_at_deg {deg}: walked to sample {r.get('left_at')}"
+                   f", said {r.get('left_at_value')}")
+            got = piston_x()
+            expect(abs(got - slider_x(deg)) < 1e-3,
+                   f"leave_at_deg {deg}: piston at {got:.4f}, the "
+                   f"slider-crank puts it at {slider_x(deg):.4f}")
+            crank = next(m for m in a.list_mates()["mates"] if m["id"] == axle)
+            expect(abs(crank["rotation_deg"] - deg) < 1e-4,  # a float
+                   f"leave_at_deg {deg}: the crank reads {crank}")
+
+        # Refused, naming the fix: the wrong unit for the driver, a value the
+        # run never walked, and two answers to one question.
+        def refused(needle, **kw):
+            try:
+                a.run_motion_study(study=study["id"], **kw)
+            except Exception as e:  # noqa: BLE001 — the message is the test
+                expect(needle in str(e), f"{kw} refused without '{needle}': "
+                                         f"{e}")
+                return
+            raise AssertionError(f"{kw} was accepted")
+        refused("use leave_at_deg", leave_at_mm=10.0)
+        refused("outside the study's range 0..360 deg", leave_at_deg=400.0)
+        refused("pass one", leave_at_deg=90.0, leave_at="last")
         print("scrub_smoke: ok")
     finally:
         app.terminate()

@@ -162,6 +162,28 @@ inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
 
+// WHERE an overlap is, in the one vocabulary every clash report speaks —
+// `interference` (named pair and sweep), `contact_report` and
+// `run_motion_study`: the intersection solid's volume-weighted centre and
+// its world bounds, in millimetres. A pair of names is a guessing game on an
+// assembly carrying eight of each; the standing sweep on the PES pump took
+// both occurrences' boxes to find one.
+inline void AddOverlapSite(nlohmann::json& j, const glm::dvec3& centroid,
+                           const glm::dvec3& lo, const glm::dvec3& hi) {
+  j["centroid_mm"] = {centroid.x, centroid.y, centroid.z};
+  j["bbox_min_mm"] = {lo.x, lo.y, lo.z};
+  j["bbox_max_mm"] = {hi.x, hi.y, hi.z};
+}
+
+// All a MESH check knows of where: the region the two sides' world boxes
+// share, which holds the overlap somewhere inside it. Named for what it is,
+// so it cannot be read as the overlap's own bounds.
+inline void AddOverlapBound(nlohmann::json& j, const glm::dvec3& lo,
+                            const glm::dvec3& hi) {
+  j["within_min_mm"] = {lo.x, lo.y, lo.z};
+  j["within_max_mm"] = {hi.x, hi.y, hi.z};
+}
+
 // Decision-complete identity errors (error-audit round): the first
 // rejection carries the measured state and the known vocabulary, so the
 // correction needs no discovery round-trip.

@@ -837,9 +837,11 @@ def section(base_plane: str = "xy", offset: float = 0.0,
           "or occurrence names (str); each occurrence's part bodies are "
           "placed by its solved transform and checked in world space — or "
           "OMIT a/b to sweep EVERY visible occurrence pair (returns {clash, "
-          "pairs: [{a, b, a_name, b_name, a_id?, b_id?, clash, volume}] — "
+          "pairs: [{a, b, a_name, b_name, a_id?, b_id?, clash, volume, "
+          "centroid_mm, bbox_min_mm, bbox_max_mm}] — "
           "a/b and a_name/b_name are the names, a_id/b_id the occurrence "
-          "ids when both are occurrences of this assembly — and the same "
+          "ids when both are occurrences of this assembly, and the centroid "
+          "and world bounds (mm) say WHERE the overlap is — and the same "
           "list again as "
           "`clashes`, which is what contact_report calls it). Run it after "
           "mating — clash checks matter most in assemblies.")

@@ -238,54 +238,56 @@ bool MotionResultStale(AppState& state, uint64_t studyId) {
          it->second != Revision(state, studyId);
 }
 
-bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
-                     std::string* error) {
-  if (!state.assembly) {
+namespace {
+
+// The study, ready to be posed: validated, and under the configuration it
+// names. A study that names its configuration is posed under it: a pose of
+// the "full load" study with the rack at idle would be a pose the study
+// never made. Switching is a document change, so it is an undo step.
+MotionStudy* StudyToPose(AppState& state, uint64_t studyId,
+                         std::string* error) {
+  const auto fail = [&](const std::string& m) -> MotionStudy* {
     if (error)
-      *error = "the active document is not an assembly";
-    return false;
-  }
+      *error = m;
+    return nullptr;
+  };
+  if (!state.assembly)
+    return fail("the active document is not an assembly");
   MotionStudy* s = state.assembly->FindMotionStudyById(studyId);
-  if (!s) {
-    if (error)
-      *error = "no motion study with id " + std::to_string(studyId);
-    return false;
-  }
+  if (!s)
+    return fail("no motion study with id " + std::to_string(studyId));
   const std::string why = motion::WhyNot(*state.assembly, *s);
-  if (!why.empty()) {
-    if (error)
-      *error = why;
-    return false;
-  }
-  // A study that names its configuration is posed under it: a pose of the
-  // "full load" study with the rack at idle would be a pose the study never
-  // made. Switching is a document change, so it is an undo step.
+  if (!why.empty())
+    return fail(why);
   if (s->configuration &&
       state.assembly->ActiveConfiguration() != *s->configuration) {
     SnapshotAssembly(state);
     state.assembly->SetActiveConfiguration(*s->configuration);
     SolveActiveAssembly(state);
   }
-  Mate* driver = state.assembly->FindMateById(s->driverMate);
-  const double target = motion::ValueAt(*s, t);
+  return s;
+}
 
-  // WALK to the pose, in the study's own steps, rather than jumping to it.
-  //
-  // A mechanism's pose is not a function of its driver alone. A slider-crank
-  // at 180 degrees has the crank and rod collinear, and BOTH branches close
-  // the loop exactly — the piston at +107 and the piston at -193 are equally
-  // valid answers to "crank at 180". Which one the solver returns depends on
-  // where it started, and jumping 90 degrees into that singularity landed the
-  // engine on the mirrored branch: the piston out through the bottom of the
-  // crankcase, reported as a clean solve because it IS one.
-  //
-  // The run does not have this problem, because it walks its samples in
-  // order and each solve starts from the last. A scrub is the same path at
-  // the same spacing, so it costs what one run sample costs per step and is
-  // bounded by the study's own sample count.
-  const double current = assembly::MateDofValue(*driver, s->driverDof);
-  const double span = s->to - s->from;
-  const int steps = std::max(s->samples - 1, 1);
+// WALK the driver to `target`, in the study's own steps, rather than jumping
+// to it.
+//
+// A mechanism's pose is not a function of its driver alone. A slider-crank
+// at 180 degrees has the crank and rod collinear, and BOTH branches close
+// the loop exactly — the piston at +107 and the piston at -193 are equally
+// valid answers to "crank at 180". Which one the solver returns depends on
+// where it started, and jumping 90 degrees into that singularity landed the
+// engine on the mirrored branch: the piston out through the bottom of the
+// crankcase, reported as a clean solve because it IS one.
+//
+// The run does not have this problem, because it walks its samples in
+// order and each solve starts from the last. A scrub is the same path at
+// the same spacing, so it costs what one run sample costs per step and is
+// bounded by the study's own sample count.
+void WalkDriver(AppState& state, const MotionStudy& s, double target) {
+  Mate* driver = state.assembly->FindMateById(s.driverMate);
+  const double current = assembly::MateDofValue(*driver, s.driverDof);
+  const double span = s.to - s.from;
+  const int steps = std::max(s.samples - 1, 1);
   const double stride = std::abs(span) / steps;
   int walk = 1;
   if (stride > 1e-12)
@@ -293,14 +295,36 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
   walk = std::clamp(walk, 1, steps);
   for (int k = 1; k <= walk; k++) {
     const double v = current + (target - current) * (double(k) / walk);
-    assembly::SetMateDof(*driver, s->driverDof, v);
+    assembly::SetMateDof(*driver, s.driverDof, v);
     assembly::PropagateRelations(*state.assembly, driver->id, [&](uint64_t id) {
       return ui::PartDocById(state, id);
     });
-    SolveActiveAssemblyDriven(state, driver->id, s->driverDof,
+    SolveActiveAssemblyDriven(state, driver->id, s.driverDof,
                               /*diagnose=*/false); // a motion sample
   }
   state.syncedDocumentVersion = UINT64_MAX; // the placements changed
+}
+
+} // namespace
+
+bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
+                     std::string* error) {
+  MotionStudy* s = StudyToPose(state, studyId, error);
+  if (!s)
+    return false;
+  WalkDriver(state, *s, motion::ValueAt(*s, t));
+  return true;
+}
+
+bool ApplyMotionValue(AppState& state, uint64_t studyId, int sample,
+                      double value, std::string* error) {
+  MotionStudy* s = StudyToPose(state, studyId, error);
+  if (!s)
+    return false;
+  const int steps = std::max(s->samples - 1, 1);
+  const double t = static_cast<double>(std::clamp(sample, 0, steps)) / steps;
+  WalkDriver(state, *s, motion::ValueAt(*s, t)); // onto the run's own path
+  WalkDriver(state, *s, value); // under one spacing: a single step
   return true;
 }
 

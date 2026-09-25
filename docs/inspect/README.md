@@ -172,8 +172,14 @@ default keeps the half opposite the plane's normal (z ≤ offset for `xy`);
   `max_pairs` (4000) or `deadline_s` (20, checked between pairs — one boolean
   can overrun it). The response says what it checked, box-cleared and left
   unchecked, and a truncated sweep's receipt is `unverified`.
-- Each clash carries `centroid` and `bbox_min` / `bbox_max` of the overlap —
-  where the solid-in-solid is, not just which two parts.
+- Each clash carries `centroid_mm` and `bbox_min_mm` / `bbox_max_mm` of the
+  overlap in world millimetres — where the solid-in-solid is, not just which
+  two parts — in the named-pair check, the sweep and `contact_report` alike,
+  from the intersection solid the exact check already builds. A mesh-mode
+  sweep knows only that two sides overlap, so its entries carry
+  `within_min_mm` / `within_max_mm` instead: the region the two sides' boxes
+  share, which holds the overlap somewhere. Motion studies use the same names
+  ([assemblies](../assemblies/README.md#motion-studies)).
 
 `contact_report` is the connectivity gate: `connected` (one component = one
 structure; anything in its own component is floating), `components`, per-pair

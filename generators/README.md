@@ -127,9 +127,11 @@ know:
 - A cam table is interpolated by a periodic monotone cubic, which cannot
   overshoot its data; a spline that dips below zero in the dwell would drive
   a closed valve into the head.
-- A motion study skips pairs that are rigid to each other, so bolted joints
-  are not reported as clashes; a scrub walks to its target at the study's own
-  spacing, so a slider-crank cannot jump onto its mirror branch at 180°.
+- A motion study checks pairs that are rigid to each other once, exactly, at
+  the first sample, and skips them after: a bolted joint that only touches is
+  not a clash, and one that overlaps is reported (`rigid: true`); a scrub
+  walks to its target at the study's own spacing, so a slider-crank cannot
+  jump onto its mirror branch at 180°.
 - Reading a hole diameter backwards through the clearance table is ambiguous
   for many sizes (11 mm is an M9 loose and an M10 normal), so it is refused
   naming the candidates and `fit_fastener` takes a `size`; a `Hole` drilled
