@@ -173,6 +173,10 @@ fi
 if [ "${1:-}" = "--gui" ]; then
   PORT="${2:-8798}"
   resolve_xvfb
+  # GLFW prefers Wayland whenever WAYLAND_DISPLAY is set, so from a shell in
+  # a Wayland session the "Xvfb" instance opened a hidden window on the
+  # user's own compositor instead, never presented, and stalled.
+  unset WAYLAND_DISPLAY
   echo "headless-preview: starting WINDOWED instance on --remote $PORT (Xvfb; ui_action works)"
   exec "$XVFB_RUN" -a -s '-screen 0 1280x720x24' \
     nix-shell "$ROOT/shell.nix" --run "'$BIN' --hidden --remote $PORT"

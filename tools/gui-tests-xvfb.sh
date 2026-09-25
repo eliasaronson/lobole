@@ -62,6 +62,10 @@ else
   XVFB_RUN="$(nix-shell -p xvfb-run --run 'which xvfb-run' | tail -1)"
 fi
 SCREEN='-screen 0 1600x1000x24'
+# GLFW prefers Wayland whenever WAYLAND_DISPLAY is set: run from a Wayland
+# session, every shard would open its window on the user's compositor rather
+# than on its Xvfb.
+unset WAYLAND_DISPLAY
 
 # Reap orphaned Xvfb servers before starting new ones. When a run (or a
 # headless-preview / ad-hoc xvfb-run) is killed hard, xvfb-run dies without
