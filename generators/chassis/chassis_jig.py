@@ -108,6 +108,7 @@ def plate(d, frame, name, mark, x, log=None):
 
     # Every tube that passes through, as a notch OPEN AT THE TOP: the round
     # seat it sits in, and the slot above it that lets it drop in.
+    retried = 0
     for i, c in enumerate(cross):
         seat_r = c["od"] / 2.0 + CLEARANCE
         # A CYLINDER, not a swept pipe. A pipe's surface is a spline even
@@ -119,27 +120,28 @@ def plate(d, frame, name, mark, x, log=None):
             "type": "Cylinder", "name": f"Seat {i}", "center": list(a),
             "direction": list(c["dir"]), "radius": seat_r, "height": 400.0})
         _check(seat, f"{name} seat {i}")
-        _cut(d, f"Notch {i}", seat)
+        retried += _cut(d, f"Notch {i}", seat)
 
-        # The slot: from the tube's centre up past the top edge. NARROWER
-        # than the seat, by half the clearance a side. A slot as wide as the
-        # seat or wider, floored on the seat's axis, meets the seat's
-        # cylinder exactly along the floor's edges, and the kernel answered
-        # that cut by returning the plate UNCUT (the rear plate had no slot
-        # over its right lower rail) until the app started checking
-        # booleans. The tube still drops through with 0.25 mm a side.
-        slot_w = c["od"] / 2.0 + CLEARANCE / 2.0
+        # The slot: from the tube's centre up past the top edge, as wide as
+        # the seat. Its walls meet the seat's cylinder exactly along the
+        # floor's edges, which OpenCASCADE's exact cut gets wrong (it came
+        # back UNCUT); the app refuses that result and retries the cut with
+        # the kernel's fuzzy option, and a feature that needed it carries a
+        # warning (docs/modeling/README.md#a-refused-boolean-gets-one-fuzzy-retry).
+        slot_w = seat_r
         rise = top - c["at"][2] + 20.0
         box = d.call("add_feature", feature={
             "type": "Box", "name": f"Slot {i}",
             "position": [x - 50.0, c["at"][1] - slot_w, c["at"][2]],
             "width": 100.0, "height": slot_w * 2.0, "depth": rise})
         _check(box, f"{name} slot {i}")
-        _cut(d, f"Open {i}", box)
+        retried += _cut(d, f"Open {i}", box)
 
     if log:
-        log(f"    {name}: {len(cross)} tubes, {2 * half:.0f} x {top:.0f} mm")
-    return {"name": name, "mark": mark, "tubes": len(cross)}
+        log(f"    {name}: {len(cross)} tubes, {2 * half:.0f} x {top:.0f} mm"
+            + (f", {retried} cut(s) through the fuzzy retry" if retried else ""))
+    return {"name": name, "mark": mark, "tubes": len(cross),
+            "fuzzy_retries": retried}
 
 
 def _cut(d, name, tool):
@@ -150,6 +152,10 @@ def _cut(d, name, tool):
         "type": "Boolean", "name": name, "op": "subtract",
         "target_id": plate_id, "tool_id": tool["id"]})
     _check(r, name)
+    # 1 when the exact cut was refused and the fuzzy retry made it. The
+    # regen block lists every feature's warning, so this one's by name.
+    return int(any(w.get("name") == name and "fuzzy option" in w["warning"]
+                   for w in r.get("regen", {}).get("warnings", [])))
 
 
 def _check(result, what):

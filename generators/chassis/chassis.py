@@ -202,7 +202,10 @@ def main():
         chassis_panels.firewall(d)
         tabs = chassis_panels.tabs(d, f)
         plates = chassis_jig.build(d, f)
-        print(f"{len(tabs)} tabs, {len(plates)} jig plates")
+        retried = sum(p["fuzzy_retries"] for p in plates)
+        print(f"{len(tabs)} tabs, {len(plates)} jig plates"
+              + (f" ({retried} cut(s) through the fuzzy retry)"
+                 if retried else ""))
         d.call("set_active_part", part="Chassis")
     for i in range(len(bodies)):
         d.call("set_material", body=i, material=S.MATERIAL)
