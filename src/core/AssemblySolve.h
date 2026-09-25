@@ -86,7 +86,9 @@ struct SolveReport {
 // `asmById` (A5/v57) lets a face anchor reach a part INSIDE a placed
 // sub-assembly, via the connector's innerPath. The returned frame is always
 // in the TOP-LEVEL occurrence's space, so the solve composes it exactly as
-// before — a rigid unit's inner face sits at a known place in the unit.
+// before — a rigid unit's inner face sits at a known place in the unit, and
+// a flexible one's where its own inner poses put it. An ORIGIN anchor with a
+// path is the origin of what the path names, not the unit's.
 std::optional<glm::mat4>
 ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
                     const PartResolver& partById, std::string* whyNot = nullptr,

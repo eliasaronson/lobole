@@ -161,8 +161,9 @@ struct Connector {
   // to mate onto one was to open that assembly — which cannot express "bolt
   // this bracket to the flange of the pump inside the pump unit". The mate
   // still positions the TOP-LEVEL occurrence: the anchor only reads
-  // geometry, and the unit is rigid, so a face inside it is at a known place
-  // in the unit's frame.
+  // geometry, and a rigid unit's face is at a known place in its frame. In a
+  // FLEXIBLE unit (v129) a path that enters at a moving part mates that part
+  // (ExpandFlexible re-points it).
   std::vector<uint64_t> innerPath;
 };
 

@@ -474,6 +474,7 @@ one.
 |---|---|
 | `src/core/Occurrence.{h,cpp}` | the model: occurrences, connectors, mates, relations, views, studies, assertions; `CamLift` |
 | `src/core/AssemblySolve.{h,cpp}` | connector frames, relation propagation, the placement pass, attachments, `Flatten`, `ResolvePath`, `WouldCycle`, `SubtreeVersions`, `MassProperties` |
+| `src/core/AssemblyFlexible.cpp` | flexible sub-assemblies: `ExpandFlexible`, `CollapseFlexible`, `FlexibleRefusal`, mates named `{path, mate}` |
 | `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve; `MateAdjustFor`, `DeriveMateDofs` |
 | `src/core/MotionStudy.{h,cpp}` | running a motion study |
 | `src/core/io/SerializeAssembly.cpp`, `Serialization.cpp` | JSON and the directory layout |
@@ -491,13 +492,17 @@ one.
   partitioning, driven DOF held, which tilted connector keeps a loop open —
   `-L diagnose`), `test_assembly_relations.cpp` (every
   relation kind, propagation order, freewheel/reverser/click, loop rows),
-  `test_assembly_flatten.cpp`, `test_motion.cpp`. Goldens in
+  `test_assembly_flatten.cpp`, `test_motion.cpp`,
+  `test_flexible_subassembly.cpp` (a parent relation into an inner mate,
+  two placements posed apart, a configuration per placement, clashes per
+  leaf, the refusals). Goldens in
   `tests/golden/assembly/`.
 - Headless smokes: `assembly_smoke.py`, `assembly_mates_smoke.py`,
   `assembly_loops_smoke.py`, `assembly_relations_smoke.py`,
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
-  `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`.
+  `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`,
+  `flexible_subassembly_smoke.py`.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
@@ -517,3 +522,6 @@ one.
 - Contact dynamics: gears and cams are kinematic relations, checked for
   clash statically and over motion studies.
 - A version pin on an occurrence's part (`part_version`).
+- More than one level of flexibility, and a GUI toggle for `flexible` (it is
+  set over RPC and the SDK); an exploded view of a flexible unit's parts one
+  by one.
