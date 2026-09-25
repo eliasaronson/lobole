@@ -1960,12 +1960,81 @@ class Occurrence:
                 "or one whose bodies all failed to build")
         return tuple(o["bbox_min"]), tuple(o["bbox_max"])
 
+    def inner(self, occurrence, name=None):
+        """An occurrence INSIDE this placed sub-assembly, by its id there (or
+        an Occurrence handle from that assembly's own tab): a mate side
+        `(occ.inner(k), "frame")` reaches into it with `inner_path`, and
+        `.frame()` reads it where it stands. On a FLEXIBLE placement a
+        moving part is mated as itself."""
+        inner_id = occurrence.id if hasattr(occurrence, "id") else occurrence
+        label = name or getattr(occurrence, "name", None) or str(inner_id)
+        return InnerOccurrence(self, inner_id, label)
+
+    def mate(self, mate):
+        """A mate INSIDE this flexible sub-assembly placement, named
+        {path, mate} (v129): its id in the sub-assembly, from that
+        assembly's own tab. A relation or a motion study here can then drive
+        it — an engine's chain turning its pump's camshaft."""
+        return InnerMate(_id(mate), [self.id])
+
     def __repr__(self):
         return f"Occurrence({self.name!r}, id={self.id})"
 
 
+class InnerOccurrence:
+    """An occurrence inside a placed sub-assembly: the top-level placement
+    (`id`, what a connector's `occurrence` is) and the path below it."""
+
+    def __init__(self, root, inner_id, name):
+        self.root, self.asm = root, root.asm
+        self.id, self.inner_path = root.id, [inner_id]
+        self.name = f"{root.name}/{name}"
+
+    @property
+    def path(self):
+        return [self.root.id] + self.inner_path
+
+    def frame(self, name=None):
+        """WHERE a named frame of it is, in world space — as the placement
+        has it standing (a flexible one's own pose of it)."""
+        self.asm.activate()
+        kw = {"occurrence": "/".join(str(i) for i in self.path)}
+        if name is not None:
+            kw["frame"] = name
+        return Frame.from_query(self.asm, self.asm.app.frame(**kw), name=name)
+
+    def __repr__(self):
+        return f"InnerOccurrence({self.name!r}, path={self.path})"
+
+
+class InnerMate(dict):
+    """A mate named {path, mate} (v129): `id` in the sub-assembly the
+    flexible placement `path` places."""
+
+    def __init__(self, mate_id, path):
+        super().__init__(id=mate_id, path=list(path))
+
+    @property
+    def id(self):
+        return self["id"]
+
+    @property
+    def path(self):
+        return self["path"]
+
+
+def _mate_ref(key, mate):
+    """`{key: id}`, plus `{key}_path` for a mate inside a flexible
+    placement."""
+    out = {key: _id(mate)}
+    if isinstance(mate, InnerMate):
+        out[f"{key}_path"] = mate.path
+    return out
+
+
 class Asm(_Tab):
-    def place(self, part, at=None, fixed=False, name=None):
+    def place(self, part, at=None, fixed=False, name=None, flexible=False,
+              configuration=None):
         """Place a part OR ANOTHER ASSEMBLY. `at` is a world position; leave
         it out and mate it instead — which is the point.
 
@@ -1973,17 +2042,28 @@ class Asm(_Tab):
         in the active assembly"), and this took only a Part — so a subassembly
         had to be placed by passing its name as a bare string, which reads
         like a mistake rather than a feature.
+
+        `flexible=True` places a sub-assembly whose own mechanism MOVES here
+        (v129; its mates are then reached with `occ.mate(...)`), and
+        `configuration` (a name or id) is the one of ITS configurations the
+        placement runs under.
         """
         self.activate()
         kw = {"part": part.name if isinstance(part, (Part, Asm)) else part,
               "fixed": fixed}
+        if flexible:
+            kw["flexible"] = True
         if name:
             kw["name"] = name
         if at is not None:
             kw["transform"] = {"position": list(V(at)),
                                "orientation": [0, 0, 0, 1]}
         r = self.app.add_occurrence(**kw)
-        return Occurrence(self, dict(r, name=r.get("name", name or "")))
+        occ = Occurrence(self, dict(r, name=r.get("name", name or "")))
+        if configuration is not None:
+            self.app.set_occurrence_configuration(occurrence=occ.id,
+                                                  configuration=configuration)
+        return occ
 
     def occurrences(self):
         self.activate()
@@ -2171,8 +2251,8 @@ class Asm(_Tab):
 
     def gear(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
         self.activate()
-        return self.app.add_relation(type="gear", a=_id(mate_a),
-                                     b=_id(mate_b), teeth_a=teeth_a,
+        return self.app.add_relation(type="gear", **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
 
     def thread_engagement(self, a, b):
@@ -2207,8 +2287,8 @@ class Asm(_Tab):
         """A chain or belt: like a gear, but both sprockets turn the SAME
         way (v88)."""
         self.activate()
-        return self.app.add_relation(type="chain", a=_id(mate_a),
-                                     b=_id(mate_b), teeth_a=teeth_a,
+        return self.app.add_relation(type="chain", **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
 
     def rack(self, rotating, sliding, pitch_radius, **kw):
@@ -2218,8 +2298,8 @@ class Asm(_Tab):
         pinion slides the rack. `rotating` is a revolute or cylindrical mate
         (its turn), `sliding` a slider or cylindrical one (its slide)."""
         self.activate()
-        return self.app.add_relation(type="rack", a=_id(rotating),
-                                     b=_id(sliding),
+        return self.app.add_relation(type="rack", **_mate_ref("a", rotating),
+                                     **_mate_ref("b", sliding),
                                      pitch_radius=pitch_radius, **kw)
 
     def cam(self, mate_a, mate_b, **kw):
@@ -2228,16 +2308,16 @@ class Asm(_Tab):
         rise_deg, duration_deg, start_deg} for a cosine lobe. A cylindrical
         follower takes dof_b="rotation" to turn (v88, turning v102)."""
         self.activate()
-        return self.app.add_relation(type="cam", a=_id(mate_a),
-                                     b=_id(mate_b), **kw)
+        return self.app.add_relation(type="cam", **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b), **kw)
 
     def freewheel(self, mate_a, mate_b, drives, ratio=1.0, **kw):
         """A one-way clutch, rotation to rotation (v104): b follows a while
         a drives it in `drives` ("positive" or "negative") and slips when a
         goes back. Its history is the relation's `lead`."""
         self.activate()
-        return self.app.add_relation(type="freewheel", a=_id(mate_a),
-                                     b=_id(mate_b), drives=drives,
+        return self.app.add_relation(type="freewheel", **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b), drives=drives,
                                      ratio=ratio, **kw)
         # teeth=N and ride_mate/ride_dof/ride_mm|ride_deg (v105) make it a
         # toothed clutch that LIFTS what it names as it rides over them.
@@ -2260,6 +2340,8 @@ class Asm(_Tab):
         self.activate()
         ref = rim.ref if hasattr(rim, "ref") else dict(rim)
         ref["occurrence"] = _id(occurrence)
+        if isinstance(occurrence, InnerOccurrence):
+            ref["inner_path"] = occurrence.inner_path
         return self.app.fit_fastener(rim=ref, standard=standard, **kw)
 
     def motion(self, driver, **kw):
@@ -2267,7 +2349,8 @@ class Asm(_Tab):
         assembly configuration it runs under (v128): an id, 0 for the base,
         omitted for whichever is active when it runs."""
         self.activate()
-        return self.app.add_motion_study(driver=_id(driver), **kw)
+        ref = _mate_ref("driver", driver)
+        return self.app.add_motion_study(**ref, **kw)
 
     def solve(self):
         """Run the mate solver. Always answers errored_mates, placed,
@@ -2452,6 +2535,10 @@ def _conn(spec):
     its origin."""
     if isinstance(spec, tuple) and len(spec) == 2:
         occ, what = spec
+        if isinstance(occ, InnerOccurrence):
+            out = _conn((occ.root, what))
+            out["inner_path"] = occ.inner_path
+            return out
         # A PATH names a part inside a sub-assembly ("carburettor/carb body"),
         # which is how the app says to reach one: a sub-assembly occurrence
         # "has no frames or faces of its own".
@@ -2470,6 +2557,9 @@ def _conn(spec):
             f"on its own")
     if isinstance(spec, Occurrence):
         return {"occurrence": spec.id, "origin": True}
+    if isinstance(spec, InnerOccurrence):
+        return {"occurrence": spec.id, "origin": True,
+                "inner_path": spec.inner_path}
     if isinstance(spec, dict):
         return spec
     raise SdkError("a mate side is an Occurrence (its origin) or "
@@ -2541,7 +2631,7 @@ def _id(x):
         return 0
     if isinstance(x, Ref):
         return x
-    if isinstance(x, (Sketch, Frame, Occurrence)):
+    if isinstance(x, (Sketch, Frame, Occurrence, InnerOccurrence)):
         return x.id
     if isinstance(x, Body):
         return x.created_by

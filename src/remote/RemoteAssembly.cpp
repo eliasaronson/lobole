@@ -296,12 +296,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Derive a fastener from a picked hole RIM and place it "
      "(docs/parts/README.md). `rim` is a circular EDGE — the one the head sits "
      "against; a cylindrical face has an axis but no direction and cannot say "
-     "which end it goes in from. `rim` is {feature_id, element, occurrence?} "
+     "which end it goes in from. `rim` is {feature_id, element, occurrence?, "
+     "inner_path?} "
      "— the occurrence is needed whenever more than one placement answers to "
      "that element, which is every part placed twice AND every part built the "
      "same way as another (mirror sides of a cart carry the same feature ids "
      "and the same mapped names). Leaving it out THERE is refused, naming "
-     "them, rather than resolved to the first. "
+     "them, rather than resolved to the first. `inner_path` (the occurrence "
+     "ids below it) picks the leaf inside a placed sub-assembly. "
      "The SIZE comes from the hole's own diameter "
      "(the clearance table read backwards) and the LENGTH from the stack the "
      "axis passes through, snapped to a length that size is made in. Reading "
@@ -812,6 +814,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // leaving it out is refused rather than resolved to whichever comes
     // first (docs/parts/README.md).
     rim.occurrence = r.value("occurrence", uint64_t{0});
+    if (r.contains("inner_path")) // a leaf inside a sub-assembly
+      rim.innerPath = r.at("inner_path").get<std::vector<uint64_t>>();
     ui::FastenerRequest request;
     request.standard = p.value("standard", std::string("iso4762"));
     request.drive = p.value("drive", std::string{});
@@ -825,6 +829,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       request.farEnd.element.featureId = e.at("feature_id").get<uint64_t>();
       request.farEnd.element.name = e.at("element").get<std::string>();
       request.farEnd.occurrence = e.value("occurrence", uint64_t{0});
+      if (e.contains("inner_path"))
+        request.farEnd.innerPath =
+            e.at("inner_path").get<std::vector<uint64_t>>();
     }
     request.dryRun = p.value("dry_run", false);
     const ui::FastenerFit fit = ui::FitFastenerToHole(state, rim, request);

@@ -341,6 +341,11 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
 struct RimPick {
   uint64_t occurrence = 0;
   ElementRef element;
+  // The occurrence chain below `occurrence` down to the leaf that carries
+  // the element (FlatInstance::innerIds); empty = any leaf under it. A
+  // sub-assembly's parts can share feature ids and element names, and a
+  // flexible pump's housing is one leaf of seventy.
+  std::vector<uint64_t> innerPath;
 };
 
 // What deriving a fastener from a picked hole worked out, whether or not it

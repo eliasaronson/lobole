@@ -13,6 +13,12 @@ loop row in `src/core/AssemblyLoopSolve.cpp`; `add_relation` /
 `set_relation` in `src/remote/RemoteAssembly.cpp`. Tests:
 `tests/test_assembly_relations.cpp`, `tests/assembly_relations_smoke.py`.
 
+Either side may be a mate inside a
+[flexible sub-assembly](README.md#flexible-sub-assemblies) placement, named
+`{path, mate}` (`add_relation {a_path, b_path}`): an engine's chain drives
+its pump's own camshaft mate. Freewheels and clicks cannot, since their
+history would be per-placement state.
+
 ## Kinds
 
 A relation names mate `a` and mate `b` by id and the DOF on each (`rotation`

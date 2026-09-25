@@ -855,3 +855,12 @@ add_test(NAME toolmakers_clamp_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/toolmakers_clamp_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(toolmakers_clamp_smoke PROPERTIES TIMEOUT 120)
+
+# Flexible sub-assemblies (v129,
+# docs/assemblies/README.md#flexible-sub-assemblies) over RPC through the
+# SDK: a parent relation into an inner mate by path, set_mate by path, a
+# study driven by path, the per-leaf GLB node, and the refusals. Headless.
+add_test(NAME flexible_subassembly_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flexible_subassembly_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(flexible_subassembly_smoke PROPERTIES TIMEOUT 180)

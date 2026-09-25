@@ -180,6 +180,16 @@ turn parts end for end about their own axes. So the SDK's mate verbs pass
 face anchors, and leave alone any call that says `flipped` or `derive`
 itself.
 
+### Reaching into a sub-assembly
+
+`asm.place(sub, flexible=True, configuration="Full load")` places a
+[flexible sub-assembly](../assemblies/README.md#flexible-sub-assemblies).
+`occ.inner(id)` is an occurrence inside it (its id in the sub-assembly): a
+mate side `(occ.inner(k), "flange")` carries the `inner_path`, `.frame()`
+reads it where it stands, and `asm.bolt(rim, occ.inner(k))` fits a fastener
+to a rim on that leaf. `occ.mate(m)` is one of its mates, `{path, mate}`:
+`gear`, `chain`, `rack`, `cam` and `motion` take it wherever they take a mate.
+
 ## Measurement snapshots
 
 `body.snapshot(circular=, fields=, max_elements=)` (or the typed

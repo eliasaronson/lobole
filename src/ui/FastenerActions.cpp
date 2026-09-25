@@ -444,7 +444,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const RimOn* chosen = nullptr;
   if (rim.occurrence != 0) {
     for (const RimOn& c : candidates)
-      if (c.inst->rootOccurrenceId == rim.occurrence)
+      if (c.inst->rootOccurrenceId == rim.occurrence &&
+          (rim.innerPath.empty() || c.inst->innerIds == rim.innerPath))
         chosen = &c;
     if (chosen == nullptr) {
       std::string where;
@@ -616,6 +617,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
         continue;
       if (request.farEnd.occurrence != 0 &&
           inst.rootOccurrenceId != request.farEnd.occurrence)
+        continue;
+      if (!request.farEnd.innerPath.empty() &&
+          inst.innerIds != request.farEnd.innerPath)
         continue;
       if (const std::optional<glm::vec3> c = Measure::CentreOf(
               inst.part->GetBodies(), request.farEnd.element)) {
