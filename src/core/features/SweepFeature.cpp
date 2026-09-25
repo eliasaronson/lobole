@@ -41,6 +41,16 @@ TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId) {
   return TopoDS_Wire();
 }
 
+std::string SweepPathError(const RegenContext& ctx, uint64_t pathId,
+                           const std::string& role) {
+  const Feature* f = ctx.FindById(pathId);
+  if (f != nullptr && !f->GetError().empty())
+    return role + " '" + f->GetName() +
+           "' failed to build, so there is nothing to sweep along: fix that "
+           "feature first";
+  return role + " must be an open sketch chain or a 3D curve";
+}
+
 CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
                                  const TopoDS_Wire& spine, SweepFrame frame,
                                  const TopoDS_Wire& guide, bool scaleToGuide) {
@@ -119,7 +129,7 @@ bool SweepFeature::Execute(RegenContext& ctx) {
   // helix, control-poly) — curves-3d Phase 1.
   const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathSketchId);
   if (spine.IsNull()) {
-    SetError("sweep path must be an open sketch chain or a 3D curve");
+    SetError(SweepPathError(ctx, pathSketchId, "sweep path"));
     return false;
   }
   // Optional guide curve ("two directions", curves-3d Phase 3): a second
@@ -128,7 +138,7 @@ bool SweepFeature::Execute(RegenContext& ctx) {
   if (guideId != 0) {
     guide = ResolveSweepPathWire(ctx, guideId);
     if (guide.IsNull()) {
-      SetError("sweep guide must be an open sketch chain or a 3D curve");
+      SetError(SweepPathError(ctx, guideId, "sweep guide"));
       return false;
     }
   }

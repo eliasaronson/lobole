@@ -199,6 +199,61 @@ def main():
         expect("INVALID" in failed[0]["error"],
                f"and it says the solid is invalid: {failed[0]['error']}")
 
+        # --- a cut the kernel got wrong while BRepCheck calls it valid ----
+        # The PES-on-OM615 intake flange, reduced (tests/test_boolean_volume
+        # .cpp builds the same document): a slot whose round ends are two
+        # swept bores' own cylinders. The kernel kept the bores' floors
+        # inside the slot; in the full manifold the bores came out inside
+        # out. The refusal belongs in the response of the call that made
+        # the cut, naming the feature and both volumes.
+        d.call("new_project")
+        plane_x = {"normal": [-1, 0, 0], "uAxis": [0, 1, 0]}
+        blk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Block",
+            "plane": dict(plane_x, origin=[-100, -97, 283.3999938964844]),
+            "entities": [
+                {"type": "line", "a": [-40, -25], "b": [40, -25]},
+                {"type": "line", "a": [40, -25], "b": [40, 25]},
+                {"type": "line", "a": [40, 25], "b": [-40, 25]},
+                {"type": "line", "a": [-40, 25], "b": [-40, -25]}]})["id"]
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Block", "sketch_id": blk,
+            "distance": 20.0, "mode": "new_body"})
+        for y in (-112.0, -82.0):
+            arc = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Bore arc",
+                "plane": {"normal": [0, -1, 0], "origin": [0, y, 0],
+                          "uAxis": [1, 0, 0]},
+                "entities": [{"type": "arc",
+                              "center": [-100, 341.9468688964844],
+                              "radius": 58.546875,
+                              "start_angle": 2.4474694465108136,
+                              "end_angle": -1.5707963267948986}]})["id"]
+            d.call("add_feature", feature={
+                "type": "Pipe", "name": "Bore", "path_id": arc,
+                "outer_diameter": 26.0, "mode": "cut"})
+        half = math.pi / 2
+        slot = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Slot",
+            "plane": dict(plane_x, origin=[-99, -97, 283.3999938964844]),
+            "entities": [
+                {"type": "line", "a": [-15, 13], "b": [15, 13]},
+                {"type": "line", "a": [-15, -13], "b": [15, -13]},
+                {"type": "arc", "center": [15, 0], "radius": 13.0,
+                 "start_angle": -half, "end_angle": half},
+                {"type": "arc", "center": [-15, 0], "radius": 13.0,
+                 "start_angle": half, "end_angle": 3 * half}]})["id"]
+        reg = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Slot", "sketch_id": slot,
+            "distance": 14.0, "mode": "cut"})["regen"]
+        failed = [f for f in reg["failed"] if f["name"] == "Slot"]
+        expect(not reg["ok"] and failed,
+               f"the slot the kernel got wrong is refused in its own call: {reg}")
+        why = failed[0]["error"]
+        expect("cut 'Slot'" in why and "mm3 before" in why
+               and "mm3 after" in why and "INSIDE the tool" in why,
+               f"naming the feature, the operation, both volumes and why: {why}")
+
         print("regen_honesty_smoke: OK")
     finally:
         app.terminate()

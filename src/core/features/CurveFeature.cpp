@@ -252,6 +252,17 @@ glm::dvec3 HelixReference(const glm::dvec3& axis) {
   return {x.X(), x.Y(), x.Z()};
 }
 
+std::string CurveFeature::WhyIncomplete() const {
+  if (kind != Curve3DKind::BentPath)
+    return {};
+  std::vector<Bend> bends;
+  double length = 0.0;
+  std::string why;
+  if (BendPathWire(points, radius, bends, length, &why).IsNull())
+    return why.empty() ? "the bent path could not be built" : why;
+  return {};
+}
+
 bool CurveFeature::Execute(RegenContext& ctx) {
   (void)ctx;
   m_polyline.clear();

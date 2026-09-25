@@ -73,6 +73,7 @@ add_executable(designer_tests
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp
+    test_boolean_volume.cpp
     test_catalog.cpp
     test_hole.cpp
     test_draft.cpp

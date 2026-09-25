@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
 
 #include <cmath>
@@ -206,6 +207,49 @@ TEST_CASE("A former too big for the straight is refused by name",
   CurveFeature* b = AddCurve(doc, std::move(back));
   doc.Regenerate();
   CHECK(b->GetError().find("doubles back") != std::string::npos);
+}
+
+TEST_CASE("A bent path that cannot be bent is the ONLY error",
+          "[curve3d][bent][tube]") {
+  // From the PES-on-OM615 dogfood: a leak-off pipe whose straight was 20 mm
+  // with 27.3 mm of bends on it. The refusal said so — and was followed by
+  // "pipe path must be an open sketch chain or a 3D curve", which it was:
+  // the pipe had been added on the path the first message refused, and a
+  // reader has to work out which of the two is true.
+  auto tight =
+      std::make_unique<CurveFeature>("Leak-off path", Curve3DKind::BentPath);
+  tight->points = {{0, 0, 0}, {0, 0, 20}, {100, 0, 20}, {100, 0, 0}};
+  tight->radius = 45.0;
+
+  // It is refused where it is ADDED (add_feature asks WhyIncomplete before
+  // committing), so the caller's next step — the pipe — never runs on it.
+  const std::string why = tight->WhyIncomplete();
+  INFO(why);
+  CHECK(why.find("20 mm") != std::string::npos);
+  CHECK(why.find("tighter former") != std::string::npos);
+  CHECK(why.find("open sketch chain") == std::string::npos);
+
+  // A path that CAN be bent is not refused, and nor is any other kind: a
+  // fit spline's geometry is its own business at regeneration.
+  auto fine = std::make_unique<CurveFeature>("Fine", Curve3DKind::BentPath);
+  fine->points = {{0, 0, 0}, {0, 0, 90}, {100, 0, 90}};
+  fine->radius = 45.0;
+  CHECK(fine->WhyIncomplete().empty());
+
+  // A path that breaks LATER (an edit, a file) still regenerates broken, and
+  // the pipe on it defers to it by name instead of misdescribing it.
+  Document doc;
+  doc.AddFeature(std::move(tight));
+  const uint64_t pathId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<PipeFeature>("Leak-off", pathId, 6.0, 1.0));
+  doc.Regenerate();
+  const std::string pathErr = doc.GetFeature(0)->GetError();
+  const std::string pipeErr = doc.GetFeature(1)->GetError();
+  INFO(pathErr << " / " << pipeErr);
+  CHECK(pathErr.find("20 mm") != std::string::npos);
+  CHECK(pipeErr.find("open sketch chain") == std::string::npos);
+  CHECK(pipeErr.find("'Leak-off path' failed to build") != std::string::npos);
+  CHECK(doc.GetFeature(1)->ErrorAfterEarlierFailure());
 }
 
 TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {

@@ -17,6 +17,13 @@ between bends can be read back. A spline fitted through sampled arc points
 cannot do that: it bows between points on the straights and has no radius
 anything can read (`src/core/features/CurveFeature.h`, `Curve3DKind::BentPath`).
 
+A path that cannot be bent — a straight shorter than the bends at its ends
+need, a corner that doubles back — is refused by `add_feature` with that one
+reason and nothing is committed, so the `Pipe` a script adds next never runs
+on it. A path that breaks later (an edit) still regenerates broken, and the
+pipe on it names it ("pipe path '…' failed to build") rather than calling it
+the wrong kind of path.
+
 The metal turns SHORT of each corner — on a 152.4 mm former round a right
 angle, by R(√2−1) ≈ 63 mm — so anything asking "where does this member run"
 must use the evaluated curve, not the corners. `curve_points {curve,

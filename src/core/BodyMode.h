@@ -2,6 +2,7 @@
 
 #include "cad/CADKernel.h"
 #include "core/Feature.h"                 // Body
+#include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/features/ExtrudeFeature.h" // ExtrudeMode
 
 #include <string>
@@ -35,6 +36,33 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                    const std::string& name, const std::string& material,
                    uint64_t ownerId, std::string* warning = nullptr,
                    std::string* error = nullptr);
+
+// What a body boolean must keep, checked on its RESULT before it is committed
+// (docs/modeling/README.md#a-boolean-is-checked-before-it-is-kept). A kernel
+// boolean can return a shape that is non-null, passes BRepCheck, and is still
+// wrong: a slot whose round ends were the same cylinders as two bores came
+// back with the bores' floors kept inside the slot and its far end standing
+// in the empty bores — the bores INSIDE OUT, a section solid where the holes
+// are, and the part 13,800 mm3 lighter than any cut could have made it.
+// Checked:
+//   - the result's volume is not negative, and no closed shell of it is the
+//     wrong way round (a solid's outer shell inward, a void outward);
+//   - a Subtract is no larger than `target`, an Intersect no larger than
+//     either operand, a Union no smaller than `target`;
+//   - no face of a cut or a union lies strictly INSIDE the tool, and none of
+//     an intersection outside it — judged for every face the boolean made
+//     and every face of the target it kept whole that reaches into the
+//     tool's box, at one point inside each, against the tool (a sound solid,
+//     and usually a small one).
+// The volumes are the ones the callers need anyway; the rest cost the
+// OM615's build about 2%. Tolerances are relative to the sizes compared.
+// Returns the refusal in user-grade prose naming `feature`, the operation,
+// `body` and both volumes; empty when the result is sound.
+[[nodiscard]] std::string BooleanRefusal(const std::string& feature,
+                                         BooleanOp op, const std::string& body,
+                                         const CADShape& target,
+                                         const CADShape& tool,
+                                         const CADShape& result);
 
 // Convenience for the solid-producing features: run ApplyBodyMode and forward
 // any advisory onto `owner` (Feature::SetWarning) and any failure reason onto

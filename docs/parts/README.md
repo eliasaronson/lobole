@@ -99,6 +99,12 @@ screw body in a part, mass and BOM would count it as the part, and
   every placement of a part and by every part built the same way, so the pick
   carries the occurrence as well; when several placements answer to the name
   and none is given, it is refused listing them.
+- **A rim may be arcs.** The faces around a hole split its rim wherever they
+  meet it — a seat that was two faces before the hole was cut, a slot across
+  it — so the picked edge may be an arc. `Measure::RimCircleOf` gathers every
+  edge of the same body on that circle (centre, axis and radius to a
+  tolerance relative to the radius) and the fit is to the whole circle. Arcs
+  that do not close it are refused: "this rim is N arcs covering M°".
 - **Size**: the Hole behind the rim (`drawing::FindHoleForRef`) says its
   thread if it recorded a fit; otherwise the diameter is read backwards out of
   the clearance table, and an ambiguous diameter is refused naming the
