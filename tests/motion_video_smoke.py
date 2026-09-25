@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """A motion study films to every format, and the refusals refuse.
 
-`export_motion_video` (docs/assemblies/README.md#motion-video) poses the
-study frame by frame, captures the model with the quick render's raster path
-and hands the frames to ffmpeg (mp4, webm, gif) or writes them as numbered
-PNGs into a folder. What must hold, on a small slider-crank:
+`export_motion_video` (docs/assemblies/README.md#motion-video) plays the
+study as the Motion window's Play does, captures each frame as the viewport
+renders it and hands the frames to ffmpeg (mp4, webm, gif) or writes them as
+numbered PNGs into a folder. What must hold, on a small slider-crank:
 
-  - png: one file per frame, each exactly the size asked for, and the
-    mechanism MOVES between them (the first and a middle frame differ);
+  - png: as many frames as Play takes at 60 fps, each exactly the size asked
+    for, and the mechanism MOVES between them (the first and a middle frame
+    differ);
+  - a frame IS the viewport: the PNG of a frame that falls on a sample is,
+    pixel for pixel, the screenshot of the assembly posed at that sample;
   - gif, mp4, webm: ffprobe reads back the frame count, the size and the
     codec (gif, h264, vp9) — decoded, not trusted from our own answer;
   - the assembly is left at the pose it had before, mid-stroke;
@@ -43,6 +46,9 @@ from smoke_app import launch_app  # noqa: E402
 
 W, H = 160, 120
 SAMPLES = 25
+FPS = 60.0
+PLAY_S = (SAMPLES - 1) / 24.0  # the Motion window plays 24 samples a second
+FRAMES = round(PLAY_S * FPS) + 1
 
 
 def expect(condition, message):
@@ -73,6 +79,25 @@ def probe(path):
     s = json.loads(out)["streams"][0]
     return s["codec_name"], int(s["width"]), int(s["height"]), \
         int(s["nb_read_frames"])
+
+
+def pixels_differing(a_path, b_path):
+    """The share of pixels whose colour differs by more than 8 in any
+    channel, both PNGs decoded by ffmpeg (no imaging library needed)."""
+    def rgb(path):
+        return subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo",
+             "-pix_fmt", "rgb24", "-"], check=True,
+            capture_output=True).stdout
+    a, b = rgb(a_path), rgb(b_path)
+    if len(a) != len(b):
+        return 1.0
+    off = 0
+    for i in range(0, len(a), 3):
+        if (abs(a[i] - b[i]) > 8 or abs(a[i + 1] - b[i + 1]) > 8
+                or abs(a[i + 2] - b[i + 2]) > 8):
+            off += 1
+    return off / (len(a) // 3)
 
 
 def refused(app, needles, **kw):
@@ -171,22 +196,24 @@ def main():
         r = a.export_motion_video(_timeout=600, study=sid, path=frames_dir, format="png",
                                   width=W, height=H)
         names = sorted(n for n in os.listdir(frames_dir) if n.endswith(".png"))
-        expect(len(names) == SAMPLES and r["frames"] == SAMPLES,
-               f"png: {len(names)} frames for {SAMPLES} samples")
+        expect(len(names) == FRAMES and r["frames"] == FRAMES,
+               f"png: {len(names)} frames for {SAMPLES} samples played in "
+               f"{PLAY_S} s at {FPS} fps")
         expect(all(png_size(os.path.join(frames_dir, n)) == (W, H)
                    for n in names), f"png: every frame is {W}x{H}")
         expect(sha(os.path.join(frames_dir, names[0])) !=
-               sha(os.path.join(frames_dir, names[SAMPLES // 4])),
+               sha(os.path.join(frames_dir, names[FRAMES // 4])),
                "png: the mechanism moves between frames")
         expect(r["bytes"] > 0 and r["fps"] > 0, f"png: answered {r}")
         expect(pose(a) == before, "png: the pose is back where it was")
 
-        # The defaults are derived: no size given is the viewport's, and no
-        # fps plays the study in about four seconds.
+        # The defaults are derived: no size given is the viewport's, the rate
+        # a display's, and the length what Play takes.
         d = a.export_motion_video(_timeout=600, study=sid, format="png",
                                   path=os.path.join(root, "defaults"))
-        expect(abs(d["fps"] - SAMPLES / 4.0) < 1e-9,
-               f"default fps {d['fps']} plays {SAMPLES} frames in 4 s")
+        expect(d["fps"] == FPS and d["frames"] == FRAMES,
+               f"default {d['frames']} frames at {d['fps']} fps: {SAMPLES} "
+               f"samples played in {PLAY_S} s")
         expect(d["width"] > 0 and d["height"] > 0,
                f"default size is the viewport's ({d['width']}x{d['height']})")
 
@@ -224,9 +251,9 @@ def main():
             r = a.export_motion_video(_timeout=600, study=sid, path=path, width=W, height=H,
                                       fps=10, **kw)
             got = probe(path)
-            expect(got == (codec, W, H, SAMPLES),
-                   f"{fmt}: ffprobe reads {got}, want "
-                   f"{(codec, W, H, SAMPLES)}")
+            want = (codec, W, H, r["frames"])
+            expect(r["frames"] == round(PLAY_S * 10) + 1 and got == want,
+                   f"{fmt}: ffprobe reads {got}, want {want}")
             expect(r["bytes"] == os.path.getsize(path),
                    f"{fmt}: answered bytes {r['bytes']} = the file's")
             expect(pose(a) == before, f"{fmt}: the pose is back where it was")
@@ -243,7 +270,7 @@ def main():
         # --- async: a job, cancellable, leaving nothing behind --------------
         slow = os.path.join(root, "slow.mp4")
         r = a.export_motion_video(_timeout=600, study=sid, path=slow, width=W, height=H,
-                                  frames=600, **{"async": True})
+                                  frames=6000, **{"async": True})
         expect(r["started"] and r["job"] == "motion-video",
                f"async answers at once: {r}")
         kinds = [j["kind"] for j in a.background_jobs()["jobs"]]
@@ -262,6 +289,26 @@ def main():
                not last.get("ok"), f"cancelled: {st}")
         expect(not os.path.exists(slow), "a cancelled video leaves no file")
         expect(pose(a) == before, "cancelled: the pose is back where it was")
+
+        # --- a frame IS the viewport ----------------------------------------
+        # Frame k sits on sample k * (SAMPLES - 1) / (FRAMES - 1); the one on
+        # sample 6 (a quarter turn in) is compared with a screenshot of the
+        # assembly posed there. This --offscreen instance's viewport is its
+        # whole 1280 x 720 framebuffer, so the frame is taken at that size:
+        # the same camera, the same pixels. Last, because the pose it leaves
+        # is sample 6's.
+        on_sample = 6 * (FRAMES - 1) // (SAMPLES - 1)
+        big = os.path.join(root, "big")
+        a.export_motion_video(_timeout=600, study=sid, path=big, format="png",
+                              width=1280, height=720)
+        a.set_motion_pose(study=sid, t=6 / (SAMPLES - 1))
+        shot = os.path.join(root, "shot.png")
+        a.screenshot(path=shot)
+        frame = os.path.join(big, f"frame_{on_sample:04d}.png")
+        off = pixels_differing(shot, frame)
+        expect(off < 0.001,
+               f"the frame on sample 6 is the screenshot there: "
+               f"{100 * off:.3f}% of pixels differ by more than 8")
     finally:
         stop(app_proc)
     return 0

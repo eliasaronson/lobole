@@ -648,6 +648,25 @@ struct RasterFrame {
 // A quick render's downsample + encode, on its worker (RendererSync.cpp).
 struct QuickEncode;
 
+// Frames of the VIEWPORT's render, one after another, read back pipelined
+// (render::FrameStream): what a motion video films
+// (docs/assemblies/README.md#motion-video). Made by `beginFrameCapture`,
+// which aims the renderers at the capture's size; destroying it waits for
+// the frames in flight and aims them back at the viewport, so it lives for
+// one slice of the frame loop, never across frames.
+class FrameCapture {
+public:
+  virtual ~FrameCapture() = default;
+  // The renderers as they are now (camera, poses), one frame. Does not wait.
+  virtual bool Submit(std::string* error) = 0;
+  // The oldest frame in flight, waited for: width x height RGBA8 in memory
+  // order B,G,R,A when `Bgra()`, else R,G,B,A; rows top to bottom.
+  virtual bool Collect(std::vector<uint8_t>* pixels, std::string* error) = 0;
+  virtual bool Full() const = 0; // Collect before the next Submit
+  virtual size_t InFlight() const = 0;
+  virtual bool Bgra() const = 0;
+};
+
 // A motion video export's outcome (MotionActions.h).
 struct MotionVideoResult;
 
@@ -1166,6 +1185,11 @@ struct AppState {
   bool motionPlaying = false;     // advancing; false = paused on a frame
   double motionPlaybackPos = 0.0; // in samples, 0 .. n-1 (fractional)
   double motionPlaybackLastTick = 0.0;
+  // Poses shown in place of the stored result's: a video export's own run,
+  // made when the study has no fresh result to play
+  // (docs/assemblies/README.md#motion-video). Read the way the stored
+  // result is — the same interpolation — and never a reason to stop.
+  std::shared_ptr<const motion::Result> motionPlaybackPinned;
   // The last video export's outcome (export_motion_video,
   // docs/assemblies/README.md#motion-video): what motion_video_status and the
   // panel report once the job is gone. Null until one has finished.
@@ -1878,6 +1902,21 @@ struct AppState {
   std::function<bool(const RasterStill&, RasterFrame* out, std::string* error,
                      std::string* warning)>
       captureRaster;
+  // The viewport's own render at width x height pixels, frame after frame
+  // (FrameCapture above): every renderer and setting the viewport draws the
+  // model with — MSAA, shadow map, SSAO, outlines at their widths — and none
+  // of the overlays (sketches, datums, gizmos, handles, selection, panels).
+  // Installed next to captureRaster; null under --headless.
+  std::function<std::unique_ptr<FrameCapture>(uint32_t width, uint32_t height,
+                                              std::string* error)>
+      beginFrameCapture;
+  // The viewport as the frame loop draws it — every scene renderer, overlays
+  // included, no panels — re-rendered and read back as RGB8 at the viewport's
+  // framebuffer pixels. What a test holds another capture against (the
+  // motion video's frames are the viewport's). Windowed loop only.
+  std::function<bool(std::vector<uint8_t>* rgb, uint32_t* width,
+                     uint32_t* height)>
+      captureViewport;
 
   // Frame-time accounting
   // (docs/rendering/frame-pacing.md#the-frame-time-instrument). Always measured

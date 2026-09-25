@@ -261,8 +261,12 @@ omitted = whichever is active).
 - The range is stored in the DOF's own unit (radians / mm); the RPC takes
   degrees for a rotation and converts once.
 - Samples are walked in order, each solve starting from the last, so a closed
-  loop stays on the branch it is on. A sample that does not solve is reported
-  unsolved with its residual, never drawn in the last good pose.
+  loop stays on the branch it is on — and the first sample is WALKED to from
+  wherever the document has the driver, at the study's own spacing, as the
+  scrub walks: a jump from a crank left at 180 degrees to 0 landed a
+  slider-crank on its mirrored branch, and the whole run followed it there.
+  A sample that does not solve is reported unsolved with its residual, never
+  drawn in the last good pose.
 - Pairs rigid to each other over the whole study — fastened, or carried by
   the same moving part — cannot be made to collide by the motion, so they are
   checked once, at the first sample, and skipped at every later one. A
@@ -312,42 +316,78 @@ someone or attach to an issue.
 - **Refused, never substituted**: an unknown format or quality, a path whose
   extension disagrees with `format`, `png` given a file rather than a folder,
   an odd width or height for mp4/webm (4:2:0 colour), fewer than two frames,
-  a study that cannot pose (`why_not`), no renderer (`--headless`), and a
+  a study that cannot pose (`why_not`) or whose run of its poses does not
+  solve, no renderer (`--headless`), and a
   missing ffmpeg — "export_motion_video format mp4 needs ffmpeg on PATH;
   install it, or use format png". `ping`'s `features.ffmpeg` says whether it
   is there, so a test or an agent can gate on it. When ffmpeg itself fails,
   the refusal carries the last lines it wrote on stderr.
-- **Frames.** Frame k poses the study at `t = k / (frames - 1)` through the
-  scrub (`set_motion_pose`), which walks sample to sample, so a slider-crank
-  stays on its branch. It needs no run: the frames are posed, not replayed,
-  and playback is stopped first so it cannot draw over them. Each frame is
-  captured by the quick render's raster path (the model's renderers only —
-  no sketches, handles, selection or panels — at `width` x `height`,
-  supersampled 2x and averaged in linear light) from the current camera, so
-  it is the 3D view in the windowed app and offscreen alike.
-- **Streaming.** A job of kind `motion-video` in `background_jobs`. Posing and
-  capturing need the documents and the renderers, so they are the job's
-  main-thread slice (its `finish`, one frame a call); an encoder thread
-  averages each frame down and writes it — raw RGB into ffmpeg's stdin, or a
-  PNG — behind a queue three frames deep. No temporary frames are written
-  for a video. Cancel stops after the frame in hand and deletes the partial
-  file. Synchronous by default (the answer is the file's `bytes`, `frames`,
-  `fps` and size); `async: true` returns at once and `motion_video_status`
-  reads the outcome.
-- **Defaults** come from what is exported: the size is the viewport's (rounded
-  down to even for mp4/webm), `frames` the study's samples, `fps` whatever
-  plays them in about four seconds, `quality` medium (`low|medium|high`: x264
-  and VP9 CRF, GIF palette size).
-- **Afterwards** the assembly is at the pose it had before: every placement,
-  mate value, relation state and the active configuration are put back whole.
-  An edit made to the assembly during an async export is overwritten by that.
+- **Poses: what Play shows.** The video plays the study as the Motion
+  window's Play does: the run's samples at 24 a second
+  (`kPlaybackSamplesPerSecond`), each frame the playback's own blend between
+  the two samples either side (positions lerped, orientations slerped), so a
+  49-sample study is a two-second video. The poses are the stored run when
+  playback could show it (fresh, solved, not cancelled); without one the
+  export makes its own — the study run without collision checks, on a
+  worker, and NOT stored as the study's result (`PosesToPlay`). It needs no
+  run, and the document is never posed: the frames are shown through the
+  playback's pinned poses (`ShowMotionPoses`), which is display-only, so the
+  assembly is where it was afterwards and an edit made during an async
+  export survives it. Playback is stopped first; the viewport shows the film
+  going by and returns to the document's placements at the end.
+- **Frames: what the viewport draws.** Each frame is the viewport's own
+  render of the model (`AppState::beginFrameCapture`): the mesh, field and
+  outline renderers at the viewport's settings — MSAA, shadow map, SSAO,
+  outline widths — and none of the overlays (sketches, datums, gizmos,
+  handles, selection or hover tints, panels), from the current camera at
+  `width` x `height`. It is NOT supersampled: a 2x capture averaged down drew
+  the outlines lighter and the ambient occlusion at four times the pixels,
+  which is the picture the app does not show. Offscreen, a frame on a sample
+  is the screenshot of the assembly posed there, pixel for pixel
+  (`motion_video_smoke`); windowed, it is the viewport re-rendered as the
+  frame loop draws it, apart from the SSAO noise tiling from another origin
+  (`assembly/motion_video_frames_are_the_view`, `captureViewport`).
+- **Streaming.** A job of kind `motion-video` in `background_jobs`. Showing a
+  pose and capturing it need the renderers, so they are the job's main-thread
+  slice (its `finish`): each slice aims the renderers at the video's size,
+  streams frames for up to 100 ms and aims them back, so the windowed app
+  keeps drawing its progress. The readback is PIPELINED
+  (`render::FrameStream`): one target made once, three slots each with its
+  own command buffer, fence and host-cached readback buffer, and the slot is
+  the frame index the renderers record with — frame N+1 is posed and
+  recorded while N renders, and N is read back only when its slot is needed
+  again. An encoder thread turns each frame into RGB and writes it — into
+  ffmpeg's stdin, or a PNG — behind a queue six frames deep (counting those
+  on the GPU). No temporary frames are written for a video. Cancel stops
+  after the frames in hand and deletes the partial file. Synchronous by
+  default (the answer is the file's `bytes`, `frames`, `fps`, size and
+  `seconds`); `async: true` returns at once and `motion_video_status` reads
+  the outcome.
+- **Encoding.** mp4 is x264 (`-preset medium -profile:v high`, `+faststart`),
+  webm VP9 (`-b:v 0 -row-mt 1`), both 4:2:0 converted with the BT.709 matrix
+  and tagged BT.709, limited range — what a player assumes of an HD video
+  (ffmpeg's own default converts with BT.601 and tags nothing). `quality`
+  `low|medium|high` is x264 CRF 23/18/14, VP9 CRF 36/30/24, a GIF palette of
+  64/128/256 colours.
+- **Defaults** come from what is exported: the size is the viewport's in the
+  pixels it is drawn with (its size times the framebuffer scale, rounded
+  down to even for mp4/webm), `fps` 60, `frames` as many as Play takes at
+  that rate (`(samples - 1) / 24` seconds, both ends included), `quality`
+  medium. `frames` given spreads the study over that many frames.
+- **Speed.** On the OM615 (332 occurrences, 49 samples, 1280 x 720) the
+  export is about 3.3 s for 121 frames, of which about 2.4 s is the
+  collision-free run of its poses; the frames themselves stream at over a
+  hundred a second. It was 49 frames in about 21 s, each a scrub solve and a
+  one-shot capture.
 - **GUI.** "Export animation…" in the Motion window, under "Export GLB…",
   opens a save dialog whose file type picks the format (a `.png` pick writes
   the frames into a folder named after the file); while it runs the button is
   its progress bar and Cancel.
 
-Code: `src/ui/MotionVideo.cpp`, `src/common/ChildProcess.{h,cpp}` (PATH
-lookup and a child fed on stdin: `posix_spawn`, or `_popen` on Windows).
+Code: `src/ui/MotionVideo.cpp`, `src/render/FrameStream.{h,cpp}`, the
+capture in `src/app/main.cpp` (`ViewportFrameCapture`),
+`src/common/ChildProcess.{h,cpp}` (PATH lookup and a child fed on stdin:
+`posix_spawn`, or `_popen` on Windows).
 
 ## Exploded views
 
