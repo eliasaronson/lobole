@@ -23,6 +23,7 @@
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
+#include "render/FrameStream.h"
 #include "render/FramesInFlight.h"
 #include "render/GpuTimer.h"
 #include "render/IBL.h"
@@ -1067,6 +1068,70 @@ struct RasterTarget {
   uint32_t vpW = 0, vpH = 0;
 };
 
+// The model's renderers only: the sketch, underlay and CAM stock renderers
+// carry the overlays (sketches, datums, gizmos, handles). What a quick render
+// and a motion video draw.
+static void RecordModel(VkCommandBuffer cb, uint32_t frame) {
+  g_MeshRenderer->Render(cb, frame);
+  if (g_FieldRenderer)
+    g_FieldRenderer->Render(cb, frame);
+  if (g_OutlineRenderer)
+    g_OutlineRenderer->Render(cb, frame);
+}
+
+// Point every renderer at a W x H capture of the current camera, drawn `k`
+// times larger than it will be shown (lines widened to match), after waiting
+// for the GPU: the SSAO targets are reallocated. Returns the outline settings
+// AimRenderersBack restores.
+static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k) {
+  vkDeviceWaitIdle(g_Device);
+  // Only the model: no selection or hover tint on it (the GUI re-applies
+  // both next frame), and none of the overlay renderers.
+  g_MeshRenderer->ClearFaceHighlight();
+  g_MeshRenderer->ClearFaceHover();
+  // Everything that is sized in pixels, pointed at the capture.
+  for (SceneRenderer* r : g_Scene)
+    r->SetViewport(0, 0, W, H);
+  if (g_SSAORenderer) {
+    g_SSAORenderer->Resize(W, H);
+    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+  }
+  OutlineSettings outline{};
+  if (g_OutlineRenderer) {
+    outline = g_OutlineRenderer->GetOutlineSettings();
+    OutlineSettings wide = outline;
+    wide.lineWidth *= float(k); // the viewport's width once averaged down
+    wide.outlineWidth *= float(k);
+    g_OutlineRenderer->SetOutlineSettings(wide);
+  }
+  const glm::mat4 view = g_Camera->GetViewMatrix();
+  const glm::mat4 proj = g_Camera->GetProjectionMatrixForAspect(
+      static_cast<float>(W) / static_cast<float>(H));
+  for (SceneRenderer* r : g_Scene)
+    r->UpdateCamera(view, proj);
+  if (g_OutlineRenderer)
+    g_OutlineRenderer->SettleSilhouettes();
+  return outline;
+}
+
+// Put back everything the next frame reads.
+static void AimRenderersBack(const RasterTarget& t,
+                             const OutlineSettings& outline) {
+  vkDeviceWaitIdle(g_Device);
+  if (g_OutlineRenderer)
+    g_OutlineRenderer->SetOutlineSettings(outline);
+  if (g_SSAORenderer) {
+    g_SSAORenderer->Resize(t.aoW, t.aoH);
+    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+  }
+  for (SceneRenderer* r : g_Scene)
+    r->SetViewport(t.vpX, t.vpY, t.vpW, t.vpH);
+  const glm::mat4 view = g_Camera->GetViewMatrix();
+  const glm::mat4 liveProj = g_Camera->GetProjectionMatrix();
+  for (SceneRenderer* r : g_Scene)
+    r->UpdateCamera(view, liveProj);
+}
+
 // QUICK render (docs/rendering/still-render.md#quick-mode): the model as the
 // viewport rasterizes it, captured supersampled at k x the requested size
 // into `out` (DownsampleToPng averages it down and writes it). Synchronous;
@@ -1104,66 +1169,19 @@ static bool CaptureRasterStill(const RasterTarget& t,
                std::to_string(limit) + " px on a side";
   const uint32_t W = req.width * k, H = req.height * k;
 
-  vkDeviceWaitIdle(g_Device);
-  // Only the model: no selection or hover tint on it (the GUI re-applies
-  // both next frame), and none of the overlay renderers below.
-  g_MeshRenderer->ClearFaceHighlight();
-  g_MeshRenderer->ClearFaceHover();
-  // Everything that is sized in pixels, pointed at the big image.
-  for (SceneRenderer* r : g_Scene)
-    r->SetViewport(0, 0, W, H);
-  if (g_SSAORenderer) {
-    g_SSAORenderer->Resize(W, H);
-    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
-  }
-  OutlineSettings outline{};
-  if (g_OutlineRenderer) {
-    outline = g_OutlineRenderer->GetOutlineSettings();
-    OutlineSettings wide = outline;
-    wide.lineWidth *= float(k); // the viewport's width once averaged down
-    wide.outlineWidth *= float(k);
-    g_OutlineRenderer->SetOutlineSettings(wide);
-  }
-  const glm::mat4 view = g_Camera->GetViewMatrix();
-  const glm::mat4 proj = g_Camera->GetProjectionMatrixForAspect(
-      static_cast<float>(req.width) / static_cast<float>(req.height));
-  for (SceneRenderer* r : g_Scene)
-    r->UpdateCamera(view, proj);
+  const OutlineSettings outline = AimRenderersAt(W, H, k);
 
   out->rgb.clear();
-  if (g_OutlineRenderer)
-    g_OutlineRenderer->SettleSilhouettes();
   std::string captureError;
   FrameStats stats; // whole frame: there is no chrome in it
   const bool captured = CaptureScreenshot(
       g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, t.pass, t.format, W,
-      H, t.clear,
-      [&](VkCommandBuffer cb) {
-        // The model's renderers only: the sketch, underlay and CAM stock
-        // renderers carry the overlays (sketches, datums, gizmos, handles).
-        g_MeshRenderer->Render(cb, t.frame);
-        if (g_FieldRenderer)
-          g_FieldRenderer->Render(cb, t.frame);
-        if (g_OutlineRenderer)
-          g_OutlineRenderer->Render(cb, t.frame);
-      },
+      H, t.clear, [&](VkCommandBuffer cb) { RecordModel(cb, t.frame); },
       /*outputPath=*/"", &captureError, g_MSAASamples,
       [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, t.frame); }, &stats,
       t.finalLayout, 1, {}, &out->rgb);
 
-  // Put back everything the next frame reads.
-  vkDeviceWaitIdle(g_Device);
-  if (g_OutlineRenderer)
-    g_OutlineRenderer->SetOutlineSettings(outline);
-  if (g_SSAORenderer) {
-    g_SSAORenderer->Resize(t.aoW, t.aoH);
-    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
-  }
-  for (SceneRenderer* r : g_Scene)
-    r->SetViewport(t.vpX, t.vpY, t.vpW, t.vpH);
-  const glm::mat4 liveProj = g_Camera->GetProjectionMatrix();
-  for (SceneRenderer* r : g_Scene)
-    r->UpdateCamera(view, liveProj);
+  AimRenderersBack(t, outline);
 
   if (!captured)
     return fail(captureError.empty() ? "the capture failed" : captureError);
@@ -1179,6 +1197,84 @@ static bool CaptureRasterStill(const RasterTarget& t,
                 "(fit the view first, or pass fit: true)";
   }
   return true;
+}
+
+// A motion video's frames (ui::FrameCapture,
+// docs/assemblies/README.md#motion-video): the viewport's own render — the
+// same renderers, settings, MSAA and line widths — at the video's size, not
+// supersampled, streamed through a render::FrameStream. Lives for one slice
+// of the frame loop.
+class ViewportFrameCapture final : public ui::FrameCapture {
+public:
+  explicit ViewportFrameCapture(const RasterTarget& t) : m_t(t) {}
+  ~ViewportFrameCapture() override {
+    if (!m_aimed)
+      return;
+    m_stream.reset(); // waits for the frames in flight
+    AimRenderersBack(m_t, m_outline);
+  }
+  bool Begin(uint32_t w, uint32_t h, std::string* error) {
+    if (!g_MeshRenderer || !g_Camera) {
+      if (error)
+        *error = "no renderer: a video needs a GPU (not --headless)";
+      return false;
+    }
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+    const uint32_t limit = std::min(props.limits.maxImageDimension2D,
+                                    props.limits.maxFramebufferWidth);
+    if (w == 0 || h == 0 || w > limit || h > limit) {
+      if (error)
+        *error = "a frame must be 1.." + std::to_string(limit) +
+                 " px on a side (the device's largest image)";
+      return false;
+    }
+    m_outline = AimRenderersAt(w, h, 1);
+    m_aimed = true;
+    render::FrameStream::Config c;
+    c.device = g_Device;
+    c.physicalDevice = g_PhysicalDevice;
+    c.queue = g_Queue;
+    c.commandPool = g_CommandPool;
+    c.renderPass = m_t.pass;
+    c.format = m_t.format;
+    c.samples = g_MSAASamples;
+    c.colorFinalLayout = m_t.finalLayout;
+    c.width = w;
+    c.height = h;
+    c.clear = m_t.clear;
+    m_stream = std::make_unique<render::FrameStream>();
+    return m_stream->Init(c, error);
+  }
+  bool Submit(std::string* error) override {
+    return m_stream->Submit(
+        [](VkCommandBuffer cb, uint32_t frame) {
+          RecordScenePrepasses(cb, frame);
+        },
+        [](VkCommandBuffer cb, uint32_t frame) { RecordModel(cb, frame); },
+        error);
+  }
+  bool Collect(std::vector<uint8_t>* pixels, std::string* error) override {
+    return m_stream->Collect(pixels, error);
+  }
+  bool Full() const override { return m_stream->Full(); }
+  size_t InFlight() const override { return m_stream->InFlight(); }
+  bool Bgra() const override { return m_stream->Bgra(); }
+
+private:
+  RasterTarget m_t;
+  OutlineSettings m_outline{};
+  bool m_aimed = false;
+  std::unique_ptr<render::FrameStream> m_stream;
+};
+
+static std::unique_ptr<ui::FrameCapture>
+BeginFrameCapture(const RasterTarget& t, uint32_t w, uint32_t h,
+                  std::string* error) {
+  auto c = std::make_unique<ViewportFrameCapture>(t);
+  if (!c->Begin(w, h, error))
+    return nullptr;
+  return c;
 }
 
 static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
@@ -1770,10 +1866,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   // Quick render (docs/rendering/still-render.md#quick-mode). Synchronous like
   // the burst; the lazy projection is brought up to date first, as a capture
   // is.
-  g_App.captureRaster = [&](const ui::AppState::RasterStill& req,
-                            ui::RasterFrame* out, std::string* error,
-                            std::string* warning) {
-    SyncOffscreenScene();
+  const auto offscreenTarget = [&] {
     RasterTarget t;
     t.pass = offscreenPass;
     t.format = kOffFormat;
@@ -1783,7 +1876,18 @@ static int RunOffscreen(const CommandLineArgs& args) {
     t.clear.color = {{vp.r, vp.g, vp.b, 1.0f}};
     t.aoW = t.vpW = kOffW;
     t.aoH = t.vpH = kOffH;
-    return CaptureRasterStill(t, req, out, error, warning);
+    return t;
+  };
+  g_App.captureRaster = [&](const ui::AppState::RasterStill& req,
+                            ui::RasterFrame* out, std::string* error,
+                            std::string* warning) {
+    SyncOffscreenScene();
+    return CaptureRasterStill(offscreenTarget(), req, out, error, warning);
+  };
+  // A motion video's frames: the same target, streamed.
+  g_App.beginFrameCapture = [&](uint32_t w, uint32_t h, std::string* error) {
+    SyncOffscreenScene();
+    return BeginFrameCapture(offscreenTarget(), w, h, error);
   };
 
   std::signal(SIGINT, HandleOffscreenStop);
@@ -2416,9 +2520,7 @@ int main(int argc, char** argv) {
   // or render_still. Both run on this thread between frames, so after a wait
   // the current frame slot is idle; the viewport rect it restores is the one
   // UI.cpp sets every frame (the dock between the panels, in framebuffer px).
-  g_App.captureRaster = [](const ui::AppState::RasterStill& req,
-                           ui::RasterFrame* out, std::string* error,
-                           std::string* warning) {
+  static const auto windowTarget = [] {
     ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
     RasterTarget t;
     t.pass = wd->RenderPass;
@@ -2439,7 +2541,53 @@ int main(int argc, char** argv) {
       t.vpW = t.aoW;
       t.vpH = t.aoH;
     }
-    return CaptureRasterStill(t, req, out, error, warning);
+    return t;
+  };
+  g_App.captureRaster = [](const ui::AppState::RasterStill& req,
+                           ui::RasterFrame* out, std::string* error,
+                           std::string* warning) {
+    return CaptureRasterStill(windowTarget(), req, out, error, warning);
+  };
+  // A motion video's frames: the viewport's render, streamed.
+  g_App.beginFrameCapture = [](uint32_t w, uint32_t h, std::string* error) {
+    return BeginFrameCapture(windowTarget(), w, h, error);
+  };
+  // The live viewport, re-rendered as the frame loop records it (the remote
+  // screenshot's path without the interface) and cropped to the viewport.
+  g_App.captureViewport = [](std::vector<uint8_t>* rgb, uint32_t* w,
+                             uint32_t* h) {
+    ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+    const RasterTarget t = windowTarget();
+    vkQueueWaitIdle(g_Queue);
+    if (g_OutlineRenderer)
+      g_OutlineRenderer->SettleSilhouettes();
+    std::vector<uint8_t> full;
+    const uint32_t W = static_cast<uint32_t>(wd->Width),
+                   H = static_cast<uint32_t>(wd->Height);
+    if (!CaptureScreenshot(
+            g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
+            wd->SurfaceFormat.format, W, H, wd->ClearValue,
+            [&](VkCommandBuffer cb) {
+              for (SceneRenderer* r : g_Scene)
+                r->Render(cb, wd->FrameIndex);
+            },
+            /*outputPath=*/"", nullptr, g_MSAASamples,
+            [&](VkCommandBuffer cb) {
+              RecordScenePrepasses(cb, wd->FrameIndex);
+            },
+            nullptr, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1, {}, &full))
+      return false;
+    const uint32_t x0 = static_cast<uint32_t>(std::max(t.vpX, 0)),
+                   y0 = static_cast<uint32_t>(std::max(t.vpY, 0));
+    if (t.vpW == 0 || t.vpH == 0 || x0 + t.vpW > W || y0 + t.vpH > H)
+      return false;
+    rgb->resize(size_t(t.vpW) * t.vpH * 3);
+    for (uint32_t y = 0; y < t.vpH; y++)
+      std::copy_n(&full[(size_t(y0 + y) * W + x0) * 3], size_t(t.vpW) * 3,
+                  &(*rgb)[size_t(y) * t.vpW * 3]);
+    *w = t.vpW;
+    *h = t.vpH;
+    return true;
   };
 
   // Load startup file if specified

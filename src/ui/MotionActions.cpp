@@ -438,9 +438,9 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
 // --- playback (docs/ui/panels.md#assembly-tab-the-model-panel) ---------------
 
 namespace {
-// Samples per second: the rate the GLB export plays at, so the panel and the
-// exported file show a study at the same speed.
-constexpr double kPlaybackSamplesPerSecond = 24.0;
+// kPlaybackSamplesPerSecond (MotionActions.h) is the rate the GLB export
+// plays at too, so the panel and the exported file show a study at the same
+// speed.
 constexpr double kMaxPlaybackStep = 0.25; // s: a stalled frame does not skip
 
 bool FindWorld(const motion::Sample& s, uint64_t occId, glm::mat4& out) {
@@ -477,7 +477,9 @@ bool PlaybackSpan(const AppState& state, const motion::Result*& r, size_t& i,
                   float& f) {
   if (state.motionPlaybackStudy == 0)
     return false;
-  r = MotionResultFor(state, state.motionPlaybackStudy);
+  r = state.motionPlaybackPinned
+          ? state.motionPlaybackPinned.get()
+          : MotionResultFor(state, state.motionPlaybackStudy);
   if (!r || r->samples.size() < 2)
     return false;
   const size_t n = r->samples.size();
@@ -494,6 +496,66 @@ void PushAllLive(AppState& state) {
     PushOccurrenceLive(state, o.id);
 }
 } // namespace
+
+std::string MotionPosesRefusal(const motion::Result& r) {
+  if (!r.error.empty())
+    return r.error;
+  if (r.cancelled)
+    return "the run was cancelled";
+  if (r.samples.size() < 2)
+    return "the run has fewer than two samples";
+  for (size_t i = 0; i < r.samples.size(); i++)
+    if (!r.samples[i].solved)
+      return "sample " + std::to_string(i) +
+             " did not solve, so there is no pose to show there";
+  return {};
+}
+
+std::shared_ptr<MotionPoses> PosesToPlay(AppState& state, uint64_t studyId,
+                                         std::string* error) {
+  auto poses = std::make_shared<MotionPoses>();
+  if (MotionPlaybackRefusal(state, studyId).empty()) {
+    // The stored run, fresh and whole: the poses Play would show. A copy,
+    // so a run finishing meanwhile cannot change them under the video.
+    poses->result = std::make_shared<const motion::Result>(
+        *MotionResultFor(state, studyId));
+    poses->done.store(true);
+    return poses;
+  }
+  // No run to play: make one, without the collision checks — only the poses
+  // are wanted, and the exact checks can take minutes on an engine.
+  auto run = std::make_shared<MotionRun>();
+  RunOverride preview;
+  preview.checkClash = false;
+  if (!Prepare(state, studyId, *run, error, /*copyDocs=*/true, &preview))
+    return nullptr;
+  MotionPoses* raw = poses.get();
+  poses->worker = std::thread([run, raw] {
+    OSD::SetSignal(Standard_False);
+    auto r = std::make_shared<motion::Result>(motion::Run(
+        run->asmCopy, PartsOf(*run), AssembliesOf(*run), run->study,
+        [raw] { return raw->cancel.load(); }, nullptr, &run->meshes,
+        run->contacts.get()));
+    raw->error = MotionPosesRefusal(*r);
+    raw->result = std::move(r);
+    raw->done.store(true); // last
+  });
+  return poses;
+}
+
+void ShowMotionPoses(AppState& state, uint64_t studyId,
+                     const std::shared_ptr<const motion::Result>& poses,
+                     double pos) {
+  if (state.motionPlaybackStudy != studyId ||
+      state.motionPlaybackPinned != poses) {
+    state.motionPlaybackStudy = studyId;
+    state.motionPlaybackPinned = poses;
+    state.syncedDocumentVersion = UINT64_MAX; // a full resync reads them too
+  }
+  state.motionPlaying = false; // the caller moves it
+  state.motionPlaybackPos = pos;
+  PushAllLive(state); // matrices only: no solve, no re-tessellation
+}
 
 std::string MotionPlaybackRefusal(AppState& state, uint64_t studyId) {
   if (!state.assembly)
@@ -536,6 +598,7 @@ void StopMotionPlayback(AppState& state) {
   if (state.motionPlaybackStudy == 0)
     return;
   state.motionPlaybackStudy = 0;
+  state.motionPlaybackPinned.reset();
   state.motionPlaying = false;
   state.motionPlaybackPos = 0.0;
   // Back to the document's own placements, and picking with them.
@@ -544,6 +607,10 @@ void StopMotionPlayback(AppState& state) {
 
 void TickMotionPlayback(AppState& state, double now) {
   if (state.motionPlaybackStudy == 0)
+    return;
+  // Poses a video export is showing: it moves them itself, and they are not
+  // the stored result, so that result's staleness is no reason to stop.
+  if (state.motionPlaybackPinned)
     return;
   // Anything that invalidated the result — an edit, a new run, a tab
   // switch — ends playback rather than showing poses of something else.

@@ -1,24 +1,26 @@
 // A motion study to a video (docs/assemblies/README.md#motion-video).
 //
 // The shape: a job of kind "motion-video" with NO worker of its own on the
-// registry's side — posing needs the assembly and capturing needs the
-// renderers, both main-thread things — so its `finish` is the slice (the
-// ImportJob's materialize is the other one): each call poses one frame and
-// captures it. The frames go to an ENCODER thread, which averages the
-// supersampled capture down and hands it on — to ffmpeg's stdin, or to a PNG
-// file — so a slow encoder costs the frame loop nothing but a short queue.
+// registry's side — showing a pose and capturing it need the renderers, a
+// main-thread thing — so its `finish` is the slice (the ImportJob's
+// materialize is the other one). The poses are the Motion window's Play: a
+// run's samples, interpolated at the playback's rate (PosesToPlay makes a
+// collision-free run when there is no fresh one to play). Each slice streams
+// frames of the viewport's own render through a FrameCapture for a few
+// milliseconds; the frames go to an ENCODER thread, which hands them on — to
+// ffmpeg's stdin, or to a PNG file — so a slow encoder costs the frame loop
+// nothing but a short queue.
 
 #include "ui/MotionActions.h"
 
 #include "common/ChildProcess.h"
 #include "common/Logger.h"
 #include "core/Occurrence.h"
-#include "render/Screenshot.h"
+#include "imgui.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"
 #include "ui/BackgroundJobs.h"
-#include "ui/RendererSync.h"
 
 #include "thirdparty/stb_image_write.h"
 
@@ -39,16 +41,14 @@ namespace fs = std::filesystem;
 namespace ui {
 namespace {
 
-// The study plays in about this long unless `fps` says otherwise: the frame
-// rate is derived from the frame count, so a 49-sample study is 12 fps and a
-// 200-sample one 50, and neither is a number somebody typed.
-constexpr double kDefaultPlaySeconds = 4.0;
-// Captured this many times wider and taller and averaged down, as the quick
-// render does by default: the edges of a moving part are what a video shows.
-constexpr uint32_t kSupersample = 2;
-// Frames captured ahead of the encoder. Enough to keep it busy; few enough
-// that a slow encoder holds a few frames of memory, not the whole study.
-constexpr size_t kQueueDepth = 3;
+// Frames captured ahead of the encoder, counting those still on the GPU.
+// Enough to keep both busy; few enough that a slow encoder holds a few
+// frames of memory, not the whole study.
+constexpr size_t kQueueDepth = 6;
+// How long one slice of the frame loop streams frames for. The capture aims
+// the renderers at the video's size and back once per slice, so a slice is
+// many frames; short enough that the windowed app keeps drawing its progress.
+constexpr auto kSliceBudget = std::chrono::milliseconds(100);
 
 std::string Lower(std::string s) {
   std::transform(s.begin(), s.end(), s.begin(),
@@ -61,13 +61,14 @@ bool IsVideo(const std::string& f) {
 }
 
 // What the quality words mean to each encoder: x264's and VP9's constant
-// rate factor (lower is better), the GIF palette's size.
+// rate factor (lower is better; x264's 18 is about where a CAD model's thin
+// outlines stop smearing), the GIF palette's size.
 std::string QualityValue(const std::string& format, const std::string& q) {
   const int i = q == "low" ? 0 : q == "high" ? 2 : 1;
   if (format == "mp4")
-    return std::array<const char*, 3>{"28", "23", "18"}[i];
+    return std::array<const char*, 3>{"23", "18", "14"}[i];
   if (format == "webm")
-    return std::array<const char*, 3>{"40", "33", "24"}[i];
+    return std::array<const char*, 3>{"36", "30", "24"}[i];
   return std::array<const char*, 3>{"64", "128", "256"}[i]; // gif colours
 }
 
@@ -87,15 +88,28 @@ std::vector<std::string> FfmpegArgs(const MotionVideoPlan& p) {
       "-framerate",   FpsText(p.fps),
       "-i",           "pipe:0"};
   const std::string q = QualityValue(p.format, p.quality);
+  if (p.format == "mp4" || p.format == "webm") {
+    // The frames are sRGB, full range. Converted to 4:2:0 with the BT.709
+    // matrix and SAID to be BT.709, which is what a player assumes of an
+    // untagged HD video anyway — ffmpeg's own default converts with BT.601
+    // and tags nothing, so every player shifted the colours a little. The
+    // tags go on the frames (setparams): the encoder takes them from there.
+    a.push_back("-vf");
+    a.push_back("scale=out_color_matrix=bt709:out_range=tv:"
+                "flags=accurate_rnd+full_chroma_int,"
+                "setparams=color_primaries=bt709:color_trc=bt709:"
+                "colorspace=bt709:range=tv");
+    a.push_back("-pix_fmt");
+    a.push_back("yuv420p");
+  }
   if (p.format == "mp4") {
-    for (const char* s : {"-c:v", "libx264", "-preset", "medium", "-pix_fmt",
-                          "yuv420p", "-movflags", "+faststart", "-crf"})
+    for (const char* s : {"-c:v", "libx264", "-preset", "medium", "-profile:v",
+                          "high", "-movflags", "+faststart", "-crf"})
       a.push_back(s);
     a.push_back(q);
   } else if (p.format == "webm") {
-    for (const char* s :
-         {"-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-b:v", "0", "-row-mt",
-          "1", "-deadline", "good", "-cpu-used", "4", "-crf"})
+    for (const char* s : {"-c:v", "libvpx-vp9", "-b:v", "0", "-row-mt", "1",
+                          "-deadline", "good", "-cpu-used", "4", "-crf"})
       a.push_back(s);
     a.push_back(q);
   } else { // gif: ONE palette for the whole animation, from its own colours
@@ -109,34 +123,9 @@ std::vector<std::string> FfmpegArgs(const MotionVideoPlan& p) {
   return a;
 }
 
-// The pose a scrub changes: every placement, mate value and relation state
-// the solve writes, and the configuration a study may switch to. Put back
-// whole at the end, like a scrub that was never made.
-struct SavedPose {
-  std::vector<Occurrence> occurrences;
-  std::vector<Mate> mates;
-  std::vector<Relation> relations;
-  uint64_t configuration = 0;
-};
-
-SavedPose SavePose(const AssemblyDocument& a) {
-  return {a.GetOccurrences(), a.GetMates(), a.GetRelations(),
-          a.ActiveConfiguration()};
-}
-
-void RestorePose(AppState& state, SavedPose& saved) {
-  AssemblyDocument& a = *state.assembly;
-  a.GetOccurrences() = std::move(saved.occurrences);
-  a.GetMates() = std::move(saved.mates);
-  a.GetRelations() = std::move(saved.relations);
-  a.SetActiveConfigurationRaw(saved.configuration);
-  a.BumpVersion(); // the placements changed back: renderers resync
-  state.syncedDocumentVersion = UINT64_MAX;
-}
-
 struct Frame {
-  std::vector<uint8_t> rgb; // supersampled
-  uint32_t width = 0, height = 0, factor = 1;
+  std::vector<uint8_t> pixels; // RGBA8 in memory order B,G,R,A when bgra
+  bool bgra = true;
   int index = 0;
 };
 
@@ -171,13 +160,27 @@ std::string FramePath(const MotionVideoPlan& p, int index) {
   return (fs::path(p.path) / name).string();
 }
 
+// Four bytes a pixel in either order to three, R G B.
+void ToRgb(const Frame& f, std::vector<uint8_t>* rgb) {
+  const size_t n = f.pixels.size() / 4;
+  rgb->resize(n * 3);
+  const size_t r = f.bgra ? 2 : 0, b = f.bgra ? 0 : 2;
+  const uint8_t* src = f.pixels.data();
+  uint8_t* dst = rgb->data();
+  for (size_t i = 0; i < n; i++, src += 4, dst += 3) {
+    dst[0] = src[r];
+    dst[1] = src[1];
+    dst[2] = src[b];
+  }
+}
+
 void EncoderLoop(Encoder* e) {
   const bool video = IsVideo(e->plan.format);
   const auto fail = [&](const std::string& why) {
     e->error = why;
     e->failed.store(true);
   };
-  std::vector<uint8_t> small;
+  std::vector<uint8_t> rgb;
   for (;;) {
     Frame f;
     {
@@ -195,14 +198,15 @@ void EncoderLoop(Encoder* e) {
     e->cv.notify_all(); // room in the queue
     if (e->failed.load())
       continue; // drain without work; the main side stops feeding
-    std::string err;
-    if (!DownsampleRgb(f.rgb, f.width, f.height, f.factor, &small, &err)) {
-      fail(err);
+    ToRgb(f, &rgb);
+    const uint32_t w = e->plan.width, h = e->plan.height;
+    if (rgb.size() != size_t(w) * h * 3) {
+      fail("frame " + std::to_string(f.index) + " is not " + std::to_string(w) +
+           "x" + std::to_string(h) + " px");
       continue;
     }
-    const uint32_t w = f.width / f.factor, h = f.height / f.factor;
     if (video) {
-      if (!e->child.Write(small.data(), small.size())) {
+      if (!e->child.Write(rgb.data(), rgb.size())) {
         std::string tail;
         const int code = e->child.Finish(&tail);
         fail("ffmpeg stopped reading at frame " + std::to_string(f.index) +
@@ -211,7 +215,7 @@ void EncoderLoop(Encoder* e) {
         continue;
       }
     } else if (stbi_write_png(FramePath(e->plan, f.index).c_str(), int(w),
-                              int(h), 3, small.data(), int(w) * 3) == 0) {
+                              int(h), 3, rgb.data(), int(w) * 3) == 0) {
       fail("could not write " + FramePath(e->plan, f.index));
       continue;
     }
@@ -252,14 +256,87 @@ struct VideoRun {
   MotionVideoPlan plan;
   uint64_t studyId = 0;
   const AssemblyDocument* ranAgainst = nullptr; // identity, never dereferenced
-  SavedPose saved;
-  bool restored = false;
-  int next = 0; // the next frame to capture
+  std::shared_ptr<MotionPoses> poses;
+  bool shown = false;       // the poses are pinned to the viewport
+  int next = 0;             // the next frame to submit
+  int collected = 0;        // frames read back (in order) so far
+  double samplesSpan = 0.0; // playback positions run 0 .. this
   std::shared_ptr<Encoder> encoder;
   std::vector<std::string> warnings;
-  std::string error; // the main side's (a capture, a pose, a tab switch)
+  std::string error; // the main side's (a capture, the poses, a tab switch)
   std::chrono::steady_clock::time_point started;
 };
+
+// Frame k's playback position, in samples: the study's whole range over the
+// frames, first frame on the first sample and last on the last.
+double FramePos(const VideoRun& run, int k) {
+  return run.plan.frames > 1
+             ? run.samplesSpan * double(k) / double(run.plan.frames - 1)
+             : 0.0;
+}
+
+// One slice of frames: aim a capture at the video's size, submit frames as
+// long as the encoder has room and the slice has time, reading back each as
+// the pipeline fills, then read back what is still in flight. False (with
+// `run.error`) when the capture fails.
+bool StreamFrames(AppState& s, VideoRun& run) {
+  Encoder& e = *run.encoder;
+  std::string err;
+  std::unique_ptr<FrameCapture> cap =
+      s.beginFrameCapture(run.plan.width, run.plan.height, &err);
+  if (!cap) {
+    run.error = "the frames could not be captured: " + err;
+    return false;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + kSliceBudget;
+  const auto collect = [&]() -> bool {
+    Frame f;
+    if (!cap->Collect(&f.pixels, &err)) {
+      run.error = "frame " + std::to_string(run.collected) +
+                  " could not be read back: " + err;
+      return false;
+    }
+    f.bgra = cap->Bgra();
+    f.index = run.collected++;
+    {
+      std::lock_guard lock(e.m);
+      e.queue.push_back(std::move(f));
+    }
+    e.cv.notify_all();
+    return true;
+  };
+  bool ok = true;
+  while (ok && run.next < run.plan.frames && !e.cancel.load() &&
+         !e.failed.load()) {
+    {
+      std::unique_lock lock(e.m);
+      if (e.queue.size() + cap->InFlight() >= kQueueDepth) {
+        if (std::chrono::steady_clock::now() >= deadline)
+          break;
+        // A short wait, not a spin: the encoder frees a place soon.
+        e.cv.wait_for(lock, std::chrono::milliseconds(2));
+        continue;
+      }
+    }
+    if (cap->Full() && !collect()) {
+      ok = false;
+      break;
+    }
+    ShowMotionPoses(s, run.studyId, run.poses->result, FramePos(run, run.next));
+    if (!cap->Submit(&err)) {
+      run.error = "frame " + std::to_string(run.next) +
+                  " could not be rendered: " + err;
+      ok = false;
+      break;
+    }
+    run.next++;
+    if (std::chrono::steady_clock::now() >= deadline)
+      break;
+  }
+  while (ok && cap->InFlight() > 0)
+    ok = collect();
+  return ok;
+}
 
 } // namespace
 
@@ -332,27 +409,45 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
     p.quality = "medium";
   }
 
-  // Frames: the study's own samples, or as many as asked, over its range.
-  p.frames = req.frames > 0 ? req.frames : s->samples;
-  if (req.frames < 0)
-    return fail("frames must be positive (or omitted for the study's " +
-                std::to_string(s->samples) + " samples)");
-  if (p.frames < 2)
+  // Timing: the study plays for as long as Play takes, at a display's rate,
+  // one frame per display frame — Play's own poses in between the samples.
+  if (s->samples < 2)
     return fail("motion study '" + s->name + "' has " +
-                std::to_string(p.frames) +
-                " samples; a video needs at least 2 frames — set its "
-                "samples (set_motion_study) or pass frames");
+                std::to_string(s->samples) +
+                " samples; a video needs at least 2 — set its samples "
+                "(set_motion_study)");
+  if (req.frames < 0)
+    return fail("frames must be positive (or omitted for as many as the "
+                "study's playback takes at fps)");
+  if (req.fps < 0.0 || !std::isfinite(req.fps))
+    return fail("fps must be a positive number of frames per second");
+  p.fps = req.fps > 0.0 ? req.fps : kMotionVideoFps;
+  const double seconds = (s->samples - 1) / kPlaybackSamplesPerSecond;
+  p.frames = req.frames > 0
+                 ? req.frames
+                 : static_cast<int>(std::lround(seconds * p.fps)) + 1;
+  if (p.frames < 2)
+    return fail("a video needs at least 2 frames; pass frames, or a higher "
+                "fps");
 
-  // Size: the viewport's, unless asked. The encoders' 4:2:0 needs even
-  // sides; a derived size is rounded down to one, an asked-for odd one is
-  // refused rather than changed.
+  // Size: the viewport's, in the pixels it is drawn with, unless asked. The
+  // encoders' 4:2:0 needs even sides; a derived size is rounded down to one,
+  // an asked-for odd one is refused rather than changed.
   const bool yuv = p.format == "mp4" || p.format == "webm";
   if ((req.width == 0) != (req.height == 0))
     return fail("width and height go together (pixels); pass both, or "
                 "neither for the viewport's size");
   if (req.width == 0) {
-    p.width = static_cast<uint32_t>(std::max(0.0f, state.viewportSize.x));
-    p.height = static_cast<uint32_t>(std::max(0.0f, state.viewportSize.y));
+    // On a high-DPI screen the viewport is drawn at more pixels than its
+    // size in points: a video of the points would be the blurrier picture.
+    glm::vec2 scale(1.0f);
+    if (ImGui::GetCurrentContext() != nullptr)
+      scale = {ImGui::GetIO().DisplayFramebufferScale.x,
+               ImGui::GetIO().DisplayFramebufferScale.y};
+    p.width = static_cast<uint32_t>(
+        std::max(0.0f, state.viewportSize.x * std::max(scale.x, 1.0f)));
+    p.height = static_cast<uint32_t>(
+        std::max(0.0f, state.viewportSize.y * std::max(scale.y, 1.0f)));
     if (yuv) {
       p.width &= ~1u;
       p.height &= ~1u;
@@ -371,11 +466,6 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
                   " px is not");
   }
 
-  // Frame rate: the study in about four seconds, unless asked.
-  if (req.fps < 0.0 || !std::isfinite(req.fps))
-    return fail("fps must be a positive number of frames per second");
-  p.fps = req.fps > 0.0 ? req.fps : p.frames / kDefaultPlaySeconds;
-
   // The encoder, by name. A video is never quietly made into something else.
   if (IsVideo(p.format)) {
     p.ffmpeg = FfmpegPath();
@@ -383,7 +473,7 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
       return fail("export_motion_video format " + p.format +
                   " needs ffmpeg on PATH; install it, or use format png");
   }
-  if (!state.captureRaster)
+  if (!state.beginFrameCapture)
     return fail("a video is captured with the renderer, and this instance "
                 "has none (--headless); run it --offscreen or windowed");
   *plan = std::move(p);
@@ -406,6 +496,11 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
     return false;
   if (planOut)
     *planOut = run->plan;
+  // The poses first: a study that cannot be run is refused before a file
+  // or an encoder exists.
+  run->poses = PosesToPlay(state, req.studyId, error);
+  if (!run->poses)
+    return false;
   std::error_code ec;
   if (run->plan.format == "png") {
     fs::create_directories(run->plan.path, ec);
@@ -425,10 +520,8 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
 
   run->studyId = req.studyId;
   run->ranAgainst = state.assembly.get();
-  run->saved = SavePose(*state.assembly);
   run->started = std::chrono::steady_clock::now();
-  // Playback draws a stored run's poses over the document's: a video of the
-  // posed document must not be a video of that instead.
+  // Playback moves the same renderers the frames are taken from.
   StopMotionPlayback(state);
 
   auto bg = std::make_unique<BackgroundJob>();
@@ -456,59 +549,47 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
       e.cancel.store(true);
       e.cv.notify_all();
     }
-    const bool stopping = e.cancel.load() || e.failed.load();
+    const bool stopping =
+        e.cancel.load() || e.failed.load() || !run->error.empty();
 
-    // Capture the next frame, while there is one and room for it.
     if (!stopping && run->next < run->plan.frames) {
-      {
-        std::unique_lock lock(e.m);
-        if (e.queue.size() >= kQueueDepth) {
-          // A short wait, not a spin: the synchronous RPC calls this in a
-          // loop, and the frame loop can afford a few milliseconds.
-          e.cv.wait_for(lock, std::chrono::milliseconds(5));
-          return false;
-        }
-      }
-      const int k = run->next;
-      const double t = double(k) / double(run->plan.frames - 1);
-      std::string err;
-      if (!ApplyMotionPose(s, run->studyId, t, &err)) {
-        stop("frame " + std::to_string(k) + ": " + err);
+      MotionPoses& poses = *run->poses;
+      if (!poses.done.load()) { // the run of the poses is still going
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         return false;
       }
-      SyncRenderersToDocument(s);
-      AppState::RasterStill req;
-      req.width = run->plan.width;
-      req.height = run->plan.height;
-      req.supersample = kSupersample;
-      RasterFrame captured;
-      std::string warning;
-      if (!s.captureRaster(req, &captured, &err, &warning)) {
-        stop("frame " + std::to_string(k) + " could not be captured: " + err);
+      if (!poses.error.empty()) {
+        stop("motion study '" + run->plan.studyName +
+             "' has no poses to film: " + poses.error);
         return false;
       }
-      if (!warning.empty() &&
-          std::find(run->warnings.begin(), run->warnings.end(), warning) ==
-              run->warnings.end())
-        run->warnings.push_back(warning);
-      {
-        std::lock_guard lock(e.m);
-        e.queue.push_back(Frame{std::move(captured.rgb), captured.width,
-                                captured.height, captured.factor, k});
+      if (!run->shown) {
+        run->shown = true;
+        run->samplesSpan = double(poses.result->samples.size() - 1);
+        // Pinned before the first capture aims the renderers, so the
+        // resync that pinning asks for happens once, not every slice.
+        ShowMotionPoses(s, run->studyId, poses.result, 0.0);
+        return false;
       }
-      e.cv.notify_all();
-      run->next++;
-      raw->fraction.store(0.5 * (double(run->next) + double(e.written.load())) /
+      if (!StreamFrames(s, *run))
+        stop(run->error);
+      raw->fraction.store(0.5 *
+                          (double(run->collected) + double(e.written.load())) /
                           double(run->plan.frames));
       return false;
     }
 
-    // Every frame captured (or the export stopped): the pose goes back
-    // first — the encoder does not need it — and no more frames come.
-    if (!run->restored) {
-      run->restored = true;
-      if (ours)
-        RestorePose(s, run->saved);
+    // Every frame captured (or the export stopped): the viewport goes back
+    // to the document's placements, and no more frames come.
+    if (run->poses) {
+      run->poses->cancel.store(true);
+      if (ours && s.motionPlaybackPinned == run->poses->result &&
+          run->poses->result)
+        StopMotionPlayback(s);
+      if (run->poses->done.load())
+        run->poses.reset();
+      else
+        return false; // its run stops at the next sample
       std::lock_guard lock(e.m);
       e.closing = true;
     }
@@ -549,9 +630,9 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
         result->ok ? OutputBytes(run->plan, result->framesWritten) : 0;
     if (result->ok)
       LOG_INFO("Motion video written to {} ({} frames, {}x{}, {} fps, {} "
-               "bytes)",
+               "bytes, {:.1f} s)",
                run->plan.path, result->framesWritten, run->plan.width,
-               run->plan.height, run->plan.fps, result->bytes);
+               run->plan.height, run->plan.fps, result->bytes, result->seconds);
     else
       LOG_WARN("Motion video to {} failed: {}", run->plan.path, result->error);
     s.motionVideoLast = std::move(result);

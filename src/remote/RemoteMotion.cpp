@@ -147,25 +147,28 @@ constexpr MethodDoc MotionMethods[] = {
      "path, study"},
     {"export_motion_video",
      "Film the study: {study, path, format?, width?, height?, fps?, frames?, "
-     "quality?, async?}. Frame k poses the assembly as set_motion_pose does "
-     "(walking sample to sample, so a slider-crank stays on its branch) and "
-     "captures the model as the viewport draws it, from the CURRENT camera, "
-     "at width x height PIXELS, with no overlays — so set the camera first. "
-     "It needs no run. `format`: mp4 (H.264), webm (VP9) or gif (one "
-     "palette for the whole animation) — encoded by ffmpeg, which must be "
-     "on PATH (ping's features.ffmpeg says) and is REFUSED by name when it "
-     "is not — or png, numbered frames written into a FOLDER (`path`), "
-     "needing nothing. Omitted, the format is the path's extension; a "
-     "format and an extension that disagree are refused. Defaults: width "
-     "and height the viewport's (pixels; mp4/webm need both even), `frames` "
-     "the study's samples, `fps` (frames per SECOND) whatever plays the "
-     "study in about four seconds, `quality` medium (low|medium|high; not "
-     "png). The assembly is left at the pose it had before. Synchronous by "
-     "default, answering {path, format, frames, width, height, fps, bytes, "
-     "seconds, warnings?}, and refusing with ffmpeg's own last lines when it "
-     "fails; {async: true} runs it as a background job ('motion-video' in "
-     "background_jobs, cancellable) and motion_video_status reads the "
-     "outcome.",
+     "quality?, async?}. It plays as the Motion window's Play does — the "
+     "run's poses at 24 samples per second, interpolated between samples — "
+     "and each frame is the VIEWPORT's own render of the model (its "
+     "materials, shadows, ambient occlusion, outlines and anti-aliasing; no "
+     "sketches, gizmos, selection or panels) from the CURRENT camera, at "
+     "width x height PIXELS — so set the camera first. It needs no run: "
+     "without a fresh one it makes its own, collision-free, and does not "
+     "store it. `format`: mp4 (H.264), webm (VP9) or gif (one palette for "
+     "the whole animation) — encoded by ffmpeg, which must be on PATH "
+     "(ping's features.ffmpeg says) and is REFUSED by name when it is not — "
+     "or png, numbered frames written into a FOLDER (`path`), needing "
+     "nothing. Omitted, the format is the path's extension; a format and an "
+     "extension that disagree are refused. Defaults: width and height the "
+     "viewport's (pixels; mp4/webm need both even), `fps` (frames per "
+     "SECOND) 60, `frames` as many as Play takes at that rate ((samples - "
+     "1) / 24 seconds), `quality` medium (low|medium|high: x264 CRF "
+     "23/18/14, VP9 CRF 36/30/24, GIF 64/128/256 colours; not png). The "
+     "assembly is not moved. Synchronous by default, answering {path, "
+     "format, frames, width, height, fps, bytes, seconds, warnings?}, and "
+     "refusing with ffmpeg's own last lines when it fails; {async: true} "
+     "runs it as a background job ('motion-video' in background_jobs, "
+     "cancellable) and motion_video_status reads the outcome.",
      "async, format, fps, frames, height, path, quality, study, width",
      remote::NotInBatch},
     {"motion_video_status",
@@ -772,8 +775,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       req.fps = p.at("fps").get<double>();
       if (!(req.fps > 0.0))
         throw std::runtime_error("fps must be a positive number of frames "
-                                 "per second (omit it to play the study in "
-                                 "about four seconds)");
+                                 "per second (omit it for 60)");
     }
     if (p.contains("frames")) {
       req.frames = p.at("frames").get<int>();

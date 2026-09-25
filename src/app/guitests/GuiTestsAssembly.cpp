@@ -776,7 +776,12 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_STR_EQ(video.error.c_str(), "");
     IM_CHECK(video.ok);
     IM_CHECK_EQ(video.plan.format, std::string("png"));
-    IM_CHECK_EQ(video.framesWritten, 6);
+    // Played as Play plays it: 6 samples at 24 a second, at 60 fps.
+    const int frames = int(std::lround(5 / ui::kPlaybackSamplesPerSecond *
+                                       ui::kMotionVideoFps)) +
+                       1;
+    IM_CHECK_EQ(video.plan.frames, frames);
+    IM_CHECK_EQ(video.framesWritten, frames);
 
     // The frame is the VIEWPORT's size — and the window is not, so a capture
     // of the whole framebuffer could not pass this.
@@ -850,6 +855,38 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // And the assembly is where it was before the film.
     IM_CHECK(ui::OccurrenceMatrix(*s_App->assembly->FindById(armOcc)) ==
              armBefore);
+
+    // The frame IS the viewport's picture: frame 0 is the study's first
+    // sample, so with the assembly posed there the viewport — re-rendered
+    // as the frame loop draws it, panels aside — is the same picture. What
+    // may differ is noise: the frame's ambient-occlusion target is the
+    // frame's size, the viewport's the window's, so its noise tiles from
+    // another origin.
+    IM_CHECK(ui::ApplyMotionPose(*s_App, study.id, 0.0, &err));
+    ctx->Yield(3);
+    std::vector<uint8_t> view;
+    uint32_t vw = 0, vh = 0;
+    IM_CHECK(s_App->captureViewport(&view, &vw, &vh));
+    IM_CHECK_EQ(vw, (uint32_t)w);
+    IM_CHECK_EQ(vh, (uint32_t)h);
+    size_t off = 0;
+    double sum = 0.0;
+    for (size_t i = 0; i < view.size(); i += 3) {
+      int worst = 0;
+      for (int c = 0; c < 3; c++) {
+        const int d = std::abs(int(view[i + c]) - int(first[i + c]));
+        worst = std::max(worst, d);
+        sum += d;
+      }
+      off += worst > 24;
+    }
+    const double offShare = double(off) / double(view.size() / 3);
+    const double meanDiff = sum / double(view.size());
+    ctx->LogInfo("video frame vs viewport: %.4f%% of pixels off by > 24, mean "
+                 "|d| %.3f",
+                 100.0 * offShare, meanDiff);
+    IM_CHECK(offShare < 0.005);
+    IM_CHECK(meanDiff < 1.0);
     std::filesystem::remove_all(dir);
     ctx->ItemClick("//Motion###ToolWindow/###motion_close");
     ctx->Yield(2);

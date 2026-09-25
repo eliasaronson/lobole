@@ -753,6 +753,7 @@ set(app_sources
     src/ui/Widgets.cpp
     src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
+    src/render/FrameStream.cpp
     src/remote/RemoteServer.cpp
     src/remote/RemoteSession.cpp
     src/remote/RemoteDispatch.cpp

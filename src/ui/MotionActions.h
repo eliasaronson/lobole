@@ -4,8 +4,11 @@
 
 #include <glm/glm.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ui {
@@ -68,21 +71,29 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
 
 // --- Video (docs/assemblies/README.md#motion-video) -------------------------
 //
-// The study as a MOVIE: frame k poses the assembly the way set_motion_pose
-// does — walking sample to sample, so a slider-crank stays on its branch —
-// and captures it with the quick render's raster path (the model only, no
+// The study as a MOVIE, played the way the Motion window's Play plays it:
+// the run's poses at the playback's rate, interpolated between samples with
+// the playback's own interpolation, and each frame the viewport's own render
+// (FrameCapture: the model's renderers at the viewport's settings, no
 // overlays, at the requested size, in the windowed and offscreen app alike).
-// mp4 (H.264), webm (VP9) and gif (a palette pass over the whole animation)
-// are encoded by ffmpeg as an external program, fed raw RGB on its stdin;
-// png writes numbered frames into a folder and needs nothing. It needs no
-// run: the frames are posed, not replayed. A job of kind "motion-video",
-// sliced on the main thread (posing and capturing need the documents and the
-// renderers); the encoding is on a worker. The assembly is left at the pose
-// it had before.
+// It needs no stored run: without a fresh one it makes its own, collision-
+// free like Preview, and keeps it to itself. mp4 (H.264), webm (VP9) and gif
+// (a palette pass over the whole animation) are encoded by ffmpeg as an
+// external program, fed raw RGB on its stdin; png writes numbered frames
+// into a folder and needs nothing. A job of kind "motion-video", sliced on
+// the main thread (posing and capturing need the documents and the
+// renderers); the encoding is on a worker. The document is never posed, so
+// the assembly is where it was.
 
 // The formats, as a refusal names them.
 inline constexpr const char* kMotionVideoFormats = "mp4, webm, gif, png";
 inline constexpr const char* kMotionVideoQualities = "low, medium, high";
+
+// Frames per second a video has unless asked: a display's.
+inline constexpr double kMotionVideoFps = 60.0;
+// Samples per second the Motion window plays a study at — and so the video:
+// its length is what Play takes, (samples - 1) / this.
+inline constexpr double kPlaybackSamplesPerSecond = 24.0;
 
 struct MotionVideoRequest {
   uint64_t studyId = 0;
@@ -90,7 +101,7 @@ struct MotionVideoRequest {
   std::string format;             // empty = read from the path's extension
   uint32_t width = 0, height = 0; // pixels; 0 = the viewport's
   double fps = 0.0;               // frames per second; 0 = derived
-  int frames = 0;                 // 0 = the study's samples
+  int frames = 0;                 // 0 = derived
   std::string quality;            // empty = medium; not for png
 };
 
@@ -125,6 +136,34 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
                       std::string* error, MotionVideoPlan* planOut = nullptr);
 // ffmpeg's full path on PATH, or empty: what `ping` reports as a feature.
 std::string FfmpegPath();
+
+// The poses to play a study with when there may be no stored run to play:
+// the stored result when playback could show it, else a collision-free run
+// of the study (what Preview runs) on a worker, kept here and NOT stored as
+// the study's result. `result` is set before `done`; a refusal is `error`.
+struct MotionPoses {
+  std::atomic<bool> done{false};
+  std::atomic<bool> cancel{false};
+  std::shared_ptr<const motion::Result> result;
+  std::string error;
+  std::thread worker;
+  ~MotionPoses() {
+    cancel.store(true);
+    if (worker.joinable())
+      worker.join();
+  }
+};
+std::shared_ptr<MotionPoses> PosesToPlay(AppState& state, uint64_t studyId,
+                                         std::string* error);
+// Why these poses cannot be played (a sample did not solve, the run was
+// cancelled or refused), or empty.
+std::string MotionPosesRefusal(const motion::Result& r);
+// Show `poses` at playback position `pos` (samples, 0 .. n-1) in the
+// viewport: the playback's pose, its interpolation included, pushed to the
+// renderers. The document is not touched. StopMotionPlayback ends it.
+void ShowMotionPoses(AppState& state, uint64_t studyId,
+                     const std::shared_ptr<const motion::Result>& poses,
+                     double pos);
 
 // PLAYBACK: the poses a run made, shown in the viewport without solving and
 // without editing the document — display-only, like an exploded view. Refused
