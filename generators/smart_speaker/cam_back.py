@@ -105,7 +105,13 @@ def _stock_top(app, setup_id):
     """The Z the stock's top face sits at in this setup, from the setup."""
     for s in app.list_cam_setups()["setups"]:
         if s["id"] == setup_id:
-            return float(s["stock"]["max"][2])
+            # The resolved box is `stock.box`; `stock` itself is the request
+            # (mode, size, margins). No box means the stock was refused.
+            box = s["stock"].get("box")
+            if not box:
+                raise SdkError(f"setup {setup_id} has no stock: "
+                               f"{s['stock'].get('refusal', 'no reason given')}")
+            return float(box["max"][2])
     raise SdkError(f"setup {setup_id} has gone")
 
 
