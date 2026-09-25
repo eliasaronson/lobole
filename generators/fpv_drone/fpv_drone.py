@@ -690,6 +690,21 @@ def part_sheets(app, out):
         app.update_drawing()
         geometry = app.list_drawing_geometry(view=view["id"])["geometry"]
 
+        # The notes FIRST: a dimension is placed clear of what is already
+        # on the sheet, so a note written after it can land on its text
+        # (the arm's hole callout, which names its fit, ran into the
+        # material block).
+        note(app, (0.72 * sheet_w, 0.46 * sheet_h), [
+            f"MATERIAL {material}",
+            f"THICKNESS {thickness:g} mm",
+            f"QUANTITY {qty}",
+            "CUT CNC router or waterjet",
+            "1 mm cutter, corners as drawn",
+            "EDGES deburr, tab roots square",
+            "FINISH none"])
+        note(app, (0.72 * sheet_w, 0.92 * sheet_h),
+             ["HOLE CENTRES from the part origin"] + tables[name])
+
         # The label goes OUTSIDE the view, so the offset is measured from
         # the view's own extent rather than picked: at 1:1 a 108 mm plate
         # needs 66, and a guessed 16 puts the number on top of the part.
@@ -715,17 +730,6 @@ def part_sheets(app, out):
         for radius, circle in sorted(holes.items()):
             app.add_drawing_dim(view=view["id"], kind="hole_callout",
                                 refs=[{"edge": circle["ref"]}])
-
-        note(app, (0.72 * sheet_w, 0.46 * sheet_h), [
-            f"MATERIAL {material}",
-            f"THICKNESS {thickness:g} mm",
-            f"QUANTITY {qty}",
-            "CUT CNC router or waterjet",
-            "1 mm cutter, corners as drawn",
-            "EDGES deburr, tab roots square",
-            "FINISH none"])
-        note(app, (0.72 * sheet_w, 0.92 * sheet_h),
-             ["HOLE CENTRES from the part origin"] + tables[name])
 
         dims = app.list_drawing_dims()["dims"]
         dangling = [d for d in dims if not d.get("resolved")]
