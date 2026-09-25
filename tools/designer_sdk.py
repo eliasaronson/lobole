@@ -305,6 +305,13 @@ class App:
         # another part otherwise has to remember to switch back, and gets
         # "the active document is not an assembly" when it does not.
         self._active = None
+        # The tab ids THIS client object created (add_part/add_assembly, by
+        # `part(name)` or directly). `part(name)` opens one of these again
+        # without being asked twice; any other tab of that name is somebody
+        # else's, and writing into it is the PES-on-OM615 bug — a pump
+        # generator built its camshaft INTO the engine's. Ids are per
+        # project, so opening or starting one forgets them.
+        self._created = set()
 
     # The generated surface. Deliberately __getattr__ rather than setattr in
     # a loop: an SDK method defined on the class always wins, and shadowing
@@ -352,9 +359,16 @@ class App:
             _validate_contract(self._schemas[method], params, method)
         if method in self._MOVES_TAB:
             self._active = None
+        if method in ("new_project", "open_project"):
+            self._created.clear()
         if _timeout is None:
-            return self._remote.call(method, **params)
-        return self._remote.request(method, params, timeout=_timeout)
+            out = self._remote.call(method, **params)
+        else:
+            out = self._remote.request(method, params, timeout=_timeout)
+        if method in ("add_part", "add_assembly") and isinstance(out, dict) \
+                and "id" in out:
+            self._created.add(out["id"])
+        return out
 
     def active(self):
         """The id of the tab that is in front, asked rather than remembered.
@@ -412,13 +426,28 @@ class App:
     def parts(self):
         return self.call("list_parts")["parts"]
 
-    def part(self, name=None, create=True):
-        """Switch to (or create) a part tab and return a `Part`.
+    def part(self, name=None, create=True, reuse=False):
+        """Create a part tab and return a `Part` — or, when asked, open one.
+
+        Which of the two a name means is the CALLER's choice, never a lookup
+        that happens to hit:
+
+        - `part(name)` creates the part. If a tab of that name already
+          exists it must be one THIS client created (switching back to a
+          part built earlier in the same script); anything else is refused,
+          because writing into it silently is how a pump generator built its
+          camshaft into the engine's.
+        - `part(name, create=False)` opens an existing part, and refuses when
+          there is none.
+        - `part(name, reuse=True)` opens the part if it exists and creates it
+          if not — for a generator that deliberately rebuilds its OWN part in
+          place (an `--update-component` flow).
 
         `name` may be a slot ID, which is the only address that works when
-        names repeat — as they do after any STEP import.
+        names repeat — as they do after any STEP import; an id always opens.
+        `part()` with no name opens the first part.
         """
-        return _open_tab(self, name, "part", create)
+        return _open_tab(self, name, "part", create, reuse)
 
     def parts(self):
         """The PART tabs only. `list_parts` lists every tab — assemblies and
@@ -432,8 +461,10 @@ class App:
         return [x for x in self.list_parts()["parts"]
                 if x.get("type") == "assembly"]
 
-    def assembly(self, name=None, create=True):
-        return _open_tab(self, name, "assembly", create)
+    def assembly(self, name=None, create=True, reuse=False):
+        """An assembly tab, by the same rule as `part()`: `assembly(name)`
+        creates, `create=False` opens an existing one, `reuse=True` either."""
+        return _open_tab(self, name, "assembly", create, reuse)
 
     def transaction(self, stop_on_error=True):
         """A `Batch` over several calls: one transaction, one regeneration,
@@ -451,7 +482,11 @@ class App:
         return self
 
 
-def _open_tab(app, name, kind, create):
+def _open_tab(app, name, kind, create, reuse=False):
+    if reuse and not create:
+        raise SdkError(f"{kind}({name!r}, create=False, reuse=True) asks for "
+                       f"two things: create=False opens an existing {kind}, "
+                       f"reuse=True opens or creates one")
     slots = app.call("list_parts")["parts"]
     # By id as well as by name. An imported STEP names thirty tabs `Part 1`,
     # so the name is not an address and the slot id is the only way to say
@@ -468,6 +503,14 @@ def _open_tab(app, name, kind, create):
         return (Part if kind == "part" else Asm)(app, hit)
     hit = next((s for s in slots if s["name"] == name and s["type"] == kind),
                None) if name else None
+    if (hit is not None and create and not reuse
+            and hit["id"] not in app._created):
+        raise SdkError(
+            f"a {kind} named {name!r} already exists and this script did not "
+            f"create it, so {kind}({name!r}) will not write into it. Say which "
+            f"you mean: app.{kind}({name!r}, create=False) opens the existing "
+            f"one; app.{kind}({name!r}, reuse=True) is for a generator that "
+            f"rebuilds its own {kind} in place; or choose another name")
     if hit is None and name is not None and create:
         app.call("add_part" if kind == "part" else "add_assembly", name=name)
         hit = next(s for s in app.call("list_parts")["parts"]

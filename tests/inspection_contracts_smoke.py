@@ -170,7 +170,7 @@ def main():
             app.save_project(path=saved)
             app.open_project(path=saved)
             refusal(refreshed.validate, 'stale_snapshot')
-            reopened = app.part('angled cylinder').body().snapshot(circular=True)
+            reopened = app.part('angled cylinder', create=False).body().snapshot(circular=True)
             reopened.validate()
             # A new project can reuse IDs/version counters; identity must differ.
             app.new()

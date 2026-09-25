@@ -38,7 +38,7 @@ def main():
             app = App(running.designer)
             app.open_project(path=str(Path(args.project).resolve()))
             for name in args.parts:
-                part = app.part(name)
+                part = app.part(name, create=False)
                 timings = dict(live_s=[], snapshot_s=[])
                 max_difference = 0.0
 

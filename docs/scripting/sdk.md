@@ -7,7 +7,7 @@ with. It has two layers, and the split is the design.
 from designer_sdk import connect
 
 app = connect()                         # the one announced instance, or port=
-part = app.part("piston")               # switch to (or create) a part tab
+part = app.part("piston")               # create a part tab (create=False opens one)
 bore = part.param("bore", 86)           # a variable, and a Param that knows it
 body = part.cylinder(d="bore", h=40)    # a Body
 part.fillet(body.edges(circular=True), r=2)
@@ -80,6 +80,25 @@ returns the ids it made; a default with a unit is derived from what it acts
 on (CLAUDE.md, "Defaults"). A coordinate or radius given as a string rides
 on the entity as its `*_expr` field and the document evaluates it, so there
 is no second expression language in the client.
+
+### Opening a part is a choice
+
+`app.part(name)` creates the part. When a tab of that name already exists it
+opens it only if this `App` object created it (a script switching back to a
+part it built earlier); any other is refused, naming the two ways to say what
+is meant:
+
+- `app.part(name, create=False)` opens an existing part, and refuses when
+  there is none — for a script that reads or edits a part it did not build.
+- `app.part(name, reuse=True)` opens the part if it exists and creates it if
+  not — for a generator that deliberately rebuilds its own part in place.
+
+`app.assembly(name, ...)` follows the same rule. A slot id (`app.part(7)`)
+and `app.part()` with no name always open. The rule exists because a pump
+generator building into an engine project wrote its camshaft into the
+engine's `camshaft` tab: the name matched, and the SDK opened it without
+saying so. `new_project` and `open_project` forget which tabs the client
+created, since ids are per project.
 
 ### Parameters carry their expression
 

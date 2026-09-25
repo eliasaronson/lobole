@@ -161,7 +161,7 @@ def main():
         expect(why is not None and "far_end" in why,
                f"without a far end it refuses AND names the way through: "
                f"{why}")
-        floors = a.part("base").body().edges(
+        floors = a.part("base", create=False).body().edges(
             circular=True, radius=5.5, where=lambda e: e.center.z < 59.0)
         expect(len(floors) == 1, f"one hole floor in the base: {len(floors)}")
         base_occ = next(o for o in rig.occurrences() if o.name == "base")

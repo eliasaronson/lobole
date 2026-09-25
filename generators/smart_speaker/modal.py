@@ -142,7 +142,7 @@ def perimeter(part, axis, dado):
 
 def study(app, name, axis, mesh_mm, braced, modes=6):
     """One panel, clamped where it is glued, solved. Returns its frequencies."""
-    part = app.part(name)
+    part = app.part(name, create=False)
     part.activate()
     label = f"{name} {'+ divider' if braced else 'glued edges'}"
     sid = app.add_study(kind="modal", name=f"{label} {mesh_mm:g}mm")["id"]
@@ -220,7 +220,7 @@ def main():
         # part study's 311 read ~20% low, as it said), with the braces
         # 562.4 Hz — inside the 515-593 Hz hand calculation for the
         # floor-to-brace regions.
-        app.part("speaker").activate()
+        app.assembly("speaker", create=False).activate()
         print(f"modal on the assembly, mesh {args.mesh:g} mm:")
         assembly_study(app, "side wall, walls as contacts", WALL_SUPPORTS,
                        args.mesh)

@@ -144,7 +144,7 @@ def _zero_on_the_cut_end(app, setup_id, label):
 
 def build(app, p, panel):
     """One back-face job for one upright. Returns (job, [setup ids])."""
-    part = app.part(panel)
+    part = app.part(panel, create=False)
     part.activate()
     job = app.machine_part(part=part.id, name=f"{panel} - face 2 (back)")
     # The JOB's id for this part, which is not the part document's: a job

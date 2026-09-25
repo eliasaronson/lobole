@@ -65,8 +65,9 @@ so the engine's block is machined to the pump's numbers:
   assembly the rack is held with `rack_offset` instead.
 - **The part names.** The camshaft is "pump camshaft" and the governor's
   filler cap "governor filler cap", so an engine's own camshaft and oil
-  filler cap keep theirs: `app.part(name)` opens a tab that already has the
-  name.
+  filler cap keep theirs. `app.part(name)` now refuses a name another
+  script created, so a clash would stop the build rather than write into
+  the engine's part.
 
 ## What it looks like
 
