@@ -50,12 +50,30 @@ resolve_xvfb() {
   fi
 }
 
-# Block until the remote answers ping, so callers know it's drivable.
+# Block until the remote answers ping, so callers know it's drivable. Given
+# the pid just launched, the answer must come from THAT process: a port handed
+# out earlier (worktree-build.sh prints one) can be taken by another instance
+# before this one binds it, and then the new app fails to listen while the old
+# one answers every ping -- a parallel agent once drove another's instance for
+# minutes that way. So: the launched process must still be alive, and the pid
+# `ping` reports must be it.
 wait_ready() {
-  local port="$1" i
+  local port="$1" want="${2:-}" i out got
   for i in $(seq 1 100); do
-    if python3 "$ROOT/tools/designer_remote.py" "$port" ping >/dev/null 2>&1; then
-      return 0
+    if [ -n "$want" ] && ! kill -0 "$want" 2>/dev/null; then
+      echo "headless-preview: the instance for port $port exited before" \
+        "answering (is the port taken?)" >&2
+      return 1
+    fi
+    if out="$(python3 "$ROOT/tools/designer_remote.py" "$port" ping 2>/dev/null)"; then
+      [ -z "$want" ] && return 0
+      got="$(printf '%s' "$out" | python3 -c \
+        'import json, sys; print(json.load(sys.stdin).get("pid", ""))')"
+      [ "$got" = "$want" ] && return 0
+      echo "headless-preview: port $port is answered by pid ${got:-unknown}," \
+        "not the $want just started: another instance holds it" >&2
+      kill "$want" 2>/dev/null || true
+      return 1
     fi
     sleep 0.2
   done
@@ -127,7 +145,10 @@ if [ "${1:-}" = "--start" ]; then
   else
     nohup "$BIN" --offscreen --remote "$PORT" >"$LOG" 2>&1 </dev/null &
   fi
-  wait_ready "$PORT" || { echo "headless-preview: see $LOG" >&2; exit 1; }
+  # setsid and nohup both exec in place here (a background job is not a
+  # process-group leader), so $! is the app itself.
+  APP=$!
+  wait_ready "$PORT" "$APP" || { echo "headless-preview: see $LOG" >&2; exit 1; }
   REG="${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json"
   PID="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$REG" 2>/dev/null)"
   echo "headless-preview: ready on $PORT (pid ${PID:-unknown}, log $LOG)"
@@ -141,7 +162,7 @@ if [ "${1:-}" = "--render" ]; then
   "$BIN" --offscreen --remote "$PORT" &
   APP=$!
   trap 'kill "$APP" 2>/dev/null || true' EXIT
-  wait_ready "$PORT"
+  wait_ready "$PORT" "$APP"
   python3 "$ROOT/tools/designer_remote.py" "$PORT" open_project "{\"path\": \"$PROJECT\"}" >/dev/null
   python3 "$ROOT/tools/designer_remote.py" "$PORT" fit_view >/dev/null 2>&1 || true
   python3 "$ROOT/tools/designer_remote.py" "$PORT" screenshot "{\"path\": \"$OUT\"}" >/dev/null
