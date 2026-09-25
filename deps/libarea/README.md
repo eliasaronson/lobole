@@ -40,7 +40,8 @@ the patches to the pinned commit and the result must equal these files.
 | patch | why |
 |---|---|
 | `0001-deterministic-link-path.patch` | `ResolveLinkPath` gave up after a `clock()` budget. `clock()` is the whole PROCESS's CPU time, and adaptive passes run on parallel workers, so the other passes drained each one's budget: the same part produced a different toolpath depending on thread scheduling. Two CAM tests failed only under a parallel `ctest`. The search's own step limit (10000) still bounds it. |
- The library narrates itself to `std::cout`;
+
+The library narrates itself to `std::cout`;
 that is swallowed by the bridge at the call site rather than patched out
 here. `-DENABLE_CAM_ADAPTIVE=OFF` removes the dependency entirely, and the
 concentric pocket strategy covers for it.
