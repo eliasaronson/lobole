@@ -2,7 +2,7 @@
 
 `Adaptive.cpp` / `Adaptive.hpp` are Kresimir Tusek's adaptive-clearing
 algorithm, and `clipper.cpp` / `clipper.hpp` are the Clipper 1 it uses
-internally. Copied **unmodified** from FreeCAD:
+internally. Copied from FreeCAD, with the one patch listed below:
 
     https://github.com/FreeCAD/FreeCAD
     commit b2da06bfe0521773f302c8be977b31dc27f60203
@@ -33,8 +33,14 @@ Two rules follow, and both matter more than build tidiness:
 2. **Only `src/core/cam/CamAdaptive.cpp` may include `Adaptive.hpp`.** That
    file is the whole boundary; its header exposes nothing from libarea.
 
-These files are kept byte-identical to upstream on purpose — it is what makes
-"we changed nothing" checkable. The library narrates itself to `std::cout`;
+These files are kept identical to upstream **plus the patches in `patches/`**,
+and nothing else. That is what makes "what did we change" checkable: apply
+the patches to the pinned commit and the result must equal these files.
+
+| patch | why |
+|---|---|
+| `0001-deterministic-link-path.patch` | `ResolveLinkPath` gave up after a `clock()` budget. `clock()` is the whole PROCESS's CPU time, and adaptive passes run on parallel workers, so the other passes drained each one's budget: the same part produced a different toolpath depending on thread scheduling. Two CAM tests failed only under a parallel `ctest`. The search's own step limit (10000) still bounds it. |
+ The library narrates itself to `std::cout`;
 that is swallowed by the bridge at the call site rather than patched out
 here. `-DENABLE_CAM_ADAPTIVE=OFF` removes the dependency entirely, and the
 concentric pocket strategy covers for it.

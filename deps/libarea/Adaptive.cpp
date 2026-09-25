@@ -2839,17 +2839,12 @@ bool Adaptive2d::ResolveLinkPath(
     size_t sindex;
     double par;
 
-    // put a time limit on the resolving the link path
-    clock_t time_limit = (clock_t)(max(keepToolDownDistRatio, 3.0) * CLOCKS_PER_SEC / 6);
-
-    clock_t time_out = clock() + time_limit;
+    // Designer patch 0001: no CPU-time limit here. Upstream gave up after a
+    // clock() budget, so the same input produced a different toolpath when
+    // the machine was busy; the step limit below bounds the search alone.
 
     while (!queue.empty()) {
         if (stopProcessing) {
-            return false;
-        }
-        if (clock() > time_out) {
-            cout << "Unable to resolve tool down linking path (limit reached)." << endl;
             return false;
         }
 
