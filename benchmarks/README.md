@@ -310,9 +310,12 @@ full surface would look like a valid comparison and be a duplicate.
 `REPORT.md` carries the current headline finding. 
 
 `summary.md` has the headline table; `runs.jsonl` has one record per run with
-its checks, tool calls by name, cost, tokens and the agent's final message;
-`runs/<task>__<arm>__r<n>/` keeps that run's STEP, its MCP config and the full
-agent stream.
+its checks, tool calls by name, cost, tokens and the agent's final message
+(`analysis/compare.py` reads it); `meta.json` records the sweep's tasks, arms
+and commit. `runs/<task>__<arm>__r<n>/part.step` is the STEP that run
+exported, committed so an old sweep can be re-graded by a newer oracle. The
+full agent stream (`stream.jsonl`), the run's MCP config and a per-run copy of
+its record are written beside it but stay local (`benchmarks/.gitignore`).
 
 Two cautions on the numbers:
 

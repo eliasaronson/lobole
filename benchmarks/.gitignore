@@ -1,10 +1,17 @@
 # A sweep produces ~7 MB, and 5 MB of that is the raw agent transcript. Every
-# number taken from it already lives in record.json (tool calls by name, final
-# message, cost, tokens), so the transcript stays local for forensics and out
-# of history for weight.
+# number taken from it already lives in the sweep's runs.jsonl (tool calls by
+# name, final message, cost, tokens), so the transcript stays local for
+# forensics and out of history for weight.
 results/*/runs/*/stream.jsonl
 results/*/runs/*/cwd/
 
+# Per-run copies nothing reads: record.json is the same record as that run's
+# line in runs.jsonl, and mcp.json is the run's MCP config, which names paths
+# on the machine that ran it.
+results/*/runs/*/record.json
+results/*/runs/*/mcp.json
+
 # The exported STEP files DO stay committed, deliberately: they are the one
 # thing a future oracle version cannot reconstruct, and re-grading an old sweep
-# with a better oracle is worth 1 MB a run.
+# with a better oracle is worth 1 MB a run. runs.jsonl cites each one
+# (`facts.file`).
