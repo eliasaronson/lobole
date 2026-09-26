@@ -34,9 +34,7 @@ app exchanges files with.
   rotation.
 - At the file boundaries: glTF/GLB export converts to glTF's Y-up and metres
   (`RWMesh_CoordinateSystemConverter` in `cad/MeshExport.cpp`); STEP, STL,
-  BREP, OBJ and PLY are written in world coordinates. The Onshape importer
-  (`tools/onshape_import.py`) keeps Onshape's raw plane geometry, so an
-  imported model keeps its source orientation.
+  BREP, OBJ and PLY are written in world coordinates.
 
 **Gate: `tests/test_world_up.cpp`.** It calls the real consumers and checks
 them against the constants: the basis is orthonormal and right-handed, the

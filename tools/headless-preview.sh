@@ -101,8 +101,8 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   # an agent editing a machine here cannot touch the shop's.
   #
   # settings.json and machines/ only, explicitly. `cp -r` of the whole
-  # directory would take onshape.env with it, and a scratch dir under /tmp is
-  # not where API credentials belong.
+  # directory would take anything else kept there with it, and a scratch dir
+  # under /tmp is not where credentials belong.
   [ -d "$REAL_DIR/machines" ] &&
     cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/designer/"
 fi

@@ -69,8 +69,8 @@ safe:
   and it still renders.
 - The child gets a scratch `XDG_CONFIG_HOME` seeded with the real
   `settings.json` and `machines/` directory by name — never the whole
-  directory, which holds `onshape.env` — so `set_settings` cannot rewrite the
-  human's preferences and a CAM setup still finds its machine.
+  directory, which may hold other credentials — so `set_settings` cannot
+  rewrite the human's preferences and a CAM setup still finds its machine.
 - It dies with the server. A spawn that exits or never announces raises with
   the tail of the child's own log.
 

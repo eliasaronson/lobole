@@ -153,7 +153,7 @@ TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
 TEST_CASE("Sweep on a degenerate path errors instead of aborting", "[sweep]") {
   // A path sketch whose only segment is zero-length made OCC throw
   // StdFail_NotDone from BRepBuilderAPI_MakeEdge::Edge(), which uncaught
-  // aborted the whole process (surfaced by an Onshape import). It must fail
+  // aborted the whole process (surfaced by an imported model). It must fail
   // the feature cleanly now.
   Document doc;
   const uint64_t prof = AddSketch(

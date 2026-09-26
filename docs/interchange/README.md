@@ -11,7 +11,6 @@ project format are in [../versioning/README.md](../versioning/README.md).
 | glTF (`.glb`, `.gltf`), OBJ, PLY | — | visual meshes with PBR materials, part or assembly, instanced |
 | DXF | — | a sheet-metal flat pattern (see [../sheetmetal/README.md](../sheetmetal/README.md)) |
 | SVG, PDF | — | drawing sheets (see [../drawings/README.md](../drawings/README.md)) |
-| Onshape | parametric, via `tools/onshape_import.py` | — |
 
 Native SolidWorks files are not read: their feature tree is undocumented and
 their geometry is Parasolid. From SolidWorks, save as STEP AP242 and import
@@ -181,47 +180,6 @@ the dialog everything is `ui::ExportActiveDocument(state, path)`, which the
 tests drive directly because a native dialog cannot be driven. STL and BREP
 on an assembly tab, and unknown extensions, are refused by name.
 
-## The Onshape importer
-
-`tools/onshape_import.py` reads an Onshape part studio through Onshape's
-REST API and replays its feature history into a running Designer over the
-JSON-RPC remote, so the model arrives editable: variables drive dimensions
-and sketches keep their constraints. It is an external translator over the
-same surface a script uses, with no C++ of its own.
-
-```
-onshape_import.py info        <document-url>
-onshape_import.py features    <document-url>
-onshape_import.py dump        <document-url> <out.json>     # save once, offline
-onshape_import.py replay      <part-studio-url> [port]
-onshape_import.py replay-dump <dump.json> <studio> [port]    # zero API calls
-```
-
-Pass the port of the instance to build in (the default is 8799).
-Credentials are `ONSHAPE_ACCESS_KEY` / `ONSHAPE_SECRET_KEY`, from the
-environment or `~/.config/designer/onshape.env`. Onshape's wire units are
-metres; the mapping converts to mm once. API calls are an annual budget, so
-dump once and replay from the dump while iterating
-([onshape-terms.md](onshape-terms.md)).
-
-It maps variables; sketches (lines, circles, arcs, points, splines, most
-constraints; sketch B-splines are solved for the control poles whose curve
-passes through Onshape's points); extrude, revolve, loft, sweep, boolean,
-mirror, fillet, chamfer, shell, draft and external thread; construction
-planes (baked into sketch planes); face-attached sketches; and 3D
-`fitSpline`s as `Curve3D`, re-fitted through a dense sample of the curve
-Onshape built. Onshape queries do not resolve at rollback, so edge and face
-picks are recovered by measuring geometry rather than resolving the query.
-
-Every feature it cannot map is reported with a reason, never dropped: the
-run ends with a per-feature table (mapped / skipped). Not mapped: patterns,
-`splitPart` (Designer has `Split`, but Onshape's knife is a query that does
-not resolve at rollback), FeatureScript custom features, and assemblies
-(`dump` saves the assembly definitions; `replay` builds part studios only).
-
-`tests/onshape_import_test.py` tests the mapping functions offline against
-`tests/fixtures/onshape/shelltest.json`: no network, no app.
-
 ## RPCs
 
 | RPC | module | does |
@@ -243,7 +201,6 @@ not resolve at rollback), FeatureScript custom features, and assemblies
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly` |
 | `tests/visual_export_smoke.py` | parses the binary glTF: meshes, materials, instancing |
-| `tests/onshape_import_test.py` | the Onshape mapping layer, offline |
 
 `export_step` is an MCP tool, so a change to it is measured by the
 benchmark's `reference.py`, `negative_controls.py` and `villain.py` too

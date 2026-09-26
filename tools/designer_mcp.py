@@ -566,8 +566,8 @@ def _autostart():
     # cannot touch the shop's.
     #
     # settings.json and machines/ by name, never the whole directory: that
-    # would take onshape.env with it, and a scratch dir under /tmp is not
-    # where API credentials belong.
+    # would take anything else kept there with it, and a scratch dir under
+    # /tmp is not where credentials belong.
     if (real_dir / "machines").is_dir():
         shutil.copytree(real_dir / "machines", cfg / "machines")
     env["XDG_CONFIG_HOME"] = str(pathlib.Path(scratch, "config"))

@@ -667,13 +667,6 @@ add_test(NAME visual_export_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(visual_export_smoke PROPERTIES TIMEOUT 120)
 
-# Interchange I3 Onshape importer: pure mapping-layer unit tests against a
-# small checked-in fixture (no app, no network, no Onshape quota) — the
-# expression/entity/constraint translation that regresses most often.
-add_test(NAME onshape_import_test
-         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/onshape_import_test.py)
-set_tests_properties(onshape_import_test PROPERTIES TIMEOUT 60)
-
 # `describe`'s parameter schema matches the keys each handler actually reads.
 # Source-only (no app, no GPU, no display) — RpcParams knows a method's exact
 # vocabulary but only at runtime, after the handler has run, so the schema is
