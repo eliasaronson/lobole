@@ -12,9 +12,9 @@ may name any entry above it, which is how `alpair_cutout_dia` stays
 ## The frame
 
 World Z is up and z = 0 is the TOP of the MDF carcass, so the cabinet hangs
-down into negative z. That is the frame the Onshape port used and the CAM job
-and the assembly transforms are both written in it; changing it would buy
-nothing and invalidate both.
+down into negative z. That is the frame the original model's STEP used, and
+the CAM job and the assembly transforms are both written in it; changing it
+would buy nothing and invalidate both.
 
     z =     0   top of the top wall            <- the datum
     z =   -16   under the top wall             = wall_thickness
@@ -124,8 +124,8 @@ TABLE = [
      "export overlaps them by this much"),
     ("port_throat_protrusion", "7.49",
      "how far the lower flare's throat stands above the cabinet's inner "
-     "floor. Measured off the Onshape assembly, which hangs that flare "
-     "mouth-DOWN under the floor at z -1038.4 .. -998.5"),
+     "floor. Measured off the original model's STEP assembly, which hangs "
+     "that flare mouth-DOWN under the floor at z -1038.4 .. -998.5"),
     ("port_brace_bolt_circle", "130.0",
      "measured off the bought upper flare: four lugs at radius 65. The\n      ring brace is drilled to THIS, not to a rail width — it is the\n      thing the flare bolts to"),
     ("port_brace_bolt_count", "4", ""),

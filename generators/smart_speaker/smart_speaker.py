@@ -11,7 +11,8 @@ the back of the bay under both, and an ESP32 amplifier beside the port. Six
 MDF panels, two braces and the port are made here; the drivers, the amplifier
 and the power brick are bought and arrive as STEP (`extract_bought.py`).
 
-This replaces an Onshape port that brought over the six panels and stopped.
+This replaces an earlier port of the original model's STEP export that
+brought over the six panels and stopped.
 What it is for, and what it fixes about that port, is
 [README.md](README.md#structure). The short version:
 one parameter table instead of six copies of one, driver heights derived from

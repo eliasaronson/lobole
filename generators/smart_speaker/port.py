@@ -96,7 +96,7 @@ def placements(p):
     half = float(p["port_flare_h"]) / 2
     tube_top = z0 + TUBE_SEAT + float(p["port_length_total"])
     return [
-        # TURNED OVER, mouth down. The Onshape assembly places this
+        # TURNED OVER, mouth down. The source STEP assembly places this
         # occurrence at quat [1,0,0,0] and it reads unambiguously in a
         # section: the trumpet hangs below the cabinet floor and opens
         # downward into the plinth, throat up through the hole. Identity

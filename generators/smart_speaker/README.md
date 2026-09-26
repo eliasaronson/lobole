@@ -7,9 +7,10 @@ and an ESP32 amplifier and power brick on the bay floor. Six MDF panels, four
 3.6 mm plywood coverings, two braces, the port and the dowel and T-nut
 hardware are made here; the drivers, amplifier and brick are bought and
 arrive as STEP. The run also writes the baffle's and the uprights' CNC jobs
-for the 6090 router. It started as an Onshape document ported to this app,
-and the generator replaces that port. `BUILD.md` beside the code is the
-builder's guide: glue lines, what the model cannot enforce.
+for the 6090 router. It started as a model from another CAD system, ported to
+this app from its STEP export, and the generator replaces that port.
+`BUILD.md` beside the code is the builder's guide: glue lines, what the model
+cannot enforce.
 
 ## Running it
 
@@ -20,10 +21,11 @@ python3 generators/smart_speaker/smart_speaker.py [--port N] [--out scratch/smar
 python3 generators/smart_speaker/modal.py [--port N] [--mesh 25] [--project P] [--assembly]
 ```
 
-- `extract_bought.py` slices the 48 MB Onshape export into small per-part
-  STEPs, once: the driver by its solids' names, the Alpair and the brick by
-  the volume and box only they have (a non-unique match is refused), the
-  amplifier as its two case halves and board at their assembly placements.
+- `extract_bought.py` slices the original model's 48 MB STEP export into
+  small per-part STEPs, once: the driver by its solids' names, the Alpair
+  and the brick by the volume and box only they have (a non-unique match is
+  refused), the amplifier as its two case halves and board at their assembly
+  placements.
   The board's ~200 passives are left out unless `--with-passives`. The
   output lives in `scratch/` and is regenerable, so neither it nor the
   project is tracked.

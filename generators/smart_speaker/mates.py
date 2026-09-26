@@ -369,7 +369,7 @@ def build(app, asm, p, made):
     #   bay.
     #
     # The lower flare is turned over. Its bell opens toward its own +Z and it
-    # has to open down, which is also what the Onshape export says — that
+    # has to open down, which is also what the source STEP says — that
     # occurrence carries quat [1,0,0,0].
     bottom = part("bottom_wall")
     flare = part("port_flare_bottom")

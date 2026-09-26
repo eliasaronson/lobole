@@ -1,7 +1,8 @@
 """The parts nobody here makes: two drivers, the amplifier, the power brick.
 
 They arrive as STEP from `scratch/smart_speaker/bought/`, which
-`extract_bought.py` slices out of the 48 MB Onshape export once. Importing
+`extract_bought.py` slices out of the original model's 48 MB STEP export
+once. Importing
 them is under a second; importing the source would be 27.5 s and 301 tabs.
 
 `import_step` re-centres what it brings in: every one of these arrives with
@@ -68,7 +69,7 @@ def import_all(app, p):
             f"no bought geometry: {', '.join(gone)} — run\n"
             f"    python3 generators/smart_speaker/extract_bought.py\n"
             f"once against {BOUGHT.parent.name}/ to slice them out of the "
-            f"Onshape export")
+            f"original model's STEP export")
     made = []
     for stem, name, _what in PARTS:
         part = app.part(name)

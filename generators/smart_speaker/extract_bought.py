@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Slice the Onshape STEP into the bought parts the generator imports.
+"""Slice the original model's STEP export into the bought parts the
+generator imports.
 
     python3 generators/smart_speaker/extract_bought.py [--port N]
             [--step ~/Downloads/step_files/speaker.step]
             [--out scratch/smart_speaker/bought]
 
-Run this ONCE, and again only when the Onshape export changes. The source is
+Run this ONCE, and again only when the source STEP changes. The source is
 48 MB and 302 products, of which about two hundred are the SMD parts on the
 amplifier board; importing it costs 27.5 s and fills the project with tabs
 nobody edits. The generator wants three small files instead, so it imports
@@ -16,7 +17,7 @@ Parts are found three ways, because the export names them three ways.
 By NAME where it gives one: the driver's four solids are `W170Sbasket`,
 `W170Scone`, `W170Sspider`, `W170Ssusp`.
 
-By SHAPE where it does not: Onshape exported the cabinet as `Part 1`, twenty
+By SHAPE where it does not: the export named the cabinet `Part 1`, twenty
 times over, so the Alpair and the power brick are identified by the volume and
 bounding box that only they have. A match that is not unique is refused rather
 than guessed at — a wrong solid here is a driver that looks right and is 30 mm
@@ -72,7 +73,7 @@ def _tab(app, row):
     """A Part for a slot row.
 
     `app.part(name)` is the SDK's way in and it addresses a tab by NAME, which
-    an imported STEP does not give you: Onshape exported thirty solids all
+    an imported STEP does not give you: the source exported thirty solids all
     called "Part 1", and asking for that name returns whichever came first.
     The slot row from `list_parts` carries the id, and `Part` takes it.
     """
