@@ -1,0 +1,64 @@
+name: Bug report
+description: Something Designer does wrong, crashes on, or refuses without reason.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem goes in a private report
+        instead (SECURITY.md), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Numbered steps from a fresh start. A `.dsgn` project or a short script
+        driving the RPC that reproduces it is worth more than a description.
+      placeholder: |
+        1. New part
+        2. Sketch on XY, rectangle 40 x 20
+        3. Extrude 10 mm, then Fillet one edge 12 mm
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: build
+    attributes:
+      label: Build configuration
+      description: |
+        `designer --version`, how you built it (Nix, Flatpak, Ubuntu packages,
+        other), and any CMake options you changed (for example
+        `-DENABLE_CAM=OFF`, `-DENABLE_TEST_ENGINE=OFF`).
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and GPU
+      placeholder: "Ubuntu 24.04, Intel Arc A770 (Mesa 25.1)"
+    validations:
+      required: true
+  - type: textarea
+    id: ping
+    attributes:
+      label: "`ping` output"
+      description: |
+        Start the app with `--remote <port>` (or `--headless --remote <port>`)
+        and paste `python3 tools/designer_remote.py <port> ping`. It lists the
+        version and which optional features the build has.
+      render: json
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or stack trace
+      description: |
+        If it crashed or hung, the symbolized stack trace or `main thread
+        stalled` report is on stderr; paste it.
+      render: text

@@ -5,6 +5,8 @@ OpenCASCADE, PlaneGCS, Dear ImGui) with an unusual design goal: **an AI
 assistant drives it through the same command layer a human does**. That shapes
 most of the conventions below.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 Start with [`docs/README.md`](docs/README.md): each area of the program has a
 `README.md` under `docs/` describing how it works now, and
 [`docs/roadmap.md`](docs/roadmap.md) lists what is not built yet.
@@ -214,6 +216,11 @@ For a screenshot-capable instance without a desktop session:
 `./tools/headless-preview.sh <port>`.
 
 ## Reporting a bug
+
+Open an issue with the bug template
+([`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/bug_report.yml)); ideas
+use the feature template. A security problem is reported privately instead,
+as [`SECURITY.md`](SECURITY.md) describes, and never in a public issue.
 
 Include `designer --version`, your OS and GPU, and what you did. If it
 crashed, the symbolized stack trace is on stderr (a `std::stacktrace` handler

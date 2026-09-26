@@ -1,0 +1,31 @@
+name: Feature request
+description: Something Designer should be able to do and cannot.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check docs/roadmap.md first: it lists what is known and not built yet.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What you are trying to make or do, and where Designer stops you.
+        A real part is the best argument.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would solve it
+      description: |
+        The behaviour you want. If another tool does it well, say what it does
+        and what you like about it.
+  - type: textarea
+    id: agent
+    attributes:
+      label: Scripting and agents
+      description: |
+        Everything in Designer is also an RPC an agent can drive. If this needs
+        a command, what should it take and return?
