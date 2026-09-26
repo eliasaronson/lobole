@@ -335,7 +335,7 @@ those in its own license. The distributable notice is also available as
 
 ### Trademarks
 
-Other CAD products named in this repository are trademarks of their owners, and
+Other products named in this repository are trademarks of their owners, and
 Designer is **not affiliated with, endorsed by, or sponsored by** any of them.
 Where those names are used, and why — see [`TRADEMARKS.md`](TRADEMARKS.md).
 

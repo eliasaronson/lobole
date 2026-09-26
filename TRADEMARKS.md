@@ -1,37 +1,54 @@
 # Trademarks
 
-Onshape®, Onshape Full-Cloud CAD® and FeatureScript™ are trademarks of PTC
-Inc.; SolidWorks of Dassault Systèmes; Fusion 360 of Autodesk, Inc.; FreeCAD is
-a trademark of the FreeCAD project. Designer is **not affiliated with, endorsed
-by, or sponsored by** any of them.
+This repository names other companies' products. Every such name is a
+trademark or registered trademark of its owner, used here only to refer to
+that product. Designer is **not affiliated with, endorsed by, or sponsored
+by** any of them, and naming a product claims no compatibility,
+certification or approval.
 
-## How these names are used here
+## Which names appear
 
-Where a name is not needed it is not used — this project is described on its
-own terms, not by comparison. It is not offered as a replica of, or a drop-in
-replacement for, any of them.
+- **Other CAD, CAM and design software:** FreeCAD, SolidWorks, Parasolid,
+  Fusion, Creo, NX, Inventor, Blender, Kiri:Moto, KiCad, PrusaSlicer, Bambu
+  and blendercam.
+- **Machine controllers and machines:** Mach3, LinuxCNC, GRBL, Haas and
+  Shapeoko.
+- **Makers of real parts the example generators model:** Mercedes-Benz and
+  Bosch (`generators/om615/`, `generators/pes_pump/`), Visaton and Markaudio
+  (`generators/smart_speaker/`), and hardware such as the Raspberry Pi and
+  ESP32 named as the part a model represents.
 
-What remains is **referential**: naming someone else's product to refer to that
-product. Three places, and nowhere else:
+The list is of names that appear, not an exhaustive statement of whose marks
+they are; each belongs to its respective owner.
 
-1. **Interoperation.** `tools/onshape_import.py` reads documents out of the
-   Onshape API, so it names the format it reads and the operations it maps
-   (`splitPart`, `fitSpline`, their face and edge queries). A tool that reads
-   another system's files has to be able to say which system.
-2. **Prior art in the design record.** The `docs/` design documents cite what
-   other CAD systems do and why: a decision recorded as "we chose this because
-   a named product does it, and here is where that stops working" can be
-   checked later, and one recorded as "because CAD systems do" cannot. That
-   citation belongs in the design record — the **source comments carry none of
-   it** (2026-08-31: all 37 were rewritten to describe the convention rather
-   than name a product), because a comment beside the code is read as part of
-   the code, not as a bibliography.
-3. **One licence attribution.** PlaneGCS is vendored from FreeCAD, so the About
-   dialog and [`THIRD_PARTY.md`](THIRD_PARTY.md) name it. That attribution is
-   an obligation, not a choice.
+## How they are used
 
-No third-party logos or branding are used, no compatibility or certification is
-claimed, and no name appears in the application's own interface or its source —
-no menu item, label, tool description, `help()` text or code comment names
-another product. The single user-visible exception is the FreeCAD attribution
-above.
+All of it is **referential (nominative) use**: naming someone else's product
+to talk about that product, and no more of the name than that takes. No
+third-party logos or branding are used. Designer is described on its own
+terms, and is not offered as a replica of, or a drop-in replacement for, any
+of these products.
+
+The uses fall into a few kinds:
+
+1. **Interoperability.** A tool that reads or writes another system's files,
+   or drives another system's machine, has to say which. The G-code posts are
+   named after the controller dialect they emit (`mach3`, `linuxcnc`, `grbl`),
+   the mesh exports name the viewers they are meant for, and
+   `generators/chassis/sldprt_frame.py` reads geometry out of a SolidWorks
+   part file without SolidWorks.
+2. **Prior art.** Design documents and source comments cite what another
+   system does, or why this one differs, so the decision can be checked later
+   ("FreeCAD's simulator does X; this one does Y because…"). Some of those
+   citations sit beside the code they explain, mostly in the CAM headers and
+   the sketch and keymap code.
+3. **Real-world subjects.** The example generators model real engines, pumps
+   and loudspeaker drivers, and name the manufacturer and model so a reader
+   can find the datasheet or manual the dimensions came from.
+4. **Licence attribution.** PlaneGCS is vendored from FreeCAD, and the
+   fastener dimension tables from the FreeCAD Fasteners Workbench, so the
+   About dialog and [`THIRD_PARTY.md`](THIRD_PARTY.md) name FreeCAD. That
+   attribution is an obligation, not a choice.
+
+If you own one of these marks and think a use here goes beyond reference,
+open an issue and it will be changed.

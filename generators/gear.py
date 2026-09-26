@@ -5,7 +5,7 @@
     python3 generators/gear.py --port 8799 ...   # into a specific instance
 
 What this is (docs/roadmap.md#6-the-agent-interface, "scripted features"):
-the kind of thing other CADs grow a workbench or a FeatureScript for, done
+the kind of thing other CADs grow a workbench or a feature language for, done
 as an ordinary script against the API. The result is an ordinary part:
 thickness and bore stay LIVE as project variables driving expressions; the
 tooth profile is computed from module, teeth and pressure angle and is
