@@ -154,7 +154,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // 480-hole pattern cost 245 s (BRepAlgoAPI_Fuse re-processes the entire
   // accumulated cutter on every call), against 12 s for the compound — 27x.
   // Each hole's own bore + head DO touch, so those are still fused, twice
-  // rather than n times. Measured by scratch/scale_batching.py.
+  // rather than n times. Measured by driving a 480-hole plate over the RPC.
   std::vector<CADShape> tools;
   tools.reserve(centers.size());
   for (const glm::vec3& c : centers) {

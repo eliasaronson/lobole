@@ -87,3 +87,8 @@ AGENTS.md
 
 # tools/ci-local.sh build trees (one per container image)
 .ci-local/
+
+# Local agent, direnv and editor state
+.claude/
+.direnv/
+.envrc
