@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "clipper2-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1749202198,
+        "narHash": "sha256-2vZXxT5hISz2xbWbvYNGTrq9QovTjNwUK103iVtz8ok=",
+        "owner": "AngusJohnson",
+        "repo": "Clipper2",
+        "rev": "ef88ee97c0e759792e43a2b2d8072def6c9244e8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "AngusJohnson",
+        "repo": "Clipper2",
+        "rev": "ef88ee97c0e759792e43a2b2d8072def6c9244e8",
+        "type": "github"
+      }
+    },
     "imgui-src": {
       "flake": false,
       "locked": {
@@ -69,6 +86,7 @@
     },
     "root": {
       "inputs": {
+        "clipper2-src": "clipper2-src",
         "imgui-src": "imgui-src",
         "imgui-test-engine-src": "imgui-test-engine-src",
         "nfd-src": "nfd-src",

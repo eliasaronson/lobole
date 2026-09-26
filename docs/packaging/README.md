@@ -48,11 +48,12 @@ At run time `RuntimePaths` (`src/common/RuntimePaths.{h,cpp}`) resolves:
 
 ## The Nix flake
 
-`flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the three
-git submodules (imgui, imgui_test_engine, nativefiledialog-extended) as
-`flake = false` inputs, so `nix build` needs no `?submodules=1`. Keep those
-revisions in sync with `.gitmodules` when a submodule moves. PlaneGCS and
-the fonts are vendored in-tree.
+`flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the four
+git submodules (imgui, imgui_test_engine, nativefiledialog-extended, clipper2)
+as `flake = false` inputs, so `nix build` needs no `?submodules=1`. Keep those
+revisions in sync with `.gitmodules` when a submodule moves; a missing
+clipper2 does not fail the build, it configures CAM off. PlaneGCS, libarea
+and the fonts are vendored in-tree.
 
 - `packages.x86_64-linux.default` (= `designer`): a Release build of the app
   only, installed through the CMake install phase. Netgen is

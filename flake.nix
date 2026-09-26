@@ -7,7 +7,7 @@
   # nixpkgs provides opencascade-occt 7.9.3 (matches what the CMake config
   # package expects — the TKDE* library split is handled in CMakeLists.txt).
   #
-  # The three git submodules are pinned here as flake inputs (flake = false)
+  # The four git submodules are pinned here as flake inputs (flake = false)
   # rather than relying on `?submodules=1`, so `nix build` is reproducible from
   # a plain flake ref. planegcs and deps/fonts are vendored in-tree (git-tracked)
   # and come in with the main source. Keep these SHAs in sync with .gitmodules
@@ -28,9 +28,14 @@
       url = "github:btzy/nativefiledialog-extended/fc168e8605bfa51aaec22ab0c4e46b9de665a437"; # v1.3.0
       flake = false;
     };
+    # CAM's polygon offsetting: without it CMake configures with CAM off.
+    clipper2-src = {
+      url = "github:AngusJohnson/Clipper2/ef88ee97c0e759792e43a2b2d8072def6c9244e8"; # Clipper2_1.5.4
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src }:
+  outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src, clipper2-src }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -83,7 +88,8 @@
         postUnpack = ''
           for d in imgui:${imgui-src} \
                    imgui_test_engine:${imgui-test-engine-src} \
-                   nativefiledialog-extended:${nfd-src}; do
+                   nativefiledialog-extended:${nfd-src} \
+                   clipper2:${clipper2-src}; do
             name="''${d%%:*}"; path="''${d#*:}"
             rm -rf "$sourceRoot/deps/$name"
             cp -r --no-preserve=mode,ownership "$path" "$sourceRoot/deps/$name"
