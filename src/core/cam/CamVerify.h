@@ -19,7 +19,7 @@
 // post, in modal state, or in linking is invisible to anything that inspects
 // `std::vector<Move>`, and one of those (a NaN retract) had already shipped.
 //
-// Surveyed before writing (~/Documents/CAD/CAM): FreeCAD's PathSimulator is a
+// Surveyed before writing (other open-source CAM): FreeCAD's PathSimulator is a
 // height-map (`Array2D<float>` + a tool profile function) and CAMotics is a
 // full implicit-field/marching-cubes simulator needing its own build system.
 // For 3-axis verification the height map is the right model, and it needs no

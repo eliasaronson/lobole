@@ -20,7 +20,12 @@ import so101_gripper_spec as P                        # noqa: E402
 from _lib import connect                              # noqa: E402
 from gear import involute_profile                     # noqa: E402
 
-SERVO_STEP = "/home/elias/Downloads/SO-ARM100/STEP/SO100/STS3215_03a.step"
+# The servo comes from a local clone of the SO-ARM100 repository
+# (github.com/TheRobotStudio/SO-ARM100): --so-arm100 DIR, else $SO_ARM100_DIR,
+# else ~/SO-ARM100.
+SO_ARM100_DEFAULT = os.environ.get("SO_ARM100_DIR",
+                                   os.path.expanduser("~/SO-ARM100"))
+SERVO_IN_REPO = os.path.join("STEP", "SO100", "STS3215_03a.step")
 SX = (-P.A - 12.4, -P.A + 12.4)      # gripper servo case, in X
 SZ = (P.ZA - 35.2, P.ZA + 10.2)      # gripper servo case, in Z
 RIM = 5.8                            # material around a pivot post
@@ -447,7 +452,14 @@ def build_camera_mock(b):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
+    ap.add_argument("--so-arm100", default=SO_ARM100_DEFAULT,
+                    help="a clone of the SO-ARM100 repository (default: "
+                         "$SO_ARM100_DIR, else ~/SO-ARM100)")
     a = ap.parse_args()
+    servo_step = os.path.join(a.so_arm100, SERVO_IN_REPO)
+    if not os.path.isfile(servo_step):
+        raise SystemExit(f"no servo STEP at {servo_step}: pass --so-arm100 "
+                         f"with a clone of the SO-ARM100 repository")
     d = connect(a.port)
     d.sock.settimeout(900)
     b = Build(d)
@@ -480,7 +492,7 @@ def main():
     # `keep_origin: True` would move the whole body by its bbox centre and
     # invalidate all of them (add_feature reports the shift as
     # `recentred_by`).
-    b.feat(type="Import", name="STS3215", path=SERVO_STEP)
+    b.feat(type="Import", name="STS3215", path=servo_step)
 
     for name, mat in (("Chassis", "plastic_black"),
                       ("DrivePlate L", "plastic_black"),

@@ -41,9 +41,9 @@ MACHINE = {
 # Two cutters. The ER11 collet tops out at 7 mm, so the openings and recesses
 # go with a 6 mm flat and the screw holes with a 3 mm — one tool change in the
 # program.
-# Speeds and feeds AS TEST CUT, read back out of the ported job
-# (~/Documents/smart_speaker.dsgn/jobs/). These were 12000 rpm on both tools
-# here, which is half the chip load the shop settled on:
+# Speeds and feeds AS TEST CUT, read back out of the ported job (the saved
+# project's jobs/ directory, not in the repo). These were 12000 rpm on both
+# tools here, which is half the chip load the shop settled on:
 #
 #     tool          as generated          as cut       mm/tooth
 #     6 mm 4F   1200 @ 12000 rpm   1200 @  6000        0.025 -> 0.050

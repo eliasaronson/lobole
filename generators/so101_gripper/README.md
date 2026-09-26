@@ -13,7 +13,7 @@ STEP.
 In order, against one instance:
 
 ```sh
-python3 generators/so101_gripper/so101_gripper.py --port N            # every part, and the servo import
+python3 generators/so101_gripper/so101_gripper.py --port N [--so-arm100 DIR]  # every part + servo
 python3 generators/so101_gripper/so101_gripper_assembly.py --port N --create [--theta 0]
 python3 generators/so101_gripper/so101_gripper_motion.py --port N [--samples 49]
 python3 generators/so101_gripper/so101_gripper_export.py --port N
@@ -21,10 +21,12 @@ python3 generators/so101_gripper/so101_gripper_export.py --port N
 
 - The parts script declares the mechanism's governing numbers as project
   variables (drive pivot offset and height, link length, parallelogram base,
-  maximum opening, plate thickness) and imports the servo from the path in
-  `SERVO_STEP`, which must point at `STEP/SO100/STS3215_03a.step` from a
-  local clone of the SO-ARM100 repository. The import is left centred (the
-  default): every servo dimension in the spec was measured off that import.
+  maximum opening, plate thickness) and imports the servo from
+  `STEP/SO100/STS3215_03a.step` in a local clone of the SO-ARM100
+  repository: `--so-arm100 DIR`, else `$SO_ARM100_DIR`, else `~/SO-ARM100`.
+  It refuses, naming the path, when the file is not there. The import is
+  left centred (the default): every servo dimension in the spec was measured
+  off that import.
 - `so101_gripper_assembly.py` places the parts at a link angle `--theta`
   (from +Z, positive closing); re-running with a new angle moves the existing
   occurrences.

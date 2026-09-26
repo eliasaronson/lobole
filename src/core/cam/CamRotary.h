@@ -24,14 +24,14 @@
 // model feeds both the picture and the verdict. What changes is the surface
 // it is measured from.
 //
-// Surveyed before writing (~/Documents/CAD/CAM): FreeCAD leaves its height-map
-// simulator untouched and verifies rotary output with 1,873 lines of G-code
-// regression tests instead; Kiri:Moto wrote a SECOND simulator, a Manifold CSG
-// solid with the tool rotated into the part's frame; blendercam left its 2-D
-// height map reachable from a 4-axis path with no guard, which is a verdict
-// about a program nobody checked. A radius field is the answer that keeps one
-// engine, and its limit is the one every surveyed rotary op imposes anyway:
-// the stock is a cylinder on one axis.
+// Surveyed before writing (other open-source CAM): FreeCAD leaves its
+// height-map simulator untouched and verifies rotary output with 1,873 lines of
+// G-code regression tests instead; Kiri:Moto wrote a SECOND simulator, a
+// Manifold CSG solid with the tool rotated into the part's frame; blendercam
+// left its 2-D height map reachable from a 4-axis path with no guard, which is
+// a verdict about a program nobody checked. A radius field is the answer that
+// keeps one engine, and its limit is the one every surveyed rotary op imposes
+// anyway: the stock is a cylinder on one axis.
 namespace cam {
 
 // The rotary axis is SETUP SPACE +X through (0, 0, 0). Not a choice made

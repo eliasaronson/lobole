@@ -2316,13 +2316,15 @@ LoopStats StatsOf(const cam::Loop& l) {
 
 TEST_CASE("cam probe: what the front_wall section does by depth",
           "[.][frontwall]") {
+  // The part is the smart speaker's saved front_wall, which is not in the
+  // repo: point DESIGNER_FRONT_WALL at its part directory.
   const char* env = std::getenv("DESIGNER_FRONT_WALL");
-  const std::string dir =
-      env ? env : "/home/elias/Documents/smart_speaker.dsgn/parts/front_wall";
-  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json")) {
-    WARN("no front_wall at " << dir << " — set DESIGNER_FRONT_WALL");
-    return;
-  }
+  if (!env)
+    SKIP("DESIGNER_FRONT_WALL is not set (the front_wall part directory of a "
+         "saved smart_speaker project; the part is not in the repo)");
+  const std::string dir = env;
+  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json"))
+    SKIP("no front_wall at " << dir << " (DESIGNER_FRONT_WALL)");
   auto loaded = DocumentIO::Load(dir);
   REQUIRE(loaded.has_value());
   std::unique_ptr<Document>& doc = *loaded;
@@ -2546,13 +2548,15 @@ TEST_CASE("cam probe: a bore that opens onto an edge", "[.][frontwall]") {
 // Hidden for the same reason as the section probe — the part is not in the
 // repo.  build/designer_tests "[frontwall]"
 TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
+  // The part is the smart speaker's saved front_wall, which is not in the
+  // repo: point DESIGNER_FRONT_WALL at its part directory.
   const char* env = std::getenv("DESIGNER_FRONT_WALL");
-  const std::string dir =
-      env ? env : "/home/elias/Documents/smart_speaker.dsgn/parts/front_wall";
-  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json")) {
-    WARN("no front_wall at " << dir << " — set DESIGNER_FRONT_WALL");
-    return;
-  }
+  if (!env)
+    SKIP("DESIGNER_FRONT_WALL is not set (the front_wall part directory of a "
+         "saved smart_speaker project; the part is not in the repo)");
+  const std::string dir = env;
+  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json"))
+    SKIP("no front_wall at " << dir << " (DESIGNER_FRONT_WALL)");
   auto loaded = DocumentIO::Load(dir);
   REQUIRE(loaded.has_value());
   std::unique_ptr<Document>& doc = *loaded;

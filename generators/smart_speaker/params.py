@@ -80,7 +80,7 @@ TABLE = [
     # is already right.
     #
     # This is a Precision Port, and its flares are the reason it is one:
-    # ~/Documents/speakers/PLAN.md chose it because "a straight 100 mm tube
+    # the design's planning notes chose it because "a straight 100 mm tube
     # would need 36 cm length, with pipe resonance at 476 Hz right in the
     # crossover transition band", where the flared 25 cm resonates at 686 Hz.
     # A 36 cm straight tube is Leff 433 mm, so at 250 mm physical these

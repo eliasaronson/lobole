@@ -4,9 +4,9 @@ What the model cannot enforce. Each of these is something the run checks, or
 cannot check, and that the finished box depends on.
 
 Run `python3 generators/smart_speaker/smart_speaker.py --port <n>` for the
-parts and the G-code; `modal.py` for the panel modes. Design intent lives in
-`~/Documents/speakers/PLAN.md` — where this disagrees with that, this is
-newer.
+parts and the G-code; `modal.py` for the panel modes. The design intent
+came from a separate planning document that is not in the repo; where this
+disagrees with it, this is newer.
 
 ## The glue lines ARE the design
 
