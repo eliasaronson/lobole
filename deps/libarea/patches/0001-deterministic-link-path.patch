@@ -2,7 +2,7 @@ diff --git a/deps/libarea/Adaptive.cpp b/deps/libarea/Adaptive.cpp
 index 34a2228f..47f49da9 100644
 --- a/deps/libarea/Adaptive.cpp
 +++ b/deps/libarea/Adaptive.cpp
-@@ -2839,19 +2839,14 @@ bool Adaptive2d::ResolveLinkPath(
+@@ -2839,19 +2839,15 @@ bool Adaptive2d::ResolveLinkPath(
      size_t sindex;
      double par;
  
@@ -10,9 +10,10 @@ index 34a2228f..47f49da9 100644
 -    clock_t time_limit = (clock_t)(max(keepToolDownDistRatio, 3.0) * CLOCKS_PER_SEC / 6);
 -
 -    clock_t time_out = clock() + time_limit;
-+    // Designer patch 0001: no CPU-time limit here. Upstream gave up after a
-+    // clock() budget, so the same input produced a different toolpath when
-+    // the machine was busy; the step limit below bounds the search alone.
++    // Designer patch 0001, 2026-09-25: no CPU-time limit here. Upstream
++    // gave up after a clock() budget, so the same input produced a
++    // different toolpath when the machine was busy; the step limit below
++    // bounds the search alone.
  
      while (!queue.empty()) {
          if (stopProcessing) {

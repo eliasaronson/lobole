@@ -374,7 +374,15 @@ constexpr Attribution kThirdParty[] = {
     {"nlohmann/json", "MIT"},
     {"FreeType", "FTL or GPL-2.0-or-later"},
     {"Boost", "BSL-1.0"},
+    {"libarea Adaptive (FreeCAD)", "LGPL-2.1-or-later"},
+    {"Clipper / Clipper2", "BSL-1.0"},
+    {"libvterm", "MIT"},
+    {"stb_image", "MIT or public domain"},
     {"Font Awesome 6 Free", "SIL OFL 1.1"},
+    {"JetBrains Mono", "SIL OFL 1.1"},
+    {"Roboto", "Apache-2.0"},
+    {"Fastener tables (FreeCAD Fasteners)", "GPL-2.0-or-later"},
+    {"Hole tables (bd_warehouse)", "Apache-2.0"},
 };
 
 void DrawAboutWindow(AppState& state) {

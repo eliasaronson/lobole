@@ -25,6 +25,21 @@ original per-file copyright headers:
 It is deliberately built as a shared library so users can relink or replace it.
 The modified source is included in every Designer source release.
 
+### libarea Adaptive — adaptive clearing for CAM
+
+- **Location:** `deps/libarea`
+- **License:** `Adaptive.{cpp,hpp}` LGPL-2.1-or-later (Kresimir Tusek);
+  `clipper.{cpp,hpp}`, the Clipper 1 it uses internally, BSL-1.0 (Angus
+  Johnson)
+- **Linkage:** separate shared library, `libdesigner_adaptive.so`, installed by
+  every package; only `src/core/cam/CamAdaptive.cpp` calls it
+- **Source:** copied from FreeCAD commit
+  `b2da06bfe0521773f302c8be977b31dc27f60203`, `src/Mod/CAM/libarea/`
+
+Designer's changes are the patches in `deps/libarea/patches/`, each also marked
+and dated where it lands in the source; `deps/libarea/README.md` lists them.
+`-DENABLE_CAM_ADAPTIVE=OFF` builds without it.
+
 ### Netgen — tetrahedral mesher
 
 - **Version used by the current Nix build:** 6.2.2605
@@ -65,6 +80,7 @@ locations and LGPL library replacement information.
 | fmt | formatting used by spdlog | MIT |
 | JSON for Modern C++ 3.12 | document/RPC JSON | MIT |
 | Vulkan Loader and headers | Vulkan API loading | Apache-2.0 and bundled notices |
+| libvterm 0.3 | VT emulation for the terminal panel (optional, `-DENABLE_TERMINAL=OFF`) | MIT |
 
 These are supplied by the build/distribution environment rather than vendored
 in the Designer source tree. The Nix package pins their exact revisions.
@@ -96,6 +112,14 @@ the remote `ui_action` tier and nothing else; the semantic RPC surface,
 screenshots included, is unchanged. It is the configuration for anyone whose
 use falls outside the engine's free-license criteria. CI compiles it on every
 push so it cannot rot.
+
+### Clipper2
+
+- **Location:** `deps/clipper2` submodule
+- **Revision:** Clipper2 1.5.4 pin
+- **License:** Boost Software License 1.0
+- **Linkage:** built as a static library into Designer (CAM polygon offsetting;
+  absent with `-DENABLE_CAM=OFF`)
 
 ### nativefiledialog-extended
 
@@ -132,7 +156,8 @@ packages and source distributions.
 
 Vendored from https://github.com/shaise/FreeCAD_FastenersWB (`FsData/`),
 **GPL-2.0-or-later**, unmodified below a provenance header. Data only — no code
-is taken. These are the dimension tables a generated fastener is built from and
+is taken. The licence text is `LICENSES/GPL-2.0.txt`, with attribution in
+`LICENSES/NOTICE-data-tables.txt`. These are the dimension tables a generated fastener is built from and
 checked against (docs/parts/README.md).
 
 ## bd_warehouse — clearance-hole table
@@ -144,5 +169,7 @@ Vendored from https://github.com/gumyr/bd_warehouse
 only — upstream also carries imperial sizes whose columns are fractional drill
 designations ("17/64") rather than numbers. Data only; no code is taken. It is
 what lets a plain 6.6 mm hole be read back as "an M6 normal clearance"
-(docs/parts/README.md, phase 3).
+(docs/parts/README.md, phase 3). The licence text is `LICENSES/Apache-2.0.txt`;
+the attribution and modification notice Apache-2.0 §4 asks for is
+`LICENSES/NOTICE-data-tables.txt`, installed with every binary.
 

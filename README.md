@@ -128,8 +128,8 @@ than either and leaves you maintaining it — the OCCT project publishes source
 archives and Windows binaries only, so there is nothing prebuilt to drop in
 on Linux.
 
-Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog)
-are git submodules — clone with `--recurse-submodules`, or:
+Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog,
+Clipper2) are git submodules — clone with `--recurse-submodules`, or:
 
 ```
 git submodule update --init --recursive

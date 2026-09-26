@@ -122,6 +122,11 @@ dir` source would otherwise copy them into itself.
   `post-install`: a bare `nix-shell` lacks the gdk-pixbuf loaders that
   `appstreamcli compose` and `flatpak build-export`'s icon check need.
 - File dialogs go through `xdg-desktop-portal`, which the app already uses.
+- The host's `ffmpeg` is not on `PATH` inside the sandbox, so motion video
+  export to mp4, webm or gif needs an `ffmpeg` inside it; without one the
+  export refuses by name (`ping`'s `features.ffmpeg` is false) and PNG frames
+  still work. If ffmpeg is ever bundled, it must be an LGPL build shipped
+  with a source offer.
 
 ## Windows
 
@@ -197,14 +202,19 @@ installs them with every binary.
 
 - LGPL libraries (OpenCASCADE with its exception, Netgen, PlaneGCS, libarea
   for adaptive clearing) are linked dynamically, so a user can relink against
-  a modified version. PlaneGCS is modified, which is why it is built as
-  `libplanegcs.so` rather than linked statically; its modifications are
-  published with the source.
+  a modified version. PlaneGCS and libarea are modified, which is why they
+  are built as `libplanegcs.so` and `libdesigner_adaptive.so` rather than
+  linked statically; their modifications are published with the source
+  (libarea's as the dated patches in `deps/libarea/patches/`).
 - imgui_test_engine is not test-only: the `ui_action` RPC drives the GUI
   through it at run time. Its licence permits derivatives released under an
   OSI licence.
-- Everything else (Eigen and Spectra MPL-2.0, Boost, glfw, spdlog,
-  nlohmann_json, glm, imgui, nativefiledialog-extended, fonts) is permissive.
+- Everything else (Eigen and Spectra MPL-2.0, Boost, Clipper2 and libarea's
+  Clipper 1 BSL-1.0, glfw, spdlog, nlohmann_json, glm, imgui,
+  nativefiledialog-extended, libvterm, the fonts) is permissive.
+- The standard-parts tables in `assets/parts/` are data under their own
+  licences: the fastener tables GPL-2.0-or-later, the bd_warehouse hole tables
+  Apache-2.0, with texts and the attribution notice in `LICENSES/`.
 
 ## The agent surface
 

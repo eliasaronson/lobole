@@ -442,8 +442,8 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
 # a build flag is cheaper than trusting that a dependency stays small.
 option(ENABLE_CAM "Milling toolpaths + G-code (vendored Clipper2)" ON)
 option(ENABLE_TERMINAL "Embedded terminal panel (libvterm)" ON)
-# Adaptive clearing is the one LGPL dependency: separable on purpose, both
-# so it can be dropped and so the licence boundary stays a dynamic link.
+# Adaptive clearing is LGPL (like PlaneGCS): separable on purpose, both so it
+# can be dropped and so the licence boundary stays a dynamic link.
 option(ENABLE_CAM_ADAPTIVE "Adaptive clearing (LGPL libarea, linked as a shared library)" ON)
 
 # Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
@@ -485,11 +485,9 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     # Adaptive clearing (C8): Kresimir Tusek's Adaptive2d from FreeCAD's
     # libarea, vendored at deps/libarea/ from FreeCAD b2da06bf.
     #
-    # It is **LGPL-2.1-or-later**, and this is the one dependency here that is
-    # copyleft. It is therefore built as its OWN SHARED LIBRARY and linked
-    # dynamically, never absorbed into designer_core: the LGPL's relinking
-    # condition is satisfied by a boundary a user can replace, which keeps
-    # this application's own licence a decision we can still make later. Do
+    # It is **LGPL-2.1-or-later**, so it is built as its OWN SHARED LIBRARY and
+    # linked dynamically, never absorbed into designer_core: the LGPL's
+    # relinking condition is satisfied by a boundary a user can replace. Do
     # not "simplify" this to a static library or fold the sources into
     # core_sources — the arrangement is the point, not the build tidiness.
     # (libarea's own Clipper1, which Adaptive uses internally, is BSL-1.0 and
@@ -1254,6 +1252,7 @@ install(FILES
         "${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf"
+        "${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")

@@ -1,0 +1,33 @@
+Designer ships two sets of third-party data tables under assets/parts/
+(installed as share/designer/parts/). They are data only; no code is taken
+from either project.
+
+--------------------------------------------------------------------------------
+bd_warehouse -- clearance-hole and tap-hole tables
+--------------------------------------------------------------------------------
+
+Files: clearance_hole_sizes.csv, tap_hole_sizes.csv
+
+This product includes data from bd_warehouse
+(https://github.com/gumyr/bd_warehouse, src/bd_warehouse/data/),
+Copyright 2024 Gumyr (Roger Maitland), licensed under the Apache License,
+Version 2.0. The full licence text is in Apache-2.0.txt beside this file.
+
+Modifications: only the metric rows are kept; upstream also carries imperial
+sizes whose drill columns are fractional designations. Each file states this
+in its own header. bd_warehouse ships no NOTICE file of its own.
+
+--------------------------------------------------------------------------------
+FreeCAD Fasteners Workbench -- standard-parts dimension tables
+--------------------------------------------------------------------------------
+
+Files: iso4762def.csv, iso4032def.csv, iso7089def.csv, iso888length.csv,
+iso4757def.csv, iso10664def.csv, iso14579def.csv, iso4017head.csv,
+iso10642def.csv, iso7380def.csv
+
+From the FreeCAD Fasteners Workbench
+(https://github.com/shaise/FreeCAD_FastenersWB, FsData/), licensed under the
+GNU General Public License, version 2 or (at your option) any later version.
+Unmodified below a provenance header. The full licence text is in
+GPL-2.0.txt beside this file; the source of these tables is the files
+themselves, which are shipped in their original, readable form.

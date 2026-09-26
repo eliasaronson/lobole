@@ -2839,9 +2839,10 @@ bool Adaptive2d::ResolveLinkPath(
     size_t sindex;
     double par;
 
-    // Designer patch 0001: no CPU-time limit here. Upstream gave up after a
-    // clock() budget, so the same input produced a different toolpath when
-    // the machine was busy; the step limit below bounds the search alone.
+    // Designer patch 0001, 2026-09-25: no CPU-time limit here. Upstream
+    // gave up after a clock() budget, so the same input produced a
+    // different toolpath when the machine was busy; the step limit below
+    // bounds the search alone.
 
     while (!queue.empty()) {
         if (stopProcessing) {
