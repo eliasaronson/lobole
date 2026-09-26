@@ -2,11 +2,19 @@
 
 [![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
 
-Project to build an open-source parametric 3D CAD application using Vulkan, ImGui and
-OpenCASCADE — working the way commercial parametric CAD applications do,
-with transformation checkpoints, global variables, a Python REPL/scripting API, git-based
-versioning, and an interface designed so that LLM assistants can use the same commands as
+Project to build an open-source parametric 3D CAD application using Vulkan,
+ImGui and OpenCASCADE — working the way commercial parametric CAD applications
+do, with transformation checkpoints, global variables, git-based versioning,
+and an interface designed so that LLM assistants can use the same commands as
 human users.
+
+Scripting happens outside the process: the app serves a JSON-RPC interface,
+and a generated Python SDK (`tools/designer_sdk.py`), an MCP server for agents
+and plain scripts all drive it (see
+[docs/scripting/README.md](docs/scripting/README.md)). An optional terminal
+panel runs a shell or an agent inside the app window, already pointed at that
+instance ([docs/ui/terminal.md](docs/ui/terminal.md)). There is no Python
+interpreter embedded in the app.
 
 See [docs/README.md](docs/README.md) for how each part of the program works, and
 [docs/roadmap.md](docs/roadmap.md) for what is not built yet.
@@ -59,8 +67,8 @@ Designer 0.1.0 — optional features
 Everything marked with a switch can be turned off at configure time, and the
 feature then does not exist: no sources compiled, no dependency looked for, no
 tests, no RPCs in `describe`, no preference in the window. `cmake -B build
--DENABLE_CAM=OFF -DENABLE_TERMINAL=OFF` builds and passes its suite (643
-tests instead of 670 — the difference is exactly those features' tests).
+-DENABLE_CAM=OFF -DENABLE_TERMINAL=OFF` builds and passes its suite, which is
+the full suite minus exactly those features' tests.
 
 The two dependencies those flags govern are deliberately small: **Clipper2**
 is vendored (three `.cpp` files, Boost licence, nothing transitive) and
@@ -224,8 +232,9 @@ Python integration smokes driving `designer --headless`; it is what CI runs on
 every push. The GUI suite drives the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
 mouse and keyboard on the actual UI) and needs a GPU — `gui-tests-xvfb.sh`
-supplies the display, splits the suite across four parallel shards (~80 s
-rather than 335 s) and serializes concurrent runs with a lock. Plain `ctest`
+supplies the display, splits the suite across four parallel shards (a few
+times faster than one serial run) and serializes concurrent runs with a
+lock. Plain `ctest`
 with no `-LE gui` will try to run the display-gated tests too.
 
 ## Sanitizers & static analysis
