@@ -1396,6 +1396,20 @@ class _Tab:
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r})"
 
+    def render(self, path, view="iso"):
+        """Screenshot this part or assembly on its own, fitted. Needs a
+        renderer, so an `--offscreen` instance (a `--headless` one refuses,
+        saying so).
+
+        Here because looking is what caught the defect none of the other
+        checks could: four bolt bosses hanging off a deck flange, one solid
+        body, clean study, bolts correctly sized, `check()` green
+        (generators/README.md#single-cylinder-and-air-cooled-engines).
+        """
+        self.activate()
+        self.app.screenshot(path=path, view=view, fit=True)
+        return path
+
 
 class Part(_Tab):
     def _add(self, feature):
@@ -1846,19 +1860,6 @@ class Part(_Tab):
                                 name=f"{name} {i + 1}" if len(draws) > 1
                                 else name, **kw)
         return body
-
-    def render(self, path, view="iso"):
-        """Screenshot this part on its own, fitted. Needs a renderer, so an
-        `--offscreen` instance (a `--headless` one refuses, saying so).
-
-        Here because looking is what caught the defect none of the other
-        checks could: four bolt bosses hanging off a deck flange, one solid
-        body, clean study, bolts correctly sized, `check()` green
-        (generators/README.md#single-cylinder-and-air-cooled-engines).
-        """
-        self.activate()
-        self.app.screenshot(path=path, view=view, fit=True)
-        return path
 
     def material(self, slug, body=None):
         """Give this part's bodies a material, so mass properties and the BOM

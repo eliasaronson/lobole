@@ -132,6 +132,28 @@ def main():
             raise AssertionError("scalar offset must be refused")
         except RuntimeError as e:
             expect("[x, y]" in str(e), f"names the shape: {e}")
+        # A distance with one pick, and a pick that names no curve the view
+        # drew: both refused at the add, not left on the sheet dangling for
+        # check_drawing to blame on "an edge consumed upstream".
+        try:
+            d.call("add_drawing_dim", view=front_id, kind="distance_y",
+                   refs=[{"edge": vlines[0]["ref"],
+                          "occurrence": vlines[0]["source_id"]}])
+            raise AssertionError("a one-pick distance must be refused")
+        except RuntimeError as e:
+            expect("TWO picks" in str(e), f"says it needs two: {e}")
+        try:
+            d.call("add_drawing_dim", view=front_id, kind="distance_x",
+                   refs=[{"edge": vlines[0]["ref"],
+                          "occurrence": vlines[0]["source_id"]},
+                         {"edge": {"feature_id": vlines[0]["ref"]["feature_id"],
+                                   "element": "no/such/edge"},
+                          "occurrence": vlines[0]["source_id"]}])
+            raise AssertionError("an unresolvable dim must be refused")
+        except RuntimeError as e:
+            expect("does not resolve" in str(e), f"says why: {e}")
+        expect(len(d.call("list_drawing_dims")["dims"]) == 1,
+               "neither refusal left a dimension behind")
         try:
             d.call("set_drawing_sheet", title_block="W170S")
             raise AssertionError("string title_block must be refused")

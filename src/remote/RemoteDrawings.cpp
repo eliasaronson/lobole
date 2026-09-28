@@ -1046,6 +1046,28 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       // title block).
       dim.labelOffset = ui::AutoDimOffset(state, dim);
     }
+    // A distance is BETWEEN two picks. One was accepted, never resolved, and
+    // check_drawing then blamed "an edge consumed upstream" for it.
+    if ((dim.kind == DrawingDimKind::Distance ||
+         dim.kind == DrawingDimKind::DistanceX ||
+         dim.kind == DrawingDimKind::DistanceY) &&
+        dim.refs.size() < 2)
+      throw std::runtime_error(
+          "a " + std::string(p.at("kind").get<std::string>()) +
+          " dimension measures between TWO picks (an edge's length is the "
+          "distance between the edges or points at its two ends); got " +
+          std::to_string(dim.refs.size()));
+    // Refused, not added dangling: on a projected view a dimension that does
+    // not resolve now never will, and the sheet would carry it as an issue
+    // with no way to tell it from one a later edit broke.
+    if (state.drawingRenders.contains(dim.viewId) &&
+        !ui::ResolveDrawingDim(state, dim).resolved)
+      throw std::runtime_error(
+          "that dimension does not resolve on the projected view: a pick "
+          "names no curve the view drew (list_drawing_geometry gives the "
+          "ones it has, each with its ref), or names a silhouette as an "
+          "`edge` -- a curve whose kind is silhouette is picked with "
+          "`sil_face`");
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddDim(dim);
     // Echo the resolved value now (the view is already projected).
