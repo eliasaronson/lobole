@@ -49,9 +49,6 @@ and every groove at least 3.4 mm, and the finish alone makes the part.
   bishop's first mitre; redesigned as a notch, not diagnosed).
 - **A spiral rest pass** winds the whole length at the rotary's speed limit,
   air included, and its `holding_clipped_mm` reads as nearly all of it.
-- **Sixteen pieces in one undersides job**, each clamped face up per
-  placement, derived its depths from the wrong end; retest now that
-  `FacePlane` is fixed, and fold the per-rank jobs back into one.
 
 ## Verification
 
