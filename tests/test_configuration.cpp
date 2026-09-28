@@ -180,6 +180,52 @@ TEST_CASE("A configuration suppresses a feature, composed with authored flags",
   CHECK(doc.GetBodies().size() == 1);
 }
 
+// A configuration that turns a variant ON turns on its sketch as well as the
+// feature built on it. References resolved against the AUTHORED flag only, so
+// the revolve or extrude of a family member failed with "profile sketch not
+// found earlier in history" in exactly the configuration that asked for it --
+// and a sketch a configuration suppressed stayed referable.
+TEST_CASE("A reference resolves through the configuration's suppression",
+          "[configuration]") {
+  Document doc;
+  auto sk1 = std::make_unique<SketchFeature>("Wide", kXY);
+  AddRect(*sk1, 4, 2);
+  doc.AddFeature(std::move(sk1));
+  const uint64_t s1 = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("E1", s1, 3.0, ExtrudeMode::NewBody));
+  const uint64_t e1 = doc.GetFeature(1)->GetId();
+  auto sk2 = std::make_unique<SketchFeature>("Narrow", kXY);
+  AddRect(*sk2, 2, 2);
+  doc.AddFeature(std::move(sk2));
+  const uint64_t s2 = doc.GetFeature(2)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("E2", s2, 3.0, ExtrudeMode::NewBody));
+  const uint64_t e2 = doc.GetFeature(3)->GetId();
+  // The authored model is the wide variant; the narrow one is off.
+  doc.GetFeature(2)->SetSuppressed(true);
+  doc.GetFeature(3)->SetSuppressed(true);
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(Vol(doc), WithinRel(4.0 * 2.0 * 3.0, 1e-6));
+
+  Configuration& narrow = doc.AddConfiguration("Narrow");
+  narrow.suppressedFeatures = {s1, e1};
+  narrow.unsuppressedFeatures = {s2, e2};
+  const uint64_t narrowId = narrow.id;
+  REQUIRE(doc.SetActiveConfiguration(narrowId));
+  CHECK(doc.GetFeature(3)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(Vol(doc), WithinRel(2.0 * 2.0 * 3.0, 1e-6));
+
+  // Suppressing only a SKETCH in a configuration breaks the feature on it,
+  // the same as suppressing it in the authored model does.
+  Configuration& noProfile = doc.AddConfiguration("No profile");
+  noProfile.suppressedFeatures = {s1};
+  doc.SetActiveConfiguration(noProfile.id);
+  CHECK_FALSE(doc.GetFeature(1)->GetError().empty());
+  CHECK(doc.GetBodies().empty());
+}
+
 TEST_CASE("Configurations round-trip through save/load (v31)",
           "[configuration][serialization]") {
   Document doc;

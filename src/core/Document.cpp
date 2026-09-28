@@ -368,6 +368,7 @@ bool Document::Regenerate() {
         RegenContext ctx{m_bodies,  m_features,
                          i,         &m_symbols,
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
+        ctx.configuration = ActiveConfig();
         datums++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty())
@@ -420,6 +421,7 @@ bool Document::Regenerate() {
         RegenContext ctx{m_bodies,  m_features,
                          i,         &m_symbols,
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
+        ctx.configuration = ActiveConfig();
         m_lastStats.executed++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty()) {

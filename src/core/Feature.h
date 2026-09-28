@@ -171,6 +171,8 @@ class Feature;
 // so far, and read access to the features strictly BEFORE it in the history
 // (a feature can only reference what already exists — e.g. an extrude can
 // only consume an earlier sketch).
+struct Configuration;
+
 struct RegenContext {
   std::vector<Body>& bodies;
   const std::vector<std::unique_ptr<Feature>>& features;
@@ -189,7 +191,15 @@ struct RegenContext {
   // null is a reportable state and not a default to fall back on.
   const sheet::SheetMetalRules* sheetMetal = nullptr;
 
-  // Searches features[0, currentIndex) by stable id; nullptr if absent.
+  // The configuration the document is regenerating under, or null for the
+  // authored model. A reference resolves through the SAME suppression the
+  // regeneration loop uses (Document::EffectiveSuppressed): reading only a
+  // feature's authored flag made a sketch a configuration turns ON invisible
+  // to the revolve built on it, and one it turns OFF still referable.
+  const Configuration* configuration = nullptr;
+
+  // Searches features[0, currentIndex) by stable id; nullptr if absent or
+  // suppressed.
   const Feature* FindById(uint64_t id) const;
 };
 

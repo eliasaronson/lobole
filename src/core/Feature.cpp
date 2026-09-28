@@ -2,6 +2,7 @@
 
 #include "cad/CADMaterials.h"
 #include "core/AxisRef.h"
+#include "core/Configuration.h"
 
 #include <filesystem>
 #include <fstream>
@@ -47,8 +48,14 @@ const Feature* RegenContext::FindById(uint64_t id) const {
   for (size_t i = 0; i < currentIndex && i < features.size(); i++) {
     // A suppressed feature is invisible to references — its consumers fail
     // with their normal missing-reference errors, same rule as deletion (R1).
-    if (features[i]->GetId() == id)
-      return features[i]->IsSuppressed() ? nullptr : features[i].get();
+    if (features[i]->GetId() != id)
+      continue;
+    if (configuration != nullptr && configuration->Unsuppresses(id))
+      return features[i].get();
+    const bool suppressed =
+        features[i]->IsSuppressed() ||
+        (configuration != nullptr && configuration->Suppresses(id));
+    return suppressed ? nullptr : features[i].get();
   }
   return nullptr;
 }
