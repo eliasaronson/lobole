@@ -130,8 +130,20 @@ ModelledBreak FindModelledBreak(const std::vector<Body>& bodies,
   if (lo >= ceiling || !within(lo))
     return out; // a sharp edge: the face above starts at the wall
   double hi = ceiling;
-  if (within(hi))
-    return out; // material all the way up: a step, not a break
+  if (const std::optional<double> atTop = within(hi)) {
+    // Material AT the wall all the way up is a step, not a break. Material
+    // only within reach is the break's own top: a stock whose top IS the
+    // part's (no margin) sections the top face there, and a 3 mm chamfer
+    // under a 12 mm V-bit read as a step -- the derived chamfer went on
+    // below the modelled one, 5.75 mm into the chess board's frame.
+    if (*atTop < 0.05)
+      return out;
+    out.found = true;
+    out.topZ = hi;
+    out.height = hi - wall.topZ;
+    out.width = *atTop;
+    return out;
+  }
   while (hi - lo > 1e-3) {
     const double mid = (lo + hi) * 0.5;
     (within(mid) ? lo : hi) = mid;

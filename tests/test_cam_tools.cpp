@@ -215,6 +215,24 @@ TEST_CASE("cam: an edge break follows the break the model already has",
   INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
   CHECK(v.maxGouge < 0.05);
 
+  // A stock whose top IS the part's: the top face's own outline sits within
+  // the V-bit's reach there, and read as "material all the way up" -- a step
+  // -- the break went on below the modelled one (the chess board's 3 mm
+  // chamfer, 5.75 mm into its frame).
+  {
+    auto flush = BrokenBlockDoc(3.0, EdgeBlendOp::Chamfer);
+    cam::Setup level = setup;
+    level.stock.margin = glm::dvec3(5.0, 5.0, 0.0);
+    const cam::DerivedOp f =
+        cam::DeriveOperation(level, flush->GetBodies(), cam::OpType::EdgeRound,
+                             cam::Target{0, SideWall(*flush)});
+    INFO(f.why);
+    REQUIRE(f.ok);
+    CHECK_THAT(f.op.topZ, WithinAbs(20.0, 0.01));
+    CHECK_THAT(f.op.edgeSize, WithinAbs(3.0, 0.02));
+    CHECK_THAT(f.op.bottomZ, WithinAbs(17.0, 0.02));
+  }
+
   // A V-bit of another angle would cut another chamfer: refused, naming both.
   setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 60.0)};
   const cam::DerivedOp other = cam::DeriveOperation(
