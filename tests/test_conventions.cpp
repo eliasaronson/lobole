@@ -647,9 +647,10 @@ TEST_CASE("every feature reference is reported by VisitFeatureRefs",
   // Fields that hold an id naming something OUTSIDE this feature list, which
   // VisitFeatureRefs must NOT report. Each needs a reason, not just a name.
   const std::set<std::string> kNotThisHistory = {
-      "sourcePart",      // Derived: a part SLOT, not a feature
-      "bodies",          // Derived: created_by ids in the SOURCE document
-      "sourceCreatedBy", // Derived: ditto, per snapshot body
+      "sourcePart",          // Derived: a part SLOT, not a feature
+      "bodies",              // Derived: created_by ids in the SOURCE document
+      "sourceCreatedBy",     // Derived: ditto, per snapshot body
+      "sourceConfiguration", // Derived: a configuration OF the source part
   };
 
   std::vector<std::string> problems;

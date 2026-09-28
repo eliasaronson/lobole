@@ -22,6 +22,9 @@ that need other documents), `src/remote/RemoteModeling.cpp` (RPCs).
   Import feature creates every body of a STEP (hundreds for a PCB), so a
   `created_by` filter cannot pick one out. A filter that selects nothing is
   refused, naming what the source has.
+- `configuration` (v133) — the source configuration the copy is taken in, by
+  id (`add_feature` also takes its name and stores the id). Absent: whichever
+  the source has active. See [Configurations](#configurations).
 - `placement {position, orientation}` — where the copy sits in this part;
   identity unless made from an in-context edit.
 - `reference` (default true) — see below.
@@ -85,11 +88,29 @@ ghosts are never copied further.
 `reference: false` makes the copy an ordinary body of this part — the way to
 use one part as a cutting tool for another.
 
+## Configurations
+
+A part with a configuration per variant is a family, and a Derived with a
+`configuration` takes one member of it: the chess set's pieces are one
+`piece` part with a configuration per rank, and each blank and each wood is a
+part that derives the member it needs. The snapshot is taken from the source
+regenerated under that configuration — the copy `ui::ConfiguredPartDocument`
+keeps, the same one a drawing view in a non-active configuration reads — so
+taking it never switches the source's own tab. Staleness compares against that
+configured copy's `TipChainHash`, not the live one: the tip hash moves with
+the configuration a part has active, and comparing against it called every
+copy of a non-active member stale.
+
+A configuration the source does not have (deleted, or a name that matches
+none) is refused, naming the ones it has, and so is one in which a feature of
+the source fails.
+
 ## Refusals
 
 Deriving from this part itself, or from a part whose derived chain reaches
 this part (`derived::WouldCycle`, naming the chain); from a part not in the
-project; a `bodies`/`body_names` filter the source does not satisfy.
+project; a `bodies`/`body_names` filter the source does not satisfy; a
+`configuration` the source does not have, or one it fails to build in.
 `derive_occurrence` outside an in-context edit, or on an occurrence that is not
 a neighbour, is refused.
 
@@ -97,8 +118,9 @@ a neighbour, is refused.
 
 RPC:
 
-- `add_feature {type: Derived, source_part, bodies?, body_names?, placement?,
-  reference?}` — the handler takes the snapshot through the project.
+- `add_feature {type: Derived, source_part, configuration?, bodies?,
+  body_names?, placement?, reference?}` — the handler takes the snapshot
+  through the project.
 - `update_derived {feature_id | index | all: true}`.
 - `derive_occurrence {occurrence, name?, reference?, bodies?, body_names?}` —
   during `edit_in_context` only; placement
@@ -128,7 +150,9 @@ copy and its source, no ghost curves in a drawing view); GUI
 `derived/tool_copies_the_other_part_as_a_ghost`,
 `derived/source_list_takes_the_snapshot`,
 `derived/a_ghost_is_not_drawn_in_assemblies`, and `defaults/derive` (refuses
-until a source exists). Goldens `v84-derived-servo`, `v85-derived-by-name`.
+until a source exists). Goldens `v84-derived-servo`, `v85-derived-by-name`,
+`v133-derived-configuration` (a copy taken in a configuration the source does
+not have active, and its stale check against that configuration).
 
 ## Not built
 

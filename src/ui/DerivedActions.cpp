@@ -1,4 +1,5 @@
 #include "ui/DerivedActions.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
@@ -121,7 +122,11 @@ std::string PointDerivedAt(AppState& state, DerivedFeature& feature,
     return "no active part";
   if (const std::string why = Refusal(state, source.slotId); !why.empty())
     return why;
-  const Document* src = PartDocById(state, source.slotId);
+  std::string why;
+  const Document* src = ConfiguredPartDocument(
+      state, source.slotId, feature.sourceConfiguration, &why);
+  if (src == nullptr)
+    return why;
   DerivedFeature trial = feature;
   trial.sourcePart = source.slotId;
   trial.sourceName = SlotName(state, source.slotId);
@@ -144,11 +149,15 @@ std::string SnapshotDerived(AppState& state, DerivedFeature& feature) {
   if (feature.sourcePart == 0)
     return "'" + feature.GetName() +
            "' has no source (its link was broken); it is a frozen copy";
-  const Document* src = PartDocById(state, feature.sourcePart);
-  if (src == nullptr)
+  if (PartDocById(state, feature.sourcePart) == nullptr)
     return "the source of '" + feature.GetName() + "' (" + feature.sourceName +
            ", id " + std::to_string(feature.sourcePart) +
            ") is not in this project";
+  std::string why;
+  const Document* src = ConfiguredPartDocument(
+      state, feature.sourcePart, feature.sourceConfiguration, &why);
+  if (src == nullptr)
+    return "'" + feature.GetName() + "': " + why;
   DerivedFeature trial = feature;
   trial.sourceName = SlotName(state, feature.sourcePart);
   if (const std::string why =
@@ -163,7 +172,15 @@ std::optional<bool> DerivedStale(AppState& state,
                                  const DerivedFeature& feature) {
   if (feature.sourcePart == 0)
     return false; // a broken link is a frozen copy: never behind anything
-  return derived::IsStale(feature, PartResolverFor(state));
+  // Compared in the configuration the copy was taken in: the source's tip
+  // hash moves with the configuration it has active, so comparing against
+  // the live one called a copy of the pawn stale whenever the part showed
+  // the king.
+  return derived::IsStale(feature, [&](uint64_t id) -> const Document* {
+    if (PartDocById(state, id) == nullptr)
+      return nullptr;
+    return ConfiguredPartDocument(state, id, feature.sourceConfiguration);
+  });
 }
 
 void CreateDerived(AppState& state) {

@@ -13,6 +13,7 @@
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
@@ -423,8 +424,35 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json::object();
   }
   if (m == "add_feature") {
-    auto feature = FeatureFromJsonNamed(p.at("feature"));
-    RejectUnknownFeatureFields(p.at("feature"), *feature);
+    json fj = p.at("feature");
+    // A Derived's configuration may be NAMED ("pawn"); the feature stores
+    // the id, which survives a rename. An unknown name is refused with the
+    // ones the source has, never read as "whichever is active".
+    if (fj.is_object() && fj.value("type", std::string{}) == "Derived" &&
+        fj.contains("configuration") && fj.at("configuration").is_string()) {
+      const std::string want = fj.at("configuration").get<std::string>();
+      const Document* src =
+          ui::PartDocById(state, fj.value("source_part", uint64_t{0}));
+      if (src == nullptr)
+        throw std::runtime_error("Derived: configuration '" + want +
+                                 "' names a configuration of source_part, "
+                                 "which is not a part of this project");
+      uint64_t id = 0;
+      std::string known;
+      for (const Configuration& c : src->GetConfigurations()) {
+        if (c.name == want)
+          id = c.id;
+        known += (known.empty() ? "" : ", ") + c.name;
+      }
+      if (id == 0)
+        throw std::runtime_error(
+            "Derived: the source part has no configuration '" + want +
+            "' (it has: " + (known.empty() ? std::string("none") : known) +
+            ")");
+      fj["configuration"] = id;
+    }
+    auto feature = FeatureFromJsonNamed(fj);
+    RejectUnknownFeatureFields(fj, *feature);
     // The GUI refuses a tool with missing inputs; the script API used to
     // accept one and commit a feature that does nothing (a fillet with no
     // edges regenerates happily). Same rule, both surfaces.

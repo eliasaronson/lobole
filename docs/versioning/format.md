@@ -213,6 +213,7 @@ here; the golden corpus and git history cover them.
 | 130 | Explode step `path` `[placement]`: `occurrence` is then a moving part inside that flexible placement ([assemblies](../assemblies/README.md#flexible-sub-assemblies)) |
 | 131 | CAM tool `shank_diameter`: how wide the tool is above its flutes; wider than the cutter, a cut deeper than the flutes is refused ([CAM setup](../cam/setup.md#reach)) |
 | 132 | Machine `rotary` `{along, chuck_end, word, top_moves}` (how the rotary is installed) and `holding` (chuck and tailstock sizes); setup `held_in`, `grip_mm`, `tailstock`, `chuck` ([4th axis](../cam/rotary.md#how-the-rotary-is-installed)) |
+| 133 | Derived `configuration`: the source's configuration the copy is taken in, by id; absent = whichever it has active ([Derived](../modeling/derived.md#configurations)) |
 
 ## The directory form
 

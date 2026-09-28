@@ -15,6 +15,7 @@
 #include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
+#include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/MassProps.h"
@@ -435,6 +436,59 @@ TEST_CASE("a derived copy picks source bodies by name", "[derived]") {
   both.bodyNames = {"Boss"};
   CHECK_THAT(derived::TakeSnapshot(both, *source, host),
              ContainsSubstring("narrow TOGETHER"));
+}
+
+// How tests/golden/v133-derived-configuration.json was made: the source
+// below with a configuration that suppresses its boss, derived IN that
+// configuration while the source shows its authored model. Set
+// DESIGNER_WRITE_GOLDEN=<path> to write it again.
+TEST_CASE("the v133 derived-configuration golden builds from this recipe",
+          "[derived][configuration]") {
+  auto source = MakeSource();
+  Configuration& bare = source->AddConfiguration("Bare");
+  bare.suppressedFeatures = {source->GetFeatures()[1]->GetId()};
+  const uint64_t bareId = bare.id;
+  // What ui::ConfiguredPartDocument hands TakeSnapshot: a copy regenerated
+  // under the configuration, the source itself untouched.
+  Document configured(*source);
+  REQUIRE(configured.SetActiveConfiguration(bareId));
+  REQUIRE(configured.GetBodies().size() == 1);
+  REQUIRE(source->GetBodies().size() == 2);
+
+  Document host;
+  auto d = std::make_unique<DerivedFeature>("Bare servo", 7);
+  d->sourceName = "Servo";
+  d->sourceConfiguration = bareId;
+  d->reference = false;
+  REQUIRE(derived::TakeSnapshot(*d, configured, host).empty());
+  host.AddFeature(std::move(d));
+  REQUIRE(host.Regenerate());
+  REQUIRE(host.GetBodies().size() == 1);
+  CHECK_THAT(host.GetBodies()[0].shape.Volume(),
+             WithinRel(20.0 * 10.0 * 5.0, 1e-6));
+  // Stale is judged in the copy's configuration: the configured source has
+  // not moved, while its authored model's tip is a different hash.
+  const auto* taken = dynamic_cast<const DerivedFeature*>(host.GetFeature(0));
+  REQUIRE(taken);
+  CHECK(derived::IsStale(*taken, [&](uint64_t) { return &configured; }) ==
+        std::optional<bool>{false});
+  CHECK(derived::IsStale(*taken, [&](uint64_t) { return source.get(); }) ==
+        std::optional<bool>{true});
+
+  const char* out = std::getenv("DESIGNER_WRITE_GOLDEN");
+  const fs::path path = out ? fs::path(out) : TempPath("derived-v133.json");
+  REQUIRE(testio::Save(host, path.string()));
+  auto reloaded = testio::Load(path.string());
+  REQUIRE(reloaded);
+  CHECK(reloaded->GetBodies().size() == 1);
+  const auto* back =
+      dynamic_cast<const DerivedFeature*>(reloaded->GetFeature(0));
+  REQUIRE(back);
+  CHECK(back->sourceConfiguration == bareId);
+  if (!out) {
+    std::error_code ec;
+    fs::remove(path, ec);
+  }
 }
 
 // How tests/golden/v85-derived-by-name.json was made: the source below,

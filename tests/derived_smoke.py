@@ -197,6 +197,34 @@ def main():
             "type": "Derived", "name": "x", "source_part": servo,
             "bodies": [1], "body_names": ["Lug"]})
 
+        # v133: a copy taken in a configuration the source does not have
+        # active -- one member of a family -- named, stored as its id, and
+        # judged fresh against that configuration, not the one showing.
+        d.call("set_active_part", part="servo")
+        lug_id = next(f["id"] for f in d.call("get_state")["features"]
+                      if f["name"] == "Lug")
+        bare = d.call("add_configuration", name="bare")["id"]
+        d.call("set_configuration", id=bare, suppressed_features=[lug_id])
+        d.call("set_active_part", part="jaw")
+        refused(d, "add_feature", "(it has: bare)", feature={
+            "type": "Derived", "name": "x", "source_part": servo,
+            "configuration": "bear"})
+        r = d.call("add_feature", feature={
+            "type": "Derived", "name": "bare servo", "source_part": servo,
+            "configuration": "bare", "reference": False})
+        expect(r["regen"]["ok"], r)
+        row = next(f for f in d.call("get_state")["features"]
+                   if f["name"] == "bare servo")
+        expect(row.get("configuration") == bare, row)
+        expect(row["stale"] is False, f"a configured copy reads stale: {row}")
+        mine = [b for b in bodies(d) if b["name"].endswith("Lug")]
+        expect(len(mine) == 1, f"the bare copy brought a lug: {bodies(d)}")
+        # The source's tab never left its authored model.
+        d.call("set_active_part", part="servo")
+        expect(d.call("list_configurations")["active"] == 0,
+               "taking the copy switched the source's configuration")
+        expect(len(bodies(d)) == 2, bodies(d))
+
         print("derived_smoke: ok")
     finally:
         app.terminate()

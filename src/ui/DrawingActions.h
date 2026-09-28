@@ -71,6 +71,16 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 // list_drawing_geometry name the feature a projected curve came from.
 Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId);
 
+// A part evaluated in `configuration`: the live document when that is 0 or
+// already active, else a copy regenerated under it and cached in
+// AppState::configuredSources until the part or its configurations move.
+// Null, with `error` (may be null) saying why, for a slot that is not a part,
+// a configuration it does not have (naming the ones it has), or one in which
+// a feature fails. Drawing views and Derived copies both read through this.
+const Document* ConfiguredPartDocument(AppState& state, uint64_t partId,
+                                       uint64_t configuration,
+                                       std::string* error = nullptr);
+
 // The part a VIEW draws: its source evaluated in the view's configuration
 // (the live document when that is 0 or already active, else a cached copy).
 // Null for assembly sources, a missing slot, or a configuration the part no

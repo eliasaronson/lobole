@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    132; // v132: how a machine's rotary is INSTALLED (`rotary`: along,
+    133; // v133: a Derived's `configuration` -- the source configuration the
+         //      copy is taken in (absent = the source's active one).
+         // v132: how a machine's rotary is INSTALLED (`rotary`: along,
          //      chuck_end, word, top_moves) and what holds a part in it
          //      (`holding`: the chuck and the tailstock); a setup's `held_in`,
          //      `grip_mm`, `tailstock` and `chuck`. A setup held in the

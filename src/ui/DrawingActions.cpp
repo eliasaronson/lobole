@@ -640,25 +640,31 @@ Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
   return nullptr;
 }
 
-const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
-                                    std::string* error) {
+const Document* ConfiguredPartDocument(AppState& state, uint64_t partId,
+                                       uint64_t configuration,
+                                       std::string* error) {
   const auto fail = [&](std::string why) -> const Document* {
     if (error)
       *error = std::move(why);
     return nullptr;
   };
-  const Document* live = DrawingSourceDocument(state, view.sourceDocId);
+  const Document* live = DrawingSourceDocument(state, partId);
   if (!live)
     return fail("source document is not a part");
-  if (view.configuration == 0 ||
-      live->ActiveConfiguration() == view.configuration)
+  if (configuration == 0 || live->ActiveConfiguration() == configuration)
     return live;
-  const Configuration* cfg = live->FindConfiguration(view.configuration);
-  if (!cfg)
+  const Configuration* cfg = live->FindConfiguration(configuration);
+  if (!cfg) {
+    std::string known;
+    for (const Configuration& c : live->GetConfigurations())
+      known += (known.empty() ? "" : ", ") + c.name + " (" +
+               std::to_string(c.id) + ")";
     return fail("the source part has no configuration " +
-                std::to_string(view.configuration) +
-                " any more; pick another for this view");
-  const std::pair<uint64_t, uint64_t> key{view.sourceDocId, view.configuration};
+                std::to_string(configuration) +
+                (known.empty() ? std::string(" (it has none)")
+                               : " (it has: " + known + ")"));
+  }
+  const std::pair<uint64_t, uint64_t> key{partId, configuration};
   const auto hit = state.configuredSources.find(key);
   const bool fresh =
       hit != state.configuredSources.end() && hit->second.doc &&
@@ -667,7 +673,7 @@ const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
       hit->second.configurationsRevision == live->ConfigurationsRevision();
   if (!fresh) {
     auto copy = std::make_unique<Document>(*live);
-    copy->SetActiveConfiguration(view.configuration);
+    copy->SetActiveConfiguration(configuration);
     // What the copy's own regeneration said. Nobody can LOOK at this
     // document — the model tab is on another configuration — so a feature
     // that failed here would otherwise show up only as the folded part
@@ -689,6 +695,21 @@ const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
     return cached.doc.get();
   }
   return hit->second.doc.get();
+}
+
+const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
+                                    std::string* error) {
+  const Document* live = DrawingSourceDocument(state, view.sourceDocId);
+  if (live && view.configuration != 0 &&
+      !live->FindConfiguration(view.configuration)) {
+    if (error)
+      *error = "the source part has no configuration " +
+               std::to_string(view.configuration) +
+               " any more; pick another for this view";
+    return nullptr;
+  }
+  return ConfiguredPartDocument(state, view.sourceDocId, view.configuration,
+                                error);
 }
 
 namespace {

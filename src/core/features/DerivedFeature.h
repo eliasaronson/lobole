@@ -69,6 +69,12 @@ public:
   // the name is what error messages say once the source is gone.
   uint64_t sourcePart = 0;
   std::string sourceName;
+  // The source's configuration the copy is taken in (v133), by id; 0 = the
+  // one the source has active when the snapshot is taken. One part with a
+  // configuration per variant (a chess piece per rank) is then a family a
+  // Derived can take any member of, where before it could only copy the
+  // variant that happened to be showing.
+  uint64_t sourceConfiguration = 0;
   // Which of the source's bodies, by their created_by id. Empty = all.
   std::vector<uint64_t> bodies;
   // ...and/or by NAME (v85). One Import feature creates every body of a

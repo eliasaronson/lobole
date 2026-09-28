@@ -902,6 +902,8 @@ json FeatureToJson(const Feature& feature) {
     // new source hash) invalidates everything after the feature.
     j["source_part"] = d->sourcePart;
     j["source_name"] = d->sourceName;
+    if (d->sourceConfiguration != 0) // v133; absent = the source's active one
+      j["configuration"] = d->sourceConfiguration;
     if (!d->bodies.empty())
       j["bodies"] = d->bodies;
     if (!d->bodyNames.empty())
@@ -1442,7 +1444,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "frame, or a re-import of your own export needs. The applied shift is "
      "reported as `recentred_by`"},
     {"Derived", 84,
-     "source_part (a part slot id), bodies?: [created_by ids] and/or "
+     "source_part (a part slot id), configuration?: the source's "
+     "configuration to copy, an id (or its name, which add_feature resolves) "
+     "-- absent = whichever the source has active; bodies?: [created_by ids] "
+     "and/or "
      "body_names?: [names] (both absent = all of the source's bodies; the "
      "names are what get_state shows, and are the only way to pick from the "
      "hundreds one Import creates), placement?: {position [x,y,z], orientation "
@@ -1937,6 +1942,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto d = std::make_unique<DerivedFeature>(
         name, j.at("source_part").get<uint64_t>());
     d->sourceName = j.value("source_name", std::string{});
+    d->sourceConfiguration = j.value("configuration", uint64_t{0}); // v133
     if (j.contains("bodies"))
       d->bodies = j.at("bodies").get<std::vector<uint64_t>>();
     if (j.contains("body_names")) // v85
