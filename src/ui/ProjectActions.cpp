@@ -355,10 +355,10 @@ bool WasRebuilt(const Document& doc) {
 }
 
 // One document of a project, read into a slot. Pure: no AppState.
-std::expected<PartSlot, std::string> ReadSlot(const nlohmann::json& entry,
-                                              size_t i,
-                                              const std::filesystem::path& root,
-                                              std::string* rebuiltReason) {
+std::expected<PartSlot, std::string>
+ReadSlot(const nlohmann::json& entry, size_t i,
+         const std::filesystem::path& root, std::string* rebuiltReason,
+         const DocumentIO::ProjectScope& scope) {
   const std::string name = entry.at("name").get<std::string>();
   const std::string dir = (root / entry.at("dir").get<std::string>()).string();
   const std::string type = entry.value("type", std::string("part"));
@@ -387,11 +387,16 @@ std::expected<PartSlot, std::string> ReadSlot(const nlohmann::json& entry,
   } else {
     slot.kind = DocKind::Part;
     const auto onDisk = DocumentIO::InspectGeometry(dir);
-    auto r = DocumentIO::Load(dir);
+    auto r = DocumentIO::Load(dir, scope);
     if (!r)
       return std::unexpected(r.error());
     if (WasRebuilt(**r))
       *rebuiltReason = RebuildReason(onDisk);
+    // The scope lives only as long as the read; AdoptProject points the part
+    // at the project's own (SyncProjectScope), whose regeneration then finds
+    // every feature cached.
+    (*r)->SetProjectSymbols(nullptr);
+    (*r)->SetProjectParameters(nullptr);
     slot.doc = std::move(*r);
     slot.commands = std::make_unique<CommandStack>();
   }
@@ -441,6 +446,23 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
     if (progress)
       progress->total.store(static_cast<int>(n));
 
+    // The project variables, evaluated BEFORE any part loads, so a part that
+    // uses one regenerates right the first time and keeps its baked
+    // geometry. Loaded without them, the chess set's piece part came up with
+    // king_h unknown, every feature on it failed, and each open rebuilt it
+    // from scratch before the adopt put it right.
+    std::vector<Parameter> projectParams;
+    for (const auto& pj :
+         out.index.value("parameters", nlohmann::json::array()))
+      projectParams.push_back({pj.at("name").get<std::string>(),
+                               pj.at("expression").get<std::string>(),
+                               pj.value("comment", std::string{}),
+                               0.0,
+                               {}});
+    SymbolTable projectSymbols;
+    EvaluateParameterTable(projectParams, projectSymbols, nullptr, {});
+    const DocumentIO::ProjectScope scope{&projectSymbols, &projectParams};
+
     // Every document is independent of the others until the adopt wires the
     // project scope in, so they load side by side, collected by index and
     // taken in order afterwards so the result does not depend on which
@@ -467,7 +489,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
         progress->building.push_back(name);
       }
       try {
-        slots[i] = ReadSlot(docs[i], i, fs::path(path), &reasons[i]);
+        slots[i] = ReadSlot(docs[i], i, fs::path(path), &reasons[i], scope);
       } catch (const std::exception& e) {
         slots[i] = std::unexpected(std::string(e.what()));
       }

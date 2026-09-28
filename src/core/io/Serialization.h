@@ -23,10 +23,21 @@ namespace DocumentIO {
 [[nodiscard]] std::expected<void, std::string> Save(const Document& doc,
                                                     const std::string& path);
 
+// The project scope a part's regeneration on load reads (Phase V): the
+// project variables' values and expressions. Both must outlive the load; the
+// loaded document keeps pointing at them until the caller repoints it.
+struct ProjectScope {
+  const SymbolTable* symbols = nullptr;
+  const std::vector<Parameter>* parameters = nullptr;
+};
+
 // On failure returns an unexpected error message. The returned document is
-// already regenerated.
+// already regenerated -- against `scope` when given. A part that uses a
+// project variable and was loaded without it regenerated with the variable
+// unknown: its features failed, its baked geometry did not match, and every
+// open rebuilt it from scratch before the project scope put it right.
 [[nodiscard]] std::expected<std::unique_ptr<Document>, std::string>
-Load(const std::string& path);
+Load(const std::string& path, const ProjectScope& scope = {});
 
 // Write `text` to `target` via a temp file + rename, so an interrupted write
 // can never leave a truncated file. Identical content is skipped entirely, so

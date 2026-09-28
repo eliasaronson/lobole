@@ -218,3 +218,53 @@ TEST_CASE("An open says which parts it rebuilt and why", "[open][baked]") {
   }
   fs::remove_all(proj);
 }
+
+// A part that uses a PROJECT variable regenerates against it on the read, not
+// only once the adopt wires the project scope in. Read without it, the chess
+// set's piece part came up with king_h unknown: every feature on it failed,
+// the baked geometry did not match, and each open rebuilt it from scratch
+// before the adopt put it right.
+TEST_CASE("A part using a project variable opens from its baked geometry",
+          "[open][baked][variables]") {
+  const fs::path proj = TempProject("open-project-var.dsgn");
+  const fs::path dir = proj / "parts" / "plate.dsgn";
+  fs::create_directories(dir.parent_path());
+  std::vector<Parameter> params{{"plate_w", "40", "", 0.0, {}}};
+  SymbolTable symbols;
+  EvaluateParameterTable(params, symbols, nullptr, {});
+  {
+    Document doc;
+    doc.SetProjectSymbols(&symbols);
+    doc.SetProjectParameters(&params);
+    // Through a part variable, as the piece's base_r reads king_h: a
+    // feature naming the project variable directly keeps its saved number
+    // when the name is unknown, a part variable has none to keep.
+    doc.SetParameter("half_w", "plate_w / 2");
+    auto box = std::make_unique<BoxFeature>("Plate", glm::vec3(0), 1, 10, 30);
+    box->widthExpr = "half_w * 2";
+    doc.AddFeature(std::move(box));
+    REQUIRE(doc.Regenerate());
+    REQUIRE(doc.GetBodies().size() == 1);
+    REQUIRE(testio::Save(doc, dir.string()));
+  }
+  std::ofstream(proj / "project.json")
+      << nlohmann::json{{"documents",
+                         {{{"name", "plate"},
+                           {"dir", "parts/plate.dsgn"},
+                           {"type", "part"},
+                           {"id", 1}}}},
+                        {"parameters",
+                         {{{"name", "plate_w"}, {"expression", "40"}}}},
+                        {"active", 0}}
+             .dump(2);
+  const auto r = ui::ReadProject(proj.string());
+  REQUIRE(r.has_value());
+  CHECK(r->rebuiltParts == 0);
+  REQUIRE(r->parts.size() == 1);
+  const Document& plate = *r->parts[0].doc;
+  REQUIRE(plate.GetBodies().size() == 1);
+  CHECK(plate.GetFeatures()[0]->GetError().empty());
+  // The read leaves no pointer into its own, now gone, scope.
+  CHECK(plate.ProjectSymbols() == nullptr);
+  fs::remove_all(proj);
+}

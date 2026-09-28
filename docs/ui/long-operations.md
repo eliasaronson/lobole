@@ -212,7 +212,13 @@ stays up across the part → assembly tab switch
 - `ReadProject(path, progress) -> LoadedProject` is pure: it parses
   `project.json` and loads every document, the catalogs, sections and
   parameters into a plain struct, touching no `AppState`. Parts are
-  independent documents and load in parallel (`parallel::For`).
+  independent documents and load in parallel (`parallel::For`). The project
+  variables are evaluated first and handed to every part's load
+  (`DocumentIO::ProjectScope`), so a part that uses one regenerates right the
+  first time and keeps its baked geometry; loaded without them it failed,
+  refused its bake, and rebuilt on every open. The read then clears that
+  pointer: the scope is its own, and the adopt points the part at the
+  project's.
 - `AdoptProject(state, LoadedProject&&)` swaps the slots in, activates,
   syncs the project scope, solves an assembly and frames — milliseconds, on
   the main thread.

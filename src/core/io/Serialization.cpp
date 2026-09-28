@@ -757,7 +757,8 @@ void CheckIndexIdsUnique(const json& ids, const char* what) {
 } // namespace
 
 std::unique_ptr<Document> LoadDir(const std::string& dirPath,
-                                  std::string* error) {
+                                  std::string* error,
+                                  const ProjectScope& scope) {
   namespace fs = std::filesystem;
   try {
     std::ifstream in(fs::path(dirPath) / "index.json");
@@ -785,6 +786,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     }
 
     auto doc = std::make_unique<Document>();
+    doc->SetProjectSymbols(scope.symbols);
+    doc->SetProjectParameters(scope.parameters);
     doc->SetCommitGeometry(index.value("commit_geometry", true));
     doc->SetCatalogsRaw(index.value("catalogs", json::array()));
     doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
@@ -1441,10 +1444,11 @@ static bool SaveImpl(const Document& doc, const std::string& path,
 }
 
 static std::unique_ptr<Document> LoadImpl(const std::string& path,
-                                          std::string* error) {
+                                          std::string* error,
+                                          const ProjectScope& scope) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
-    return LoadDir(normalized, error);
+    return LoadDir(normalized, error, scope);
   }
   try {
     std::ifstream in(path);
@@ -1473,6 +1477,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     }
 
     auto doc = std::make_unique<Document>();
+    doc->SetProjectSymbols(scope.symbols);
+    doc->SetProjectParameters(scope.parameters);
     doc->SetCommitGeometry(j.value("commit_geometry", true));
     doc->SetCatalogsRaw(j.value("catalogs", json::array()));
     doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
@@ -2098,9 +2104,9 @@ std::expected<void, std::string> Save(const Document& doc,
 }
 
 std::expected<std::unique_ptr<Document>, std::string>
-Load(const std::string& path) {
+Load(const std::string& path, const ProjectScope& scope) {
   std::string error;
-  if (auto doc = LoadImpl(path, &error))
+  if (auto doc = LoadImpl(path, &error, scope))
     return doc;
   return std::unexpected(error);
 }
