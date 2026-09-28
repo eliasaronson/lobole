@@ -282,6 +282,46 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
   const int di = static_cast<int>(std::ceil(R / model.res)) + 1;
   const int n = model.nTheta;
 
+  // The highest the model stands in each BLOCK of cells. A cell's cutter can
+  // rest no higher than the highest cell under it, so once the best contact
+  // found stands within TipHeight(d) of that, no cell d or further out can
+  // raise it -- and the kernel below walks outward from its centre and stops
+  // there. The answer is the full kernel's, exactly: only cells that cannot
+  // win are skipped. On a smooth turned surface that is most of the kernel;
+  // the pawn blank's finish-and-rest took 334 s visiting every one.
+  constexpr int kBlock = 16;
+  const int bx = (model.nx + kBlock - 1) / kBlock;
+  const int bt = (n + kBlock - 1) / kBlock;
+  std::vector<float> blockMax(static_cast<size_t>(bx) * bt, 0.0f);
+  for (int j = 0; j < n; j++)
+    for (int i = 0; i < model.nx; i++) {
+      float& m = blockMax[static_cast<size_t>(j / kBlock) * bx + i / kBlock];
+      m = std::max(m, model.At(i, j));
+    }
+  const auto maxUnder = [&](int i0, int i1, int j0, int j1) {
+    // i clamped to the map, j wrapping round the axis (j1 - j0 < n).
+    const int b0 = std::max(0, i0) / kBlock;
+    const int b1 = std::min(model.nx - 1, i1) / kBlock;
+    float m = 0.0f;
+    // Split where the range wraps: nTheta is rarely a multiple of the
+    // block, so a block index past the last does not continue at block 0.
+    const auto span = [&](int lo, int hi) {
+      for (int t = lo / kBlock; t <= hi / kBlock; t++)
+        for (int b = b0; b <= b1; b++)
+          m = std::max(m, blockMax[static_cast<size_t>(t) * bx + b]);
+    };
+    if (j0 < 0) {
+      span(j0 + n, n - 1);
+      span(0, std::min(j1, n - 1));
+    } else if (j1 >= n) {
+      span(j0, n - 1);
+      span(0, std::min(j1 - n, n - 1));
+    } else {
+      span(j0, j1);
+    }
+    return static_cast<double>(m);
+  };
+
   // Over THETA ROWS, each writing only its own: nothing is shared, so the
   // rows are independent exactly as the planar drop cutter's are, and it
   // uses the same `parallel::For`. This function ran on one core and `perf`
@@ -302,17 +342,29 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
       // assumes one lap at most.
       const int dj = std::min(
           static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1, n / 2);
+      const double top = maxUnder(i - di, i + di, j - dj, j + dj);
       double best = 0.0;
       bool touched = false;
-      for (int a = -di; a <= di; a++) {
+      // Outward from the centre along X (0, +1, -1, +2, ...), and along
+      // theta within each: TipHeight only grows with the distance, so the
+      // first offset that cannot beat `best` ends its row, and the first row
+      // that cannot ends the kernel.
+      for (int k = 0; k <= 2 * di; k++) {
+        const int a = (k & 1) ? (k + 1) / 2 : -(k / 2);
+        const double ax = a * model.res;
+        const double ax2 = ax * ax;
+        if (ax2 > R2) {
+          if (k & 1)
+            continue; // its mirror, one step on, may still be inside
+          break;
+        }
+        if (touched && top - TipHeight(tool, std::abs(ax)) <= best)
+          break;
         const int ni = i + a;
         if (ni < 0 || ni >= model.nx)
           continue;
-        const double ax = a * model.res;
-        const double ax2 = ax * ax;
-        if (ax2 > R2)
-          continue;
-        for (int b = -dj; b <= dj; b++) {
+        for (int m = 0; m <= 2 * dj; m++) {
+          const int b = (m & 1) ? (m + 1) / 2 : -(m / 2);
           // Squared, and the root taken only for a cell that is inside the
           // cutter. `std::hypot` was a third of the profile on its own: it is
           // careful about overflow, which a distance of a few millimetres
@@ -320,8 +372,17 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
           // including the fifth of them outside the circle.
           const double by = b * arc;
           const double d2 = ax2 + by * by;
-          if (d2 > R2)
-            continue;
+          if (d2 > R2) {
+            if (m & 1)
+              continue;
+            break;
+          }
+          const double drop = TipHeight(tool, std::sqrt(d2));
+          if (touched && top - drop <= best) {
+            if (m & 1)
+              continue;
+            break;
+          }
           int nj = j + b;
           if (nj < 0)
             nj += n;
@@ -330,7 +391,7 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
           const double s = model.At(ni, nj);
           if (s <= 0.0)
             continue; // off the part: nothing there to rest on
-          const double tip = s - TipHeight(tool, std::sqrt(d2));
+          const double tip = s - drop;
           if (!touched || tip > best) {
             best = tip;
             touched = true;
@@ -340,6 +401,41 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
       out.Set(i, j, static_cast<float>(touched ? best : 0.0));
     }
   });
+  return out;
+}
+
+RadiusMap ResampleRotary(const RadiusMap& src, const RadiusMap& like) {
+  RadiusMap out = like;
+  if (src.nx <= 0 || src.nTheta <= 0 || like.nx <= 0 || like.nTheta <= 0)
+    return out;
+  const int n = src.nTheta;
+  const double dTheta = 2.0 * 3.14159265358979323846 / n;
+  for (int j = 0; j < like.nTheta; j++) {
+    // Cell centres are at (k + 0.5) steps; `u` counts from the first one.
+    const double tj = like.CellTheta(j) / dTheta - 0.5;
+    const int j0 = static_cast<int>(std::floor(tj));
+    const double fj = tj - j0;
+    const int ja = ((j0 % n) + n) % n;
+    const int jb = (ja + 1) % n;
+    for (int i = 0; i < like.nx; i++) {
+      const double ti = (like.CellX(i) - src.x0) / src.res - 0.5;
+      const int i0 =
+          std::clamp(static_cast<int>(std::floor(ti)), 0, src.nx - 1);
+      const int i1 = std::min(i0 + 1, src.nx - 1);
+      const double fi = std::clamp(ti - i0, 0.0, 1.0);
+      const float a = src.At(i0, ja), b = src.At(i1, ja);
+      const float c = src.At(i0, jb), d = src.At(i1, jb);
+      float v;
+      if (a <= 0.0f || b <= 0.0f || c <= 0.0f || d <= 0.0f) {
+        const int ni = fi < 0.5 ? i0 : i1;
+        v = src.At(ni, fj < 0.5 ? ja : jb);
+      } else {
+        v = static_cast<float>((1 - fj) * ((1 - fi) * a + fi * b) +
+                               fj * ((1 - fi) * c + fi * d));
+      }
+      out.Set(i, j, v);
+    }
+  }
   return out;
 }
 

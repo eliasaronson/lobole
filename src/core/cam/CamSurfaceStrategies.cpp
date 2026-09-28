@@ -472,7 +472,22 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
                  std::to_string(op.restFromTool) + ", is not in this setup";
       return;
     }
-    const RadiusMap bigCl = RotaryCL(model, *bigger);
+    // The larger cutter's surface on ITS OWN grid, read here by bilinear
+    // interpolation: on this cutter's finer one it cost ~4x this pass's own
+    // surface (the kernel grows with the cutter, the grid with this one), and
+    // was most of the pawn blank's 157 s. It is the envelope of a ball larger
+    // than this one, smooth to well inside the rest threshold at its own
+    // resolution.
+    const double bigRes =
+        std::max(res, DerivedDropRes(*bigger, 0.0, DerivedCusp(*bigger, 0.0)));
+    RadiusMap bigModel = SampleModelRotary(
+        bodies, MakeRotaryStock(x0 - past, x1 + past, rad, bigRes));
+    if (op.stockToLeave > 0.0)
+      for (float& v : bigModel.r)
+        if (v > 0.0f)
+          v = static_cast<float>(v + op.stockToLeave);
+    const RadiusMap bigOwn = RotaryCL(bigModel, *bigger);
+    const RadiusMap bigCl = ResampleRotary(bigOwn, cl);
     const double dTheta = 2.0 * 3.14159265358979323846 / cl.nTheta;
     // Radius for height: the tool comes from outside with its tip innermost,
     // and across the axis the pitch is ARC length, which grows with the

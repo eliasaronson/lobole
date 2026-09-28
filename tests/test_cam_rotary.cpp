@@ -695,6 +695,81 @@ TEST_CASE("cam rotary: the stock mesh is a closed tube facing outward",
   CHECK_THAT(m.Volume(), WithinRel(field, 0.01));
 }
 
+// RotaryCL skips the cells under the cutter that cannot raise it (the best
+// contact already stands within TipHeight of the highest cell around). The
+// skip must never change the answer: here it is checked cell for cell against
+// the whole kernel, on a surface with steps, a groove, a ridge and a gap off
+// the part, for a ball, a flat and a V-bit -- on a grid whose cells round
+// the axis are not a whole number of the pruning's blocks, where a kernel
+// wrapping past the last cell once read the wrong block.
+TEST_CASE("cam rotary: the pruned CL equals the full kernel's",
+          "[cam][rotary]") {
+  cam::RadiusMap model = cam::MakeRotaryStock(0.0, 30.0, 12.0, 0.1);
+  for (int j = 0; j < model.nTheta; j++)
+    for (int i = 0; i < model.nx; i++) {
+      const double x = model.CellX(i);
+      const double th = model.CellTheta(j);
+      double r = 8.0 + 0.8 * std::sin(3.0 * th) + 0.05 * x;
+      if (x > 10.0 && x < 11.0)
+        r -= 2.5; // a groove narrower than the ball
+      if (x > 18.0 && x < 18.4)
+        r += 1.5; // a thin ridge
+      if (x > 26.0)
+        r = 0.0; // off the part
+      model.Set(i, j, static_cast<float>(std::max(0.0, r)));
+    }
+  const auto brute = [&](const cam::Tool& tool) {
+    cam::RadiusMap out = model;
+    const double R = tool.diameter * 0.5;
+    const int n = model.nTheta;
+    for (int j = 0; j < n; j++)
+      for (int i = 0; i < model.nx; i++) {
+        const double arc = model.ArcAt(std::max<double>(model.At(i, j), 0.01));
+        const int di = static_cast<int>(std::ceil(R / model.res)) + 1;
+        const int dj = std::min(
+            static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1, n / 2);
+        double best = 0.0;
+        bool touched = false;
+        for (int a = -di; a <= di; a++)
+          for (int b = -dj; b <= dj; b++) {
+            const int ni = i + a;
+            if (ni < 0 || ni >= model.nx)
+              continue;
+            const double d2 = a * model.res * a * model.res + b * arc * b * arc;
+            if (d2 > R * R)
+              continue;
+            const double s = model.At(ni, ((j + b) % n + n) % n);
+            if (s <= 0.0)
+              continue;
+            const double tip = s - cam::TipHeight(tool, std::sqrt(d2));
+            if (!touched || tip > best) {
+              best = tip;
+              touched = true;
+            }
+          }
+        out.Set(i, j, static_cast<float>(touched ? best : 0.0));
+      }
+    return out;
+  };
+  for (const auto type :
+       {cam::ToolType::Ball, cam::ToolType::Flat, cam::ToolType::VBit}) {
+    cam::Tool tool;
+    tool.number = 1;
+    tool.diameter = 3.0;
+    tool.type = type;
+    tool.tipAngleDeg = 60.0;
+    const cam::RadiusMap fast = cam::RotaryCL(model, tool);
+    const cam::RadiusMap full = brute(tool);
+    REQUIRE(fast.r.size() == full.r.size());
+    size_t differ = 0;
+    for (size_t k = 0; k < fast.r.size(); k++)
+      if (fast.r[k] != full.r[k])
+        differ++;
+    INFO("tool type " << static_cast<int>(type));
+    CHECK(differ == 0);
+  }
+}
+
 TEST_CASE("cam rotary: the CL surface at the rolling pin's size",
           "[cam][.bench]") {
   // Not a gate -- hidden by `.` -- a stopwatch. The pin's finishing grid:

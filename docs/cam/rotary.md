@@ -121,7 +121,11 @@ ALONG the axis to that face's extent (it still turns all the way round) —
 **Limit to a face** / **Whole length** in the verb window. It works on the
 cutter-location radius map `RotaryCL` (the model's radius field dilated by
 the tool), and it reads no `top_z`/`bottom_z` (those are filled with the
-blank's diameter for display only).
+blank's diameter for display only). `RotaryCL` walks each cell's kernel
+outward from its centre and stops once the best contact stands within
+`TipHeight` of the highest cell under the cutter (a per-block maximum): the
+answer is the full kernel's, cell for cell (`cam rotary: the pruned CL equals
+the full kernel's`), and a smooth turned surface visits a fraction of it.
 
 ### Patterns (`rotary_pattern`)
 
@@ -182,7 +186,12 @@ blank's diameter for display only).
   rough verb derives.
 - `rest_from_tool` works on the rotary op as on the raster
   ([operations.md](operations.md#rough-a-surface-and-rest-machining)), with
-  radius for height and arc length across the axis.
+  radius for height and arc length across the axis. The larger cutter's
+  surface is computed on its OWN grid and read onto the rest pass's by
+  `ResampleRotary` (bilinear, nearest at the part's edge): on the rest
+  cutter's finer grid it cost four times the pass's own surface, and was
+  most of the chess pawn blank's 334 s (now 71 s, one pass of which is the
+  1.5 mm ball's own surface on its 0.037 mm grid).
 - **Add operation** in the panel adds another rotary pass on a setup that
   already holds one (`cam::AddOperationType`); a 4th-axis machine with a plate
   clamped to the bed is still a 3-axis job and gets the whole-part cut-out.
