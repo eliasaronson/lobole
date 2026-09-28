@@ -326,10 +326,9 @@ void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
   for (int i = 1; i <= steps; i++) {
     const double t = static_cast<double>(i) / steps;
     const double a = 2.0 * std::numbers::pi * revolutions * t;
-    Emit(tp, Move::Kind::Cut,
-         {centre.x + radius * std::cos(a), centre.y + radius * std::sin(a),
-          fromZ - descend * t},
-         tool.feedPlunge);
+    const glm::dvec3 to(centre.x + radius * std::cos(a),
+                        centre.y + radius * std::sin(a), fromZ - descend * t);
+    Emit(tp, Move::Kind::Cut, to, EntryFeed(tool, tp.moves.back().to, to));
   }
   // One flat turn at depth: it clears the disc the spiral only grazed, and
   // it leaves the tool on a known circle for the first ring to join.
@@ -433,12 +432,26 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   // their end (so a ring can link to the next at depth), which means the
   // lateral rapid below can start from the bottom of a cut — and a rapid that
   // climbs and travels at once travels through whatever is in the way.
-  if (!tp.moves.empty() && tp.moves.back().to.z < safeZ - 1e-9)
+  //
+  // ...unless the tool is ALREADY where this pass begins: the last pass left
+  // it down, at this point, at the depth this one ramps from (the caller
+  // passed retract = false and chained `startS`). Then there is nothing to
+  // lift for -- the ramp carries straight on, the tool never stops against
+  // the wall so it leaves no dwell mark, and no pass climbs out and feeds
+  // back down through the slot the last one cut (the smart-speaker baffle's
+  // ten screw holes spent two minutes doing that).
+  const bool stillDown =
+      !tp.moves.empty() &&
+      glm::length(glm::dvec2(tp.moves.back().to) - begin) < 1e-6 &&
+      std::abs(tp.moves.back().to.z - from) < 1e-6;
+  if (!stillDown) {
+    if (!tp.moves.empty() && tp.moves.back().to.z < safeZ - 1e-9)
+      Emit(tp, Move::Kind::Rapid,
+           {tp.moves.back().to.x, tp.moves.back().to.y, safeZ}, 0.0);
+    Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
     Emit(tp, Move::Kind::Rapid,
-         {tp.moves.back().to.x, tp.moves.back().to.y, safeZ}, 0.0);
-  Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
-  Emit(tp, Move::Kind::Rapid,
-       {begin.x, begin.y, RapidFloor(from, stockTop, safeZ)}, 0.0);
+         {begin.x, begin.y, RapidFloor(from, stockTop, safeZ)}, 0.0);
+  }
 
   // Tabs, as arc-length intervals measured from pts[0]. The DESCENT has to
   // know about them as much as the lap does: it takes most of a lap to get
@@ -542,8 +555,14 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
            {a.x, a.y, zStart}, descending ? tool.feedPlunge : tool.feedCut);
       currentZ = zStart;
     }
+    // The ramp at EntryFeed: the plunge feed holds only its vertical part.
+    // Measured from where the tool IS, not from the ramp's own line: the
+    // first segment starts at the rapid floor above it, and is as steep as
+    // that makes it. Not a separate plunge -- above an op whose top is below
+    // the stock top that stretch is uncut stock, not the slot of the pass
+    // before, and a profile never plunges.
     Emit(tp, Move::Kind::Cut, {b.x, b.y, zEnd},
-         s <= rampLen + 1e-9 ? tool.feedPlunge : tool.feedCut);
+         EntryFeed(tool, tp.moves.back().to, {b.x, b.y, zEnd}));
     currentZ = zEnd;
     prev = s;
   }

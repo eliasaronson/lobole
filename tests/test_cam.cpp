@@ -98,7 +98,15 @@ TEST_CASE("cam: an outside profile runs one tool radius clear of the part",
   CHECK(tp.moves[2].kind == cam::Move::Kind::Cut);
   CHECK(tp.moves[2].to.z < 21.0); // descending...
   CHECK(tp.moves[2].to.z > 0.0);  // ...but not all the way in one move
-  CHECK_THAT(tp.moves[2].feed, WithinRel(200.0, 1e-9)); // at plunge feed
+  // Held to the plunge feed only where it goes DOWN (EntryFeed): its
+  // vertical speed is at most the plunge feed, its feed at most the cutting
+  // feed, and the rest of the ramp, at 3 degrees, runs at the cutting feed.
+  {
+    const glm::dvec3 d = tp.moves[2].to - tp.moves[1].to;
+    CHECK(tp.moves[2].feed * -d.z / glm::length(d) <= 200.0 + 1e-9);
+    CHECK(tp.moves[2].feed <= 600.0 + 1e-9);
+  }
+  CHECK_THAT(tp.moves[3].feed, WithinRel(600.0, 1e-9));
   // No vertical plunge anywhere in a profile.
   for (const cam::Move& m : tp.moves)
     CHECK(m.kind != cam::Move::Kind::Plunge);
@@ -1086,6 +1094,202 @@ TEST_CASE("cam: a pass never rapids to a depth nothing cleared", "[cam]") {
   const cam::Verdict skim = rapidsFor(/*topZ=*/12.3, /*stepdown=*/4.0);
   INFO("skim, first bad line " << skim.firstBadLine);
   CHECK(skim.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam: an entry holds only its vertical speed to the plunge feed",
+          "[cam]") {
+  cam::Tool t;
+  t.feedCut = 1200.0;
+  t.feedPlunge = 400.0;
+  const glm::dvec3 o(0.0);
+  // Level, and rising: the cutting feed. Straight down: the plunge feed.
+  CHECK_THAT(cam::EntryFeed(t, o, {10, 0, 0}), WithinRel(1200.0, 1e-12));
+  CHECK_THAT(cam::EntryFeed(t, o, {10, 0, 2}), WithinRel(1200.0, 1e-12));
+  CHECK_THAT(cam::EntryFeed(t, o, {0, 0, -5}), WithinRel(400.0, 1e-12));
+  // A 3 degree ramp comes down at 1200 sin 3 = 63 mm/min at the cutting
+  // feed, far under the plunge feed: the cutting feed it is.
+  const double a3 = glm::radians(3.0);
+  CHECK_THAT(cam::EntryFeed(t, o, {std::cos(a3), 0, -std::sin(a3)}),
+             WithinRel(1200.0, 1e-12));
+  // At 60 degrees the vertical part governs: plunge / sin 60.
+  const double a60 = glm::radians(60.0);
+  CHECK_THAT(cam::EntryFeed(t, o, {std::cos(a60), 0, -std::sin(a60)}),
+             WithinRel(400.0 / std::sin(a60), 1e-12));
+}
+
+TEST_CASE("cam: a closed profile stays down from pass to pass", "[cam]") {
+  // With no lead-out to leave by, a pass that lifts only climbs out and
+  // feeds back down the slot it just cut -- two minutes of the
+  // smart-speaker baffle's screw holes. The next pass ramps on instead.
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 20.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 5.0;
+  setup.operations.push_back(op);
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  REQUIRE(tp.error.empty());
+  size_t firstCut = 0, lastCut = 0;
+  for (size_t i = 0; i < tp.moves.size(); i++)
+    if (tp.moves[i].kind != cam::Move::Kind::Rapid) {
+      if (firstCut == 0)
+        firstCut = i;
+      lastCut = i;
+    }
+  int rapidsBetween = 0;
+  for (size_t i = firstCut; i < lastCut; i++)
+    rapidsBetween += tp.moves[i].kind == cam::Move::Kind::Rapid;
+  CHECK(rapidsBetween == 0);
+  CHECK_THAT(tp.MinZ(), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(tp.moves.back().to.z, WithinAbs(setup.safeZ, 1e-9));
+
+  // With a lead-out it still lifts after every pass, arcs stacked.
+  setup.operations[0].leadArcs = true;
+  const cam::Toolpath led =
+      cam::Generate(setup, setup.operations[0], doc->GetBodies());
+  int lifts = 0;
+  for (const cam::Move& m : led.moves)
+    lifts += m.kind == cam::Move::Kind::Rapid && m.to.z >= setup.safeZ - 1e-9;
+  CHECK(lifts >= 4); // one per pass, and the approach
+}
+
+TEST_CASE("cam: an annular pocket is cleared inside out, walls last", "[cam]") {
+  // The baffle's W170S recess in miniature: a flange recess round a through
+  // opening, a band of tool centres 14 mm wide. Cut level by level it
+  // alternated between its two edges and re-entered by ramp on every ring,
+  // walls first, and its last ring swept only what its neighbours had.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Panel", glm::vec3(0, 0, 0),
+                                               110.0, 110.0, 16.0));
+  const uint64_t panel = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Recess", glm::vec3(55, 55, 13), glm::vec3(0, 0, 1), 45.0, 4.0));
+  const uint64_t recess = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Recessed", panel, recess,
+                                                   BooleanOp::Subtract));
+  const uint64_t recessed = doc->GetFeature(2)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Opening", glm::vec3(55, 55, -1), glm::vec3(0, 0, 1), 25.0, 18.0));
+  const uint64_t opening = doc->GetFeature(3)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Baffle", recessed, opening,
+                                                   BooleanOp::Subtract));
+  cam::Setup s = BasicSetup();
+  s.stock.margin = glm::dvec3(0.0);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket;
+  op.side = cam::Side::Inside;
+  op.topZ = 16.0;
+  op.bottomZ = 13.0;
+  op.stepdown = 1.5;
+  op.stepover = 0.45;
+  op.targets = {cam::Target{0, UpFaceAt(*doc, 13.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  s.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  // The rings of each depth, by tool-centre radius, in the order cut.
+  std::map<double, std::vector<double>> rings; // z -> radii
+  for (const cam::Move& m : paths[0].moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    const double r =
+        std::round(std::hypot(m.to.x - 55.0, m.to.y - 55.0) * 10) / 10;
+    auto& seq = rings[m.to.z];
+    // A lap is many moves at one radius; a link between rings is one short
+    // move, whose end is already on the next ring.
+    if (seq.empty() || std::abs(seq.back() - r) > 0.5)
+      seq.push_back(r);
+  }
+  const auto isRing = [](double r) { return r > 27.5 && r < 42.5; };
+  for (const double z : {14.5, 13.0}) {
+    INFO("depth " << z);
+    REQUIRE(rings.count(z) == 1);
+    std::vector<double> seq;
+    for (const double r : rings[z])
+      if (isRing(r) && (seq.empty() || std::abs(seq.back() - r) > 0.5))
+        seq.push_back(r);
+    std::string said;
+    for (const double r : seq)
+      said += std::to_string(r) + " ";
+    INFO("rings cut: " << said);
+    // Five rings, not six: of the two that meet in the middle of the band,
+    // the one its neighbours already sweep is not cut.
+    std::set<double> distinct(seq.begin(), seq.end());
+    CHECK(distinct.size() == 5);
+    // Walls last on their side: the outer wall (tool centre at 42) after
+    // every ring outside the middle, the inner one (28) after every ring
+    // inside it.
+    const auto at = [&](double r) {
+      return std::find_if(seq.begin(), seq.end(),
+                          [&](double x) { return std::abs(x - r) < 0.2; }) -
+             seq.begin();
+    };
+    REQUIRE(at(42.0) < static_cast<long>(seq.size()));
+    REQUIRE(at(28.0) < static_cast<long>(seq.size()));
+    CHECK(at(39.3) < at(42.0));
+    CHECK(at(30.7) < at(28.0));
+    // It starts in the middle of the band, not at a wall.
+    CHECK(std::abs(seq.front() - 35.0) < 2.0);
+  }
+  // Two entries per depth (one per side of the band), not one per ring.
+  int lifts = 0;
+  for (const cam::Move& m : paths[0].moves)
+    lifts += m.kind == cam::Move::Kind::Rapid && m.to.z >= s.safeZ - 1e-9;
+  CHECK(lifts <= 2 * 2 * 2 + 1);
+
+  // And it is still the same pocket: nothing gouged, nothing bitten deeper
+  // than a pass -- the middle ring, first now, is a full-width slot at the
+  // stepdown, which is exactly the allowance.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.25);
+  CHECK(v.maxGouge < 0.05);
+  CHECK(v.overBites == 0);
+  // ...and nothing left standing in the band. Dropping a ring is only
+  // right when its neighbours sweep ALL of it: at a coarser threshold the
+  // baffle kept a hair of MDF 3 mm tall between two rings 0.05 mm apart.
+  INFO("leftover " << v.maxLeftover << " at " << v.leftoverAt.x << ","
+                   << v.leftoverAt.y);
+  CHECK(v.maxLeftover < 0.05);
+
+  // The case that needs the ring: a band 14.15 mm wide, as on the baffle,
+  // where the two rings either side of the middle stop 0.05 mm apart. The
+  // middle ring adds only that, and it has to be cut.
+  auto doc2 = std::make_unique<Document>();
+  doc2->AddFeature(std::make_unique<BoxFeature>("Panel", glm::vec3(0, 0, 0),
+                                                110.0, 110.0, 16.0));
+  const uint64_t panel2 = doc2->GetFeature(0)->GetId();
+  doc2->AddFeature(std::make_unique<CylinderFeature>(
+      "Recess", glm::vec3(55, 55, 13), glm::vec3(0, 0, 1), 45.15, 4.0));
+  doc2->AddFeature(std::make_unique<BooleanFeature>(
+      "Recessed", panel2, doc2->GetFeature(1)->GetId(), BooleanOp::Subtract));
+  doc2->AddFeature(std::make_unique<CylinderFeature>(
+      "Opening", glm::vec3(55, 55, -1), glm::vec3(0, 0, 1), 25.0, 18.0));
+  doc2->AddFeature(std::make_unique<BooleanFeature>(
+      "Baffle", doc2->GetFeature(2)->GetId(), doc2->GetFeature(3)->GetId(),
+      BooleanOp::Subtract));
+  cam::Setup s2 = s;
+  s2.operations[0].targets = {cam::Target{0, UpFaceAt(*doc2, 13.0)}};
+  REQUIRE(s2.operations[0].targets[0].ref.IsSet());
+  const std::vector<cam::Toolpath> paths2 =
+      cam::GenerateAll(s2, doc2->GetBodies());
+  REQUIRE(paths2.size() == 1);
+  REQUIRE(paths2[0].error.empty());
+  std::string gcode2;
+  REQUIRE(cam::PostProcess("mach3", s2, paths2, {}, gcode2, &error));
+  const cam::Verdict v2 = cam::VerifyGcode(gcode2, s2, doc2->GetBodies(), 0.25);
+  INFO("hair: leftover " << v2.maxLeftover << " at " << v2.leftoverAt.x << ","
+                         << v2.leftoverAt.y);
+  CHECK(v2.maxLeftover < 0.05);
 }
 
 TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {

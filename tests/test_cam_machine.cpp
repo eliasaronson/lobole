@@ -87,8 +87,9 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   CHECK(gcode.find("M5") != std::string::npos);
   CHECK(gcode.find("M30") != std::string::npos);
   // Feed appears on cutting moves, and modally — not on every line.
+  // (The plunge feed, F200, appears only on a move steep enough to need it,
+  // and this job's shallow ramps run at the cutting feed: EntryFeed.)
   CHECK(gcode.find("F600") != std::string::npos);
-  CHECK(gcode.find("F200") != std::string::npos);
 
   // No coordinate is ever "nan". The first retract happens before anything
   // has moved, and passing the modal X/Y through emitted "G0 Xnan Ynan Z25"

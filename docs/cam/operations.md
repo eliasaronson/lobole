@@ -102,6 +102,23 @@ is scrap.
   by plunging: a vertical plunge with a non-centre-cutting end mill rubs. The
   lap then starts where the ramp finished. A loop shorter than the ramp
   descends over one lap.
+- **Entry feed** (`EntryFeed`, `CamJob.h`). The plunge feed exists to
+  limit how fast the tool goes down, so on a ramp or a helix it holds only
+  the vertical component: `min(feed_cut, feed_plunge / sin θ)`. A level or
+  rising move gets the cutting feed, and a straight plunge (drilling, a tab
+  exit) gets the plunge feed. Each segment is measured from where the tool
+  really is: the first one starts at the rapid floor above the ramp and is
+  as steep as that makes it. A 3° ramp comes down at `sin 3°` of its feed,
+  63 mm/min at 1200, so it runs at the cutting feed. At the plunge feed it
+  cut at a third of the chip load. On a small hole, whose ramp fills the
+  whole lap, that was nearly all of the hole. This is pycam's rule; FreeCAD
+  ramps at the horizontal feed.
+- **Down between passes.** A profile with one loop and no lead-out leaves
+  the tool down at the end of each lap. The next pass finds it where its
+  ramp begins, at the depth it ramps from (`EmitLoop`'s `stillDown`), and
+  carries on with no lift and no feed back down the slot. The tool never
+  stops against the wall, so this leaves no dwell mark either. A lap that
+  ends in a lead-out, or alternates with other loops, still lifts.
 - **Helix.** A pocket region too small to ramp around is entered on a helix
   inside it, on the circle the tool centre can walk (inscribed radius minus
   tool radius, bracketed by the insets the pocket already computes).
@@ -171,10 +188,28 @@ is scrap.
   an inner wire with material standing in it (sectioned just above the floor)
   is kept whatever the option says — no flag may point the cutter at
   material.
-- **Concentric rings link at depth.** A ring whose neighbour starts within
-  one and a half step-overs keeps the tool down and rotates the next ring to
-  start where the tool is; further than that (disjoint regions) it lifts. A
-  lap can end without retracting for this.
+- **Inside out, walls last** (`GeneratePocket`). The inset loops of a
+  depth are linked into a tree: each loop's parent is the nearest loop one
+  level nearer the wall. The tree is cut depth-first, every loop after the
+  loops inside it, so the entry and the full-width first cut are in the
+  middle of the region, and each wall is the last, stepover-wide cut of its
+  side. Cut level by level, an annulus (a flange recess round an opening)
+  alternated between its two edges, never cut a neighbour next, and so
+  re-entered every ring from safe height, walls first. FreeCAD's default
+  order is inside-out; the sequencing by neighbour is Kiri:Moto's and
+  blendercam's. The helix enters when the ramp does not fit on the first
+  loop, if that loop is the innermost.
+- **No loop that clears nothing.** Insetting continues until the region
+  vanishes, so where two walls converge the last loop can lie wholly in a
+  band its neighbours already sweep. Loops are kept from the walls inward
+  with the union of their tool-radius bands, and a loop that adds nothing
+  to it (nothing wider than 0.002 mm, which is arithmetic) is dropped. A wall
+  never is. Anything coarser leaves a hair of material standing: at 0.1 mm
+  it dropped a ring whose neighbours stopped 0.05 mm apart.
+- **Concentric rings link at depth.** A ring whose nearest point lies within
+  one and a half step-overs of the tool keeps the tool down, and the ring is
+  started at that point (`StartAtPoint`). Further than that it lifts. A lap
+  can end without retracting for this.
 - **Adaptive** (`OpType::Adaptive`, Tusek's `Adaptive2d` from FreeCAD's
   libarea, vendored under `deps/` and linked as the LGPL shared library
   `designer_adaptive`) clears at near-constant engagement, so the full depth

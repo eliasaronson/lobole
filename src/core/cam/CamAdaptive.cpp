@@ -142,13 +142,12 @@ AdaptiveResult ClearImpl(double safeZ, const Operation& op, const Tool& tool,
       for (int i = 1; i <= steps; i++) {
         const double t = static_cast<double>(i) / steps;
         const double a = a0 + 2.0 * std::numbers::pi * revs * t;
-        result.moves.push_back(
-            {Move::Kind::Cut,
-             {helix.x + helixRadius * std::cos(a),
-              helix.y + helixRadius * std::sin(a), fromZ - (fromZ - z) * t},
-             false,
-             0.0,
-             tool.feedPlunge});
+        const glm::dvec3 to(helix.x + helixRadius * std::cos(a),
+                            helix.y + helixRadius * std::sin(a),
+                            fromZ - (fromZ - z) * t);
+        // The plunge feed holds only the helix's vertical part (EntryFeed).
+        result.moves.push_back({Move::Kind::Cut, to, false, 0.0,
+                                EntryFeed(tool, result.moves.back().to, to)});
       }
     } else {
       result.moves.push_back({Move::Kind::Plunge,

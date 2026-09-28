@@ -6,6 +6,7 @@
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 #include <cstdint>
@@ -155,6 +156,25 @@ struct Machine {
   default:
     return 0.0;
   }
+}
+
+// The feed for a cutting move that may descend
+// (docs/cam/operations.md#depth-passes-and-entries). A plunge feed exists to
+// limit how fast the tool goes DOWN; on a ramp or a helix most of the move is
+// sideways, so what the plunge feed governs is only the vertical component:
+// min(feedCut, feedPlunge / sin(angle)). A 3 degree ramp at 1200 mm/min comes
+// down at 63 mm/min, and running it at the plunge feed instead cut at a third
+// of the chip load -- rubbing, in MDF -- for minutes of every job; a small
+// hole, whose ramp fills its whole lap, was cut almost entirely that way. Level
+// or rising: the cutting feed. Straight down: the plunge feed. pycam's rule;
+// FreeCAD ramps at the cutting feed.
+[[nodiscard]] inline double EntryFeed(const Tool& t, const glm::dvec3& from,
+                                      const glm::dvec3& to) {
+  const double drop = from.z - to.z;
+  if (drop <= 1e-9)
+    return t.feedCut;
+  const double along = glm::length(to - from);
+  return std::min(t.feedCut, t.feedPlunge * along / drop);
 }
 
 // Does this tool state a holder at all? Both numbers, and a collar wider than

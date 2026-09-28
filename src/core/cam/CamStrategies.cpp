@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -568,14 +569,24 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // pick re-resolves its contour at each depth -- so the bottom pass is
       // the one whose polygon says where the pillars actually are.
       const bool lastPass = pass + 1 == passes.size();
+      // Down between passes when nothing else has to happen in between: one
+      // loop, no lead-out to leave by, and a pass still to come. The next
+      // pass ramps on from where this lap ended (EmitLoop, `stillDown`).
+      // Several loops alternate pass by pass, so the tool has to travel.
+      const bool stayDown = lead <= 0.0 && paths.size() == 1 && !lastPass;
       resume[loop] =
           EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop, op.tabCount,
                    op.tabWidth, bottom + op.tabHeight,
                    pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp,
-                   resume[loop], /*retract=*/true, lead,
+                   resume[loop], /*retract=*/!stayDown, lead,
                    op.side == Side::Outside, lastPass ? &tp.tabs : nullptr);
     }
   }
+  // A pass that stayed down for a next one that never came (the contour ran
+  // out below it) leaves the tool in the work: out, before anything else.
+  if (!tp.moves.empty() && tp.moves.back().to.z < setup.safeZ - 1e-9)
+    Emit(tp, Move::Kind::Rapid,
+         {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
   // Every opening skipped is an operation that cut nothing, so it fails as
   // one -- in the words of the first thing it could not do, not in a generic
   // "produced no toolpath". With SOME openings cut, the skipped ones stay a
@@ -669,11 +680,127 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       continue;
     }
 
-    // Does the ramp fit on the loop we would cut first? If not, the descent
-    // on that loop would be far steeper than asked (C6).
-    double longest = 0.0;
-    for (const Clipper2Lib::Path64& path : rings.front())
-      longest = std::max(longest, Perimeter(FromClipper(path)));
+    // The loops, each at the inset LEVEL it came from (0 = the wall).
+    struct PocketLoop {
+      Clipper2Lib::Path64 path;
+      std::vector<glm::dvec2> pts;
+      int level = 0;
+      int parent = -1;
+      std::vector<int> kids;
+    };
+    std::vector<PocketLoop> loops;
+    // Drop a loop that clears nothing
+    // (docs/cam/operations.md#pocket-and-adaptive). Insetting goes on until the
+    // region vanishes, so where two walls converge the last loop can fall in a
+    // band its neighbours have already swept: in the baffle's W170S recess, a
+    // whole lap of air at r = 82 on every depth pass. What the loops so far
+    // sweep is kept as a union of their tool-radius bands, from the walls
+    // inward; a loop whose own band adds nothing to it is not cut. A wall never
+    // goes.
+    Clipper2Lib::Paths64 swept;
+    for (size_t level = 0; level < rings.size(); level++)
+      for (const Clipper2Lib::Path64& path : rings[level]) {
+        const Clipper2Lib::Paths64 band = Clipper2Lib::InflatePaths(
+            Clipper2Lib::Paths64{path}, radius * kScale,
+            Clipper2Lib::JoinType::Round, Clipper2Lib::EndType::Joined);
+        if (level > 0) {
+          const Clipper2Lib::Paths64 fresh = Clipper2Lib::Difference(
+              band, swept, Clipper2Lib::FillRule::NonZero);
+          // A thousandth, which is arithmetic, not a whisker of material:
+          // at 0.05 this dropped the baffle's middle ring, whose neighbours
+          // stopped 0.05 mm apart, and left a hair of MDF 3 mm tall all the
+          // way round the recess.
+          if (Offset(fresh, -0.001).empty())
+            continue;
+        }
+        swept = Clipper2Lib::Union(swept, band, Clipper2Lib::FillRule::NonZero);
+        PocketLoop l;
+        l.path = path;
+        Orient(l.path, op.climb, /*insideMaterial=*/true);
+        l.pts = FromClipper(l.path);
+        l.level = static_cast<int>(level);
+        loops.push_back(std::move(l));
+      }
+    // Each loop's parent: the nearest loop one level nearer the wall (or
+    // further, where a level was dropped). On an annulus that is the loop on
+    // the same side of the band, a stepover away -- not the one across it.
+    for (size_t i = 0; i < loops.size(); i++) {
+      double best = std::numeric_limits<double>::max();
+      for (size_t j = 0; j < loops.size(); j++) {
+        if (loops[j].level >= loops[i].level || loops[i].pts.empty())
+          continue;
+        const double d = DistanceToLoop(loops[j].pts, loops[i].pts.front()) +
+                         1e3 * (loops[i].level - 1 - loops[j].level);
+        if (d < best) {
+          best = d;
+          loops[i].parent = static_cast<int>(j);
+        }
+      }
+      if (loops[i].parent >= 0)
+        loops[loops[i].parent].kids.push_back(static_cast<int>(i));
+    }
+    // INSIDE OUT, walls last: every loop after the loops it contains, so the
+    // full-width first cut is in the middle of the region and the wall is a
+    // stepover-wide finishing cut instead of the slot that forms it. And
+    // depth-first down each branch, so the next loop is a neighbour a
+    // stepover away and EmitRing links it at depth -- cut level by level, an
+    // annulus alternated between its two edges, 14 mm apart, and re-entered
+    // by ramp on every ring. FreeCAD's default order; the linking is
+    // Kiri:Moto's and blendercam's.
+    std::vector<int> order;
+    std::vector<bool> done(loops.size(), false);
+    glm::dvec2 at(0.0);
+    bool haveAt = false;
+    const std::function<void(int)> visit = [&](int i) {
+      std::vector<int> kids = loops[i].kids;
+      while (!kids.empty()) {
+        // The nearest branch first, from wherever the tool will be.
+        auto next = kids.begin();
+        if (haveAt) {
+          double best = std::numeric_limits<double>::max();
+          for (auto k = kids.begin(); k != kids.end(); ++k) {
+            const double d = DistanceToLoop(loops[*k].pts, at);
+            if (d < best) {
+              best = d;
+              next = k;
+            }
+          }
+        }
+        const int k = *next;
+        kids.erase(next);
+        visit(k);
+      }
+      order.push_back(i);
+      done[i] = true;
+      if (!loops[i].pts.empty()) {
+        at = loops[i].pts.front();
+        haveAt = true;
+      }
+    };
+    for (;;) {
+      int root = -1;
+      double best = std::numeric_limits<double>::max();
+      for (size_t i = 0; i < loops.size(); i++)
+        if (!done[i] && loops[i].parent < 0) {
+          const double d = haveAt ? DistanceToLoop(loops[i].pts, at)
+                                  : static_cast<double>(i);
+          if (d < best) {
+            best = d;
+            root = static_cast<int>(i);
+          }
+        }
+      if (root < 0)
+        break;
+      visit(root);
+    }
+    if (order.empty())
+      continue;
+
+    // Does the ramp fit on the loop we cut first? If not, the descent on
+    // that loop would be far steeper than asked (C6), and a helix goes down
+    // inside it instead -- when that loop is the innermost, which is where
+    // the helix is sized for.
+    const PocketLoop& first = loops[order.front()];
     const double descend = std::max(0.0, entryZ - z);
     const double rampLen =
         descend > 1e-9 ? descend / std::tan(glm::radians(kRampAngleDeg)) : 0.0;
@@ -681,43 +808,23 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
     // stock being left. A helix narrower than a tenth of the cutter is a
     // plunge with extra steps, so that is where the fallback stays.
     const double helixRadius = lastInset - radius - op.stockToLeave;
-    const bool helix = rampLen > longest && helixRadius > tool.diameter * 0.1 &&
-                       descend > 1e-9;
-
+    const bool helix = rampLen > Perimeter(first.pts) &&
+                       first.level + 1 == static_cast<int>(rings.size()) &&
+                       helixRadius > tool.diameter * 0.1 && descend > 1e-9;
     if (helix) {
-      // The innermost ring's centroid stands in for the incentre.
-      const std::vector<glm::dvec2> inner = FromClipper(rings.back().front());
       glm::dvec2 centre(0.0);
-      for (const glm::dvec2& p : inner)
+      for (const glm::dvec2& p : first.pts)
         centre += p;
-      centre /= static_cast<double>(inner.size());
+      centre /= static_cast<double>(first.pts.size());
       EmitHelix(tp, tool, centre, helixRadius, std::max(entryZ, z), z,
                 setup.safeZ, stockTop, kDeflection);
-      // Inside out: the helix cleared the middle, so each ring outward steps
-      // into fresh material by one step-over. Outside-in after a helix would
-      // drag the tool through uncut material to reach the wall.
-      for (auto it = rings.rbegin(); it != rings.rend(); ++it)
-        for (Clipper2Lib::Path64& path : *it) {
-          Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitRing(tp, setup, tool,
-                   WallRelief(op, tool, FromClipper(path),
-                              &*it == &rings.front(), tp),
-                   z, stockTop, step, /*entryZ=*/z);
-        }
-      Emit(tp, Move::Kind::Rapid,
-           {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
-    } else {
-      for (Clipper2Lib::Paths64& paths : rings)
-        for (Clipper2Lib::Path64& path : paths) {
-          Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitRing(tp, setup, tool,
-                   WallRelief(op, tool, FromClipper(path),
-                              &paths == &rings.front(), tp),
-                   z, stockTop, step, entryZ);
-        }
-      Emit(tp, Move::Kind::Rapid,
-           {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
     }
+    for (const int i : order)
+      EmitRing(tp, setup, tool,
+               WallRelief(op, tool, loops[i].pts, loops[i].level == 0, tp), z,
+               stockTop, step, entryZ);
+    Emit(tp, Move::Kind::Rapid,
+         {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
     entryZ = z;
   }
   if (tp.moves.empty() && tp.error.empty())
@@ -733,7 +840,11 @@ void EmitRing(Toolpath& tp, const Setup& setup, const Tool& tool,
       !tp.moves.empty() && std::abs(tp.moves.back().to.z - z) < 1e-9;
   if (atDepth) {
     const glm::dvec2 here(tp.moves.back().to.x, tp.moves.back().to.y);
-    const std::vector<glm::dvec2> rotated = StartNearest(pts, here);
+    // The nearest POINT on the ring, not its nearest vertex: a lap ends
+    // wherever its ramp put it, often mid-edge, and a rectangle's nearest
+    // vertex from there is a corner 20 mm off -- which failed the link below
+    // on every ring and re-entered each one from safe height.
+    const std::vector<glm::dvec2> rotated = StartAtPoint(pts, here);
     // A step-over and a half: enough for the neighbouring ring, not enough to
     // reach a separate region.
     if (glm::length(rotated.front() - here) <= step * 1.5) {
