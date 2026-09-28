@@ -462,6 +462,8 @@ constexpr MethodDoc kCamMethods[] = {
      "an indexed flat -- said per setup and NOT counted in max_leftover_mm, "
      "the regions or complete; other_setups_not_checked says which setups "
      "could not be consulted and why (their cut then reads as leftover). "
+     "To know that, it generates and posts every other setup of the job "
+     "too, so it costs more on a job of several setups. "
      "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material, no holder, shank, fixture, chuck or "
      "tailstock collision, no bite deeper than the op's passes, and a file "

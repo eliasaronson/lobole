@@ -79,7 +79,7 @@ computation whose result a later regenerate reads out of a cache:
 |---|---|---|
 | outline (`camOutlineQueue`) | one `ProjectedOutlines` projection (a profile's OCC sections of every body at each pass depth) | `OutlineKey` (`core/cam/CamPicks.h`): `bodiesKey`, the top, the pass heights and the deflection |
 | adaptive | one Z level of one adaptive-clearing operation (libarea) | `AdaptiveKey` (`core/cam/CamAdaptive.h`) over the seven setup/op/tool scalars `AdaptiveClear` reads, plus the loops |
-| surface | one whole 3-axis or rotary surfacing operation | `SurfaceKey` (`core/cam/CamSurface.h`): `bodiesKey` plus the fields the surfacing strategies read |
+| surface | one whole 3-axis or rotary surfacing operation | `SurfaceKey` (`core/cam/CamSurface.h`): `bodiesKey` plus the fields the surfacing strategies read, the stock its entries come down to, and whether a rest pass's finish is cut before it (`FinishedBefore`) |
 
 **Content keys, not versions.** A result is keyed by a hash of exactly its
 inputs, so it has no tab, no operation index and no document version:
@@ -137,11 +137,16 @@ reads as "this operation produces nothing"). Post, verify, simulate and Save
 G-code all ask `CamToolpathsPendingWhy` first and refuse in words.
 `RunCamVerification` on a pending list records "Not verified yet" and sets
 `camVerifyWhenSettled`, and the last pass's `finish` runs it. Verification
-itself is a `cam-verify` job.
+itself is a `cam-verify` job. It reads the job's other setups from the same
+caches (`CamToolpathsQueued`) and never cuts them on the frame: a setup whose
+passes are still queued is named as not yet compared, and the verification
+runs again when they land
+([simulation.md](../cam/simulation.md#leftover-another-setup-removes)).
 
 **RPC semantics: synchronous by default.** `cam_toolpath`, `cam_post` and
 `cam_verify` generate through `GenerateCamToolpathsNow` (join the pass in
-flight, then the cache, then compute the rest inline), and `cam_simulate`
+flight, then the cache, then compute the rest inline; `cam_verify` does so
+for every setup of the job), and `cam_simulate`
 settles first, so a script gets complete toolpaths. `cam_toolpath
 {async: true}` defers instead and answers `{pending, queued_passes, job}`,
 where `queued_passes` counts all three queues, for a client that would rather

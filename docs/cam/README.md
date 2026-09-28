@@ -81,10 +81,11 @@ space with no transform back.
 - **A setup never changes the model.** It is a document-level object outside
   the regeneration chain; describing how to cut a part does not rebuild it.
 - **One transform seam.** `JobBodies` assembles the job's bodies, and
-  `BodiesInSetupFrame` composes each part's placement and fixturing frame with
-  the rotary index — `SetupToModel` is the one place `frame · R_x(A)` is
-  composed and `FixtureFrame` the one place "how is this part clamped" is
-  answered. A consumer that builds its own copy of the transform is a bug.
+  `BodyToSetup` composes each part's placement and fixturing frame with the
+  rotary index (`BodiesInSetupFrame` applies it, and the verifier maps
+  another setup's cut through it) — `SetupToModel` is the one place
+  `frame · R_x(A)` is composed and `FixtureFrame` the one place "how is this
+  part clamped" is answered. A consumer that builds its own copy of the transform is a bug.
 - **The picture and the file cannot disagree.** The backplot is drawn from the
   same `std::vector<Toolpath>` the post consumes; the verifier and the
   simulation both read the posted G-code; the simulation's last frame is
