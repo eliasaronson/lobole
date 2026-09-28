@@ -9,6 +9,7 @@
 // turns, and what one surveyed project ships today.
 
 #include "cam_fixtures.h"
+#include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
 
@@ -1136,3 +1137,43 @@ TEST_CASE("cam rotary: a turning program longer than the travel is said",
   CHECK(cam::VerifyGcode(gcode, job.setup, job.doc->GetBodies(), 0.5)
             .outsideTravel == 0);
 }
+
+#ifdef HAVE_CAM
+// An indexed setup after a turning one starts from the TURNED part, not the
+// bar: checked against the fresh bar, every entry into the chess king's cross
+// was a rapid "through material" 12.5 mm deep and every pass a 24 mm "bite",
+// all of it air the turning had already taken away.
+TEST_CASE("cam rotary: an indexed setup starts from what the turning left",
+          "[cam][rotary]") {
+  RotaryJob turn = SmallRotaryJob(); // a Phi 30 bar, Phi 22 neck at x 12..28
+  cam::Setup indexed = BasicSetup();
+  RotaryMachine(indexed);
+  indexed.heldIn = cam::Setup::HeldIn::Rotary;
+  indexed.rotationA = 0.0;
+  indexed.stock.margin = {0.0, 1.0, 1.0};
+  const std::vector<Body>& bodies = turn.doc->GetBodies();
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(indexed, bodies, lo, hi));
+  cam::HeightMap stock = cam::MakeStock(lo, hi, 0.5);
+  const auto topAt = [&](const cam::HeightMap& h, double x) {
+    const int i = static_cast<int>((x - h.x0) / h.res);
+    const int j = static_cast<int>((0.0 - h.y0) / h.res);
+    return static_cast<double>(h.At(i, j));
+  };
+  REQUIRE(topAt(stock, 20.0) > 15.5); // fresh: the bar's top over the neck
+
+  // Only an EARLIER setup seeds; the same one listed as later does not.
+  const cam::OtherSetups later = cam::OtherSetupsOf(
+      indexed, {{&turn.setup, turn.gcode, false}}, bodies, 0.5);
+  REQUIRE_FALSE(later.HasEarlier());
+  const cam::OtherSetups earlier = cam::OtherSetupsOf(
+      indexed, {{&turn.setup, turn.gcode, true}}, bodies, 0.5);
+  REQUIRE(earlier.HasEarlier());
+  cam::SeedFromEarlier(stock, earlier, lo.z, 0.3);
+  // Over the neck the turning left about its radius (11, plus the scallop
+  // and the seed's margin); over the full bar, the bar.
+  CHECK(topAt(stock, 20.0) < 12.5);
+  CHECK(topAt(stock, 20.0) > 10.9);
+  CHECK(topAt(stock, 4.0) > 14.9);
+}
+#endif

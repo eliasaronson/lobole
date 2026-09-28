@@ -105,9 +105,20 @@ CamOtherSetups.cpp):
   from the pass caches and never computes them on the frame: a pass not yet
   cut is queued, the verdict names that setup as not yet compared, and it
   runs again when the passes land.
-- **What still starts fresh:** the simulation and the safety checks
-  (rapids, bite, collisions) start from the setup's own stock. That errs
-  toward a finding, never toward a crash.
+- **Where a later setup starts:** the setups EARLIER in the job (the job's
+  order is the cutting order) have already cut, so a planar setup's check
+  starts from what they left (`SeedFromEarlier`): each column of its fresh
+  stock is lowered to the first point no earlier setup removed, a point
+  counting as removed only 0.3 mm (or a cell) clear of what that setup left,
+  and beyond a rotary setup's bar there was never any. An indexed setup
+  after a turning one then starts from the turned part: checked against the
+  fresh bar, every entry into the chess king's cross was a rapid 12.5 mm
+  "through material" and every pass a 24 mm "bite". Rapids, bites and
+  collisions run against that stock; the cells this setup never sweeps are
+  not compared, as before.
+- **What still starts fresh:** the simulation playback (`cam_simulate`) and
+  a rotary setup's check start from the setup's own stock. That errs toward
+  a finding, never toward a crash.
 
 ### Verdict
 

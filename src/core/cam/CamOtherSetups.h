@@ -34,6 +34,9 @@ struct SetupStock {
   HeightMap height;            // planar: the machined top
   double zLo = 0.0, zHi = 0.0; // planar: the stock box's floor and top
   RadiusMap radius;            // rotary: the machined radius
+  // Cut BEFORE the setup being checked (earlier in the job's order), so
+  // what it removed is gone when this one starts.
+  bool earlier = false;
   // Whether this setup leaves air at `model` (model space), to within `tol`:
   // inside its stock, and above (beyond) what it machined. A point outside
   // its stock is not claimed -- two setups whose boxes disagree leave the
@@ -54,7 +57,24 @@ struct OtherSetups {
   [[nodiscard]] uint64_t Claims(const glm::dvec3& from, const glm::dvec3& to,
                                 double tol) const;
   [[nodiscard]] std::string NameOf(uint64_t id) const;
+  [[nodiscard]] bool HasEarlier() const {
+    for (const SetupStock& s : stocks)
+      if (s.earlier)
+        return true;
+    return false;
+  }
 };
+
+// The stock a setup starts from, when setups earlier in the job have already
+// cut: each column of `stock` (this setup's fresh stock, in its frame) lowered
+// to the first point no earlier setup removed. An indexed setup after a
+// turning one then starts from the turned part rather than the square bar it
+// was: checked against the fresh bar, every entry into the chess king's cross
+// was a rapid 12.5 mm "through material" and every pass a 24 mm "bite". A
+// point counts as removed only when it is `margin` clear of what an earlier
+// setup left, so the seed errs toward material -- toward a finding.
+void SeedFromEarlier(HeightMap& stock, const OtherSetups& others, double zLo,
+                     double margin);
 
 // Model space to `setup`'s frame, when every body of the job maps the same
 // way: per-part fixture frames or placements that differ between parts have
@@ -66,6 +86,7 @@ struct OtherSetups {
 struct SetupProgram {
   const Setup* setup = nullptr;
   std::string gcode;
+  bool earlier = false; // cut before the setup being checked
 };
 
 // The job's other setups' final stock, from their posted programs: each

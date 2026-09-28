@@ -1656,6 +1656,7 @@ struct VerifyWork {
   // not be read yet (docs/cam/simulation.md#leftover-another-setup-removes).
   std::vector<cam::Setup> others;
   std::vector<std::string> otherFiles;
+  std::vector<bool> othersEarlier; // cut before this setup, in job order
   std::vector<std::string> othersNotChecked;
   bool rotary = false;
   uint64_t generation = 0;
@@ -1685,7 +1686,7 @@ constexpr double kRotaryVerifyRes = 0.5;
 void InspectWork(VerifyWork& w) {
   std::vector<cam::SetupProgram> programs;
   for (size_t k = 0; k < w.others.size(); k++)
-    programs.push_back({&w.others[k], w.otherFiles[k]});
+    programs.push_back({&w.others[k], w.otherFiles[k], w.othersEarlier[k]});
   cam::OtherSetups others = cam::OtherSetupsOf(
       w.setup, programs, w.bodies, w.rotary ? kRotaryVerifyRes : kVerifyRes);
   others.notChecked.insert(others.notChecked.end(), w.othersNotChecked.begin(),
@@ -1835,7 +1836,10 @@ void RunCamVerification(AppState& state) {
   static uint64_t requeuedFor = 0;
   const uint64_t jobState = JobRenderVersion(state) * 1000003u + setup->id;
   bool othersPending = false;
+  bool before = true; // the job's order is the order they are cut in
   for (const cam::Setup& other : state.job->GetSetups()) {
+    if (other.id == setup->id)
+      before = false;
     if (other.id == setup->id || other.operations.empty())
       continue;
     bool pending = false;
@@ -1858,6 +1862,7 @@ void RunCamVerification(AppState& state) {
     }
     work->others.push_back(other);
     work->otherFiles.push_back(std::move(file));
+    work->othersEarlier.push_back(before);
   }
   if (othersPending && requeuedFor != jobState) {
     requeuedFor = jobState;

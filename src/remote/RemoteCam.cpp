@@ -1959,11 +1959,15 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // (docs/cam/simulation.md#leftover-another-setup-removes).
     std::vector<cam::SetupProgram> programs;
     std::vector<std::string> unposted;
+    bool before = true; // the job's order is the order they are cut in
     for (const cam::Setup& other : job->GetSetups()) {
+      if (other.id == setup.id)
+        before = false;
       if (other.id == setup.id || other.operations.empty())
         continue;
       cam::SetupProgram sp;
       sp.setup = &other;
+      sp.earlier = before;
       std::string why;
       if (!cam::PostProcess(other.machine.post, other,
                             ui::GenerateCamToolpathsNow(state, other),

@@ -121,6 +121,7 @@ OtherSetups OtherSetupsOf(const Setup& self,
     SetupStock stock;
     stock.id = s.id;
     stock.name = s.name;
+    stock.earlier = p.earlier;
     if (!ModelToSetup(s, rawBodies, stock.modelToSetup, &why)) {
       out.notChecked.push_back(label + " " + why);
       continue;
@@ -148,6 +149,60 @@ OtherSetups OtherSetupsOf(const Setup& self,
     out.stocks.push_back(std::move(stock));
   }
   return out;
+}
+
+void SeedFromEarlier(HeightMap& stock, const OtherSetups& others, double zLo,
+                     double margin) {
+  std::vector<const SetupStock*> earlier;
+  for (const SetupStock& s : others.stocks)
+    if (s.earlier)
+      earlier.push_back(&s);
+  if (earlier.empty() || stock.res <= 0.0)
+    return;
+  // Removes() calls a point air when it is `tol` INSIDE what a setup left;
+  // a negative tol asks for `margin` of clearance instead.
+  const double tol = -std::abs(margin);
+  for (int j = 0; j < stock.ny; j++)
+    for (int i = 0; i < stock.nx; i++) {
+      const double x = stock.CellX(i), y = stock.CellY(j);
+      double z = stock.At(i, j);
+      while (z > zLo) {
+        const glm::dvec3 model =
+            glm::dvec3(others.toModel * glm::dvec4(x, y, z, 1.0));
+        const bool air = std::any_of(
+            earlier.begin(), earlier.end(), [&](const SetupStock* s) {
+              // Beyond a rotary setup's blank there was never any bar: this
+              // setup's box is the bounding box of that round (or square)
+              // bar, and its corners past the bar's radius are air. Removes
+              // does not claim outside a stock, rightly for a claim, and
+              // left the whole seed at the box's top.
+              if (s->rotary) {
+                const RadiusMap& m = s->radius;
+                const glm::dvec3 q =
+                    glm::dvec3(s->modelToSetup * glm::dvec4(model, 1.0));
+                const int k =
+                    static_cast<int>(std::floor((q.x - m.x0) / m.res));
+                if (k < 0 || k >= m.nx || m.nTheta <= 0)
+                  return false; // off its length: not this setup's to say
+                double th = std::atan2(q.z, q.y);
+                if (th < 0.0)
+                  th += 2.0 * std::numbers::pi;
+                const int t =
+                    std::clamp(static_cast<int>(std::floor(
+                                   th / (2.0 * std::numbers::pi) * m.nTheta)),
+                               0, m.nTheta - 1);
+                return std::hypot(q.y, q.z) >
+                       std::min(static_cast<double>(m.At(k, t)), m.rMax) +
+                           margin;
+              }
+              return s->Removes(model, tol);
+            });
+        if (!air)
+          break;
+        z -= stock.res;
+      }
+      stock.Set(i, j, static_cast<float>(std::max(z, zLo)));
+    }
 }
 
 } // namespace cam
