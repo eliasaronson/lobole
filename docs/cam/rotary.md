@@ -205,11 +205,11 @@ feed model a controller uses.
 
 ## A winding (`G92 A`)
 
-A spiral winds A through hundreds of turns. At the end of any operation that
-leaves A a turn or more from where it started, the post writes `G92 A<v>`,
-the current angle moved by whole turns to lie nearest the next angle the file
-needs, so the next operation's approach turns the part less than half a
-revolution. It renames the same physical angle and touches A only. The parser
+A spiral winds A through hundreds of turns, and starts wound (its angle
+counts from the axis's end). At the end of any operation whose next angle is
+half a turn or more away, the post writes `G92 A<v>`, the current angle moved
+by whole turns to lie nearest the next angle the file needs, so the next
+operation's approach turns the part less than half a revolution. It renames the same physical angle and touches A only. The parser
 reads `G92 A` as a rename, keeping its moves on the continuous angle, so the
 verifier and the simulation stay in step with the machine; `G92` on a linear
 axis is reported as not modelled. There is no modulo-360 output: a feed move

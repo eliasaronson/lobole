@@ -269,8 +269,8 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 - **Helical arcs.** Only flat `G2`/`G3` are fitted.
 - **Planning around fixtures.** Operations are told they hit a fixture, not
   steered away; nothing holds a part down on 3D operations (tabs are
-  profile-only); no chuck/tailstock keep-out on a rotary setup; no spindle
-  nose.
+  profile-only); fixtures are not checked on a rotary setup (the chuck and
+  tailstock are); no spindle nose.
 - **Waterline roughing** (clearing each level between the part's section and
   the stock); rotary roughing is layers, not constant engagement.
 - **Rotary passes stop at the part's ends**, so the steep foot of a domed end

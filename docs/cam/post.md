@@ -54,8 +54,9 @@ dialect needs canned cycles translated. The post id is the machine's
   zero rapids are left out of the clock rather than invented, and the links
   run at the cutting feed.
 - **Rotary**: an indexed setup states `G0 A<index>` at safe Z before its first
-  move; a turning cut's F is scaled for the controller and `G92 A` unwinds
-  after a spiral ([rotary.md](rotary.md)). A setup held in the rotary is
+  move; a turning cut's F is scaled for the controller and `G92 A` renames
+  the angle between operations that end and start turns apart
+  ([rotary.md](rotary.md#a-winding-g92-a)). A setup held in the rotary is
   written in the machine's frame: X/Y through the rotary's quarter-turn, the
   angle signed and lettered as the machine's `rotary` says, and refused when
   it does not say ([rotary.md](rotary.md#how-the-rotary-is-installed)).

@@ -151,7 +151,9 @@ tool.
 - **Stock and safety:** safe Z; the stock mode (Around the part / A fixed
   sheet) with margins or size and place; where zero is (Stock corner, Stock
   centre, Part corner) with the resulting origin printed beside it; and the
-  job's copy of the machine's post, arcs, 4th axis and A index.
+  job's copy of the machine's post, arcs, 4th axis and A index; on a 4th-axis
+  machine, *Part held*, *In the chuck*, *mm in the jaws* and *Tailstock
+  engaged* ([rotary.md](rotary.md#chuck-and-tailstock)).
 - **Tools:** rows in the list style (right-click Edit), **Add tool** offering
   the machine's library first. Feeds and speeds are asked for, and the panel
   says why: they are the one number that is genuinely the user's. The editor
@@ -222,8 +224,10 @@ in a popup at the click.
 
 The machine store's editor: New / Duplicate / Delete, a list, and an editor
 whose every edit writes the file (a rename moves it): name, work area X, Y, Z
-(a partly typed area is kept), post, arcs, 4th axis, rapid feed, the A axis's
-top speed, and the tool library. Numeric fields go through `ui::ExprInput`.
+(a partly typed area is kept), post, arcs, 4th axis, how the rotary is
+installed and its chuck and tailstock
+([rotary.md](rotary.md#how-the-rotary-is-installed)), rapid feed, the A
+axis's top speed, and the tool library. Numeric fields go through `ui::ExprInput`.
 
 ## Tests
 

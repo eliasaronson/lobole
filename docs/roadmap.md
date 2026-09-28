@@ -50,7 +50,7 @@ title block and SVG/PDF export. Missing, in the order a shop asks for them:
   tapped has no operation that taps it.
 - **Cutter radius compensation** (G41/G42) in the posts.
 - **Workholding follow-ons:** generated vises and toe clamps, the spindle nose
-  as a collision body, a chuck and tailstock for rotary setups, holding the
+  as a collision body, holding the
   part down on 3D operations (tabs are profile-only), and a setup sheet.
 - **Other processes:** turning; laser, plasma and waterjet posts (the posts
   are milling dialects); nesting sheet blanks.
