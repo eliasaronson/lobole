@@ -716,6 +716,8 @@ TEST_CASE("cam rotary: the pruned CL equals the full kernel's",
         r += 1.5; // a thin ridge
       if (x > 26.0)
         r = 0.0; // off the part
+      if (x > 21.0 && x <= 26.0) // a SQUARE section: corners, flat faces
+        r = 9.0 / std::max(std::abs(std::cos(th)), std::abs(std::sin(th)));
       model.Set(i, j, static_cast<float>(std::max(0.0, r)));
     }
   const auto brute = [&](const cam::Tool& tool) {

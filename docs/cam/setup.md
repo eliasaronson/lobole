@@ -222,9 +222,16 @@ How the origin reaches the file is in [post.md](post.md#work-origin-in-the-file)
 `Setup::safeZ` is an absolute Z in setup space. `cam::DeriveSafeZ` puts it
 clear above the stock top and, over a setup's fixtures, above the tallest
 fixture; `ui::DeriveJobSafeZ` is the one caller on a job tab, so a clamp
-taller than the stock cannot be forgotten. It is re-derived when the geometry
-it depends on moves: a new setup, a flip, laying a face up, a Z-zero pick,
-adding, moving or removing a fixture.
+taller than the stock cannot be forgotten. On a setup held in the rotary it
+clears the radius the stock SWEEPS instead of its top: a square bar's
+corners stand at half its diagonal and pass under the cutter every turn (a
+pass the holding window clipped at the tailstock retracted to the top, and
+the next turn put the chess blank's corners 2.4 mm into the cutter). It is
+re-derived when the geometry it depends on moves: a new setup, a flip,
+laying a face up, a Z-zero pick, adding, moving or removing a fixture; and
+`set_cam_setup` raises it -- never lowers it, so a typed height stays --
+when it changes the stock, puts the part in the rotary or changes the
+machine.
 
 ## The machine's work area
 

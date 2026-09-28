@@ -1,6 +1,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamDropCutter.h"
+#include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamRotaryFeed.h"
 
@@ -855,13 +856,28 @@ bool SolveIndexA(const glm::dvec3& normal, double& degrees) {
   return true;
 }
 
+namespace {
+// How high the stock stands over the cutter's side of the axis: its top on
+// the bed, but on the rotary the radius it SWEEPS -- a square bar's corners,
+// half its diagonal, pass under the tool every turn. Taking the top there
+// retracted a pass clipped at the tailstock to 23 mm over a 36 mm bar whose
+// corners stand at 25.5, and the next turn drove them through the cutter.
+double StockReach(const Setup& setup, const glm::dvec3& lo,
+                  const glm::dvec3& hi) {
+  if (!HeldInRotary(setup))
+    return hi.z;
+  return std::max(hi.z, std::hypot(std::max(std::abs(lo.y), std::abs(hi.y)),
+                                   std::max(std::abs(lo.z), std::abs(hi.z))));
+}
+} // namespace
+
 double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBounds(setup, bodies, lo, hi))
     return setup.safeZ;
   // Clear the stock top by a fraction of the job's own height, with a floor
   // so a thin plate still gets real clearance rather than a scrape.
-  return hi.z + std::max(2.0, (hi.z - lo.z) * 0.1);
+  return StockReach(setup, lo, hi) + std::max(2.0, (hi.z - lo.z) * 0.1);
 }
 
 double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies,
@@ -871,7 +887,7 @@ double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies,
     return setup.safeZ;
   // The same clearance as over the stock, over the taller of the stock and
   // every fixture: a clamp is cleared by as much as the block is.
-  double top = hi.z;
+  double top = StockReach(setup, lo, hi);
   for (const Body& b : fixtureBodies) {
     if (!b.shape.IsValid())
       continue;

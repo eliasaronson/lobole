@@ -1673,3 +1673,26 @@ TEST_CASE("cam: every tool type and side round-trips through its name",
 }
 
 #endif // HAVE_CAM
+
+// On the rotary the safe height clears the radius the stock SWEEPS, not its
+// top: a square bar's corners stand at half its diagonal and pass under the
+// cutter every turn. From the top, a pass clipped at the tailstock retracted
+// to 23 mm over the chess set's 36 mm bar and the next turn drove its 25.5 mm
+// corners through the cutter -- 2.4 mm into the tailstock end.
+TEST_CASE("A rotary setup's safe height clears the corners it turns",
+          "[cam][rotary]") {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Bar", glm::vec3(0.0f, -18.0f, -18.0f), 100.0, 36.0, 36.0));
+  REQUIRE(doc->Regenerate());
+  cam::Setup bed = BasicSetup();
+  const double onBed = cam::DeriveSafeZ(bed, doc->GetBodies());
+  cam::Setup turned = BasicSetup();
+  RotaryMachine(turned);
+  turned.heldIn = cam::Setup::HeldIn::Rotary;
+  const double inRotary = cam::DeriveSafeZ(turned, doc->GetBodies());
+  const double corner = std::hypot(18.0, 18.0);
+  CHECK(inRotary > corner + 1.9);
+  CHECK(onBed < corner); // the bed's is the top plus its clearance
+  CHECK(inRotary > onBed);
+}

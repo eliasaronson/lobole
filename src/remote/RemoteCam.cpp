@@ -1654,6 +1654,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // Anything above can have moved the stock box, and the work origin is
     // derived from it — as is every coordinate the post writes.
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
+    // ...and the safe height is derived from it too, so an edit that grows
+    // what the cutter must clear -- a bigger stock, the part put in the
+    // rotary, where a square bar sweeps its corners -- raises it. Never
+    // lowers it: a height someone typed stays theirs. Without this a setup
+    // added and then put in the rotary kept the bed's safe Z below its own
+    // blank's corners.
+    if (!p.contains("safe_z") &&
+        (p.contains("stock") || p.contains("held_in") ||
+         p.contains("rotation_a") || p.contains("has_rotary_axis") ||
+         p.contains("machine")))
+      setup.safeZ = std::max(setup.safeZ, ui::DeriveJobSafeZ(state, setup));
     if (p.contains("fit_arcs"))
       setup.machine.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("split_output"))
