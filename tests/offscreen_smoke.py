@@ -309,7 +309,12 @@ def main():
                 "direction": [1, 0, 0], "radius": 15.0, "height": 40.0})
             job = d.call("machine_part")
             sid = d.call("add_cam_setup", name="Trunnion", post="mach3")["id"]
+            # How the rotary is installed, stated: without it a setup held
+            # in the rotary does not post (docs/cam/rotary.md#how-the-rotary-is-installed).
+            # The bar's model starts at its stock's end, so no chuck there.
             d.call("set_cam_setup", id=sid, has_rotary_axis=True, safe_z=30.0,
+                   rotary={"along": "x", "chuck_end": "-", "word": "A",
+                           "top_moves": "-y"}, chuck=False,
                    stock={"mode": "relative", "margin": [0.0, 1.0, 1.0],
                           "bottom_margin": 0.0})
             d.call("set_cam_setup", id=sid, tool={

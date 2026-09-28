@@ -377,7 +377,7 @@ TEST_CASE("cam machine: a setup embeds it, and a v76 file still reads",
   setup.name = "Sheet";
   setup.machine.name = "Shop router";
   setup.machine.post = "mach3";
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.machine.travelMax = {600.0, 400.0, 80.0};
   const auto j = DocumentIO::CamSetupToJson(setup);
   REQUIRE(j.contains("machine"));

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -478,12 +479,25 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
                     "anyway)";
   }
 
-  for (const double floorR : floors) {
+  for (size_t li = 0; li < floors.size(); li++) {
+    const double floorR = floors[li];
+    // What the layer before left: the blank for the first. A cell this layer
+    // would take no lower is EMPTY for it -- the grip, a span a layer above
+    // already cut to the surface -- so the pass breaks there instead of
+    // riding along it at the cutting feed: half the rotary sampler's rough
+    // was that.
+    const double before = li == 0 ? blankR : floors[li - 1];
     RadiusMap layer = cl;
-    if (floorR > 0.0)
-      for (float& v : layer.r)
-        if (v > 0.0f)
-          v = std::max(v, static_cast<float>(floorR));
+    for (float& v : layer.r) {
+      if (v <= 0.0f)
+        continue;
+      const double target =
+          floorR > 0.0 ? std::max(static_cast<double>(v), floorR) : v;
+      if (std::max(static_cast<double>(v), before) <= target + 1e-3)
+        v = 0.0f;
+      else
+        v = static_cast<float>(target);
+    }
 
     if (op.rotaryPattern == RotaryPattern::Spiral) {
       RotarySpiralRequest req;
@@ -545,17 +559,57 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     RotaryParallelRequest req;
     req.stepover_mm = pitch;
     req.sampleStep_mm = op.sampleStep;
+    // Neighbouring passes LINKED at depth: a zigzag pass ends at the end the
+    // next one starts, a stepover round, and turning A there with the tool
+    // down cuts only the strip that pass cuts anyway. Retracting to the safe
+    // radius and plunging again for every pass was 55 m of rapids on the
+    // rotary sampler. Only within a layer, only between ends that meet, and
+    // only where the arc between them stays clear of the part's surface.
+    bool down = false;
+    double lastX = 0.0, lastR = 0.0, lastTheta = 0.0;
+    const auto clearArc = [&](double x, double r0, double t0, double r1,
+                              double t1) {
+      const int i = std::clamp(static_cast<int>((x - layer.x0) / layer.res), 0,
+                               layer.nx - 1);
+      constexpr int kSteps = 16;
+      for (int k = 0; k <= kSteps; k++) {
+        const double f = static_cast<double>(k) / kSteps;
+        const double th = glm::radians(t0 + (t1 - t0) * f);
+        const double step = 2.0 * std::numbers::pi / layer.nTheta;
+        int j = static_cast<int>(std::floor(th / step));
+        j = ((j % layer.nTheta) + layer.nTheta) % layer.nTheta;
+        if (cl.At(i, j) > r0 + (r1 - r0) * f + 1e-3)
+          return false;
+      }
+      return true;
+    };
     for (const RotaryPass& pass : RotaryParallelPasses(layer, req)) {
       if (pass.pts.size() < 2)
         continue;
       const double a = 90.0 - pass.thetaDeg;
-      go(Move::Kind::Rapid, pass.pts.front().x, safeR, a, 0.0);
-      go(Move::Kind::Plunge, pass.pts.front().x, pass.pts.front().y, a,
-         tool.feedPlunge);
+      const glm::dvec2 start = pass.pts.front();
+      const bool link =
+          down && std::abs(start.x - lastX) <= tool.diameter * 0.5 &&
+          std::abs(glm::radians(pass.thetaDeg - lastTheta)) * blankR <=
+              2.0 * pitch + 1e-6 &&
+          clearArc(start.x, lastR, lastTheta, start.y, pass.thetaDeg);
+      if (link) {
+        go(Move::Kind::Cut, start.x, start.y, a, tool.feedCut);
+      } else {
+        if (down)
+          go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
+        go(Move::Kind::Rapid, start.x, safeR, a, 0.0);
+        go(Move::Kind::Plunge, start.x, start.y, a, tool.feedPlunge);
+      }
       for (size_t k = 1; k < pass.pts.size(); k++)
         go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
-      go(Move::Kind::Rapid, pass.pts.back().x, safeR, a, 0.0);
+      down = true;
+      lastX = pass.pts.back().x;
+      lastR = pass.pts.back().y;
+      lastTheta = pass.thetaDeg;
     }
+    if (down)
+      go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
   }
   if (tp.moves.empty())
     tp.error = "this part gives no rotary passes — check the cutter against "

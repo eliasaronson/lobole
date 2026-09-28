@@ -169,6 +169,14 @@ part is gone, and every fixture on a rotary setup (`not_checked`). When safe Z
 was raised to clear a fixture and then exceeds the Z travel, the travel line
 names the fixture.
 
+### Holding collisions
+
+A setup held in the rotary checks every move against the chuck and the
+tailstock (`holding_collisions`, the worst depth, x, line and which one); any
+collision fails `ok`, and the sizes that were defaults, not measured, are
+listed. [rotary.md](rotary.md#chuck-and-tailstock) has the envelope and the
+test.
+
 ### Machine travel
 
 With a work area stated, `outsideTravel` counts moves past it: X and Y against

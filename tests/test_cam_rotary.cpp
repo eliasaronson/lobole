@@ -452,7 +452,7 @@ TEST_CASE("cam rotary: generate, post and verify a turned part", "[cam]") {
 
   cam::Setup setup = BasicSetup();
   setup.machine.name = "trunnion";
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 0.0, 0.0};
   setup.safeZ = 40.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -551,7 +551,7 @@ RotaryJob SmallRotaryJob() {
   j.doc = NeckedShaftDoc();
   REQUIRE(j.doc->GetBodies().size() == 1);
   j.setup = BasicSetup();
-  j.setup.machine.hasRotaryAxis = true;
+  RotaryMachine(j.setup);
   j.setup.stock.margin = {0.0, 1.0, 1.0};
   j.setup.safeZ = 30.0;
   j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -756,7 +756,7 @@ TEST_CASE(
   // same as a correct program.
   auto doc = BarDoc(15.0, 40.0);
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 1.0, 1.0};
   setup.safeZ = 30.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -818,7 +818,7 @@ TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
   // get there.
   auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 4.0, 4.0};
   setup.safeZ = 40.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -864,3 +864,198 @@ TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam rotary: the file is written for the rotary as installed, and "
+          "read back the same",
+          "[cam]") {
+  // docs/cam/rotary.md#how-the-rotary-is-installed. A rotary along machine Y
+  // posted as one along X moves the machine across a part that lies the
+  // other way. Every mount -- either axis, either end, either sign, either
+  // letter -- must write a different file that reads back to the SAME
+  // setup-space program.
+  RotaryJob job = SmallRotaryJob();
+  const auto paths = cam::GenerateAll(job.setup, job.doc->GetBodies());
+  const auto setupSpace = [&](const cam::Setup& s, std::string& file) {
+    std::string error;
+    REQUIRE(cam::PostProcess("mach3", s, paths, {}, file, &error));
+    return cam::ProgramInSetupSpace(file, s);
+  };
+  std::string identityFile;
+  const cam::GProgram identity = setupSpace(job.setup, identityFile);
+  REQUIRE(identity.moves.size() > 20);
+  REQUIRE(cam::RotatesWhileCutting(identity));
+  for (const char along : {'x', 'y'})
+    for (const int end : {-1, 1})
+      for (const int topSign : {-1, 1})
+        for (const char word : {'A', 'B'}) {
+          cam::Setup s = job.setup;
+          s.machine.rotary.along = along;
+          s.machine.rotary.chuckEnd = end;
+          s.machine.rotary.word = word;
+          s.machine.rotary.topAxis = along == 'x' ? 'y' : 'x';
+          s.machine.rotary.topSign = topSign;
+          INFO("along " << along << " end " << end << " top " << topSign
+                        << " word " << word);
+          std::string file;
+          const cam::GProgram back = setupSpace(s, file);
+          CHECK(back.warnings.empty());
+          REQUIRE(back.moves.size() == identity.moves.size());
+          double worst = 0.0;
+          for (size_t k = 0; k < back.moves.size(); k++) {
+            worst = std::max(
+                worst, glm::length(back.moves[k].to - identity.moves[k].to));
+            worst = std::max(worst,
+                             std::abs(back.moves[k].a - identity.moves[k].a));
+          }
+          CHECK(worst < 1e-3);
+          // Written for THIS machine: its letter, and the part's axis on
+          // the axis the rotary lies along.
+          CHECK((file.find(std::string(" ") + word) != std::string::npos));
+          const char other = word == 'A' ? 'B' : 'A';
+          CHECK(file.find(std::string(" ") + other) == std::string::npos);
+          const cam::GProgram raw = cam::ParseGcode(file, word);
+          double spanX = 0.0, spanY = 0.0;
+          double loX = 1e9, hiX = -1e9, loY = 1e9, hiY = -1e9;
+          for (const cam::GMove& m : raw.moves) {
+            loX = std::min(loX, m.to.x);
+            hiX = std::max(hiX, m.to.x);
+            loY = std::min(loY, m.to.y);
+            hiY = std::max(hiY, m.to.y);
+          }
+          spanX = hiX - loX;
+          spanY = hiY - loY;
+          if (along == 'x')
+            CHECK(spanX > spanY);
+          else
+            CHECK(spanY > spanX);
+        }
+  // The other letter in a file is said, not read.
+  const cam::GProgram wrong = cam::ParseGcode(identityFile, 'B');
+  CHECK_FALSE(wrong.warnings.empty());
+  CHECK_FALSE(cam::RotatesWhileCutting(wrong));
+}
+
+TEST_CASE("cam rotary: a rotary nobody said how is installed is not posted",
+          "[cam]") {
+  RotaryJob job = SmallRotaryJob();
+  job.setup.machine.name = "6090";
+  job.setup.machine.rotary = cam::RotaryMount{};
+  const auto paths = cam::GenerateAll(job.setup, job.doc->GetBodies());
+  std::string gcode, error;
+  CHECK_FALSE(cam::PostProcess("mach3", job.setup, paths, {}, gcode, &error));
+  INFO(error);
+  CHECK(error.find("does not say how its rotary is installed") !=
+        std::string::npos);
+  CHECK(error.find("6090") != std::string::npos);
+  // A setup on the bed of the same machine is untouched.
+  auto block = BlockDoc();
+  cam::Setup bed = BasicSetup();
+  bed.machine = job.setup.machine;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = 10.0;
+  bed.operations.push_back(op);
+  CHECK_FALSE(cam::HeldInRotary(bed));
+  CHECK(cam::PostProcess("mach3", bed,
+                         cam::GenerateAll(bed, block->GetBodies()), {}, gcode,
+                         &error));
+  // ...until it says its part is in the rotary: an indexed setup at A = 0 is
+  // in the chuck all the same.
+  bed.heldIn = cam::Setup::HeldIn::Rotary;
+  CHECK_FALSE(cam::PostProcess("mach3", bed,
+                               cam::GenerateAll(bed, block->GetBodies()), {},
+                               gcode, &error));
+}
+
+TEST_CASE("cam rotary: the chuck and the tailstock are kept out of, and "
+          "checked",
+          "[cam]") {
+  // docs/cam/rotary.md#chuck-and-tailstock. The sampler part's first pass ran
+  // along the whole part: through the jaws, and down to 5 mm from the axis
+  // over the tailstock's centre.
+  auto doc = BarDoc(20.0, 120.0); // along X from 0 to 120
+  cam::Setup s = BasicSetup();
+  RotaryMachine(s);
+  s.chuck = 1;
+  s.tailstock = 1;
+  s.machine.holding.chuckDiameter = 80.0;
+  s.machine.holding.gripLength = 15.0;
+  s.stock.margin = {0.0, 1.0, 1.0};
+  s.safeZ = 30.0;
+  s.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceRotary;
+  op.stepover = 0.5;
+  op.stepdown = 2.0;
+  s.operations.push_back(op);
+  const cam::HoldingEnvelope env =
+      cam::HoldingEnvelopeOf(s, cam::BodiesInSetupFrame(s, doc->GetBodies()));
+  REQUIRE(env.ok);
+  CHECK_THAT(env.chuckTo, WithinAbs(15.0, 1e-6));
+  CHECK_THAT(env.RadiusAt(10.0), WithinAbs(40.0, 1e-9));
+  CHECK_THAT(env.RadiusAt(60.0), WithinAbs(0.0, 1e-9));
+  CHECK(env.RadiusAt(125.0) > 0.0); // the centre's cone
+  CHECK(env.RadiusAt(200.0) > env.RadiusAt(121.0));
+  // Unmeasured sizes are named as defaults.
+  CHECK_FALSE(env.defaulted.empty());
+
+  const auto paths = cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  CHECK(paths[0].holdingClippedMm > 0.0);
+  // ...and says so, or the uncut grip reads as leftover with no reason.
+  bool said = false;
+  for (const cam::VerdictLine& l :
+       cam::MachineLines(s, doc->GetBodies(), &paths))
+    said = said || l.text.find("chuck or the tailstock") != std::string::npos;
+  CHECK(said);
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind != cam::Move::Kind::Rapid) {
+      CHECK(m.to.x >= env.MinX(3.0) - 1e-6);
+      CHECK(m.to.x <= env.MaxX(3.0) + 1e-6);
+    }
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.5);
+  INFO("holding " << v.holdingCollisions << " worst " << v.worstHoldingDepth
+                  << " " << v.worstHoldingWhat);
+  CHECK(v.holdingCollisions == 0);
+
+  // A file that drives into the jaws is not ok, and says which.
+  const std::string jaws =
+      "(op 1)\nG0 Z30\nG0 X30 Y0\nG1 Z21 F300\nG1 X5 A10 F300\nG0 Z30\n";
+  const cam::Verdict bad = cam::VerifyGcode(jaws, s, doc->GetBodies(), 0.5);
+  CHECK(bad.holdingCollisions > 0);
+  CHECK(bad.worstHoldingWhat == "the chuck");
+  CHECK_FALSE(bad.Safe(0.05));
+}
+
+TEST_CASE("cam rotary: a turning program longer than the travel is said",
+          "[cam]") {
+  // A continuous rotary file had no travel check at all. Generated without
+  // a work area -- generation clips to one -- and checked against a machine
+  // 20 mm long in X, as a file made elsewhere would be.
+  RotaryJob job = SmallRotaryJob();
+  const auto paths = cam::GenerateAll(job.setup, job.doc->GetBodies());
+  job.setup.machine.travelMin = {0.0, 0.0, 0.0};
+  job.setup.machine.travelMax = {20.0, 600.0, 150.0};
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", job.setup, paths, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, job.setup, job.doc->GetBodies(), 0.5);
+  CHECK(v.rotary);
+  CHECK(v.outsideTravel > 0);
+  CHECK(v.outsideAxis == 'X');
+  // Lying along Y the long travel is along the part, and it fits.
+  job.setup.machine.rotary.along = 'y';
+  job.setup.machine.rotary.topAxis = 'x';
+  job.setup.machine.rotary.topSign = 1;
+  REQUIRE(cam::PostProcess("mach3", job.setup, paths, {}, gcode, &error));
+  CHECK(cam::VerifyGcode(gcode, job.setup, job.doc->GetBodies(), 0.5)
+            .outsideTravel == 0);
+}

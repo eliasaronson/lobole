@@ -27,7 +27,7 @@ cam::RadiusMap Uniform(double radius = 15.0) {
 
 cam::Setup ShaftSetup() {
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 1.0, 1.0};
   setup.safeZ = 30.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -267,7 +267,7 @@ TEST_CASE("cam spiral: a turning cut is posted at the feed the tip needs",
   // f = 600 at the tip, the tool 20 mm off the axis. The first move is the
   // rapid there, so the clock below counts exactly the three cuts.
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.rapidFeed = 0.0;
   cam::Toolpath tp;
   tp.operationId = 7;
@@ -327,7 +327,7 @@ TEST_CASE("cam spiral: a scaled F within 1% of the one in force is not "
   // restating it every line put 830,000 F words into the rolling pin's
   // spiral. Within 1% of the F in force, the line keeps it.
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   cam::Toolpath tp;
   tp.operationId = 1;
   tp.toolNumber = 1;
@@ -353,7 +353,7 @@ TEST_CASE("cam spiral: a turning cut is held to each axis's own top speed",
   // 1500 deg/min here, and THAT is what holds it -- not the linear rapid,
   // which a pure turn does not touch at all.
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.machine.rapidFeed = 600.0; // linear: would bite if it were asked
   setup.machine.rotaryMaxFeed = 1500.0;
   setup.rapidFeed = 0.0;
@@ -466,6 +466,44 @@ TEST_CASE("cam spiral: a wound axis is renamed, and the next op does not "
   CHECK(v.maxGouge < 0.1);
 }
 
+TEST_CASE("cam spiral: an op that STARTS wound is renamed to, not unwound to",
+          "[cam]") {
+  // A spiral counts its angle from the axis's end, so one that begins down
+  // the part begins many turns round -- the rotary sampler's bead started at
+  // A8087 after a finish that left the axis near zero, and the rapid between
+  // them turned the part 22 times.
+  auto doc = NeckedShaftDoc();
+  cam::Setup setup = ShaftSetup();
+  setup.operations.push_back(RotaryOp(1, cam::RotaryPattern::Parallel));
+  setup.operations.push_back(RotaryOp(2, cam::RotaryPattern::Spiral));
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 2);
+  REQUIRE(paths[0].error.empty());
+  REQUIRE(paths[1].error.empty());
+  // Twenty whole turns on: the same physical angles, wound.
+  for (cam::Move& m : paths[1].moves)
+    if (m.hasA)
+      m.a += 7200.0;
+
+  std::string gcode;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode));
+  REQUIRE(gcode.find("G92 A") != std::string::npos);
+  const cam::GProgram p = cam::ProgramInSetupSpace(gcode, setup);
+  REQUIRE(p.errors.empty());
+  size_t boundary = 0;
+  for (size_t k = 1; k < p.moves.size(); k++)
+    if (p.moves[k].op == 2 && p.moves[k - 1].op == 1) {
+      boundary = k;
+      break;
+    }
+  REQUIRE(boundary > 0);
+  double spin = 0.0;
+  for (size_t k = boundary; k < p.moves.size() && p.moves[k].rapid; k++)
+    spin = std::max(spin, std::abs(p.moves[k].a - p.moves[boundary - 1].a));
+  INFO("op 2's approach turns " << spin << " degrees");
+  CHECK(spin <= 180.0 + 1e-6);
+}
+
 TEST_CASE("cam spiral: a stepdown cuts in layers from the blank inward",
           "[cam]") {
   auto doc = NeckedShaftDoc();
@@ -481,26 +519,34 @@ TEST_CASE("cam spiral: a stepdown cuts in layers from the blank inward",
   const auto layered = cam::GenerateAll(setup, doc->GetBodies());
   REQUIRE(layered[0].error.empty());
   const auto& lm = layered[0].moves;
-  const auto& fm = finish[0].moves;
-  // Blank Phi 32 (margin 1), journal Phi 22: the layers are at 14.5, 13 and
-  // 11.5 of CL radius, then the surface -- so several times the moves.
-  REQUIRE(lm.size() > fm.size() * 2);
-  // The last layer IS the unlayered finish, move for move.
-  for (size_t k = 0; k < fm.size(); k++) {
-    const cam::Move& a = lm[lm.size() - fm.size() + k];
-    const cam::Move& b = fm[k];
-    REQUIRE(a.kind == b.kind);
-    REQUIRE(a.to == b.to);
-    REQUIRE(a.a == b.a);
-  }
-  // No layer before it cuts below its floor: the first cut of the whole op
-  // is at least one stepdown under the blank and never deeper than that.
+  // Blank Phi 32 (margin 1), journal Phi 22: layers at 14.5, 13 and 11.5 of
+  // CL radius, then the surface -- more cutting than the finish alone.
+  CHECK(layered[0].CutLength() > finish[0].CutLength());
+  // Each layer cuts only what the one before left (a span it would take no
+  // lower is skipped, not ridden), so the LAST layer is no longer the whole
+  // finish -- but together they finish the surface as the finish does.
+  std::string lg, fg, error;
+  REQUIRE(cam::PostProcess("mach3", setup, layered, {}, lg, &error));
+  cam::Setup finishSetup = setup;
+  finishSetup.operations[0].stepdown = 0.0;
+  REQUIRE(cam::PostProcess("mach3", finishSetup, finish, {}, fg, &error));
+  const cam::Verdict vl = cam::VerifyGcode(lg, setup, doc->GetBodies(), 0.5);
+  const cam::Verdict vf =
+      cam::VerifyGcode(fg, finishSetup, doc->GetBodies(), 0.5);
+  INFO("layered p95 " << vl.leftoverP95 << " finish p95 " << vf.leftoverP95
+                      << " gouge " << vl.maxGouge);
+  CHECK(vl.maxGouge < 0.1);
+  CHECK(vl.leftoverP95 <= vf.leftoverP95 + 0.05);
+  // No layer cuts below its floor: the first cut of the whole op is at most
+  // one stepdown under the blank.
   const double blankR = cam::RotaryBlankRadius(setup, 15.0);
-  double firstLayerMin = 1e18;
-  for (size_t k = 0; k < lm.size() - fm.size(); k++)
-    if (lm[k].kind == cam::Move::Kind::Cut)
-      firstLayerMin = std::min(firstLayerMin, lm[k].to.z);
-  CHECK(firstLayerMin >= blankR - 3.0 * 1.5 - 1e-6);
+  double firstCut = 0.0;
+  for (const cam::Move& m : lm)
+    if (m.kind == cam::Move::Kind::Cut) {
+      firstCut = m.to.z;
+      break;
+    }
+  CHECK(firstCut >= blankR - 1.5 - 1e-6);
 
   // The spiral layers carry the angle on rather than restarting it: no rapid
   // anywhere in the op turns the part more than a revolution.

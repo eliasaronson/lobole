@@ -71,7 +71,10 @@ struct GProgram {
 // Modal G-code: G0/G1 with X/Y/Z/F, T for the tool, M6 for a tool change,
 // parenthesised comments. Anything it does not understand is reported rather
 // than skipped silently.
-[[nodiscard]] GProgram ParseGcode(std::string_view text);
+// `rotaryWord` is the letter the machine drives its rotary with (A or B,
+// CamMount.h); the other one is a warning, never silence -- a B word used to
+// vanish into `default:`.
+[[nodiscard]] GProgram ParseGcode(std::string_view text, char rotaryWord = 'A');
 // Does the A axis MOVE in this program? False for a 3-axis file and for an
 // indexed one, which states one constant A before the first cut -- and those
 // two are the same question for every check downstream, because in both the
@@ -83,7 +86,8 @@ struct GProgram {
 // the model — the verifier, the simulator, the backplot — works in setup
 // space. This is the one place the origin is added back, and it is the exact
 // inverse of what `Emitter` subtracts
-// (docs/cam/post.md#work-origin-in-the-file).
+// (docs/cam/post.md#work-origin-in-the-file). It inverts the rotary's mount
+// too (CamMount.h): the quarter turn, the sign of A, and which letter it is.
 //
 // Take this rather than ParseGcode wherever a Setup is in hand: a program
 // parsed raw and compared against a framed model is off by the origin, which

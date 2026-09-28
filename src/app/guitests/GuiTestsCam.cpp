@@ -1358,6 +1358,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     cam::Setup* setup = Job()->FindSetup(added.id);
     IM_CHECK(setup != nullptr);
     setup->machine.hasRotaryAxis = true;
+    // Between centres, not in jaws: a 30 mm bar in the default 15 mm grip
+    // leaves too little length to tell a spiral from a raster.
+    setup->chuck = 0;
     setup->safeZ = 30.0;
     setup->stock.margin = {0.0, 1.0, 1.0};
     setup->tools[0].type = cam::ToolType::Ball;

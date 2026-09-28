@@ -530,6 +530,51 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_rotary_mounts")) {
+    // v132: how the rotary is installed. Lost on a load, a Y-mounted B axis
+    // posts as an X-mounted A -- across the part -- or does not post at all.
+    const auto& want = expect.at("cam_rotary_mounts");
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      const cam::RotaryMount& r = setups[i].machine.rotary;
+      CHECK(std::string(1, r.along) == want[i][0].get<std::string>());
+      CHECK(r.chuckEnd == want[i][1].get<int>());
+      CHECK(std::string(1, r.word) == want[i][2].get<std::string>());
+      CHECK(std::string(r.topSign < 0 ? "-" : "+") + r.topAxis ==
+            want[i][3].get<std::string>());
+    }
+  }
+  if (expect.contains("cam_holdings")) {
+    // v132: the chuck and the tailstock every rotary path is kept out of.
+    const auto& want = expect.at("cam_holdings");
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      const cam::RotaryHolding& h = setups[i].machine.holding;
+      CHECK(h.chuckDiameter == want[i][0].get<double>());
+      CHECK(h.gripLength == want[i][1].get<double>());
+      CHECK(h.hasTailstock == want[i][2].get<bool>());
+      CHECK(h.centreLength == want[i][3].get<double>());
+      CHECK(h.centreDiameter == want[i][4].get<double>());
+      CHECK(h.tailBodyDiameter == want[i][5].get<double>());
+      CHECK(h.clearance == want[i][6].get<double>());
+    }
+  }
+  if (expect.contains("cam_setup_holding")) {
+    // v132: where a setup's part is held, and by what.
+    const auto& want = expect.at("cam_setup_holding");
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      const cam::Setup& s = setups[i];
+      const std::string held = s.heldIn == cam::Setup::HeldIn::Rotary ? "rotary"
+                               : s.heldIn == cam::Setup::HeldIn::Bed
+                                   ? "bed"
+                                   : "derived";
+      CHECK(held == want[i][0].get<std::string>());
+      CHECK(s.gripLength == want[i][1].get<double>());
+      CHECK(s.tailstock == want[i][2].get<int>());
+      CHECK(s.chuck == want[i][3].get<int>());
+    }
+  }
   if (expect.contains("cam_tool_shanks")) {
     // v131: how wide the tool is above its flutes. Lost on a load, a 3 mm
     // cutter on a 6 mm shank reads as a plain 3 mm one again, and the op

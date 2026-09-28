@@ -1,5 +1,7 @@
 #include "core/cam/CamPost.h"
 
+#include "core/cam/CamMount.h"
+
 #include "core/cam/CamRotaryFeed.h"
 #include "core/cam/CamToolpath.h"
 
@@ -45,8 +47,17 @@ struct Emitter {
   // at 16.000" was a claim no line of the file honoured
   // (docs/cam/post.md#work-origin-in-the-file).
   glm::dvec3 origin{0.0, 0.0, 0.0};
+  // How the rotary is installed (CamMount.h): the quarter turn from setup
+  // space to the machine, the sign of A and its letter. Identity for a setup
+  // on the bed -- and the same place as the origin, so one function says
+  // where every coordinate in the file lands.
+  Mount mount;
   [[nodiscard]] glm::dvec3 Work(const glm::dvec3& p) const {
-    return p - origin;
+    return ToMachine(mount, p - origin);
+  }
+  // The rotary word as the machine reads it: its letter, its sign.
+  [[nodiscard]] std::string AWord(double internal, int dp) const {
+    return std::string(1, mount.word) + Num(mount.sign * internal, dp);
   }
   // Modal state: G-code repeats nothing it does not have to, and a file that
   // restates X on every line is unreadable when something goes wrong.
@@ -112,7 +123,9 @@ struct Emitter {
     // The centre moves with everything else, so I/J — being the difference
     // between two points in the SAME space — come out unchanged. Shifting it
     // here anyway rather than relying on that keeps one rule instead of two.
-    const glm::dvec2 c(centre.x - origin.x, centre.y - origin.y);
+    const glm::dvec3 cw =
+        ToMachine(mount, glm::dvec3(centre.x, centre.y, 0.0) - origin);
+    const glm::dvec2 c(cw.x, cw.y);
     std::ostringstream l;
     l << (clockwise ? "G2" : "G3");
     l << " X" << Num(w.x, decimals) << " Y" << Num(w.y, decimals);
@@ -141,7 +154,7 @@ struct Emitter {
     if (Differs(to.z, z))
       l << " Z" << Num(to.z, decimals);
     if (withA && Differs(aVal, a))
-      l << " A" << Num(aVal, decimals);
+      l << " " << AWord(aVal, decimals);
     if (f > 0.0 && Differs(f, feed)) {
       l << " F" << Num(f, decimals);
       feed = f;
@@ -461,9 +474,18 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     return false;
   }
 
+  // Held in the rotary of a machine that does not say how it is installed:
+  // refused, naming what to state
+  // (docs/cam/rotary.md#how-the-rotary-is-installed).
+  if (const std::string why = MountRefusal(setup); !why.empty()) {
+    if (error != nullptr)
+      *error = why;
+    return false;
+  }
   Emitter e;
   e.decimals = opts.decimals;
   e.origin = setup.origin;
+  e.mount = MountOf(setup);
   if (opts.comments) {
     e.Comment("Designer CAM - " + setup.name);
     e.Comment("post: " + std::string(dialect->id));
@@ -588,19 +610,10 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     // that cuts the wrong face.
     if (EmitsRotary(setup) && !e.haveA) {
       e.Retract(setup.safeZ);
-      e.Raw("G0 A" + Num(setup.rotationA, opts.decimals));
+      e.Raw("G0 " + e.AWord(setup.rotationA, opts.decimals));
       e.haveA = true;
       e.a = setup.rotationA;
     }
-    // Where the axis stood when this operation began: the index above, or
-    // -- on a setup that states none -- the operation's own first angle.
-    double aAtStart = e.a;
-    if (!e.haveA)
-      for (const Move& mv : tp.moves)
-        if (mv.hasA) {
-          aAtStart = mv.a;
-          break;
-        }
     // Cuts that turn, whose F was scaled for the controller and hit the
     // machine's cap. Counted and said ONCE for the operation: a feed nobody
     // chose is worth a line, and not one per move.
@@ -701,8 +714,11 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     // verifier and the simulator stay on the same angle as the machine.
     // Modulo-360 output would be the other answer, and it is wrong for a
     // cut: a feed move from 359 to 1 turns BACK 358 degrees, tool down, on
-    // any controller that does not take the short way.
-    if (e.haveA && std::abs(e.a - aAtStart) >= 360.0) {
+    // any controller that does not take the short way. Renamed whenever the
+    // next angle is half a turn or more away, not only after an op that
+    // wound: a spiral STARTS wound -- its angle counts from the axis's end --
+    // and the finish before it left the axis near zero.
+    if (e.haveA) {
       double next = setup.rotationA;
       bool found = false;
       for (size_t n = pathIndex + 1; n < paths.size() && !found; n++) {
@@ -717,7 +733,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       }
       const double renamed = e.a - 360.0 * std::round((e.a - next) / 360.0);
       if (Emitter::Differs(renamed, e.a)) {
-        e.Raw("G92 A" + Num(renamed, opts.decimals));
+        e.Raw("G92 " + e.AWord(renamed, opts.decimals));
         e.a = renamed;
       }
     }

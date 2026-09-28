@@ -165,6 +165,69 @@ cam::Tool ToolFromJson(const json& tj) {
 
 } // namespace
 
+// A rotary mount is stated whole or not at all: half of one would post a
+// guess with the confidence of a statement
+// (docs/cam/rotary.md#how-the-rotary-is-installed).
+cam::RotaryMount RotaryMountFromJson(const json& j) {
+  cam::RotaryMount r;
+  const auto str = [&](const char* key) {
+    if (!j.contains(key))
+      throw std::runtime_error(
+          std::string("machine rotary needs `") + key +
+          "`: a rotary is stated whole -- along (x|y), chuck_end (-|+), "
+          "word (A|B) and top_moves (+x|-x|+y|-y) -- or not at all");
+    return j.at(key).get<std::string>();
+  };
+  const std::string along = str("along");
+  if (along != "x" && along != "y")
+    throw std::runtime_error("machine rotary along '" + along +
+                             "'; it lies along x or y");
+  r.along = along[0];
+  const std::string end = str("chuck_end");
+  if (end != "-" && end != "+")
+    throw std::runtime_error("machine rotary chuck_end '" + end +
+                             "'; the chuck is at the - or the + end");
+  r.chuckEnd = end == "-" ? -1 : 1;
+  const std::string word = str("word");
+  if (word != "A" && word != "B")
+    throw std::runtime_error("machine rotary word '" + word +
+                             "'; the controller drives it as A or B");
+  r.word = word[0];
+  const std::string top = str("top_moves");
+  if (top.size() != 2 || (top[0] != '+' && top[0] != '-') ||
+      (top[1] != 'x' && top[1] != 'y'))
+    throw std::runtime_error("machine rotary top_moves '" + top +
+                             "'; it is +x, -x, +y or -y");
+  if (top[1] == r.along)
+    throw std::runtime_error(
+        "machine rotary top_moves '" + top +
+        "' is along the rotary itself; "
+        "the top of a turning part moves across it, " +
+        std::string(r.along == 'x' ? "+y or -y" : "+x or -x"));
+  r.topSign = top[0] == '+' ? 1 : -1;
+  r.topAxis = top[1];
+  return r;
+}
+
+cam::RotaryHolding RotaryHoldingFromJson(const json& h) {
+  cam::RotaryHolding out;
+  out.chuckDiameter = h.value("chuck_diameter_mm", 0.0);
+  out.gripLength = h.value("grip_mm", 0.0);
+  out.hasTailstock = h.value("tailstock", false);
+  out.centreLength = h.value("centre_length_mm", 0.0);
+  out.centreDiameter = h.value("centre_diameter_mm", 0.0);
+  out.tailBodyDiameter = h.value("tailstock_body_diameter_mm", 0.0);
+  out.clearance = h.value("clearance_mm", 0.0);
+  for (const double v :
+       {out.chuckDiameter, out.gripLength, out.centreLength, out.centreDiameter,
+        out.tailBodyDiameter, out.clearance})
+    if (v < 0.0)
+      throw std::runtime_error(
+          "machine holding sizes are millimetres, 0 for not measured; "
+          "none can be negative");
+  return out;
+}
+
 json MachineToJson(const cam::Machine& m) {
   json j;
   j["name"] = m.name;
@@ -186,6 +249,31 @@ json MachineToJson(const cam::Machine& m) {
     j["rapid_feed"] = m.rapidFeed;
   if (m.rotaryMaxFeed != 0.0) // v123
     j["a_max_deg_min"] = m.rotaryMaxFeed;
+  // v132: how the rotary is installed, and what holds a part in it -- each
+  // written only when stated, so a machine that never mentioned either
+  // re-saves byte-identically.
+  if (m.rotary.Stated())
+    j["rotary"] = {{"along", std::string(1, m.rotary.along)},
+                   {"chuck_end", m.rotary.chuckEnd < 0 ? "-" : "+"},
+                   {"word", std::string(1, m.rotary.word)},
+                   {"top_moves", std::string(m.rotary.topSign < 0 ? "-" : "+") +
+                                     std::string(1, m.rotary.topAxis)}};
+  if (m.holding != cam::RotaryHolding{}) {
+    json h;
+    const auto put = [&](const char* key, double v) {
+      if (v != 0.0)
+        h[key] = v;
+    };
+    put("chuck_diameter_mm", m.holding.chuckDiameter);
+    put("grip_mm", m.holding.gripLength);
+    if (m.holding.hasTailstock)
+      h["tailstock"] = true;
+    put("centre_length_mm", m.holding.centreLength);
+    put("centre_diameter_mm", m.holding.centreDiameter);
+    put("tailstock_body_diameter_mm", m.holding.tailBodyDiameter);
+    put("clearance_mm", m.holding.clearance);
+    j["holding"] = h;
+  }
   if (!m.library.empty()) {
     j["tools"] = json::array();
     for (const cam::Tool& t : m.library)
@@ -221,6 +309,10 @@ cam::Machine MachineFromJson(const json& j) {
   m.hasRotaryAxis = j.value("has_rotary_axis", false);
   m.rapidFeed = j.value("rapid_feed", 0.0);
   m.rotaryMaxFeed = j.value("a_max_deg_min", 0.0);
+  if (j.contains("rotary"))
+    m.rotary = RotaryMountFromJson(j.at("rotary"));
+  if (j.contains("holding"))
+    m.holding = RotaryHoldingFromJson(j.at("holding"));
   for (const json& tj : j.value("tools", json::array()))
     m.library.push_back(ToolFromJson(tj));
   return m;
@@ -354,6 +446,17 @@ json CamSetupToJson(const cam::Setup& setup) {
     j["frame"] = {setup.frame.x, setup.frame.y, setup.frame.z, setup.frame.w};
   if (setup.rotationA != 0.0)
     j["rotation_a"] = setup.rotationA;
+  // v132: where the part is held, how much of it the jaws hold, and whether
+  // the tailstock is engaged -- each only when stated.
+  if (setup.heldIn != cam::Setup::HeldIn::Derived)
+    j["held_in"] =
+        setup.heldIn == cam::Setup::HeldIn::Rotary ? "rotary" : "bed";
+  if (setup.gripLength != 0.0)
+    j["grip_mm"] = setup.gripLength;
+  if (setup.tailstock != -1)
+    j["tailstock"] = setup.tailstock == 1;
+  if (setup.chuck != -1)
+    j["chuck"] = setup.chuck == 1;
   j["stock"] = {
       {"margin",
        {setup.stock.margin.x, setup.stock.margin.y, setup.stock.margin.z}},
@@ -506,6 +609,19 @@ cam::Setup CamSetupFromJson(const json& j) {
         glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),
                    j["frame"][1].get<double>(), j["frame"][2].get<double>());
   setup.rotationA = j.value("rotation_a", 0.0);
+  if (j.contains("held_in")) {
+    const std::string h = j.at("held_in").get<std::string>();
+    if (h != "rotary" && h != "bed")
+      throw std::runtime_error("setup held_in '" + h +
+                               "'; a part is held in the rotary or on the bed");
+    setup.heldIn =
+        h == "rotary" ? cam::Setup::HeldIn::Rotary : cam::Setup::HeldIn::Bed;
+  }
+  setup.gripLength = j.value("grip_mm", 0.0);
+  if (j.contains("tailstock"))
+    setup.tailstock = j.at("tailstock").get<bool>() ? 1 : 0;
+  if (j.contains("chuck"))
+    setup.chuck = j.at("chuck").get<bool>() ? 1 : 0;
   if (j.contains("machine")) {
     setup.machine = MachineFromJson(j.at("machine"));
   } else {

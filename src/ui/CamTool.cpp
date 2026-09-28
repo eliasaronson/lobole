@@ -1804,7 +1804,10 @@ void RunCamVerification(AppState& state) {
   work->bodies = ui::JobBodies(state);
   work->fixtures =
       ui::JobFixtureSolids(state, *setup, true, &work->missingFixtures);
-  work->rotary = cam::RotatesWhileCutting(cam::ParseGcode(work->gcode));
+  // Read with the machine's own rotary letter: a B-driven file parsed as A
+  // reads as standing still and is checked on the wrong stock model.
+  work->rotary = cam::RotatesWhileCutting(
+      cam::ProgramInSetupSpace(work->gcode, work->setup));
   work->generation = state.camVerifyGeneration;
 
   // Inline when the panel is not deferring -- the GUI suite's setting, so

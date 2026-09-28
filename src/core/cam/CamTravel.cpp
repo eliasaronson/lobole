@@ -1,3 +1,4 @@
+#include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 
@@ -304,8 +305,8 @@ DerivedReach DeriveReachOffset(const Setup& setup,
               "window";
     return out;
   }
-  const glm::dvec2 travel(m.travelMax.x - m.travelMin.x,
-                          m.travelMax.y - m.travelMin.y);
+  // In SETUP axes: a rotary along machine Y has its Y travel along the part.
+  const glm::dvec2 travel(TravelSpanInSetup(setup));
   const char* axes[2] = {"X", "Y"};
   for (int a = 0; a < 2; a++) {
     const double need = hi[a] - lo[a];
@@ -349,7 +350,7 @@ std::string MachineWarning(const Setup& setup,
   const char* axes[3] = {"X", "Y", "Z"};
   for (int a = 0; a < 3; a++) {
     const double need = hi[a] - lo[a];
-    const double have = m.travelMax[a] - m.travelMin[a];
+    const double have = TravelSpanInSetup(setup)[a];
     if (need > have + 1e-6) {
       char buf[260];
       std::snprintf(buf, sizeof(buf),
@@ -383,7 +384,7 @@ bool MachineBoundsFramed(const Setup& setup, const std::vector<Body>& framed,
   // of the file. A stock LONGER than the travel is anchored at its near
   // corner, and `reach_offset` says where along it the bed is: the case it
   // exists for. On either, `reach_offset` moves the window from there.
-  const glm::dvec3 travel = m.travelMax - m.travelMin;
+  const glm::dvec3 travel = TravelSpanInSetup(setup);
   lo = slo;
   for (int a = 0; a < 2; a++)
     if (shi[a] - slo[a] <= travel[a] + 1e-6)
@@ -489,6 +490,17 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
       outside = true; // parked off the bed until something comes back in
   }
   glm::dvec3 prev = tp.moves[0].to;
+  // A where the last move left it: a move cut short, or entered part-way, on
+  // a cut that TURNS the part (a spiral) stands at the angle it had got to
+  // there, not at its end's. Inheriting the end's angle turned the part
+  // a whole segment early at every clip.
+  double prevA = tp.moves[0].a;
+  bool prevHasA = tp.moves[0].hasA;
+  const auto at = [&](const Move& m, double t, Move& into) {
+    like(into, m);
+    if (m.hasA && prevHasA)
+      into.a = prevA + (m.a - prevA) * t;
+  };
   for (size_t i = 1; i < tp.moves.size(); i++) {
     const Move& m = tp.moves[i];
     const double length = glm::length(m.to - prev);
@@ -499,6 +511,8 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
       if (cutting(m))
         clipped += length;
       prev = m.to;
+      prevA = m.a;
+      prevHasA = m.hasA;
       continue;
     }
     if (t0 > kEps) {
@@ -507,7 +521,9 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
         clipped += length * t0;
       if (!outside)
         retract(prev, m);
-      reenter(lerp(prev, m.to, t0), m);
+      Move entry = m;
+      at(m, t0, entry);
+      reenter(lerp(prev, m.to, t0), entry);
     } else if (outside) {
       // Starts on the boundary or inside while parked: come back in here.
       reenter(prev, m);
@@ -515,14 +531,17 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
     if (t1 < 1.0 - kEps) {
       Move part = m;
       part.to = lerp(prev, m.to, t1);
+      at(m, t1, part);
       out.push_back(part);
       if (cutting(m))
         clipped += length * (1.0 - t1);
-      retract(part.to, m);
+      retract(part.to, part);
     } else {
       out.push_back(m);
     }
     prev = m.to;
+    prevA = m.a;
+    prevHasA = m.hasA;
   }
   tp.moves = std::move(out);
   tp.clippedMm += clipped;
@@ -539,7 +558,7 @@ std::string MachineOverhang(const Setup& setup,
   const char* axes[3] = {"X", "Y", "Z"};
   for (int a = 0; a < 2; a++) { // a sheet hangs off in X or Y, not Z
     const double need = hi[a] - lo[a];
-    const double have = m.travelMax[a] - m.travelMin[a];
+    const double have = TravelSpanInSetup(setup)[a];
     if (need > have + 1e-6) {
       char buf[200];
       std::snprintf(buf, sizeof(buf),

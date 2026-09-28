@@ -28,7 +28,7 @@ cam::RadiusMap Twisted(double rateDegPerMm, double amplitude = 1.0) {
 
 cam::Setup ShaftSetup() {
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 1.0, 1.0};
   setup.safeZ = 30.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);

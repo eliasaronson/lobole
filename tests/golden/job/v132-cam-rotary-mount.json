@@ -1,0 +1,97 @@
+{
+  "format": "designer-document",
+  "version": 132,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Shaft"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "On the trunnion (installed along Y)",
+      "safe_z": 40.0,
+      "rotation_a": 0.0,
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm ball",
+          "diameter": 6.0,
+          "tool_type": "ball",
+          "tip_angle": 90.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Rough and finish in a spiral",
+          "type": "surface_rotary",
+          "tool": 1,
+          "top_z": 20.0,
+          "bottom_z": -20.0,
+          "stepover": 0.08,
+          "sample_step_mm": 0.4,
+          "stock_to_leave": 0.0,
+          "rotary_pattern": "spiral",
+          "stepdown": 1.5
+        },
+        {
+          "id": 5,
+          "name": "Finish in passes",
+          "type": "surface_rotary",
+          "tool": 1,
+          "top_z": 20.0,
+          "bottom_z": -20.0,
+          "stepover": 0.08,
+          "sample_step_mm": 0.4,
+          "stock_to_leave": 0.0
+        },
+        {
+          "id": 6,
+          "name": "Follow the twist",
+          "type": "surface_rotary",
+          "tool": 1,
+          "top_z": 20.0,
+          "bottom_z": -20.0,
+          "stepover": 0.08,
+          "sample_step_mm": 0.4,
+          "stock_to_leave": 0.0,
+          "rotary_pattern": "helical",
+          "lead_mm": -157.08
+        }
+      ],
+      "machine": {
+        "name": "6090",
+        "post": "mach3",
+        "has_rotary_axis": true,
+        "rotary": {
+          "along": "y",
+          "chuck_end": "-",
+          "word": "B",
+          "top_moves": "+x"
+        },
+        "holding": {
+          "chuck_diameter_mm": 80.0,
+          "grip_mm": 12.0,
+          "tailstock": true,
+          "centre_length_mm": 22.0,
+          "centre_diameter_mm": 12.0,
+          "tailstock_body_diameter_mm": 40.0,
+          "clearance_mm": 2.0
+        }
+      },
+      "held_in": "rotary",
+      "grip_mm": 18.0,
+      "tailstock": false
+    }
+  ]
+}

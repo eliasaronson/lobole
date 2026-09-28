@@ -151,7 +151,7 @@ TEST_CASE("cam: an indexed job still fits arcs", "[cam]") {
       // Half a turn about X: the puck is still a puck, so the toolpath is the
       // same circle and only the A word differs. That is what makes the two
       // posts comparable.
-      s.machine.hasRotaryAxis = true;
+      RotaryMachine(s);
       s.rotationA = a;
     }
     glm::dvec3 lo(0.0), hi(0.0);
@@ -225,7 +225,7 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   cam::Setup indexed = BasicSetup();
   // The machine has the axis, and is indexed on it. Both halves are needed:
   // a rotated FIXTURE never posts an A word (S3).
-  indexed.machine.hasRotaryAxis = true;
+  RotaryMachine(indexed);
   indexed.rotationA = 90.0;
   indexed.operations.push_back(op);
   const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
@@ -304,7 +304,7 @@ TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
   cam::Setup indexed = BasicSetup();
   // The machine has the axis, and is indexed on it. Both halves are needed:
   // a rotated FIXTURE never posts an A word (S3).
-  indexed.machine.hasRotaryAxis = true;
+  RotaryMachine(indexed);
   indexed.rotationA = 90.0;
   // Derived, not typed: the depths must come from the frame the cut happens
   // in, which is the other half of the same bug.
@@ -381,7 +381,7 @@ TEST_CASE("cam: a fixture frame cuts what a rotary index would", "[cam]") {
   auto turned = TurnedBlockDoc();
 
   cam::Setup indexed = BasicSetup();
-  indexed.machine.hasRotaryAxis = true;
+  RotaryMachine(indexed);
   indexed.rotationA = 90.0;
   indexed.operations.push_back(ProfileOp());
   const cam::Toolpath a = cam::GenerateAll(indexed, turned->GetBodies())[0];
@@ -436,7 +436,7 @@ TEST_CASE("cam: clamping a part flat posts no rotary move", "[cam]") {
   // And a machine that HAS the axis but is not indexed on it says nothing
   // either: the flag alone is not a reason to move a table.
   cam::Setup rotary = clamped;
-  rotary.machine.hasRotaryAxis = true;
+  RotaryMachine(rotary);
   const std::vector<cam::Toolpath> rp =
       cam::GenerateAll(rotary, turned->GetBodies());
   for (const cam::Move& m : rp[0].moves)

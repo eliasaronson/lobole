@@ -4,13 +4,102 @@ Two different things share the name. **Indexed** 4-axis turns the work to an
 angle and then cuts ordinary 2.5D; **continuous** 4-axis turns A while the
 tool cuts. Both need a machine with `hasRotaryAxis`: without it the rotary
 index is refused, the rotary verbs are not on the toolbar, and no file can
-carry an A word. The A axis is a rotation about setup-space X.
+carry an A word. Inside the app the rotary axis is setup-space X, the chuck
+at its low end, and A turns right-handed about it; the machine's `rotary`
+says what that is on the machine.
 
-Code: `CamSetup.cpp` (index, frames), `CamSurface.{h,cpp}` (rotary patterns,
+Code: `CamMount.{h,cpp}` (the mount, which setups are held in the rotary, the
+chuck and tailstock envelope), `CamSetup.cpp` (index, frames), `CamSurface.{h,cpp}` (rotary patterns,
 `DeriveRotaryTwist`), `CamSurfaceStrategies.cpp` (`GenerateRotarySurface`),
 `CamRotary.{h,cpp}` (radius map, blank, rotary verdict), `CamRotaryFeed.{h,cpp}`
 (feed on a turning move), `CamPost.cpp` (scaled F, `G92 A`), `CamGcode.cpp`
 (modal A, `G92 A`), `CamSim.{h,cpp}` (`RotaryStockSim`).
+
+## How the rotary is installed
+
+A rotary can lie along either machine axis, with its chuck at either end, be
+driven by A or B, and turn either way for a positive jog. None of that can be
+guessed, so the machine profile states it (`Machine::rotary`, saved as
+`rotary`):
+
+| field | values | what it says |
+|---|---|---|
+| `along` | `x` \| `y` | the machine axis the rotary lies along |
+| `chuck_end` | `-` \| `+` | which end of that axis the chuck is at |
+| `word` | `A` \| `B` | the letter the controller drives it with |
+| `top_moves` | `+x` `-x` `+y` `-y` | which way the top of the part moves on a positive jog; perpendicular to `along` |
+
+`top_moves` is what you SEE at the machine (jog +1°, watch a pen mark on
+top of the stock), so there is no handedness to reason about. The four are
+stated together or not at all: half a statement is refused at load and at
+`save_machine`, naming what is accepted.
+
+`cam::MountOf` turns the statement into a quarter-turn about Z from setup to
+machine, a sign on A and a letter:
+
+| along, chuck end | machine (X, Y) from setup (x, y) |
+|---|---|
+| x, − | (x, y) |
+| x, + | (−x, −y) |
+| y, − | (−y, x) |
+| y, + | (y, −x) |
+
+The sign is + when the internal right-hand turn (the top moves toward setup
+−y), carried through that quarter-turn, is the direction `top_moves` names.
+It is the ONE mapping: the post writes by it (`Emitter::Work`, arc centres,
+the A word of every move, `G0 A`, `G92 A`), and `ProgramInSetupSpace` reads
+by its inverse, with `ParseGcode` taking the configured letter — the other
+rotary letter is a parse warning, not silence. The travel checks
+(`MachineWarning`, `MachineBoundsFramed`, `DeriveReachOffset`,
+`MachineOverhang`) take the machine's spans through the quarter-turn
+(`TravelSpanInSetup`); a quarter-turn keeps the box axis-aligned, so
+`ClipToMachine` is unchanged. A setup on the bed is identity.
+
+**Which setups are held in the rotary.** `Setup::heldIn`, saved as
+`held_in` (`rotary` | `bed`), unstated is derived: rotary when the setup has
+a `surface_rotary` op or a non-zero index. An indexed setup at A = 0 (the
+first side of a part turned for the second) must state it. `list_cam_setups`
+reports it.
+
+**Refused, not guessed.** Posting (and so verifying a posted file) a setup
+held in the rotary of a machine that does not state `rotary` is refused,
+naming the missing setting (`MountRefusal`): a wrong guess drives the cutter
+along a part that lies the other way. Bed setups post as before.
+
+## Chuck and tailstock
+
+What holds the part is a keep-out round the axis, planned around AND checked
+(`HoldingEnvelopeOf`, shared by both). The machine's `holding`:
+`chuck_diameter_mm`, `grip_mm` (stock inside the jaws), `tailstock` (bool),
+`centre_length_mm`, `centre_diameter_mm`, `tailstock_body_diameter_mm`,
+`clearance_mm`. Unstated sizes take conservative defaults (Ø90 chuck, 15 mm
+grip, a 25 mm Ø14 centre, a Ø60 body, 3 mm clearance), and the verdict names
+each one it used (`holding_defaults`) so a default is never read as measured.
+A setup overrides with `grip_mm`, `tailstock` (engaged or not) and `chuck`
+(false: held some other way, no jaws at the low end); the panel shows them as
+*Part held*, *In the chuck*, *mm in the jaws* and *Tailstock engaged*.
+
+**The envelope**, in setup space from the stock's ends x0 and x1: the chuck's
+radius from x0 to the jaw tips (x0 + grip); from x1 the centre, a cone from
+the axis out to the centre's radius over its length, then the body's radius.
+
+- **Planning.** Every toolpath of a rotary-held setup — continuous and
+  indexed — is clipped to the X window between the jaw tips and the
+  tailstock, widened by the tool's radius and the clearance, by
+  `ClipToMachine`'s clip-retract-reenter (which carries A across a split).
+  What it leaves out is `Toolpath::holdingClippedMm`; an operation whose
+  whole cut lies in the holding fails, saying so.
+- **Verifier.** The tool is a cylinder of its radius from the tip up; it
+  collides where its nearest approach to the axis over its X slab is inside
+  the envelope's radius there (`CheckHolding`, in `Inspect` and
+  `InspectRotary`, from the program's first stated XY — the parser's X0 Y0
+  before it is not a move). `holding_collisions`, `worst_holding_depth_mm`,
+  `_x`, `_line` and `worst_holding` (chuck or tailstock) are in `cam_verify`,
+  and any collision fails `ok`.
+
+**A rotary program's travel.** The rotary route of `VerifyGcode` checks the
+program's axial and Z spans against the machine's, as the height-map route
+does.
 
 ## Indexed
 
@@ -64,9 +153,18 @@ blank's diameter for display only).
 ### Layers, rest, and the rough verb
 
 - A `stepdown` (mm, radial) cuts in **layers** from the blank radius inward,
-  each at `max(cl, r_blank − k·stepdown)`, the last one the finish; on a
+  each at `max(cl, r_blank − k·stepdown)`, the last one at `cl`; on a
   spiral each layer starts on the turn the one before ended on. This is
   depth-steady, not engagement-steady, roughing.
+- **A layer cuts only what the one before left.** A cell whose floor is no
+  lower than the layer before's (or the blank, for the first) is empty for
+  that layer, so the pass lifts over it rather than riding in air — the grip
+  and every span a shallower layer already took to `cl`. The unlayered finish
+  skips cells at or above the blank.
+- **Parallel passes link at depth.** Consecutive zigzag passes whose ends meet
+  within the tool's radius, with an arc at the blank of at most two pitches
+  that clears the part, are joined by a feed move that turns A, not a retract
+  and a rapid.
 - **Rough on the rotary** (`job.rotary_rough`, `cam::DeriveRotaryRough`) is
   the finish's derivation plus a stepdown of half the cutter and a skin of
   `DefaultFinishStock(tool)`; **Finish on the rotary** (`job.rotary_finish`)
@@ -152,7 +250,8 @@ panel's verification routes the same way.
   angle in degrees.
 - Tabs and reliefs are 2.5D statements and are not carried into a rotary
   check. Fixtures are not checked on a rotary setup, and the verdict says so
-  ([simulation.md](simulation.md#fixture-collisions)). The cutter-reach
+  ([simulation.md](simulation.md#fixture-collisions)); the chuck and the
+  tailstock are ([Chuck and tailstock](#chuck-and-tailstock)). The cutter-reach
   finding skips `surface_rotary`: its Z span is the blank's diameter, not a
   depth.
 
@@ -180,7 +279,8 @@ map).
   rotary centreline only because the derived blank is symmetric about the
   axis.
 - Passes stop at the part's ends, so a domed end's steep foot is not reached.
-- No chuck or tailstock keep-out, and nothing says how far past the ends the
-  passes may go.
+- The chuck and tailstock are axisymmetric envelopes: a jaw's actual shape,
+  a steady rest, or a part held on a mandrel are not modelled.
+- Nothing says how far past the part's ends the passes may go.
 - No rotary constant-engagement roughing; no wrapped engraving or other
   feature-following paths beyond a twist.

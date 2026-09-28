@@ -16,6 +16,7 @@
 #include "common/Logger.h"
 #include "core/Document.h"
 #include "core/cam/CamMachine.h"
+#include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
@@ -1238,6 +1239,48 @@ void DrawCamPanel(AppState& state) {
       }
       ImGui::SetItemTooltip("Rotary 4th axis: how far the table is turned for "
                             "this setup. 0 for a 3-axis job.");
+      // Where the part is held (docs/cam/rotary.md#chuck-and-tailstock). The
+      // default follows the operations; an indexed setup at A = 0 is in the
+      // chuck all the same, and says so here.
+      int held = static_cast<int>(setup->heldIn);
+      const char* holds[] = {"as its operations say", "on the bed",
+                             "in the rotary"};
+      ImGui::SetNextItemWidth(170.0f);
+      if (ImGui::Combo("Part held###cam_held_in", &held, holds, 3)) {
+        setup->heldIn = static_cast<cam::Setup::HeldIn>(held);
+        dirty = true;
+        changed = kAllOps;
+      }
+      if (cam::HeldInRotary(*setup)) {
+        bool chuck = setup->chuck != 0;
+        if (ImGui::Checkbox("In the chuck###cam_chuck", &chuck)) {
+          setup->chuck = chuck ? 1 : 0;
+          dirty = true;
+          changed = kAllOps;
+        }
+        ImGui::SetItemTooltip("Off only for a part held some other way the "
+                              "model does not show -- nothing then keeps the "
+                              "cutter off that end.");
+        if (chuck) {
+          ImGui::SameLine();
+          float grip = static_cast<float>(setup->gripLength);
+          ImGui::SetNextItemWidth(70.0f);
+          if (ExprDragFloat(state, "mm in the jaws (0 = machine's)###cam_grip",
+                            &grip, 0.5f, 0.0f, 200.0f, "%.1f")) {
+            setup->gripLength = grip;
+            dirty = true;
+            changed = kAllOps;
+          }
+        }
+        bool tail =
+            setup->tailstock == 1 ||
+            (setup->tailstock == -1 && setup->machine.holding.hasTailstock);
+        if (ImGui::Checkbox("Tailstock engaged###cam_tail", &tail)) {
+          setup->tailstock = tail ? 1 : 0;
+          dirty = true;
+          changed = kAllOps;
+        }
+      }
     }
   }
   // The struct holds a double; the widget edits a float mirror so ImGui's

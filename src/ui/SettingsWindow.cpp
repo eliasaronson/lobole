@@ -360,6 +360,98 @@ void DrawMachinesSection(AppState& state) {
         "How fast the 4th axis turns at most -- the A motor's velocity in the "
         "controller's motor tuning. A cut that turns the part is held to it, "
         "and the cycle time counts the hold.");
+
+    // How the rotary is INSTALLED
+    // (docs/cam/rotary.md#how-the-rotary-is-installed). Not stated, a setup
+    // held in the rotary does not post: the answer to which way the part lies
+    // is the machine's, not a guess.
+    cam::RotaryMount& r = m.rotary;
+    int along = r.along == 'x' ? 1 : r.along == 'y' ? 2 : 0;
+    const char* alongNames[] = {"not stated", "machine X", "machine Y"};
+    ImGui::SetNextItemWidth(ControlWidth());
+    if (ImGui::Combo("Rotary lies along###mach_rot_along", &along, alongNames,
+                     3)) {
+      if (along == 0) {
+        r = cam::RotaryMount{};
+      } else {
+        r.along = along == 1 ? 'x' : 'y';
+        // A new statement starts from the common one, shown, for the user to
+        // change: the chuck at the minus end, driven as A, right-handed.
+        r.topAxis = r.along == 'x' ? 'y' : 'x';
+        if (r.topSign == 0)
+          r.topSign = r.along == 'x' ? -1 : 1;
+      }
+      edited = true;
+    }
+    ImGui::SetItemTooltip("Which machine axis the rotary's axis is parallel "
+                          "to. Until this is stated, a setup that holds its "
+                          "part in the rotary is not posted.");
+    if (r.Stated()) {
+      int end = r.chuckEnd < 0 ? 0 : 1;
+      const char* ends[] = {"the minus end", "the plus end"};
+      ImGui::SetNextItemWidth(ControlWidth());
+      if (ImGui::Combo("Chuck at###mach_rot_end", &end, ends, 2)) {
+        r.chuckEnd = end == 0 ? -1 : 1;
+        edited = true;
+      }
+      int word = r.word == 'B' ? 1 : 0;
+      const char* words[] = {"A", "B"};
+      ImGui::SetNextItemWidth(ControlWidth());
+      if (ImGui::Combo("Driven as###mach_rot_word", &word, words, 2)) {
+        r.word = word == 0 ? 'A' : 'B';
+        edited = true;
+      }
+      ImGui::SetItemTooltip("The letter the controller drives the rotary "
+                            "with (Mach3: the axis its motor is set up on).");
+      int top = r.topSign > 0 ? 0 : 1;
+      const std::string plus = std::string("+") + char(std::toupper(r.topAxis));
+      const std::string minus =
+          std::string("-") + char(std::toupper(r.topAxis));
+      const char* tops[] = {plus.c_str(), minus.c_str()};
+      ImGui::SetNextItemWidth(ControlWidth());
+      if (ImGui::Combo("Positive jog moves the top toward###mach_rot_top", &top,
+                       tops, 2)) {
+        r.topSign = top == 0 ? 1 : -1;
+        edited = true;
+      }
+      ImGui::SetItemTooltip(
+          "Jog the rotary positive with a pen mark on top of the chuck, and "
+          "watch which way the mark goes. That is the sign of every angle in "
+          "the file.");
+    }
+
+    // What holds the part: the chuck and the tailstock, which every rotary
+    // toolpath is kept out of. 0 = not measured, and a default BIGGER than
+    // most hardware stands in, which the verdict names.
+    cam::RotaryHolding& h = m.holding;
+    const auto size = [&](const char* label, double& v, const char* tip) {
+      float f = static_cast<float>(v);
+      ImGui::SetNextItemWidth(ControlWidth());
+      if (ExprDragFloat(state, label, &f, 0.5f, 0.0f, 500.0f, "%.1f")) {
+        v = f;
+        edited = true;
+      }
+      ImGui::SetItemTooltip("%s", tip);
+    };
+    size("Chuck diameter (mm, 0 = 90)###mach_chuck_d", h.chuckDiameter,
+         "The chuck body at its widest. Nothing may come nearer the axis "
+         "than this over the jaws.");
+    size("Stock in the jaws (mm, 0 = 15)###mach_grip", h.gripLength,
+         "How much of the stock the jaws hold, from its end. A setup can "
+         "say its own.");
+    if (ImGui::Checkbox("Has a tailstock###mach_tail", &h.hasTailstock))
+      edited = true;
+    if (h.hasTailstock) {
+      size("Centre length (mm, 0 = 25)###mach_centre_l", h.centreLength,
+           "From the centre's point to where it meets the tailstock.");
+      size("Centre diameter (mm, 0 = 14)###mach_centre_d", h.centreDiameter,
+           "The centre at its base.");
+      size("Tailstock body (mm, 0 = 60)###mach_tail_d", h.tailBodyDiameter,
+           "The tailstock behind the centre, at its widest.");
+    }
+    size("Clearance (mm, 0 = 3)###mach_hold_clear", h.clearance,
+         "Kept from the chuck and the tailstock, on top of the tool's "
+         "radius.");
   }
   // The tool library (M4): what the shop owns for this machine. A new setup
   // on it copies the table; "Add tool" in the CAM panel offers these first.

@@ -14,7 +14,11 @@ what holds the stock down. The data is `cam::Setup` and its members in
 the setup's, caps X/Y/Z on a turning cut, and is the ceiling the feed check
 uses; 0 = not stated),
 `rotaryMaxFeed` (the A axis's top speed in deg/min; saved as `a_max_deg_min`;
-0 = not stated) and `library` (tools).
+0 = not stated), `rotary` (how the rotary is installed: the axis it lies
+along, the chuck's end, its letter and which way it turns;
+[rotary.md](rotary.md#how-the-rotary-is-installed)), `holding` (the chuck's
+and tailstock's sizes; [rotary.md](rotary.md#chuck-and-tailstock)) and
+`library` (tools). The settings window's machine editor has all of them.
 
 **Stored globally, one file per machine**: `~/.config/designer/machines/<slug>.json`,
 beside `settings.json` — a list of structs does not belong in the scalar
@@ -256,6 +260,9 @@ When the machine states a work area:
   amount left out is `Toolpath::clippedMm` (`clipped_mm`). A controller does
   not truncate for you — with soft limits it alarms on the line, without them
   it drives into the stop — so the file has to stop.
+- **A rotary along machine Y** swaps the X and Y travel for every one of
+  these, since the part's axis is setup X
+  ([rotary.md](rotary.md#how-the-rotary-is-installed)).
 - **Z is a span, not a position.** Where the machine's Z zero sits against
   the workpiece is set at touch-off, after the file is written, so the
   verifier's travel check in Z asks only whether the program's deepest point

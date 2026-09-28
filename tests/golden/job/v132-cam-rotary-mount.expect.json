@@ -1,0 +1,32 @@
+{
+  "job_parts": [
+    "Shaft"
+  ],
+  "cam_rotary_mounts": [
+    [
+      "y",
+      -1,
+      "B",
+      "+x"
+    ]
+  ],
+  "cam_holdings": [
+    [
+      80.0,
+      12.0,
+      true,
+      22.0,
+      12.0,
+      40.0,
+      2.0
+    ]
+  ],
+  "cam_setup_holding": [
+    [
+      "rotary",
+      18.0,
+      0,
+      -1
+    ]
+  ]
+}

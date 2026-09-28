@@ -1,5 +1,7 @@
 #include "core/cam/CamGcode.h"
 
+#include "core/cam/CamMount.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -17,7 +19,7 @@ constexpr double kArcChordTolerance = 0.02;
 
 } // namespace
 
-GProgram ParseGcode(std::string_view text) {
+GProgram ParseGcode(std::string_view text, char rotaryWord) {
   GProgram out;
   glm::dvec3 pos(0.0);
   bool rapid = true;
@@ -102,7 +104,7 @@ GProgram ParseGcode(std::string_view text) {
     // Arc centre, INCREMENTAL from the arc start (the post states G91.1).
     glm::dvec2 ij(0.0);
     for (size_t k = 0; k < clean.size(); k++) {
-      const char word = clean[k];
+      char word = clean[k];
       if (!std::isalpha(static_cast<unsigned char>(word)))
         continue;
       size_t numEnd = k + 1;
@@ -122,11 +124,25 @@ GProgram ParseGcode(std::string_view text) {
           k = numEnd - 1;
           continue;
         }
-      } else if (word == 'X' || word == 'Y' || word == 'Z' || word == 'A') {
+      } else if (word == 'X' || word == 'Y' || word == 'Z' || word == 'A' ||
+                 word == 'B') {
         // "Xnan" lands here: the axis word exists with no parseable number.
         out.errors.push_back("line " + std::to_string(lineNo) +
                              ": axis word with no number");
       }
+      // The rotary's own letter is read below as the rotary; the OTHER
+      // rotary letter is said and not read, because reading it would turn a
+      // part about an axis this machine does not have that way.
+      if ((word == 'A' || word == 'B') && word != rotaryWord) {
+        out.warnings.push_back("line " + std::to_string(lineNo) + ": a " +
+                               std::string(1, word) +
+                               " word, and this machine's rotary is " +
+                               std::string(1, rotaryWord) + ": not read");
+        k = numEnd - 1;
+        continue;
+      }
+      if (word == rotaryWord)
+        word = 'A'; // the rotary, whichever letter drives it
       switch (word) {
       case 'G':
         if (value == 0.0 || value == 1.0 || value == 2.0 || value == 3.0) {
@@ -293,11 +309,12 @@ GProgram ParseGcode(std::string_view text) {
 }
 
 GProgram ProgramInSetupSpace(std::string_view text, const Setup& setup) {
-  GProgram p = ParseGcode(text);
-  if (setup.origin == glm::dvec3(0.0))
-    return p;
-  for (GMove& m : p.moves)
-    m.to += setup.origin;
+  const Mount mount = MountOf(setup);
+  GProgram p = ParseGcode(text, mount.word);
+  for (GMove& m : p.moves) {
+    m.to = ToSetup(mount, m.to) + setup.origin;
+    m.a *= mount.sign;
+  }
   return p;
 }
 

@@ -198,7 +198,7 @@ TypedJob JobFor(cam::OpType type) {
   if (surfacing || rotary)
     j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 10.0);
   if (rotary) {
-    j.setup.machine.hasRotaryAxis = true;
+    RotaryMachine(j.setup);
     j.setup.safeZ = 40.0;
   }
   if (type == cam::OpType::EdgeRound)

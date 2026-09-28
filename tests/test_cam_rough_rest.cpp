@@ -203,7 +203,7 @@ TEST_CASE("cam rest: a smaller ball re-cuts only the corner the larger left",
 TEST_CASE("cam rest: on the rotary only at the shoulders", "[cam][slow]") {
   auto doc = NeckedShaftDoc(); // Phi 30, a Phi 22 journal from x 12 to 28
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 1.0, 1.0};
   setup.safeZ = 30.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
@@ -259,7 +259,7 @@ TEST_CASE("cam rest: on the rotary only at the shoulders", "[cam][slow]") {
 TEST_CASE("cam rotary: a picked face bounds the pass along the axis", "[cam]") {
   auto doc = NeckedShaftDoc(); // cylinders: x 0-12, the journal 12-28, 28-40
   cam::Setup setup = BasicSetup();
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   setup.stock.margin = {0.0, 1.0, 1.0};
   setup.safeZ = 30.0;
   setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);

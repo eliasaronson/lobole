@@ -154,6 +154,18 @@ struct Verdict {
   // The deepest bite of every op checked, keyed by op id, with what it was
   // allowed: the number a test (or a person) compares against the stepdown.
   std::map<uint64_t, std::pair<double, double>> biteByOp;
+  // Moves that reach into the CHUCK or the TAILSTOCK of a setup held in the
+  // rotary (docs/cam/rotary.md#chuck-and-tailstock): the tool, a cylinder of
+  // its radius from the tip up, nearer the axis over its slab along X than
+  // the holding envelope allows. Rapid or cut, checked on every move -- the
+  // sampler part's first program drove its first pass through the jaws.
+  int holdingCollisions = 0;
+  double worstHoldingDepth = 0.0; // mm into the envelope
+  double worstHoldingX = 0.0;     // along the axis, setup space
+  int worstHoldingLine = 0;
+  std::string worstHoldingWhat; // "the chuck" | "the tailstock"
+  // The holding sizes the check used that are defaults, not measured.
+  std::vector<std::string> holdingDefaults;
   // Moves that drive a SHANK wider than the cutter into material standing
   // above the flutes (docs/cam/simulation.md#shank-collisions): the wall of a
   // cut deeper than the flutes are long. Silent unless the tool states a
@@ -274,7 +286,7 @@ struct Verdict {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
            outsideTravel == 0 && holderCollisions == 0 &&
            fixtureCollisions == 0 && overBites == 0 && shankCollisions == 0 &&
-           fileErrors == 0;
+           holdingCollisions == 0 && fileErrors == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of
@@ -360,6 +372,11 @@ struct VerdictLine {
   Level level = Level::Good;
   std::string text;
 };
+
+// The chuck and the tailstock against a program in setup space, into `v`
+// (Verdict::holdingCollisions). Nothing for a setup not held in the rotary.
+void CheckHolding(const GProgram& program, const Setup& setup,
+                  const std::vector<Body>& bodies, Verdict& v);
 
 // The MACHINE's lines of the verdict
 // (docs/cam/setup.md#the-machines-work-area): the parts' reach beyond the

@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    131; // v131: a `Tool`'s `shank_diameter` -- how wide it is above the
+    132; // v132: how a machine's rotary is INSTALLED (`rotary`: along,
+         //      chuck_end, word, top_moves) and what holds a part in it
+         //      (`holding`: the chuck and the tailstock); a setup's `held_in`,
+         //      `grip_mm`, `tailstock` and `chuck`. A setup held in the
+         //      rotary of a machine that does not state its mount is not
+         //      posted (docs/cam/rotary.md#how-the-rotary-is-installed).
+         // v131: a `Tool`'s `shank_diameter` -- how wide it is above the
          //      flutes. Wider than the cutter makes a cut deeper than the
          //      flutes a collision, refused when the op is made
          //      (docs/cam/setup.md#reach) and found at the move by the

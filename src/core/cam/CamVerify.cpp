@@ -1,5 +1,7 @@
 #include "core/cam/CamVerify.h"
 
+#include "core/cam/CamMount.h"
+
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
 
@@ -984,6 +986,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.worstBiteLine = worstBiteLine;
   out.verdict.worstBiteOp = worstBiteOp;
   out.verdict.biteByOp = std::move(biteByOp);
+  CheckHolding(program, setup, rawBodies, out.verdict);
   out.verdict.shankCollisions = shankCollisions;
   out.verdict.worstShankDepth = worstShankDepth;
   out.verdict.worstShankAt = worstShankAt;
@@ -1139,9 +1142,38 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
   // silently ignored inside it.
   // Fixtures likewise: a bed-space clamp means nothing in the frame of a
   // part that turns, so a rotary file says they were not checked.
-  if (RotatesWhileCutting(ParseGcode(gcode))) {
+  const GProgram program = ProgramInSetupSpace(gcode, setup);
+  if (RotatesWhileCutting(program)) {
     Verdict v = InspectRotary(gcode, setup, bodies, res).verdict;
     v.fixturesSkippedRotary = !fixtures.empty();
+    // The machine's travel, which a turning program was never checked
+    // against. Spans, not positions: where the part sits on the rotary's
+    // axis and where Z zero is are the operator's, set after the file is
+    // written -- but a program longer along the axis, or taller, than the
+    // machine travels cannot run at any setting.
+    if (setup.machine.HasWorkArea() && !program.moves.empty()) {
+      const glm::dvec3 travel = TravelSpanInSetup(setup);
+      glm::dvec3 lo(program.moves.front().to), hi(lo);
+      for (const GMove& m : program.moves) {
+        lo = glm::min(lo, m.to);
+        hi = glm::max(hi, m.to);
+      }
+      for (const int a : {0, 2}) {
+        const double over = (hi[a] - lo[a]) - travel[a];
+        if (over <= 1e-6)
+          continue;
+        v.outsideTravel++;
+        if (over > v.worstOvershoot) {
+          v.worstOvershoot = over;
+          v.outsideAxis = a == 0 ? 'X' : 'Z';
+        }
+        if (a == 2) {
+          v.zSpanOver = over;
+          v.zSpan = hi.z - lo.z;
+          v.zTravel = travel.z;
+        }
+      }
+    }
     return v;
   }
   return Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures).verdict;
@@ -1262,6 +1294,27 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.worstHolderDepth, v.worstHolderAt.x, v.worstHolderAt.y,
                   v.worstHolderLine);
     out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.holdingCollisions > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d move%s reach into %s, worst %.1f mm in at X%.1f (line "
+                  "%d). Nothing may come nearer the axis there: keep the "
+                  "operation off that end of the part, or grip less of it.",
+                  v.holdingCollisions, v.holdingCollisions == 1 ? "" : "s",
+                  v.worstHoldingWhat.c_str(), v.worstHoldingDepth,
+                  v.worstHoldingX, v.worstHoldingLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (!v.holdingDefaults.empty()) {
+    std::string list;
+    for (const std::string& d : v.holdingDefaults)
+      list += (list.empty() ? "" : ", ") + d;
+    out.push_back({VerdictLine::Level::Warn,
+                   "The chuck and tailstock were checked with defaults, not "
+                   "your machine's sizes: " +
+                       list +
+                       ". They are bigger than most, never smaller -- measure "
+                       "yours and put them in the machine profile."});
   }
   if (v.shankCollisions > 0) {
     std::snprintf(buf, sizeof(buf),
@@ -1395,6 +1448,55 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
 
 namespace cam {
 
+void CheckHolding(const GProgram& program, const Setup& setup,
+                  const std::vector<Body>& bodies, Verdict& v) {
+  const HoldingEnvelope env =
+      HoldingEnvelopeOf(setup, BodiesInSetupFrame(setup, bodies));
+  if (!env.ok || program.moves.empty())
+    return;
+  v.holdingDefaults = env.defaulted;
+  // From the first place the file SAYS the tool is. A program begins with a
+  // retract at an XY it never states -- the reader's X0 Y0 -- and the rapid
+  // out of that is where the machine happens to be parked, which no file
+  // knows: it read as a pass over the chuck in every rotary program.
+  size_t first = 1;
+  while (first < program.moves.size() &&
+         glm::dvec2(program.moves[first].to) ==
+             glm::dvec2(program.moves.front().to))
+    first++;
+  if (first >= program.moves.size())
+    return;
+  glm::dvec3 from = program.moves[first].to;
+  for (size_t k = first + 1; k < program.moves.size(); k++) {
+    const GMove& m = program.moves[k];
+    const Tool* tool = setup.FindTool(m.tool);
+    const double r = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+    const double len = glm::length(m.to - from);
+    const int steps = std::max(1, static_cast<int>(std::ceil(len / 0.5)));
+    double worst = 0.0, worstX = 0.0;
+    for (int i = 0; i <= steps; i++) {
+      const glm::dvec3 p =
+          from + (m.to - from) * (static_cast<double>(i) / steps);
+      const double d = HoldingDepth(env, p, r);
+      if (d > worst) {
+        worst = d;
+        worstX = p.x;
+      }
+    }
+    if (worst > kGrazeTolerance) {
+      v.holdingCollisions++;
+      if (worst > v.worstHoldingDepth) {
+        v.worstHoldingDepth = worst;
+        v.worstHoldingX = worstX;
+        v.worstHoldingLine = m.line;
+        v.worstHoldingWhat =
+            worstX - r <= env.chuckTo ? "the chuck" : "the tailstock";
+      }
+    }
+    from = m.to;
+  }
+}
+
 std::vector<VerdictLine> MachineLines(const Setup& setup,
                                       const std::vector<Body>& bodies,
                                       const std::vector<Toolpath>* paths) {
@@ -1443,6 +1545,30 @@ std::vector<VerdictLine> MachineLines(const Setup& setup,
                  "). Say where the bed is on the stock (reach_offset), or "
                  "move the work: what is not in the file is not cut"});
       }
+    }
+  }
+  // Cutting left out beside the chuck or the tailstock is the part's own
+  // material, and the verifier reads it as leftover: said here, by
+  // operation, so the leftover has its reason next to it.
+  if (paths != nullptr) {
+    std::string which;
+    double clipped = 0.0;
+    for (const Toolpath& tp : *paths)
+      if (tp.holdingClippedMm > 0.0) {
+        clipped += tp.holdingClippedMm;
+        which += (which.empty() ? "" : ", ") + std::to_string(tp.operationId);
+      }
+    if (clipped > 0.0) {
+      char buf[160];
+      std::snprintf(buf, sizeof(buf),
+                    "%.0f mm of cutting within reach of the chuck or the "
+                    "tailstock is left out (op%s ",
+                    clipped, which.find(',') == std::string::npos ? "" : "s");
+      out.push_back({VerdictLine::Level::Warn,
+                     std::string(buf) + which +
+                         "): the stock there stays uncut, and reads as "
+                         "leftover. Grip less, or finish that end in another "
+                         "setup"});
     }
   }
   // A cut that turns is posted at a SCALED feed, held to what the axes can

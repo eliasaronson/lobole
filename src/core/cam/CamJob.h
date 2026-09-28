@@ -94,6 +94,40 @@ struct Tool {
   bool operator==(const Tool&) const = default;
 };
 
+// How the rotary is INSTALLED (docs/cam/rotary.md#how-the-rotary-is-installed).
+// Inside the app the part's axis is setup +X, the chuck at its low end, and A
+// turns right-handed about it; this says what that is on THIS machine, so the
+// post writes it and the reader reads it back. Stated together or not at all
+// -- and not stated, a setup held in the rotary does not post: guessing X is
+// what would have run a first program across a part that lay along Y.
+struct RotaryMount {
+  char along = 0;    // 'x' | 'y': the machine axis it lies along; 0 = unstated
+  int chuckEnd = -1; // the chuck at that axis's minus (-1) or plus (+1) end
+  char word = 'A';   // the letter the controller drives it with: 'A' | 'B'
+  // Which way the TOP of the part moves on a positive jog: an axis ('x' |
+  // 'y', across `along`) and a sign. What a person sees at the machine, so
+  // no handedness to reason about.
+  char topAxis = 0;
+  int topSign = 0;
+  [[nodiscard]] bool Stated() const { return along != 0; }
+  bool operator==(const RotaryMount&) const = default;
+};
+
+// What holds a part in the rotary: the chuck and the tailstock, as an
+// envelope round the axis (docs/cam/rotary.md#chuck-and-tailstock). Every
+// size 0 = not measured, and a conservative default stands in -- bigger than
+// the hardware, never smaller -- which the verdict says.
+struct RotaryHolding {
+  double chuckDiameter = 0.0;    // the chuck body, mm (90)
+  double gripLength = 0.0;       // how much stock the jaws hold, mm (15)
+  bool hasTailstock = false;     // the shop has one to engage
+  double centreLength = 0.0;     // the centre's point to its base, mm (25)
+  double centreDiameter = 0.0;   // the centre at its base, mm (14)
+  double tailBodyDiameter = 0.0; // the tailstock behind the centre, mm (60)
+  double clearance = 0.0;        // kept from both, mm (3)
+  bool operator==(const RotaryHolding&) const = default;
+};
+
 // The MACHINE, as one physical thing (docs/cam/setup.md#machine-profiles;
 // core/cam/CamMachine.h for what is asked about it). Post dialect, arc
 // fitting and the rotary axis lived on `Setup` because there was nowhere
@@ -124,6 +158,9 @@ struct Machine {
   // number because it is its own motor: a 4th axis turns at a few thousand
   // degrees a minute on a router whose linear rapid is 1500 mm/min.
   double rotaryMaxFeed = 0.0;
+  // How the rotary is installed, and what holds a part in it (v132).
+  RotaryMount rotary;
+  RotaryHolding holding;
   // The tool library a new setup's table is copied from (M4). Copied, never
   // linked: FreeCAD's answer, and the one the per-setup table already gives.
   std::vector<Tool> library;
@@ -628,6 +665,20 @@ struct Setup {
   // Needs `machine.hasRotaryAxis`: no file can carry an A word for an axis
   // the shop does not own.
   double rotationA = 0.0;
+  // Whether this setup's part is held IN THE ROTARY (v132). Derived when not
+  // stated: a rotary op or a non-zero index says so. An indexed setup at
+  // A = 0 -- flats on a turned part -- is in the chuck all the same, and
+  // says so itself (docs/cam/rotary.md#how-the-rotary-is-installed).
+  enum class HeldIn { Derived, Bed, Rotary };
+  HeldIn heldIn = HeldIn::Derived;
+  // How much of the stock the jaws hold, mm; 0 = the machine's.
+  double gripLength = 0.0;
+  // The tailstock: -1 = engaged when the machine has one, 0 off, 1 on.
+  int tailstock = -1;
+  // The chuck: -1 / 1 = the part's stock is gripped at its low end (the
+  // rotary has a chuck, always), 0 = held some other way nothing here models
+  // -- a collet on a spigot beyond the stock, between centres with a dog.
+  int chuck = -1;
 
   // The machine this setup was set up on: the post, arc fitting, the rotary
   // axis, the work area. An EMBEDDED COPY of a globally stored profile, named
@@ -773,6 +824,9 @@ struct Toolpath {
   // left out of this path (ClipToMachine). The verdict says so; a controller
   // never truncates for you -- it alarms on the line, or hits the stop.
   double clippedMm = 0.0;
+  // Cutting left out because it would reach into the chuck or the tailstock
+  // (CamMount.h HoldingEnvelope): its own number, not the travel's.
+  double holdingClippedMm = 0.0;
   // The targets this operation could NOT follow, one sentence each. An
   // operation with several targets is generated once per target
   // (GenerateFramed), and one unusable pick must not throw away the four good

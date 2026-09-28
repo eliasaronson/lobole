@@ -15,6 +15,7 @@
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
+#include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
@@ -61,6 +62,22 @@ std::unique_ptr<Document> BlockDoc(double w = 40, double h = 30,
   doc->AddFeature(
       std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), w, h, d));
   return doc;
+}
+
+// A rotary this test's job posts for, stated as the identity -- along X, the
+// chuck at the minus end, driven as A, the top of the part moving -Y on a
+// positive jog (right-handed) -- and nothing holding a part whose model
+// starts at its stock's end: the test is about the cut, not the chuck
+// (docs/cam/rotary.md#how-the-rotary-is-installed).
+inline void RotaryMachine(cam::Setup& s) {
+  s.machine.hasRotaryAxis = true;
+  s.machine.rotary.along = 'x';
+  s.machine.rotary.chuckEnd = -1;
+  s.machine.rotary.word = 'A';
+  s.machine.rotary.topAxis = 'y';
+  s.machine.rotary.topSign = -1;
+  s.chuck = 0;
+  s.tailstock = 0;
 }
 
 cam::Setup BasicSetup() {

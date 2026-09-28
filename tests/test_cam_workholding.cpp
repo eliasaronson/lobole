@@ -155,7 +155,7 @@ TEST_CASE("cam workholding: fixtures on a rotary setup are said, not checked",
   const cam::FixtureSolid clamp =
       PlacedBox(b, "Clamp", {10, 30, 25}, cam::FixtureSide::MinusX);
   cam::Setup indexed = b.setup;
-  indexed.machine.hasRotaryAxis = true;
+  RotaryMachine(indexed);
   indexed.rotationA = 90.0;
   const cam::Verdict v = Verify(
       b, "G0 X-4 Y-10 Z40\nG1 Z10 F300\nG1 Y40\nG0 Z40\n", {clamp}, &indexed);

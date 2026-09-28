@@ -1436,7 +1436,7 @@ TEST_CASE("cam: adaptive clears a face turned over, and falls back when it "
     }
   REQUIRE(floor.IsSet());
   cam::Setup s = BasicSetup();
-  s.machine.hasRotaryAxis = true;
+  RotaryMachine(s);
   s.rotationA = 180.0;
   cam::Operation op;
   op.id = 1;
@@ -2269,7 +2269,7 @@ TEST_CASE("cam: Add operation follows the setup", "[cam]") {
   CHECK(cam::AddOperationType(setup) == cam::OpType::Profile);
 
   // A 4th-axis machine is not the evidence: a plate on its bed is 3-axis.
-  setup.machine.hasRotaryAxis = true;
+  RotaryMachine(setup);
   cam::Operation profile;
   profile.id = 1;
   profile.type = cam::OpType::Profile;

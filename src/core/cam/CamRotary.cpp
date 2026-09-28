@@ -630,6 +630,7 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
   if (!program.warnings.empty())
     out.verdict.firstFileWarning = program.warnings.front();
+  CheckHolding(program, setup, rawBodies, out.verdict);
   out.ok = true;
   return out;
 }

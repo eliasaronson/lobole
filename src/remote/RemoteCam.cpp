@@ -9,6 +9,7 @@
 #include "core/Document.h"
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
+#include "core/cam/CamMount.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamSim.h"
 #include "core/cam/CamToolpath.h"
@@ -40,7 +41,8 @@ constexpr MethodDoc kCamMethods[] = {
      "Your machines, from ~/.config/designer/machines/*.json: each {name, "
      "post, travel?: {min, max}, fit_arcs, has_rotary_axis, rapid_feed, "
      "a_max_deg_min (the A axis's top speed; 0/absent = not stated), "
-     "tools}. A setup names one and EMBEDS a copy of it; set_cam_setup "
+     "rotary?, holding?, tools}. A setup names one and EMBEDS a copy of it; "
+     "set_cam_setup "
      "{machine} puts one on a setup.",
      "", remote::NoFlags,
      "machines[]{name,post,travel?,fit_arcs?,has_rotary_axis?,rapid_feed?,"
@@ -50,7 +52,15 @@ constexpr MethodDoc kCamMethods[] = {
     {"save_machine",
      "Write a machine to the store {machine: {name, post?, travel?: {min: "
      "[x,y,z], max: [x,y,z]}, fit_arcs?, has_rotary_axis?, rapid_feed?, "
-     "a_max_deg_min?, "
+     "a_max_deg_min?, rotary?: {along: x|y, chuck_end: -|+, word: A|B, "
+     "top_moves: +x|-x|+y|-y} (how the rotary is INSTALLED: the machine "
+     "axis it lies along, which end the chuck is at, its letter, and which "
+     "way the top of the part moves on a positive jog -- stated whole or "
+     "not at all; without it a setup held in the rotary does not post), "
+     "holding?: {chuck_diameter_mm, grip_mm, tailstock: bool, "
+     "centre_length_mm, centre_diameter_mm, tailstock_body_diameter_mm, "
+     "clearance_mm} (the chuck and tailstock every rotary toolpath is kept "
+     "out of; a size left out is a conservative default the verdict names), "
      "tools?: [...]}}, replacing one of that name. Refused without a name, "
      "with an unknown post (naming the accepted ones), or with a name that "
      "would share a file with a different name. Open jobs are not changed: a "
@@ -178,7 +188,13 @@ constexpr MethodDoc kCamMethods[] = {
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
-     "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
+     "element}, flip?, has_rotary_axis?, rotation_a?, held_in?: "
+     "rotary|bed|derived (whether the part is held in the rotary; derived "
+     "from a rotary op or a non-zero rotation_a, so an indexed setup at A=0 "
+     "states it), grip_mm? (mm of the stock the chuck's jaws hold; 0 = the "
+     "machine's), tailstock?: bool, chuck?: bool (false: held some other "
+     "way), rotary?/holding? (this setup's copy of the machine's -- see "
+     "save_machine), fit_arcs?, "
      "origin_at?: stock_min|stock_centre|model_min|stock_max, "
      "reach_offset?: [x,y] | \"auto\", "
      "order?: authored|tool|part, split_output?: bool (one program per "
@@ -277,9 +293,10 @@ constexpr MethodDoc kCamMethods[] = {
      "workpiece the sheet you own (size + place, where the part sits in it) "
      "rather than a shrink-wrap of the part; a sheet smaller than the part is "
      "refused, naming the axis and the shortfall.",
-     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, machine, name, "
-     "order, origin_at, post, reach_offset, rotation_a, safe_z, split_output, "
-     "job, stock, tool"},
+     "chuck, fit_arcs, flip, grip_mm, has_rotary_axis, held_in, holding, id, "
+     "lay_face_up, machine, name, order, origin_at, post, reach_offset, "
+     "rotary, rotation_a, safe_z, split_output, job, stock, tailstock, "
+     "tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id, job"},
     {"add_cam_op",
      "Add an operation. Every length here is MILLIMETRES — top_z, bottom_z, "
@@ -388,7 +405,9 @@ constexpr MethodDoc kCamMethods[] = {
      "multi-target operation that could not be followed while the others "
      "could, and `clipped_mm` how much cutting fell beyond the machine's "
      "travel and is NOT in the file -- both also as `warnings`, which "
-     "carries the work-area verdict too. The cheap way to check a job. "
+     "carries the work-area verdict too. `holding_clipped_mm` is the cutting "
+     "left out beside a rotary setup's chuck and tailstock. "
+     "The cheap way to check a job. "
      "Synchronous by default -- an adaptive pocket costs seconds and this "
      "waits for it. `async: true` hands the slow passes -- adaptive clearing, "
      "surfacing, and the sections a profile follows -- to a background "
@@ -1358,6 +1377,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"safe_z", setup.safeZ},
                  {"rotation_a", setup.rotationA},
                  {"has_rotary_axis", setup.machine.hasRotaryAxis},
+                 {"held_in", cam::HeldInRotary(setup) ? "rotary" : "bed"},
+                 {"grip_mm", setup.gripLength},
+                 {"tailstock", setup.tailstock},
+                 {"chuck", setup.chuck},
                  // How the part is CLAMPED, as [x, y, z, w]. Identity = as
                  // modelled. A script that reads a toolpath without this
                  // cannot tell which way up the part was cut.
@@ -1457,6 +1480,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // what it asked for rather than on what the setup used to be.
     if (p.contains("has_rotary_axis"))
       setup.machine.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
+    // The setup's copy of the machine's rotary mount and holding, as the
+    // store's profile would state them -- refused whole, naming the fields.
+    if (p.contains("rotary"))
+      setup.machine.rotary =
+          p.at("rotary").is_null()
+              ? cam::RotaryMount{}
+              : DocumentIO::RotaryMountFromJson(p.at("rotary"));
+    if (p.contains("holding"))
+      setup.machine.holding =
+          DocumentIO::RotaryHoldingFromJson(p.at("holding"));
     if (p.contains("rotation_a")) {
       const double a = p.at("rotation_a").get<double>();
       // REFUSED, not quietly honoured. `SetupToModel` applies rotationA
@@ -1476,6 +1509,34 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "would be MACHINED as if turned and the file would never turn it");
       setup.rotationA = a;
     }
+    // Where the part is held, and by what
+    // (docs/cam/rotary.md#chuck-and-tailstock).
+    if (p.contains("held_in")) {
+      const std::string h = p.at("held_in").get<std::string>();
+      if (h == "rotary")
+        setup.heldIn = cam::Setup::HeldIn::Rotary;
+      else if (h == "bed")
+        setup.heldIn = cam::Setup::HeldIn::Bed;
+      else if (h == "derived")
+        setup.heldIn = cam::Setup::HeldIn::Derived;
+      else
+        throw std::runtime_error("unknown held_in '" + h +
+                                 "'; a part is held in the rotary, on the "
+                                 "bed, or `derived` from its operations");
+    }
+    if (p.contains("grip_mm")) {
+      const double g = p.at("grip_mm").get<double>();
+      if (g < 0.0)
+        throw std::runtime_error(
+            "grip_mm is how much of the stock the jaws hold, in mm; 0 for "
+            "the machine's, and never negative (`chuck: false` for a part "
+            "held some other way)");
+      setup.gripLength = g;
+    }
+    if (p.contains("tailstock"))
+      setup.tailstock = p.at("tailstock").get<bool>() ? 1 : 0;
+    if (p.contains("chuck"))
+      setup.chuck = p.at("chuck").get<bool>() ? 1 : 0;
     if (p.contains("origin_at")) {
       const std::string at = p.at("origin_at").get<std::string>();
       if (at == "stock_min")
@@ -1965,6 +2026,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {{"op", op}, {"max_mm", b.first}, {"allowed_mm", b.second}});
            return a;
          }()},
+        // The chuck and the tailstock of a setup held in the rotary:
+        // docs/cam/rotary.md#chuck-and-tailstock.
+        {"holding_collisions", v.holdingCollisions},
+        {"worst_holding_depth_mm", v.worstHoldingDepth},
+        {"worst_holding_x", v.worstHoldingX},
+        {"worst_holding_line", v.worstHoldingLine},
+        {"worst_holding", v.worstHoldingWhat},
+        {"holding_defaults", v.holdingDefaults},
         // A shank wider than the cutter driven into a wall:
         // docs/cam/simulation.md#shank-collisions.
         {"shank_collisions", v.shankCollisions},
@@ -2272,6 +2341,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         oj["clipped_mm"] = tp.clippedMm;
         totalClipped += tp.clippedMm;
       }
+      if (tp.holdingClippedMm > 0.0)
+        oj["holding_clipped_mm"] = tp.holdingClippedMm;
       totalCut += tp.CutLength();
       lowest = std::min(lowest, tp.MinZ());
       ops.push_back(std::move(oj));

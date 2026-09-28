@@ -1,3 +1,4 @@
+#include "core/cam/CamMount.h"
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamNames.h"
@@ -1415,6 +1416,36 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   // its own through this function, and a clip that lived only in the full
   // pass left the verb's path running off the bed while the RPC's file
   // stopped at it (found live, the morning after it shipped).
+  // Kept out of the chuck and the tailstock
+  // (docs/cam/rotary.md#chuck-and-tailstock): every toolpath of a setup held in
+  // the rotary, continuous or indexed, is clipped to the window along X between
+  // them -- the tool's radius and the clearance inside each. The travel's
+  // clip-retract-reenter, with its own count: the sampler part's whole-length
+  // passes cut through the jaws and down to 5 mm from the axis over the
+  // tailstock's centre.
+  if (tp.error.empty() && tool != nullptr) {
+    const HoldingEnvelope env = HoldingEnvelopeOf(setup, bodies);
+    if (env.ok) {
+      const double r = tool->diameter * 0.5;
+      const glm::dvec3 lo(env.MinX(r), -1e9, -1e9);
+      const glm::dvec3 hi(std::min(env.MaxX(r), 1e9), 1e9, 1e9);
+      const double before = tp.clippedMm;
+      if (lo.x < hi.x)
+        ClipToMachine(tp, lo, hi, setup.safeZ, tool->feedPlunge);
+      else
+        tp.moves.clear(); // the window is shut: nothing may be cut
+      tp.holdingClippedMm = tp.clippedMm - before;
+      tp.clippedMm = before;
+      if (tp.moves.empty() || tp.CutLength() <= 0.0) {
+        tp.moves.clear();
+        tp.error = "everything this operation would cut lies in the chuck or "
+                   "the tailstock (the part is held from X" +
+                   Round2(env.x0) + " to X" + Round2(env.chuckTo) +
+                   (env.tail ? ", the centre in at X" + Round2(env.x1) : "") +
+                   ")";
+      }
+    }
+  }
   glm::dvec3 bedLo(0.0), bedHi(0.0);
   if (tp.error.empty() && MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
     ClipToMachine(tp, bedLo, bedHi, setup.safeZ,

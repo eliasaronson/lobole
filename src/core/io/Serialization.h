@@ -141,6 +141,11 @@ cam::Setup CamSetupFromJson(const nlohmann::json& j);
 // The machine (docs/cam/setup.md#machine-profiles): its JSON, embedded in a
 // setup and written as one file per machine in the global store.
 nlohmann::json MachineToJson(const cam::Machine& m);
+// How a machine's rotary is installed, and what holds a part in it (v132):
+// read and REFUSED whole -- a partial or unknown statement throws, naming
+// what is accepted (docs/cam/rotary.md#how-the-rotary-is-installed).
+cam::RotaryMount RotaryMountFromJson(const nlohmann::json& j);
+cam::RotaryHolding RotaryHoldingFromJson(const nlohmann::json& j);
 cam::Machine
 MachineFromJson(const nlohmann::json& j); // throws on an unknown post
 // The global store: `dir` holds one `<slug>.json` per machine (the app uses
