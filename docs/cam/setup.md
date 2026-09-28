@@ -323,13 +323,18 @@ the row's grip). `Setup::order` (`OrderOutputBy`) says how the post groups
 them, applied in `GenerateAll` via `CuttingOrder` (stable within a group):
 
 - `authored` (default): as written;
-- `tool`: group by tool number, one tool change per tool — what a multi-part
-  sheet authored part by part needs;
+- `tool`: group by tool, one tool change per tool — what a multi-part sheet
+  authored part by part needs. The groups go in the order each tool is first
+  used, not by number: a table is not ordered by how early each cutter is
+  wanted. And a tool a rest pass uses goes after the tool it rests from,
+  because a rest pass cleans up after a finish; run first (a 3 mm ball
+  numbered below the 6 mm finish it follows), it did the finish's work;
 - `part`: finish each part before the next, so a part that breaks free costs
   one part.
 
 Tool order is an order of *toolpaths*, since a rough-then-finish operation is
-two of them. `splitOutput` writes one program per tool and forces tool order
+two of them; `GenerateAll` ranks them by the same rule (`ToolRank`), and a
+finishing tool ranks where its operation first appears. `splitOutput` writes one program per tool and forces tool order
 (the panel says so); see [post.md](post.md#files).
 
 ## Undo

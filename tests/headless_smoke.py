@@ -2190,6 +2190,16 @@ def main():
             skimmed = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
             expect(not any("stock top" in w for w in skimmed),
                    f"no low-top warning after a skim: {skimmed}")
+            # An operation that produces nothing is named by the verdict,
+            # not just by an empty file that verifies "ok".
+            broken = d.call("add_cam_op", setup=cam_setup, type="profile",
+                            side="inside", top_z=1.0, bottom_z=0.0)
+            ver = d.call("cam_verify", setup=cam_setup)
+            expect(any(f["op"] == broken["id"] for f in ver["failed_ops"]),
+                   f"a failed op is named: {ver['failed_ops']}")
+            expect(any("produced no toolpath" in l for l in ver["says"]),
+                   f"and said: {ver['says'][:2]}")
+            d.call("remove_cam_op", id=broken["id"])
             d.call("remove_cam_op", id=face["id"])
             low = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
             expect(any("stock top" in w for w in low),

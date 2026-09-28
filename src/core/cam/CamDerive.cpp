@@ -497,8 +497,30 @@ DerivedOp DeriveOperation(const Setup& setup,
     // (The verifier has always modelled the point -- TipHeight is one
     // function -- so before this the two disagreed, and correct drilling read
     // as 1.2 mm of material left standing in every hole.)
+    // THROUGH is where the hole comes out, not the part's lowest point: a
+    // cross hole through two flats on a turned part ends 11 mm above its grip
+    // and read as blind -- it stopped short and said its flat floor kept the
+    // drill point. Through when nothing is solid just below its bottom at its
+    // centre; a section there, the centre inside an odd number of loops.
+    const auto solidBelow = [&]() {
+      if (holeRadius <= 0.0)
+        return true; // no centre to probe: the old rule decides
+      int inside = 0;
+      for (const Loop& l : SectionLoops(bodies, op.bottomZ - 0.05)) {
+        if (l.pts.size() < 3)
+          continue;
+        const Clipper2Lib::Point64 c(
+            static_cast<int64_t>(std::llround(holeCentre.x * kScale)),
+            static_cast<int64_t>(std::llround(holeCentre.y * kScale)));
+        if (Clipper2Lib::PointInPolygon(c, ToClipper(l.pts)) ==
+            Clipper2Lib::PointInPolygonResult::IsInside)
+          inside++;
+      }
+      return inside % 2 == 1;
+    };
     if (const Tool* drill = setup.FindTool(op.toolNumber);
-        drill != nullptr && op.bottomZ <= modelBottom + kThrough)
+        drill != nullptr &&
+        (op.bottomZ <= modelBottom + kThrough || !solidBelow()))
       op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
     else if (drill != nullptr) {
       // A BLIND hole: the point is the floor. Said when the model's floor is

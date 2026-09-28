@@ -432,6 +432,8 @@ constexpr MethodDoc kCamMethods[] = {
      "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
+     "failed_ops [{op, error}] names the operations that produced no "
+     "toolpath and are not in the file (first in `says` too). "
      "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material, no holder, shank or fixture "
      "collision, no bite deeper than the op's passes, and a file that "
@@ -1870,6 +1872,23 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       breaksAnEdge |=
           op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
     json says = json::array();
+    // What was not cut because its operation produced nothing, FIRST: a
+    // setup whose only operation failed verified "ok" -- true, nothing in an
+    // empty file is dangerous -- with "cuts nothing" the only hint why.
+    json failedOps = json::array();
+    for (const cam::Toolpath& tp : paths)
+      if (!tp.error.empty()) {
+        std::string name;
+        for (const cam::Operation& op : setup.operations)
+          if (op.id == tp.operationId)
+            name = op.name;
+        failedOps.push_back({{"op", tp.operationId}, {"error", tp.error}});
+        says.push_back("Operation " + std::to_string(tp.operationId) + " '" +
+                       name +
+                       "' produced no toolpath and is not in the "
+                       "file: " +
+                       tp.error);
+      }
     for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0, breaksAnEdge))
       says.push_back(line.text);
     // The machine's lines too -- the parts' reach beyond the travel, the
@@ -1978,6 +1997,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         {"first_bad_line", v.firstBadLine},
         {"resolution_mm", res},
         {"cells", v.cells},
+        {"failed_ops", failedOps},
         {"says", says},
         // Tabs the program left ON PURPOSE. Reported rather than
         // silently subtracted: four is a job to sign off, none where

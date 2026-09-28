@@ -51,7 +51,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
-| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out; peck = one diameter when deeper than three |
+| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
 | Break an edge | the wall whose top edge to break | the break the model has there (top = its top edge, `edge_size` = a chamfer's width or a round's height), else on a sharp edge the biggest the tool can make within the wall; a flat mill is refused |
 | Face the top | none | the stock above the part, top = stock top, bottom = part top |
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
@@ -218,9 +218,12 @@ is scrap.
   Its three motion types map to cut, link-at-depth through cleared material,
   and retract-rapid-re-enter. A link through cleared material is a G1 (a
   straight line, which a dog-legged G0 is not) at the machine's traverse
-  rate (`Setup::rapidFeed`) when it states one, else the cutting feed. Its failure flags become `Toolpath::error` in
-  words. When the library declines a region, concentric clearing cuts it and
-  `strategy` says so.
+  rate (`Setup::rapidFeed`) when it states one, else the cutting feed. Its
+  failure flags become `Toolpath::error` in words. When the library declines
+  a region, concentric clearing cuts it and `strategy` says so. That
+  includes finding nowhere to start, which emits nothing: its start point is
+  unset, and entering there anyway made moves that kept the fall-back from
+  running.
 - Both refuse cones (`NeedsFlatFloor`).
 
 ### Face

@@ -122,6 +122,12 @@ AdaptiveResult ClearImpl(double safeZ, double rapidFeed, const Operation& op,
     const std::string trouble = Trouble(out);
     if (!trouble.empty() && result.error.empty())
       result.error = trouble;
+    // No start is no path: its StartPoint is unset, and emitting the entry
+    // anyway put a rapid and a plunge at it -- moves, so the concentric
+    // fall-back (which takes only an empty result) never ran, and a 6 mm
+    // keyway with a 4 mm cutter failed that the rings cut.
+    if (out.StartPointNotFound)
+      continue;
 
     // The helix down. Adaptive2d hands back its centre and the entry point;
     // the descent itself is ours to emit, at the same 3 degrees the rest of

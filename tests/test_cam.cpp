@@ -1408,6 +1408,161 @@ TEST_CASE("cam verify: a sloped move cuts as low as it goes over each cell",
   CHECK(checked > 100);
 }
 
+TEST_CASE("cam: adaptive clears a face turned over, and falls back when it "
+          "cannot start",
+          "[cam]") {
+  if (!cam::AdaptiveAvailable())
+    SKIP("this build has no adaptive clearing");
+  // A pocket in the UNDERSIDE of a block, cut at A = 180: the index mirrors
+  // Y, so the face arrives turned over, and adaptive still clears it. (The
+  // rotary sampler's flats that declined at A = 0 and 180 alike were too
+  // tight round a cross hole, not turned over: the fall-back below.)
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Under", glm::vec3(8, 6, -1),
+                                               24.0, 18.0, 9.0));
+  const uint64_t under = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocketed", block, under,
+                                                   BooleanOp::Subtract));
+  ElementRef floor;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && n.z < -0.99f &&
+          std::abs(o.z - 8.0f) < 1e-3f)
+        floor = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(floor.IsSet());
+  cam::Setup s = BasicSetup();
+  s.machine.hasRotaryAxis = true;
+  s.rotationA = 180.0;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Adaptive;
+  op.side = cam::Side::Inside;
+  op.targets = {cam::Target{0, floor}};
+  op.topZ = 21.0;
+  op.bottomZ = 12.0; // the floor, turned over: 20 - 8
+  op.stepdown = 3.0;
+  op.stepover = 0.45;
+  s.operations.push_back(op);
+  const auto paths = cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error << " / " << paths[0].strategy);
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].strategy.find("concentric") == std::string::npos);
+  CHECK(paths[0].CutLength() > 100.0);
+
+  // A 4.6 mm slot with a 4 mm cutter: adaptive finds nowhere to start, and
+  // used to leave a rapid and a plunge at an unset point -- moves, so the
+  // concentric fall-back never ran. It runs now, and says so.
+  auto slot = std::make_unique<Document>();
+  slot->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                                40.0, 30.0, 20.0));
+  const uint64_t sb = slot->GetFeature(0)->GetId();
+  slot->AddFeature(std::make_unique<BoxFeature>("Slot", glm::vec3(8, 12, 15),
+                                                25.0, 4.6, 6.0));
+  const uint64_t sk = slot->GetFeature(1)->GetId();
+  slot->AddFeature(
+      std::make_unique<BooleanFeature>("Slotted", sb, sk, BooleanOp::Subtract));
+  cam::Setup ss = BasicSetup();
+  ss.tools[0].diameter = 4.0;
+  cam::Operation k;
+  k.id = 1;
+  k.type = cam::OpType::Adaptive;
+  k.side = cam::Side::Inside;
+  k.targets = {cam::Target{0, UpFaceAt(*slot, 15.0)}};
+  REQUIRE(k.targets[0].ref.IsSet());
+  k.topZ = 21.0;
+  k.bottomZ = 15.0;
+  k.stepdown = 2.0;
+  k.stepover = 0.45;
+  ss.operations.push_back(k);
+  const auto kp = cam::GenerateAll(ss, slot->GetBodies());
+  REQUIRE(kp.size() == 1);
+  INFO(kp[0].error << " / " << kp[0].strategy);
+  CHECK(kp[0].error.empty());
+  CHECK(kp[0].strategy.find("concentric") != std::string::npos);
+  CHECK(kp[0].MinZ() < 15.0 + 1e-6);
+}
+
+TEST_CASE("cam: a hole is through where it comes out, not at the part's "
+          "lowest point",
+          "[cam]") {
+  // A thick block and a thin plate beside it: a hole through the plate ends
+  // 20 mm above the block's underside, and read as BLIND -- it stopped at
+  // the plate's underside, the drill's cone left in the plate.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Thick", glm::vec3(0, 0, 0),
+                                               20.0, 30.0, 30.0));
+  const uint64_t thick = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Plate", glm::vec3(20, 0, 20),
+                                               20.0, 30.0, 10.0));
+  const uint64_t plate = doc->GetFeature(1)->GetId();
+  doc->AddFeature(
+      std::make_unique<BooleanFeature>("L", thick, plate, BooleanOp::Union));
+  const uint64_t l = doc->GetFeature(2)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(30, 15, 19), glm::vec3(0, 0, 1), 2.5, 12.0));
+  const uint64_t hole = doc->GetFeature(3)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Drilled", l, hole,
+                                                   BooleanOp::Subtract));
+  cam::Setup s = BasicSetup();
+  s.tools[0] = ShapedTool(cam::ToolType::Drill, 5.0, 118.0);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  REQUIRE(d.ok);
+  // Past the plate's underside by the point's own height, and no note about
+  // a flat floor it does not have.
+  CHECK(d.op.bottomZ < 20.0 - 1.0);
+  CHECK(d.notes.empty());
+}
+
+TEST_CASE("cam: tool order is by first use, and a rest pass follows its "
+          "finish",
+          "[cam]") {
+  auto doc = BlockDoc();
+  cam::Setup s = BasicSetup();
+  s.order = cam::OrderOutputBy::Tool;
+  for (const int n : {2, 3}) {
+    cam::Tool t = s.tools[0];
+    t.number = n;
+    s.tools.push_back(t);
+  }
+  // Authored: T3, then T1, then a T2 that rests from T3... and another T3.
+  const auto profile = [](uint64_t id, int tool) {
+    cam::Operation op;
+    op.id = id;
+    op.type = cam::OpType::Profile;
+    op.side = cam::Side::Outside;
+    op.topZ = 21.0;
+    op.bottomZ = 10.0;
+    op.toolNumber = tool;
+    return op;
+  };
+  s.operations = {profile(1, 3), profile(2, 1), profile(3, 2), profile(4, 3)};
+  s.operations[2].restFromTool = 1;
+  std::vector<int> order;
+  for (const size_t i : cam::CuttingOrder(s))
+    order.push_back(s.operations[i].toolNumber);
+  // T3 first (it is used first), both T3s together; T2 after T1, which it
+  // rests from -- not 1, 2, 3 by number.
+  CHECK(order == std::vector<int>{3, 3, 1, 2});
+  std::vector<int> posted;
+  for (const cam::Toolpath& tp : cam::GenerateAll(s, doc->GetBodies()))
+    posted.push_back(tp.toolNumber);
+  CHECK(posted == std::vector<int>{3, 3, 1, 2});
+  // A rest pass authored BEFORE the tool it rests from moves after it.
+  s.operations = {profile(1, 2), profile(2, 3)};
+  s.operations[0].restFromTool = 3;
+  order.clear();
+  for (const size_t i : cam::CuttingOrder(s))
+    order.push_back(s.operations[i].toolNumber);
+  CHECK(order == std::vector<int>{3, 2});
+}
+
 TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {
   // Every ring of a clearing pass used to get a full entry: lift to safe Z,
   // fly back, descend, ramp, cut a lap. Twelve laps of a flange recess is

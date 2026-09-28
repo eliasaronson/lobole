@@ -190,6 +190,32 @@ std::vector<std::string> LayoutWarnings(const Setup& setup,
   return out;
 }
 
+namespace {
+// Tools in the order they cut: as they first appear in `appearance`, then
+// every tool a REST pass uses moved after the tool it rests from. A rest pass
+// cleans up after a finish, and run before it -- a 3 mm ball numbered T2
+// ahead of the 6 mm finish it follows as T3 -- it cut 14 m of the finish's
+// work.
+std::vector<int> ToolRank(const Setup& setup, std::vector<int> appearance) {
+  for (const Operation& op : setup.operations) {
+    if (!op.enabled || op.restFromTool == 0)
+      continue;
+    const auto rest =
+        std::find(appearance.begin(), appearance.end(), op.toolNumber);
+    const auto from =
+        std::find(appearance.begin(), appearance.end(), op.restFromTool);
+    if (rest == appearance.end() || from == appearance.end() || rest > from)
+      continue;
+    const int t = *rest;
+    appearance.erase(rest);
+    appearance.insert(
+        std::find(appearance.begin(), appearance.end(), op.restFromTool) + 1,
+        t);
+  }
+  return appearance;
+}
+} // namespace
+
 std::vector<size_t> CuttingOrder(const Setup& setup) {
   std::vector<size_t> idx;
   idx.reserve(setup.operations.size());
@@ -223,6 +249,11 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
     const uint64_t k = key(i);
     if (std::find(seen.begin(), seen.end(), k) == seen.end())
       seen.push_back(k);
+  }
+  if (order == OrderOutputBy::Tool) {
+    std::vector<int> tools(seen.begin(), seen.end());
+    tools = ToolRank(setup, tools);
+    seen.assign(tools.begin(), tools.end());
   }
   for (uint64_t k : seen)
     for (size_t i : idx)
@@ -594,11 +625,25 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
   // put T2's finish between two T1 roughs -- which a file per tool refuses.
   const OrderOutputBy order =
       setup.splitOutput ? OrderOutputBy::Tool : setup.order;
-  if (order == OrderOutputBy::Tool)
+  // Grouped by the tool's RANK, not its number: first appearance among the
+  // toolpaths (a finishing tool appears where its operation does), rest
+  // after what it rests from. Sorted by number, this undid CuttingOrder --
+  // the reordering its own comment warns against.
+  if (order == OrderOutputBy::Tool) {
+    std::vector<int> appearance;
+    for (const Toolpath& tp : out)
+      if (std::find(appearance.begin(), appearance.end(), tp.toolNumber) ==
+          appearance.end())
+        appearance.push_back(tp.toolNumber);
+    const std::vector<int> rank = ToolRank(setup, appearance);
+    const auto rankOf = [&](int t) {
+      return std::find(rank.begin(), rank.end(), t) - rank.begin();
+    };
     std::stable_sort(out.begin(), out.end(),
-                     [](const Toolpath& a, const Toolpath& b) {
-                       return a.toolNumber < b.toolNumber;
+                     [&](const Toolpath& a, const Toolpath& b) {
+                       return rankOf(a.toolNumber) < rankOf(b.toolNumber);
                      });
+  }
   return out;
 }
 
