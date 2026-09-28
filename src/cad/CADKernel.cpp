@@ -531,8 +531,14 @@ bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
   const gp_Pnt c = props.CentreOfMass();
   center = glm::vec3(c.X(), c.Y(), c.Z());
 
-  // The plane's axis is the normal; the face orientation gives outward sense.
-  const gp_Dir nd = surf.Plane().Axis().Direction();
+  // The plane's surface normal, then the face orientation for the outward
+  // sense. The AXIS is the surface normal only when the plane's frame is
+  // right-handed; a revolve's end faces often carry a left-handed one, and
+  // taking the axis there pointed the normal into the solid -- a turned
+  // piece laid "underside up" was clamped underside down.
+  gp_Dir nd = surf.Plane().Axis().Direction();
+  if (!surf.Plane().Position().Direct())
+    nd.Reverse();
   glm::vec3 n(nd.X(), nd.Y(), nd.Z());
   if (face.Orientation() == TopAbs_REVERSED)
     n = -n;

@@ -1002,3 +1002,43 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
   std::filesystem::remove_all(destDir);
   std::filesystem::remove_all(destDir2);
 }
+
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <gp_Ax1.hxx>
+
+// FacePlane's normal points OUT of the solid on every planar face, including
+// a revolve's end faces, whose plane is often LEFT-handed: its axis is then
+// the opposite of the surface normal, and taking the axis flipped the face.
+// Laying a turned chess piece's underside up clamped it underside DOWN, and
+// every depth derived on it came from the wrong end.
+TEST_CASE("FacePlane's normal points out of the solid on a revolve's ends",
+          "[cadkernel]") {
+  BRepBuilderAPI_MakePolygon poly;
+  poly.Add(gp_Pnt(0, 0, 0));
+  poly.Add(gp_Pnt(0, 0, 10));
+  poly.Add(gp_Pnt(30, 0, 10));
+  poly.Add(gp_Pnt(30, 0, 0));
+  poly.Close();
+  const TopoDS_Face profile = BRepBuilderAPI_MakeFace(poly.Wire()).Face();
+  BRepPrimAPI_MakeRevol revol(profile,
+                              gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)));
+  REQUIRE(revol.IsDone());
+  const CADShape bar(revol.Shape());
+  int planar = 0;
+  for (int f = 0; f < 16; f++) {
+    glm::vec3 c, n, u;
+    if (!bar.FacePlane(f, c, n, u))
+      continue;
+    planar++;
+    // A step along the normal from the face's centre is outside the solid.
+    const glm::vec3 out = c + n * 0.5f;
+    BRepClass3d_SolidClassifier probe(bar.GetShape(),
+                                      gp_Pnt(out.x, out.y, out.z), 1e-6);
+    INFO("face " << f << " normal " << n.x << "," << n.y << "," << n.z);
+    CHECK(probe.State() == TopAbs_OUT);
+  }
+  CHECK(planar == 2);
+}
