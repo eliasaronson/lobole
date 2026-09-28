@@ -342,6 +342,34 @@ std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
   return loops;
 }
 
+glm::dmat4 BodyToSetup(const Setup& setup, uint64_t jobPartId) {
+  // Undo the fixture frame THIS part is clamped in -- which may not be the
+  // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
+  // laid on its edge. The part turns under a spindle that always points
+  // down, which is what both a clamp and an indexed trunnion amount to, and
+  // a rotation's inverse is its transpose.
+  const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, jobPartId));
+  glm::dmat4 m(1.0);
+  for (int col = 0; col < 3; col++)
+    for (int row = 0; row < 3; row++)
+      m[col][row] = toSetup[col][row];
+  Body probe;
+  probe.jobPartId = jobPartId;
+  if (const Placement* place = PlacementForBody(setup, probe)) {
+    const double c = std::cos(glm::radians(place->rotZdeg));
+    const double sn = std::sin(glm::radians(place->rotZdeg));
+    glm::dmat4 t(1.0);
+    t[0][0] = c;
+    t[0][1] = sn;
+    t[1][0] = -sn;
+    t[1][1] = c;
+    t[3][0] = place->pos.x;
+    t[3][1] = place->pos.y;
+    m = t * m;
+  }
+  return m;
+}
+
 // Same reason as SectionLoops above: placing bodies in the setup's frame is
 // OCC transforms, and the job tab draws them in a build with no toolpath
 // generator at all.
@@ -353,38 +381,19 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
   std::vector<Body> out;
   out.reserve(in.size());
   for (const Body& b : in) {
-    // Where the part sits in the stock composes HERE and nowhere else, after
-    // the fixture frame and in setup space -- which is what makes "where on
-    // the sheet" an in-plane statement rather than a fourth way to tilt a
-    // part (docs/cam/setup.md#parts-and-placements). A second copy of this
-    // transform is a bug (docs/cam/README.md#invariants).
+    // Where the part sits in the stock composes in `BodyToSetup` and nowhere
+    // else, after the fixture frame and in setup space -- which is what makes
+    // "where on the sheet" an in-plane statement rather than a fourth way to
+    // tilt a part (docs/cam/setup.md#parts-and-placements). A second copy of
+    // this transform is a bug (docs/cam/README.md#invariants).
     const Placement* place = PlacementForBody(setup, b);
     if (place != nullptr && !place->enabled)
       continue; // on the sheet, not cut this run
-    // Undo the fixture frame THIS part is clamped in -- which may not be the
-    // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
-    // laid on its edge. The part turns under a spindle that always points
-    // down, which is what both a clamp and an indexed trunnion amount to, and
-    // a rotation's inverse is its transpose.
-    const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, b.jobPartId));
+    const glm::dmat4 d = BodyToSetup(setup, b.jobPartId);
     glm::mat4 m(1.0f);
-    for (int col = 0; col < 3; col++)
-      for (int row = 0; row < 3; row++)
-        m[col][row] = static_cast<float>(toSetup[col][row]);
-    if (place != nullptr) {
-      const float c =
-          static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
-      const float sn =
-          static_cast<float>(std::sin(glm::radians(place->rotZdeg)));
-      glm::mat4 t(1.0f);
-      t[0][0] = c;
-      t[0][1] = sn;
-      t[1][0] = -sn;
-      t[1][1] = c;
-      t[3][0] = static_cast<float>(place->pos.x);
-      t[3][1] = static_cast<float>(place->pos.y);
-      m = t * m;
-    }
+    for (int col = 0; col < 4; col++)
+      for (int row = 0; row < 4; row++)
+        m[col][row] = static_cast<float>(d[col][row]);
     Body copy = b; // keeps createdBy and the element map: names must survive
     if (b.shape.IsValid())
       copy.shape = b.shape.Transformed(m);

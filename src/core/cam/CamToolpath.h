@@ -388,6 +388,13 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // is it with `jobPartId` 0.
 [[nodiscard]] glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId);
 
+// The ONE transform from model space to this setup's space for a body of
+// part `jobPartId`: the part's fixture frame undone, then where it sits in
+// the stock (docs/cam/setup.md#parts-and-placements). `BodiesInSetupFrame`
+// applies it; the verifier maps another setup's cut through it
+// (docs/cam/simulation.md#leftover-another-setup-removes).
+[[nodiscard]] glm::dmat4 BodyToSetup(const Setup& setup, uint64_t jobPartId);
+
 // The bodies as this setup sees them: `SetupToModel` undone, so the setup's
 // "up" is +Z again and the whole 2.5D pipeline — sectioning, face regions,
 // stock bounds, the verifier — works unchanged on a part that is not modelled

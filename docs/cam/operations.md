@@ -361,6 +361,33 @@ with no A word) and fits a constant-Z waterline lap.
   raster: the region, not the pattern, is the point. The verb refuses without
   a finish to follow or with a tool that is not smaller.
 
+### Surface entries
+
+A pass that is not linked to the one before rapids to safe height over its
+start, rapids **down to just above what is known to be left there**, and
+feeds only the rest at the plunge feed. The same rule as a 2.5D pass's
+`RapidFloor`, with more known. Each case is planar and rotary alike; on the
+rotary, the descent is radial:
+- **Nothing known** (a finish, the first layer): the stock top (the blank's
+  radius on the rotary).
+- **A later layer of a rough**: the floor the layer before left, plus the
+  ridge between its passes (a ball's scallop at the stepover).
+- **A rest pass whose finish is cut first** (`FinishedBefore`, in the
+  setup's cutting order): the highest leftover the bigger cutter's envelope
+  leaves under this tool's footprint, plus the finish's skin and cusp. Its
+  envelope is taken per block from the block's highest tip, so it can only
+  overstate. Where the finish left nothing, the pass comes down to its own
+  surface. A rest op cut before its finish knows nothing, and enters from
+  the stock top.
+- On the rotary, a cell no pass of the op reaches still stands at the blank,
+  and an entry beside one comes down no lower than that.
+
+The entry stops a clearance above what is known to be left: a millimetre, or
+the tool's radius if that is less. The verifier's
+`rapids_through_stock` is the check on all of it. The rotary sampler's rest
+pass had spent 26 of its 58 minutes feeding down from the safe radius through
+air its finish cut.
+
 ## The capability table and the field table
 
 `cam::Operation` is one struct for every type; two tables keep that honest.

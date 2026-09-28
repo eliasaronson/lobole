@@ -335,6 +335,27 @@ std::vector<cam::Toolpath> GenerateCamToolpathsNow(AppState& state,
   return cam::GenerateAll(setup, JobBodies(state), &ctx);
 }
 
+std::vector<cam::Toolpath>
+CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending) {
+  cam::GenerateContext ctx;
+  ctx.cache = &state.camAdaptiveCache;
+  ctx.surfaceCache = &state.camSurfaceCache;
+  ctx.outlineCache = &state.camOutlineCache;
+  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.defer = state.camDeferPasses;
+  std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, JobBodies(state), &ctx);
+  pending = false;
+  for (const cam::Toolpath& tp : paths)
+    pending |= tp.pending;
+  if (pending) {
+    QueueOutlinePasses(state, std::move(ctx.pendingOutline));
+    QueueAdaptivePasses(state, std::move(ctx.pending));
+    QueueSurfacePasses(state, std::move(ctx.pendingSurface));
+  }
+  return paths;
+}
+
 void CancelCamPasses(AppState& state) {
   state.camOutlineQueue.clear();
   state.camAdaptiveQueue.clear();
@@ -376,6 +397,11 @@ std::string CamToolpathsPendingWhy(const AppState&) { return {}; }
 void SettleCamToolpaths(AppState&) {}
 std::vector<cam::Toolpath> GenerateCamToolpathsNow(AppState&,
                                                    const cam::Setup&) {
+  return {};
+}
+std::vector<cam::Toolpath> CamToolpathsQueued(AppState&, const cam::Setup&,
+                                              bool& pending) {
+  pending = false;
   return {};
 }
 void CancelCamPasses(AppState&) {}

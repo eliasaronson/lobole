@@ -7,6 +7,7 @@
 #include "core/Document.h"
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamNames.h"
+#include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
@@ -1651,6 +1652,11 @@ struct VerifyWork {
   std::vector<cam::Toolpath::Tab> tabs;
   std::vector<cam::FixtureSolid> fixtures; // bed space
   std::vector<std::string> missingFixtures;
+  // The job's other setups and their posted files, and the ones that could
+  // not be read yet (docs/cam/simulation.md#leftover-another-setup-removes).
+  std::vector<cam::Setup> others;
+  std::vector<std::string> otherFiles;
+  std::vector<std::string> othersNotChecked;
   bool rotary = false;
   uint64_t generation = 0;
   // out
@@ -1677,22 +1683,32 @@ constexpr double kRotaryVerifyRes = 0.5;
 // 3.98 mm INTO the part, that is scrap" beside one quiet line admitting the
 // check could not read the file.
 void InspectWork(VerifyWork& w) {
+  std::vector<cam::SetupProgram> programs;
+  for (size_t k = 0; k < w.others.size(); k++)
+    programs.push_back({&w.others[k], w.otherFiles[k]});
+  cam::OtherSetups others = cam::OtherSetupsOf(
+      w.setup, programs, w.bodies, w.rotary ? kRotaryVerifyRes : kVerifyRes);
+  others.notChecked.insert(others.notChecked.end(), w.othersNotChecked.begin(),
+                           w.othersNotChecked.end());
   if (w.rotary) {
-    const cam::RotaryInspection ri =
-        cam::InspectRotary(w.gcode, w.setup, w.bodies, kRotaryVerifyRes);
+    const cam::RotaryInspection ri = cam::InspectRotary(
+        w.gcode, w.setup, w.bodies, kRotaryVerifyRes, &others);
     w.ok = ri.ok;
     w.why = ri.why;
     w.verdict = ri.verdict;
     w.verdict.fixturesSkippedRotary = !w.fixtures.empty();
+    w.verdict.otherSetupsNotChecked = others.notChecked;
     w.tolerance = kRotaryVerifyRes * 1.5;
     // No overlay: the leftover is painted from a HEIGHT MAP, and a radius
     // field has no renderer yet (docs/cam/rotary.md#the-rotary-picture).
     return;
   }
-  const cam::Inspection insp = cam::Inspect(
-      w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs, w.fixtures);
+  const cam::Inspection insp =
+      cam::Inspect(w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs,
+                   w.fixtures, &others);
   w.ok = insp.ok;
   w.verdict = insp.verdict;
+  w.verdict.otherSetupsNotChecked = others.notChecked;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
   // reporting it would teach the user to ignore the verdict.
   w.tolerance = kVerifyRes * 1.5;
@@ -1809,6 +1825,44 @@ void RunCamVerification(AppState& state) {
   work->rotary = cam::RotatesWhileCutting(
       cam::ProgramInSetupSpace(work->gcode, work->setup));
   work->generation = state.camVerifyGeneration;
+
+  // The job's other setups, so what one of them removes is said as its cut
+  // (docs/cam/simulation.md#leftover-another-setup-removes). From the same
+  // caches, never computed on the frame: a pass not cut yet is queued, this
+  // verdict names that setup as not yet compared, and the whole verification
+  // runs again when the passes land. Once per state of the job, so passes
+  // evicted from the cache cannot keep it cycling.
+  static uint64_t requeuedFor = 0;
+  const uint64_t jobState = JobRenderVersion(state) * 1000003u + setup->id;
+  bool othersPending = false;
+  for (const cam::Setup& other : state.job->GetSetups()) {
+    if (other.id == setup->id || other.operations.empty())
+      continue;
+    bool pending = false;
+    const std::vector<cam::Toolpath> paths =
+        CamToolpathsQueued(state, other, pending);
+    if (pending) {
+      othersPending = true;
+      work->othersNotChecked.push_back(
+          "setup '" + other.name +
+          "', because its toolpaths are still being "
+          "cut");
+      continue;
+    }
+    std::string file, why;
+    if (!cam::PostProcess(other.machine.post, other, paths, PostOpts(other),
+                          file, &why)) {
+      work->othersNotChecked.push_back("setup '" + other.name +
+                                       "', because it does not post: " + why);
+      continue;
+    }
+    work->others.push_back(other);
+    work->otherFiles.push_back(std::move(file));
+  }
+  if (othersPending && requeuedFor != jobState) {
+    requeuedFor = jobState;
+    state.camVerifyWhenSettled = true;
+  }
 
   // Inline when the panel is not deferring -- the GUI suite's setting, so
   // every test that reads the verdict right after Generate stays

@@ -1,6 +1,7 @@
 #include "core/cam/CamRotary.h"
 
 #include "core/Parallel.h"
+#include "core/cam/CamOtherSetups.h"
 
 #include "core/cam/CamToolpath.h" // BodiesInSetupFrame
 
@@ -342,7 +343,8 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
   return out;
 }
 
-Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
+Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed,
+                      const OtherSetups* others) {
   Verdict v;
   v.rotary = true;
   if (machined.nx != designed.nx || machined.nTheta != designed.nTheta ||
@@ -364,9 +366,18 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
   // one cell of resolution at a vertical face, which is precisely what the
   // grid cannot resolve there anyway: nothing in the map says which side of
   // the step the cell centre fell on.
-  const auto neighbourhood = [&](int i, int j, double& lo, double& hi) {
+  // `atEnd`: a neighbour's ray misses the part, so the part ENDS inside this
+  // column -- its designed radius is the end face's edge, sampled into a
+  // cell the part fills only partly, and the stock beside it along the axis
+  // is not the part. Gouge is not measured there, as the planar map lets the
+  // floor into a part edge's neighbourhood; a ball driven into the end face
+  // cuts the next column in, which the part fills, and reads there. Passes
+  // run a tool radius past the ends, so this column is always cut.
+  const auto neighbourhood = [&](int i, int j, double& lo, double& hi,
+                                 bool& atEnd) {
     lo = 1e18;
     hi = -1e18;
+    atEnd = false;
     for (int di = -1; di <= 1; di++)
       for (int dj = -1; dj <= 1; dj++) {
         const int ni = i + di;
@@ -374,8 +385,10 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
           continue;
         const int nj = (j + dj + designed.nTheta) % designed.nTheta;
         const double r = designed.At(ni, nj);
-        if (r <= 0.0)
+        if (r <= 0.0) {
+          atEnd = atEnd || di != 0;
           continue;
+        }
         lo = std::min(lo, r);
         hi = std::max(hi, r);
       }
@@ -413,10 +426,26 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed) {
       const double x = machined.CellX(i);
       const double theta = glm::degrees(machined.CellTheta(j));
       double lo = want, hi = want;
-      neighbourhood(i, j, lo, hi);
-      if (const double gouge = lo - got; gouge > v.maxGouge) {
+      bool atEnd = false;
+      neighbourhood(i, j, lo, hi, atEnd);
+      if (const double gouge = lo - got; !atEnd && gouge > v.maxGouge) {
         v.maxGouge = gouge;
         v.gougeAt = {x, theta};
+      }
+      // Excess another setup removes -- an indexed flat, a cross hole -- is
+      // said as that setup's cut, not left on the part
+      // (docs/cam/simulation.md#leftover-another-setup-removes).
+      if (others != nullptr && got - hi > kLeftoverFloor) {
+        const double tol = std::max(kLeftoverFloor, machined.res);
+        const double t = machined.CellTheta(j);
+        const glm::dvec3 dir(0.0, std::cos(t), std::sin(t));
+        const glm::dvec3 from = glm::dvec3(x, 0.0, 0.0) + dir * (hi + tol);
+        const glm::dvec3 to = glm::dvec3(x, 0.0, 0.0) + dir * got;
+        if (const uint64_t by = others->Claims(from, to, tol)) {
+          v.AddOtherCut(by, others->NameOf(by),
+                        machined.res * machined.ArcAt(got));
+          continue;
+        }
       }
       lefts.push_back(static_cast<float>(std::max(0.0, got - hi)));
       const size_t k = static_cast<size_t>(j) * machined.nx + i;
@@ -561,7 +590,8 @@ RadiusMap MakeRotaryBlank(const Setup& setup, const std::vector<Body>& bodies,
 }
 
 RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
-                               const std::vector<Body>& rawBodies, double res) {
+                               const std::vector<Body>& rawBodies, double res,
+                               const OtherSetups* others) {
   RotaryInspection out;
   // Framed, exactly as the planar check frames: the file is in setup space,
   // so the part must be too. For a continuous job `rotationA` is 0 -- the
@@ -618,7 +648,7 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
     aFrom = aTo;
   }
 
-  out.verdict = CompareRotary(out.machined, out.designed);
+  out.verdict = CompareRotary(out.machined, out.designed, others);
   out.verdict.rapidsThroughStock = rapids;
   out.verdict.firstBadLine = firstBadLine;
   out.verdict.worstRapidDepth = worstDepth;

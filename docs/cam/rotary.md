@@ -161,6 +161,15 @@ blank's diameter for display only).
   that layer, so the pass lifts over it rather than riding in air — the grip
   and every span a shallower layer already took to `cl`. The unlayered finish
   skips cells at or above the blank.
+- **Passes run a tool radius past each end** of the part, so a ball centred
+  beyond it rolls over the end's edge and down a domed end's steep foot. What
+  lies at the chuck or the tailstock is clipped
+  ([Chuck and tailstock](#chuck-and-tailstock)). Where the part ends inside a
+  verifier cell, gouge is not measured in that column: the part fills it only
+  partly, and the stock beside it is not the part. A ball driven into the
+  end face reads in the next column in.
+- **Entries** come radially down to just above what is known to be left
+  ([operations.md](operations.md#surface-entries)).
 - **Parallel passes link at depth.** Consecutive zigzag passes whose ends meet
   within the tool's radius, with an arc at the blank of at most two pitches
   that clears the part, are joined by a feed move that turns A, not a retract
@@ -278,9 +287,7 @@ map).
 - No round stock mode: the blank is derived, and `stock_centre` gives the
   rotary centreline only because the derived blank is symmetric about the
   axis.
-- Passes stop at the part's ends, so a domed end's steep foot is not reached.
 - The chuck and tailstock are axisymmetric envelopes: a jaw's actual shape,
   a steady rest, or a part held on a mandrel are not modelled.
-- Nothing says how far past the part's ends the passes may go.
 - No rotary constant-engagement roughing; no wrapped engraving or other
   feature-following paths beyond a twist.

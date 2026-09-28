@@ -1,6 +1,7 @@
 #include "core/cam/CamVerify.h"
 
 #include "core/cam/CamMount.h"
+#include "core/cam/CamOtherSetups.h"
 
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
@@ -238,7 +239,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 double floorZ, const std::vector<uint8_t>* touched,
                 double leftoverTolerance = 0.0,
                 const std::vector<Toolpath::Relief>& reliefs = {},
-                const std::vector<Toolpath::Tab>& tabs = {}) {
+                const std::vector<Toolpath::Tab>& tabs = {},
+                const OtherSetups* others = nullptr) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -316,6 +318,18 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
           tabbed = true;
           break;
         }
+      // Excess another setup of the job removes is not left on the part: said
+      // as that setup's cut, and out of every leftover measure
+      // (docs/cam/simulation.md#leftover-another-setup-removes).
+      if (!tabbed && others != nullptr && got - wantHi > leftTol) {
+        const glm::dvec3 from(machined.CellX(i), machined.CellY(j),
+                              wantHi + leftTol);
+        if (const uint64_t by =
+                others->Claims(from, {from.x, from.y, got}, leftTol)) {
+          v.AddOtherCut(by, others->NameOf(by), machined.res * machined.res);
+          continue;
+        }
+      }
       if (!tabbed && got - wantHi > v.maxLeftover) {
         v.maxLeftover = got - wantHi;
         v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
@@ -441,7 +455,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Body>& rawBodies, double res,
                    const std::vector<Toolpath::Relief>& reliefs,
                    const std::vector<Toolpath::Tab>& tabs,
-                   const std::vector<FixtureSolid>& fixtures) {
+                   const std::vector<FixtureSolid>& fixtures,
+                   const OtherSetups* others) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -950,7 +965,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
 
   out.designed = SampleModel(bodies, machined, lo.z);
   out.verdict = Compare(machined, out.designed, lo.z, &touched,
-                        /*leftoverTolerance=*/0.0, reliefs, tabs);
+                        /*leftoverTolerance=*/0.0, reliefs, tabs, others);
   out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.tabs = static_cast<int>(tabs.size());
   out.verdict.rapidsThroughStock = rapidsThroughStock;
@@ -1132,7 +1147,8 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Body>& bodies, double res,
                     const std::vector<Toolpath::Relief>& reliefs,
                     const std::vector<Toolpath::Tab>& tabs,
-                    const std::vector<FixtureSolid>& fixtures) {
+                    const std::vector<FixtureSolid>& fixtures,
+                    const OtherSetups* others) {
   // The STOCK MODEL follows the file, not the setup. A program whose A moves
   // is cut from a cylinder that turns and one whose A does not is cut from a
   // block that does not, and asking the setup would get the answer wrong in
@@ -1144,7 +1160,9 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
   // part that turns, so a rotary file says they were not checked.
   const GProgram program = ProgramInSetupSpace(gcode, setup);
   if (RotatesWhileCutting(program)) {
-    Verdict v = InspectRotary(gcode, setup, bodies, res).verdict;
+    Verdict v = InspectRotary(gcode, setup, bodies, res, others).verdict;
+    if (others != nullptr)
+      v.otherSetupsNotChecked = others->notChecked;
     v.fixturesSkippedRotary = !fixtures.empty();
     // The machine's travel, which a turning program was never checked
     // against. Spans, not positions: where the part sits on the rotary's
@@ -1176,7 +1194,12 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     }
     return v;
   }
-  return Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures).verdict;
+  Verdict v =
+      Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures, others)
+          .verdict;
+  if (others != nullptr)
+    v.otherSetupsNotChecked = others->notChecked;
+  return v;
 }
 
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
@@ -1436,6 +1459,17 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     out.push_back({VerdictLine::Level::Good,
                    "Machines the part cleanly. No gouges, nothing "
                    "left over."});
+  // What this setup leaves that another one cuts: said, not counted as
+  // leftover (docs/cam/simulation.md#leftover-another-setup-removes).
+  for (const Verdict::OtherCut& c : v.leftoverOtherSetups) {
+    std::snprintf(buf, sizeof(buf), "%.0f mm2 left here is cut by setup '%s'.",
+                  std::max(1.0, c.area), c.name.c_str());
+    out.push_back({VerdictLine::Level::Good, buf});
+  }
+  for (const std::string& why : v.otherSetupsNotChecked)
+    out.push_back(
+        {VerdictLine::Level::Warn, "Leftover is not compared with " + why +
+                                       ": what that cuts reads as left here."});
   if (minutes > 0.0) {
     std::snprintf(buf, sizeof(buf), "~%.0f min of cutting at these feeds.",
                   std::max(1.0, minutes));

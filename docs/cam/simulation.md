@@ -77,6 +77,38 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
   coordinate, a zero feed) counts against `ok`; what a controller may refuse
   though the parser survived it (a nested comment) is a warning.
 
+### Leftover another setup removes
+
+Every setup is verified from its own fresh stock, so a flip job's front
+reported the half-depth outline its back finishes, and an indexed setup the
+material a turn removes, as leftover: the same sentence as a forgotten
+operation. The verifier now asks the job's other setups (`OtherSetupsOf`,
+CamOtherSetups.cpp):
+- **What each other setup leaves:** its posted file is inspected as
+  `VerifyGcode` would. Its final map says where it leaves air: above a height
+  map, beyond a radius map.
+- **How a point is mapped:** from this setup's frame to model space and on
+  to that setup's frame. The map is `BodyToSetup`, the one transform
+  `BodiesInSetupFrame` applies.
+- **What counts as removed:** a leftover cell's excess, the column from the
+  designed surface plus the tolerance up to the machined one, is **cut by
+  another setup** when every point of it lies in air some other setup
+  leaves. It is said as that setup's (`leftover_other_setups`
+  [{setup, name, area_mm2}], "… mm2 left here is cut by setup 'Back'") and
+  kept out of `max_leftover_mm`, the regions and `complete`. A point outside
+  the other setup's stock is not claimed, so two boxes that disagree (a
+  `bottom_margin` unlike `margin.z`) leave the doubtful strip as leftover.
+- **What is not consulted:** a job whose parts are clamped or placed
+  differently from one another has no single map to model space. It is not
+  consulted, and the verdict says so (`other_setups_not_checked`), as it
+  does for a setup that does not post. The panel reads the other setups
+  from the pass caches and never computes them on the frame: a pass not yet
+  cut is queued, the verdict names that setup as not yet compared, and it
+  runs again when the passes land.
+- **What still starts fresh:** the simulation and the safety checks
+  (rapids, bite, collisions) start from the setup's own stock. That errs
+  toward a finding, never toward a crash.
+
 ### Verdict
 
 `ok` (`Verdict::Safe`) means nothing scraps the part or breaks the tool: no

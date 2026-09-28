@@ -30,6 +30,8 @@
 // "small enough steps that we probably hit every pixel".
 namespace cam {
 
+struct OtherSetups; // CamOtherSetups.h
+
 // --- height maps ----------------------------------------------------------
 
 struct HeightMap {
@@ -110,6 +112,27 @@ struct Verdict {
   // 1.26 mm of it: a region round a dome is mostly surface, so no region was
   // called an end face while its steepest cells were.
   double leftoverEndFaceArea = 0.0;
+  // Leftover another setup of the job removes
+  // (docs/cam/simulation.md#leftover-another-setup-removes): excess whose
+  // every point lies in air another setup leaves. Not in `maxLeftover`, the
+  // regions or `Complete()` -- said per setup instead, so a flip job's front
+  // does not report the outline its back finishes as a missing operation.
+  struct OtherCut {
+    uint64_t setup = 0;
+    std::string name;
+    double area = 0.0; // mm^2
+  };
+  std::vector<OtherCut> leftoverOtherSetups;
+  // The other setups that could not be consulted, and why.
+  std::vector<std::string> otherSetupsNotChecked;
+  void AddOtherCut(uint64_t setup, const std::string& name, double area) {
+    for (OtherCut& c : leftoverOtherSetups)
+      if (c.setup == setup) {
+        c.area += area;
+        return;
+      }
+    leftoverOtherSetups.push_back({setup, name, area});
+  }
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
@@ -346,7 +369,8 @@ Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<Body>& bodies, double res = 0.25,
         const std::vector<Toolpath::Relief>& reliefs = {},
         const std::vector<Toolpath::Tab>& tabs = {},
-        const std::vector<FixtureSolid>& fixtures = {});
+        const std::vector<FixtureSolid>& fixtures = {},
+        const OtherSetups* others = nullptr);
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -363,7 +387,8 @@ VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<Body>& bodies, double res = 0.25,
             const std::vector<Toolpath::Relief>& reliefs = {},
             const std::vector<Toolpath::Tab>& tabs = {},
-            const std::vector<FixtureSolid>& fixtures = {});
+            const std::vector<FixtureSolid>& fixtures = {},
+            const OtherSetups* others = nullptr);
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/simulation.md#verdict). Empty only when there is nothing to say.

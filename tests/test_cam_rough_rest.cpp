@@ -11,7 +11,9 @@
 #include "cad/CADKernel.h"
 #include "cam_fixtures.h"
 #include "core/cam/CamPicks.h"
+#include "core/cam/CamSurface.h"
 
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
@@ -58,6 +60,32 @@ cam::Verdict Verify(const cam::Setup& setup, const std::vector<Body>& bodies,
   std::string gcode, error;
   REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
   return cam::VerifyGcode(gcode, setup, bodies, res);
+}
+
+// How far each plunge of a toolpath descends, feeding: what an entry costs.
+std::vector<double> Plunges(const cam::Toolpath& tp) {
+  std::vector<double> out;
+  for (size_t k = 1; k < tp.moves.size(); k++)
+    if (tp.moves[k].kind == cam::Move::Kind::Plunge)
+      out.push_back(glm::length(tp.moves[k].to - tp.moves[k - 1].to));
+  return out;
+}
+
+// What the same plunges would cost fed the whole way from `from` -- the
+// stock top, or the blank's radius on the rotary (z is the radius there).
+double FedFrom(const cam::Toolpath& tp, double from) {
+  double s = 0.0;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind == cam::Move::Kind::Plunge)
+      s += std::max(0.0, from - m.to.z);
+  return s;
+}
+
+double Sum(const std::vector<double>& v) {
+  double s = 0.0;
+  for (double x : v)
+    s += x;
+  return s;
 }
 
 } // namespace
@@ -304,6 +332,167 @@ TEST_CASE("cam rotary: a picked face bounds the pass along the axis", "[cam]") {
     CHECK(spans[s].second - spans[s].first >
           0.5 * (expect[s][1] - expect[s][0]));
   }
+}
+
+TEST_CASE("cam entries: a rotary rest pass comes down just above what its "
+          "finish left",
+          "[cam][slow]") {
+  // docs/cam/operations.md#surface-entries. The rotary sampler's rest pass
+  // spent 26 of its 58 minutes plunging from the safe radius at the plunge
+  // feed, through air its finish had cut.
+  auto doc = NeckedShaftDoc(); // Phi 30, a Phi 22 journal from x 12 to 28
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  setup.safeZ = 30.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Tool small = ShapedTool(cam::ToolType::Ball, 2.0);
+  small.number = 2;
+  setup.tools.push_back(small);
+  cam::Operation f = cam::DeriveOperation(setup, doc->GetBodies(),
+                                          cam::OpType::SurfaceRotary, {}, 1)
+                         .op;
+  f.id = 1;
+  f.stepover = 0.25;
+  setup.operations.push_back(f);
+  cam::Operation c = cam::DeriveRest(setup, doc->GetBodies(), 2).op;
+  c.id = 2;
+  c.stepover = 0.25;
+  setup.operations.push_back(c);
+
+  const auto after = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(after.size() == 2);
+  REQUIRE(after[1].error.empty());
+  REQUIRE(cam::FinishedBefore(setup, setup.operations[1]) != nullptr);
+
+  // The same rest op cut FIRST knows nothing of what is left, and comes down
+  // from the blank.
+  cam::Setup first = setup;
+  std::swap(first.operations[0], first.operations[1]);
+  REQUIRE(cam::FinishedBefore(first, first.operations[0]) == nullptr);
+  const auto alone = cam::GenerateAll(first, doc->GetBodies());
+  REQUIRE(alone.size() == 2);
+  REQUIRE(alone[0].error.empty());
+  const double fed = Sum(Plunges(after[1]));
+  const double fedFirst = Sum(Plunges(alone[0]));
+  INFO("rest plunges " << fed << " mm after its finish, " << fedFirst
+                       << " mm before it");
+  CHECK(fed < 0.6 * fedFirst);
+  // Lowered, not reckless: the whole job still rapids through no stock.
+  const cam::Verdict v = Verify(setup, doc->GetBodies(), after, 0.5);
+  INFO("rapids through stock " << v.rapidsThroughStock << " worst "
+                               << v.worstRapidDepth);
+  CHECK(v.rapidsThroughStock == 0);
+  CHECK(v.maxGouge < 0.1);
+}
+
+TEST_CASE("cam entries: a layered rough enters each layer from just over "
+          "the last",
+          "[cam][slow]") {
+  SECTION("on the rotary") {
+    // A flat end too: its entry beside a shoulder is where the floor alone
+    // was not enough -- the cell at the wall's foot is never under a tool
+    // centre (the rotary sampler's rough).
+    const cam::ToolType type =
+        GENERATE(cam::ToolType::Ball, cam::ToolType::Flat);
+    auto doc = NeckedShaftDoc();
+    cam::Setup setup = BasicSetup();
+    RotaryMachine(setup);
+    setup.stock.margin = {0.0, 2.0, 2.0};
+    setup.safeZ = 30.0;
+    setup.tools[0] = ShapedTool(type, 6.0);
+    cam::Operation f = cam::DeriveOperation(setup, doc->GetBodies(),
+                                            cam::OpType::SurfaceRotary, {}, 1)
+                           .op;
+    f.id = 1;
+    f.stepover = 0.25;
+    f.stepdown = 1.5;
+    setup.operations.push_back(f);
+    const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    REQUIRE(paths[0].error.empty());
+    // A layer's floor is a stepdown under the one before; the entry is a
+    // ridge and a clearance over that.
+    // Fed from just over the layer before, not from the blank: beside a
+    // shoulder an entry stays at the wall's height, so not every one is a
+    // layer's descent, but together they are a fraction of the blank's.
+    const double fed = Sum(Plunges(paths[0]));
+    const double fromBlank =
+        FedFrom(paths[0], cam::RotaryBlankRadius(setup, 15.0) + 1.0);
+    INFO("fed " << fed << " mm of plunges; from the blank " << fromBlank);
+    CHECK(fed < 0.7 * fromBlank);
+    const cam::Verdict v = Verify(setup, doc->GetBodies(), paths, 0.5);
+    INFO("rapids through stock " << v.rapidsThroughStock << " worst "
+                                 << v.worstRapidDepth);
+    CHECK(v.rapidsThroughStock == 0);
+    CHECK(v.maxGouge < 0.1);
+  }
+  SECTION("over the bed") {
+    const std::vector<Body> bodies = DomeOnPlate();
+    cam::Setup setup = TwoBallSetup();
+    cam::Operation r = cam::DeriveSurfaceRough(setup, bodies, 1).op;
+    r.id = 1;
+    r.sampleStep = 0.4;
+    setup.operations.push_back(r);
+    const auto paths = cam::GenerateAll(setup, bodies);
+    REQUIRE(paths.size() == 1);
+    REQUIRE(paths[0].error.empty());
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+    const double fed = Sum(Plunges(paths[0]));
+    const double fromTop = FedFrom(paths[0], hi.z + 1.0);
+    INFO("fed " << fed << " mm of plunges; from the stock top " << fromTop);
+    CHECK(fed < 0.7 * fromTop);
+    const cam::Verdict v = Verify(setup, bodies, paths, 0.5);
+    INFO("rapids through stock " << v.rapidsThroughStock << " worst "
+                                 << v.worstRapidDepth);
+    CHECK(v.rapidsThroughStock == 0);
+    CHECK(v.maxGouge < 0.05);
+  }
+}
+
+TEST_CASE("cam rotary: passes run past a domed end and finish its foot",
+          "[cam][slow]") {
+  // docs/cam/rotary.md#limits used to say passes stop at the part's ends:
+  // the grid was the part's own extent, so no ball centred past the end and
+  // the steep foot of a dome was never cut. The chuck and the tailstock clip
+  // what would come near them; a free end has neither.
+  CADKernel& k = CADKernel::Instance();
+  Body body;
+  body.name = "Domed bar";
+  body.shape =
+      k.CreateCylinder(glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f), 10.0, 30.0)
+          .Union(k.CreateSphere(glm::vec3(30.0f, 0.0f, 0.0f), 10.0));
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {2.0, 1.0, 1.0};
+  setup.safeZ = 30.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Operation f =
+      cam::DeriveOperation(setup, bodies, cam::OpType::SurfaceRotary, {}, 1).op;
+  f.id = 1;
+  f.stepover = 0.2;
+  setup.operations.push_back(f);
+  const auto paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  double maxX = -1e18;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      maxX = std::max(maxX, m.to.x);
+  const cam::Verdict v = Verify(setup, bodies, paths, 0.5);
+  INFO("last cut at x " << maxX << "; dome leftover " << v.leftoverSurfaceMax
+                        << " at x " << v.leftoverSurfaceAt.x << ", gouge "
+                        << v.maxGouge);
+  CHECK(maxX > 41.5); // a ball centred well past the apex
+  // Stopping at the end left 16 mm2 on the dome's steep cap (the "end
+  // face" a rotary verdict excuses) and 0.25 mm on its foot.
+  INFO("end face leftover " << v.leftoverEndFaceArea << " mm2");
+  CHECK(v.leftoverEndFaceArea < 1.0);
+  CHECK(v.leftoverSurfaceMax < 0.15);
+  CHECK(v.maxGouge < 0.1);
 }
 
 #endif // HAVE_CAM

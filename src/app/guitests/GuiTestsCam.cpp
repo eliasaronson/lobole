@@ -1446,6 +1446,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     cam::Setup* setup = Job()->FindSetup(added.id);
     IM_CHECK(setup != nullptr);
     setup->machine.hasRotaryAxis = true;
+    // Playing posts the file, and a rotary whose installation is unstated
+    // is refused there (docs/cam/rotary.md#how-the-rotary-is-installed):
+    // stated as the identity, and nothing holding the part.
+    setup->machine.rotary.along = 'x';
+    setup->machine.rotary.chuckEnd = -1;
+    setup->machine.rotary.word = 'A';
+    setup->machine.rotary.topAxis = 'y';
+    setup->machine.rotary.topSign = -1;
+    setup->chuck = 0;
+    setup->tailstock = 0;
     setup->safeZ = 30.0;
     setup->stock.margin = {0.0, 1.0, 1.0};
     setup->tools[0].type = cam::ToolType::Ball;
@@ -3154,6 +3164,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camActiveSetup = added.id;
     cam::Setup* setup = Job()->FindSetup(added.id);
     setup->machine.hasRotaryAxis = true;
+    // Between centres: a 30 mm bar in the default 15 mm grip leaves too
+    // little to tell a face's span from the whole length.
+    setup->chuck = 0;
     setup->safeZ = 30.0;
     setup->stock.margin = {0.0, 1.0, 1.0};
     setup->tools[0].type = cam::ToolType::Ball;

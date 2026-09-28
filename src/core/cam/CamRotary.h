@@ -136,7 +136,8 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
 // ray that misses the model, which is the blank beyond the part's ends and
 // not leftover anybody asked about. Their share is `untouchedFraction`.
 [[nodiscard]] Verdict CompareRotary(const RadiusMap& machined,
-                                    const RadiusMap& designed);
+                                    const RadiusMap& designed,
+                                    const OtherSetups* others = nullptr);
 
 // Everything the rotary check produced, for a caller that wants to show it.
 struct RotaryInspection {
@@ -170,9 +171,9 @@ struct RotaryInspection {
 // are the only ones a `Stock` can state and a cylinder has one radius. A
 // round stock MODE is the honest fix and is a format change
 // (docs/cam/rotary.md#limits).
-[[nodiscard]] RotaryInspection InspectRotary(const std::string& gcode,
-                                             const Setup& setup,
-                                             const std::vector<Body>& bodies,
-                                             double res = 0.5);
+[[nodiscard]] RotaryInspection
+InspectRotary(const std::string& gcode, const Setup& setup,
+              const std::vector<Body>& bodies, double res = 0.5,
+              const OtherSetups* others = nullptr);
 
 } // namespace cam

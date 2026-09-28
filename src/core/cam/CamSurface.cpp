@@ -950,6 +950,22 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   // it is named here rather than caught by the gate's grep.
   hash.D(setup.stock.margin.y);
   hash.D(setup.stock.margin.z);
+  // Entries rapid down to the stock top (StockBoundsFramed), and a rest pass
+  // to what the finish before it left -- both read through helpers.
+  hash.I(static_cast<int64_t>(setup.stock.mode));
+  hash.D(setup.stock.margin.x);
+  hash.D(setup.stock.bottomMargin);
+  for (int a = 0; a < 3; a++) {
+    hash.D(setup.stock.size[a]);
+    hash.D(setup.stock.place[a]);
+  }
+  hash.I(setup.placements.empty() ? 0 : 1);
+  if (const Operation* finish = FinishedBefore(setup, op)) {
+    hash.I(1);
+    hash.D(finish->stockToLeave);
+  } else {
+    hash.I(0);
+  }
   hash.I(setup.machine.hasRotaryAxis ? 1 : 0);
   hash.D(tool.diameter);
   hash.I(static_cast<int64_t>(tool.type));

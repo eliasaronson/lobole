@@ -2,6 +2,7 @@
 
 #include "core/cam/CamNames.h"
 #include "core/cam/CamOpFields.h"
+#include "core/cam/CamOtherSetups.h"
 #include "ui/ViewActions.h"
 
 #ifdef HAVE_CAM
@@ -456,6 +457,11 @@ constexpr MethodDoc kCamMethods[] = {
      "is reported, never counted as gouge. "
      "failed_ops [{op, error}] names the operations that produced no "
      "toolpath and are not in the file (first in `says` too). "
+     "leftover_other_setups [{setup, name, area_mm2}]: material this setup "
+     "leaves that another setup of the job removes -- a flip's other side, "
+     "an indexed flat -- said per setup and NOT counted in max_leftover_mm, "
+     "the regions or complete; other_setups_not_checked says which setups "
+     "could not be consulted and why (their cut then reads as leftover). "
      "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material, no holder, shank, fixture, chuck or "
      "tailstock collision, no bite deeper than the op's passes, and a file "
@@ -1923,10 +1929,34 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                           gcode, &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
+    // The job's other setups, posted, so what one of them removes is said as
+    // its cut rather than as leftover here
+    // (docs/cam/simulation.md#leftover-another-setup-removes).
+    std::vector<cam::SetupProgram> programs;
+    std::vector<std::string> unposted;
+    for (const cam::Setup& other : job->GetSetups()) {
+      if (other.id == setup.id || other.operations.empty())
+        continue;
+      cam::SetupProgram sp;
+      sp.setup = &other;
+      std::string why;
+      if (!cam::PostProcess(other.machine.post, other,
+                            ui::GenerateCamToolpathsNow(state, other),
+                            PostOptsOf(other), sp.gcode, &why)) {
+        unposted.push_back("setup '" + other.name +
+                           "', because it does not post: " + why);
+        continue;
+      }
+      programs.push_back(std::move(sp));
+    }
+    cam::OtherSetups others =
+        cam::OtherSetupsOf(setup, programs, ui::JobBodies(state), res);
+    others.notChecked.insert(others.notChecked.end(), unposted.begin(),
+                             unposted.end());
     std::vector<std::string> missingFixtures;
     const cam::Verdict v = cam::VerifyGcode(
         gcode, setup, ui::JobBodies(state), res, reliefs, tabs,
-        ui::JobFixtureSolids(state, setup, true, &missingFixtures));
+        ui::JobFixtureSolids(state, setup, true, &missingFixtures), &others);
     const double tol = res * 1.5; // one cell of quantisation, plus slack
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
@@ -1982,7 +2012,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         rj["end_face"] = r.endFace;
       biggest.push_back(std::move(rj));
     }
+    json otherCuts = json::array();
+    for (const cam::Verdict::OtherCut& c : v.leftoverOtherSetups)
+      otherCuts.push_back(
+          {{"setup", c.setup}, {"name", c.name}, {"area_mm2", c.area}});
     json out = json{
+        {"leftover_other_setups", otherCuts},
+        {"other_setups_not_checked", v.otherSetupsNotChecked},
         {"max_gouge_mm", v.maxGouge},
         {"max_leftover_mm", v.maxLeftover},
         // Past the bottom of the stock: the spoilboard, not the part.

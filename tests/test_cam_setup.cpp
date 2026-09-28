@@ -6,6 +6,7 @@
 // (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
+#include "core/cam/CamOtherSetups.h"
 #include "core/features/RevolveFeature.h"
 #include "ui/DocumentSlots.h"
 
@@ -541,6 +542,98 @@ TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
   CHECK(paths[0].error.empty());
   for (const cam::Move& m2 : paths[0].moves)
     CHECK_FALSE(m2.hasA);
+}
+
+TEST_CASE("cam: a flip job's sides say what the other cuts, not leftover",
+          "[cam]") {
+  // docs/cam/simulation.md#leftover-another-setup-removes. Each side cuts the
+  // outline half way down; alone, each reports the other half as 10 mm of
+  // leftover, which reads exactly like a forgotten operation.
+  auto doc = BlockDoc(40, 30, 20);
+  const auto side = [&](const char* name, uint64_t id, bool flipped) {
+    cam::Setup s = BasicSetup();
+    s.id = id;
+    s.name = name;
+    s.stock.margin = {3.0, 3.0, 0.0};
+    s.stock.bottomMargin = 0.0; // the two boxes agree only when these do
+    if (flipped)
+      s.frame = cam::FlipFrame(s.frame);
+    s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Profile;
+    op.toolNumber = 1;
+    op.topZ = hi.z;
+    op.bottomZ = 0.5 * (lo.z + hi.z);
+    op.stepdown = 5.0;
+    s.operations.push_back(op);
+    return s;
+  };
+  const cam::Setup front = side("Front", 1, false);
+  const cam::Setup back = side("Back", 2, true);
+  const auto post = [&](const cam::Setup& s) {
+    const auto paths = cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+    return gcode;
+  };
+  const std::string frontFile = post(front), backFile = post(back);
+
+  // Alone: the lower half of the outline is left.
+  const cam::Verdict alone =
+      cam::VerifyGcode(frontFile, front, doc->GetBodies(), 0.5);
+  INFO("alone: leftover " << alone.maxLeftover);
+  CHECK(alone.maxLeftover > 9.0);
+  CHECK(alone.leftoverOtherSetups.empty());
+
+  // With the back consulted, that half is the back's, and the front is
+  // complete.
+  const cam::OtherSetups others =
+      cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.5);
+  REQUIRE(others.notChecked.empty());
+  const cam::Verdict v = cam::VerifyGcode(frontFile, front, doc->GetBodies(),
+                                          0.5, {}, {}, {}, &others);
+  INFO("with the back: leftover " << v.maxLeftover);
+  CHECK(v.Complete(0.75));
+  REQUIRE(v.leftoverOtherSetups.size() == 1);
+  CHECK(v.leftoverOtherSetups[0].setup == 2);
+  CHECK(v.leftoverOtherSetups[0].name == "Back");
+  CHECK(v.leftoverOtherSetups[0].area > 100.0);
+  bool said = false;
+  for (const cam::VerdictLine& l : cam::Explain(v, 0.75, 0.0, false))
+    said = said || l.text.find("cut by setup 'Back'") != std::string::npos;
+  CHECK(said);
+
+  // A back that cuts only its top quarter leaves a strip neither side cuts:
+  // still leftover, not excused.
+  cam::Setup shallow = back;
+  shallow.operations[0].bottomZ = -5.0; // its frame runs z -20 to 0
+  const cam::OtherSetups partial = cam::OtherSetupsOf(
+      front, {{&shallow, post(shallow)}}, doc->GetBodies(), 0.5);
+  const cam::Verdict gap = cam::VerifyGcode(frontFile, front, doc->GetBodies(),
+                                            0.5, {}, {}, {}, &partial);
+  INFO("with a shallow back: leftover " << gap.maxLeftover);
+  CHECK(gap.maxLeftover > 4.0);
+
+  // Parts placed differently from one another have no one map to the
+  // model: said, not guessed.
+  std::vector<Body> two = doc->GetBodies();
+  Body other = two.front();
+  other.jobPartId = 7;
+  two.push_back(other);
+  cam::Setup placed = front;
+  cam::Placement pl;
+  pl.jobPartId = 7;
+  pl.pos = {100.0, 0.0};
+  placed.placements.push_back(pl);
+  const cam::OtherSetups refused =
+      cam::OtherSetupsOf(placed, {{&back, backFile}}, two, 0.5);
+  REQUIRE(refused.notChecked.size() == 1);
+  CHECK(refused.notChecked[0].find("placed differently") != std::string::npos);
 }
 
 // --- W1-W3: the workpiece, and where zero is on it ------------------------

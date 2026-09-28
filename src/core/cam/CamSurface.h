@@ -274,6 +274,14 @@ struct SurfaceResult {
 [[nodiscard]] uint64_t SurfaceKey(const Setup& setup, const Operation& op,
                                   const Tool& tool, uint64_t bodiesKey);
 
+// The finishing op a rest op cleans up after, when it is cut BEFORE the rest
+// op in this setup's cutting order: an enabled surface op of the same kind
+// using `restFromTool`'s cutter. Null when there is none, or it comes after --
+// a rest pass then knows nothing about what is left and enters from the stock
+// top (docs/cam/operations.md#surface-entries).
+[[nodiscard]] const Operation* FinishedBefore(const Setup& setup,
+                                              const Operation& op);
+
 // The same pass, from a request -- the form a worker thread calls.
 [[nodiscard]] SurfaceResult SurfacePass(const SurfaceRequest& request);
 

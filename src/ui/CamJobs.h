@@ -59,6 +59,13 @@ void SettleCamToolpaths(AppState& state);
 [[nodiscard]] std::vector<cam::Toolpath>
 GenerateCamToolpathsNow(AppState& state, const cam::Setup& setup);
 
+// Another setup's toolpaths from the same caches WITHOUT computing on the
+// frame: a pass not yet cut is queued on the workers and `pending` set. What
+// the panel's verification reads the job's other setups with
+// (docs/cam/simulation.md#leftover-another-setup-removes).
+[[nodiscard]] std::vector<cam::Toolpath>
+CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending);
+
 // Drop the queue. The pass now cutting finishes (libarea has no interruption
 // points; its result is cached, it was paid for) and the toolpaths that were
 // waiting stop being pending and say they were cancelled — the next edit or

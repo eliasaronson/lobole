@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -34,7 +35,8 @@ namespace {
 // lead-out -- none of which apply here, so this is a sibling rather than a
 // retrofit.
 //
-// The entry is a rapid to safe Z over the first point, then a plunge to it.
+// The entry is a rapid to safe Z over the first point, a rapid down to just
+// above what is known to be left there (`floorAt`), then a plunge to it.
 // There is no ramp: a finishing pass starts on a surface the roughing already
 // cleared, so the descent is through air.
 // Emit a run of passes, LINKING the ones that are neighbours.
@@ -52,9 +54,10 @@ namespace {
 // runs below by the sagitta, which for a 0.9 mm step on a 30 mm crown is
 // 3 microns. Anything further apart than a couple of stepovers is a real gap
 // -- a hole in the region, or the far side of it -- and gets the lift.
-void EmitSurfacePasses(Toolpath& tp, const Setup& setup, const Tool& tool,
-                       const std::vector<SurfacePath>& passes,
-                       double linkWithin) {
+void EmitSurfacePasses(
+    Toolpath& tp, const Setup& setup, const Tool& tool,
+    const std::vector<SurfacePath>& passes, double linkWithin,
+    const std::function<double(const glm::dvec3&)>& floorAt) {
   // ORDER them first, nearest end to nearest end, reversing a pass when its
   // far end is the closer one.
   //
@@ -109,6 +112,10 @@ void EmitSurfacePasses(Toolpath& tp, const Setup& setup, const Tool& tool,
         Emit(tp, Move::Kind::Rapid, {at.x, at.y, setup.safeZ}, 0.0);
       Emit(tp, Move::Kind::Rapid, {path.front().x, path.front().y, setup.safeZ},
            0.0);
+      // Down to just above what is left, then the plunge feed.
+      if (const double z = floorAt(path.front());
+          z < setup.safeZ - 1e-3 && z > path.front().z + 1e-3)
+        Emit(tp, Move::Kind::Rapid, {path.front().x, path.front().y, z}, 0.0);
       Emit(tp, Move::Kind::Plunge, path.front(), tool.feedPlunge);
     }
     for (size_t i = 1; i < path.size(); i++)
@@ -227,7 +234,8 @@ template <class BigTip, class BigReached, class SmallTip, class SmallReached,
 std::vector<bool>
 RestMask(int nx, int ny, double resX, SpanY spanY, bool wrapY, BigTip bigTip,
          BigReached reachedBig, SmallTip smallTip, SmallReached reachedSmall,
-         Part partAt, const Tool& big, const Tool& small, double tolerance) {
+         Part partAt, const Tool& big, const Tool& small, double tolerance,
+         std::vector<float>* leftTop = nullptr) {
   const double rSmall = 0.5 * small.diameter;
   const int fx = std::max(1, static_cast<int>(std::floor(rSmall / 3.0 / resX)));
   int fy =
@@ -293,7 +301,65 @@ RestMask(int nx, int ny, double resX, SpanY spanY, bool wrapY, BigTip bigTip,
     for (int i = 0; i < nx; i++)
       out[static_cast<size_t>(j) * nx + i] =
           coarse[static_cast<size_t>(j / fy) * cx + i / fx];
+  // How high the big cutter's leftover stands, per fine cell, NaN where it
+  // left nothing measurable: a block's envelope is taken from its HIGHEST
+  // tip, so this can only overstate -- the side a rapid's floor must err on
+  // (docs/cam/operations.md#surface-entries).
+  if (leftTop != nullptr) {
+    leftTop->assign(static_cast<size_t>(nx) * ny, std::nanf(""));
+    for (int j = 0; j < ny; j++)
+      for (int i = 0; i < nx; i++) {
+        const size_t c = static_cast<size_t>(j / fy) * cx + i / fx;
+        if (!std::isnan(part[c]) && leftBig[c] - part[c] > tolerance)
+          (*leftTop)[static_cast<size_t>(j) * nx + i] = leftBig[c];
+      }
+  }
   return out;
+}
+
+// --- entries ---------------------------------------------------------------
+
+// A surface pass rapids down to just above what is KNOWN to be left and feeds
+// only the last of it (docs/cam/operations.md#surface-entries). This far
+// above: a millimetre, or the tool's radius when that is less.
+double EntryClearance(const Tool& tool) {
+  return std::min(1.0, 0.5 * tool.diameter);
+}
+
+// The ridge a pass leaves beside the next one `step` over: a ball's scallop,
+// nothing for a flat end.
+double Scallop(const Tool& tool, double step) {
+  if (tool.type != ToolType::Ball)
+    return 0.0;
+  const double R = 0.5 * tool.diameter;
+  const double h = std::min(0.5 * step, R);
+  return R - std::sqrt(R * R - h * h);
+}
+
+// The highest of `top` (NaN = nothing there) within `R` of cell (ci, cj):
+// `spanY` is a cell's pitch across, `wrapY` closes a rotary map.
+double FootprintMax(const std::vector<float>& top, int nx, int ny, double resX,
+                    double spanY, bool wrapY, int ci, int cj, double R) {
+  double best = -1e18;
+  const int kx = static_cast<int>(std::ceil(R / resX));
+  const int ky =
+      std::min(static_cast<int>(std::ceil(R / std::max(spanY, 1e-6))), ny / 2);
+  for (int dj = -ky; dj <= ky; dj++) {
+    int jj = cj + dj;
+    if (wrapY)
+      jj = ((jj % ny) + ny) % ny;
+    else if (jj < 0 || jj >= ny)
+      continue;
+    for (int di = -kx; di <= kx; di++) {
+      const int ii = ci + di;
+      if (ii < 0 || ii >= nx)
+        continue;
+      const float v = top[static_cast<size_t>(jj) * nx + ii];
+      if (!std::isnan(v))
+        best = std::max(best, static_cast<double>(v));
+    }
+  }
+  return best;
 }
 
 // 4-axis finishing (docs/cam/rotary.md#continuous-surface_rotary), by the op's
@@ -336,7 +402,14 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     return;
   }
 
-  const RadiusMap grid = MakeRotaryStock(x0, x1, rad, res);
+  // A tool radius past each end: a ball centred beyond the part rolls over
+  // its end's edge and down a domed end's steep foot, which one centred no
+  // further than the end never reaches. What lies at the chuck or the
+  // tailstock is clipped by the holding window (GenerateOp), so running past
+  // the ends takes the cutter nowhere the holding does not already bound
+  // (docs/cam/rotary.md#layers-rest-and-the-rough-verb).
+  const double past = 0.5 * tool.diameter;
+  const RadiusMap grid = MakeRotaryStock(x0 - past, x1 + past, rad, res);
   RadiusMap model = SampleModelRotary(bodies, grid);
   // Stock to leave on a rotary pass holds the tool OUT, radially -- the same
   // field that shifts bottomZ on a 2.5D op and raises the tool on a planar
@@ -373,6 +446,23 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
           cl.Set(i, j, 0.0f);
   }
 
+  // Cells this cutter cannot reach at all (off a picked face's span, or
+  // beyond the part) still stand at the blank: taken BEFORE the rest mask,
+  // whose empty cells the finish did cut.
+  std::vector<float> blankTop(cl.r.size(), std::nanf(""));
+  {
+    const double blank = RotaryBlankRadius(setup, rad);
+    for (size_t k = 0; k < cl.r.size(); k++)
+      if (cl.r[k] <= 0.0f)
+        blankTop[k] = static_cast<float>(blank);
+  }
+
+  // What a rest pass knows is left after its finish (NaN where nothing), and
+  // how far above that the leftover may stand: the finish's own skin and cusp.
+  std::vector<float> restTop;
+  double restAbove = 0.0;
+  bool restKnown = false;
+
   // Rest machining: cut only where the larger cutter that finished before
   // could not reach -- where its envelope stands proud of this one's.
   if (op.restFromTool != 0) {
@@ -401,7 +491,7 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
           const float r = model.At(i, j);
           return r > 0.0f ? static_cast<double>(r) : std::nan("");
         },
-        *bigger, tool, std::max(0.02, 2.0 * cusp));
+        *bigger, tool, std::max(0.02, 2.0 * cusp), &restTop);
     size_t kept = 0;
     for (int j = 0; j < cl.nTheta; j++)
       for (int i = 0; i < cl.nx; i++) {
@@ -414,6 +504,10 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
       tp.error = "nothing is left for it: T" + std::to_string(op.restFromTool) +
                  " reached everywhere this cutter can";
       return;
+    }
+    if (const Operation* finish = FinishedBefore(setup, op)) {
+      restKnown = true;
+      restAbove = finish->stockToLeave + DerivedCusp(*bigger, 0.0);
     }
   }
 
@@ -454,6 +548,56 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
   // the retract is RADIAL, so "safe" is a radius outside the blank.
   const double safeR = std::max(blankR, rad) + std::max(2.0, tool.diameter);
   const double pitch = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+
+  // Entries (docs/cam/operations.md#surface-entries): rapid radially down to
+  // just above what is known to be left, then the plunge feed -- not the
+  // whole way from the safe radius at the plunge feed, which was 26 of the
+  // rotary sampler's rest pass's 58 minutes. Known: the blank for a first
+  // layer, the floor the layer before left (ridges and all) for a later
+  // one, the leftover under the tool for a rest pass after its finish. A
+  // cell no pass of this op reaches still stands at the blank, so an entry
+  // beside one comes down no lower than that.
+  const double clear = EntryClearance(tool);
+  const double ridge = Scallop(tool, pitch);
+  const auto entryR = [&](size_t li, double x, double r, double thetaDeg) {
+    const int ci =
+        std::clamp(static_cast<int>((x - cl.x0) / cl.res), 0, cl.nx - 1);
+    const double turn =
+        std::fmod(thetaDeg, 360.0) + (thetaDeg < 0 ? 360.0 : 0.0);
+    const int cj =
+        std::clamp(static_cast<int>(std::floor(turn / 360.0 * cl.nTheta)), 0,
+                   cl.nTheta - 1);
+    const double span = cl.ArcAt(std::max(r, 1.0));
+    const double R = 0.5 * tool.diameter;
+    double top = 0.0;
+    if (li > 0)
+      // Not the floor alone: a cell beside a wall is never under a tool
+      // centre -- its CL stands at the wall -- and keeps what the bodies
+      // round it left, up to that CL. The highest of the two under the
+      // footprint is what the layer before can have left (the rotary
+      // sampler's rough came down into a shoulder's foot without it).
+      top =
+          std::max(floors[li - 1], FootprintMax(cl.r, cl.nx, cl.nTheta, cl.res,
+                                                span, true, ci, cj, R)) +
+          ridge;
+    else if (restKnown)
+      top = FootprintMax(restTop, cl.nx, cl.nTheta, cl.res, span, true, ci, cj,
+                         R) +
+            restAbove;
+    else
+      return std::min(safeR, blankR + clear);
+    top = std::max(top, FootprintMax(blankTop, cl.nx, cl.nTheta, cl.res, span,
+                                     true, ci, cj, R));
+    return std::min(safeR, std::max(r, top) + clear);
+  };
+  const auto enter = [&](size_t li, double x, double r, double thetaDeg) {
+    const double a = 90.0 - thetaDeg;
+    go(Move::Kind::Rapid, x, safeR, a, 0.0);
+    if (const double e = entryR(li, x, r, thetaDeg);
+        e < safeR - 1e-3 && e > r + 1e-3)
+      go(Move::Kind::Rapid, x, e, a, 0.0);
+    go(Move::Kind::Plunge, x, r, a, tool.feedPlunge);
+  };
 
   // Where the last layer's spiral left the axis, in unwound part degrees.
   // The next one starts on the same turn rather than back at zero: a spiral
@@ -514,8 +658,7 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
         q.thetaDeg += shift;
       thetaCarry = path.back().thetaDeg;
       const RotaryPathPoint& p0 = path.front();
-      go(Move::Kind::Rapid, p0.x, safeR, 90.0 - p0.thetaDeg, 0.0);
-      go(Move::Kind::Plunge, p0.x, p0.r, 90.0 - p0.thetaDeg, tool.feedPlunge);
+      enter(li, p0.x, p0.r, p0.thetaDeg);
       for (size_t k = 1; k < path.size(); k++)
         go(Move::Kind::Cut, path[k].x, path[k].r, 90.0 - path[k].thetaDeg,
            tool.feedCut);
@@ -544,8 +687,7 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
         for (RotaryPathPoint& q : pass)
           q.thetaDeg += shift;
         const RotaryPathPoint& p0 = pass.front();
-        go(Move::Kind::Rapid, p0.x, safeR, 90.0 - p0.thetaDeg, 0.0);
-        go(Move::Kind::Plunge, p0.x, p0.r, 90.0 - p0.thetaDeg, tool.feedPlunge);
+        enter(li, p0.x, p0.r, p0.thetaDeg);
         for (size_t k = 1; k < pass.size(); k++)
           go(Move::Kind::Cut, pass[k].x, pass[k].r, 90.0 - pass[k].thetaDeg,
              tool.feedCut);
@@ -598,8 +740,7 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
       } else {
         if (down)
           go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
-        go(Move::Kind::Rapid, start.x, safeR, a, 0.0);
-        go(Move::Kind::Plunge, start.x, start.y, a, tool.feedPlunge);
+        enter(li, start.x, start.y, pass.thetaDeg);
       }
       for (size_t k = 1; k < pass.pts.size(); k++)
         go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
@@ -694,6 +835,21 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   }
   const auto unreached = [&](double z) { return z <= drop.floorZ + 1e-6; };
 
+  // Where a pass may rapid down to: the stock top when nothing more is
+  // known, which is `RapidFloor`'s rule for the 2.5D ops -- above the stock
+  // there is no material (docs/cam/operations.md#surface-entries).
+  const double clear = EntryClearance(tool);
+  double stockTop = setup.safeZ;
+  {
+    glm::dvec3 slo(0.0), shi(0.0);
+    if (StockBoundsFramed(setup, bodies, slo, shi))
+      stockTop = std::min(setup.safeZ, shi.z + clear);
+  }
+  std::function<double(const glm::dvec3&)> floorAt = [&](const glm::dvec3&) {
+    return stockTop;
+  };
+  std::vector<float> restTop; // what the bigger cutter left, NaN where nothing
+
   // Rest machining: cut only where the larger cutter that finished before
   // could not reach, by comparing what each LEAVES (ToolEnvelope). The
   // raster's: a clean-up after a waterline is a raster too (DeriveRest),
@@ -747,7 +903,7 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
         [&](int i, int j) { return !unreached(bigAt(i, j)); },
         [&](int i, int j) { return static_cast<double>(a.At(i, j)); },
         [&](int i, int j) { return !unreached(a.At(i, j)); }, partAt, *bigger,
-        tool, std::max(0.02, 2.0 * DerivedCusp(tool, 0.0)));
+        tool, std::max(0.02, 2.0 * DerivedCusp(tool, 0.0)), &restTop);
     size_t kept = 0;
     for (int j = 0; j < a.ny; j++)
       for (int i = 0; i < a.nx; i++) {
@@ -760,6 +916,23 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
       tp.error = "nothing is left for it: T" + std::to_string(op.restFromTool) +
                  " reached everywhere this cutter can";
       return;
+    }
+    // After its finish, a rest pass enters just above the leftover under the
+    // tool -- not from the stock top, through the air the finish cut. Only
+    // when that finish is cut FIRST: in any other order the stock is whole.
+    if (const Operation* finish = FinishedBefore(setup, op)) {
+      const double above =
+          finish->stockToLeave + DerivedCusp(*bigger, 0.0) + clear;
+      const double R = 0.5 * tool.diameter;
+      floorAt = [&restTop, &cl, stockTop, clear, above,
+                 R](const glm::dvec3& p) {
+        const HeightMap& m = cl.z;
+        const int ci = static_cast<int>(std::floor((p.x - m.x0) / m.res));
+        const int cj = static_cast<int>(std::floor((p.y - m.y0) / m.res));
+        const double top =
+            FootprintMax(restTop, m.nx, m.ny, m.res, m.res, false, ci, cj, R);
+        return std::min(stockTop, std::max(p.z + clear, top + above));
+      };
     }
   }
 
@@ -795,7 +968,30 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
     req.floorZ = masked;
     double above = op.topZ; // where the previous layer left each cell, at most
     size_t emitted = 0;
+    const double ridge = Scallop(tool, req.stepover_mm);
     for (const double f : floors) {
+      // The first layer enters from the stock top; a later one from just
+      // over the floor the one before left, ridges and all.
+      // Under the whole footprint, the higher of that floor and the target:
+      // a cell beside a wall is never under a tool centre and keeps what the
+      // bodies round it left, up to its own target.
+      const bool first = above >= op.topZ;
+      const double floorBefore = above;
+      const double R = 0.5 * tool.diameter;
+      const std::function<double(const glm::dvec3&)> layerAt =
+          [&, first, floorBefore, R](const glm::dvec3& p) {
+            if (first)
+              return stockTop;
+            const int ci =
+                static_cast<int>(std::floor((p.x - target.x0) / target.res));
+            const int cj =
+                static_cast<int>(std::floor((p.y - target.y0) / target.res));
+            const double top = std::max(
+                floorBefore,
+                FootprintMax(target.z, target.nx, target.ny, target.res,
+                             target.res, false, ci, cj, R));
+            return std::min(stockTop, std::max(p.z, top + ridge) + clear);
+          };
       // A cell whose target already stands above the previous floor has
       // nothing left over it: unreached for this layer, so the pass breaks
       // there instead of dragging the tool through air it cut already.
@@ -810,7 +1006,8 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
       SurfacePaths r = ParallelPasses(layer, region.loops, req);
       if (!r.passes.empty()) {
         emitted += r.passes.size();
-        EmitSurfacePasses(tp, setup, tool, r.passes, req.stepover_mm * 2.0);
+        EmitSurfacePasses(tp, setup, tool, r.passes, req.stepover_mm * 2.0,
+                          layerAt);
       }
       above = f;
     }
@@ -871,7 +1068,7 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   const double step = op.type == OpType::SurfaceParallel
                           ? std::clamp(op.stepover, 0.02, 0.95) * tool.diameter
                           : (op.zStep > 0.0 ? op.zStep : tool.diameter * 0.1);
-  EmitSurfacePasses(tp, setup, tool, passes, step * 2.0);
+  EmitSurfacePasses(tp, setup, tool, passes, step * 2.0, floorAt);
 }
 
 } // namespace
@@ -922,6 +1119,23 @@ void SurfaceThroughCache(const Setup& setup, const Operation& op,
 }
 
 } // namespace detail
+
+const Operation* FinishedBefore(const Setup& setup, const Operation& op) {
+  if (op.restFromTool == 0)
+    return nullptr;
+  const bool rotary = op.type == OpType::SurfaceRotary;
+  for (const size_t i : CuttingOrder(setup)) {
+    const Operation& o = setup.operations[i];
+    if (o.id == op.id)
+      return nullptr;
+    const bool finishes = rotary ? o.type == OpType::SurfaceRotary
+                                 : (o.type == OpType::SurfaceParallel ||
+                                    o.type == OpType::SurfaceWaterline);
+    if (o.enabled && finishes && o.toolNumber == op.restFromTool)
+      return &o;
+  }
+  return nullptr;
+}
 
 SurfaceResult SurfacePass(const SurfaceRequest& request) {
   // The form a worker thread calls. It takes the strategy's own path with no

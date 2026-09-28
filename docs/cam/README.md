@@ -271,11 +271,12 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   steered away; nothing holds a part down on 3D operations (tabs are
   profile-only); fixtures are not checked on a rotary setup (the chuck and
   tailstock are); no spindle nose.
+- **Stock carried between setups.** Leftover another setup removes is said
+  as that setup's ([simulation.md](simulation.md#leftover-another-setup-removes)),
+  but each setup's simulation, rapid, bite and collision checks start from its
+  own fresh stock.
 - **Waterline roughing** (clearing each level between the part's section and
   the stock); rotary roughing is layers, not constant engagement.
-- **Rotary passes stop at the part's ends**, so the steep foot of a domed end
-  is left; running passes a tool radius past each end is undecided because it
-  takes the cutter toward whatever holds the work.
 - **Paths that follow a feature** other than a twist (wrapped text, engraving
   round a cylinder).
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
