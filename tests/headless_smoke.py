@@ -2129,6 +2129,19 @@ def main():
             # Whatever cut it, it must cut the right thing.
             v = d.call("cam_verify", setup=ell_setup, resolution=0.8)
             expect(v["ok"], f"the fallback cuts cleanly: {v}")
+            # The same pick with its depths typed keeps its target. It was
+            # read only by the derivation, which typed depths skip: the op
+            # came out with no target at all -- the whole part -- and the
+            # call answered "unknown parameter 'target'" after making it.
+            typed = d.call("add_cam_op", setup=ell_setup, type="pocket",
+                           tool=1, target=floor, top_z=op["top_z"],
+                           bottom_z=op["bottom_z"])
+            expect(len(typed.get("targets", [])) == 1,
+                   f"a typed-depth op keeps its one target: {typed}")
+            d.call("remove_cam_op", id=typed["id"])
+            expect_error(d, "add_cam_op", "not both", setup=ell_setup,
+                         type="pocket", tool=1, target=floor,
+                         targets=[floor], top_z=1.0, bottom_z=0.0)
 
             d.call("new_project")
             d.call("add_feature", feature={

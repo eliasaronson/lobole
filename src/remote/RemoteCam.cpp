@@ -307,7 +307,9 @@ constexpr MethodDoc kCamMethods[] = {
      "and feeds are mm/min on the TOOL, not here. {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round|surface_parallel|"
      "surface_waterline|surface_rotary, "
-     "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
+     "tool?, target? (one pick, as cam_derive_op takes it -- the same as a "
+     "one-entry targets; not both), top_z?, bottom_z?, stepdown?, peck? "
+     "(drill: retract between "
      "pecks of this depth; derived as the tool's diameter once a hole is "
      "deeper than three), corner_relief?: none|dogbone|tbone (profile and "
      "pocket: clear the inside corners a round cutter leaves, by the tool's "
@@ -374,7 +376,7 @@ constexpr MethodDoc kCamMethods[] = {
      "finish_stock, finish_tool, id, lead_arcs, lead_mm, name, peck, "
      "rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
-     "stock_to_leave, tabs, targets, tool, top_z, type, use_outline, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
@@ -664,9 +666,19 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.tabWidth = t.value("width", 6.0);
     op.tabHeight = t.value("height", 1.5);
   }
-  if (p.contains("targets")) {
+  // `target` is one pick, the shape cam_derive_op takes. The derivation
+  // read it, but only when it ran -- with top_z and bottom_z both given it
+  // did not, the op kept NO target, and a profile meant for one slit cut
+  // round the whole part (the chess bishop's mitre gouged the blank it was
+  // on, and the call answered "unknown parameter 'target'" after making it).
+  if (p.contains("target") && p.contains("targets"))
+    throw std::runtime_error(
+        "give `targets` (a list) or `target` (one pick), not both");
+  const json oneTarget =
+      p.contains("target") ? json::array({p.at("target")}) : json::array();
+  if (p.contains("targets") || p.contains("target")) {
     op.targets.clear();
-    for (const json& tj : p.at("targets")) {
+    for (const json& tj : p.contains("targets") ? p.at("targets") : oneTarget) {
       ElementRef ref;
       ref.featureId = tj.value("feature_id", uint64_t{0});
       ref.name = tj.value("element", std::string());
