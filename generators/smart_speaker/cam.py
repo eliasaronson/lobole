@@ -63,7 +63,11 @@ TOOLS = [
 ]
 
 THROUGH_OVERRUN = 0.5  # mm past the far face, so a through cut is through
-TAB = {"count": 4, "height": 3.0, "width": 8.0}
+# `width` is how far the tool's CENTRE travels lifted, so the tab left in the
+# middle of the kerf is width minus the cutter: this was 8, which on the 6 mm
+# cutter held each slug on 2 mm of MDF. Twice the cutter, the app's own
+# derived width, leaves 6 (docs/cam/operations.md#profile).
+TAB = {"count": 4, "height": 3.0, "width": 2.0 * TOOLS[0]["diameter"]}
 
 
 # Picks are made in the PART's own frame, where the baffle faces -Y — it is
@@ -223,12 +227,20 @@ def verify(app, sid):
     v = app.cam_verify(setup=sid)
     print(f"  verify: gouge {v.get('max_gouge_mm', 0):.3f} mm, "
           f"leftover {v.get('max_leftover_mm', 0):.3f} mm, "
-          f"rapids through stock: {v.get('rapids_through_stock')}")
-    # A GOUGE is the failure — material taken that the model keeps. Leftover
-    # is not: the openings are cut on tabs, so their slugs are still attached
-    # and stand the full thickness of the panel. That is the tabs working.
-    ok = (not empty and v.get("max_gouge_mm", 1.0) < 0.01
-          and not v.get("rapids_through_stock"))
+          f"rapids through stock: {v.get('rapids_through_stock')}, "
+          f"over-deep bites: {v.get('over_bites')}, "
+          f"shank collisions: {v.get('shank_collisions')}")
+    # `ok` is the verifier's own gate: no gouge, no rapid through stock, and
+    # nothing that breaks the tool -- a cut biting deeper than its passes, a
+    # shank or holder driven into the work. Gating on gouge and rapids alone
+    # passed the program whose lead-outs slotted 16 mm of solid MDF and moved
+    # the board: the part came out the same, so neither number moved.
+    # Leftover is not a failure: the openings are cut on tabs, so their slugs
+    # are still attached and stand the full thickness of the panel.
+    if not v.get("ok"):
+        for line in v.get("says", []):
+            print(f"    !! {line}")
+    ok = not empty and bool(v.get("ok"))
     return ok, v
 
 
