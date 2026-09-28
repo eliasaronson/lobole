@@ -20,12 +20,22 @@ struct KernelCell {
 std::vector<KernelCell> BuildKernel(const Tool& tool, double res) {
   std::vector<KernelCell> cells;
   const double radius = tool.diameter * 0.5;
-  const int reach = static_cast<int>(std::ceil(radius / res));
+  const int reach = static_cast<int>(std::ceil(radius / res)) + 1;
   cells.reserve(static_cast<size_t>(2 * reach + 1) *
                 static_cast<size_t>(2 * reach + 1));
   for (int dj = -reach; dj <= reach; dj++)
     for (int di = -reach; di <= reach; di++) {
-      const double d = std::hypot(di * res, dj * res);
+      // A sample stands for the SQUARE of material around it, so the cutter
+      // meets it at the square's nearest point, not at its centre. Measured
+      // at the centre, the model ended at the last sample inside a sharp
+      // convex edge -- up to half a cell short of the real one -- and near
+      // its rim a ball's tip is steep enough to turn that into most of a
+      // millimetre: a finish dipped 0.27 mm into a plate's corner, hidden
+      // until the verifier carved sloped moves correctly. The nearest point
+      // errs toward leaving a fraction of a cell, never toward the part.
+      const double dx = std::max(0.0, std::abs(di) * res - res * 0.5);
+      const double dy = std::max(0.0, std::abs(dj) * res - res * 0.5);
+      const double d = std::hypot(dx, dy);
       // The kernel is the cutter's FOOTPRINT, so a cell outside its radius is
       // not part of the tool and must not lift it.
       if (d > radius)

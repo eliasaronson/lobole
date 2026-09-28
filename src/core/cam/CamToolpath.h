@@ -101,6 +101,9 @@ struct DerivedOp {
   bool ok = false;
   std::string why; // when !ok: why this verb cannot apply here
   Operation op;    // id left 0 — the caller owns id allocation
+  // What is true of the op as derived and worth saying before anything is
+  // cut: a drill's point in a flat-bottomed hole, say. Not refusals.
+  std::vector<std::string> notes;
 };
 
 // Where the workpiece is, in setup space, when the stock is FIXED: the model
@@ -301,7 +304,8 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // clamped where the work is; this works out where that is, from the toolpaths
 // rather than from the sheet. `ok` false with `why` in words when no position
 // helps -- the cutting itself is wider than the travel, which is genuinely two
-// setups and says so.
+// setups and says so. Zero along an axis where the stock fits the travel: the
+// window is centred there already.
 struct DerivedReach {
   glm::dvec2 offset{0.0, 0.0};
   bool ok = false;
@@ -315,10 +319,11 @@ struct DerivedReach {
                                           const std::vector<Body>& bodies);
 
 // Where the machine's travel sits in SETUP space: a box the size of the
-// travel, its near-left corner at the stock's and its floor at the stock's
-// bottom -- how a sheet is loaded, and the one anchoring the viewport draws
-// and the clip below cuts to. False when the machine states no work area or
-// there is no stock. `bodies` unframed; the Framed form takes them framed.
+// travel, its floor at the stock's bottom, centred on the stock along an axis
+// where the stock fits and at its near corner along one where it is longer,
+// plus reachOffset -- how a sheet is loaded, and the one anchoring the viewport
+// draws and the clip below cuts to. False when the machine states no work area
+// or there is no stock. `bodies` unframed; the Framed form takes them framed.
 [[nodiscard]] bool MachineBounds(const Setup& setup,
                                  const std::vector<Body>& bodies,
                                  glm::dvec3& lo, glm::dvec3& hi);

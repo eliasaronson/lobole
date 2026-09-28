@@ -307,3 +307,35 @@ TEST_CASE("cam rotary: a picked face bounds the pass along the axis", "[cam]") {
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam waterline: the top of a dome is lapped, not left",
+          "[cam][surface]") {
+  // Evenly spaced levels spread apart where a surface flattens, and the cap
+  // above the highest lap was never cut: 0.6 mm left on the sampler part's
+  // dome. Levels are added where the band between two -- or over the cap --
+  // is wider than the finish's own cusp allows.
+  const std::vector<Body> bodies = DomeOnPlate(12.0);
+  cam::Setup setup = TwoBallSetup();
+  const cam::DerivedOp d =
+      cam::DeriveOperation(setup, bodies, cam::OpType::SurfaceWaterline, {}, 1);
+  INFO(d.why);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+  const cam::Inspection insp = cam::Inspect(gcode, setup, bodies, 0.1);
+  REQUIRE(insp.ok);
+  // The apex, at (0, 0), and the cells round it within 1.5 mm.
+  double worst = 0.0;
+  for (int j = 0; j < insp.machined.ny; j++)
+    for (int i = 0; i < insp.machined.nx; i++)
+      if (std::hypot(insp.machined.CellX(i), insp.machined.CellY(j)) < 1.5)
+        worst = std::max(worst, static_cast<double>(insp.machined.At(i, j) -
+                                                    insp.designed.At(i, j)));
+  INFO("left at the apex " << worst);
+  CHECK(worst < 0.1);
+}

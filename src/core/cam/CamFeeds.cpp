@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -128,7 +129,10 @@ ChiploadBand ToolBandFor(const Tool& t, CutClass c) {
 // across -- a 3 mm bit in an ER11 and a 12 mm bit in an ER20 do not want the
 // same margin. Half a diameter is the honest small end of that.
 double CollarClearance(const Tool& t) {
-  return std::max(1.0, t.diameter * 0.5);
+  // The collet grips the SHANK, so its nut scales with that when it is
+  // stated: a 12 mm V-bit on a 6.35 mm shank sits in a quarter-inch collet.
+  return std::max(1.0,
+                  (t.shankDiameter > 0.0 ? t.shankDiameter : t.diameter) * 0.5);
 }
 
 Reach ReachCheck(const Operation& op, const Tool& t) {
@@ -178,16 +182,34 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
                Fmt("%.1f", over) +
                " mm is cut by the shank and the holder is in the work. Use a "
                "longer cutter, or take the depth in two setups";
-  } else if (over <= 1e-3 && out.depth > t.fluteLength - CollarClearance(t)) {
+  } else if (const double collet =
+                 // Where the nut is: the stated stickout, else the top of the
+                 // flutes -- except on a tool narrower above its flutes than
+                 // in them (a V-bit's cone, a necked cutter), whose shank goes
+                 // on up to a nut nothing here says the height of. There a
+                 // 1.5 mm chamfer with a 6 mm cone was "the depth where the
+                 // nut touches the work".
+             t.overallLength > 0.0 ? t.overallLength
+             : necked              ? std::numeric_limits<double>::max()
+                                   : t.fluteLength;
+             over <= 1e-3 && out.depth > collet - CollarClearance(t)) {
     // MARGIN, not just overrun. The first version of this check fired only
     // when the cut was DEEPER than the flute, so a 25.0 mm cut with a
     // 25.0 mm cutter passed in silence -- and that is a cut whose collet nut
     // sits exactly on the stock surface with nothing to spare. Stock
     // thickness and Z zero are each good to a few tenths, and they add.
     out.level = Reach::Level::Tight;
+    // Named by what the room is measured FROM: with a stickout stated that
+    // is the nut, and "25 mm of flute -- only 20 mm to spare" contradicted
+    // itself.
+    const std::string from = t.overallLength > 0.0
+                                 ? "the collet nut " +
+                                       Fmt("%.1f", t.overallLength) +
+                                       " mm above the tip"
+                                 : Fmt("%.1f", t.fluteLength) + " mm of flute";
     out.text = who + " cuts " + Fmt("%.1f", out.depth) + " mm deep with " +
-               Fmt("%.1f", t.fluteLength) + " mm of flute -- only " +
-               Fmt("%.1f", std::max(0.0, t.fluteLength - out.depth)) +
+               from + " -- only " +
+               Fmt("%.1f", std::max(0.0, collet - out.depth)) +
                " mm to spare, and the collet needs about " +
                Fmt("%.1f", CollarClearance(t)) +
                " mm of it. Stock thickness and Z zero are each good to a few "
@@ -357,9 +379,9 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
                 Fmt("%.0f", t.spindleRpm) +
                 " rpm and the machine tops out at " + Fmt("%.0f", have) +
                 ", so no feed here reaches it. That is worth knowing rather "
-                "than fixing -- " +
+                "than fixing -- a " +
                 std::to_string(fewest) +
-                " flutes would fit inside the ceiling");
+                "-flute cutter would fit inside the ceiling");
       }
     } else if (chip > band.max) {
       finding(who + " cuts " + std::string(CutClassName(klass)) + " at " +

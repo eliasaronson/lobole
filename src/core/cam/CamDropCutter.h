@@ -21,15 +21,21 @@
 // The model surface dilated by the tool's own profile:
 //
 //   z_CL(x,y) = max over cells p within the tool's radius of
-//                 ( z_surface(p) - TipHeight(tool, |p - (x,y)|) )
+//                 ( z_surface(p) - TipHeight(tool, d(p)) )
+//
+// where d(p) is the distance to the NEAREST POINT of the square of material
+// the sample p stands for, not to its centre: conservative by up to half a
+// cell, and never into the part (docs/cam/operations.md#3-axis-surfacing).
 //
 // `TipHeight` is the same function `CarveSweep` verifies with, so the surface
 // the generator plans against and the shape the checker removes cannot
 // disagree about the cutter. opencamlib calls it `MillingCutter::height` and
 // uses it for the VERTEX-drop case only, paying for facet and edge drop with a
 // three-scalar offset-surface descriptor and a closed form per cutter. A grid
-// dilation buys vertex and facet accuracy without either, and loses precision
-// only on sharp convex edges -- which a finish pass is not for.
+// dilation buys vertex and facet accuracy without either; measured at sample
+// centres it lost precision on sharp convex edges -- most of a millimetre of
+// gouge under a ball's steep rim -- which the nearest-point distance above
+// turns into at most half a cell of material left instead.
 namespace cam {
 
 // What the drop cutter was asked for, and what it could not do.

@@ -84,6 +84,14 @@ struct WaterlineRequest {
   // the Z step it actually uses is a different property entirely.
   double zStep_mm = 1.0;
 
+  // The widest a band between two neighbouring laps may be, measured across
+  // the surface, in mm. 0 is no limit. Evenly spaced levels spread apart
+  // where the surface flattens, and the cap above the highest lap is not cut
+  // at all: 0.6 mm left on a dome's top at the derived step. Levels are
+  // added in Z wherever the band between two is wider than this, and over
+  // the cap, until none is.
+  double maxGap_mm = 0.0;
+
   // The band to lap, in mm. Levels run from `topZ` downward to `bottomZ`,
   // with the last landing exactly on it -- the same rule DepthPasses follows,
   // for the same reason: a lap a hair below the one asked for is a scrapped
@@ -101,7 +109,9 @@ struct WaterlineRequest {
 //
 // Waterline is the other half of finishing and answers the opposite question
 // to the raster: it is good on steep walls, where a raster's passes crowd
-// together, and poor on shallow ones, where they spread out. A separate verb
+// together, and on shallow ones its laps would spread out -- so levels are
+// added there, and over the cap, until no band between laps is wider than
+// `maxGap_mm`. A separate verb
 // rather than a flag on one, because a single op cannot honestly carry both
 // an XY fraction and a Z step under one name.
 [[nodiscard]] SurfacePaths WaterlinePasses(const CLSurface& cl,

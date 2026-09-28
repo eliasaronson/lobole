@@ -108,10 +108,41 @@ double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
       // out of it was then reported as a rapid through material. A move
       // that stands still in XY reaches its lowest point over every cell it
       // covers.
-      const double toolZ =
-          xyStill ? std::min(from.z, to.z) : from.z + (to.z - from.z) * t;
-      const double surface =
-          toolZ + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      // ...and while it MOVES, the lowest the tool reaches over the stretch
+      // of the move during which this cell lies under it -- not its height
+      // at the closest approach. A descending move goes on down after it
+      // has passed closest, with the cell still under its rim: taking Z at
+      // the closest point left the cell up to the whole descent too high,
+      // which read as leftover on every ramp and as a "rapid through
+      // material" when the tool then lifted out of its own cut (0.12 mm on
+      // the sampler part's 3D rough). The stretch is where |p(t) - c| <= r,
+      // an interval of t; a flat end is lowest at one of its ends, and a
+      // shaped tip is sampled across it.
+      double surface = 0.0;
+      if (xyStill) {
+        surface = std::min(from.z, to.z) +
+                  (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      } else {
+        const glm::dvec2 e = b - a;
+        const glm::dvec2 d0 = a - c;
+        const double qa = glm::dot(e, e);
+        const double qb = 2.0 * glm::dot(d0, e);
+        const double qc = glm::dot(d0, d0) - radius * radius;
+        const double disc = std::max(0.0, qb * qb - 4.0 * qa * qc);
+        const double t1 =
+            std::clamp((-qb - std::sqrt(disc)) / (2.0 * qa), 0.0, 1.0);
+        const double t2 =
+            std::clamp((-qb + std::sqrt(disc)) / (2.0 * qa), 0.0, 1.0);
+        const auto at = [&](double u) {
+          const glm::dvec2 p = a + e * u;
+          return from.z + (to.z - from.z) * u +
+                 (tool != nullptr ? TipHeight(*tool, glm::length(p - c)) : 0.0);
+        };
+        surface = std::min({at(t), at(t1), at(t2)});
+        if (tool != nullptr && tool->type != ToolType::Flat)
+          for (int k = 1; k < 8; k++)
+            surface = std::min(surface, at(t1 + (t2 - t1) * k / 8.0));
+      }
       if (const double top = stock.At(i, j); top > surface) {
         removed += top - surface;
         stock.Set(i, j, static_cast<float>(surface));
@@ -1017,11 +1048,12 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
       haveZ = true;
     }
     // Z is a SPAN, not a position, and that distinction is the whole of this
-    // paragraph. In X and Y the bed's near corner is assumed to sit on the
-    // stock's near corner plus `reach_offset` -- a stated assumption a person
-    // can correct. There is no equivalent in Z: nothing says where the
-    // machine's Z zero sits relative to the workpiece, because that is what
-    // the operator sets when they touch off, AFTER the file is written.
+    // paragraph. In X and Y the window is centred on a stock that fits, or at
+    // the near corner of a longer one, plus `reach_offset` -- a stated
+    // assumption a person can correct. There is no equivalent in Z: nothing
+    // says where the machine's Z zero sits relative to the workpiece, because
+    // that is what the operator sets when they touch off, AFTER the file is
+    // written.
     //
     // Anchoring it anyway is what this check did when it grew its third axis,
     // and it read `lo.z = the stock's underside` -- so the waveguide's five
@@ -1118,7 +1150,9 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                                  double minutes, bool breaksAnEdge) {
   std::vector<VerdictLine> out;
-  char buf[256];
+  // Long enough for the longest sentence below with its numbers: at 256 the
+  // rapid-through-material line lost its last words ("...not been cut y").
+  char buf[1024];
   // (x, y) in three axes and (x, theta) in four. `Verdict::rotary` says
   // which, because a pair of doubles cannot, and printing an angle under a
   // "Y" is the kind of wrong that reads as right.
@@ -1378,9 +1412,39 @@ std::vector<VerdictLine> MachineLines(const Setup& setup,
       reach += buf;
     }
     out.push_back({VerdictLine::Level::Warn, reach});
-  } else if (const std::string over = MachineOverhang(setup, bodies);
-             !over.empty())
-    out.push_back({VerdictLine::Level::Warn, over});
+  } else {
+    if (const std::string over = MachineOverhang(setup, bodies); !over.empty())
+      out.push_back({VerdictLine::Level::Warn, over});
+    // Clipped cutting on parts that FIT is said too, and by operation. It
+    // used to ride on the "parts are bigger than the machine" line alone, so
+    // an outline clipped by a window in the wrong place was a number on the
+    // op and nothing else -- and the verifier, reading the clipped file,
+    // called the uncut strip leftover and suggested another operation.
+    if (paths != nullptr) {
+      std::string which;
+      double clipped = 0.0;
+      for (const Toolpath& tp : *paths)
+        if (tp.clippedMm > 0.0) {
+          clipped += tp.clippedMm;
+          which += (which.empty() ? "" : ", ") + std::to_string(tp.operationId);
+        }
+      if (clipped > 0.0) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "%.0f mm of cutting lies beyond %s's travel and is left "
+                      "out of the file (op%s ",
+                      clipped,
+                      setup.machine.name.empty() ? "the machine"
+                                                 : setup.machine.name.c_str(),
+                      which.find(',') == std::string::npos ? "" : "s");
+        out.push_back(
+            {VerdictLine::Level::Warn,
+             std::string(buf) + which +
+                 "). Say where the bed is on the stock (reach_offset), or "
+                 "move the work: what is not in the file is not cut"});
+      }
+    }
+  }
   // A cut that turns is posted at a SCALED feed, held to what the axes can
   // do, and near the axis that hold bites: the tip then runs slower than the
   // feed chosen. Said here, once per operation, with the same function the

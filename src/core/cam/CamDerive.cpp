@@ -99,6 +99,52 @@ EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window) {
   return out;
 }
 
+struct ModelledBreak {
+  bool found = false;
+  double topZ = 0.0;   // the real edge: the top of the break
+  double width = 0.0;  // how far the break steps back from the wall
+  double height = 0.0; // how far it drops to the wall's own top
+};
+
+// The break a model ALREADY has on a wall's top edge: a chamfer or a fillet
+// between the wall and the face above it. Found by sectioning just above the
+// wall's own top: on a sharp edge there is nothing there, and on a broken one
+// the material steps back from the wall by the break's width at that height,
+// until the top face. Bisected to the highest height with material within
+// `reach` of the wall -- the real edge -- and measured there.
+ModelledBreak FindModelledBreak(const std::vector<Body>& bodies,
+                                const WallContour& wall, double reach,
+                                double ceiling) {
+  ModelledBreak out;
+  const auto within = [&](double z) -> std::optional<double> {
+    double best = std::numeric_limits<double>::max();
+    for (const Loop& l : SectionLoops(bodies, z))
+      best = std::min(best, DistanceToLoop(l.pts, wall.at));
+    if (best <= reach)
+      return best;
+    return std::nullopt;
+  };
+  constexpr double kAbove = 0.02; // clear of the wall's own top edge
+  double lo = wall.topZ + kAbove;
+  if (lo >= ceiling || !within(lo))
+    return out; // a sharp edge: the face above starts at the wall
+  double hi = ceiling;
+  if (within(hi))
+    return out; // material all the way up: a step, not a break
+  while (hi - lo > 1e-3) {
+    const double mid = (lo + hi) * 0.5;
+    (within(mid) ? lo : hi) = mid;
+  }
+  const std::optional<double> width = within(lo);
+  if (!width)
+    return out;
+  out.found = true;
+  out.topZ = lo;
+  out.height = lo - wall.topZ;
+  out.width = *width;
+  return out;
+}
+
 } // namespace detail
 
 DerivedOp DeriveOperation(const Setup& setup,
@@ -327,7 +373,47 @@ DerivedOp DeriveOperation(const Setup& setup,
       out.why = wall.why;
       return out;
     }
-    const EdgeBreak brk = EdgeBreakFor(tool, 0.0, wall.topZ - wall.bottomZ);
+    // The edge is where the MODEL has it. A modelled chamfer or fillet
+    // lowers the wall's own top by the break's height, and deriving from
+    // that put the break below the modelled one, sized to the tool: the
+    // sampler part's 1.5 mm chamfer came out 6 mm, 4.5 mm into the part all
+    // the way round, and its r3 round-over gouged the top beside it. Found,
+    // the break is the model's, from the model's top edge.
+    const ModelledBreak modelled =
+        FindModelledBreak(bodies, wall, tool.diameter * 0.5 + 1e-6, hi.z);
+    double edgeTop = wall.topZ;
+    double asked = 0.0;
+    if (modelled.found) {
+      if (tool.type == ToolType::VBit) {
+        const double modelDeg =
+            glm::degrees(std::atan2(modelled.width, modelled.height) * 2.0);
+        if (std::abs(modelDeg - tool.tipAngleDeg) > 2.0) {
+          out.why = "the model's chamfer on that edge is " + Round2(modelDeg) +
+                    " degrees included (" + Round2(modelled.width) +
+                    " mm wide, " + Round2(modelled.height) +
+                    " mm tall) and tool " + std::to_string(tool.number) +
+                    " cuts " + Round2(tool.tipAngleDeg) +
+                    " -- it would cut a different chamfer. Use a V-bit of the "
+                    "model's angle, or change the chamfer";
+          return out;
+        }
+      } else if (tool.type == ToolType::Ball &&
+                 std::abs(modelled.width - modelled.height) >
+                     0.1 * std::max(modelled.width, modelled.height)) {
+        out.why = "the model's break on that edge is " +
+                  Round2(modelled.width) + " mm wide and " +
+                  Round2(modelled.height) +
+                  " mm tall, which is not a round -- a ball rounds an edge. "
+                  "Use a V-bit for a chamfer";
+        return out;
+      }
+      edgeTop = modelled.topZ;
+      // A chamfer's width is exact at its top; a round meets the top face
+      // tangentially, so its width just below the top falls short of the
+      // radius (1.96 for an r2), while its HEIGHT is the radius exactly.
+      asked = tool.type == ToolType::Ball ? modelled.height : modelled.width;
+    }
+    const EdgeBreak brk = EdgeBreakFor(tool, asked, edgeTop - wall.bottomZ);
     if (!brk.ok) {
       out.why = brk.why;
       return out;
@@ -335,8 +421,8 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.name = tool.type == ToolType::Ball ? "Round the edge" : "Chamfer edge";
     op.targets = {target};
     op.side = wall.opening ? Side::Inside : Side::Outside;
-    op.topZ = wall.topZ;
-    op.bottomZ = wall.topZ - brk.depth;
+    op.topZ = edgeTop;
+    op.bottomZ = edgeTop - brk.depth;
     op.edgeSize = brk.size;
     break;
   }
@@ -355,6 +441,8 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.name = "Drill";
     op.topZ = hi.z;
     bool found = false;
+    glm::dvec2 holeCentre(0.0);
+    double holeRadius = 0.0;
     for (const Body& body : bodies) {
       if (body.createdBy != target.ref.featureId || !body.shape.IsValid())
         continue;
@@ -386,6 +474,10 @@ DerivedOp DeriveOperation(const Setup& setup,
           // to its own floor — the face's extent says which.
           op.bottomZ = z0;
           found = true;
+          holeCentre = {origin.x, origin.y};
+          const BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
+          if (surf.GetType() == GeomAbs_Cylinder)
+            holeRadius = surf.Cylinder().Radius();
         }
         break;
       }
@@ -408,6 +500,28 @@ DerivedOp DeriveOperation(const Setup& setup,
     if (const Tool* drill = setup.FindTool(op.toolNumber);
         drill != nullptr && op.bottomZ <= modelBottom + kThrough)
       op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
+    else if (drill != nullptr) {
+      // A BLIND hole: the point is the floor. Said when the model's floor is
+      // FLAT, because then the cone is material the model does not have --
+      // correct drilling, and the verifier's leftover, with nothing having
+      // said why. A section half way down the point's height finds the hole
+      // still its full width when the floor is flat.
+      const double cone = TipHeight(*drill, drill->diameter * 0.5);
+      if (cone > 1e-3 && holeRadius > 0.0) {
+        double nearest = std::numeric_limits<double>::max();
+        for (const Loop& l : SectionLoops(bodies, op.bottomZ + cone * 0.5))
+          nearest = std::min(nearest, DistanceToLoop(l.pts, holeCentre));
+        if (std::abs(nearest - holeRadius) < 0.05)
+          out.notes.push_back(
+              "the hole is blind and its floor is flat in the model, but "
+              "tool " +
+              std::to_string(drill->number) + " is pointed (" +
+              Round2(drill->tipAngleDeg) + " degrees): it leaves a cone " +
+              Round2(cone) +
+              " mm deep in the floor. Model the point (a drilled hole), or "
+              "finish the floor with a flat mill");
+      }
+    }
     op.targets = {target};
     // Pecking, derived from the cutter: a hole deeper than three diameters
     // packs its flutes, so retract every diameter and let the chips out.

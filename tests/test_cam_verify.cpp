@@ -177,6 +177,26 @@ TEST_CASE("cam verify: a shank wider than the cutter is found at the wall",
   }
 }
 
+TEST_CASE("cam verify: a verdict line is never cut short", "[cam]") {
+  // At 256 characters the rapid line lost its last words ("...not been cut
+  // y"): every sentence Explain writes ends where it was written to.
+  cam::Verdict v;
+  v.cells = 1000; // something was compared, or there is nothing to explain
+  v.rapidsThroughStock = 12;
+  v.worstRapidDepth = 30.0;
+  v.worstRapidAt = {163.625, 27.375};
+  v.worstRapidLine = 14275;
+  bool found = false;
+  for (const cam::VerdictLine& l : cam::Explain(v, 0.05, 1.0))
+    if (l.text.find("rapids through material") != std::string::npos) {
+      found = true;
+      INFO(l.text);
+      CHECK(l.text.size() > 256);
+      CHECK(l.text.substr(l.text.size() - 6) == "steep.");
+    }
+  CHECK(found);
+}
+
 TEST_CASE("cam verify: what the parser found reaches the verdict", "[cam]") {
   // The parser's errors and warnings were computed and DROPPED. `Inspect`
   // parsed the program, built its findings and returned none of them --

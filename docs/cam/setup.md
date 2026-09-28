@@ -79,7 +79,14 @@ before the field existed. Graded by what happens:
 | shank **wider** than the cutter (a 3 mm bit on a 6 mm shank, a V-bit's body) | driven into the wall | **refused**, naming the op, the depth, the flutes and the shank |
 | shank the cutter's width, or unstated | rubs, and the holder follows it into the work | allowed; said in the edit's `warnings` |
 | shank **narrower** (a necked tool) | reaches, by design | allowed; the holder check owns the rest |
-| within the flutes, less to spare than the collet needs (`CollarClearance`) | touches | allowed; said |
+| within reach, less to spare than the collet nut needs (`CollarClearance`, below) | touches | allowed; said |
+
+Where the nut is: the tool's stickout (`overall_length`) when stated; else
+the top of the flutes; and on a tool narrower above its flutes than in them
+(a V-bit's cone, a necked cutter), nowhere this can say, so there is no
+"Tight" for it. The clearance scales with the shank the collet grips when
+it is stated, else the cutter. A 12 mm V-bit's 1.5 mm chamfer was once
+"the depth where the nut touches the work".
 
 A refused edit changes nothing: the RPCs apply it to a copy, and the panel
 takes the field back and shows why. A disabled operation cuts nothing and is
@@ -219,17 +226,29 @@ adding, moving or removing a fixture.
 
 When the machine states a work area:
 
-- **Where the machine sits.** `cam::MachineBounds` places a travel-sized box
-  with its near-left corner at the stock's plus `Setup::reachOffset`, its
-  floor at the stock's bottom. `reachOffset` (default zero) is where the bed
-  is on a sheet longer than the machine; `set_cam_setup {reach_offset: "auto"}`
-  runs `DeriveReachOffset`, which puts the window on the cutting.
+- **Where the machine sits.** `cam::MachineBounds` places a travel-sized box,
+  its floor at the stock's bottom, per axis:
+  - **Stock that fits the travel:** centred on it, so a cutter running
+    outside the stock (an outline) has room on every side. Anchored at the
+    stock's near corner, an outline round a part that fit the machine lost
+    its two near sides.
+  - **Stock longer than the travel:** its near-left corner at the stock's.
+  - `Setup::reachOffset` moves it from there. It is where the bed is on a
+    sheet longer than the machine.
+  - `set_cam_setup {reach_offset: "auto"}` runs `DeriveReachOffset`. That
+    puts the window on the cutting along an axis that does not fit, and
+    leaves a fitting axis centred.
 - **`MachineWarning`** compares what the spindle has to REACH — the placed
   parts' extent per axis — with the travel. A part longer than the bed is a
   warning, not a refusal: it is cut as far as the machine reaches and the rest
   is another setup with the sheet moved along. **`MachineOverhang`** notes a
-  sheet longer than the bed whose parts fit. `cam::MachineLines` gives the
-  panel and `cam_verify` the same lines. The bed is never grown to fit.
+  sheet longer than the bed whose parts fit. Clipped cutting is a line of
+  its own whenever there is any, naming the operations, parts that fit or
+  not. It used to ride on the "bigger than the machine" line alone, so it
+  was otherwise a number on the op, and the verifier, reading the clipped
+  file, called the uncut strip leftover. `cam::MachineLines` gives the
+  panel, `cam_toolpath`, `cam_post` and `cam_verify` the same lines. The bed
+  is never grown to fit.
 - **`ClipToMachine`** clips every move to the box in X and Y, applied once in
   `GenerateAll`, so the backplot, the simulation, the verifier and the file
   show the same shortened cut. A cut that runs out is cut to the boundary and

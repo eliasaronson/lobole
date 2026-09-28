@@ -208,7 +208,8 @@ constexpr MethodDoc kCamMethods[] = {
      "cut_angle_deg (degrees anticlockwise from +X), stepping ACROSS by "
      "stepover (a fraction of the cutter) and reading the surface ALONG by "
      "sample_step_mm; surface_waterline laps at constant Z, stepping DOWN by "
-     "z_step_mm. Those are three different quantities and none of them is "
+     "z_step_mm, and closer where the surface is shallow. Those are three "
+     "different quantities and none of them is "
      "the others. A zero sample_step_mm or z_step_mm derives from the cutter. "
      "surface_rotary is 4-AXIS finishing, by rotary_pattern: parallel "
      "(default) runs passes along the rotary axis (setup-space X) stepping "
@@ -262,12 +263,14 @@ constexpr MethodDoc kCamMethods[] = {
      "an index without it is REFUSED, because the part would be machined as "
      "if turned while the file never turns it. Without it no file can carry "
      "an A word. "
-     "`reach_offset` is WHERE THE BED IS ON THE SHEET, from the stock's "
-     "near corner: a sheet longer than the machine is slid through and "
-     "clamped where the work is, and without this the reach window is nailed "
-     "to the stock's corner — an assumption that decides what gets clipped "
-     "and that MOVES when you turn the part round. \"auto\" puts the window "
-     "on the cutting. origin_at is WHERE X0 Y0 IS in the posted file — the "
+     "`reach_offset` is WHERE THE BED IS ON THE SHEET, in mm from the "
+     "default window: centred on the stock along an axis where the stock "
+     "fits the travel, at its near corner along one where it is longer. A "
+     "sheet longer than the machine is slid through and clamped where the "
+     "work is, and without this the window sits at its corner — an "
+     "assumption that decides what gets clipped and that MOVES when you turn "
+     "the part round. \"auto\" puts the window on the cutting. origin_at is "
+     "WHERE X0 Y0 IS in the posted file — the "
      "corner the "
      "operator touches off on; the post subtracts it from every coordinate, "
      "and Z comes from the picked top face. stock.mode `fixed` makes the "
@@ -325,9 +328,12 @@ constexpr MethodDoc kCamMethods[] = {
      "each), or nothing at all to cut the part free. Face: pick nothing. "
      "Edge_round: pick the WALL whose top edge to "
      "break — a V-bit chamfers it, a ball rounds it, a flat mill is refused; "
-     "edge_size? sets the bevel width / round radius, and left out it is the "
+     "edge_size? sets the bevel width / round radius; left out it is the "
+     "break the MODEL has on that edge (a chamfer or fillet, from the part's "
+     "top -- a V-bit of another angle is refused), or on a sharp edge the "
      "biggest break that tool can make within the wall. A refusal says what "
-     "to pick instead. A "
+     "to pick instead. Derivation notes (a drill's point in a flat-bottomed "
+     "blind hole) come back in `warnings`. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
@@ -1497,7 +1503,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         setup.reachOffset = glm::dvec2(r[0].get<double>(), r[1].get<double>());
       } else {
         throw std::runtime_error(
-            "reach_offset is [x, y] in mm from the stock's near corner, or "
+            "reach_offset is [x, y] in mm from the default window (centred on "
+            "a stock that fits, at the near corner of a longer one), or "
             "\"auto\" to put the window where the cutting is");
       }
     }
@@ -1711,6 +1718,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // than a person.
     const bool derive =
         m == "cam_derive_op" || !p.contains("top_z") || !p.contains("bottom_z");
+    json notes = json::array(); // what the derivation had to say
     if (derive) {
       const cam::OpType type =
           TypeFrom(p.value("type", std::string("profile")));
@@ -1733,6 +1741,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
           setup, ui::JobBodies(state), type, picked, op.toolNumber);
       if (!derived.ok)
         throw std::runtime_error(derived.why);
+      for (const std::string& n : derived.notes)
+        notes.push_back(n);
       const int tool = op.toolNumber;
       op = derived.op;
       op.toolNumber = tool;
@@ -1749,7 +1759,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (op.name.empty())
       op.name = std::string(TypeName(op.type)) + " " +
                 std::to_string(setup.operations.size() + 1);
-    const json warnings = ReachWarnings(setup, op);
+    json warnings = ReachWarnings(setup, op);
+    for (const json& n : notes)
+      warnings.push_back(n);
     if (m == "cam_derive_op") {
       json out{{"derived", derive}, {"operation", OpJson(op)}};
       if (!warnings.empty())
@@ -2181,14 +2193,28 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // micron is still a thousand times finer than any router cares about
       // (docs/cam/README.md#invariants).
       constexpr double kTopSlack = 1e-3;
-      for (const cam::Operation& op : setup.operations) {
-        if (op.enabled && op.topZ < stockHi.z - kTopSlack)
+      // The stock top AS IT STANDS when each op runs: a face op before it in
+      // the cutting order has already taken the top down to its own bottom.
+      // Against the untouched top, every op after a skim that starts at the
+      // part's top -- an edge break, most -- was warned about rapids through
+      // stock that was no longer there.
+      double top = stockHi.z;
+      for (const size_t i : cam::CuttingOrder(setup)) {
+        const cam::Operation& op = setup.operations[i];
+        if (!op.enabled)
+          continue;
+        if (op.topZ < top - kTopSlack)
           warnings.push_back(
               "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
-              zfmt(op.topZ) + " is " + zfmt(stockHi.z - op.topZ) +
-              " mm below the stock top (Z" + zfmt(stockHi.z) +
+              zfmt(op.topZ) + " is " + zfmt(top - op.topZ) +
+              " mm below the stock top (Z" + zfmt(top) +
+              (top < stockHi.z - kTopSlack ? ", as the face op before it "
+                                             "leaves it"
+                                           : "") +
               ") — entry rapids will pass through stock; raise top_z or "
               "leave it out to derive");
+        if (op.type == cam::OpType::Face)
+          top = std::min(top, op.bottomZ);
       }
     }
 

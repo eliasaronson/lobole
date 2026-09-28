@@ -780,6 +780,16 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
   } else {
     WaterlineRequest req;
     req.zStep_mm = op.zStep > 0.0 ? op.zStep : DerivedCusp(tool, 0.0) * 10.0;
+    // How far apart two laps may be across the surface: the spacing that
+    // leaves the finish's own cusp -- 2 sqrt(2rc - c^2) for a ball -- or half
+    // the cutter for a flat one, which has no cusp to solve for.
+    {
+      const double r = tool.diameter * 0.5;
+      const double c = std::min(DerivedCusp(tool, 0.0), r);
+      req.maxGap_mm = tool.type == ToolType::Ball
+                          ? 2.0 * std::sqrt(std::max(0.0, 2.0 * r * c - c * c))
+                          : r;
+    }
     req.topZ = op.topZ;
     req.bottomZ = op.bottomZ;
     req.sampleStep_mm = op.sampleStep;

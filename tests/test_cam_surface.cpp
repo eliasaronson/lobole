@@ -163,8 +163,16 @@ TEST_CASE("drop cutter: a cutter too fat for a gap stays out of it",
   // flank does enter a gap narrower than itself, resting on the two top
   // edges 1 mm either side. Its tip then sits TipHeight(r=3, d=1) below
   // them -- 3 - sqrt(8) = 0.1716 mm -- and not one micron further.
+  //
+  // Never LOWER than that: a sample stands for the square around it and the
+  // ball meets it at its nearest point, so the surface errs toward leaving
+  // material and never toward the part. The price is at most half a cell:
+  // this grid has a sample exactly on each block's edge, whose square
+  // reaches 0.1 mm into the gap, so the ball rests as if the gap were 1.8 mm.
   const double dip = 3.0 - std::sqrt(8.0);
-  CHECK_THAT(At(s, 20.0, 15.0), WithinAbs(20.0 - dip, 5e-3));
+  const double halfCell = 3.0 - std::sqrt(9.0 - 0.9 * 0.9);
+  CHECK(At(s, 20.0, 15.0) >= 20.0 - dip - 5e-3);
+  CHECK(At(s, 20.0, 15.0) <= 20.0 - halfCell + 5e-3);
   // What it must not do is reach the floor it can see between them. A
   // surface that let the tool to z = 0 here would plan a full-depth cut
   // into both walls.

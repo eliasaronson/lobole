@@ -62,11 +62,12 @@ std::string Trouble(const AdaptivePath::AdaptiveOutput& out) {
 bool AdaptiveAvailable() { return true; }
 
 namespace {
-// The pass itself. `safeZ` rather than the Setup: it is the one field a pass
-// reads, and taking only it is what lets a request carry the whole input.
-AdaptiveResult ClearImpl(double safeZ, const Operation& op, const Tool& tool,
-                         const std::vector<Loop>& region, double z,
-                         double fromZ) {
+// The pass itself. `safeZ` and `rapidFeed` rather than the Setup: they are
+// the fields a pass reads, and taking only them is what lets a request carry
+// the whole input.
+AdaptiveResult ClearImpl(double safeZ, double rapidFeed, const Operation& op,
+                         const Tool& tool, const std::vector<Loop>& region,
+                         double z, double fromZ) {
   AdaptiveResult result;
   result.available = true;
 
@@ -192,13 +193,17 @@ AdaptiveResult ClearImpl(double safeZ, const Operation& op, const Tool& tool,
           down = true;
           continue;
         }
-        result.moves.push_back({motion == AdaptivePath::MotionType::mtCutting
-                                    ? Move::Kind::Cut
-                                    : Move::Kind::Cut,
-                                {pt.first, pt.second, z},
-                                false,
-                                0.0,
-                                tool.feedCut});
+        // A link through what this pass has already cleared is still a G1
+        // -- a straight line, which a dog-legged G0 is not -- but at the
+        // machine's traverse rate when it states one: at the cutting feed,
+        // links through air were 3.9 of the sampler part's 33 minutes.
+        const bool cutting = motion == AdaptivePath::MotionType::mtCutting;
+        result.moves.push_back(
+            {Move::Kind::Cut,
+             {pt.first, pt.second, z},
+             false,
+             0.0,
+             cutting ? tool.feedCut : std::max(tool.feedCut, rapidFeed)});
       }
     }
     if (!result.moves.empty())
@@ -216,11 +221,11 @@ AdaptiveResult ClearImpl(double safeZ, const Operation& op, const Tool& tool,
 AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
                              const Tool& tool, const std::vector<Loop>& region,
                              double z, double fromZ) {
-  return ClearImpl(setup.safeZ, op, tool, region, z, fromZ);
+  return ClearImpl(setup.safeZ, setup.rapidFeed, op, tool, region, z, fromZ);
 }
 
 AdaptiveResult AdaptiveClear(const AdaptiveRequest& r) {
-  return ClearImpl(r.safeZ, r.op, r.tool, r.region, r.z, r.fromZ);
+  return ClearImpl(r.safeZ, r.rapidFeed, r.op, r.tool, r.region, r.z, r.fromZ);
 }
 
 } // namespace cam
@@ -279,6 +284,7 @@ uint64_t AdaptiveKey(const Setup& setup, const Operation& op, const Tool& tool,
   // ("the adaptive key covers every field the pass reads").
   Hasher hash;
   hash.D(setup.safeZ);
+  hash.D(setup.rapidFeed);
   hash.D(op.stepover);
   hash.D(op.stockToLeave);
   hash.I(static_cast<int64_t>(op.side));
@@ -306,6 +312,7 @@ AdaptiveRequest MakeAdaptiveRequest(const Setup& setup, const Operation& op,
   AdaptiveRequest r;
   r.key = AdaptiveKey(setup, op, tool, region, z, fromZ);
   r.safeZ = setup.safeZ;
+  r.rapidFeed = setup.rapidFeed;
   r.op = op;
   r.tool = tool;
   r.region = region;

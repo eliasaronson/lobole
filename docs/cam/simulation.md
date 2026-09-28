@@ -24,8 +24,14 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
   and a tool is its profile function `TipHeight(tool, r)` — flat, ball, V and
   drill from one function. `CarveSweep(from, to, tool, stock)` tests each
   cell analytically against the swept segment (exact, not oversampled),
-  returns the volume it took (what [the bite](#bite) is measured from), and is
-  the one carve: `Simulate`, `Inspect` and the playback all call it, carving
+  lowering it to the lowest the tool reaches over the stretch of the move
+  during which the cell lies under it, not to its height at the closest
+  approach. That stretch is an interval of the move: a flat end is lowest at
+  one of its ends, and a shaped tip is sampled across it. At the closest
+  approach, a descending move left cells it went on to cut up to its whole
+  descent too high, which read as leftover on ramps and as rapids through
+  material when the tool lifted out. It returns the volume it took (what
+  [the bite](#bite) is measured from), and is the one carve: `Simulate`, `Inspect` and the playback all call it, carving
   each segment from its own start so a program played in pieces ends
   bit-identical to one played whole.
 - **The designed surface** is sampled on the same grid (`SampleModel`, a

@@ -2181,6 +2181,20 @@ def main():
             again = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
             expect(not any("stock top" in w for w in again),
                    f"restored top_z clears that warning: {again}")
+            # ...but not against the UNTOUCHED top when a face op runs first:
+            # it has already taken the top down to its own bottom, and an op
+            # starting there has nothing to rapid through.
+            face = d.call("add_cam_op", setup=cam_setup, type="face")
+            d.call("move_cam_op", id=face["id"], to=0)
+            d.call("set_cam_op", id=cam_ops[0]["id"], top_z=face["bottom_z"])
+            skimmed = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
+            expect(not any("stock top" in w for w in skimmed),
+                   f"no low-top warning after a skim: {skimmed}")
+            d.call("remove_cam_op", id=face["id"])
+            low = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
+            expect(any("stock top" in w for w in low),
+                   f"and the same top_z warns without it: {low}")
+            d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
             # A tool with no `number` is REFUSED. It used to default to 1 and
             # silently edit the first tool -- rename it, resize it, change
             # its type -- and report success, which is how a second cutter

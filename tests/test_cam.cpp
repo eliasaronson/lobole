@@ -1292,6 +1292,122 @@ TEST_CASE("cam: an annular pocket is cleared inside out, walls last", "[cam]") {
   CHECK(v2.maxLeftover < 0.05);
 }
 
+TEST_CASE("cam: a bore climbs straight out before it moves to the next ring",
+          "[cam]") {
+  // A bore is rings of helices, and each one began with one rapid to its
+  // start at safe Z: from the bottom of the last ring that climbed and
+  // travelled at once, through the wall of a hole not yet cut to size.
+  auto doc = DrilledDoc(); // D16 through a 40 x 30 x 20 block
+  cam::Setup s = BasicSetup();
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, BoreWall(*doc)});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  s.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  int sideways = 0;
+  for (size_t k = 1; k < paths[0].moves.size(); k++) {
+    const cam::Move& m = paths[0].moves[k];
+    const glm::dvec3& from = paths[0].moves[k - 1].to;
+    if (m.kind == cam::Move::Kind::Rapid &&
+        glm::length(glm::dvec2(m.to - from)) > 1e-6 &&
+        std::min(from.z, m.to.z) < hi.z - 1e-6)
+      sideways++;
+  }
+  CHECK(sideways == 0);
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+  CHECK(cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.25).rapidsThroughStock ==
+        0);
+}
+
+TEST_CASE("cam: adaptive links run at the machine's traverse rate", "[cam]") {
+  if (!cam::AdaptiveAvailable())
+    SKIP("this build has no adaptive clearing");
+  auto doc = PocketDoc();
+  cam::Setup s = BasicSetup();
+  s.rapidFeed = 2000.0; // the tool cuts at 600
+  const cam::DerivedOp d =
+      cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, PocketFloorRef(*doc)});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.type = cam::OpType::Adaptive;
+  s.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  int links = 0;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut && std::abs(m.feed - 2000.0) < 1e-9)
+      links++;
+  CHECK(links > 0);
+}
+
+TEST_CASE("cam: a drill's point in a flat-bottomed blind hole is said",
+          "[cam]") {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(20, 15, 8), glm::vec3(0, 0, 1), 2.5, 13.0));
+  const uint64_t hole = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Drilled", block, hole,
+                                                   BooleanOp::Subtract));
+  cam::Setup s = BasicSetup();
+  s.tools[0] = ShapedTool(cam::ToolType::Drill, 5.0, 118.0);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  REQUIRE(d.ok);
+  REQUIRE(d.notes.size() == 1);
+  CHECK(d.notes[0].find("cone") != std::string::npos);
+  // A through hole breaks out and has no floor to speak of.
+  const auto through = HoleDoc(5.0);
+  const cam::DerivedOp t =
+      cam::DeriveOperation(s, through->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*through)});
+  REQUIRE(t.ok);
+  CHECK(t.notes.empty());
+}
+
+TEST_CASE("cam verify: a sloped move cuts as low as it goes over each cell",
+          "[cam]") {
+  // Carved at the tool's height at the closest approach, a cell a descending
+  // move passes and then keeps under its rim stayed as high as the tool was
+  // when it passed -- leftover on every ramp, and a "rapid through material"
+  // when the tool lifted out of its own cut.
+  cam::Tool flat;
+  flat.diameter = 6.0;
+  cam::HeightMap map =
+      cam::MakeStock(glm::dvec3(-5, -5, 0), glm::dvec3(6, 5, 10), 0.1);
+  const glm::dvec3 a(0.0, 0.0, 5.0), b(1.0, 0.0, 4.0);
+  (void)cam::CarveSweep(a, b, &flat, map);
+  int checked = 0;
+  for (int j = 0; j < map.ny; j++)
+    for (int i = 0; i < map.nx; i++) {
+      const glm::dvec2 c(map.CellX(i), map.CellY(j));
+      double lowest = 10.0;
+      for (int k = 0; k <= 2000; k++) {
+        const double t = k / 2000.0;
+        const glm::dvec3 p = a + (b - a) * t;
+        if (glm::length(glm::dvec2(p) - c) <= 3.0)
+          lowest = std::min(lowest, p.z);
+      }
+      if (lowest < 10.0) {
+        checked++;
+        CHECK_THAT(map.At(i, j), WithinAbs(lowest, 2e-3));
+      }
+    }
+  CHECK(checked > 100);
+}
+
 TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {
   // Every ring of a clearing pass used to get a full entry: lift to safe Z,
   // fly back, descend, ramp, cut a lap. Twelve laps of a flange recess is

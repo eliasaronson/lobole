@@ -65,7 +65,8 @@ AdaptiveClear(const Setup& setup, const Operation& op, const Tool& tool,
 // Everything one pass reads, and nothing it does not.
 struct AdaptiveRequest {
   uint64_t key = 0;
-  double safeZ = 0.0; // the one Setup field a pass reads
+  double safeZ = 0.0;     // the Setup fields a pass reads: safe Z...
+  double rapidFeed = 0.0; // ...and the traverse rate its links run at
   Operation op;
   Tool tool;
   std::vector<Loop> region;

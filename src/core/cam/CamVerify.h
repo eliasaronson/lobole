@@ -366,7 +366,8 @@ struct VerdictLine {
 // travel, or the sheet's overhang when the parts fit -- as WARN lines, never
 // refusals. One helper for the panel and the RPC, so the two verdicts cannot
 // disagree about the machine. `paths`, when given, adds how much cutting was
-// clipped off at the travel.
+// clipped off at the travel -- on its own line, naming the operations, when
+// the parts fit and the clip is the window's doing.
 [[nodiscard]] std::vector<VerdictLine>
 MachineLines(const Setup& setup, const std::vector<Body>& bodies,
              const std::vector<Toolpath>* paths = nullptr);

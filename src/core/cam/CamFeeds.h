@@ -96,7 +96,7 @@ struct FeedReport {
 struct Reach {
   enum class Level {
     Fine,
-    Tight,    // within the flutes, with less to spare than the collet needs
+    Tight,    // within reach, with less to spare than the collet nut needs
     Rubs,     // past the flutes on a shank no wider than the cut
     Collides, // past the flutes on a shank WIDER than the cut
   };

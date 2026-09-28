@@ -727,6 +727,48 @@ TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
   CHECK(lines[0].text.find("left out of the file") != std::string::npos);
 }
 
+TEST_CASE("cam machine: a stock that fits has room round it, and a clip on "
+          "one is said",
+          "[cam][machine]") {
+  // Anchored at the stock's corner, the bed left no room for a cutter
+  // running outside the stock: an outline round a part that fits the machine
+  // lost the two near sides, and nothing but a number on the op said so.
+  auto doc = BlockDoc(); // 40 x 30 x 20; the stock 44 x 34
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 7;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 8.0;
+  setup.operations.push_back(op);
+  setup.machine.name = "Bench";
+  setup.machine.travelMin = {0.0, 0.0, -100.0};
+  setup.machine.travelMax = {60.0, 50.0, 0.0};
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::MachineBounds(setup, doc->GetBodies(), lo, hi));
+  // Centred on the stock (-2..42 x -2..32): 8 mm of room each side in both.
+  CHECK_THAT(lo.x, WithinAbs(-10.0, 1e-9));
+  CHECK_THAT(lo.y, WithinAbs(-10.0, 1e-9));
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  CHECK(paths[0].clippedMm == 0.0);
+  CHECK(cam::MachineLines(setup, doc->GetBodies(), &paths).empty());
+
+  // Moved by a reach_offset until the near side is off the bed: clipped,
+  // and said, by operation, though the part still fits the machine.
+  setup.reachOffset = {9.0, 0.0};
+  const auto moved = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(moved[0].error.empty());
+  CHECK(moved[0].clippedMm > 20.0);
+  const auto lines = cam::MachineLines(setup, doc->GetBodies(), &moved);
+  REQUIRE(lines.size() == 1);
+  INFO(lines[0].text);
+  CHECK(lines[0].text.find("beyond Bench's travel") != std::string::npos);
+  CHECK(lines[0].text.find("op 7") != std::string::npos);
+}
+
 TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
           "[cam][feeds]") {
   // The real numbers off the speaker baffle: a 6 mm FOUR-flute at 9000 rpm
@@ -1302,13 +1344,25 @@ TEST_CASE("cam reach: a shank wider than the cut collides, a necked one "
   t.shankDiameter = 2.5;
   CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Fine);
 
-  // Within the flutes, a wide shank changes nothing: 10 mm is fine, 11 mm
-  // leaves less than the collet's 1.5 mm and is Tight -- never refused.
+  // Within the flutes a wide shank is never refused, only Tight near the
+  // top: the collet grips the 6 mm shank, so its nut wants 3 mm, and 8 mm
+  // deep is fine where 10 leaves 2 and is Tight.
   t.shankDiameter = 6.0;
-  op.bottomZ = 10.0;
+  op.bottomZ = 12.0;
   CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Fine);
-  op.bottomZ = 9.0;
+  op.bottomZ = 10.0;
   CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Tight);
+  // A V-bit's cone on a narrower shank: nothing says where the nut is, so a
+  // shallow chamfer is not "the depth where the nut touches the work".
+  cam::Tool v = t;
+  v.type = cam::ToolType::VBit;
+  v.diameter = 12.0;
+  v.fluteLength = 6.0;
+  v.shankDiameter = 6.35;
+  cam::Operation chamfer = op;
+  chamfer.topZ = 30.0;
+  chamfer.bottomZ = 28.5;
+  CHECK(cam::ReachCheck(chamfer, v).level == cam::Reach::Level::Fine);
 
   // Through a setup: named by the op, and silent for a disabled one.
   op.bottomZ = 5.0;

@@ -320,6 +320,14 @@ void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
       std::max(segments, static_cast<int>(std::ceil(revolutions * segments)));
 
   const glm::dvec2 start(centre.x + radius, centre.y);
+  // STRAIGHT UP first if the tool is still down, as EmitLoop does. A bore
+  // cuts ring after ring with a helix each, and the next ring's rapid to its
+  // start at safe Z, from the bottom of the last one, climbed and travelled
+  // at once: through the wall of a hole not yet cut to size, 31 mm deep on
+  // the sampler part's D16 bore.
+  if (!tp.moves.empty() && tp.moves.back().to.z < safeZ - 1e-9)
+    Emit(tp, Move::Kind::Rapid,
+         {tp.moves.back().to.x, tp.moves.back().to.y, safeZ}, 0.0);
   Emit(tp, Move::Kind::Rapid, {start.x, start.y, safeZ}, 0.0);
   Emit(tp, Move::Kind::Rapid,
        {start.x, start.y, RapidFloor(fromZ, stockTop, safeZ)}, 0.0);

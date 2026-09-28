@@ -52,7 +52,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
 | Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out; peck = one diameter when deeper than three |
-| Break an edge | the wall whose top edge to break | the edge; `edge_size` = the biggest break that tool can make within the wall; a flat mill is refused |
+| Break an edge | the wall whose top edge to break | the break the model has there (top = its top edge, `edge_size` = a chamfer's width or a round's height), else on a sharp edge the biggest the tool can make within the wall; a flat mill is refused |
 | Face the top | none | the stock above the part, top = stock top, bottom = part top |
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
@@ -216,7 +216,9 @@ is scrap.
   can be taken in one pass. Parameters map straight across: stepover factor,
   stock to leave, the chord tolerance, helix ramp diameters from the tool.
   Its three motion types map to cut, link-at-depth through cleared material,
-  and retract-rapid-re-enter. Its failure flags become `Toolpath::error` in
+  and retract-rapid-re-enter. A link through cleared material is a G1 (a
+  straight line, which a dog-legged G0 is not) at the machine's traverse
+  rate (`Setup::rapidFeed`) when it states one, else the cutting feed. Its failure flags become `Toolpath::error` in
   words. When the library declines a region, concentric clearing cuts it and
   `strategy` says so.
 - Both refuse cones (`NeedsFlatFloor`).
@@ -238,6 +240,13 @@ rings from the centre outward by the stepover, the wall last so a through
 hole's slug goes progressively. A hole narrower than the tool is refused. A
 hole must point at the spindle.
 
+A bore's rings each begin with a helix, and each climbs straight out of the
+hole before it travels (`EmitHelix`): a rapid that climbed and travelled at
+once went through the wall of a hole not yet cut to size. A pointed tool in a
+blind hole whose floor the model has flat is said at derivation
+(`DerivedOp::notes`, in the RPC's `warnings`): the point leaves a cone of its
+own height, which the verifier would otherwise first report as leftover.
+
 ### Edge break
 
 Follows a wall's top edge and breaks it with the tool's own shape: a V-bit
@@ -245,6 +254,22 @@ chamfers (tip angle is the included angle; `edge_size` is the bevel's
 horizontal width), a ball rounds (`edge_size` is the radius). `stepover` sets
 the cusp between arc passes. A flat mill is refused rather than cutting a
 square step nobody asked for.
+
+**Derived from the model's break when it has one** (`FindModelledBreak`).
+- **The probe:** sections just above the wall's own top. On a sharp edge
+  there is nothing within a tool radius of the wall there. On a chamfered
+  or rounded one the material steps back from it up to the top face.
+  Bisection finds that face, which is the real edge and the op's `top_z`.
+- **The size:** the break's width there for a chamfer (exact at its top),
+  or its height for a round (a round meets the face tangentially, so its
+  width just below falls short).
+- **Refused:** a V-bit whose angle is not the chamfer's, naming both, and a
+  ball on a break that is not a round.
+- **Before this:** the edge was the wall's top, below the modelled break,
+  and the size the biggest the tool allowed. A 1.5 mm chamfer was cut 6 mm,
+  and the verdict's own advice ("model the break") could not help.
+- **A sharp edge:** the biggest break the tool can make within the wall,
+  as before.
 
 ## Rough then finish
 
@@ -264,10 +289,14 @@ two are independent.
 - **The cutter-location surface** (`CamDropCutter`): for each (x, y), the
   lowest Z the tool can sit at without cutting the model — the designed
   surface sampled on a grid (`SampleModel`) dilated by the tool's own profile,
-  `z_CL(x,y) = max over p within the radius of (z(p) − TipHeight(tool, |p − (x,y)|))`.
-  `TipHeight` is the same function the verifier carves with. A grid dilation
-  is exact at vertices and facets and loses precision only on sharp convex
-  edges, which a finish is not for. The drop cutter takes a frame and refuses
+  `z_CL(x,y) = max over p within the radius of (z(p) − TipHeight(tool, d))`.
+  `TipHeight` is the same function the verifier carves with. A sample
+  stands for the square of material round it, so `d` is the distance to
+  that square's nearest point, not its centre. Measured at centres, the
+  model ended half a cell short of a sharp convex edge, and near its rim a
+  ball's tip is steep enough to turn that into most of a millimetre of
+  gouge. The nearest point errs by at most half a cell toward leaving
+  material, never toward the part. The drop cutter takes a frame and refuses
   a rotated one by name rather than dropping along the wrong axis.
 - **The region** (`PickedSurfaceRegion`): a face of any orientation,
   tessellated and projected to its XY silhouette; with no pick the whole
@@ -283,7 +312,16 @@ two are independent.
   and takes the highest of four where they differ steeply, so bilinear
   interpolation cannot undercut a cliff or a masked cell.
 - **`surface_waterline`**: constant-Z laps (marching squares on the CL
-  surface), `z_step_mm` apart.
+  surface), `z_step_mm` apart, and closer where the surface flattens.
+  - Evenly spaced levels spread apart on a shallow slope, and the cap above
+    the highest lap was never cut (0.6 mm left on a dome's top).
+  - Between two levels, the band between their regions is measured on the
+    CL grid, inside the region: area over perimeter, the perimeter scaled
+    by pi/4 for its staircase. A band wider than the spacing that leaves
+    the finish's own cusp (`2 sqrt(2rc - c^2)` for a ball, half a flat
+    cutter) gets a level at its middle height, recursively.
+  - The cap, from the surface's own top, is cut from its rim only, so it
+    is held to a quarter of that.
 
 Three quantities, three names: `stepover` (across passes, a fraction of the
 cutter), `sample_step_mm` (along a pass, mm; 0 derives from the CL grid) and

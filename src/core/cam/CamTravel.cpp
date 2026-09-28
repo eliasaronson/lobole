@@ -290,9 +290,15 @@ DerivedReach DeriveReachOffset(const Setup& setup,
       out.why = buf;
       return out;
     }
-    // Centre the window on the cutting, then keep it on the sheet's near side
-    // -- a window starting before the stock is a machine position no sheet
-    // reaches.
+    // A stock that fits the travel is centred in it already
+    // (MachineBoundsFramed), with room round every cut: nothing to move.
+    if (shi[a] - slo[a] <= travel[a] + 1e-6) {
+      out.offset[a] = 0.0;
+      continue;
+    }
+    // A longer sheet: centre the window on the cutting, then keep it on the
+    // sheet's near side -- a window starting before the stock is a machine
+    // position no sheet reaches.
     const double centred = (lo[a] + hi[a]) * 0.5 - travel[a] * 0.5;
     out.offset[a] = std::max(0.0, centred - slo[a]);
   }
@@ -338,10 +344,21 @@ bool MachineBoundsFramed(const Setup& setup, const std::vector<Body>& framed,
   glm::dvec3 slo(0.0), shi(0.0);
   if (!StockBoundsFramed(setup, framed, slo, shi))
     return false;
-  // Where the bed sits ON the sheet. Zero is the near corner, which is what
-  // this always assumed and is only an answer for a sheet that fits.
-  lo = slo + glm::dvec3(setup.reachOffset, 0.0);
-  hi = lo + (m.travelMax - m.travelMin);
+  // Where the bed sits ON the sheet (docs/cam/setup.md#the-machines-work-area).
+  // Per axis: a stock that FITS the travel is centred in it, so every cutter
+  // has room on both sides of it -- anchored at the stock's near corner, an
+  // outline cutter running a radius outside the stock was outside the window
+  // on the near sides, and half the sampler part's outline was clipped out
+  // of the file. A stock LONGER than the travel is anchored at its near
+  // corner, and `reach_offset` says where along it the bed is: the case it
+  // exists for. On either, `reach_offset` moves the window from there.
+  const glm::dvec3 travel = m.travelMax - m.travelMin;
+  lo = slo;
+  for (int a = 0; a < 2; a++)
+    if (shi[a] - slo[a] <= travel[a] + 1e-6)
+      lo[a] = (slo[a] + shi[a]) * 0.5 - travel[a] * 0.5;
+  lo += glm::dvec3(setup.reachOffset, 0.0);
+  hi = lo + travel;
   return true;
 }
 

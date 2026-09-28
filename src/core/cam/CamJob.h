@@ -587,7 +587,9 @@ struct Setup {
   OriginAt originAt = OriginAt::StockMin;
 
   // WHERE THE MACHINE IS ON THE SHEET, in setup space, measured from the
-  // stock's near corner.
+  // default window: centred on the stock along an axis where it fits the
+  // travel, at its near corner along one where it is longer
+  // (docs/cam/setup.md#the-machines-work-area).
   //
   // The reach box has always been travel-sized with its corner AT the stock's
   // -- fine for a sheet that fits the bed, and an assumption for one that does
@@ -597,9 +599,9 @@ struct Setup {
   // the part was turned round, so spinning a board end-for-end made seven
   // operations fall off a machine that could reach every one of them.
   //
-  // Zero (the default) is exactly the old behaviour, so nothing that fits
-  // changes. `DeriveReachOffset` computes the offset that brings the cutting
-  // inside the window, which is what an overhanging sheet actually needs.
+  // Zero (the default) is that default window. `DeriveReachOffset` computes
+  // the offset that brings the cutting inside it, which is what an
+  // overhanging sheet actually needs; on an axis that fits it is zero.
   glm::dvec2 reachOffset{0.0, 0.0};
 
   // How the part is FIXTURED: the rotation taking setup space to model space.

@@ -6,6 +6,7 @@
 // (docs/architecture.md#source-layout).
 
 #include "cam_fixtures.h"
+#include "core/features/FilletFeature.h"
 
 TEST_CASE("cam: a ball nose steps over by the cusp it leaves", "[cam]") {
   // A flat mill's floor is flat whatever the stepover, so 45% of the cutter
@@ -157,6 +158,94 @@ TEST_CASE("cam: a V-bit chamfers the edge it is pointed at", "[cam]") {
   }
   CHECK(cuts > 4);
   CHECK(onContour == cuts);
+}
+
+namespace {
+// The block of BlockDoc with its top outline broken in the MODEL: a chamfer
+// or a round of `size` on every top edge.
+std::unique_ptr<Document> BrokenBlockDoc(double size, EdgeBlendOp how) {
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  const Body& body = doc->GetBodies().at(0);
+  std::vector<ElementRef> top;
+  const auto polylines = body.shape.GenerateEdgePolylines();
+  for (size_t e = 0; e < polylines.size(); e++) {
+    bool atTop = polylines[e].size() >= 2;
+    for (const glm::vec3& p : polylines[e])
+      atTop = atTop && std::abs(p.z - 20.0f) < 1e-3f;
+    if (!atTop)
+      continue;
+    const std::string* name = body.elementMap.EdgeNameOf(static_cast<int>(e));
+    REQUIRE(name != nullptr);
+    top.push_back(ElementRef{body.createdBy, *name});
+  }
+  REQUIRE(top.size() == 4);
+  doc->AddFeature(std::make_unique<FilletFeature>("Break", top, size, how));
+  REQUIRE(doc->Regenerate());
+  return doc;
+}
+} // namespace
+
+TEST_CASE("cam: an edge break follows the break the model already has",
+          "[cam]") {
+  // Derived from the wall's own top, a break went below the one modelled
+  // above it and as big as the tool allowed: the sampler part's 1.5 mm
+  // chamfer came out 6 mm, cut 4.5 mm into the part all round.
+  auto doc = BrokenBlockDoc(1.5, EdgeBlendOp::Chamfer);
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 90.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.topZ, WithinAbs(20.0, 0.01));
+  CHECK_THAT(d.op.edgeSize, WithinAbs(1.5, 0.02));
+  CHECK_THAT(d.op.bottomZ, WithinAbs(18.5, 0.02));
+  cam::Setup job = setup;
+  cam::Operation op = d.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", job, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, job, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.maxGouge < 0.05);
+
+  // A V-bit of another angle would cut another chamfer: refused, naming both.
+  setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 60.0)};
+  const cam::DerivedOp other = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  CHECK_FALSE(other.ok);
+  CHECK(other.why.find("90 degrees") != std::string::npos);
+  CHECK(other.why.find("cuts 60") != std::string::npos);
+
+  // A modelled round: a ball takes its radius, from the block's top.
+  auto round = BrokenBlockDoc(2.0, EdgeBlendOp::Fillet);
+  setup.tools = {ShapedTool(cam::ToolType::Ball, 6.0)};
+  const ElementRef rwall = SideWall(*round);
+  const cam::DerivedOp r = cam::DeriveOperation(
+      setup, round->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, rwall});
+  INFO(r.why);
+  REQUIRE(r.ok);
+  CHECK_THAT(r.op.topZ, WithinAbs(20.0, 0.01));
+  CHECK_THAT(r.op.edgeSize, WithinAbs(2.0, 0.02));
+  cam::Setup rjob = setup;
+  cam::Operation rop = r.op;
+  rop.id = 1;
+  rjob.operations.push_back(rop);
+  const std::vector<cam::Toolpath> rpaths =
+      cam::GenerateAll(rjob, round->GetBodies());
+  REQUIRE(rpaths[0].error.empty());
+  std::string rgcode;
+  REQUIRE(cam::PostProcess("mach3", rjob, rpaths, {}, rgcode, &error));
+  const cam::Verdict rv =
+      cam::VerifyGcode(rgcode, rjob, round->GetBodies(), 0.25);
+  INFO("round gouge " << rv.maxGouge);
+  CHECK(rv.maxGouge < 0.05);
 }
 
 TEST_CASE("cam: a ball nose rounds the edge over an arc", "[cam]") {

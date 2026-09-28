@@ -1196,6 +1196,11 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
           for (const double r : rings)
             EmitHelix(tp, tool, centre, r, op.topZ, op.bottomZ, setup.safeZ,
                       stockTop, kDeflection);
+          // Out of the finished hole straight up, then over: one rapid to
+          // the centre at safe Z from the wall ring's bottom climbed and
+          // travelled at once.
+          Emit(tp, Move::Kind::Rapid,
+               {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
           Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);
           break;
         }

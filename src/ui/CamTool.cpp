@@ -1549,8 +1549,9 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     LoopWalls(rect, lo.z, hi.z, kStockFill, quads);
 
     // ...and the MACHINE's work area around it, when the machine states one:
-    // a box the size of the travel, its near-left corner at the stock's and
-    // its floor at the stock's bottom, which is how a sheet is loaded. Where
+    // a box the size of the travel (cam::MachineBounds: centred on a stock
+    // that fits, at the near corner of a longer one), its floor at the
+    // stock's bottom, which is how a sheet is loaded. Where
     // the operator touches off inside the travel is not the job's to know,
     // so this is the machine's SIZE against the job's -- the check
     // cam::MachineWarning makes in words. Never resized to fit.

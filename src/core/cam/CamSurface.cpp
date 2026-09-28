@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <utility>
@@ -408,6 +410,94 @@ SurfacePaths WaterlinePasses(const CLSurface& cl,
        z -= req.zStep_mm)
     levels.push_back(z);
   levels.push_back(req.bottomZ);
+
+  // Refined where the surface is shallow (WaterlineRequest::maxGap_mm). The
+  // band between two levels is measured on the CL grid, inside the region,
+  // as the area it adds over the perimeter of the lower level's region: the
+  // band's mean width across the surface. The cap above the highest level is
+  // a band too, from the surface's own top.
+  if (req.maxGap_mm > 0.0) {
+    const HeightMap& g = cl.z;
+    std::vector<uint8_t> inside(g.z.size(), 1);
+    if (!clip.empty())
+      for (int j = 0; j < g.ny; j++)
+        for (int i = 0; i < g.nx; i++) {
+          const Clipper2Lib::Point64 p(
+              static_cast<int64_t>(std::llround(g.CellX(i) * kScale)),
+              static_cast<int64_t>(std::llround(g.CellY(j) * kScale)));
+          bool in = false;
+          for (const Clipper2Lib::Path64& path : clip)
+            if (Clipper2Lib::PointInPolygon(p, path) !=
+                Clipper2Lib::PointInPolygonResult::IsOutside)
+              in = !in; // even-odd over the union's outers and holes
+          inside[static_cast<size_t>(j) * static_cast<size_t>(g.nx) +
+                 static_cast<size_t>(i)] = in ? 1 : 0;
+        }
+    const auto isIn = [&](int i, int j, double z) {
+      const size_t k = static_cast<size_t>(j) * static_cast<size_t>(g.nx) +
+                       static_cast<size_t>(i);
+      return inside[k] != 0 && g.z[k] >= z;
+    };
+    // Area and perimeter of {CL >= z} inside the region, in mm2 and mm.
+    const auto stats = [&](double z) {
+      double cells = 0.0, edges = 0.0;
+      for (int j = 0; j < g.ny; j++)
+        for (int i = 0; i < g.nx; i++) {
+          if (!isIn(i, j, z))
+            continue;
+          cells += 1.0;
+          edges += (i == 0 || !isIn(i - 1, j, z)) +
+                   (i + 1 == g.nx || !isIn(i + 1, j, z)) +
+                   (j == 0 || !isIn(i, j - 1, z)) +
+                   (j + 1 == g.ny || !isIn(i, j + 1, z));
+        }
+      return std::pair<double, double>(cells * g.res * g.res, edges * g.res);
+    };
+    double top = std::numeric_limits<double>::lowest();
+    for (size_t k = 0; k < g.z.size(); k++)
+      if (inside[k] != 0 && g.z[k] > req.floorZ + 1e-9)
+        top = std::max(top, static_cast<double>(g.z[k]));
+    // The levels start at the op's top, usually the stock's, and the first
+    // ones above the surface cut nothing: the first band that matters is
+    // the cap, from the surface's own top down to the first level below it.
+    if (top > std::numeric_limits<double>::lowest()) {
+      std::vector<double> refined;
+      // Between hi and lo (hi > lo): the levels to add, highest first.
+      //
+      // Two corrections to area over perimeter. The perimeter is counted in
+      // cell edges, and a staircase is 4/pi longer than the curve it steps
+      // round, so it is scaled back. And the CAP is cut from its rim only:
+      // a band between two laps is closed from both sides and may be as wide
+      // as the gap, but a cap of radius rho is the half of a gap 2 rho wide
+      // -- and a disc's area over perimeter is rho / 2. So a cap is done at
+      // a quarter of the gap.
+      const std::function<void(double, double, int, bool)> split =
+          [&](double hi, double lo, int depth, bool cap) {
+            const auto [aLo, pLo] = stats(lo);
+            const double aHi = stats(hi).first;
+            if (pLo <= 0.0 || depth > 10 || hi - lo < 0.01)
+              return;
+            const double width = (aLo - aHi) / (pLo * std::numbers::pi / 4.0);
+            if (width <= req.maxGap_mm * (cap ? 0.25 : 1.0))
+              return;
+            const double mid = 0.5 * (hi + lo);
+            split(hi, mid, depth + 1, cap);
+            refined.push_back(mid);
+            split(mid, lo, depth + 1, false);
+          };
+      double hi = std::min(top, req.topZ);
+      bool cap = true;
+      for (const double z : levels) {
+        if (z < hi) {
+          split(hi, z, 0, cap);
+          cap = false;
+        }
+        refined.push_back(z);
+        hi = std::min(hi, z);
+      }
+      levels = std::move(refined);
+    }
+  }
 
   const double sample = req.sampleStep_mm > 0.0 ? req.sampleStep_mm : cl.z.res;
   for (const double z : levels) {

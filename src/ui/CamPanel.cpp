@@ -1676,7 +1676,8 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
       touched(op.id);
     }
     ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
-                          "bevel (V-bit), mm. 0 = the biggest this tool "
+                          "bevel (V-bit), mm. Derived, it is the break the "
+                          "model has on that edge; 0 = the biggest this tool "
                           "can make within the wall.");
   }
   // Surfacing: across, along and down. Three fields because they are
