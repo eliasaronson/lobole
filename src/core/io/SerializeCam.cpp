@@ -136,6 +136,10 @@ json ToolToJson(const cam::Tool& t) {
     tj["overall_length"] = t.overallLength;
     tj["collar_diameter"] = t.collarDiameter;
   }
+  // And again (v131): nobody stating a shank is the tool as every check
+  // took it before, the cutter's width all the way up.
+  if (t.shankDiameter > 0.0)
+    tj["shank_diameter"] = t.shankDiameter;
   return tj;
 }
 
@@ -155,6 +159,7 @@ cam::Tool ToolFromJson(const json& tj) {
   t.chiploadMax = tj.value("chipload_max", 0.0);
   t.overallLength = tj.value("overall_length", 0.0);
   t.collarDiameter = tj.value("collar_diameter", 0.0);
+  t.shankDiameter = tj.value("shank_diameter", 0.0);
   return t;
 }
 

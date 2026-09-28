@@ -81,6 +81,15 @@ struct Tool {
   // question a cylinder already answers conservatively.
   double overallLength = 0.0;  // mm, tip to the collar's underside
   double collarDiameter = 0.0; // mm, the collet nut / holder, at its widest
+  // How wide the tool is ABOVE its flutes, from the top of the flutes up to
+  // the collar. Zero (the default) means nobody said, and the tool is taken
+  // to be the cutter's width all the way up -- the assumption every check
+  // made before this existed. Wider is the common small cutter: a 3 mm bit
+  // on a 6 mm shank, a V-bit's body, a stepped downcut. Below its flute
+  // length along a wall that part does not rub, it HITS: the cut is narrower
+  // than the thing being driven into it. Narrower is a necked tool, made to
+  // reach past its flutes (docs/cam/setup.md#reach).
+  double shankDiameter = 0.0;
   bool operator==(const Tool&) const = default;
 };
 
@@ -161,7 +170,8 @@ struct Machine {
 // Deliberately blind inside the cutter's own radius. There the tool is the
 // tool: material in that column is either cut (and the height map records
 // that it was) or it is a plunge deeper than the cutter is long, which
-// `CamFeeds` already states at the SETUP, before a file exists. Reporting it
+// `cam::ReachCheck` states (or refuses) when the op or its tool is edited,
+// before a file exists. Reporting it
 // twice, in two different vocabularies, is how a check stops being read.
 [[nodiscard]] inline bool FoulsHolder(const Tool& t, double d, double h) {
   return HasHolder(t) && d > t.diameter * 0.5 && d <= t.collarDiameter * 0.5 &&

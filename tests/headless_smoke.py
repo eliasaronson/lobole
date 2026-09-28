@@ -2228,6 +2228,65 @@ def main():
                    f"and it reports no field it does not read: {back}")
             d.call("set_cam_op", id=cam_ops[0]["id"], lead_arcs=False)
 
+            # Reach, where it is MADE (docs/cam/setup.md#reach): a shank wider
+            # than the cutter, below the flutes, is driven into the wall, so
+            # the edit that would ask for it is refused -- the tool's or the
+            # op's -- and leaves things as they were. Short of that, the edit
+            # goes through and says so in its OWN response.
+            op0 = cam_ops[0]
+            tools = d.call("list_cam_setups")["setups"][0]["tools"]
+            t0 = next(t for t in tools if t["number"] == op0["tool"])
+            depth = op0["top_z"] - op0["bottom_z"]
+            wide = t0["diameter"] * 2.0
+            try:
+                d.call("set_cam_setup", id=cam_setup,
+                       tool={"number": t0["number"],
+                             "flute_length": depth - 2.0,
+                             "shank_diameter": wide})
+                raise AssertionError("a tool edit that buries its shank "
+                                     "must refuse")
+            except RuntimeError as e:
+                expect("driven into it" in str(e) and op0["name"] in str(e),
+                       f"the refusal names the op and what happens: {e}")
+            kept = next(t for t in d.call("list_cam_setups")["setups"][0]
+                        ["tools"] if t["number"] == t0["number"])
+            expect(kept["flute_length"] == t0["flute_length"] and
+                   kept["shank_diameter"] == 0.0,
+                   f"a refused tool edit changes nothing: {kept}")
+            # The wide shank alone: this op is cut within the flutes, so it
+            # is allowed -- and the reply says how little is to spare.
+            said = d.call("set_cam_setup", id=cam_setup,
+                          tool={"number": t0["number"],
+                                "flute_length": depth,
+                                "shank_diameter": wide})
+            expect(any("to spare" in w for w in said.get("warnings", [])),
+                   f"a tight reach comes back with the edit: {said}")
+            try:
+                d.call("set_cam_op", id=op0["id"],
+                       bottom_z=op0["bottom_z"] - 1.0)
+                raise AssertionError("deeper than the flutes on a wide "
+                                     "shank must refuse")
+            except RuntimeError as e:
+                expect("driven into it" in str(e),
+                       f"set_cam_op refuses the collision: {e}")
+            back = d.call("list_cam_setups")["setups"][0]["operations"][0]
+            expect(back["bottom_z"] == op0["bottom_z"],
+                   f"and leaves the op as it was: {back['bottom_z']}")
+            # A shank the cutter's width only rubs: allowed, and said.
+            d.call("set_cam_setup", id=cam_setup,
+                   tool={"number": t0["number"],
+                         "shank_diameter": t0["diameter"]})
+            rubbed = d.call("set_cam_op", id=op0["id"],
+                            bottom_z=op0["bottom_z"] - 1.0)
+            expect(any("cut by the shank" in w
+                       for w in rubbed.get("warnings", [])),
+                   f"a rub is allowed and said: {rubbed}")
+            d.call("set_cam_op", id=op0["id"], bottom_z=op0["bottom_z"])
+            d.call("set_cam_setup", id=cam_setup,
+                   tool={"number": t0["number"],
+                         "flute_length": t0["flute_length"],
+                         "shank_diameter": 0.0})
+
             # R7: a targetless drill derive teaches, instead of "not a verb".
             try:
                 d.call("cam_derive_op", setup=cam_setup, type="drill")

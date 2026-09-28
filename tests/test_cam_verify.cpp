@@ -75,6 +75,108 @@ TEST_CASE("cam verify: the 3-axis check refuses a part that turns", "[cam]") {
   CHECK_FALSE(flat.verdict.Safe(0.01));
 }
 
+TEST_CASE("cam verify: a cut that bites deeper than its passes is reported",
+          "[cam]") {
+  // One slot across a 40 x 30 x 20 block, 8 mm deep: once in a single cut,
+  // once in four 2 mm passes. The op asks for 2 mm passes both times, so the
+  // first is a cutter buried four stepdowns deep, full width -- the load that
+  // breaks tools and shifts the work, and that nothing else in the verdict
+  // measures (the part comes out the same either way).
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::On;
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+  op.stepdown = 2.0;
+  setup.operations.push_back(op);
+  // Stock flush with the part, so the first pass takes the 2 mm it says
+  // (the default leaves a millimetre on top).
+  setup.stock.margin = glm::dvec3(0.0);
+
+  const std::string buried = "(op 1)\nG0 Z25\nG0 X-5 Y15\nG1 Z12 F200\n"
+                             "G1 X45 F600\nG0 Z25\n";
+  const cam::Verdict bad =
+      cam::VerifyGcode(buried, setup, doc->GetBodies(), 0.25);
+  INFO("worst bite " << bad.worstBite << " allowed " << bad.worstBiteAllowed);
+  CHECK(bad.overBites > 0);
+  CHECK_THAT(bad.worstBite, WithinAbs(8.0, 0.5));
+  CHECK_THAT(bad.worstBiteAllowed, WithinAbs(2.0, 1e-9));
+  CHECK(bad.worstBiteOp == 1);
+  CHECK_FALSE(bad.Safe(0.01));
+  bool said = false;
+  for (const cam::VerdictLine& l : cam::Explain(bad, 0.05, 1.0))
+    said = said || (l.level == cam::VerdictLine::Level::Bad &&
+                    l.text.find("bite deeper") != std::string::npos);
+  CHECK(said);
+
+  std::string stepped = "(op 1)\nG0 Z25\nG0 X-5 Y15\n";
+  for (const int z : {18, 16, 14, 12})
+    stepped += "G1 Z" + std::to_string(z) + " F200\nG1 X" +
+               (z % 4 == 2 ? "45" : "-5") + " F600\n";
+  stepped += "G0 Z25\n";
+  const cam::Verdict good =
+      cam::VerifyGcode(stepped, setup, doc->GetBodies(), 0.25);
+  REQUIRE(good.biteByOp.count(1) == 1);
+  INFO("stepped bite " << good.biteByOp.at(1).first);
+  CHECK(good.overBites == 0);
+  CHECK(good.biteByOp.at(1).first < 2.3);
+
+  // A drilling op is not measured: a peck is the whole depth by design.
+  setup.operations[0].type = cam::OpType::Drill;
+  CHECK(cam::VerifyGcode(buried, setup, doc->GetBodies(), 0.25).overBites == 0);
+}
+
+TEST_CASE("cam verify: a shank wider than the cutter is found at the wall",
+          "[cam]") {
+  // A 3 mm cutter with 12 mm of flute on a 6 mm shank, slotting 15 mm into a
+  // block in 2 mm passes. Every pass bites what it should; it is the last
+  // two that put the shank below the stock top, between walls 3 mm apart.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin = glm::dvec3(0.0);
+  setup.tools[0].diameter = 3.0;
+  setup.tools[0].fluteLength = 12.0;
+  setup.tools[0].shankDiameter = 6.0;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::On;
+  op.topZ = 20.0;
+  op.bottomZ = 5.0;
+  op.stepdown = 2.0;
+  setup.operations.push_back(op);
+  std::string g = "(op 1)\nG0 Z25\nG0 X-5 Y15\n";
+  bool out = true;
+  for (const int z : {18, 16, 14, 12, 10, 8, 6, 5}) {
+    g += "G1 Z" + std::to_string(z) + " F200\nG1 X" + (out ? "45" : "-5") +
+         " F600\n";
+    out = !out;
+  }
+  g += "G0 Z25\n";
+  const cam::Verdict hit = cam::VerifyGcode(g, setup, doc->GetBodies(), 0.25);
+  INFO("shank " << hit.shankCollisions << " worst " << hit.worstShankDepth);
+  CHECK(hit.shankCollisions > 0);
+  // At the 5 mm pass the flutes end at 17: 3 mm of wall stands above them.
+  CHECK_THAT(hit.worstShankDepth, WithinAbs(3.0, 0.3));
+  CHECK(hit.overBites == 0);
+  CHECK_FALSE(hit.Safe(0.01));
+  bool said = false;
+  for (const cam::VerdictLine& l : cam::Explain(hit, 0.05, 1.0))
+    said = said || l.text.find("SHANK") != std::string::npos;
+  CHECK(said);
+
+  // The same cut with the shank the cutter's width, or unstated: nothing
+  // here -- the depth alone is the reach finding's, at the op.
+  for (const double shank : {3.0, 0.0}) {
+    setup.tools[0].shankDiameter = shank;
+    CHECK(cam::VerifyGcode(g, setup, doc->GetBodies(), 0.25).shankCollisions ==
+          0);
+  }
+}
+
 TEST_CASE("cam verify: what the parser found reaches the verdict", "[cam]") {
   // The parser's errors and warnings were computed and DROPPED. `Inspect`
   // parsed the program, built its findings and returned none of them --

@@ -118,20 +118,40 @@ is scrap.
   `ProjectedOutlines` — the union of sections from `topZ` down — so a bore
   opening onto a side face does not pull the profile into a notch with solid
   above and below it. A picked wall is re-resolved against the projection per
-  pass. Projecting from the operation's top (not the stock's) is what lets an
-  opening that starts below the stock top be profiled. This is the expensive
-  step of a profile and runs on the background worker.
+  pass: each depth takes the loop nearest the pick, unless that loop is more
+  than a tool radius away. Then the picked wall is not at that depth at all
+  (an opening under a flange recess: above the recess floor the projection
+  holds only the recess's wall), and the depth cuts the picked wall's loop
+  from the nearest depth that has it, the one below first. Following the
+  nearest wall anyway sent the top pass round the recess, in air, and left
+  the next pass two stepdowns to take at once. Projecting from the
+  operation's top (not the stock's) is what lets an opening that starts
+  below the stock top be profiled. This is the expensive step of a profile
+  and runs on the background worker.
 - **Tabs** (`tabCount`, `tabWidth`, `tabHeight`; derived as four tabs, twice
   the tool diameter wide, a fifth of the depth tall with a 0.5 mm floor, on
   any profile that is not cutting an opening — an opening's slug is scrap)
   split the segments they cross; the ramp and lap are one function of arc length, so a tab is a pillar
   from the bottom of the cut to its stated height and nothing crosses it. Each
   toolpath records its tabs (`Toolpath::tabs`: point, pillar radius, top
-  height) so the verifier excuses them, up to their height.
+  height) so the verifier excuses them, up to their height. `tabWidth` is
+  measured along the tool's centre line, where the tool lifts and drops, so
+  the material left at the middle of the kerf is `tabWidth` minus the
+  cutter's diameter: 8 mm on a 6 mm cutter is a 2 mm tab.
 - **Lead arcs** (`leadArcs`): the cut leaves the wall on a tangent arc of the
   tool's radius at the end of every pass instead of stopping against it (the
   dwell mark). Lead-out only: the ramp is the entry, arriving already moving
-  along the wall. Refused inside an opening with no room for the arc.
+  along the wall. Refused inside an opening with no room for the arc. The arc
+  goes into the waste side (an opening's slug, the stock round an outside
+  profile), which nothing has cut, so **every pass leaves the wall at the
+  same point**. That point is the middle of the loop's longest edge on the
+  first pass, and the nearest point on the wall on each pass after
+  (`StartAtPoint`). Each pass starts its ramp one ramp length before it, in the kerf
+  the previous pass cut, and the lap ends there (`EmitLoop`). Stacked, each
+  arc cuts one stepdown under the one before it. Chained from wherever the
+  last lap stopped, each arc landed somewhere new and slotted full width
+  from the stock top down to its pass. The arcs of the last passes were
+  16 mm of solid MDF at the cutting feed, and moved the board.
 - **Corner relief** (`cornerRelief`: `none`, `dogbone`, `tbone`), on profile
   and pocket: at inside corners of the material, computed on the offset ring
   from the turn direction and the side, a bite of the tool's radius along the

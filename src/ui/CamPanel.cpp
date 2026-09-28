@@ -1909,6 +1909,20 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   }
   ImGui::SetItemTooltip("The collet nut at its widest, mm. Needs the "
                         "stickout beside it to mean anything.");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(70.0f);
+  float shank = static_cast<float>(t.shankDiameter);
+  if (ExprDragFloat(state, "shank###shankdia", &shank, 0.1f, 0.0f, 50.0f,
+                    "%.2f")) {
+    t.shankDiameter = shank;
+    changed = true;
+  }
+  ImGui::SetItemTooltip("How wide the tool is ABOVE its flutes, mm. Wider "
+                        "than the cutter (a 3 mm bit on a 6 mm shank, a "
+                        "V-bit's body) and no operation may cut deeper than "
+                        "the flutes: the shank would be driven into the "
+                        "wall. Narrower is a necked tool. 0 = the cutter's "
+                        "width all the way up.");
   return changed;
 }
 

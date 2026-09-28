@@ -643,6 +643,89 @@ TEST_CASE("cam lead: a profile leaves the wall on a tangent arc",
 // ---------------------------------------------------------------------------
 // R6: rough then finish.
 
+TEST_CASE("cam lead: every pass leaves the wall at one place, so the arcs "
+          "stack",
+          "[cam][lead]") {
+  // The smart-speaker baffle, in miniature: a through opening under a flange
+  // recess, cut from the recess floor's openings on tabs with lead-outs.
+  // Chained pass to pass, each lead-out landed somewhere new in the slug and
+  // slotted through everything from the stock top down to its pass -- on the
+  // real board, 16 mm of MDF at the cutting feed, which moved the work.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Panel", glm::vec3(0, 0, 0),
+                                               80.0, 80.0, 16.0));
+  const uint64_t panel = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Recess", glm::vec3(40, 40, 13), glm::vec3(0, 0, 1), 32.0, 4.0));
+  const uint64_t recess = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Recessed", panel, recess,
+                                                   BooleanOp::Subtract));
+  const uint64_t recessed = doc->GetFeature(2)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Opening", glm::vec3(40, 40, -1), glm::vec3(0, 0, 1), 25.0, 18.0));
+  const uint64_t opening = doc->GetFeature(3)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Baffle", recessed, opening,
+                                                   BooleanOp::Subtract));
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 7;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.topZ = 16.0;
+  op.bottomZ = -0.5;
+  op.stepdown = 2.5;
+  op.leadArcs = true;
+  op.tabCount = 4;
+  op.tabWidth = 12.0;
+  op.tabHeight = 3.0;
+  op.targets = {cam::Target{0, UpFaceAt(*doc, 13.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  setup.operations.push_back(op);
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  const auto& moves = paths[0].moves;
+
+  // Every lap follows the OPENING, the top ones included. Above the recess
+  // floor the only wall in the projection is the recess's, and the top pass
+  // used to go round that instead -- in air -- leaving the next pass to take
+  // two stepdowns at once. Tool centre on the opening: 25 - 3 = 22.
+  double outermost = 0.0;
+  for (const cam::Move& m : moves)
+    if (m.kind != cam::Move::Kind::Rapid)
+      outermost = std::max(outermost, std::hypot(m.to.x - 40.0, m.to.y - 40.0));
+  CHECK(outermost < 22.05);
+
+  // Where each pass's lead-out ends: the last cutting move before each
+  // retract. All of them in one place.
+  std::vector<glm::dvec2> ends;
+  for (size_t k = 1; k < moves.size(); k++)
+    if (moves[k].kind == cam::Move::Kind::Rapid &&
+        moves[k - 1].kind != cam::Move::Kind::Rapid &&
+        moves[k].to.z > moves[k - 1].to.z)
+      ends.emplace_back(moves[k - 1].to.x, moves[k - 1].to.y);
+  REQUIRE(ends.size() >= 6); // 16.5 mm in 2.5 mm passes
+  for (const glm::dvec2& e : ends)
+    CHECK(glm::length(e - ends.front()) < 0.05);
+  // ...a radius into the slug, off the wall it left.
+  CHECK_THAT(std::hypot(ends.front().x - 40.0, ends.front().y - 40.0),
+             WithinAbs(std::hypot(19.0, 3.0), 0.05));
+
+  // And the simulation agrees: nothing in this op bites deeper than a pass
+  // or a tab exit asks of the cutter.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25, {}, paths[0].tabs);
+  REQUIRE(v.biteByOp.count(7) == 1);
+  INFO("bite " << v.biteByOp.at(7).first << " allowed "
+               << v.biteByOp.at(7).second);
+  CHECK_THAT(v.biteByOp.at(7).second, WithinAbs(3.0, 1e-9));
+  CHECK(v.biteByOp.at(7).first < 3.0 * 1.25 + 0.2);
+  CHECK(v.overBites == 0);
+}
+
 TEST_CASE("cam finish: one operation roughs with one tool and finishes with "
           "another",
           "[cam][finish]") {

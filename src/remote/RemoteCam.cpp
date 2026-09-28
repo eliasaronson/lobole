@@ -189,7 +189,7 @@ constexpr MethodDoc kCamMethods[] = {
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
      "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?, "
-     "overall_length?, collar_diameter?}} "
+     "overall_length?, collar_diameter?, shank_diameter?}} "
      "— `id` and `tool` are SIBLING parameters, not a nested object, and "
      "`number` is required because it says WHICH tool. The tool is "
      "added when the number is new. chipload_min/max are mm per tooth THIS "
@@ -240,6 +240,14 @@ constexpr MethodDoc kCamMethods[] = {
      "collar driven into material the cutter never went near -- a clamp, a "
      "boss beside a pocket, a tall neighbour on the same sheet. Without them "
      "no holder is checked, because a limit nobody typed is not a limit. "
+     "shank_diameter is how wide the tool is ABOVE its flutes, in mm (a 3 mm "
+     "cutter on a 6 mm shank, a V-bit's body); left out, the tool is the "
+     "cutter's width all the way up. Wider than the cutter, an operation "
+     "deeper than flute_length drives that shank into the wall, so the edit "
+     "that would make one -- this tool edit, or an add_cam_op/set_cam_op -- "
+     "is REFUSED naming the op; narrower is a necked tool, made to reach "
+     "past its flutes. A reach the tool can make with little to spare, or "
+     "only by rubbing its shank, is allowed and comes back in `warnings`. "
      "diameter, tip_angle and the feeds are mm, degrees and mm/min. "
      "tool_type is the shape of the end: it decides what the verifier thinks "
      "was removed, and an edge_round op reads it to know whether it is "
@@ -284,8 +292,10 @@ constexpr MethodDoc kCamMethods[] = {
      "pocket: clear the inside corners a round cutter leaves, by the tool's "
      "radius -- along the bisector, or along the longer wall), lead_arcs?: "
      "bool (profile: leave the wall on a tangent arc of the tool's radius "
-     "instead of stopping against it -- no dwell mark; refused inside an "
-     "opening with no room for it), finish_tool?: number (rough with `tool` "
+     "instead of stopping against it -- no dwell mark; every depth pass "
+     "leaves at the same point, so each arc cuts one stepdown of the waste; "
+     "refused inside an opening with no room for it), finish_tool?: number "
+     "(rough with `tool` "
      "leaving finish_stock -- derived as a tenth of its diameter -- then "
      "take the wall in one full-depth pass with this tool; two toolpaths "
      "from one operation), finish_stock?, side?: "
@@ -298,7 +308,11 @@ constexpr MethodDoc kCamMethods[] = {
      "on (list_elements reports it as `job_part`), and is REQUIRED when the "
      "same element name appears on more than one part of the job -- guessing "
      "there machines the wrong one. Returns its id and every field derived for "
-     "it. LEAVE OUT top_z/bottom_z and they are derived from what the "
+     "it, and `warnings` when its tool reaches the depth only just or by "
+     "rubbing its shank; a depth its tool cannot reach at all -- deeper than "
+     "the flutes on a shank wider than the cutter -- is refused (see "
+     "set_cam_setup's shank_diameter). LEAVE OUT top_z/bottom_z and they are "
+     "derived from what the "
      "operation acts on — the same derivation the GUI's verbs use, so a "
      "script does not type a depth the panel would not let a person type. "
      "Pocket: pick the floor. Profile: pick a wall (an opening cuts inside "
@@ -330,7 +344,8 @@ constexpr MethodDoc kCamMethods[] = {
      "at another cutter: a stepdown still at the old tool's derived value "
      "follows the new one (every derived number is a fraction of the "
      "cutter), one you typed is kept, and a tool this setup does not have is "
-     "refused.",
+     "refused. The tool's reach is checked as add_cam_op checks it: refused "
+     "when the shank would be driven into a wall, `warnings` otherwise.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
      "finish_stock, finish_tool, id, lead_arcs, lead_mm, name, peck, "
      "rest_from_tool, rotary_pattern, "
@@ -348,7 +363,10 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_derive_op",
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
-     "one. The dry run behind add_cam_op's derivation, and its lengths are "
+     "one -- including a depth its tool cannot reach (a shank wider than the "
+     "cutter below the flutes), with `warnings` when it reaches only just or "
+     "by rubbing. The dry run behind add_cam_op's derivation, and its lengths "
+     "are "
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
@@ -409,9 +427,14 @@ constexpr MethodDoc kCamMethods[] = {
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
      "`ok` = nothing scraps the part or breaks the tool (no "
-     "gouge, no rapid through material, no holder or fixture collision, and "
-     "a file that "
-     "read straight) and is the one to gate on; `complete` "
+     "gouge, no rapid through material, no holder, shank or fixture "
+     "collision, no bite deeper than the op's passes, and a file that "
+     "read straight) and is the one to gate on; over_bites / "
+     "worst_bite_mm (_allowed_mm, _at, _line, _op) / bite_by_op [{op, "
+     "max_mm, allowed_mm}] say how deep a stretch of cutting actually took "
+     "as a full-width equivalent, against the op's stepdown or tab height; "
+     "shank_collisions / worst_shank_depth_mm (_at, _line) find a shank "
+     "wider than its cutter driven into a wall; `complete` "
      "= nothing left standing. A TAB is not left standing by accident -- the "
      "toolpath says where it put each one and they are excused, up to their "
      "own height, so a tabbed job can now be complete. A dropping "
@@ -644,11 +667,29 @@ json ToolJson(const cam::Tool& t) {
               {"flute_length", t.fluteLength},
               {"overall_length", t.overallLength},
               {"collar_diameter", t.collarDiameter},
+              {"shank_diameter", t.shankDiameter},
               {"feed_cut", t.feedCut},
               {"feed_plunge", t.feedPlunge},
               {"spindle_rpm", t.spindleRpm},
               {"chipload_min", t.chiploadMin},
               {"chipload_max", t.chiploadMax}};
+}
+
+// Whether an op's tools reach its depth (cam::ReachCheck,
+// docs/cam/setup.md#reach): THROWS when a shank wider than the cutter would be
+// driven into a wall, and returns the rest of what it has to say for the
+// edit's own `warnings`. Asked by every edit that can change the answer --
+// the op's own, and its tool's -- so the problem is said where it is made,
+// not first when somebody posts the file. A disabled op cuts nothing and is
+// asked again when it is enabled.
+json ReachWarnings(const cam::Setup& setup, const cam::Operation& op) {
+  json out = json::array();
+  for (const cam::Reach& r : cam::ReachChecks(setup, op)) {
+    if (r.level == cam::Reach::Level::Collides)
+      throw std::runtime_error(r.text);
+    out.push_back(r.text);
+  }
+  return out;
 }
 
 json OpJson(const cam::Operation& op) {
@@ -1554,16 +1595,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "`id` (the setup) and `tool` are SIBLING parameters: "
             "set_cam_setup {id: <setup>, tool: {number: 2, ...}}");
       const int number = tj.at("number").get<int>();
-      cam::Tool* tool = nullptr;
+      cam::Tool* existing = nullptr;
       for (cam::Tool& t : setup.tools)
         if (t.number == number)
-          tool = &t;
-      if (tool == nullptr) {
-        cam::Tool fresh;
-        fresh.number = number;
-        setup.tools.push_back(fresh);
-        tool = &setup.tools.back();
-      }
+          existing = &t;
+      // Edited as a copy and committed only once every check below has
+      // passed: a refused edit leaves the tool, and the setup, as they were.
+      cam::Tool next;
+      next.number = number;
+      if (existing != nullptr)
+        next = *existing;
+      cam::Tool* tool = &next;
       tool->name = tj.value("name", tool->name);
       tool->diameter = tj.value("diameter", tool->diameter);
       if (tj.contains("tool_type"))
@@ -1578,6 +1620,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax);
       tool->overallLength = tj.value("overall_length", tool->overallLength);
       tool->collarDiameter = tj.value("collar_diameter", tool->collarDiameter);
+      tool->shankDiameter = tj.value("shank_diameter", tool->shankDiameter);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
       if (tool->fluteLength <= 0.0)
@@ -1606,6 +1649,35 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         throw std::runtime_error(
             "overall_length is measured from the TIP and includes the "
             "flutes, so it cannot be shorter than flute_length");
+      if (tool->shankDiameter < 0.0)
+        throw std::runtime_error(
+            "shank_diameter cannot be negative; 0 (or leaving it out) means "
+            "the tool is the cutter's width all the way up");
+      if (tool->shankDiameter > 0.0 && tool->collarDiameter > 0.0 &&
+          tool->shankDiameter > tool->collarDiameter)
+        throw std::runtime_error(
+            "shank_diameter is wider than collar_diameter, and the shank "
+            "sits INSIDE the collet nut -- one of the two is a typo");
+      // Every op this tool cuts, against the tool as it is about to be: a
+      // shorter flute or a wider shank can make an existing op uncuttable,
+      // and that is refused here, naming the op, rather than found at post.
+      json warnings = json::array();
+      for (const cam::Operation& op : setup.operations) {
+        if (op.toolNumber != number && op.finishTool != number)
+          continue;
+        cam::Setup trial;
+        trial.tools = {next};
+        for (const json& w : ReachWarnings(trial, op))
+          warnings.push_back(w);
+      }
+      if (existing != nullptr)
+        *existing = next;
+      else
+        setup.tools.push_back(next);
+      json out{{"id", setup.id}};
+      if (!warnings.empty())
+        out["warnings"] = warnings;
+      return out;
     }
     return json{{"id", setup.id}};
   }
@@ -1677,12 +1749,19 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (op.name.empty())
       op.name = std::string(TypeName(op.type)) + " " +
                 std::to_string(setup.operations.size() + 1);
-    if (m == "cam_derive_op")
-      return json{{"derived", derive}, {"operation", OpJson(op)}};
+    const json warnings = ReachWarnings(setup, op);
+    if (m == "cam_derive_op") {
+      json out{{"derived", derive}, {"operation", OpJson(op)}};
+      if (!warnings.empty())
+        out["warnings"] = warnings;
+      return out;
+    }
     op.id = job->AllocateId();
     setup.operations.push_back(op);
     json out = OpJson(op);
     out["derived"] = derive;
+    if (!warnings.empty())
+      out["warnings"] = warnings;
     return out;
   }
 
@@ -1695,8 +1774,15 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");
-    ApplyOpFields(state, *setup, *op, p);
-    return json{{"id", op->id}};
+    // On a copy, so a refusal leaves the op as it was.
+    cam::Operation next = *op;
+    ApplyOpFields(state, *setup, next, p);
+    const json warnings = ReachWarnings(*setup, next);
+    *op = next;
+    json out{{"id", op->id}};
+    if (!warnings.empty())
+      out["warnings"] = warnings;
+    return out;
   }
 
   if (m == "move_cam_op") {
@@ -1801,76 +1887,98 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         rj["end_face"] = r.endFace;
       biggest.push_back(std::move(rj));
     }
-    json out =
-        json{{"max_gouge_mm", v.maxGouge},
-             {"max_leftover_mm", v.maxLeftover},
-             // Past the bottom of the stock: the spoilboard, not the part.
-             // Separate from the gouge because every through cut does it
-             // on purpose, and conflating them called correct G-code scrap.
-             {"below_stock_mm", v.belowStock},
-             {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
-             {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
-             {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
-             // How MUCH is left over, and in how many places: corner radii
-             // a cutter cannot reach are several tiny regions, a forgotten
-             // operation is one big one, and the deepest-point number
-             // alone reads the same for both.
-             {"leftover_area_mm2", v.leftoverArea},
-             {"leftover_regions", v.leftoverRegions},
-             {"leftover_biggest", biggest},
-             {"rapids_through_stock", v.rapidsThroughStock},
-             {"worst_rapid_depth_mm", v.worstRapidDepth},
-             {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
-             {"worst_rapid_line", v.worstRapidLine},
-             // Which STOCK MODEL answered. True means the file's A moved, so
-             // it was checked against a rotary blank r(x, theta) and the
-             // second number in every `*_at` pair is an ANGLE IN DEGREES,
-             // not a Y. A pair of doubles cannot say that and a caller
-             // reading an angle as a coordinate would be quietly wrong.
-             {"rotary", v.rotary},
-             {"file_errors", v.fileErrors},
-             {"first_file_error", v.firstFileError},
-             {"file_warnings", v.fileWarnings},
-             {"first_file_warning", v.firstFileWarning},
-             {"holder_collisions", v.holderCollisions},
-             {"worst_holder_depth_mm", v.worstHolderDepth},
-             {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
-             {"worst_holder_line", v.worstHolderLine},
-             // The cutter or the holder into a fixture (a clamp, a vise):
-             // docs/cam/simulation.md#fixture-collisions.
-             {"fixture_collisions", v.fixtureCollisions},
-             {"fixtures_checked", v.fixturesChecked},
-             {"worst_fixture_depth_mm", v.worstFixtureDepth},
-             {"worst_fixture_at", {v.worstFixtureAt.x, v.worstFixtureAt.y}},
-             {"worst_fixture_line", v.worstFixtureLine},
-             {"worst_fixture", v.worstFixtureName},
-             {"worst_fixture_by", v.worstFixtureByHolder ? "holder" : "cutter"},
-             {"not_checked", notChecked},
-             // Moves the machine cannot reach. A verdict field nothing
-             // reports is the same silence this check exists to end.
-             {"outside_travel", v.outsideTravel},
-             {"outside_travel_axis", std::string(1, v.outsideAxis)},
-             {"outside_travel_overshoot_mm", v.worstOvershoot},
-             {"first_outside_line", v.firstOutsideLine},
-             {"z_span_over_mm", v.zSpanOver},
-             {"z_deepest_line", v.zDeepestLine},
-             {"z_highest_line", v.zHighestLine},
-             {"first_bad_line", v.firstBadLine},
-             {"resolution_mm", res},
-             {"cells", v.cells},
-             {"says", says},
-             // Tabs the program left ON PURPOSE. Reported rather than
-             // silently subtracted: four is a job to sign off, none where
-             // four were asked for is a job to look at.
-             {"tabs", v.tabs},
-             {"reliefs", v.reliefs},
-             // Two questions. `ok` is the one that is never in doubt:
-             // nothing here scraps the part or breaks the tool. `complete`
-             // is softer — a height map cannot watch a slug fall out of a
-             // through cut, so a correct job can still report material
-             // left over. Tabs no longer count against it.
-             {"ok", v.Safe(tol)},
-             {"complete", v.Complete(tol)}};
+    json out = json{
+        {"max_gouge_mm", v.maxGouge},
+        {"max_leftover_mm", v.maxLeftover},
+        // Past the bottom of the stock: the spoilboard, not the part.
+        // Separate from the gouge because every through cut does it
+        // on purpose, and conflating them called correct G-code scrap.
+        {"below_stock_mm", v.belowStock},
+        {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
+        {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
+        {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
+        // How MUCH is left over, and in how many places: corner radii
+        // a cutter cannot reach are several tiny regions, a forgotten
+        // operation is one big one, and the deepest-point number
+        // alone reads the same for both.
+        {"leftover_area_mm2", v.leftoverArea},
+        {"leftover_regions", v.leftoverRegions},
+        {"leftover_biggest", biggest},
+        {"rapids_through_stock", v.rapidsThroughStock},
+        {"worst_rapid_depth_mm", v.worstRapidDepth},
+        {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
+        {"worst_rapid_line", v.worstRapidLine},
+        // Which STOCK MODEL answered. True means the file's A moved, so
+        // it was checked against a rotary blank r(x, theta) and the
+        // second number in every `*_at` pair is an ANGLE IN DEGREES,
+        // not a Y. A pair of doubles cannot say that and a caller
+        // reading an angle as a coordinate would be quietly wrong.
+        {"rotary", v.rotary},
+        {"file_errors", v.fileErrors},
+        {"first_file_error", v.firstFileError},
+        {"file_warnings", v.fileWarnings},
+        {"first_file_warning", v.firstFileWarning},
+        // Cutting that bit deeper than its op's passes take
+        // (docs/cam/simulation.md#bite), as a full-width equivalent.
+        {"over_bites", v.overBites},
+        {"worst_bite_mm", v.worstBite},
+        {"worst_bite_allowed_mm", v.worstBiteAllowed},
+        {"worst_bite_at", {v.worstBiteAt.x, v.worstBiteAt.y}},
+        {"worst_bite_line", v.worstBiteLine},
+        {"worst_bite_op", v.worstBiteOp},
+        {"bite_by_op",
+         [&] {
+           json a = json::array();
+           for (const auto& [op, b] : v.biteByOp)
+             a.push_back(
+                 {{"op", op}, {"max_mm", b.first}, {"allowed_mm", b.second}});
+           return a;
+         }()},
+        // A shank wider than the cutter driven into a wall:
+        // docs/cam/simulation.md#shank-collisions.
+        {"shank_collisions", v.shankCollisions},
+        {"worst_shank_depth_mm", v.worstShankDepth},
+        {"worst_shank_at", {v.worstShankAt.x, v.worstShankAt.y}},
+        {"worst_shank_line", v.worstShankLine},
+        {"holder_collisions", v.holderCollisions},
+        {"worst_holder_depth_mm", v.worstHolderDepth},
+        {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
+        {"worst_holder_line", v.worstHolderLine},
+        // The cutter or the holder into a fixture (a clamp, a vise):
+        // docs/cam/simulation.md#fixture-collisions.
+        {"fixture_collisions", v.fixtureCollisions},
+        {"fixtures_checked", v.fixturesChecked},
+        {"worst_fixture_depth_mm", v.worstFixtureDepth},
+        {"worst_fixture_at", {v.worstFixtureAt.x, v.worstFixtureAt.y}},
+        {"worst_fixture_line", v.worstFixtureLine},
+        {"worst_fixture", v.worstFixtureName},
+        {"worst_fixture_by", v.worstFixtureByHolder ? "holder" : "cutter"},
+        {"not_checked", notChecked},
+        // Moves the machine cannot reach. A verdict field nothing
+        // reports is the same silence this check exists to end.
+        {"outside_travel", v.outsideTravel},
+        {"outside_travel_axis", std::string(1, v.outsideAxis)},
+        {"outside_travel_overshoot_mm", v.worstOvershoot},
+        {"first_outside_line", v.firstOutsideLine},
+        {"z_span_over_mm", v.zSpanOver},
+        {"z_deepest_line", v.zDeepestLine},
+        {"z_highest_line", v.zHighestLine},
+        {"first_bad_line", v.firstBadLine},
+        {"resolution_mm", res},
+        {"cells", v.cells},
+        {"says", says},
+        // Tabs the program left ON PURPOSE. Reported rather than
+        // silently subtracted: four is a job to sign off, none where
+        // four were asked for is a job to look at.
+        {"tabs", v.tabs},
+        {"reliefs", v.reliefs},
+        // Two questions. `ok` is the one that is never in doubt:
+        // nothing here scraps the part or breaks the tool. `complete`
+        // is softer — a height map cannot watch a slug fall out of a
+        // through cut, so a correct job can still report material
+        // left over. Tabs no longer count against it.
+        {"ok", v.Safe(tol)},
+        {"complete", v.Complete(tol)}};
     // The typical scallop, where the worst cell is an end face no rotary
     // pass can reach. Rotary only: the height map does not compute it, and
     // a zero here would read as a measurement.
@@ -1897,7 +2005,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                                " cells; anything narrower than a cell is "
                                "below what this can see";
       receipt::Claim safe("the program does not cut into the part or the "
-                          "machine",
+                          "machine, and asks no more of the tool than its "
+                          "passes and its reach allow",
                           oracle,
                           v.Safe(tol) ? receipt::Verdict::Pass
                                       : receipt::Verdict::Fail);

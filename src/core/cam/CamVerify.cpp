@@ -67,8 +67,9 @@ HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max, double res) {
   return map;
 }
 
-void CarveSweep(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
-                HeightMap& stock) {
+double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
+                  const Tool* tool, HeightMap& stock) {
+  double removed = 0.0;
   const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
 
   // Cells the swept tool can touch, from the segment's bounding box grown
@@ -111,10 +112,13 @@ void CarveSweep(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
           xyStill ? std::min(from.z, to.z) : from.z + (to.z - from.z) * t;
       const double surface =
           toolZ + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-      if (stock.At(i, j) > surface)
+      if (const double top = stock.At(i, j); top > surface) {
+        removed += top - surface;
         stock.Set(i, j, static_cast<float>(surface));
+      }
     }
   }
+  return removed * stock.res * stock.res;
 }
 
 void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
@@ -425,6 +429,10 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   glm::dvec2 worstRapidAt(0.0);
   int worstRapidLine = 0;
   int firstBadLine = 0;
+  int shankCollisions = 0;
+  double worstShankDepth = 0.0;
+  glm::dvec2 worstShankAt(0.0);
+  int worstShankLine = 0;
   int holderCollisions = 0;
   double worstHolderDepth = 0.0;
   glm::dvec2 worstHolderAt(0.0);
@@ -443,6 +451,72 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   int worstFixtureOwner = -1;
   bool worstFixtureByHolder = false;
   std::vector<uint8_t> touched(machined.z.size(), 0);
+  // The bite (Verdict::overBites). Measured over a WINDOW of cutting, not per
+  // move: an arc posted as eight 0.6 mm chords removes a crescent per chord
+  // that the grid quantises to within a cell, and volume over length on one
+  // of them is mostly that quantisation. A couple of millimetres of travel
+  // averages it out and is still far shorter than any cut worth reporting.
+  int overBites = 0;
+  double worstBite = 0.0, worstBiteAllowed = 0.0;
+  glm::dvec2 worstBiteAt(0.0);
+  int worstBiteLine = 0;
+  uint64_t worstBiteOp = 0;
+  std::map<uint64_t, std::pair<double, double>> biteByOp;
+  // What an op's passes take, or 0 for an op this does not check: drilling
+  // and edge breaks plunge or skim by design, and the surfacing and rotary
+  // passes have no stepdown to measure against.
+  const auto allowedBite = [&](uint64_t opId) {
+    const Operation* op = nullptr;
+    for (const Operation& o : setup.operations)
+      if (o.id == opId)
+        op = &o;
+    if (op == nullptr)
+      return 0.0;
+    switch (op->type) {
+    case OpType::Profile:
+    case OpType::Pocket:
+    case OpType::Adaptive:
+    case OpType::Face:
+      break;
+    default:
+      return 0.0;
+    }
+    const double pass =
+        op->stepdown > 0.0 ? op->stepdown : op->topZ - op->bottomZ;
+    const double tab = op->tabCount > 0 ? op->tabHeight : 0.0;
+    return std::max(pass, tab);
+  };
+  double winVol = 0.0, winLen = 0.0;
+  uint64_t winOp = 0;
+  int winTool = 0;
+  double winAllowed = 0.0;
+  const auto judgeBite = [&](double bite, const glm::dvec2& at, int line,
+                             uint64_t opId, double allowed) {
+    auto& [worst, limit] = biteByOp[opId];
+    worst = std::max(worst, bite);
+    limit = allowed;
+    // A quarter over, plus the grid: the window's two ends are each good to
+    // a cell, and a stepdown is a request the ramp meets only on average.
+    if (bite <= allowed * 1.25 + 0.2)
+      return;
+    overBites++;
+    if (bite > worstBite) {
+      worstBite = bite;
+      worstBiteAllowed = allowed;
+      worstBiteAt = at;
+      worstBiteLine = line;
+      worstBiteOp = opId;
+    }
+  };
+  glm::dvec2 winAt(0.0);
+  int winLine = 0;
+  double winDiameter = 0.0;
+  const auto flushBite = [&] {
+    if (winAllowed > 0.0 && winLen > 0.5 && winDiameter > 0.0)
+      judgeBite(winVol / (winDiameter * winLen), winAt, winLine, winOp,
+                winAllowed);
+    winVol = winLen = 0.0;
+  };
   {
     HeightMap probe = machined;
     glm::dvec3 from(0.0);
@@ -597,6 +671,70 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
             }
           }
         }();
+      // A shank WIDER than the cutter, on every move: material within its
+      // radius but outside the cutter's, standing above the top of the
+      // flutes, is a wall the shank is being driven into
+      // (docs/cam/simulation.md#shank-collisions). Inside the cutter's own
+      // radius the tool is the tool, as for the holder: a cut deeper than
+      // the flutes is stated at the op (cam::ReachCheck), in one vocabulary.
+      if (const Tool* tool = setup.FindTool(m.tool);
+          tool != nullptr && tool->shankDiameter > tool->diameter + 1e-6)
+        [&] {
+          const double rc = tool->diameter * 0.5;
+          const double rs = tool->shankDiameter * 0.5;
+          const double zLow = std::min(from.z, m.to.z);
+          // Above the uncut block, nothing can stand over the flutes.
+          if (zLow + tool->fluteLength >= hi.z - kGrazeTolerance)
+            return;
+          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+          const int i0 = std::max(
+              0, static_cast<int>((std::min(a.x, b.x) - rs - probe.x0) /
+                                  probe.res));
+          const int i1 =
+              std::min(probe.nx - 1,
+                       static_cast<int>((std::max(a.x, b.x) + rs - probe.x0) /
+                                        probe.res) +
+                           1);
+          const int j0 = std::max(
+              0, static_cast<int>((std::min(a.y, b.y) - rs - probe.y0) /
+                                  probe.res));
+          const int j1 =
+              std::min(probe.ny - 1,
+                       static_cast<int>((std::max(a.y, b.y) + rs - probe.y0) /
+                                        probe.res) +
+                           1);
+          bool hit = false;
+          double deepest = 0.0;
+          glm::dvec2 deepestAt(0.0);
+          for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+              double t = 0.0;
+              const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
+              const double d = DistToSegment(c, a, b, t);
+              // A cell's worth off the cutter's edge: the wall the cutter
+              // itself leaves stands exactly at its radius, and quantised to
+              // the grid half of it lands just outside.
+              if (d <= rc + probe.res || d > rs)
+                continue;
+              const double into = probe.At(i, j) - (zLow + tool->fluteLength);
+              if (into <= kGrazeTolerance)
+                continue;
+              hit = true;
+              if (into > deepest) {
+                deepest = into;
+                deepestAt = c;
+              }
+            }
+          }
+          if (hit) {
+            shankCollisions++;
+            if (deepest > worstShankDepth) {
+              worstShankDepth = deepest;
+              worstShankAt = deepestAt;
+              worstShankLine = m.line;
+            }
+          }
+        }();
       // Fixtures, on EVERY move, like the holder: a cutter fed into a clamp
       // breaks just as a rapid through one does. The cutter is its TipHeight
       // shape; beyond its radius, out to the collar's, it is the collar's
@@ -677,11 +815,103 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
         }();
       // Apply every move (cuts remove material; rapids over air do nothing).
       if (!m.rapid) {
-        CarveSweep(from, m.to, setup.FindTool(m.tool), probe);
+        const Tool* tool = setup.FindTool(m.tool);
+        const double allowed = allowedBite(m.op);
+        const double dia = tool != nullptr ? tool->diameter : 2.0;
+        const double len = glm::length(glm::dvec2(m.to - from));
+        // Steep enough to be a plunge. Not `len == 0`: the arc before a tab
+        // exit is re-expanded to chords here, and its last chord can end a
+        // few microns off the file's own point -- so the plunge off the tab
+        // read as a lateral move of no length carrying a whole disc of
+        // volume. The ramp is 3 degrees; this is anything past about 63.
+        const bool plunge = len < 1e-3 || from.z - m.to.z > 2.0 * len;
+        // A plunge's bite is the mean depth under the cutter's face, read
+        // BEFORE it cuts -- and without the face's outermost cell. An arc is
+        // simulated as chords, whose sagitta leaves a ring of cells at the
+        // kerf's edge standing at full stock height; a lateral stretch
+        // brushes that ring along its length, but a plunge averages over the
+        // disc, and a tab exit that took 1.5 mm read as 3.9.
+        double plungeBite = 0.0;
+        if (allowed > 0.0 && plunge) {
+          const double inner = dia * 0.5 - 1.5 * probe.res;
+          const double zLow = std::min(from.z, m.to.z);
+          double sum = 0.0;
+          int cells = 0;
+          const int i0 = std::max(
+              0, static_cast<int>((m.to.x - inner - probe.x0) / probe.res));
+          const int i1 = std::min(
+              probe.nx - 1,
+              static_cast<int>((m.to.x + inner - probe.x0) / probe.res) + 1);
+          const int j0 = std::max(
+              0, static_cast<int>((m.to.y - inner - probe.y0) / probe.res));
+          const int j1 = std::min(
+              probe.ny - 1,
+              static_cast<int>((m.to.y + inner - probe.y0) / probe.res) + 1);
+          for (int j = j0; j <= j1; j++)
+            for (int i = i0; i <= i1; i++) {
+              const double d = glm::length(
+                  glm::dvec2(probe.CellX(i) - m.to.x, probe.CellY(j) - m.to.y));
+              if (inner <= 0.0 || d > inner)
+                continue;
+              const double surface =
+                  zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+              sum += std::max(0.0, probe.At(i, j) - surface);
+              cells++;
+            }
+          plungeBite = cells > 0 ? sum / cells : 0.0;
+        }
+        // Judged in pieces no longer than the window: one 50 mm move that
+        // starts and ends in air would otherwise average its bite over the
+        // air as well. Carving the pieces removes exactly what carving the
+        // whole move would.
+        const double window = std::max(2.0, dia * 0.5);
+        const int pieces = allowed > 0.0 && !plunge && len > window
+                               ? static_cast<int>(std::ceil(len / window))
+                               : 1;
+        double removed = 0.0;
+        for (int k = 1; k <= pieces; k++) {
+          const glm::dvec3 a = from + (m.to - from) * ((k - 1.0) / pieces);
+          const glm::dvec3 b = from + (m.to - from) * (k / double(pieces));
+          const double took = CarveSweep(a, b, tool, probe);
+          if (pieces > 1) {
+            flushBite();
+            winOp = m.op;
+            winTool = m.tool;
+            winAllowed = allowed;
+            winDiameter = dia;
+            winVol = took;
+            winLen = len / pieces;
+            winAt = glm::dvec2(b);
+            winLine = m.line;
+            flushBite();
+          }
+          removed += took;
+        }
         MarkSwept(from, m, setup, probe, touched);
+        if (m.op != winOp || m.tool != winTool)
+          flushBite();
+        winOp = m.op;
+        winTool = m.tool;
+        winAllowed = allowed;
+        winDiameter = dia;
+        if (allowed > 0.0 && plunge) {
+          // A plunge, measured above; the window it interrupts carries on
+          // after it.
+          judgeBite(plungeBite, glm::dvec2(m.to), m.line, m.op, allowed);
+        } else if (allowed > 0.0 && pieces == 1) {
+          winVol += removed;
+          winLen += len;
+          winAt = glm::dvec2(m.to);
+          winLine = m.line;
+          if (winLen >= window)
+            flushBite();
+        }
+      } else {
+        flushBite();
       }
       from = m.to;
     }
+    flushBite();
     machined = probe;
   }
 
@@ -716,6 +946,17 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
   if (!program.warnings.empty())
     out.verdict.firstFileWarning = program.warnings.front();
+  out.verdict.overBites = overBites;
+  out.verdict.worstBite = worstBite;
+  out.verdict.worstBiteAllowed = worstBiteAllowed;
+  out.verdict.worstBiteAt = worstBiteAt;
+  out.verdict.worstBiteLine = worstBiteLine;
+  out.verdict.worstBiteOp = worstBiteOp;
+  out.verdict.biteByOp = std::move(biteByOp);
+  out.verdict.shankCollisions = shankCollisions;
+  out.verdict.worstShankDepth = worstShankDepth;
+  out.verdict.worstShankAt = worstShankAt;
+  out.verdict.worstShankLine = worstShankLine;
   out.verdict.holderCollisions = holderCollisions;
   out.verdict.worstHolderDepth = worstHolderDepth;
   out.verdict.worstHolderAt = worstHolderAt;
@@ -986,6 +1227,30 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.holderCollisions, v.holderCollisions == 1 ? "" : "s",
                   v.worstHolderDepth, v.worstHolderAt.x, v.worstHolderAt.y,
                   v.worstHolderLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.shankCollisions > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d move%s drive the SHANK into a wall, worst %.2f mm of "
+                  "material above the flutes at X%.1f Y%.1f (line %d). The "
+                  "shank is wider than the cut, so below the flutes it cannot "
+                  "follow the cutter down -- use a cutter with longer flutes, "
+                  "or take the depth from both sides.",
+                  v.shankCollisions, v.shankCollisions == 1 ? "" : "s",
+                  v.worstShankDepth, v.worstShankAt.x, v.worstShankAt.y,
+                  v.worstShankLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.overBites > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d stretch%s of cutting bite deeper than the operation's "
+                  "passes, worst op %llu at X%.1f Y%.1f (line %d): as deep as "
+                  "a full-width cut %.1f mm deep, where its passes take %.1f. "
+                  "That is the load that breaks cutters and shifts the work.",
+                  v.overBites, v.overBites == 1 ? "" : "es",
+                  static_cast<unsigned long long>(v.worstBiteOp),
+                  v.worstBiteAt.x, v.worstBiteAt.y, v.worstBiteLine,
+                  v.worstBite, v.worstBiteAllowed);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
   if (v.fixtureCollisions > 0) {

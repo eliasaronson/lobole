@@ -253,6 +253,42 @@ std::vector<glm::dvec2> StartNearest(const std::vector<glm::dvec2>& pts,
   return out;
 }
 
+std::vector<glm::dvec2> StartAtPoint(const std::vector<glm::dvec2>& pts,
+                                     const glm::dvec2& at) {
+  if (pts.size() < 2)
+    return pts;
+  size_t best = 0;
+  double bestD = std::numeric_limits<double>::max(), bestT = 0.0;
+  for (size_t i = 0; i < pts.size(); i++) {
+    const glm::dvec2 e = pts[(i + 1) % pts.size()] - pts[i];
+    const double len2 = glm::dot(e, e);
+    const double t = len2 > 1e-18
+                         ? std::clamp(glm::dot(at - pts[i], e) / len2, 0.0, 1.0)
+                         : 0.0;
+    const double d = glm::length(pts[i] + e * t - at);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+      bestT = t;
+    }
+  }
+  const glm::dvec2& a = pts[best];
+  const glm::dvec2& b = pts[(best + 1) % pts.size()];
+  const glm::dvec2 p = a + (b - a) * bestT;
+  std::vector<glm::dvec2> out;
+  out.reserve(pts.size() + 1);
+  out.push_back(p);
+  // The rest of the loop from the far end of that edge round to its at
+  // end. An end that IS the point is not repeated: a zero-length edge has no
+  // direction for the lead-out to be tangent to.
+  for (size_t k = 1; k <= pts.size(); k++) {
+    const glm::dvec2& q = pts[(best + k) % pts.size()];
+    if (glm::length(q - p) > 1e-9 && glm::length(q - out.back()) > 1e-9)
+      out.push_back(q);
+  }
+  return out;
+}
+
 // A helix down to depth, for a loop too short to hold the ramp
 // (docs/cam/operations.md#depth-passes-and-entries). Descending on the toolpath
 // itself is right when the path is long; on a small pocket that lap is short
@@ -317,7 +353,8 @@ void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
 // pass that then restarts at pts[0] has to lift, fly back ACROSS the opening
 // at safe height, and drop again, once per pass. Starting where the last one
 // stopped puts the lift and the drop at the same point instead, which is no
-// travel at all.
+// travel at all. A lead-out OVERRIDES this: the lap ends at pts[0], so the
+// arcs of successive passes stack (see the header).
 // `leadOut` > 0: leave the wall on a tangent arc of that radius (R5) before
 // retracting, curving AWAY from the material -- `materialInside` says which
 // side of the loop that is. A tool that stops against the wall and lifts
@@ -354,6 +391,24 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   const auto wrapS = [&](double v) {
     return std::fmod(std::fmod(v, perimeter) + perimeter, perimeter);
   };
+  const double from = std::max(entryZ, z);
+  const double descend = from - z;
+  double rampLen =
+      descend > 1e-9 ? descend / std::tan(glm::radians(kRampAngleDeg)) : 0.0;
+  // A loop shorter than the ramp would spiral forever: descend over one lap
+  // instead, steeper than asked but bounded and still not a plunge.
+  rampLen = std::min(rampLen, perimeter);
+  // A lap that ends on a lead-out ends at pts[0], on every pass. The arc
+  // leaves the wall into the WASTE side -- an opening's slug, the stock round
+  // an outside profile -- which nothing has cut. Chained from where the last
+  // lap stopped, each pass's arc landed on a new spot and slotted through
+  // everything from the stock top down to that pass's depth: on the
+  // smart-speaker baffle a 6 mm cutter took 16 mm of solid MDF at the cutting
+  // feed and moved the board. Stacked, each arc cuts only the stepdown under
+  // the one before it. The ramp starts `rampLen` early, in the kerf the
+  // previous pass already cut, so this costs a short rapid and no path.
+  if (leadOut > 1e-9)
+    startS = -rampLen;
   startS = wrapS(startS);
   const auto at = [&](const std::vector<glm::dvec2>& poly, double arc) {
     double m = std::fmod(std::fmod(arc, perimeter) + perimeter, perimeter);
@@ -382,16 +437,8 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     Emit(tp, Move::Kind::Rapid,
          {tp.moves.back().to.x, tp.moves.back().to.y, safeZ}, 0.0);
   Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
-  const double from = std::max(entryZ, z);
   Emit(tp, Move::Kind::Rapid,
        {begin.x, begin.y, RapidFloor(from, stockTop, safeZ)}, 0.0);
-
-  const double descend = from - z;
-  double rampLen =
-      descend > 1e-9 ? descend / std::tan(glm::radians(kRampAngleDeg)) : 0.0;
-  // A loop shorter than the ramp would spiral forever: descend over one lap
-  // instead, steeper than asked but bounded and still not a plunge.
-  rampLen = std::min(rampLen, perimeter);
 
   // Tabs, as arc-length intervals measured from pts[0]. The DESCENT has to
   // know about them as much as the lap does: it takes most of a lap to get

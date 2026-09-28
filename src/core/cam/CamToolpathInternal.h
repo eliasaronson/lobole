@@ -117,6 +117,13 @@ constexpr double kRampAngleDeg = 3.0;
 std::vector<glm::dvec2> StartNearest(const std::vector<glm::dvec2>& pts,
                                      const glm::dvec2& from);
 
+// The same loop, starting at the point on it nearest `at` (inserted as a
+// vertex when it falls mid-edge). Not the nearest VERTEX: a lead-out held at
+// the middle of a wall has to stay there on every pass, and an offset polygon
+// has no vertex there to find.
+std::vector<glm::dvec2> StartAtPoint(const std::vector<glm::dvec2>& pts,
+                                     const glm::dvec2& at);
+
 // steep, so instead the tool spirals down inside the region and the rings
 // are then cut from the middle outwards.
 //
@@ -155,7 +162,10 @@ enum class Entry { Ramp, AtDepth };
 // `leadOut` > 0: leave the wall on a tangent arc of that radius (R5) before
 // retracting, curving AWAY from the material -- `materialInside` says which
 // side of the loop that is. A tool that stops against the wall and lifts
-// leaves a mark where it dwelt; one that arcs off does not.
+// leaves a mark where it dwelt; one that arcs off does not. A lead-out
+// OVERRIDES `startS`: the lap ends at pts[0], so the arcs of successive
+// passes stack and each cuts one stepdown of the waste, not the whole depth
+// from the stock top (docs/cam/operations.md#profile).
 // `tabsOut`: where the tabs of THIS lap ended up, appended. Only the caller
 // knows which pass leaves them standing, and only this function knows where
 // along the contour they fall, so the answer is handed back rather than

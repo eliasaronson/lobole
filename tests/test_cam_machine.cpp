@@ -1261,3 +1261,71 @@ TEST_CASE("cam: a grbl file states its own tool numbers", "[cam][post]") {
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam reach: a shank wider than the cut collides, a necked one "
+          "reaches past its flutes",
+          "[cam][feeds]") {
+  // A 3 mm cutter with 12 mm of flute, 15 mm deep. What happens past the
+  // flutes is decided by what is above them (docs/cam/setup.md#reach).
+  cam::Tool t;
+  t.number = 1;
+  t.diameter = 3.0;
+  t.flutes = 2;
+  t.fluteLength = 12.0;
+  cam::Operation op;
+  op.id = 1;
+  op.name = "slot";
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 5.0;
+
+  // Nobody said, and the cutter's width all the way up: it rubs, as before.
+  cam::Reach r = cam::ReachCheck(op, t);
+  CHECK(r.level == cam::Reach::Level::Rubs);
+  CHECK_THAT(r.depth, WithinAbs(15.0, 1e-9));
+  CHECK(r.text.find("cut by the shank") != std::string::npos);
+  t.shankDiameter = 3.0;
+  CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Rubs);
+
+  // A 6 mm shank on it: driven into the wall, and the words say so.
+  t.shankDiameter = 6.0;
+  r = cam::ReachCheck(op, t);
+  CHECK(r.level == cam::Reach::Level::Collides);
+  INFO(r.text);
+  CHECK(r.text.find("6.0 mm across") != std::string::npos);
+  CHECK(r.text.find("12.0 mm of flute") != std::string::npos);
+  CHECK(r.text.find("at least 15.0") != std::string::npos);
+
+  // Necked: made to reach past the flutes; the holder check owns the rest.
+  t.shankDiameter = 2.5;
+  CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Fine);
+
+  // Within the flutes, a wide shank changes nothing: 10 mm is fine, 11 mm
+  // leaves less than the collet's 1.5 mm and is Tight -- never refused.
+  t.shankDiameter = 6.0;
+  op.bottomZ = 10.0;
+  CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Fine);
+  op.bottomZ = 9.0;
+  CHECK(cam::ReachCheck(op, t).level == cam::Reach::Level::Tight);
+
+  // Through a setup: named by the op, and silent for a disabled one.
+  op.bottomZ = 5.0;
+  cam::Setup setup = BasicSetup();
+  setup.tools = {t};
+  setup.operations = {op};
+  auto all = cam::ReachChecks(setup, op);
+  REQUIRE(all.size() == 1);
+  CHECK(all[0].level == cam::Reach::Level::Collides);
+  CHECK(all[0].text.rfind("operation \"slot\": ", 0) == 0);
+  op.enabled = false;
+  CHECK(cam::ReachChecks(setup, op).empty());
+
+  // The feeds report tells the same story for the file.
+  auto doc = BlockDoc();
+  const cam::FeedReport feeds = cam::FeedsFor(setup, doc->GetBodies());
+  bool said = false;
+  for (const cam::Finding& f : feeds.findings)
+    said = said || f.text.find("driven into it") != std::string::npos;
+  CHECK(said);
+}

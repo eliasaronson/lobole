@@ -87,4 +87,30 @@ struct FeedReport {
 [[nodiscard]] FeedReport FeedsFor(const Setup& setup,
                                   const std::vector<Body>& bodies);
 
+// Can this tool reach this operation's depth (docs/cam/setup.md#reach)?
+// A fact about the op's depth and the tool alone, so it is asked when the op
+// is MADE or edited, and when its tool is -- not first when the file is
+// posted. `Collides` is refused by every edit that would create it: a shank
+// wider than the cut, driven below the flutes into a wall, is a broken tool.
+// The rest are said and allowed.
+struct Reach {
+  enum class Level {
+    Fine,
+    Tight,    // within the flutes, with less to spare than the collet needs
+    Rubs,     // past the flutes on a shank no wider than the cut
+    Collides, // past the flutes on a shank WIDER than the cut
+  };
+  Level level = Level::Fine;
+  double depth = 0.0; // mm the op cuts, top to bottom
+  std::string text;   // empty when Fine
+};
+[[nodiscard]] Reach ReachCheck(const Operation& op, const Tool& t);
+// ReachCheck for every tool an op cuts with -- its own and its finishing
+// tool -- in the setup's current tools, worded with the op's name. Nothing
+// for a disabled op, which cuts nothing and is asked again when enabled.
+// What the RPCs and the panel both ask, so they cannot disagree about
+// which edit is refused.
+[[nodiscard]] std::vector<Reach> ReachChecks(const Setup& setup,
+                                             const Operation& op);
+
 } // namespace cam

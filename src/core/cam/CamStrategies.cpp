@@ -352,8 +352,59 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // Why nothing came out, if nothing does — see the same field in the pocket.
   std::string tooTight;
   // Where each loop's previous depth pass finished, so the next one carries on
-  // from there instead of flying back across the opening at safe height.
+  // from there instead of flying back across the opening at safe height --
+  // unless it has a lead-out, which always ends at `leadAt` (below) and so
+  // starts its ramp from there, whatever this says.
   std::vector<double> resume;
+  // Where each loop's lead-out left the wall. A lap with a lead-out ends at
+  // its loop's pts[0] (EmitLoop), so the arcs stack only if pts[0] stays put
+  // from pass to pass -- and a wall re-resolved at each depth is a new
+  // polygon, free to start anywhere. Each pass is turned to start nearest
+  // the last one's lead point.
+  std::vector<std::optional<glm::dvec2>> leadAt;
+  // Which loop each seed names at each depth. The nearest one, unless the
+  // nearest is more than a tool radius from the pick: then the picked wall is
+  // not at this depth at all, and what is nearest is some OTHER wall. An
+  // opening under a flange recess is the case -- above the recess floor the
+  // projection holds only the recess's wall, so the top pass of the opening
+  // went round the recess (in air: the pocket had cleared it) and the next
+  // pass took the opening's first two stepdowns in one bite. Such a depth
+  // cuts the picked wall's loop from the nearest depth that has it, the one
+  // below first: the column above an opening is waste to the stock top.
+  std::vector<std::vector<const Loop*>> seedLoop(
+      passes.size(), std::vector<const Loop*>(seeds.size(), nullptr));
+  for (size_t k = 0; k < seeds.size(); k++) {
+    std::vector<const Loop*> nearestAt(passes.size(), nullptr);
+    std::vector<bool> onPick(passes.size(), false);
+    bool anyOnPick = false;
+    for (size_t pass = 0; pass < passes.size(); pass++) {
+      double best = std::numeric_limits<double>::max();
+      for (const Loop& l : projected[pass]) {
+        const double d = DistanceToLoop(l.pts, seeds[k]);
+        if (d < best) {
+          best = d;
+          nearestAt[pass] = &l;
+        }
+      }
+      onPick[pass] = nearestAt[pass] != nullptr && best <= radius;
+      anyOnPick = anyOnPick || onPick[pass];
+    }
+    for (size_t pass = 0; pass < passes.size(); pass++) {
+      seedLoop[pass][k] = nearestAt[pass];
+      if (!anyOnPick || onPick[pass])
+        continue;
+      for (size_t step = 1; step < passes.size(); step++) {
+        if (pass + step < passes.size() && onPick[pass + step]) {
+          seedLoop[pass][k] = nearestAt[pass + step];
+          break;
+        }
+        if (pass >= step && onPick[pass - step]) {
+          seedLoop[pass][k] = nearestAt[pass - step];
+          break;
+        }
+      }
+    }
+  }
   for (size_t pass = 0; pass < passes.size(); pass++) {
     const double z = passes[pass];
     std::vector<Loop> solid;
@@ -364,16 +415,7 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
         // a merged boundary is the right one to follow, and proximity finds
         // it either way. Two seeds landing on the same merged loop cut it
         // once.
-        for (const glm::dvec2& seed : seeds) {
-          const Loop* nearest = nullptr;
-          double best = std::numeric_limits<double>::max();
-          for (const Loop& l : projected[pass]) {
-            const double d = DistanceToLoop(l.pts, seed);
-            if (d < best) {
-              best = d;
-              nearest = &l;
-            }
-          }
+        for (const Loop* nearest : seedLoop[pass]) {
           if (nearest == nullptr)
             continue;
           bool already = false;
@@ -499,6 +541,27 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
         if (pass == 0)
           for (const glm::dvec2& c : corners)
             tp.reliefs.push_back({c, radius * 2.0});
+      }
+      if (lead > 0.0 && pts.size() >= 2) {
+        if (leadAt.size() <= loop)
+          leadAt.resize(loop + 1);
+        if (!leadAt[loop]) {
+          // The first pass picks the middle of the loop's longest edge: a
+          // straight wall to arc off, not a corner, whose rounded offset
+          // turns the tangent under the arc.
+          size_t longest = 0;
+          double best = -1.0;
+          for (size_t i = 0; i < pts.size(); i++) {
+            const double l = glm::length(pts[(i + 1) % pts.size()] - pts[i]);
+            if (l > best) {
+              best = l;
+              longest = i;
+            }
+          }
+          leadAt[loop] = (pts[longest] + pts[(longest + 1) % pts.size()]) * 0.5;
+        }
+        pts = StartAtPoint(pts, *leadAt[loop]);
+        leadAt[loop] = pts.front();
       }
       // The tabs are recorded from the LAST pass only. Every pass lifts over
       // them, but it is the bottom one that leaves them standing, and a wall

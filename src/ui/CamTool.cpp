@@ -1012,8 +1012,30 @@ bool DrawOperationEditor(AppState& state) {
   ImGui::TextDisabled("%s", CamOpSummary(*setup, *op).c_str());
   ImGui::Separator();
 
-  if (DrawCamOpSettings(state, *setup, *op))
-    ApplyCamOpEdit(state, op->id);
+  // An edit that would drive a shank into a wall is taken back, and says
+  // why -- as add_cam_op/set_cam_op refuse it (docs/cam/setup.md#reach).
+  const cam::Operation before = *op;
+  if (DrawCamOpSettings(state, *setup, *op)) {
+    bool refused = false;
+    for (const cam::Reach& r : cam::ReachChecks(*setup, *op))
+      if (r.level == cam::Reach::Level::Collides) {
+        *op = before;
+        state.camRefusal = r.text;
+        refused = true;
+        break;
+      }
+    if (!refused) {
+      state.camRefusal.clear();
+      ApplyCamOpEdit(state, op->id);
+    }
+  }
+  // What it can cut, but only just or only by rubbing: said here, where the
+  // depth is typed, not first in the verdict after a post.
+  for (const cam::Reach& r : cam::ReachChecks(*setup, *op)) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.35f, 1.0f));
+    ImGui::TextWrapped("%s", r.text.c_str());
+    ImGui::PopStyleColor();
+  }
 
   for (const cam::Toolpath& tp : state.camToolpaths)
     if (tp.operationId == op->id) {
@@ -1055,8 +1077,29 @@ bool DrawToolEditor(AppState& state) {
   }
   BeginToolWindowFrame(state, "Edit tool T" + std::to_string(tool->number));
   ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
-  if (DrawCamToolFields(state, *tool))
-    ApplyCamToolEdit(state);
+  // The tool as the ops that use it need it: an edit that leaves one of
+  // them with a shank driven into a wall is taken back, naming the op.
+  const cam::Tool before = *tool;
+  if (DrawCamToolFields(state, *tool)) {
+    bool refused = false;
+    for (const cam::Operation& op : setup->operations) {
+      if (op.toolNumber != tool->number && op.finishTool != tool->number)
+        continue;
+      for (const cam::Reach& r : cam::ReachChecks(*setup, op))
+        if (r.level == cam::Reach::Level::Collides) {
+          *tool = before;
+          state.camRefusal = r.text;
+          refused = true;
+          break;
+        }
+      if (refused)
+        break;
+    }
+    if (!refused) {
+      state.camRefusal.clear();
+      ApplyCamToolEdit(state);
+    }
+  }
   const std::vector<std::string> users = CamOpsUsingTool(*setup, tool->number);
   ImGui::Spacing();
   if (users.empty()) {

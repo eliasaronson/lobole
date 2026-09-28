@@ -131,6 +131,92 @@ double CollarClearance(const Tool& t) {
   return std::max(1.0, t.diameter * 0.5);
 }
 
+Reach ReachCheck(const Operation& op, const Tool& t) {
+  Reach out;
+  // A ROTARY pass is skipped, not approximated. Its top and bottom Z are not
+  // a depth: it cuts radially while the part turns, so its Z range is the
+  // blank's DIAMETER -- and reading that as a plunge told the handle job that
+  // a 6 mm ball was cutting 38.3 mm deep with 25 mm of flute, on a pass whose
+  // deepest radial cut is about four millimetres. What a rotary pass asks of
+  // a cutter's length is how far it must reach past the chuck, a fixturing
+  // question this does not have the fixture to answer.
+  if (op.type == OpType::SurfaceRotary || t.fluteLength <= 0.0)
+    return out;
+  out.depth = op.topZ - op.bottomZ;
+  const std::string who = "T" + std::to_string(t.number) + " (" +
+                          Fmt("%.0f", t.diameter) + " mm, " +
+                          std::to_string(t.flutes) + " flute)";
+  // A MICRON of overrun, not a nanometre. The depth comes from typed values
+  // against a float-derived stock top, so a cut that is exactly the flute
+  // length arrives as 25.00000025 and took the overrun branch -- which then
+  // said "the last 0.0 mm is cut by the shank", a sentence that reads as
+  // nonsense. Same trap as the low-top_z warning
+  // (docs/cam/README.md#invariants).
+  const double over = out.depth - t.fluteLength;
+  const bool wider = t.shankDiameter > t.diameter + 1e-6;
+  const bool necked = t.shankDiameter > 0.0 && t.shankDiameter < t.diameter;
+  if (over > 1e-3 && wider) {
+    out.level = Reach::Level::Collides;
+    out.text =
+        who + " cuts " + Fmt("%.1f", out.depth) + " mm deep and has " +
+        Fmt("%.1f", t.fluteLength) + " mm of flute, and above the flutes it " +
+        "is " + Fmt("%.1f", t.shankDiameter) +
+        " mm across -- wider than the cut it is in. Below " +
+        Fmt("%.1f", t.fluteLength) +
+        " mm that shank does not rub the wall, it is driven into it. Use a "
+        "cutter with flutes at least " +
+        Fmt("%.1f", out.depth) +
+        " mm long, a shallower depth, or cut from both sides";
+  } else if (over > 1e-3 && !necked) {
+    // Past the flutes a cutter is a plain shank, and past the shank is the
+    // collet and the spindle nose, so a cut deeper than the cutter is long
+    // rubs the work with something that has no edge and then drives the
+    // holder into it.
+    out.level = Reach::Level::Rubs;
+    out.text = who + " cuts " + Fmt("%.1f", out.depth) + " mm deep and has " +
+               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
+               Fmt("%.1f", over) +
+               " mm is cut by the shank and the holder is in the work. Use a "
+               "longer cutter, or take the depth in two setups";
+  } else if (over <= 1e-3 && out.depth > t.fluteLength - CollarClearance(t)) {
+    // MARGIN, not just overrun. The first version of this check fired only
+    // when the cut was DEEPER than the flute, so a 25.0 mm cut with a
+    // 25.0 mm cutter passed in silence -- and that is a cut whose collet nut
+    // sits exactly on the stock surface with nothing to spare. Stock
+    // thickness and Z zero are each good to a few tenths, and they add.
+    out.level = Reach::Level::Tight;
+    out.text = who + " cuts " + Fmt("%.1f", out.depth) + " mm deep with " +
+               Fmt("%.1f", t.fluteLength) + " mm of flute -- only " +
+               Fmt("%.1f", std::max(0.0, t.fluteLength - out.depth)) +
+               " mm to spare, and the collet needs about " +
+               Fmt("%.1f", CollarClearance(t)) +
+               " mm of it. Stock thickness and Z zero are each good to a few "
+               "tenths and they add, so this is the depth where the nut "
+               "touches the work. A longer cutter, or flip the part and cut "
+               "from both sides";
+  }
+  // A necked tool past its flutes: the neck clears the walls by design, and
+  // how far it reaches is the holder's question (FoulsHolder), not this one.
+  return out;
+}
+
+std::vector<Reach> ReachChecks(const Setup& setup, const Operation& op) {
+  std::vector<Reach> out;
+  if (!op.enabled)
+    return out;
+  for (const int number : {op.toolNumber, op.finishTool}) {
+    const Tool* t = number != 0 ? setup.FindTool(number) : nullptr;
+    if (t == nullptr)
+      continue;
+    Reach r = ReachCheck(op, *t);
+    if (r.level == Reach::Level::Fine)
+      continue;
+    r.text = "operation \"" + op.name + "\": " + r.text;
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+
 FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
   FeedReport out;
   // The material of what is being cut. Several bodies may differ; the
@@ -162,75 +248,29 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
   for (const Tool& t : setup.tools) {
     if (used.find(t.number) == used.end())
       continue;
-    const std::string who = "T" + std::to_string(t.number) + " (" +
-                            Fmt("%.0f", t.diameter) + " mm, " +
-                            std::to_string(t.flutes) + " flute)";
-    // Reach. The one failure here is not a finish problem: past the flutes a
-    // cutter is a plain shank, and past the shank is the collet and the
-    // spindle nose, so a cut deeper than the cutter is long rubs the work
-    // with something that has no edge and then drives the holder into it.
-    //
     // EVERY op that cuts at depth, not just the two chip room asks about: a
     // pocket or an adaptive pass buries a short cutter exactly as well as a
     // slot does, and it is the deepest one that decides.
-    double reach = 0.0;
+    const Operation* deepest = nullptr;
     for (const Operation& op : setup.operations) {
-      if (!op.enabled || op.toolNumber != t.number)
+      if (!op.enabled ||
+          (op.toolNumber != t.number && op.finishTool != t.number) ||
+          op.type == OpType::SurfaceRotary)
         continue;
-      // ...except a ROTARY pass, whose top and bottom Z are not a depth. It
-      // cuts radially while the part turns, so its Z range is the blank's
-      // DIAMETER -- and reading that as a plunge told the handle job that a
-      // 6 mm ball was cutting 38.3 mm deep with 25 mm of flute, on a pass
-      // whose deepest radial cut is about four millimetres. A check that
-      // wrong on a correct job is worse than no check.
-      //
-      // Skipped rather than approximated: what a rotary pass actually asks
-      // of a cutter's length is how far the tool must reach PAST the chuck
-      // to the far end of the part, which is a fixturing question this does
-      // not have the fixture to answer. Saying nothing is honest; saying
-      // 38.3 mm is not.
-      if (op.type == OpType::SurfaceRotary)
-        continue;
-      reach = std::max(reach, op.topZ - op.bottomZ);
+      if (deepest == nullptr ||
+          op.topZ - op.bottomZ > deepest->topZ - deepest->bottomZ)
+        deepest = &op;
     }
-    // A MICRON of overrun, not a nanometre. `reach` comes from typed depths
-    // against a float-derived stock top, so a cut that is exactly the flute
-    // length arrives as 25.00000025 and took the overrun branch -- which then
-    // said "the last 0.0 mm is cut by the shank", a sentence that reads as
-    // nonsense. Same trap as the low-top_z warning
-    // (docs/cam/README.md#invariants).
-    const double over = reach - t.fluteLength;
-    if (t.fluteLength > 0.0 && over > 1e-3) {
-      Finding f;
-      f.tool = t.number;
-      f.source = "the cutter's own usable length";
-      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep and has " +
-               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
-               Fmt("%.1f", reach - t.fluteLength) +
-               " mm is cut by the shank and the holder is in the work. Use a "
-               "longer cutter, or take the depth in two setups";
-      out.findings.push_back(f);
-    } else if (t.fluteLength > 0.0 &&
-               reach > t.fluteLength - CollarClearance(t)) {
-      // MARGIN, not just overrun. The first version of this check fired only
-      // when the cut was DEEPER than the flute, so a 25.0 mm cut with a
-      // 25.0 mm cutter passed in silence -- and that is a cut whose collet
-      // nut sits exactly on the stock surface with nothing to spare. Stock
-      // thickness and Z zero are each good to a few tenths, and they add.
-      Finding f;
-      f.tool = t.number;
-      f.source = "the cutter's own usable length";
-      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep with " +
-               Fmt("%.1f", t.fluteLength) + " mm of flute -- only " +
-               Fmt("%.1f", std::max(0.0, t.fluteLength - reach)) +
-               " mm to spare, and the collet needs about " +
-               Fmt("%.1f", CollarClearance(t)) +
-               " mm of it. Stock thickness and Z zero are each good to a few "
-               "tenths and they add, so this is the depth where the nut "
-               "touches the work. A longer cutter, or flip the part and cut "
-               "from both sides";
-      out.findings.push_back(f);
-    }
+    if (deepest == nullptr)
+      continue;
+    const Reach r = ReachCheck(*deepest, t);
+    if (r.level == Reach::Level::Fine)
+      continue;
+    Finding f;
+    f.tool = t.number;
+    f.source = "the cutter's own usable length";
+    f.text = r.text;
+    out.findings.push_back(f);
   }
 
   if (klass == CutClass::Unknown) {

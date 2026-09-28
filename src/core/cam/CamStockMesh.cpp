@@ -319,8 +319,14 @@ StockMesh BuildToolMesh(const Tool& tool) {
     profile.push_back({d, TipHeight(tool, d)});
   }
   profile.push_back({r, flutes});
+  // Above the flutes, the shank as stated: the 6 mm a 3 mm bit steps out to
+  // is the thing the reach check refuses to drive into a wall
+  // (docs/cam/setup.md#reach). Unstated, the cutter's width, as always.
+  const double shankR = tool.shankDiameter > 0.0 ? tool.shankDiameter * 0.5 : r;
+  if (std::abs(shankR - r) > 1e-9)
+    profile.push_back({shankR, flutes});
   if (collarZ > flutes)
-    profile.push_back({r, collarZ});
+    profile.push_back({shankR, collarZ});
   profile.push_back({holderR, collarZ});
   profile.push_back({holderR, holderZ});
   profile.push_back({0.0, holderZ}); // cap, so the holder is closed

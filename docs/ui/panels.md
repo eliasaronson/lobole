@@ -188,7 +188,9 @@ Parts, Fixtures, Stock and safety, Tools, and the operations.
 - **Tools** are `ListRow`s (number and type glyph, description, diameter as
   the tail); double-click edits in the tool window. Delete is disabled while
   an operation uses the tool, with those operations named, and
-  `RemoveCamTool` refuses with the same sentence.
+  `RemoveCamTool` refuses with the same sentence. An edit that would drive
+  the tool's shank into a wall in one of those operations is taken back, the
+  reason in `camRefusal` ([CAM setup](../cam/setup.md#reach)).
 - **Generate** is a window, not a panel block (`src/ui/CamGenerate.cpp`):
   the toolbar's gears (`job.generate`, G) always regenerate and open it; it
   shows progress, the verdict, the cut order, one-file-per-tool, Show path

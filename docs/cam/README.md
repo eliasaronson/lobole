@@ -103,10 +103,14 @@ space with no transform back.
   `number` is refused rather than editing tool 1. A tool the setup does not
   have is refused rather than falling back. A field an operation type does not
   read is refused at the RPC. An inside profile with nothing to follow
-  refuses rather than offsetting the part's own outline.
+  refuses rather than offsetting the part's own outline. A depth a tool
+  cannot reach, deeper than its flutes on a shank wider than the cutter, is
+  refused by the edit that asks for it ([setup.md](setup.md#reach)).
 - **Feeds and speeds are the user's.** The app computes none it cannot
   justify; it checks chip load and reach and says what it found
-  ([simulation.md](simulation.md#findings-about-the-cutter)).
+  ([simulation.md](simulation.md#findings-about-the-cutter)). Reach is also
+  said, or refused, when the op or its tool is edited
+  ([setup.md](setup.md#reach)).
 - **Nothing silently changes strategy.** When adaptive clearing declines a
   region and concentric clearing cuts it, the toolpath's `strategy` says so.
   An operation that produces nothing carries `error`; a target of a

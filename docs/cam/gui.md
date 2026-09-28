@@ -154,12 +154,17 @@ tool.
   job's copy of the machine's post, arcs, 4th axis and A index.
 - **Tools:** rows in the list style (right-click Edit), **Add tool** offering
   the machine's library first. Feeds and speeds are asked for, and the panel
-  says why: they are the one number that is genuinely the user's.
+  says why: they are the one number that is genuinely the user's. The editor
+  has the shank's width beside stickout and collar; an edit that would leave
+  an operation with its shank driven into a wall is taken back, with the
+  reason shown ([setup.md](setup.md#reach)).
 - **Operations:** rows in the feature list's style, reorderable by the grip
   (the order is the cutting sequence); double-click opens the op's settings in
   the CAM tool window; right-click Edit, Enable/Disable, Show what it removes,
-  Delete. The settings show only the fields the type has (the capability
-  table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
+  Delete. A depth or tool its cutter cannot reach is taken back with the
+  reason shown, and a reach that is only just, or rubs, is said under the
+  settings ([setup.md](setup.md#reach)). The settings show only the fields
+  the type has (the capability table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
   corner relief, finish tool, Over openings, the rotary pattern as a radio
   pair, and so on. **Add operation** adds what the setup calls for
   (`cam::AddOperationType`: another rotary pass on a setup that already cuts

@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,9 +58,10 @@ struct HeightMap {
 // place material is removed: `Simulate`, the rapid probe in `Inspect` and the
 // playback in CamSim.h all funnel through it, so the picture on screen cannot
 // remove different metal from the check that signs the job off. A null tool
-// is a 2 mm flat mill (the file states a T, not a shape).
-void CarveSweep(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
-                HeightMap& stock);
+// is a 2 mm flat mill (the file states a T, not a shape). Returns the volume
+// it took, mm^3: what the verifier measures a move's bite from.
+double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
+                  const Tool* tool, HeightMap& stock);
 
 // Runs `program` against `stock`, lowering it where the tool passes. Tool
 // radii come from the setup's tool table (the file carries only T-words).
@@ -133,6 +135,34 @@ struct Verdict {
   double worstHolderDepth = 0.0; // mm the stock stands above the collar
   glm::dvec2 worstHolderAt{0.0};
   int worstHolderLine = 0;
+  // Cuts that bite deeper than their operation ever asked the tool to
+  // (docs/cam/simulation.md#bite). Measured on the posted file as material
+  // actually removed: the volume a stretch of cutting takes, over the cutter's
+  // diameter times the distance, is the depth of a full-width cut that would
+  // take the same -- a slot at the stepdown reads as the stepdown, a finishing
+  // skim as a fraction of it. Profile, pocket, adaptive and face ops, against
+  // their stepdown (or their tab height, which a tab exit plunges). What it
+  // exists for: a lead-out that slotted 16 mm of solid MDF at the cutting feed
+  // on a job whose stepdown was 2.5, which moved the board and was reported by
+  // nothing.
+  int overBites = 0;
+  double worstBite = 0.0;        // mm, full-width equivalent
+  double worstBiteAllowed = 0.0; // mm, what that op's passes take
+  glm::dvec2 worstBiteAt{0.0};
+  int worstBiteLine = 0;
+  uint64_t worstBiteOp = 0;
+  // The deepest bite of every op checked, keyed by op id, with what it was
+  // allowed: the number a test (or a person) compares against the stepdown.
+  std::map<uint64_t, std::pair<double, double>> biteByOp;
+  // Moves that drive a SHANK wider than the cutter into material standing
+  // above the flutes (docs/cam/simulation.md#shank-collisions): the wall of a
+  // cut deeper than the flutes are long. Silent unless the tool states a
+  // wider shank (`Tool::shankDiameter`); the depth alone is stated earlier,
+  // at the op (cam::ReachCheck).
+  int shankCollisions = 0;
+  double worstShankDepth = 0.0; // mm the material stands above the flutes
+  glm::dvec2 worstShankAt{0.0};
+  int worstShankLine = 0;
   // Moves that drive the cutter, or the holder, into a FIXTURE -- a clamp or
   // a vise the job was told about (docs/cam/simulation.md#fixture-collisions).
   // Checked on every move against the fixtures' own height field, which is
@@ -243,7 +273,8 @@ struct Verdict {
   [[nodiscard]] bool Safe(double tolerance) const {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
            outsideTravel == 0 && holderCollisions == 0 &&
-           fixtureCollisions == 0 && fileErrors == 0;
+           fixtureCollisions == 0 && overBites == 0 && shankCollisions == 0 &&
+           fileErrors == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of

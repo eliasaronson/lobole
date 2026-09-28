@@ -530,6 +530,22 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_tool_shanks")) {
+    // v131: how wide the tool is above its flutes. Lost on a load, a 3 mm
+    // cutter on a 6 mm shank reads as a plain 3 mm one again, and the op
+    // that drives that shank into a wall stops being refused.
+    const auto& want = expect.at("cam_tool_shanks");
+    std::vector<double> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Tool& t : s.tools)
+        got.push_back(t.shankDiameter);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("tool " << i << " shank");
+      CHECK_THAT(got[i],
+                 Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("cam_fixtures")) {
     // v126: what holds the stock (docs/cam/setup.md#workholding-fixtures). A
     // fixture that loses its place or its size stops being where the clamp is,

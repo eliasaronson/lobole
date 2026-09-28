@@ -59,6 +59,37 @@ typed. Each setup posts its own file.
 A setup arrives with one 6 mm tool (a setup with no tools can produce
 nothing) and a derived safe Z.
 
+## Reach
+
+Whether a tool reaches an operation's depth (`topZ − bottomZ`) is a fact
+about the operation and the tool alone, so it is asked when the operation is
+**made**, not first when the file is posted. `cam::ReachCheck(op, tool)`
+(`CamFeeds.cpp`) is called by every edit that can change the answer:
+`add_cam_op`, `cam_derive_op` and `set_cam_op` for that op, and a tool edit
+in `set_cam_setup` for every op that cuts with the tool, its own or as its
+`finish_tool` (`ReachChecks`). The panel's operation and tool editors call
+the same function.
+
+Above its flutes a tool is `shank_diameter` wide (v131). Left at 0, the tool
+is taken to be the cutter's width all the way up, as every check assumed
+before the field existed. Graded by what happens:
+
+| | past the flutes | edit |
+|---|---|---|
+| shank **wider** than the cutter (a 3 mm bit on a 6 mm shank, a V-bit's body) | driven into the wall | **refused**, naming the op, the depth, the flutes and the shank |
+| shank the cutter's width, or unstated | rubs, and the holder follows it into the work | allowed; said in the edit's `warnings` |
+| shank **narrower** (a necked tool) | reaches, by design | allowed; the holder check owns the rest |
+| within the flutes, less to spare than the collet needs (`CollarClearance`) | touches | allowed; said |
+
+A refused edit changes nothing: the RPCs apply it to a copy, and the panel
+takes the field back and shows why. A disabled operation cuts nothing and is
+asked again when it is enabled. `surface_rotary` is not asked, since its Z
+span is the blank's diameter, not a depth. A document saved before this can
+still hold a refused op, and `FeedsFor` states it for the post. Where the
+depth cannot tell, for example an op whose `top_z` sits under a pocket
+narrower than the shank, the verifier finds the shank at the wall
+([simulation.md](simulation.md#shank-collisions)).
+
 ## Parts and placements
 
 `JobPart{id, sourceDocId, name}` references a part document; the job owns no

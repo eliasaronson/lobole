@@ -23,7 +23,8 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
 - **The stock is a height map** `z(x, y)` over the stock box (`MakeStock`),
   and a tool is its profile function `TipHeight(tool, r)` — flat, ball, V and
   drill from one function. `CarveSweep(from, to, tool, stock)` tests each
-  cell analytically against the swept segment (exact, not oversampled) and is
+  cell analytically against the swept segment (exact, not oversampled),
+  returns the volume it took (what [the bite](#bite) is measured from), and is
   the one carve: `Simulate`, `Inspect` and the playback all call it, carving
   each segment from its own start so a program played in pieces ends
   bit-identical to one played whole.
@@ -74,8 +75,8 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
 
 `ok` (`Verdict::Safe`) means nothing scraps the part or breaks the tool: no
 gouge beyond tolerance, no rapid through material, nothing past the travel,
-no holder or fixture collision, and a file that read straight — the flag to
-gate on. `complete` means nothing is left standing. They are separate
+no holder, shank or fixture collision, no bite deeper than the operation's
+passes, and a file that read straight — the flag to gate on. `complete` means nothing is left standing. They are separate
 because a height map cannot watch a slug drop out of a through cut, so a
 correct job can be `ok` and not `complete`; tabs do not count against
 `complete`. `cam_verify` also reports how much is left over and where
@@ -97,11 +98,52 @@ move, a cell standing above `tip + overall_length`, further from the axis than
 the cutter's radius and no further than the collar's, is the nut in the work
 (`FoulsHolder`, `holder_collisions` with worst depth, place and line). Blind
 inside the cutter's radius on purpose: there the material is either cut or it
-is a cut deeper than the flute, which the reach finding already states. Silent
+is a cut deeper than the flute, which the reach check already states
+([setup.md](setup.md#reach)). Silent
 unless both numbers are stated, and the RPC refuses one without the other —
 half a holder would disable the check while looking like it enabled it. A
 collar riding above the uncut stock top is skipped whole, which keeps the
 check nearly free on ordinary jobs. The tool glyph draws the stated collar.
+
+### Shank collisions
+
+A tool that states a `shank_diameter` wider than its cutter
+([setup.md](setup.md#reach)) has its shank checked on every move: a cell
+further from the axis than the cutter's radius (plus one cell, where the
+cutter's own wall lands on the grid) and no further than the shank's,
+standing above the top of the flutes, is a wall the shank is being driven
+into (`shank_collisions`, `worst_shank_depth_mm/_at/_line`). The depth alone
+is not this check's business: a cut deeper than the flutes is stated at the
+operation, when it is made. Silent for a tool with no stated shank, or one
+no wider than its cutter.
+
+### Bite
+
+How deep each stretch of cutting actually bites, against what its operation
+asked for. The volume a move removes, read off the height map as it is
+carved, over the cutter's diameter times the distance, is the depth of a
+full-width cut that would take the same. A slot at the stepdown reads as the
+stepdown, and a finishing skim as a fraction of it. It is measured over
+stretches of at least 2 mm (or half the diameter). A long move is judged in
+pieces that long, so air on either side cannot dilute a bite. An arc posted
+as short chords is averaged over enough of them that the grid's quantisation
+washes out. A plunge (any move steeper than about 63°: the arc before a tab
+exit ends a few microns off its point once turned into chords) is judged on
+its own. It uses the mean depth under the cutter's face before it cuts,
+without the face's outermost cell, where the chords' sagitta leaves a ring
+standing at full height.
+
+Profile, pocket, adaptive and face operations are measured against their
+stepdown (the whole depth when it is 0), or their tab height when that is
+larger, since a tab exit plunges the tab's height. A stretch more than a
+quarter over that plus 0.2 mm is a finding: `over_bites`,
+`worst_bite_mm/_allowed_mm/_at/_line/_op`, and `bite_by_op`, each op's
+deepest with its allowance. Drilling and edge breaks are not measured, since
+they plunge or skim by design, and neither are the surfacing passes, which
+have no stepdown. This is what found the lead-outs that slotted a baffle's
+slug full depth, and then the opening whose top pass had gone round the
+recess above it. The part came out the same both times, so no other number
+in the verdict saw either.
 
 ### Fixture collisions
 
@@ -144,12 +186,13 @@ prescriptions.
   vendor chart for that cutter beats any rule). Under the band is said, not
   shouted: light machines often run under it and still cut. When the band
   needs a feed the machine's `rapid_feed` cannot reach, that is stated too.
-- **Reach**: the deepest cut against `flute_length`, with a margin for the
-  collet, per operation (a micron of overrun, not a nanometre); skipped for
-  `surface_rotary`, whose Z span is not a depth.
+- **Reach**: `cam::ReachCheck` on each tool's deepest operation, as its own
+  tool or its finishing tool ([setup.md](setup.md#reach)). The same words
+  the edit that made the operation returned, less the operation's name.
 - **Chip room** for full-width cuts (the `FullWidth` column: profile, drill).
 
-The findings reach the panel's verdict and `cam_verify`.
+The findings reach the panel's verdict and the `warnings` of `cam_toolpath`
+and `cam_post`. `cam_verify` does not repeat them.
 
 ## The simulation
 
@@ -190,8 +233,8 @@ scene renderer. It takes the scene's light directions, colours and ambient from
 The tool is a `MeshRenderer` instance — static geometry that moves, built once
 per tool number and placed by transform each frame. Its mesh revolves the
 `TipHeight` profile (so it shares its shape with the removal math), with the
-flute at full length, a short collar, and the stated holder collar when there
-is one. Normals are per segment, blended only across joints within a crease
+flute at full length, the stated shank above it, a short collar, and the
+stated holder collar when there is one. Normals are per segment, blended only across joints within a crease
 angle, so a flat shoulder shades flat and a ball's tip stays round; every
 triangle winds the way its normals point (gated for all four shapes and for
 the stock mesh). The material is matte: a mirror finish slides reflections

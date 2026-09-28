@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    130; // v130: an explode step's `path` -- [a flexible placement], with
+    131; // v131: a `Tool`'s `shank_diameter` -- how wide it is above the
+         //      flutes. Wider than the cutter makes a cut deeper than the
+         //      flutes a collision, refused when the op is made
+         //      (docs/cam/setup.md#reach) and found at the move by the
+         //      verifier. Written only when stated, so a v130 build reads
+         //      a job of plain tools byte-identically.
+         // v130: an explode step's `path` -- [a flexible placement], with
          //      `occurrence` the sub-assembly's id for a moving part inside
          //      it, exploded on its own on top of the unit's step
          //      (docs/assemblies/README.md#flexible-sub-assemblies).

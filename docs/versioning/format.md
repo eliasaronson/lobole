@@ -211,6 +211,7 @@ here; the golden corpus and git history cover them.
 | 128 | AxisRef kind `custom` `{origin, direction}`; helix `start_deg` (+`_expr`); motion study `configuration` |
 | 129 | Occurrence `flexible`, `inner_poses` `[{occurrence, position, orientation}]`, `inner_mate_dofs` `[{mate, rotation, offset, dx?, dy?, ball_rotation?}]` (a flexible sub-assembly placement, [assemblies](../assemblies/README.md#flexible-sub-assemblies)); a mate named `{path, mate}`: relation `mate_a_path`/`mate_b_path`, motion study `driver_path` |
 | 130 | Explode step `path` `[placement]`: `occurrence` is then a moving part inside that flexible placement ([assemblies](../assemblies/README.md#flexible-sub-assemblies)) |
+| 131 | CAM tool `shank_diameter`: how wide the tool is above its flutes; wider than the cutter, a cut deeper than the flutes is refused ([CAM setup](../cam/setup.md#reach)) |
 
 ## The directory form
 
