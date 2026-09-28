@@ -129,8 +129,13 @@ documented in the sheet-metal and tube areas.
 
 Body modes: extrude, revolve, sweep, loft and pipe take `mode:
 new_body|add|cut`, applied by `ApplyBodyMode` (`src/core/BodyMode.{h,cpp}`),
-which propagates element names through the boolean. `add` never fuses into a
-reference (ghost) body, and `cut` passes through one. A cut warns when it
+which propagates element names through the boolean. `add` fuses into the last
+body its bounding box overlaps, and every other body the new solid actually
+touches joins that one — a neck strung between two turned pieces makes one
+body of them, where it used to overlap the second as a separate solid and the
+part weighed the overlap twice. A body that only shares a bounding box with it
+stays separate. `add` never fuses into a reference (ghost) body, and `cut`
+passes through one. A cut warns when it
 removes no material, and when it consumes EVERY body: a part left with
 nothing is a tool the wrong way round or a boolean the kernel could not do,
 and without the warning the first sign is "no bodies" from `mass_properties`

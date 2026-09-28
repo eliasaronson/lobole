@@ -450,6 +450,42 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     }
     bodies[target].shape = std::move(fused.shape);
     bodies[target].elementMap = std::move(fused.map); // propagated (T5)
+
+    // The tool may bridge several bodies -- the necks strung between turned
+    // pieces, a rib across two blocks. Every other body it actually TOUCHES
+    // joins the result: fused into one only, the tool overlapped the rest as
+    // separate solids, and the part weighed the overlap twice. A body that
+    // merely shares a bounding box with the tool stays its own (the tool and
+    // it fuse to as many solids as they were apart).
+    for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
+      if (i == target || bodies[i].reference)
+        continue;
+      glm::vec3 bmin, bmax;
+      bodies[i].shape.GetBoundingBox(bmin, bmax);
+      if (!BoxesOverlap(pmin, pmax, bmin, bmax))
+        continue;
+      const CADShape touch = shape.Union(bodies[i].shape);
+      if (!touch.IsValid() ||
+          touch.SolidCount() >=
+              shape.SolidCount() + bodies[i].shape.SolidCount())
+        continue;
+      CheckedBoolean joined =
+          CheckedBooleanNamed(name, BooleanOp::Union, bodies[target].name,
+                              bodies[target].shape, bodies[target].elementMap,
+                              bodies[i].shape, bodies[i].elementMap, ownerId);
+      if (!joined.refusal.empty() || !joined.shape.IsValid()) {
+        if (warning)
+          *warning = "the added solid also touches body '" + bodies[i].name +
+                     "', which could not be joined to it: " +
+                     (joined.refusal.empty() ? joined.error : joined.refusal);
+        continue;
+      }
+      bodies[target].shape = std::move(joined.shape);
+      bodies[target].elementMap = std::move(joined.map);
+      bodies.erase(bodies.begin() + i);
+      if (i < target)
+        target--;
+    }
     return true;
   }
 

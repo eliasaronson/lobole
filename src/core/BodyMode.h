@@ -17,7 +17,10 @@
 //   Add:     fuse into the last body whose bbox overlaps (else the last),
 //            leaving that body's createdBy (and material) untouched; element
 //            names propagate through the fuse (toponaming T5) — the target's
-//            names plus `shapeMap`'s, rewritten onto the fused shape.
+//            names plus `shapeMap`'s, rewritten onto the fused shape. Every
+//            OTHER body the shape touches joins that one too (a neck between
+//            two turned pieces makes one body of them), and is removed from
+//            the list.
 //   Cut:     subtract from every body, dropping any the cut fully consumes;
 //            each surviving body's names propagate through its cut.
 // Returns false only on an operation that genuinely failed (a fuse/cut error,

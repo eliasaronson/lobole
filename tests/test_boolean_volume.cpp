@@ -400,3 +400,34 @@ TEST_CASE("A boolean result the wrong size or the wrong way out is refused",
                        CADShape(drill), drilled)
             .empty());
 }
+
+// An added solid that bridges two bodies makes ONE of them. It used to fuse
+// into the last body its bounding box overlapped and leave the other as a
+// separate solid the new one overlapped: the chess blanks' necks strung four
+// pawns together and the part came out as four pawns plus a fifth body
+// running through three of them, weighing the overlap twice.
+TEST_CASE("An add that bridges two bodies joins both, and only those",
+          "[boolean][body-mode]") {
+  const auto box = [](double x0, double y0, double z0, double dx, double dy,
+                      double dz) {
+    return CADShape(
+        BRepPrimAPI_MakeBox(gp_Pnt(x0, y0, z0), dx, dy, dz).Shape());
+  };
+  std::vector<Body> bodies;
+  bodies.push_back({"Left", box(0, 0, 0, 10, 10, 10), "", 1});
+  bodies.push_back({"Right", box(20, 0, 0, 10, 10, 10), "", 2});
+  bodies.push_back({"Apart", box(0, 40, 0, 10, 10, 10), "", 3});
+  std::string warning, error;
+  REQUIRE(ApplyBodyMode(bodies, box(5, 4, 4, 20, 2, 2), ElementMap{},
+                        ExtrudeMode::Add, "Bridge", "", 9, &warning, &error));
+  CHECK(error.empty());
+  REQUIRE(bodies.size() == 2);
+  // The joined body: both blocks and the 10 mm of bar between them, once.
+  const Body& joined = bodies[0].name == "Apart" ? bodies[1] : bodies[0];
+  CHECK(joined.shape.SolidCount() == 1);
+  CHECK_THAT(joined.shape.Volume(),
+             WithinRel(2 * 1000.0 + 10.0 * 2.0 * 2.0, 1e-6));
+  const Body& apart = bodies[0].name == "Apart" ? bodies[0] : bodies[1];
+  CHECK(apart.name == "Apart");
+  CHECK_THAT(apart.shape.Volume(), WithinRel(1000.0, 1e-9));
+}
