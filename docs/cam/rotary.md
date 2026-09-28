@@ -186,12 +186,16 @@ the full kernel's`), and a smooth turned surface visits a fraction of it.
   rough verb derives.
 - `rest_from_tool` works on the rotary op as on the raster
   ([operations.md](operations.md#rough-a-surface-and-rest-machining)), with
-  radius for height and arc length across the axis. The larger cutter's
-  surface is computed on its OWN grid and read onto the rest pass's by
-  `ResampleRotary` (bilinear, nearest at the part's edge): on the rest
-  cutter's finer grid it cost four times the pass's own surface, and was
-  most of the chess pawn blank's 334 s (now 71 s, one pass of which is the
-  1.5 mm ball's own surface on its 0.037 mm grid).
+  radius for height and arc length across the axis. What the larger cutter
+  left is found on ITS OWN grid, exactly: both cutters' surfaces and
+  envelopes (`ToolEnvelope`) there, the leftover where the larger one's
+  stands more than the tolerance above both the part and the smaller one's,
+  grown by the smaller cutter's radius and read onto the rest pass's grid by
+  the nearest cell. The raster's `RestMask` bounds the envelopes over blocks
+  instead (the larger tip the highest in each, the smaller the lowest), which
+  overstates the leftover by a block's rise; a turned part is slopes end to
+  end, and on the chess pawn blank that made the rest pass cut 135 m, twice
+  its finish.
 - **Add operation** in the panel adds another rotary pass on a setup that
   already holds one (`cam::AddOperationType`); a 4th-axis machine with a plate
   clamped to the bed is still a 3-axis job and gets the whole-part cut-out.

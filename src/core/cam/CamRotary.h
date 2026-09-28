@@ -128,13 +128,6 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
 // to present the work.
 [[nodiscard]] RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool);
 
-// `src` read onto `like`'s grid: bilinear along X and round the axis (which
-// wraps), and the nearest cell where one of the four is off the part (0), so
-// an edge of the part is not averaged into a radius nobody cut to. For a
-// surface computed on a coarser grid than the one that reads it.
-[[nodiscard]] RadiusMap ResampleRotary(const RadiusMap& src,
-                                       const RadiusMap& like);
-
 // The verdict, from the rotary pair. Same `Verdict` the height map fills, so
 // the panel, the RPC and `Explain` need no second vocabulary -- with
 // `rotary` set, which is what makes an angle print as an angle.

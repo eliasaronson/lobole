@@ -404,41 +404,6 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
   return out;
 }
 
-RadiusMap ResampleRotary(const RadiusMap& src, const RadiusMap& like) {
-  RadiusMap out = like;
-  if (src.nx <= 0 || src.nTheta <= 0 || like.nx <= 0 || like.nTheta <= 0)
-    return out;
-  const int n = src.nTheta;
-  const double dTheta = 2.0 * 3.14159265358979323846 / n;
-  for (int j = 0; j < like.nTheta; j++) {
-    // Cell centres are at (k + 0.5) steps; `u` counts from the first one.
-    const double tj = like.CellTheta(j) / dTheta - 0.5;
-    const int j0 = static_cast<int>(std::floor(tj));
-    const double fj = tj - j0;
-    const int ja = ((j0 % n) + n) % n;
-    const int jb = (ja + 1) % n;
-    for (int i = 0; i < like.nx; i++) {
-      const double ti = (like.CellX(i) - src.x0) / src.res - 0.5;
-      const int i0 =
-          std::clamp(static_cast<int>(std::floor(ti)), 0, src.nx - 1);
-      const int i1 = std::min(i0 + 1, src.nx - 1);
-      const double fi = std::clamp(ti - i0, 0.0, 1.0);
-      const float a = src.At(i0, ja), b = src.At(i1, ja);
-      const float c = src.At(i0, jb), d = src.At(i1, jb);
-      float v;
-      if (a <= 0.0f || b <= 0.0f || c <= 0.0f || d <= 0.0f) {
-        const int ni = fi < 0.5 ? i0 : i1;
-        v = src.At(ni, fj < 0.5 ? ja : jb);
-      } else {
-        v = static_cast<float>((1 - fj) * ((1 - fi) * a + fi * b) +
-                               fj * ((1 - fi) * c + fi * d));
-      }
-      out.Set(i, j, v);
-    }
-  }
-  return out;
-}
-
 Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed,
                       const OtherSetups* others) {
   Verdict v;

@@ -1,5 +1,6 @@
 #include "core/cam/CamToolpath.h"
 
+#include "core/Parallel.h"
 #include "core/cam/CamDropCutter.h"
 #include "core/cam/CamPicks.h"
 #include "core/cam/CamRotary.h"
@@ -145,33 +146,98 @@ std::vector<float> ToolEnvelope(int nx, int ny, double resX, SpanY spanY,
   const bool ball = tool.type == ToolType::Ball;
   std::vector<float> out(static_cast<size_t>(nx) * ny, 0.0f);
   const int kx = static_cast<int>(std::ceil(R / resX));
+
+  // The lowest tip in each BLOCK of cells: no placement in a block can leave
+  // the underside lower than that plus how far its ball rises at the
+  // distance. The kernel walks outward from the cell and stops once that
+  // bound reaches the best found -- the answer is the full kernel's, only
+  // placements that cannot win are skipped (the RotaryCL argument, for a
+  // minimum). Rows are independent, as there.
+  constexpr int kBlock = 16;
+  const int bx = (nx + kBlock - 1) / kBlock;
+  const int by = (ny + kBlock - 1) / kBlock;
+  std::vector<double> blockMin(static_cast<size_t>(bx) * by, 1e18);
   for (int j = 0; j < ny; j++)
+    for (int i = 0; i < nx; i++)
+      if (reached(i, j)) {
+        double& m = blockMin[static_cast<size_t>(j / kBlock) * bx + i / kBlock];
+        m = std::min(m, static_cast<double>(tipAt(i, j)));
+      }
+  const auto minUnder = [&](int i0, int i1, int j0, int j1) {
+    const int b0 = std::max(0, i0) / kBlock;
+    const int b1 = std::min(nx - 1, i1) / kBlock;
+    double m = 1e18;
+    const auto span = [&](int lo, int hi) {
+      for (int t = lo / kBlock; t <= hi / kBlock; t++)
+        for (int b = b0; b <= b1; b++)
+          m = std::min(m, blockMin[static_cast<size_t>(t) * bx + b]);
+    };
+    if (!wrapY)
+      span(std::max(0, j0), std::min(ny - 1, j1));
+    else if (j0 < 0) {
+      span(j0 + ny, ny - 1);
+      span(0, std::min(j1, ny - 1));
+    } else if (j1 >= ny) {
+      span(j0, ny - 1);
+      span(0, std::min(j1 - ny, ny - 1));
+    } else
+      span(j0, j1);
+    return m;
+  };
+  const auto rise = [&](double d2) {
+    return ball ? R - std::sqrt(std::max(0.0, R * R - d2)) : 0.0;
+  };
+
+  parallel::For(static_cast<size_t>(ny), [&](size_t jrow) {
+    const int j = static_cast<int>(jrow);
     for (int i = 0; i < nx; i++) {
       double best = 1e18;
       const double sy = std::max(spanY(i, j), 1e-6);
       const int ky = std::min(static_cast<int>(std::ceil(R / sy)), ny / 2);
-      for (int dj = -ky; dj <= ky; dj++) {
-        int jj = j + dj;
-        if (wrapY)
-          jj = ((jj % ny) + ny) % ny;
-        else if (jj < 0 || jj >= ny)
-          continue;
-        for (int di = -kx; di <= kx; di++) {
-          const int ii = i + di;
-          if (ii < 0 || ii >= nx || !reached(ii, jj))
+      const double low = minUnder(i - kx, i + kx, j - ky, j + ky);
+      // Outward: 0, +1, -1, +2, ... along X, and the same across within.
+      for (int k = 0; k <= 2 * kx; k++) {
+        const int di = (k & 1) ? (k + 1) / 2 : -(k / 2);
+        const double dx2 = (di * resX) * (di * resX);
+        if (dx2 > R * R) {
+          if (k & 1)
             continue;
-          const double d2 = (di * resX) * (di * resX) + (dj * sy) * (dj * sy);
-          if (d2 > R * R)
+          break;
+        }
+        if (low + rise(dx2) >= best)
+          break;
+        const int ii = i + di;
+        if (ii < 0 || ii >= nx)
+          continue;
+        for (int m = 0; m <= 2 * ky; m++) {
+          const int dj = (m & 1) ? (m + 1) / 2 : -(m / 2);
+          const double d2 = dx2 + (dj * sy) * (dj * sy);
+          if (d2 > R * R) {
+            if (m & 1)
+              continue;
+            break;
+          }
+          const double up = rise(d2);
+          if (low + up >= best) {
+            if (m & 1)
+              continue;
+            break;
+          }
+          int jj = j + dj;
+          if (wrapY)
+            jj = ((jj % ny) + ny) % ny;
+          else if (jj < 0 || jj >= ny)
+            continue;
+          if (!reached(ii, jj))
             continue;
           // The underside of the tool standing at (ii, jj), over (i, j).
-          const double under =
-              tipAt(ii, jj) + (ball ? R - std::sqrt(R * R - d2) : 0.0);
-          best = std::min(best, under);
+          best = std::min(best, tipAt(ii, jj) + up);
         }
       }
       out[static_cast<size_t>(j) * nx + i] =
           static_cast<float>(best < 1e17 ? best : 0.0);
     }
+  });
   return out;
 }
 
@@ -472,12 +538,14 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
                  std::to_string(op.restFromTool) + ", is not in this setup";
       return;
     }
-    // The larger cutter's surface on ITS OWN grid, read here by bilinear
-    // interpolation: on this cutter's finer one it cost ~4x this pass's own
-    // surface (the kernel grows with the cutter, the grid with this one), and
-    // was most of the pawn blank's 157 s. It is the envelope of a ball larger
-    // than this one, smooth to well inside the rest threshold at its own
-    // resolution.
+    // What the larger cutter LEFT, on ITS OWN grid and exactly: its surface
+    // and envelope there, and this cutter's envelope on the same grid for
+    // what it could take. On this cutter's finer grid the larger kernel cost
+    // ~4x this pass's own surface; RestMask's way round that -- envelopes
+    // over blocks, the big tip the highest in each and the small the lowest
+    // -- overstates the leftover by a block's rise, and on a turned part,
+    // which is slopes end to end, that marked nearly everything: the chess
+    // pawn blank's rest pass cut 135 m, twice its finish.
     const double bigRes =
         std::max(res, DerivedDropRes(*bigger, 0.0, DerivedCusp(*bigger, 0.0)));
     RadiusMap bigModel = SampleModelRotary(
@@ -486,27 +554,50 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
       for (float& v : bigModel.r)
         if (v > 0.0f)
           v = static_cast<float>(v + op.stockToLeave);
-    const RadiusMap bigOwn = RotaryCL(bigModel, *bigger);
-    const RadiusMap bigCl = ResampleRotary(bigOwn, cl);
-    const double dTheta = 2.0 * 3.14159265358979323846 / cl.nTheta;
+    const RadiusMap bigCl = RotaryCL(bigModel, *bigger);
+    const RadiusMap smallCl = RotaryCL(bigModel, tool);
+    const int bnx = bigModel.nx, bny = bigModel.nTheta;
+    const double bigStep = 2.0 * 3.14159265358979323846 / bny;
     // Radius for height: the tool comes from outside with its tip innermost,
     // and across the axis the pitch is ARC length, which grows with the
-    // radius. The part's radius is the sampled model's (it carries the stock
-    // to leave, as both cutters' surfaces do).
-    const std::vector<bool> cut = RestMask(
-        cl.nx, cl.nTheta, cl.res,
-        [&](int i, int j) {
-          return std::max(1e-3, static_cast<double>(model.At(i, j))) * dTheta;
-        },
-        true, [&](int i, int j) { return static_cast<double>(bigCl.At(i, j)); },
-        [&](int i, int j) { return bigCl.At(i, j) > 0.0f; },
-        [&](int i, int j) { return static_cast<double>(cl.At(i, j)); },
-        [&](int i, int j) { return cl.At(i, j) > 0.0f; },
-        [&](int i, int j) {
-          const float r = model.At(i, j);
-          return r > 0.0f ? static_cast<double>(r) : std::nan("");
-        },
-        *bigger, tool, std::max(0.02, 2.0 * cusp), &restTop);
+    // radius.
+    const auto bigSpan = [&](int i, int j) {
+      return std::max(1e-3, static_cast<double>(bigModel.At(i, j))) * bigStep;
+    };
+    const std::vector<float> leftBig = ToolEnvelope(
+        bnx, bny, bigRes, bigSpan, true,
+        [&](int i, int j) { return static_cast<double>(bigCl.At(i, j)); },
+        [&](int i, int j) { return bigCl.At(i, j) > 0.0f; }, *bigger);
+    const std::vector<float> leftSmall = ToolEnvelope(
+        bnx, bny, bigRes, bigSpan, true,
+        [&](int i, int j) { return static_cast<double>(smallCl.At(i, j)); },
+        [&](int i, int j) { return smallCl.At(i, j) > 0.0f; }, tool);
+    std::vector<float> partBig(bigModel.r.size(), std::nanf(""));
+    for (size_t k = 0; k < partBig.size(); k++)
+      if (bigModel.r[k] > 0.0f)
+        partBig[k] = bigModel.r[k];
+    const double tol = std::max(0.02, 2.0 * cusp);
+    const double midSpan = bigSpan(bnx / 2, bny / 2);
+    const std::vector<bool> coarse =
+        RestCells(leftBig, leftSmall, partBig, bnx, bny, bigRes, midSpan, true,
+                  tol, 0.5 * tool.diameter + 0.5 * std::hypot(bigRes, midSpan));
+    // Onto this pass's grid, nearest cell; and how high the leftover stands
+    // where there is some, for the entries.
+    std::vector<bool> cut(cl.r.size(), false);
+    restTop.assign(cl.r.size(), std::nanf(""));
+    for (int j = 0; j < cl.nTheta; j++) {
+      const int bj =
+          std::clamp(static_cast<int>(cl.CellTheta(j) / bigStep), 0, bny - 1);
+      for (int i = 0; i < cl.nx; i++) {
+        const int bi = std::clamp(
+            static_cast<int>((cl.CellX(i) - bigModel.x0) / bigRes), 0, bnx - 1);
+        const size_t b = static_cast<size_t>(bj) * bnx + bi;
+        const size_t f = static_cast<size_t>(j) * cl.nx + i;
+        cut[f] = coarse[b];
+        if (!std::isnan(partBig[b]) && leftBig[b] - partBig[b] > tol)
+          restTop[f] = leftBig[b];
+      }
+    }
     size_t kept = 0;
     for (int j = 0; j < cl.nTheta; j++)
       for (int i = 0; i < cl.nx; i++) {
