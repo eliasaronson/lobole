@@ -1023,11 +1023,22 @@ class SketchBuilder:
         was no way to draw one, so every rounded corner in the air-cooled
         engine is a slot or a polygon. A radius on a drawn profile is the
         normal case (generators/README.md#single-cylinder-and-air-cooled-engines).
+
+        `radius` may be an expression string or a `Param`, like a circle's:
+        an arc whose centre follows a variable while its radius stayed the
+        number it was drawn at no longer met the lines either side of it.
         """
         n = len(self.entities)
+        if isinstance(radius, str):
+            self._pending_exprs.append((n, "r", radius))
+            radius_mm = 0.0
+        else:
+            if isinstance(radius, Param):
+                self._pending_exprs.append((n, "r", radius.expr))
+            radius_mm = float(radius)
         self.entities.append({"type": "arc",
                               "center": list(_uv(self, center, n, 0, "arc")),
-                              "radius": float(radius),
+                              "radius": radius_mm,
                               "start_angle": math.radians(start_deg),
                               "end_angle": math.radians(end_deg),
                               "construction": bool(construction)})
@@ -1043,18 +1054,37 @@ class SketchBuilder:
         closed profile an extrude can use — dense poles sampled off a smooth
         outline (a cam lobe) give one smooth face where a polyline gives a
         facet per segment. A closed spline through a convex polygon lies
-        just INSIDE it."""
-        pts = [tuple(_uv(self, q)) for q in poles]
-        if closed and pts and pts[0] != pts[-1]:
-            pts.append(pts[0])
-        if len(pts) < degree + 1:
+        just INSIDE it.
+
+        A pole coordinate may be a `Param` or an expression string, as a line
+        endpoint may: it rides as `p<k>x_expr` / `p<k>y_expr`, so the outline
+        follows the variable that sizes the rest of the part."""
+        poles = list(poles)
+        if closed and poles and tuple(poles[0]) != tuple(poles[-1]):
+            poles.append(poles[0])
+        if len(poles) < degree + 1:
             raise SdkError(f"a degree-{degree} spline needs at least "
-                           f"{degree + 1} poles, got {len(pts)}")
+                           f"{degree + 1} poles, got {len(poles)}")
+        n = len(self.entities)
+        pts, exprs = [], {}
+        for k, q in enumerate(poles):
+            if isinstance(q, (tuple, list)) and len(q) == 2:
+                for axis, c in zip("xy", q):
+                    expr = c if isinstance(c, str) else (
+                        c.expr if isinstance(c, Param) else None)
+                    if expr is not None:
+                        exprs[f"p{k}{axis}_expr"] = expr
+                u, v = (0.0 if isinstance(c, str) else float(c) for c in q)
+                pts.append((u, v))
+            else:
+                pts.append(tuple(_uv(self, q)))
         e = {"type": "spline", "degree": int(degree),
              "poles": [[float(u), float(v)] for u, v in pts]}
+        e.update(exprs)
         if construction:
             e["construction"] = True
         self.entities.append(e)
+        self._attach_exprs(n)
         return self
 
     def rect(self, c1, c2):

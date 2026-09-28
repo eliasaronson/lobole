@@ -549,6 +549,8 @@ void Solver::Load(const SketchFeature& sketch) {
         fixCoord(1, /*xAxis=*/true);
       else if (field == "by")
         fixCoord(1, /*xAxis=*/false);
+      else if (const auto pf = PoleField(field); pf && pf->first < 256)
+        fixCoord(static_cast<uint8_t>(pf->first), pf->second);
       else if (field == "r") {
         if (im.circleOf.count(id) != 0)
           im.fixedParams.insert(

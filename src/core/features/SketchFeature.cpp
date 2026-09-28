@@ -98,6 +98,20 @@ bool AngleInArc(double ang, const sketch::Arc& arc) {
 
 namespace sketch {
 
+std::optional<std::pair<size_t, bool>> PoleField(const std::string& field) {
+  // "p<k>x" / "p<k>y": pole k's coordinate.
+  if (field.size() < 3 || field[0] != 'p' ||
+      (field.back() != 'x' && field.back() != 'y'))
+    return std::nullopt;
+  size_t k = 0;
+  for (size_t i = 1; i + 1 < field.size(); i++) {
+    if (field[i] < '0' || field[i] > '9')
+      return std::nullopt;
+    k = k * 10 + static_cast<size_t>(field[i] - '0');
+  }
+  return std::pair<size_t, bool>{k, field.back() == 'x'};
+}
+
 std::vector<std::string> EntityExprFields(const Entity& e) {
   return std::visit(
       [](const auto& g) -> std::vector<std::string> {
@@ -110,7 +124,16 @@ std::vector<std::string> EntityExprFields(const Entity& e) {
           return {"cx", "cy", "r"};
         else if constexpr (std::is_same_v<T, Arc>)
           return {"cx", "cy", "r"};
-        else // Ellipse / BSpline: no expr-driven scalar fields in v1
+        else if constexpr (std::is_same_v<T, BSpline>) {
+          // Every pole, so an outline drawn as a spline (a knight's head, a
+          // cam lobe) can follow a variable the way a polyline does.
+          std::vector<std::string> out;
+          for (size_t k = 0; k < g.poles.size(); k++) {
+            out.push_back("p" + std::to_string(k) + "x");
+            out.push_back("p" + std::to_string(k) + "y");
+          }
+          return out;
+        } else // Ellipse: no expr-driven scalar fields in v1
           return {};
       },
       e);
@@ -143,6 +166,10 @@ std::optional<double> GetEntityField(const Entity& e,
             return g.center.y;
           if (field == "r")
             return g.radius;
+        } else if constexpr (std::is_same_v<T, BSpline>) {
+          if (const auto pf = PoleField(field);
+              pf && pf->first < g.poles.size())
+            return pf->second ? g.poles[pf->first].x : g.poles[pf->first].y;
         }
         return std::nullopt;
       },
@@ -192,6 +219,12 @@ bool SetEntityField(Entity& e, const std::string& field, double value) {
           }
           if (field == "r") {
             g.radius = value;
+            return true;
+          }
+        } else if constexpr (std::is_same_v<T, BSpline>) {
+          if (const auto pf = PoleField(field);
+              pf && pf->first < g.poles.size()) {
+            (pf->second ? g.poles[pf->first].x : g.poles[pf->first].y) = f;
             return true;
           }
         }

@@ -197,6 +197,47 @@ TEST_CASE("Expression-driven entity coordinates follow a parameter through "
   CHECK_THAT(circle().center.x, WithinRel(14.0f, 1e-6f));
 }
 
+// A spline's poles take expressions like a line's endpoints do, so an outline
+// drawn as a spline scales with the variable that sizes the rest of the part
+// instead of staying the shape it was drawn at.
+TEST_CASE("Expression-driven spline poles follow a parameter",
+          "[variables][exprs]") {
+  Document doc;
+  doc.SetParameter("s", "1");
+  auto skOwned = std::make_unique<SketchFeature>("Outline", kXY);
+  sketch::BSpline bs;
+  bs.poles = {{0, 0}, {10, 0}, {10, 10}, {0, 10}, {0, 0}};
+  const uint32_t id = skOwned->AddEntity(bs);
+  auto& ex = skOwned->entityExprs[id];
+  const std::vector<std::pair<float, float>> unit = {
+      {0, 0}, {10, 0}, {10, 10}, {0, 10}, {0, 0}};
+  for (size_t k = 0; k < unit.size(); k++) {
+    ex["p" + std::to_string(k) + "x"] = std::to_string(unit[k].first) + " * s";
+    ex["p" + std::to_string(k) + "y"] = std::to_string(unit[k].second) + " * s";
+  }
+  doc.AddFeature(std::move(skOwned));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketchId, 2.0,
+                                                  ExtrudeMode::NewBody));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  const double v1 = doc.GetBodies()[0].shape.Volume();
+
+  doc.SetParameter("s", "2");
+  auto* sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  REQUIRE(sk != nullptr);
+  const auto& moved =
+      std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(id)]);
+  CHECK_THAT(moved.poles[2].x, WithinRel(20.0f, 1e-6f));
+  CHECK_THAT(moved.poles[3].y, WithinRel(20.0f, 1e-6f));
+  // Twice the size in the plane, the same depth: four times the volume.
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(4.0 * v1, 1e-4));
+
+  CHECK_FALSE(sketch::PoleField("px").has_value());
+  CHECK_FALSE(sketch::PoleField("r").has_value());
+  CHECK(sketch::PoleField("p12y") == std::pair<size_t, bool>{12, false});
+}
+
 // --- Project-wide variables (Phase V) ----------------------------------------
 
 TEST_CASE("A project symbol table drives features in two documents",

@@ -521,10 +521,13 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
 //   Circle "cx" "cy" "r"         (center + radius)
 //   Arc    "cx" "cy" "r"         (center + radius; angles deliberately not)
 //   Point  "x" "y"
+//   BSpline "p<k>x" "p<k>y"       (pole k, from 0)
 // Ellipse fields are not expression-drivable in v1 (the solver treats
 // ellipses as rigid anyway). Serialized as "<field>_expr" keys on the entity
 // JSON; stored on SketchFeature::entityExprs.
 std::vector<std::string> EntityExprFields(const Entity& e);
+// {pole index, is x} for a spline field "p<k>x"/"p<k>y", else nullopt.
+std::optional<std::pair<size_t, bool>> PoleField(const std::string& field);
 // Read / write one such field (radius stays double; vec2 coords go through
 // float). nullopt / false when the field doesn't apply to the entity kind.
 std::optional<double> GetEntityField(const Entity& e, const std::string& field);

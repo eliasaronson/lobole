@@ -31,7 +31,9 @@ for agents.
   is omitted when empty. Sketches have two kinds of expression field:
   - a dimension constraint's `valueExpr`, stored as the `"expr"` key;
   - driven entity coordinates in `SketchFeature::entityExprs`: Line
-    `ax ay bx by`, Circle and Arc `cx cy r`, Point `x y`. They are stored as
+    `ax ay bx by`, Circle and Arc `cx cy r`, Point `x y`, and a spline's
+    poles `p<k>x p<k>y` (k from 0), so a spline outline scales with the
+    variable that sizes the rest of the part. They are stored as
     `<field>_expr` keys on the entity. Ellipses and arc angles cannot be
     driven. An `_expr` key the entity does not have (`radius_expr` on a
     circle, whose field is `r`) is refused naming the ones it takes, not
