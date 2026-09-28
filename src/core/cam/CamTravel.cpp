@@ -148,10 +148,22 @@ std::vector<PlacementFit> CheckPlacements(const Setup& setup,
 std::vector<std::string> LayoutWarnings(const Setup& setup,
                                         const std::vector<Body>& bodies) {
   std::vector<std::string> out;
+  // The widest cutter that CUTS here: the tools the operations use, not
+  // every tool in the table -- a 12 mm V-bit kept for another setup's
+  // chamfer called 12 mm-apart chess pieces too close for a 4 mm pocket.
+  // With no operation yet, every tool is a candidate.
   double widest = 0.0;
   std::string widestName;
+  const auto used = [&](const Tool& t) {
+    if (setup.operations.empty())
+      return true;
+    for (const Operation& op : setup.operations)
+      if (op.toolNumber == t.number || op.finishTool == t.number)
+        return true;
+    return false;
+  };
   for (const Tool& t : setup.tools)
-    if (t.diameter > widest) {
+    if (used(t) && t.diameter > widest) {
       widest = t.diameter;
       widestName = t.name;
     }

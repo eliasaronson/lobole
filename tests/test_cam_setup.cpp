@@ -1418,6 +1418,23 @@ TEST_CASE("cam job: the layout says where each part is, and when they are too "
   // Diagonal neighbours are not "between" anything: nothing cuts there.
   setup.placements[1].pos = {44.0, 34.0};
   CHECK(cam::LayoutWarnings(setup, bodies).empty());
+
+  // Sized by the cutter that CUTS: a 12 mm V-bit in the table that no
+  // operation here uses does not make 8 mm apart too close for a 6 mm one.
+  setup.placements[1].pos = {48.0, 0.0};
+  cam::Tool vbit;
+  vbit.number = 8;
+  vbit.name = "12 mm V-bit";
+  vbit.diameter = 12.0;
+  vbit.type = cam::ToolType::VBit;
+  setup.tools.push_back(vbit);
+  CHECK_FALSE(cam::LayoutWarnings(setup, bodies).empty()); // no ops: any tool
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = setup.tools.front().number;
+  setup.operations.push_back(op);
+  CHECK(cam::LayoutWarnings(setup, bodies).empty());
 }
 
 TEST_CASE("cam job: a per-part frame survives a save and reload",
