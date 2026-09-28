@@ -28,6 +28,11 @@ that need other documents), `src/remote/RemoteModeling.cpp` (RPCs).
 - `placement {position, orientation}` — where the copy sits in this part;
   identity unless made from an in-context edit.
 - `reference` (default true) — see below.
+- `material` (every feature's) — given to the copy, it is every copied body's;
+  empty, each body keeps its source body's. Material is out of the chain
+  hash, so setting it is a cache hit: `Document`'s material stamp applies a
+  Derived's own material (and restores the source's when it is cleared),
+  since `Execute`, where the copy otherwise stamps it, does not run.
 - `snapshot` — per body: its asset name, name, material, source `created_by`,
   the source's element map and display colour; plus `source_chain_hash`.
 

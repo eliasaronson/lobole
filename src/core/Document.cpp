@@ -1,4 +1,5 @@
 #include "core/Document.h"
+#include "core/features/DerivedFeature.h"
 
 #include "common/Logger.h"
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
@@ -218,10 +219,28 @@ bool Document::Regenerate() {
   // not geometry". Features that work their material out from something
   // other than m_material say so and are left alone.
   const auto stampMaterial = [this] {
-    for (Body& b : m_bodies)
-      if (const Feature* f = FindFeatureById(b.createdBy))
-        if (!f->StampsOwnMaterial())
-          b.material = f->GetMaterial();
+    // A feature that stamps its own material does so in Execute, and a
+    // material edit is a CACHE HIT (material is out of the chain hash), so
+    // Execute does not run: a walnut chess piece derived from the piece part
+    // kept the source's empty material and weighed nothing. Its own
+    // material, when it has one, is stamped here like everyone else's; a
+    // Derived with none takes its source body's back.
+    for (Body& b : m_bodies) {
+      const Feature* f = FindFeatureById(b.createdBy);
+      if (f == nullptr)
+        continue;
+      if (!f->StampsOwnMaterial() || !f->GetMaterial().empty()) {
+        b.material = f->GetMaterial();
+        continue;
+      }
+      // The copy carries the source body's name (DerivedFeature::Execute).
+      if (const auto* d = dynamic_cast<const DerivedFeature*>(f))
+        for (const DerivedBody& sb : d->snapshot)
+          if (sb.name == b.name) {
+            b.material = sb.material;
+            break;
+          }
+    }
   };
 
   // Rollback bar: only the prefix regenerates; the tail keeps its params but

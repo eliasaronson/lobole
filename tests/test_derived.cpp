@@ -798,3 +798,32 @@ TEST_CASE("a mate connector on a derived face resolves in the assembly",
   CHECK_THAT((*frame)[3].x, WithinAbs(10.0f, 1e-3f));
   CHECK_THAT(std::abs((*frame)[2].z), WithinAbs(1.0f, 1e-4f));
 }
+
+// A material given to the COPY reaches its bodies. Material is out of the
+// chain hash, so the edit is a cache hit and Execute -- where a Derived
+// stamps its own -- never ran: a walnut chess piece derived from the piece
+// part kept its source's empty material and weighed nothing.
+TEST_CASE("a material given to a derived copy reaches its bodies",
+          "[derived]") {
+  auto source = MakeSource();
+  source->GetFeatures()[0]->SetMaterial("steel");
+  REQUIRE(source->Regenerate());
+  Document host;
+  const uint64_t did = Derive(host, *source, /*reference=*/false);
+  REQUIRE(host.Regenerate());
+  const auto materialOf = [&](const std::string& name) {
+    const Body* b = BodyNamed(host, name);
+    REQUIRE(b != nullptr);
+    return b->material;
+  };
+  CHECK(materialOf("Servo") == "steel"); // the source's, inherited
+  Feature* copy = host.FindFeatureById(did);
+  REQUIRE(copy != nullptr);
+  copy->SetMaterial("wood_walnut");
+  REQUIRE(host.Regenerate());
+  CHECK(materialOf("Servo") == "wood_walnut");
+  CHECK(materialOf("Boss") == "wood_walnut");
+  copy->SetMaterial("");
+  REQUIRE(host.Regenerate());
+  CHECK(materialOf("Servo") == "steel"); // back to the source's
+}
