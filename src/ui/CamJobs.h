@@ -17,6 +17,7 @@
 #include "core/cam/CamPicks.h" // OutlineRequest
 #include "core/cam/CamSurface.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,21 @@ GenerateCamToolpathsNow(AppState& state, const cam::Setup& setup);
 // (docs/cam/simulation.md#leftover-another-setup-removes).
 [[nodiscard]] std::vector<cam::Toolpath>
 CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending);
+
+// What an RPC that must not compute on the frame asks instead
+// (docs/cam/README.md#requests-that-wait): queue every pass `setup` reads
+// that is not cached -- deferred regardless of `camDeferPasses` -- and say
+// whether any is still owed (queued or cutting).
+[[nodiscard]] bool QueueCamPassesFor(AppState& state, const cam::Setup& setup);
+
+// Whether the "cam" worker has anything queued or cutting. A synchronous
+// reader joins every "cam" job, so it only runs without stalling when this
+// is false.
+[[nodiscard]] bool CamPassesBusy(const AppState& state);
+
+// Bumped by every CancelCamPasses: a request waiting for passes compares it
+// to learn that what it was waiting for will not land.
+[[nodiscard]] uint64_t CamPassCancellations();
 
 // Drop the queue. The pass now cutting finishes (libarea has no interruption
 // points; its result is cached, it was paid for) and the toolpaths that were

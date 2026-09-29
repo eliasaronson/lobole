@@ -8,6 +8,7 @@
 #include <deque>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -18,6 +19,7 @@ struct ImGuiTestContext;
 
 namespace remote {
 class RpcParams;
+class CamParking;
 }
 
 // Opt-in JSON-RPC server (newline-delimited JSON over localhost TCP) that
@@ -123,7 +125,22 @@ private:
     std::string method;
     nlohmann::json params;
     int client = -1; // fd the response goes back to
+    // Came back from parking (below): dispatch it, do not park it again.
+    bool resumed = false;
   };
+
+  // A request answered LATER, while the frame and other clients carry on:
+  // a CAM request waiting for its passes (remote/RemoteCam.h,
+  // docs/architecture.md#requests-that-wait). Unlike a screenshot it does
+  // not hold the queue -- only its own client's later requests wait behind
+  // it, so each connection still gets its answers in the order it asked.
+  // Defined in RemoteUiActions.cpp; shared_ptr because it is incomplete here.
+  struct Parked;
+  std::vector<std::shared_ptr<Parked>> m_parked;
+  // Advance every parked request one tick: answer it, refuse it, or put it
+  // back at the head of the queue to be dispatched.
+  void PollParked(ui::AppState& state);
+  bool ClientConnected(int client);
 
   // Accept loop (listen socket bound in Start) spawning one reader per
   // connection — several clients may be connected at once (e.g. the MCP

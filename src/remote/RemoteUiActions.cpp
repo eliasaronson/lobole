@@ -710,6 +710,82 @@ bool RemoteServer::QueueUiAction(const Request& request) {
 #endif
 }
 
+// --- Parked requests (docs/architecture.md#requests-that-wait) -------------
+
+struct RemoteServer::Parked {
+  Request request;
+  // Over `request.params`, kept for the whole wait: the keys the waiting
+  // steps read are what the unknown-parameter check compares against when
+  // the answer comes from them rather than from a handler.
+  std::unique_ptr<remote::RpcParams> params;
+  std::unique_ptr<remote::CamParking> wait;
+};
+
+bool RemoteServer::ClientConnected(int client) {
+  std::lock_guard<std::mutex> lock(m_clientsMutex);
+  return std::find(m_clients.begin(), m_clients.end(), client) !=
+         m_clients.end();
+}
+
+void RemoteServer::PollParked(ui::AppState& state) {
+  std::vector<Request> resume;
+  for (auto it = m_parked.begin(); it != m_parked.end();) {
+    Parked& parked = **it;
+    // Nobody to answer: the passes keep cutting (they are cached, and paid
+    // for), the answer is simply not sent.
+    if (!ClientConnected(parked.request.client)) {
+      it = m_parked.erase(it);
+      continue;
+    }
+    json answer;
+    remote::CamParking::Next next = remote::CamParking::Next::Wait;
+    try {
+      const watchdog::Label label("RPC " + parked.request.method + " (parked)");
+      next = parked.wait->Poll(state, *parked.params, answer);
+    } catch (const std::exception& e) {
+      RespondError(parked.request.client, parked.request.id, e.what());
+      it = m_parked.erase(it);
+      continue;
+    } catch (const Standard_Failure& e) {
+      RespondError(parked.request.client, parked.request.id,
+                   std::string("OpenCASCADE error: ") +
+                       (e.GetMessageString() ? e.GetMessageString()
+                                             : "unspecified failure"));
+      it = m_parked.erase(it);
+      continue;
+    }
+    if (next == remote::CamParking::Next::Wait) {
+      ++it;
+      continue;
+    }
+    if (next == remote::CamParking::Next::Dispatch) {
+      parked.request.resumed = true;
+      resume.push_back(std::move(parked.request));
+    } else if (auto unknown = parked.params->UnknownKeys(); !unknown.empty()) {
+      RespondError(parked.request.client, parked.request.id,
+                   UnknownParamError(parked.request.method, unknown,
+                                     parked.params->SeenKeys()));
+    } else {
+      if (m_recording.is_open()) {
+        m_recording << json{{"method", parked.request.method},
+                            {"params", parked.request.params}}
+                           .dump()
+                    << "\n";
+        m_recording.flush();
+      }
+      Respond(parked.request.client, parked.request.id, answer);
+    }
+    it = m_parked.erase(it);
+  }
+  if (resume.empty())
+    return;
+  // At the HEAD of the queue, in the order they were parked: each is its
+  // client's oldest request, and its client's later ones wait behind it.
+  std::lock_guard<std::mutex> lock(m_queueMutex);
+  for (auto r = resume.rbegin(); r != resume.rend(); ++r)
+    m_requests.push_front(std::move(*r));
+}
+
 size_t RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
     return 0;
@@ -732,6 +808,12 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
   // even if the client never polls for it — this is the RPC pump's own
   // main-thread join point, and it applies before it answers.
   ui::ReapBackgroundJobs(state);
+  // Parked requests next: one whose passes just landed is answered on the
+  // same tick, ahead of anything that arrived since.
+  PollParked(state);
+  // While one waits, the loop stays at full rate so it is answered the tick
+  // its work lands (docs/rendering/frame-pacing.md#idle-throttle).
+  const auto parkedActivity = [this] { return m_parked.empty() ? 0u : 1u; };
 
   // Finish an in-flight UI action once the engine is done with it
 #ifdef HAVE_TEST_ENGINE
@@ -805,12 +887,47 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       std::lock_guard<std::mutex> lock(m_queueMutex);
       if ((m_uiActionInFlight || m_screenshotPending || m_sheet.active))
         return activity + 1; // in flight: full rate until it completes
-      if (m_requests.empty())
-        return activity;
-      request = std::move(m_requests.front());
-      m_requests.pop_front();
+      // The oldest request whose client has none parked: a parked request
+      // holds only its OWN connection's later ones, so a second client's
+      // ping or get_state is answered while a cam_verify waits.
+      auto next = m_requests.begin();
+      for (; next != m_requests.end(); ++next) {
+        bool held = false;
+        for (const std::shared_ptr<Parked>& parked : m_parked)
+          held |= parked->request.client == next->client;
+        if (!held)
+          break;
+      }
+      if (next == m_requests.end())
+        return activity + parkedActivity();
+      request = std::move(*next);
+      m_requests.erase(next);
     }
     activity++;
+
+    // A CAM request that would compute on the frame waits instead
+    // (remote/RemoteCam.h). A `batch` never parks -- its calls run inside
+    // HandleSemantic, one transaction -- and neither does a request coming
+    // back from parking.
+    if (!request.resumed) {
+      auto parked = std::make_shared<Parked>();
+      parked->request = std::move(request);
+      parked->params =
+          std::make_unique<remote::RpcParams>(parked->request.params);
+      try {
+        const watchdog::Label label("RPC " + parked->request.method +
+                                    " (parking)");
+        parked->wait = remote::ParkCamRequest(state, parked->request.method,
+                                              *parked->params);
+      } catch (...) {
+        parked->wait = nullptr; // the handler says what went wrong
+      }
+      if (parked->wait) {
+        m_parked.push_back(std::move(parked));
+        continue;
+      }
+      request = std::move(parked->request);
+    }
 
     // Outside the try: the catch below reports which keys the handler read,
     // which is half of what makes a type error fixable from the message.
@@ -886,7 +1003,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         m_screenshotPath = request.params.at("path").get<std::string>();
         m_screenshotPending = true;
         m_screenshotHeldFrames = 0;
-        return activity; // main loop captures after this frame renders
+        return activity + parkedActivity(); // main loop captures after
       }
       if (request.method == "render_sheet") {
         // V3: stage a multi-view sheet job; the ProcessPending pump captures
@@ -970,8 +1087,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         m_sheet.id = request.id;
         m_sheet.client = request.client;
         m_sheet.active = true;
-        return activity; // the pump kicks tile 0 next frame; requests queue
-                         // behind
+        // the pump kicks tile 0 next frame; requests queue behind
+        return activity + parkedActivity();
       }
       if (!UiActionsAvailable() && IsUiAction(request.method)) {
         // Three different reasons, three different remedies: nothing to
@@ -993,7 +1110,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         continue;
       }
       if (QueueUiAction(request)) {
-        return activity; // response sent when the engine finishes the action
+        // response sent when the engine finishes the action
+        return activity + parkedActivity();
       }
       RespondError(request.client, request.id,
                    "unknown method: " + request.method);

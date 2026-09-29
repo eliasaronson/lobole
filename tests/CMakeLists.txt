@@ -515,6 +515,14 @@ add_test(NAME part_configuration_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(part_configuration_smoke PROPERTIES TIMEOUT 120)
 
+# CAM requests that wait off the frame (docs/cam/README.md#requests-that-wait):
+# a parked cam_verify answers exactly what the synchronous handler says while
+# a second connection is answered; order per connection, edits, cancel.
+add_test(NAME cam_parked_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/cam_parked_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(cam_parked_smoke PROPERTIES LABELS "cam;slow" TIMEOUT 300)
+
 # Sheet metal (v108/v109): the rules and the first two features over the RPC —
 # the gauge tables, the refusals in words, and a flanged volume checked
 # against the bend allowance by hand.

@@ -356,7 +356,38 @@ CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending) {
   return paths;
 }
 
+namespace {
+uint64_t g_camPassCancellations = 0;
+}
+
+bool QueueCamPassesFor(AppState& state, const cam::Setup& setup) {
+  cam::GenerateContext ctx;
+  ctx.cache = &state.camAdaptiveCache;
+  ctx.surfaceCache = &state.camSurfaceCache;
+  ctx.outlineCache = &state.camOutlineCache;
+  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.defer = true; // never cut on the frame: that is what the caller avoids
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, JobBodies(state), &ctx);
+  bool pending = false;
+  for (const cam::Toolpath& tp : paths)
+    pending |= tp.pending;
+  if (pending) {
+    QueueOutlinePasses(state, std::move(ctx.pendingOutline));
+    QueueAdaptivePasses(state, std::move(ctx.pending));
+    QueueSurfacePasses(state, std::move(ctx.pendingSurface));
+  }
+  return pending;
+}
+
+bool CamPassesBusy(const AppState& state) {
+  return !CamPassesIdle(state) || BackgroundJobRunning(state, kKind);
+}
+
+uint64_t CamPassCancellations() { return g_camPassCancellations; }
+
 void CancelCamPasses(AppState& state) {
+  g_camPassCancellations++;
   state.camOutlineQueue.clear();
   state.camAdaptiveQueue.clear();
   state.camSurfaceQueue.clear();
@@ -404,6 +435,9 @@ std::vector<cam::Toolpath> CamToolpathsQueued(AppState&, const cam::Setup&,
   pending = false;
   return {};
 }
+bool QueueCamPassesFor(AppState&, const cam::Setup&) { return false; }
+bool CamPassesBusy(const AppState&) { return false; }
+uint64_t CamPassCancellations() { return 0; }
 void CancelCamPasses(AppState&) {}
 CamPassProgress CamPassProgressOf(const AppState&) { return {}; }
 } // namespace ui

@@ -294,9 +294,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Every long operation running off the frame, as {jobs: [{kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
      "job cannot say. Kinds: `cam` (an adaptive clearing pass; see "
-     "cam_toolpath's `async`), `cam-verify`, `sync` (git fetch/push/clone), "
-     "`topo`, `study` (a FEM solve), `mesh`, `import`, `motion`, "
-     "`motion-video` (export_motion_video), `open` (a "
+     "cam_toolpath's `async`, and what a waiting cam_toolpath, cam_post, "
+     "cam_verify or cam_simulate is waiting for), `cam-verify` (the panel's "
+     "verification, or a waiting cam_verify's simulation), `sync` (git "
+     "fetch/push/clone), `topo`, `study` (a FEM solve), `mesh`, `import`, "
+     "`motion`, `motion-video` (export_motion_video), `open` (a "
      "project opening). Empty when nothing is running. Not the CAM "
      "job document -- that is list_job_parts.",
      ""},

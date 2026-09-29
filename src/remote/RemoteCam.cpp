@@ -7,6 +7,8 @@
 
 #ifdef HAVE_CAM
 
+#include <Standard_Failure.hxx>
+
 #include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/cam/CamFeeds.h"
@@ -19,6 +21,8 @@
 #include "core/io/Serialization.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
+#include "ui/BackgroundJob.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
@@ -33,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <thread>
 
 namespace remote {
 
@@ -459,8 +464,13 @@ constexpr MethodDoc kCamMethods[] = {
      "left out beside a rotary setup's chuck and tailstock. "
      "The cheap way to check a job. "
      "Synchronous by default -- an adaptive pocket costs seconds and this "
-     "waits for it. `async: true` hands the slow passes -- adaptive clearing, "
-     "surfacing, and the sections a profile follows -- to a background "
+     "waits for it, but OFF the frame: the passes cut on the `cam` "
+     "background job while the app keeps drawing and other connections are "
+     "answered, and a later request on the SAME connection waits behind "
+     "this one. Cancelling the passes (cancel_background_job cam) refuses "
+     "the waiting call. `async: true` hands the slow passes -- adaptive "
+     "clearing, surfacing, and the sections a profile follows -- to a "
+     "background "
      "job and answers {pending, queued_passes, job: \"cam\"} at once; "
      "watch `background_jobs` until none of kind cam remains, then call "
      "again without `async` for the list.",
@@ -515,7 +525,10 @@ constexpr MethodDoc kCamMethods[] = {
      "the regions or complete; other_setups_not_checked says which setups "
      "could not be consulted and why (their cut then reads as leftover). "
      "To know that, it generates and posts every other setup of the job "
-     "too, so it costs more on a job of several setups. "
+     "too, so it costs more on a job of several setups. It waits OFF the "
+     "frame: the passes cut on the `cam` background job and the simulation "
+     "runs as a `cam-verify` one, while other connections are answered; "
+     "cancelling either refuses the call. "
      "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material, no holder, shank, fixture, chuck or "
      "tailstock collision, no bite deeper than the op's passes, and a file "
@@ -547,7 +560,8 @@ constexpr MethodDoc kCamMethods[] = {
      "feed is in the file but no machine states its rapid rate, so a time "
      "axis would be part measurement and part invention — `cutting_minutes` "
      "counts what the file states and nothing else. Generates the toolpaths "
-     "if they are not current, and leaves the app SHOWING the simulation "
+     "if they are not current -- waiting for their passes off the frame, as "
+     "cam_toolpath does -- and leaves the app SHOWING the simulation "
      "(screenshot it, or `close` to put the model back).",
      "at, close, job, play, resolution, setup"},
     {"cam_post",
@@ -564,7 +578,9 @@ constexpr MethodDoc kCamMethods[] = {
      "to a machine. With split_output on the setup, `path` is the base and "
      "one file per tool is written beside it as `<base>-T<n>.<ext>` (no "
      "spaces: these go on an SD card and through a shell), each "
-     "complete and starting by loading its tool; `files` names every one.",
+     "complete and starting by loading its tool; `files` names every one. "
+     "Waits for its passes off the frame, as cam_toolpath does; a cancelled "
+     "pass refuses the call and writes nothing.",
      "job, path, post, setup"},
 };
 
@@ -932,6 +948,304 @@ void SelectJob(ui::AppState& state, const RpcParams& p) {
       have += (have.empty() ? "" : ", ") + slot.name;
   throw std::runtime_error("no job named " + which.dump() +
                            "; jobs: " + (have.empty() ? "(none)" : have));
+}
+
+// cam_verify in three steps (docs/cam/README.md#requests-that-wait): what
+// it reads, COPIED on the frame; the simulation, which touches nothing but
+// this struct and so runs inline or on a worker alike; and the answer, on
+// the frame again. The synchronous handler runs all three in a row; a
+// parked request runs the middle one on a "cam-verify" background job.
+struct VerifyRun {
+  cam::Setup setup;
+  std::vector<cam::Toolpath> paths;
+  std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
+  std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
+  std::string gcode;
+  double res = 0.25;
+  // The job's other setups and their files, so what one of them removes is
+  // said as its cut rather than as leftover here
+  // (docs/cam/simulation.md#leftover-another-setup-removes).
+  std::vector<cam::Setup> others;
+  std::vector<std::string> otherFiles;
+  std::vector<bool> othersEarlier; // cut before this one, in job order
+  std::vector<std::string> unposted;
+  std::vector<Body> bodies;
+  std::vector<cam::FixtureSolid> fixtures;
+  std::vector<std::string> missingFixtures;
+  // out
+  cam::Verdict verdict;
+  std::string error;
+  // Main thread only: set by the background job's finish.
+  bool landed = false;
+  bool cancelled = false;
+};
+
+// Step one, on the frame. Throws the handler's refusals. Every pass it reads
+// is generated through the caches; a parked request only gets here once
+// they are all cut, so nothing here takes long.
+std::shared_ptr<VerifyRun>
+PrepareVerify(ui::AppState& state, cam::JobDocument& job, const RpcParams& p) {
+  auto w = std::make_shared<VerifyRun>();
+  const cam::Setup& setup = RequireSetup(job, p.at("setup").get<uint64_t>());
+  w->setup = setup;
+  w->paths = ui::GenerateCamToolpathsNow(state, setup);
+  for (const cam::Toolpath& tp : w->paths) {
+    w->reliefs.insert(w->reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
+    w->tabs.insert(w->tabs.end(), tp.tabs.begin(), tp.tabs.end());
+  }
+  std::string error;
+  if (!cam::PostProcess(setup.machine.post, setup, w->paths, PostOptsOf(setup),
+                        w->gcode, &error))
+    throw std::runtime_error(error);
+  w->res = p.value("resolution", 0.25);
+  bool before = true; // the job's order is the order they are cut in
+  for (const cam::Setup& other : job.GetSetups()) {
+    if (other.id == setup.id)
+      before = false;
+    if (other.id == setup.id || other.operations.empty())
+      continue;
+    std::string file, why;
+    if (!cam::PostProcess(other.machine.post, other,
+                          ui::GenerateCamToolpathsNow(state, other),
+                          PostOptsOf(other), file, &why)) {
+      w->unposted.push_back("setup '" + other.name +
+                            "', because it does not post: " + why);
+      continue;
+    }
+    w->others.push_back(other);
+    w->otherFiles.push_back(std::move(file));
+    w->othersEarlier.push_back(before);
+  }
+  w->bodies = ui::JobBodies(state);
+  w->fixtures = ui::JobFixtureSolids(state, setup, true, &w->missingFixtures);
+  return w;
+}
+
+// Step two: the simulations. Reads nothing but `w`.
+void ComputeVerify(VerifyRun& w) {
+  std::vector<cam::SetupProgram> programs;
+  for (size_t k = 0; k < w.others.size(); k++)
+    programs.push_back({&w.others[k], w.otherFiles[k], w.othersEarlier[k]});
+  cam::OtherSetups others =
+      cam::OtherSetupsOf(w.setup, programs, w.bodies, w.res);
+  others.notChecked.insert(others.notChecked.end(), w.unposted.begin(),
+                           w.unposted.end());
+  w.verdict = cam::VerifyGcode(w.gcode, w.setup, w.bodies, w.res, w.reliefs,
+                               w.tabs, w.fixtures, &others);
+}
+
+// Step three: the answer, in the same sentences the panel shows.
+json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
+  const cam::Verdict& v = w.verdict;
+  const double res = w.res;
+  const double tol = res * 1.5; // one cell of quantisation, plus slack
+  // The same sentences the panel shows. A verdict that reads as a row of
+  // numbers over the RPC and as English in the GUI is two verdicts, and the
+  // agent gets the worse one.
+  bool breaksAnEdge = false;
+  for (const cam::Operation& op : w.setup.operations)
+    breaksAnEdge |=
+        op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
+  json says = json::array();
+  // What was not cut because its operation produced nothing, FIRST: a
+  // setup whose only operation failed verified "ok" -- true, nothing in an
+  // empty file is dangerous -- with "cuts nothing" the only hint why.
+  json failedOps = json::array();
+  for (const cam::Toolpath& tp : w.paths)
+    if (!tp.error.empty()) {
+      std::string name;
+      for (const cam::Operation& op : w.setup.operations)
+        if (op.id == tp.operationId)
+          name = op.name;
+      failedOps.push_back({{"op", tp.operationId}, {"error", tp.error}});
+      says.push_back("Operation " + std::to_string(tp.operationId) + " '" +
+                     name +
+                     "' produced no toolpath and is not in the "
+                     "file: " +
+                     tp.error);
+    }
+  for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0, breaksAnEdge))
+    says.push_back(line.text);
+  // The machine's lines too -- the parts' reach beyond the travel, the
+  // sheet's overhang -- the same helper the panel uses.
+  for (const cam::VerdictLine& line :
+       cam::MachineLines(w.setup, w.bodies, &w.paths))
+    says.push_back(line.text);
+  // A fixture that pushed safe Z past the machine's Z, named.
+  if (const auto line = ui::FixtureTravelLine(state, w.setup, v))
+    says.push_back(line->text);
+  // A fixture whose part is gone was not checked, and says so: the same
+  // words the panel shows.
+  json notChecked = json::array();
+  for (const std::string& name : w.missingFixtures) {
+    const std::string line = "fixture \"" + name + "\" -- its part is gone";
+    notChecked.push_back(line);
+    says.push_back("Not checked: " + line);
+  }
+  if (v.fixturesSkippedRotary)
+    notChecked.push_back("fixtures, on a rotary setup");
+  json biggest = json::array();
+  for (const cam::Verdict::Region& r : v.biggest) {
+    json rj{
+        {"at", {r.at.x, r.at.y}}, {"area_mm2", r.area}, {"depth_mm", r.depth}};
+    if (v.rotary) {
+      rj["end_face"] = r.endFace;
+      rj["ring"] = r.ring;
+      rj["span_deg"] = r.spanDeg;
+    }
+    biggest.push_back(std::move(rj));
+  }
+  json otherCuts = json::array();
+  for (const cam::Verdict::OtherCut& c : v.leftoverOtherSetups)
+    otherCuts.push_back(
+        {{"setup", c.setup}, {"name", c.name}, {"area_mm2", c.area}});
+  json out = json{
+      {"leftover_other_setups", otherCuts},
+      {"other_setups_not_checked", v.otherSetupsNotChecked},
+      {"max_gouge_mm", v.maxGouge},
+      {"max_leftover_mm", v.maxLeftover},
+      // Past the bottom of the stock: the spoilboard, not the part.
+      // Separate from the gouge because every through cut does it
+      // on purpose, and conflating them called correct G-code scrap.
+      {"below_stock_mm", v.belowStock},
+      {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
+      {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
+      {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
+      // How MUCH is left over, and in how many places: corner radii
+      // a cutter cannot reach are several tiny regions, a forgotten
+      // operation is one big one, and the deepest-point number
+      // alone reads the same for both.
+      {"leftover_area_mm2", v.leftoverArea},
+      {"leftover_regions", v.leftoverRegions},
+      {"leftover_biggest", biggest},
+      {"rapids_through_stock", v.rapidsThroughStock},
+      {"worst_rapid_depth_mm", v.worstRapidDepth},
+      {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
+      {"worst_rapid_line", v.worstRapidLine},
+      // Which STOCK MODEL answered. True means the file's A moved, so
+      // it was checked against a rotary blank r(x, theta) and the
+      // second number in every `*_at` pair is an ANGLE IN DEGREES,
+      // not a Y. A pair of doubles cannot say that and a caller
+      // reading an angle as a coordinate would be quietly wrong.
+      {"rotary", v.rotary},
+      {"file_errors", v.fileErrors},
+      {"first_file_error", v.firstFileError},
+      {"file_warnings", v.fileWarnings},
+      {"first_file_warning", v.firstFileWarning},
+      // Cutting that bit deeper than its op's passes take
+      // (docs/cam/simulation.md#bite), as a full-width equivalent.
+      {"over_bites", v.overBites},
+      {"worst_bite_mm", v.worstBite},
+      {"worst_bite_allowed_mm", v.worstBiteAllowed},
+      {"worst_bite_at", {v.worstBiteAt.x, v.worstBiteAt.y}},
+      {"worst_bite_line", v.worstBiteLine},
+      {"worst_bite_op", v.worstBiteOp},
+      {"bite_by_op",
+       [&] {
+         json a = json::array();
+         for (const auto& [op, b] : v.biteByOp)
+           a.push_back(
+               {{"op", op}, {"max_mm", b.first}, {"allowed_mm", b.second}});
+         return a;
+       }()},
+      // The chuck and the tailstock of a setup held in the rotary:
+      // docs/cam/rotary.md#chuck-and-tailstock.
+      {"holding_collisions", v.holdingCollisions},
+      {"worst_holding_depth_mm", v.worstHoldingDepth},
+      {"worst_holding_x", v.worstHoldingX},
+      {"worst_holding_line", v.worstHoldingLine},
+      {"worst_holding", v.worstHoldingWhat},
+      {"holding_defaults", v.holdingDefaults},
+      // A shank wider than the cutter driven into a wall:
+      // docs/cam/simulation.md#shank-collisions.
+      {"shank_collisions", v.shankCollisions},
+      {"worst_shank_depth_mm", v.worstShankDepth},
+      {"worst_shank_at", {v.worstShankAt.x, v.worstShankAt.y}},
+      {"worst_shank_line", v.worstShankLine},
+      {"holder_collisions", v.holderCollisions},
+      {"worst_holder_depth_mm", v.worstHolderDepth},
+      {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
+      {"worst_holder_line", v.worstHolderLine},
+      // The cutter or the holder into a fixture (a clamp, a vise):
+      // docs/cam/simulation.md#fixture-collisions.
+      {"fixture_collisions", v.fixtureCollisions},
+      {"fixtures_checked", v.fixturesChecked},
+      {"worst_fixture_depth_mm", v.worstFixtureDepth},
+      {"worst_fixture_at", {v.worstFixtureAt.x, v.worstFixtureAt.y}},
+      {"worst_fixture_line", v.worstFixtureLine},
+      {"worst_fixture", v.worstFixtureName},
+      {"worst_fixture_by", v.worstFixtureByHolder ? "holder" : "cutter"},
+      {"not_checked", notChecked},
+      // Moves the machine cannot reach. A verdict field nothing
+      // reports is the same silence this check exists to end.
+      {"outside_travel", v.outsideTravel},
+      {"outside_travel_axis", std::string(1, v.outsideAxis)},
+      {"outside_travel_overshoot_mm", v.worstOvershoot},
+      {"first_outside_line", v.firstOutsideLine},
+      {"z_span_over_mm", v.zSpanOver},
+      {"z_deepest_line", v.zDeepestLine},
+      {"z_highest_line", v.zHighestLine},
+      {"first_bad_line", v.firstBadLine},
+      {"resolution_mm", res},
+      {"cells", v.cells},
+      {"failed_ops", failedOps},
+      {"says", says},
+      // Tabs the program left ON PURPOSE. Reported rather than
+      // silently subtracted: four is a job to sign off, none where
+      // four were asked for is a job to look at.
+      {"tabs", v.tabs},
+      {"reliefs", v.reliefs},
+      // Two questions. `ok` is the one that is never in doubt:
+      // nothing here scraps the part or breaks the tool. `complete`
+      // is softer — a height map cannot watch a slug fall out of a
+      // through cut, so a correct job can still report material
+      // left over. Tabs no longer count against it.
+      {"ok", v.Safe(tol)},
+      {"complete", v.Complete(tol)}};
+  // The typical scallop, where the worst cell is an end face no rotary
+  // pass can reach. Rotary only: the height map does not compute it, and
+  // a zero here would read as a measurement.
+  if (v.rotary) {
+    out["leftover_p95_mm"] = v.leftoverP95;
+    out["leftover_surface_max_mm"] = v.leftoverSurfaceMax;
+    out["leftover_surface_at"] = {v.leftoverSurfaceAt.x, v.leftoverSurfaceAt.y};
+    out["leftover_surface_p99_mm"] = v.leftoverSurfaceP99;
+    out["leftover_end_face_area_mm2"] = v.leftoverEndFaceArea;
+  }
+  {
+    // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
+    // so PREDICTED (core/Receipt.h). Anything narrower than a cell is
+    // invisible to it, and `complete` is soft by construction because a
+    // height map cannot watch a slug fall out of a through cut. The receipt
+    // can therefore never read better than provisional, which is the honest
+    // standing for a number that comes from a discretisation.
+    receipt::Receipt receipt;
+    const receipt::Oracle oracle{"designer/cam-stocksim", "1"};
+    const std::string note = "height-map simulation at " + std::to_string(res) +
+                             " mm resolution over " + std::to_string(v.cells) +
+                             " cells; anything narrower than a cell is "
+                             "below what this can see";
+    receipt::Claim safe(
+        "the program does not cut into the part or the "
+        "machine, and asks no more of the tool than its "
+        "passes and its reach allow",
+        oracle, v.Safe(tol) ? receipt::Verdict::Pass : receipt::Verdict::Fail);
+    safe.basis = receipt::Basis::Predicted;
+    safe.value = v.maxGouge;
+    safe.unit = "mm";
+    safe.note = note;
+    receipt.Add(std::move(safe));
+    receipt::Claim done("the program cuts everything it was asked to", oracle,
+                        v.Complete(tol) ? receipt::Verdict::Pass
+                                        : receipt::Verdict::Fail);
+    done.basis = receipt::Basis::Predicted;
+    done.value = v.maxLeftover;
+    done.unit = "mm";
+    done.note = note;
+    receipt.Add(std::move(done));
+    AttachReceipt(out, receipt);
+  }
+  return out;
 }
 
 } // namespace
@@ -2030,268 +2344,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   if (m == "cam_verify") {
     // `job` is read in the preamble, before the active job is looked up --
     // one place for every branch, and invisible to the scanner from here.
-    // rpc-params: job
-    const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
-    // Synchronous, like every reader here: the pass in flight is joined and
-    // the rest is computed now, through the same cache the panel fills
-    // (docs/ui/long-operations.md#cam-toolpath-passes).
-    const std::vector<cam::Toolpath> paths =
-        ui::GenerateCamToolpathsNow(state, setup);
-    std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
-    std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
-    for (const cam::Toolpath& tp : paths) {
-      reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
-      tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
-    }
-    std::string gcode, error;
-    if (!cam::PostProcess(setup.machine.post, setup, paths, PostOptsOf(setup),
-                          gcode, &error))
-      throw std::runtime_error(error);
-    const double res = p.value("resolution", 0.25);
-    // The job's other setups, posted, so what one of them removes is said as
-    // its cut rather than as leftover here
-    // (docs/cam/simulation.md#leftover-another-setup-removes).
-    std::vector<cam::SetupProgram> programs;
-    std::vector<std::string> unposted;
-    bool before = true; // the job's order is the order they are cut in
-    for (const cam::Setup& other : job->GetSetups()) {
-      if (other.id == setup.id)
-        before = false;
-      if (other.id == setup.id || other.operations.empty())
-        continue;
-      cam::SetupProgram sp;
-      sp.setup = &other;
-      sp.earlier = before;
-      std::string why;
-      if (!cam::PostProcess(other.machine.post, other,
-                            ui::GenerateCamToolpathsNow(state, other),
-                            PostOptsOf(other), sp.gcode, &why)) {
-        unposted.push_back("setup '" + other.name +
-                           "', because it does not post: " + why);
-        continue;
-      }
-      programs.push_back(std::move(sp));
-    }
-    cam::OtherSetups others =
-        cam::OtherSetupsOf(setup, programs, ui::JobBodies(state), res);
-    others.notChecked.insert(others.notChecked.end(), unposted.begin(),
-                             unposted.end());
-    std::vector<std::string> missingFixtures;
-    const cam::Verdict v = cam::VerifyGcode(
-        gcode, setup, ui::JobBodies(state), res, reliefs, tabs,
-        ui::JobFixtureSolids(state, setup, true, &missingFixtures), &others);
-    const double tol = res * 1.5; // one cell of quantisation, plus slack
-    // The same sentences the panel shows. A verdict that reads as a row of
-    // numbers over the RPC and as English in the GUI is two verdicts, and the
-    // agent gets the worse one.
-    bool breaksAnEdge = false;
-    for (const cam::Operation& op : setup.operations)
-      breaksAnEdge |=
-          op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
-    json says = json::array();
-    // What was not cut because its operation produced nothing, FIRST: a
-    // setup whose only operation failed verified "ok" -- true, nothing in an
-    // empty file is dangerous -- with "cuts nothing" the only hint why.
-    json failedOps = json::array();
-    for (const cam::Toolpath& tp : paths)
-      if (!tp.error.empty()) {
-        std::string name;
-        for (const cam::Operation& op : setup.operations)
-          if (op.id == tp.operationId)
-            name = op.name;
-        failedOps.push_back({{"op", tp.operationId}, {"error", tp.error}});
-        says.push_back("Operation " + std::to_string(tp.operationId) + " '" +
-                       name +
-                       "' produced no toolpath and is not in the "
-                       "file: " +
-                       tp.error);
-      }
-    for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0, breaksAnEdge))
-      says.push_back(line.text);
-    // The machine's lines too -- the parts' reach beyond the travel, the
-    // sheet's overhang -- the same helper the panel uses.
-    for (const cam::VerdictLine& line :
-         cam::MachineLines(setup, ui::JobBodies(state), &paths))
-      says.push_back(line.text);
-    // A fixture that pushed safe Z past the machine's Z, named.
-    if (const auto line = ui::FixtureTravelLine(state, setup, v))
-      says.push_back(line->text);
-    // A fixture whose part is gone was not checked, and says so: the same
-    // words the panel shows.
-    json notChecked = json::array();
-    for (const std::string& name : missingFixtures) {
-      const std::string line = "fixture \"" + name + "\" -- its part is gone";
-      notChecked.push_back(line);
-      says.push_back("Not checked: " + line);
-    }
-    if (v.fixturesSkippedRotary)
-      notChecked.push_back("fixtures, on a rotary setup");
-    json biggest = json::array();
-    for (const cam::Verdict::Region& r : v.biggest) {
-      json rj{{"at", {r.at.x, r.at.y}},
-              {"area_mm2", r.area},
-              {"depth_mm", r.depth}};
-      if (v.rotary) {
-        rj["end_face"] = r.endFace;
-        rj["ring"] = r.ring;
-        rj["span_deg"] = r.spanDeg;
-      }
-      biggest.push_back(std::move(rj));
-    }
-    json otherCuts = json::array();
-    for (const cam::Verdict::OtherCut& c : v.leftoverOtherSetups)
-      otherCuts.push_back(
-          {{"setup", c.setup}, {"name", c.name}, {"area_mm2", c.area}});
-    json out = json{
-        {"leftover_other_setups", otherCuts},
-        {"other_setups_not_checked", v.otherSetupsNotChecked},
-        {"max_gouge_mm", v.maxGouge},
-        {"max_leftover_mm", v.maxLeftover},
-        // Past the bottom of the stock: the spoilboard, not the part.
-        // Separate from the gouge because every through cut does it
-        // on purpose, and conflating them called correct G-code scrap.
-        {"below_stock_mm", v.belowStock},
-        {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
-        {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
-        {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
-        // How MUCH is left over, and in how many places: corner radii
-        // a cutter cannot reach are several tiny regions, a forgotten
-        // operation is one big one, and the deepest-point number
-        // alone reads the same for both.
-        {"leftover_area_mm2", v.leftoverArea},
-        {"leftover_regions", v.leftoverRegions},
-        {"leftover_biggest", biggest},
-        {"rapids_through_stock", v.rapidsThroughStock},
-        {"worst_rapid_depth_mm", v.worstRapidDepth},
-        {"worst_rapid_at", {v.worstRapidAt.x, v.worstRapidAt.y}},
-        {"worst_rapid_line", v.worstRapidLine},
-        // Which STOCK MODEL answered. True means the file's A moved, so
-        // it was checked against a rotary blank r(x, theta) and the
-        // second number in every `*_at` pair is an ANGLE IN DEGREES,
-        // not a Y. A pair of doubles cannot say that and a caller
-        // reading an angle as a coordinate would be quietly wrong.
-        {"rotary", v.rotary},
-        {"file_errors", v.fileErrors},
-        {"first_file_error", v.firstFileError},
-        {"file_warnings", v.fileWarnings},
-        {"first_file_warning", v.firstFileWarning},
-        // Cutting that bit deeper than its op's passes take
-        // (docs/cam/simulation.md#bite), as a full-width equivalent.
-        {"over_bites", v.overBites},
-        {"worst_bite_mm", v.worstBite},
-        {"worst_bite_allowed_mm", v.worstBiteAllowed},
-        {"worst_bite_at", {v.worstBiteAt.x, v.worstBiteAt.y}},
-        {"worst_bite_line", v.worstBiteLine},
-        {"worst_bite_op", v.worstBiteOp},
-        {"bite_by_op",
-         [&] {
-           json a = json::array();
-           for (const auto& [op, b] : v.biteByOp)
-             a.push_back(
-                 {{"op", op}, {"max_mm", b.first}, {"allowed_mm", b.second}});
-           return a;
-         }()},
-        // The chuck and the tailstock of a setup held in the rotary:
-        // docs/cam/rotary.md#chuck-and-tailstock.
-        {"holding_collisions", v.holdingCollisions},
-        {"worst_holding_depth_mm", v.worstHoldingDepth},
-        {"worst_holding_x", v.worstHoldingX},
-        {"worst_holding_line", v.worstHoldingLine},
-        {"worst_holding", v.worstHoldingWhat},
-        {"holding_defaults", v.holdingDefaults},
-        // A shank wider than the cutter driven into a wall:
-        // docs/cam/simulation.md#shank-collisions.
-        {"shank_collisions", v.shankCollisions},
-        {"worst_shank_depth_mm", v.worstShankDepth},
-        {"worst_shank_at", {v.worstShankAt.x, v.worstShankAt.y}},
-        {"worst_shank_line", v.worstShankLine},
-        {"holder_collisions", v.holderCollisions},
-        {"worst_holder_depth_mm", v.worstHolderDepth},
-        {"worst_holder_at", {v.worstHolderAt.x, v.worstHolderAt.y}},
-        {"worst_holder_line", v.worstHolderLine},
-        // The cutter or the holder into a fixture (a clamp, a vise):
-        // docs/cam/simulation.md#fixture-collisions.
-        {"fixture_collisions", v.fixtureCollisions},
-        {"fixtures_checked", v.fixturesChecked},
-        {"worst_fixture_depth_mm", v.worstFixtureDepth},
-        {"worst_fixture_at", {v.worstFixtureAt.x, v.worstFixtureAt.y}},
-        {"worst_fixture_line", v.worstFixtureLine},
-        {"worst_fixture", v.worstFixtureName},
-        {"worst_fixture_by", v.worstFixtureByHolder ? "holder" : "cutter"},
-        {"not_checked", notChecked},
-        // Moves the machine cannot reach. A verdict field nothing
-        // reports is the same silence this check exists to end.
-        {"outside_travel", v.outsideTravel},
-        {"outside_travel_axis", std::string(1, v.outsideAxis)},
-        {"outside_travel_overshoot_mm", v.worstOvershoot},
-        {"first_outside_line", v.firstOutsideLine},
-        {"z_span_over_mm", v.zSpanOver},
-        {"z_deepest_line", v.zDeepestLine},
-        {"z_highest_line", v.zHighestLine},
-        {"first_bad_line", v.firstBadLine},
-        {"resolution_mm", res},
-        {"cells", v.cells},
-        {"failed_ops", failedOps},
-        {"says", says},
-        // Tabs the program left ON PURPOSE. Reported rather than
-        // silently subtracted: four is a job to sign off, none where
-        // four were asked for is a job to look at.
-        {"tabs", v.tabs},
-        {"reliefs", v.reliefs},
-        // Two questions. `ok` is the one that is never in doubt:
-        // nothing here scraps the part or breaks the tool. `complete`
-        // is softer — a height map cannot watch a slug fall out of a
-        // through cut, so a correct job can still report material
-        // left over. Tabs no longer count against it.
-        {"ok", v.Safe(tol)},
-        {"complete", v.Complete(tol)}};
-    // The typical scallop, where the worst cell is an end face no rotary
-    // pass can reach. Rotary only: the height map does not compute it, and
-    // a zero here would read as a measurement.
-    if (v.rotary) {
-      out["leftover_p95_mm"] = v.leftoverP95;
-      out["leftover_surface_max_mm"] = v.leftoverSurfaceMax;
-      out["leftover_surface_at"] = {v.leftoverSurfaceAt.x,
-                                    v.leftoverSurfaceAt.y};
-      out["leftover_surface_p99_mm"] = v.leftoverSurfaceP99;
-      out["leftover_end_face_area_mm2"] = v.leftoverEndFaceArea;
-    }
-    {
-      // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
-      // so PREDICTED (core/Receipt.h). Anything narrower than a cell is
-      // invisible to it, and `complete` is soft by construction because a
-      // height map cannot watch a slug fall out of a through cut. The receipt
-      // can therefore never read better than provisional, which is the honest
-      // standing for a number that comes from a discretisation.
-      receipt::Receipt receipt;
-      const receipt::Oracle oracle{"designer/cam-stocksim", "1"};
-      const std::string note = "height-map simulation at " +
-                               std::to_string(res) + " mm resolution over " +
-                               std::to_string(v.cells) +
-                               " cells; anything narrower than a cell is "
-                               "below what this can see";
-      receipt::Claim safe("the program does not cut into the part or the "
-                          "machine, and asks no more of the tool than its "
-                          "passes and its reach allow",
-                          oracle,
-                          v.Safe(tol) ? receipt::Verdict::Pass
-                                      : receipt::Verdict::Fail);
-      safe.basis = receipt::Basis::Predicted;
-      safe.value = v.maxGouge;
-      safe.unit = "mm";
-      safe.note = note;
-      receipt.Add(std::move(safe));
-      receipt::Claim done("the program cuts everything it was asked to", oracle,
-                          v.Complete(tol) ? receipt::Verdict::Pass
-                                          : receipt::Verdict::Fail);
-      done.basis = receipt::Basis::Predicted;
-      done.value = v.maxLeftover;
-      done.unit = "mm";
-      done.note = note;
-      receipt.Add(std::move(done));
-      AttachReceipt(out, receipt);
-    }
-    return out;
+    // rpc-params: job, resolution, setup
+    // Synchronous here: the pass in flight is joined and the rest computed
+    // now, through the same cache the panel fills
+    // (docs/ui/long-operations.md#cam-toolpath-passes). A client's request
+    // is PARKED first (ParkCamRequest) and runs these steps itself, the
+    // simulation on a worker; it reaches this handler only when parking
+    // gave up (docs/cam/README.md#requests-that-wait).
+    const std::shared_ptr<VerifyRun> w = PrepareVerify(state, *job, p);
+    ComputeVerify(*w);
+    return VerifyAnswer(state, *w);
   }
   if (m == "cam_simulate") {
     // `job` is read in the preamble, before the active job is looked up --
@@ -2640,6 +2702,173 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   return std::nullopt;
 }
 
+// --- Requests that wait (docs/cam/README.md#requests-that-wait) -----------
+
+namespace {
+
+// Rounds of "the worker went idle and passes were STILL owed" before a
+// parked request stops waiting and runs synchronously. Owed again after
+// idle means the job moved on under it (another client edited it) or the
+// cache let a pass go; either way it converges, and the bound only keeps a
+// cache too small for the whole job from cycling for ever. The fallback is
+// what every one of these requests did before parking existed.
+constexpr int kMaxPassRounds = 4;
+
+// Queue every pass `m` reads; true while any is owed. Throws the handler's
+// refusals, which ParkCamRequest turns into "dispatch it and let the
+// handler say it".
+bool PassesOwed(ui::AppState& state, const std::string& m, const RpcParams& p) {
+  SelectJob(state, p);
+  cam::JobDocument* job = ui::ActiveJob(state);
+  if (job == nullptr)
+    throw std::runtime_error("no job");
+  std::vector<const cam::Setup*> read;
+  if (m == "cam_simulate") {
+    const uint64_t id = p.contains("setup") ? p.at("setup").get<uint64_t>()
+                                            : state.camActiveSetup;
+    const cam::Setup& setup = RequireSetup(*job, id);
+    // Only a simulation that (re)opens settles the toolpaths; a seek on the
+    // one already playing reads nothing new.
+    if (state.camPlaybackOpen && state.camActiveSetup == setup.id &&
+        !p.contains("resolution"))
+      return false;
+    read.push_back(&setup);
+  } else {
+    const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    read.push_back(&setup);
+    // cam_verify posts every other setup of the job too
+    // (docs/cam/simulation.md#leftover-another-setup-removes).
+    if (m == "cam_verify")
+      for (const cam::Setup& other : job->GetSetups())
+        if (other.id != setup.id && !other.operations.empty())
+          read.push_back(&other);
+  }
+  bool owed = false;
+  for (const cam::Setup* setup : read)
+    owed |= ui::QueueCamPassesFor(state, *setup);
+  return owed;
+}
+
+class CamWait final : public CamParking {
+public:
+  explicit CamWait(std::string method)
+      : m_method(std::move(method)),
+        m_cancellations(ui::CamPassCancellations()) {}
+
+  // cam_verify's simulation, on a "cam-verify" worker. Throws a refusal
+  // from PrepareVerify (a setup that does not post, say).
+  void StartVerify(ui::AppState& state, const RpcParams& p) {
+    SelectJob(state, p);
+    cam::JobDocument* job = ui::ActiveJob(state);
+    if (job == nullptr)
+      throw std::runtime_error("no job");
+    std::shared_ptr<VerifyRun> w = PrepareVerify(state, *job, p);
+    auto bg = std::make_unique<ui::BackgroundJob>();
+    bg->kind = "cam-verify";
+    bg->label = "Verifying setup '" + w->setup.name + "' for cam_verify";
+    bg->cancellable = false; // the carve has no interruption points
+    bg->fraction.store(-1.0);
+    ui::BackgroundJob* raw = bg.get();
+    bg->thread = std::thread([w, raw] {
+      try {
+        ComputeVerify(*w);
+      } catch (const std::exception& e) {
+        w->error = std::string("cam_verify failed: ") + e.what();
+      } catch (const Standard_Failure& e) {
+        w->error = std::string("cam_verify failed: OpenCASCADE error: ") +
+                   (e.GetMessageString() ? e.GetMessageString()
+                                         : "unspecified failure");
+      }
+      raw->done.store(true); // last
+    });
+    bg->finish = [w, raw](ui::AppState&) -> bool {
+      w->landed = true;
+      w->cancelled = raw->cancel.load();
+      return true;
+    };
+    ui::StartBackgroundJob(state, std::move(bg));
+    m_verify = std::move(w);
+  }
+
+  Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
+    if (m_verify) {
+      if (!m_verify->landed)
+        return Next::Wait;
+      if (m_verify->cancelled)
+        throw std::runtime_error(
+            "cam_verify's simulation was cancelled (cancel_background_job "
+            "cam-verify) before it answered -- call cam_verify again");
+      if (!m_verify->error.empty())
+        throw std::runtime_error(m_verify->error);
+      answer = VerifyAnswer(state, *m_verify);
+      return Next::Answer;
+    }
+    // A cancel drops the queue; the passes this request waits on will not
+    // land, and waiting on would only queue them again behind the caller's
+    // back.
+    if (ui::CamPassCancellations() != m_cancellations)
+      throw std::runtime_error(
+          m_method +
+          " was waiting for toolpath passes and they were cancelled "
+          "(cancel_background_job cam) -- call it again to cut them");
+    if (ui::CamPassesBusy(state))
+      return Next::Wait;
+    bool owed = false;
+    try {
+      owed = PassesOwed(state, m_method, p);
+    } catch (...) {
+      return Next::Dispatch; // the handler refuses it, in its own words
+    }
+    if (owed && ++m_rounds < kMaxPassRounds)
+      return Next::Wait;
+    if (owed || m_method != "cam_verify")
+      return Next::Dispatch;
+    try {
+      StartVerify(state, p);
+    } catch (...) {
+      return Next::Dispatch;
+    }
+    return Next::Wait;
+  }
+
+private:
+  std::string m_method;
+  uint64_t m_cancellations = 0;
+  int m_rounds = 0;
+  std::shared_ptr<VerifyRun> m_verify;
+};
+
+} // namespace
+
+std::unique_ptr<CamParking>
+ParkCamRequest(ui::AppState& state, const std::string& m, const RpcParams& p) {
+  if (m != "cam_toolpath" && m != "cam_post" && m != "cam_verify" &&
+      m != "cam_simulate")
+    return nullptr;
+  try {
+    // The poller's form answers at once, and closing a simulation reads
+    // nothing: neither waits.
+    if (m == "cam_toolpath" && p.value("async", false))
+      return nullptr;
+    if (m == "cam_simulate" && p.value("close", false))
+      return nullptr;
+    auto wait = std::make_unique<CamWait>(m);
+    // Ready means every pass cached AND the worker idle: the synchronous
+    // handler joins every "cam" job, so a pass cutting for somebody else
+    // would stall it just the same.
+    if (!PassesOwed(state, m, p) && !ui::CamPassesBusy(state)) {
+      if (m != "cam_verify")
+        return nullptr;
+      wait->StartVerify(state, p);
+    }
+    return wait;
+  } catch (...) {
+    // Whatever went wrong -- no job, no such setup, a parameter of the
+    // wrong type, a setup that does not post -- the handler says it.
+    return nullptr;
+  }
+}
+
 } // namespace remote
 
 #else // !HAVE_CAM
@@ -2652,6 +2881,10 @@ HandleCamRpc(ui::AppState&, Document*, const std::string&, const RpcParams&) {
   return std::nullopt;
 }
 std::span<const MethodDoc> CamMethodDocs() { return {}; }
+std::unique_ptr<CamParking> ParkCamRequest(ui::AppState&, const std::string&,
+                                           const RpcParams&) {
+  return nullptr;
+}
 } // namespace remote
 
 #endif // HAVE_CAM
