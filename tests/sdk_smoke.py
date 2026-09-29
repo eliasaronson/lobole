@@ -222,6 +222,48 @@ def check_bad_blend_refuses(app):
            f"and say why, in its own words: {why!r}")
 
 
+def check_faces_by_maker(app):
+    """A feature call hands back the feature, and its faces are asked for
+    by what made them (docs/modeling/toponaming.md): a cut's floor, a
+    hole's bores, a Derived copy's through `via`. A cut returned None, so a
+    script had nothing to ask and filtered by normal and position."""
+    part = app.part("maker faces")
+    sk = part.sketch(sdk.Plane.xy(), name="plate")
+    sk.rect((0, 0), (60, 40))
+    plate = part.extrude(sk.add(), 20, name="Plate")
+    expect(plate.feature.end_cap().normal.z > 0.99,
+           "a new body's feature answers for its caps")
+    pk = part.sketch(sdk.Plane.xy(20), name="pocket")
+    pk.rect((5, 5), (25, 25))
+    pocket = part.cut(pk.add(), 8, reversed=True, name="Pocket")
+    expect(isinstance(pocket, sdk.Feature) and pocket["id"] == pocket.id,
+           f"a cut hands back its feature, and still reads like the dict: "
+           f"{pocket!r}")
+    floor = pocket.floor()
+    expect(abs(floor.centroid.z - 12.0) < 1e-6 and floor.role == "end_cap",
+           f"the pocket's floor, by name: {floor.name} {floor.centroid}")
+    expect(len(pocket.walls()) == 4, "and its four walls")
+    holes = part.sketch(sdk.Plane.xy(20), name="holes")
+    holes.point((45, 10))
+    holes.point((45, 30))
+    h = part.hole(holes.add(), d=5, depth=10, name="Holes")
+    expect(len(h.bores()) == 2 and all(b.role == "bore" for b in h.bores()),
+           "a hole's bores")
+    refused(lambda: h.faces(role="countersink"), "made bore")
+    expect(len(part.body().faces(made_by="Pocket", role="walls")) == 4,
+           "Body.faces takes made_by and role")
+    expect(part.feature("Pocket").id == pocket.id, "a feature by name")
+
+    other = app.part("maker copy")
+    other.activate()
+    app.add_feature(feature={"type": "Derived", "name": "copy",
+                             "source_part": part.id, "reference": False})
+    copied = other.faces(via="copy", made_by=part.feature("Pocket"),
+                         role="floor")
+    expect(len(copied) == 1 and abs(copied[0].centroid.z - 12.0) < 1e-6,
+           f"the copy's pocket floor, through via: {copied}")
+
+
 def check_compare_aligns(app, tmp):
     """`compare_geometry {align}` answers about the SHAPE, not the place.
 
@@ -474,6 +516,9 @@ def main():
 
         # ---- A bad blend refuses, and the session survives it ------------
         check_bad_blend_refuses(app)
+
+        # ---- Faces by what made them --------------------------------------
+        check_faces_by_maker(app)
 
         # ---- compare_geometry can be asked about shape alone -------------
         check_compare_aligns(app, tmp)

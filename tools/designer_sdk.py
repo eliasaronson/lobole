@@ -720,6 +720,13 @@ class Element:
         self.name = raw["name"]
         self.kind = raw.get("kind", "other")
         self.feature_id = body.created_by
+        # What MADE it (a feature id; for a Derived copy's, one of the source
+        # part's) and in what role: end_cap, side, blend, bore...
+        # (docs/modeling/toponaming.md). `feature_id` is the body's, which a
+        # ref needs; this is the answer to "which cut is this the floor of".
+        self.made_by = raw.get("made_by")
+        self.role = raw.get("role")
+        self.entity = raw.get("entity")
 
     @property
     def ref(self):
@@ -777,6 +784,122 @@ class Edge(Element):
             raise SdkError(f"edge {self.name!r} is a {self.kind}; only a "
                            f"circle or arc has a centre")
         return self.frame().origin
+
+
+def _made_filter(made_by, role, via, entity):
+    kw = {}
+    if made_by is not None:
+        kw["made_by"] = made_by.id if isinstance(made_by, Feature) else made_by
+    if role is not None:
+        kw["role"] = role
+    if via is not None:
+        kw["via"] = via.id if isinstance(via, Feature) else via
+    if entity is not None:
+        kw["entity"] = int(entity)
+    return kw
+
+
+class Feature:
+    """A feature of a part, and the faces and edges it made.
+
+    What `hole`, `fillet`, `pattern`, a cut and every feature call that
+    makes no new body return -- and what a new body's `.feature` is. It
+    still reads like the response dict it replaces (`h["id"]`,
+    `r["regen"]`), so older scripts keep working.
+
+    Its faces are asked of the app by what MADE them, not guessed from
+    normals and positions (docs/modeling/toponaming.md):
+
+        pocket = part.cut(sk, 8, reversed=True)
+        part.pocket_op(pocket.floor())      # the pocket's floor, by name
+        hole.bores()                        # every bore the Hole drilled
+
+    A question with no answer raises, saying why -- "made side x4, none
+    end_cap" for the floor of a cut that went through -- rather than
+    returning an empty list a script would carry on with.
+    """
+
+    def __init__(self, part, raw):
+        self.part = part
+        self._raw = dict(raw)
+        self.id = raw["id"]
+        self.name = raw.get("name")
+        self.type = raw.get("type")
+
+    # the response dict, as before
+    def __getitem__(self, key):
+        return self._raw[key]
+
+    def get(self, key, default=None):
+        return self._raw.get(key, default)
+
+    def __contains__(self, key):
+        return key in self._raw
+
+    def keys(self):
+        return self._raw.keys()
+
+    def __repr__(self):
+        return f"Feature({self.id}, {self.name!r})"
+
+    def _ask(self, role, entity, edges, via=None, on=None):
+        on = on or self.part
+        r = on.app.list_elements(part=on.id,
+                                 **_made_filter(self, role, via, entity))
+        out = []
+        for row in r["bodies"]:
+            body = Body(on, row["body"], {"name": row["name"],
+                                         "created_by": row["created_by"]})
+            for raw in row["edges" if edges else "faces"]:
+                out.append((Edge if edges else Face)(on, body, raw))
+        if not out:
+            raise SdkError(r.get("why") or
+                           f"feature {self.id} made no "
+                           f"{'edges' if edges else 'faces'} here"
+                           + (f" in role {role!r}" if role else ""))
+        return out
+
+    def faces(self, role=None, entity=None):
+        """The faces this feature made, in `role` if given: start_cap,
+        end_cap (floor), side (walls; `entity=` the sketch line), blend,
+        bore, bottom, counterbore, counterbore_floor, countersink,
+        positional, boundary."""
+        return self._ask(role, entity, edges=False)
+
+    def edges(self, role=None, entity=None):
+        """The edges named from the faces this feature made."""
+        return self._ask(role, entity, edges=True)
+
+    def floors(self):
+        """A cut's floors -- one per pattern copy when it has copies."""
+        return self.faces(role="end_cap")
+
+    def floor(self):
+        """A cut's floor, when it has exactly one."""
+        return _only(self.floors(), "floor", {"feature": self.id})
+
+    def walls(self, entity=None):
+        """A cut's or an extrude's side faces; `entity=` the sketch line
+        one was swept from."""
+        return self.faces(role="side", entity=entity)
+
+    def end_cap(self):
+        """An extrude's far end (a revolve's, when partial)."""
+        return _only(self.faces(role="end_cap"), "end cap",
+                     {"feature": self.id})
+
+    def start_cap(self):
+        """An extrude's first end, on its sketch plane."""
+        return _only(self.faces(role="start_cap"), "start cap",
+                     {"feature": self.id})
+
+    def bores(self):
+        """Every bore a Hole drilled."""
+        return self.faces(role="bore")
+
+    def bottoms(self):
+        """Every blind hole's bottom."""
+        return self.faces(role="bottom")
 
 
 class Frame:
@@ -853,12 +976,31 @@ class Body:
             return self._raw["created_by"]
         return self._load()["created_by"]
 
+    def _made(self, made_by, role, via, entity):
+        """This body's elements a feature made, asked of the app."""
+        kw = _made_filter(made_by, role, via, entity)
+        r = self._part.app.list_elements(body=self.index, part=self._part.id,
+                                         **kw)["bodies"][0]
+        return ([Face(self._part, self, f) for f in r["faces"]],
+                [Edge(self._part, self, e) for e in r["edges"]])
+
     def faces(self, kind=None, where=None, normal=None, radius=None,
-              tol=0.01, radius_tol=0.05):
+              tol=0.01, radius_tol=0.05, made_by=None, role=None, via=None,
+              entity=None):
         """Faces, filtered. `normal=(0,0,1)` keeps the ones pointing that
-        way; `where` is any predicate over a Face."""
-        self._load()
-        out = self._faces
+        way; `where` is any predicate over a Face.
+
+        `made_by=` (a Feature, an id or a name) and `role=` ask for the
+        faces a feature made, in a role -- `made_by=pocket, role="floor"` --
+        instead of guessing them from normals and positions; `via=` a
+        Derived feature when they came in through one (made_by then names a
+        feature of the source part). See Feature.faces."""
+        if made_by is not None or role is not None or via is not None \
+                or entity is not None:
+            out = self._made(made_by, role, via, entity)[0]
+        else:
+            self._load()
+            out = self._faces
         if kind:
             out = [f for f in out if f.kind == kind]
         if normal is not None:
@@ -872,7 +1014,7 @@ class Body:
         return out
 
     def edges(self, kind=None, where=None, radius=None, circular=None,
-              tol=0.05):
+              tol=0.05, made_by=None, role=None, via=None, entity=None):
         """Edges, filtered.
 
         `circular=True` means "a round rim" — circle OR arc. Whether the
@@ -884,9 +1026,16 @@ class Body:
 
         `tol` is a real tolerance in millimetres (0.05 by default), not a
         float-comparison epsilon: an imported radius is rarely exact.
+
+        `made_by=`, `role=`, `via=`, `entity=` as for faces(): an edge's
+        origin is the face it was named from's.
         """
-        self._load()
-        out = self._edges
+        if made_by is not None or role is not None or via is not None \
+                or entity is not None:
+            out = self._made(made_by, role, via, entity)[1]
+        else:
+            self._load()
+            out = self._edges
         if circular:
             out = [e for e in out if e.kind in ("circle", "arc")]
         if kind:
@@ -1416,6 +1565,13 @@ class Part(_Tab):
         self.activate()
         return self.app.add_feature(feature=feature)
 
+    def _feature(self, feature):
+        """Add a feature and hand back its Feature (the response dict,
+        with the faces it made to ask for)."""
+        r = self._add(feature)
+        return Feature(self, dict(r, name=feature.get("name"),
+                                  type=feature.get("type")))
+
     # --- parameters --------------------------------------------------------
     def var(self, name, expression, comment="", scope="part"):
         """A named parameter. Every dimension the spec names should be one:
@@ -1552,7 +1708,7 @@ class Part(_Tab):
              "sketch_id": _id(sketch), "mode": mode}
         _dim(f, "distance", distance)
         f.update(kw)
-        return self._body_from(self._add(f))
+        return self._body_from(self._add(f), f)
 
     def cut(self, sketch, distance, **kw):
         return self.extrude(sketch, distance, mode="cut", **kw)
@@ -1565,7 +1721,7 @@ class Part(_Tab):
              "axis": axis if isinstance(axis, dict) else {"kind": axis}}
         _dim(f, "angle_deg", angle_deg)
         f.update(kw)
-        return self._body_from(self._add(f))
+        return self._body_from(self._add(f), f)
 
     @_renamed(angle=("angle_deg", "the same degrees"))
     def revolve_profile(self, points, plane=None, axis="z", angle_deg=360.0,
@@ -1583,7 +1739,7 @@ class Part(_Tab):
         _dim(f, "width", w)
         _dim(f, "height", h)
         _dim(f, "depth", d)
-        return self._body_from(self._add(f))
+        return self._body_from(self._add(f), f)
 
     def cylinder(self, center=(0, 0, 0), direction=(0, 0, 1), d=None, r=None,
                  h=1.0, name="Cylinder"):
@@ -1594,7 +1750,7 @@ class Part(_Tab):
         _dim(f, "radius", (f"({d}) / 2" if isinstance(d, str) else
                            (d / 2.0 if d is not None else r)))
         _dim(f, "height", h)
-        return self._body_from(self._add(f))
+        return self._body_from(self._add(f), f)
 
     def sphere(self, center=(0, 0, 0), d=None, r=None, name="Sphere"):
         if (d is None) == (r is None):
@@ -1602,7 +1758,7 @@ class Part(_Tab):
         f = {"type": "Sphere", "name": name, "center": list(V(center))}
         _dim(f, "radius", (f"({d}) / 2" if isinstance(d, str) else
                            (d / 2.0 if d is not None else r)))
-        return self._body_from(self._add(f))
+        return self._body_from(self._add(f), f)
 
     def hole(self, sketch, d, depth=None, through=False, kind="simple", **kw):
         """Holes at a sketch's points and at its circles' centres — so a
@@ -1616,7 +1772,7 @@ class Part(_Tab):
         if depth is not None:
             _dim(f, "depth", depth)
         f.update(kw)
-        return self._add(f)
+        return self._feature(f)
 
     def thread(self, face, designation, allow_engagement=False, minimum_engagement=0):
         """Annotate actual manufacturing geometry; engagement is explicit opt-in.
@@ -1654,7 +1810,7 @@ class Part(_Tab):
         f = {"type": type_, "name": name,
              "edges": [e.ref for e in edges]}
         _dim(f, "radius", r)
-        return self._add(f)
+        return self._feature(f)
 
     @_renamed(rotate=("rotate_deg", "the same degrees per axis"))
     def frame(self, name, of=None, origin=None, z=(0, 0, 1), x=(1, 0, 0),
@@ -1730,7 +1886,7 @@ class Part(_Tab):
             _dim(f, "angle_deg", step_deg)
         else:
             raise SdkError("pattern takes linear= or circular= (an axis)")
-        return self._add(f)
+        return self._feature(f)
 
     @_renamed(start_angle=("start_deg",
                            "DEGREES (the old name took radians)"))
@@ -1793,6 +1949,14 @@ class Part(_Tab):
 
     def faces(self, **kw):
         return [f for b in self.bodies() for f in b.faces(**kw)]
+
+    def feature(self, name):
+        """A feature of this part by name (or id), as a Feature: its faces
+        are then `.faces(role=...)`, and it is what `made_by=` takes -- also
+        for a Derived copy of this part, with `via=`."""
+        rows = self.state()["features"]
+        hit = [f for f in rows if f.get("name") == name or f.get("id") == name]
+        return Feature(self, _only(hit, "feature", {"name": name}))
 
     def edges(self, **kw):
         return [e for b in self.bodies() for e in b.edges(**kw)]
@@ -1939,14 +2103,20 @@ class Part(_Tab):
         a rollback if any of them fails."""
         return Batch(self.app)
 
-    def _body_from(self, r):
+    def _body_from(self, r, feature=None):
         """A feature response, as the Body it created (looked up after the
-        regeneration, so its faces and edges are the real ones)."""
+        regeneration, so its faces and edges are the real ones), with the
+        feature as its `.feature`. A feature that made no body of its own --
+        a cut, an extrude joined to another body -- is the Feature (it was
+        None, which left a cut's floor with nothing to ask)."""
         fid = r["id"]
+        feat = Feature(self, dict(r, name=(feature or {}).get("name"),
+                                  type=(feature or {}).get("type")))
         for b in self.bodies(reference=False):
             if b.created_by == fid:
+                b.feature = feat
                 return b
-        return None
+        return feat
 
 
 # --------------------------------------------------------------------------

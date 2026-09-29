@@ -59,6 +59,18 @@ Only what `describe` cannot express:
   `face(...)` / `edge(...)` demand exactly one match and refuse otherwise.
   `circular=True` means circle or arc, because the kernel may split a hole's
   rim into arcs; `tol` is a real tolerance in millimetres (0.05 by default).
+- **Faces by what made them.** A feature call hands back the feature: a new
+  body's `.feature`, and a `Feature` from a cut, a join, `hole`, `fillet`,
+  `chamfer` and `pattern` (it still reads like the response dict, `h["id"]`).
+  Its faces are asked of the app by name, not guessed from geometry:
+  `pocket.floor()`, `pocket.walls(entity=)`, `extrude.end_cap()`,
+  `hole.bores()`, `fillet.faces()`, `feature.faces(role=)`. `body.faces()`
+  and `part.faces()` take `made_by=` (a Feature, id or name), `role=`,
+  `entity=` and `via=` (a Derived feature; `made_by` then names a feature of
+  the source part, `source.feature("Crenel")`). A question with no answer
+  raises with the app's why ("made side x4 -- none end_cap"). Every `Face`
+  and `Edge` carries `made_by` and `role`
+  ([toponaming](../modeling/toponaming.md)).
 - **Plane arithmetic.** `Plane.xy(z)`, `.xz(y)`, `.yz(x)`, a face's
   `.plane()`, `plane.uv(world_point)` and `plane.world(u, v)`. Sketch UV is
   measured from the plane origin: `world = origin + u*U + v*V`. The sketch
