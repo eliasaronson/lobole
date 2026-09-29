@@ -199,10 +199,7 @@ std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
                                              const Connector& c) {
   if (!state.assembly)
     return std::nullopt;
-  const assembly::PartResolver resolve =
-      [&state](uint64_t partId) -> const Document* {
-    return PartDocById(state, partId);
-  };
+  const assembly::PartResolver resolve = PartResolverFor(state);
   const auto local = assembly::ConnectorLocalFrame(c, *state.assembly, resolve);
   if (!local)
     return std::nullopt;

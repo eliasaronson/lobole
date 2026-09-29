@@ -15,6 +15,7 @@
 
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/FlexibleActions.h"
 #include <map>
 #include <set>
@@ -50,8 +51,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
      "reference that would close a cycle is refused. {flexible: true} places "
      "a sub-assembly whose own mechanism MOVES here (see "
-     "set_occurrence_flexible), and answers with the solve's errored_mates.",
-     "fixed, flexible, name, part, transform, visible"},
+     "set_occurrence_flexible), and answers with the solve's errored_mates. "
+     "{configuration: name|id} places it in that configuration of what it "
+     "places (a part's or a sub-assembly's; see "
+     "set_occurrence_configuration).",
+     "configuration, fixed, flexible, name, part, transform, visible"},
     {"remove_occurrence",
      "Remove an occurrence. Takes `occurrence` as well as `id`.",
      "id, occurrence"},
@@ -101,11 +105,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Rename an occurrence. Takes `occurrence` as well as `id`.",
      "id, name, occurrence"},
     {"set_occurrence_configuration",
-     "Choose which configuration of a placed SUB-ASSEMBLY this occurrence "
-     "uses {id, configuration: name|id|null}; null = that document's active "
-     "one. Two placements of one assembly can differ. A FLEXIBLE placement "
-     "runs its mechanism under this configuration (its holds and "
-     "suppressions), and is re-solved.",
+     "Choose which configuration of the placed part or sub-assembly this "
+     "occurrence uses {id, configuration: name|id|null}; null = that "
+     "document's active one. Two placements of one part can differ -- a "
+     "pawn and a rook of one piece part -- and the part is drawn, measured, "
+     "mated and listed in the BOM as that configuration; one it does not "
+     "build in is refused, saying which feature fails. A part placement, "
+     "or a FLEXIBLE one (which runs its mechanism under the configuration), "
+     "is re-solved.",
      "configuration, id, occurrence"},
     {"select_occurrence",
      "Select an occurrence in the UI; nothing (or 0) clears it. Takes "
@@ -417,6 +424,35 @@ static constexpr MethodDoc AssemblyMethods[] = {
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
 namespace {
+
+// A configuration of what an occurrence places -- a part's or a
+// sub-assembly's -- by name or id; null, 0 or "" is that document's active
+// one. Refused naming the ones it has.
+uint64_t PlacedConfiguration(ui::AppState& state, OccurrenceRef kind,
+                             uint64_t docId, const std::string& label,
+                             const json& c) {
+  if (c.is_null())
+    return 0;
+  std::vector<Configuration> cfgs;
+  if (kind == OccurrenceRef::Assembly) {
+    if (const AssemblyDocument* sub = ui::AssemblyDocById(state, docId))
+      cfgs = sub->GetConfigurations();
+  } else if (const Document* part = ui::PartDocById(state, docId)) {
+    cfgs = part->GetConfigurations();
+  }
+  std::string known;
+  for (const Configuration& cfg : cfgs) {
+    known += (known.empty() ? "" : ", ") + cfg.name;
+    if ((c.is_number() && cfg.id == c.get<uint64_t>()) ||
+        (c.is_string() && cfg.name == c.get<std::string>()))
+      return cfg.id;
+  }
+  if ((c.is_number() && c.get<uint64_t>() == 0) ||
+      (c.is_string() && c.get<std::string>().empty()))
+    return 0;
+  throw std::runtime_error("no configuration " + c.dump() + " in '" + label +
+                           "'. Known: " + (known.empty() ? "(none)" : known));
+}
 
 // --- Declared clearances (v97, docs/assemblies/README.md#clearance-assertions)
 //
@@ -924,6 +960,16 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           NormalizeTransform(p.value("transform", identityTransform))},
          {"visible", p.value("visible", true)},
          {"fixed", p.value("fixed", false)}});
+    // Placed in a configuration of what it places; a part's has to build.
+    occ.configurationId =
+        PlacedConfiguration(state, refKind, refId, refName,
+                            p.value("configuration", json(nullptr)));
+    if (occ.configurationId != 0 && refKind == OccurrenceRef::Part) {
+      std::string bad;
+      if (ui::ConfiguredPartDocument(state, refId, occ.configurationId, &bad) ==
+          nullptr)
+        throw std::runtime_error("cannot place '" + refName + "': " + bad);
+    }
     // v129: placed FLEXIBLE, its sub-assembly's mechanism moves here.
     occ.flexible = p.value("flexible", false);
     if (occ.flexible) {
@@ -1018,7 +1064,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             bmx = it->second.second;
             have = true;
           }
-        } else if (Document* pd = ui::PartDocById(state, o.partId)) {
+        } else if (const Document* pd = ui::OccurrencePartDoc(state, o)) {
           have = Measure::WorldBounds(pd->GetBodies(), ui::OccurrenceMatrix(o),
                                       bmn, bmx);
         }
@@ -1077,32 +1123,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         // A5/v56: which configuration of the REFERENCED document this
         // placement uses. Named or by id; 0 / "" goes back to that
         // document's active one.
-        uint64_t cfgId = 0;
-        if (p.contains("configuration") && !p.at("configuration").is_null()) {
-          const json& c = p.at("configuration");
-          if (c.is_number()) {
-            cfgId = c.get<uint64_t>();
-          } else if (const std::string want = c.get<std::string>();
-                     !want.empty()) {
-            const AssemblyDocument* sub =
-                occ->refKind == OccurrenceRef::Assembly
-                    ? ui::AssemblyDocById(state, occ->partId)
-                    : nullptr;
-            std::string known;
-            if (sub != nullptr)
-              for (const Configuration& cfg : sub->GetConfigurations()) {
-                known += (known.empty() ? "" : ", ") + cfg.name;
-                if (cfg.name == want)
-                  cfgId = cfg.id;
-              }
-            if (sub != nullptr && cfgId == 0)
-              throw std::runtime_error(
-                  "no configuration '" + want + "' in '" + occ->name +
-                  "'. Known: " + (known.empty() ? "(none)" : known));
-            if (sub == nullptr)
-              cfgId = UINT64_MAX; // the action refuses a part, naming why
-          }
-        }
+        const uint64_t cfgId =
+            PlacedConfiguration(state, occ->refKind, occ->partId, occ->name,
+                                p.value("configuration", json(nullptr)));
         if (!ui::SetOccurrenceConfiguration(state, occId, cfgId, &why, &rep,
                                             &solved))
           throw std::runtime_error(why);
@@ -1507,9 +1530,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     }
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
-    (void)assembly::PropagateRelations(
-        *state.assembly, mate->id,
-        [&](uint64_t id) { return ui::PartDocById(state, id); });
+    (void)assembly::PropagateRelations(*state.assembly, mate->id,
+                                       ui::PartResolverFor(state));
     // Hold what was just set: in a closed loop the solver would otherwise
     // treat this DOF as one more unknown and move it.
     ui::SolveActiveAssemblyDriven(state, mate->id,

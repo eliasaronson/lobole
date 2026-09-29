@@ -184,7 +184,7 @@ ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
   const Occurrence* occ = state.assembly->FindById(e.occurrenceId);
   if (!occ)
     return std::nullopt;
-  Document* part = PartDocById(state, occ->partId);
+  const Document* part = OccurrencePartDoc(state, *occ);
   if (!part)
     return std::nullopt;
   return MeasureSource{&part->GetBodies(), OccurrenceMatrix(*occ),

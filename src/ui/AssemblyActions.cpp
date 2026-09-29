@@ -7,6 +7,7 @@
 #include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
 #include "ui/CamTool.h"  // RunCamVerification
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h" // JobPlacedBodies
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
@@ -251,10 +252,7 @@ assembly::SolveReport SolveActiveAssemblyReport(AppState& state,
                                                 bool diagnose) {
   if (!state.assembly)
     return {};
-  const assembly::PartResolver resolve =
-      [&state](uint64_t partId) -> const Document* {
-    return PartDocById(state, partId);
-  };
+  const assembly::PartResolver resolve = PartResolverFor(state);
   const assembly::SolveReport rep = assembly::Solve(
       *state.assembly, resolve, AssemblyResolverFor(state), driven, diagnose);
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync
@@ -538,10 +536,16 @@ AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId) {
 // needs the leaf parts of the active assembly goes through here, so none of
 // them has to know how slots are stored.
 assembly::PartResolver PartResolverFor(AppState& state) {
-  return [&state](uint64_t id) -> const Document* {
-    return PartDocById(state, id);
+  return [&state](uint64_t id, uint64_t configuration) -> const Document* {
+    return configuration == 0
+               ? PartDocById(state, id)
+               : ConfiguredPartDocument(state, id, configuration);
   };
 }
+const Document* OccurrencePartDoc(AppState& state, const Occurrence& occ) {
+  return PartResolverFor(state)(occ.partId, occ.configurationId);
+}
+
 assembly::AssemblyResolver AssemblyResolverFor(AppState& state) {
   return [&state](uint64_t id) -> const AssemblyDocument* {
     return AssemblyDocById(state, id);

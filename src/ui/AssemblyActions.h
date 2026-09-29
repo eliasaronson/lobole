@@ -489,6 +489,14 @@ AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId);
 
 assembly::PartResolver PartResolverFor(AppState& state);
 
+// The part an occurrence places, in the configuration it asks for: the live
+// document when that is 0 or already active, else a copy regenerated in it
+// (ConfiguredPartDocument). Read-only: to EDIT the part, open its slot.
+// Every read of a placed part's geometry goes through here, not through
+// PartDocById(occ.partId), which is the active configuration whatever the
+// placement asked for (tests/test_conventions.cpp holds the line).
+const Document* OccurrencePartDoc(AppState& state, const Occurrence& occ);
+
 assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
 
 // The active assembly's leaf parts, placed in world space — the one walk

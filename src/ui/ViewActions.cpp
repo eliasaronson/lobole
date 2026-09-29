@@ -655,7 +655,7 @@ void FitCameraToSelection(AppState& state) {
       glm::mat4 xf(1.0f);
       if (it.id != 0 && state.assembly) {
         const Occurrence* occ = state.assembly->FindById(it.id);
-        Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
+        const Document* part = occ ? OccurrencePartDoc(state, *occ) : nullptr;
         if (!part)
           break;
         bodies = &part->GetBodies();
@@ -677,7 +677,7 @@ void FitCameraToSelection(AppState& state) {
       if (!state.assembly)
         break;
       const Occurrence* occ = state.assembly->FindById(it.id);
-      Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
+      const Document* part = occ ? OccurrencePartDoc(state, *occ) : nullptr;
       if (!part)
         break;
       const glm::mat4 xf = DisplayMatrix(state, *occ);

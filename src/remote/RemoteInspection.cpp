@@ -1842,7 +1842,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         if (found == nullptr)
           throw std::runtime_error("occurrence " + v.dump() + " not found");
-        Document* pd = ui::PartDocById(state, found->partId);
+        const Document* pd = ui::OccurrencePartDoc(state, *found);
         if (pd == nullptr)
           throw std::runtime_error("occurrence part document is missing");
         std::vector<Body> placed;
@@ -2399,9 +2399,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (p.contains("part"))
       massDoc = ResolvePartParam(state, p.at("part"));
     if (massDoc == nullptr && state.assembly) {
-      const assembly::PartResolver resolve = [&](uint64_t id) {
-        return ui::PartDocById(state, id);
-      };
+      const assembly::PartResolver resolve = ui::PartResolverFor(state);
       const assembly::AssemblyMass am = assembly::MassProperties(
           *state.assembly, resolve, ui::AssemblyResolverFor(state));
       json rows = json::array();
@@ -3148,7 +3146,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               side->owned.push_back(std::move(nb));
             }
           }
-        } else if (const Document* pd = ui::PartDocById(state, occ->partId)) {
+        } else if (const Document* pd = ui::OccurrencePartDoc(state, *occ)) {
           for (const Body& b : pd->GetBodies()) {
             Body nb = b;
             nb.shape = b.shape.Transformed(world);
@@ -3471,7 +3469,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               "'" + label +
               "' is a sub-assembly, which has no frames or faces of its own: "
               "address the part inside it by path (\"Unit/Part\")");
-        const Document* part = ui::PartDocById(state, occ->partId);
+        const Document* part = ui::OccurrencePartDoc(state, *occ);
         if (part == nullptr)
           throw std::runtime_error("the part of '" + label + "' is not loaded");
         std::string inner;

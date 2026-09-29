@@ -121,11 +121,12 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
         return false;
       continue;
     }
-    const Document* part = ctx.partById(occ.partId);
+    const Document* part = ctx.partById(occ.partId, occ.configurationId);
     if (part == nullptr)
       continue; // dangling part reference, as today
     FlatInstance fi;
     fi.partId = occ.partId;
+    fi.configurationId = occ.configurationId;
     fi.part = part;
     fi.world = world;
     fi.path = prefix + occ.name;
@@ -300,9 +301,44 @@ SubtreeVersions(const AssemblyDocument& top, const PartResolver& partById,
           visited.push_back(occ.partId);
           stack.push_back({sub, depth + 1});
         }
-      } else if (const Document* part = partById(occ.partId)) {
-        out.emplace_back(occ.partId, part->Version());
+      } else if (const Document* part = partById(occ.partId, 0)) {
+        // One stamp per PART, whatever configuration a placement asks for
+        // (a caller keys them by part): its Version, and its configurations'
+        // revision, since editing a configuration a placement uses moves no
+        // Version. Choosing another is an edit of the assembly itself.
+        out.emplace_back(occ.partId,
+                         part->Version() ^ (part->ConfigurationsRevision() *
+                                            0x9E3779B97F4A7C15ull));
       }
+    }
+  }
+  return out;
+}
+
+std::vector<std::pair<uint64_t, uint64_t>>
+SubtreePartConfigurations(const AssemblyDocument& top,
+                          const AssemblyResolver& asmById, int maxDepth) {
+  std::vector<std::pair<uint64_t, uint64_t>> out;
+  std::vector<std::pair<const AssemblyDocument*, int>> stack{{&top, 0}};
+  std::vector<uint64_t> visited;
+  while (!stack.empty()) {
+    const auto [doc, depth] = stack.back();
+    stack.pop_back();
+    if (depth > maxDepth)
+      continue;
+    for (const Occurrence& occ : doc->GetOccurrences()) {
+      if (occ.refKind == OccurrenceRef::Assembly) {
+        const AssemblyDocument* sub = asmById ? asmById(occ.partId) : nullptr;
+        if (sub != nullptr && std::find(visited.begin(), visited.end(),
+                                        occ.partId) == visited.end()) {
+          visited.push_back(occ.partId);
+          stack.push_back({sub, depth + 1});
+        }
+        continue;
+      }
+      const std::pair<uint64_t, uint64_t> key{occ.partId, occ.configurationId};
+      if (std::find(out.begin(), out.end(), key) == out.end())
+        out.push_back(key);
     }
   }
   return out;
@@ -452,7 +488,7 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     // own origin, which it used to answer before walking the path at all.
     if (c.anchor.origin)
       return innerXf;
-    const Document* innerPart = partById(inner->partId);
+    const Document* innerPart = partById(inner->partId, inner->configurationId);
     if (innerPart == nullptr)
       return fail("the part inside the sub-assembly is not loaded");
     partForFace = innerPart; // resolve the face on the part the path names
@@ -460,7 +496,8 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
   if (c.anchor.origin)
     return glm::mat4(1.0f); // the part's coordinate origin
 
-  const Document* part = partForFace ? partForFace : partById(occ->partId);
+  const Document* part =
+      partForFace ? partForFace : partById(occ->partId, occ->configurationId);
   if (!part) {
     // A5: distinguish "gone" from "it is a sub-assembly". A face anchor
     // names a face of a PART; a placed assembly has no faces of its own, and
@@ -697,7 +734,7 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         r.error = "thread-backed relation needs a part resolver";
         continue;
       }
-      const Document* doc = partById(r.threadPart);
+      const Document* doc = partById(r.threadPart, 0);
       const ThreadFeature* thread = nullptr;
       if (doc)
         for (size_t i = 0; i < doc->GetFeatures().size(); ++i) {

@@ -3,6 +3,7 @@
 #include "ui/AppActionsInternal.h" // DisplayMatrix, ExplodeInnerOffset
 #include "ui/AssemblyActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/SelectionPipeline.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -91,18 +92,18 @@ bool SetOccurrenceConfiguration(AppState& state, uint64_t occId,
   Occurrence* occ = state.assembly->FindById(occId);
   if (occ == nullptr)
     return refuse("no occurrence with id " + std::to_string(occId));
-  if (configurationId != 0) {
-    const AssemblyDocument* sub = occ->refKind == OccurrenceRef::Assembly
-                                      ? AssemblyDocById(state, occ->partId)
-                                      : nullptr;
+  const bool placesPart = occ->refKind == OccurrenceRef::Part;
+  if (configurationId != 0 && placesPart) {
+    // A part in a configuration: it has to have it, and build in it --
+    // said here, not as a part that silently vanishes from the assembly.
+    std::string bad;
+    if (ConfiguredPartDocument(state, occ->partId, configurationId, &bad) ==
+        nullptr)
+      return refuse("'" + occ->name + "': " + bad);
+  } else if (configurationId != 0) {
+    const AssemblyDocument* sub = AssemblyDocById(state, occ->partId);
     if (sub == nullptr)
-      return refuse(
-          "'" + occ->name +
-          "' places a part, and per-occurrence PART configurations are "
-          "not supported (a part configuration changes geometry, which "
-          "would mean regenerating it per configuration) — configure "
-          "sub-assemblies, or set the part document's own active "
-          "configuration");
+      return refuse("'" + occ->name + "' places nothing that is loaded");
     if (sub->FindConfiguration(configurationId) == nullptr) {
       std::string known;
       for (const Configuration& cfg : sub->GetConfigurations())
@@ -117,8 +118,10 @@ bool SetOccurrenceConfiguration(AppState& state, uint64_t occId,
   occ->configurationId = configurationId;
   state.assembly->BumpVersion();
   // A flexible unit moves under its configuration, so choosing another
-  // re-solves it (v129). A rigid one only shows other parts.
-  if (occ->flexible) {
+  // re-solves it (v129), and so does a part: its faces, which its mates
+  // anchor on, are another configuration's now. A rigid sub-assembly only
+  // shows other parts.
+  if (occ->flexible || placesPart) {
     const assembly::SolveReport rep = SolveActiveAssemblyReport(state);
     if (report)
       *report = rep;

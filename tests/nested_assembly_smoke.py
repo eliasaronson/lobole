@@ -237,17 +237,17 @@ def main(binary):
                   if o.get("ref_kind") == "assembly"}
         expect(sorted(leaves.values()) == [1, 2],
                f"the placements differ ({sorted(leaves.values())})")
-        # A PART occurrence cannot take one: a part configuration changes
-        # geometry, and honouring it per placement means regenerating it.
+        # A PART occurrence takes its PART's configurations (v135); one the
+        # part does not have is refused, naming the ones it does.
         part_occ = [o for o in d.call("list_occurrences")["occurrences"]
                     if o.get("ref_kind", "part") == "part"][0]
         try:
             d.call("set_occurrence_configuration", id=part_occ["id"],
                    configuration="short")
-            expect(False, "a part occurrence must refuse a configuration")
+            expect(False, "a configuration the part lacks must be refused")
         except RuntimeError as e:
-            expect("not supported" in str(e),
-                   f"parts refuse with the reason: {str(e)[:60]}")
+            expect("no configuration" in str(e) and "Known" in str(e),
+                   f"refused, naming what it has: {str(e)[:80]}")
         d.call("set_occurrence_configuration", id=gangs[0]["id"],
                configuration=None)  # back to base for the round-trip below
 

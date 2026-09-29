@@ -66,7 +66,9 @@ TEST_CASE("Fastened mate aligns an origin connector to a face frame",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true)); // id 1
@@ -157,7 +159,9 @@ TEST_CASE("Slider offset slides the placement along the connector axis",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -190,7 +194,9 @@ TEST_CASE("Revolute mate seats the part axially by its offset (finding #6a)",
   // collapse. rotation stays the free DOF on top of that fixed seat.
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -225,7 +231,9 @@ TEST_CASE(
   // offset-using mate type (slider/cylindrical/revolute share MateAdjust).
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext); // top cap "cap1" at z=3, normal +Z
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   auto placeWithOffset = [&](float offset) {
     AssemblyDocument asmDoc;
@@ -253,7 +261,9 @@ TEST_CASE("Assembly mass properties aggregate occurrences in world space "
           "(finding #5)",
           "[assembly][solve]") {
   auto box = BuildSteelBox(3.0); // 4x4x3 steel box: vol 48 mm^3
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true)); // local CoM (2,2,1.5)
@@ -289,7 +299,9 @@ TEST_CASE("Revolute rotation spins without translating an origin connector",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -325,7 +337,9 @@ TEST_CASE("Payoff: editing the base part moves the mated occurrence",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -359,7 +373,9 @@ TEST_CASE("A floating component with no fixed anchor stays put",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {5, 0, 0}));    // id 1, NOT fixed
@@ -386,7 +402,9 @@ TEST_CASE("A floating component with no fixed anchor stays put",
 TEST_CASE("An over-constrained loop is reported, not solved",
           "[assembly][solve]") {
   auto box = std::unique_ptr<Document>();
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   // Two fixed occurrences at conflicting positions...
@@ -412,7 +430,9 @@ TEST_CASE("An over-constrained loop is reported, not solved",
 TEST_CASE("A dangling connector ref errors the mate", "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -453,7 +473,9 @@ TEST_CASE("Cylindrical mate frees both rotation and offset",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -473,7 +495,9 @@ TEST_CASE("Cylindrical mate frees both rotation and offset",
 TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -495,7 +519,9 @@ TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
 TEST_CASE("Ball mate rotates freely without translating", "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {7, 8, 9}, true)); // fixed somewhere
@@ -525,7 +551,9 @@ TEST_CASE("Unresolvable connector names its side and suggests near misses",
           "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true)); // id 1

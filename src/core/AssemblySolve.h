@@ -30,9 +30,13 @@ class AssemblyDocument;
 namespace assembly {
 
 // Resolves an occurrence's part_id to its already-regenerated part Document
-// (GetBodies() must be populated — the caller keeps parts regenerated). The UI
-// passes ui::PartDocById; tests pass a lambda over locally-built documents.
-using PartResolver = std::function<const Document*(uint64_t partId)>;
+// (GetBodies() must be populated — the caller keeps parts regenerated), in
+// `configurationId` -- the configuration the placement asked for, 0 for
+// whatever the part has active. The UI passes ui::PartResolverFor, which
+// regenerates a copy in the asked configuration; tests pass a lambda over
+// locally-built documents.
+using PartResolver =
+    std::function<const Document*(uint64_t partId, uint64_t configurationId)>;
 
 // Resolves a slot id to an assembly document (nullptr when it is not one).
 // Declared beside PartResolver because everything from mate connectors to
@@ -247,6 +251,10 @@ bool SetMateDofAt(AssemblyDocument& doc, const std::vector<uint64_t>& path,
 // solves.
 struct FlatInstance {
   uint64_t partId = 0;            // always a PART: the leaves of the tree
+  // The part configuration the placement asked for; 0 = the part's active
+  // one. `part` is the document evaluated in it, so two placements of one
+  // part in two configurations are two different documents here.
+  uint64_t configurationId = 0;
   const Document* part = nullptr; // resolved, regenerated
   glm::mat4 world{1.0f};          // composed down the tree
   std::string path;               // "Gangway/Board 03" — display, not a key
@@ -326,9 +334,18 @@ bool WouldCycle(const AssemblyDocument& host, uint64_t hostSlotId,
 // anything below it changed. Keyed by slot id: part versions and, for nested
 // assemblies, their own document versions too. A top-level assembly that
 // stamps only its DIRECT parts cannot see an edit inside a sub-assembly.
+// A part's stamp also folds in its configurations' revision: editing a
+// configuration a placement uses moves no Version. (Choosing another is an
+// edit of the assembly, which its own Version says.)
 std::vector<std::pair<uint64_t, uint64_t>>
 SubtreeVersions(const AssemblyDocument& top, const PartResolver& partById,
                 const AssemblyResolver& asmById, int maxDepth = 8);
+
+// Every (part, configuration) placed anywhere in `top`'s subtree, once each,
+// in walk order -- the documents a consumer that copies the subtree needs.
+std::vector<std::pair<uint64_t, uint64_t>>
+SubtreePartConfigurations(const AssemblyDocument& top,
+                          const AssemblyResolver& asmById, int maxDepth = 8);
 
 // ---- Assembly mass aggregation (finding #5) -------------------------------
 // One placed occurrence's mass contribution, in WORLD space. Volume and mass

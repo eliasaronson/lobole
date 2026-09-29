@@ -56,7 +56,8 @@ struct MotionRun {
   const AssemblyDocument* ranAgainst = nullptr; // identity, never dereferenced
   MotionStudy study;
   AssemblyDocument asmCopy;
-  std::map<uint64_t, std::unique_ptr<Document>> parts;
+  // (part, configuration) -> a copy evaluated in it
+  std::map<std::pair<uint64_t, uint64_t>, std::unique_ptr<Document>> parts;
   std::map<uint64_t, std::unique_ptr<AssemblyDocument>> assemblies;
   std::map<const void*, std::shared_ptr<const collide::Mesh>> meshes;
   motion::Result result;
@@ -67,29 +68,28 @@ struct MotionRun {
 
 // Copies of every document under the assembly, and a resolver over them.
 void CopySubtree(AppState& state, MotionRun& run) {
-  for (const auto& [slotId, version] :
-       assembly::SubtreeVersions(*state.assembly, PartResolverFor(state),
-                                 AssemblyResolverFor(state))) {
+  const assembly::PartResolver resolve = PartResolverFor(state);
+  // One copy per (part, configuration), not per occurrence: a part placed
+  // four times built four Documents to overwrite each other (16 copies for
+  // 10 parts on the SO-101 gripper). CopyWithGeometry, not a plain copy: a
+  // plain one ends in a Regenerate that re-executes every boolean in the
+  // part -- 54% of a profile of this call -- and the run only READS it.
+  for (const auto& key : assembly::SubtreePartConfigurations(
+           *state.assembly, AssemblyResolverFor(state)))
+    if (const Document* pd = resolve(key.first, key.second))
+      run.parts[key] = Document::CopyWithGeometry(*pd);
+  for (const auto& [slotId, version] : assembly::SubtreeVersions(
+           *state.assembly, resolve, AssemblyResolverFor(state))) {
     (void)version;
-    // One row per OCCURRENCE, not per document — a part placed four times is
-    // listed four times, and copying it four times built a whole Document
-    // just to overwrite the previous one. 16 copies for 10 parts on the
-    // SO-101 gripper.
-    if (run.parts.count(slotId) != 0 || run.assemblies.count(slotId) != 0)
-      continue;
-    // CopyWithGeometry, not a plain copy: a plain one ends in a Regenerate
-    // that re-executes every boolean in the part. That was 54% of a profile
-    // of this exact call, and the run only ever READS the geometry.
-    if (const Document* pd = PartDocById(state, slotId))
-      run.parts[slotId] = Document::CopyWithGeometry(*pd);
-    else if (const AssemblyDocument* ad = AssemblyDocById(state, slotId))
-      run.assemblies[slotId] = std::make_unique<AssemblyDocument>(*ad);
+    if (run.assemblies.count(slotId) == 0)
+      if (const AssemblyDocument* ad = AssemblyDocById(state, slotId))
+        run.assemblies[slotId] = std::make_unique<AssemblyDocument>(*ad);
   }
 }
 
 assembly::PartResolver PartsOf(MotionRun& run) {
-  return [&run](uint64_t id) -> const Document* {
-    const auto it = run.parts.find(id);
+  return [&run](uint64_t id, uint64_t configuration) -> const Document* {
+    const auto it = run.parts.find({id, configuration});
     return it == run.parts.end() ? nullptr : it->second.get();
   };
 }

@@ -143,6 +143,27 @@ struct SharedBody {
   float alpha = 1.0f;
 };
 
+// A part as drawn: its slot id and the configuration a placement asked for
+// (0 = the part's active one). Two configurations of one part are two
+// different geometries, and keyed by the part alone the second drew as the
+// first -- a configured copy carries the live part's Version.
+struct PartRenderKey {
+  uint64_t part = 0;
+  uint64_t configuration = 0;
+  bool operator==(const PartRenderKey&) const = default;
+};
+struct PartRenderKeyHash {
+  size_t operator()(const PartRenderKey& k) const {
+    return std::hash<uint64_t>()(k.part) ^
+           (std::hash<uint64_t>()(k.configuration) * 0x9E3779B97F4A7C15ull);
+  }
+};
+
+// What a cached tessellation was built from: the part's Version, and its
+// configurations' revision -- editing a configuration regenerates the copy
+// drawn in it without moving its Version.
+uint64_t PartRenderStamp(const Document& part);
+
 // What is cached for one part, the document version it was built from, and
 // what it costs to keep.
 struct PartRenderCacheEntry {
@@ -162,7 +183,8 @@ struct PartRenderCacheEntry {
 // — ReleasePartRenderCache / EvictPartRenderCache below are the only two
 // places that should.
 struct PartRenderCacheStore {
-  std::unordered_map<uint64_t, PartRenderCacheEntry> parts;
+  std::unordered_map<PartRenderKey, PartRenderCacheEntry, PartRenderKeyHash>
+      parts;
   uint64_t syncSerial = 0; // ++ per sync; stamps entries for the LRU
 };
 
@@ -230,12 +252,14 @@ struct CpuBody {
   std::vector<uint32_t> triangleFaces;
   std::vector<std::vector<glm::vec3>> edges;
 };
-using PrewarmedParts = std::unordered_map<uint64_t, std::vector<CpuBody>>;
+using PrewarmedParts =
+    std::unordered_map<PartRenderKey, std::vector<CpuBody>, PartRenderKeyHash>;
 
 // Tessellates the given parts across threads, ahead of the sync loop that
 // consumes them. Work is GROUPED BY TSHAPE, so two threads can never mesh
 // shapes that share one -- see the comment on the definition.
-void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
+void PrewarmTessellations(AppState& state,
+                          const std::vector<PartRenderKey>& parts,
                           PrewarmedParts& out);
 
 // The cached tessellation for a shape, built now if it is not there. Pass the

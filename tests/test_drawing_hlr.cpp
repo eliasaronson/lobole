@@ -797,7 +797,7 @@ TEST_CASE("HLR project benchmark compares incremental assembly visibility",
   REQUIRE_FALSE(assemblies.empty());
   auto flat = assembly::Flatten(
       *assemblies.begin()->second,
-      [&](uint64_t id) -> const Document* {
+      [&](uint64_t id, uint64_t) -> const Document* {
         const auto it = parts.find(id);
         return it == parts.end() ? nullptr : it->second.get();
       },

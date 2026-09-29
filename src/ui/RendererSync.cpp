@@ -510,6 +510,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     // means "no cache entry to look for" (the part-tab branch below): the
     // cache is filled by the assembly sync and keyed on assembly part slots.
     uint64_t partId = 0;
+    uint64_t configuration = 0;
     uint64_t partVersion = 0;
     size_t bodyIndex = 0;
   };
@@ -530,8 +531,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
         continue;
       const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++)
-        rtItems.push_back(
-            {&bodies[bi], inst.world, inst.partId, inst.part->Version(), bi});
+        rtItems.push_back({&bodies[bi], inst.world, inst.partId,
+                           inst.configurationId, PartRenderStamp(*inst.part),
+                           bi});
       capSources.push_back({&bodies, inst.world});
     }
   } else if (state.job) {
@@ -556,7 +558,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       [&state](const RTItem& it) -> const BodyTessellation* {
     if (it.partId == 0 || !state.partRenderCache)
       return nullptr;
-    const auto entry = state.partRenderCache->parts.find(it.partId);
+    const auto entry = state.partRenderCache->parts.find(
+        PartRenderKey{it.partId, it.configuration});
     if (entry == state.partRenderCache->parts.end())
       return nullptr;
     // Version-checked, not merely present: a stale tessellation in a render
@@ -1159,7 +1162,7 @@ void SyncAssemblyRenderers(AppState& state) {
   // Which parts this sync actually drew. They are never evicted below — you
   // cannot drop what is on screen — and everything else ages against the
   // budget.
-  std::unordered_set<uint64_t> touched;
+  std::unordered_set<PartRenderKey, PartRenderKeyHash> touched;
 
   // One submit+wait for every asset this sync uploads, instead of one per
   // buffer. A cold 299-part build creates 1196 buffers; unbatched that is
@@ -1196,18 +1199,19 @@ void SyncAssemblyRenderers(AppState& state) {
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
   PrewarmedParts prewarmed;
   {
-    std::vector<uint64_t> missing;
-    std::unordered_set<uint64_t> seen;
+    std::vector<PartRenderKey> missing;
+    std::unordered_set<PartRenderKey, PartRenderKeyHash> seen;
     for (const assembly::FlatInstance& inst : flat) {
-      if (!inst.visible || !seen.insert(inst.partId).second)
+      const PartRenderKey key{inst.partId, inst.configurationId};
+      if (!inst.visible || !seen.insert(key).second)
         continue;
-      const Document* part = PartDocById(state, inst.partId);
+      const Document* part = inst.part;
       if (part == nullptr)
         continue;
-      const auto entry = cache.parts.find(inst.partId);
+      const auto entry = cache.parts.find(key);
       if (entry == cache.parts.end() ||
-          entry->second.docVersion != part->Version())
-        missing.push_back(inst.partId);
+          entry->second.docVersion != PartRenderStamp(*part))
+        missing.push_back(key);
     }
     if (!missing.empty()) {
       const auto warmStart = SyncClock::now();
@@ -1224,9 +1228,10 @@ void SyncAssemblyRenderers(AppState& state) {
   for (const assembly::FlatInstance& inst : flat) {
     if (!inst.visible)
       continue; // hidden here, or inside a hidden sub-assembly
-    Document* part = PartDocById(state, inst.partId);
+    const Document* part = inst.part;
     if (!part)
       continue; // dangling reference (part deleted) — skip
+    const PartRenderKey key{inst.partId, inst.configurationId};
     // The occurrence this leaf belongs to at the TOP level: what selection,
     // explode and picking address. A leaf inside a sub-assembly reports its
     // sub-assembly's occurrence, which is what makes it one unit.
@@ -1235,12 +1240,13 @@ void SyncAssemblyRenderers(AppState& state) {
       continue;
     const Occurrence& occ = *rootOcc;
 
-    touched.insert(inst.partId);
-    auto it = cache.parts.find(inst.partId);
+    touched.insert(key);
+    auto it = cache.parts.find(key);
     // A hit is only a hit at the SAME document version: a regenerated part
     // must re-tessellate. Materials and appearances bump the version too, and
     // they are baked into the entry, so one key covers both.
-    if (it != cache.parts.end() && it->second.docVersion != part->Version()) {
+    if (it != cache.parts.end() &&
+        it->second.docVersion != PartRenderStamp(*part)) {
       cache.parts.erase(it);
       it = cache.parts.end();
     }
@@ -1250,7 +1256,7 @@ void SyncAssemblyRenderers(AppState& state) {
       // First time we see this part at this version: tessellate its bodies +
       // create assets. Everything below is what the cache exists to skip.
       PartRenderCacheEntry entry;
-      entry.docVersion = part->Version();
+      entry.docVersion = PartRenderStamp(*part);
       std::vector<SharedBody>& shared = entry.bodies;
       const auto& bodies = part->GetBodies();
       // The fallback palette is seeded from the PART, not from the order
@@ -1259,7 +1265,7 @@ void SyncAssemblyRenderers(AppState& state) {
       // every part after it and silently recolour unrelated geometry — and a
       // cached colour would then disagree with a freshly built one.
       size_t palette = static_cast<size_t>(inst.partId);
-      const auto warm = prewarmed.find(inst.partId);
+      const auto warm = prewarmed.find(key);
       for (size_t bodyIdx = 0; bodyIdx < bodies.size(); bodyIdx++) {
         const auto& body = bodies[bodyIdx];
         SharedBody sb;
@@ -1316,7 +1322,7 @@ void SyncAssemblyRenderers(AppState& state) {
         // many PARTS the assembly layer pins, which is what its LRU is for.
         entry.gpuBytes += sb.tess->bytes;
       }
-      it = cache.parts.emplace(inst.partId, std::move(entry)).first;
+      it = cache.parts.emplace(key, std::move(entry)).first;
       buildMs += elapsedMsSince(buildStart);
     }
     it->second.lastUsed = cache.syncSerial;
@@ -1445,7 +1451,7 @@ void SyncAssemblyRenderers(AppState& state) {
   // evicting least-recently-drawn first — and never a part drawn this sync,
   // whose assets are in use.
   size_t idleBytes = 0;
-  std::vector<std::pair<uint64_t, uint64_t>> idle; // (lastUsed, partId)
+  std::vector<std::pair<uint64_t, PartRenderKey>> idle; // (lastUsed, key)
   for (const auto& [partId, entry] : cache.parts) {
     if (touched.count(partId) != 0)
       continue;
@@ -1453,7 +1459,9 @@ void SyncAssemblyRenderers(AppState& state) {
     idle.emplace_back(entry.lastUsed, partId);
   }
   if (idleBytes > kPartRenderCacheBudgetBytes) {
-    std::sort(idle.begin(), idle.end()); // oldest first
+    std::sort(idle.begin(), idle.end(), [](const auto& a, const auto& b) {
+      return a.first < b.first;
+    }); // oldest first
     size_t dropped = 0;
     for (const auto& [lastUsed, partId] : idle) {
       if (idleBytes <= kPartRenderCacheBudgetBytes)
@@ -1499,10 +1507,7 @@ void SyncInContextGhosts(AppState& state) {
   if (!asmSlot || !asmSlot->assembly)
     return; // the context assembly is gone; the mode quietly shows nothing
   AssemblyDocument& asmDoc = *asmSlot->assembly;
-  const assembly::PartResolver resolve =
-      [&state](uint64_t partId) -> const Document* {
-    return PartDocById(state, partId);
-  };
+  const assembly::PartResolver resolve = PartResolverFor(state);
 
   // Stale check against the stashed slot's stamps (the active-tab machinery
   // in SolveActiveAssembly/AssemblyPartsStale can't see a stashed assembly).
@@ -1513,7 +1518,7 @@ void SyncInContextGhosts(AppState& state) {
       continue;
     const auto it = asmSlot->solvedPartVersions.find(occ.partId);
     if (it == asmSlot->solvedPartVersions.end() ||
-        it->second != part->Version()) {
+        it->second != PartRenderStamp(*part)) {
       stale = true;
       break;
     }
@@ -1524,7 +1529,7 @@ void SyncInContextGhosts(AppState& state) {
     asmSlot->solvedPartVersions.clear();
     for (const Occurrence& occ : asmDoc.GetOccurrences())
       if (const Document* part = PartDocById(state, occ.partId))
-        asmSlot->solvedPartVersions[occ.partId] = part->Version();
+        asmSlot->solvedPartVersions[occ.partId] = PartRenderStamp(*part);
   }
 
   const Occurrence* edited = asmDoc.FindById(state.inContext.occurrenceId);
@@ -1537,7 +1542,9 @@ void SyncInContextGhosts(AppState& state) {
   const glm::vec3 kGhostTint(0.55f, 0.60f, 0.68f);
   // partId -> one cache entry per body (nullptr for a body that meshes to
   // nothing, so the index still lines up with GetBodies()).
-  std::unordered_map<uint64_t, std::vector<std::shared_ptr<BodyTessellation>>>
+  std::unordered_map<PartRenderKey,
+                     std::vector<std::shared_ptr<BodyTessellation>>,
+                     PartRenderKeyHash>
       byPart;
   // A5: ghost the whole tree. Editing INTO a sub-assembly is still a non-goal
   // (open its own tab), but the CONTEXT around the part you are editing has
@@ -1550,10 +1557,11 @@ void SyncInContextGhosts(AppState& state) {
   for (const assembly::FlatInstance& inst : *flat) {
     if (!inst.visible || inst.rootOccurrenceId == edited->id)
       continue;
-    Document* part = PartDocById(state, inst.partId);
+    const Document* part = inst.part;
     if (!part)
       continue;
-    auto it = byPart.find(inst.partId);
+    const PartRenderKey key{inst.partId, inst.configurationId};
+    auto it = byPart.find(key);
     if (it == byPart.end()) {
       // Cached by shape identity (AppActionsInternal.h): the neighbour was
       // tessellated once, by whichever tab drew it first, and a regeneration
@@ -1561,7 +1569,7 @@ void SyncInContextGhosts(AppState& state) {
       std::vector<std::shared_ptr<BodyTessellation>> tess;
       for (const auto& body : part->GetBodies())
         tess.push_back(TessellationFor(state, body.shape));
-      it = byPart.emplace(inst.partId, std::move(tess)).first;
+      it = byPart.emplace(key, std::move(tess)).first;
     }
     const glm::mat4 xf = inv * inst.world;
     for (size_t bi = 0; bi < it->second.size(); bi++) {

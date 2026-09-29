@@ -179,7 +179,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     }
     ctx->Yield(3);
     IM_CHECK(s_App->partRenderCache != nullptr);
-    auto entry = s_App->partRenderCache->parts.find(partId);
+    auto entry =
+        s_App->partRenderCache->parts.find(ui::PartRenderKey{partId, 0});
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
     const uint32_t meshAsset = entry->second.bodies[0].tess->meshAsset;
@@ -192,7 +193,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     ui::SetActivePart(*s_App, asmIdx);
     ctx->Yield(3);
-    entry = s_App->partRenderCache->parts.find(partId);
+    entry = s_App->partRenderCache->parts.find(ui::PartRenderKey{partId, 0});
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
     IM_CHECK_EQ(entry->second.bodies[0].tess->meshAsset, meshAsset);
@@ -211,7 +212,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SetActivePart(*s_App, asmIdx);
     ctx->Yield(3);
-    entry = s_App->partRenderCache->parts.find(partId);
+    entry = s_App->partRenderCache->parts.find(ui::PartRenderKey{partId, 0});
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
     IM_CHECK_EQ(entry->second.bodies[0].tess->meshAsset, meshAsset);
@@ -230,7 +231,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ui::SetActivePart(*s_App, asmIdx);
     ctx->Yield(3);
-    entry = s_App->partRenderCache->parts.find(partId);
+    entry = s_App->partRenderCache->parts.find(ui::PartRenderKey{partId, 0});
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
     IM_CHECK(entry->second.bodies[0].tess->meshAsset != meshAsset);

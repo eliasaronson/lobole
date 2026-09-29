@@ -114,10 +114,9 @@ namespace {
 void EvictPartRenderCache(AppState& state, uint64_t partSlotId) {
   if (!state.partRenderCache)
     return;
-  auto it = state.partRenderCache->parts.find(partSlotId);
-  if (it == state.partRenderCache->parts.end())
-    return;
-  state.partRenderCache->parts.erase(it);
+  // every configuration of it
+  std::erase_if(state.partRenderCache->parts,
+                [&](const auto& kv) { return kv.first.part == partSlotId; });
 }
 
 void ReleasePartRenderCache(AppState& state) {
@@ -245,18 +244,25 @@ void ReleaseTessellationCache(AppState& state) {
 //     which SHARES its TShape. So rather than trust it, work is GROUPED BY
 //     TSHAPE below: shapes that share one are always meshed by the same
 //     thread, which makes the race impossible instead of merely absent.
-void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
+uint64_t PartRenderStamp(const Document& part) {
+  return part.Version() ^
+         (part.ConfigurationsRevision() * 0x9E3779B97F4A7C15ull);
+}
+
+void PrewarmTessellations(AppState& state,
+                          const std::vector<PartRenderKey>& parts,
                           PrewarmedParts& out) {
   // One work item per body, keyed by the TShape whose triangulation it writes.
   struct Item {
-    uint64_t partId;
+    PartRenderKey partId;
     size_t bodyIndex;
     const CADShape* shape;
   };
   std::unordered_map<const void*, std::vector<Item>> byTShape;
   size_t bodies = 0;
-  for (uint64_t partId : parts) {
-    const Document* part = PartDocById(state, partId);
+  const assembly::PartResolver resolve = PartResolverFor(state);
+  for (const PartRenderKey& partId : parts) {
+    const Document* part = resolve(partId.part, partId.configuration);
     if (part == nullptr)
       continue;
     const auto& partBodies = part->GetBodies();
@@ -325,7 +331,7 @@ void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
           try {
             meshOne(item);
           } catch (const Standard_Failure& e) {
-            LOG_WARN("Tessellation failed for part {}: {}", item.partId,
+            LOG_WARN("Tessellation failed for part {}: {}", item.partId.part,
                      e.GetMessageString());
           }
         }

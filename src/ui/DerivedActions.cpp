@@ -73,7 +73,10 @@ std::string Refusal(AppState& state, uint64_t sourceId) {
                          : "; the parts are: " + have);
   }
   std::string why;
-  if (derived::WouldCycle(host, sourceId, PartResolverFor(state), &why))
+  const derived::PartResolver byId = [&state](uint64_t id) -> const Document* {
+    return PartDocById(state, id);
+  };
+  if (derived::WouldCycle(host, sourceId, byId, &why))
     return why;
   return {};
 }

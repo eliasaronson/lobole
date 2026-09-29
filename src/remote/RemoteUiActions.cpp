@@ -388,7 +388,7 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
       for (const Occurrence& o : state.assembly->GetOccurrences()) {
         if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
           continue;
-        Document* pd = ui::PartDocById(state, o.partId);
+        const Document* pd = ui::OccurrencePartDoc(state, o);
         glm::vec3 bmn(0.0f), bmx(0.0f);
         if (pd == nullptr ||
             !Measure::WorldBounds(pd->GetBodies(), ui::OccurrenceMatrix(o), bmn,
@@ -953,7 +953,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                              " to focus (see list_occurrences)");
             continue;
           }
-          Document* pd = ui::PartDocById(state, found->partId);
+          const Document* pd = ui::OccurrencePartDoc(state, *found);
           if (pd == nullptr ||
               !Measure::WorldBounds(pd->GetBodies(),
                                     ui::OccurrenceMatrix(*found),

@@ -312,10 +312,7 @@ uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
   mate.b.innerPath = b.innerIds;
   mate.b.anchor.face = *faceB;
 
-  const assembly::PartResolver resolve =
-      [&state](uint64_t partId) -> const Document* {
-    return PartDocById(state, partId);
-  };
+  const assembly::PartResolver resolve = PartResolverFor(state);
   const assembly::AssemblyResolver asmResolve = AssemblyResolverFor(state);
   const auto fa = assembly::ConnectorLocalFrame(mate.a, *state.assembly,
                                                 resolve, nullptr, asmResolve);

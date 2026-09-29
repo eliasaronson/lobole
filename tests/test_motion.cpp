@@ -48,7 +48,7 @@ struct Rig {
   AssemblyDocument asmDoc;
   uint64_t carrierOcc = 0, armOcc = 0, stopOcc = 0, axle = 0;
   assembly::PartResolver Parts() {
-    return [this](uint64_t id) -> const Document* {
+    return [this](uint64_t id, uint64_t configuration) -> const Document* {
       if (id == 1)
         return carrier.get();
       if (id == 2)
@@ -608,14 +608,14 @@ struct PlatedRig {
   std::unique_ptr<Document> b = BoxPart({45, 40, -2}, {10, 10, 4});
   std::unique_ptr<Document> c = BoxPart({55, 40, -2}, {10, 10, 4});
   assembly::PartResolver Parts() {
-    return [this](uint64_t id) -> const Document* {
+    return [this](uint64_t id, uint64_t configuration) -> const Document* {
       if (id == 4)
         return a.get();
       if (id == 5)
         return b.get();
       if (id == 6)
         return c.get();
-      return rig.Parts()(id);
+      return rig.Parts()(id, configuration);
     };
   }
   PlatedRig() {

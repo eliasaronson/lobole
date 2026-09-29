@@ -337,7 +337,9 @@ TEST_CASE("A slider loop resolves its own offset", "[assembly][solve][loops]") {
 TEST_CASE("Solve reports a consistent loop instead of erroring on it",
           "[assembly][solve][loops]") {
   auto box = BuildBox();
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -362,7 +364,9 @@ TEST_CASE("Solve reports a consistent loop instead of erroring on it",
 TEST_CASE("Solve still errors when a loop genuinely conflicts",
           "[assembly][solve][loops]") {
   auto box = BuildBox();
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -386,7 +390,9 @@ TEST_CASE("Solve still errors when a loop genuinely conflicts",
 TEST_CASE("A loop-free assembly reports nothing from the loop pass",
           "[assembly][solve][loops]") {
   auto box = BuildBox();
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -481,7 +487,9 @@ TEST_CASE("A loop leaves a mate tree elsewhere in the document alone",
   // to MERGE them over what the walk produced — replacing would silently
   // strand every occurrence in the other group at its stored transform.
   auto box = BuildBox();
-  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
 
   AssemblyDocument asmDoc;
   const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
@@ -799,7 +807,8 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
   auto rocker = Link({{0, 0, 0}, {60, 0, 0}});
   const std::vector<Document*> parts{ground.get(), crank.get(), coupler.get(),
                                      rocker.get()};
-  const assembly::PartResolver resolve = [&](uint64_t id) -> const Document* {
+  const assembly::PartResolver resolve = [&](uint64_t id,
+                                             uint64_t) -> const Document* {
     return id >= 1 && id <= parts.size() ? parts[id - 1] : nullptr;
   };
   const auto frameId = [&](size_t part, size_t i) {

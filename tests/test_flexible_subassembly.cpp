@@ -57,7 +57,7 @@ struct Rig {
   uint64_t frameOcc = 0, driveOcc = 0, unitOcc = 0, drive = 0, chain = 0;
 
   assembly::PartResolver Parts() {
-    return [this](uint64_t id) -> const Document* {
+    return [this](uint64_t id, uint64_t configuration) -> const Document* {
       switch (id) {
       case 1:
       case 2:

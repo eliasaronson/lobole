@@ -455,7 +455,7 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
         if (asmDoc == nullptr)
           return nullptr;
         const Occurrence* occ = asmDoc->FindById(occId);
-        return occ ? PartDocById(state, occ->partId) : nullptr;
+        return occ ? OccurrencePartDoc(state, *occ) : nullptr;
       };
     }
   }

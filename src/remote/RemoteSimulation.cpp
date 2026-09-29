@@ -635,7 +635,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         const Occurrence& occ =
             host.OccurrenceOf(p.at("occurrence"), "occurrence");
         l.occurrenceId = occ.id;
-        faceDoc = ui::PartDocById(state, occ.partId);
+        faceDoc = ui::OccurrencePartDoc(state, occ);
         if (!faceDoc)
           throw std::runtime_error("occurrence " + occ.name +
                                    " refers to no part in this project");

@@ -58,7 +58,7 @@ std::vector<FitCheck> CheckFits(AppState& state) {
     // A5: walk down to the part the anchor actually means. The same descent
     // AssemblySolve's ConnectorFrame makes, minus the transform — a fit is
     // between two SIZES, and a size does not care where the part was placed.
-    Document* pd = nullptr;
+    const Document* pd = nullptr;
     if (!c.innerPath.empty()) {
       if (occ->refKind != OccurrenceRef::Assembly) {
         side.reason = std::string(which) + " (" + occ->name +
@@ -88,7 +88,7 @@ std::vector<FitCheck> CheckFits(AppState& state) {
                   ? AssemblyDocById(state, inner->partId)
                   : nullptr;
       }
-      pd = PartDocById(state, inner->partId);
+      pd = OccurrencePartDoc(state, *inner);
     }
     if (c.anchor.frameId != 0 || c.anchor.origin || !c.anchor.face.IsSet()) {
       side.reason = std::string(which) + " (" + side.occurrence +
@@ -98,7 +98,7 @@ std::vector<FitCheck> CheckFits(AppState& state) {
       return side;
     }
     if (pd == nullptr)
-      pd = PartDocById(state, occ->partId);
+      pd = OccurrencePartDoc(state, *occ);
     if (!pd) {
       side.reason =
           std::string(which) + " (" + side.occurrence + ")" +

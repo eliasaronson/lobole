@@ -1598,7 +1598,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
       return;
     }
     const Occurrence* occ = host.asmDoc->FindById(occurrenceId);
-    faceDoc = occ ? PartDocById(state, occ->partId) : nullptr;
+    faceDoc = occ ? OccurrencePartDoc(state, *occ) : nullptr;
   }
 
   // Keep tool (topology): freeze the picked face solid.

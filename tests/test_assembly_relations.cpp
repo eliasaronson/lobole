@@ -77,7 +77,7 @@ Train MakeTrain() {
 // so an empty document per part is enough.
 assembly::PartResolver NoParts() {
   static Document empty;
-  return [](uint64_t) -> const Document* { return &empty; };
+  return [](uint64_t, uint64_t) -> const Document* { return &empty; };
 }
 
 Relation Gear(uint64_t a, uint64_t b, double ratio, double phase = 0.0) {

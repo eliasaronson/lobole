@@ -33,7 +33,7 @@ struct World {
   std::map<uint64_t, std::unique_ptr<AssemblyDocument>> assemblies;
 
   assembly::PartResolver PartById() {
-    return [this](uint64_t id) -> const Document* {
+    return [this](uint64_t id, uint64_t) -> const Document* {
       const auto it = parts.find(id);
       return it == parts.end() ? nullptr : it->second.get();
     };
@@ -284,4 +284,42 @@ TEST_CASE("A placement chooses the sub-assembly's configuration",
     if (inst.visible)
       visible2++;
   CHECK(visible2 == 2);
+}
+
+TEST_CASE("Flatten resolves each part placement in its own configuration",
+          "[assembly][flatten][configuration]") {
+  // One part placed twice, once per configuration: the leaves are two
+  // documents, each the part in the configuration its placement asked for.
+  // A resolver keyed by the part alone drew a rook and a pawn alike.
+  Document small, large;
+  small.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  large.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 3, 3, 3));
+  const assembly::PartResolver resolve =
+      [&](uint64_t id, uint64_t configuration) -> const Document* {
+    if (id != 7)
+      return nullptr;
+    return configuration == 2 ? &large : &small;
+  };
+  AssemblyDocument top;
+  Occurrence a = Place("pawn", 7, OccurrenceRef::Part, {0, 0, 0});
+  Occurrence b = Place("rook", 7, OccurrenceRef::Part, {10, 0, 0});
+  b.configurationId = 2;
+  top.AddOccurrence(a);
+  top.AddOccurrence(b);
+
+  const auto flat = assembly::Flatten(top, resolve, nullptr);
+  REQUIRE(flat.has_value());
+  REQUIRE(flat->size() == 2);
+  CHECK((*flat)[0].configurationId == 0);
+  CHECK((*flat)[1].configurationId == 2);
+  CHECK((*flat)[0].part == &small);
+  CHECK((*flat)[1].part == &large);
+  // One stamp per PART, whatever each placement asks for: a caller keys
+  // them by part, and two would fight.
+  const auto stamps = assembly::SubtreeVersions(top, resolve, nullptr);
+  REQUIRE(stamps.size() == 2);
+  CHECK(stamps[0] == stamps[1]);
+  // And the (part, configuration) pairs to copy, once each.
+  const auto pairs = assembly::SubtreePartConfigurations(top, nullptr);
+  CHECK(pairs == std::vector<std::pair<uint64_t, uint64_t>>{{7, 0}, {7, 2}});
 }

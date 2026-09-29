@@ -512,7 +512,7 @@ void DrawMotionBody(AppState& state) {
                 : AssemblyDocById(state, asmDoc.FindById(path.front())->partId);
         if (const Occurrence* o =
                 owner ? owner->FindById(driver->b.occurrenceId) : nullptr)
-          if (const Document* pd = PartDocById(state, o->partId)) {
+          if (const Document* pd = OccurrencePartDoc(state, *o)) {
             glm::vec3 lo, hi;
             if (Measure::WorldBounds(pd->GetBodies(), glm::mat4(1.0f), lo, hi))
               reach = glm::length(hi - lo);
@@ -1289,7 +1289,7 @@ void DrawMateToolWindow(AppState& state) {
     if (c.anchor.frameId != 0) { // v86: the mate as designed, by name
       std::string fname = "frame " + std::to_string(c.anchor.frameId);
       if (const Occurrence* o = asmDoc.FindById(c.occurrenceId))
-        if (const Document* part = PartDocById(state, o->partId))
+        if (const Document* part = OccurrencePartDoc(state, *o))
           for (const auto& f : part->GetFeatures())
             if (f->GetId() == c.anchor.frameId)
               fname = f->GetName();

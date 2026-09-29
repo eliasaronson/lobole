@@ -536,8 +536,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Solve copies of every dependent assembly with the candidate resolver.
     // Missing datums and broken mates fail before any target mutation.
     json affected = json::array();
-    const auto parts = [&](uint64_t partId) -> const Document* {
-      return partId == id ? &source : ui::PartDocById(state, partId);
+    // The staged part stands in for every configuration of it: its
+    // configured copies do not exist yet, and its active one is what the
+    // import changed.
+    const assembly::PartResolver others = ui::PartResolverFor(state);
+    const auto parts = [&](uint64_t partId,
+                           uint64_t configuration) -> const Document* {
+      return partId == id ? &source : others(partId, configuration);
     };
     for (const auto& slot : state.parts) {
       const auto* assembly = ui::AssemblyDocById(state, slot.id);

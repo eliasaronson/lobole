@@ -780,7 +780,8 @@ TEST_CASE("a mate connector on a derived face resolves in the assembly",
   jaw.partId = 2;
   jaw.position = glm::vec3(0.0f, 0.0f, 100.0f);
   const uint64_t jawOcc = asmDoc.AddOccurrence(jaw);
-  const assembly::PartResolver partById = [&](uint64_t id) -> const Document* {
+  const assembly::PartResolver partById = [&](uint64_t id,
+                                              uint64_t) -> const Document* {
     return id == 2 ? host.get() : nullptr;
   };
   const assembly::AssemblyResolver asmById =
