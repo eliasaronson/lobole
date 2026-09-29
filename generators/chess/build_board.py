@@ -84,6 +84,20 @@ def board(app):
                                                 slab_f.walls()))
     assert len(top_outer) == 4, [e.name for e in top_outer]
     part.chamfer(top_outer, 3.0, name="Frame chamfer")
+    # The files a-h along the near border and the ranks 1-8 up the left one,
+    # single stroke (Hershey) for a V-bit, each centred on its square's line
+    # in the middle of the border: sized from the border, so a bigger set
+    # gets bigger letters.
+    label = part.param("label_h", "0.3 * frame",
+                       comment="cap height of the a-h and 1-8 labels")
+    sk = part.sketch(Plane.xy(SLAB_T), name="Labels")
+    for i in range(8):
+        along = frame + sq * i + sq * 0.5
+        sk.text("abcdefgh"[i], (along, frame * 0.5), label, font="hershey",
+                halign="center", valign="middle")
+        sk.text(str(i + 1), (frame * 0.5, along), label, font="hershey",
+                halign="center", valign="middle")
+    sk.add()
     part.material("wood_oak")
     return part
 

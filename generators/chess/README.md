@@ -55,7 +55,9 @@ and the finishing ball left a ring at each of its corners.
   head's outline turns tighter than the 3 mm ball at the mouth and under
   the chin.
 - Board: dark-square pockets, a 2 mm pass round each square's corners, the
-  frame's chamfer (V-bit), cut-out; a second setup faces it after the epoxy.
+  frame's chamfer (V-bit), cut-out; a second setup faces it after the epoxy
+  and engraves a-h and 1-8 in the border (single-stroke text in the
+  `Labels` sketch, one Engrave op with the V-bit, sized from the border).
 - Base jig: the seats and the cut-out; then one side's sixteen pieces in it,
   a setup per rank, felt recess and weight bore.
 

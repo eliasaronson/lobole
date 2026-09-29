@@ -316,9 +316,15 @@ def board_job(app):
            target=sides[0].ref)
     job.op(sid, "Cut out", type="profile", tool=1,
            tabs={"count": 8, "width": 8.0, "height": 3.0})
-    # After the epoxy has cured proud of the squares: face it back flat.
+    # After the epoxy has cured proud of the squares: face it back flat --
+    # and then the a-h and 1-8, so the facing cannot soften them.
     sid2 = bed_setup(job, "Face after epoxy", margin=(5.0, 5.0, 0.8))
     job.op(sid2, "Face", type="face", tool=1)
+    labels = next(f for f in board.state()["features"]
+                  if f.get("name") == "Labels")
+    job.op(sid2, "Labels", type="engrave", tool=8, targets=[
+        {"feature_id": labels["id"], "element": f"g{e['id']}"}
+        for e in labels.get("entities", []) if e.get("type") == "text"])
     return job
 
 
