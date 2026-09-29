@@ -667,10 +667,13 @@ void DrawViewsSection(AppState& state) {
       row.glyphColor = ImVec4(0.82f, 0.31f, 0.27f, 1.0f);
     row.label = (view.name.empty() ? std::string("view") : view.name) +
                 "###dwg_view_" + std::to_string(view.id);
-    char tail[64];
+    char tail[80];
     std::snprintf(tail, sizeof(tail), "%s  %s",
                   ViewOrientationToString(view.orientation),
                   ScaleText(view.scale).c_str());
+    if (view.rotationDeg != 0.0)
+      std::snprintf(tail + std::strlen(tail), sizeof(tail) - std::strlen(tail),
+                    "  %g°", view.rotationDeg);
     row.tail = tail;
     row.tooltip = !rendered ? std::string("Needs an update.")
                   : failed
@@ -692,6 +695,24 @@ void DrawViewsSection(AppState& state) {
               v) {
             SnapshotDrawing(state);
             v->scale = scale;
+            state.drawing->BumpVersion();
+            UpdateDrawingRenders(state);
+          }
+        }
+        ImGui::EndMenu();
+      }
+      // Turned on the sheet: a part modelled along X draws upright at 90.
+      if (ImGui::BeginMenu("Rotate###dwg_view_rotate")) {
+        DrawingView* v = state.drawing->FindView(viewId);
+        for (const double deg : {0.0, 90.0, 180.0, 270.0}) {
+          const std::string label = std::to_string(int(deg)) +
+                                    "°###dwg_rotate_" +
+                                    std::to_string(int(deg));
+          if (ImGui::MenuItem(label.c_str(), nullptr,
+                              v && std::abs(v->rotationDeg - deg) < 1e-9) &&
+              v) {
+            SnapshotDrawing(state);
+            v->rotationDeg = deg;
             state.drawing->BumpVersion();
             UpdateDrawingRenders(state);
           }

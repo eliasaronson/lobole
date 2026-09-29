@@ -40,7 +40,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "drawings[]{name,index,id,views,dims}"},
     {"set_drawing_view",
      "Edit a view {id, position?, scale?, name?, "
-     "show_hidden?, quality?, base_view?, configuration?}; folded axes note. "
+     "show_hidden?, quality?, base_view?, configuration?, rotation_deg?}; "
+     "folded axes note. `rotation_deg` turns the view on the sheet, "
+     "counter-clockwise about its own direction (a part modelled along X "
+     "drawn upright is its front view at 90). "
      "`configuration` (name or id of the SOURCE part's configurations; 0 = "
      "whatever it has active) draws the part in that variant, so a sheet of "
      "the Flat configuration shows the blank whatever the model tab is on; a "
@@ -63,8 +66,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
      "still draw exactly. ",
-     "base_view, configuration, hidden, id, name, position, quality, scale, "
-     "show_hidden"},
+     "base_view, configuration, hidden, id, name, position, quality, "
+     "rotation_deg, scale, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
@@ -75,7 +78,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "receipt{schema,standing,summary,claims}"},
     {"add_drawing_view",
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
-     "scale, position, configuration?}. "
+     "scale, position, configuration?, rotation_deg?}. `rotation_deg` turns "
+     "it on the sheet (see set_drawing_view). "
      "`configuration` (name or id of the SOURCE part's configurations; 0 = "
      "whatever it has active) draws the part in that variant, so a sheet of "
      "the Flat configuration shows the blank whatever the model tab is on; a "
@@ -102,7 +106,7 @@ static constexpr MethodDoc DrawingMethods[] = {
      "with its two valve springs left off, while the other seventeen bodies "
      "still draw exactly. ",
      "base_view, configuration, drawing, hidden, name, orientation, position, "
-     "quality, scale, source"},
+     "quality, rotation_deg, scale, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views",
      "List views with placement and scale, each with what its projection "
@@ -545,6 +549,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     v.name =
         p.value("name", std::string(ViewOrientationToString(v.orientation)));
     v.baseViewId = p.value("base_view", uint64_t{0});
+    v.rotationDeg = p.value("rotation_deg", 0.0);
     // Say nothing about size or place and you get what the "Add view" button
     // gives: a standard scale that fits this sheet, and a spot clear of the
     // views already on it. This RPC dropped every view at the sheet centre at
@@ -665,6 +670,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       view->hidden = ParseHidden(state, *view, p.at("hidden"));
     if (p.contains("base_view"))
       view->baseViewId = p.at("base_view").get<uint64_t>();
+    if (p.contains("rotation_deg"))
+      view->rotationDeg = p.at("rotation_deg").get<double>();
     state.drawing->BumpVersion();
     ui::UpdateDrawingRenders(state); // bboxes/dims are baked at projection
 

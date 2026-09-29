@@ -1,0 +1,48 @@
+{
+  "format": "designer-document",
+  "version": 134,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Chess set",
+      "document": "Pieces",
+      "author": "Elias",
+      "date": "2026-09-29"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "front",
+      "source": 3,
+      "orientation": "front",
+      "scale": 1.0,
+      "position": [
+        80.0,
+        150.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "rotation_deg": 90.0
+    },
+    {
+      "id": 2,
+      "name": "top",
+      "source": 3,
+      "orientation": "top",
+      "scale": 1.0,
+      "position": [
+        240.0,
+        150.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": []
+    }
+  ],
+  "dims": [],
+  "notes": []
+}

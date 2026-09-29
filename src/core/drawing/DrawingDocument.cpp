@@ -1,5 +1,6 @@
 #include "core/drawing/DrawingDocument.h"
 
+#include "core/Angles.h"
 #include "core/Conventions.h"
 
 #include <algorithm>
@@ -139,6 +140,17 @@ void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up) {
   // tests/test_world_up.cpp checks the enum round-trips through the table.
   viewDir = -v->toCamera;
   up = v->up;
+}
+
+void ViewAxes(const DrawingView& view, glm::dvec3& viewDir, glm::dvec3& up) {
+  OrientationAxes(view.orientation, viewDir, up);
+  if (view.rotationDeg == 0.0)
+    return;
+  // The picture turns counter-clockwise by t, so the world vector drawn
+  // upward turns clockwise: up' = up cos t + right sin t (sheet x is right).
+  const double t = angles::ToRadians(view.rotationDeg);
+  const glm::dvec3 right = glm::normalize(glm::cross(viewDir, up));
+  up = glm::normalize(up * std::cos(t) + right * std::sin(t));
 }
 
 const char* SheetSizeToString(SheetSize size) {

@@ -21,7 +21,7 @@ onto one sheet. A project holds any number of drawings.
   (part or assembly — a rename cannot break a view), a named orientation, a
   scale (with an optional expression), a sheet position in mm, `showHidden`,
   `quality` (`exact` or `fast`), `hidden` occurrences, a part
-  `configuration`, and `baseViewId` for a projected child.
+  `configuration`, a `rotation_deg`, and `baseViewId` for a projected child.
 - **Dimensions** (`DrawingDim`): a kind, a view, one or more `ProjRef`s and a
   label offset in sheet mm.
 - **Notes** (`DrawingNote`): text at a sheet position, optionally with a
@@ -48,6 +48,17 @@ looking along +Y (the camera sits at −Y). Top and bottom are rolled so the
 part's front edge is at the bottom of the sheet, which is what lets a top
 view sit directly above its front view. `tests/test_drawing_hlr.cpp` checks
 the orientations against the model's up axis.
+
+### Rotation
+
+`rotation_deg` turns a view on the sheet, counter-clockwise about its own
+view direction (`ViewAxes`, which every projection of a view goes through
+instead of `OrientationAxes`). It is for a part modelled lying down — a
+turned piece along X draws upright as its front view at 90 — without a
+rotated copy of the model. It turns the picture, not the view: a front view
+at 90 still looks along +Y, and a child folds from it only along an axis the
+two still share. The panel's view row offers 0/90/180/270
+(`Rotate`); `add_drawing_view` and `set_drawing_view` take any angle.
 
 ### Projected children
 

@@ -238,8 +238,8 @@ picture needs a windowed instance.
 ## Drawing tab: the Drawing panel
 
 `src/ui/DrawingPanel.cpp`. Views and dimensions are `ListRow`s (a view's tail
-is its scale, a dimension's its value). A view's menu sets its **Scale**,
-adds a bend table (when the view has bends) and deletes; a dimension's menu
+is its scale, a dimension's its value). A view's menu sets its **Scale**
+and **Rotate** (0/90/180/270), adds a bend table (when the view has bends) and deletes; a dimension's menu
 deletes. Rows have the menu gestures but no selection: a click highlights
 nothing on the sheet. **Add view** is one path: the toolbar opens it in the
 tool window (`DrawAddViewToolWindow`, `drawingAddViewOpen`) with the source,

@@ -1762,6 +1762,8 @@ json DrawingViewToJson(const DrawingView& v) {
     j["scale_expr"] = v.scaleExpr;
   if (v.configuration != 0) // v115
     j["configuration"] = v.configuration;
+  if (v.rotationDeg != 0.0) // v134
+    j["rotation_deg"] = v.rotationDeg;
   return j;
 }
 
@@ -1785,6 +1787,7 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.quality = j.value("quality", std::string("exact"));
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
   v.configuration = j.value("configuration", uint64_t{0});
+  v.rotationDeg = j.value("rotation_deg", 0.0);
   return v;
 }
 

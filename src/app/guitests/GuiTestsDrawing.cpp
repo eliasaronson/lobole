@@ -97,6 +97,17 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
         ("###dwg_view_scale/###dwg_scale_" + std::to_string(0.5)).c_str());
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->drawing->FindView(firstId)->scale, 0.5);
+    // ... and turns it on the sheet: at 90 the drawn view's width and height
+    // trade places.
+    const glm::dvec2 before = extent(0);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->SetRef("//$FOCUSED");
+    ctx->MenuClick("###dwg_view_rotate/###dwg_rotate_90");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->drawing->FindView(firstId)->rotationDeg, 90.0);
+    IM_CHECK(std::abs(extent(0).x - before.y) < 1e-3);
+    IM_CHECK(std::abs(extent(0).y - before.x) < 1e-3);
     ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
     ctx->Yield();
     ctx->ItemClick("//$FOCUSED/###dwg_view_delete");

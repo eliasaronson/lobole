@@ -111,6 +111,11 @@ struct DrawingView {
   // the blank and the drawing of the folded part are two views of one part
   // (docs/sheetmetal/README.md#dxf-and-drawings).
   uint64_t configuration = 0;
+  // Turns the drawn view on the sheet, degrees counter-clockwise about its
+  // own view direction (v134). A part modelled lying along X -- a turned
+  // chess piece -- draws upright as its front view turned 90, with no
+  // rotated copy of the model.
+  double rotationDeg = 0.0;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured
@@ -222,6 +227,9 @@ SheetChrome ChromeOf(const Sheet& sheet);
 // front as the view cube's and the `view` RPC's. Passed straight to
 // drawing::ProjectView.
 void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up);
+// A view's own axes: its orientation's, turned by its rotationDeg. Every
+// projection of a view goes through this, not OrientationAxes.
+void ViewAxes(const DrawingView& view, glm::dvec3& viewDir, glm::dvec3& up);
 
 const char* SheetSizeToString(SheetSize size);
 [[nodiscard]] bool SheetSizeFromString(const std::string& s, SheetSize& out);

@@ -261,7 +261,7 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
     inputs.push_back(sb.input);
 
   glm::dvec3 viewDir, up;
-  OrientationAxes(view.orientation, viewDir, up);
+  ViewAxes(view, viewDir, up);
   drawing::ProjectionOptions opts;
   opts.hiddenLines = view.showHidden;
   opts.cache = &state.drawingProjectionCache;
@@ -351,7 +351,7 @@ AssembleSheetView(AppState& state, const DrawingView& view,
   // view that looks square onto the blank — seen edge-on, a crease is a
   // point or lies along the sheet's own outline.
   glm::dvec3 viewDir, up;
-  OrientationAxes(view.orientation, viewDir, up);
+  ViewAxes(view, viewDir, up);
   const glm::dvec3 d = glm::normalize(viewDir);
   for (const SourceBody& sb : bodies) {
     if (!sb.bends)
@@ -402,8 +402,8 @@ FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view) {
   if (!base)
     return out;
   glm::dvec3 vd, up, bvd, bup;
-  OrientationAxes(view.orientation, vd, up);
-  OrientationAxes(base->orientation, bvd, bup);
+  ViewAxes(view, vd, up);
+  ViewAxes(*base, bvd, bup);
   const glm::dvec3 right = glm::normalize(glm::cross(vd, up));
   const glm::dvec3 bright = glm::normalize(glm::cross(bvd, bup));
   constexpr double eps = 1e-6;
@@ -541,7 +541,7 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
     DrawingNote table = note;
     if (doc) {
       glm::dvec3 viewDir, up;
-      OrientationAxes(view->orientation, viewDir, up);
+      ViewAxes(*view, viewDir, up);
       table.text = drawing::BendTableText(*doc, note.text, viewDir);
     }
     if (!doc || table.text.empty()) {

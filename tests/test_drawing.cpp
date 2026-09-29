@@ -7,6 +7,7 @@
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/drawing/DrawingValidate.h"
 #include "core/features/ExtrudeFeature.h"
@@ -1151,6 +1152,47 @@ TEST_CASE("Drawing golden loads and round-trips (v115 flat pattern sheet)",
   std::ofstream(bad) << text;
   CHECK(testio::LoadDrawing(bad.string()) == nullptr);
   fs::remove(bad);
+}
+
+TEST_CASE("Drawing golden loads and round-trips (v134 view rotation)",
+          "[drawing][serialization][golden]") {
+  // v134 added a view's `rotation_deg`: a piece modelled along X drawn
+  // upright. The second view has no key, which is 0.
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "drawing" / "v134-view-rotation.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->ViewCount() == 2);
+  CHECK(dwg->GetViews()[0].rotationDeg == 90.0);
+  CHECK(dwg->GetViews()[1].rotationDeg == 0.0);
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v134_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(reloaded->GetViews()[0].rotationDeg == 90.0);
+  CHECK(reloaded->GetViews()[1].rotationDeg == 0.0);
+  fs::remove(tmp);
+}
+
+TEST_CASE("A view's rotation turns what it draws, not where it looks",
+          "[drawing]") {
+  DrawingView v;
+  v.orientation = ViewOrientation::Front;
+  glm::dvec3 dir0, up0, dir, up;
+  ViewAxes(v, dir0, up0);
+  v.rotationDeg = 90.0;
+  ViewAxes(v, dir, up);
+  CHECK(glm::length(dir - dir0) < 1e-12); // still looking the same way
+  // Turned counter-clockwise by 90, what was drawn to the right is drawn up:
+  // the world's right-hand vector is the new up.
+  const glm::dvec3 right0 = glm::normalize(glm::cross(dir0, up0));
+  CHECK(glm::length(up - right0) < 1e-12);
+  // A point to the right of the origin lands above it on the sheet.
+  const glm::dvec2 p = drawing::ProjectPoint(right0 * 10.0, dir, up);
+  CHECK(std::abs(p.x) < 1e-9);
+  CHECK(std::abs(p.y - 10.0) < 1e-9);
 }
 
 TEST_CASE("Drawing golden loads and round-trips (v90 hidden occurrences)",
