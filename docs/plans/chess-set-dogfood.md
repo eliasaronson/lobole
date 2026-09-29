@@ -35,13 +35,6 @@ The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
 - **The mitre's pocket both errors and posts.** The bishop's 3.2 mm notch,
   derived as adaptive for a 3 mm cutter, reports "could not lead into the
   cut" and still produces 9229 moves; the outcome must be one or the other.
-- **A pattern of a Hole.** `pattern(source=<hole>)` fails with "source body
-  not found": a Hole makes no body, and the pattern looks for one. A hole
-  pattern is what a bolt circle is; it should pattern the hole's centres.
-- **A cut that removes nothing still splits faces.** A cut extruded away
-  from the part warns "removed no material" and leaves the face it touched
-  split in two (`cap1;M4.0`, `cap1;M4.1`); with nothing removed the model
-  should be unchanged.
 
 ## 2. Picking faces by what made them
 

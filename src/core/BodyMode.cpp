@@ -442,10 +442,17 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     }
     const double before = bodies[target].shape.Volume();
     const double after = fused.shape.Volume();
-    if (warning && VolumeUnchanged(before, after)) {
-      *warning = "add merged no new material — the tool lies entirely inside "
-                 "the target body (check the sketch plane and profile)";
-    } else if (warning && fused.fuzzy > 0.0) {
+    if (VolumeUnchanged(before, after)) {
+      if (warning)
+        *warning = "add merged no new material — the tool lies entirely "
+                   "inside the target body (check the sketch plane and "
+                   "profile)";
+      // Nothing was added, so nothing changes: the fused result is the same
+      // solid with the tool's outline imprinted on it, which renamed faces
+      // (cap1;M4.0 / cap1;M4.1) a no-op had no business touching.
+      return true;
+    }
+    if (warning && fused.fuzzy > 0.0) {
       *warning = std::move(fused.warning);
     }
     bodies[target].shape = std::move(fused.shape);
@@ -527,6 +534,13 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
         return false;
       }
       if (!cut.shape.IsValid())
+        continue;
+      // A body the tool only TOUCHED keeps what it was. The boolean still
+      // imprints the tool's outline where they meet -- a face split in two
+      // and renamed -- and a cut that removes nothing must leave the model
+      // exactly as it found it.
+      if (VolumeUnchanged(body.shape.Volume(), cut.shape.Volume()) &&
+          cut.shape.SolidCount() == body.shape.SolidCount())
         continue;
       if (cut.fuzzy > 0.0)
         retried += (retried.empty() ? "" : "; ") + cut.warning;

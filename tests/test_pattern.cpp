@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -220,6 +221,39 @@ TEST_CASE("Pattern of a cut replicates the cutter", "[pattern]") {
     if (name.find('#') != std::string::npos)
       suffixed++;
   CHECK(suffixed >= 3); // the barrel of instances 1..3 (0 is the source cut)
+}
+
+TEST_CASE("Pattern of a Hole feature repeats the hole", "[pattern]") {
+  // The test above patterns an Extrude CUT; a Hole feature exposed no tool,
+  // so patterning one -- a bolt circle -- refused "source body not found".
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 20, 5));
+  auto sk = std::make_unique<SketchFeature>(
+      "HoleSk",
+      SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  sk->AddEntity(sketch::Point{{10, 10}});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  auto hole =
+      std::make_unique<HoleFeature>("Hole", skId, HoleKind::Simple, 6.0, 5.0);
+  hole->through = true;
+  doc.AddFeature(std::move(hole));
+  const uint64_t holeId = doc.GetFeature(2)->GetId();
+  INFO(doc.GetFeature(2)->GetError());
+  REQUIRE(doc.GetFeature(2)->GetError().empty());
+  const double one = 6000.0 - TotalVolume(doc);
+  REQUIRE(one > 100.0);
+
+  auto pat =
+      std::make_unique<PatternFeature>("Holes x4", PatternKind::Linear, holeId);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 4;
+  pat->spacing = 12.0;
+  doc.AddFeature(std::move(pat));
+  INFO(doc.GetFeature(3)->GetError());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  CHECK_THAT(TotalVolume(doc), WithinRel(6000.0 - 4.0 * one, 1e-3));
 }
 
 TEST_CASE("Pattern of an adding extrude replicates the boss", "[pattern]") {

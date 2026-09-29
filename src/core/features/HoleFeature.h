@@ -37,6 +37,13 @@ public:
     visit(sketchId); // the hole-centre sketch
   }
 
+  // What a Pattern of this hole repeats: the drilled tool, cut at each
+  // copy (Feature::ToolShape). A hole leaves no body of its own.
+  const CADShape* ToolShape() const override {
+    return m_tool.IsValid() ? &m_tool : nullptr;
+  }
+  const ElementMap* ToolMap() const override { return &m_toolMap; }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(diameterExpr, diameter);
     visit(depthExpr, depth);
@@ -72,4 +79,9 @@ public:
   // `csDepth` (typical 82/90 deg bolt heads — the caller picks the depth).
   double csDiameter = 2.0;
   double csDepth = 0.5;
+
+private:
+  // The last-drilled tool and its names (ToolShape).
+  CADShape m_tool;
+  ElementMap m_toolMap;
 };

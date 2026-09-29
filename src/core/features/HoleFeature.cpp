@@ -67,6 +67,8 @@ bool ClipToBox(const glm::vec3& origin, const glm::vec3& dir,
 } // namespace
 
 bool HoleFeature::Execute(RegenContext& ctx) {
+  m_tool = CADShape(); // a failed regen leaves no stale tool to pattern
+  m_toolMap = {};
   const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sk) {
     SetError(
@@ -266,6 +268,8 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 
   ElementMap toolMap;
   topo::NamePrimitiveElements(tool, std::to_string(GetId()), toolMap);
+  m_tool = tool;
+  m_toolMap = toolMap;
   if (!ApplyBodyModeReporting(ctx.bodies, std::move(tool), std::move(toolMap),
                               ExtrudeMode::Cut, *this)) {
     SetError("hole cut failed");

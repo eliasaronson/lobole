@@ -305,6 +305,26 @@ TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",
   CHECK_FALSE(cut->GetWarning().empty()); // ...but flagged as a no-op
 }
 
+TEST_CASE("A cut that only touches the body leaves it exactly as it was",
+          "[extrude][feature][warning][toponaming]") {
+  // Drawn on the top face and extruded away from the part, the tool shares
+  // only a face with it. The boolean imprinted its outline anyway, splitting
+  // the top in two and renaming it (cap1;M4.0 / cap1;M4.1), for a cut that
+  // removed nothing.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+  const auto before = doc.GetBodies()[0].elementMap.names;
+  const SketchPlane top(glm::vec3(0, 0, 2), glm::vec3(0, 0, 1),
+                        glm::vec3(1, 0, 0));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Away", sid, 5.0, ExtrudeMode::Cut));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_FALSE(doc.GetFeature(doc.FeatureCount() - 1)->GetWarning().empty());
+  CHECK(doc.GetBodies()[0].elementMap.names == before);
+}
+
 TEST_CASE("ExtrudeFeature Cut that removes material carries no warning",
           "[extrude][feature][warning]") {
   Document doc;

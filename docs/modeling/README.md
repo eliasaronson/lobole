@@ -168,7 +168,11 @@ body as it was.
 - **Thin** (`thin: {thickness, side: out|in|both}`): every loop becomes a wall
   ring (OCC `MakeOffset`), composing with any end condition.
 - A cut or add extrude keeps the prism it swept (`ToolShape()`), which is what
-  lets a pattern repeat it.
+  lets a pattern repeat it; a Hole keeps its drilled tool the same way, so a
+  bolt circle is one Hole and a pattern.
+- A cut that removes nothing, or an add that adds nothing, leaves the body as
+  it was, with a warning: the boolean would still imprint the tool's outline
+  where the two touch, splitting a face and renaming it.
 
 ### Patterns
 
@@ -178,8 +182,8 @@ source by feature id. `count`, `spacing` and `angle_deg` are expressions.
 - A **body source**: every instance (seed plus copies) is fused and split back
   into connected solids, so touching instances merge and disjoint ones become
   separate bodies. The seed is consumed.
-- A **cut or add source** leaves no body of its own, so the pattern repeats
-  the source's tool (`Feature::ToolShape`) and subtracts or fuses each
+- A **cut, add or Hole source** leaves no body of its own, so the pattern
+  repeats the source's tool (`Feature::ToolShape`) and subtracts or fuses each
   transformed copy. In the GUI the pick for this is the cut's tree row with the
   Source slot armed; a body pick resolves to the body's `createdBy`, which is
   the plate, not the cut.
