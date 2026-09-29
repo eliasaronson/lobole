@@ -15,7 +15,7 @@ Each stage opens the project the one before saved; all of it lands in
 | `build_piece.py` | the `piece` part: a configuration per rank | `piece.dsgn` |
 | `build_blanks.py` | the four rotary blanks, pieces Derived in their configurations on necks | `blanks.dsgn` |
 | `build_board.py` | the board, a Derived part per rank and wood, the base jig | `set.dsgn` |
-| `build_set.py` | the assembled set, its BOM, the pieces' drawing | `set.dsgn` |
+| `build_set.py` | the assembled set, its BOM, the pieces' drawing (views turned upright, each height to its top's `extreme`) | `set.dsgn` |
 | `cam.py` | every job, verified and posted | `chess.dsgn`, `nc/` |
 
 `profiles.py` holds the turned profiles.
@@ -56,6 +56,15 @@ and the finishing ball left a ring at each of its corners.
   frame's chamfer (V-bit), cut-out; a second setup faces it after the epoxy.
 - Base jig: the seats and the cut-out; then one side's sixteen pieces in it,
   a setup per rank, felt recess and weight bore.
+
+Every face an operation targets is asked for by what made it
+(docs/modeling/toponaming.md): a crenel's floors are `made(..., "Crenels",
+"rook 1", role="floor")` -- the piece part's pattern, through the rook's
+Derived copy -- and a radial cut's floors are its faces that face away from
+the axis. One pick is still by position: the board's chamfered top outer edges
+(`build_board.py`), where
+an edge's name comes from whichever face named it first, so "where the
+slab's sides meet its top" is not a question of what made it.
 
 `MACHINE` in `cam.py` holds the rotary's mount as TEST values: the 6090's axis
 letter, direction and steps per degree are not measured, so no rotary

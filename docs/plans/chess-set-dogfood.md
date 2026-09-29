@@ -3,12 +3,9 @@
 The set is designed and every program is generated
 ([generators/chess](../../generators/chess/README.md); `run_all.sh PORT`
 rebuilds all of it from nothing into `scratch/chess/`). What remains is the
-machine and the app work the round found. The two large items -- picking faces by what made them, and a
-configuration per occurrence -- are the ones that would have saved most of the
-round's scripting; the rest are bugs and CAM gaps. Text is last.
-
-Phases 2 and 3 both reach element resolution and the SDK, so they go in
-order, 2 first.
+machine and the app work the round found. The large item -- a configuration
+per occurrence -- is the one that would have saved most of the round's
+scripting; the rest are CAM gaps. Text is last.
 
 ## 0. At the machine (the user)
 
@@ -21,111 +18,6 @@ order, 2 first.
    calipers on the first pawn against the drawing.
 
 The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
-
-## 2. Picking faces by what made them
-
-The round's biggest cost was face picking: every operation needed a filter by
-normal, centroid and radius, and the wrong ones (a collar step taken for a
-bore floor, a silhouette for an edge) each cost a rerun. What made a face is
-already in its name, and nothing reads it. From a real part (a block, a
-pocket cut 4 over sketch lines 2-5, a hole 6, a fillet 7):
-
-| face | name | what it says |
-|---|---|---|
-| pocket floor | `4/cap1` | cut 4's far end |
-| pocket walls | `4/g2` .. `4/g5` | swept from sketch entities 2-5 |
-| block top | `2/cap1;M4;M6;M7` | extrude 2's end, cut by 4, 6 and 7 |
-| fillet | `2/g5;U3;G7` | made by fillet 7 from edge `2/g5;U3` |
-| hole bore, bottom | `6/face0`, `6/face1` | positional: the hole renames wholesale |
-
-and in a chess blank, the rook's crenel floor copied in by Derived feature 9
-is `9/12/31/cap1#2;M15` -- the third pattern copy of the piece part's cut
-31's far end.
-
-### The decoder
-
-`src/core/ElementOrigin.{h,cpp}`: a name to
-
-```
-ElementOrigin {
-  derived   [ (derived feature id, source created_by) ... ]  outermost first
-  madeBy    the feature that MADE it, in the innermost document: the seed's
-            tag, or the last G step's tag when there is one (a blend face is
-            the fillet's, not the edge's)
-  role      start_cap | end_cap | side | generated | pole | seam | positional
-            | boundary (the L fallback: made of other faces' edges, no role)
-            | bore | bottom | counterbore | counterbore_floor | countersink
-  entity    the sketch entity a side face was swept from (0 when none)
-  instance  the pattern copy ('#i'), or none; 'm' for a mirror
-  modifiedBy the M steps' tags, in order
-}
-```
-
-It reads every form the grammar has and the ones seen in real documents:
-`#i` before later steps, `.i` on M and G, a feature's M on its own seed,
-nested Derived prefixes, multi-group caps (`cap0@g<k>`), `U` edge suffixes
-(an edge's origin is its face's, plus which boundary edge). An edge decodes
-through the face it was named from. `drawing::MappedNameFeatureIds` and
-`HoleFeature::RecordTapping`'s prefix match go through it, so there is one
-parser. Test: every name in the golden corpus and in the chess project
-decodes, and `madeBy` names a feature that exists in that document.
-
-### A hole names its faces by role
-
-`HoleFeature` stops naming its tool positionally. Each hole is built per
-centre and its faces named `<hole>/p<entity>/bore`, `/bottom`,
-`/counterbore`, `/counterbore_floor`, `/countersink`, keyed by the sketch
-entity the centre came from, so adding a hole renames none of the others.
-No golden or saved reference names a hole face today. The tapping record
-takes the bores by role instead of by radius. Test: a three-hole
-counterbored Hole names every face by role, and deleting the middle point
-leaves the other two holes' names unchanged.
-
-Shell, draft, split, loft, sweep, pipe, rib, fasteners and imports keep
-positional names; they decode as `positional` with `madeBy` still right.
-
-### One RPC: `list_elements` filters and says
-
-`list_elements` gains `made_by` (feature id or name; with `part` on a
-Derived-bearing part, `{part, feature}` names a feature of the SOURCE part),
-`via` (the Derived feature it came in through), `role`, `entity`, and every
-face and edge it lists carries `made_by`, `role` and, when set, `entity`,
-`instance`, `derived`. A second RPC would be a second place to learn.
-
-- An unknown role is refused, naming the roles.
-- A filter that matches nothing says why: the feature does not exist; it
-  made no faces on this part; or it renames wholesale ("feature 12 is a
-  Shell; its faces are named by position, 12/face0..n, role positional").
-- Roles that read better for a cut are aliases a cut answers to: `floor` =
-  `end_cap` of a cut, `walls` = `side`. A through cut has no floor and says
-  so.
-
-### The SDK
-
-- Every feature call returns a `Feature` handle -- `hole`, `fillet`,
-  `chamfer`, `pattern`, and `cut`, which returns None today because a cut
-  makes no body. It still indexes like the response dict (`h["id"]`), so no
-  generator breaks. `extrude`/`revolve` keep returning the Body they made;
-  one that joins or cuts returns the `Feature`.
-- `Feature.faces(role=, entity=)` / `.edges(...)` over the whole part, and
-  the words a script means: `cut.floor()`, `cut.walls(entity=)`,
-  `extrude.end_cap()`, `extrude.start_cap()`, `fillet.faces()`,
-  `hole.bores()`, `hole.bottoms()`.
-- `Body.faces(made_by=, role=, via=)` beside the existing geometric filters,
-  and `Part.feature("Crenel")` for a feature by name.
-- Face and Edge carry `made_by` and `role`; `Element.feature_id` stays the
-  body's (it is what a ref needs).
-
-### Dogfood
-
-The chess generator's picks go through it: `cam.py`'s `floors()` (normal,
-radius and an x window) becomes the crenel cut's floors via the rook's
-Derived feature; the knight's fillet edges are the head extrude's side
-edges. What cannot go is said in the round's notes.
-
-Tests: the decoder over both corpora; each role on extrude, revolve, cut,
-pattern, mirror, fillet, hole, shell and a nested Derived copy; the RPC's
-refusals and its "why nothing"; `sdk_smoke.py` for the handles.
 
 ## 3. A configuration per occurrence and per job part
 
@@ -202,7 +94,7 @@ the refusal.
 Tests: a parked `cam_verify` answers while `ping` answers in between;
 playback of an indexed setup after a turning one starts from the turned
 stock; a four-index crenel op posts four A words and verifies clean; the
-pawn blank's spiral rest cuts only its bands.
+knights blank's spiral rest cuts only its bands.
 
 ## 5. Text (later)
 
@@ -212,5 +104,5 @@ pockets) and an engrave operation: the board's a-h and 1-8.
 ## Verification
 
 Each phase's tests as above, the headless and GUI suites, the CAM-off build,
-and the chess generator rebuilt from nothing after phases 1, 3 and 4 with
+and the chess generator rebuilt from nothing after phases 3 and 4 with
 every `cam_verify` read. At the machine: calipers on the first pawn.

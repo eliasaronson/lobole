@@ -250,11 +250,13 @@ def knight_fillet(app, part, ids, feats):
     configuration, the only one its edges exist in, then kept off in the
     authored model and on in the knight's."""
     app.call("set_active_configuration", id=ids["knight"])
+    # The outline's two curves: the head extrude's spline edges on its caps,
+    # asked for by what made them rather than found at y = +-5.5 u.
     u = part.value_of("u")
+    head = part.feature("Knight head")
     body = part.bodies()[0]
-    edges = body.edges(where=lambda e: e.kind == "other"
-                       and e.midpoint is not None
-                       and abs(abs(e.midpoint[1]) - 5.5 * u) < 0.05)
+    edges = [e for role in ("start_cap", "end_cap")
+             for e in body.edges(made_by=head, role=role, kind="other")]
     assert len(edges) == 2, [e.name for e in edges]
     r = app.add_feature(feature={
         "type": "Fillet", "name": "Knight head round",

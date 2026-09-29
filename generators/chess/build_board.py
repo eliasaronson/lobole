@@ -77,7 +77,9 @@ def board(app):
                              "sketch_id": s.id, "mode": "cut",
                              "distance": POCKET, "distance_expr": depth.expr,
                              "reversed": True})
-    # The frame's top outer edge, chamfered.
+    # The frame's top outer edge, chamfered. Found by position: an edge is
+    # named from whichever face named it first, so "where the slab's sides
+    # meet its top" is not a question of what made it.
     b = part.bodies()[0]
     top_outer = b.edges(where=lambda e: e.kind == "line" and e.midpoint
                         and abs(e.midpoint[2] - SLAB_T) < 0.01

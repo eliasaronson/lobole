@@ -12,6 +12,7 @@ so no program posted here is for the machine until they are.
 """
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -165,29 +166,33 @@ def turn(job, sid, rest=False):
         job.op(sid, "Rest", type="surface_rotary", tool=7, rest_from_tool=2)
 
 
-def body(app, part_name):
-    return app.part(part_name, create=False).bodies()[0]
-
-
 def a_for(normal):
     """The rotary index that turns a face with this outward normal to the
     spindle: A = 0 presents +Z, 90 presents -Y (found by the pocket
     derivation refusing every other pairing), so A = theta - 90 with theta
     the normal's angle from +Y toward +Z."""
-    import math
     th = math.degrees(math.atan2(normal[2], normal[1]))
     return round((th - 90.0) % 360.0, 3)
 
 
-def floors(b, x0, x1, r, tol=0.3):
-    """Planar faces facing outward at radius r between x0 and x1."""
+def made(app, part_name, piece_feature, via, **kw):
+    """The faces a feature of the piece part made in `part_name`, where the
+    piece came in as the Derived feature `via` -- asked for by what made
+    them (docs/modeling/toponaming.md), not found by normal, radius and an
+    x window, which is what every pick here was and what went wrong."""
+    piece = app.part("piece", create=False)
+    return app.part(part_name, create=False).faces(
+        via=via, made_by=piece.feature(piece_feature), **kw)
+
+
+def outward(faces):
+    """The ones facing away from the axis: a radial cut's floors. Its other
+    faces are its walls, which face round the axis or along it."""
     out = []
-    for f in b.faces(kind="plane"):
+    for f in faces:
         c, n = f.centroid, f.normal
-        if not (x0 < c[0] < x1) or n is None or abs(n[0]) > 0.1:
-            continue
-        rad = abs(c[1] * n[1] + c[2] * n[2])
-        if abs(rad - r) < tol:
+        r = math.hypot(c[1], c[2])
+        if n is not None and r > 1e-6 and (n[1] * c[1] + n[2] * c[2]) / r > 0.99:
             out.append(f)
     return out
 
@@ -218,20 +223,18 @@ def pawns(app):
 def rook_bishop(app):
     job = Job(app, "blank_rook_bishop", "Rook and bishop")
     turned(job)
-    b = body(app, "blank_rook_bishop")
-    x_rook = 14.0
-    top = x_rook + 0.58 * 85
-    # Crenellations: four notch floors at r = 8, one index each.
-    for a, fs in sorted(by_a(floors(b, top - 7, top + 1, 8.0)).items()):
+    blank = "blank_rook_bishop"
+    # Crenellations: the four notch floors, one index each.
+    crenels = made(app, blank, "Crenels", "rook 1", role="floor")
+    for a, fs in sorted(by_a(crenels).items()):
         sid = job.setup(f"Crenel A{a:g}", a=a)
         job.op(sid, "Crenel", type="pocket", tool=4, targets=[
             {"feature_id": f.ref["feature_id"], "element": f.ref["element"]}
             for f in fs])
-    # The mitre: a slit through the head, cut half from each side along Y.
-    x_b = top + 0.07 * 85
-    btop = x_b + 0.74 * 85
-    mitre = floors(b, btop - 10, btop - 4, 2.0)
-    mitre = [f for f in mitre if f.normal[2] > 0.99]
+    # The mitre: a notch down across the head. Its floor is a side face --
+    # swept from the notch sketch's bottom line -- and the one of its three
+    # that faces away from the axis.
+    mitre = outward(made(app, blank, "Mitre", "bishop 2"))
     assert len(mitre) == 1, [f.name for f in mitre]
     sid = job.setup("Mitre", a=a_for(mitre[0].normal))
     # From the turned head's surface, not the square it was: this setup's
@@ -249,19 +252,20 @@ def target_list(fs):
 def queen_king(app):
     job = Job(app, "blank_queen_king", "Queen and king")
     turned(job)
-    b = body(app, "blank_queen_king")
-    qtop = 14.0 + 0.89 * 85
-    # The crown: eight notch floors at r = 8.8, one index each.
-    for a, fs in sorted(by_a(floors(b, qtop - 10.5, qtop - 6, 8.8)).items()):
+    blank = "blank_queen_king"
+    # The crown: eight notch floors, one index each. Each notch is cut
+    # sideways, so its caps are its walls and its floor a side face.
+    crown = outward(made(app, blank, "Crown notches", "queen 1"))
+    for a, fs in sorted(by_a(crown).items()):
         sid = job.setup(f"Crown A{a:g}", a=a)
         # the notch floor runs only 2.3 mm along the axis before the dome
         # falls away; that end is OPEN, so a 3 mm cutter clears it
         job.op(sid, "Crown notch", type="pocket", tool=5,
                targets=target_list(fs), top_z=12.5)
-    ktop = qtop + 0.07 * 85 + 85
-    # The cross: its bar's faces at 2 mm from the axis are the floors -- the
-    # bar's top and bottom from above and below, its flats from either side.
-    cross = [f for f in floors(b, ktop - 11.5, ktop + 0.5, 2.0)]
+    # The cross: its bar's faces are the floors -- the bar's top and bottom
+    # from above and below, its flats from either side.
+    cross = outward(made(app, blank, "Cross corners", "king 2") +
+                    made(app, blank, "Cross flats", "king 2"))
     for a, fs in sorted(by_a(cross).items()):
         sid = job.setup(f"Cross A{a:g}", a=a)
         job.op(sid, "Cross", type="pocket", tool=5, targets=target_list(fs),
@@ -294,30 +298,18 @@ def bed_setup(job, name, margin=(5.0, 5.0, 0.0)):
 
 def board_job(app):
     job = Job(app, "board", "Board")
-    b = body(app, "board")
-    top = max(f.centroid[2] for f in b.faces(kind="plane"))
-    floors_ = [f for f in b.faces(kind="plane")
-               if f.normal and f.normal[2] > 0.99
-               and abs(f.centroid[2] - (top - 2.0)) < 0.05]
-    walls = []
-    for f in floors_:
-        # one wall per square: the wall whose outward normal is +X, beside
-        # this floor
-        c = f.centroid
-        w = [g for g in b.faces(kind="plane")
-             if g.normal and g.normal[0] < -0.99
-             and abs(g.centroid[1] - c[1]) < 20 and 0 < g.centroid[0] - c[0]
-             < 30 and g.centroid[2] > top - 2.1]
-        if w:
-            walls.append(min(w, key=lambda g: g.centroid[0] - c[0]))
+    board = app.part("board", create=False)
+    floors_ = board.faces(made_by="Dark squares", role="floor")
+    # one wall per square for the corner pass (a profile follows the loop
+    # the wall is on): the one that faces -X
+    walls = board.faces(made_by="Dark squares", role="walls",
+                        normal=(-1, 0, 0))
     sid = bed_setup(job, "Top")
     job.op(sid, "Dark squares", type="pocket", tool=1,
            targets=target_list(floors_))
     job.op(sid, "Square corners", type="profile", tool=6, side="inside",
            targets=target_list(walls))
-    sides = [f for f in b.faces(kind="plane") if f.normal
-             and abs(f.normal[2]) < 0.01 and f.centroid[2] < top - 3.5
-             and (f.normal[0] < -0.99)]
+    sides = board.faces(made_by="Slab", role="walls", normal=(-1, 0, 0))
     job.op(sid, "Frame chamfer", type="edge_round", tool=8,
            target=sides[0].ref)
     job.op(sid, "Cut out", type="profile", tool=1,
@@ -330,8 +322,8 @@ def board_job(app):
 
 def jig_job(app):
     job = Job(app, "base_jig", "Base jig")
-    b = body(app, "base_jig")
-    top = max(b.faces(kind="plane"), key=lambda f: f.centroid[2])
+    top, = app.part("base_jig", create=False).faces(made_by="Plate",
+                                                     role="end_cap")
     sid = bed_setup(job, "Plate")
     job.op(sid, "Seats", type="profile", tool=1, side="inside",
            target=top.ref)
@@ -356,16 +348,13 @@ def undersides_jig_job(app):
     holes = jig_holes()
     faces = {}
     for kind in build_board.SIDE:
-        bk = body(app, f"{kind}_light")
-        base_r = sizes[kind][1] / 2 * 85.0
-        faces[kind] = (
-            [f for f in bk.faces(kind="plane") if f.normal
-             and f.normal[0] < -0.99 and abs(f.centroid[0]) < 0.01][0].ref,
-            sorted((f for f in bk.faces(kind="plane") if f.normal
-                    and f.normal[0] < -0.99
-                    and 0.1 < f.centroid[0] < 0.8 * base_r
-                    and abs(f.centroid[1]) < 1 and abs(f.centroid[2]) < 1),
-                   key=lambda f: f.centroid[0]))
+        # the piece came into its part as the Derived feature named `kind`
+        part = f"{kind}_light"
+        recess, = made(app, part, "Felt recess", kind, role="floor")
+        bore, = made(app, part, "Weight bore", kind, role="floor")
+        # laid up by the recess's floor, which faces the way the underside
+        # does
+        faces[kind] = (recess.ref, [recess, bore])
     for kind in build_board.SIDE:
         h = sizes[kind][0] * 85.0
         base_r = sizes[kind][1] / 2 * 85.0
