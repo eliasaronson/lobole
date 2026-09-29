@@ -566,11 +566,12 @@ public:
   // Configurations: named assembly variants. Reuses the Configuration type —
   // for an assembly, `suppressedFeatures` holds suppressed OCCURRENCE ids (a
   // suppressed occurrence is hidden from render / solve / BOM). Parameter
-  // overrides are unused (an assembly has no parameters). An occurrence of a
-  // sub-assembly picks one of ITS configurations (Occurrence::configurationId);
-  // per-occurrence PART configurations are not supported, and
-  // set_occurrence_configuration refuses them. The active configuration
-  // (0 = base) is persisted.
+  // overrides are unused (an assembly has no parameters). An occurrence picks
+  // one of the configurations of what it places, a part's or a
+  // sub-assembly's (Occurrence::configurationId, 0 = that document's active
+  // one); a part placed in one is a regenerated copy
+  // (ui::ConfiguredPartDocument). The active configuration (0 = base) is
+  // persisted.
   const std::vector<Configuration>& GetConfigurations() const {
     return m_configurations;
   }

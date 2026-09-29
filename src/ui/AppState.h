@@ -812,8 +812,9 @@ struct PartSlot {
   // UpdateDrawingRenders can skip views that cannot have changed (U11).
   uint64_t drawingRendersVersion = 0;
   uint64_t lastSavedVersion = 0; // per-document dirty tracking
-  // Assembly tabs only (A4): referenced parts' Document::Version() at this
-  // assembly's last solve, stashed while inactive. See AppState field.
+  // Assembly tabs only (A4): referenced parts' stamps (ui::PartStamp: the
+  // Version and the configurations' revision) at this assembly's last solve,
+  // stashed while inactive. See AppState field.
   std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
 };
 
@@ -963,8 +964,9 @@ struct AppState {
   // against.
   std::vector<Body> jobPlacedBodies;
   uint64_t jobPlacedKey = 0;
-  // Part→assembly change propagation (A4): {partId → Document::Version()}
-  // stamped at the active assembly's last solve. AssemblyPartsStale compares
+  // Part→assembly change propagation (A4): {partId → ui::PartStamp, the
+  // Version and the configurations' revision} stamped at the active
+  // assembly's last solve. AssemblyPartsStale compares
   // against these on tab activation, so a part edit re-solves mates
   // automatically. In-memory session state — never persisted (the F5
   // `partVersion` git pin is a separate, reserved concept).

@@ -38,8 +38,9 @@ Document* JobSourceDocument(AppState& state, uint64_t sourceDocId);
 // (the source is gone, or does not build in that configuration).
 const Document* JobPartDocument(AppState& state, const cam::JobPart& part,
                                 std::string* why = nullptr);
-// That document's Version(), or 0 when it is gone. What a staleness report
-// compares against.
+// That document's Version() mixed with its ConfigurationsRevision() (the
+// PartStamp rule: editing a configuration the job cuts moves no Version), or
+// 0 when it is gone. What a staleness report compares against.
 uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId);
 
 // Every body the ACTIVE job cuts, in MODEL space. The setup's own framing is

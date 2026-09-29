@@ -40,7 +40,8 @@ struct AssemblyFacePick {
 };
 
 // Bill of materials (A4): derived from the active assembly every call, never
-// stored. One row per referenced part, in first-occurrence order; masses via
+// stored. One row per (part, configuration, material) placed, in
+// first-occurrence order; masses via
 // Measure::MassOfBodies (a part with any density-less body reports its mass
 // unknown and taints the total). `visible=false` occurrences count —
 // visibility is a display state, not suppression.

@@ -20,7 +20,7 @@ namespace ui {
 struct StepExportCounts {
   size_t bodies = 0;    // placed body shapes (an occurrence of a 2-body part
                         // counts 2): what the file holds, solid by solid
-  size_t products = 0;  // distinct parts written
+  size_t products = 0;  // distinct (part, configuration, material) written
   size_t instances = 0; // placed parts (1 for a part export)
 };
 
@@ -31,7 +31,9 @@ std::expected<CADKernel::StepExportModel, std::string>
 BuildPartStepModel(const Document& part, const std::string& name,
                    int bodyIndex = -1);
 
-// The ACTIVE assembly, as its tree: every part once, placed by reference;
+// The ACTIVE assembly, as its tree: every part once per (part,
+// configuration, material) -- a product named "part (configuration)
+// material", each placement in its configuration -- placed by reference;
 // every sub-assembly once per (document, configuration), nested. Hidden and
 // suppressed occurrences are left out, as the viewport leaves them out.
 std::expected<CADKernel::StepExportModel, std::string>

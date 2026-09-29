@@ -121,7 +121,8 @@ void TrimTessellationCache(AppState& state);
 void ReleaseTessellationCache(AppState& state);
 
 // One part body's tessellation, its two GPU assets, and the resolved look the
-// instances of it draw with. Shared by every occurrence of the part.
+// instances of it draw with. Shared by every occurrence of the part in one
+// configuration and material (a PartRenderKey).
 struct SharedBody {
   // The geometry: tessellation + both renderers' assets, owned by the
   // app-wide shape cache below (BodyTessellation). It used to be owned
@@ -169,10 +170,10 @@ struct PartRenderKeyHash {
 // the part's Version.
 uint64_t PartStamp(const Document& part);
 
-// What is cached for one part, the document version it was built from, and
-// what it costs to keep.
+// What is cached for one part as drawn (a PartRenderKey), the PartStamp it
+// was built from, and what it costs to keep.
 struct PartRenderCacheEntry {
-  uint64_t docVersion = 0;
+  uint64_t docVersion = 0; // PartStamp, not the bare Version()
   std::vector<SharedBody> bodies;
   // Device-local bytes the two renderer assets hold (vertices + indices,
   // twice). Budgeted against, because this is the scarce resource.
@@ -181,12 +182,12 @@ struct PartRenderCacheEntry {
   uint64_t lastUsed = 0;
 };
 
-// AppState::partRenderCache's payload: part slot id -> its entry. The assets
-// inside are RETAINED in both renderers (MeshRenderer::RetainAsset /
-// OutlineRenderer::RetainAsset), so they survive the instance teardown at the
-// head of every resync. Anything that drops an entry must release them first
-// — ReleasePartRenderCache / EvictPartRenderCache below are the only two
-// places that should.
+// AppState::partRenderCache's payload: PartRenderKey (part, configuration,
+// material) -> its entry. The assets inside are RETAINED in both renderers
+// (MeshRenderer::RetainAsset / OutlineRenderer::RetainAsset), so they survive
+// the instance teardown at the head of every resync. Anything that drops an
+// entry must release them first — ReleasePartRenderCache /
+// EvictPartRenderCache below are the only two places that should.
 struct PartRenderCacheStore {
   std::unordered_map<PartRenderKey, PartRenderCacheEntry, PartRenderKeyHash>
       parts;
@@ -249,8 +250,9 @@ inline constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
 void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
                        std::vector<LineVertex3D>& out);
 
-// One body's CPU-side mesh, and a batch of them keyed by part slot: what the
-// prewarm produces and the sync consumes. Defined in TessellationCache.cpp.
+// One body's CPU-side mesh, and a batch of them keyed by PartRenderKey: what
+// the prewarm produces and the sync consumes. Defined in
+// TessellationCache.cpp.
 struct CpuBody {
   std::vector<Vertex3D> vertices;
   std::vector<uint32_t> indices;
