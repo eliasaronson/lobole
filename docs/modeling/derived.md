@@ -97,8 +97,11 @@ use one part as a cutting tool for another.
 
 A part with a configuration per variant is a family, and a Derived with a
 `configuration` takes one member of it: the chess set's pieces are one
-`piece` part with a configuration per rank, and each blank and each wood is a
-part that derives the member it needs. The snapshot is taken from the source
+`piece` part with a configuration per rank, and its rotary blanks are parts
+that derive the member they need. (The set itself no longer derives: it
+places `piece` with a configuration and a material per placement --
+[assemblies](../assemblies/README.md#configurations-per-placement).) The
+snapshot is taken from the source
 regenerated under that configuration — the copy `ui::ConfiguredPartDocument`
 keeps, the same one a drawing view in a non-active configuration reads — so
 taking it never switches the source's own tab. Staleness compares against that

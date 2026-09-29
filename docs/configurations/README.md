@@ -11,7 +11,10 @@ place, and it is stored with the document.
   example is a watch with its crown pulled out.
 
 Export, drawings and simulation all read the regenerated bodies, so they
-always reflect the active configuration.
+reflect the active configuration -- unless something names another: an
+assembly placement, a job part, a Derived feature or a drawing view that
+asks for one reads the part regenerated in that one
+(`ui::ConfiguredPartDocument`), whatever is active.
 
 ## Model
 
@@ -83,11 +86,14 @@ The overlay is applied inside `assembly::Solve`
   authored `rotation`/`offset`, plus `held` and `suppressed` when the
   active configuration applies.
 
-A placed **sub-assembly** can use a configuration other than its own active
-one: `Occurrence::configurationId`, set with `set_occurrence_configuration`.
-A placed **part** always shows the part document's active configuration.
-Per-occurrence part configurations are refused by name, because they would
-mean regenerating the part once per configuration.
+A placement can use a configuration other than its document's active one:
+`Occurrence::configurationId`, set with `add_occurrence {configuration}` or
+`set_occurrence_configuration` (0 = the active one). For a **sub-assembly**
+it is a suppression set; for a **part** (v135) it is the part regenerated in
+that configuration, a cached copy (`ui::ConfiguredPartDocument`), so a pawn
+and a rook can be two placements of one piece part. A configuration the part
+lacks, or does not build in, is refused, naming the feature that fails
+([assemblies](../assemblies/README.md#configurations-per-placement)).
 
 ## Undo
 

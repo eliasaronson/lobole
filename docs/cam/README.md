@@ -29,7 +29,7 @@ Topic pages:
 
 ```
 JobDocument                        core/cam/JobDocument.h
-  parts[]    JobPart{id, sourceDocId, name}      a reference, never a copy
+  parts[]    JobPart{id, sourceDocId, name, configuration}   a reference, never a copy
   setups[]   cam::Setup                          core/cam/CamJob.h
     machine          embedded copy of a Machine profile (post, arcs, rotary, travel, library)
     stock, originAt, origin (derived), reachOffset
@@ -44,8 +44,12 @@ JobDocument                        core/cam/JobDocument.h
     operations[]     cam::Operation{type, toolNumber, targets[], depths, per-type fields}
 ```
 
-- A **job part** names a project part document by its stable id. A job part's
-  source that is deleted is reported (`missing`), never substituted.
+- A **job part** names a project part document by its stable id, and the
+  configuration of it the job cuts (v135; 0 = whatever it has active), so a
+  blank of pawns and one of rooks are one part in two configurations. A job
+  part whose source is deleted, or does not build in that configuration, is
+  reported (`list_job_parts`: `missing` and `why`, beside `configuration`
+  and `configuration_name`), never substituted.
 - A **target** is `cam::Target{jobPartId, ElementRef}`. Two parts in one job
   can own the same feature id and element name, so a bare `ElementRef` is not
   an answer; an operation names the PART, and is cut wherever that part is

@@ -89,8 +89,10 @@ placement asked for. A configuration the part does not have, or does not
 build in, is refused when it is chosen, saying which feature fails.
 
 `material` (v135) makes a placement of a part a material other than its
-part's, every body of it: mass, the BOM and the renderers read it. One chess
-piece part placed as pawns and rooks, in maple and walnut, is one part.
+part's, every body of it: mass, the BOM, the renderers and STEP export read
+it (`set_occurrence_material {id, material: slug | ""}`; `""` is the part's
+own). One chess piece part placed as pawns and rooks, in maple and walnut, is
+one part. A per-placement *appearance* override does not exist.
 
 Keys follow: the renderer's tessellation cache and the in-context ghosts are
 keyed by (part, configuration, material), a motion study copies each (part,
@@ -122,8 +124,8 @@ skips a dangling reference rather than failing.
 - A sub-assembly is a live reference: the parent shows whatever that document
   currently is. `set_occurrence_configuration` chooses which of its assembly
   configurations a placement uses (0 = its active one), so two placements of
-  one assembly can differ. Per-occurrence *part* configurations are not
-  supported (a part configuration changes geometry).
+  one assembly can differ -- as two placements of one part can
+  ([above](#configurations-per-placement)).
 - A top-level occurrence is one node for contact and interference, one
   explode step, one drawing reference.
 - A mate may anchor on a face, a frame or the origin of something *inside* a
@@ -439,9 +441,11 @@ Derived every time, never stored. `ComputeBom` (`src/ui/Bom.cpp`) groups the
 flattened leaf parts by part, configuration and material -- a pawn and a
 rook of one piece part are two lines, named `piece (pawn)` -- so a
 sub-assembly placed twice doubles its parts' quantities; hidden or suppressed occurrences (at any level) are left
-out. A row carries quantity, material, unit and total mass (null when a body
-has no density), and for a generated standard part its `standard` and
-`designation`. The per-unit BOM of a sub-assembly is the same function on its
+out. A row carries `configuration` (its name, `""` for the part's active
+one) and `configuration_id`, quantity, material, unit and total mass (null
+when a body has no density), and for a generated standard part its
+`standard` and `designation`; the CSV has a `configuration` column after
+`part`. The per-unit BOM of a sub-assembly is the same function on its
 own tab. `bom` / `export_bom {path}` (CSV); in the GUI a floating window from
 the assembly toolbar. `assembly::MassProperties` aggregates mass, volume and
 world centre of mass by the same visibility rule.
@@ -519,7 +523,9 @@ failed boolean is not clearance. Motion replies separate `pairs_cached` from
 ## Background motion copies without regenerating
 
 A background motion run copies every document under the assembly
-(`ui::CopySubtree`) so the worker shares nothing with the tab. The copy is
+(`ui::CopySubtree`) so the worker shares nothing with the tab -- each (part,
+configuration) placed once (`assembly::SubtreePartConfigurations`), however
+many occurrences place it. The copy is
 `Document::CopyWithGeometry`, not the plain copy constructor, which ends in
 `Regenerate()`: it hands the copy the source's bodies as baked geometry, and
 the tip-hash comparison an opened project uses decides whether they still
@@ -600,8 +606,9 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   (`bounds: true` adds world bboxes), `set_occurrence_transform` (orientation
   as a quaternion or `rotate {axis, angle_deg}`), `set_occurrence_visible`,
   `set_occurrence_fixed`, `rename_occurrence`,
-  `set_occurrence_configuration`, `set_occurrence_flexible`,
-  `select_occurrence`.
+  `set_occurrence_configuration`, `set_occurrence_material`,
+  `set_occurrence_flexible`, `select_occurrence`. `add_occurrence` takes
+  `configuration` and `material` too.
 - Mates: `add_mate` (`derive: twist|pose` reads a fastened mate's numbers
   off the current placement), `set_mate`, `remove_mate`, `list_mates`,
   `select_mate`, `solve_assembly`. On the wire a mate's `type` is its kind
@@ -657,13 +664,17 @@ one.
   `test_flexible_subassembly.cpp` (a parent relation into an inner mate,
   two placements posed apart, a configuration per placement, clashes per
   leaf, the refusals). Goldens in
-  `tests/golden/assembly/`.
+  `tests/golden/assembly/` (`v135-part-configurations.json`: part
+  placements in a configuration and a material).
 - Headless smokes: `assembly_smoke.py`, `assembly_mates_smoke.py`,
   `assembly_loops_smoke.py`, `assembly_relations_smoke.py`,
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
   `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`,
-  `flexible_subassembly_smoke.py`. `motion_video_smoke.py` (renderer, label
+  `flexible_subassembly_smoke.py`, `part_configuration_smoke.py` (one part
+  placed in two configurations and two materials: BOM lines, mass, STEP
+  products, a job part in a configuration, the refusals).
+  `motion_video_smoke.py` (renderer, label
   `pygui`): every video format read back by ffprobe, the refusals including
   a PATH without ffmpeg, the pose put back, an async cancel.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
@@ -683,8 +694,8 @@ one.
   feature-less assembly document do not have.
 - References from a part to assembly geometry while editing in context.
 - Mate limits (min/max on a DOF).
-- Per-occurrence part configurations; editing into a sub-assembly from its
-  parent.
+- Editing into a sub-assembly from its parent.
+- A per-occurrence appearance override (a placement's `material` exists).
 - Creating a relation from the GUI; a gear relation's phase derived from the
   gears' geometry.
 - Contact dynamics: gears and cams are kinematic relations, checked for

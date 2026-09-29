@@ -67,7 +67,9 @@ Only what `describe` cannot express:
   `hole.bores()`, `fillet.faces()`, `feature.faces(role=)`. `body.faces()`
   and `part.faces()` take `made_by=` (a Feature, id or name), `role=`,
   `entity=` and `via=` (a Derived feature; `made_by` then names a feature of
-  the source part, `source.feature("Crenel")`). A question with no answer
+  the source part, `source.feature("Crenel")`); `part.faces()` also takes
+  `configuration=`, asking of the part as it is in that configuration (what
+  a placement or a job part in it is made of). A question with no answer
   raises with the app's why ("made side x4 -- none end_cap"). Every `Face`
   and `Edge` carries `made_by` and `role`, an `Edge` the names of the
   `faces` it joins, and `edges(between=(a, b))` keeps the ones joining a

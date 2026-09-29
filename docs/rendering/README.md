@@ -173,11 +173,14 @@ shadow-caster and SSAO-prepass sets.
 A document edit rebuilds the renderers' view of the document
 (`SyncDocumentRenderers` for a part tab, `SyncAssemblyRenderers` for an
 assembly: remove every instance, re-add). What makes that cheap is
-`AppState::partRenderCache` (`src/ui/TessellationCache.cpp`): per part (slot
-id, document version) it keeps the tessellation and both renderer assets,
-holding its own reference through `MeshRenderer::RetainAsset` /
-`OutlineRenderer::RetainAsset`, so the assets survive the instance teardown
-at the head of every resync. One asset serves every occurrence of a part.
+`AppState::partRenderCache` (`src/ui/TessellationCache.cpp`): per part as
+drawn -- a `PartRenderKey` (slot id, configuration, material), stamped with
+`PartStamp` (the document's `Version` mixed with its configurations'
+revision, since editing a configuration moves no `Version`) -- it keeps the
+tessellation and both renderer assets, holding its own reference through
+`MeshRenderer::RetainAsset` / `OutlineRenderer::RetainAsset`, so the assets
+survive the instance teardown at the head of every resync. One asset serves
+every occurrence of a part in one configuration and material.
 Eviction is LRU against `kPartRenderCacheBudgetBytes` (256 MB,
 `AppActionsInternal.h`) and never evicts what the current sync draws. A
 visibility toggle is a full resync through this cache.
@@ -446,7 +449,8 @@ renderer, and by looking at the pictures.
 - **Device-memory reporting** — no allocation count or heap budget is shown
   anywhere.
 - **Per-occurrence appearance** and **per-face appearance** — see
-  [materials.md](materials.md).
+  [materials.md](materials.md). A per-occurrence *material* exists
+  ([assemblies](../assemblies/README.md#configurations-per-placement)).
 - A **BVH for picking** (see [Picking](#picking)).
 - The path tracer builds one BLAS per body occurrence from pre-transformed
   geometry rather than sharing one per asset.

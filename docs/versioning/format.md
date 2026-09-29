@@ -243,7 +243,11 @@ An assembly uses the same `designer-document` format and version number,
 with `"kind": "assembly"`. Its body is an ordered `occurrences` list; each
 occurrence is `{id, name, part_id, part_version, transform: {position,
 orientation}, visible, fixed}` plus optional `ref_kind` (a sub-assembly),
-`configuration_id` and `attached_to`. `orientation` is a quaternion
+`configuration_id` (a part's or a sub-assembly's configuration; v135 for a
+part), `attached_to` (with `attach_offset` / `attach_rotation`), `material`
+(v135: what this placement of a part is made of) and `flexible` (v129, with
+the `inner_poses` and `inner_mate_dofs` it keeps). `orientation` is a
+quaternion
 `[x, y, z, w]`. Occurrences reference parts by **stable id**, never by name,
 so renaming a part cannot break an assembly. The stored `transform` is always
 the last solved placement, so a file opens at sane positions even with its

@@ -104,8 +104,9 @@ struct Appearance {                    // src/core/Feature.h
   roughness 0.6), not `DEFAULT`'s metal. Overriding the colour of a patterned
   material keeps the pattern.
 - The merge edits CPU-resolved values, so the push constant does not grow.
-- Mass properties, FEM and the BOM read `Body::material` only; an appearance
-  never reaches physics.
+- Mass properties, FEM and the BOM read `Body::material` only (or, in an
+  assembly, the placement's `material`, which overrides every body's); an
+  appearance never reaches physics.
 - The colour is **linear**, not sRGB: the renderer lights it as linear and
   STEP/GLB export is handed it as linear, so an sRGB 0.5 grey is about 0.2.
 
@@ -114,8 +115,11 @@ no optional field clears it; a colour given as 0..255 is refused with a hint.
 `get_state` echoes it per body; the body context menu in the feature tree has
 an **Appearance** submenu.
 
-Not supported: a per-occurrence override (the same part coloured differently
-in two places of an assembly), per-face appearance, and image textures.
+Not supported: a per-occurrence appearance override (the same part coloured
+differently in two places of an assembly), per-face appearance, and image
+textures. A per-occurrence MATERIAL does exist (`set_occurrence_material`,
+v135): it replaces every body's material for mass, the BOM, rendering and
+STEP ([assemblies](../assemblies/README.md#configurations-per-placement)).
 
 ## Glass
 

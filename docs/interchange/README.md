@@ -116,15 +116,19 @@ file carries the same structure whichever way it was asked for.
   bodies are never written. `body` narrows the export to one body.
 - **An assembly tab** is built from `assembly::Flatten`, the one tree walk,
   whose `FlatInstance::levels` record the sub-assembly placements above each
-  leaf. Each part is written once and placed per occurrence under the
-  occurrence's name; each (sub-assembly document, configuration) is one
-  nested STEP assembly, since one sub-assembly in two configurations has two
-  contents. Hidden and suppressed occurrences are left out. Each part exports
-  in its document's active configuration.
+  leaf. Each (part, configuration, material) is written once, as a product
+  named `part (configuration) material` -- plain `part` for a placement in
+  the part's active configuration and its own material -- and placed per
+  occurrence under the occurrence's name, each placement in its own
+  configuration (v135); each
+  (sub-assembly document, configuration) is one nested STEP assembly, since
+  one sub-assembly in two configurations has two contents. Hidden and
+  suppressed occurrences are left out.
 - **Colour** is what the viewport shows: one resolver,
   `ui::ResolveBodyLook` (`src/ui/BodyAppearance.{h,cpp}`), shared with
-  `RendererSync`: appearance override > material > imported display colour >
-  palette. The palette is seeded the way the showing tab seeds it, so every
+  `RendererSync`: appearance override > material (a placement's `material`
+  before its bodies' own) > imported display colour > palette. The palette
+  is seeded the way the showing tab seeds it, so every
   occurrence of an unpainted part is one colour. Colours are written linear,
   as the shaders light them.
 - **Units** are written as millimetres, explicitly.
@@ -196,11 +200,12 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | where | covers |
 |---|---|
-| `tests/test_step_export.cpp` | an assembly exports as its tree (each part once, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
+| `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
 | `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly` |
 | `tests/visual_export_smoke.py` | parses the binary glTF: meshes, materials, instancing |
+| `tests/part_configuration_smoke.py` | one part placed in two configurations and two materials exports as two products |
 
 `export_step` is an MCP tool, so a change to it is measured by the
 benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
@@ -213,7 +218,7 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 - DXF of a drawing, and DXF import.
 - Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
   reference mesh.
-- STEP PMI / AP242 GD&T, and per-occurrence part configurations in export.
+- STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.
 - `import_step` on a part does not report the centring shift the way
   `add_feature` does.
