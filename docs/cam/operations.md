@@ -69,7 +69,8 @@ to the new tool's, keeps one the user typed, and refuses a tool the setup does
 not have.
 
 What derivation refuses, by name and with what to do instead: a curved or
-tilted face for a verb that needs a level one ("pick a level face"); a wall
+tilted face for a verb that needs a level one ("pick a level face"), and a
+level one that faces down, away from the spindle ("points down"); a wall
 where a floor is wanted and the reverse; a hole that does not point at the
 spindle ("lay a face up"); a cutter wider than the hole; a V-bit or drill on
 anything with a floor (pocket, face, adaptive — the `NeedsFlatFloor` column:

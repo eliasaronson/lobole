@@ -166,6 +166,14 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
       out.why = "pick a level face — a tilted one has no single depth";
       return out;
     }
+    // Level and facing DOWN is a ceiling: the spindle comes from above and
+    // cannot reach it. It was pocketed anyway, as if the cutter went through
+    // the part to get there (a rotary mitre indexed the wrong way round).
+    if (normal.z < 0.0f) {
+      out.why = "that face points down, away from the spindle — turn the "
+                "part over (lay_face_up, flip, or the rotary 180° round)";
+      return out;
+    }
     // Walk to the face in the same explorer order FacePlane uses.
     TopoDS_Face face;
     int i = 0;

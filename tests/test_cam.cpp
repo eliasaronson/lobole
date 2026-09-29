@@ -964,6 +964,23 @@ TEST_CASE("cam: an opening too narrow to cut out says which, and how narrow",
   CHECK(tp.error.find("depths") == std::string::npos);
 }
 
+TEST_CASE("cam: a face that points down is not a floor to cut to", "[cam]") {
+  // A ceiling is level too, and was pocketed as if the cutter went through
+  // the part to reach it -- a rotary mitre indexed the wrong way round.
+  auto doc = PocketDoc(/*island=*/false);
+  ElementRef under;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u) && n.z < -0.99f)
+        under = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(under.IsSet());
+  const cam::FaceRegion region = cam::PickedFaceRegion(doc->GetBodies(), under);
+  CHECK_FALSE(region.ok);
+  CHECK(region.why.find("points down") != std::string::npos);
+}
+
 TEST_CASE("cam: an island in the picked floor is machined around",
           "[cam][slow]") {
   auto doc = PocketDoc(/*island=*/true);
