@@ -266,7 +266,12 @@ panel's verification routes the same way.
   typical scallop), and `leftover_surface_max_mm` / `_at` /
   `leftover_surface_p99_mm` measured OFF the end-facing cells (surface
   steeper than 70° along the axis); regions wrap round θ, each says whether it
-  is `end_face`, and `leftover_end_face_area_mm2` sums the end faces. Areas
+  is `end_face`, how far round it reaches (`span_deg`, its angle the middle of
+  that arc) and whether it is a `ring` — all the way round, which is what an
+  inside corner no pass reaches leaves, and whose angle is 0 and means
+  nothing. A patch at one angle is a pass missing or lifting there; the two
+  used to look alike, because the angle was a vector average that a ring
+  cancels to noise. `leftover_end_face_area_mm2` sums the end faces. Areas
   are summed cell by cell, a cell's area its axial size by its arc at its
   radius. In a rotary answer the second number of every `_at` pair is an
   angle in degrees.

@@ -554,8 +554,11 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed,
         continue;
       v.leftoverRegions++;
       Verdict::Region region;
-      double sumX = 0.0, sumC = 0.0, sumS = 0.0, area = 0.0;
+      double sumX = 0.0, area = 0.0;
       size_t mine = 0, ends = 0;
+      // Which theta rows the region touches: its angular extent is the turn
+      // less the widest run of rows it does NOT touch.
+      std::vector<uint8_t> rows(static_cast<size_t>(machined.nTheta), 0);
       seen[start] = 1;
       stack.push_back(start);
       while (!stack.empty()) {
@@ -566,10 +569,7 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed,
         const double r = machined.At(i, j);
         area += machined.res * machined.ArcAt(r);
         sumX += machined.CellX(i);
-        // The centroid's angle is taken as a vector average, so a region
-        // across the 0/360 seam does not land on the far side of the part.
-        sumC += std::cos(machined.CellTheta(j));
-        sumS += std::sin(machined.CellTheta(j));
+        rows[static_cast<size_t>(j)] = 1;
         mine++;
         ends += endFacing[k];
         region.depth =
@@ -588,9 +588,42 @@ Verdict CompareRotary(const RadiusMap& machined, const RadiusMap& designed,
         }
       }
       region.area = area;
-      double at = glm::degrees(std::atan2(sumS, sumC));
-      if (at < 0.0)
-        at += 360.0;
+      // The angle is the middle of the ARC the region covers, found from the
+      // widest gap between the rows it touches (wrapping round the seam).
+      // It was a vector average of the cells' angles, which for a region
+      // that goes all the way round -- a ring left at an inside corner no
+      // pass reaches, the common rotary leftover -- is the average of
+      // vectors that cancel: an angle of rounding noise, identical for every
+      // ring on the grid. The chess blanks' rings at their plugs' corners
+      // read as patches "at A131.5", as if one pass had been skipped. A
+      // region touching every row is said as a RING instead.
+      const int n = machined.nTheta;
+      int gap = 0, gapEnd = -1; // widest run of untouched rows; its last row
+      {
+        int run = 0;
+        for (int k = 0; k < 2 * n; k++) { // twice round: a run over the seam
+          if (rows[static_cast<size_t>(k % n)] != 0) {
+            run = 0;
+            continue;
+          }
+          run = std::min(run + 1, n);
+          if (run > gap) {
+            gap = run;
+            gapEnd = k % n;
+          }
+        }
+      }
+      const double step = 360.0 / n;
+      region.spanDeg = (n - gap) * step;
+      region.ring = gap == 0;
+      double at = 0.0;
+      if (!region.ring) {
+        // The arc starts on the row after the gap and runs n - gap rows.
+        const int first = (gapEnd + 1) % n;
+        at = glm::degrees(machined.CellTheta(first)) +
+             0.5 * (n - gap - 1) * step;
+        at = std::fmod(at, 360.0);
+      }
       region.at = {sumX / static_cast<double>(mine), at};
       region.endFace = ends * 2 > mine;
       v.biggest.push_back(region);

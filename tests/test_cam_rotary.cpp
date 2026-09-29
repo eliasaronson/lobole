@@ -185,6 +185,60 @@ TEST_CASE("cam rotary: material only ever comes off", "[cam]") {
   CHECK_THAT(MaxRadius(stock), WithinAbs(20.0, 1e-6));
 }
 
+TEST_CASE("cam rotary: a leftover ring is said as a ring, a patch at its angle",
+          "[cam]") {
+  // The two leftovers a turned part shows and what each means: a RING all
+  // the way round is a corner no pass reaches; a PATCH at one angle is a
+  // pass missing there. The region's angle was the vector average of its
+  // cells', which a ring cancels to rounding noise -- so the chess blanks'
+  // plug corners read as patches "at A131.5", every one at the same angle,
+  // and sent the search after a skipped pass that did not exist.
+  cam::RadiusMap designed = cam::MakeRotaryStock(0.0, 20.0, 10.0, 0.5);
+  REQUIRE(designed.nx == 40);
+  const int n = designed.nTheta;
+  REQUIRE(n > 60);
+  cam::RadiusMap machined = designed;
+  const auto proud = [&](int i, int j) {
+    machined.Set(i, (j + n) % n, machined.At(i, (j + n) % n) + 0.5f);
+  };
+  for (int j = 0; j < n; j++)
+    proud(10, j); // a ring, one cell wide
+  for (int i = 20; i <= 22; i++)
+    for (int j = 20; j <= 24; j++)
+      proud(i, j); // a patch, five rows round
+  for (int i = 30; i <= 31; i++)
+    for (int j = -2; j <= 1; j++)
+      proud(i, j); // a patch ACROSS the seam
+
+  const cam::Verdict v = cam::CompareRotary(machined, designed, nullptr);
+  REQUIRE(v.leftoverRegions == 3);
+  REQUIRE(v.biggest.size() == 3);
+  const double step = 360.0 / n;
+  int rings = 0;
+  for (const cam::Verdict::Region& r : v.biggest) {
+    INFO("x " << r.at.x << " at " << r.at.y << " span " << r.spanDeg);
+    if (std::abs(r.at.x - designed.CellX(10)) < 1e-6) {
+      rings++;
+      CHECK(r.ring);
+      CHECK(std::abs(r.spanDeg - (360.0)) < 1e-6);
+      CHECK(r.at.y == 0.0);
+    } else if (std::abs(r.at.x - designed.CellX(21)) < 1e-6) {
+      CHECK_FALSE(r.ring);
+      CHECK(std::abs(r.spanDeg - (5 * step)) < 1e-6);
+      CHECK(std::abs(r.at.y - (glm::degrees(designed.CellTheta(22)))) < 1e-6);
+    } else {
+      CHECK(std::abs(r.at.x - 0.5 * (designed.CellX(30) + designed.CellX(31))) <
+            1e-6);
+      CHECK_FALSE(r.ring);
+      CHECK(std::abs(r.spanDeg - (4 * step)) < 1e-6);
+      // Rows n-2, n-1, 0, 1: the middle is the seam itself.
+      const double off = std::min(r.at.y, 360.0 - r.at.y);
+      CHECK(off < 1e-6);
+    }
+  }
+  CHECK(rings == 1);
+}
+
 TEST_CASE("cam rotary: a turned-down bar verifies clean, an overcut does not",
           "[cam]") {
   // The closed loop, which is the only thing that makes any of the above

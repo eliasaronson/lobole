@@ -435,8 +435,11 @@ constexpr MethodDoc kCamMethods[] = {
      "/ _at / leftover_surface_p99_mm, the same measured OFF the faces "
      "turned toward the axis's ends (steeper than 70 degrees along it), which "
      "is what tells two rotary patterns apart; each leftover_biggest region "
-     "then says end_face, and leftover_end_face_area_mm2 sums the end faces' "
-     "leftover by cell), "
+     "then says end_face, span_deg (how far round the axis it reaches; its "
+     "angle is the middle of that arc) and ring (all the way round -- a "
+     "corner no pass reaches, whose angle is then 0 and means nothing; a "
+     "patch at one angle is a pass missing there), and "
+     "leftover_end_face_area_mm2 sums the end faces' leftover by cell), "
      "file_errors (with first_file_error: lines the PARSER could not read -- "
      "a NaN coordinate, a feed of zero; anything else in the answer was "
      "measured on a different program, so this counts against ok), "
@@ -2055,8 +2058,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       json rj{{"at", {r.at.x, r.at.y}},
               {"area_mm2", r.area},
               {"depth_mm", r.depth}};
-      if (v.rotary)
+      if (v.rotary) {
         rj["end_face"] = r.endFace;
+        rj["ring"] = r.ring;
+        rj["span_deg"] = r.spanDeg;
+      }
       biggest.push_back(std::move(rj));
     }
     json otherCuts = json::array();

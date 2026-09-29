@@ -297,6 +297,12 @@ struct Verdict {
     // Rotary only: the region sits on faces turned toward the axis's ends,
     // which no rotary pass can reach -- expected, not a missing operation.
     bool endFace = false;
+    // Rotary only: how far round the axis it reaches, degrees, and whether it
+    // goes all the way -- a RING, whose `at` angle is then 0 and means
+    // nothing. A ring is what a corner no pass can reach leaves on a turned
+    // part; a patch at one angle is a pass that is missing or lifts there.
+    double spanDeg = 0.0;
+    bool ring = false;
   };
   std::vector<Region> biggest;
 
