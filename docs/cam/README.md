@@ -316,11 +316,14 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   steered away; nothing holds a part down on 3D operations (tabs are
   profile-only); fixtures are not checked on a rotary setup (the chuck and
   tailstock are); no spindle nose.
-- **Stock carried between setups** into the simulation playback and into a
-  rotary setup's check. A planar setup's check starts from what the earlier
-  setups left, and leftover another setup removes is said as that setup's
-  ([simulation.md](simulation.md#leftover-another-setup-removes)); the
-  playback and a rotary check still start from fresh stock.
+- **Stock carried FORWARD from a later setup.** A setup's check, rotary
+  check and playback start from what the EARLIER setups left, leftover a
+  later setup removes is said as that setup's
+  ([simulation.md](simulation.md#leftover-another-setup-removes)), and a
+  derived top follows a turning before it
+  ([operations.md](operations.md#derivation--what-a-click-means)); toolpath
+  generation itself still plans against the setup's own stock (a clearing
+  pass does not know the corners are gone).
 - **Waterline roughing** (clearing each level between the part's section and
   the stock); rotary roughing is layers, not constant engagement.
 - **Paths that follow a feature** other than a twist (wrapped text, engraving

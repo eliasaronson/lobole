@@ -79,10 +79,9 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
 
 ### Leftover another setup removes
 
-Every setup is verified from its own fresh stock, so a flip job's front
-reported the half-depth outline its back finishes, and an indexed setup the
-material a turn removes, as leftover: the same sentence as a forgotten
-operation. The verifier now asks the job's other setups (`OtherSetupsOf`,
+A setup verified from its own fresh stock reports a flip job's half-depth
+outline that its back finishes, and an indexed setup the material a turn
+removes, as leftover: the same sentence as a forgotten operation. The verifier now asks the job's other setups (`OtherSetupsOf`,
 CamOtherSetups.cpp):
 - **What each other setup leaves:** its posted file is inspected as
   `VerifyGcode` would. Its final map says where it leaves air: above a height
@@ -106,19 +105,28 @@ CamOtherSetups.cpp):
   cut is queued, the verdict names that setup as not yet compared, and it
   runs again when the passes land.
 - **Where a later setup starts:** the setups EARLIER in the job (the job's
-  order is the cutting order) have already cut, so a planar setup's check
-  starts from what they left (`SeedFromEarlier`): each column of its fresh
-  stock is lowered to the first point no earlier setup removed, a point
-  counting as removed only 0.3 mm (or a cell) clear of what that setup left,
-  and beyond a rotary setup's bar there was never any. An indexed setup
-  after a turning one then starts from the turned part: checked against the
-  fresh bar, every entry into the chess king's cross was a rapid 12.5 mm
-  "through material" and every pass a 24 mm "bite". Rapids, bites and
-  collisions run against that stock; the cells this setup never sweeps are
-  not compared, as before.
-- **What still starts fresh:** the simulation playback (`cam_simulate`) and
-  a rotary setup's check start from the setup's own stock. That errs toward
-  a finding, never toward a crash.
+  order is the cutting order) have already cut, so a setup starts from what
+  they left (`StartingStock`, `SeedFromEarlier`): each column of a planar
+  setup's fresh stock is lowered, and each ray of a rotary setup's blank
+  shortened, to the first point no earlier setup removed, a point counting
+  as removed only 0.3 mm (or a cell) clear of what that setup left, and
+  beyond a rotary setup's bar there was never any. An indexed setup after a
+  turning one then starts from the turned part: checked against the fresh
+  bar, every entry into the chess king's cross was a rapid 12.5 mm "through
+  material" and every pass a 24 mm "bite". Rapids, bites and collisions run
+  against that stock; the cells this setup never sweeps are not compared, as
+  before.
+- **One start for the check and the picture:** the planar check, the rotary
+  check (`InspectRotary`, `StartingRotaryStock`) and the playback
+  (`BeginCamPlayback`, `cam_simulate`) all start from that stock, so the
+  playback of an indexed setup plays against the turned part and its last
+  frame is the verifier's own stock. The playback reads the earlier setups
+  from their posted files like the check; in the panel a pass of theirs not
+  yet cut refuses the playback in words, as its own would, and `cam_simulate`
+  generates it first. `cam_simulate` names what it started from
+  (`starts_from`, and `earlier_setups_not_read` for a setup that does not
+  post), and the transport says "Starts from what 'Turn' left". A setup that
+  cannot be read leaves its stock in place, which errs toward a finding.
 
 ### Verdict
 

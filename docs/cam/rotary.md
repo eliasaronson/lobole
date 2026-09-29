@@ -327,7 +327,9 @@ panel's verification routes the same way.
 - **The blank** is derived from the part (`MakeRotaryBlank`,
   `RotaryBlankRadius`): its extent along the axis and its furthest point from
   it, plus the setup's margins, the radial one the larger of Y and Z. The
-  simulator and the verifier share this one derivation.
+  simulator and the verifier share this one derivation, and start from what
+  the job's earlier setups left of it (`StartingRotaryStock`,
+  [simulation.md](simulation.md#leftover-another-setup-removes)).
 - **The grid** is derived from the arc: enough angular cells that one cell's
   arc at the blank's surface is about the resolution, so a blank of any
   diameter is measured at the same fineness. The model is sampled per

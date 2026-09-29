@@ -47,7 +47,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 
 | verb | pick | derives |
 |---|---|---|
-| Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top. A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
+| Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top as the earlier setups left it (below). A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
@@ -57,6 +57,26 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
 | Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
+
+**The stock top is what the earlier setups left.** `DeriveOperation` takes
+the job's setups cut before this one (`EarlierSetups`: the job's order is the
+cutting order), and a top derived from the stock — a pocket's, a contour's, a
+drill's, a 3-axis surface pass's (`TopFromStock`) — comes from
+`StockTopOver`: on an indexed setup after a TURNING one, the top of the turned
+part over the operation. That is the model's largest radius along the span the
+operation cuts (its targets' faces, widened by the cutter's radius; the whole
+part without targets), plus the turning's `stock_to_leave`, its scallop (a
+ball's cusp at its stepover, a flat end's facet across the radius) and the
+tessellation, taken above the axis where the span comes nearest it. A span the
+turning did not reach whole — past its target, or inside the chuck's or the
+tailstock's keep-out — keeps the bar's top, and so does a setup whose part
+does not sit on the turning's axis. `add_cam_op` with several targets takes
+the top over all of them, and so does `RederiveDepths`. `cam_toolpath`'s
+"top_z is below the stock top — entry rapids will pass through stock" warning
+reads the same top, so a typed depth at the turned surface is not warned
+about. The chess set's indexed heads (the bishop's mitre, the queen's crown,
+the king's cross) had their tops typed to keep them out of the air the turning
+had removed; they derive now.
 
 Derived numbers are fractions of the cutter: **stepdown** = half the tool
 diameter (`DerivedStepdown`); **stepover** = 45 % for a flat mill, and for a
