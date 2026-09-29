@@ -2506,6 +2506,118 @@ TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
   CHECK(v.rapidsThroughStock == 0);
 }
 
+TEST_CASE("cam: adaptive that cannot lead in falls back whole, and says so "
+          "once",
+          "[cam]") {
+  if (!cam::AdaptiveAvailable())
+    SKIP("this build has no adaptive clearing");
+  // The chess bishop's mitre: a 3.2 mm notch through the head, derived as a
+  // pocket deep enough to come back ADAPTIVE, cut with a 3 mm flat. Its floor
+  // runs out into air at both ends, where the region grows by the cutter's
+  // radius; adaptive starts there, cuts, and ALSO flags that it could not
+  // lead into the cut. The pass kept both: 9229 moves in the file and an
+  // ERROR on the op, so the setup counted failed while the verifier said the
+  // program it posted machined cleanly. An operation's outcome is one thing:
+  // what it posts is what it reports.
+  //
+  // The region is the one the mitre's floor gave (x shifted to start at 0),
+  // cut here as a closed pocket 8 mm deep so that exactly this outline is
+  // what the pass is handed.
+  const std::vector<glm::dvec2> floor = {
+      {1.429, -8.421}, {1.617, -8.396}, {1.800, -8.346}, {1.975, -8.274},
+      {2.140, -8.180}, {2.212, -8.130}, {3.179, -7.412}, {3.324, -7.289},
+      {3.327, -7.286}, {4.193, -6.449}, {4.321, -6.309}, {4.325, -6.305},
+      {5.074, -5.363}, {5.182, -5.207}, {5.187, -5.201}, {5.804, -4.171},
+      {5.891, -4.003}, {5.956, -3.824}, {5.999, -3.639}, {6.017, -3.451},
+      {6.018, -3.399}, {6.018, -1.337}, {5.943, -1.358}, {5.683, -1.513},
+      {5.453, -1.716}, {5.252, -1.951}, {4.937, -2.491}, {4.852, -2.686},
+      {4.823, -2.753}, {4.536, -3.378}, {4.534, -3.381}, {4.533, -3.383},
+      {4.529, -3.386}, {4.527, -3.387}, {4.524, -3.388}, {4.520, -3.389},
+      {4.518, -3.389}, {4.518, 3.389},  {4.521, 3.389},  {4.523, 3.389},
+      {4.528, 3.387},  {4.530, 3.385},  {4.532, 3.384},  {4.535, 3.380},
+      {4.823, 2.753},  {4.852, 2.686},  {4.937, 2.491},  {5.252, 1.951},
+      {5.453, 1.716},  {5.683, 1.513},  {5.943, 1.358},  {6.018, 1.337},
+      {6.018, 3.399},  {6.006, 3.589},  {5.970, 3.775},  {5.911, 3.955},
+      {5.830, 4.126},  {5.804, 4.171},  {5.187, 5.201},  {5.079, 5.357},
+      {5.074, 5.363},  {4.325, 6.305},  {4.197, 6.445},  {4.193, 6.449},
+      {3.327, 7.286},  {3.183, 7.409},  {3.179, 7.412},  {2.212, 8.130},
+      {2.053, 8.233},  {1.882, 8.315},  {1.703, 8.375},  {1.517, 8.412},
+      {1.327, 8.425},  {1.138, 8.415},  {0.952, 8.380},  {0.771, 8.322},
+      {0.599, 8.242},  {0.439, 8.141},  {0.292, 8.020},  {0.163, 7.882},
+      {0.051, 7.729},  {0.002, 7.639},  {0.118, 7.591},  {0.735, 7.282},
+      {0.737, 7.281},  {1.328, 6.928},  {1.331, 6.926},  {1.333, 6.925},
+      {1.336, 6.920},  {1.337, 6.916},  {1.338, 6.913},  {1.338, 6.911},
+      {1.318, 6.926},  {1.318, -6.926}, {1.338, -6.911}, {1.338, -6.914},
+      {1.337, -6.916}, {1.336, -6.919}, {1.335, -6.921}, {1.332, -6.925},
+      {1.328, -6.928}, {0.737, -7.281}, {0.735, -7.282}, {0.119, -7.591},
+      {0.000, -7.640}, {0.006, -7.653}, {0.108, -7.812}, {0.230, -7.958},
+      {0.369, -8.087}, {0.523, -8.197}, {0.690, -8.288}, {0.867, -8.356},
+      {1.051, -8.402}, {1.239, -8.423}};
+  // The library's side of it, frozen: moves AND a complaint, from one pass.
+  cam::Setup s = BasicSetup();
+  s.tools[0].diameter = 3.0;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Adaptive;
+  op.side = cam::Side::Inside;
+  op.toolNumber = s.tools[0].number;
+  op.topZ = 10.0;
+  op.bottomZ = 2.0;
+  op.stepdown = 1.5;
+  op.stepover = 0.45;
+  {
+    cam::Loop l;
+    l.pts = floor;
+    const cam::AdaptiveResult raw =
+        cam::AdaptiveClear(s, op, s.tools[0], {l}, 8.5, 10.0);
+    INFO(raw.error);
+    CHECK_FALSE(raw.moves.empty());
+    CHECK_FALSE(raw.error.empty());
+  }
+
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Block", glm::vec3(-3.0f, -11.0f, 0.0f), 12.0, 22.0, 10.0));
+  auto sk = std::make_unique<SketchFeature>(
+      "Floor sketch",
+      SketchPlane(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f, 0.0f, 1.0f),
+                  glm::vec3(1.0f, 0.0f, 0.0f)));
+  for (size_t i = 0; i < floor.size(); i++)
+    sk->AddEntity(sketch::Line{glm::vec2(floor[i]),
+                               glm::vec2(floor[(i + 1) % floor.size()])});
+  doc->AddFeature(std::move(sk));
+  const uint64_t sid = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<ExtrudeFeature>("Mitre", sid, 8.0,
+                                                   ExtrudeMode::Cut, true));
+  REQUIRE(doc->GetBodies().size() == 1);
+  op.targets = {cam::Target{0, UpFaceAt(*doc, 2.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  s.operations.push_back(op);
+  const auto paths = cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  const cam::Toolpath& tp = paths[0];
+  INFO("error: " << tp.error << " / strategy: " << tp.strategy << " / moves "
+                 << tp.moves.size());
+  // Cut, by the strategy that could, and no error beside it...
+  CHECK(tp.error.empty());
+  REQUIRE_FALSE(tp.moves.empty());
+  CHECK(tp.strategy.find("concentric") != std::string::npos);
+  CHECK(tp.strategy.find("lead") != std::string::npos);
+  double lo = 1e18;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind != cam::Move::Kind::Rapid)
+      lo = std::min(lo, m.to.z);
+  CHECK(std::abs(lo - 2.0) < 1e-3);
+
+  // ...and what it posts verifies as the pocket.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover);
+  CHECK(v.maxGouge < 0.05);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
 TEST_CASE("cam: the vendored adaptive library throws on some vertex layouts",
           "[cam][slow]") {
   // Frozen because it is the reason the fallback below exists. Adaptive2d

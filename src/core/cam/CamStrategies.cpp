@@ -1000,7 +1000,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
                  "(side: inside)";
       return;
     }
-    if (!cleared.error.empty() && cleared.moves.empty()) {
+    if (!cleared.error.empty()) {
       // Adaptive declined this region — a vertex layout the vendored library
       // throws on, a shape it cannot lead into, a start point it cannot find.
       // The pocket still has to be cleared, and the concentric strategy is
@@ -1010,6 +1010,14 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       // (docs/cam/operations.md#pocket-and-adaptive). Which strategy cut it is
       // REPORTED, not hidden — a job that quietly changed strategy is a job
       // whose feeds were chosen for the other one.
+      //
+      // Declined WITH moves too. Adaptive2d flags trouble on an output it
+      // still fills -- a lead it could not plan, area it left -- and keeping
+      // that output beside the error posted a program for an operation that
+      // reported failure: the chess bishop's 3.2 mm mitre came out as 9229
+      // moves AND an error, its setup counted failed, and the verifier
+      // passed the file. A half-trusted pass is not a result; the rings
+      // cut the same notch in 343 mm, cleanly, with nothing to report.
       tp.moves.clear();
       GeneratePocket(setup, op, tool, bodies, tp);
       tp.strategy =
@@ -1024,8 +1032,6 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       // `adaptive`, so it is the one a person actually hits.
       tooTight = FloorWidthRefusal(op, bodies, region, !picked.empty(), tool);
     }
-    if (!cleared.error.empty() && tp.error.empty())
-      tp.error = cleared.error; // partial: say so, keep what it did cut
     tp.moves.insert(tp.moves.end(), cleared.moves.begin(), cleared.moves.end());
     entryZ = z;
   }

@@ -231,11 +231,14 @@ is scrap.
   and retract-rapid-re-enter. A link through cleared material is a G1 (a
   straight line, which a dog-legged G0 is not) at the machine's traverse
   rate (`Setup::rapidFeed`) when it states one, else the cutting feed. Its
-  failure flags become `Toolpath::error` in words. When the library declines
-  a region, concentric clearing cuts it and `strategy` says so. That
-  includes finding nowhere to start, which emits nothing: its start point is
-  unset, and entering there anyway made moves that kept the fall-back from
-  running.
+  failure flags are put in words. When the library flags ANY of them on any
+  depth, concentric clearing cuts the whole operation instead and
+  `strategy` says why — never an error beside moves, because a program the
+  op posts has to be what it reports. It flags trouble on output it still
+  fills (a lead it could not plan: a 3.2 mm slot and a 3 mm cutter), and
+  keeping both posted a program for an op that said it failed. Finding
+  nowhere to start emits nothing: its start point is unset, and entering
+  there anyway made moves that kept the fall-back from running.
 - Both refuse cones (`NeedsFlatFloor`).
 
 ### Face
