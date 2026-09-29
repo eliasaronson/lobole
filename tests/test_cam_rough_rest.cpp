@@ -495,8 +495,6 @@ TEST_CASE("cam rotary: passes run past a domed end and finish its foot",
   CHECK(v.maxGouge < 0.1);
 }
 
-#endif // HAVE_CAM
-
 TEST_CASE("cam waterline: the top of a dome is lapped, not left",
           "[cam][surface]") {
   // Evenly spaced levels spread apart where a surface flattens, and the cap
@@ -528,3 +526,5 @@ TEST_CASE("cam waterline: the top of a dome is lapped, not left",
   INFO("left at the apex " << worst);
   CHECK(worst < 0.1);
 }
+
+#endif // HAVE_CAM

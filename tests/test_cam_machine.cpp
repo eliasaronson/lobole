@@ -1303,8 +1303,6 @@ TEST_CASE("cam: a grbl file states its own tool numbers", "[cam][post]") {
   CHECK(cutWithFour);
 }
 
-#endif // HAVE_CAM
-
 TEST_CASE("cam reach: a shank wider than the cut collides, a necked one "
           "reaches past its flutes",
           "[cam][feeds]") {
@@ -1384,3 +1382,5 @@ TEST_CASE("cam reach: a shank wider than the cut collides, a necked one "
     said = said || f.text.find("driven into it") != std::string::npos;
   CHECK(said);
 }
+
+#endif // HAVE_CAM

@@ -941,8 +941,6 @@ TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
   CHECK(none.why.find("4th axis") != std::string::npos);
 }
 
-#endif // HAVE_CAM
-
 TEST_CASE("cam rotary: the file is written for the rotary as installed, and "
           "read back the same",
           "[cam]") {
@@ -1138,7 +1136,6 @@ TEST_CASE("cam rotary: a turning program longer than the travel is said",
             .outsideTravel == 0);
 }
 
-#ifdef HAVE_CAM
 // An indexed setup after a turning one starts from the TURNED part, not the
 // bar: checked against the fresh bar, every entry into the chess king's cross
 // was a rapid "through material" 12.5 mm deep and every pass a 24 mm "bite",

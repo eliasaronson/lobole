@@ -1689,8 +1689,6 @@ TEST_CASE("cam: every tool type and side round-trips through its name",
   CHECK_FALSE(cam::TrySideFromName("left", sd));
 }
 
-#endif // HAVE_CAM
-
 // On the rotary the safe height clears the radius the stock SWEEPS, not its
 // top: a square bar's corners stand at half its diagonal and pass under the
 // cutter every turn. From the top, a pass clipped at the tailstock retracted
@@ -1713,3 +1711,5 @@ TEST_CASE("A rotary setup's safe height clears the corners it turns",
   CHECK(onBed < corner); // the bed's is the top plus its clearance
   CHECK(inRotary > onBed);
 }
+
+#endif // HAVE_CAM
