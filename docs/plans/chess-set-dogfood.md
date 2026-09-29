@@ -33,10 +33,6 @@ and every groove at least 3.4 mm, and the finish alone makes the part.
 
 ## App work found and not done
 
-- **A pocket open on a side is cleared as if walled.** The queen's crown
-  notch floor runs 2.3 mm along the axis before the dome falls away; the
-  pocket refused a 3 mm cutter by that width. Edges where the floor meets
-  air, not a wall, should let the tool pass.
 - **Text.** No text sketch entity, no engrave operation: the board's a-h / 1-8
   are not on it.
 - **Carry the stock into the playback and the rotary check** as the planar
