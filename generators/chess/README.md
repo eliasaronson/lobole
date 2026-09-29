@@ -61,10 +61,8 @@ Every face an operation targets is asked for by what made it
 (docs/modeling/toponaming.md): a crenel's floors are `made(..., "Crenels",
 "rook 1", role="floor")` -- the piece part's pattern, through the rook's
 Derived copy -- and a radial cut's floors are its faces that face away from
-the axis. One pick is still by position: the board's chamfered top outer edges
-(`build_board.py`), where
-an edge's name comes from whichever face named it first, so "where the
-slab's sides meet its top" is not a question of what made it.
+the axis. The board's chamfered edges are the ones joining the slab's top
+to its sides (`edges(between=...)`).
 
 `MACHINE` in `cam.py` holds the rotary's mount as TEST values: the 6090's axis
 letter, direction and steps per degree are not measured, so no rotary
