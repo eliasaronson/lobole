@@ -809,10 +809,10 @@ double TurnedScallop(const Tool& tool, double stepover, double radius) {
 
 } // namespace
 
-double StockTopOver(const Setup& setup,
-                    const std::vector<const Setup*>& earlier,
-                    const std::vector<Body>& rawBodies, const Operation& op,
-                    double freshTop) {
+static double TopOverOneFrame(const Setup& setup,
+                              const std::vector<const Setup*>& earlier,
+                              const std::vector<Body>& rawBodies,
+                              const Operation& op, double freshTop) {
   double top = freshTop;
   if (earlier.empty())
     return top;
@@ -907,6 +907,48 @@ double StockTopOver(const Setup& setup,
     top = std::min(top, o.z + std::sqrt(std::max(0.0, r * r - dy * dy)));
   }
   return top;
+}
+
+double StockTopOver(const Setup& setup,
+                    const std::vector<const Setup*>& earlier,
+                    const std::vector<Body>& rawBodies, const Operation& op,
+                    double freshTop) {
+  if (!CutAtIndices(op))
+    return TopOverOneFrame(setup, earlier, rawBodies, op, freshTop);
+  // Cut at several indices
+  // (docs/cam/rotary.md#one-operation-at-several-indices): each angle's piece
+  // is generated in its own frame from ONE top_z, so the top is the highest
+  // any of them meets -- read in each
+  // angle's frame, over the targets GenerateAtIndices cuts there (a floor
+  // only at the index that turns it to the spindle).
+  const bool floors =
+      !op.targets.empty() && OpTypeHas(op.type, OpField::NeedsFlatFloor);
+  bool any = false;
+  double top = -std::numeric_limits<double>::infinity();
+  for (const double a : op.indexA) {
+    Setup turned = setup;
+    turned.rotationA = a;
+    Operation here = op;
+    here.indexA.clear();
+    if (floors) {
+      const std::vector<Body> framed = BodiesInSetupFrame(turned, rawBodies);
+      here.targets.clear();
+      for (const Target& t : op.targets) {
+        glm::vec3 n(0.0f);
+        if (FaceNormalOf(framed, t.ref, n, t.jobPartId) && n.z > 0.99f)
+          here.targets.push_back(t);
+      }
+      if (here.targets.empty())
+        continue; // nothing faces the spindle at this index
+    }
+    glm::dvec3 lo(0.0), hi(0.0);
+    const double fresh =
+        StockBounds(turned, rawBodies, lo, hi) ? hi.z : freshTop;
+    top =
+        std::max(top, TopOverOneFrame(turned, earlier, rawBodies, here, fresh));
+    any = true;
+  }
+  return any ? top : freshTop;
 }
 
 DerivedOp DeriveSurfaceRough(const Setup& setup,
@@ -1030,14 +1072,18 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies,
                                   op.toolNumber, earlier);
     if (!d.ok)
       continue;
-    // The derivation reads one target; the top is over all of them.
-    if (op.targets.size() > 1 && !earlier.empty() && TopFromStock(op.type)) {
+    // The derivation reads one target in the setup's frame; the top is over
+    // all of them, and at each index of an op cut at several.
+    if ((op.targets.size() > 1 || CutAtIndices(op)) && !earlier.empty() &&
+        TopFromStock(op.type)) {
       glm::dvec3 lo(0.0), hi(0.0);
       if (StockBounds(setup, bodies, lo, hi)) {
         Operation all = d.op;
         all.targets = op.targets;
-        d.op.topZ = std::max(d.op.topZ,
-                             StockTopOver(setup, earlier, bodies, all, hi.z));
+        all.indexA = op.indexA;
+        const double top = StockTopOver(setup, earlier, bodies, all, hi.z);
+        if (top > d.op.bottomZ)
+          d.op.topZ = top;
       }
     }
     // Depths only. The tool, the tabs, the stepover and anything else typed

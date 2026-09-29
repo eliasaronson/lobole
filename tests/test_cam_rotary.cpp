@@ -1673,6 +1673,16 @@ TEST_CASE("cam derive: a top after a turning is the turned part's",
   // A cutter as wide as the shoulders beside the neck reaches over them.
   op.toolNumber = 1;
   CHECK(cam::StockTopOver(indexed, earlier, bodies, op, hi.z) > 15.0);
+  // An op cut at several indices is read in each angle's frame, and its
+  // one top is the highest of them: the neck is round, so every angle
+  // agrees on it.
+  op.toolNumber = 99;
+  op.type = cam::OpType::Profile; // follows its target at every index
+  op.indexA = {0.0, 90.0, 225.0};
+  const double indexed3 = cam::StockTopOver(indexed, earlier, bodies, op, hi.z);
+  CHECK(indexed3 > 11.0);
+  CHECK(indexed3 < 12.0);
+  op.indexA.clear();
   // A turning that does not run -- disabled -- leaves the bar.
   turn.setup.operations.front().enabled = false;
   op.toolNumber = 99;

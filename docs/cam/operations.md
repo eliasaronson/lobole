@@ -70,8 +70,11 @@ ball's cusp at its stepover, a flat end's facet across the radius) and the
 tessellation, taken above the axis where the span comes nearest it. A span the
 turning did not reach whole — past its target, or inside the chuck's or the
 tailstock's keep-out — keeps the bar's top, and so does a setup whose part
-does not sit on the turning's axis. `add_cam_op` with several targets takes
-the top over all of them, and so does `RederiveDepths`. `cam_toolpath`'s
+does not sit on the turning's axis. The top is the OPERATION's: `add_cam_op`
+with several targets takes it over all of them, and an operation cut at
+several indices (`index_a_deg`) reads it in each angle's frame, over the
+targets that angle cuts, and keeps the highest — its one `top_z` serves every
+angle. `RederiveDepths` does the same. `cam_toolpath`'s
 "top_z is below the stock top — entry rapids will pass through stock" warning
 reads the same top, so a typed depth at the turned surface is not warned
 about. The chess set's indexed heads (the bishop's mitre, the queen's crown,

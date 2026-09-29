@@ -2261,16 +2261,20 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // point, not a cage. (To force a strategy on a derived operation, set it
     // afterwards with set_cam_op.)
     ApplyOpFields(state, setup, op, p, /*keepType=*/derive);
-    // The derivation read the first target; a derived top is the top of
-    // what the earlier setups left over ALL of them.
-    if (derive && !p.contains("top_z") && op.targets.size() > 1 &&
+    // The derivation read the first target in the setup's own frame; a
+    // derived top is the top of what the earlier setups left over ALL of
+    // them, and for an op cut at several indices, in each angle's frame.
+    if (derive && !p.contains("top_z") &&
+        (op.targets.size() > 1 || cam::CutAtIndices(op)) &&
         cam::TopFromStock(op.type)) {
       glm::dvec3 lo(0.0), hi(0.0);
-      if (cam::StockBounds(setup, ui::JobBodies(state), lo, hi))
-        op.topZ = std::max(
-            op.topZ, cam::StockTopOver(
-                         setup, cam::EarlierSetups(job->GetSetups(), setup.id),
-                         ui::JobBodies(state), op, hi.z));
+      if (cam::StockBounds(setup, ui::JobBodies(state), lo, hi)) {
+        const double top = cam::StockTopOver(
+            setup, cam::EarlierSetups(job->GetSetups(), setup.id),
+            ui::JobBodies(state), op, hi.z);
+        if (top > op.bottomZ)
+          op.topZ = top;
+      }
     }
     // A clearing operation clears INSIDE its boundary; the struct's Outside
     // default is a profile's notion and means "nothing to cut" here.
