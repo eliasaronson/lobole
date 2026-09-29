@@ -86,7 +86,8 @@ Only what `describe` cannot express:
   `polyline`, `slot`, `polygon`, `arc_through`, `project`, `pattern`,
   `fillet(edges=...)`, `hole`, `thread`, and a sketch builder that
   constrains (`concentric=`, driven by a variable) rather than placing by
-  number.
+  number, and places text labels (`text(s, at, height, font=)`,
+  [sketching](../sketching/README.md#text)).
 - **Assembly verbs that mate by frame name**: `asm.place`, `fasten`,
   `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `gear`, `chain`,
   `rack`, `screw`, `cam`, `motion`, `bolt`, and `asm.check()`, which raises

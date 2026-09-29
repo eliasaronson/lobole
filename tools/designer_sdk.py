@@ -1235,6 +1235,37 @@ class SketchBuilder:
         self._attach_exprs(n)
         return self
 
+    def text(self, s, at, height, font="sans", angle_deg=0.0,
+             halign="left", valign="baseline", spacing=0.0,
+             construction=False):
+        """A one-line text label (the app's `text` entity, v137) anchored at
+        `at`. `height` is the CAP height in mm (a number, a Param or an
+        expression string); `font` is "sans" (outline: extruding it cuts or
+        adds every letter) or "hershey" (single stroke: open curves for
+        engraving, no profile). `halign` left|center|right and `valign`
+        baseline|bottom|middle|top place the label's box — the font's
+        ascender and descender — on the anchor. The app refuses an unknown
+        font or alignment, and a character the font has no glyph for, by
+        name. The glyphs are regenerated from these fields, never sent."""
+        n = len(self.entities)
+        e = {"type": "text", "text": str(s),
+             "anchor": list(_uv(self, at, n, 0, "text")),
+             "font": font, "angle_deg": float(angle_deg),
+             "halign": halign, "valign": valign}
+        if isinstance(height, str) or isinstance(height, Param):
+            expr = height if isinstance(height, str) else height.expr
+            self._pending_exprs.append((n, "height", expr))
+            e["height"] = float(height) if isinstance(height, Param) else 1.0
+        else:
+            e["height"] = float(height)
+        if spacing:
+            e["spacing"] = float(spacing)
+        if construction:
+            e["construction"] = True
+        self.entities.append(e)
+        self._attach_exprs(n)
+        return self
+
     def spline(self, poles, degree=3, closed=False, construction=False):
         """A B-spline through CONTROL POLES [(u, v), ...] (the app's `spline`
         entity, v40): the curve follows the poles and touches only the first
@@ -1508,6 +1539,7 @@ _COORD_FIELDS = {
     "line": {0: ("ax", "ay"), 1: ("bx", "by")},
     "circle": {0: ("cx", "cy")},
     "arc": {0: ("cx", "cy")},
+    "text": {0: ("x", "y")},
 }
 
 
