@@ -287,6 +287,10 @@ enum class OpType {
   // between them, or one spiral with A turning while the tool cuts -- by the
   // op's `rotaryPattern` (docs/cam/rotary.md#patterns-rotary_pattern).
   SurfaceRotary,
+  // Follow SKETCH curves ON the curve, down from the surface the sketch lies
+  // on (v138, docs/cam/operations.md#engrave): a label, a line, an arc. The
+  // one type whose target is not a face of a body.
+  Engrave,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
   // reloaded as a full-depth contour round the part -- the silent
@@ -460,6 +464,13 @@ struct Operation {
   // the setup's own `rotationA`. Needs a machine with a rotary axis; not on
   // a surface_rotary, which turns the part as it cuts.
   std::vector<double> indexA;
+
+  // Engrave only (v138, docs/cam/operations.md#engrave): the groove's width
+  // AT THE SURFACE, mm, or its depth below it, mm -- one statement, not two.
+  // A V-bit's depth IS its width (TipHeight(tool, width / 2)); a flat or a
+  // ball takes a depth only. 0 = not stated.
+  double engraveWidth = 0.0;
+  double engraveDepth = 0.0;
 
   bool enabled = true;
 
@@ -825,6 +836,20 @@ struct Toolpath {
     double topZ = 0.0;
   };
   std::vector<Tab> tabs;
+  // Where the path cut INTO the surface on purpose along a line: an
+  // engraving's stroke (docs/cam/operations.md#engrave), as the tool
+  // centre's polyline in setup XY, the height its tip ran at, the surface it
+  // was cut from and the tool that cut it. The verifier excuses a cut down
+  // to that NOMINAL groove -- the stroke swept by the tool's own shape,
+  // TipHeight -- and nothing under it or beside it: a relief excuses any
+  // depth within its bite, a groove only its own shape.
+  struct Groove {
+    std::vector<glm::dvec2> pts;
+    double tipZ = 0.0;
+    double topZ = 0.0;
+    Tool tool;
+  };
+  std::vector<Groove> grooves;
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;

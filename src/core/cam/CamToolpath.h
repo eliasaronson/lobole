@@ -2,6 +2,7 @@
 
 #include "core/Feature.h" // Body
 #include "core/cam/CamAdaptive.h"
+#include "core/cam/CamEngrave.h" // SketchCurves
 #include "core/cam/CamJob.h"
 #include "core/cam/CamPicks.h" // FaceRegion, WallContour, SurfaceRegion — kept
 #include "core/cam/CamSurface.h" // SurfaceCache, SurfaceRequest
@@ -70,6 +71,11 @@ struct GenerateContext {
   // turns it off.
   OutlineCache* outlineCache = nullptr;
   std::vector<OutlineRequest> pendingOutline; // out
+  // The curves the engravings follow (docs/cam/operations.md#engrave): a
+  // sketch makes no body, so the caller that has the documents resolves
+  // them (SketchEntityCurves) and hands them in. An engraving whose target
+  // is not here is refused, not guessed at.
+  std::vector<SketchCurves> sketchCurves;
 };
 
 // One operation's toolpath. Never throws: a failure comes back as
@@ -207,10 +213,13 @@ EarlierSetups(const std::vector<Setup>& all, uint64_t setupId);
 // carries the wrong stepdown.
 // `earlier`: the job's setups cut before this one (`EarlierSetups`). A top
 // derived from the stock is taken from what they left (`StockTopOver`).
+// `curves`: an engraving's target resolved (SketchEntityCurves) -- a sketch
+// makes no body, so the bodies cannot answer for it.
 [[nodiscard]] DerivedOp
 DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
                 OpType type, const Target& target, int toolNumber = 0,
-                const std::vector<const Setup*>& earlier = {});
+                const std::vector<const Setup*>& earlier = {},
+                const std::vector<SketchCurves>& curves = {});
 
 // The frame an op cut at `indices` is derived in
 // (docs/cam/rotary.md#one-operation-at-several-indices): the setup turned to
@@ -219,10 +228,12 @@ DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
 // setup itself when there is no list, no target, or no index presents it (the
 // derivation then refuses in its own words). Read in the setup's own frame,
 // the rook's crenel floors faced sideways and were refused as walls.
+// An engraving's sketch plane is presented like a floor, from `curves`.
 [[nodiscard]] Setup IndexFrameFor(const Setup& setup,
                                   const std::vector<Body>& bodies, OpType type,
                                   const Target& target,
-                                  const std::vector<double>& indices);
+                                  const std::vector<double>& indices,
+                                  const std::vector<SketchCurves>& curves = {});
 
 // A rotary ROUGH (docs/cam/rotary.md#layers-rest-and-the-rough-verb): the
 // rotary finish's derivation and refusals, then layers of half the cutter from

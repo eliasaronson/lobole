@@ -4,6 +4,8 @@
 
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h"
+
+#include "core/cam/CamEngrave.h"
 #include "ui/Icons.h"
 #include "ui/Widgets.h"
 
@@ -63,9 +65,9 @@ constexpr glm::vec4 kRapidColor(0.50f, 0.52f, 0.60f, 0.55f);
 // and indexes it by that enum at three more places, so a row out of step is
 // an out-of-bounds read and a row missing is the wrong label on every type
 // after it. Asserted rather than trusted.
-const char* kOpTypes[] = {"Profile",        "Pocket",       "Face",
-                          "Drill",          "Adaptive",     "Edge break",
-                          "Finish surface", "Finish walls", "Finish rotary"};
+const char* kOpTypes[] = {
+    "Profile",    "Pocket",         "Face",         "Drill",         "Adaptive",
+    "Edge break", "Finish surface", "Finish walls", "Finish rotary", "Engrave"};
 static_assert(IM_ARRAYSIZE(kOpTypes) == static_cast<int>(cam::OpType::Count),
               "kOpTypes must have one label per OpType, in enum order");
 
@@ -83,11 +85,15 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
   fresh.moves = previous.moves;
   fresh.reliefs = previous.reliefs;
   fresh.tabs = previous.tabs;
+  fresh.grooves = previous.grooves;
   fresh.strategy = previous.strategy;
 }
 
-cam::GenerateContext ContextOf(AppState& state) {
+cam::GenerateContext ContextOf(AppState& state, const cam::Setup& setup) {
   cam::GenerateContext ctx;
+  // An engraving's curves are a sketch's, which makes no body: resolved here,
+  // where the part documents are (docs/cam/operations.md#engrave).
+  ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
   // The fingerprint the surfacing key needs of the geometry. `JobRenderVersion`
@@ -106,7 +112,7 @@ void RefreshCamToolpaths(AppState& state) {
   cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr || !state.job)
     return;
-  cam::GenerateContext ctx = ContextOf(state);
+  cam::GenerateContext ctx = ContextOf(state, *setup);
   state.camToolpaths = cam::GenerateAll(*setup, ui::JobBodies(state), &ctx);
   for (cam::Toolpath& fresh : state.camToolpaths)
     for (const cam::Toolpath& old : previous)
@@ -146,7 +152,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
   // (GenerateAll); this path has to say the same, or a verb-made operation
   // on a bad layout generated fine here and only a Generate press refused.
   cam::Toolpath fresh;
-  cam::GenerateContext ctx = ContextOf(state);
+  cam::GenerateContext ctx = ContextOf(state, *setup);
   if (const std::string why =
           cam::PlacementRefusal(*setup, ui::JobBodies(state));
       !why.empty()) {
@@ -1725,6 +1731,49 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
                           "model has on that edge; 0 = the biggest this tool "
                           "can make within the wall.");
   }
+  // An engraving's groove: its width at the surface OR its depth, one
+  // statement (docs/cam/operations.md#engrave). Typing one clears the other,
+  // and the bottom follows -- for a V-bit the two are the same number.
+  if (cam::OpTypeHas(op.type, cam::OpField::EngraveWidth) ||
+      cam::OpTypeHas(op.type, cam::OpField::EngraveDepth)) {
+    const cam::Tool* tool = setup->FindTool(op.toolNumber);
+    bool edited = false;
+    if (tool != nullptr && tool->type == cam::ToolType::VBit) {
+      ImGui::SetNextItemWidth(70.0f);
+      float width = static_cast<float>(op.engraveWidth);
+      if (ExprDragFloat(state, "Width###engravewidth", &width, 0.05f, 0.0f,
+                        static_cast<float>(tool->diameter), "%.2f")) {
+        op.engraveWidth = width;
+        op.engraveDepth = 0.0;
+        edited = true;
+      }
+      ImGui::SetItemTooltip("The groove's width at the surface, mm. A "
+                            "V-bit's depth IS its width: the cone reaches "
+                            "that width at that depth.");
+      ImGui::SameLine();
+    }
+    ImGui::SetNextItemWidth(70.0f);
+    cam::EngraveGroove shown = tool != nullptr
+                                   ? cam::EngraveGrooveFor(op, *tool)
+                                   : cam::EngraveGroove{};
+    float depth = static_cast<float>(shown.ok ? shown.depth : op.engraveDepth);
+    if (ExprDragFloat(state, "Depth###engravedepth", &depth, 0.05f, 0.0f,
+                      100.0f, "%.2f")) {
+      op.engraveDepth = depth;
+      op.engraveWidth = 0.0;
+      edited = true;
+    }
+    ImGui::SetItemTooltip("How deep the tip goes below the surface the "
+                          "sketch lies on, mm.");
+    if (edited && tool != nullptr) {
+      const cam::EngraveGroove g = cam::EngraveGrooveFor(op, *tool);
+      if (g.ok)
+        op.bottomZ = op.topZ - g.depth;
+      else
+        state.camRefusal = g.why;
+      touched(op.id);
+    }
+  }
   // Surfacing: across, along and down. Three fields because they are
   // three quantities, and the table decides which of them this type has.
   if (cam::OpTypeHas(op.type, cam::OpField::RotaryPattern)) {
@@ -2151,6 +2200,8 @@ const char* OpGlyph(cam::OpType t) {
     return CommandIcon("job.walls");
   case cam::OpType::SurfaceRotary:
     return CommandIcon("job.rotary_finish");
+  case cam::OpType::Engrave: // no verb makes one yet: a curve, as sketched
+    return CommandIcon("sketch.spline");
   case cam::OpType::Count:
     break;
   }

@@ -152,7 +152,8 @@ as `belowStock` / `below_stock_mm`, not as a gouge.
 | framing, stock, origin, fixtures, seats | `CamSetup.cpp` |
 | picks | `CamPicks.{h,cpp}`, `CamGeometry.cpp` (`PickedFaceRegion`, `PickedWallContour`, `PickedSurfaceRegion`, `ProjectedOutlines`), `CamSurfacePick.cpp` |
 | derivation | `CamDerive.cpp` (`DeriveOperation`, `DeriveSafeZ`, `DeriveSurfaceRough`, `DeriveRest`, `DeriveRotaryRough`, `AddOperationType`, `CuttingMinutes`) |
-| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamDropCutter.{h,cpp}` (cutter-location surface) |
+| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving) |
+| sketch curves | `CamSketchCurves.cpp` (`SketchEntityCurves`, the one resolver from a sketch entity to curves in model space, and the engraving's groove, frame, surface probe and stroke order; built with CAM off too), `ui::JobSketchCurves` in `JobActions.cpp` |
 | layout, order, travel | `CamTravel.cpp` (`CheckPlacements`, `PlacementRefusal`, `CuttingOrder`, `MachineWarning`, `ClipToMachine`, `GenerateAll`) |
 | post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}` |
 | parse and verify | `CamGcode.{h,cpp}` (parser), `CamVerify.{h,cpp}` (height map, verdict, `Explain`, `MachineLines`), `CamRotary.{h,cpp}` (radius map), `CamFeeds.{h,cpp}` (chip load, reach) |

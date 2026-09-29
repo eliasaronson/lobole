@@ -27,6 +27,72 @@ double DistToSegment(const glm::dvec2& p, const glm::dvec2& a,
   return glm::length(p - (a + ab * t));
 }
 
+// No groove over this cell.
+constexpr float kNoGroove = std::numeric_limits<float>::max();
+
+// How far out from its stroke an engraved groove reaches at the surface: where
+// the tool's own shape (TipHeight) climbs back to the top.
+double GrooveHalfWidth(const Toolpath::Groove& g) {
+  const double depth = g.topZ - g.tipZ;
+  const double r = g.tool.diameter * 0.5;
+  switch (g.tool.type) {
+  case ToolType::VBit:
+  case ToolType::Drill: {
+    const double tanHalf = std::tan(glm::radians(g.tool.tipAngleDeg * 0.5));
+    return std::min(r, depth * tanHalf);
+  }
+  case ToolType::Ball:
+    return depth >= r
+               ? r
+               : std::sqrt(std::max(0.0, r * r - (r - depth) * (r - depth)));
+  case ToolType::Flat:
+    break;
+  }
+  return r;
+}
+
+// The NOMINAL grooves (docs/cam/simulation.md#engraved-grooves), rastered
+// onto the grid: per cell, the lowest the declared strokes swept by their
+// tool's own shape reach -- the same TipHeight the carve uses, so a correct
+// engraving carves each cell to exactly this and a deeper one is below it.
+std::vector<float> GrooveFloor(const HeightMap& grid,
+                               const std::vector<Toolpath::Groove>& grooves) {
+  std::vector<float> floor(grid.z.size(), kNoGroove);
+  for (const Toolpath::Groove& g : grooves) {
+    const double r = g.tool.diameter * 0.5;
+    // Segment by segment; a lone point is a plunge, a segment of no length.
+    const size_t segments = g.pts.size() > 1 ? g.pts.size() - 1 : g.pts.size();
+    for (size_t s = 0; s < segments; s++) {
+      const glm::dvec2 a = g.pts[s];
+      const glm::dvec2 b = g.pts.size() > 1 ? g.pts[s + 1] : a;
+      const int i0 = std::max(
+          0, static_cast<int>((std::min(a.x, b.x) - r - grid.x0) / grid.res));
+      const int i1 = std::min(
+          grid.nx - 1,
+          static_cast<int>((std::max(a.x, b.x) + r - grid.x0) / grid.res) + 1);
+      const int j0 = std::max(
+          0, static_cast<int>((std::min(a.y, b.y) - r - grid.y0) / grid.res));
+      const int j1 = std::min(
+          grid.ny - 1,
+          static_cast<int>((std::max(a.y, b.y) + r - grid.y0) / grid.res) + 1);
+      for (int j = j0; j <= j1; j++)
+        for (int i = i0; i <= i1; i++) {
+          double t = 0.0;
+          const double d =
+              DistToSegment({grid.CellX(i), grid.CellY(j)}, a, b, t);
+          if (d > r)
+            continue;
+          const size_t k =
+              static_cast<size_t>(j) * static_cast<size_t>(grid.nx) +
+              static_cast<size_t>(i);
+          floor[k] = std::min(
+              floor[k], static_cast<float>(g.tipZ + TipHeight(g.tool, d)));
+        }
+    }
+  }
+  return floor;
+}
+
 // Flags every cell the swept tool covers on one cutting move. The same
 // culling Simulate uses, but recording coverage rather than depth: it is what
 // tells "the cutter left a corner" apart from "you have not programmed that
@@ -240,7 +306,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 double leftoverTolerance = 0.0,
                 const std::vector<Toolpath::Relief>& reliefs = {},
                 const std::vector<Toolpath::Tab>& tabs = {},
-                const OtherSetups* others = nullptr) {
+                const OtherSetups* others = nullptr,
+                const std::vector<float>* grooveFloor = nullptr) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -302,8 +369,27 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
           relieved = true;
           break;
         }
-      if (!relieved && wantLo - got > v.maxGouge) {
-        v.maxGouge = wantLo - got;
+      // Inside an engraved groove the cut below the model is the point too,
+      // but only down to the groove the toolpath declared -- unlike a relief,
+      // which excuses any depth in its bite, a groove excuses its own shape
+      // and nothing under it or beside it
+      // (docs/cam/simulation.md#engraved-grooves). And it says how far short
+      // of that shape the cut stopped: a groove the program declares and
+      // does not reach is an engraving left shallow.
+      double want = wantLo;
+      if (grooveFloor != nullptr && grooveFloor->size() == total &&
+          (*grooveFloor)[k] != kNoGroove) {
+        const double floor = (*grooveFloor)[k];
+        if (floor < designed.At(i, j) - 1e-6) {
+          want = std::min(want, floor);
+          if (got - floor > v.grooveShallow) {
+            v.grooveShallow = got - floor;
+            v.grooveShallowAt = {machined.CellX(i), machined.CellY(j)};
+          }
+        }
+      }
+      if (!relieved && want - got > v.maxGouge) {
+        v.maxGouge = want - got;
         v.gougeAt = {machined.CellX(i), machined.CellY(j)};
       }
       // A tab is material left standing ON PURPOSE, so it is not leftover --
@@ -456,7 +542,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Toolpath::Relief>& reliefs,
                    const std::vector<Toolpath::Tab>& tabs,
                    const std::vector<FixtureSolid>& fixtures,
-                   const OtherSetups* others) {
+                   const OtherSetups* others,
+                   const std::vector<Toolpath::Groove>& grooves) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -969,10 +1056,25 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   }
 
   out.designed = SampleModel(bodies, machined, lo.z);
+  const std::vector<float> grooveFloor = GrooveFloor(machined, grooves);
   out.verdict = Compare(machined, out.designed, lo.z, &touched,
-                        /*leftoverTolerance=*/0.0, reliefs, tabs, others);
+                        /*leftoverTolerance=*/0.0, reliefs, tabs, others,
+                        grooves.empty() ? nullptr : &grooveFloor);
   out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.tabs = static_cast<int>(tabs.size());
+  out.verdict.grooves = static_cast<int>(grooves.size());
+  // A groove narrower than three cells is one this grid barely sees: its
+  // floor falls between cell centres, so a correct engraving and a wrong
+  // one can read alike. Said, with the resolution that would see it.
+  out.verdict.grooveCells = res * 3.0;
+  for (const Toolpath::Groove& g : grooves) {
+    const double w = 2.0 * GrooveHalfWidth(g);
+    if (w >= res * 3.0)
+      continue;
+    out.verdict.narrowGrooves++;
+    if (out.verdict.narrowestGroove <= 0.0 || w < out.verdict.narrowestGroove)
+      out.verdict.narrowestGroove = w;
+  }
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
   out.verdict.worstRapidDepth = worstRapidDepth;
@@ -1153,7 +1255,8 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Toolpath::Relief>& reliefs,
                     const std::vector<Toolpath::Tab>& tabs,
                     const std::vector<FixtureSolid>& fixtures,
-                    const OtherSetups* others) {
+                    const OtherSetups* others,
+                    const std::vector<Toolpath::Groove>& grooves) {
   // The STOCK MODEL follows the file, not the setup. A program whose A moves
   // is cut from a cylinder that turns and one whose A does not is cut from a
   // block that does not, and asking the setup would get the answer wrong in
@@ -1199,9 +1302,9 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     }
     return v;
   }
-  Verdict v =
-      Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures, others)
-          .verdict;
+  Verdict v = Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures,
+                      others, grooves)
+                  .verdict;
   if (others != nullptr)
     v.otherSetupsNotChecked = others->notChecked;
   return v;
@@ -1231,6 +1334,32 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   "%d inside corner%s relieved for a square fit.", v.reliefs,
                   v.reliefs == 1 ? "" : "s");
     out.push_back({VerdictLine::Level::Good, buf});
+  }
+  if (v.grooves > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d engraved stroke%s checked against the groove%s the "
+                  "program declares.",
+                  v.grooves, v.grooves == 1 ? "" : "s",
+                  v.grooves == 1 ? "" : "s");
+    out.push_back({VerdictLine::Level::Good, buf});
+  }
+  if (v.grooveShallow > tolerance) {
+    std::snprintf(buf, sizeof(buf),
+                  "The engraving stops up to %.2f mm short of its groove at "
+                  "X%.1f %s%.1f -- that stroke is shallower than asked.",
+                  v.grooveShallow, v.grooveShallowAt.x, second,
+                  v.grooveShallowAt.y);
+    out.push_back({VerdictLine::Level::Warn, buf});
+  }
+  if (v.narrowGrooves > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d engraved stroke%s %s narrower (%.2f mm at the "
+                  "narrowest) than three cells of this check (%.2f mm), so "
+                  "the check barely sees %s: verify at a finer resolution.",
+                  v.narrowGrooves, v.narrowGrooves == 1 ? "" : "s",
+                  v.narrowGrooves == 1 ? "is" : "are", v.narrowestGroove,
+                  v.grooveCells, v.narrowGrooves == 1 ? "it" : "them");
+    out.push_back({VerdictLine::Level::Warn, buf});
   }
   if (v.tabs > 0) {
     // Said out loud rather than silently subtracted: four tabs is a job to

@@ -218,6 +218,7 @@ here; the golden corpus and git history cover them.
 | 135 | A part occurrence's `configuration_id` names one of the PART's configurations (it was sub-assemblies only); an occurrence's `material` overrides every body's (a slug; absent = the part's own); a job part's `configuration` ([assemblies](../assemblies/README.md#configurations-per-placement)) |
 | 136 | CAM operation `index_a_deg`: the rotary indices one operation is cut at, generated once per angle and joined by a retract; absent = the setup's `rotation_a` ([4th axis](../cam/rotary.md#one-operation-at-several-indices)) |
 | 137 | Sketch entity `text`: a one-line label (`text`, `font` sans/hershey, CAP `height`, `anchor`, `angle`/`angle_deg`, `halign`, `valign`, `spacing`), its glyphs regenerated from the fields and never saved ([sketching](../sketching/README.md#text)) |
+| 138 | CAM operation type `engrave` (sketch curves followed on the curve; a target is `{feature_id: <sketch>, element: "g<entity id>"}`) and its groove, `width_mm` or `depth_mm`; absent = not stated ([engrave](../cam/operations.md#engrave)) |
 
 ## The directory form
 

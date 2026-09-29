@@ -331,6 +331,7 @@ std::vector<cam::Toolpath> GenerateCamToolpathsNow(AppState& state,
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
   ctx.bodiesKey = JobRenderVersion(state);
+  ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = false; // the reader's path: compute what is missing, now
   return cam::GenerateAll(setup, JobBodies(state), &ctx);
 }
@@ -342,6 +343,7 @@ CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending) {
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
   ctx.bodiesKey = JobRenderVersion(state);
+  ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = state.camDeferPasses;
   std::vector<cam::Toolpath> paths =
       cam::GenerateAll(setup, JobBodies(state), &ctx);
@@ -366,6 +368,7 @@ bool QueueCamPassesFor(AppState& state, const cam::Setup& setup) {
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
   ctx.bodiesKey = JobRenderVersion(state);
+  ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = true; // never cut on the frame: that is what the caller avoids
   const std::vector<cam::Toolpath> paths =
       cam::GenerateAll(setup, JobBodies(state), &ctx);
@@ -398,6 +401,7 @@ void CancelCamPasses(AppState& state) {
       tp.moves.clear();
       tp.reliefs.clear();
       tp.tabs.clear();
+      tp.grooves.clear();
       tp.strategy.clear();
       tp.error = "this pass was cancelled before it was cut "
                  "-- press Generate to queue it again";

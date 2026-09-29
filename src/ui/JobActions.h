@@ -1,7 +1,8 @@
 #pragma once
 
 #include "core/Feature.h"
-#include "core/cam/CamVerify.h" // FixtureSolid
+#include "core/cam/CamEngrave.h" // SketchCurves
+#include "core/cam/CamVerify.h"  // FixtureSolid
 #include "core/cam/JobDocument.h"
 #include "ui/AppState.h"
 
@@ -129,6 +130,15 @@ uint64_t JobRenderVersion(AppState& state);
 // reason — callers REFUSE on it rather than machining a guess.
 cam::Target TargetFor(AppState& state, const ElementRef& ref,
                       uint64_t partHint = 0, std::string* why = nullptr);
+
+// The sketch curves the ENGRAVINGS of `setup` follow, and those of `extra`
+// (a pick being derived), resolved from the job's part documents
+// (docs/cam/operations.md#engrave): what GenerateContext::sketchCurves and
+// DeriveOperation are handed, because a sketch makes no body. A target
+// whose part is gone comes back with its `why`.
+std::vector<cam::SketchCurves>
+JobSketchCurves(AppState& state, const cam::Setup& setup,
+                const std::vector<cam::Target>& extra = {});
 
 // Create a job tab for one part document and make it active. Returns the new
 // tab's index. `name` empty derives one from the part.

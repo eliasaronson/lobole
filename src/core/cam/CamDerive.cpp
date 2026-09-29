@@ -1,3 +1,4 @@
+#include "core/cam/CamEngrave.h"
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamDropCutter.h"
@@ -164,7 +165,8 @@ ModelledBreak FindModelledBreak(const std::vector<Body>& bodies,
 DerivedOp DeriveOperation(const Setup& setup,
                           const std::vector<Body>& rawBodies, OpType type,
                           const Target& target, int toolNumber,
-                          const std::vector<const Setup*>& earlier) {
+                          const std::vector<const Setup*>& earlier,
+                          const std::vector<SketchCurves>& curves) {
   // Depths are read in the frame the machine cuts in, or an indexed setup
   // derives them from the wrong axis (C9).
   const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
@@ -652,6 +654,60 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.stepdown = 0.0;
     break;
   }
+  case OpType::Engrave: {
+    // docs/cam/operations.md#engrave: the curves of a sketch entity, cut ON
+    // them, down from the surface the sketch lies on.
+    if (!target.IsSet()) {
+      out.why = "an engraving follows sketch curves: target {feature_id: "
+                "<sketch>, element: \"g<entity id>\"}";
+      return out;
+    }
+    const SketchCurves* c = FindSketchCurves(curves, target);
+    if (c == nullptr) {
+      out.why = "the curves of " + target.ref.name + " of feature " +
+                std::to_string(target.ref.featureId) +
+                " were not resolved -- is the job part's document open?";
+      return out;
+    }
+    if (!c->why.empty()) {
+      out.why = c->why;
+      return out;
+    }
+    const EngraveFrame frame = EngraveFrameOf(setup, *c);
+    if (!frame.ok) {
+      out.why = frame.why;
+      return out;
+    }
+    if (const std::string off = EngraveSurfaceRefusal(bodies, frame);
+        !off.empty()) {
+      out.why = off;
+      return out;
+    }
+    // The groove, derived when nobody said: a V-bit by its width (a
+    // label's cap / 8, else a quarter of the cutter), a flat or a ball by
+    // its depth.
+    if (tool.type == ToolType::VBit)
+      op.engraveWidth = DefaultEngraveWidth(tool, c->textHeight);
+    else
+      op.engraveDepth = DefaultEngraveDepth(tool);
+    const EngraveGroove groove = EngraveGrooveFor(op, tool);
+    if (!groove.ok) {
+      out.why = groove.why;
+      return out;
+    }
+    op.name = "Engrave";
+    op.targets = {target};
+    op.topZ = frame.surfaceZ;
+    op.bottomZ = frame.surfaceZ - groove.depth;
+    op.stepdown = 0.0; // one pass: a groove is its own depth
+    if (hi.z > frame.surfaceZ + 1e-3)
+      out.notes.push_back(
+          "the stock stands " + Round2(hi.z - frame.surfaceZ) +
+          " mm above the surface this engraves: face it down to the surface "
+          "in an operation before this one, or the hops between strokes "
+          "pass through it");
+    break;
+  }
   case OpType::Count:
     // Not a type. This switch used to have no case for an unhandled value at
     // all, so it fell through to `ok = true` with a DEFAULT Operation -- top
@@ -953,14 +1009,23 @@ double StockTopOver(const Setup& setup,
 
 Setup IndexFrameFor(const Setup& setup, const std::vector<Body>& bodies,
                     OpType type, const Target& target,
-                    const std::vector<double>& indices) {
+                    const std::vector<double>& indices,
+                    const std::vector<SketchCurves>& curves) {
   if (indices.empty() || !target.ref.IsSet() ||
       !OpTypeHas(type, OpField::Indexed))
     return setup;
   const bool floor = OpTypeHas(type, OpField::NeedsFlatFloor);
+  // An engraving's sketch plane is presented like a floor.
+  const SketchCurves* engraved =
+      type == OpType::Engrave ? FindSketchCurves(curves, target) : nullptr;
   for (const double a : indices) {
     Setup turned = setup;
     turned.rotationA = a;
+    if (engraved != nullptr) {
+      if (EngraveFrameOf(turned, *engraved).ok)
+        return turned;
+      continue;
+    }
     if (!floor)
       return turned;
     glm::vec3 n(0.0f);

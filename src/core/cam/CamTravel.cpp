@@ -737,11 +737,13 @@ std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
                                  const std::vector<Body>& bodies,
                                  GenerateContext* ctx) {
   if (CutAtIndices(op))
-    return GenerateAtIndices(setup, op, bodies,
-                             [ctx](const Setup& s, const Operation& o,
-                                   const std::vector<Body>& framed) {
-                               return GenerateOpFramed(s, o, framed, ctx);
-                             });
+    return GenerateAtIndices(
+        setup, op, bodies,
+        [ctx](const Setup& s, const Operation& o,
+              const std::vector<Body>& framed) {
+          return GenerateOpFramed(s, o, framed, ctx);
+        },
+        ctx != nullptr ? &ctx->sketchCurves : nullptr);
   return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
 

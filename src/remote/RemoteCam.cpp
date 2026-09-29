@@ -1,5 +1,6 @@
 #include "remote/RemoteCam.h"
 
+#include "core/cam/CamEngrave.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamOpFields.h"
 #include "core/cam/CamOtherSetups.h"
@@ -358,7 +359,7 @@ constexpr MethodDoc kCamMethods[] = {
      "the tool diameter (0.05-0.9), so 0.45 steps over by 45% of the cutter. "
      "and feeds are mm/min on the TOOL, not here. {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round|surface_parallel|"
-     "surface_waterline|surface_rotary, "
+     "surface_waterline|surface_rotary|engrave, "
      "tool?, target? (one pick, as cam_derive_op takes it -- the same as a "
      "one-entry targets; not both), top_z?, bottom_z?, stepdown?, peck? "
      "(drill: retract between "
@@ -407,13 +408,27 @@ constexpr MethodDoc kCamMethods[] = {
      "to pick instead. Derivation notes (a drill's point in a flat-bottomed "
      "blind hole) come back in `warnings`. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
-     "type adaptive; set_cam_op forces either strategy.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, name, "
+     "type adaptive; set_cam_op forces either strategy. Engrave: target a "
+     "SKETCH entity, {feature_id: <the sketch>, element: \"g<entity id>\"} "
+     "(a line, an arc, a circle, a spline -- open or closed), and the tool's "
+     "axis follows its curves ON them, from the surface the sketch lies on; "
+     "the sketch must lie on the part's face and that face must face the "
+     "spindle (refused otherwise, naming the angle). width_mm? is the "
+     "groove's width at the surface -- a V-bit's depth IS its width, cut to "
+     "where its cone is that wide; a width past the cone is refused -- or "
+     "depth_mm? its depth; state one (setting one clears the other). A flat "
+     "or ball takes depth_mm only. Left out, a V-bit's width is a quarter of "
+     "the cutter (a text label's: its cap height / 8), a flat's or ball's "
+     "depth a quarter of the cutter. Strokes are cut nearest first, reversed "
+     "where that is shorter, the tool staying down where one stroke ends on "
+     "the next.",
+     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "enabled, finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, "
+     "name, "
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "z_step_mm"},
+     "width_mm, z_step_mm"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields, whose lengths — "
      "stepdown, edge_size and the rest — are MILLIMETRES, while stepover is a "
@@ -424,12 +439,13 @@ constexpr MethodDoc kCamMethods[] = {
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused. The tool's reach is checked as add_cam_op checks it: refused "
      "when the shank would be driven into a wall, `warnings` otherwise.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, id, index_a_deg, lead_arcs, lead_mm, name, "
+     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "enabled, finish_stock, finish_tool, id, index_a_deg, lead_arcs, "
+     "lead_mm, name, "
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "z_step_mm"},
+     "width_mm, z_step_mm"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -447,12 +463,13 @@ constexpr MethodDoc kCamMethods[] = {
      "are "
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, name, "
+     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "enabled, finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, "
+     "name, "
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "z_step_mm"},
+     "width_mm, z_step_mm"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm), lowest Z, and the "
@@ -513,7 +530,13 @@ constexpr MethodDoc kCamMethods[] = {
      "holding_collisions (with worst_holding_depth_mm/_x/_line, "
      "worst_holding: chuck|tailstock, and holding_defaults naming the sizes "
      "the machine did not state -- moves into what holds a rotary setup), "
-     "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
+     "below_stock_mm, tabs, reliefs, grooves, groove_shallow_mm, "
+     "narrow_grooves, ok, complete, says}. `grooves` counts the engraved "
+     "strokes checked against the groove each declares: a cut inside one is "
+     "engraving, a cut below or beside it is gouge; groove_shallow_mm is how "
+     "far short of its groove an engraving stopped (it counts against "
+     "`complete`), and narrow_grooves how many are under three cells of the "
+     "check wide. `below_stock_mm` is "
      "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
@@ -730,6 +753,25 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
   }
   if (p.contains("finish_stock"))
     op.finishStock = p.at("finish_stock").get<double>();
+  // An engraving's groove is ONE statement, its width or its depth
+  // (docs/cam/operations.md#engrave): stating one clears the other, and the
+  // bottom follows it. A groove the tool cannot cut -- a width past a V-bit's
+  // cone, a width for a flat -- is refused here, where it is said.
+  if (op.type == cam::OpType::Engrave) {
+    if (p.contains("width_mm") && !p.contains("depth_mm") &&
+        op.engraveWidth > 0.0)
+      op.engraveDepth = 0.0;
+    if (p.contains("depth_mm") && !p.contains("width_mm") &&
+        op.engraveDepth > 0.0)
+      op.engraveWidth = 0.0;
+    if (const cam::Tool* tool = setup.FindTool(op.toolNumber)) {
+      const cam::EngraveGroove g = cam::EngraveGrooveFor(op, *tool);
+      if (!g.ok)
+        throw std::runtime_error(g.why);
+      if (!p.contains("bottom_z"))
+        op.bottomZ = op.topZ - g.depth;
+    }
+  }
   if (p.contains("tabs")) {
     const json& t = p.at("tabs");
     op.tabCount = t.value("count", 0);
@@ -963,6 +1005,7 @@ struct VerifyRun {
   cam::Setup setup;
   std::vector<cam::Toolpath> paths;
   std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
+  std::vector<cam::Toolpath::Groove> grooves; // engraving: not gouge
   std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
   std::string gcode;
   double res = 0.25;
@@ -996,6 +1039,7 @@ PrepareVerify(ui::AppState& state, cam::JobDocument& job, const RpcParams& p) {
   for (const cam::Toolpath& tp : w->paths) {
     w->reliefs.insert(w->reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
     w->tabs.insert(w->tabs.end(), tp.tabs.begin(), tp.tabs.end());
+    w->grooves.insert(w->grooves.end(), tp.grooves.begin(), tp.grooves.end());
   }
   std::string error;
   if (!cam::PostProcess(setup.machine.post, setup, w->paths, PostOptsOf(setup),
@@ -1035,7 +1079,7 @@ void ComputeVerify(VerifyRun& w) {
   others.notChecked.insert(others.notChecked.end(), w.unposted.begin(),
                            w.unposted.end());
   w.verdict = cam::VerifyGcode(w.gcode, w.setup, w.bodies, w.res, w.reliefs,
-                               w.tabs, w.fixtures, &others);
+                               w.tabs, w.fixtures, &others, w.grooves);
 }
 
 // Step three: the answer, in the same sentences the panel shows.
@@ -1199,6 +1243,9 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       // four were asked for is a job to look at.
       {"tabs", v.tabs},
       {"reliefs", v.reliefs},
+      {"grooves", v.grooves},
+      {"groove_shallow_mm", v.grooveShallow},
+      {"narrow_grooves", v.narrowGrooves},
       // Two questions. `ok` is the one that is never in doubt:
       // nothing here scraps the part or breaks the tool. `complete`
       // is softer — a height map cannot watch a slug fall out of a
@@ -2248,14 +2295,19 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         throw std::runtime_error(why);
       // An op cut at several indices is derived where its first target is
       // cut (cam::IndexFrameFor), not in the setup's own frame.
+      // An engraving's pick is a sketch's curves, resolved from the part
+      // documents (docs/cam/operations.md#engrave).
+      const std::vector<cam::SketchCurves> curves =
+          ui::JobSketchCurves(state, setup, {picked});
       const cam::Setup frame = cam::IndexFrameFor(
           setup, ui::JobBodies(state), type, picked,
           p.contains("index_a_deg")
               ? p.at("index_a_deg").get<std::vector<double>>()
-              : std::vector<double>{});
+              : std::vector<double>{},
+          curves);
       const cam::DerivedOp derived = cam::DeriveOperation(
           frame, ui::JobBodies(state), type, picked, op.toolNumber,
-          cam::EarlierSetups(job->GetSetups(), setup.id));
+          cam::EarlierSetups(job->GetSetups(), setup.id), curves);
       if (!derived.ok)
         throw std::runtime_error(derived.why);
       for (const std::string& n : derived.notes)
@@ -2563,7 +2615,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             earlier.empty() ? top
                             : cam::StockTopOver(setup, earlier,
                                                 ui::JobBodies(state), op, top);
-        if (op.topZ < here - kTopSlack)
+        // An engraving's top is the surface its sketch lies on, not a
+        // choice: typing it higher changes nothing, so the remedy is the
+        // stock's (docs/cam/operations.md#engrave).
+        if (op.type == cam::OpType::Engrave && op.topZ < here - kTopSlack)
+          warnings.push_back(
+              "op " + std::to_string(op.id) + " '" + op.name +
+              "': the surface it engraves is Z" + zfmt(op.topZ) + ", " +
+              zfmt(here - op.topZ) + " mm under the stock top (Z" + zfmt(here) +
+              ") -- the hops between its strokes pass through that stock; "
+              "face it down to the surface in an operation before this "
+              "one");
+        else if (op.topZ < here - kTopSlack)
           warnings.push_back(
               "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
               zfmt(op.topZ) + " is " + zfmt(here - op.topZ) +

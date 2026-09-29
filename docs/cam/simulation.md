@@ -67,7 +67,9 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
 - **Told, not guessed:** each toolpath's corner reliefs are skipped for gouge,
   and its tabs are excused for leftover up to their own height (a relief
   excuses a cut too deep, a tab one that did not happen, so a tab needs its
-  height or it would excuse a genuinely uncut slab above it).
+  height or it would excuse a genuinely uncut slab above it). An engraving's
+  grooves excuse a cut down to their own shape and no further
+  ([below](#engraved-grooves)).
 - **Rapids through material** are counted with the worst depth, place and
   line (`rapids_through_stock`, `worst_rapid_depth_mm/_at/_line`: a graze and
   a crash are the same count and different numbers). The rapid check models
@@ -76,6 +78,29 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
 - **File errors and warnings.** What the parser could not read (a NaN
   coordinate, a zero feed) counts against `ok`; what a controller may refuse
   though the parser survived it (a nested comment) is a warning.
+
+### Engraved grooves
+
+An engraving cuts INTO the part on purpose, and the model does not have the
+groove, so each stroke is declared (`Toolpath::Groove`: its polyline, the
+height its tip ran at, the surface and the tool) and the verifier rasters the
+NOMINAL groove onto its grid: per cell, the stroke swept by the tool's own
+shape, `tip + TipHeight(tool, d)`, the same function the carve uses, so a
+correct engraving carves each cell to exactly that. A cell's gouge is measured
+against the lower of the model and the groove there: a cut inside the groove
+is engraving, a cut below it (an engraving deeper than it declared) or beside
+it (one that ran off its stroke) is gouge. Unlike a relief, which excuses any
+depth inside its bite, a groove excuses its own shape and nothing else.
+
+The other direction is measured too: `grooveShallow`
+(`groove_shallow_mm`) is how far above its groove the cut stopped, at the
+worst cell where the groove is below the model, and it counts against
+`complete`. A groove narrower than three cells of the check is one the grid
+barely resolves (its floor falls between cell centres), and the verdict counts
+those (`narrow_grooves`) and says to verify finer. Grooves are 2.5D
+statements like reliefs and tabs: a file that turns while cutting is checked
+by the rotary inspection, which reads none of them, and an operation cut at
+several indices does not carry them.
 
 ### Leftover another setup removes
 

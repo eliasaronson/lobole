@@ -86,6 +86,15 @@ constexpr OpTypeRow kRows[] = {
      OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
          OpField::SampleStep | OpField::RotaryPattern | OpField::Lead |
          OpField::RestFromTool},
+    // Engraving (v138, docs/cam/operations.md#engrave): one groove, cut ON
+    // sketch curves -- its width or its depth and nothing else. No stepdown (a
+    // groove is one pass at its own depth), no side (the tool's axis is ON
+    // the curve), no climb (a groove cuts both walls at once), no stock to
+    // leave, no finish. Every target at once, because the strokes of all of
+    // them are ordered together. FullWidth: a flat cuts a slot.
+    {OpType::Engrave, "engrave", false,
+     OpField::EngraveWidth | OpField::EngraveDepth | OpField::FullWidth |
+         OpField::Indexed},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a

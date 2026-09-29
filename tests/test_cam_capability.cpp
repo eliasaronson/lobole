@@ -97,6 +97,18 @@ constexpr FieldPoke kPokes[] = {
     // with no rotary axis, the operation is refused).
     {cam::OpField::Indexed, "index_a_deg",
      [](cam::Operation& o) { o.indexA = {0.0}; }},
+    // An engraving's groove, stated each way: each clears the other, as the
+    // RPC does, so the one poked is the one that decides.
+    {cam::OpField::EngraveWidth, "width_mm",
+     [](cam::Operation& o) {
+       o.engraveWidth = 2.0;
+       o.engraveDepth = 0.0;
+     }},
+    {cam::OpField::EngraveDepth, "depth_mm",
+     [](cam::Operation& o) {
+       o.engraveDepth = 0.4;
+       o.engraveWidth = 0.0;
+     }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.
@@ -127,6 +139,10 @@ std::string Fingerprint(const std::vector<cam::Toolpath>& paths) {
 struct TypedJob {
   std::unique_ptr<Document> doc;
   cam::Setup setup;
+  // An engraving's curves: a sketch makes no body, so the generator is handed
+  // them (docs/cam/operations.md#engrave). Null for every other type, which
+  // generates exactly as it always has.
+  std::shared_ptr<cam::GenerateContext> ctx;
 };
 
 // A 120 x 90 x 20 block with a Phi 50 DOME standing on it. The surfacing types
@@ -194,6 +210,16 @@ TypedJob JobFor(cam::OpType type) {
   j.doc = rotary      ? NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0)
           : surfacing ? DomedDoc()
                       : PartDoc();
+  uint64_t sketch = 0;
+  uint32_t stroke = 0;
+  if (type == cam::OpType::Engrave) {
+    // A line and nothing else on the top face, clear of the pocket.
+    auto sk = std::make_unique<SketchFeature>(
+        "Label", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+    stroke = sk->AddEntity(sketch::Line{{4.0f, 4.0f}, {56.0f, 5.0f}});
+    j.doc->AddFeature(std::move(sk));
+    sketch = j.doc->GetFeature(j.doc->FeatureCount() - 1)->GetId();
+  }
   j.setup = BasicSetup();
   // A 10 mm cutter, not the fixture's 6. Nothing here is about the tool, and
   // the clearing strategies cost passes: at 6 mm the adaptive cases alone put
@@ -207,6 +233,8 @@ TypedJob JobFor(cam::OpType type) {
   }
   if (type == cam::OpType::EdgeRound)
     j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  if (type == cam::OpType::Engrave)
+    j.setup.tools[0] = ShapedTool(cam::ToolType::VBit, 6.0);
   ElementRef target;
   switch (type) {
   case cam::OpType::Profile:
@@ -229,11 +257,18 @@ TypedJob JobFor(cam::OpType type) {
     break;
   case cam::OpType::SurfaceRotary:
     break; // it takes NO pick: the whole part turns under the cutter
+  case cam::OpType::Engrave:
+    target = ElementRef{sketch, "g" + std::to_string(stroke)};
+    j.ctx = std::make_shared<cam::GenerateContext>();
+    j.ctx->sketchCurves = {cam::SketchEntityCurves(*j.doc, target)};
+    break;
   case cam::OpType::Count:
     break;
   }
-  const cam::DerivedOp d = cam::DeriveOperation(j.setup, j.doc->GetBodies(),
-                                                type, cam::Target{0, target});
+  const cam::DerivedOp d = cam::DeriveOperation(
+      j.setup, j.doc->GetBodies(), type, cam::Target{0, target}, 0, {},
+      j.ctx != nullptr ? j.ctx->sketchCurves
+                       : std::vector<cam::SketchCurves>{});
   INFO("deriving a " << cam::OpTypeNameOrThrow(type) << ": " << d.why);
   REQUIRE(d.ok);
   cam::Operation op = d.op;
@@ -274,8 +309,14 @@ TEST_CASE("cam: a generator reads only the fields its type declares", "[cam]") {
   // and sensitive to its own inputs, and the bulk poke says so.
   for (const cam::OpTypeRow& row : cam::OpTypes()) {
     TypedJob j = JobFor(row.type);
-    const std::string base =
-        Fingerprint(cam::GenerateAll(j.setup, j.doc->GetBodies()));
+    // A copy per call: a context carries what a pass left in it.
+    const auto generate = [&](const cam::Setup& s) {
+      if (j.ctx == nullptr)
+        return cam::GenerateAll(s, j.doc->GetBodies());
+      cam::GenerateContext ctx = *j.ctx;
+      return cam::GenerateAll(s, j.doc->GetBodies(), &ctx);
+    };
+    const std::string base = Fingerprint(generate(j.setup));
     INFO("type " << row.name);
     // A fixture that generates nothing passes every equality below without
     // testing one thing, which is the failure this whole file is about.
@@ -286,7 +327,7 @@ TEST_CASE("cam: a generator reads only the fields its type declares", "[cam]") {
       for (const FieldPoke& p : kPokes)
         if (cam::OpTypeHas(row.type, p.field) == claimed)
           p.poke(poked.operations[0]);
-      return Fingerprint(cam::GenerateAll(poked, j.doc->GetBodies()));
+      return Fingerprint(generate(poked));
     };
 
     if (pokeAll(/*claimed=*/false) != base) {
@@ -299,7 +340,7 @@ TEST_CASE("cam: a generator reads only the fields its type declares", "[cam]") {
         p.poke(poked.operations[0]);
         INFO("a " << row.name << " does not declare `" << p.name
                   << "`, so setting it must change nothing");
-        CHECK(Fingerprint(cam::GenerateAll(poked, j.doc->GetBodies())) == base);
+        CHECK(Fingerprint(generate(poked)) == base);
       }
       // ...and fail even if the bisection cannot reproduce it singly, which
       // would mean two undeclared fields that only matter together.

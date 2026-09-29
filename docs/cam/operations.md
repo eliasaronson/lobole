@@ -5,7 +5,8 @@ strategy turns it into moves. The data is `cam::Operation` in
 `src/core/cam/CamJob.h`; derivation is `CamDerive.cpp`; the 2.5D strategies
 are `CamStrategies.cpp` (with `CamGeometry.cpp` and `CamAdaptive.cpp`), the
 surfacing ones `CamSurfaceStrategies.cpp` over `CamSurface.cpp` and
-`CamDropCutter.cpp`. The 4th-axis operation is in [rotary.md](rotary.md).
+`CamDropCutter.cpp`, engraving `CamEngrave.cpp` over `CamSketchCurves.cpp`.
+The 4th-axis operation is in [rotary.md](rotary.md).
 
 ## Operation types
 
@@ -20,6 +21,7 @@ surfacing ones `CamSurfaceStrategies.cpp` over `CamSurface.cpp` and
 | `SurfaceParallel` | `surface_parallel` | raster finish of a curved or tilted surface; with a stepdown, a 3D rough |
 | `SurfaceWaterline` | `surface_waterline` | constant-Z laps of a steep surface |
 | `SurfaceRotary` | `surface_rotary` | 4th-axis finishing and roughing ([rotary.md](rotary.md)) |
+| `Engrave` | `engrave` | follow a sketch's curves ON the curve: a groove, down from the surface the sketch lies on ([below](#engrave)) |
 
 Common fields: `toolNumber`, `targets` (`Target{jobPartId, ElementRef}`),
 `topZ`/`bottomZ` (setup space; top is where the cut starts, usually the stock
@@ -57,6 +59,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
 | Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
+| (`add_cam_op` type `engrave`; no verb yet) | a sketch entity, `{feature_id: <sketch>, element: "g<entity id>"}` | top = the sketch's plane in the setup; a V-bit's `width_mm` a quarter of the cutter (a text label's: its cap height / 8), a flat's or ball's `depth_mm` a quarter of the cutter; bottom = top minus the depth ([Engrave](#engrave)) |
 
 **The stock top is what the earlier setups left.** `DeriveOperation` takes
 the job's setups cut before this one (`EarlierSetups`: the job's order is the
@@ -311,6 +314,75 @@ square step nobody asked for.
   and the verdict's own advice ("model the break") could not help.
 - **A sharp edge:** the biggest break the tool can make within the wall,
   as before.
+
+### Engrave
+
+`OpType::Engrave` follows the curves of a SKETCH entity ON the curve, not
+offset from it: a line, an arc, a circle, an ellipse, a spline, open or
+closed, and a stroke text label when the sketch has one. It is the one
+operation whose target is not a face of a body, so its target is
+`{feature_id: <the sketch>, element: "g<entity id>"}`, the entity's stable id
+(the same `g<id>` a sketch-made face is named by). Several targets are one
+operation, every stroke of every one ordered together.
+
+- **Resolving the curves.** A sketch makes no body, so the generator cannot
+  find its curves among the bodies it is handed. The caller that has the
+  documents resolves each target (`cam::SketchEntityCurves(doc, ref)`, in
+  `CamSketchCurves.cpp`: the entity's strokes in the part's model space, its
+  sketch plane, and a text label's cap height) and hands them in
+  `GenerateContext::sketchCurves` and to `DeriveOperation`
+  (`ui::JobSketchCurves` in the app; a test resolves its own document). A new
+  sketch entity type is taught to be engraved in ONE place, `StrokesOf` in
+  that file, and the build fails there until it is. Refused, by name: a
+  feature that is not a sketch, an element that is not `g<id>`, an entity the
+  sketch does not have, construction geometry and a point. An engraving
+  handed no curves for a target refuses rather than cutting nothing.
+- **Where it cuts.** The curves go through the sketch plane, the job part's
+  placement and the setup's frame (`BodyToSetup`, the one transform bodies
+  take). The plane must face the spindle; one that does not is refused,
+  naming its angle (lay the face up, or turn it up with `index_a_deg`: at
+  several indices each target is cut only where its plane faces up, as a
+  floor is). The top is the sketch plane in the setup, and it is probed along
+  the strokes (`EngraveSurfaceRefusal`): material just under the plane and
+  none just over it, or the operation is refused, naming where the curve
+  leaves the surface, rather than cut in the air or sunk into the part. The
+  top is read from the plane at every generate; `top_z` and `bottom_z` are
+  what the derivation reported.
+- **Depth from width.** `width_mm` is the groove's width at the surface and
+  `depth_mm` its depth, and they are one statement, not two: setting one over
+  the RPC or in the panel clears the other. For a V-bit
+  `depth = TipHeight(tool, width / 2)`, the verifier's own function, so the
+  two cannot disagree; a width past the cone (wider than the cutter) or a
+  depth past its height is refused, and so are a width and a depth that
+  describe different grooves. A flat or a ball takes `depth_mm` only (a
+  flat's groove is its own width); a drill is refused. Derived: a V-bit's
+  width is a quarter of the cutter, or a text label's cap height / 8, never
+  wider than the cone; a flat's or a ball's depth is a quarter of the cutter.
+  With stock standing above the surface the derivation says so in its notes,
+  and `cam_toolpath` warns unless a face operation before it takes that off
+  (face it first).
+- **Order.** Label by label (a label is one target): the authored first, then
+  whichever is nearest where the last finished. Inside a label, nearest
+  neighbour over its strokes -- an open stroke reversed when its far end is
+  nearer, a closed one started at its nearest point -- then 2-opt, which
+  reverses stretches of the sequence where that shortens the joins
+  (`OrderStrokes`). A stroke that starts where the last one ended keeps the
+  tool down.
+- **Moves.** Onto a label from safe Z: a rapid down to the stock top, then a
+  straight plunge at the plunge feed (a V-bit's point cuts at its centre, and
+  a 3-degree ramp is longer than most strokes). The stroke at the cutting
+  feed, all at one depth. Between strokes of a label a short hop, a
+  clearance over the surface (a millimetre, or the tool's radius if less);
+  one that would pass through the part at that height goes over at safe Z.
+  Between labels, safe Z.
+- **Told to the verifier.** Each stroke is a `Toolpath::Groove` (its
+  polyline, tip height, surface and tool): see
+  [simulation.md](simulation.md#engraved-grooves).
+
+The capability row is `width_mm`, `depth_mm` and `index_a_deg`; every other
+field is refused by name. There is no GUI verb yet: the job tab does not draw
+sketches to pick from, so an engraving is made over the RPC and edited in the
+panel (its type in the combo, its width and depth as widgets).
 
 ## Rough then finish
 

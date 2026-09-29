@@ -269,6 +269,18 @@ struct Verdict {
   // "left 4 tabs standing" is a job to sign off, and a job that reports none
   // where four were asked for is a job to look at.
   int tabs = 0;
+  // Engraved strokes the program declared
+  // (docs/cam/simulation.md#engraved-grooves): a cell inside one's nominal
+  // groove is not gouge down to that groove. `grooveShallow` is how far above
+  // its groove the cut stopped at the worst cell, and counts against Complete;
+  // a groove narrower than `grooveCells` (three cells) is one the grid barely
+  // resolves, counted.
+  int grooves = 0;
+  double grooveShallow = 0.0;
+  glm::dvec2 grooveShallowAt{0.0};
+  int narrowGrooves = 0;
+  double narrowestGroove = 0.0;
+  double grooveCells = 0.0;
   int firstBadLine = 0; // the G-code line of the first such rapid
   size_t cells = 0;
   // How much of the stock the program never passed over. A pocket-only job
@@ -328,7 +340,7 @@ struct Verdict {
   // are the corners a round cutter cannot reach, one large one is an
   // operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
-    return maxLeftover <= tolerance;
+    return maxLeftover <= tolerance && grooveShallow <= tolerance;
   }
 };
 
@@ -376,7 +388,8 @@ Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<Toolpath::Relief>& reliefs = {},
         const std::vector<Toolpath::Tab>& tabs = {},
         const std::vector<FixtureSolid>& fixtures = {},
-        const OtherSetups* others = nullptr);
+        const OtherSetups* others = nullptr,
+        const std::vector<Toolpath::Groove>& grooves = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -394,7 +407,8 @@ VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<Toolpath::Relief>& reliefs = {},
             const std::vector<Toolpath::Tab>& tabs = {},
             const std::vector<FixtureSolid>& fixtures = {},
-            const OtherSetups* others = nullptr);
+            const OtherSetups* others = nullptr,
+            const std::vector<Toolpath::Groove>& grooves = {});
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/simulation.md#verdict). Empty only when there is nothing to say.

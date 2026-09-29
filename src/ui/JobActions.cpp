@@ -363,6 +363,41 @@ const std::vector<Body>& JobBodies(AppState& state) {
   return state.jobBodies;
 }
 
+std::vector<cam::SketchCurves>
+JobSketchCurves(AppState& state, const cam::Setup& setup,
+                const std::vector<cam::Target>& extra) {
+  std::vector<cam::SketchCurves> out;
+  const cam::JobDocument* job = ActiveJob(state);
+  const auto add = [&](const cam::Target& t) {
+    if (!t.IsSet() || cam::FindSketchCurves(out, t) != nullptr)
+      return;
+    const cam::JobPart* part =
+        job != nullptr ? job->FindPart(t.jobPartId) : nullptr;
+    std::string why;
+    const Document* doc =
+        part != nullptr ? JobPartDocument(state, *part, &why) : nullptr;
+    cam::SketchCurves c;
+    if (doc != nullptr) {
+      c = cam::SketchEntityCurves(*doc, t.ref);
+    } else {
+      c.ref = t.ref;
+      c.why = part != nullptr
+                  ? "job part " + std::to_string(t.jobPartId) +
+                        " cannot be read: " + why
+                  : "this job has no part " + std::to_string(t.jobPartId);
+    }
+    c.jobPartId = t.jobPartId;
+    out.push_back(std::move(c));
+  };
+  for (const cam::Operation& op : setup.operations)
+    if (op.type == cam::OpType::Engrave)
+      for (const cam::Target& t : op.targets)
+        add(t);
+  for (const cam::Target& t : extra)
+    add(t);
+  return out;
+}
+
 cam::Target TargetFor(AppState& state, const ElementRef& ref, uint64_t partHint,
                       std::string* why) {
   cam::Target t;
@@ -374,6 +409,19 @@ cam::Target TargetFor(AppState& state, const ElementRef& ref, uint64_t partHint,
     if (std::find(owners.begin(), owners.end(), b.jobPartId) == owners.end())
       owners.push_back(b.jobPartId);
   }
+  // ...or a SKETCH of a part, which makes no body: an engraving names its
+  // curves as {sketch feature, "g<entity id>"}
+  // (docs/cam/operations.md#engrave). Owned by the part whose document has that
+  // sketch; whether the entity is one that can be cut is the operation's to
+  // say, in its own words.
+  if (owners.empty())
+    if (const cam::JobDocument* job = ActiveJob(state))
+      for (const cam::JobPart& part : job->GetParts())
+        if (const Document* doc = JobPartDocument(state, part))
+          if (const Feature* f = doc->FindFeatureById(ref.featureId);
+              f != nullptr && f->TypeName() == "Sketch" &&
+              std::find(owners.begin(), owners.end(), part.id) == owners.end())
+            owners.push_back(part.id);
   if (partHint != 0) {
     if (std::find(owners.begin(), owners.end(), partHint) != owners.end()) {
       t.jobPartId = partHint;

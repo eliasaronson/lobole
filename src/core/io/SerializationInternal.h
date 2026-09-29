@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    137; // v137: the sketch `text` entity -- a one-line label regenerated
+    138; // v138: an operation of type `engrave` -- sketch curves followed
+         //      on the curve -- and its `width_mm` / `depth_mm`.
+         // v137: the sketch `text` entity -- a one-line label regenerated
          //      from its fields (font, cap height, anchor, alignment).
          // v136: an operation's `index_a_deg` -- the rotary indices it is
          //      cut at, one generation per angle (absent = the setup's).

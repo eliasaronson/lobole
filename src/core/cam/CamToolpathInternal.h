@@ -223,6 +223,12 @@ void SurfaceThroughCache(const Setup& setup, const Operation& op,
                          const Tool& tool, const std::vector<Body>& bodies,
                          Toolpath& tp, GenerateContext* ctx);
 
+// An engraving (CamEngrave.cpp, docs/cam/operations.md#engrave): every
+// target's sketch curves from `ctx->sketchCurves`, label by label.
+void GenerateEngrave(const Setup& setup, const Operation& op, const Tool& tool,
+                     const std::vector<Body>& bodies, Toolpath& tp,
+                     const GenerateContext* ctx);
+
 } // namespace detail
 
 // Defined at `cam` scope in the .cpp files but NOT part of the public
@@ -263,8 +269,12 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
 // machine with no rotary axis. Called only when `CutAtIndices(op)`.
 using GenerateAtOneIndex = std::function<std::vector<Toolpath>(
     const Setup&, const Operation&, const std::vector<Body>&)>;
-std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
-                                        const std::vector<Body>& bodies,
-                                        const GenerateAtOneIndex& one);
+// An engraving's targets are presented like floors, by their sketch planes
+// in `curves`.
+std::vector<Toolpath>
+GenerateAtIndices(const Setup& setup, const Operation& op,
+                  const std::vector<Body>& bodies,
+                  const GenerateAtOneIndex& one,
+                  const std::vector<SketchCurves>* curves = nullptr);
 
 } // namespace cam

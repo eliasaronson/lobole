@@ -89,6 +89,9 @@ enum class OpField : uint32_t {
   // Cut at several rotary indices (v136): every op that is cut with the
   // part standing still -- not the rotary surfacing, which turns it.
   Indexed = 1u << 22,
+  // An engraving's groove (v138): its width at the surface, or its depth.
+  EngraveWidth = 1u << 23,
+  EngraveDepth = 1u << 24,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

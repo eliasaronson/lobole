@@ -7,6 +7,7 @@
 #include "core/Measure.h"
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamDropCutter.h"
+#include "core/cam/CamEngrave.h"
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
 
@@ -1398,6 +1399,9 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
   case OpType::SurfaceRotary:
     SurfaceThroughCache(setup, op, tool, bodies, tp, ctx);
     break;
+  case OpType::Engrave:
+    GenerateEngrave(setup, op, tool, bodies, tp, ctx);
+    break;
   case OpType::Count:
     // Not a type. Named so the switch stays exhaustive and a REAL new type
     // still breaks the build rather than landing here.
@@ -1457,6 +1461,8 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
       tp.reliefs.insert(tp.reliefs.end(), sub.reliefs.begin(),
                         sub.reliefs.end());
       tp.tabs.insert(tp.tabs.end(), sub.tabs.begin(), sub.tabs.end());
+      tp.grooves.insert(tp.grooves.end(), sub.grooves.begin(),
+                        sub.grooves.end());
     }
     // Every target refused: there is no operation left, so it fails as one.
     if (tp.moves.empty() && !tp.pending && !tp.skipped.empty())
@@ -1534,9 +1540,9 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   return tp;
 }
 
-std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
-                                        const std::vector<Body>& bodies,
-                                        const GenerateAtOneIndex& one) {
+std::vector<Toolpath> GenerateAtIndices(
+    const Setup& setup, const Operation& op, const std::vector<Body>& bodies,
+    const GenerateAtOneIndex& one, const std::vector<SketchCurves>* curves) {
   const auto refuse = [&](std::string why) {
     Toolpath t;
     t.operationId = op.id;
@@ -1555,8 +1561,13 @@ std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
   // other: the rook's four crenel floors are one pocket's four targets, and
   // at A90 three of them face sideways or down. Other targets -- a wall, a
   // bore -- are followed at every index.
+  // An engraving's sketch plane is the same kind of thing as a floor: it is
+  // cut at the index that faces it to the spindle
+  // (docs/cam/operations.md#engrave).
+  const bool engraving = op.type == OpType::Engrave;
   const bool floors =
-      !op.targets.empty() && OpTypeHas(op.type, OpField::NeedsFlatFloor);
+      !op.targets.empty() &&
+      (OpTypeHas(op.type, OpField::NeedsFlatFloor) || engraving);
   std::vector<bool> presented(op.targets.size(), false);
   std::vector<Toolpath> out;
   for (const double a : op.indexA) {
@@ -1568,9 +1579,15 @@ std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
       here.targets.clear();
       for (size_t i = 0; i < op.targets.size(); i++) {
         glm::vec3 n(0.0f);
-        if (FaceNormalOf(framed, op.targets[i].ref, n,
-                         op.targets[i].jobPartId) &&
-            n.z > 0.99f) {
+        const SketchCurves* c = engraving && curves != nullptr
+                                    ? FindSketchCurves(*curves, op.targets[i])
+                                    : nullptr;
+        const bool faces = engraving
+                               ? c != nullptr && EngraveFrameOf(turned, *c).ok
+                               : FaceNormalOf(framed, op.targets[i].ref, n,
+                                              op.targets[i].jobPartId) &&
+                                     n.z > 0.99f;
+        if (faces) {
           here.targets.push_back(op.targets[i]);
           presented[i] = true;
         }
@@ -1621,9 +1638,10 @@ std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
         tp.moves.push_back(turn);
       }
       tp.moves.insert(tp.moves.end(), piece.moves.begin(), piece.moves.end());
-      // Reliefs and tabs are not carried: each is a point in ONE angle's
-      // frame, and a file that turns is checked by the rotary inspection,
-      // which reads neither (docs/cam/rotary.md#verifying-a-turning-part).
+      // Reliefs, tabs and grooves are not carried: each is a place in ONE
+      // angle's frame, and a file that turns is checked by the rotary
+      // inspection, which reads none of them
+      // (docs/cam/rotary.md#verifying-a-turning-part).
     }
   }
   if (out.empty())
@@ -1646,12 +1664,14 @@ std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
 Toolpath Generate(const Setup& setup, const Operation& op,
                   const std::vector<Body>& bodies, GenerateContext* ctx) {
   if (CutAtIndices(op))
-    return GenerateAtIndices(setup, op, bodies,
-                             [ctx](const Setup& s, const Operation& o,
-                                   const std::vector<Body>& framed) {
-                               return std::vector<Toolpath>{
-                                   GenerateFramed(s, o, framed, ctx)};
-                             })
+    return GenerateAtIndices(
+               setup, op, bodies,
+               [ctx](const Setup& s, const Operation& o,
+                     const std::vector<Body>& framed) {
+                 return std::vector<Toolpath>{
+                     GenerateFramed(s, o, framed, ctx)};
+               },
+               ctx != nullptr ? &ctx->sketchCurves : nullptr)
         .front();
   return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }

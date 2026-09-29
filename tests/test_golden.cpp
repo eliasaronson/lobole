@@ -508,6 +508,32 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
       CHECK(got[i] == want[i].get<std::vector<double>>());
     }
   }
+  if (expect.contains("cam_op_engrave_widths") ||
+      expect.contains("cam_op_engrave_depths")) {
+    // v138: an engraving's groove, stated as its width or its depth. One
+    // that reloads as 0 is refused at the next generate ("state width_mm or
+    // depth_mm"); one that reloads as the OTHER statement is a different
+    // groove for any tool but the one it was typed for.
+    std::vector<double> widths, depths;
+    for (const cam::Setup& s : setups)
+      for (const cam::Operation& o : s.operations) {
+        widths.push_back(o.engraveWidth);
+        depths.push_back(o.engraveDepth);
+      }
+    const auto check = [](const char* key, const std::vector<double>& got,
+                          const nlohmann::json& want) {
+      REQUIRE(got.size() == want.size());
+      for (size_t i = 0; i < got.size(); i++) {
+        INFO("op " << i << " " << key);
+        CHECK_THAT(got[i],
+                   Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
+      }
+    };
+    if (expect.contains("cam_op_engrave_widths"))
+      check("width_mm", widths, expect.at("cam_op_engrave_widths"));
+    if (expect.contains("cam_op_engrave_depths"))
+      check("depth_mm", depths, expect.at("cam_op_engrave_depths"));
+  }
   if (expect.contains("cam_op_rest_from_tools")) {
     // v125: a rest pass's reference cutter. One that reloads as 0 cuts the
     // whole region again with the small tool -- hours, for a corner.

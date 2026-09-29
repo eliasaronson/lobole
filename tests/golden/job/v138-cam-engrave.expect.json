@@ -1,0 +1,22 @@
+{
+  "job_parts": [
+    "Board"
+  ],
+  "cam_op_types": [
+    "engrave",
+    "engrave"
+  ],
+  "job_target_parts": [
+    1,
+    1,
+    1
+  ],
+  "cam_op_engrave_widths": [
+    1.0,
+    0.0
+  ],
+  "cam_op_engrave_depths": [
+    0.0,
+    0.4
+  ]
+}
