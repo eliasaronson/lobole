@@ -114,16 +114,24 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
       return true;
     }
   }
-  // A hole's faces by role, keyed by the sketch point they were drilled at.
+  // A hole's faces by role, keyed by the sketch point they were drilled at;
+  // ".n" keeps two pieces of one role apart, and a face with no role (the
+  // entry disc of a hole started inside the material) is positional.
   if (words.size() == 2) {
     if (const auto e = Numbered(words[0], "p")) {
+      const std::string word = last.substr(0, last.find('.'));
+      if (Numbered(word, "face")) {
+        o.role = ElementRole::Positional;
+        o.entity = *e;
+        return true;
+      }
       for (const RoleSpelling& r : kRoles) {
         const bool holeRole = r.role == ElementRole::Bore ||
                               r.role == ElementRole::Bottom ||
                               r.role == ElementRole::Counterbore ||
                               r.role == ElementRole::CounterboreFloor ||
                               r.role == ElementRole::Countersink;
-        if (holeRole && last == r.name) {
+        if (holeRole && word == r.name) {
           o.role = r.role;
           o.entity = *e;
           return true;

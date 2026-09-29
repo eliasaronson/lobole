@@ -81,6 +81,10 @@ public:
   double csDepth = 0.5;
 
 private:
+  void NameByRole(const CADShape& tool, const std::vector<glm::vec3>& centers,
+                  const std::vector<uint32_t>& entities, const glm::vec3& axis,
+                  double boreDepth, ElementMap& out) const;
+
   // The last-drilled tool and its names (ToolShape).
   CADShape m_tool;
   ElementMap m_toolMap;

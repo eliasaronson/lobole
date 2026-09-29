@@ -4,12 +4,15 @@
 
 #include "TestIO.h"
 #include "core/Document.h"
+#include "core/ElementOrigin.h"
 #include "core/Feature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
 #include <filesystem>
+#include <map>
+#include <set>
 
 using Catch::Matchers::WithinRel;
 
@@ -67,6 +70,58 @@ TEST_CASE("Counterbore removes more than a simple hole", "[hole]") {
   const double removed = M_PI * 1 * 1 * 6 + M_PI * 2 * 2 * 2 - M_PI * 1 * 1 * 2;
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
              WithinRel(1000.0 - removed, 1e-2));
+}
+
+TEST_CASE("A hole names its faces by role and by point", "[hole][toponaming]") {
+  // Named by position, every hole's faces interleaved (7/face0..n), nothing
+  // could ask for "the bores", and adding a point renamed the others.
+  const auto build = [](const std::vector<glm::vec2>& pts) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(
+        std::make_unique<BoxFeature>("B", glm::vec3(0), 40, 10, 10));
+    const uint64_t sk = PointSketch(*doc, 10.0, pts);
+    auto ho =
+        std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 3.0, 6.0);
+    ho->cbDiameter = 6.0;
+    ho->cbDepth = 2.0;
+    doc->AddFeature(std::move(ho));
+    return doc;
+  };
+  auto doc = build({{5, 5}, {20, 5}, {35, 5}});
+  REQUIRE(doc->GetBodies().size() == 1);
+  const uint64_t hole = doc->GetFeature(2)->GetId();
+  std::map<std::string, int> roles;
+  std::set<std::string> mine;
+  for (const auto& [i, name] : doc->GetBodies()[0].elementMap.names) {
+    const topo::ElementOrigin o = topo::DecodeElementName(name);
+    REQUIRE(o.ok);
+    if (o.madeBy != hole)
+      continue;
+    roles[topo::ElementRoleName(o.role)]++;
+    mine.insert(name.substr(0, name.find(';')));
+  }
+  CHECK(roles["bore"] == 3);
+  CHECK(roles["bottom"] == 3);
+  CHECK(roles["counterbore"] == 3);
+  CHECK(roles["counterbore_floor"] == 3);
+  CHECK(roles.size() == 4); // nothing positional
+
+  // Drop the middle point: the other two holes keep every name.
+  auto* sk = dynamic_cast<SketchFeature*>(doc->GetFeature(1));
+  REQUIRE(sk != nullptr);
+  const uint32_t middle = sketch::EntityId(sk->entities[1]);
+  sk->entities.erase(sk->entities.begin() + 1);
+  REQUIRE(doc->Regenerate());
+  std::set<std::string> kept;
+  for (const std::string& n : mine)
+    if (n.find("/p" + std::to_string(middle) + "/") == std::string::npos)
+      kept.insert(n);
+  CHECK(kept.size() == 8);
+  std::set<std::string> after;
+  for (const auto& [i, name] : doc->GetBodies()[0].elementMap.names)
+    if (topo::DecodeElementName(name).madeBy == hole)
+      after.insert(name.substr(0, name.find(';')));
+  CHECK(after == kept);
 }
 
 TEST_CASE("Hole errors and round-trips (v21)", "[hole]") {

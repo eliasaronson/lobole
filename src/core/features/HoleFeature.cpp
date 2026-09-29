@@ -11,14 +11,20 @@
 #include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
+#include "core/ElementOrigin.h"
 #include "core/features/SketchFeature.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepTools.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Lin.hxx>
 
 #include <algorithm>
+#include <map>
 #include <variant>
 #include <vector>
 
@@ -112,20 +118,22 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // source split in two (the camera PCB's) projects as two half-arcs, and a
   // cylinder projected along its axis as two circles.
   std::vector<glm::vec3> centers;
-  const auto add = [&](const glm::vec2& uv) {
+  std::vector<uint32_t> entities; // the sketch entity each centre came from
+  const auto add = [&](const glm::vec2& uv, uint32_t entity) {
     const glm::vec3 w = sk->plane.PlaneToWorld(uv);
     for (const glm::vec3& c : centers)
       if (glm::length(c - w) < 1e-4f)
         return;
     centers.push_back(w);
+    entities.push_back(entity);
   };
   for (const auto& e : sk->entities) {
     if (const auto* p = std::get_if<sketch::Point>(&e))
-      add(p->p);
+      add(p->p, p->id);
     else if (const auto* c = std::get_if<sketch::Circle>(&e))
-      add(c->center);
+      add(c->center, c->id);
     else if (const auto* a = std::get_if<sketch::Arc>(&e))
-      add(a->center);
+      add(a->center, a->id);
   }
   if (centers.empty()) {
     SetError("hole sketch has no points or circles to place holes at");
@@ -267,7 +275,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   }
 
   ElementMap toolMap;
-  topo::NamePrimitiveElements(tool, std::to_string(GetId()), toolMap);
+  NameByRole(tool, centers, entities, axis, boreDepth, toolMap);
   m_tool = tool;
   m_toolMap = toolMap;
   if (!ApplyBodyModeReporting(ctx.bodies, std::move(tool), std::move(toolMap),
@@ -296,23 +304,86 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 // not a thread. The region carries no length, so it is the whole bore, and
 // no minimum engagement, so the standard's pitch stands.
 void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
-  const std::string mine = std::to_string(GetId()) + "/";
-  const double want = diameter / 2.0;
   for (Body& body : bodies) {
     if (body.reference || !body.shape.IsValid())
       continue;
-    int index = 0;
-    for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
-         ex.Next(), index++) {
-      const std::string* name = body.elementMap.NameOf(index);
-      if (name == nullptr || name->rfind(mine, 0) != 0)
-        continue;
-      BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
-      if (surf.GetType() != GeomAbs_Cylinder ||
-          std::abs(surf.Cylinder().Radius() - want) > 1e-6)
-        continue;
-      body.threadRegions.push_back(
-          {ElementRef{body.createdBy, *name}, fitThread, 0.0, 0.0, false});
+    for (const auto& [index, name] : body.elementMap.names) {
+      const topo::ElementOrigin o = topo::DecodeElementName(name);
+      if (o.ok && o.derived.empty() && o.madeBy == GetId() &&
+          o.role == topo::ElementRole::Bore)
+        body.threadRegions.push_back(
+            {ElementRef{body.createdBy, name}, fitThread, 0.0, 0.0, false});
     }
   }
+}
+
+// Each face of the drilled tool by what it is, keyed by the sketch entity
+// its hole was drilled at: `<id>/p<entity>/bore`, `/bottom`, `/counterbore`,
+// `/counterbore_floor`, `/countersink`. Positional names interleaved every
+// hole's faces, so nothing could ask for "the bores", and adding a point
+// renumbered the rest (docs/modeling/toponaming.md#naming-grammar).
+void HoleFeature::NameByRole(const CADShape& tool,
+                             const std::vector<glm::vec3>& centers,
+                             const std::vector<uint32_t>& entities,
+                             const glm::vec3& axis, double boreDepth,
+                             ElementMap& out) const {
+  out = {};
+  const gp_Dir dir(axis.x, axis.y, axis.z);
+  const double r = diameter / 2.0;
+  const double tol = 1e-4 * std::max(1.0, boreDepth);
+  const auto same = [&](double a, double b) { return std::abs(a - b) < tol; };
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(tool.GetShape(), TopAbs_FACE, faces);
+  std::map<std::string, int> seen;
+  std::map<size_t, int> unnamed; // per hole
+  for (int i = 1; i <= faces.Extent(); i++) {
+    const TopoDS_Face& face = TopoDS::Face(faces(i));
+    BRepAdaptor_Surface s(face);
+    // A point on (or level with) the face, on its hole's axis.
+    gp_Pnt p;
+    std::string role;
+    if (s.GetType() == GeomAbs_Cylinder) {
+      const gp_Cylinder cy = s.Cylinder();
+      p = cy.Location();
+      if (same(cy.Radius(), r))
+        role = "bore";
+      else if (kind == HoleKind::Counterbore &&
+               same(cy.Radius(), cbDiameter / 2))
+        role = "counterbore";
+    } else if (s.GetType() == GeomAbs_Cone) {
+      p = s.Cone().Location();
+      role = "countersink";
+    } else {
+      double u0, u1, v0, v1;
+      BRepTools::UVBounds(face, u0, u1, v0, v1);
+      p = s.Value((u0 + u1) / 2, (v0 + v1) / 2);
+    }
+    // Its hole: the centre whose axis it sits on.
+    size_t site = 0;
+    double best = 1e300;
+    for (size_t k = 0; k < centers.size(); k++) {
+      const gp_Pnt c(centers[k].x, centers[k].y, centers[k].z);
+      const double d = gp_Lin(c, dir).Distance(p);
+      if (d < best) {
+        best = d;
+        site = k;
+      }
+    }
+    if (s.GetType() == GeomAbs_Plane) {
+      const glm::vec3& c = centers[site];
+      const double t = gp_Vec(gp_Pnt(c.x, c.y, c.z), p).Dot(gp_Vec(dir));
+      if (same(t, boreDepth))
+        role = "bottom";
+      else if (kind == HoleKind::Counterbore && same(t, cbDepth))
+        role = "counterbore_floor";
+    }
+    if (role.empty())
+      role = "face" + std::to_string(unnamed[site]++);
+    std::string name = std::to_string(GetId()) + "/p" +
+                       std::to_string(entities[site]) + "/" + role;
+    if (const int n = seen[name]++; n > 0) // a role split in two pieces
+      name += "." + std::to_string(n);
+    out.names[i - 1] = name;
+  }
+  topo::ApplyFallbackPasses(tool, out);
 }
