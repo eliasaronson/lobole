@@ -24,7 +24,7 @@ so they go in order, 2 first.
 
 The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
 
-## 1. The rotary finish and the mitre
+## 1. Small fixes
 
 - **The rotary finish leaves patches at one angle.** The profiles are
   finishable by the 3 mm ball everywhere (every inside radius is at least
@@ -35,47 +35,118 @@ The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
 - **The mitre's pocket both errors and posts.** The bishop's 3.2 mm notch,
   derived as adaptive for a 3 mm cutter, reports "could not lead into the
   cut" and still produces 9229 moves; the outcome must be one or the other.
+- **A pattern of a Hole.** `pattern(source=<hole>)` fails with "source body
+  not found": a Hole makes no body, and the pattern looks for one. A hole
+  pattern is what a bolt circle is; it should pattern the hole's centres.
+- **A cut that removes nothing still splits faces.** A cut extruded away
+  from the part warns "removed no material" and leaves the face it touched
+  split in two (`cap1;M4.0`, `cap1;M4.1`); with nothing removed the model
+  should be unchanged.
 
 ## 2. Picking faces by what made them
 
 The round's biggest cost was face picking: every operation needed a filter by
 normal, centroid and radius, and the wrong ones (a collar step taken for a
-bore floor, a silhouette for an edge) each cost a rerun. The information is
-already in the element names -- `<cut>/cap1;M<cut>` is that cut's floor,
-`<extrude>/g<N>` the side swept from sketch entity N, `...;G<fillet>` a
-fillet's face -- but nothing reads it.
+bore floor, a silhouette for an edge) each cost a rerun. What made a face is
+already in its name, and nothing reads it. From a real part (a block, a
+pocket cut 4 over sketch lines 2-5, a hole 6, a fillet 7):
 
-- **One decoder** (`src/core/ElementOrigin.{h,cpp}`): a name to
-  `{made_by, role: start_cap | end_cap | side(entity) | blend | positional,
-  modified_by[], generated_by[], derived_path, pattern_instance}`. It
-  handles the Derived prefix (nested), `#i` anywhere in the chain, `.i` on
-  both M and G, and the `L` fallback (role unknown, said so). It replaces
-  `drawing::MappedNameFeatureIds` and `HoleFeature::RecordTapping`'s prefix
-  match, so there is one parser.
-- **Roles for the features that rename wholesale where it matters:** the
-  Hole names its bore, its bottom and its counterbore instead of
-  `<id>/face<i>`, because a drill target is what CAM picks most. Shell,
-  draft, loft, sweep and the rest keep positional names and report the role
-  as `positional`, naming the feature responsible.
-- **`find_elements` RPC** `{part?, body?, made_by, role?, entity?, kind?,
-  facing?}`: the faces or edges a feature made in a given role, each with
-  its ref, geometry and the reason it matched. An empty answer says why
-  ("feature 12 is a Shell, which renames every face; its faces are
-  12/face0..n"); an unknown role is refused, naming the roles. Convenience
-  roles over it: `floor` (a cut's end-cap pieces), `walls` (its sides),
-  `bore` (a hole's).
-- **`list_elements`** reports each face's `made_by` and `role`.
-- **SDK:** the handle a feature call returns answers for its own faces:
-  `cut.floors()`, `cut.walls(entity=)`, `extrude.end_cap()`,
-  `fillet.faces()`, `hole.bores()`; `Body.faces(made_by=, role=)` for the
-  rest.
-- **Dogfood:** rewrite the chess generator's picks with it; every geometry
-  filter that can go, goes.
+| face | name | what it says |
+|---|---|---|
+| pocket floor | `4/cap1` | cut 4's far end |
+| pocket walls | `4/g2` .. `4/g5` | swept from sketch entities 2-5 |
+| block top | `2/cap1;M4;M6;M7` | extrude 2's end, cut by 4, 6 and 7 |
+| fillet | `2/g5;U3;G7` | made by fillet 7 from edge `2/g5;U3` |
+| hole bore, bottom | `6/face0`, `6/face1` | positional: the hole renames wholesale |
 
-Tests: the decoder over the golden corpus (every named element decodes, the
-round-trip `made_by` matches the producing feature), each role on extrude,
-revolve, cut, pattern, fillet, hole and a Derived copy, and a smoke over
-`find_elements`' refusals.
+and in a chess blank, the rook's crenel floor copied in by Derived feature 9
+is `9/12/31/cap1#2;M15` -- the third pattern copy of the piece part's cut
+31's far end.
+
+### The decoder
+
+`src/core/ElementOrigin.{h,cpp}`: a name to
+
+```
+ElementOrigin {
+  derived   [ (derived feature id, source created_by) ... ]  outermost first
+  madeBy    the feature that MADE it, in the innermost document: the seed's
+            tag, or the last G step's tag when there is one (a blend face is
+            the fillet's, not the edge's)
+  role      start_cap | end_cap | side | blend | pole | seam | positional
+            | boundary (the L fallback: made of other faces' edges, no role)
+            | bore | bottom | counterbore | counterbore_floor | countersink
+  entity    the sketch entity a side face was swept from (0 when none)
+  instance  the pattern copy ('#i'), or none; 'm' for a mirror
+  modifiedBy the M steps' tags, in order
+}
+```
+
+It reads every form the grammar has and the ones seen in real documents:
+`#i` before later steps, `.i` on M and G, a feature's M on its own seed,
+nested Derived prefixes, multi-group caps (`cap0@g<k>`), `U` edge suffixes
+(an edge's origin is its face's, plus which boundary edge). An edge decodes
+through the face it was named from. `drawing::MappedNameFeatureIds` and
+`HoleFeature::RecordTapping`'s prefix match go through it, so there is one
+parser. Test: every name in the golden corpus and in the chess project
+decodes, and `madeBy` names a feature that exists in that document.
+
+### A hole names its faces by role
+
+`HoleFeature` stops naming its tool positionally. Each hole is built per
+centre and its faces named `<hole>/p<entity>/bore`, `/bottom`,
+`/counterbore`, `/counterbore_floor`, `/countersink`, keyed by the sketch
+entity the centre came from, so adding a hole renames none of the others.
+No golden or saved reference names a hole face today. The tapping record
+takes the bores by role instead of by radius. Test: a three-hole
+counterbored Hole names every face by role, and deleting the middle point
+leaves the other two holes' names unchanged.
+
+Shell, draft, split, loft, sweep, pipe, rib, fasteners and imports keep
+positional names; they decode as `positional` with `madeBy` still right.
+
+### One RPC: `list_elements` filters and says
+
+`list_elements` gains `made_by` (feature id or name; with `part` on a
+Derived-bearing part, `{part, feature}` names a feature of the SOURCE part),
+`via` (the Derived feature it came in through), `role`, `entity`, and every
+face and edge it lists carries `made_by`, `role` and, when set, `entity`,
+`instance`, `derived`. A second RPC would be a second place to learn.
+
+- An unknown role is refused, naming the roles.
+- A filter that matches nothing says why: the feature does not exist; it
+  made no faces on this part; or it renames wholesale ("feature 12 is a
+  Shell; its faces are named by position, 12/face0..n, role positional").
+- Roles that read better for a cut are aliases a cut answers to: `floor` =
+  `end_cap` of a cut, `walls` = `side`. A through cut has no floor and says
+  so.
+
+### The SDK
+
+- Every feature call returns a `Feature` handle -- `hole`, `fillet`,
+  `chamfer`, `pattern`, and `cut`, which returns None today because a cut
+  makes no body. It still indexes like the response dict (`h["id"]`), so no
+  generator breaks. `extrude`/`revolve` keep returning the Body they made;
+  one that joins or cuts returns the `Feature`.
+- `Feature.faces(role=, entity=)` / `.edges(...)` over the whole part, and
+  the words a script means: `cut.floor()`, `cut.walls(entity=)`,
+  `extrude.end_cap()`, `extrude.start_cap()`, `fillet.faces()`,
+  `hole.bores()`, `hole.bottoms()`.
+- `Body.faces(made_by=, role=, via=)` beside the existing geometric filters,
+  and `Part.feature("Crenel")` for a feature by name.
+- Face and Edge carry `made_by` and `role`; `Element.feature_id` stays the
+  body's (it is what a ref needs).
+
+### Dogfood
+
+The chess generator's picks go through it: `cam.py`'s `floors()` (normal,
+radius and an x window) becomes the crenel cut's floors via the rook's
+Derived feature; the knight's fillet edges are the head extrude's side
+edges. What cannot go is said in the round's notes.
+
+Tests: the decoder over both corpora; each role on extrude, revolve, cut,
+pattern, mirror, fillet, hole, shell and a nested Derived copy; the RPC's
+refusals and its "why nothing"; `sdk_smoke.py` for the handles.
 
 ## 3. A configuration per occurrence and per job part
 
