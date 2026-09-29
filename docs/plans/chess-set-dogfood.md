@@ -22,16 +22,19 @@ so they go in order, 2 first.
 2. **The pawn blank in cheap wood**, rough and finish only (`-T1`, `-T2`);
    calipers on the first pawn against the drawing.
 
-Phase 1's profile change lands before this, so the pawn needs no rest pass.
+The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
 
-## 1. Small fixes and the profile change
+## 1. The rotary finish and the mitre
 
-- **Profiles a 3 mm ball finishes** (`generators/chess/profiles.py`). Round
-  the arc-to-line inside corners too (bead, cove, ball necks), not only the
-  line-to-line ones, and widen every groove to at least 3.4 mm, so every
-  inside radius is at least 1.6 mm. Verified: each blank's `cam_verify` with
-  rough and finish only leaves nothing over the finish's cusp, and the rest
-  op is dropped from the jobs.
+- **The rotary finish leaves patches at one angle.** The profiles are
+  finishable by the 3 mm ball everywhere (every inside radius is at least
+  1.6 mm), yet each blank's verify lists 0.16-0.45 mm regions, each at ONE
+  rotary angle rather than a ring -- the finish toolpath misses or lifts
+  there, or the verifier samples wrongly. Test: a turned cove finished by a
+  ball leaves nothing past its cusp at any A.
+- **The mitre's pocket both errors and posts.** The bishop's 3.2 mm notch,
+  derived as adaptive for a 3 mm cutter, reports "could not lead into the
+  cut" and still produces 9229 moves; the outcome must be one or the other.
 
 ## 2. Picking faces by what made them
 
