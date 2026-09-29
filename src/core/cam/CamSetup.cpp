@@ -402,6 +402,37 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
   return out;
 }
 
+uint64_t FramingKey(const Setup& setup) {
+  uint64_t h = 1469598103934665603ULL;
+  const auto d = [&h](double v) {
+    const unsigned char* c = reinterpret_cast<const unsigned char*>(&v);
+    for (size_t i = 0; i < sizeof v; i++) {
+      h ^= c[i];
+      h *= 1099511628211ULL;
+    }
+  };
+  const auto q = [&d](const glm::dquat& r) {
+    d(r.w);
+    d(r.x);
+    d(r.y);
+    d(r.z);
+  };
+  q(setup.frame);
+  d(setup.rotationA);
+  d(static_cast<double>(setup.placements.size()));
+  for (const Placement& p : setup.placements) {
+    d(static_cast<double>(p.jobPartId));
+    d(p.pos.x);
+    d(p.pos.y);
+    d(p.rotZdeg);
+    d(p.enabled ? 1.0 : 0.0);
+    d(p.frame ? 1.0 : 0.0);
+    if (p.frame)
+      q(*p.frame);
+  }
+  return h;
+}
+
 // --- seats (docs/cam/setup.md#seats) --------------------------------
 
 bool ParseStockEdge(const std::string& text, StockEdge& out) {

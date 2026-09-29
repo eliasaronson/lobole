@@ -682,10 +682,11 @@ ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
   return out;
 }
 
-uint64_t OutlineKey(uint64_t bodiesKey, double topZ,
+uint64_t OutlineKey(uint64_t bodiesKey, uint64_t framingKey, double topZ,
                     const std::vector<double>& passes, double deflection) {
   // Every argument ProjectedOutlines takes, and nothing else: the function
-  // is pure, so this is complete by construction and needs no gate.
+  // is pure, so this is complete by construction and needs no gate. Its
+  // bodies arrive FRAMED, so they are the geometry AND how it is turned.
   uint64_t h = 1469598103934665603ULL;
   const auto bytes = [&h](const void* p, size_t n) {
     const unsigned char* c = static_cast<const unsigned char*>(p);
@@ -695,6 +696,7 @@ uint64_t OutlineKey(uint64_t bodiesKey, double topZ,
     }
   };
   bytes(&bodiesKey, sizeof bodiesKey);
+  bytes(&framingKey, sizeof framingKey);
   bytes(&topZ, sizeof topZ);
   bytes(&deflection, sizeof deflection);
   const uint64_t count = passes.size();

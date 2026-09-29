@@ -30,25 +30,26 @@ constexpr OpTypeRow kRows[] = {
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Tabs | OpField::CornerRelief |
          OpField::LeadArcs | OpField::DrilledBores | OpField::Finish |
-         OpField::FullWidth},
+         OpField::FullWidth | OpField::Indexed},
     {OpType::Pocket, "pocket", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Stepover | OpField::UseOutline |
          OpField::CornerRelief | OpField::Finish | OpField::ClearsInside |
-         OpField::NeedsFlatFloor},
+         OpField::NeedsFlatFloor | OpField::Indexed},
     {OpType::Face, "face", false,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
-         OpField::Stepover | OpField::Finish | OpField::NeedsFlatFloor},
+         OpField::Stepover | OpField::Finish | OpField::NeedsFlatFloor |
+         OpField::Indexed},
     {OpType::Drill, "drill", false,
      OpField::StockToLeave | OpField::Stepover | OpField::Peck |
-         OpField::Finish | OpField::FullWidth},
+         OpField::Finish | OpField::FullWidth | OpField::Indexed},
     {OpType::Adaptive, "adaptive", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Side |
          OpField::Stepover | OpField::UseOutline | OpField::Finish |
-         OpField::ClearsInside | OpField::NeedsFlatFloor},
+         OpField::ClearsInside | OpField::NeedsFlatFloor | OpField::Indexed},
     {OpType::EdgeRound, "edge_round", true,
      OpField::Climb | OpField::Side | OpField::Stepover | OpField::EdgeSize |
-         OpField::Finish},
+         OpField::Finish | OpField::Indexed},
     // Finishing passes. Short rows, and the absences are the design: no
     // stepdown (a finish pass is not a stack of levels -- pycam says this
     // most clearly by simply not declaring the key), no side (there is no
@@ -66,9 +67,11 @@ constexpr OpTypeRow kRows[] = {
     // be a REST pass, cutting only where a larger cutter could not reach.
     {OpType::SurfaceParallel, "surface_parallel", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Stepover |
-         OpField::SampleStep | OpField::CutAngle | OpField::RestFromTool},
+         OpField::SampleStep | OpField::CutAngle | OpField::RestFromTool |
+         OpField::Indexed},
     {OpType::SurfaceWaterline, "surface_waterline", true,
-     OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
+     OpField::StockToLeave | OpField::SampleStep | OpField::ZStep |
+         OpField::Indexed},
     // 4-axis finishing: parallel passes (a rotary raster), one spiral, or
     // helical passes that follow a twist (both continuous 4-axis), by
     // `rotaryPattern`; `leadMm` is the helical pattern's. The absences are

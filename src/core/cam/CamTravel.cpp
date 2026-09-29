@@ -647,8 +647,11 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
     if (!op.enabled)
       continue;
     // Each path arrives clipped to the machine (GenerateFramed), the full
-    // pass and the panel's single-operation refresh alike.
-    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx))
+    // pass and the panel's single-operation refresh alike. An operation cut
+    // at several indices is framed once per angle instead.
+    for (Toolpath& tp : CutAtIndices(op)
+                            ? GenerateOp(setup, op, bodies, ctx)
+                            : GenerateOpFramed(setup, op, framed, ctx))
       out.push_back(std::move(tp));
   }
   // Tool order is an order of TOOLPATHS (R6): an operation that roughs with
@@ -725,6 +728,12 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
 std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
                                  const std::vector<Body>& bodies,
                                  GenerateContext* ctx) {
+  if (CutAtIndices(op))
+    return GenerateAtIndices(setup, op, bodies,
+                             [ctx](const Setup& s, const Operation& o,
+                                   const std::vector<Body>& framed) {
+                               return GenerateOpFramed(s, o, framed, ctx);
+                             });
   return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
 

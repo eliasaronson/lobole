@@ -57,7 +57,8 @@ rotary letter is a parse warning, not silence. The travel checks
 
 **Which setups are held in the rotary.** `Setup::heldIn`, saved as
 `held_in` (`rotary` | `bed`), unstated is derived: rotary when the setup has
-a `surface_rotary` op or a non-zero index. An indexed setup at A = 0 (the
+a `surface_rotary` op, an op cut at several indices, or a non-zero index.
+An indexed setup at A = 0 (the
 first side of a part turned for the second) must state it. `list_cam_setups`
 reports it.
 
@@ -112,6 +113,40 @@ simulation run unchanged; every move carries the constant A, and the post
 writes one `G0 A…` at safe Z before the first operation. An indexed file
 verifies and plays on the ordinary height map: one constant A is a part
 standing still. Arc fitting works on indexed jobs.
+
+### One operation at several indices
+
+`Operation::indexA`, saved and taken over the RPC as `index_a_deg` (a list of
+degrees; every op type but `surface_rotary`, capability `OpField::Indexed`),
+cuts one operation at each of those indices: the rook's four crenels are one
+pocket at `[0, 90, 180, 270]`, not four setups that each repeat it. Empty
+cuts at the setup's `rotation_a`. The panel offers it as "at A" on a machine
+with a rotary axis; a machine without one is refused in the operation's own
+error. A `surface_rotary` does not take it (the RPC refuses it by name), and
+a list carried onto one from another route changes nothing (`CutAtIndices`).
+
+`GenerateAtIndices` runs the ordinary generation once per angle, on a copy of
+the setup turned to it and the bodies framed for that copy, and joins each
+role's pieces (rough, and finish when there is one): a rapid at safe Z over
+the next piece's start carries the new A, so the post retracts and turns
+there, and every move is stamped with its A, A0 included. The targets of an
+op that clears down to a floor (`OpField::NeedsFlatFloor`: pocket, face,
+adaptive) are floors, and each is cut only at the index that turns it to
+the spindle; a floor no index presents is named in `skipped`. Other targets
+(a wall, a bore) are followed at every index. A piece that fails
+is named by its angle in `skipped`; the operation fails only when every angle
+did. Each angle's depths are the op's own `top_z`/`bottom_z`, in that angle's
+frame.
+
+Such a file's A changes, so `VerifyGcode` reads it on the radius map, and the
+backplot draws each move where it lands on the work. Tabs and reliefs are not
+carried (a point in one angle's frame; the rotary check reads neither).
+
+The caches that live across generations key on how the part is framed
+(`FramingKey`: the fixture frame, the index and every placement) as well as
+the caller's geometry fingerprint — one fingerprint covers every setup of a
+job and every index of one operation, and keyed on it alone the outline cache
+handed one framing's outlines to another.
 
 ## Continuous: `surface_rotary`
 

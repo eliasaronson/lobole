@@ -2398,8 +2398,8 @@ TEST_CASE("cam: a profile's outlines are cached, and can be deferred to a "
     CHECK(deferred[0].error.empty()); // not "produced no toolpath"
     REQUIRE(ctx.pendingOutline.size() == 1);
     const cam::OutlineRequest& req = ctx.pendingOutline.front();
-    CHECK(req.key ==
-          cam::OutlineKey(kBodies, req.topZ, req.passes, req.deflection));
+    CHECK(req.key == cam::OutlineKey(kBodies, cam::FramingKey(setup), req.topZ,
+                                     req.passes, req.deflection));
     CHECK(req.passes == cam::DepthPasses(op));
 
     cache.Put(req.key, cam::OutlinePass(req));
@@ -2416,11 +2416,40 @@ TEST_CASE("cam: a profile's outlines are cached, and can be deferred to a "
 
   SECTION("the key moves with every argument") {
     const std::vector<double> passes = cam::DepthPasses(op);
-    const uint64_t k = cam::OutlineKey(kBodies, op.topZ, passes, 0.02);
-    CHECK(cam::OutlineKey(kBodies + 1, op.topZ, passes, 0.02) != k);
-    CHECK(cam::OutlineKey(kBodies, op.topZ + 0.5, passes, 0.02) != k);
-    CHECK(cam::OutlineKey(kBodies, op.topZ, {passes.front()}, 0.02) != k);
-    CHECK(cam::OutlineKey(kBodies, op.topZ, passes, 0.05) != k);
+    const uint64_t f = cam::FramingKey(setup);
+    const uint64_t k = cam::OutlineKey(kBodies, f, op.topZ, passes, 0.02);
+    CHECK(cam::OutlineKey(kBodies + 1, f, op.topZ, passes, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, f + 1, op.topZ, passes, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, f, op.topZ + 0.5, passes, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, f, op.topZ, {passes.front()}, 0.02) != k);
+    CHECK(cam::OutlineKey(kBodies, f, op.topZ, passes, 0.05) != k);
+    cam::Setup turned = setup;
+    turned.rotationA = 90.0;
+    CHECK(cam::FramingKey(turned) != f);
+    turned = setup;
+    turned.frame = cam::FlipFrame(setup.frame);
+    CHECK(cam::FramingKey(turned) != f);
+  }
+
+  SECTION("one geometry key, two framings: neither reads the other's") {
+    // Every setup of a job shares the caller's fingerprint, and so does every
+    // index of one operation. Keyed on it alone, the block turned onto its
+    // side was cut round the outline of the block standing up.
+    cam::OutlineCache cache;
+    cam::GenerateContext ctx;
+    ctx.outlineCache = &cache;
+    ctx.bodiesKey = kBodies;
+    (void)cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    cam::Setup turned = setup;
+    turned.rotationA = 90.0;
+    const std::vector<cam::Toolpath> fresh =
+        cam::GenerateAll(turned, doc->GetBodies());
+    const std::vector<cam::Toolpath> cached =
+        cam::GenerateAll(turned, doc->GetBodies(), &ctx);
+    REQUIRE(fresh.size() == 1);
+    REQUIRE(cached.size() == 1);
+    CHECK_FALSE(SameMoves(fresh[0], ref[0]));
+    CHECK(SameMoves(cached[0], fresh[0]));
   }
 }
 

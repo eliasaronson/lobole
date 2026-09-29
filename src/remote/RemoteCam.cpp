@@ -291,6 +291,11 @@ constexpr MethodDoc kCamMethods[] = {
      "has_rotary_axis. With no target it cuts the whole length; a target "
      "face bounds it ALONG the axis to that face's extent (it still turns "
      "all the way round). "
+     "index_a_deg (a list of degrees about the rotary axis) cuts any op but "
+     "surface_rotary at EACH of those indices -- four crenels are one op at "
+     "[0, 90, 180, 270] -- generated in each angle's frame, joined by a "
+     "retract, every move carrying its A; empty cuts at the setup's "
+     "rotation_a. It needs a machine with has_rotary_axis. "
      "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
      "the whole tool): an operation cutting deeper than that is cutting with "
      "the shank and driving the holder into the work, and the reach finding "
@@ -399,8 +404,8 @@ constexpr MethodDoc kCamMethods[] = {
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
-     "rest_from_tool, rotary_pattern, "
+     "finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, name, "
+     "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -415,8 +420,8 @@ constexpr MethodDoc kCamMethods[] = {
      "refused. The tool's reach is checked as add_cam_op checks it: refused "
      "when the shank would be driven into a wall, `warnings` otherwise.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, id, lead_arcs, lead_mm, name, peck, "
-     "rest_from_tool, rotary_pattern, "
+     "finish_stock, finish_tool, id, index_a_deg, lead_arcs, lead_mm, name, "
+     "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},
@@ -438,8 +443,8 @@ constexpr MethodDoc kCamMethods[] = {
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
      "bottom_z, climb, corner_relief, cut_angle_deg, edge_size, enabled, "
-     "finish_stock, finish_tool, lead_arcs, lead_mm, name, peck, "
-     "rest_from_tool, rotary_pattern, "
+     "finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, name, "
+     "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
      "z_step_mm"},

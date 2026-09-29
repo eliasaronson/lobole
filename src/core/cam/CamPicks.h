@@ -125,8 +125,12 @@ struct OutlineResult {
 };
 
 // `bodiesKey` is the caller's fingerprint of the geometry, as for surfacing
-// (`JobRenderVersion`); the rest are ProjectedOutlines' own arguments.
-[[nodiscard]] uint64_t OutlineKey(uint64_t bodiesKey, double topZ,
+// (`JobRenderVersion`), and `framingKey` how the setup turns it
+// (`FramingKey`): one fingerprint covers every setup of a job, and every
+// index of one operation, whose outlines differ. The rest are
+// ProjectedOutlines' own arguments.
+[[nodiscard]] uint64_t OutlineKey(uint64_t bodiesKey, uint64_t framingKey,
+                                  double topZ,
                                   const std::vector<double>& passes,
                                   double deflection);
 

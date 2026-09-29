@@ -216,6 +216,7 @@ here; the golden corpus and git history cover them.
 | 133 | Derived `configuration`: the source's configuration the copy is taken in, by id; absent = whichever it has active ([Derived](../modeling/derived.md#configurations)) |
 | 134 | Drawing view `rotation_deg`: the view turned on the sheet, counter-clockwise about its own direction; absent = 0 ([drawings](../drawings/README.md#rotation)). A dimension ref's `extreme` (`left`/`right`/`top`/`bottom`): the curve's furthest point that way ([dimensions](../drawings/README.md#dimensions-and-annotation)) |
 | 135 | A part occurrence's `configuration_id` names one of the PART's configurations (it was sub-assemblies only); an occurrence's `material` overrides every body's (a slug; absent = the part's own); a job part's `configuration` ([assemblies](../assemblies/README.md#configurations-per-placement)) |
+| 136 | CAM operation `index_a_deg`: the rotary indices one operation is cut at, generated once per angle and joined by a retract; absent = the setup's `rotation_a` ([4th axis](../cam/rotary.md#one-operation-at-several-indices)) |
 
 ## The directory form
 

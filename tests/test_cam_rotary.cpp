@@ -1227,4 +1227,85 @@ TEST_CASE("cam rotary: an indexed setup starts from what the turning left",
   CHECK(topAt(stock, 20.0) > 10.9);
   CHECK(topAt(stock, 4.0) > 14.9);
 }
+TEST_CASE("cam rotary: one operation cut at four indices posts four A words "
+          "and verifies clean",
+          "[cam][rotary]") {
+  // A 24 mm square bar on the axis: four faces, and ONE face operation at
+  // 0/90/180/270 is what cuts them from the round blank -- the rook's
+  // crenels and the queen's crown were a setup per angle before
+  // (docs/cam/rotary.md#one-operation-at-several-indices).
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Square bar", glm::vec3(0, -12, -12), 60.0, 24.0, 24.0));
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.heldIn = cam::Setup::HeldIn::Rotary;
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  setup.safeZ = 30.0;
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Face, cam::Target{});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  // From the round blank's top (the bar's corner radius, 17, plus the 1 mm
+  // margin) down to the face, in layers.
+  op.topZ = 18.0;
+  op.bottomZ = 12.0;
+  op.stepdown = 2.0;
+  op.indexA = {0.0, 90.0, 180.0, 270.0};
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  CHECK(paths[0].skipped.empty());
+  std::set<double> angles;
+  for (const cam::Move& m : paths[0].moves) {
+    REQUIRE(m.hasA);
+    angles.insert(m.a);
+  }
+  CHECK(angles == std::set<double>{0.0, 90.0, 180.0, 270.0});
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+  // The A words the MOTION carries -- not the G92 at the end, which renames
+  // the last angle so the next program does not unwind it.
+  std::set<std::string> words;
+  std::istringstream lines(gcode);
+  for (std::string line; std::getline(lines, line);) {
+    const size_t at = line.find(" A");
+    if (line.rfind("G0", 0) == 0 && at != std::string::npos)
+      words.insert(line.substr(at + 1, line.find(' ', at + 1) - at - 1));
+  }
+  CHECK(words == std::set<std::string>{"A0", "A90", "A180", "A270"});
+
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.5);
+  INFO("rotary " << v.rotary << " gouge " << v.maxGouge << " leftover "
+                 << v.maxLeftover << " rapids " << v.rapidsThroughStock);
+  REQUIRE(v.rotary); // the file turns, so it is read as one that does
+  CHECK(v.maxGouge < 0.1);
+  CHECK(v.maxLeftover < 0.6);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam rotary: indices are refused where nothing can turn the part",
+          "[cam][rotary]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Face;
+  op.topZ = 20.0;
+  op.bottomZ = 19.0;
+  op.indexA = {0.0, 180.0};
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].moves.empty());
+  CHECK(paths[0].error.find("no rotary axis") != std::string::npos);
+}
 #endif

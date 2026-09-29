@@ -93,6 +93,10 @@ constexpr FieldPoke kPokes[] = {
     // reach, so a type that reads the field says so and cuts nothing.
     {cam::OpField::RestFromTool, "rest_from_tool",
      [](cam::Operation& o) { o.restFromTool = 1; }},
+    // The same cut, stated at A0: every move carries its A (or, on a machine
+    // with no rotary axis, the operation is refused).
+    {cam::OpField::Indexed, "index_a_deg",
+     [](cam::Operation& o) { o.indexA = {0.0}; }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.

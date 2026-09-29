@@ -26,6 +26,7 @@
 
 #include <glm/glm.hpp>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -249,5 +250,21 @@ bool FindVerticalWallFace(const std::vector<Body>& bodies,
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
                         const std::vector<Body>& bodies, GenerateContext* ctx);
+
+// An operation with `indexA`
+// (docs/cam/rotary.md#one-operation-at-several-indices): `one` run once per
+// angle, on a copy of the setup turned to it and the MODEL-space `bodies`
+// framed for that copy, and each role's pieces
+// joined -- a rapid at safe Z carrying the next angle between them, so the
+// post retracts and turns there, and every move stamped with its A. A piece
+// that fails goes in `skipped`, named by its angle; the operation fails only
+// when every angle did. A pocket's, face's or adaptive's targets are FLOORS,
+// each cut only at the index that turns it to the spindle. Refused whole on a
+// machine with no rotary axis. Called only when `CutAtIndices(op)`.
+using GenerateAtOneIndex = std::function<std::vector<Toolpath>(
+    const Setup&, const Operation&, const std::vector<Body>&)>;
+std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
+                                        const std::vector<Body>& bodies,
+                                        const GenerateAtOneIndex& one);
 
 } // namespace cam

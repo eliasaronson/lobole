@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    135; // v135: a part placement's `configuration_id` names one of the
+    136; // v136: an operation's `index_a_deg` -- the rotary indices it is
+         //      cut at, one generation per angle (absent = the setup's).
+         // v135: a part placement's `configuration_id` names one of the
          //      PART's configurations (it was sub-assemblies only), and
          //      an occurrence's `material` overrides its bodies'; a job
          //      part's `configuration`.

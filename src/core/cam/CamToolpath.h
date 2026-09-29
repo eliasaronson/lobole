@@ -406,6 +406,13 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 [[nodiscard]] std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                                    const std::vector<Body>& in);
 
+// Everything `BodiesInSetupFrame` reads from the setup, hashed: the fixture
+// frame, the index and every placement. A cache keyed on the caller's
+// geometry fingerprint alone hands one framing's result to another -- two
+// setups of one job, or one operation cut at four indices, share that
+// fingerprint and not their outlines.
+[[nodiscard]] uint64_t FramingKey(const Setup& setup);
+
 // The outward normal of a planar face, or false when the ref names nothing
 // resolvable or something curved. Engine-side because both doors need it --
 // the pick in the panel and `lay_face_up` over the RPC -- and a geometry

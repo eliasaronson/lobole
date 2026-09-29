@@ -945,6 +945,9 @@ uint64_t SurfaceKey(const Setup& setup, const Operation& op, const Tool& tool,
   }
   hash.D(setup.safeZ);
   hash.D(setup.rotationA);
+  // ...and the rest of how the part is framed: the fixture and placements
+  // turn the same geometry fingerprint into different surfaces.
+  hash.I(static_cast<int64_t>(FramingKey(setup)));
   // A rotary layer starts from the BLANK, whose radius is the part's plus
   // this margin (RotaryBlankRadius) -- read through a helper, which is why
   // it is named here rather than caught by the gate's grep.

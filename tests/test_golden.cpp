@@ -494,6 +494,20 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
                  Catch::Matchers::WithinAbs(want[i].get<double>(), 1e-12));
     }
   }
+  if (expect.contains("cam_op_index_a")) {
+    // v136: the indices one operation is cut at. A list that reloads empty
+    // cuts ONE crenel of four, at the setup's own index, and verifies clean.
+    const auto& want = expect.at("cam_op_index_a");
+    std::vector<std::vector<double>> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Operation& o : s.operations)
+        got.push_back(o.indexA);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("op " << i << " index_a_deg");
+      CHECK(got[i] == want[i].get<std::vector<double>>());
+    }
+  }
   if (expect.contains("cam_op_rest_from_tools")) {
     // v125: a rest pass's reference cutter. One that reloads as 0 cuts the
     // whole region again with the small tool -- hours, for a corner.

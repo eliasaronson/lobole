@@ -1,5 +1,6 @@
 #include "core/cam/CamMount.h"
 
+#include "core/cam/CamNames.h" // CutAtIndices
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamToolpathInternal.h" // StockBoundsFramed
 
@@ -22,7 +23,7 @@ bool HeldInRotary(const Setup& setup) {
   if (std::abs(setup.rotationA) > 1e-9)
     return true;
   for (const Operation& op : setup.operations)
-    if (op.type == OpType::SurfaceRotary)
+    if (op.type == OpType::SurfaceRotary || CutAtIndices(op))
       return true;
   return false;
 }

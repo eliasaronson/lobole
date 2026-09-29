@@ -2396,6 +2396,8 @@ def main():
                     return round(value * 0.5 + 0.35, 6)
                 if isinstance(value, str):
                     return value + " poked"
+                if isinstance(value, list):
+                    return [0.0, 90.0]  # index_a_deg: a list of angles
                 raise AssertionError(f"no poke for {key}={value!r}")
 
             types = ("profile", "pocket", "face", "drill", "adaptive",

@@ -9,6 +9,7 @@
 
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include <cstdlib>
 #include <cstring>
 
 #ifdef HAVE_CAM
@@ -1762,6 +1763,52 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
         "A part with no twist is cut as parallel passes, and says so.");
     ImGui::SameLine();
   }
+  // Cut at several indices
+  // (docs/cam/rotary.md#one-operation-at-several-indices): a list of
+  // degrees, typed as one -- "0 90 180 270". Offered
+  // only where the machine can turn the part; a list that does not parse
+  // is left as it was rather than read as far as it went.
+  if (cam::OpTypeHas(op.type, cam::OpField::Indexed) &&
+      setup->machine.hasRotaryAxis) {
+    std::string text;
+    for (const double a : op.indexA) {
+      char one[32];
+      std::snprintf(one, sizeof(one), "%s%g", text.empty() ? "" : " ", a);
+      text += one;
+    }
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "%s", text.c_str());
+    ImGui::SetNextItemWidth(140.0f);
+    if (ImGui::InputText("at A###index_a", buf, sizeof(buf),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+      std::vector<double> list;
+      bool ok = true;
+      std::string word;
+      const std::string all = std::string(buf) + " ";
+      for (const char c : all) {
+        if (c == ' ' || c == ',') {
+          if (word.empty())
+            continue;
+          char* end = nullptr;
+          const double v = std::strtod(word.c_str(), &end);
+          ok = ok && end != nullptr && *end == '\0';
+          list.push_back(v);
+          word.clear();
+        } else {
+          word += c;
+        }
+      }
+      if (ok && list != op.indexA) {
+        op.indexA = list;
+        touched(op.id);
+      }
+    }
+    ImGui::SetItemTooltip(
+        "Cut this operation at each of these indices, in degrees -- the "
+        "four crenels of a rook are one operation at 0 90 180 270. Empty "
+        "cuts at the setup's own index.");
+    ImGui::SameLine();
+  }
   if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
     ImGui::SetNextItemWidth(70.0f);
     float angle = static_cast<float>(op.cutAngleDeg);
@@ -2154,7 +2201,15 @@ std::string CamOpSummary(const cam::Setup& setup, const cam::Operation& op) {
                 cam::OpTypeHas(op.type, cam::OpField::Climb)
                     ? (op.climb ? ", climb" : ", conventional")
                     : "");
-  return buf;
+  std::string out = buf;
+  if (!op.indexA.empty()) {
+    out += ", at A";
+    for (size_t i = 0; i < op.indexA.size(); i++) {
+      std::snprintf(buf, sizeof(buf), "%s%g", i == 0 ? "" : "/", op.indexA[i]);
+      out += buf;
+    }
+  }
+  return out;
 }
 
 std::string CamOpPathLine(const cam::Operation& op, const cam::Toolpath& tp) {

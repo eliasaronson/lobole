@@ -246,15 +246,19 @@ std::vector<glm::dvec2> AddCornerRelief(const std::vector<glm::dvec2>& pts,
 // (docs/cam/README.md#background-work). Empty when deferred, and `tp` is then
 // pending: a profile has nothing to follow until its outlines land.
 std::optional<std::vector<std::vector<Loop>>>
-OutlinesThroughCache(const std::vector<Body>& bodies, double topZ,
-                     const std::vector<double>& passes, Toolpath& tp,
-                     GenerateContext* ctx) {
+OutlinesThroughCache(const Setup& setup, const std::vector<Body>& bodies,
+                     double topZ, const std::vector<double>& passes,
+                     Toolpath& tp, GenerateContext* ctx) {
   constexpr double kDeflection = 0.02;
   const bool cached =
       ctx != nullptr && ctx->outlineCache != nullptr && ctx->bodiesKey != 0;
   if (!cached)
     return ProjectedOutlines(bodies, topZ, passes, kDeflection);
-  const uint64_t key = OutlineKey(ctx->bodiesKey, topZ, passes, kDeflection);
+  // The bodies arrive FRAMED, so the framing is part of what they are: the
+  // caller's fingerprint alone is one per job, and handed setup B -- or the
+  // next index of one operation -- setup A's outlines.
+  const uint64_t key =
+      OutlineKey(ctx->bodiesKey, FramingKey(setup), topZ, passes, kDeflection);
   if (const OutlineResult* hit = ctx->outlineCache->Find(key))
     return hit->outlines;
   OutlineRequest req;
@@ -377,7 +381,7 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // (ProjectedOutlines, and docs/cam/operations.md#profile for the gouge that
   // is).
   const std::optional<std::vector<std::vector<Loop>>> projectedOr =
-      OutlinesThroughCache(bodies, op.topZ, passes, tp, ctx);
+      OutlinesThroughCache(setup, bodies, op.topZ, passes, tp, ctx);
   if (!projectedOr)
     return; // pending: the worker is sectioning
   const std::vector<std::vector<Loop>>& projected = *projectedOr;
@@ -498,8 +502,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       }
       if (modelBottom < op.topZ) {
         const std::optional<std::vector<std::vector<Loop>>> atBottomOr =
-            OutlinesThroughCache(bodies, op.topZ, {modelBottom + 1e-3}, tp,
-                                 ctx);
+            OutlinesThroughCache(setup, bodies, op.topZ, {modelBottom + 1e-3},
+                                 tp, ctx);
         if (!atBottomOr) {
           // Pending, and nothing drawn yet is honest: a half-cut profile
           // would read as the whole operation.
@@ -1530,8 +1534,125 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   return tp;
 }
 
+std::vector<Toolpath> GenerateAtIndices(const Setup& setup, const Operation& op,
+                                        const std::vector<Body>& bodies,
+                                        const GenerateAtOneIndex& one) {
+  const auto refuse = [&](std::string why) {
+    Toolpath t;
+    t.operationId = op.id;
+    t.toolNumber = op.toolNumber;
+    t.error = std::move(why);
+    return std::vector<Toolpath>{std::move(t)};
+  };
+  if (!setup.machine.hasRotaryAxis)
+    return refuse("index_a_deg turns the part between cuts, and " +
+                  (setup.machine.name.empty() ? std::string("this machine")
+                                              : setup.machine.name) +
+                  " has no rotary axis (has_rotary_axis)");
+  Operation still = op;
+  still.indexA.clear();
+  // A floor is cut at the index that turns it to the spindle, and at no
+  // other: the rook's four crenel floors are one pocket's four targets, and
+  // at A90 three of them face sideways or down. Other targets -- a wall, a
+  // bore -- are followed at every index.
+  const bool floors =
+      !op.targets.empty() && OpTypeHas(op.type, OpField::NeedsFlatFloor);
+  std::vector<bool> presented(op.targets.size(), false);
+  std::vector<Toolpath> out;
+  for (const double a : op.indexA) {
+    Setup turned = setup;
+    turned.rotationA = a;
+    const std::vector<Body> framed = BodiesInSetupFrame(turned, bodies);
+    Operation here = still;
+    if (floors) {
+      here.targets.clear();
+      for (size_t i = 0; i < op.targets.size(); i++) {
+        glm::vec3 n(0.0f);
+        if (FaceNormalOf(framed, op.targets[i].ref, n,
+                         op.targets[i].jobPartId) &&
+            n.z > 0.99f) {
+          here.targets.push_back(op.targets[i]);
+          presented[i] = true;
+        }
+      }
+      if (here.targets.empty())
+        continue; // nothing faces the spindle at this index
+    }
+    std::vector<Toolpath> pieces = one(turned, here, framed);
+    if (out.empty())
+      for (const Toolpath& p : pieces) {
+        Toolpath t;
+        t.operationId = p.operationId;
+        t.toolNumber = p.toolNumber;
+        t.finish = p.finish;
+        out.push_back(std::move(t));
+      }
+    const std::string where = "at A" + Round2(a);
+    for (size_t i = 0; i < pieces.size() && i < out.size(); i++) {
+      Toolpath& tp = out[i];
+      Toolpath& piece = pieces[i];
+      if (!piece.error.empty()) {
+        tp.skipped.push_back(where + ": " + piece.error);
+        continue;
+      }
+      for (const std::string& s : piece.skipped)
+        tp.skipped.push_back(where + ": " + s);
+      tp.pending = tp.pending || piece.pending;
+      if (tp.strategy.empty())
+        tp.strategy = piece.strategy;
+      tp.clippedMm += piece.clippedMm;
+      tp.holdingClippedMm += piece.holdingClippedMm;
+      // Stamped on EVERY move, A0 included: GenerateFramed stamps only a
+      // non-zero index (a 3-axis shop is never handed an axis it lacks), and
+      // here the machine has one and is told where each piece is cut.
+      for (Move& m : piece.moves) {
+        m.hasA = true;
+        m.a = a;
+      }
+      // The join: up to safe Z over where the next piece starts, turning to
+      // its angle -- a rapid that turns A, which the post retracts before.
+      if (!tp.moves.empty() && !piece.moves.empty()) {
+        Move turn;
+        turn.kind = Move::Kind::Rapid;
+        turn.to = glm::dvec3(piece.moves.front().to.x, piece.moves.front().to.y,
+                             setup.safeZ);
+        turn.hasA = true;
+        turn.a = a;
+        tp.moves.push_back(turn);
+      }
+      tp.moves.insert(tp.moves.end(), piece.moves.begin(), piece.moves.end());
+      // Reliefs and tabs are not carried: each is a point in ONE angle's
+      // frame, and a file that turns is checked by the rotary inspection,
+      // which reads neither (docs/cam/rotary.md#verifying-a-turning-part).
+    }
+  }
+  if (out.empty())
+    return refuse("none of this operation's floors faces the spindle at any "
+                  "of its indices");
+  for (size_t i = 0; floors && i < op.targets.size(); i++)
+    if (!presented[i])
+      for (Toolpath& tp : out)
+        tp.skipped.push_back("target " + std::to_string(i + 1) + " of " +
+                             std::to_string(op.targets.size()) + " (" +
+                             op.targets[i].ref.name +
+                             "): faces the spindle at none of the indices");
+  for (Toolpath& tp : out)
+    if (tp.moves.empty() && !tp.pending && !tp.skipped.empty())
+      tp.error = "this operation could be cut at none of its indices. " +
+                 tp.skipped.front();
+  return out;
+}
+
 Toolpath Generate(const Setup& setup, const Operation& op,
                   const std::vector<Body>& bodies, GenerateContext* ctx) {
+  if (CutAtIndices(op))
+    return GenerateAtIndices(setup, op, bodies,
+                             [ctx](const Setup& s, const Operation& o,
+                                   const std::vector<Body>& framed) {
+                               return std::vector<Toolpath>{
+                                   GenerateFramed(s, o, framed, ctx)};
+                             })
+        .front();
   return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
 

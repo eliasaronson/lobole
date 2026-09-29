@@ -86,6 +86,9 @@ enum class OpField : uint32_t {
   Lead = 1u << 20,
   // Rest machining: cut only where a larger cutter could not reach (v125).
   RestFromTool = 1u << 21,
+  // Cut at several rotary indices (v136): every op that is cut with the
+  // part standing still -- not the rotary surfacing, which turns it.
+  Indexed = 1u << 22,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {
@@ -133,6 +136,12 @@ bool FollowsOneTargetAtATime(OpType t);
 // Does this op type use that field? The one answer the panel, `OpJson`,
 // `ApplyOpFields` and the feeds checks all read.
 bool OpTypeHas(OpType t, OpField f);
+// Whether this op is cut at its own list of rotary indices: it has one, and
+// its type takes one. A list on a type that does not (surface_rotary, which
+// turns the part as it cuts) changes nothing, as every undeclared field.
+[[nodiscard]] inline bool CutAtIndices(const Operation& op) {
+  return !op.indexA.empty() && OpTypeHas(op.type, OpField::Indexed);
+}
 
 // The tool's shape. Refusing here is what RemoteCam's own table already said
 // it was for -- "a name we do not know is refused, never silently read as the

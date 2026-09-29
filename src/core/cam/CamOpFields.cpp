@@ -36,6 +36,7 @@ const OpFieldRow kRows[] = {
     {"rotary_pattern", OpField::RotaryPattern, &Operation::rotaryPattern},
     {"lead_mm", OpField::Lead, &Operation::leadMm},
     {"rest_from_tool", OpField::RestFromTool, &Operation::restFromTool},
+    {"index_a_deg", OpField::Indexed, &Operation::indexA},
     {"enabled", OpField::None, &Operation::enabled},
 };
 
@@ -127,9 +128,20 @@ std::vector<double> OpFieldValues(const Operation& op) {
   std::vector<double> out;
   out.reserve(std::size(kRows));
   for (const OpFieldRow& row : kRows)
-    out.push_back(
-        std::visit([&](auto member) { return static_cast<double>(op.*member); },
-                   row.member));
+    std::visit(
+        [&](auto member) {
+          using T = std::remove_cvref_t<decltype(op.*member)>;
+          if constexpr (std::is_same_v<T, std::vector<double>>) {
+            // a list: its length, then each value, so [90] and [90, 0]
+            // differ
+            out.push_back(static_cast<double>((op.*member).size()));
+            for (const double v : op.*member)
+              out.push_back(v);
+          } else {
+            out.push_back(static_cast<double>(op.*member));
+          }
+        },
+        row.member);
   return out;
 }
 

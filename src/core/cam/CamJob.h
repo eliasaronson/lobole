@@ -453,6 +453,14 @@ struct Operation {
   // derive it from the part's own twist (DeriveRotaryTwist).
   double leadMm = 0.0;
 
+  // Cut at each of these rotary indices, degrees about X (v136): the
+  // crenels of a rook are ONE operation at 0/90/180/270, not four setups
+  // that each repeat it at one angle. Generated once per angle in that
+  // angle's frame and joined by a retract; every move carries its A. Empty =
+  // the setup's own `rotationA`. Needs a machine with a rotary axis; not on
+  // a surface_rotary, which turns the part as it cuts.
+  std::vector<double> indexA;
+
   bool enabled = true;
 
   // Every member, compared without anyone listing them: what lets the

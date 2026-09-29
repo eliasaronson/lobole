@@ -1,0 +1,63 @@
+{
+  "format": "designer-document",
+  "version": 136,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Rook"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Crenels, on the rotary",
+      "safe_z": 40.0,
+      "rotation_a": 0.0,
+      "tools": [
+        {
+          "number": 1,
+          "name": "3 mm flat",
+          "diameter": 3.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Four crenels",
+          "type": "pocket",
+          "tool": 1,
+          "top_z": 15.0,
+          "bottom_z": 9.0,
+          "index_a_deg": [
+            0.0,
+            90.0,
+            180.0,
+            270.0
+          ]
+        },
+        {
+          "id": 5,
+          "name": "One slot, at the setup's index",
+          "type": "pocket",
+          "tool": 1,
+          "top_z": 15.0,
+          "bottom_z": 9.0
+        }
+      ],
+      "machine": {
+        "name": "6090",
+        "post": "mach3",
+        "has_rotary_axis": true
+      },
+      "held_in": "rotary"
+    }
+  ]
+}

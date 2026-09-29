@@ -197,7 +197,9 @@ re-cutting inside the frame.
 
 The expensive steps of a generate run on a `cam` background job
 (`src/ui/CamJobs.cpp`), keyed by content so a result that lands after its
-inputs moved on is simply never read:
+inputs moved on is simply never read. The content includes how the part is
+framed (`FramingKey`), because the caller's geometry fingerprint is one per
+job ([4th axis](rotary.md#one-operation-at-several-indices)):
 
 - a profile's projected outlines (`QueueOutlinePasses`, started first: every
   profile waits on its own);
