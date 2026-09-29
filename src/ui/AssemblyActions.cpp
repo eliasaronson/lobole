@@ -546,6 +546,13 @@ const Document* OccurrencePartDoc(AppState& state, const Occurrence& occ) {
   return PartResolverFor(state)(occ.partId, occ.configurationId);
 }
 
+const Document* MeshPartDoc(AppState& state, const DocumentRenderMesh& mesh,
+                            const Occurrence& occ) {
+  return mesh.leafPartId != 0
+             ? PartResolverFor(state)(mesh.leafPartId, mesh.leafConfiguration)
+             : OccurrencePartDoc(state, occ);
+}
+
 assembly::AssemblyResolver AssemblyResolverFor(AppState& state) {
   return [&state](uint64_t id) -> const AssemblyDocument* {
     return AssemblyDocById(state, id);

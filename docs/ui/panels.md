@@ -104,6 +104,11 @@ properties in `DrawAssemblyEditWindow`, and a mate's (name, flip, rotate, its
 DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
 (`DrawMateToolWindow`). Each field edit is one undo step per drag.
 
+- A part placement's editor adds its **Configuration** picker
+  (`###occ_part_config`, shown when the part has configurations) and its
+  **Material** (`###occ_material`: "The part's own" or a slug), through
+  `ui::SetOccurrenceConfiguration` / `ui::SetOccurrenceMaterial`, one undo
+  step each ([per placement](../assemblies/README.md#configurations-per-placement)).
 - A sub-assembly placement's editor adds its **Configuration** picker
   (`###occ_config`: "Its active one (…)" or one of the sub-assembly's
   configurations) and **Flexible** (`###occ_flexible`). Both go through

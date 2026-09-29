@@ -589,8 +589,9 @@ AssemblyStudyPartVersions(AppState& state, const AssemblyDocument& asmDoc,
       seen = seen || id == occ->partId;
     if (seen)
       continue;
+    // the live part: its stamp covers every configuration of it
     const Document* part = PartDocById(state, occ->partId);
-    out.push_back({occ->partId, part ? part->Version() : 0});
+    out.push_back({occ->partId, part ? PartStamp(*part) : 0});
   }
   return out;
 }
@@ -599,7 +600,7 @@ bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
                         uint64_t studyId) {
   return asmDoc.StudyResultsStale(studyId, [&state](uint64_t partId) {
     const Document* part = PartDocById(state, partId);
-    return part ? part->Version() : uint64_t{0};
+    return part ? PartStamp(*part) : uint64_t{0};
   });
 }
 

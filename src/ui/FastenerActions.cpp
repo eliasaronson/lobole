@@ -1015,6 +1015,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     for (const parts::StackSegment& seg : stack) {
       if (seg.exit > joinEnds + 1e-3)
         continue;
+      // the live part: being a fastener is not a configuration's
       if (SoleFastenerOf(PartDocById(state, seg.partId)) != nullptr)
         continue;
       if (!spanned.empty() && spanned.back()->occurrence == seg.occurrence)

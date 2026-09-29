@@ -255,6 +255,8 @@ struct FlatInstance {
   // one. `part` is the document evaluated in it, so two placements of one
   // part in two configurations are two different documents here.
   uint64_t configurationId = 0;
+  // The placement's material, overriding every body's; "" = the part's own.
+  std::string material;
   const Document* part = nullptr; // resolved, regenerated
   glm::mat4 world{1.0f};          // composed down the tree
   std::string path;               // "Gangway/Board 03" — display, not a key

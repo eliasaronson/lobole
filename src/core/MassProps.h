@@ -35,9 +35,12 @@ struct DocumentMass {
   double massG = 0.0;
 };
 
-// Unit-density OCC mass properties x material density for every body.
-// nullopt (with `error` set) when a shape's computation fails.
-std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
-                                         std::string* error = nullptr);
+// Unit-density OCC mass properties x material density for every body --
+// `materialOverride`'s density for all of them when it is set (an
+// occurrence made of another material than its part). nullopt (with `error`
+// set) when a shape's computation fails.
+std::optional<DocumentMass>
+MassOfBodies(const std::vector<Body>& bodies, std::string* error = nullptr,
+             const std::string& materialOverride = {});
 
 } // namespace Measure

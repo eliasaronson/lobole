@@ -511,6 +511,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     // cache is filled by the assembly sync and keyed on assembly part slots.
     uint64_t partId = 0;
     uint64_t configuration = 0;
+    std::string material; // the placement's, overriding the body's
     uint64_t partVersion = 0;
     size_t bodyIndex = 0;
   };
@@ -532,8 +533,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++)
         rtItems.push_back({&bodies[bi], inst.world, inst.partId,
-                           inst.configurationId, PartRenderStamp(*inst.part),
-                           bi});
+                           inst.configurationId, inst.material,
+                           PartStamp(*inst.part), bi});
       capSources.push_back({&bodies, inst.world});
     }
   } else if (state.job) {
@@ -559,7 +560,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     if (it.partId == 0 || !state.partRenderCache)
       return nullptr;
     const auto entry = state.partRenderCache->parts.find(
-        PartRenderKey{it.partId, it.configuration});
+        PartRenderKey{it.partId, it.configuration, it.material});
     if (entry == state.partRenderCache->parts.end())
       return nullptr;
     // Version-checked, not merely present: a stale tessellation in a render
@@ -588,11 +589,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     const std::vector<uint32_t>& indices =
         cached != nullptr ? cached->indices : cadMesh.indices;
 
+    // The placement's material, when it overrides the part's.
+    const std::string& wears =
+        it.material.empty() ? body.material : it.material;
     CADMaterials::MaterialProperties mat =
-        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(wears);
     // Appearance override, same merge as the raster paths.
     if (body.appearance.Any()) {
-      if (body.material.empty()) {
+      if (wears.empty()) {
         mat.metallic = 0.0f;
         mat.roughness = 0.6f;
         mat.specular = 0.5f;
@@ -1202,7 +1206,7 @@ void SyncAssemblyRenderers(AppState& state) {
     std::vector<PartRenderKey> missing;
     std::unordered_set<PartRenderKey, PartRenderKeyHash> seen;
     for (const assembly::FlatInstance& inst : flat) {
-      const PartRenderKey key{inst.partId, inst.configurationId};
+      const PartRenderKey key{inst.partId, inst.configurationId, inst.material};
       if (!inst.visible || !seen.insert(key).second)
         continue;
       const Document* part = inst.part;
@@ -1210,7 +1214,7 @@ void SyncAssemblyRenderers(AppState& state) {
         continue;
       const auto entry = cache.parts.find(key);
       if (entry == cache.parts.end() ||
-          entry->second.docVersion != PartRenderStamp(*part))
+          entry->second.docVersion != PartStamp(*part))
         missing.push_back(key);
     }
     if (!missing.empty()) {
@@ -1231,7 +1235,7 @@ void SyncAssemblyRenderers(AppState& state) {
     const Document* part = inst.part;
     if (!part)
       continue; // dangling reference (part deleted) — skip
-    const PartRenderKey key{inst.partId, inst.configurationId};
+    const PartRenderKey key{inst.partId, inst.configurationId, inst.material};
     // The occurrence this leaf belongs to at the TOP level: what selection,
     // explode and picking address. A leaf inside a sub-assembly reports its
     // sub-assembly's occurrence, which is what makes it one unit.
@@ -1245,8 +1249,7 @@ void SyncAssemblyRenderers(AppState& state) {
     // A hit is only a hit at the SAME document version: a regenerated part
     // must re-tessellate. Materials and appearances bump the version too, and
     // they are baked into the entry, so one key covers both.
-    if (it != cache.parts.end() &&
-        it->second.docVersion != PartRenderStamp(*part)) {
+    if (it != cache.parts.end() && it->second.docVersion != PartStamp(*part)) {
       cache.parts.erase(it);
       it = cache.parts.end();
     }
@@ -1256,7 +1259,7 @@ void SyncAssemblyRenderers(AppState& state) {
       // First time we see this part at this version: tessellate its bodies +
       // create assets. Everything below is what the cache exists to skip.
       PartRenderCacheEntry entry;
-      entry.docVersion = PartRenderStamp(*part);
+      entry.docVersion = PartStamp(*part);
       std::vector<SharedBody>& shared = entry.bodies;
       const auto& bodies = part->GetBodies();
       // The fallback palette is seeded from the PART, not from the order
@@ -1297,7 +1300,16 @@ void SyncAssemblyRenderers(AppState& state) {
         }
         // Resolve order: appearance > material > displayColor > palette
         // (ui/BodyAppearance.h — the part-tab loop and the exports share it).
-        const BodyLook look = ResolveBodyLook(body, palette);
+        // A placement made of another material than its part wears it.
+        Body worn;
+        if (!inst.material.empty()) {
+          worn.material = inst.material;
+          worn.appearance = body.appearance;
+          worn.displayColor = body.displayColor;
+          worn.hasDisplayColor = body.hasDisplayColor;
+        }
+        const BodyLook look =
+            ResolveBodyLook(inst.material.empty() ? body : worn, palette);
         sb.palette = look.palette;
         if (state.outlineRenderer)
           OutlineAssetFor(state, *sb.tess);
@@ -1391,7 +1403,7 @@ void SyncAssemblyRenderers(AppState& state) {
       state.documentMeshes.push_back(
           {meshId, outlineId, bi, occ.id,
            glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,
-           inst.innerIds, sb.tess->edges});
+           inst.innerIds, sb.tess->edges, inst.configurationId});
     }
 
     // Section caps (I3). Without these an assembly section shows the inside
@@ -1513,12 +1525,13 @@ void SyncInContextGhosts(AppState& state) {
   // in SolveActiveAssembly/AssemblyPartsStale can't see a stashed assembly).
   bool stale = false;
   for (const Occurrence& occ : asmDoc.GetOccurrences()) {
+    // the live part: its stamp covers every configuration of it
     const Document* part = PartDocById(state, occ.partId);
     if (!part)
       continue;
     const auto it = asmSlot->solvedPartVersions.find(occ.partId);
     if (it == asmSlot->solvedPartVersions.end() ||
-        it->second != PartRenderStamp(*part)) {
+        it->second != PartStamp(*part)) {
       stale = true;
       break;
     }
@@ -1528,8 +1541,9 @@ void SyncInContextGhosts(AppState& state) {
     asmDoc.BumpVersion();
     asmSlot->solvedPartVersions.clear();
     for (const Occurrence& occ : asmDoc.GetOccurrences())
+      // the live part: its stamp covers every configuration of it
       if (const Document* part = PartDocById(state, occ.partId))
-        asmSlot->solvedPartVersions[occ.partId] = PartRenderStamp(*part);
+        asmSlot->solvedPartVersions[occ.partId] = PartStamp(*part);
   }
 
   const Occurrence* edited = asmDoc.FindById(state.inContext.occurrenceId);
@@ -1560,7 +1574,7 @@ void SyncInContextGhosts(AppState& state) {
     const Document* part = inst.part;
     if (!part)
       continue;
-    const PartRenderKey key{inst.partId, inst.configurationId};
+    const PartRenderKey key{inst.partId, inst.configurationId, inst.material};
     auto it = byPart.find(key);
     if (it == byPart.end()) {
       // Cached by shape identity (AppActionsInternal.h): the neighbour was

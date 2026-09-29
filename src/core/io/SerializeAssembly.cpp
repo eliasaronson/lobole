@@ -1,6 +1,7 @@
 #include "core/io/Serialization.h"
 #include "core/io/SerializationInternal.h"
 
+#include "cad/CADMaterials.h"
 #include "core/Occurrence.h"
 
 #include <nlohmann/json.hpp>
@@ -36,6 +37,9 @@ json OccurrenceToJson(const Occurrence& o) {
   // v56: which configuration of the reference this placement uses; 0 (and
   // absent, in every older file) = that document's active one.
   j["configuration_id"] = o.configurationId;
+  // v135: the material this placement is made of; absent = the part's own.
+  if (!o.material.empty())
+    j["material"] = o.material;
   // v129: a flexible placement and the poses it keeps for its sub-assembly.
   // Omitted when rigid, so every earlier assembly serializes unchanged.
   if (o.flexible) {
@@ -71,6 +75,13 @@ Occurrence OccurrenceFromJson(const json& j) {
                   ? OccurrenceRef::Assembly
                   : OccurrenceRef::Part;
   o.configurationId = j.value("configuration_id", uint64_t{0});
+  o.material = j.value("material", std::string{});
+  CADMaterials::MaterialType unusedType;
+  if (!CADMaterials::MaterialLibrary::TryMaterialTypeFromString(o.material,
+                                                                unusedType))
+    throw std::runtime_error(
+        "occurrence '" + o.name + "': unknown material '" + o.material +
+        "' (known: " + CADMaterials::MaterialLibrary::SlugList() + ")");
   if (j.contains("part_version") && !j.at("part_version").is_null())
     o.partVersion = j.at("part_version").get<std::string>();
   // Both halves of the transform are optional: a caller placing a part by

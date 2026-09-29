@@ -32,6 +32,10 @@ struct JobPart {
   // source has been deleted can still say what is missing rather than
   // printing a number.
   std::string name;
+  // Which configuration of the source this job cuts (v135); 0 = whatever it
+  // has active. A blank of pawns and one of rooks are one part in two
+  // configurations, not two Derived copies of it.
+  uint64_t configuration = 0;
 };
 
 class JobDocument {

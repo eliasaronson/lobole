@@ -1,4 +1,6 @@
 #include "ui/OccurrencePanel.h"
+
+#include "cad/CADMaterials.h"
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Measure.h"
@@ -988,12 +990,16 @@ void DrawBomWindow(AppState& state) {
           r.massKnown ? MassText(state, r.unitMassG * r.quantity) : "?";
       // Everything about the row, for the hover — the escape hatch for
       // whatever the column still cannot hold.
-      const std::string full = r.partName + "  x" + std::to_string(r.quantity) +
+      // "piece (pawn)": one part in two configurations is two lines
+      const std::string label = r.configuration.empty()
+                                    ? r.partName
+                                    : r.partName + " (" + r.configuration + ")";
+      const std::string full = label + "  x" + std::to_string(r.quantity) +
                                "  " + material + "  " + unit + " each, " +
                                total + " total";
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
-      ImGui::TextUnformatted(r.partName.c_str());
+      ImGui::TextUnformatted(label.c_str());
       CellTooltip(full);
       ImGui::TableNextColumn();
       ImGui::Text("%d", r.quantity);
@@ -1521,6 +1527,106 @@ void DrawRelationSides(AppState& state, Relation& r) {
   }
 }
 
+// A part placement's two settings: which of the part's configurations it
+// is, and what it is made of
+// (docs/assemblies/README.md#configurations-per-placement). The same actions
+// set_occurrence_configuration and set_occurrence_material are
+// (ui/FlexibleActions.h); a refusal shows under them in the app's words.
+void DrawPartPlacement(AppState& state, Occurrence& sel) {
+  // the live part: the configurations there are to choose from
+  const Document* part = PartDocById(state, sel.partId);
+  if (part == nullptr)
+    return;
+  const uint64_t occId = sel.id;
+  const bool refusedHere =
+      state.asmEditRefusalFor == occId && !state.asmEditRefusal.empty();
+  ImGui::Separator();
+  if (!part->GetConfigurations().empty()) {
+    LeftLabel("Configuration");
+    const auto cfgName = [&](uint64_t id) -> std::string {
+      if (id == 0) {
+        const Configuration* active =
+            part->FindConfiguration(part->ActiveConfiguration());
+        return std::string("Its active one (") +
+               (active ? active->name : std::string("base")) + ")";
+      }
+      const Configuration* c = part->FindConfiguration(id);
+      return c ? c->name : "(missing " + std::to_string(id) + ")";
+    };
+    uint64_t pickCfg = UINT64_MAX;
+    if (ImGui::BeginCombo("###occ_part_config",
+                          cfgName(sel.configurationId).c_str())) {
+      if (ImGui::Selectable((cfgName(0) + "###occ_part_config_0").c_str(),
+                            sel.configurationId == 0))
+        pickCfg = 0;
+      for (const Configuration& c : part->GetConfigurations())
+        if (ImGui::Selectable(
+                (c.name + "###occ_part_config_" + std::to_string(c.id)).c_str(),
+                sel.configurationId == c.id))
+          pickCfg = c.id;
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Which configuration of '%s' this placement is. Two "
+                        "placements of one part can be two of them.",
+                        RefNameById(state, sel).c_str());
+    if (pickCfg != UINT64_MAX && pickCfg != sel.configurationId) {
+      std::string why;
+      state.asmEditRefusalFor = occId;
+      if (SetOccurrenceConfiguration(state, occId, pickCfg, &why))
+        state.asmEditRefusal.clear();
+      else
+        state.asmEditRefusal = why;
+      return; // the document moved under `sel`; draw it again next frame
+    }
+  }
+  LeftLabel("Material");
+  const auto matName = [](const std::string& slug) -> std::string {
+    CADMaterials::MaterialType t;
+    if (!CADMaterials::MaterialLibrary::TryMaterialTypeFromString(slug, t))
+      return slug;
+    return CADMaterials::MaterialLibrary::GetMaterial(t).name;
+  };
+  std::string pickMat;
+  bool picked = false;
+  if (ImGui::BeginCombo("###occ_material",
+                        sel.material.empty() ? "The part's own"
+                                             : matName(sel.material).c_str())) {
+    if (ImGui::Selectable("The part's own###occ_material_own",
+                          sel.material.empty())) {
+      picked = true;
+      pickMat.clear();
+    }
+    for (CADMaterials::MaterialType t :
+         CADMaterials::MaterialLibrary::AllTypes()) {
+      const std::string slug = CADMaterials::MaterialLibrary::Slug(t);
+      if (ImGui::Selectable((matName(slug) + "###occ_material_" + slug).c_str(),
+                            sel.material == slug)) {
+        picked = true;
+        pickMat = slug;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("What this placement is made of, for its mass, the BOM "
+                      "and how it draws. One part in two woods is one part.");
+  if (picked && pickMat != sel.material) {
+    std::string why;
+    state.asmEditRefusalFor = occId;
+    if (SetOccurrenceMaterial(state, occId, pickMat, &why))
+      state.asmEditRefusal.clear();
+    else
+      state.asmEditRefusal = why;
+    return;
+  }
+  if (refusedHere) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
+}
+
 // A sub-assembly placement's two settings
 // (docs/assemblies/README.md#flexible-sub-assemblies): which of its
 // configurations it uses, and whether its own mechanism moves here. Both go
@@ -1689,6 +1795,8 @@ void DrawAssemblyEditWindow(AppState& state) {
       SetOccurrencesVisible(state, {sel->id}, visible);
     if (isSub)
       DrawSubAssemblyPlacement(state, *sel);
+    else
+      DrawPartPlacement(state, *sel);
     ImGui::Separator();
     bool remove = false;
     if (ImGui::Button("Edit in context###occ_in_context")) {

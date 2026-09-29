@@ -188,6 +188,44 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a placed part is read in the configuration it is placed in",
+          "[convention][configuration]") {
+  // PartDocById(occ.partId) is the part in its ACTIVE configuration,
+  // whatever the placement asked for: a rook placed from the piece part
+  // measured, picked and weighed as a pawn. Reading a placed part's geometry
+  // goes through ui::OccurrencePartDoc / MeshPartDoc / FlatInstance::part
+  // (docs/assemblies/README.md#configurations-per-placement). A read that
+  // means the live document -- whether it exists, a stamp that covers every
+  // configuration -- says so with "the live part" on the line above.
+  const std::regex byOwnId(
+      R"(PartDocById\([^,]+,\s*[A-Za-z_]+(\.|->)partId\))");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"}) {
+    for (const SourceFile& f : SourcesUnder("src", ext)) {
+      std::istringstream lines(f.text);
+      std::string line, previous;
+      int n = 0;
+      while (std::getline(lines, line)) {
+        n++;
+        if (std::regex_search(line, byOwnId) &&
+            previous.find("the live part") == std::string::npos &&
+            line.find("the live part") == std::string::npos)
+          offenders.push_back(Relative(f.path) + ":" + std::to_string(n));
+        previous = line;
+      }
+    }
+  }
+  INFO("read a placed part through ui::OccurrencePartDoc (its "
+       "configuration), or say \"the live part\" above the line:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("no bare degree/radian conversion outside core/Angles.h",
           "[convention]") {
   // The same shape as the world up-axis before core/Conventions.h: a constant

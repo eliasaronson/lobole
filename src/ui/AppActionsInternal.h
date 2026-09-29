@@ -147,22 +147,27 @@ struct SharedBody {
 // (0 = the part's active one). Two configurations of one part are two
 // different geometries, and keyed by the part alone the second drew as the
 // first -- a configured copy carries the live part's Version.
+// The placement's material override is part of it too: materials are baked
+// into the entry.
 struct PartRenderKey {
   uint64_t part = 0;
   uint64_t configuration = 0;
+  std::string material;
   bool operator==(const PartRenderKey&) const = default;
 };
 struct PartRenderKeyHash {
   size_t operator()(const PartRenderKey& k) const {
     return std::hash<uint64_t>()(k.part) ^
-           (std::hash<uint64_t>()(k.configuration) * 0x9E3779B97F4A7C15ull);
+           (std::hash<uint64_t>()(k.configuration) * 0x9E3779B97F4A7C15ull) ^
+           (std::hash<std::string>()(k.material) * 0xC2B2AE3D27D4EB4Full);
   }
 };
 
-// What a cached tessellation was built from: the part's Version, and its
-// configurations' revision -- editing a configuration regenerates the copy
-// drawn in it without moving its Version.
-uint64_t PartRenderStamp(const Document& part);
+// What anything cached from a part was built from -- a tessellation, a
+// solve, a study's results: its Version, and its configurations' revision.
+// Editing a configuration regenerates the copies placed in it without moving
+// the part's Version.
+uint64_t PartStamp(const Document& part);
 
 // What is cached for one part, the document version it was built from, and
 // what it costs to keep.

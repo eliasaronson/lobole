@@ -32,6 +32,12 @@ const cam::JobDocument* ActiveJob(const AppState& state);
 // DrawingSourceDocument, deliberately: a cross-document reference that goes
 // stale is a trap this repo has already paid for twice (A4, A5).
 Document* JobSourceDocument(AppState& state, uint64_t sourceDocId);
+
+// A job part as it is cut: its source in the configuration the job asks for
+// (the live document when that is 0), else null with `why` saying what
+// (the source is gone, or does not build in that configuration).
+const Document* JobPartDocument(AppState& state, const cam::JobPart& part,
+                                std::string* why = nullptr);
 // That document's Version(), or 0 when it is gone. What a staleness report
 // compares against.
 uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId);

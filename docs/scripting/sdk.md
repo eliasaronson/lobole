@@ -197,6 +197,14 @@ turn parts end for end about their own axes. So the SDK's mate verbs pass
 face anchors, and leave alone any call that says `flipped` or `derive`
 itself.
 
+### One part, placed as several
+
+`asm.place(piece, configuration="rook", material="wood_walnut")` places a
+part in one of its configurations and a material other than its own
+([per placement](../assemblies/README.md#configurations-per-placement)):
+one piece part is every rank of a chess set, in both woods, and the BOM has
+a line per configuration and material.
+
 ### Reaching into a sub-assembly
 
 `asm.place(sub, flexible=True, configuration="Full load")` places a

@@ -127,6 +127,7 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     FlatInstance fi;
     fi.partId = occ.partId;
     fi.configurationId = occ.configurationId;
+    fi.material = occ.material;
     fi.part = part;
     fi.world = world;
     fi.path = prefix + occ.name;
@@ -1521,7 +1522,8 @@ AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
     if (!inst.visible)
       continue; // BOM convention: hidden/suppressed occurrences don't count
     std::string err;
-    const auto mass = Measure::MassOfBodies(inst.part->GetBodies(), &err);
+    const auto mass =
+        Measure::MassOfBodies(inst.part->GetBodies(), &err, inst.material);
     if (!mass) {
       out.skipped.push_back(inst.path + " (" + err + ")");
       out.massKnown = false;

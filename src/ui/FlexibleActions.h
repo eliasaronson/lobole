@@ -30,13 +30,22 @@ SetOccurrenceFlexible(AppState& state, uint64_t occId, bool flexible,
                       std::string* why,
                       assembly::SolveReport* report = nullptr);
 
-// Which configuration of its sub-assembly a placement uses (0 = that
-// document's active one): one undo step, re-solved when the placement is
-// flexible (its mechanism runs under it). Refused for a part occurrence and
-// for an id the sub-assembly does not have. `solved` says whether it solved.
+// Which configuration of what it places a placement uses (0 = that
+// document's active one): one undo step, re-solved when it places a part
+// (its faces, which its mates anchor on, change) or is flexible (its
+// mechanism runs under it). Refused for an id that document does not have,
+// and for a part configuration the part does not build in, saying what
+// fails. `solved` says whether it solved.
 [[nodiscard]] bool SetOccurrenceConfiguration(
     AppState& state, uint64_t occId, uint64_t configurationId, std::string* why,
     assembly::SolveReport* report = nullptr, bool* solved = nullptr);
+
+// What a placement of a part is made of: a material slug, or "" for its
+// part's own (v135). One undo step. Refused for a sub-assembly placement
+// and for a slug this build does not know, naming the known ones.
+[[nodiscard]] bool SetOccurrenceMaterial(AppState& state, uint64_t occId,
+                                         const std::string& material,
+                                         std::string* why);
 
 // A mate that turns or slides, as a study driver or a relation side names it:
 // {path, mate} -- this document's own (empty path) or one inside a flexible

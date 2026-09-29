@@ -47,6 +47,11 @@ struct AssemblyFacePick {
 struct BomRow {
   uint64_t partId = 0;
   std::string partName; // "(missing part)" when the reference dangles
+  // The configuration these are placed in (v135): one row per part,
+  // configuration and material, so a pawn and a rook of one piece part --
+  // or a maple pawn and a walnut one -- are two lines.
+  uint64_t configurationId = 0;
+  std::string configuration; // its name; "" = the part's active one
   int quantity = 0;
   std::string material;    // slug; "" = none, "mixed" when bodies differ
   double unitVolume = 0.0; // mm^3, all bodies of the part
@@ -496,6 +501,12 @@ assembly::PartResolver PartResolverFor(AppState& state);
 // PartDocById(occ.partId), which is the active configuration whatever the
 // placement asked for (tests/test_conventions.cpp holds the line).
 const Document* OccurrencePartDoc(AppState& state, const Occurrence& occ);
+
+// The part a render mesh of `occ` shows -- its leaf part in the leaf's
+// configuration, which for a sub-assembly occurrence is not the
+// occurrence's own. What a viewport pick names its faces through.
+const Document* MeshPartDoc(AppState& state, const DocumentRenderMesh& mesh,
+                            const Occurrence& occ);
 
 assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
 

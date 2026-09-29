@@ -13,7 +13,7 @@ baked geometry and autosave are in [README.md](README.md).
 ```json
 {
   "format": "designer-document",
-  "version": 134,
+  "version": 135,
   "parameters": [ {"name": "width", "expression": "40", "comment": "…"} ],
   "features":   [ {"type": "Box", "id": 1, "name": "Box 1", "…": "…"} ]
 }
@@ -215,6 +215,7 @@ here; the golden corpus and git history cover them.
 | 132 | Machine `rotary` `{along, chuck_end, word, top_moves}` (how the rotary is installed) and `holding` (chuck and tailstock sizes); setup `held_in`, `grip_mm`, `tailstock`, `chuck` ([4th axis](../cam/rotary.md#how-the-rotary-is-installed)) |
 | 133 | Derived `configuration`: the source's configuration the copy is taken in, by id; absent = whichever it has active ([Derived](../modeling/derived.md#configurations)) |
 | 134 | Drawing view `rotation_deg`: the view turned on the sheet, counter-clockwise about its own direction; absent = 0 ([drawings](../drawings/README.md#rotation)). A dimension ref's `extreme` (`left`/`right`/`top`/`bottom`): the curve's furthest point that way ([dimensions](../drawings/README.md#dimensions-and-annotation)) |
+| 135 | A part occurrence's `configuration_id` names one of the PART's configurations (it was sub-assemblies only); an occurrence's `material` overrides every body's (a slug; absent = the part's own); a job part's `configuration` ([assemblies](../assemblies/README.md#configurations-per-placement)) |
 
 ## The directory form
 

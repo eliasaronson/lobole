@@ -7,6 +7,7 @@
 
 #ifdef HAVE_CAM
 
+#include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
@@ -17,11 +18,13 @@
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
-#include "ui/CamTool.h"       // CamFixturesChanged
-#include "ui/DocumentSlots.h" // JobUndoGuard
+#include "ui/CamTool.h"        // CamFixturesChanged
+#include "ui/DocumentSlots.h"  // JobUndoGuard
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
 #include "ui/MachineActions.h"
 
@@ -36,6 +39,37 @@ namespace remote {
 using nlohmann::json;
 
 namespace {
+
+// A configuration of `sourceId`, a job part's source, by name or id; null,
+// 0 or "" is its active one. Refused naming the ones it has, or saying
+// which feature fails in it.
+uint64_t SourceConfiguration(ui::AppState& state, uint64_t sourceId,
+                             const std::string& label,
+                             const nlohmann::json& c) {
+  if (c.is_null())
+    return 0;
+  const Document* part = ui::PartDocById(state, sourceId);
+  uint64_t id = 0;
+  std::string known;
+  if (part != nullptr)
+    for (const Configuration& cfg : part->GetConfigurations()) {
+      known += (known.empty() ? "" : ", ") + cfg.name;
+      if ((c.is_number() && cfg.id == c.get<uint64_t>()) ||
+          (c.is_string() && cfg.name == c.get<std::string>()))
+        id = cfg.id;
+    }
+  if (id == 0) {
+    if ((c.is_number() && c.get<uint64_t>() == 0) ||
+        (c.is_string() && c.get<std::string>().empty()))
+      return 0;
+    throw std::runtime_error("no configuration " + c.dump() + " in '" + label +
+                             "'. Known: " + (known.empty() ? "(none)" : known));
+  }
+  std::string bad;
+  if (ui::ConfiguredPartDocument(state, sourceId, id, &bad) == nullptr)
+    throw std::runtime_error("'" + label + "': " + bad);
+  return id;
+}
 
 constexpr MethodDoc kCamMethods[] = {
     {"list_machines",
@@ -71,20 +105,24 @@ constexpr MethodDoc kCamMethods[] = {
     {"delete_machine", "Remove a machine from the store {name}.", "name"},
     {"machine_part",
      "Make a JOB for a part and switch to it {part?: id or name (default: the "
-     "open part), name?}. A job is a document of its own since v73 -- it "
+     "open part), name?, configuration?: which of the part's configurations "
+     "it cuts (v135; default its active one)}. A job is a document of its own "
+     "since v73 -- it "
      "REFERENCES parts and says how they are cut -- so this is the one step "
      "from a part you have open to a tab you can add setups on. Returns the "
      "job's tab id and the job part it holds. Every verb below then takes "
      "`job` (name or id) to say WHICH job it acts on; without one they act on "
      "whichever job tab is in front, which is fine interactively and is a "
      "trap in a script that switches tabs between calls.",
-     "part, name"},
+     "configuration, name, part"},
     {"add_job_part",
-     "Add a part to the open job {part: id or name} -- another thing this job "
-     "cuts. Returns the job part's id, which is what an operation target and "
-     "a placement name. A job is what makes four brackets out of one sheet "
-     "expressible; before v73 a setup could only ever be about one part.",
-     "job, part"},
+     "Add a part to the open job {part: id or name, configuration?: name or "
+     "id} -- another thing this job cuts, in that configuration of it (v135; "
+     "default its active one). Returns the job part's id, which is what an "
+     "operation target and a placement name. A job is what makes four "
+     "brackets out of one sheet expressible; before v73 a setup could only "
+     "ever be about one part.",
+     "configuration, job, part"},
     {"remove_job_part",
      "Drop a part from the job {id}. Every placement and every operation "
      "target that named it goes with it -- a target on a part the job no "
@@ -93,11 +131,14 @@ constexpr MethodDoc kCamMethods[] = {
      "id, job"},
     {"list_job_parts",
      "The parts this job cuts {job?}: per part `id`, `source` (the document "
-     "id), `name`, `missing` (its source document is gone -- reported, never "
-     "substituted) and `placements`, each {setup, id, pos, rot_z, enabled, "
-     "frame, clamped_per_part}. The id is what an operation target and a "
-     "placement name.",
-     "job", remote::NoFlags, "parts[]{id,source,name,missing,placements}"},
+     "id), `name`, `configuration` (+ `configuration_name`), `missing` (its "
+     "source is gone or does not build in that configuration -- reported "
+     "with `why`, never substituted) and `placements`, each {setup, id, pos, "
+     "rot_z, enabled, frame, clamped_per_part}. The id is what an operation "
+     "target and a placement name.",
+     "job", remote::NoFlags,
+     "parts[]{id,source,name,configuration,configuration_name?,missing,why?,"
+     "placements}"},
     {"check_layout",
      "How the parts are arranged in the stock {job?, setup?}. Per placement: "
      "`fit` -- `inside`, `partly_outside` (hanging over an edge) or "
@@ -930,17 +971,25 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       sourceId = active.id;
       sourceName = active.name;
     }
+    const uint64_t cfg =
+        SourceConfiguration(state, sourceId, sourceName,
+                            p.value("configuration", nlohmann::json(nullptr)));
     const size_t tab =
         ui::CreateJobForPart(state, sourceId, p.value("name", std::string()));
     cam::JobDocument* made = ui::ActiveJob(state);
     if (made == nullptr || made->GetParts().empty())
       throw std::runtime_error("could not create a job for '" + sourceName +
                                "'");
+    if (cfg != 0) {
+      made->GetParts()[0].configuration = cfg;
+      made->BumpVersion();
+    }
     return json{{"id", state.parts[tab].id},
                 {"name", state.parts[tab].name},
                 {"part", json{{"id", made->GetParts()[0].id},
                               {"source", sourceId},
-                              {"name", sourceName}}}};
+                              {"name", sourceName},
+                              {"configuration", cfg}}}};
   }
 
   if (m == "list_machines") {
@@ -999,9 +1048,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (sourceId == 0)
       throw std::runtime_error("no part " + pj.dump() +
                                " in this project; list_parts shows them");
+    const uint64_t cfg =
+        SourceConfiguration(state, sourceId, sourceName,
+                            p.value("configuration", nlohmann::json(nullptr)));
     const uint64_t id = job->AddPart(sourceId, sourceName);
+    job->FindPart(id)->configuration = cfg;
     job->BumpVersion();
-    return json{{"id", id}, {"source", sourceId}, {"name", sourceName}};
+    return json{{"id", id},
+                {"source", sourceId},
+                {"name", sourceName},
+                {"configuration", cfg}};
   }
 
   if (m == "remove_job_part") {
@@ -1023,12 +1079,24 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: job
     json out = json::array();
     for (const cam::JobPart& part : job->GetParts()) {
-      json pj = {
-          {"id", part.id}, {"source", part.sourceDocId}, {"name", part.name}};
-      // A source that is gone is REPORTED, never substituted: the job cannot
-      // cut what it cannot find, and saying nothing here is how a job posts
-      // an empty file and looks fine doing it.
-      pj["missing"] = ui::JobSourceDocument(state, part.sourceDocId) == nullptr;
+      json pj = {{"id", part.id},
+                 {"source", part.sourceDocId},
+                 {"name", part.name},
+                 {"configuration", part.configuration}};
+      if (part.configuration != 0)
+        if (const Document* src =
+                ui::JobSourceDocument(state, part.sourceDocId))
+          if (const Configuration* c =
+                  src->FindConfiguration(part.configuration))
+            pj["configuration_name"] = c->name;
+      // A source that is gone -- or no longer builds in the configuration
+      // the job cuts -- is REPORTED, never substituted: the job cannot cut
+      // what it cannot find, and saying nothing here is how a job posts an
+      // empty file and looks fine doing it.
+      std::string why;
+      pj["missing"] = ui::JobPartDocument(state, part, &why) == nullptr;
+      if (pj["missing"])
+        pj["why"] = why;
       json places = json::array();
       for (const cam::Setup& setup : job->GetSetups())
         for (const cam::Placement& pl : setup.placements)

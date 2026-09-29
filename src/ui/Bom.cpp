@@ -118,13 +118,18 @@ BomTable ComputeBom(AppState& state) {
   // A5: aggregate over the LEAF parts of the whole tree, so a sub-assembly
   // placed twice doubles its parts' quantities. The per-unit BOM needs no
   // code of its own — it is this same function on that assembly's tab.
+  std::vector<std::string> rowWears; // each row's material override
   for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
     if (!inst.visible)
       continue; // hidden or suppressed, here or above: out of the BOM
+    // One line per part, configuration and material: what is made, and
+    // what it is made of.
     BomRow* row = nullptr;
-    for (BomRow& r : table.rows)
-      if (r.partId == inst.partId) {
-        row = &r;
+    for (size_t i = 0; i < table.rows.size(); i++)
+      if (table.rows[i].partId == inst.partId &&
+          table.rows[i].configurationId == inst.configurationId &&
+          rowWears[i] == inst.material) {
+        row = &table.rows[i];
         break;
       }
     if (row) {
@@ -133,11 +138,16 @@ BomTable ComputeBom(AppState& state) {
     }
     BomRow fresh;
     fresh.partId = inst.partId;
+    fresh.configurationId = inst.configurationId;
     fresh.quantity = 1;
     for (const PartSlot& slot : state.parts)
       if (slot.kind == DocKind::Part && slot.id == inst.partId)
         fresh.partName = slot.name;
-    const Document* part = PartDocById(state, inst.partId);
+    const Document* part = inst.part; // in the placement's configuration
+    if (part != nullptr && inst.configurationId != 0)
+      if (const Configuration* cfg =
+              part->FindConfiguration(inst.configurationId))
+        fresh.configuration = cfg->name;
     if (const FastenerFeature* screw = SoleFastenerOf(part)) {
       fresh.standard = screw->standard;
       fresh.designation = screw->Designation();
@@ -146,7 +156,8 @@ BomTable ComputeBom(AppState& state) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown
       table.warnings.push_back("'" + inst.path +
                                "' references a missing part — mass unknown");
-    } else if (const auto mass = Measure::MassOfBodies(part->GetBodies())) {
+    } else if (const auto mass = Measure::MassOfBodies(
+                   part->GetBodies(), nullptr, inst.material)) {
       fresh.unitVolume = mass->volume;
       fresh.massKnown = mass->massKnown;
       fresh.unitMassG = mass->massG;
@@ -166,6 +177,7 @@ BomTable ComputeBom(AppState& state) {
               " — mass unknown");
     }
     table.rows.push_back(std::move(fresh));
+    rowWears.push_back(inst.material);
   }
   for (const BomRow& r : table.rows) {
     if (r.massKnown)
@@ -405,24 +417,25 @@ std::string BomToCsv(const BomTable& bom) {
   // `standard` and `designation` are the two columns a purchase order needs
   // and the panel has no room for: blank on a part somebody made, filled on
   // a bought one, so a filter on either splits the list in two.
-  std::string csv = "part,quantity,standard,designation,material,"
-                    "unit_volume_mm3,unit_mass_g,total_mass_g\n";
+  std::string csv = "part,configuration,quantity,standard,designation,"
+                    "material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
   char buf[64];
   auto num = [&buf](double v) {
     snprintf(buf, sizeof buf, "%.6g", v);
     return std::string(buf);
   };
   for (const BomRow& r : bom.rows) {
-    csv += field(r.partName) + "," + std::to_string(r.quantity) + "," +
-           field(r.standard) + "," + field(r.designation) + "," +
-           field(r.material) + "," + num(r.unitVolume) + ",";
+    csv += field(r.partName) + "," + field(r.configuration) + "," +
+           std::to_string(r.quantity) + "," + field(r.standard) + "," +
+           field(r.designation) + "," + field(r.material) + "," +
+           num(r.unitVolume) + ",";
     if (r.massKnown)
       csv += num(r.unitMassG) + "," + num(r.unitMassG * r.quantity);
     else
       csv += ",";
     csv += "\n";
   }
-  csv += "total,,,,,,,";
+  csv += "total,,,,,,,,";
   if (bom.massKnown)
     csv += num(bom.totalMassG);
   csv += "\n";

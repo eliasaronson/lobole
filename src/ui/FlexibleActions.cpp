@@ -1,5 +1,7 @@
 #include "ui/FlexibleActions.h"
 
+#include "cad/CADMaterials.h"
+
 #include "ui/AppActionsInternal.h" // DisplayMatrix, ExplodeInnerOffset
 #include "ui/AssemblyActions.h"
 #include "ui/DocumentSlots.h"
@@ -74,6 +76,37 @@ bool SetOccurrenceFlexible(AppState& state, uint64_t occId, bool flexible,
   const assembly::SolveReport rep = SolveActiveAssemblyReport(state);
   if (report)
     *report = rep;
+  return true;
+}
+
+bool SetOccurrenceMaterial(AppState& state, uint64_t occId,
+                           const std::string& material, std::string* why) {
+  const auto refuse = [why](std::string w) {
+    if (why)
+      *why = std::move(w);
+    return false;
+  };
+  if (!state.assembly)
+    return refuse("the active document is not an assembly");
+  Occurrence* occ = state.assembly->FindById(occId);
+  if (occ == nullptr)
+    return refuse("no occurrence with id " + std::to_string(occId));
+  if (!material.empty()) {
+    if (occ->refKind == OccurrenceRef::Assembly)
+      return refuse("'" + occ->name +
+                    "' places a sub-assembly: set the material on the parts "
+                    "inside it");
+    CADMaterials::MaterialType unused;
+    if (!CADMaterials::MaterialLibrary::TryMaterialTypeFromString(material,
+                                                                  unused))
+      return refuse("unknown material '" + material + "' (known: " +
+                    CADMaterials::MaterialLibrary::SlugList() + ")");
+  }
+  if (occ->material == material)
+    return true;
+  SnapshotAssembly(state);
+  occ->material = material;
+  state.assembly->BumpVersion();
   return true;
 }
 

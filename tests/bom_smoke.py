@@ -103,7 +103,8 @@ def main():
         expect(out["rows"] == 2, f"export row count: {out}")
         lines = open(csv_path).read().strip().splitlines()
         expect(lines[0] ==
-               "part,quantity,standard,designation,material,unit_volume_mm3,"
+               "part,configuration,quantity,standard,designation,material,"
+               "unit_volume_mm3,"
                "unit_mass_g,total_mass_g",
                f"csv header: {lines[0]}")
         expect(len(lines) == 4, f"2 rows + header + total: {lines}")

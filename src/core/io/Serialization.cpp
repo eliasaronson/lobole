@@ -2185,9 +2185,12 @@ json JobEnvelope() {
 json JobBodyJson(const cam::JobDocument& job) {
   json j = JobEnvelope();
   j["parts"] = json::array();
-  for (const cam::JobPart& p : job.GetParts())
-    j["parts"].push_back(
-        json{{"id", p.id}, {"source", p.sourceDocId}, {"name", p.name}});
+  for (const cam::JobPart& p : job.GetParts()) {
+    json pj{{"id", p.id}, {"source", p.sourceDocId}, {"name", p.name}};
+    if (p.configuration != 0) // v135
+      pj["configuration"] = p.configuration;
+    j["parts"].push_back(std::move(pj));
+  }
   j["cam"] = json::array();
   for (const cam::Setup& setup : job.GetSetups())
     j["cam"].push_back(CamSetupToJson(setup));
@@ -2205,6 +2208,7 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
     part.id = pj.value("id", uint64_t{0});
     part.sourceDocId = pj.value("source", uint64_t{0});
     part.name = pj.value("name", std::string{});
+    part.configuration = pj.value("configuration", uint64_t{0});
     maxId = std::max(maxId, part.id);
     job->GetParts().push_back(std::move(part));
   }

@@ -85,16 +85,20 @@ struct Occurrence {
   glm::quat attachRotation{1.0f, 0.0f, 0.0f, 0.0f};
 
   // Which CONFIGURATION of the referenced document this placement uses
-  // (A5, v56); 0 = whatever that document's active configuration is, which
-  // is the behaviour every existing file means.
+  // (A5, v56; a part's since v135); 0 = whatever that document's active
+  // configuration is, which is the behaviour every existing file means.
   //
-  // This is what makes a sub-assembly reusable rather than merely tidy: one
-  // Gangway placed "short" beside another placed "long". Scoped to ASSEMBLY
-  // configurations, which are a suppression set the walk can simply consult
-  // — a PART configuration changes geometry, so honouring it per occurrence
-  // would mean regenerating that part once per configuration, and stays
-  // deferred (it was already deferred in C0-C4).
+  // This is what makes a placed document reusable rather than merely tidy:
+  // one Gangway placed "short" beside another placed "long", one chess piece
+  // part placed as a pawn and as a rook. A part in a configuration is a copy
+  // regenerated in it (ui::ConfiguredPartDocument), read through
+  // ui::OccurrencePartDoc.
   uint64_t configurationId = 0;
+
+  // The material this placement is made of, overriding every body's (a
+  // material slug, v135); "" = the part's own. One piece part in maple and
+  // in walnut is one part, not two copies that differ in a slug.
+  std::string material;
 
   // FLEXIBLE (v129): a placed sub-assembly whose own mechanism moves in this
   // assembly — its occurrences, mates and relations join the parent's solve

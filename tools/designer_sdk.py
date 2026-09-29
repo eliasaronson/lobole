@@ -2282,7 +2282,7 @@ def _mate_ref(key, mate):
 
 class Asm(_Tab):
     def place(self, part, at=None, fixed=False, name=None, flexible=False,
-              configuration=None):
+              configuration=None, material=None):
         """Place a part OR ANOTHER ASSEMBLY. `at` is a world position; leave
         it out and mate it instead — which is the point.
 
@@ -2291,10 +2291,13 @@ class Asm(_Tab):
         had to be placed by passing its name as a bare string, which reads
         like a mistake rather than a feature.
 
+        `configuration` (a name or id) is which of the placed document's
+        configurations this placement is: a sub-assembly's, or a PART's
+        (v135) -- one piece part placed as a pawn and as a rook.
+        `material` (a slug) is what this placement of a part is made of,
+        over the part's own: one part in maple and in walnut is one part.
         `flexible=True` places a sub-assembly whose own mechanism MOVES here
-        (v129; its mates are then reached with `occ.mate(...)`), and
-        `configuration` (a name or id) is the one of ITS configurations the
-        placement runs under.
+        (v129; its mates are then reached with `occ.mate(...)`).
         """
         self.activate()
         kw = {"part": part.name if isinstance(part, (Part, Asm)) else part,
@@ -2303,15 +2306,15 @@ class Asm(_Tab):
             kw["flexible"] = True
         if name:
             kw["name"] = name
+        if configuration is not None:
+            kw["configuration"] = configuration
+        if material is not None:
+            kw["material"] = material
         if at is not None:
             kw["transform"] = {"position": list(V(at)),
                                "orientation": [0, 0, 0, 1]}
         r = self.app.add_occurrence(**kw)
-        occ = Occurrence(self, dict(r, name=r.get("name", name or "")))
-        if configuration is not None:
-            self.app.set_occurrence_configuration(occurrence=occ.id,
-                                                  configuration=configuration)
-        return occ
+        return Occurrence(self, dict(r, name=r.get("name", name or "")))
 
     def occurrences(self):
         self.activate()

@@ -70,7 +70,35 @@ the solve, it goes one level deep only, and the gizmo will not drag a rider
 (its pose is derived). Deleting an occurrence deletes what rides on it.
 
 Rendering is instanced: every occurrence of a part draws the part's one
-tessellation with its own transform.
+tessellation with its own transform -- one per configuration and material it
+is placed in (below).
+
+### Configurations per placement
+
+`configuration_id` says which configuration of the placed document an
+occurrence uses; 0 is whatever that document has active. For a sub-assembly
+that is a suppression set; for a part (v135) it is a different geometry: the
+part regenerated in that configuration, a cached copy
+(`ui::ConfiguredPartDocument`, the one drawing views and Derived features
+read). `assembly::PartResolver` takes `(part, configuration)`, so `Flatten`,
+mate connectors and the solve see each placement as placed, and
+`FlatInstance::configurationId` says which. Every other read of a placed
+part's geometry goes through `ui::OccurrencePartDoc` -- never
+`PartDocById(occ.partId)`, which is the active configuration whatever the
+placement asked for. A configuration the part does not have, or does not
+build in, is refused when it is chosen, saying which feature fails.
+
+`material` (v135) makes a placement of a part a material other than its
+part's, every body of it: mass, the BOM and the renderers read it. One chess
+piece part placed as pawns and rooks, in maple and walnut, is one part.
+
+Keys follow: the renderer's tessellation cache and the in-context ghosts are
+keyed by (part, configuration, material), a motion study copies each (part,
+configuration) once, and staleness stamps fold in the part's configurations
+revision -- editing a configuration a placement uses regenerates its copy
+without moving the part's `Version`, and a configured copy carries the live
+part's `Version`, so a key or a stamp on the part alone drew one
+configuration as another.
 
 ## Sub-assemblies
 
@@ -408,8 +436,9 @@ session state (`set_explode`), not saved.
 ## Bill of materials
 
 Derived every time, never stored. `ComputeBom` (`src/ui/Bom.cpp`) groups the
-flattened leaf parts by part id, so a sub-assembly placed twice doubles its
-parts' quantities; hidden or suppressed occurrences (at any level) are left
+flattened leaf parts by part, configuration and material -- a pawn and a
+rook of one piece part are two lines, named `piece (pawn)` -- so a
+sub-assembly placed twice doubles its parts' quantities; hidden or suppressed occurrences (at any level) are left
 out. A row carries quantity, material, unit and total mass (null when a body
 has no density), and for a generated standard part its `standard` and
 `designation`. The per-unit BOM of a sub-assembly is the same function on its

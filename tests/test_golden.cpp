@@ -321,6 +321,15 @@ void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
       got.push_back(p.name);
     CHECK(got == want);
   }
+  // v135: which configuration of its source each job part cuts.
+  if (expect.contains("job_part_configurations")) {
+    const auto want =
+        expect.at("job_part_configurations").get<std::vector<uint64_t>>();
+    std::vector<uint64_t> got;
+    for (const cam::JobPart& p : job.GetParts())
+      got.push_back(p.configuration);
+    CHECK(got == want);
+  }
   if (expect.contains("job_target_parts")) {
     const auto want =
         expect.at("job_target_parts").get<std::vector<uint64_t>>();

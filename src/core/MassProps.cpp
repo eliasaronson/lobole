@@ -5,7 +5,8 @@
 namespace Measure {
 
 std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
-                                         std::string* error) {
+                                         std::string* error,
+                                         const std::string& materialOverride) {
   DocumentMass out;
   glm::dvec3 weightedCom(0.0);
   for (const Body& body : bodies) {
@@ -19,7 +20,7 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
     }
     BodyMass bm;
     bm.name = body.name;
-    bm.material = body.material;
+    bm.material = materialOverride.empty() ? body.material : materialOverride;
     bm.volume = mp.volume;
     bm.surfaceArea = mp.surfaceArea;
     bm.centerOfMass = glm::dvec3(mp.centerOfMass);
@@ -27,9 +28,9 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
       for (int c = 0; c < 3; c++)
         bm.inertia[r][c] = mp.inertia[r][c];
     const float density =
-        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material)
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(bm.material)
             .density;
-    if (!body.material.empty() && density > 0.0f) {
+    if (!bm.material.empty() && density > 0.0f) {
       bm.density = density;
       bm.massKnown = true;
       bm.massG = density * mp.volume * 1e-6;

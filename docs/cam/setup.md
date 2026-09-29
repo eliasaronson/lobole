@@ -103,11 +103,16 @@ narrower than the shank, the verifier finds the shank at the wall
 
 ## Parts and placements
 
-`JobPart{id, sourceDocId, name}` references a part document; the job owns no
-geometry. `ui::JobBodies` returns every part's bodies in model space, each
-stamped with its transient `jobPartId`; its cache key is the job's version
-plus every source part's version, so a model edit reaches the toolpath the
-frame it happens. `ui::JobPlacedBodies` is the same list laid out in the
+`JobPart{id, sourceDocId, name, configuration}` references a part document,
+in one of its configurations (v135; 0 = its active one -- `add_job_part` /
+`machine_part {configuration}`); the job owns no geometry. `ui::JobBodies`
+returns every part's bodies in model space (`ui::JobPartDocument`: the part
+in its configuration), each stamped with its transient `jobPartId`; its
+cache key is the job's version plus every source part's version,
+configurations revision and the configuration it cuts, so a model edit
+reaches the toolpath the frame it happens. A source that is gone, or no
+longer builds in that configuration, is reported by `list_job_parts`
+(`missing`, `why`), never substituted. `ui::JobPlacedBodies` is the same list laid out in the
 active setup's frame — what the job tab draws and what is cut.
 
 A **placement** (`cam::Placement`) says where a part sits in this setup's

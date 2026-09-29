@@ -244,7 +244,7 @@ void ReleaseTessellationCache(AppState& state) {
 //     which SHARES its TShape. So rather than trust it, work is GROUPED BY
 //     TSHAPE below: shapes that share one are always meshed by the same
 //     thread, which makes the race impossible instead of merely absent.
-uint64_t PartRenderStamp(const Document& part) {
+uint64_t PartStamp(const Document& part) {
   return part.Version() ^
          (part.ConfigurationsRevision() * 0x9E3779B97F4A7C15ull);
 }

@@ -118,8 +118,7 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // A5: the face belongs to the LEAF part. For a sub-assembly occurrence
   // occ->partId is an assembly — no bodies, no faces — so resolving through
   // it returned false and a click inside a placed unit picked nothing.
-  Document* part =
-      PartDocById(state, rm->leafPartId ? rm->leafPartId : occ->partId);
+  const Document* part = MeshPartDoc(state, *rm, *occ);
   if (!part || rm->bodyIndex >= part->GetBodies().size())
     return false;
 

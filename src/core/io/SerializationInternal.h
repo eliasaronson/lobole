@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    134; // v134: a drawing view's `rotation_deg` -- the view turned on the
+    135; // v135: a part placement's `configuration_id` names one of the
+         //      PART's configurations (it was sub-assemblies only), and
+         //      an occurrence's `material` overrides its bodies'; a job
+         //      part's `configuration`.
+         // v134: a drawing view's `rotation_deg` -- the view turned on the
          //      sheet about its own direction (absent = 0); a dimension
          //      ref's `extreme` (left/right/top/bottom, absent = none).
          // v133: a Derived's `configuration` -- the source configuration the

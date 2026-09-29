@@ -273,6 +273,29 @@ def check_faces_by_maker(app):
            f"the copy's pocket floor, through via: {copied}")
 
 
+def check_place_configured(app):
+    """place(configuration=, material=): one part as two BOM lines."""
+    part = app.part("slab")
+    sk = part.sketch(sdk.Plane.xy(), name="slab")
+    sk.rect((0, 0), (10, 10))
+    t = part.param("t", 5)
+    part.extrude(sk.add(), t, name="Slab")
+    app.add_configuration(name="thick")
+    thick = [c for c in app.list_configurations()["configurations"]
+             if c["name"] == "thick"][0]["id"]
+    app.set_configuration(id=thick, parameter_overrides=[
+        {"name": "t", "expression": "15"}])
+    asm = app.assembly("slabs")
+    asm.place(part, at=(0, 0, 0), fixed=True, material="wood_maple")
+    asm.place(part, at=(30, 0, 0), fixed=True, configuration="thick",
+              material="wood_walnut")
+    rows = app.bom()["rows"]
+    got = sorted((r["configuration"], r["material"], round(r["unit_volume"]))
+                 for r in rows)
+    expect(got == [("", "wood_maple", 500), ("thick", "wood_walnut", 1500)],
+           f"two lines, each its configuration and wood: {got}")
+
+
 def check_compare_aligns(app, tmp):
     """`compare_geometry {align}` answers about the SHAPE, not the place.
 
@@ -528,6 +551,9 @@ def main():
 
         # ---- Faces by what made them --------------------------------------
         check_faces_by_maker(app)
+
+        # ---- One part placed in two configurations and woods -------------
+        check_place_configured(app)
 
         # ---- compare_geometry can be asked about shape alone -------------
         check_compare_aligns(app, tmp)

@@ -6,6 +6,9 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Occurrence.h"
+#include "core/io/Serialization.h"
+
+#include <nlohmann/json.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -322,4 +325,31 @@ TEST_CASE("Flatten resolves each part placement in its own configuration",
   // And the (part, configuration) pairs to copy, once each.
   const auto pairs = assembly::SubtreePartConfigurations(top, nullptr);
   CHECK(pairs == std::vector<std::pair<uint64_t, uint64_t>>{{7, 0}, {7, 2}});
+}
+
+TEST_CASE("The v135 golden: part placements in configurations and materials",
+          "[assembly][io][configuration]") {
+  // One piece part placed as pawns and a rook, in maple and walnut, and a
+  // king in whatever the part has active and made of its own material.
+  const std::string golden = std::string(DESIGNER_SOURCE_DIR) +
+                             "/tests/golden/assembly/v135-part-"
+                             "configurations.json";
+  auto g = DocumentIO::LoadAssembly(golden);
+  REQUIRE(g.has_value());
+  const AssemblyDocument& doc = **g;
+  REQUIRE(doc.OccurrenceCount() == 4);
+  CHECK(doc.FindById(1)->configurationId == 2);
+  CHECK(doc.FindById(2)->configurationId == 3);
+  CHECK(doc.FindById(3)->material == "wood_walnut");
+  CHECK(doc.FindById(4)->configurationId == 0);
+  CHECK(doc.FindById(4)->material.empty());
+  // Round trip: the material rides only when it is set.
+  const auto j = DocumentIO::OccurrenceToJson(*doc.FindById(1));
+  CHECK(j.at("material") == "wood_maple");
+  CHECK_FALSE(
+      DocumentIO::OccurrenceToJson(*doc.FindById(4)).contains("material"));
+  // A material this build does not know is refused, not read as none.
+  nlohmann::json bad = j;
+  bad["material"] = "wood_teak";
+  CHECK_THROWS(DocumentIO::OccurrenceFromJson(bad));
 }

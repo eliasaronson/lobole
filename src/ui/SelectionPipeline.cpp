@@ -72,8 +72,7 @@ AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
     // occurrence is not occ->partId — that resolves to an assembly, has no
     // bodies, and used to make this return nullopt, so clicking anything
     // inside a placed unit produced no pick at all.
-    Document* part =
-        PartDocById(state, m.leafPartId ? m.leafPartId : occ->partId);
+    const Document* part = MeshPartDoc(state, m, *occ);
     if (!part || m.bodyIndex >= part->GetBodies().size())
       return std::nullopt;
     const Body& body = part->GetBodies()[m.bodyIndex];
@@ -439,8 +438,8 @@ bool ResolveElementItem(const AppState& state, const SelectionItem& item,
   const std::vector<Body>* bodies = nullptr;
   if (item.id != 0 && state.assembly) {
     const Occurrence* occ = state.assembly->FindById(item.id);
-    Document* part =
-        occ ? PartDocById(const_cast<AppState&>(state), occ->partId) : nullptr;
+    const Document* part =
+        occ ? OccurrencePartDoc(const_cast<AppState&>(state), *occ) : nullptr;
     if (!part)
       return false;
     bodies = &part->GetBodies();

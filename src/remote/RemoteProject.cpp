@@ -373,6 +373,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         json recipe = json::array();
         for (const auto& occurrence : assembly->GetOccurrences()) {
           recipe.push_back(DocumentIO::OccurrenceToJson(occurrence));
+          // the live part: whether it exists at all
           if (!ui::PartDocById(state, occurrence.partId) &&
               !ui::AssemblyDocById(state, occurrence.partId))
             missing.push_back(

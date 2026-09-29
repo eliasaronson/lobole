@@ -406,7 +406,7 @@ void RegisterFlexibleGuiTests(ImGuiTestEngine* engine) {
             ->FindById(r.crankOcc);
     const glm::mat4 world = ui::InnerDisplayMatrix(*s_App, Unit(r), *crank);
     glm::vec3 lo, hi;
-    ui::PartDocById(*s_App, crank->partId)
+    ui::OccurrencePartDoc(*s_App, *crank)
         ->GetBodies()[0]
         .shape.GetBoundingBox(lo, hi);
     const glm::vec3 mid = glm::vec3(world * glm::vec4((lo + hi) * 0.5f, 1.0f));

@@ -1,5 +1,6 @@
 #include "remote/RemoteAssembly.h"
 
+#include "cad/CADMaterials.h"
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
@@ -54,8 +55,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "set_occurrence_flexible), and answers with the solve's errored_mates. "
      "{configuration: name|id} places it in that configuration of what it "
      "places (a part's or a sub-assembly's; see "
-     "set_occurrence_configuration).",
-     "configuration, fixed, flexible, name, part, transform, visible"},
+     "set_occurrence_configuration); {material: slug} makes this placement "
+     "of that material (see set_occurrence_material).",
+     "configuration, fixed, flexible, material, name, part, transform, "
+     "visible"},
     {"remove_occurrence",
      "Remove an occurrence. Takes `occurrence` as well as `id`.",
      "id, occurrence"},
@@ -104,6 +107,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"rename_occurrence",
      "Rename an occurrence. Takes `occurrence` as well as `id`.",
      "id, name, occurrence"},
+    {"set_occurrence_material",
+     "What this placement of a part is made of {id, material: slug | \"\" "
+     "for the part's own}: every body of it, for mass, the BOM and how it "
+     "draws. One piece part placed in maple and in walnut is one part. A "
+     "sub-assembly placement is refused (set its parts'); an unknown slug is "
+     "refused, naming the known ones.",
+     "id, material, occurrence"},
     {"set_occurrence_configuration",
      "Choose which configuration of the placed part or sub-assembly this "
      "occurrence uses {id, configuration: name|id|null}; null = that "
@@ -428,6 +438,24 @@ namespace {
 // A configuration of what an occurrence places -- a part's or a
 // sub-assembly's -- by name or id; null, 0 or "" is that document's active
 // one. Refused naming the ones it has.
+// What a placement is made of (v135): a material slug, or "" / null for its
+// part's own. Refused for a sub-assembly (its parts are what is made of
+// something) and for a slug this build does not know.
+std::string OccurrenceMaterial(const Occurrence& occ, const json& m) {
+  const std::string slug = m.is_null() ? std::string() : m.get<std::string>();
+  if (slug.empty())
+    return slug;
+  if (occ.refKind == OccurrenceRef::Assembly)
+    throw std::runtime_error("'" + occ.name +
+                             "' places a sub-assembly: set the material on "
+                             "the parts inside it");
+  CADMaterials::MaterialType unused;
+  if (!CADMaterials::MaterialLibrary::TryMaterialTypeFromString(slug, unused))
+    throw std::runtime_error("unknown material '" + slug + "' (known: " +
+                             CADMaterials::MaterialLibrary::SlugList() + ")");
+  return slug;
+}
+
 uint64_t PlacedConfiguration(ui::AppState& state, OccurrenceRef kind,
                              uint64_t docId, const std::string& label,
                              const json& c) {
@@ -970,6 +998,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           nullptr)
         throw std::runtime_error("cannot place '" + refName + "': " + bad);
     }
+    if (p.contains("material"))
+      occ.material = OccurrenceMaterial(occ, p.at("material"));
     // v129: placed FLEXIBLE, its sub-assembly's mechanism moves here.
     occ.flexible = p.value("flexible", false);
     if (occ.flexible) {
@@ -1088,7 +1118,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   // version so the renderer resyncs. `id` names the occurrence.
   if (m == "set_occurrence_transform" || m == "set_occurrence_visible" ||
       m == "set_occurrence_fixed" || m == "rename_occurrence" ||
-      m == "set_occurrence_configuration" || m == "set_occurrence_flexible") {
+      m == "set_occurrence_configuration" || m == "set_occurrence_flexible" ||
+      m == "set_occurrence_material") {
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
@@ -1110,6 +1141,16 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // The two a flexible placement is made of go through the SAME actions as
     // the occurrence panel's checkbox and picker (ui/FlexibleActions.h), each
     // its own undo step and solve.
+    // The panel's material picker is this same action (ui/FlexibleActions.h).
+    if (m == "set_occurrence_material") {
+      const json& mj = p.at("material");
+      std::string why;
+      if (!ui::SetOccurrenceMaterial(
+              state, occId,
+              mj.is_null() ? std::string() : mj.get<std::string>(), &why))
+        throw std::runtime_error(why);
+      return DocumentIO::OccurrenceToJson(*state.assembly->FindById(occId));
+    }
     if (m == "set_occurrence_flexible" || m == "set_occurrence_configuration") {
       std::string why;
       assembly::SolveReport rep;
@@ -2400,9 +2441,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     const ui::BomTable bom = ui::ComputeBom(state);
     json rows = json::array();
     for (const ui::BomRow& r : bom.rows) {
-      json row = {{"part_id", r.partId},        {"part", r.partName},
-                  {"quantity", r.quantity},     {"material", r.material},
-                  {"standard", r.standard},     {"designation", r.designation},
+      json row = {{"part_id", r.partId},
+                  {"part", r.partName},
+                  {"configuration", r.configuration},
+                  {"configuration_id", r.configurationId},
+                  {"quantity", r.quantity},
+                  {"material", r.material},
+                  {"standard", r.standard},
+                  {"designation", r.designation},
                   {"unit_volume", r.unitVolume}};
       row["unit_mass_g"] = r.massKnown ? json(r.unitMassG) : json(nullptr);
       row["total_mass_g"] =

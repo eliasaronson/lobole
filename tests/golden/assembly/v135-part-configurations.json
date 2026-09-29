@@ -1,0 +1,107 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "version": 135,
+  "mates": [],
+  "occurrences": [
+    {
+      "configuration_id": 2,
+      "fixed": true,
+      "id": 1,
+      "name": "pawn a2",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true,
+      "material": "wood_maple"
+    },
+    {
+      "configuration_id": 3,
+      "fixed": false,
+      "id": 2,
+      "name": "rook a1",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          40.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true,
+      "material": "wood_maple"
+    },
+    {
+      "configuration_id": 2,
+      "fixed": false,
+      "id": 3,
+      "name": "pawn a7",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          80.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true,
+      "material": "wood_walnut"
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 4,
+      "name": "king e1",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          120.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ]
+}

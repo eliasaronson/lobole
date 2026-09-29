@@ -104,6 +104,10 @@ struct DocumentRenderMesh {
   // B-Rep edge polylines (world space, edgeIndex order — the ElementMap /
   // PickEdge convention). Cached here for edge highlighting.
   std::vector<std::vector<glm::vec3>> edgePolylines;
+  // The configuration that leaf is placed in (v135): its faces are that
+  // configuration's, so a pick names them through it
+  // (ui::MeshPartDoc), not through the part's active one.
+  uint64_t leafConfiguration = 0;
 };
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };

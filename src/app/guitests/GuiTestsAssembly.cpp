@@ -90,6 +90,63 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     s_App->bomWindowOpen = false; // a floating window must not outlive its test
   };
 
+  // A part placement's configuration and material, picked in its own
+  // controls (docs/assemblies/README.md#configurations-per-placement): one
+  // part placed twice becomes two BOM lines, and each pick is an undo step.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "part_placement_takes_a_configuration_and_material");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    Doc()->GetFeature(0)->SetMaterial("wood_maple");
+    const uint64_t alt = Doc()->AddConfiguration("alt").id;
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Board");
+    ui::SetActivePart(*s_App, asmIdx);
+    uint64_t second = 0;
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Piece " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      o.position = glm::vec3(40.0f * i, 0.0f, 0.0f);
+      second = s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(3);
+    IM_CHECK_EQ(ui::ComputeBom(*s_App).rows.size(), (size_t)1);
+    const size_t undo0 = s_App->assemblyHistory.undo.size();
+
+    ctx->ItemDoubleClick(
+        ("//###Model/###occ_" + std::to_string(second)).c_str());
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick(
+        ("###occ_part_config/###occ_part_config_" + std::to_string(alt))
+            .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->FindById(second)->configurationId, alt);
+    ctx->ComboClick("###occ_material/###occ_material_wood_walnut");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->FindById(second)->material,
+                std::string("wood_walnut"));
+    IM_CHECK_EQ(s_App->assemblyHistory.undo.size(), undo0 + 2);
+    ctx->ItemClick("###occ_edit_done");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+
+    // Two lines now, the second in walnut and named for its configuration.
+    const ui::BomTable bom = ui::ComputeBom(*s_App);
+    IM_CHECK_EQ(bom.rows.size(), (size_t)2);
+    bool walnut = false;
+    for (const ui::BomRow& r : bom.rows)
+      if (r.configuration == "alt")
+        walnut = r.material == "wood_walnut" && r.quantity == 1;
+    IM_CHECK(walnut);
+  };
+
   // An exploded view is pure display state: it must move what is drawn and
   // leave the occurrence transforms alone (that invariant is what makes a
   // saved exploded view unable to corrupt a placement).

@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <map>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -26,10 +27,19 @@ std::string SlotName(const AppState& state, uint64_t slotId) {
 // tab showing it seeds it; reference bodies advance the count (the part tab
 // draws them) but are never written — they are another part's geometry.
 std::vector<CADKernel::StepBody> PartBodies(const Document& part,
-                                            size_t palette) {
+                                            size_t palette,
+                                            const std::string& wears = {}) {
   std::vector<CADKernel::StepBody> out;
   for (const Body& b : part.GetBodies()) {
-    const BodyLook look = ResolveBodyLook(b, palette);
+    // a placement of another material than its part exports as that
+    Body worn;
+    if (!wears.empty()) {
+      worn.material = wears;
+      worn.appearance = b.appearance;
+      worn.displayColor = b.displayColor;
+      worn.hasDisplayColor = b.hasDisplayColor;
+    }
+    const BodyLook look = ResolveBodyLook(wears.empty() ? b : worn, palette);
     if (b.reference || !b.shape.IsValid())
       continue;
     out.push_back({b.shape, b.name, look.Color()});
@@ -97,22 +107,32 @@ BuildAssemblyStepModel(AppState& state) {
   // document it mirrors: a sub-assembly placed twice is filled once.
   std::vector<std::unordered_set<uint64_t>> holds(1);
 
-  // One product per part — a part regenerates in its document's active
-  // configuration, so its id is the whole key. -1: nothing to write.
-  std::unordered_map<uint64_t, long> partIndex;
+  // One product per part, configuration and material (v135): a pawn and a
+  // rook of one piece part are two shapes, a maple pawn and a walnut one two
+  // products. -1: nothing to write.
+  std::map<std::tuple<uint64_t, uint64_t, std::string>, long> partIndex;
   const auto partFor = [&](const assembly::FlatInstance& inst) -> long {
-    const auto it = partIndex.find(inst.partId);
+    const auto key =
+        std::make_tuple(inst.partId, inst.configurationId, inst.material);
+    const auto it = partIndex.find(key);
     if (it != partIndex.end())
       return it->second;
     // Seeded from the PART, as the assembly renderer seeds it.
     std::vector<CADKernel::StepBody> bodies =
-        PartBodies(*inst.part, static_cast<size_t>(inst.partId));
+        PartBodies(*inst.part, static_cast<size_t>(inst.partId), inst.material);
     long index = -1;
     if (!bodies.empty()) {
+      std::string name = SlotName(state, inst.partId);
+      if (inst.configurationId != 0)
+        if (const Configuration* c =
+                inst.part->FindConfiguration(inst.configurationId))
+          name += " (" + c->name + ")";
+      if (!inst.material.empty())
+        name += " " + inst.material;
       index = static_cast<long>(model.parts.size());
-      model.parts.push_back({SlotName(state, inst.partId), std::move(bodies)});
+      model.parts.push_back({name, std::move(bodies)});
     }
-    partIndex.emplace(inst.partId, index);
+    partIndex.emplace(key, index);
     return index;
   };
   // One assembly per (document, configuration): the placement chooses the

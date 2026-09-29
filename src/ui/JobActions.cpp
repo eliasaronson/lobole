@@ -4,6 +4,7 @@
 
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 
 #include "cad/CADKernel.h"
 
@@ -33,7 +34,11 @@ Document* JobSourceDocument(AppState& state, uint64_t sourceDocId) {
 
 uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId) {
   const Document* doc = JobSourceDocument(state, sourceDocId);
-  return doc ? doc->Version() : 0;
+  // Editing a configuration the job cuts regenerates it and moves no
+  // Version.
+  return doc ? doc->Version() ^
+                   (doc->ConfigurationsRevision() * 0x9E3779B97F4A7C15ull)
+             : 0;
 }
 
 // What the assembled bodies depend on: which parts the job lists, and what
@@ -43,6 +48,7 @@ uint64_t JobBodiesKey(AppState& state, const cam::JobDocument& job) {
   uint64_t key = 1469598103934665603ull ^ job.Version();
   for (const cam::JobPart& part : job.GetParts()) {
     key = (key ^ part.sourceDocId) * 1099511628211ull;
+    key = (key ^ part.configuration) * 1099511628211ull;
     key = (key ^ JobSourceVersion(state, part.sourceDocId)) * 1099511628211ull;
   }
   return key;
@@ -310,6 +316,18 @@ double DeriveJobSafeZ(AppState& state, const cam::Setup& setup) {
 #endif
 }
 
+const Document* JobPartDocument(AppState& state, const cam::JobPart& part,
+                                std::string* why) {
+  if (part.configuration == 0) {
+    const Document* doc = JobSourceDocument(state, part.sourceDocId);
+    if (!doc && why)
+      *why = "its source part is gone";
+    return doc;
+  }
+  return ConfiguredPartDocument(state, part.sourceDocId, part.configuration,
+                                why);
+}
+
 const std::vector<Body>& JobBodies(AppState& state) {
   static const std::vector<Body> kNone;
   const cam::JobDocument* job = ActiveJob(state);
@@ -323,7 +341,7 @@ const std::vector<Body>& JobBodies(AppState& state) {
     return state.jobBodies;
   state.jobBodies.clear();
   for (const cam::JobPart& part : job->GetParts()) {
-    const Document* doc = JobSourceDocument(state, part.sourceDocId);
+    const Document* doc = JobPartDocument(state, part);
     if (!doc)
       continue; // a source that is gone is reported, never substituted
     for (const Body& b : doc->GetBodies()) {
