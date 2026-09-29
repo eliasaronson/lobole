@@ -97,9 +97,11 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"export_step",
      "Export to STEP {path}: the active part (or {part}, from any tab), or — "
      "on an assembly tab — the assembly at its SOLVED placements. The file "
-     "carries product structure: each part is ONE named, coloured product "
-     "placed once per occurrence, each sub-assembly a nested assembly, each "
-     "body of a multi-body part its own named product; millimetres. {body} "
+     "carries product structure: each (part, configuration, material) is ONE "
+     "named, coloured product -- \"part (configuration) material\" -- placed "
+     "once per occurrence in its configuration, each sub-assembly a nested "
+     "assembly, each body of a multi-body part its own named product; "
+     "millimetres. {body} "
      "exports one body of a part. Replies {bodies} (part) or {shapes} "
      "(assembly) — placed body shapes — plus {products} and {instances}. "
      "`deflection` is ignored: STEP is exact.",

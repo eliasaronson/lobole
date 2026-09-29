@@ -291,7 +291,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from
-  list_parts>, "bodies"?: [<created_by ids>] (absent = all),
+  list_parts>, "configuration"?: <the source's configuration, id or
+  name> (absent = its active one), "bodies"?: [<created_by ids>]
+  (absent = all),
   "placement"?: {{"position": [x,y,z], "orientation": [x,y,z,w]}},
   "reference"?: true (a ghost: absent from mass, BOM, export, CAM and
   booleans) | false (an ordinary body of this part)}} — the snapshot is
@@ -933,15 +935,19 @@ def measure(a: dict, b: dict | None = None,
           "changing the feature history. Optional body index restricts to "
           "one body; optional `part` (slot name or stable id) reads another "
           "part WITHOUT switching the active tab — works from an assembly "
-          "tab too.")
+          "tab too — and with it `configuration` (name or id) lists the part "
+          "as it is in that configuration: what a placement or a job part "
+          "in it is made of.")
 def list_elements(body: int = -1, part: str | int | None = None,
+                  configuration: str | int | None = None,
                   made_by: str | int | None = None, role: str | None = None,
                   entity: int | None = None, via: str | int | None = None,
                   max_faces: int | None = None) -> dict:
     params = {}
     if body >= 0:
         params["body"] = body
-    for key, value in (("part", part), ("made_by", made_by), ("role", role),
+    for key, value in (("part", part), ("configuration", configuration),
+                       ("made_by", made_by), ("role", role),
                        ("entity", entity), ("via", via),
                        ("max_faces", max_faces)):
         if value is not None:
@@ -984,7 +990,10 @@ def delete_feature(index: int) -> dict:
           "well as appearance. Target ONE of: feature_id "
           "(the body's created_by from get_state/list_elements) or body (an "
           "index into get_state's bodies — add/cut keep the original creator, "
-          "so this recolors everything fused into that body). Slugs: "
+          "so this recolors everything fused into that body). In an "
+          "assembly, an occurrence's own material "
+          "(set_occurrence_material) overrides this for that placement. "
+          "Slugs: "
           + MATERIAL_SLUGS + ". Empty string restores the default; any other "
           "unrecognised slug is refused.")
 def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
@@ -1316,8 +1325,10 @@ def save_project(path: str, message: str = "save") -> dict:
 @mcp.tool(description="Export to STEP, the exact B-Rep other CAD opens. "
           "The active part (or `part`, from any tab), or the active "
           "assembly at its solved placements. The file keeps names, "
-          "colours and structure: each part is one product placed once per "
-          "occurrence, sub-assemblies nest. `body` exports one body of a "
+          "colours and structure: each (part, configuration, material) is "
+          "one product, named \"part (configuration) material\", placed once "
+          "per occurrence in its configuration; sub-assemblies nest. `body` "
+          "exports one body of a "
           "part by index.")
 def export_step(path: str, body: int = -1, part: str = "") -> dict:
     return _call("export_step", path=path,
@@ -1433,14 +1444,32 @@ def add_assembly(name: str = "") -> dict:
           "assembly anchor; visible=false hides it. A sub-assembly is one "
           "rigid unit: it contributes its whole subtree to the BOM, mass and "
           "clash checks, and a reference that would close a cycle is refused. "
+          "configuration (name or id) places it in that configuration of what "
+          "it places -- a part's or a sub-assembly's; two placements of one "
+          "part can differ (a pawn and a rook of one piece part), and one the "
+          "part lacks or does not build in is refused. material (a slug) "
+          "makes this placement of that material: every body of it, for "
+          "mass, BOM, rendering and STEP. flexible=true places a "
+          "sub-assembly whose own mechanism moves here "
+          "(set_occurrence_flexible). Change them later with "
+          "set_occurrence_configuration / set_occurrence_material. "
           "Returns {id, part_id, ref_kind}.")
 def add_occurrence(part: str, name: str = "", transform: dict | None = None,
-                   fixed: bool = False, visible: bool = True) -> dict:
+                   fixed: bool = False, visible: bool = True,
+                   configuration: str | int | None = None,
+                   material: str | None = None,
+                   flexible: bool = False) -> dict:
     params = {"part": part, "fixed": fixed, "visible": visible}
     if name:
         params["name"] = name
     if transform is not None:
         params["transform"] = transform
+    if configuration is not None:
+        params["configuration"] = configuration
+    if material:
+        params["material"] = material
+    if flexible:
+        params["flexible"] = True
     return _call("add_occurrence", **params)
 
 
@@ -1473,8 +1502,31 @@ def rename_occurrence(id: int, name: str) -> dict:
     return _call("rename_occurrence", id=id, name=name)
 
 
+@_reference(description="Choose which configuration of the placed part or "
+          "sub-assembly an occurrence uses: configuration = a name or id, "
+          "or None for that document's active one. Two placements of one "
+          "part can differ, and the part is drawn, measured, mated and listed "
+          "in the BOM as that configuration; one it lacks or does not build "
+          "in is refused, saying which feature fails. Undoable.")
+def set_occurrence_configuration(id: int,
+                                 configuration: str | int | None) -> dict:
+    return _call("set_occurrence_configuration", id=id,
+                 configuration=configuration)
+
+
+@_reference(description="What this placement of a part is made of: material = "
+          "a slug, or \"\" for the part's own. It overrides every body's "
+          "material for mass, BOM, rendering and STEP (one piece part placed "
+          "in maple and in walnut is one part). A sub-assembly placement is "
+          "refused, as is an unknown slug. Undoable.")
+def set_occurrence_material(id: int, material: str) -> dict:
+    return _call("set_occurrence_material", id=id, material=material)
+
+
 @_reference(description="List the active assembly's occurrences: id, name, "
-          "part_id, transform, visible, fixed.")
+          "part_id, transform, visible, fixed, configuration_id (0 = the "
+          "placed document's active configuration) and material (present "
+          "when the placement overrides its part's).")
 def list_occurrences() -> dict:
     return _call("list_occurrences")
 
@@ -1617,7 +1669,9 @@ def set_explode(view: int = -1, factor: float = -1.0) -> dict:
 
 
 @_reference(description="Bill of materials for the active assembly (A4): one "
-          "row per referenced part with quantity, material, unit/total mass "
+          "row per (part, configuration, material) placed, with "
+          "configuration (its name; \"\" = the part's active one), "
+          "configuration_id, quantity, material, unit/total mass "
           "(grams; null when a body has no material density) and a mass "
           "total. Derived fresh from the document on every call.")
 def bom() -> dict:
@@ -1625,7 +1679,8 @@ def bom() -> dict:
 
 
 @_reference(description="Write the active assembly's bill of materials to a "
-          "CSV file at `path` (same rows as `bom`).")
+          "CSV file at `path` (same rows as `bom`, with a `configuration` "
+          "column after `part`).")
 def export_bom(path: str) -> dict:
     return _call("export_bom", path=path)
 

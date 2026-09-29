@@ -72,7 +72,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "bounds", remote::NoFlags,
      "occurrences[]{type,id,name,part_id,ref_kind,part_version,transform,"
      "visible,fixed,configuration_id,attached_to?,attach_offset?,attach_"
-     "rotation?,bbox_min?,bbox_max?,leaf_count?,leaves?}"},
+     "rotation?,material?,flexible?,inner_poses?,inner_mate_dofs?,bbox_min?,"
+     "bbox_max?,leaf_count?,leaves?}"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
@@ -362,7 +363,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "drive, dry_run, far_end, nut, rim, size, standard, washer, "
      "washer_under_head, washer_under_nut"},
     {"bom",
-     "Bill of materials (aggregated part counts, masses). A row generated "
+     "Bill of materials (aggregated part counts, masses): one row per (part, "
+     "configuration, material) placed, carrying `configuration` (its name; "
+     "\"\" = the part's active one) and `configuration_id`. A row generated "
      "from a standard carries {standard, designation} — the two fields a "
      "purchase order needs — and a modelled part leaves them empty, so a "
      "filter on either splits bought from made.",
@@ -383,7 +386,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "", remote::NoFlags,
      "ok, examined, skipped, findings[]{occurrence,part,why}, "
      "receipt{schema,standing,summary,claims}"},
-    {"export_bom", "Export the BOM as CSV {path}.", "path"},
+    {"export_bom",
+     "Export the BOM as CSV {path}: the bom rows, with a `configuration` "
+     "column after `part`.",
+     "path"},
     {"edit_in_context",
      "Enter in-context editing of a part within the assembly.", "occurrence"},
     {"add_exploded_view", "Add an exploded view.", "name"},
@@ -2432,7 +2438,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "bom") {
-    // Bill of materials (A4): derived, one row per referenced part.
+    // Bill of materials (A4): derived, one row per (part, configuration,
+    // material) placed.
     // Unknown masses (a body without a density) are null and taint the total.
     if (!state.assembly)
       throw std::runtime_error(
