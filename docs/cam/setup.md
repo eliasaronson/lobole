@@ -168,7 +168,10 @@ One rule for both doors, the GUI pick and `set_job_placement {lay_face_up}`:
 a part that HAS a placement is clamped there; in a one-part job with no
 placement the setup's frame is the answer; in a job of several parts, laying
 one part's face up gives that part a placement rather than re-orienting the
-others. `set_cam_setup {lay_face_up}` sets the setup's own frame.
+others. `set_cam_setup {lay_face_up}` sets the setup's own frame; in a job
+of several parts it takes `lay_face_up.part`, because every Derived part's
+feature is id 1 and a feature id alone names a face on each of them — named
+on more than one, the call is refused rather than taking the first.
 
 Re-clamping re-derives every targeted operation's depths
 (`cam::RederiveDepths`), since `topZ`/`bottomZ` are heights in setup space; the

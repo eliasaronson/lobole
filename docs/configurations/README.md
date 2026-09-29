@@ -140,7 +140,7 @@ refuse with guidance.
 |---|---|---|
 | `add_configuration` | `name` | `{id, name}`; does not activate |
 | `remove_configuration` | `id` | if it was active, the document drops to base |
-| `list_configurations` | none | `{configurations[], active}`; part entries carry `parameter_overrides, suppressed_features, unsuppressed_features`, assembly entries `suppressed_occurrences, suppressed_mates, suppressed_relations, mate_overrides` |
+| `list_configurations` | `part?` (id or name: that part's, from any tab) | `{configurations[], active}`; part entries carry `parameter_overrides, suppressed_features, unsuppressed_features`, assembly entries `suppressed_occurrences, suppressed_mates, suppressed_relations, mate_overrides` |
 | `set_configuration` | `id, name?`, then the part keys (`parameter_overrides, suppressed_features, unsuppressed_features`) or the assembly keys (`suppressed_occurrences, suppressed_mates, suppressed_relations, mate_overrides`) | each list passed replaces the stored one. The other document kind's keys are **refused**, with the right key names in the error. Mate/relation ids must exist; a rotation hold needs a mate with a rotation DOF; `rotation` and `rotation_deg` together are refused. Editing the active configuration regenerates or re-solves. |
 | `set_active_configuration` | `id` (0 = base) | part: `{active, bodies, volumes, digest, regen}`; assembly: `{active, visible_occurrences}` |
 

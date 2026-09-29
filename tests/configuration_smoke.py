@@ -131,12 +131,21 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "W", "position": [0, 0, 0],
             "width": 5, "height": 5, "depth": 5})
+        d.call("add_configuration", name="Small")
         d.call("add_assembly", name="rig")
         o1 = d.call("add_occurrence", part="widget", fixed=True)["id"]
         o2 = d.call("add_occurrence", part="widget",
                     transform={"position": [10, 0, 0], "orientation": [0, 0, 0, 1]})["id"]
         # A config that suppresses the second occurrence.
         acfg = d.call("add_configuration", name="Half")["id"]
+        # A part's configurations, read from the assembly tab by naming it;
+        # without `part` the tab's own answer.
+        pc = d.call("list_configurations", part="widget")
+        expect([c["name"] for c in pc["configurations"]] == ["Small"],
+               f"widget's configurations from the assembly tab: {pc}")
+        ac = d.call("list_configurations")
+        expect([c["name"] for c in ac["configurations"]] == ["Half"],
+               f"the assembly's own configurations: {ac}")
         d.call("set_configuration", id=acfg, suppressed_occurrences=[o2])
         cur = {c["id"]: c for c in d.call("list_configurations")["configurations"]}
         expect(cur[acfg]["suppressed_occurrences"] == [o2],

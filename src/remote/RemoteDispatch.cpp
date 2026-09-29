@@ -997,6 +997,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return tubeOut;
   if (json smOut; remote::HandleSheetMetalRpc(state, doc, m, p, smOut))
     return smOut;
+  // A read that names its part answers from any tab, like get_state.
+  if (m == "list_configurations" && p.contains("part")) {
+    json cfgOut;
+    remote::HandleConfigurationRpc(
+        state, *remote::ResolvePartParam(state, p.at("part")), m, p, cfgOut);
+    return cfgOut;
+  }
   if (doc) {
     if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
       return cfgOut;

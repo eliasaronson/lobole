@@ -1913,6 +1913,34 @@ def main():
                    "and the setup before it")
             d.call("new_project")
 
+        phase("Laying a face up in a job of several parts")
+        # Every part's first feature is id 1, so in a job of two a feature id
+        # names a face on each: lay_face_up refuses to guess, and takes `part`.
+        if has_cam:
+            d.call("new_project")
+            first = d.call("add_feature", feature={
+                "type": "Box", "name": "A", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("add_part", name="B")
+            second = d.call("add_feature", feature={
+                "type": "Box", "name": "B", "position": [0, 0, 0],
+                "width": 30, "height": 30, "depth": 10})
+            expect(first["id"] == second["id"],
+                   f"both parts' first feature share an id: {first} {second}")
+            d.call("machine_part", part="Part 1")
+            jp = d.call("add_job_part", part="B")["id"]
+            sid = d.call("add_cam_setup", name="Both")["id"]
+            face = next(f["name"] for f in
+                        d.call("list_elements", part="B")["bodies"][0]["faces"]
+                        if f["normal"][0] > 0.999)
+            pick = {"feature_id": second["id"], "element": face}
+            expect_error(d, "set_cam_setup", "say which", id=sid,
+                         lay_face_up=pick)
+            expect_error(d, "set_cam_setup", "no job part", id=sid,
+                         lay_face_up=dict(pick, part=9999))
+            d.call("set_cam_setup", id=sid, lay_face_up=dict(pick, part=jp))
+            d.call("new_project")
+
         phase("Workholding over the RPC")
         # docs/cam/setup.md#workholding-fixtures: a clamp is a keep-out the verifier
         # sees -- a keep-out box, or any part the job does not cut.

@@ -189,7 +189,8 @@ constexpr MethodDoc kCamMethods[] = {
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
-     "element}, flip?, has_rotary_axis?, rotation_a?, held_in?: "
+     "element, part? (the job part, when several share the feature id)}, "
+     "flip?, has_rotary_axis?, rotation_a?, held_in?: "
      "rotary|bed|derived (whether the part is held in the rotary; derived "
      "from a rotary op or a non-zero rotation_a, so an indexed setup at A=0 "
      "states it), grip_mm? (mm of the stock the chuck's jaws hold; 0 = the "
@@ -1630,16 +1631,33 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ElementRef ref;
       ref.featureId = fj.at("feature_id").get<uint64_t>();
       ref.name = fj.at("element").get<std::string>();
-      glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
-      bool found = false;
-      for (const Body& body : ui::JobBodies(state)) {
-        if (body.createdBy != ref.featureId)
-          continue;
-        const std::optional<int> idx = body.elementMap.Resolve(ref.name);
-        found = idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
-        break;
+      const uint64_t partId = fj.value("part", uint64_t{0});
+      if (partId != 0 && job->FindPart(partId) == nullptr)
+        throw std::runtime_error("lay_face_up: no job part with id " +
+                                 std::to_string(partId) +
+                                 "; list_job_parts shows the ones that exist");
+      // Every Derived part's feature is id 1, so in a job of several parts
+      // a feature id alone names a face on each of them: which one is the
+      // caller's to say, not the first body's.
+      if (partId == 0) {
+        std::vector<uint64_t> owners;
+        for (const Body& body : ui::JobBodies(state))
+          if (body.createdBy == ref.featureId && body.jobPartId != 0 &&
+              body.elementMap.Resolve(ref.name) &&
+              std::ranges::find(owners, body.jobPartId) == owners.end())
+            owners.push_back(body.jobPartId);
+        if (owners.size() > 1) {
+          std::string ids;
+          for (uint64_t o : owners)
+            ids += (ids.empty() ? "" : ", ") + std::to_string(o);
+          throw std::runtime_error(
+              "lay_face_up: face '" + ref.name + "' of feature " +
+              std::to_string(ref.featureId) + " is on job parts " + ids +
+              " — say which with lay_face_up.part");
+        }
       }
-      if (!found)
+      glm::vec3 normal(0.0f);
+      if (!cam::FaceNormalOf(ui::JobBodies(state), ref, normal, partId))
         throw std::runtime_error(
             "no planar face '" + ref.name + "' on feature " +
             std::to_string(ref.featureId) + " — lay_face_up needs a flat face");
