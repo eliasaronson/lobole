@@ -6,6 +6,7 @@
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/ElementOrigin.h"
 #include "core/FitStandards.h"
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
@@ -15,7 +16,9 @@
 #include "core/Parallel.h"
 #include "core/ToleranceStack.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
 #include "core/tube/CutList.h"
@@ -109,6 +112,162 @@ const Document& SubjectPart(ui::AppState& state, Document* active,
 }
 
 namespace {
+
+// A feature of `doc` by id or by name, for a filter; refused by name.
+Feature* FeatureParam(Document& doc, const json& j, const char* what) {
+  if (j.is_number_unsigned() || j.is_number_integer()) {
+    if (Feature* f = doc.FindFeatureById(j.get<uint64_t>()))
+      return f;
+    throw std::runtime_error(std::string(what) + ": no feature with id " +
+                             j.dump() + " in this part (get_state lists them)");
+  }
+  if (j.is_string()) {
+    for (size_t i = 0; i < doc.FeatureCount(); i++)
+      if (doc.GetFeature(i)->GetName() == j.get<std::string>())
+        return doc.GetFeature(i);
+    throw std::runtime_error(std::string(what) + ": no feature named " +
+                             j.dump() + " in this part (get_state lists them)");
+  }
+  throw std::runtime_error(std::string(what) +
+                           " is a feature id or a feature name");
+}
+
+// list_elements' filters: the elements a feature made, in a role.
+struct ElementFilter {
+  bool hasMadeBy = false, hasRole = false;
+  uint64_t madeBy = 0;
+  std::string madeByLabel; // "feature 4 (Pocket, Extrude)"
+  topo::ElementRole role = topo::ElementRole::Unknown;
+  std::string roleAsked;
+  uint32_t entity = 0;
+  uint64_t via = 0; // a Derived feature of the listed part
+
+  bool Any() const { return hasMadeBy || hasRole || entity != 0 || via != 0; }
+
+  // Everything but the role and entity: what the "why" counts roles over.
+  bool MatchesMaker(const topo::ElementOrigin& o) const {
+    if (via != 0) {
+      if (o.derived.empty() || o.derived.front().derivedId != via)
+        return false;
+    } else if (hasMadeBy && !o.derived.empty()) {
+      return false; // a copy's ids are its SOURCE's: say `via`
+    }
+    return !hasMadeBy || o.madeBy == madeBy;
+  }
+  bool Matches(const topo::ElementOrigin& o) const {
+    if (!MatchesMaker(o))
+      return false;
+    if (hasRole && o.role != role)
+      return false;
+    return entity == 0 || o.entity == entity;
+  }
+
+  std::string WhyNothing(const std::vector<Body>& bodies) const {
+    std::map<std::string, int> roles;
+    for (const Body& b : bodies)
+      for (const auto& [idx, name] : b.elementMap.names) {
+        const topo::ElementOrigin o = topo::DecodeElementName(name);
+        if (MatchesMaker(o))
+          roles[topo::ElementRoleName(o.role)]++;
+      }
+    const std::string who = hasMadeBy ? madeByLabel : "the filter";
+    if (roles.empty())
+      return who +
+             " made no face that is on this part now: it made none (a "
+             "sketch, a datum), everything it made was cut away since, or " +
+             (via != 0 ? "it is not in that Derived copy"
+                       : "the faces came in through a Derived copy (say "
+                         "`via`)");
+    std::string made;
+    for (const auto& [r, n] : roles)
+      made += (made.empty() ? "" : ", ") + r + " x" + std::to_string(n);
+    std::string asked = roleAsked;
+    if (entity != 0)
+      asked += (asked.empty() ? "" : " ") + std::string("from entity ") +
+               std::to_string(entity);
+    std::string out = who + " made " + made + " -- none " + asked;
+    if (roles.count("positional"))
+      out += ". It names its faces by position (a shell, loft, sweep, "
+             "import...), so they have no role but `positional`";
+    return out;
+  }
+};
+
+ElementFilter ParseElementFilter(ui::AppState& state, Document* listed,
+                                 const RpcParams& p) {
+  ElementFilter f;
+  Document* makers = listed; // where `made_by` names a feature
+  if (p.contains("via")) {
+    if (listed == nullptr)
+      throw std::runtime_error("via names a Derived feature of a part: pass "
+                               "`part` with it");
+    Feature* d = FeatureParam(*listed, p.at("via"), "via");
+    const auto* derived = dynamic_cast<const DerivedFeature*>(d);
+    if (derived == nullptr)
+      throw std::runtime_error("via: feature " + std::to_string(d->GetId()) +
+                               " is a " + d->TypeName() +
+                               ", not a Derived copy");
+    f.via = d->GetId();
+    makers = ui::PartDocById(state, derived->sourcePart);
+  }
+  if (p.contains("made_by")) {
+    f.hasMadeBy = true;
+    const json& mb = p.at("made_by");
+    if (makers != nullptr) {
+      Feature* m = FeatureParam(*makers, mb, "made_by");
+      f.madeBy = m->GetId();
+      f.madeByLabel = "feature " + std::to_string(m->GetId()) + " (" +
+                      m->GetName() + ", " + m->TypeName() + ")";
+      // A pattern's copies keep its SOURCE's names with an instance (#2),
+      // so the faces a pattern made are its source's, every copy included.
+      if (const auto* pat = dynamic_cast<const PatternFeature*>(m)) {
+        f.madeBy = pat->sourceId;
+        f.madeByLabel += ", whose copies are feature " +
+                         std::to_string(pat->sourceId) + "'s";
+      }
+    } else if (mb.is_number()) {
+      f.madeBy = mb.get<uint64_t>();
+      f.madeByLabel = "feature " + std::to_string(f.madeBy);
+    } else {
+      throw std::runtime_error("made_by by name needs `part` on a job tab");
+    }
+  }
+  if (p.contains("role")) {
+    f.roleAsked = p.at("role").get<std::string>();
+    std::string r = f.roleAsked;
+    if (r == "floor")
+      r = "end_cap";
+    else if (r == "walls")
+      r = "side";
+    if (!topo::ElementRoleFromString(r, f.role))
+      throw std::runtime_error("role '" + f.roleAsked +
+                               "' is not one of: " + topo::ElementRoleList() +
+                               " (and floor = end_cap, walls = side)");
+    f.hasRole = true;
+  }
+  f.entity = p.value("entity", uint32_t{0});
+  return f;
+}
+
+// What made an element, on its list_elements row.
+void OriginJson(const topo::ElementOrigin& o, json& row) {
+  row["made_by"] = o.madeBy;
+  row["role"] = topo::ElementRoleName(o.role);
+  if (o.entity != 0)
+    row["entity"] = o.entity;
+  if (!o.instances.empty()) {
+    std::string inst;
+    for (const std::string& i : o.instances)
+      inst += (inst.empty() ? "" : "#") + i;
+    row["instance"] = inst;
+  }
+  if (!o.derived.empty()) {
+    json d = json::array();
+    for (const topo::DerivedStep& s : o.derived)
+      d.push_back(s.derivedId);
+    row["derived"] = d;
+  }
+}
 
 // The active part document, required by the part-tab-only inspection RPCs.
 Document& RequirePartDoc(Document* doc, const char* what) {
@@ -600,9 +759,24 @@ static constexpr MethodDoc InspectionMethods[] = {
      "so a zero there is what makes the rest of the list a complete answer "
      "rather than merely a long one. Edges are named only when something "
      "needs them (a plain box has six named faces and no named edges), so "
-     "there is no such count for them.",
-     "body, max_faces, part", remote::NoFlags,
-     "bodies[]{body,name,created_by,job_part,faces,edges,unnamed_faces}"},
+     "there is no such count for them. "
+     "Every face and edge says what MADE it (`made_by`, a feature id) and "
+     "its `role`: start_cap | end_cap (a cut's floor) | side (swept from "
+     "sketch `entity`) | blend (a fillet's or chamfer's) | bore | bottom | "
+     "counterbore | counterbore_floor | countersink (a Hole's) | positional "
+     "(a feature that names by index: shell, loft, sweep, import...) | "
+     "boundary (named from its edges; no role) | pole | seam; plus "
+     "`instance` for a pattern copy and `derived` for one come in through "
+     "Derived features. Filter by them: `made_by` (feature id or name), "
+     "`role` (also `floor` = end_cap, `walls` = side), `entity`, and `via` "
+     "(a Derived feature: then `made_by` names a feature of ITS source "
+     "part) -- the faces a feature made in a role, instead of a filter by "
+     "normal and position. A filter that matches nothing says why.",
+     "body, entity, made_by, max_faces, part, role, via", remote::NoFlags,
+     "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
+     "role,entity?,instance?,derived?,kind,area,centroid,normal,radius?,"
+     "axis?},edges[]{...},unnamed_faces}, matched_faces?, matched_edges?, "
+     "why?"},
     {"curve_points",
      "The polyline a Curve3D actually BUILT, sampled to `deflection_mm` "
      "(default 0.1) with the arc length of each point from the start. A bent "
@@ -3459,11 +3633,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // came from, which is the other half of a machining target -- so an agent
     // can go straight from here to add_cam_op without knowing to switch tabs
     // and without a second call to work out which part it is looking at.
+    Document* listed =
+        p.contains("part")     ? ResolvePartParam(state, p.at("part"))
+        : state.job != nullptr ? nullptr
+                               : &RequirePartDoc(doc, "list_elements");
     const auto& bodies =
-        p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
-        : state.job != nullptr
-            ? ui::JobBodies(state)
-            : RequirePartDoc(doc, "list_elements").GetBodies();
+        listed != nullptr ? listed->GetBodies() : ui::JobBodies(state);
+    const ElementFilter filter = ParseElementFilter(state, listed, p);
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error(IndexError("body", p.value("body", -1),
@@ -3478,7 +3654,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only))
         continue;
-      faceCount += bodies[i].elementMap.names.size();
+      for (const auto& [idx, name] : bodies[i].elementMap.names)
+        faceCount += filter.Matches(topo::DecodeElementName(name)) ? 1 : 0;
       describedBodies++;
     }
     if (faceCount > maxFaces)
@@ -3494,12 +3671,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                    "or raise max_faces (now ") +
                            std::to_string(maxFaces) + ")"));
     json out = json::array();
+    size_t matchedFaces = 0, matchedEdges = 0;
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only))
         continue;
       json faces = json::array(), edges = json::array();
       for (const auto& [idx, name] : bodies[i].elementMap.names) {
+        const topo::ElementOrigin origin = topo::DecodeElementName(name);
+        if (!filter.Matches(origin))
+          continue;
+        matchedFaces++;
         json f = {{"index", idx}, {"name", name}};
+        OriginJson(origin, f);
         if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {
           f["kind"] = fi->kind;
           f["area"] = fi->area;
@@ -3520,7 +3703,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         faces.push_back(f);
       }
       for (const auto& [idx, name] : bodies[i].elementMap.edgeNames) {
+        const topo::ElementOrigin origin = topo::DecodeElementName(name);
+        if (!filter.Matches(origin))
+          continue;
+        matchedEdges++;
         json e = {{"index", idx}, {"name", name}};
+        OriginJson(origin, e);
         if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
           e["kind"] = ei->kind;
           e["length"] = ei->length;
@@ -3559,7 +3747,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             std::max(0, shapeFaces - static_cast<int>(
                                          bodies[i].elementMap.names.size()))}});
     }
-    return json{{"bodies", out}};
+    json result{{"bodies", out}};
+    if (filter.Any()) {
+      result["matched_faces"] = matchedFaces;
+      result["matched_edges"] = matchedEdges;
+      if (matchedFaces + matchedEdges == 0)
+        result["why"] = filter.WhyNothing(bodies);
+    }
+    return result;
   }
   return std::nullopt;
 }

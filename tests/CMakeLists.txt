@@ -500,6 +500,14 @@ add_test(NAME derived_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(derived_smoke PROPERTIES TIMEOUT 120)
 
+# list_elements by what made a face: a pocket's floor and walls, a hole's
+# bores, a pattern's copies, a Derived copy through `via`, and the why of a
+# filter that matches nothing.
+add_test(NAME elements_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/elements_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(elements_smoke PROPERTIES TIMEOUT 120)
+
 # Sheet metal (v108/v109): the rules and the first two features over the RPC —
 # the gauge tables, the refusals in words, and a flanged volume checked
 # against the bend allowance by hand.

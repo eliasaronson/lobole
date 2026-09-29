@@ -121,6 +121,13 @@ positional, or boundary for an L face), the Derived copies it came in through,
 its pattern instances and what modified it since. Drawing provenance and a
 tapped hole's thread record read names through it.
 
+`list_elements` reports each element's `made_by` and `role` from it, and
+filters by them: `made_by` (a feature id or name; a pattern means its
+source's faces, every copy), `role` (`floor` and `walls` read as `end_cap`
+and `side`), `entity`, and `via` -- a Derived feature, with `made_by` then
+naming a feature of the source part. A filter that matches nothing answers
+`why`: the roles that feature did make, or that it made no face here.
+
 An unnamed face cannot be picked, threaded, filleted, fitted or measured by
 reference, and `list_elements` omits it; its `unnamed_faces` count is what says
 whether the listing is complete.
