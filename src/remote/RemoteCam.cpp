@@ -2773,6 +2773,14 @@ bool PassesOwed(ui::AppState& state, const std::string& m, const RpcParams& p) {
         !p.contains("resolution"))
       return false;
     read.push_back(&setup);
+    // ...and the setups before it, whose files its stock starts from
+    // (docs/cam/simulation.md#leftover-another-setup-removes).
+    for (const cam::Setup& other : job->GetSetups()) {
+      if (other.id == setup.id)
+        break;
+      if (!other.operations.empty())
+        read.push_back(&other);
+    }
   } else {
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     read.push_back(&setup);
@@ -2787,6 +2795,24 @@ bool PassesOwed(ui::AppState& state, const std::string& m, const RpcParams& p) {
   for (const cam::Setup* setup : read)
     owed |= ui::QueueCamPassesFor(state, *setup);
   return owed;
+}
+
+// cam_simulate, once its passes are cached: whether the stock it starts
+// from -- what the earlier setups left, the rotary carve of a turning's
+// whole file -- is still being read on a worker. Starts that read.
+bool SimulateStartReading(ui::AppState& state, const RpcParams& p) {
+  SelectJob(state, p);
+  const uint64_t id = p.contains("setup") ? p.at("setup").get<uint64_t>()
+                                          : state.camActiveSetup;
+  if (state.camPlaybackOpen && state.camActiveSetup == id &&
+      !p.contains("resolution"))
+    return false; // a seek on the one playing
+  // The grid the handler will arm at, clamped as it clamps it.
+  const double res =
+      p.contains("resolution")
+          ? std::clamp(p.at("resolution").get<double>(), 0.05, 5.0)
+          : state.camSimRes;
+  return ui::CamPlaybackStartReading(state, id, res);
 }
 
 class CamWait final : public CamParking {
@@ -2830,6 +2856,9 @@ public:
     m_verify = std::move(w);
   }
 
+  // cam_simulate, parked for its start's read alone.
+  void Reading() { m_reading = true; }
+
   Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
     if (m_verify) {
       if (!m_verify->landed)
@@ -2842,6 +2871,14 @@ public:
         throw std::runtime_error(m_verify->error);
       answer = VerifyAnswer(state, *m_verify);
       return Next::Answer;
+    }
+    if (m_reading) {
+      // Reading what the earlier setups left: nothing else to wait for.
+      try {
+        return SimulateStartReading(state, p) ? Next::Wait : Next::Dispatch;
+      } catch (...) {
+        return Next::Dispatch;
+      }
     }
     // A cancel drops the queue; the passes this request waits on will not
     // land, and waiting on would only queue them again behind the caller's
@@ -2861,6 +2898,19 @@ public:
     }
     if (owed && ++m_rounds < kMaxPassRounds)
       return Next::Wait;
+    // The stock a simulation starts from is read off the frame too, even
+    // after the passes stopped converging: that read is the whole carve of
+    // a turning's file.
+    if (m_method == "cam_simulate") {
+      try {
+        if (SimulateStartReading(state, p)) {
+          m_reading = true;
+          return Next::Wait;
+        }
+      } catch (...) {
+        return Next::Dispatch;
+      }
+    }
     if (owed || m_method != "cam_verify")
       return Next::Dispatch;
     try {
@@ -2875,6 +2925,7 @@ private:
   std::string m_method;
   uint64_t m_cancellations = 0;
   int m_rounds = 0;
+  bool m_reading = false; // cam_simulate: its start is being read
   std::shared_ptr<VerifyRun> m_verify;
 };
 
@@ -2897,6 +2948,12 @@ ParkCamRequest(ui::AppState& state, const std::string& m, const RpcParams& p) {
     // handler joins every "cam" job, so a pass cutting for somebody else
     // would stall it just the same.
     if (!PassesOwed(state, m, p) && !ui::CamPassesBusy(state)) {
+      if (m == "cam_simulate") {
+        if (!SimulateStartReading(state, p))
+          return nullptr;
+        wait->Reading();
+        return wait;
+      }
       if (m != "cam_verify")
         return nullptr;
       wait->StartVerify(state, p);

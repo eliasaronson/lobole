@@ -228,15 +228,20 @@ PARKS such a request (`ParkCamRequest`, `src/remote/RemoteCam.cpp`):
 
 - it queues every pass the request reads on the `cam` worker
   (`QueueCamPassesFor`, deferred whatever `camDeferPasses` says) -- the
-  setup, and for `cam_verify` every other setup of the job;
+  setup, for `cam_verify` every other setup of the job, and for
+  `cam_simulate` the setups before it;
 - when the worker is idle and nothing is owed, it dispatches the ordinary
   handler, which now finds everything in the caches. `cam_verify` instead runs
   the handler's own three steps (`PrepareVerify`, `ComputeVerify`,
   `VerifyAnswer`) with the middle one -- the other setups' stock and the
-  simulation of the posted file -- on a `cam-verify` background job;
+  simulation of the posted file -- on a `cam-verify` background job.
+  `cam_simulate` of a setup with earlier setups first reads what they left
+  (`CamPlaybackStartReading`, a `cam-simulate` background job: a turning's
+  whole file carved), and the handler arms the playback from that read
+  ([simulation.md](simulation.md#leftover-another-setup-removes));
 - a request whose passes are all cached and whose worker is idle is not
   parked at all, except `cam_verify`, whose simulation always goes to the
-  worker.
+  worker, and a `cam_simulate` with an earlier setup's stock to read.
 
 Meanwhile the frame keeps drawing and every other connection is answered; a
 request on the SAME connection waits behind the parked one, so each

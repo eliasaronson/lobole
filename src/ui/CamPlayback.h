@@ -29,6 +29,14 @@ namespace ui {
 // refusal, like this setup's own.
 bool BeginCamPlayback(AppState& state, bool settle = false);
 
+// For a request that waits (docs/cam/README.md#requests-that-wait): reads
+// what the earlier setups of `setupId` left on a worker, for the playback
+// `BeginCamPlayback` arms next at grid `simRes`, and says whether that read
+// is still running. False when there is nothing earlier to read, or the
+// read has landed. Call only once the setups' passes are cached.
+[[nodiscard]] bool CamPlaybackStartReading(AppState& state, uint64_t setupId,
+                                           double simRes);
+
 // THE way out. Restores the bodies, drops the stock and the tool, and leaves
 // no session state behind. Safe to call when nothing is playing.
 void EndCamPlayback(AppState& state);

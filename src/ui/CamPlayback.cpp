@@ -4,6 +4,7 @@
 #ifdef HAVE_CAM
 
 #include "core/Document.h"
+#include "core/cam/CamGcode.h"
 #include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
@@ -109,10 +110,37 @@ void DropToolInstance(AppState& state) {
 // (docs/cam/simulation.md#leftover-another-setup-removes). Everything the
 // read needs is COPIED -- plain values and shape handles -- so it runs the
 // same inline and on a worker: reading a turning's program is the rotary
-// carve of the whole file, 40 s on the chess set's queen and king, and that
-// is not a thing to do on the frame.
+// carve of the whole file, 40 s before the chess rook and bishop's mitre, and
+// that is not a thing to do on the frame.
+// What the earlier setups' files are made from, cheap to take and compare:
+// telling whether a start read a moment ago is still this job's start must
+// not cost what reading it did -- regenerating a turning evicted from the
+// pass cache is 18 s on the chess rook and bishop.
+struct EarlierPrint {
+  std::vector<uint64_t> ids, framing;
+  std::vector<std::vector<cam::Operation>> ops;
+  std::vector<std::vector<cam::Tool>> tools;
+  std::vector<cam::Machine> machines;
+  bool operator==(const EarlierPrint&) const = default;
+};
+
+EarlierPrint PrintOf(AppState& state, uint64_t setupId) {
+  EarlierPrint p;
+  for (const cam::Setup& s : state.job->GetSetups()) {
+    if (s.id == setupId)
+      break;
+    p.ids.push_back(s.id);
+    p.framing.push_back(cam::FramingKey(s));
+    p.ops.push_back(s.operations);
+    p.tools.push_back(s.tools);
+    p.machines.push_back(s.machine);
+  }
+  return p;
+}
+
 struct StartWork {
   // in
+  EarlierPrint print;
   cam::Setup setup;
   std::vector<Body> bodies;
   std::vector<cam::Setup> others; // earlier, in job order
@@ -231,11 +259,104 @@ bool ArmPlayback(AppState& state, const cam::Setup& setup, StartWork& w) {
   return true;
 }
 
-// A start being read on a worker, so a second Simulate does not start a
-// second one.
-bool g_startReading = false;
+// A start read on a worker, kept for the playback that asks for it: the
+// panel's Simulate, whose transport opens when it lands, or a parked
+// `cam_simulate` (docs/cam/README.md#requests-that-wait), which is answered
+// once it has. One at a time.
+struct StartSlot {
+  std::shared_ptr<StartWork> work;
+  bool landed = false;
+  bool armWhenLanded = false; // the panel's: open the transport on landing
+};
+StartSlot g_start;
+
+// Whether the start in the slot was read for the playback of `setupId` at
+// grid `res` on the stock model `rotary`, of the file `gcode`, from earlier
+// setups that still stand as `print` says. Compared without posting them
+// again.
+bool SlotFits(AppState& state, uint64_t setupId, double res, bool rotary,
+              const std::string* gcode) {
+  const StartWork* w = g_start.work.get();
+  return w != nullptr && w->setupId == setupId && w->rotary == rotary &&
+         w->res == (rotary ? kRotarySimRes : res) &&
+         (gcode == nullptr || w->gcode == *gcode) &&
+         w->print == PrintOf(state, setupId);
+}
+
+void ReadStartOffFrame(AppState& state, std::shared_ptr<StartWork> work,
+                       bool armWhenLanded) {
+  g_start = {work, false, armWhenLanded};
+  auto job = std::make_unique<BackgroundJob>();
+  job->kind = "cam-simulate";
+  job->label = "Reading what the earlier setups left";
+  job->cancellable = false; // the carve has no interruption points
+  job->fraction.store(-1.0);
+  BackgroundJob* raw = job.get();
+  job->thread = std::thread([work, raw] {
+    ReadStart(*work);
+    raw->done.store(true); // last
+  });
+  job->finish = [work](AppState& s) -> bool {
+    if (g_start.work != work)
+      return true; // superseded
+    g_start.landed = true;
+    // Opened only if the same file is still the one to play: Begin reads
+    // the job again and takes this start only when it still fits.
+    if (g_start.armWhenLanded && !s.camPlaybackOpen && !BeginCamPlayback(s))
+      s.camRefusalPopup = true; // said where the button was pressed
+    return true;
+  };
+  StartBackgroundJob(state, std::move(job));
+}
+
+// The start for `setup`, collected on the frame; false + the refusal when an
+// earlier setup's passes are still being cut and `settle` does not ask for
+// them now.
+bool CollectStart(AppState& state, const cam::Setup& setup,
+                  const std::string& gcode, bool rotary, double simRes,
+                  bool settle, StartWork& w, std::string& refusal) {
+  w.print = PrintOf(state, setup.id);
+  w.setup = setup;
+  w.bodies = ui::JobBodies(state);
+  w.rotary = rotary;
+  w.res = rotary ? kRotarySimRes : simRes;
+  w.setupId = setup.id;
+  w.gcode = gcode;
+  return CollectEarlier(state, setup, settle, w, refusal);
+}
 
 } // namespace
+
+bool CamPlaybackStartReading(AppState& state, uint64_t setupId, double simRes) {
+  if (!state.job)
+    return false;
+  const cam::Setup* setup = state.job->FindSetup(setupId);
+  if (setup == nullptr || setup->operations.empty())
+    return false;
+  // Asked every tick while the read runs: answered from the slot, without
+  // posting anything again.
+  if (g_start.work && g_start.work->setupId == setupId &&
+      SlotFits(state, setupId, simRes, g_start.work->rotary, nullptr))
+    return !g_start.landed;
+  // Every pass is cached by now (the caller waited for them), so this posts
+  // from the cache.
+  const std::vector<cam::Toolpath> paths =
+      GenerateCamToolpathsNow(state, *setup);
+  std::string gcode, error;
+  if (!cam::PostProcess(setup->machine.post, *setup, paths, PostOpts(*setup),
+                        gcode, &error))
+    return false; // the handler refuses it, in its own words
+  auto work = std::make_shared<StartWork>();
+  std::string refusal;
+  if (!CollectStart(
+          state, *setup, gcode,
+          cam::RotatesWhileCutting(cam::ProgramInSetupSpace(gcode, *setup)),
+          simRes, /*settle=*/true, *work, refusal) ||
+      work->others.empty())
+    return false; // nothing earlier to read: the handler is quick
+  ReadStartOffFrame(state, std::move(work), /*armWhenLanded=*/false);
+  return true;
+}
 
 bool BeginCamPlayback(AppState& state, bool settle) {
   state.camPlaybackRefusal.clear();
@@ -261,7 +382,7 @@ bool BeginCamPlayback(AppState& state, bool settle) {
     state.camPlaybackRefusal = why;
     return false;
   }
-  if (g_startReading)
+  if (g_start.work && !g_start.landed && g_start.armWhenLanded && !settle)
     return true; // already on its way: it opens when the read lands
 
   // The POSTED FILE, like the verification: a bug in the post, in modal
@@ -300,18 +421,21 @@ bool BeginCamPlayback(AppState& state, bool settle) {
     return false;
   }
 
+  // Read off the frame already, for this very playback: take it.
+  if (g_start.landed && SlotFits(state, setup->id, state.camSimRes,
+                                 state.camTimeline.rotary, &gcode)) {
+    std::shared_ptr<StartWork> landed = std::move(g_start.work);
+    g_start = {};
+    return ArmPlayback(state, *setup, *landed);
+  }
+
   // Where the stock starts: what the job's earlier setups left, as this
   // setup's verification starts from it.
   auto work = std::make_shared<StartWork>();
-  work->setup = *setup;
-  work->bodies = ui::JobBodies(state);
-  work->rotary = state.camTimeline.rotary;
-  work->res = work->rotary ? kRotarySimRes : state.camSimRes;
-  work->setupId = setup->id;
-  work->gcode = gcode;
   {
     std::string refusal;
-    if (!CollectEarlier(state, *setup, settle, *work, refusal)) {
+    if (!CollectStart(state, *setup, gcode, state.camTimeline.rotary,
+                      state.camSimRes, settle, *work, refusal)) {
       state.camPlaybackRefusal = refusal;
       state.camPlaybackGcode.clear();
       state.camTimeline = cam::Timeline{};
@@ -320,37 +444,16 @@ bool BeginCamPlayback(AppState& state, bool settle) {
   }
 
   // Inline when there is nothing earlier to read, when the caller settles
-  // (the RPC reader waits for its answer), or when the panel is not
-  // deferring -- the GUI suite's setting, as for the verification.
+  // (the RPC reader, which parks for the read before it gets here -- this is
+  // its fallback), or when the panel is not deferring -- the GUI suite's
+  // setting, as for the verification.
   if (work->others.empty() || settle || !state.camDeferPasses) {
     ReadStart(*work);
     return ArmPlayback(state, *setup, *work);
   }
 
-  // Otherwise on a worker, and the playback opens when it lands -- if the
-  // same file is still the one to play.
-  g_startReading = true;
-  auto job = std::make_unique<BackgroundJob>();
-  job->kind = "cam-simulate";
-  job->label = "Reading what the earlier setups left";
-  job->cancellable = false; // the carve has no interruption points
-  job->fraction.store(-1.0);
-  BackgroundJob* raw = job.get();
-  job->thread = std::thread([work, raw] {
-    ReadStart(*work);
-    raw->done.store(true); // last
-  });
-  job->finish = [work](AppState& s) -> bool {
-    g_startReading = false;
-    const cam::Setup* now = s.job ? ActiveCamSetup(s) : nullptr;
-    if (now == nullptr || now->id != work->setupId || s.camPlaybackOpen ||
-        s.camPlaybackGcode != work->gcode)
-      return true; // the job moved on: this start is not its start
-    if (!ArmPlayback(s, *now, *work))
-      s.camRefusalPopup = true; // said where the button was pressed
-    return true;
-  };
-  StartBackgroundJob(state, std::move(job));
+  // Otherwise on a worker, and the transport opens when it lands.
+  ReadStartOffFrame(state, std::move(work), /*armWhenLanded=*/true);
   return true;
 }
 
@@ -802,6 +905,7 @@ void DrawCamTransportWindow(AppState& state) {
 
 namespace ui {
 bool BeginCamPlayback(AppState&, bool) { return false; }
+bool CamPlaybackStartReading(AppState&, uint64_t, double) { return false; }
 void EndCamPlayback(AppState&) {}
 void TickCamPlayback(AppState&, double) {}
 void SeekCamPlayback(AppState&, cam::SimCursor) {}

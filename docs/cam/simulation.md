@@ -124,10 +124,11 @@ CamOtherSetups.cpp):
   from their posted files like the check; in the panel a pass of theirs not
   yet cut refuses the playback in words, as its own would, and `cam_simulate`
   generates it first. Reading a turning's file is the rotary carve of all of
-  it (40 s for the chess set's queen and king), so the panel reads on a
+  it (40 s before the chess rook and bishop's mitre), so the panel reads on a
   worker ("Reading what the earlier setups left") and the transport opens
-  when it lands, unless the file changed meanwhile; `cam_simulate` waits for
-  it. `cam_simulate` names what it started from
+  when it lands, unless the file changed meanwhile; `cam_simulate` parks for
+  it ([README.md](README.md#requests-that-wait)). `cam_simulate` names what
+  it started from
   (`starts_from`, and `earlier_setups_not_read` for a setup that does not
   post), and the transport says "Starts from what 'Turn' left". A setup that
   cannot be read leaves its stock in place, which errs toward a finding.
