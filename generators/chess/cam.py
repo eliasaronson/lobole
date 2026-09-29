@@ -238,10 +238,9 @@ def rook_bishop(app):
     mitre = outward(made(app, blank, "Mitre", "bishop 2"))
     assert len(mitre) == 1, [f.name for f in mitre]
     sid = job.setup("Mitre", a=a_for(mitre[0].normal))
-    # From the turned head's surface, not the square it was: this setup's
-    # stock is the whole blank again (stock is not carried between setups).
-    job.op(sid, "Mitre", type="pocket", tool=5, target=mitre[0].ref,
-           top_z=10.0)
+    # Its top derives from the turned head over the notch, not the square
+    # bar: the setup starts from what the turning left.
+    job.op(sid, "Mitre", type="pocket", tool=5, target=mitre[0].ref)
     return job
 
 
@@ -262,15 +261,14 @@ def queen_king(app):
         # the notch floor runs only 2.3 mm along the axis before the dome
         # falls away; that end is OPEN, so a 3 mm cutter clears it
         job.op(sid, "Crown notch", type="pocket", tool=5,
-               targets=target_list(fs), top_z=12.5)
+               targets=target_list(fs))
     # The cross: its bar's faces are the floors -- the bar's top and bottom
     # from above and below, its flats from either side.
     cross = outward(made(app, blank, "Cross corners", "king 2") +
                     made(app, blank, "Cross flats", "king 2"))
     for a, fs in sorted(by_a(cross).items()):
         sid = job.setup(f"Cross A{a:g}", a=a)
-        job.op(sid, "Cross", type="pocket", tool=5, targets=target_list(fs),
-               top_z=8.0)
+        job.op(sid, "Cross", type="pocket", tool=5, targets=target_list(fs))
     return job
 
 
