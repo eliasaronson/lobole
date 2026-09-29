@@ -41,13 +41,6 @@ Phase 1's profile change lands before this, so the pawn needs no rest pass.
 - **The blind slot floor that measured 1 mm across.** Reproduce the
   bishop's first mitre (a slanted blind slot, floor at y = -1) in a test and
   find why `InscribedRadius` saw 0.99 mm where the floor is 3.2 mm wide.
-- **Small refs and reads.**
-  - `lay_face_up` on a setup of a multi-part job takes `part`, since every
-    Derived part's feature is id 1.
-  - `list_configurations` takes `part`.
-  - Drawing views take a rotation, so a part modelled along X can be drawn
-    upright.
-  - Wood materials: maple and beech; an epoxy fill.
 
 ## 2. Picking faces by what made them
 
