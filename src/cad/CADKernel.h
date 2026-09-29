@@ -310,6 +310,9 @@ private:
   // the kind that reaches CAM as a stock size. `tests/test_conventions.cpp`
   // fails on one.
   void SetShape(const TopoDS_Shape& shape);
+  // Transformed's: the tight box onto a copy moved by quarter turns.
+  void CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
+                  CADShape& to) const;
 
   TopoDS_Shape m_shape;
 

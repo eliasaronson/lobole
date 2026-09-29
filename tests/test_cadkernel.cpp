@@ -383,6 +383,41 @@ TEST_CASE("the two bounding-box flavours keep their own memo",
   CHECK(againHi == tHi);
 }
 
+TEST_CASE("a quarter-turned copy carries the tight box, and it is exact",
+          "[kernel][bbox]") {
+  // CAM frames every body of a job through quarter turns (laid on a face,
+  // flipped, a placement turned), and each framed copy recomputed its tight
+  // box from the surfaces -- seconds on a turned blank. A copy moved by such a
+  // turn now carries the box, permuted; it must equal what a cold copy
+  // computes, for turns that swap axes, flip them and translate.
+  const auto make = [] {
+    return CADKernel::Instance().CreateCylinder(glm::vec3(3, -2, 7),
+                                                glm::vec3(1, 0, 0), 4.0, 25.0);
+  };
+  CADShape warm = make();
+  glm::vec3 lo(0.0f), hi(0.0f);
+  warm.GetBoundingBox(lo, hi, /*tight=*/true);
+  const glm::mat4 moves[] = {
+      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1, 0, 0)),
+      glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(1, 0, 0)),
+      glm::translate(glm::mat4(1.0f), glm::vec3(40, -5, 2)) *
+          glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f),
+                      glm::vec3(0, 0, 1)),
+      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 1, 0)),
+      // not a quarter turn: nothing carried, and still right
+      glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(1, 0, 0)),
+  };
+  for (const glm::mat4& m : moves) {
+    glm::vec3 cLo(0.0f), cHi(0.0f), fLo(0.0f), fHi(0.0f);
+    warm.Transformed(m).GetBoundingBox(cLo, cHi, /*tight=*/true);
+    make().Transformed(m).GetBoundingBox(fLo, fHi, /*tight=*/true);
+    for (int a = 0; a < 3; a++) {
+      CHECK_THAT(cLo[a], WithinAbs(fLo[a], 1e-3f));
+      CHECK_THAT(cHi[a], WithinAbs(fHi[a], 1e-3f));
+    }
+  }
+}
+
 TEST_CASE("GenerateMesh honours a stated deflection", "[kernel][mesh]") {
   // The deflection argument used to be decoration: the size-scaling rule
   // (0.2% of the bounding diagonal) overwrote it whenever the shape had a

@@ -348,6 +348,16 @@ flavour (conservative, tight). A slot is filled lazily and dropped by
 `tests/test_conventions.cpp`), so an in-place transform cannot bypass it. A
 regeneration builds new shapes, which start cold.
 
+A copy made by `Transformed` through quarter turns and a translation (every
+basis entry 0 or +-1) carries the tight box, permuted: the permutation is exact,
+and CAM frames every body of a job through such moves (laid on a face, flipped,
+a placement turned). Any other angle starts cold. The conservative box is not
+carried: it is bounded in the frame it was taken in. A job's bodies are warmed
+on their SOURCE documents' bodies (`ui::JobBodies`), which outlive the job's
+copies, so returning to a job tab pays nothing; the stock and machine boxes a
+job tab draws every frame are memoized in `CamTool.cpp` on the job's geometry
+and the setup less its operations.
+
 The memo lives inside the object, not in a cache beside it: a shape's
 address-based id is recycled by the allocator, so an outside cache keyed on it
 could hand a freed shape's box to whatever lands at that address next.

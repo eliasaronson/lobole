@@ -336,6 +336,46 @@ CADShape CADShape::Difference(const CADShape& other) const {
   return CADShape();
 }
 
+// The memoized boxes, carried onto a copy moved by quarter turns: a basis
+// whose every entry is 0 or +-1 only permutes and flips the axes, so the
+// copy's tight box is this one's, permuted -- exactly, nothing evaluated. A
+// CAM setup frames every body through such a move (laid on a face, flipped,
+// a placement turned 90 degrees) and each framed copy used to recompute its
+// tight box from the surfaces: seconds on a turned blank's tori, every time a
+// job tab was opened. Any other angle leaves the copy cold, as before.
+void CADShape::CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
+                          CADShape& to) const {
+  for (int c = 0; c < 3; c++)
+    for (int r = 0; r < 3; r++) {
+      const float v = std::abs(basis[c][r]);
+      if (v > 1e-5f && std::abs(v - 1.0f) > 1e-5f)
+        return;
+    }
+  // The TIGHT box only: it is the surfaces' true extent, which a quarter
+  // turn permutes exactly. The conservative one is bounded in the frame it
+  // was taken in, and carried it would depend on which way the shape had
+  // been turned first.
+  for (const int slot : {1}) {
+    if (!m_boxValid[slot])
+      continue;
+    glm::vec3 lo(0.0f), hi(0.0f);
+    for (int r = 0; r < 3; r++) {
+      // Row r of the rotated box: the one source axis c that lands on r.
+      for (int c = 0; c < 3; c++) {
+        const float e = std::round(basis[c][r]);
+        if (e == 0.0f)
+          continue;
+        const float a = e * m_boxMin[slot][c], b = e * m_boxMax[slot][c];
+        lo[r] = std::min(a, b) + shift[r];
+        hi[r] = std::max(a, b) + shift[r];
+      }
+    }
+    to.m_boxValid[slot] = true;
+    to.m_boxMin[slot] = lo;
+    to.m_boxMax[slot] = hi;
+  }
+}
+
 CADShape CADShape::Transformed(const glm::mat4& m) const {
   if (m_shape.IsNull())
     return CADShape();
@@ -377,7 +417,9 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
   if (rigid) {
     // A pure placement: attach it as a LOCATION, which copies no geometry.
     try {
-      return CADShape(m_shape.Moved(TopLoc_Location(t)));
+      CADShape moved(m_shape.Moved(TopLoc_Location(t)));
+      CarryBoxes(basis, glm::vec3(m[3]), moved);
+      return moved;
     } catch (const Standard_Failure&) {
       // Moved() enforces "no scaling" and throws Standard_Failure, which is
       // NOT a std::exception — uncaught, it took the whole application down

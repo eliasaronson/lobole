@@ -347,6 +347,13 @@ const std::vector<Body>& JobBodies(AppState& state) {
     for (const Body& b : doc->GetBodies()) {
       if (b.reference)
         continue; // a derived ghost is not stock to cut
+      // Warmed on the SOURCE body, which outlives this list: switching to
+      // another job and back rebuilt it, and warming only the copies paid
+      // the whole box again on every return -- seconds on the chess blanks.
+      if (b.shape.IsValid()) {
+        glm::vec3 lo(0.0f), hi(0.0f);
+        b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
+      }
       state.jobBodies.push_back(b);
       state.jobBodies.back().jobPartId = part.id;
     }

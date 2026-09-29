@@ -12,6 +12,7 @@
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
+#include "core/io/Serialization.h" // CamSetupToJson: the stock view's key
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
@@ -116,6 +117,43 @@ const cam::FaceRegion& CachedRegion(AppState& state,
   return cache.region;
 }
 
+// The stock and the machine's box, CACHED. The job tab draws both every
+// frame, and each asks OCC for the tight bounding box of every body framed for
+// the setup -- three times over (StockBounds, MachineBounds, MachineWarning).
+// On a turned blank's toroidal faces that is a particle-swarm optimisation per
+// face: a second a frame on the chess set's undersides job, which ran at one
+// frame a second while doing nothing. The key is the job's geometry and the
+// setup as it is saved, less its operations, which none of the three reads --
+// so any edit that could move a box moves the key.
+struct StockView {
+  bool stock = false;
+  glm::dvec3 lo{0.0}, hi{0.0};
+  bool bed = false;
+  glm::dvec3 bedLo{0.0}, bedHi{0.0};
+  bool fits = true;
+};
+
+const StockView& CachedStockView(AppState& state, const cam::Setup& setup) {
+  // One memo, not one per AppState: it is keyed on everything it answers
+  // from, so a second state (a test) can only miss, never read a stale box.
+  static StockView view;
+  static std::string key;
+  // Asked first: it is what refreshes `jobBodiesKey`.
+  const std::vector<Body>& bodies = ui::JobBodies(state);
+  cam::Setup shape = setup;
+  shape.operations.clear();
+  std::string now = std::to_string(state.jobBodiesKey) + "|" +
+                    DocumentIO::CamSetupToJson(shape).dump();
+  if (now == key)
+    return view;
+  key = std::move(now);
+  view = StockView{};
+  view.stock = cam::StockBounds(setup, bodies, view.lo, view.hi);
+  view.bed = cam::MachineBounds(setup, bodies, view.bedLo, view.bedHi);
+  view.fits = !view.bed || cam::MachineWarning(setup, bodies).empty();
+  return view;
+}
+
 void OperationGhost(AppState& state, const cam::Setup& setup,
                     const cam::Operation& op, std::vector<PrimVertex>& prims,
                     std::vector<LineVertex3D>& quads) {
@@ -128,11 +166,13 @@ void OperationGhost(AppState& state, const cam::Setup& setup,
       return;
     loops = region.loops;
   } else {
-    const std::vector<Body> bodies =
-        cam::BodiesInSetupFrame(setup, ui::JobBodies(state));
-    glm::dvec3 lo(0.0), hi(0.0);
-    if (!cam::StockBounds(setup, bodies, lo, hi))
+    // Model-space bodies: StockBounds frames them itself, and handed framed
+    // ones it framed them TWICE -- the ghost of a turned setup drawn in the
+    // wrong place.
+    const StockView& view = CachedStockView(state, setup);
+    if (!view.stock)
       return;
+    const glm::dvec3 lo = view.lo, hi = view.hi;
     cam::Loop rect;
     rect.pts = {{lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
     loops.push_back(rect);
@@ -1537,9 +1577,9 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
   // left it invisible most of the time. "Only in the session" was written
   // when CAM lived on the part tab, where the box was clutter over the model
   // being drawn; a job tab draws nothing else.
-  glm::dvec3 lo(0.0), hi(0.0);
-  if (state.camShowStock &&
-      cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
+  const StockView& view = CachedStockView(state, *setup);
+  if (state.camShowStock && view.stock) {
+    const glm::dvec3 lo = view.lo, hi = view.hi;
     const std::vector<glm::dvec2> rect = {
         {lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
     LoopLines(rect, lo.z, 1.0f, kStockLine, prims);
@@ -1556,16 +1596,15 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     // the operator touches off inside the travel is not the job's to know,
     // so this is the machine's SIZE against the job's -- the check
     // cam::MachineWarning makes in words. Never resized to fit.
-    glm::dvec3 bedLo(0.0), bedHi(0.0);
-    if (cam::MachineBounds(*setup, ui::JobBodies(state), bedLo, bedHi)) {
+    if (view.bed) {
+      const glm::dvec3 bedLo = view.bedLo, bedHi = view.bedHi;
       // The SAME box the generator clips to (cam::MachineBounds): what is
       // drawn as the machine is what the file stays inside.
       const std::vector<glm::dvec2> bed = {{bedLo.x, bedLo.y},
                                            {bedHi.x, bedLo.y},
                                            {bedHi.x, bedHi.y},
                                            {bedLo.x, bedHi.y}};
-      const bool fits =
-          cam::MachineWarning(*setup, ui::JobBodies(state)).empty();
+      const bool fits = view.fits;
       const glm::vec4 line = fits ? kBedLine : kBedRefusedLine;
       LoopLines(bed, bedLo.z, 1.0f, line, prims);
       LoopLines(bed, bedHi.z, 0.8f, line, prims);
