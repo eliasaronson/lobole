@@ -1991,12 +1991,32 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   // Straight up already: A = 0.
   REQUIRE(cam::SolveIndexA({0.0, 0.0, 1.0}, degrees));
   CHECK_THAT(degrees, WithinAbs(0.0, 1e-9));
-  // Pointing at +Y: turn the table 90 degrees.
-  REQUIRE(cam::SolveIndexA({0.0, 1.0, 0.0}, degrees));
-  CHECK_THAT(degrees, WithinAbs(90.0, 1e-9));
-  // Pointing down: 180.
+  // Pointing down: half a turn.
   REQUIRE(cam::SolveIndexA({0.0, 0.0, -1.0}, degrees));
   CHECK_THAT(std::abs(degrees), WithinAbs(180.0, 1e-9));
+  // The contract, and the only thing that matters: turned by the solved A,
+  // the face points at the spindle IN THE FRAME THE TOOLPATHS ARE CUT IN.
+  // The formula was once checked against its own number (+Y -> 90) while
+  // the framing turns by R_x(-A): at A90 a +Y face points DOWN, and "Turn a
+  // face up" machined the part's far side.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  setup.machine.hasRotaryAxis = true;
+  for (const glm::dvec2& at :
+       {glm::dvec2(20.0, 30.0), glm::dvec2(20.0, 0.0), glm::dvec2(0.0, 15.0)}) {
+    const ElementRef wall = WallNear(*doc, at.x, at.y);
+    glm::vec3 n(0.0f);
+    REQUIRE(cam::FaceNormalOf(doc->GetBodies(), wall, n));
+    if (!cam::SolveIndexA(glm::dvec3(n), degrees))
+      continue; // the X-facing wall: refused, below
+    cam::Setup turned = setup;
+    turned.rotationA = degrees;
+    glm::vec3 up(0.0f);
+    REQUIRE(cam::FaceNormalOf(cam::BodiesInSetupFrame(turned, doc->GetBodies()),
+                              wall, up));
+    INFO("wall at " << at.x << "," << at.y << " A " << degrees);
+    CHECK(up.z > 0.999f);
+  }
   // Along the rotary axis itself: no rotation about X can bring it up, and
   // the honest answer is to say so rather than pick the nearest angle.
   CHECK_FALSE(cam::SolveIndexA({1.0, 0.0, 0.0}, degrees));

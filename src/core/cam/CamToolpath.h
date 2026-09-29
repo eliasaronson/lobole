@@ -488,7 +488,10 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 [[nodiscard]] glm::dquat SolveFaceUp(const glm::dvec3& normal,
                                      const glm::dquat& current);
 
-// The A that would turn `normal` to face the spindle, in degrees. Returns
+// The A that would turn `normal` to face the spindle, in degrees, with
+// `normal` as the rotary sees it: in the setup's frame at A = 0 (fixture and
+// placement applied). Turned by it, BodiesInSetupFrame shows the face up --
+// the contract its test checks, since the framing turns by R_x(-A). Returns
 // false when there is none: a face pointing along X can never face +Z under
 // a rotation about X, and saying so beats rotating to the nearest wrong
 // thing.

@@ -1250,9 +1250,10 @@ bool SolveIndexA(const glm::dvec3& normal, double& degrees) {
   // cannot be brought to face the spindle.
   if (std::abs(n.x) > 1e-3)
     return false;
-  // R_x(A) * n = +Z has the solution A = atan2(ny, nz): sin A = ny and
-  // cos A = nz, which is consistent because ny^2 + nz^2 = 1 here.
-  degrees = glm::degrees(std::atan2(n.y, n.z));
+  // The part is framed by R_x(-A) (SetupToModel is frame . R_x(A), undone
+  // by BodyToSetup), so the face points up when R_x(-A) * n = +Z:
+  // sin A = -ny and cos A = nz.
+  degrees = glm::degrees(std::atan2(-n.y, n.z));
   return true;
 }
 

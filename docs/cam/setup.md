@@ -161,7 +161,10 @@ normal on +Z. Any planar face has one. A normal fixes two of three rotations;
 the spin about the spindle is taken as the shortest arc from the frame in
 hand, so a click changes as little as possible and repeating it is idempotent.
 **Turn a face up** (`SolveIndexA`) is the rotary path: the A that brings a
-face to +Z by rotating about X, refused for a face pointing along X.
+face to +Z by rotating about X, refused for a face pointing along X. The face's
+normal is read in the setup's frame with no index (the fixture frame and the
+placement applied); the framing turns the part by R_x(-A), so a +Y face comes
+up at A = -90.
 
 **Per-part fixturing.** `Placement::frame` is optional: set means "this part
 is clamped this way", unset means "as the setup says" (`cam::FixtureFrame` is

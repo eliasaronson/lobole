@@ -749,9 +749,16 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     cam::Setup* setup = EnsureCamSetup(state);
     if (setup == nullptr)
       return;
+    // The normal as the rotary SEES it: the setup's frame with no index --
+    // the fixture frame and the part's placement applied, which is what the
+    // index then turns. Read in model space it ignored both, and a part laid
+    // on its side was indexed for the way it was modelled.
+    cam::Setup unturned = *setup;
+    unturned.rotationA = 0.0;
     glm::vec3 normal(0.0f);
     if (!cam::FaceNormalOf(
-            ui::JobBodies(state), item.element, normal,
+            cam::BodiesInSetupFrame(unturned, ui::JobBodies(state)),
+            item.element, normal,
             ui::TargetFor(state, item.element, item.jobPartId).jobPartId)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
