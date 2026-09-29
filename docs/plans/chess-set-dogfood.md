@@ -48,10 +48,43 @@ playback of an indexed setup after a turning one starts from the turned
 stock; a four-index crenel op posts four A words and verifies clean; the
 knights blank's spiral rest cuts only its bands.
 
-## 5. Text (later)
+## 5. Text
 
-A text sketch entity (a single-stroke font for engraving, an outline font for
-pockets) and an engrave operation: the board's a-h and 1-8.
+The board's a-h and 1-8, engraved. Two layers, in this order:
+
+- **A text sketch entity** (string, font, height, position, angle, anchor)
+  that regenerates into curves the existing features already consume: extrude
+  for raised letters, cut for recessed, construction for guides. In the
+  sketch, not a feature of its own, so a label is dimensioned and constrained
+  like anything else and its faces are named for CAM to pick. Outline glyphs
+  come from OpenCASCADE's `Font_BRepTextBuilder` (FreeType, already linked)
+  with one bundled TTF in `deps/fonts/`; a font that is not there is refused,
+  naming those that are.
+- **Single-stroke text and an Engrave operation.** Hershey glyphs (public
+  domain polylines, embedded as data) give open centreline curves; Engrave
+  follows open sketch curves at a depth with a V-bit, derived and verified
+  like the other types. Outline text can already be cut as pockets without it.
+
+Before building, read how the programs in `~/Documents/CAD` do it and take
+what holds up: FreeCAD (ShapeString, Path Engrave and VCarve), OpenSCAD
+(`text()`), SolveSpace (TrueType and its vector font), KiCad (the stroke
+font), and blendercam, pycam and Kiri:Moto (grid-apps) for engraving.
+
+Tests: a text entity's outline matches the glyph's advance and height and
+survives a save; a cut label's faces are named and pickable; an unknown font
+is refused; an Engrave op on single-stroke text posts a file whose moves lie
+on the strokes at depth and verifies clean; the board generator engraves
+a-h and 1-8.
+
+## 6. Looking back
+
+After 4 and 5: where the time in this round went, what blocked, and what in
+the build, test and development system should change. Read from the session
+transcripts, git history and the agents' reports, not from memory: builds
+(compiles killed for memory, header rebuilds, ninja contention between
+worktrees), test runs and their waits, agents (duration, rework, merge
+conflicts), and failures that turned out to be the environment. The output
+is a list of changes with their expected saving, each small enough to act on.
 
 ## Verification
 
