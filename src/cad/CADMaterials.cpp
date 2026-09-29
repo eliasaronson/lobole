@@ -151,6 +151,14 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                        // Low reflectance
       "Concrete"};
 
+  materials[MaterialType::EPOXY] = {
+      glm::vec3(0.03f, 0.03f, 0.03f), // Pigmented black
+      0.0f,
+      0.15f, // cast and sanded flush, then finished: near gloss
+      0.6f,
+      0.045f, // ((n-1)/(n+1))^2 at n = 1.55
+      "Epoxy"};
+
   // Wood & engineered wood. Base tone only here; the grain figure is applied
   // procedurally in the shader (see the "procedural grain" block below).
   // Colors are the light early-wood tone — the shader darkens toward the
@@ -179,6 +187,20 @@ void MaterialLibrary::InitializeMaterials() {
       0.45f,
       0.04f,
       "Walnut"};
+  materials[MaterialType::WOOD_MAPLE] = {
+      glm::vec3(0.66f, 0.55f, 0.40f), // Pale cream, less yellow than pine
+      0.0f,
+      0.5f,
+      0.4f,
+      0.04f,
+      "Maple"};
+  materials[MaterialType::WOOD_BEECH] = {
+      glm::vec3(0.58f, 0.42f, 0.28f), // Pinkish tan
+      0.0f,
+      0.55f,
+      0.4f,
+      0.04f,
+      "Beech"};
   materials[MaterialType::PLYWOOD_BIRCH] = {
       glm::vec3(0.60f, 0.48f, 0.30f), // Pale cream birch face
       0.0f,
@@ -227,11 +249,14 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::GLASS].transmission = 1.0f;
   materials[MaterialType::GLASS].ior = 1.52f;
   materials[MaterialType::CONCRETE].density = 2400.0f;
+  materials[MaterialType::EPOXY].density = 1150.0f;
   // Wood densities are moisture-dependent; these are typical air-dry (~12% MC)
   // values, well-defined enough for mass properties.
   materials[MaterialType::WOOD_OAK].density = 700.0f;
   materials[MaterialType::WOOD_PINE].density = 500.0f;
   materials[MaterialType::WOOD_WALNUT].density = 610.0f;
+  materials[MaterialType::WOOD_MAPLE].density = 705.0f;
+  materials[MaterialType::WOOD_BEECH].density = 720.0f;
   materials[MaterialType::PLYWOOD_BIRCH].density = 680.0f;
   materials[MaterialType::PLYWOOD_PINE].density = 500.0f;
   materials[MaterialType::MDF].density = 750.0f;
@@ -264,6 +289,7 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::GLASS, 70.0f, 0.22f, 0.0f);
   elastic(MaterialType::RUBY, 345.0f, 0.29f, 0.0f);
   elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
+  elastic(MaterialType::EPOXY, 3.0f, 0.35f, 60.0f);
   // Wood is strongly anisotropic (along-grain stiffness is ~15-20x the
   // transverse), but our FEM is linear-isotropic. These are representative
   // ALONG-GRAIN values (modulus, and modulus-of-rupture as a yield proxy);
@@ -273,6 +299,8 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::WOOD_OAK, 11.0f, 0.37f, 95.0f);
   elastic(MaterialType::WOOD_PINE, 9.0f, 0.35f, 80.0f);
   elastic(MaterialType::WOOD_WALNUT, 11.5f, 0.38f, 100.0f);
+  elastic(MaterialType::WOOD_MAPLE, 12.6f, 0.37f, 109.0f);
+  elastic(MaterialType::WOOD_BEECH, 14.3f, 0.36f, 110.0f);
   elastic(MaterialType::PLYWOOD_BIRCH, 10.0f, 0.30f, 55.0f);
   elastic(MaterialType::PLYWOOD_PINE, 8.0f, 0.30f, 45.0f);
   elastic(MaterialType::MDF, 3.6f, 0.25f, 18.0f);
@@ -291,6 +319,8 @@ void MaterialLibrary::InitializeMaterials() {
   pattern(MaterialType::WOOD_OAK, SP::Wood, 0.15f, 0.35f);
   pattern(MaterialType::WOOD_PINE, SP::Wood, 0.09f, 0.5f);   // wide, strong
   pattern(MaterialType::WOOD_WALNUT, SP::Wood, 0.22f, 0.3f); // fine, figured
+  pattern(MaterialType::WOOD_MAPLE, SP::Wood, 0.2f, 0.18f);  // faint, fine
+  pattern(MaterialType::WOOD_BEECH, SP::Wood, 0.25f, 0.22f); // fine, even
   pattern(MaterialType::PLYWOOD_BIRCH, SP::Plywood, 0.7f, 0.3f); // plies/mm
   pattern(MaterialType::PLYWOOD_PINE, SP::Plywood, 0.5f, 0.35f);
   // 3K twill is roughly a 2 mm repeat, so 0.5 tows/mm. The contrast here is
@@ -345,9 +375,12 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::GLASS, "glass"},
       {MaterialType::RUBY, "ruby"},
       {MaterialType::CONCRETE, "concrete"},
+      {MaterialType::EPOXY, "epoxy"},
       {MaterialType::WOOD_OAK, "wood_oak"},
       {MaterialType::WOOD_PINE, "wood_pine"},
       {MaterialType::WOOD_WALNUT, "wood_walnut"},
+      {MaterialType::WOOD_MAPLE, "wood_maple"},
+      {MaterialType::WOOD_BEECH, "wood_beech"},
       {MaterialType::PLYWOOD_BIRCH, "plywood_birch"},
       {MaterialType::PLYWOOD_PINE, "plywood_pine"},
       {MaterialType::MDF, "mdf"},

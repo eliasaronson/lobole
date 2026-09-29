@@ -349,8 +349,8 @@ also the parallel-lines distance (use an endpoint of the first line)."""
 MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
                   "chrome, gold, silver, titanium, plastic_white, "
                   "plastic_black, carbon_fibre, rubber, glass, ruby, concrete, "
-                  "wood_oak, "
-                  "wood_pine, wood_walnut, plywood_birch, plywood_pine, mdf")
+                  "epoxy, wood_oak, wood_pine, wood_walnut, wood_maple, "
+                  "wood_beech, plywood_birch, plywood_pine, mdf")
 
 WORKFLOW = """You are modeling in Designer, a parametric B-Rep CAD app
 (sketch → constrain → extrude/revolve, feature history, expressions).

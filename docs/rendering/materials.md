@@ -47,8 +47,8 @@ part under any transform, and it lives in exactly one place,
 1. **The material names the figure**: `MaterialProperties::pattern` — a
    `CADMaterials::SurfacePattern`: `Flat`, `Wood`, `Plywood`, `Weave` — with
    `patternScale` (per mm) and `patternContrast` (0..1), set per material in
-   the `pattern(...)` table in `CADMaterials.cpp` (oak, pine, walnut, birch
-   and pine plywood, carbon fibre). Every metal, plastic and ceramic, and MDF,
+   the `pattern(...)` table in `CADMaterials.cpp` (oak, pine, walnut, maple,
+   beech, birch and pine plywood, carbon fibre). Every metal, plastic and ceramic, and MDF,
    is `Flat`.
 2. **One `vec4` carries it**: `(pattern, scale, contrast, axis)` — the
    `procMaterial` field of the mesh push constant on the raster path and

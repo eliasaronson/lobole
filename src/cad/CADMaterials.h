@@ -39,12 +39,19 @@ enum class MaterialType {
   // blue appearance is the honest model of it.
   RUBY,
   CONCRETE,
+  // Cured casting epoxy, the fill of an inlay (a chess board's dark
+  // squares). Its own row for its density and stiffness; the colour is the
+  // pigmented black an inlay is poured in -- a clear pour is this with a
+  // glass appearance.
+  EPOXY,
 
   // Wood & engineered wood. Appearance is a procedural surface pattern shaded
   // from local object-space position (no textures / UVs); see SurfacePattern.
   WOOD_OAK,
   WOOD_PINE,
   WOOD_WALNUT,
+  WOOD_MAPLE, // hard maple: the pale wood of a turned set or a board
+  WOOD_BEECH,
   PLYWOOD_BIRCH,
   PLYWOOD_PINE,
   MDF,

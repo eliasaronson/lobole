@@ -17,7 +17,8 @@ using CADMaterials::SurfacePattern;
 // but genuinely near-uniform.
 static bool IsGrainWood(MaterialType t) {
   return t == MaterialType::WOOD_OAK || t == MaterialType::WOOD_PINE ||
-         t == MaterialType::WOOD_WALNUT;
+         t == MaterialType::WOOD_WALNUT || t == MaterialType::WOOD_MAPLE ||
+         t == MaterialType::WOOD_BEECH;
 }
 static bool IsPlywood(MaterialType t) {
   return t == MaterialType::PLYWOOD_BIRCH || t == MaterialType::PLYWOOD_PINE;
@@ -56,6 +57,10 @@ TEST_CASE("Wood serialization tokens are stable", "[materials]") {
         MaterialType::WOOD_PINE);
   CHECK(MaterialLibrary::MaterialTypeFromString("wood_walnut") ==
         MaterialType::WOOD_WALNUT);
+  CHECK(MaterialLibrary::MaterialTypeFromString("wood_maple") ==
+        MaterialType::WOOD_MAPLE);
+  CHECK(MaterialLibrary::MaterialTypeFromString("wood_beech") ==
+        MaterialType::WOOD_BEECH);
   CHECK(MaterialLibrary::MaterialTypeFromString("plywood_birch") ==
         MaterialType::PLYWOOD_BIRCH);
   CHECK(MaterialLibrary::MaterialTypeFromString("plywood_pine") ==
