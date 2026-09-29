@@ -3,6 +3,7 @@
 #include "core/cam/CamDropCutter.h"
 #include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
+#include "core/cam/CamOtherSetups.h" // ModelToSetup
 #include "core/cam/CamRotaryFeed.h"
 
 #include "core/cam/CamToolpathInternal.h"
@@ -162,7 +163,8 @@ ModelledBreak FindModelledBreak(const std::vector<Body>& bodies,
 
 DerivedOp DeriveOperation(const Setup& setup,
                           const std::vector<Body>& rawBodies, OpType type,
-                          const Target& target, int toolNumber) {
+                          const Target& target, int toolNumber,
+                          const std::vector<const Setup*>& earlier) {
   // Depths are read in the frame the machine cuts in, or an indexed setup
   // derives them from the wrong axis (C9).
   const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
@@ -659,9 +661,252 @@ DerivedOp DeriveOperation(const Setup& setup,
     return out;
   }
 
+  // Down from the top of what the EARLIER setups left, not the fresh stock's:
+  // on an indexed setup after a turning one that is the turned envelope over
+  // the target, and the bar's corners above it are air. Deriving from the
+  // bar started the chess king's cross 10 mm above the turned head, every
+  // pass of it in air, and a typed top_z to avoid that drew a warning that
+  // entry rapids would pass through stock that was no longer there.
+  if (!earlier.empty() && TopFromStock(op.type) &&
+      std::abs(op.topZ - hi.z) < 1e-9) {
+    const double top = StockTopOver(setup, earlier, rawBodies, op, hi.z);
+    if (top < op.topZ - 1e-6 && top > op.bottomZ + 1e-6) {
+      op.topZ = top;
+      // The two numbers derived from the depth, derived again from it.
+      if (type == OpType::Pocket && op.type == OpType::Adaptive &&
+          op.topZ - op.bottomZ <= tool.diameter)
+        op.type = OpType::Pocket;
+      if (op.tabCount > 0)
+        op.tabHeight = std::max(0.5, (op.topZ - op.bottomZ) * 0.2);
+    }
+  }
+
   out.op = op;
   out.ok = true;
   return out;
+}
+
+bool TopFromStock(OpType type) {
+  switch (type) {
+  case OpType::Pocket:
+  case OpType::Adaptive:
+  case OpType::Profile:
+  case OpType::Drill:
+  case OpType::SurfaceParallel:
+  case OpType::SurfaceWaterline:
+    return true;
+  default:
+    return false;
+  }
+}
+
+std::vector<const Setup*> EarlierSetups(const std::vector<Setup>& all,
+                                        uint64_t setupId) {
+  std::vector<const Setup*> out;
+  for (const Setup& s : all) {
+    if (s.id == setupId)
+      return out;
+    out.push_back(&s);
+  }
+  return {}; // not in the job: nothing is known to be cut before it
+}
+
+namespace {
+
+// The box in `framed` bodies' space (x0, x1, y0, y1) the op cuts over: its
+// targets' faces, or the whole part when it names none.
+bool TargetsBox(const std::vector<Body>& framed, const Operation& op,
+                glm::dvec4& box) {
+  Bnd_Box b;
+  bool any = false;
+  for (const Target& t : op.targets) {
+    for (const Body& body : framed) {
+      if (body.createdBy != t.ref.featureId || !body.shape.IsValid())
+        continue;
+      if (t.jobPartId != 0 && body.jobPartId != 0 &&
+          body.jobPartId != t.jobPartId)
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(t.ref.name);
+      if (!idx)
+        continue;
+      int i = 0;
+      for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next(), i++)
+        if (i == *idx) {
+          BRepBndLib::AddOptimal(ex.Current(), b, false, false);
+          any = true;
+          break;
+        }
+      break;
+    }
+  }
+  if (op.targets.empty()) {
+    glm::dvec3 lo(0.0), hi(0.0);
+    if (!ModelBoundsFramed(framed, lo, hi))
+      return false;
+    box = {lo.x, hi.x, lo.y, hi.y};
+    return true;
+  }
+  if (!any || b.IsVoid())
+    return false;
+  double x0, y0, z0, x1, y1, z1;
+  b.Get(x0, y0, z0, x1, y1, z1);
+  box = {x0, x1, y0, y1};
+  return true;
+}
+
+// The furthest the part reaches from the X axis between x = a and x = b, in
+// the space of `framed`. Exact for the tessellation: the distance from the
+// axis is convex, so over a triangle clipped to the slab its largest value is
+// at a corner of the clipped polygon -- a vertex of the triangle inside the
+// slab, or where an edge crosses one of its faces. The vertices alone miss a
+// cylinder's whole side between its two end rings.
+double MaxRadiusOver(const std::vector<Body>& framed, double a, double b,
+                     double& deflection) {
+  double best = 0.0;
+  deflection = 0.0;
+  for (const Body& body : framed) {
+    if (!body.shape.IsValid())
+      continue;
+    glm::vec3 blo, bhi;
+    body.shape.GetBoundingBox(blo, bhi);
+    // GenerateMesh's own choice for a zero deflection (CADKernel.h).
+    deflection = std::max(deflection, 0.002 * glm::length(bhi - blo));
+    const CADShape::Mesh mesh = body.shape.GenerateMeshDetached(0.0);
+    const auto radius = [](const glm::dvec3& p) {
+      return std::hypot(p.y, p.z);
+    };
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+      glm::dvec3 v[3];
+      for (int k = 0; k < 3; k++)
+        v[k] = glm::dvec3(mesh.vertices[mesh.indices[t + k]].position);
+      for (int k = 0; k < 3; k++) {
+        const glm::dvec3& p = v[k];
+        const glm::dvec3& q = v[(k + 1) % 3];
+        if (p.x >= a && p.x <= b)
+          best = std::max(best, radius(p));
+        for (const double plane : {a, b})
+          if ((p.x - plane) * (q.x - plane) < 0.0) {
+            const double s = (plane - p.x) / (q.x - p.x);
+            best = std::max(best, radius(p + (q - p) * s));
+          }
+      }
+    }
+  }
+  return best;
+}
+
+// How far a turned surface stands above the model it was cut to: the cusp a
+// ball leaves between passes, or the facet a flat end leaves across a radius.
+double TurnedScallop(const Tool& tool, double stepover, double radius) {
+  const double r = tool.diameter * 0.5;
+  if (tool.type == ToolType::Ball) {
+    const double half = 0.5 * std::clamp(stepover, 0.0, 1.0) * tool.diameter;
+    return r - std::sqrt(std::max(0.0, r * r - half * half));
+  }
+  return radius - std::sqrt(std::max(0.0, radius * radius - r * r));
+}
+
+} // namespace
+
+double StockTopOver(const Setup& setup,
+                    const std::vector<const Setup*>& earlier,
+                    const std::vector<Body>& rawBodies, const Operation& op,
+                    double freshTop) {
+  double top = freshTop;
+  if (earlier.empty())
+    return top;
+  glm::dmat4 mine(1.0);
+  if (!ModelToSetup(setup, rawBodies, mine, nullptr))
+    return top; // parts placed differently: no one frame to read a top in
+  const std::vector<Body> framed = BodiesInSetupFrame(setup, rawBodies);
+  glm::dvec4 box;
+  if (!TargetsBox(framed, op, box))
+    return top;
+  // Widened by the cutter: its edge passes over the material beside the
+  // target as it cuts the target.
+  const Tool* tool = setup.FindTool(op.toolNumber);
+  const double reach = tool != nullptr ? tool->diameter * 0.5 : 0.0;
+  box += glm::dvec4(-reach, reach, -reach, reach);
+
+  for (const Setup* turn : earlier) {
+    if (turn == nullptr || !HeldInRotary(*turn))
+      continue;
+    glm::dmat4 theirs(1.0);
+    if (!ModelToSetup(*turn, rawBodies, theirs, nullptr))
+      continue;
+    // Their axis (their +X through their origin) in this setup's frame. An
+    // index turns the part ABOUT that axis, so it stays put; anything else
+    // -- another fixture, another clamping -- is not the same part on it.
+    const glm::dmat4 toMine = mine * glm::inverse(theirs);
+    const glm::dvec3 o(toMine * glm::dvec4(0.0, 0.0, 0.0, 1.0));
+    const glm::dvec3 d(toMine * glm::dvec4(1.0, 0.0, 0.0, 0.0));
+    if (std::abs(d.y) > 1e-6 || std::abs(d.z) > 1e-6 || std::abs(d.x) < 1e-6)
+      continue;
+    // The op's span along their axis.
+    double ta = (box.x - o.x) * d.x, tb = (box.y - o.x) * d.x;
+    if (ta > tb)
+      std::swap(ta, tb);
+    const std::vector<Body> theirFramed = BodiesInSetupFrame(*turn, rawBodies);
+    // Beyond the ends of their stock there is no bar at all, so the cutter
+    // reaching past the part's end asks nothing there.
+    glm::dvec3 stockLo(0.0), stockHi(0.0);
+    if (!StockBoundsFramed(*turn, theirFramed, stockLo, stockHi))
+      continue;
+    ta = std::max(ta, stockLo.x);
+    tb = std::min(tb, stockHi.x);
+    // A face ON the span's end -- a shoulder the target meets -- stands
+    // beside it, not over it: the cutter's own reach is what brings a
+    // neighbour in.
+    constexpr double kBeside = 1e-3;
+    if (tb - ta > 2.0 * kBeside) {
+      ta += kBeside;
+      tb -= kBeside;
+    }
+    if (tb < ta)
+      continue;
+    const HoldingEnvelope env = HoldingEnvelopeOf(*turn, theirFramed);
+    // The turning pass that reaches this whole span and leaves least on it.
+    const Operation* best = nullptr;
+    const Tool* bestTool = nullptr;
+    for (const Operation& t : turn->operations) {
+      if (!t.enabled || t.type != OpType::SurfaceRotary)
+        continue;
+      const Tool* tt = turn->FindTool(t.toolNumber);
+      if (tt == nullptr)
+        continue;
+      glm::dvec4 span;
+      if (!TargetsBox(theirFramed, t, span))
+        continue;
+      double lo = span.x, hi = span.y;
+      if (env.ok) {
+        lo = std::max(lo, env.MinX(tt->diameter * 0.5));
+        hi = std::min(hi, env.MaxX(tt->diameter * 0.5));
+      }
+      if (ta < lo || tb > hi)
+        continue; // the turning did not reach all of it: the bar is there
+      if (best == nullptr || t.stockToLeave < best->stockToLeave) {
+        best = &t;
+        bestTool = tt;
+      }
+    }
+    if (best == nullptr)
+      continue;
+    double deflection = 0.0;
+    const double model = MaxRadiusOver(theirFramed, ta, tb, deflection);
+    if (model <= 0.0)
+      continue;
+    const double r = model + std::max(0.0, best->stockToLeave) +
+                     TurnedScallop(*bestTool, best->stepover, model) +
+                     deflection;
+    // Over the op's box the turned solid is highest where the box comes
+    // nearest the axis across it.
+    const double dy = box.z > o.y   ? box.z - o.y
+                      : o.y > box.w ? o.y - box.w
+                                    : 0.0;
+    top = std::min(top, o.z + std::sqrt(std::max(0.0, r * r - dy * dy)));
+  }
+  return top;
 }
 
 DerivedOp DeriveSurfaceRough(const Setup& setup,
@@ -775,15 +1020,26 @@ DerivedOp DeriveRotaryRough(const Setup& setup, const std::vector<Body>& bodies,
   return out;
 }
 
-int RederiveDepths(Setup& setup, const std::vector<Body>& bodies) {
+int RederiveDepths(Setup& setup, const std::vector<Body>& bodies,
+                   const std::vector<const Setup*>& earlier) {
   int moved = 0;
   for (Operation& op : setup.operations) {
     if (op.targets.empty())
       continue;
-    const DerivedOp d = DeriveOperation(setup, bodies, op.type,
-                                        op.targets.front(), op.toolNumber);
+    DerivedOp d = DeriveOperation(setup, bodies, op.type, op.targets.front(),
+                                  op.toolNumber, earlier);
     if (!d.ok)
       continue;
+    // The derivation reads one target; the top is over all of them.
+    if (op.targets.size() > 1 && !earlier.empty() && TopFromStock(op.type)) {
+      glm::dvec3 lo(0.0), hi(0.0);
+      if (StockBounds(setup, bodies, lo, hi)) {
+        Operation all = d.op;
+        all.targets = op.targets;
+        d.op.topZ = std::max(d.op.topZ,
+                             StockTopOver(setup, earlier, bodies, all, hi.z));
+      }
+    }
     // Depths only. The tool, the tabs, the stepover and anything else typed
     // are answers to different questions and the frame did not change them.
     if (std::abs(op.topZ - d.op.topZ) > 1e-9 ||

@@ -1501,7 +1501,8 @@ void DrawCamPanel(AppState& state) {
     // rotary pass, not a 3-axis contour round the dowel
     // (docs/cam/operations.md#derivation--what-a-click-means).
     const cam::DerivedOp derived = cam::DeriveOperation(
-        *setup, ui::JobBodies(state), cam::AddOperationType(*setup), {});
+        *setup, ui::JobBodies(state), cam::AddOperationType(*setup), {}, 0,
+        cam::EarlierSetups(state.job->GetSetups(), setup->id));
     if (derived.ok) {
       cam::Operation op = derived.op;
       op.id = state.job->AllocateId();

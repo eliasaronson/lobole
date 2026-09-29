@@ -11,9 +11,14 @@
 #include "cam_fixtures.h"
 #include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamRotary.h"
+#include "core/cam/CamSim.h"
 #include "core/cam/CamSurface.h"
 
 #include <catch2/generators/catch_generators.hpp>
+
+#include <BRepAdaptor_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
 
 #include <chrono>
 
@@ -1495,5 +1500,182 @@ TEST_CASE("cam rotary: what the chuck clips off a spiral is counted along "
   // And it is turns, not an axial advance: at least the chuck's grip of
   // them, 15 mm of a 3 mm pitch.
   CHECK(held[0].holdingClippedMm > 0.8 * turn * 15.0 / 3.0);
+}
+
+namespace {
+
+// The indexed setup the tests below cut after `SmallRotaryJob`'s turning:
+// the same bar on the same axis, at A = 0.
+cam::Setup IndexedAfterTurn() {
+  cam::Setup indexed = BasicSetup();
+  RotaryMachine(indexed);
+  indexed.id = 2;
+  indexed.name = "Indexed";
+  indexed.heldIn = cam::Setup::HeldIn::Rotary;
+  indexed.rotationA = 0.0;
+  indexed.stock.margin = {0.0, 1.0, 1.0};
+  return indexed;
+}
+
+double TopAt(const cam::HeightMap& h, double x, double y = 0.0) {
+  const int i = static_cast<int>((x - h.x0) / h.res);
+  const int j = static_cast<int>((y - h.y0) / h.res);
+  return static_cast<double>(h.At(i, j));
+}
+
+} // namespace
+
+// The playback starts where the verifier starts. It used to arm every setup
+// with its FRESH stock, so an indexed setup after a turning one played its
+// entries through a square bar the turning had already taken away -- while
+// the verdict, seeded from the turning, said they were over air.
+TEST_CASE("cam rotary: playback of an indexed setup starts from the turned "
+          "stock",
+          "[cam][rotary]") {
+  RotaryJob turn = SmallRotaryJob(); // Phi 30 bar, Phi 22 neck at x 12..28
+  turn.setup.id = 1;
+  turn.setup.name = "Turn";
+  const cam::Setup indexed = IndexedAfterTurn();
+  const std::vector<Body>& bodies = turn.doc->GetBodies();
+  // Down to 13 over the neck -- air once it is turned, the bar before -- and
+  // a short cut there.
+  const std::string gcode = "(op 1)\nG0 Z30\nG0 X20 Y0\nG0 Z13\n"
+                            "G1 X22 F300\nG0 Z30\n";
+  constexpr double kRes = 0.5;
+  const cam::OtherSetups earlier = cam::OtherSetupsOf(
+      indexed, {{&turn.setup, turn.gcode, true}}, bodies, kRes);
+  REQUIRE(earlier.HasEarlier());
+
+  cam::HeightMap fresh, start;
+  REQUIRE(cam::StartingStock(indexed, bodies, kRes, nullptr, fresh));
+  REQUIRE(cam::StartingStock(indexed, bodies, kRes, &earlier, start));
+  CHECK(TopAt(fresh, 20.0) > 15.5); // the bar
+  CHECK(TopAt(start, 20.0) < 12.5); // the turned neck
+  CHECK(TopAt(start, 4.0) > 14.9);  // the full diameter, still there
+
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ProgramInSetupSpace(gcode, indexed), 0.0);
+  cam::StockSim sim;
+  sim.Begin(tl, indexed, start);
+  REQUIRE(sim.Ready());
+  CHECK(TopAt(sim.Stock(), 20.0) < 12.5); // the first frame is the turned part
+
+  // ...and the last frame is the verifier's own stock, cell for cell: one
+  // start, one carve.
+  sim.SeekTo(tl.End());
+  const cam::Inspection insp =
+      cam::Inspect(gcode, indexed, bodies, kRes, {}, {}, {}, &earlier);
+  REQUIRE(insp.ok);
+  REQUIRE(insp.machined.z.size() == sim.Stock().z.size());
+  size_t differ = 0;
+  for (size_t c = 0; c < insp.machined.z.size(); c++)
+    differ += std::abs(insp.machined.z[c] - sim.Stock().z[c]) > 1e-4f;
+  CHECK(differ == 0);
+  // Over air, the rapid down to 13 is no finding; over the bar it was.
+  CHECK(insp.verdict.rapidsThroughStock == 0);
+  CHECK(cam::Inspect(gcode, indexed, bodies, kRes).verdict.rapidsThroughStock >
+        0);
+}
+
+// The rotary check starts from what earlier setups left too: a second
+// turning after the first starts on the turned part, not the blank.
+TEST_CASE("cam rotary: a turning after a turning starts from what it left",
+          "[cam][rotary]") {
+  RotaryJob first = SmallRotaryJob();
+  first.setup.id = 1;
+  first.setup.name = "Turn";
+  cam::Setup second = first.setup;
+  second.id = 2;
+  second.name = "Again";
+  const std::vector<Body>& bodies = first.doc->GetBodies();
+  const cam::OtherSetups earlier = cam::OtherSetupsOf(
+      second, {{&first.setup, first.gcode, true}}, bodies, 0.5);
+  REQUIRE(earlier.HasEarlier());
+  const cam::RadiusMap blank =
+      cam::StartingRotaryStock(second, bodies, 0.5, nullptr);
+  const cam::RadiusMap start =
+      cam::StartingRotaryStock(second, bodies, 0.5, &earlier);
+  REQUIRE_FALSE(start.r.empty());
+  REQUIRE(start.r.size() == blank.r.size());
+  const int neck = static_cast<int>((20.0 - start.x0) / start.res);
+  for (int j = 0; j < start.nTheta; j += start.nTheta / 8) {
+    CHECK(blank.At(neck, j) > 15.5f);
+    CHECK(start.At(neck, j) < 12.5f);
+    CHECK(start.At(neck, j) > 10.9f);
+  }
+  // And the check reads the same program against it: the second pass of
+  // the same file finds nothing left to cut.
+  const cam::RotaryInspection again =
+      cam::InspectRotary(first.gcode, second, bodies, 0.5, &earlier);
+  REQUIRE(again.ok);
+  const cam::RotaryInspection alone =
+      cam::InspectRotary(first.gcode, second, bodies, 0.5);
+  REQUIRE(alone.ok);
+  CHECK(again.verdict.maxLeftover <= alone.verdict.maxLeftover + 1e-6);
+}
+
+// An operation's derived top on an indexed setup after a turning one is the
+// top of the TURNED part over it: the model's largest radius along its span,
+// plus what the turning leaves -- not the square bar's top. The chess king's
+// cross was typed `top_z=8.0` to stop it cutting 10 mm of air, and was warned
+// for it.
+TEST_CASE("cam derive: a top after a turning is the turned part's",
+          "[cam][rotary]") {
+  RotaryJob turn = SmallRotaryJob();
+  turn.setup.id = 1;
+  turn.setup.name = "Turn";
+  cam::Setup indexed = IndexedAfterTurn();
+  const std::vector<Body>& bodies = turn.doc->GetBodies();
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(indexed, bodies, lo, hi));
+  REQUIRE(hi.z > 15.9); // the bar, with its margin
+  const std::vector<const cam::Setup*> earlier = {&turn.setup};
+
+  // Over the whole part: the full diameter, plus the ball's scallop and the
+  // tessellation -- well under the bar's top.
+  const cam::DerivedOp whole = cam::DeriveOperation(
+      indexed, bodies, cam::OpType::Profile, {}, 1, earlier);
+  REQUIRE(whole.ok);
+  CHECK(whole.op.topZ < hi.z - 0.3);
+  CHECK(whole.op.topZ > 15.0);
+  // With nothing before it, the bar's top, as ever.
+  const cam::DerivedOp alone =
+      cam::DeriveOperation(indexed, bodies, cam::OpType::Profile, {}, 1);
+  REQUIRE(alone.ok);
+  CHECK(alone.op.topZ == hi.z);
+  // Listed AFTER the turning, the turning is not before it.
+  std::vector<cam::Setup> job = {indexed, turn.setup};
+  CHECK(cam::EarlierSetups(job, indexed.id).empty());
+  CHECK(cam::EarlierSetups(job, turn.setup.id).size() == 1);
+
+  // Over the neck alone, the neck's radius: 11, not 15.
+  ElementRef neck;
+  const Body& body = bodies.front();
+  int i = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), i++) {
+    BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+    if (s.GetType() == GeomAbs_Cylinder &&
+        std::abs(s.Cylinder().Radius() - 11.0) < 1e-6)
+      if (const std::string* name = body.elementMap.NameOf(i)) {
+        neck.featureId = body.createdBy;
+        neck.name = *name;
+      }
+  }
+  REQUIRE(neck.IsSet());
+  cam::Operation op;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 99; // no such cutter: the span is the face's own, unwidened
+  op.targets = {cam::Target{0, neck}};
+  const double top = cam::StockTopOver(indexed, earlier, bodies, op, hi.z);
+  CHECK(top > 11.0);
+  CHECK(top < 12.0);
+  // A cutter as wide as the shoulders beside the neck reaches over them.
+  op.toolNumber = 1;
+  CHECK(cam::StockTopOver(indexed, earlier, bodies, op, hi.z) > 15.0);
+  // A turning that does not run -- disabled -- leaves the bar.
+  turn.setup.operations.front().enabled = false;
+  op.toolNumber = 99;
+  CHECK(cam::StockTopOver(indexed, earlier, bodies, op, hi.z) == hi.z);
 }
 #endif

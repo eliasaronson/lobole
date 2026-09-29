@@ -4,6 +4,7 @@
 #ifdef HAVE_CAM
 
 #include "core/Document.h"
+#include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
@@ -100,10 +101,55 @@ void DropToolInstance(AppState& state) {
   state.camToolInstanceFor = -1;
 }
 
+// What the job's EARLIER setups leave, from their posted files -- the same
+// reading the verifier seeds a later setup's stock with
+// (docs/cam/simulation.md#leftover-another-setup-removes). False, with the
+// refusal, when one of them is still being cut and `settle` does not ask
+// for it now: a playback started from the bar there would be a picture of a
+// job nobody posts.
+bool EarlierStock(AppState& state, const cam::Setup& setup, bool settle,
+                  double res, cam::OtherSetups& out, std::string& refusal) {
+  std::vector<cam::SetupProgram> programs;
+  std::vector<std::string> unposted;
+  for (const cam::Setup& other : state.job->GetSetups()) {
+    if (other.id == setup.id)
+      break; // the job's order is the order they are cut in
+    if (other.operations.empty())
+      continue;
+    std::vector<cam::Toolpath> paths;
+    if (settle) {
+      paths = GenerateCamToolpathsNow(state, other);
+    } else {
+      bool pending = false;
+      paths = CamToolpathsQueued(state, other, pending);
+      if (pending) {
+        refusal = "Setup '" + other.name +
+                  "' is cut before this one, and its toolpaths are still "
+                  "being generated -- this one starts from what it leaves. "
+                  "Simulate again when they land.";
+        return false;
+      }
+    }
+    std::string file, why;
+    if (!cam::PostProcess(other.machine.post, other, paths, PostOpts(other),
+                          file, &why)) {
+      unposted.push_back("setup '" + other.name +
+                         "', because it does not post: " + why);
+      continue;
+    }
+    programs.push_back({&other, std::move(file), /*earlier=*/true});
+  }
+  out = cam::OtherSetupsOf(setup, programs, ui::JobBodies(state), res);
+  out.notChecked.insert(out.notChecked.end(), unposted.begin(), unposted.end());
+  return true;
+}
+
 } // namespace
 
-bool BeginCamPlayback(AppState& state) {
+bool BeginCamPlayback(AppState& state, bool settle) {
   state.camPlaybackRefusal.clear();
+  state.camPlaybackSeededFrom.clear();
+  state.camPlaybackNotSeeded.clear();
   if (!state.job) {
     state.camPlaybackRefusal = "A simulation needs a part. Switch to a part "
                                "tab.";
@@ -160,16 +206,35 @@ bool BeginCamPlayback(AppState& state) {
     state.camPlaybackGcode.clear();
     return false;
   }
+  // What the job's earlier setups left: this one starts from it, as its
+  // verification does. The file is read in setup order, so a pointer into
+  // the job's setups is taken only after every other refusal above.
+  cam::OtherSetups earlier;
+  {
+    std::string refusal;
+    if (!EarlierStock(state, *setup, settle,
+                      state.camTimeline.rotary ? kRotarySimRes
+                                               : state.camSimRes,
+                      earlier, refusal)) {
+      state.camPlaybackRefusal = refusal;
+      state.camPlaybackGcode.clear();
+      state.camTimeline = cam::Timeline{};
+      return false;
+    }
+    for (const cam::SetupStock& s : earlier.stocks)
+      if (s.earlier)
+        state.camPlaybackSeededFrom.push_back(s.name);
+    state.camPlaybackNotSeeded = earlier.notChecked;
+  }
   if (state.camTimeline.rotary) {
     // The part TURNS: a radius field about the rotary axis, from the same
-    // blank the verifier derives, at the grid the panel verifies on -- so
-    // the last frame of this playback is the stock the verdict was read
-    // from, cell for cell (cam rotary: playing to the end leaves the
-    // verifier's own stock).
+    // start the verifier derives (the blank, or what earlier setups left of
+    // it), at the grid the panel verifies on -- so the last frame of this
+    // playback is the stock the verdict was read from, cell for cell (cam
+    // rotary: playing to the end leaves the verifier's own stock).
     std::string why;
-    cam::RadiusMap blank = cam::MakeRotaryBlank(
-        *setup, cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)),
-        kRotarySimRes, &why);
+    cam::RadiusMap blank = cam::StartingRotaryStock(
+        *setup, ui::JobBodies(state), kRotarySimRes, &earlier, &why);
     if (blank.r.empty()) {
       state.camPlaybackRefusal = "This job cannot be simulated: " + why;
       state.camPlaybackGcode.clear();
@@ -178,8 +243,11 @@ bool BeginCamPlayback(AppState& state) {
     }
     state.camRotarySim.Begin(state.camTimeline, *setup, std::move(blank));
   } else {
-    state.camStockSim.Begin(state.camTimeline, *setup,
-                            cam::MakeStock(lo, hi, state.camSimRes));
+    cam::HeightMap start;
+    if (!cam::StartingStock(*setup, ui::JobBodies(state), state.camSimRes,
+                            &earlier, start))
+      start = cam::MakeStock(lo, hi, state.camSimRes); // bounds held above
+    state.camStockSim.Begin(state.camTimeline, *setup, std::move(start));
   }
   state.camCursor = {0, 0.0};
   state.camPlaybackOpen = true;
@@ -628,6 +696,17 @@ void DrawCamTransportWindow(AppState& state) {
                         tl.DistanceAt(state.camCursor), tl.totalDistance,
                         tl.MinutesAt(state.camCursor));
   }
+  // Where the block came from, when it is not the fresh stock: a turned
+  // part under an indexed setup looks like a modelling mistake otherwise.
+  if (!state.camPlaybackSeededFrom.empty()) {
+    std::string names;
+    for (const std::string& n : state.camPlaybackSeededFrom)
+      names += (names.empty() ? "'" : ", '") + n + "'";
+    ImGui::TextDisabled("Starts from what %s left", names.c_str());
+  }
+  if (!state.camPlaybackNotSeeded.empty())
+    ImGui::TextDisabled("Not read, so started from its stock: %s",
+                        state.camPlaybackNotSeeded.front().c_str());
   ImGui::End();
 }
 
@@ -636,7 +715,7 @@ void DrawCamTransportWindow(AppState& state) {
 #else // !HAVE_CAM
 
 namespace ui {
-bool BeginCamPlayback(AppState&) { return false; }
+bool BeginCamPlayback(AppState&, bool) { return false; }
 void EndCamPlayback(AppState&) {}
 void TickCamPlayback(AppState&, double) {}
 void SeekCamPlayback(AppState&, cam::SimCursor) {}

@@ -137,7 +137,31 @@ struct DerivedOp {
 // Only operations that name a target are touched: those are the ones whose
 // numbers were derived from the model in the first place, and there is
 // nothing to re-derive the others from.
-int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
+int RederiveDepths(Setup& setup, const std::vector<Body>& bodies,
+                   const std::vector<const Setup*>& earlier = {});
+
+// The setups of `all` cut before the one with id `setupId` -- the job's
+// order is the order they are cut in.
+[[nodiscard]] std::vector<const Setup*>
+EarlierSetups(const std::vector<Setup>& all, uint64_t setupId);
+
+// The top of the material over `op`'s region, in `setup`'s frame, when the
+// job's `earlier` setups have already cut: an indexed setup after a TURNING
+// one starts on the turned part, whose top over the op is the turned
+// envelope -- the model's largest radius along the op's span plus what the
+// turning left on it -- not the square bar's top. `freshTop` (the stock's)
+// where no earlier setup turned this span, or where the frames do not share
+// the turning axis. Never above `freshTop`
+// (docs/cam/operations.md#derivation--what-a-click-means).
+[[nodiscard]] double StockTopOver(const Setup& setup,
+                                  const std::vector<const Setup*>& earlier,
+                                  const std::vector<Body>& rawBodies,
+                                  const Operation& op, double freshTop);
+// Whether a derived operation of this type starts at the top of the stock
+// (and so from `StockTopOver`) -- a clearing, a contour, a drill or a 3-axis
+// surface pass -- rather than at a height of the model's own, like an edge
+// break's edge or a facing's part top.
+[[nodiscard]] bool TopFromStock(OpType type);
 
 // How far to step over per pass, as a fraction of the cutter's diameter.
 //
@@ -181,10 +205,12 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 // `toolNumber` 0 = the setup's first tool. Every derived number is a fraction
 // of the cutter, so an operation derived for one tool and cut with another
 // carries the wrong stepdown.
-[[nodiscard]] DerivedOp DeriveOperation(const Setup& setup,
-                                        const std::vector<Body>& bodies,
-                                        OpType type, const Target& target,
-                                        int toolNumber = 0);
+// `earlier`: the job's setups cut before this one (`EarlierSetups`). A top
+// derived from the stock is taken from what they left (`StockTopOver`).
+[[nodiscard]] DerivedOp
+DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
+                OpType type, const Target& target, int toolNumber = 0,
+                const std::vector<const Setup*>& earlier = {});
 
 // A rotary ROUGH (docs/cam/rotary.md#layers-rest-and-the-rough-verb): the
 // rotary finish's derivation and refusals, then layers of half the cutter from

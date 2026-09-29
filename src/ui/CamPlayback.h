@@ -21,7 +21,13 @@ namespace ui {
 // arms the stock. False + `state.camPlaybackRefusal` when there is nothing to
 // play, which is a refusal the panel prints where the button is rather than a
 // button that does nothing.
-bool BeginCamPlayback(AppState& state);
+//
+// The stock starts from what the job's EARLIER setups left
+// (cam::StartingStock), so an indexed setup after a turning one plays
+// against the turned part. `settle`: generate those setups' toolpaths now
+// (the RPC reader's path); otherwise a pass of theirs still being cut is a
+// refusal, like this setup's own.
+bool BeginCamPlayback(AppState& state, bool settle = false);
 
 // THE way out. Restores the bodies, drops the stock and the tool, and leaves
 // no session state behind. Safe to call when nothing is playing.

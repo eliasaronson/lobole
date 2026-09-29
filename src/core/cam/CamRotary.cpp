@@ -693,7 +693,10 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   // whatever fixture put the part on the trunnion.
   const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
 
-  out.machined = MakeRotaryBlank(setup, bodies, res, &out.why);
+  // The blank -- or, when earlier setups of the job have cut, what they left
+  // of it: the same start the playback plays from
+  // (docs/cam/simulation.md#leftover-another-setup-removes).
+  out.machined = StartingRotaryStock(setup, rawBodies, res, others, &out.why);
   if (out.machined.r.empty())
     return out;
   out.designed = SampleModelRotary(bodies, out.machined);

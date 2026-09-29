@@ -467,12 +467,12 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
     return out;
 
   const GProgram program = ProgramInSetupSpace(gcode, setup);
-  HeightMap machined = MakeStock(lo, hi, res);
   // Where the earlier setups of the job have already cut, this one starts
-  // from what they left
+  // from what they left -- the same start the playback plays from
   // (docs/cam/simulation.md#leftover-another-setup-removes).
-  if (others != nullptr && others->HasEarlier())
-    SeedFromEarlier(machined, *others, lo.z, std::max(0.3, res));
+  HeightMap machined;
+  if (!StartingStock(setup, rawBodies, res, others, machined))
+    return out;
 
   // Rapids through material: checked BEFORE the cut is applied, because a
   // rapid is only safe over air. This is the check a shape comparison cannot

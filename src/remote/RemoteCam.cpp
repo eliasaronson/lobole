@@ -556,7 +556,11 @@ constexpr MethodDoc kCamMethods[] = {
      "play?, close?, resolution?: the height map's cell size in mm, echoed as "
      "resolution_mm}. Returns {open, at, distance_mm, total_mm, "
      "cutting_minutes, removed_mm3, operation, tool, feed_mm_min, line, "
-     "position}. The cursor is PATH DISTANCE, not a clock: every cutting "
+     "position, starts_from, earlier_setups_not_read?}. The stock starts "
+     "from what the job's EARLIER setups left (`starts_from` names them; "
+     "empty = the fresh stock), so an indexed setup after a turning one "
+     "plays against the turned part. The cursor is PATH DISTANCE, not a "
+     "clock: every cutting "
      "feed is in the file but no machine states its rapid rate, so a time "
      "axis would be part measurement and part invention — `cutting_minutes` "
      "counts what the file states and nothing else. Generates the toolpaths "
@@ -2243,7 +2247,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       if (target.IsSet() && picked.jobPartId == 0)
         throw std::runtime_error(why);
       const cam::DerivedOp derived = cam::DeriveOperation(
-          setup, ui::JobBodies(state), type, picked, op.toolNumber);
+          setup, ui::JobBodies(state), type, picked, op.toolNumber,
+          cam::EarlierSetups(job->GetSetups(), setup.id));
       if (!derived.ok)
         throw std::runtime_error(derived.why);
       for (const std::string& n : derived.notes)
@@ -2256,6 +2261,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // point, not a cage. (To force a strategy on a derived operation, set it
     // afterwards with set_cam_op.)
     ApplyOpFields(state, setup, op, p, /*keepType=*/derive);
+    // The derivation read the first target; a derived top is the top of
+    // what the earlier setups left over ALL of them.
+    if (derive && !p.contains("top_z") && op.targets.size() > 1 &&
+        cam::TopFromStock(op.type)) {
+      glm::dvec3 lo(0.0), hi(0.0);
+      if (cam::StockBounds(setup, ui::JobBodies(state), lo, hi))
+        op.topZ = std::max(
+            op.topZ, cam::StockTopOver(
+                         setup, cam::EarlierSetups(job->GetSetups(), setup.id),
+                         ui::JobBodies(state), op, hi.z));
+    }
     // A clearing operation clears INSIDE its boundary; the struct's Outside
     // default is a profile's notion and means "nothing to cut" here.
     if (!p.contains("side") && !derive &&
@@ -2384,7 +2400,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // Complete toolpaths or none: a pass still cutting would make the
       // playback a picture of the previous file.
       ui::SettleCamToolpaths(state);
-      if (!ui::BeginCamPlayback(state))
+      // `settle`: the earlier setups this one starts from are generated
+      // now, too -- a reader waits for the answer, it does not get a
+      // refusal to come back later.
+      if (!ui::BeginCamPlayback(state, /*settle=*/true))
         throw std::runtime_error(state.camPlaybackRefusal);
       // Framed ONCE, as the simulation opens: an instance driven entirely
       // over the RPC has a camera nobody ever pointed, and its first
@@ -2434,8 +2453,14 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              {"rotary", state.camTimeline.rotary},
              {"a_deg", state.camTimeline.AngleAt(state.camCursor)},
              {"resolution_mm", state.camSimRes},
+             // What the stock started from: the earlier setups whose cut it
+             // was seeded with (empty = the fresh stock), and any that could
+             // not be read.
+             {"starts_from", state.camPlaybackSeededFrom},
              {"segments", tl.Segments()},
              {"position", {pos.x, pos.y, pos.z}}};
+    if (!state.camPlaybackNotSeeded.empty())
+      out["earlier_setups_not_read"] = state.camPlaybackNotSeeded;
     if (move != nullptr) {
       out["operation"] = move->op;
       out["tool"] = move->tool;
@@ -2515,18 +2540,29 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // part's top -- an edge break, most -- was warned about rapids through
       // stock that was no longer there.
       double top = stockHi.z;
+      // And as the job's EARLIER setups leave it: over an indexed op after a
+      // turning, the top is the turned part's, not the bar's.
+      const std::vector<const cam::Setup*> earlier =
+          cam::EarlierSetups(job->GetSetups(), setup.id);
       for (const size_t i : cam::CuttingOrder(setup)) {
         const cam::Operation& op = setup.operations[i];
         if (!op.enabled)
           continue;
-        if (op.topZ < top - kTopSlack)
+        const double here =
+            earlier.empty() ? top
+                            : cam::StockTopOver(setup, earlier,
+                                                ui::JobBodies(state), op, top);
+        if (op.topZ < here - kTopSlack)
           warnings.push_back(
               "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
-              zfmt(op.topZ) + " is " + zfmt(top - op.topZ) +
-              " mm below the stock top (Z" + zfmt(top) +
-              (top < stockHi.z - kTopSlack ? ", as the face op before it "
-                                             "leaves it"
-                                           : "") +
+              zfmt(op.topZ) + " is " + zfmt(here - op.topZ) +
+              " mm below the stock top (Z" + zfmt(here) +
+              (here < stockHi.z - kTopSlack
+                   ? (here < top - kTopSlack ? ", as the earlier setups "
+                                               "leave it over this op"
+                                             : ", as the face op before it "
+                                               "leaves it")
+                   : "") +
               ") — entry rapids will pass through stock; raise top_z or "
               "leave it out to derive");
         if (op.type == cam::OpType::Face)

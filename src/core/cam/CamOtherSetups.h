@@ -9,8 +9,9 @@
 // leave is their final machined map -- the air above a height map, beyond a
 // radius map -- and a leftover cell whose whole excess lies in that air is
 // not left on the part: it is said as cut by that setup, not counted as
-// leftover. The simulation and the safety checks still start from fresh
-// stock, which errs toward a finding.
+// leftover. A setup cut AFTER others starts from what they left
+// (`StartingStock`): the planar check, the rotary check and the playback
+// alike.
 
 #include "core/Feature.h" // Body
 #include "core/cam/CamJob.h"
@@ -75,6 +76,30 @@ struct OtherSetups {
 // setup left, so the seed errs toward material -- toward a finding.
 void SeedFromEarlier(HeightMap& stock, const OtherSetups& others, double zLo,
                      double margin);
+// The same for a rotary stock: each ray of `stock` (this setup's blank, a
+// radius map about its axis) shortened to the first point no earlier setup
+// removed.
+void SeedFromEarlier(RadiusMap& stock, const OtherSetups& others,
+                     double margin);
+
+// The clearance a seed keeps from what an earlier setup left: a cell of the
+// grid, and never under 0.3 mm.
+[[nodiscard]] double SeedMargin(double res);
+
+// The stock a setup STARTS from: its fresh stock, seeded from what the job's
+// earlier setups in `others` left -- a height map, or for a program whose A
+// moves a radius map. THE start: the verifier, the rotary check and the
+// playback all begin from it, so the picture and the verdict start from the
+// same stock and an indexed setup after a turning one is played and checked
+// against the turned part, not the square bar. `others` may be null: fresh.
+[[nodiscard]] bool StartingStock(const Setup& setup,
+                                 const std::vector<Body>& rawBodies, double res,
+                                 const OtherSetups* others, HeightMap& out);
+[[nodiscard]] RadiusMap StartingRotaryStock(const Setup& setup,
+                                            const std::vector<Body>& rawBodies,
+                                            double res,
+                                            const OtherSetups* others,
+                                            std::string* why = nullptr);
 
 // Model space to `setup`'s frame, when every body of the job maps the same
 // way: per-part fixture frames or placements that differ between parts have

@@ -218,7 +218,8 @@ struct Verb {
 
 cam::DerivedOp DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
                              const std::vector<Body>& bodies, cam::OpType type,
-                             const cam::Target& target, int tool) {
+                             const cam::Target& target, int tool,
+                             const std::vector<const cam::Setup*>& earlier) {
   switch (derive) {
   case Verb::Derive::RotaryRough:
     return cam::DeriveRotaryRough(setup, bodies, tool);
@@ -229,7 +230,7 @@ cam::DerivedOp DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
   case Verb::Derive::Standard:
     break;
   }
-  return cam::DeriveOperation(setup, bodies, type, target, tool);
+  return cam::DeriveOperation(setup, bodies, type, target, tool, earlier);
 }
 
 using CamVerb = AppState::CamVerb;
@@ -422,7 +423,8 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
   }
   const cam::DerivedOp derived =
       DeriveForVerb(derive, *setup, ui::JobBodies(state), type, picked,
-                    VerbTool(state, *setup));
+                    VerbTool(state, *setup),
+                    cam::EarlierSetups(state.job->GetSetups(), setup->id));
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return 0;
@@ -483,8 +485,9 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   JobUndoGuard undoGuard(state);
   const cam::Target target =
       op->targets.empty() ? cam::Target{} : op->targets.front();
-  cam::DerivedOp derived = DeriveForVerb(
-      verb.derive, setup, ui::JobBodies(state), verb.type, target, tool);
+  cam::DerivedOp derived =
+      DeriveForVerb(verb.derive, setup, ui::JobBodies(state), verb.type, target,
+                    tool, cam::EarlierSetups(state.job->GetSetups(), setup.id));
   // A rotary pass limited to a face keeps the face across a change of tool
   // (the rough's derivation takes no target of its own).
   if (derived.ok && target.ref.IsSet() && derived.op.targets.empty())
@@ -541,7 +544,9 @@ void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
 void CamOrientationChanged(AppState& state, cam::Setup& setup) {
   const bool hadZero = setup.topFace.IsSet();
   ReZeroFromTopFace(state, setup);
-  const int moved = cam::RederiveDepths(setup, ui::JobBodies(state));
+  const int moved =
+      cam::RederiveDepths(setup, ui::JobBodies(state),
+                          cam::EarlierSetups(state.job->GetSetups(), setup.id));
   setup.safeZ = ui::DeriveJobSafeZ(state, setup);
   state.camSafeZEdit = static_cast<float>(setup.safeZ);
 
@@ -684,7 +689,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     (void)cam::RecomputeOrigin(*setup, ui::JobBodies(state));
     state.camNote.clear();
     if (reclamped) {
-      const int moved = cam::RederiveDepths(*setup, ui::JobBodies(state));
+      const int moved = cam::RederiveDepths(
+          *setup, ui::JobBodies(state),
+          cam::EarlierSetups(state.job->GetSetups(), setup->id));
       state.camNote = "laid the part flat on that face";
       if (moved > 0)
         state.camNote +=

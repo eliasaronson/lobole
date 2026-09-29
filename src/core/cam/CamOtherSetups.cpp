@@ -151,58 +151,116 @@ OtherSetups OtherSetupsOf(const Setup& self,
   return out;
 }
 
-void SeedFromEarlier(HeightMap& stock, const OtherSetups& others, double zLo,
-                     double margin) {
+namespace {
+
+// Whether an earlier setup left air at `model`, `margin` clear of what it
+// left, so a seed errs toward material -- toward a finding.
+bool AirAfter(const SetupStock& s, const glm::dvec3& model, double margin) {
+  // Beyond a rotary setup's blank there was never any bar: a later setup's
+  // box is the bounding box of that round (or square) bar, and its corners
+  // past the bar's radius are air. Removes does not claim outside a stock,
+  // rightly for a claim, and left the whole seed at the box's top.
+  if (s.rotary) {
+    const RadiusMap& m = s.radius;
+    const glm::dvec3 q = glm::dvec3(s.modelToSetup * glm::dvec4(model, 1.0));
+    const int k = static_cast<int>(std::floor((q.x - m.x0) / m.res));
+    if (k < 0 || k >= m.nx || m.nTheta <= 0)
+      return false; // off its length: not this setup's to say
+    double th = std::atan2(q.z, q.y);
+    if (th < 0.0)
+      th += 2.0 * std::numbers::pi;
+    const int t = std::clamp(
+        static_cast<int>(std::floor(th / (2.0 * std::numbers::pi) * m.nTheta)),
+        0, m.nTheta - 1);
+    return std::hypot(q.y, q.z) >
+           std::min(static_cast<double>(m.At(k, t)), m.rMax) + margin;
+  }
+  // Removes() calls a point air when it is `tol` INSIDE what a setup left;
+  // a negative tol asks for `margin` of clearance instead.
+  return s.Removes(model, -std::abs(margin));
+}
+
+std::vector<const SetupStock*> EarlierOf(const OtherSetups& others) {
   std::vector<const SetupStock*> earlier;
   for (const SetupStock& s : others.stocks)
     if (s.earlier)
       earlier.push_back(&s);
+  return earlier;
+}
+
+bool AirAfterAny(const std::vector<const SetupStock*>& earlier,
+                 const glm::dvec3& model, double margin) {
+  return std::any_of(earlier.begin(), earlier.end(), [&](const SetupStock* s) {
+    return AirAfter(*s, model, margin);
+  });
+}
+
+} // namespace
+
+void SeedFromEarlier(HeightMap& stock, const OtherSetups& others, double zLo,
+                     double margin) {
+  const std::vector<const SetupStock*> earlier = EarlierOf(others);
   if (earlier.empty() || stock.res <= 0.0)
     return;
-  // Removes() calls a point air when it is `tol` INSIDE what a setup left;
-  // a negative tol asks for `margin` of clearance instead.
-  const double tol = -std::abs(margin);
   for (int j = 0; j < stock.ny; j++)
     for (int i = 0; i < stock.nx; i++) {
       const double x = stock.CellX(i), y = stock.CellY(j);
       double z = stock.At(i, j);
-      while (z > zLo) {
-        const glm::dvec3 model =
-            glm::dvec3(others.toModel * glm::dvec4(x, y, z, 1.0));
-        const bool air = std::any_of(
-            earlier.begin(), earlier.end(), [&](const SetupStock* s) {
-              // Beyond a rotary setup's blank there was never any bar: this
-              // setup's box is the bounding box of that round (or square)
-              // bar, and its corners past the bar's radius are air. Removes
-              // does not claim outside a stock, rightly for a claim, and
-              // left the whole seed at the box's top.
-              if (s->rotary) {
-                const RadiusMap& m = s->radius;
-                const glm::dvec3 q =
-                    glm::dvec3(s->modelToSetup * glm::dvec4(model, 1.0));
-                const int k =
-                    static_cast<int>(std::floor((q.x - m.x0) / m.res));
-                if (k < 0 || k >= m.nx || m.nTheta <= 0)
-                  return false; // off its length: not this setup's to say
-                double th = std::atan2(q.z, q.y);
-                if (th < 0.0)
-                  th += 2.0 * std::numbers::pi;
-                const int t =
-                    std::clamp(static_cast<int>(std::floor(
-                                   th / (2.0 * std::numbers::pi) * m.nTheta)),
-                               0, m.nTheta - 1);
-                return std::hypot(q.y, q.z) >
-                       std::min(static_cast<double>(m.At(k, t)), m.rMax) +
-                           margin;
-              }
-              return s->Removes(model, tol);
-            });
-        if (!air)
-          break;
+      while (z > zLo &&
+             AirAfterAny(earlier,
+                         glm::dvec3(others.toModel * glm::dvec4(x, y, z, 1.0)),
+                         margin))
         z -= stock.res;
-      }
       stock.Set(i, j, static_cast<float>(std::max(z, zLo)));
     }
+}
+
+void SeedFromEarlier(RadiusMap& stock, const OtherSetups& others,
+                     double margin) {
+  const std::vector<const SetupStock*> earlier = EarlierOf(others);
+  if (earlier.empty() || stock.res <= 0.0 || stock.nTheta <= 0)
+    return;
+  // The height map's walk, inward along each ray instead of down each
+  // column: a turning setup after an indexed one, or after another turning,
+  // starts from what those left.
+  for (int j = 0; j < stock.nTheta; j++) {
+    const double th = stock.CellTheta(j);
+    const double c = std::cos(th), s = std::sin(th);
+    for (int i = 0; i < stock.nx; i++) {
+      const double x = stock.CellX(i);
+      double r = stock.At(i, j);
+      while (r > 0.0 &&
+             AirAfterAny(
+                 earlier,
+                 glm::dvec3(others.toModel * glm::dvec4(x, r * c, r * s, 1.0)),
+                 margin))
+        r -= stock.res;
+      stock.Set(i, j, static_cast<float>(std::max(r, 0.0)));
+    }
+  }
+}
+
+double SeedMargin(double res) { return std::max(0.3, res); }
+
+bool StartingStock(const Setup& setup, const std::vector<Body>& rawBodies,
+                   double res, const OtherSetups* others, HeightMap& out) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, rawBodies, lo, hi))
+    return false;
+  out = MakeStock(lo, hi, res);
+  if (others != nullptr && others->HasEarlier())
+    SeedFromEarlier(out, *others, lo.z, SeedMargin(res));
+  return true;
+}
+
+RadiusMap StartingRotaryStock(const Setup& setup,
+                              const std::vector<Body>& rawBodies, double res,
+                              const OtherSetups* others, std::string* why) {
+  RadiusMap out =
+      MakeRotaryBlank(setup, BodiesInSetupFrame(setup, rawBodies), res, why);
+  if (!out.r.empty() && others != nullptr && others->HasEarlier())
+    SeedFromEarlier(out, *others, SeedMargin(res));
+  return out;
 }
 
 } // namespace cam

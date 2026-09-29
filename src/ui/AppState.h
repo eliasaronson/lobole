@@ -1860,6 +1860,13 @@ struct AppState {
   double camStockDrawnAt = 0.0;
   // Why playback will not start, in words, where the button is.
   std::string camPlaybackRefusal;
+  // What the playback's stock starts from: the names of the job's earlier
+  // setups whose cut it was seeded with (empty = the fresh stock), and the
+  // earlier setups that could not be read, with why -- a playback that
+  // started from the bar where a turning should have been says so
+  // (docs/cam/simulation.md#leftover-another-setup-removes).
+  std::vector<std::string> camPlaybackSeededFrom;
+  std::vector<std::string> camPlaybackNotSeeded;
   // The cutter, drawn as a real solid through the mesh renderer (it is static
   // geometry that MOVES, which is the one thing that renderer is good at).
   // `camToolInstanceFor` is the T number it was built for; a tool change
