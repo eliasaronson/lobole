@@ -6,9 +6,11 @@
 #include "core/ElementHistory.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <functional>
@@ -420,4 +422,90 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
   REQUIRE(loaded->Regenerate());
   CHECK_THAT(loaded->GetBodies().at(0).shape.Volume(), WithinRel(volume, 1e-6));
   fs::remove(path);
+}
+
+TEST_CASE("A filleted spline head fused to a turned base names every edge",
+          "[fillet][toponaming]") {
+  // The chess knight: a closed-spline side outline extruded symmetric and
+  // ADDED to a revolved base, then its two side outlines rounded. Every edge
+  // must come out named — an unnamed one is invisible to drawings
+  // (list_drawing_geometry skips it) and cannot be dimensioned or picked.
+  // Much of it hangs off the fallback passes: the closed spline's side face
+  // is L-named from the caps' U edges, and the fillet's outline edges are U
+  // edges of that face and of the blends.
+  Document doc;
+  auto base = std::make_unique<SketchFeature>("Base", kXY);
+  base->AddRectangle({0, 0}, {19.4f, 14});
+  doc.AddFeature(std::move(base));
+  auto rev = std::make_unique<RevolveFeature>(
+      "Turned", doc.GetFeature(0)->GetId(), 360.0, ExtrudeMode::NewBody);
+  rev->axis.kind = AxisRef::Kind::X;
+  doc.AddFeature(std::move(rev));
+
+  auto head = std::make_unique<SketchFeature>("Head", kXY);
+  sketch::BSpline outline;
+  // The knight's side outline (generators/chess/build_piece.py KNIGHT_HEAD),
+  // closed by repeating the first pole.
+  const std::vector<glm::vec2> poles = {
+      {17, -9},       {26, -10.5f},  {35, -10},   {45, -7.5f}, {51, -5.5f},
+      {54.4f, -4.5f}, {54.8f, 2.5f}, {52, 3.2f},  {49, 4},     {44, 9},
+      {39, 13.5f},    {35, 14.8f},   {31.5f, 13}, {31, 9},     {33, 5},
+      {29, 3},        {23, 5},       {17, 7.5f},  {17, -9}};
+  outline.poles = poles;
+  head->AddEntity(outline);
+  doc.AddFeature(std::move(head));
+  auto pad = std::make_unique<ExtrudeFeature>(
+      "Head pad", doc.GetFeature(2)->GetId(), 11.0, ExtrudeMode::Add);
+  pad->endMode = ExtrudeEnd::Symmetric;
+  doc.AddFeature(std::move(pad));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // The two side outlines: curved edges lying in z = +-5.5.
+  std::vector<ElementRef> outlines;
+  {
+    const Body& body = doc.GetBodies().at(0);
+    const auto polys = body.shape.GenerateEdgePolylines();
+    for (size_t e = 0; e < polys.size(); e++) {
+      const auto& poly = polys[e];
+      if (poly.size() < 8 || std::abs(std::abs(poly.front().z) - 5.5f) > 1e-3f)
+        continue;
+      bool flat = true;
+      for (const auto& p : poly)
+        flat = flat && std::abs(p.z - poly.front().z) < 1e-3f;
+      const std::string* name = body.elementMap.EdgeNameOf(int(e));
+      if (flat && name)
+        outlines.push_back({body.createdBy, *name});
+    }
+  }
+  REQUIRE(outlines.size() == 2);
+  doc.AddFeature(std::make_unique<FilletFeature>("Round", outlines, 1.5));
+  REQUIRE(doc.Regenerate());
+  const auto* fil = doc.GetFeature(4);
+  REQUIRE(fil->GetError().empty());
+
+  const auto names = [](const Document& d) {
+    const Body& body = d.GetBodies().at(0);
+    const auto polys = body.shape.GenerateEdgePolylines();
+    std::vector<std::string> out;
+    for (size_t e = 0; e < polys.size(); e++) {
+      const std::string* n = body.elementMap.EdgeNameOf(int(e));
+      INFO("edge " << e << " from (" << polys[e].front().x << ", "
+                   << polys[e].front().y << ", " << polys[e].front().z
+                   << ") to (" << polys[e].back().x << ", " << polys[e].back().y
+                   << ", " << polys[e].back().z << ")");
+      CHECK(n != nullptr);
+      out.push_back(n ? *n : "");
+    }
+    // Names are unique: two edges answering to one name would make a pick
+    // resolve to whichever came first.
+    std::vector<std::string> sorted = out;
+    std::sort(sorted.begin(), sorted.end());
+    CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
+    return out;
+  };
+  const auto first = names(doc);
+  // Stable: a from-scratch regeneration names the same edges the same way.
+  const Document again(doc);
+  CHECK(names(again) == first);
 }
