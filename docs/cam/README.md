@@ -8,7 +8,8 @@ orphaning it. That is the reason to have CAM in the CAD rather than downstream
 of a STEP export.
 
 Scope: 2.5D milling (profile, pocket, adaptive clearing, face, drill, edge
-break), 3-axis surface finishing and roughing, an indexed 4th axis, and
+break, engraving along sketch curves and text), 3-axis surface finishing and
+roughing, an indexed 4th axis (one operation at several indices), and
 continuous 4-axis finishing on a rotary axis. Three post dialects: `mach3`,
 `linuxcnc`, `grbl`. The posted file is verified by simulating it through a
 height map (or, for a turning part, a radius map), and the same simulation is
@@ -34,7 +35,8 @@ JobDocument                        core/cam/JobDocument.h
     machine          embedded copy of a Machine profile (post, arcs, rotary, travel, library)
     stock, originAt, origin (derived), reachOffset
     frame            how the part is clamped (setup -> model rotation)
-    rotationA        the machine's rotary index (needs machine.hasRotaryAxis)
+    rotationA        the machine's rotary index (needs machine.hasRotaryAxis;
+                     an operation's indexA lists its own)
     topFace          the face Z zero was picked from (a Target)
     safeZ, rapidFeed
     placements[]     where each part sits in the stock: pos, rotZdeg, enabled, optional frame
@@ -125,8 +127,11 @@ space with no transform back.
   bounding box (surfaces evaluated), not the conservative one that bounds a
   B-spline by its control points; stock is material a person buys and
   clamps. Shapes cache the tight bound, and `JobBodies`/`JobPlacedBodies` warm
-  it once on the bodies that survive, because `BodiesInSetupFrame` returns
-  copies and a bound warmed on a temporary is lost.
+  it once on the bodies that survive (the source documents' bodies, and the
+  framed list), because `BodiesInSetupFrame` returns copies and a bound
+  warmed on a temporary is lost. A copy moved by quarter turns carries the
+  tight box, permuted; any other angle starts cold
+  ([modeling](../modeling/README.md#bounding-boxes-are-memoized-on-the-shape)).
 - **Physical tolerances, not nanometres.** Comparisons against float-derived
   geometry use a micron (`top_z` against the stock top, reach against flute
   length) and `kStockFit = 1e-3` mm for "does the part fit this sheet"; OCC's
@@ -222,10 +227,9 @@ works on copies of the framed bodies.
 
 ## Requests that wait
 
-`cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` answer as they
-always did -- complete toolpaths, the same response -- but they no longer
-compute on the frame, where a real job held the app for minutes. The server
-PARKS such a request (`ParkCamRequest`, `src/remote/RemoteCam.cpp`):
+`cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` answer with
+complete toolpaths, but do not compute on the frame, where a real job would
+hold the app for minutes. The server PARKS such a request (`ParkCamRequest`, `src/remote/RemoteCam.cpp`):
 
 - it queues every pass the request reads on the `cam` worker
   (`QueueCamPassesFor`, deferred whatever `camDeferPasses` says) -- the
@@ -251,8 +255,7 @@ connection gets its answers in the order it asked
 describes the job as it stands when it is given: an edit from another
 connection while one waits queues that edit's passes, and the request waits
 for those too. After four rounds of "idle, and still owed" (a cache too small
-for the whole job) it stops waiting and runs synchronously, which is what it
-always did.
+for the whole job) it stops waiting and runs synchronously, on the frame.
 
 What refuses a waiting request: `cancel_background_job cam` (the passes it
 waited for will not land; re-queueing them behind the caller's back would
@@ -288,14 +291,16 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   (`test_cam_rough_rest.cpp`), rotary (`test_cam_rotary.cpp`,
   `test_cam_spiral.cpp`, `test_cam_helical.cpp`), clipping to the machine
   (`test_cam_travel.cpp`), tools (`test_cam_tools.cpp`), workholding
-  (`test_cam_workholding.cpp`), and the capability table enforced
+  (`test_cam_workholding.cpp`), engraving and its grooves in the verifier
+  (`test_cam_engrave.cpp`), and the capability table enforced
   (`test_cam_capability.cpp`: every field a type does not declare is poked,
   and the moves must not change; every field round-trips through save and
   load).
 - The job format: goldens in `tests/golden/job/` gated by `test_golden.cpp`.
 - RPC: `tests/headless_smoke.py` (machines, fixtures, seats, the op-field
   round trip through `set_cam_op`/`list_cam_setups`), `rpc_gate_smoke`,
-  `rpc_units_gate.py`, the params gate.
+  `rpc_units_gate.py`, the params gate; `tests/cam_parked_smoke.py`, the
+  requests that wait off the frame ([above](#requests-that-wait)).
 - GUI: `src/app/guitests/GuiTestsCam.cpp` (the `cam/*` cases), which run
   windowed — `--offscreen` has no panels, so something drawn at the wrong
   scale or offset looks right there.

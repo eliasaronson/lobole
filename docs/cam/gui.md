@@ -168,7 +168,11 @@ tool.
   settings ([setup.md](setup.md#reach)). The settings show only the fields
   the type has (the capability table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
   corner relief, finish tool, Over openings, the rotary pattern as a radio
-  pair, and so on. **Add operation** adds what the setup calls for
+  pair, an engraving's width (for a V-bit) and depth, and so on. On a
+  machine with a rotary axis, **at A** takes the indices the operation is cut
+  at, typed as one list (`0 90 180 270`; empty = the setup's own index,
+  [rotary.md](rotary.md#one-operation-at-several-indices)), and the row's
+  summary ends "at A0/90/180/270". **Add operation** adds what the setup calls for
   (`cam::AddOperationType`: another rotary pass on a setup that already cuts
   on the 4th axis, else the whole-part cut-out) through `DeriveOperation`, and
   shows a refusal instead of adding a dead operation.
@@ -196,7 +200,10 @@ cached on the toolpaths' key.
 
 `job.simulate` opens the transport window along the bottom of the viewport
 ([simulation.md](simulation.md#transport)). With nothing generated it refuses
-in a popup at the click.
+in a popup at the click. A setup with earlier setups in the job first reads
+what they left, on a worker ("Reading what the earlier setups left"), and the
+transport opens when that lands, saying "Starts from what 'Turn' left"
+([simulation.md](simulation.md#leftover-another-setup-removes)).
 
 ## Gizmos
 

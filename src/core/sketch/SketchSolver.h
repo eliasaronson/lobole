@@ -19,9 +19,10 @@ struct SolveResult {
 };
 
 // Adapter around PlaneGCS: maps a SketchFeature's entities (points, lines,
-// circles, arcs, ellipses, ellipse arcs, B-splines) and constraints to the
-// solver, solves, and writes solved coordinates back. A rectangle is four
-// ordinary lines, solved like any other. Falls back to a no-op when built
+// circles, arcs, ellipses, ellipse arcs, B-splines, and a text label's anchor
+// with its box corners riding it) and constraints to the solver, solves, and
+// writes solved coordinates back. A rectangle is four ordinary lines, solved
+// like any other. Falls back to a no-op when built
 // without HAVE_PLANEGCS.
 class Solver {
 public:

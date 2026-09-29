@@ -407,8 +407,11 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // --- C9: the setup frame (indexed 4th axis) --------------------------------
 
 // Whether this setup commands a rotary axis: the machine has one AND it is
-// indexed off zero. The ONE question the toolpath and the post ask before
-// putting an A word in a file — a rotated FIXTURE is not an answer to it.
+// indexed off zero. The question the toolpath asks before stamping the
+// setup's index on its moves — a rotated FIXTURE is not an answer to it. The
+// other source of an A word is an operation's own index list, whose moves
+// carry their angles (GenerateAtIndices); the post writes an A word only
+// for a move that carries one.
 [[nodiscard]] bool EmitsRotary(const Setup& setup);
 
 // The other side of the same part: this fixture turned a half turn about the

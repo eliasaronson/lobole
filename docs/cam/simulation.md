@@ -106,7 +106,7 @@ several indices does not carry them.
 
 A setup verified from its own fresh stock reports a flip job's half-depth
 outline that its back finishes, and an indexed setup the material a turn
-removes, as leftover: the same sentence as a forgotten operation. The verifier now asks the job's other setups (`OtherSetupsOf`,
+removes, as leftover: the same sentence as a forgotten operation. So the verifier asks the job's other setups (`OtherSetupsOf`,
 CamOtherSetups.cpp):
 - **What each other setup leaves:** its posted file is inspected as
   `VerifyGcode` would. Its final map says where it leaves air: above a height
@@ -307,8 +307,10 @@ segments that begin an operation or a tool change, for the skip buttons.
 
 ### Stock
 
-`StockSim` holds the pristine block and the cursor. Forward is incremental;
-**backward re-runs from the pristine block**, because a height map is lossy
+`StockSim` holds the block the setup starts from (the fresh stock less what
+earlier setups removed, [above](#leftover-another-setup-removes)) and the
+cursor. Forward is incremental; **backward re-runs from that starting
+block**, because a height map is lossy
 and a lowered cell cannot say what it was — a full re-run of a real program is
 a frame. The rotary twin keeps snapshots ([rotary.md](rotary.md#the-rotary-picture)).
 
@@ -369,7 +371,8 @@ ones to re-check whenever stock or part shading changes.
 generates toolpaths if they are not current, leaves the app showing the
 simulation (screenshot it, or `close`), frames the job once as it opens, and
 returns `distance_mm`, `total_mm`, `cutting_minutes`, `removed_mm3`, the
-operation, tool, feed, line and position — so a headless caller can assert a
+operation, tool, feed, line and position, and `starts_from` (the earlier
+setups whose leftover it started from) — so a headless caller can assert a
 simulation did something without owning a renderer.
 
 ## Tests

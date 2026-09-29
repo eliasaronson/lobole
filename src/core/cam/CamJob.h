@@ -685,7 +685,8 @@ struct Setup {
   // the shop does not own.
   double rotationA = 0.0;
   // Whether this setup's part is held IN THE ROTARY (v132). Derived when not
-  // stated: a rotary op or a non-zero index says so. An indexed setup at
+  // stated: a rotary op, an op with its own index list or a non-zero index
+  // says so. An indexed setup at
   // A = 0 -- flats on a turned part -- is in the chuck all the same, and
   // says so itself (docs/cam/rotary.md#how-the-rotary-is-installed).
   enum class HeldIn { Derived, Bed, Rotary };
@@ -758,14 +759,13 @@ struct Setup {
 
 // --- toolpaths ------------------------------------------------------------
 
-// One machine move. Carries an optional A: the plan's rule is that v1 must
-// not assume three axes in the toolpath representation or the post interface.
-//
-// Since C9 something DOES emit one -- an indexed setup stamps its constant
-// `rotationA` on every move of every toolpath (CamStrategies.cpp) and the
-// post writes the A word. Everything downstream of the post is still three
-// axes: the G-code parser drops an A word, and the height map the verifier
-// and the simulation share cannot represent a part that turns.
+// One machine move. Carries an optional A, written by the post as an A word.
+// An indexed setup stamps its constant `rotationA` on every move of every
+// toolpath, an operation cut at several indices (`Operation::indexA`) stamps
+// each piece with its own angle, and a continuous rotary pass turns A while
+// it cuts (CamStrategies.cpp, CamSurfaceStrategies.cpp). The parser keeps a
+// modal A, and a file whose A moves is verified and played on a radius map
+// (docs/cam/rotary.md#verifying-a-turning-part).
 struct Move {
   enum class Kind { Rapid, Cut, Plunge };
   Kind kind = Kind::Cut;
@@ -869,7 +869,8 @@ struct Toolpath {
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a
-  // test can assert against a known contour.
+  // test can assert against a known contour. The TIP's path (SegmentLength):
+  // a cut that turns A counts the arc it turns under the tool.
   [[nodiscard]] double CutLength() const;
   // Lowest Z reached. A toolpath that dives below the stock bottom is a bug
   // worth catching in a test rather than in aluminium.

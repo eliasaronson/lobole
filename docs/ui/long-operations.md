@@ -12,7 +12,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 
 | field | meaning |
 |---|---|
-| `kind` | `"cam"`, `"cam-verify"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -77,9 +77,9 @@ computation whose result a later regenerate reads out of a cache:
 
 | queue | unit | key |
 |---|---|---|
-| outline (`camOutlineQueue`) | one `ProjectedOutlines` projection (a profile's OCC sections of every body at each pass depth) | `OutlineKey` (`core/cam/CamPicks.h`): `bodiesKey`, the top, the pass heights and the deflection |
+| outline (`camOutlineQueue`) | one `ProjectedOutlines` projection (a profile's OCC sections of every body at each pass depth) | `OutlineKey` (`core/cam/CamPicks.h`): `bodiesKey`, how the setup frames the part (`FramingKey`), the top, the pass heights and the deflection |
 | adaptive | one Z level of one adaptive-clearing operation (libarea) | `AdaptiveKey` (`core/cam/CamAdaptive.h`) over the seven setup/op/tool scalars `AdaptiveClear` reads, plus the loops |
-| surface | one whole 3-axis or rotary surfacing operation | `SurfaceKey` (`core/cam/CamSurface.h`): `bodiesKey` plus the fields the surfacing strategies read, the stock its entries come down to, and whether a rest pass's finish is cut before it (`FinishedBefore`) |
+| surface | one whole 3-axis or rotary surfacing operation | `SurfaceKey` (`core/cam/CamSurface.h`): `bodiesKey` and `FramingKey` plus the fields the surfacing strategies read, the stock its entries come down to, and whether a rest pass's finish is cut before it (`FinishedBefore`) |
 
 **Content keys, not versions.** A result is keyed by a hash of exactly its
 inputs, so it has no tab, no operation index and no document version:
@@ -94,7 +94,12 @@ inputs, so it has no tab, no operation index and no document version:
 
 The core cannot fingerprint geometry cheaply, so the caller supplies
 `GenerateContext::bodiesKey`, which the UI fills from `JobRenderVersion` (the
-job, its sources, the active setup, the fixturing and every placement).
+job, its sources, the active setup, the fixturing and every placement). That
+fingerprint is one per job, while an operation cut at several indices, or a
+second setup, frames the same bodies differently, so the outline and surface
+keys also hash `FramingKey` (the fixture frame, the index and every
+placement of the setup the pass is cut in,
+[rotary.md](../cam/rotary.md#one-operation-at-several-indices)).
 
 **The keys must cover every field the pass reads.** A field read but not
 hashed is a stale result nobody can see, so `test_conventions.cpp` has "the

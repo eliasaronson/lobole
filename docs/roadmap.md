@@ -164,5 +164,4 @@ Split what the next feature extends, not as a standalone sweep:
 
 ## Not planned
 
-- Sketch text.
 - NURBS surface modelling (boundary, fill, sew, thicken).

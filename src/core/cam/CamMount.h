@@ -21,7 +21,7 @@
 namespace cam {
 
 // Whether this setup's part is held in the rotary: stated, or derived from a
-// rotary op or a non-zero index.
+// rotary op, an op with its own index list, or a non-zero index.
 [[nodiscard]] bool HeldInRotary(const Setup& setup);
 
 // From setup space to the machine: `quarter` turns of +90 degrees about Z,

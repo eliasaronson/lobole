@@ -58,7 +58,10 @@ machine, one list of fixtures, tools and operations. The panel adds (`+`),
 renames, switches, deletes (`x`) and **flips** setups: Flip makes a new setup
 whose frame is the active one turned half a turn about the setup's own X
 (`cam::FlipFrame`), which is the second side of a flip job derived rather than
-typed. Each setup posts its own file.
+typed. Each setup posts its own file. The job's list of setups is the order
+they are cut in (`EarlierSetups`): a setup's check, its playback and the tops
+its operations derive start from what the setups before it left
+([simulation.md](simulation.md#leftover-another-setup-removes)).
 
 A setup arrives with one 6 mm tool (a setup with no tools can produce
 nothing) and a derived safe Z.
@@ -153,8 +156,13 @@ composes `frame · R_x(A)`, and a test pins that a 90° frame and
 
 `rotationA` needs `machine.hasRotaryAxis`: an index on a machine without the
 axis is refused, and `EmitsRotary` (the axis exists AND the index is off zero)
-is the one question the toolpath and the post ask before writing an A word. A
-3-axis job with a rotated frame posts no A word.
+is the question the toolpath asks before stamping the setup's index on its
+moves. The other source of an A word is an operation's own index list
+(`index_a_deg`, which also needs the axis): its moves carry the angle each
+piece is cut at, A0 included
+([rotary.md](rotary.md#one-operation-at-several-indices)). The post writes an
+A word only for a move that carries one. A 3-axis job with a rotated frame
+posts no A word.
 
 **Lay a face up** (`SolveFaceUp`) returns the frame that puts a planar face's
 normal on +Z. Any planar face has one. A normal fixes two of three rotations;
@@ -204,8 +212,11 @@ dropped and the note says so.
 
 `StockBounds`/`StockBoundsFramed` is the one function that answers "what is
 the workpiece"; safe Z, derived depths, the origin, the verifier, the
-simulator and the plan view all go through it. `list_cam_setups` reports both
-the stock request (mode, size, place, margins) and the box it resolves to.
+simulator and the plan view all go through it. That box is the FRESH stock:
+the verifier and the simulator lower it by what earlier setups removed
+(`StartingStock`), and a derived top reads the turned part over the
+operation (`StockTopOver`). `list_cam_setups` reports both the stock request
+(mode, size, place, margins) and the box it resolves to.
 
 ## Work origin
 

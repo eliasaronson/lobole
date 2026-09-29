@@ -3,10 +3,10 @@
 // Leftover another setup removes
 // (docs/cam/simulation.md#leftover-another-setup-removes).
 //
-// Each setup is verified from its own fresh stock, so a flip job's front side
-// reports the half-depth outline the back finishes, and an indexed setup the
-// material a turn or the other side removes. What the OTHER setups of the job
-// leave is their final machined map -- the air above a height map, beyond a
+// A setup verified from its own fresh stock alone would report, as leftover,
+// the half-depth outline a flip job's back finishes, and on an indexed setup
+// the material a turn or the other side removes. What the OTHER setups of the
+// job leave is their final machined map -- the air above a height map, beyond a
 // radius map -- and a leftover cell whose whole excess lies in that air is
 // not left on the part: it is said as cut by that setup, not counted as
 // leftover. A setup cut AFTER others starts from what they left

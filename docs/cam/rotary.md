@@ -136,8 +136,10 @@ the next piece's start carries the new A, so the post retracts and turns
 there, and every move is stamped with its A, A0 included. The targets of an
 op that clears down to a floor (`OpField::NeedsFlatFloor`: pocket, face,
 adaptive) are floors, and each is cut only at the index that turns it to
-the spindle; a floor no index presents is named in `skipped`. Other targets
-(a wall, a bore) are followed at every index. `add_cam_op` derives such an op
+the spindle; a floor no index presents is named in `skipped`. An
+engraving's targets are taken the same way, by their sketch plane
+(`EngraveFrameOf`). Other targets (a wall, a bore) are followed at every
+index. `add_cam_op` derives such an op
 in the frame of the first index that presents its first target
 (`IndexFrameFor`): read in the setup's own frame, a floor that faces round the
 axis is a wall, and the pick was refused. A piece that fails
@@ -260,12 +262,10 @@ cut at all.
 - **`spiral`**: one helix per band, rings at the band's ends. Inside the band
   it follows the WHOLE contact surface round the axis — a spiral cannot break,
   so cells the finish already reached are re-cut at the surface rather than
-  crossed in the air and fed back down beside the leftover. Wound over the
-  whole length, as it was, a 1.5 mm ball's rest spiral on a chess blank turned
-  the axis at its top speed through every millimetre the finish had cleaned.
-  A band is walls either side, and the spiral's pitch shrinks on walls (the
-  steepest slope within a pitch either side), so a band costs more turns per
-  millimetre than a flat.
+  crossed in the air and fed back down beside the leftover. A band is walls
+  either side, and the spiral's pitch shrinks on walls (the steepest slope
+  within a pitch either side), so a band costs more turns per millimetre
+  than a flat.
 - **`parallel`** and **`helical`**: the band's passes over the masked surface,
   breaking where the mask is empty as before; grouping them by band keeps a
   pass set from rapiding between two leftovers at every angle. A zigzag link

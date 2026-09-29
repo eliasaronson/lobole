@@ -115,15 +115,17 @@ BuildTimeline(GProgram program, double rapidFeed,
 // The stock at a cursor.
 //
 // Forward is incremental — a segment's swept bbox is a handful of cells.
-// BACKWARD RESTARTS FROM THE PRISTINE BLOCK, because a height map is lossy: a
+// BACKWARD RESTARTS FROM THE STARTING BLOCK, because a height map is lossy: a
 // cell that has been lowered cannot say what it used to be. That is a
 // property of the model, not an oversight; if scrubbing a long program back
 // ever measures too slow, the fix is to keep snapshots every N segments,
 // which is a cache and not a redesign.
 class StockSim {
 public:
-  // Arms the simulation over `pristine` (from `MakeStock`). The cursor starts
-  // at the beginning, with nothing cut.
+  // Arms the simulation over `pristine`, the stock this setup starts from
+  // (`StartingStock`: the fresh block, less what the job's earlier setups
+  // removed). The cursor starts at the beginning, with nothing of THIS
+  // setup's program cut.
   void Begin(const Timeline& timeline, const Setup& setup, HeightMap pristine);
   void Clear();
 

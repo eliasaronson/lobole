@@ -103,8 +103,9 @@ const std::vector<Body>& JobPlacedBodies(AppState& state) {
   state.jobPlacedBodies =
       setup != nullptr ? cam::BodiesInSetupFrame(*setup, bodies) : bodies;
   state.jobPlacedKey = key;
-  // Framed bodies are NEW shapes when the setup is not square, so their memo
-  // is cold even though the ones they came from are warm.
+  // Framed bodies are NEW shapes. One moved by quarter turns carries its
+  // source's tight box (CADShape::Transformed permutes it); at any other
+  // angle its memo is cold even though the one it came from is warm.
   WarmTightBounds(state.jobPlacedBodies);
   return state.jobPlacedBodies;
 }

@@ -80,9 +80,7 @@ targets that angle cuts, and keeps the highest — its one `top_z` serves every
 angle. `RederiveDepths` does the same. `cam_toolpath`'s
 "top_z is below the stock top — entry rapids will pass through stock" warning
 reads the same top, so a typed depth at the turned surface is not warned
-about. The chess set's indexed heads (the bishop's mitre, the queen's crown,
-the king's cross) had their tops typed to keep them out of the air the turning
-had removed; they derive now.
+about.
 
 Derived numbers are fractions of the cutter: **stepdown** = half the tool
 diameter (`DerivedStepdown`); **stepover** = 45 % for a flat mill, and for a

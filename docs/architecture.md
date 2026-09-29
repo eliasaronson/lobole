@@ -202,8 +202,8 @@ the viewport live in `ui/Overlays.cpp`; the actions layer asks
 calling `ImGui::IsAnyItemActive()`.
 
 **Long operations run off the frame.** Each (STEP import, FEM mesh and solve,
-topology optimization, git sync, CAM adaptive passes, motion studies, the
-offline render) has a worker and a `Poll…` that applies its result on the
+topology optimization, git sync, CAM toolpath passes, verification and the
+playback's starting stock, motion studies, the offline render) has a worker and a `Poll…` that applies its result on the
 main thread. `ui::PollBackgroundJobs` (`ui/BackgroundJobs.h`) is called once
 per iteration by each of the three loops — windowed, `--offscreen` and
 `--headless` — and never from a panel, so whether an operation can finish

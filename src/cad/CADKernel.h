@@ -135,7 +135,9 @@ public:
   // Transformation
   // A copy placed by a rigid transform (rotation + translation; uniform
   // scale tolerated). A sheared matrix returns the shape unmoved — OCC
-  // locations are similarity-only.
+  // locations are similarity-only. A copy moved by quarter turns and a
+  // translation carries the tight box, permuted; any other starts cold
+  // (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape).
   CADShape Transformed(const glm::mat4& m) const;
   void Translate(const glm::vec3& offset);
   void Rotate(const glm::vec3& axis, double angle);

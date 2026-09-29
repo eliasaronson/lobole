@@ -129,7 +129,8 @@ const char* OpTypeNameOrThrow(OpType t);
 // toolpath that cuts the wrong thing while the file looks fine.
 bool TryOpTypeFromName(const std::string& s, OpType& out);
 
-// "profile, pocket, face, drill, adaptive, edge_round" -- for those refusals.
+// Every type's name in row order ("profile, pocket, face, drill, …,
+// engrave") -- for those refusals.
 std::string OpTypeNameList();
 
 // Refuses (throws) for a value with no row rather than answering `false`,
