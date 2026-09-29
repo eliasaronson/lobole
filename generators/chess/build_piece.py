@@ -24,6 +24,9 @@ from designer_sdk import connect, Param, Plane  # noqa: E402
 import profiles  # noqa: E402
 
 KING_H = 85.0
+# The steel bar the weights are cut from, bought: the underside bore takes it,
+# and the blanks plug that bore to the same size (build_blanks.py).
+SLUG_D = 12.0
 # height and base DIAMETER as fractions of the king's height
 SIZES = {
     "king": (1.00, 0.45),
@@ -202,7 +205,7 @@ def details(app, part, piece_h, base_r, u):
 
 def underside(app, part, base_r):
     """Felt recess and the steel weight's bore, on every piece."""
-    slug_d = part.param("slug_d", 12, comment="the steel bar the weights are "
+    slug_d = part.param("slug_d", SLUG_D, comment="the steel bar the weights are "
                         "cut from, bought")
     recess = part.sketch(Plane.yz(0), name="Felt recess sketch")
     recess.circle((0, 0), d=base_r * 1.8)

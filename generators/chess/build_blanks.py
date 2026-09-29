@@ -27,7 +27,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))
 from designer_sdk import connect, Plane  # noqa: E402
-from build_piece import SIZES  # noqa: E402
+from build_piece import SIZES, SLUG_D  # noqa: E402
 
 # Which pieces each blank carries, chuck end first. A blank's length stays
 # under the rotary's chuck-to-centre capacity (ROTARY_LEN).
@@ -100,12 +100,21 @@ def build_blank(app, name, pieces, piece_part):
     prev_top, prev_r = 0.0, 0.05 * king_h  # the grip takes a full neck
     for kind, x in zip(pieces, xs):
         base_r = SIZES[kind][1] / 2 * king_h
-        plug_r = 0.9 * base_r
-        plug_d = 0.7 * base_r + 0.5
+        # The plug is the underside's two cuts filled, each to its own size
+        # (build_piece.underside): the felt recess, 0.9 base radii across and
+        # 0.05 deep, and the weight's bore, SLUG_D across and 0.7 deep, each
+        # half a millimetre on into the wood so the union fuses. One cylinder
+        # the recess's width down the bore's depth stood OUT of the piece
+        # wherever the base narrows below 0.9 base radii -- a collar with two
+        # square inside corners, on every piece of every blank, which the
+        # finishing ball left as rings and the report read as patches.
+        recess_r, recess_d = 0.9 * base_r, 0.05 * base_r + 0.5
+        bore_r, bore_d = SLUG_D / 2, 0.7 * base_r + 0.5
         # neck from the previous top (or the grip) into this piece's plug
         pts = [(prev_top - EMBED, 0), (prev_top - EMBED, prev_r),
-               (x, prev_r), (x, plug_r), (x + plug_d, plug_r),
-               (x + plug_d, 0)]
+               (x, prev_r), (x, recess_r), (x + recess_d, recess_r),
+               (x + recess_d, bore_r), (x + bore_d, bore_r),
+               (x + bore_d, 0)]
         sk.polyline(pts, close=True)
         prev_top = x + SIZES[kind][0] * king_h
         prev_r = TOP_NECK_R[kind] * u

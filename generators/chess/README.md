@@ -40,7 +40,10 @@ between a square grip (the chuck's jaws plus the clearance a cutter keeps
 from them) and a square stub for the tailstock's centre. A neck is sized to
 the top of the piece before it, so the fine tops (bishop, queen, king,
 knight) go last, beside the tailstock. Each piece's underside is plugged in
-the blank: the rotary cannot reach an end face.
+the blank: the rotary cannot reach an end face. The plug fills the felt
+recess and the weight's bore each to its own size; one cylinder the
+recess's width down the bore's depth stood out of every base that narrows,
+and the finishing ball left a ring at each of its corners.
 
 ## Jobs
 
