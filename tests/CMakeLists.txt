@@ -103,6 +103,7 @@ add_executable(designer_tests
     test_flexible_subassembly.cpp
     test_motion.cpp
     test_revolve.cpp
+    test_element_origin.cpp
     test_boolean.cpp
     test_split.cpp
     test_refine.cpp

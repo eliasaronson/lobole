@@ -368,6 +368,7 @@ set(core_sources
     src/core/features/SplitFeature.cpp
     src/core/features/RefineFeature.cpp
     src/core/ElementHistory.cpp
+    src/core/ElementOrigin.cpp
     src/core/features/FilletFeature.cpp
     src/core/features/PatternFeature.cpp
     src/core/sketch/SketchSolver.cpp

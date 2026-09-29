@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingCallout.h"
 
 #include "core/Document.h"
+#include "core/ElementOrigin.h"
 #include "core/Measure.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
@@ -10,61 +11,9 @@
 #include <cmath>
 
 namespace drawing {
-namespace {
-
-// Parse a leading unsigned integer from `s` starting at `pos`; returns
-// nullopt when there is none. Advances `pos` past the digits.
-std::optional<uint64_t> LeadingId(const std::string& s, size_t& pos) {
-  size_t i = pos;
-  uint64_t v = 0;
-  bool any = false;
-  while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
-    v = v * 10 + static_cast<uint64_t>(s[i] - '0');
-    any = true;
-    ++i;
-  }
-  if (!any)
-    return std::nullopt;
-  pos = i;
-  return v;
-}
-
-} // namespace
 
 std::vector<uint64_t> MappedNameFeatureIds(const std::string& mappedName) {
-  std::vector<uint64_t> ids;
-  size_t start = 0;
-  while (start <= mappedName.size()) {
-    size_t semi = mappedName.find(';', start);
-    if (semi == std::string::npos)
-      semi = mappedName.size();
-    // One ';'-separated token. Base segments may be comma-joined L-names;
-    // split those too.
-    size_t tokStart = start;
-    while (tokStart < semi) {
-      size_t comma = mappedName.find(',', tokStart);
-      if (comma == std::string::npos || comma > semi)
-        comma = semi;
-      const std::string tok = mappedName.substr(tokStart, comma - tokStart);
-      if (!tok.empty()) {
-        size_t pos = 0;
-        if (tok[0] == 'M' || tok[0] == 'G') {
-          // Modifier suffix: "M14", "G4.0" (ordinal after '.' ignored).
-          pos = 1;
-          if (const auto id = LeadingId(tok, pos))
-            ids.push_back(*id);
-        } else if (std::isdigit(static_cast<unsigned char>(tok[0]))) {
-          // Base segment: "<id>/face1", "<id>/seam0", "<id>/cap0".
-          if (const auto id = LeadingId(tok, pos))
-            if (pos < tok.size() && tok[pos] == '/')
-              ids.push_back(*id);
-        }
-      }
-      tokStart = comma + 1;
-    }
-    start = semi + 1;
-  }
-  return ids;
+  return topo::FeatureIdsMentioned(mappedName); // the one grammar reader
 }
 
 const HoleFeature* FindHoleForRef(const Document& doc,
