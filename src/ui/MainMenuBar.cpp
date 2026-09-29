@@ -380,6 +380,8 @@ constexpr Attribution kThirdParty[] = {
     {"stb_image", "MIT or public domain"},
     {"Font Awesome 6 Free", "SIL OFL 1.1"},
     {"JetBrains Mono", "SIL OFL 1.1"},
+    {"Liberation Sans", "SIL OFL 1.1"},
+    {"Hershey fonts (Roman Simplex)", "public domain, attribution required"},
     {"Roboto", "Apache-2.0"},
     {"Fastener tables (FreeCAD Fasteners)", "GPL-2.0-or-later"},
     {"Hole tables (bd_warehouse)", "Apache-2.0"},

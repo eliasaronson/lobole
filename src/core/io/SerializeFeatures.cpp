@@ -35,6 +35,7 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/UnfoldFeature.h"
+#include "core/sketch/SketchText.h"
 
 #include <nlohmann/json.hpp>
 
@@ -79,6 +80,18 @@ json EntityToJson(const sketch::Entity& entity) {
                   {"r_major", e.rMajor},    {"r_minor", e.rMinor},
                   {"rotation", e.rotation}, {"start_param", e.startParam},
                   {"end_param", e.endParam}};
+        } else if constexpr (std::is_same_v<T, sketch::Text>) {
+          json t = {{"type", "text"},
+                    {"text", e.text},
+                    {"font", e.font},
+                    {"height", e.height},
+                    {"anchor", Vec2ToJson(e.anchor)},
+                    {"angle", e.angle},
+                    {"halign", sketch::TextHAlignName(e.halign)},
+                    {"valign", sketch::TextVAlignName(e.valign)}};
+          if (e.spacing != 0.0)
+            t["spacing"] = e.spacing;
+          return t;
         } else { // BSpline
           json poles = json::array();
           for (const glm::vec2& p : e.poles)
@@ -210,6 +223,43 @@ sketch::Entity EntityFromJson(const json& j) {
       bs.poles.push_back(Vec2FromJson(pj));
     bs.degree = j.value("degree", 3);
     e = std::move(bs);
+  } else if (type == "text") { // v137
+    // Refused, never substituted: an unknown font or alignment word that
+    // loaded as the default would build a plausible label in the wrong face
+    // or the wrong place (docs/sketching/README.md#text).
+    sketch::Text t;
+    t.text = j.at("text").get<std::string>();
+    if (t.text.find('\n') != std::string::npos ||
+        t.text.find('\r') != std::string::npos)
+      throw std::runtime_error("text is one line: a newline is refused (use "
+                               "a second label)");
+    t.font = j.value("font", std::string("sans"));
+    if (!sketch::IsKnownTextFont(t.font))
+      throw std::runtime_error("unknown font \"" + t.font +
+                               "\" — the bundled fonts are " +
+                               sketch::TextFontList());
+    if (!j.contains("height"))
+      throw std::runtime_error("text needs a height: the CAP height, mm");
+    t.height = j.at("height").get<double>();
+    if (!(t.height > 0.0))
+      throw std::runtime_error("text height must be positive (the CAP "
+                               "height, mm)");
+    t.anchor = Vec2FromJson(j.at("anchor"));
+    t.angle = AngleRadians(j, "angle", "angle_deg", 0.0);
+    const std::string h = j.value("halign", std::string("left"));
+    const auto ha = sketch::ParseTextHAlign(h);
+    if (!ha)
+      throw std::runtime_error("unknown halign \"" + h + "\" — one of " +
+                               sketch::kTextHAlignWords);
+    t.halign = *ha;
+    const std::string v = j.value("valign", std::string("baseline"));
+    const auto va = sketch::ParseTextVAlign(v);
+    if (!va)
+      throw std::runtime_error("unknown valign \"" + v + "\" — one of " +
+                               sketch::kTextVAlignWords);
+    t.valign = *va;
+    t.spacing = j.value("spacing", 0.0);
+    e = std::move(t);
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
     // rectangles become four lines); anything else is unknown. Decision-
@@ -1583,6 +1633,15 @@ static constexpr SketchEntityInfo kSketchEntityTypes[] = {
      "r_minor·sin t), which is not the angle from the centre unless the "
      "ellipse is a circle, so it has no _deg twin"},
     {"spline", 40, "poles [[x,y], ...], degree? (default 3)"},
+    {"text", 137,
+     "text (UTF-8, one line), height (the CAP height, mm), anchor [x,y], "
+     "font? (sans = outline, the default; hershey = single stroke, for "
+     "engraving: open curves, no profile), angle (RADIANS) or angle_deg "
+     "(default 0), halign? (left|center|right), valign? "
+     "(baseline|bottom|middle|top, from the font's metrics), spacing? (extra "
+     "mm between characters). which 0 = anchor, 1..4 = the box corners "
+     "(BL, BR, TR, TL). Picking one letter's region picks the label "
+     "(+_expr: x, y, height, angle_deg, spacing)"},
 };
 std::span<const SketchEntityInfo> SketchEntityTypes() {
   return kSketchEntityTypes;

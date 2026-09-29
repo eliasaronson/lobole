@@ -167,6 +167,10 @@ if(OPENCASCADE_FOUND)
         # RWMesh. The glTF/OBJ/PLY writers live in TKRWMesh through OCCT 7.7
         # and split into TKDE* in 7.8 (appended below when present).
         TKLCAF TKCAF TKXCAF TKVCAF TKRWMesh
+        # Sketch text: StdPrs_BRepFont / Font_FTFont (FreeType glyph
+        # outlines) live here. Named explicitly -- it used to arrive only
+        # transitively, through TKVCAF (docs/sketching/README.md#text).
+        TKService
     )
 
     # STEP/STL data-exchange libraries were renamed in OCCT 7.8
@@ -342,6 +346,7 @@ set(core_sources
     src/core/features/SketchFeature.cpp
     src/core/sketch/SketchProfile.cpp
     src/core/sketch/SketchInference.cpp
+    src/core/sketch/SketchText.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp
     src/core/features/FastenerFeature.cpp
@@ -788,6 +793,11 @@ configure_file(${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf
 # Monospace for the terminal panel: the UI font has no box-drawing glyphs, and
 # a TUI drawn in a proportional font is unreadable (docs/ui/terminal.md).
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+# The outline font of sketch text (font "sans"), read by the CORE through
+# RuntimePaths::DataDir(), so the test binary finds it too
+# (docs/sketching/README.md#text).
+file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/LiberationSans-Regular.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 # The MCP server and its client, beside the assets: the terminal panel points
 # a Claude Code session at THIS instance by generating a config that names
@@ -1252,6 +1262,7 @@ install(FILES
         "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf"
+        "${CMAKE_SOURCE_DIR}/deps/fonts/LiberationSans-Regular.ttf"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")

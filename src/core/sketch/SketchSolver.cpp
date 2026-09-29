@@ -1,6 +1,7 @@
 #include "core/sketch/SketchSolver.h"
 
 #include "common/Logger.h"
+#include "core/sketch/SketchText.h"
 
 #include <cmath>
 #include <deque>
@@ -153,6 +154,8 @@ void Solver::Load(const SketchFeature& sketch) {
       nParams += 2; // centre only
     else if (auto* bs = std::get_if<BSpline>(&e))
       nParams += 2 * bs->poles.size(); // one solver point per pole
+    else if (std::holds_alternative<Text>(e))
+      nParams += 10; // anchor + four box corners
   }
   (void)nParams; // deque addresses are stable; no reservation needed
 
@@ -259,6 +262,21 @@ void Solver::Load(const SketchFeature& sketch) {
       const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
       for (size_t k = 0; k < nPoles; k++)
         addPoint(id, static_cast<uint8_t>(k), bs->poles[k]);
+    } else if (auto* tx = std::get_if<Text>(&e)) {
+      // The anchor (which 0) is the label's one free point; the glyphs are
+      // rigid. The box corners (which 1..4) are solver points tied to it by
+      // fixed offsets (tag 0, definitional), so the solver READS them — a
+      // dimension or a coincidence on a corner places the label — but never
+      // moves one relative to the others (docs/sketching/README.md#text).
+      const GCS::Point anchor = addPoint(id, 0, tx->anchor);
+      for (uint8_t k = 1; k <= 4; k++) {
+        const glm::vec2 corner = TextPointUV(*tx, k);
+        const GCS::Point gp = addPoint(id, k, corner);
+        im.params.push_back(static_cast<double>(corner.x) - tx->anchor.x);
+        im.sys.addConstraintDifference(anchor.x, gp.x, &im.params.back(), 0);
+        im.params.push_back(static_cast<double>(corner.y) - tx->anchor.y);
+        im.sys.addConstraintDifference(anchor.y, gp.y, &im.params.back(), 0);
+      }
     }
     // Rectangle: rigid in v1, not added to the solver.
   }
@@ -701,6 +719,8 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
           pointAt(0); // radii/rotation/params rigid
     } else if (std::holds_alternative<Ellipse>(e)) {
       std::get<Ellipse>(e).center = pointAt(0); // radii/rotation rigid
+    } else if (std::holds_alternative<Text>(e)) {
+      std::get<Text>(e).anchor = pointAt(0); // the glyphs and box ride it
     } else if (std::holds_alternative<BSpline>(e)) {
       auto& bs = std::get<BSpline>(e);
       const size_t nPoles = std::min<size_t>(bs.poles.size(), 256);

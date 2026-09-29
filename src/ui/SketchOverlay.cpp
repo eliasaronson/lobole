@@ -161,6 +161,8 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityDots(const sketch::Entity& e) {
       dots.push_back({static_cast<uint8_t>(k), bs->poles[k]});
     return dots;
   }
+  if (auto* tx = std::get_if<sketch::Text>(&e))
+    return {{0, tx->anchor}}; // the box corners stay pickable, not dotted
   return {};
 }
 
@@ -293,14 +295,17 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
                           : isDefined ? defined
                                       : base;
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
-    std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
-    for (size_t i = 0; i + 1 < poly.size(); i++) {
-      glm::vec3 wa = sk->plane.PlaneToWorld(poly[i]);
-      glm::vec3 wb = sk->plane.PlaneToWorld(poly[i + 1]);
-      if (constr && !s && !h)
-        AppendPrimDashedLine(wa, wb, halfPx, col, prims);
-      else
-        AppendPrimLine(wa, wb, halfPx, col, prims);
+    // One polyline for most entities; one per glyph contour for a label.
+    for (const std::vector<glm::vec2>& poly :
+         sketch::TessellateEntityPolylines(e)) {
+      for (size_t i = 0; i + 1 < poly.size(); i++) {
+        glm::vec3 wa = sk->plane.PlaneToWorld(poly[i]);
+        glm::vec3 wb = sk->plane.PlaneToWorld(poly[i + 1]);
+        if (constr && !s && !h)
+          AppendPrimDashedLine(wa, wb, halfPx, col, prims);
+        else
+          AppendPrimLine(wa, wb, halfPx, col, prims);
+      }
     }
   }
 

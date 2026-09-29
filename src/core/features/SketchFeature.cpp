@@ -1,9 +1,11 @@
 #include "core/features/SketchFeature.h"
 
 #include "common/Logger.h"
+#include "core/Angles.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchText.h"
 
 #include <algorithm>
 #include <cmath>
@@ -133,7 +135,9 @@ std::vector<std::string> EntityExprFields(const Entity& e) {
             out.push_back("p" + std::to_string(k) + "y");
           }
           return out;
-        } else // Ellipse: no expr-driven scalar fields in v1
+        } else if constexpr (std::is_same_v<T, Text>)
+          return {"x", "y", "height", "angle_deg", "spacing"};
+        else // Ellipse: no expr-driven scalar fields in v1
           return {};
       },
       e);
@@ -170,6 +174,17 @@ std::optional<double> GetEntityField(const Entity& e,
           if (const auto pf = PoleField(field);
               pf && pf->first < g.poles.size())
             return pf->second ? g.poles[pf->first].x : g.poles[pf->first].y;
+        } else if constexpr (std::is_same_v<T, Text>) {
+          if (field == "x")
+            return g.anchor.x;
+          if (field == "y")
+            return g.anchor.y;
+          if (field == "height")
+            return g.height;
+          if (field == "angle_deg") // the expression speaks degrees
+            return angles::ToDegrees(g.angle);
+          if (field == "spacing")
+            return g.spacing;
         }
         return std::nullopt;
       },
@@ -225,6 +240,27 @@ bool SetEntityField(Entity& e, const std::string& field, double value) {
           if (const auto pf = PoleField(field);
               pf && pf->first < g.poles.size()) {
             (pf->second ? g.poles[pf->first].x : g.poles[pf->first].y) = f;
+            return true;
+          }
+        } else if constexpr (std::is_same_v<T, Text>) {
+          if (field == "x") {
+            g.anchor.x = f;
+            return true;
+          }
+          if (field == "y") {
+            g.anchor.y = f;
+            return true;
+          }
+          if (field == "height") {
+            g.height = value;
+            return true;
+          }
+          if (field == "angle_deg") {
+            g.angle = angles::ToRadians(value);
+            return true;
+          }
+          if (field == "spacing") {
+            g.spacing = value;
             return true;
           }
         }
@@ -1151,6 +1187,20 @@ bool SketchFeature::Execute(RegenContext& ctx) {
   // plane so the projected construction entities track their source.
   if (!external.empty() && !RegenerateExternal(ctx))
     return false;
+
+  // A text label that cannot be laid out — an unknown font, a character its
+  // font has no glyph for — is this sketch's error, named, rather than a
+  // label that quietly builds with letters missing
+  // (docs/sketching/README.md#text).
+  for (const sketch::Entity& e : entities) {
+    const auto* text = std::get_if<sketch::Text>(&e);
+    if (text == nullptr)
+      continue;
+    if (auto geo = sketch::BuildTextGeometry(*text); !geo) {
+      SetError("text \"" + text->text + "\": " + geo.error());
+      return false;
+    }
+  }
 
   const bool exprDriven =
       std::any_of(constraints.begin(), constraints.end(),

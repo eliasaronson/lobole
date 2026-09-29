@@ -22,6 +22,8 @@ versions, linkage, and source locations are listed in `THIRD_PARTY.md`.
 | `IconFontCppHeaders.txt` | generated Font Awesome codepoint header |
 | `Roboto-Apache-2.0.txt` | Roboto font |
 | `JetBrains-Mono-OFL-1.1.txt` | JetBrains Mono font |
+| `Liberation-Sans-OFL-1.1.txt` | Liberation Sans font (sketch text) |
+| `Hershey.txt` | Hershey Roman Simplex glyph data (single-stroke sketch text) |
 | `libvterm.txt` | libvterm (the terminal panel) |
 | `GPL-2.0.txt` | the FreeCAD Fasteners Workbench dimension tables in `share/designer/parts/` |
 | `Apache-2.0.txt` | the bd_warehouse hole tables in `share/designer/parts/` |

@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+#include "core/sketch/SketchText.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -162,6 +163,40 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
             ee.entityId = e.id;
             ee.ellipseArc = e; // canonical sweep; forward[] orients it
             freeEdges.push_back(std::move(ee));
+          } else if constexpr (std::is_same_v<T, Text>) {
+            // Each glyph contour is a closed loop already, in order: added
+            // directly, never chained with other geometry. Stroke text is
+            // open and skipped (docs/sketching/README.md#text); a label that
+            // cannot be laid out is its sketch's error (SketchFeature::
+            // Execute), so it contributes nothing here.
+            if (IsStrokeFont(e.font))
+              return;
+            auto geo = BuildTextGeometry(e);
+            if (!geo)
+              return;
+            for (const TextContour& c : geo->contours) {
+              if (!c.closed)
+                continue;
+              Loop loop;
+              for (size_t k = 0; k < c.segments.size(); k++) {
+                LoopEdge le;
+                le.entityId = e.id;
+                le.glyph = static_cast<int32_t>(c.glyph);
+                le.contour = c.contour;
+                le.seg = static_cast<uint32_t>(k);
+                if (const auto* l = std::get_if<Line>(&c.segments[k])) {
+                  le.a = l->a;
+                  le.b = l->b;
+                } else if (const auto* b =
+                               std::get_if<BSpline>(&c.segments[k])) {
+                  le.a = b->poles.front();
+                  le.b = b->poles.back();
+                  le.spline = *b;
+                }
+                loop.edges.push_back(std::move(le));
+              }
+              loops.push_back(std::move(loop));
+            }
           } else if constexpr (std::is_same_v<T, BSpline>) {
             if (e.poles.size() < 2)
               return; // degenerate: contributes nothing
@@ -585,23 +620,32 @@ bool PolygonContains(const std::vector<glm::vec2>& poly, const glm::vec2& p) {
 }
 
 // One outer loop with the holes that belong to it (multi-profile, M3.1).
-// `key` is the lowest entity id in the outer loop: a stable identity for
-// per-group element names (cap faces) that survives loop reordering.
+// `key` names the outer loop by its lowest entity id ("g7"): a stable
+// identity for per-group element names (cap faces) that survives loop
+// reordering. A text glyph's loop adds its glyph and contour ("g7.2.0"): one
+// label is ONE entity, so its id alone would name every letter's caps alike.
 struct ProfileGroup {
   size_t outer;
   std::vector<size_t> holes;
-  uint32_t key;
+  std::string key;
 };
 
-uint32_t LoopKey(const Loop& loop) {
+std::string LoopKey(const Loop& loop) {
   if (loop.circle)
-    return loop.circle->id;
+    return "g" + std::to_string(loop.circle->id);
   if (loop.ellipse)
-    return loop.ellipse->id;
-  uint32_t key = UINT32_MAX;
+    return "g" + std::to_string(loop.ellipse->id);
+  const LoopEdge* best = nullptr;
   for (const auto& e : loop.edges)
-    key = std::min(key, e.entityId);
-  return key == UINT32_MAX ? 0 : key;
+    if (best == nullptr || e.entityId < best->entityId)
+      best = &e;
+  if (best == nullptr)
+    return "g0";
+  std::string key = "g" + std::to_string(best->entityId);
+  if (best->glyph >= 0)
+    key +=
+        "." + std::to_string(best->glyph) + "." + std::to_string(best->contour);
+  return key;
 }
 
 // Groups loops into outers-with-holes by containment depth: even depth =
@@ -612,13 +656,29 @@ uint32_t LoopKey(const Loop& loop) {
 std::vector<ProfileGroup> ClassifyLoops(const std::vector<Loop>& loops) {
   const size_t n = loops.size();
   std::vector<std::vector<glm::vec2>> polys(n);
-  for (size_t i = 0; i < n; i++)
+  std::vector<std::pair<glm::vec2, glm::vec2>> boxes(n);
+  for (size_t i = 0; i < n; i++) {
     polys[i] = LoopPolygon(loops[i]);
+    glm::vec2 lo(1e30f), hi(-1e30f);
+    for (const glm::vec2& p : polys[i]) {
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+    boxes[i] = {lo, hi};
+  }
+  // Disjoint bounding boxes: no vertex of one can be inside the other. A
+  // label is dozens of loops, and the test below is quadratic in them.
+  const auto apart = [&](size_t a, size_t b) {
+    return boxes[a].second.x < boxes[b].first.x ||
+           boxes[b].second.x < boxes[a].first.x ||
+           boxes[a].second.y < boxes[b].first.y ||
+           boxes[b].second.y < boxes[a].first.y;
+  };
 
   // Partial overlap: some but not all of a loop's vertices inside another.
   for (size_t a = 0; a < n; a++) {
     for (size_t b = 0; b < n; b++) {
-      if (a == b)
+      if (a == b || apart(a, b))
         continue;
       size_t inside = 0;
       for (const glm::vec2& v : polys[a])
@@ -637,7 +697,7 @@ std::vector<ProfileGroup> ClassifyLoops(const std::vector<Loop>& loops) {
   std::vector<std::vector<size_t>> containers(n);
   for (size_t i = 0; i < n; i++) {
     for (size_t j = 0; j < n; j++) {
-      if (i != j && !polys[i].empty() &&
+      if (i != j && !polys[i].empty() && !apart(i, j) &&
           PolygonContains(polys[j], polys[i].front()))
         containers[i].push_back(j);
     }
@@ -1105,10 +1165,48 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
         } else if constexpr (std::is_same_v<T, BSpline>) {
           points = BSplineSampleUV(e);
         }
-        // Point: no polyline
+        // Point: no polyline. Text: several — TessellateEntityPolylines.
       },
       entity);
   return points;
+}
+
+std::vector<std::vector<glm::vec2>>
+TessellateEntityPolylines(const Entity& entity) {
+  const auto* text = std::get_if<Text>(&entity);
+  if (text == nullptr) {
+    std::vector<glm::vec2> one = TessellateEntity(entity);
+    if (one.empty())
+      return {};
+    return {std::move(one)};
+  }
+  std::vector<std::vector<glm::vec2>> out;
+  auto geo = BuildTextGeometry(*text);
+  if (!geo)
+    return out;
+  for (const TextContour& c : geo->contours) {
+    std::vector<glm::vec2> poly;
+    for (const Entity& seg : c.segments) {
+      std::vector<glm::vec2> pts;
+      if (const auto* b = std::get_if<BSpline>(&seg))
+        pts = BSplineSampleUV(*b, 8);
+      else
+        pts = TessellateEntity(seg);
+      for (size_t i = (poly.empty() ? 0 : 1); i < pts.size(); i++)
+        poly.push_back(pts[i]);
+    }
+    if (poly.size() >= 2)
+      out.push_back(std::move(poly));
+  }
+  return out;
+}
+
+std::string LoopEdgeName(const LoopEdge& e) {
+  std::string name = "g" + std::to_string(e.entityId);
+  if (e.glyph >= 0)
+    name += "." + std::to_string(e.glyph) + "." + std::to_string(e.contour) +
+            "." + std::to_string(e.seg);
+  return name;
 }
 
 namespace {
@@ -1195,10 +1293,48 @@ std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
 
 namespace {
 
+// A text segment's edge, matched by its two ends and its middle: the glyph
+// segments are lines and Beziers whose OCC edge is parametrised exactly as
+// the sketch's (a clamped B-spline over [0, 1]), so the parameter midpoint is
+// the same point on both, and it tells apart two segments between the same
+// two points.
+const LoopEdge* MatchTextEdge(const TopoDS_Edge& edge, const SketchPlane& plane,
+                              const std::vector<Loop>& loops) {
+  BRepAdaptor_Curve curve(edge);
+  const auto toUV = [&](const gp_Pnt& p) {
+    return plane.WorldToPlane(glm::vec3(p.X(), p.Y(), p.Z()));
+  };
+  const double f = curve.FirstParameter(), l = curve.LastParameter();
+  const glm::vec2 a = toUV(curve.Value(f)), b = toUV(curve.Value(l));
+  const glm::vec2 mid = toUV(curve.Value(0.5 * (f + l)));
+  const float tol = 1e-3f;
+  for (const Loop& loop : loops) {
+    for (const LoopEdge& le : loop.edges) {
+      if (le.glyph < 0)
+        continue;
+      const bool same =
+          glm::length(le.a - a) < tol && glm::length(le.b - b) < tol;
+      const bool flipped =
+          glm::length(le.a - b) < tol && glm::length(le.b - a) < tol;
+      if (!same && !flipped)
+        continue;
+      glm::vec2 m = 0.5f * (le.a + le.b);
+      if (le.spline) {
+        const double span = static_cast<double>(le.spline->poles.size()) -
+                            BSplineDegree(*le.spline);
+        m = BSplineEvalUV(*le.spline, 0.5 * span);
+      }
+      if (glm::length(m - mid) < tol)
+        return &le;
+    }
+  }
+  return nullptr;
+}
+
 // The stable id of the sketch entity that produced `edge` (an edge of the
 // profile face), matched by geometry against the entity-id-carrying loops —
 // ShapeFix rebuilds the OCC edges, so there is no direct handle. 0 if
-// unmatched.
+// unmatched. Lines by their ends; arcs and circles by centre and radius.
 uint32_t MatchEntityId(const TopoDS_Edge& edge, const SketchPlane& plane,
                        const std::vector<Loop>& loops) {
   const std::optional<Entity> ent = EdgeToSketchEntity(edge, plane);
@@ -1209,7 +1345,7 @@ uint32_t MatchEntityId(const TopoDS_Edge& edge, const SketchPlane& plane,
   if (const auto* line = std::get_if<Line>(&*ent)) {
     for (const Loop& loop : loops) {
       for (const LoopEdge& le : loop.edges) {
-        if (le.arc) {
+        if (le.arc || le.glyph >= 0) {
           continue;
         }
         if ((glm::length(le.a - line->a) < tol &&
@@ -1236,6 +1372,21 @@ uint32_t MatchEntityId(const TopoDS_Edge& edge, const SketchPlane& plane,
     }
   }
   return 0;
+}
+
+// The face-name word of the entity edge `edge` came from: "g<id>", or a text
+// segment's "g<id>.<glyph>.<contour>.<seg>". Empty if unmatched.
+std::string MatchEdgeName(const TopoDS_Edge& edge, const SketchPlane& plane,
+                          const std::vector<Loop>& loops) {
+  const bool anyText =
+      std::any_of(loops.begin(), loops.end(), [](const Loop& loop) {
+        return !loop.edges.empty() && loop.edges.front().glyph >= 0;
+      });
+  if (anyText)
+    if (const LoopEdge* le = MatchTextEdge(edge, plane, loops))
+      return LoopEdgeName(*le);
+  const uint32_t id = MatchEntityId(edge, plane, loops);
+  return id == 0 ? std::string() : "g" + std::to_string(id);
 }
 
 // 0-based index of `face` in TopExp_Explorer(shape, TopAbs_FACE) order — the
@@ -1314,11 +1465,11 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
       // the sketch entity that produced the edge (unique across groups).
       for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
         const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
-        const uint32_t entityId = MatchEntityId(edge, plane, loops);
-        if (entityId == 0) {
+        const std::string word = MatchEdgeName(edge, plane, loops);
+        if (word.empty()) {
           continue; // unmatched edge (e.g. a seam); leave it for a later pass
         }
-        const std::string name = tag + "g" + std::to_string(entityId);
+        const std::string name = tag + word;
         const TopTools_ListOfShape& gen = prism.Generated(edge);
         for (const TopoDS_Shape& sideFace : gen) {
           const int idx = FaceIndexOf(shape, sideFace);
@@ -1331,8 +1482,7 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
       // Caps: fixed sentinels, so adding/removing a hole never renames them.
       // With several groups each pair is keyed by its outer loop's lowest
       // entity id ("cap0@g7"), stable against group reordering.
-      const std::string capSuffix =
-          multi ? "@g" + std::to_string(group.key) : "";
+      const std::string capSuffix = multi ? "@" + group.key : "";
       const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
       if (baseIdx >= 0) {
         out.names[faceOffset + baseIdx] = tag + "cap0" + capSuffix;
@@ -1430,13 +1580,13 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
       // pre-rotated, query the swept *copy* of each original edge.
       for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
         const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
-        const uint32_t entityId = MatchEntityId(edge, plane, loops);
-        if (entityId == 0) {
+        const std::string word = MatchEdgeName(edge, plane, loops);
+        if (word.empty()) {
           continue;
         }
         const TopoDS_Shape query =
             xform ? xform->ModifiedShape(edge) : TopoDS_Shape(edge);
-        const std::string name = tag + "g" + std::to_string(entityId);
+        const std::string name = tag + word;
         for (const TopoDS_Shape& sideFace : revol.Generated(query)) {
           const int idx = FaceIndexOf(shape, sideFace);
           if (idx >= 0) {
@@ -1448,8 +1598,7 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
       // Caps: the planar ends of a partial revolve. A full revolution has
       // none (FirstShape/LastShape are not part of the result; FaceIndexOf
       // misses). Multi-group caps are keyed like the prism's.
-      const std::string capSuffix =
-          multi ? "@g" + std::to_string(group.key) : "";
+      const std::string capSuffix = multi ? "@" + group.key : "";
       if (!revol.FirstShape().IsNull()) {
         const int baseIdx = FaceIndexOf(shape, revol.FirstShape());
         if (baseIdx >= 0) {
@@ -1581,8 +1730,7 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
       }
       const TopoDS_Shape shape = prism.Shape();
 
-      const std::string capSuffix =
-          multi ? "@g" + std::to_string(LoopKey(loop)) : "";
+      const std::string capSuffix = multi ? "@" + LoopKey(loop) : "";
       const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
       if (baseIdx >= 0) {
         out.names[faceOffset + baseIdx] = tag + "cap0" + capSuffix;
@@ -1772,16 +1920,39 @@ std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
   return ProjectElement(shape, ExternalKind::Face, faceIndex, plane);
 }
 
+std::string
+StrokeTextProfileRefusal(const std::vector<Entity>& entities,
+                         const std::vector<std::vector<uint32_t>>& regions,
+                         bool noLoops) {
+  for (const Entity& e : entities) {
+    const auto* t = std::get_if<Text>(&e);
+    if (t == nullptr || IsConstruction(e) || !IsStrokeFont(t->font))
+      continue;
+    const bool picked =
+        std::any_of(regions.begin(), regions.end(), [&](const auto& r) {
+          return r.size() == 1 && r[0] == t->id;
+        });
+    if (picked || noLoops)
+      return "the text \"" + t->text + "\" is single-stroke (font \"" +
+             t->font +
+             "\"): open curves for engraving, which make no profile - use "
+             "an outline font to extrude it";
+  }
+  return {};
+}
+
 bool FilterLoopsToRegions(std::vector<Loop>& loops,
                           const std::vector<std::vector<uint32_t>>& regions) {
   std::vector<bool> keep(loops.size(), false);
   for (const auto& region : regions) {
     bool matched = false;
+    // Every loop with that id set: a text label is ONE entity drawing a
+    // loop per glyph contour, so picking one letter picks the label
+    // (docs/sketching/README.md#text). Other entities make one loop each.
     for (size_t i = 0; i < loops.size(); i++) {
       if (LoopEntityIds(loops[i]) == region) {
         keep[i] = true;
         matched = true;
-        break;
       }
     }
     if (!matched)
@@ -1804,9 +1975,16 @@ bool FilterLoopsToRegions(std::vector<Loop>& loops,
     }
   }
   size_t w = 0;
-  for (size_t i = 0; i < loops.size(); i++)
-    if (keep[i])
-      loops[w++] = std::move(loops[i]);
+  // Never a self-move: libstdc++'s vector move-assigned onto itself comes
+  // out EMPTY, which dropped a kept loop's edges whenever it was already in
+  // place (a run of kept loops from index 0 — every letter of a label).
+  for (size_t i = 0; i < loops.size(); i++) {
+    if (!keep[i])
+      continue;
+    if (w != i)
+      loops[w] = std::move(loops[i]);
+    w++;
+  }
   loops.resize(w);
   return true;
 }

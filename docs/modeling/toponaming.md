@@ -42,9 +42,15 @@ rewrites the prefix, so a name records its derivation.
 ```
 name  := seed (';' step)* ('#' instance)?
 seed  := tag '/g' entityId       side face swept from sketch entity <entityId>
+       | tag '/g' entityId '.' glyph '.' contour '.' seg
+                                 side face swept from one segment of a text
+                                 label's glyph (glyphs counted over rendered
+                                 characters only)
        | tag '/cap0' | '/cap1'   extrude/revolve start and end caps
        | tag '/cap0@g' key       caps of one profile group of a multi-profile
-                                 sketch (key = its outer loop's lowest entity id)
+                                 sketch (key = its outer loop's lowest entity
+                                 id, plus '.' glyph '.' contour for a text
+                                 label's letter)
        | tag '/pole' n           a revolve's degenerate pole edge at the axis
        | tag '/seam' i           boolean section edge history did not name
        | prefix '/face' i        a primitive, import or rebuilt shape (below)
@@ -65,6 +71,14 @@ bodies combine. `entityId` is the sketch's stable entity id (monotonic, never
 reused), which is what makes the names stable: moving, resizing or reordering
 sketch entities keeps the names, and adding a hole never renames a cap because
 caps are fixed sentinels. Deleting the entity removes the name.
+
+A text label is ONE sketch entity drawing many glyph segments, so its side
+faces carry the sub-index: the third segment of the second contour of the
+first letter of label 9, cut by extrude 4, is `4/g9.0.1.2`. It decodes as a
+side face of entity 9 like `4/g9` would. Editing the string renames the faces
+of the letters after the edit (their glyph index or contour count changed);
+anything that must survive a text edit targets the entity, `g<textId>`, as
+CAM does.
 
 Examples: extrude 4 over line 7 gives side face `4/g7` and caps `4/cap0`,
 `4/cap1`; a fillet 5 on an edge of it gives a blend face `<edge name>;G5`;

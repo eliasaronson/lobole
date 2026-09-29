@@ -1,0 +1,23 @@
+{
+  "format": "designer-document",
+  "version": 137,
+  "features": [
+    {"type": "Sketch", "name": "Plate", "id": 1,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [40, 0]},
+       {"type": "line", "id": 2, "a": [40, 0], "b": [40, 20]},
+       {"type": "line", "id": 3, "a": [40, 20], "b": [0, 20]},
+       {"type": "line", "id": 4, "a": [0, 20], "b": [0, 0]},
+       {"type": "text", "id": 5, "text": "Rook", "font": "sans",
+        "height": 8.0, "anchor": [20, 10], "angle": 0.0,
+        "halign": "center", "valign": "middle"},
+       {"type": "text", "id": 6, "text": "a1", "font": "hershey",
+        "height": 3.0, "anchor": [2, 2], "angle_deg": 90,
+        "halign": "left", "valign": "baseline", "spacing": 0.5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 3.0, "mode": "new_body", "reversed": false}
+  ]
+}

@@ -35,7 +35,20 @@ struct LoopEdge {
   // the forward[] test in MakeLoopWire, so a/b may be swapped without touching
   // the params.
   std::optional<EllipseArc> ellipseArc;
+  // Set (>= 0) when this edge is one segment of a TEXT label's glyph: the
+  // glyph (counted over rendered characters only, so a space renumbers
+  // nothing), the contour within it and the segment within that. A label is
+  // ONE entity, so these are what keep its side faces apart: they are named
+  // "<feature>/g<entityId>.<glyph>.<contour>.<seg>" (LoopEdgeName).
+  int32_t glyph = -1;
+  uint32_t contour = 0;
+  uint32_t seg = 0;
 };
+
+// The face-name word of the entity edge `e` sweeps into: "g<entityId>", or
+// "g<entityId>.<glyph>.<contour>.<seg>" for a text segment
+// (docs/modeling/toponaming.md).
+std::string LoopEdgeName(const LoopEdge& e);
 
 // One closed loop of a sketch profile, in plane UV space.
 struct Loop {
@@ -51,7 +64,10 @@ struct Loop {
 // ellipses and self-closed B-splines are loops by construction; lines, arcs,
 // ellipse arcs and open B-splines are chained by endpoint proximity
 // (tolerance 1e-4) into closed loops. Open chains are discarded with a
-// warning.
+// warning. An outline text label contributes each glyph contour as a loop of
+// its own (never chained with other geometry); a single-stroke label is OPEN
+// curves and contributes nothing, silently — it is for engraving
+// (docs/sketching/README.md#text).
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
 
 // The outer boundary wire of a single-profile sketch, in world space on the
@@ -67,9 +83,10 @@ TopoDS_Wire BuildProfileWire(const SketchPlane& plane,
 TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
                               const std::vector<Entity>& entities);
 
-// Builds the profile face (largest-|area| loop is the outer boundary, the
-// rest become holes) and extrudes it along the plane normal. Returns an
-// invalid CADShape on failure.
+// Builds the profile faces — loops grouped by containment depth: a loop
+// inside an even number of others is an outer boundary, inside an odd number
+// a hole of its innermost container — and extrudes them along the plane
+// normal. Returns an invalid CADShape on failure.
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed);
 
@@ -130,6 +147,12 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
 // marker elsewhere).
 std::vector<glm::vec2> TessellateEntity(const Entity& entity);
 
+// Every polyline an entity draws as: TessellateEntity's one for most kinds,
+// one per glyph contour for a text label (whose glyphs must not be joined).
+// A label that cannot be laid out draws nothing.
+std::vector<std::vector<glm::vec2>>
+TessellateEntityPolylines(const Entity& entity);
+
 // If segments [a1,b1] and [a2,b2] properly cross, returns the crossing's
 // parameter t in [0,1] along the *first* segment; nullopt if parallel or the
 // crossing lies outside either segment. Used to find trim cut points.
@@ -173,6 +196,16 @@ std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
 // Ids are 0; the caller assigns them.
 std::vector<Entity> ProjectElement(const CADShape& shape, ExternalKind kind,
                                    int index, const SketchPlane& plane);
+
+// Why a profile consumer (extrude, revolve) got nothing from single-stroke
+// text, naming the label and its font: a region that picks one, or a sketch
+// whose only would-be profile is one. Empty when no stroke text is involved.
+// Stroke text is open curves for engraving and is otherwise skipped silently
+// (docs/sketching/README.md#text).
+std::string
+StrokeTextProfileRefusal(const std::vector<Entity>& entities,
+                         const std::vector<std::vector<uint32_t>>& regions,
+                         bool noLoops);
 
 // Keeps only the loops whose id set matches one of `regions`, plus every
 // loop nested inside a kept one (holes ride along with their outer). Returns

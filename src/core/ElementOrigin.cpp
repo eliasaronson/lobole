@@ -89,13 +89,32 @@ std::optional<uint32_t> Numbered(const std::string& word, const char* prefix) {
   return static_cast<uint32_t>(std::stoul(rest));
 }
 
-// The seed's words after its tag: "g7", "cap1@g3", "b1/face4", "p5/bore".
+// A text label's side-face word, "g<entity>.<glyph>.<contour>.<segment>":
+// one label is ONE sketch entity, so the sub-index is what keeps its faces
+// apart (docs/modeling/toponaming.md). The entity id, or nullopt.
+std::optional<uint32_t> TextSideEntity(const std::string& word) {
+  const std::vector<std::string> parts = Split(word, '.');
+  if (parts.size() != 4)
+    return std::nullopt;
+  for (size_t i = 1; i < parts.size(); i++)
+    if (!AllDigits(parts[i]))
+      return std::nullopt;
+  return Numbered(parts[0], "g");
+}
+
+// The seed's words after its tag: "g7", "g7.2.0.5", "cap1@g3", "b1/face4",
+// "p5/bore".
 bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
   if (words.empty())
     return false;
   const std::string& last = words.back();
   if (words.size() == 1) {
     if (const auto e = Numbered(last, "g")) {
+      o.role = ElementRole::Side;
+      o.entity = *e;
+      return true;
+    }
+    if (const auto e = TextSideEntity(last)) {
       o.role = ElementRole::Side;
       o.entity = *e;
       return true;

@@ -82,6 +82,10 @@ EntityPoints(const sketch::Entity& e) {
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
     for (size_t k = 0; k < nPoles; k++)
       pts.push_back({static_cast<uint8_t>(k), bs->poles[k]});
+  } else if (std::holds_alternative<sketch::Text>(e)) {
+    // The anchor, then the box corners (docs/sketching/README.md#text).
+    for (uint8_t k = 0; k <= 4; k++)
+      pts.push_back({k, sketch::EntityPointUV(e, k)});
   }
   return pts;
 }
@@ -158,6 +162,14 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
             d, DistToSegment(mousePos,
                              SketchUVToScreen(state, sketch.plane, uv[k]),
                              SketchUVToScreen(state, sketch.plane, uv[k + 1])));
+    } else if (std::holds_alternative<sketch::Text>(e)) {
+      // Any glyph's outline (or stroke) picks the whole label.
+      for (const auto& uv : sketch::TessellateEntityPolylines(e))
+        for (size_t k = 0; k + 1 < uv.size(); k++)
+          d = std::min(
+              d, DistToSegment(
+                     mousePos, SketchUVToScreen(state, sketch.plane, uv[k]),
+                     SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
     if (d < tolPx)
       bodies.push_back({d, SketchPick{true, true, {id, sketch::kWholeEntity}}});

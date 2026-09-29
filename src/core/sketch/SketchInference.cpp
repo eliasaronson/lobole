@@ -39,6 +39,10 @@ template <class F> void ForEachVertex(const Entity& e, F fn) {
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
     for (size_t k = 0; k < nPoles; k++)
       fn(static_cast<uint8_t>(k), bs->poles[k]);
+  } else if (std::holds_alternative<Text>(e)) {
+    // The anchor and the box corners: all five are solver points.
+    for (uint8_t k = 0; k <= 4; k++)
+      fn(k, EntityPointUV(e, k));
   }
 }
 

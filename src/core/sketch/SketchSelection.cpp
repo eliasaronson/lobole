@@ -44,6 +44,9 @@ SamplePoints(const Entity& e,
   std::vector<glm::vec2> uv;
   if (auto* p = std::get_if<Point>(&e))
     uv = {p->p};
+  else if (std::holds_alternative<Text>(e)) // every glyph's outline
+    for (const auto& poly : TessellateEntityPolylines(e))
+      uv.insert(uv.end(), poly.begin(), poly.end());
   else
     uv = TessellateEntity(e);
   std::vector<glm::vec2> screen;

@@ -24,6 +24,14 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   }
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
+  // Single-stroke text makes no profile: refused by name when it is what was
+  // picked, or all there is (docs/sketching/README.md#text).
+  if (const std::string why = sketch::StrokeTextProfileRefusal(
+          sketch->entities, regions, loops.empty());
+      !why.empty()) {
+    SetError(why);
+    return false;
+  }
   if (loops.empty()) {
     SetError("sketch has no closed profile");
     return false;

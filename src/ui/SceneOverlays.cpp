@@ -129,10 +129,12 @@ void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
       out.push_back(LineVertex(c + v, color));
       continue;
     }
-    std::vector<glm::vec2> poly = sketch::TessellateEntity(entity);
-    for (size_t i = 0; i + 1 < poly.size(); i++) {
-      out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i]), color));
-      out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i + 1]), color));
+    for (const std::vector<glm::vec2>& poly :
+         sketch::TessellateEntityPolylines(entity)) {
+      for (size_t i = 0; i + 1 < poly.size(); i++) {
+        out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i]), color));
+        out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i + 1]), color));
+      }
     }
   }
 }

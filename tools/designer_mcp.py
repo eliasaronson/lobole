@@ -58,6 +58,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
     {{"type": "ellipse_arc", "center": [u,v], "r_major": num, "r_minor": num,
       "rotation": rad, "start_param": rad, "end_param": rad}}
     {{"type": "spline", "poles": [[u,v], ...], "degree"?: int (default 3)}}
+    {{"type": "text", "text": str (one line), "height": CAP height mm,
+      "anchor": [u,v], "font"?: "sans" (outline, default) | "hershey"
+      (single stroke: open curves for engraving, NO profile), "angle_deg"?:
+      deg, "halign"?: left|center|right, "valign"?: baseline|bottom|middle|top,
+      "spacing"?: extra mm between characters}} — one entity; its glyphs
+      are regenerated, never sent. Extruding it cuts/adds every letter (one
+      region = the whole label); its faces are "<feature>/g<id>.<glyph>...".
+      An unknown font or a character the font lacks is refused by name.
     {{"type": "rect", "c1": [u,v], "c2": [u,v]}} — a convenience that
       expands to FOUR "line" entities (+ corner coincident/H/V constraints);
       the 4 ids land at the END of entity_ids, after every non-rect
@@ -67,7 +75,8 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   Entity coordinates can be EXPRESSION-DRIVEN via "<field>_expr" keys
   evaluated against document variables on every regeneration: line "ax_expr"/
   "ay_expr"/"bx_expr"/"by_expr", circle+arc "cx_expr"/"cy_expr"/"r_expr",
-  point "x_expr"/"y_expr" (e.g. {{"type": "circle", "center": [0, 0],
+  point "x_expr"/"y_expr", text "x_expr"/"y_expr"/"height_expr"/
+  "angle_deg_expr"/"spacing_expr" (e.g. {{"type": "circle", "center": [0, 0],
   "radius": 5, "r_expr": "bore / 2"}}). Driven coordinates are pinned during
   the sketch solve (shown violet, like linked copies) — don't also dimension
   them. Often a distance/radius constraint with "expr" is the better tool;
@@ -331,7 +340,9 @@ point_on_line, symmetric, midpoint, fixed, concentric, collinear,
 distance_x, distance_y, diameter, distance_pl.
 
 refs is a list of [entity_id, which] pairs. `which` picks a point on the
-entity: line 0=a 1=b; circle 0=center; arc 0=center 1=start 2=end. For
+entity: line 0=a 1=b; circle 0=center; arc 0=center 1=start 2=end;
+text 0=anchor 1..4=its box corners BL,BR,TR,TL (dimension a corner to place
+the label; the box is the font's ascender/descender and the advance). For
 whole-entity kinds (parallel, equal, tangent, ...) `which` is ignored — pass 0.
 symmetric takes a third ref: the symmetry line.
 

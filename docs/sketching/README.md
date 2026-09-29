@@ -15,6 +15,7 @@ in the file; the UI and expressions show degrees.
 | data model, entity ops (add/delete/split/trim/mirror/fillet/pattern/offset, derived ops, images) | `src/core/features/SketchFeature.{h,cpp}` |
 | PlaneGCS adapter, drag sessions, DOF diagnosis | `src/core/sketch/SketchSolver.{h,cpp}` |
 | loops, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
+| text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
 | serialization | `src/core/io/SerializeFeatures.cpp` (`EntityFromJson`, `ConstraintToJson`, `DerivedOpToJson`, the sketch arm of `FeatureToJson/FromJson`) |
@@ -60,6 +61,7 @@ their axes are tabled in
 | `Ellipse` | `center, rMajor, rMinor, rotation` | `ellipse` | centre only; radii and rotation rigid |
 | `EllipseArc` | ellipse + `startParam, endParam` | `ellipse_arc` | centre only; rigid |
 | `BSpline` | `poles, degree` | `spline` | each pole a free point; no inter-pole rules |
+| `Text` | `anchor, text, font, height, angle, halign, valign, spacing` | `text` | the anchor a free point; the glyphs rigid; the box corners ride the anchor ([Text](#text)) |
 
 Every entity also has `id` and `construction`. Rules that hold everywhere:
 
@@ -96,8 +98,57 @@ are small, and a cached map is a desync risk).
 
 `PointRef {entity, which}` addresses a point: Line 0 = `a`, 1 = `b`; Circle
 and Ellipse 0 = centre; Arc and EllipseArc 0 = centre, 1 = start, 2 = end;
-BSpline k = pole k. `kWholeEntity` (0xFF) marks a *selection* of the whole
+BSpline k = pole k; Text 0 = anchor, 1..4 = the box corners (bottom-left,
+bottom-right, top-right, top-left). `kWholeEntity` (0xFF) marks a *selection* of the whole
 entity; constraints never use it.
+
+### Text
+
+A `Text` entity is a one-line label (v137): ONE entity whose glyphs are
+regenerated from its fields by `sketch::BuildTextGeometry` and never saved.
+
+| field | meaning |
+|---|---|
+| `text` | UTF-8, one line: a newline is refused |
+| `font` | a bundled font by name: `sans` (outline, Liberation Sans) or `hershey` (single stroke, Hershey Roman Simplex); any other name is refused, listing these |
+| `height` | the CAP height, mm, measured once per font from 'H' |
+| `anchor` | the point the label is placed by, and its only solver unknowns |
+| `angle` | radians CCW from +U (the baseline's direction); `angle_deg` in JSON and expressions |
+| `halign` / `valign` | `left`/`center`/`right`; `baseline`/`bottom`/`middle`/`top`, from the FONT's ascender and descender, never the string's ink, so a row of labels lines up |
+| `spacing` | extra mm between characters |
+
+The label's **box** runs from the pen's start to its end (the advance of the
+whole string, kerning and spacing included) and from the font's descender to
+its ascender. Its corners are `which` 1..4: solver points tied to the anchor
+by fixed offsets, so the solver reads them but never moves one relative to
+the others. Dimensioning a corner, or making it coincident with something,
+places the label. The expression fields are `x`, `y` (the anchor), `height`,
+`angle_deg` and `spacing`.
+
+**Fonts are bundled, never the system's**, so a document builds the same on
+every machine:
+
+- **Outline** glyphs come from OpenCASCADE's `StdPrs_BRepFont` (FreeType,
+  `TKService`, linked explicitly), initialised on the TTF under
+  `share/designer/fonts/` (`deps/fonts/` in the tree; `DataDir()`), never by
+  a font-manager name. OCC's unicode-subset fallback is switched OFF (it
+  would borrow a missing glyph from a SYSTEM font), and every character is
+  checked with `HasSymbol` first: a missing glyph is refused, naming it.
+  Composite-curve mode stays off, so every segment is a line or a 3/4-pole
+  Bezier, which is exactly the sketch's clamped B-spline of degree 2/3:
+  nothing is flattened. Glyphs are placed by their advance, with kerning from
+  the font's `kern` table; there is no shaping (no ligatures, no complex
+  scripts). The bundled Liberation Sans has no overlapping contours
+  (profiles refuse partial overlap), which a test checks for every printable
+  ASCII glyph.
+- **Single stroke**: the original Hershey Roman Simplex data (the
+  `rowmans.jhf` records, attribution in `LICENSES/Hershey.txt`), embedded and
+  decoded from its `'R'`-offset pairs (Y down). Printable ASCII only. Its
+  contours are OPEN polylines, for engraving.
+
+A label that cannot be laid out (unknown font, missing glyph, empty text) is
+its sketch's regeneration error, named. Mirroring a label mirrors its anchor
+and direction but not its letters: a mirrored label still reads.
 
 ### Datum geometry
 
@@ -297,15 +348,29 @@ logs a warning rather than failing the history.
 `BuildLoops` (`SketchProfile.cpp`) turns non-construction entities into closed
 `Loop`s: circles and ellipses are loops on their own; lines, arcs, elliptical
 arcs and splines chain by endpoint proximity (1e-4) into ordered `LoopEdge`
-lists; open chains are discarded with a warning. Every wire goes through
-`ShapeFix_Wire` (reorder, reconnect, close) before face building. The largest
-loop is the outer boundary, the rest holes. Side faces are named
-`<feature>/g<entityId>` after the generating entity.
+lists; open chains are discarded with a warning. An outline text label adds
+each glyph contour as a loop of its own, never chained with other geometry;
+single-stroke text is skipped silently (an extrude or revolve whose region
+picks it, or whose sketch has nothing else, is refused naming the label and
+its font). Every wire goes through `ShapeFix_Wire` (reorder, reconnect,
+close) before face building. Loops are grouped by **containment depth**
+(`ClassifyLoops`): a loop inside an even number of others is an outer
+boundary, inside an odd number a hole of its innermost container, so a
+letter's counter is a hole and an island inside a hole is an outer again.
+Partially overlapping loops are refused. Side faces are named
+`<feature>/g<entityId>` after the generating entity; a text segment's face is
+`<feature>/g<textId>.<glyph>.<contour>.<seg>`, the glyph counted over
+rendered characters only, so a space renumbers nothing
+([naming](../modeling/toponaming.md)).
 
 A **region** is referenced by the sorted entity ids of its outer loop
 (`LoopEntityIds`). `SiblingRegions` expands a picked loop that belongs to a
 linked pattern or mirror to every member, since a cut through one hole of a
-bolt circle but not its copies is almost never the intent.
+bolt circle but not its copies is almost never the intent. A label is one
+entity, so every glyph's loop has the same id set `{textId}`, and picking any
+letter picks the whole label (`FilterLoopsToRegions` keeps every loop that
+matches a region). CAM likewise targets the entity (`g<textId>`), which
+survives editing the string.
 `BuildOpenPathWire` gives open chains for sweep paths.
 
 ## GUI
@@ -321,14 +386,18 @@ never dirties the document.
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
 Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles,
 Enter/double-click finishes), Trim, Mirror, Fillet, Pattern, Offset,
-Dimension, Project (live external geometry), CalibrateImage, Image.
+Dimension, Project (live external geometry), CalibrateImage, Image, Text
+(each click places a label; the Tool window edits its text, cap height,
+font and alignment, and a label selected when the tool is armed is edited
+instead. The default cap height is five cells of the sketch's grid, which is
+sized from the sketch and the part — never a literal).
 
 **Default keys** (sketch context; the global binding of the same chord is
 shadowed while sketching; rebindable — `src/core/io/Keymap.cpp`):
 
 | draw | modify | constrain | other |
 |---|---|---|---|
-| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, X project, Shift+I reference image | M trim, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
+| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
 
 Point-on-line, symmetric, midpoint, fixed and collinear are commands with no
 default key.
@@ -415,7 +484,8 @@ In entity JSON an arc's angles are `start_angle`/`end_angle` (radians) or the
 `_deg` pair; `ellipse` takes `rotation` or `rotation_deg`; an `ellipse_arc`'s
 `start_param`/`end_param` are ellipse parameters, not angles, so they have no
 `_deg` twin. An arc sweeping more than a full turn is refused (almost always
-degrees in a radian field). Any entity may carry `construction` and
+degrees in a radian field). A `text` takes `angle` or `angle_deg`, and
+refuses an unknown `font`, `halign` or `valign` naming the accepted words. Any entity may carry `construction` and
 `<field>_expr`.
 
 There is no RPC to delete a single constraint, trim, split, paste or break a
@@ -435,6 +505,10 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - `tests/test_spline.cpp` `[spline]` `[profile]` — evaluator vs OCC, profiles.
 - `tests/test_reference_image.cpp` — placement, calibration, asset storage in
   both formats, regen-hash exclusion.
+- `tests/test_sketch_text.cpp` `[text]` — cap height, advance and kerning
+  against the fonts' own numbers, alignment, save/reload, refusals, every
+  ASCII glyph of the outline font as a profile, a cut label's face names,
+  stroke text in profiles, a dimensioned box corner.
 - GUI: `src/app/guitests/GuiTestsSketch.cpp` (`sketch/*`, `constraints/*`,
   `trim/*`, `mirror/*`, `infer/*`, `drag/*`, `region/*`, `dims/*`, reference
   image panel and drag), `GuiTestsViewport.cpp` (`pick/*`, `select/*`),
@@ -443,7 +517,7 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - Goldens: `tests/golden/v03-legacy-sketch` (index refs and rigid rects
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
-  `v51-mirror-and-center-ref`.
+  `v51-mirror-and-center-ref`, `v137-text`.
 
 ## Not built
 
@@ -454,4 +528,6 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - Offset as a regenerating op (it bakes).
 - Transferring a dimension from a deleted entity onto a coincident survivor.
 - Extend tool, numeric move/rotate/scale of a selection, slot and polygon
-  primitives, sketch text.
+  primitives.
+- Text: multi-line labels, text on a path, shaping (ligatures, complex
+  scripts), fonts beyond the two bundled ones.

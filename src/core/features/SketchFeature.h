@@ -95,11 +95,39 @@ struct BSpline {
   bool construction = false;
 };
 
+// A one-line text label (v137, docs/sketching/README.md#text): one entity,
+// rigid glyph geometry, one free point — the `anchor` (`which` 0). Its glyphs
+// are NEVER stored: they are regenerated from these fields by
+// sketch::BuildTextGeometry (core/sketch/SketchText.h). `which` 1..4 are the
+// corners of the label's box (bottom-left, bottom-right, top-right, top-left,
+// from the FONT's ascender/descender and the label's advance), which the
+// solver reads but does not move: they ride the anchor, so dimensioning one
+// places the label.
+enum class TextHAlign : uint8_t { Left, Center, Right };
+enum class TextVAlign : uint8_t { Baseline, Bottom, Middle, Top };
+struct Text {
+  glm::vec2 anchor{0.0f};
+  std::string text;          // UTF-8, one line
+  std::string font = "sans"; // a bundled font by name (sketch::TextFontNames)
+  double height = 0.0;       // CAP height, sketch units (mm)
+  double angle = 0.0;        // radians CCW from +U (the baseline direction)
+  TextHAlign halign = TextHAlign::Left;
+  TextVAlign valign = TextVAlign::Baseline;
+  double spacing = 0.0; // extra tracking between characters, mm
+  uint32_t id = 0;
+  bool construction = false;
+};
+
+// UV of a text label's anchor (which 0) or box corner (which 1..4). Defined in
+// core/sketch/SketchText.cpp: the box needs the font's metrics. A label whose
+// layout fails (unknown font, missing glyph) answers its anchor.
+glm::vec2 TextPointUV(const Text& text, uint8_t which);
+
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
 // trimmable. Legacy files with a rigid "rect" entity are migrated on load.
 using Entity =
-    std::variant<Point, Line, Circle, Arc, Ellipse, EllipseArc, BSpline>;
+    std::variant<Point, Line, Circle, Arc, Ellipse, EllipseArc, BSpline, Text>;
 
 // A reference image ("underlay", v49): a raster (PNG/JPEG/BMP) placed on the
 // sketch plane to trace geometry over. It is deliberately NOT a sketch Entity —
@@ -403,6 +431,16 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           while (p1 <= p0)
             p1 += 2.0 * M_PI; // CCW-always
           return EllipseArc{c, g.rMajor, g.rMinor, rot2, p0, p1};
+        } else if constexpr (std::is_same_v<T, Text>) {
+          // The anchor and the baseline direction reflect; the letters do
+          // not — a mirrored label still reads (docs/sketching/README.md#text).
+          Text t = g;
+          t.anchor = ReflectPoint(g.anchor, a, b);
+          const glm::vec2 dir(static_cast<float>(std::cos(g.angle)),
+                              static_cast<float>(std::sin(g.angle)));
+          const glm::vec2 tip = ReflectPoint(g.anchor + dir, a, b) - t.anchor;
+          t.angle = std::atan2(tip.y, tip.x);
+          return t;
         } else { // BSpline: reflect every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -434,7 +472,11 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
         else if constexpr (std::is_same_v<T, EllipseArc>)
           return EllipseArc{g.center + t, g.rMajor,     g.rMinor,
                             g.rotation,   g.startParam, g.endParam};
-        else { // BSpline: translate every pole
+        else if constexpr (std::is_same_v<T, Text>) {
+          Text moved = g;
+          moved.anchor += t;
+          return moved;
+        } else { // BSpline: translate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
             pole += t;
@@ -474,7 +516,12 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
         else if constexpr (std::is_same_v<T, EllipseArc>)
           return EllipseArc{rot(g.center),    g.rMajor,     g.rMinor,
                             g.rotation + ang, g.startParam, g.endParam};
-        else { // BSpline: rotate every pole
+        else if constexpr (std::is_same_v<T, Text>) {
+          Text turned = g;
+          turned.anchor = rot(g.anchor);
+          turned.angle = g.angle + ang;
+          return turned;
+        } else { // BSpline: rotate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
             pole = rot(pole);
@@ -506,6 +553,8 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
           return g.center; // only the centre (which 0)
         else if constexpr (std::is_same_v<T, EllipseArc>)
           return EllipseArcPointUV(g, which);
+        else if constexpr (std::is_same_v<T, Text>)
+          return which == 0 ? g.anchor : TextPointUV(g, which);
         else { // BSpline: which addresses pole k
           if (g.poles.empty())
             return glm::vec2(0.0f);
@@ -522,6 +571,8 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
 //   Arc    "cx" "cy" "r"         (center + radius; angles deliberately not)
 //   Point  "x" "y"
 //   BSpline "p<k>x" "p<k>y"       (pole k, from 0)
+//   Text   "x" "y" (anchor) "height" "angle_deg" "spacing" — the angle's
+//          expression speaks DEGREES, as the angle dimension's does
 // Ellipse fields are not expression-drivable in v1 (the solver treats
 // ellipses as rigid anyway). Serialized as "<field>_expr" keys on the entity
 // JSON; stored on SketchFeature::entityExprs.
@@ -536,8 +587,9 @@ bool SetEntityField(Entity& e, const std::string& field, double value);
 // A reference to a point on an entity. `entity` is the entity's stable **id**
 // (not its index in the list — that shifts on insert/delete). `which` selects
 // which point: Line 0 = a, 1 = b; Circle 0 = center; Arc 0 = center, 1 = start,
-// 2 = end. For whole-entity constraints (Horizontal on a line, Radius on a
-// circle/arc), `which` is ignored and `a.entity` names the entity.
+// 2 = end; Text 0 = anchor, 1..4 = its box corners (BL, BR, TR, TL). For
+// whole-entity constraints (Horizontal on a line, Radius on a circle/arc),
+// `which` is ignored and `a.entity` names the entity.
 struct PointRef {
   uint32_t entity = 0;
   uint8_t which = 0;
