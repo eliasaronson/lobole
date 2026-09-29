@@ -11,6 +11,7 @@
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
 #include "render/StockRenderer.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"      // ActiveCamSetup, PostOpts
 #include "ui/FeatureEditor.h" // kCamToolSlot
@@ -24,6 +25,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <chrono>
+#include <memory>
+#include <thread>
 
 #include <algorithm>
 #include <cstdio>
@@ -101,16 +104,38 @@ void DropToolInstance(AppState& state) {
   state.camToolInstanceFor = -1;
 }
 
-// What the job's EARLIER setups leave, from their posted files -- the same
-// reading the verifier seeds a later setup's stock with
-// (docs/cam/simulation.md#leftover-another-setup-removes). False, with the
-// refusal, when one of them is still being cut and `settle` does not ask
-// for it now: a playback started from the bar there would be a picture of a
-// job nobody posts.
-bool EarlierStock(AppState& state, const cam::Setup& setup, bool settle,
-                  double res, cam::OtherSetups& out, std::string& refusal) {
-  std::vector<cam::SetupProgram> programs;
+// Where a playback's stock starts: what the job's EARLIER setups left, read
+// from their posted files as the verifier reads them
+// (docs/cam/simulation.md#leftover-another-setup-removes). Everything the
+// read needs is COPIED -- plain values and shape handles -- so it runs the
+// same inline and on a worker: reading a turning's program is the rotary
+// carve of the whole file, 40 s on the chess set's queen and king, and that
+// is not a thing to do on the frame.
+struct StartWork {
+  // in
+  cam::Setup setup;
+  std::vector<Body> bodies;
+  std::vector<cam::Setup> others; // earlier, in job order
+  std::vector<std::string> files;
   std::vector<std::string> unposted;
+  bool rotary = false;
+  double res = 0.25;
+  uint64_t setupId = 0;
+  std::string gcode; // the file the playback is for
+  // out
+  cam::OtherSetups earlier;
+  cam::HeightMap height;
+  cam::RadiusMap radius;
+  bool ok = false;
+  std::string why;
+};
+
+// The earlier setups' posted files, on the frame from the caches. False,
+// with the refusal, when one of them is still being cut and `settle` does
+// not ask for it now: a playback started from the bar there would be a
+// picture of a job nobody posts.
+bool CollectEarlier(AppState& state, const cam::Setup& setup, bool settle,
+                    StartWork& w, std::string& refusal) {
   for (const cam::Setup& other : state.job->GetSetups()) {
     if (other.id == setup.id)
       break; // the job's order is the order they are cut in
@@ -133,16 +158,82 @@ bool EarlierStock(AppState& state, const cam::Setup& setup, bool settle,
     std::string file, why;
     if (!cam::PostProcess(other.machine.post, other, paths, PostOpts(other),
                           file, &why)) {
-      unposted.push_back("setup '" + other.name +
-                         "', because it does not post: " + why);
+      w.unposted.push_back("setup '" + other.name +
+                           "', because it does not post: " + why);
       continue;
     }
-    programs.push_back({&other, std::move(file), /*earlier=*/true});
+    w.others.push_back(other);
+    w.files.push_back(std::move(file));
   }
-  out = cam::OtherSetupsOf(setup, programs, ui::JobBodies(state), res);
-  out.notChecked.insert(out.notChecked.end(), unposted.begin(), unposted.end());
   return true;
 }
+
+// The expensive half: touches nothing but its own struct.
+void ReadStart(StartWork& w) {
+  std::vector<cam::SetupProgram> programs;
+  for (size_t k = 0; k < w.others.size(); k++)
+    programs.push_back({&w.others[k], w.files[k], /*earlier=*/true});
+  w.earlier = cam::OtherSetupsOf(w.setup, programs, w.bodies, w.res);
+  w.earlier.notChecked.insert(w.earlier.notChecked.end(), w.unposted.begin(),
+                              w.unposted.end());
+  if (w.rotary) {
+    // The part TURNS: a radius field about the rotary axis, from the same
+    // start the verifier derives (the blank, or what earlier setups left of
+    // it), at the grid the panel verifies on -- so the last frame of this
+    // playback is the stock the verdict was read from, cell for cell (cam
+    // rotary: playing to the end leaves the verifier's own stock).
+    w.radius =
+        cam::StartingRotaryStock(w.setup, w.bodies, w.res, &w.earlier, &w.why);
+    w.ok = !w.radius.r.empty();
+    if (!w.ok)
+      w.why = "This job cannot be simulated: " + w.why;
+    return;
+  }
+  w.ok = cam::StartingStock(w.setup, w.bodies, w.res, &w.earlier, w.height);
+  if (!w.ok)
+    w.why = "This setup has no stock to cut — the model has no size.";
+}
+
+// Arms the playback from a start `ReadStart` made. False + the refusal when
+// the start could not be made.
+bool ArmPlayback(AppState& state, const cam::Setup& setup, StartWork& w) {
+  if (!w.ok) {
+    state.camPlaybackRefusal = w.why;
+    state.camPlaybackGcode.clear();
+    state.camTimeline = cam::Timeline{};
+    return false;
+  }
+  state.camPlaybackSeededFrom.clear();
+  for (const cam::SetupStock& s : w.earlier.stocks)
+    if (s.earlier)
+      state.camPlaybackSeededFrom.push_back(s.name);
+  state.camPlaybackNotSeeded = w.earlier.notChecked;
+  if (w.rotary)
+    state.camRotarySim.Begin(state.camTimeline, setup, std::move(w.radius));
+  else
+    state.camStockSim.Begin(state.camTimeline, setup, std::move(w.height));
+  state.camCursor = {0, 0.0};
+  state.camPlaybackOpen = true;
+  // The simulation is the one thing on screen now: a verb window still
+  // asking for a face, or a measurement, over a block being cut is two
+  // sessions claiming the same clicks. Close them -- the job stays.
+  state.camToolOpen = false;
+  state.camVerb = AppState::CamVerb::None;
+  state.camVerbOp = 0;
+  state.camGhostOp = 0;
+  state.camRefusal.clear();
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.measure = MeasureState{};
+  state.sectionToolOpen = false;
+  state.camPlaying = false;
+  state.camStockDrawnRevision = 0;
+  return true;
+}
+
+// A start being read on a worker, so a second Simulate does not start a
+// second one.
+bool g_startReading = false;
 
 } // namespace
 
@@ -170,6 +261,8 @@ bool BeginCamPlayback(AppState& state, bool settle) {
     state.camPlaybackRefusal = why;
     return false;
   }
+  if (g_startReading)
+    return true; // already on its way: it opens when the read lands
 
   // The POSTED FILE, like the verification: a bug in the post, in modal
   // state or in linking is invisible to anything that plays a
@@ -206,65 +299,58 @@ bool BeginCamPlayback(AppState& state, bool settle) {
     state.camPlaybackGcode.clear();
     return false;
   }
-  // What the job's earlier setups left: this one starts from it, as its
-  // verification does. The file is read in setup order, so a pointer into
-  // the job's setups is taken only after every other refusal above.
-  cam::OtherSetups earlier;
+
+  // Where the stock starts: what the job's earlier setups left, as this
+  // setup's verification starts from it.
+  auto work = std::make_shared<StartWork>();
+  work->setup = *setup;
+  work->bodies = ui::JobBodies(state);
+  work->rotary = state.camTimeline.rotary;
+  work->res = work->rotary ? kRotarySimRes : state.camSimRes;
+  work->setupId = setup->id;
+  work->gcode = gcode;
   {
     std::string refusal;
-    if (!EarlierStock(state, *setup, settle,
-                      state.camTimeline.rotary ? kRotarySimRes
-                                               : state.camSimRes,
-                      earlier, refusal)) {
+    if (!CollectEarlier(state, *setup, settle, *work, refusal)) {
       state.camPlaybackRefusal = refusal;
       state.camPlaybackGcode.clear();
       state.camTimeline = cam::Timeline{};
       return false;
     }
-    for (const cam::SetupStock& s : earlier.stocks)
-      if (s.earlier)
-        state.camPlaybackSeededFrom.push_back(s.name);
-    state.camPlaybackNotSeeded = earlier.notChecked;
   }
-  if (state.camTimeline.rotary) {
-    // The part TURNS: a radius field about the rotary axis, from the same
-    // start the verifier derives (the blank, or what earlier setups left of
-    // it), at the grid the panel verifies on -- so the last frame of this
-    // playback is the stock the verdict was read from, cell for cell (cam
-    // rotary: playing to the end leaves the verifier's own stock).
-    std::string why;
-    cam::RadiusMap blank = cam::StartingRotaryStock(
-        *setup, ui::JobBodies(state), kRotarySimRes, &earlier, &why);
-    if (blank.r.empty()) {
-      state.camPlaybackRefusal = "This job cannot be simulated: " + why;
-      state.camPlaybackGcode.clear();
-      state.camTimeline = cam::Timeline{};
-      return false;
-    }
-    state.camRotarySim.Begin(state.camTimeline, *setup, std::move(blank));
-  } else {
-    cam::HeightMap start;
-    if (!cam::StartingStock(*setup, ui::JobBodies(state), state.camSimRes,
-                            &earlier, start))
-      start = cam::MakeStock(lo, hi, state.camSimRes); // bounds held above
-    state.camStockSim.Begin(state.camTimeline, *setup, std::move(start));
+
+  // Inline when there is nothing earlier to read, when the caller settles
+  // (the RPC reader waits for its answer), or when the panel is not
+  // deferring -- the GUI suite's setting, as for the verification.
+  if (work->others.empty() || settle || !state.camDeferPasses) {
+    ReadStart(*work);
+    return ArmPlayback(state, *setup, *work);
   }
-  state.camCursor = {0, 0.0};
-  state.camPlaybackOpen = true;
-  // The simulation is the one thing on screen now: a verb window still
-  // asking for a face, or a measurement, over a block being cut is two
-  // sessions claiming the same clicks. Close them -- the job stays.
-  state.camToolOpen = false;
-  state.camVerb = AppState::CamVerb::None;
-  state.camVerbOp = 0;
-  state.camGhostOp = 0;
-  state.camRefusal.clear();
-  if (state.slotPick.featureId == kCamToolSlot)
-    state.slotPick = {};
-  state.measure = MeasureState{};
-  state.sectionToolOpen = false;
-  state.camPlaying = false;
-  state.camStockDrawnRevision = 0;
+
+  // Otherwise on a worker, and the playback opens when it lands -- if the
+  // same file is still the one to play.
+  g_startReading = true;
+  auto job = std::make_unique<BackgroundJob>();
+  job->kind = "cam-simulate";
+  job->label = "Reading what the earlier setups left";
+  job->cancellable = false; // the carve has no interruption points
+  job->fraction.store(-1.0);
+  BackgroundJob* raw = job.get();
+  job->thread = std::thread([work, raw] {
+    ReadStart(*work);
+    raw->done.store(true); // last
+  });
+  job->finish = [work](AppState& s) -> bool {
+    g_startReading = false;
+    const cam::Setup* now = s.job ? ActiveCamSetup(s) : nullptr;
+    if (now == nullptr || now->id != work->setupId || s.camPlaybackOpen ||
+        s.camPlaybackGcode != work->gcode)
+      return true; // the job moved on: this start is not its start
+    if (!ArmPlayback(s, *now, *work))
+      s.camRefusalPopup = true; // said where the button was pressed
+    return true;
+  };
+  StartBackgroundJob(state, std::move(job));
   return true;
 }
 

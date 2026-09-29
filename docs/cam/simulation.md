@@ -123,7 +123,11 @@ CamOtherSetups.cpp):
   frame is the verifier's own stock. The playback reads the earlier setups
   from their posted files like the check; in the panel a pass of theirs not
   yet cut refuses the playback in words, as its own would, and `cam_simulate`
-  generates it first. `cam_simulate` names what it started from
+  generates it first. Reading a turning's file is the rotary carve of all of
+  it (40 s for the chess set's queen and king), so the panel reads on a
+  worker ("Reading what the earlier setups left") and the transport opens
+  when it lands, unless the file changed meanwhile; `cam_simulate` waits for
+  it. `cam_simulate` names what it started from
   (`starts_from`, and `earlier_setups_not_read` for a setup that does not
   post), and the transport says "Starts from what 'Turn' left". A setup that
   cannot be read leaves its stock in place, which errs toward a finding.
