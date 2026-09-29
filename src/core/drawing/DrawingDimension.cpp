@@ -54,12 +54,21 @@ bool RefPoint(const SheetView& v, const ProjRef& r, glm::dvec2& out) {
       }
   if (pts.empty())
     return false;
-  if (r.end == 1) {
-    out = pts.front();
-    return true;
-  }
-  if (r.end == 2) {
-    out = pts.back();
+  // An end is an end of the curve list_drawing_geometry REPORTS: the first
+  // visible segment of the ref (else its first), whose front and back are
+  // p1 and p2 there. Taken off every segment joined, the ends of a circle
+  // seen edge-on -- a visible half and a hidden half, back where it began --
+  // were the same point, and a base's diameter measured 0.
+  if (r.end == 1 || r.end == 2) {
+    const SheetCurve* rep = cs.front();
+    for (const SheetCurve* c : cs)
+      if (c->visible && !c->points.empty()) {
+        rep = c;
+        break;
+      }
+    if (rep->points.empty())
+      return false;
+    out = r.end == 1 ? rep->points.front() : rep->points.back();
     return true;
   }
   glm::dvec2 lo(1e30), hi(-1e30);

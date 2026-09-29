@@ -290,6 +290,13 @@ TEST_CASE("A circle's end is its end, not its centre", "[drawing][dimension]") {
   underside.conicCenter = {40, 245};
   underside.conicRadius = 19.0;
   underside.points = {{40, 264}, {40, 245}, {40, 226}};
+  underside.visible = true;
+  // ...and the hidden half HLR returns for the same edge, back to the start:
+  // an end is the reported (visible) segment's, not the joined ones'.
+  drawing::SheetCurve hidden = underside;
+  hidden.visible = false;
+  hidden.points = {{40, 226}, {40, 245}, {40, 264}};
+  view.curves.insert(view.curves.begin(), hidden);
   view.curves.push_back(underside);
   ProjRef a = EdgeRef(3, "under"), b = EdgeRef(3, "under");
   a.end = 1;
