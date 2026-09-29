@@ -318,6 +318,70 @@ TEST_CASE("cam: verify is clean on an engraving and flags one cut deeper than "
   CHECK(coarse.narrowGrooves == 2);
 }
 
+TEST_CASE("cam: a single-stroke text label engraves as one operation and "
+          "verifies clean",
+          "[cam]") {
+  // The board's files, in the stroke font: every pen-down stroke of every
+  // glyph is one groove, and the label is one target.
+  uint32_t label = 0;
+  Engraved e = EngravedBlock([&](SketchFeature& sk) {
+    sketch::Text t;
+    t.anchor = {4.0f, 10.0f};
+    t.text = "abcd";
+    t.font = "hershey";
+    t.height = 8.0;
+    label = sk.AddEntity(t);
+  });
+  const cam::SketchCurves curves =
+      cam::SketchEntityCurves(*e.doc, TargetOf(e, label).ref);
+  INFO("resolver: " << curves.why);
+  REQUIRE(curves.why.empty());
+  CHECK(curves.strokes.size() >= 4); // at least a stroke a letter
+  CHECK_THAT(curves.textHeight, WithinAbs(8.0, 1e-12));
+
+  const cam::Operation op = Derived(e, {TargetOf(e, label)});
+  // The groove is the label's cap height / 8, derived rather than typed.
+  CHECK_THAT(op.engraveWidth, WithinAbs(1.0, 1e-12));
+  const cam::Toolpath tp = Cut(e, op);
+  INFO("error: " << tp.error);
+  REQUIRE(tp.error.empty());
+  CHECK(tp.grooves.size() == curves.strokes.size());
+  // Between strokes of one label the tool hops just over the surface, never
+  // to safe Z: the only rapids at safe Z are the way in and the way out.
+  int atSafe = 0;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind == cam::Move::Kind::Rapid &&
+        std::abs(m.to.z - e.setup.safeZ) < 1e-9)
+      atSafe++;
+  CHECK(atSafe == 2);
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", e.setup, {tp}, {}, gcode, &error));
+  const double res = 0.1, tol = res * 1.5;
+  const cam::Verdict v = cam::VerifyGcode(gcode, e.setup, e.doc->GetBodies(),
+                                          res, {}, {}, {}, nullptr, tp.grooves);
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y
+                << "; shallow " << v.grooveShallow << "; rapids "
+                << v.rapidsThroughStock);
+  CHECK(v.Safe(tol));
+  CHECK(v.Complete(tol));
+  CHECK(v.grooves == static_cast<int>(tp.grooves.size()));
+  CHECK(v.narrowGrooves == 0);
+
+  // A label that cannot be laid out is refused with the layout's reason.
+  uint32_t bad = 0;
+  Engraved odd = EngravedBlock([&](SketchFeature& sk) {
+    sketch::Text t;
+    t.anchor = {4.0f, 10.0f};
+    t.text = "ab";
+    t.font = "no-such-font";
+    t.height = 8.0;
+    bad = sk.AddEntity(t);
+  });
+  CHECK_THAT(cam::SketchEntityCurves(*odd.doc, TargetOf(odd, bad).ref).why,
+             Catch::Matchers::ContainsSubstring("laid out"));
+}
+
 TEST_CASE("cam: an engraving refuses a sketch whose plane does not face the "
           "spindle or is off the surface",
           "[cam]") {

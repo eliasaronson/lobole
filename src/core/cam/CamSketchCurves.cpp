@@ -4,12 +4,14 @@
 #include "core/Feature.h"
 #include "core/cam/CamToolpath.h" // BodyToSetup
 #include "core/features/SketchFeature.h"
+#include "core/sketch/SketchText.h"
 
 #include <glm/gtc/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <expected>
 #include <limits>
 #include <type_traits>
 
@@ -119,6 +121,35 @@ EntityStrokes StrokesOf(const sketch::Entity& entity) {
               pts.size() > 2 && glm::length(pts.front() - pts.back()) < 1e-6;
           out.strokes.push_back(std::move(pts));
           out.closed.push_back(closed);
+        } else if constexpr (std::is_same_v<T, sketch::Text>) {
+          // A label is every contour of every glyph: a stroke font's
+          // pen-down strokes (open unless one returns to its start), an
+          // outline font's closed outlines. Laid out from its fields the
+          // same way the sketch draws it, and a label that cannot be laid
+          // out -- an unknown font, a missing glyph -- is refused with the
+          // layout's own reason, never engraved as nothing.
+          const std::expected<sketch::TextGeometry, std::string> geometry =
+              sketch::BuildTextGeometry(e);
+          if (!geometry) {
+            out.why = "cannot be laid out: " + geometry.error();
+            return;
+          }
+          for (const sketch::TextContour& c : geometry->contours) {
+            std::vector<glm::dvec2> pts;
+            for (const sketch::Entity& segment : c.segments) {
+              const EntityStrokes piece = StrokesOf(segment);
+              for (const std::vector<glm::dvec2>& s : piece.strokes)
+                for (const glm::dvec2& p : s)
+                  if (pts.empty() || glm::length(p - pts.back()) > 1e-9)
+                    pts.push_back(p);
+            }
+            if (pts.size() < 2)
+              continue;
+            out.strokes.push_back(std::move(pts));
+            out.closed.push_back(c.closed);
+          }
+          // The groove a label is derived with is its cap height / 8.
+          out.textHeight = e.height;
         } else {
           static_assert(kNoStrokesYet<T>,
                         "a sketch entity type the engraving resolver does "

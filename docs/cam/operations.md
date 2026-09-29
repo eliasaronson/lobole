@@ -319,7 +319,9 @@ square step nobody asked for.
 
 `OpType::Engrave` follows the curves of a SKETCH entity ON the curve, not
 offset from it: a line, an arc, a circle, an ellipse, a spline, open or
-closed, and a stroke text label when the sketch has one. It is the one
+closed, and a text label -- in the single-stroke font (`hershey`) every
+pen-down stroke of every glyph, in the outline font every glyph's outline
+([text](../sketching/README.md#text)). It is the one
 operation whose target is not a face of a body, so its target is
 `{feature_id: <the sketch>, element: "g<entity id>"}`, the entity's stable id
 (the same `g<id>` a sketch-made face is named by). Several targets are one
