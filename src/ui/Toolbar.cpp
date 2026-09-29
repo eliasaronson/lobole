@@ -728,6 +728,7 @@ void DrawSketchModeToolbar(AppState& state) {
         SketchTool::EllipseArc}});
   toolBtn("sketch.spline", "Spline", SketchTool::Spline);
   toolBtn("sketch.point", "Point", SketchTool::Point);
+  toolBtn("sketch.text", "Text: click to place a label", SketchTool::Text);
   toolBtn("sketch.trim", "Trim", SketchTool::Trim);
   toolBtn("sketch.dimension", "Dimension", SketchTool::Dimension);
   Divider();

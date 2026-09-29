@@ -121,6 +121,58 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // The Text tool (docs/sketching/README.md#text): a click places a label
+  // whose cap height came from the sketch's own size, not a literal, and the
+  // Tool window then edits THAT label — one undo record per committed edit.
+  t = IM_REGISTER_TEST(engine, "sketch", "text_tool_places_and_edits_a_label");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 1);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_text");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Text);
+    IM_CHECK(ctx->GetWindowByRef("//Text###ToolWindow") != nullptr);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    const float expected = 5.0f * ui::SketchGridFor(*s_App, *sk).step;
+    IM_CHECK_EQ(s_App->sketchEdit.textHeight, expected);
+
+    const glm::vec2 c = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0));
+    ctx->MouseMoveToPos(ImVec2(c.x + 40.0f, c.y + 20.0f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    const auto* placed = std::get_if<sketch::Text>(&sk->entities[0]);
+    IM_CHECK(placed != nullptr);
+    IM_CHECK_EQ(static_cast<float>(placed->height), expected);
+    IM_CHECK_EQ(s_App->sketchEdit.textEditId, placed->id);
+
+    // Edit the placed label's string and font from the window.
+    ctx->ItemInputValue("//Text###ToolWindow/###tx_text", "b8");
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    const auto* edited = std::get_if<sketch::Text>(&sk->entities[0]);
+    IM_CHECK(edited != nullptr);
+    IM_CHECK(edited->text == "b8");
+    IM_CHECK(sk->GetError().empty());
+
+    // A character the font lacks is refused in the window, not committed.
+    ctx->ItemInputValue("//Text###ToolWindow/###tx_text", "\xe4\xb8\xad");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sketchEdit.textError.empty());
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(std::get<sketch::Text>(sk->entities[0]).text == "b8");
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   // The primary way a user opens a sketch now that the Create menu is gone:
   // the toolbar's sketch button arms plane-picking, then a viewport click on a
   // base-plane quad enters edit mode. The other sketch tests take the direct

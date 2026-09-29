@@ -139,8 +139,10 @@ enum class SketchTool {
   CalibrateImage,  // click two points on a reference image, then type the real
                    // distance between them to scale the image (v49)
   EllipseArc,      // 5-click: centre, major-axis end, minor radius, start, end
-  Image            // U8 polish: reference-image session (insert/opacity/
+  Image,           // U8 polish: reference-image session (insert/opacity/
                    // calibrate/delete for selectedImageId) in the Tool window
+  Text             // click places a label; the Tool window edits its text,
+                   // height, font and alignment (docs/sketching/README.md#text)
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -219,6 +221,18 @@ struct SketchEditState {
   // REFERENCE so the pattern tracks it.
   bool patternPickCenter = false;
   sketch::PointRef patternCenterRef{0, 0};
+
+  // Text tool (v137): what the next click places, and the label the Tool
+  // window is editing (0 = none yet). `textHeight` <= 0 means "not chosen":
+  // the tool derives it from the sketch's size when it arms
+  // (docs/ui/tool-sessions.md#defaults-and-refusals).
+  std::string textString = "A";
+  float textHeight = 0.0f;
+  int textFont = 0;   // index into sketch::TextFontNames()
+  int textHAlign = 0; // sketch::TextHAlign
+  int textVAlign = 0; // sketch::TextVAlign
+  uint32_t textEditId = 0;
+  std::string textError; // why the last edit was refused (shown in window)
 
   // Offset tool params (applied to the selected closed loop).
   float offsetDistance = 0.5f;

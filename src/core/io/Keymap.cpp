@@ -238,6 +238,7 @@ const Binding kDefaults[] = {
      "Ctrl+Shift+A"},
     {"sketch.spline", Context::Sketch, "Spline", "Draw", "S"},
     {"sketch.point", Context::Sketch, "Point", "Draw", "."},
+    {"sketch.text", Context::Sketch, "Text", "Draw", "Shift+T"},
     {"sketch.project", Context::Sketch, "Project model edges", "Draw", "X"},
     {"sketch.image", Context::Sketch, "Insert reference image", "Draw",
      "Shift+I"},

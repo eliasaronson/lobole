@@ -12,6 +12,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchText.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 #include "ui/DocumentSlots.h"
@@ -150,6 +151,27 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     if (bs.poles.size() >= 2)
       emitPoly(sketch::BSplineSampleUV(bs));
     emitPoly(bs.poles); // control polygon
+    return;
+  }
+
+  // Text: the label a click would place, ghosted at the cursor.
+  if (edit.tool == SketchTool::Text && edit.textHeight > 0.0f) {
+    sketch::Text t;
+    t.anchor = edit.hoverPoint;
+    t.text = edit.textString;
+    const std::vector<std::string>& fonts = sketch::TextFontNames();
+    t.font = fonts[static_cast<size_t>(
+        std::clamp(edit.textFont, 0, static_cast<int>(fonts.size()) - 1))];
+    t.height = edit.textHeight;
+    t.halign =
+        static_cast<sketch::TextHAlign>(std::clamp(edit.textHAlign, 0, 2));
+    t.valign =
+        static_cast<sketch::TextVAlign>(std::clamp(edit.textVAlign, 0, 3));
+    for (const auto& poly : sketch::TessellateEntityPolylines(t))
+      for (size_t i = 0; i + 1 < poly.size(); i++) {
+        out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
+        out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
+      }
     return;
   }
 
@@ -425,6 +447,11 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Trim:
     set("Trim", 0, 0, "click a segment to remove it");
+    break;
+  case T::Text:
+    set("Text", 0, 0,
+        edit.textEditId != 0 ? "click to place another label (Esc to finish)"
+                             : "click to place the label");
     break;
   case T::Mirror:
     set("Mirror", edit.mirrorAxisPhase ? 2 : 1, 2,

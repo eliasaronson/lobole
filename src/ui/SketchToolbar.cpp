@@ -9,6 +9,7 @@
 #include "core/io/Serialization.h" // DocumentIO (break-link commit)
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchText.h"
 #include "ui/CreateActions.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
@@ -348,7 +349,8 @@ void DrawSketchToolWindow(AppState& state) {
       edit.tool == SketchTool::Mirror || edit.tool == SketchTool::Fillet ||
       edit.tool == SketchTool::Pattern || edit.tool == SketchTool::Offset ||
       edit.tool == SketchTool::CalibrateImage ||
-      edit.tool == SketchTool::Dimension || edit.tool == SketchTool::Image;
+      edit.tool == SketchTool::Dimension || edit.tool == SketchTool::Image ||
+      edit.tool == SketchTool::Text;
   if (!hasSession) {
     // A Hole session gets a window of its own while placing centres — but
     // only when no per-tool session owns the window, so switching to e.g.
@@ -577,6 +579,62 @@ void DrawSketchToolWindow(AppState& state) {
                     edit.selected[i].entity);
         ImGui::PopID();
       }
+    }
+    break;
+  }
+  case SketchTool::Text: {
+    // What the next click places -- and, once one is placed (or a selected
+    // label armed the tool), that label's own fields: each committed change
+    // is one undo record (docs/sketching/README.md#text).
+    BeginToolWindowFrame(state, "Text");
+    bool changed = false;
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "%s", edit.textString.c_str());
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+    if (ImGui::InputText("Text###tx_text", buf, sizeof(buf)))
+      edit.textString = buf;
+    changed |= ImGui::IsItemDeactivatedAfterEdit();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    changed |= ExprInputFloat(state, "Cap height (mm)###tx_height",
+                              &edit.textHeight, "%.3g");
+    const std::vector<std::string>& fonts = sketch::TextFontNames();
+    const int fontIdx =
+        std::clamp(edit.textFont, 0, static_cast<int>(fonts.size()) - 1);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
+    if (ImGui::BeginCombo("Font###tx_font",
+                          fonts[static_cast<size_t>(fontIdx)].c_str())) {
+      for (int i = 0; i < static_cast<int>(fonts.size()); i++) {
+        const std::string& name = fonts[static_cast<size_t>(i)];
+        const std::string label =
+            name +
+            (sketch::IsStrokeFont(name) ? " (single stroke)" : " (outline)");
+        if (ImGui::Selectable(label.c_str(), edit.textFont == i)) {
+          edit.textFont = i;
+          changed = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+    const char* hWords[] = {"left", "center", "right"};
+    const char* vWords[] = {"baseline", "bottom", "middle", "top"};
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    changed |= ImGui::Combo("###tx_halign", &edit.textHAlign, hWords, 3);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    changed |= ImGui::Combo("Align###tx_valign", &edit.textVAlign, vWords, 4);
+    if (!edit.textError.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.35f, 1.0f));
+      ImGui::TextWrapped("%s", edit.textError.c_str());
+      ImGui::PopStyleColor();
+    }
+    ImGui::TextDisabled(edit.textEditId != 0
+                            ? "Editing the placed label - click to place "
+                              "another"
+                            : "Click in the sketch to place the label");
+    if (changed && edit.textEditId != 0) {
+      ImGui::End(); // the commit replaces the feature: act after End()
+      ApplyTextEdit(state);
+      return;
     }
     break;
   }

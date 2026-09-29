@@ -825,6 +825,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         edit.splinePoles.push_back(uv);
     } else if (edit.tool == SketchTool::Point) {
       CommitEntity(state, *sketch, index, sketch::Point{uv}, infer);
+    } else if (edit.tool == SketchTool::Text) {
+      PlaceSketchText(state, uv); // may replace the sketch feature
+      return true;
     } else if (edit.tool == SketchTool::Arc ||
                edit.tool == SketchTool::ArcThreePoint) {
       // Both arc tools are 3-click: two pending points, then commit on the

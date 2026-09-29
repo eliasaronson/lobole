@@ -70,6 +70,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"sketch.ellipse_arc", ICON_DS_ELLIPSE_ARC},
     {"sketch.spline", ICON_FA_BEZIER_CURVE},
     {"sketch.point", ICON_FA_CIRCLE_DOT},
+    {"sketch.text", ICON_FA_FONT},
     {"sketch.trim", ICON_FA_SCISSORS},
     {"sketch.dimension", ICON_FA_RULER_COMBINED},
     {"sketch.mirror", ICON_DS_MIRROR},

@@ -50,8 +50,9 @@ std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
 void CommitCenterRectangle(AppState& state, SketchFeature& sketch, size_t index,
                            glm::vec2 center, glm::vec2 corner, bool infer);
 
-void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
-                  const sketch::Entity& entity, bool infer);
+// Returns the committed entity's stable id.
+uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
+                      const sketch::Entity& entity, bool infer);
 
 void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
                 glm::vec2 a, glm::vec2 b, bool infer);

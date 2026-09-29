@@ -199,8 +199,8 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
 // geometry (the clicks were already cursor-snapped, so this re-finds the same
 // targets) and the implied coincident / point-on-line / align constraints are
 // applied — the non-line twin of CommitLine's inference.
-void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
-                  const sketch::Entity& entity, bool infer) {
+uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
+                      const sketch::Entity& entity, bool infer) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   std::vector<std::pair<uint8_t, sketch::Snap>> snaps;
   if (infer) {
@@ -228,6 +228,7 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
   if (std::holds_alternative<sketch::Circle>(entity) ||
       std::holds_alternative<sketch::Arc>(entity))
     state.sketchEdit.lastDrawn = {id};
+  return id;
 }
 
 // Per-frame while dragging: retarget from the cursor delta, re-solve, write
@@ -595,6 +596,8 @@ void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
           } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
             for (glm::vec2& pole : ent.poles)
               pole += d;
+          } else if constexpr (std::is_same_v<T, sketch::Text>) {
+            ent.anchor += d;
           }
         },
         e);
@@ -695,6 +698,10 @@ void SetSketchTool(AppState& state, SketchTool tool) {
   edit.actionMsg.clear();
   if (tool == SketchTool::Mirror)
     MirrorToolActivated(state); // preselected construction line = axis
+  edit.textEditId = 0;
+  edit.textError.clear();
+  if (tool == SketchTool::Text)
+    TextToolActivated(state); // default height; a selected label to edit
 }
 
 } // namespace ui

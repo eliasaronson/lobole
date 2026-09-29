@@ -234,4 +234,16 @@ bool EditDimensionValue(AppState& state, int dimIndex, double value);
 // selection isn't a single closed loop.
 bool ApplyOffset(AppState& state);
 
+// Text tool (docs/sketching/README.md#text). Arming it picks the default cap
+// height from the sketch's own size (never a literal) and, when exactly one
+// label is selected, loads it for editing.
+void TextToolActivated(AppState& state);
+// Places a label at `uv` from the Tool window's fields and makes it the one
+// the window edits. False (with SketchEditState::textError set) when the
+// label cannot be laid out — refused visibly, nothing committed.
+bool PlaceSketchText(AppState& state, glm::vec2 uv);
+// Re-applies the Tool window's fields to the label being edited, as one undo
+// record. False (textError set) when the edit is refused.
+bool ApplyTextEdit(AppState& state);
+
 } // namespace ui

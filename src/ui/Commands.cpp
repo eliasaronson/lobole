@@ -585,6 +585,7 @@ const std::vector<Command>& Table() {
     tool("sketch.ellipse_arc", SketchTool::EllipseArc);
     tool("sketch.spline", SketchTool::Spline);
     tool("sketch.point", SketchTool::Point);
+    tool("sketch.text", SketchTool::Text);
     tool("sketch.project", SketchTool::Project);
     tool("sketch.trim", SketchTool::Trim);
     tool("sketch.offset", SketchTool::Offset);

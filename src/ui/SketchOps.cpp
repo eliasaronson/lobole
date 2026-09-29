@@ -12,6 +12,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchText.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 #include "ui/DocumentSlots.h"
@@ -645,6 +646,119 @@ bool ToggleConstruction(AppState& state) {
   }
 
   state.document->Regenerate(); // profile changes when a line leaves/enters it
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  return true;
+}
+
+// ---- Text tool -------------------------------------------------------------
+
+namespace {
+
+// The label the Tool window's fields describe, at `anchor`.
+sketch::Text TextFromToolState(const SketchEditState& edit, glm::vec2 anchor,
+                               double angle, double spacing) {
+  const std::vector<std::string>& fonts = sketch::TextFontNames();
+  sketch::Text t;
+  t.anchor = anchor;
+  t.text = edit.textString;
+  t.font = fonts[static_cast<size_t>(
+      std::clamp(edit.textFont, 0, static_cast<int>(fonts.size()) - 1))];
+  t.height = edit.textHeight;
+  t.angle = angle;
+  t.spacing = spacing;
+  t.halign = static_cast<sketch::TextHAlign>(std::clamp(edit.textHAlign, 0, 2));
+  t.valign = static_cast<sketch::TextVAlign>(std::clamp(edit.textVAlign, 0, 3));
+  return t;
+}
+
+} // namespace
+
+void TextToolActivated(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr)
+    return;
+  // One selected label: edit it rather than place a new one.
+  const sketch::Text* picked = nullptr;
+  for (const sketch::PointRef& r : edit.selected) {
+    const size_t i = sketch->IndexOfEntity(r.entity);
+    if (i == SIZE_MAX)
+      continue;
+    const auto* t = std::get_if<sketch::Text>(&sketch->entities[i]);
+    if (t == nullptr || (picked != nullptr && picked->id != t->id)) {
+      picked = nullptr;
+      break;
+    }
+    picked = t;
+  }
+  if (picked != nullptr) {
+    const std::vector<std::string>& fonts = sketch::TextFontNames();
+    edit.textEditId = picked->id;
+    edit.textString = picked->text;
+    edit.textHeight = static_cast<float>(picked->height);
+    edit.textFont = static_cast<int>(
+        std::find(fonts.begin(), fonts.end(), picked->font) - fonts.begin());
+    edit.textHAlign = static_cast<int>(picked->halign);
+    edit.textVAlign = static_cast<int>(picked->valign);
+    return;
+  }
+  // The default cap height is the sketch's, never a literal
+  // (docs/ui/tool-sessions.md#defaults-and-refusals): five cells of the grid,
+  // which is itself sized from the sketch and the part around it.
+  if (edit.textHeight <= 0.0f)
+    edit.textHeight = 5.0f * SketchGridFor(state, *sketch).step;
+}
+
+bool PlaceSketchText(AppState& state, glm::vec2 uv) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (sketch == nullptr)
+    return false;
+  SketchEditState& edit = state.sketchEdit;
+  if (edit.textHeight <= 0.0f)
+    TextToolActivated(state);
+  const sketch::Text t = TextFromToolState(edit, uv, 0.0, 0.0);
+  if (auto geo = sketch::BuildTextGeometry(t); !geo) {
+    edit.textError = geo.error();
+    return false;
+  }
+  edit.textError.clear();
+  edit.textEditId = CommitEntity(state, *sketch, index, t, false);
+  return true;
+}
+
+bool ApplyTextEdit(AppState& state) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  SketchEditState& edit = state.sketchEdit;
+  if (sketch == nullptr || edit.textEditId == 0)
+    return false;
+  const size_t i = sketch->IndexOfEntity(edit.textEditId);
+  const auto* old =
+      i == SIZE_MAX ? nullptr : std::get_if<sketch::Text>(&sketch->entities[i]);
+  if (old == nullptr) {
+    edit.textEditId = 0; // the label went (undo, delete)
+    return false;
+  }
+  sketch::Text t =
+      TextFromToolState(edit, old->anchor, old->angle, old->spacing);
+  t.id = old->id;
+  t.construction = old->construction;
+  if (auto geo = sketch::BuildTextGeometry(t); !geo) {
+    edit.textError = geo.error();
+    return false;
+  }
+  edit.textError.clear();
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->entities[i] = t;
+  sketch::Solver solver; // the box corners moved: constraints on them follow
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
   nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
