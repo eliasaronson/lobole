@@ -137,7 +137,10 @@ there, and every move is stamped with its A, A0 included. The targets of an
 op that clears down to a floor (`OpField::NeedsFlatFloor`: pocket, face,
 adaptive) are floors, and each is cut only at the index that turns it to
 the spindle; a floor no index presents is named in `skipped`. Other targets
-(a wall, a bore) are followed at every index. A piece that fails
+(a wall, a bore) are followed at every index. `add_cam_op` derives such an op
+in the frame of the first index that presents its first target
+(`IndexFrameFor`): read in the setup's own frame, a floor that faces round the
+axis is a wall, and the pick was refused. A piece that fails
 is named by its angle in `skipped`; the operation fails only when every angle
 did. Each angle's depths are the op's own `top_z`/`bottom_z`, in that angle's
 frame.

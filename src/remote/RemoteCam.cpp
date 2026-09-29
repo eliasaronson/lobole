@@ -2246,8 +2246,15 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
           ui::TargetFor(state, target, tj.value("part", uint64_t{0}), &why);
       if (target.IsSet() && picked.jobPartId == 0)
         throw std::runtime_error(why);
+      // An op cut at several indices is derived where its first target is
+      // cut (cam::IndexFrameFor), not in the setup's own frame.
+      const cam::Setup frame = cam::IndexFrameFor(
+          setup, ui::JobBodies(state), type, picked,
+          p.contains("index_a_deg")
+              ? p.at("index_a_deg").get<std::vector<double>>()
+              : std::vector<double>{});
       const cam::DerivedOp derived = cam::DeriveOperation(
-          setup, ui::JobBodies(state), type, picked, op.toolNumber,
+          frame, ui::JobBodies(state), type, picked, op.toolNumber,
           cam::EarlierSetups(job->GetSetups(), setup.id));
       if (!derived.ok)
         throw std::runtime_error(derived.why);

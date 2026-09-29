@@ -212,6 +212,18 @@ DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
                 OpType type, const Target& target, int toolNumber = 0,
                 const std::vector<const Setup*>& earlier = {});
 
+// The frame an op cut at `indices` is derived in
+// (docs/cam/rotary.md#one-operation-at-several-indices): the setup turned to
+// the first index that presents `target` -- for a type that clears to a
+// floor, the one that turns it to the spindle; for any other, the first. The
+// setup itself when there is no list, no target, or no index presents it (the
+// derivation then refuses in its own words). Read in the setup's own frame,
+// the rook's crenel floors faced sideways and were refused as walls.
+[[nodiscard]] Setup IndexFrameFor(const Setup& setup,
+                                  const std::vector<Body>& bodies, OpType type,
+                                  const Target& target,
+                                  const std::vector<double>& indices);
+
 // A rotary ROUGH (docs/cam/rotary.md#layers-rest-and-the-rough-verb): the
 // rotary finish's derivation and refusals, then layers of half the cutter from
 // the blank inward and a stock to leave of DefaultFinishStock(tool), so the

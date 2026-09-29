@@ -1688,4 +1688,39 @@ TEST_CASE("cam derive: a top after a turning is the turned part's",
   op.toolNumber = 99;
   CHECK(cam::StockTopOver(indexed, earlier, bodies, op, hi.z) == hi.z);
 }
+TEST_CASE("cam rotary: an op at several indices derives where its floor "
+          "faces the spindle",
+          "[cam][rotary]") {
+  // The rook's crenel floors face round the axis; derived in the setup's own
+  // frame (A0) a sideways floor reads as a wall and the pick is refused. The
+  // derivation is taken at the index that turns the first target up.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  const std::vector<Body>& bodies = doc->GetBodies();
+  cam::Target side;
+  side.ref = WallNear(*doc, 20.0, 30.0); // the +Y face
+  const auto facesUp = [&](const cam::Setup& s) {
+    glm::vec3 n(0.0f);
+    return cam::FaceNormalOf(cam::BodiesInSetupFrame(s, bodies), side.ref, n) &&
+           n.z > 0.99f;
+  };
+  REQUIRE_FALSE(facesUp(setup));
+  const std::vector<double> four = {0.0, 90.0, 180.0, 270.0};
+  const cam::Setup at =
+      cam::IndexFrameFor(setup, bodies, cam::OpType::Pocket, side, four);
+  CHECK(facesUp(at));
+  CHECK(at.rotationA != 0.0);
+  // No index presents it: the setup itself, and the derivation's refusal.
+  CHECK(cam::IndexFrameFor(setup, bodies, cam::OpType::Pocket, side, {0.0})
+            .rotationA == 0.0);
+  // A contour is followed at every index: the first.
+  CHECK(cam::IndexFrameFor(setup, bodies, cam::OpType::Profile, side,
+                           {180.0, 90.0})
+            .rotationA == 180.0);
+  // A type that is not cut at indices is derived as it always was.
+  CHECK(
+      cam::IndexFrameFor(setup, bodies, cam::OpType::SurfaceRotary, side, four)
+          .rotationA == 0.0);
+}
 #endif

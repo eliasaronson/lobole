@@ -951,6 +951,27 @@ double StockTopOver(const Setup& setup,
   return any ? top : freshTop;
 }
 
+Setup IndexFrameFor(const Setup& setup, const std::vector<Body>& bodies,
+                    OpType type, const Target& target,
+                    const std::vector<double>& indices) {
+  if (indices.empty() || !target.ref.IsSet() ||
+      !OpTypeHas(type, OpField::Indexed))
+    return setup;
+  const bool floor = OpTypeHas(type, OpField::NeedsFlatFloor);
+  for (const double a : indices) {
+    Setup turned = setup;
+    turned.rotationA = a;
+    if (!floor)
+      return turned;
+    glm::vec3 n(0.0f);
+    if (FaceNormalOf(BodiesInSetupFrame(turned, bodies), target.ref, n,
+                     target.jobPartId) &&
+        n.z > 0.99f)
+      return turned;
+  }
+  return setup;
+}
+
 DerivedOp DeriveSurfaceRough(const Setup& setup,
                              const std::vector<Body>& bodies, int toolNumber) {
   DerivedOp out =
