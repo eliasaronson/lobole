@@ -161,7 +161,10 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
   // (docs/cam/README.md#invariants).
   const double over = out.depth - t.fluteLength;
   const bool wider = t.shankDiameter > t.diameter + 1e-6;
-  const bool necked = t.shankDiameter > 0.0 && t.shankDiameter < t.diameter;
+  // A V-bit is widest at the top of its cone, so with no shank stated the
+  // one above it can only be narrower: necked, the nut's height unknown.
+  const bool necked = (t.shankDiameter > 0.0 && t.shankDiameter < t.diameter) ||
+                      (t.type == ToolType::VBit && t.shankDiameter <= 0.0);
   if (over > 1e-3 && wider) {
     out.level = Reach::Level::Collides;
     out.text =

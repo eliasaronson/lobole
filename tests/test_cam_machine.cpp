@@ -1361,6 +1361,12 @@ TEST_CASE("cam reach: a shank wider than the cut collides, a necked one "
   chamfer.topZ = 30.0;
   chamfer.bottomZ = 28.5;
   CHECK(cam::ReachCheck(chamfer, v).level == cam::Reach::Level::Fine);
+  // ...and with no shank stated at all: a V-bit is widest at the top of its
+  // cone, so what is above can only be narrower. The chess board's 0.3 mm
+  // engraving with a 12 mm V-bit was "the depth where the nut touches".
+  v.shankDiameter = 0.0;
+  chamfer.bottomZ = 29.7;
+  CHECK(cam::ReachCheck(chamfer, v).level == cam::Reach::Level::Fine);
 
   // Through a setup: named by the op, and silent for a disabled one.
   op.bottomZ = 5.0;
