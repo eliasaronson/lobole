@@ -537,6 +537,95 @@ TEST_CASE("cam: a pocket's open edge does not hold the cutter back", "[cam]") {
   CHECK(refused.error.find("2.3 mm across") != std::string::npos);
 }
 
+// The chess bishop's first mitre: a slanted blind slot, drawn as four
+// corners -- two ends 3.2 mm long, and sides running 14 mm into the head.
+// The ends were square to the direction the script MEANT, not the one it
+// drew, so they lie 18 degrees off the sides instead of square to them and
+// the slot is 3.2 * sin 18 = 0.99 mm wide. "0.99 mm across" was the truth.
+// The slot also runs out of the part, and once a floor's open edges grew by
+// the cutter's radius the region a pocket clears is wider there than the
+// floor, in air, by an amount the cutter sets: measured on that, the same
+// slot read "1.57 mm across" for a 3 mm cutter. The width quoted is the
+// floor's own.
+TEST_CASE("cam: a slot too thin for the cutter is measured on its floor "
+          "and not on the air past its open end",
+          "[cam]") {
+  const auto slotted = [](double lean) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+    const double ang = 54.0 * std::numbers::pi / 180.0;
+    // Along the slot, from outside the block's +X face inward.
+    const glm::dvec2 along(-std::cos(ang), -std::sin(ang));
+    // Across it: square to `along`, then turned by `lean`.
+    const double c = std::cos(lean), s = std::sin(lean);
+    const glm::dvec2 across(-along.y * c - along.x * s,
+                            along.x * c - along.y * s);
+    const glm::dvec2 a(44.0, 20.0);
+    const glm::dvec2 b = a + 14.0 * along;
+    const double w = 1.6; // half of each 3.2 mm end
+    const glm::dvec2 k[4] = {a + w * across, b + w * across, b - w * across,
+                             a - w * across};
+    // On the block's top, cut 8 mm down: a floor at z = 12.
+    auto sk = std::make_unique<SketchFeature>(
+        "Mitre sketch",
+        SketchPlane(glm::vec3(0.0f, 0.0f, 20.0f), glm::vec3(0.0f, 0.0f, 1.0f),
+                    glm::vec3(1.0f, 0.0f, 0.0f)));
+    for (int i = 0; i < 4; i++)
+      sk->AddEntity(sketch::Line{glm::vec2(k[i]), glm::vec2(k[(i + 1) % 4])});
+    doc->AddFeature(std::move(sk));
+    const uint64_t sid = doc->GetFeature(1)->GetId();
+    doc->AddFeature(std::make_unique<ExtrudeFeature>("Mitre", sid, 8.0,
+                                                     ExtrudeMode::Cut, true));
+    return doc;
+  };
+  cam::Setup setup = BasicSetup();
+  cam::Tool three;
+  three.number = 5;
+  three.diameter = 3.0;
+  setup.tools.push_back(three);
+  cam::Operation op;
+  op.id = 15;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 5;
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+
+  // As drawn: the ends turned 72 degrees from square, 18 off the sides.
+  const double lean = 72.0 * std::numbers::pi / 180.0;
+  auto drawn = slotted(lean);
+  op.targets = {cam::Target{0, UpFaceAt(*drawn, 12.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  for (const cam::OpType type : {cam::OpType::Pocket, cam::OpType::Adaptive}) {
+    op.type = type;
+    const cam::Toolpath refused = cam::Generate(setup, op, drawn->GetBodies());
+    INFO(refused.error);
+    CHECK(refused.Empty());
+    CHECK(refused.error.find("0.99 mm across") != std::string::npos);
+    CHECK(refused.error.find("cannot reach in") != std::string::npos);
+  }
+  // ...and 0.99 is the width a cutter meets: a 0.8 mm one goes in.
+  cam::Tool fine;
+  fine.number = 6;
+  fine.diameter = 0.8;
+  setup.tools.push_back(fine);
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 6;
+  const cam::Toolpath thin = cam::Generate(setup, op, drawn->GetBodies());
+  INFO(thin.error);
+  CHECK_FALSE(thin.Empty());
+
+  // Drawn square, the same 3.2 mm ends make a 3.2 mm slot, and the 3 mm
+  // cutter clears it.
+  auto square = slotted(0.0);
+  op.targets = {cam::Target{0, UpFaceAt(*square, 12.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  op.toolNumber = 5;
+  const cam::Toolpath cut = cam::Generate(setup, op, square->GetBodies());
+  INFO(cut.error);
+  CHECK_FALSE(cut.Empty());
+}
+
 TEST_CASE("cam: stock to leave can be what does not fit, and says so",
           "[cam]") {
   // The tool fits the slot; the tool PLUS the stock being left does not. Two

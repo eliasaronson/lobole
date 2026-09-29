@@ -150,7 +150,8 @@ def details(app, part, piece_h, base_r, u):
     # Bishop: the mitre, a notch 3.2 wide down across the top of the head
     # to a floor 2 mm above the axis -- one pocket from above for a 3 mm
     # cutter. (A slit slanted through the head has no floor any pocket can
-    # clear; blind, its floor measured 1 mm across -- docs/plans finding.)
+    # clear. The blind one measured 0.99 mm across, and was: its 3.2 mm ends
+    # were drawn square to (dx, dz) while its sides ran along (-dx, dz).)
     ids = box_cut(part, P, (piece_h - u * 9.0, u * 2.0),
                   (piece_h - u * 5.8, u * 14.0), u * 30, "Mitre")
     out["bishop"] += ids

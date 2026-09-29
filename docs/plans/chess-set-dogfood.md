@@ -38,9 +38,6 @@ Phase 1's profile change lands before this, so the pawn needs no rest pass.
   `ElementHistory.cpp`) and name them. Test: every edge of a filleted spline
   extrude has a name, and a drawing height dimension to the knight's top
   reads 54.4.
-- **The blind slot floor that measured 1 mm across.** Reproduce the
-  bishop's first mitre (a slanted blind slot, floor at y = -1) in a test and
-  find why `InscribedRadius` saw 0.99 mm where the floor is 3.2 mm wide.
 
 ## 2. Picking faces by what made them
 

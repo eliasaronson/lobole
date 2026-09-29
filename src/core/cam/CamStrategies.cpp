@@ -106,9 +106,12 @@ std::vector<Loop> FaceOpenings(const std::vector<Body>& bodies,
   return out;
 }
 
+// `openEdges` false leaves the floor as it is drawn, for measuring it: see
+// FloorWidthRefusal below.
 Clipper2Lib::Paths64 TargetPaths(const Operation& op,
                                  const std::vector<Body>& bodies, bool holesToo,
-                                 double toolRadius, std::string& error) {
+                                 double toolRadius, std::string& error,
+                                 bool openEdges = true) {
   if (op.targets.empty())
     return {};
   // A wall names one contour at every depth — the case an opening that goes
@@ -139,7 +142,7 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
   // floor and trims the growth back. Treated as walled, the queen's crown
   // notch -- 3.4 mm wide, its floor 2.3 mm along the axis before the dome
   // falls away -- was refused for a 3 mm cutter as "2.3 mm across".
-  if (holesToo && toolRadius > 0.0) {
+  if (openEdges && holesToo && toolRadius > 0.0) {
     Clipper2Lib::Paths64 section;
     for (const Loop& l : SectionLoops(bodies, region.z + kIslandProbe))
       section.push_back(ToClipper(l.pts));
@@ -206,6 +209,27 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
   }
   return Clipper2Lib::Difference(outer, islands,
                                  Clipper2Lib::FillRule::NonZero);
+}
+
+// Why a clearing region the cutter could not enter refused it, measured on
+// the FLOOR as drawn -- not on `region`, which for a picked floor has grown
+// by the tool's radius across its open edges. That growth is air beyond the
+// part, and its width is set by the cutter asking, so a slot 0.99 mm wide
+// read as "1.57 mm across" for a 3 mm cutter: the chess bishop's first mitre,
+// whose sketch drew 3.2 mm ends 18 degrees off its sides, not square. Growth
+// only ever adds, so a floor the cutter fits is a region it fits, and the
+// measurement cannot blame a floor that was not the reason.
+std::string FloorWidthRefusal(const Operation& op,
+                              const std::vector<Body>& bodies,
+                              const Clipper2Lib::Paths64& region, bool picked,
+                              const Tool& tool) {
+  std::string ignored;
+  const Clipper2Lib::Paths64 floor =
+      picked ? TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5,
+                           ignored, /*openEdges=*/false)
+             : Clipper2Lib::Paths64{};
+  return TooTightForTool(floor.empty() ? region : floor, tool, op.stockToLeave,
+                         "pocket");
 }
 
 // Profile: offset the section outward (or inward) by the tool radius and
@@ -700,7 +724,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       // The region closed up before the first pass — the cutter is wider than
       // the narrowest part of what it was asked to clear.
       if (tooTight.empty())
-        tooTight = TooTightForTool(region, tool, op.stockToLeave, "pocket");
+        tooTight = FloorWidthRefusal(op, bodies, region, !picked.empty(), tool);
       continue;
     }
 
@@ -998,7 +1022,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       // operation lands on the generic "check its depths". This is the path a
       // real pocket takes: a derived pocket deep enough comes back as
       // `adaptive`, so it is the one a person actually hits.
-      tooTight = TooTightForTool(region, tool, op.stockToLeave, "pocket");
+      tooTight = FloorWidthRefusal(op, bodies, region, !picked.empty(), tool);
     }
     if (!cleared.error.empty() && tp.error.empty())
       tp.error = cleared.error; // partial: say so, keep what it did cut

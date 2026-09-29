@@ -195,7 +195,10 @@ is scrap.
   the floor, trims the growth back. Every edge taken as a wall, a notch open
   at one end was refused by its length: the chess queen's crown notch, 3.4 mm
   wide with a floor 2.3 mm long before the dome falls away, was "2.3 mm
-  across" for a 3 mm cutter.
+  across" for a 3 mm cutter. The growth is air, as wide as the cutter asking
+  makes it, so a refusal's "N mm across" is measured on the floor as drawn
+  (`FloorWidthRefusal`): a slot 0.99 mm wide running out of the part read
+  "1.57 mm across" for a 3 mm cutter when the grown region was measured.
 - **Inside out, walls last** (`GeneratePocket`). The inset loops of a
   depth are linked into a tree: each loop's parent is the nearest loop one
   level nearer the wall. The tree is cut depth-first, every loop after the
