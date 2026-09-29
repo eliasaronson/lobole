@@ -93,10 +93,6 @@ HEADS = {
 }
 
 
-# how far off the axis a head's last arc stops (mm at the nominal size)
-TOP_R = 0.6
-
-
 def fmt(c):
     s = f"{c:.4f}".rstrip("0").rstrip(".")
     return s if s not in ("-0", "") else "0"
@@ -136,21 +132,6 @@ def segments(kind):
     out.append(("S", None, prev[1], head[0][1]))
     prev = ("head", head[0][1])
     for seg in head[1:]:
-        if seg[0] == "A" and seg[-1][1] == 0.0:
-            # An arc may not END on the axis: its endpoint is computed from
-            # a centre, a radius and an angle in single precision, lands a
-            # hair either side of the axis, and one size in several makes
-            # the revolve refuse a profile that crosses it. Stop the arc
-            # TOP_R off the axis and finish with a flat.
-            (cx, cy), r = circle3(prev[1], seg[1], seg[2])
-            a = cx - math.sqrt(max(r * r - (TOP_R - cy) ** 2, 0.0))
-            if abs(a - seg[2][0]) > abs(cx + (cx - a) - seg[2][0]):
-                a = 2 * cx - a
-            end = (a, TOP_R)
-            out.append(("A", "head", prev[1], seg[1], end))
-            out.append(("L", "head", end, (a, 0.0)))
-            prev = ("head", (a, 0.0))
-            continue
         out.append((seg[0], "head", prev[1]) + seg[1:])
         prev = ("head", seg[-1])
     out.append(("C", None, prev, ("base", (0.0, 0.0))))

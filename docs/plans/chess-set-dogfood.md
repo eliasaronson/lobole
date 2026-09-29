@@ -38,11 +38,6 @@ Phase 1's profile change lands before this, so the pawn needs no rest pass.
   `ElementHistory.cpp`) and name them. Test: every edge of a filleted spline
   extrude has a name, and a drawing height dimension to the knight's top
   reads 54.4.
-- **A revolve at any size.** An arc ending exactly on the axis crosses it by
-  float noise at some sizes. Snap profile vertices within tolerance of the
-  axis onto it before building the face (`BuildRevolve`,
-  `SketchProfile.cpp`). Test: the pawn profile without `TOP_R`'s workaround
-  revolves at every `king_h` from 70 to 110; drop the workaround.
 - **The blind slot floor that measured 1 mm across.** Reproduce the
   bishop's first mitre (a slanted blind slot, floor at y = -1) in a test and
   find why `InscribedRadius` saw 0.99 mm where the floor is 3.2 mm wide.

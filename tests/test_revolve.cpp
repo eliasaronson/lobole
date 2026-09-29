@@ -410,3 +410,49 @@ TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   REQUIRE(coil);
   CHECK(glm::length(coil->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3f);
 }
+
+TEST_CASE("A profile whose arc ends on the axis revolves at every size",
+          "[revolve][arc]") {
+  // A turned finial: up from the axis, across, and an arc back down onto the
+  // axis. The arc's centre is float32 (as a sketch stores it), so its end
+  // lands a hair either side of the axis; past it, MakeRevol refused the
+  // whole profile -- at one size in several of the chess set's queen.
+  const SketchPlane xz(PlaneType::XZ);
+  int failed = 0;
+  for (int step = 0; step <= 100; step++) {
+    const double k = 0.8 + 0.005 * step; // the size, as a scale
+    // three points of the arc, in double: from (40k, 2.2k) over the top
+    // down to the axis at (45k, 0)
+    const glm::dvec2 p0(40.0 * k, 2.2 * k), p1(43.0 * k, 2.6 * k),
+        p2(45.0 * k, 0.0);
+    const double d = 2 * (p0.x * (p1.y - p2.y) + p1.x * (p2.y - p0.y) +
+                          p2.x * (p0.y - p1.y));
+    const double n0 = glm::dot(p0, p0), n1 = glm::dot(p1, p1),
+                 n2 = glm::dot(p2, p2);
+    const glm::dvec2 c(
+        (n0 * (p1.y - p2.y) + n1 * (p2.y - p0.y) + n2 * (p0.y - p1.y)) / d,
+        (n0 * (p2.x - p1.x) + n1 * (p0.x - p2.x) + n2 * (p1.x - p0.x)) / d);
+    const double r = glm::length(p0 - c);
+    const double end = std::atan2(p0.y - c.y, p0.x - c.x);
+    const double start = std::atan2(p2.y - c.y, p2.x - c.x);
+    std::vector<sketch::Entity> ents = {
+        sketch::Line{{0.0f, 0.0f}, {0.0f, float(5.0 * k)}, 1},
+        sketch::Line{{0.0f, float(5.0 * k)}, {float(p0.x), float(5.0 * k)}, 2},
+        sketch::Line{
+            {float(p0.x), float(5.0 * k)}, {float(p0.x), float(p0.y)}, 3},
+        sketch::Arc{glm::vec2(c), r, start, end, 4},
+        sketch::Line{{float(p2.x), 0.0f}, {0.0f, 0.0f}, 5}};
+    const auto loops = sketch::BuildLoops(ents);
+    REQUIRE(loops.size() == 1);
+    ElementMap names;
+    std::string error;
+    const CADShape body =
+        sketch::BuildRevolveNamed(xz, loops, {0, 0, 0}, {1, 0, 0}, 2 * M_PI,
+                                  false, false, 7, names, &error);
+    if (!body.IsValid()) {
+      failed++;
+      UNSCOPED_INFO("k = " << k << ": " << error);
+    }
+  }
+  CHECK(failed == 0);
+}

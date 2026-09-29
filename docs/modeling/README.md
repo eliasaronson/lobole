@@ -106,7 +106,7 @@ The authoritative list, with every field, is `kFeatureTypes` in
 | `Import` | STEP/STL/BREP bodies; centred on their bbox unless `keep_origin` |
 | `Sketch` | 2D profile on a base plane, a `DatumPlane` (`planeRef`) or a body face (`face_ref`); see the sketching area |
 | `Extrude` | see [Extrude](#extrude) |
-| `Revolve` | profile about an `AxisRef` (`x`, `y`, `z` through the world origin, `sketch_line`, `datum_axis`, `custom {origin, direction}`); `angle_deg`, `symmetric`, `reversed`. The axis must lie in the sketch plane and the profile must not cross it |
+| `Revolve` | profile about an `AxisRef` (`x`, `y`, `z` through the world origin, `sketch_line`, `datum_axis`, `custom {origin, direction}`); `angle_deg`, `symmetric`, `reversed`. The axis must lie in the sketch plane and the profile must not cross it; a joint within 1e-4 mm of it is ON it, so an arc may end on the axis |
 | `DatumPlane` | `offset` from a plane, `angle` about an axis, or `through_points`; sketches that reference it move with it |
 | `DatumAxis` | two points, a sketch line, or a global axis |
 | `Frame` | a named datum frame that mates anchor to (assemblies area) |

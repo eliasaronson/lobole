@@ -931,6 +931,29 @@ TEST_CASE("Expression-driven entity fields are pinned during the solve",
              WithinAbs(10.0f, 1e-4f));
 }
 
+TEST_CASE("An expression-driven arc keeps its angles through a solve",
+          "[solver][exprs][arc]") {
+  // A sketch whose arcs follow variables re-solves on every regen. The
+  // arc's endpoints were seeded through float32, ~1e-6 off the arc rules;
+  // the solve moved the ANGLES to meet them and the write-back kept that,
+  // so the chess set's queen drifted until its arcs no longer met their
+  // lines ("sketch has no closed profile") at every size.
+  SketchFeature s = MakeSketch();
+  const double a0 = -0.1080008521212341, a1 = 2.2845669156660735;
+  const uint32_t arc = s.AddEntity(sketch::Arc{
+      {60.21451950073242f, 0.22611357271671295f}, 2.0977032402036246, a0, a1});
+  s.entityExprs[arc] = {{"cx", "x"}, {"cy", "y"}, {"r", "r"}};
+  for (int pass = 0; pass < 20; pass++) {
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    solver.WriteBack(s.entities);
+  }
+  const auto& out = std::get<sketch::Arc>(s.entities[0]);
+  CHECK_THAT(out.startAngle, WithinAbs(a0, 1e-12));
+  CHECK_THAT(out.endAngle, WithinAbs(a1, 1e-12));
+}
+
 // A sketch fillet must NEVER rotate a line — it only trims to the tangent
 // points and inserts the arc. These guard the reported staircase bug: a line
 // whose direction is locked only IMPLICITLY (transitively through the shared

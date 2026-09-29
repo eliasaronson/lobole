@@ -14,9 +14,11 @@
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <ElCLib.hxx>
 #include <GC_MakeSegment.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_Circle.hxx>
 #include <Precision.hxx>
 #include <ShapeFix_Wire.hxx>
 #include <Standard_Failure.hxx>
@@ -39,6 +41,7 @@
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Elips.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
@@ -274,7 +277,34 @@ Handle(Geom_BSplineCurve)
 // wire is passed through ShapeFix_Wire (reorder / reconnect / close) so greedy
 // edge order and small endpoint gaps — especially where arcs meet lines — are
 // repaired before face building (FreeCAD Sketch::toShape does the same).
-TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
+// The parameter nearest `hint` at which `circ` meets `line`, a line in the
+// circle's plane; `hint` itself when they do not meet.
+double CircleMeetsLine(const gp_Circ& circ, const gp_Lin& line, double hint) {
+  // Signed distance from the line, along its in-plane normal m, of
+  // C + r(cos t X + sin t Y) is k + A cos t + B sin t.
+  const gp_Dir m = circ.Axis().Direction().Crossed(line.Direction());
+  const gp_Vec mv(m);
+  const double k = gp_Vec(line.Location(), circ.Location()).Dot(mv);
+  const double a = circ.Radius() * gp_Vec(circ.XAxis().Direction()).Dot(mv);
+  const double b = circ.Radius() * gp_Vec(circ.YAxis().Direction()).Dot(mv);
+  const double h = std::hypot(a, b);
+  if (h < 1e-12 || std::abs(k) > h)
+    return hint;
+  const double phi = std::atan2(b, a), d = std::acos(-k / h);
+  double best = hint, bestGap = 1e300;
+  for (const double t0 : {phi + d, phi - d}) {
+    // the root's turn nearest `hint`
+    const double t = t0 + 2.0 * M_PI * std::round((hint - t0) / (2.0 * M_PI));
+    if (std::abs(t - hint) < bestGap) {
+      bestGap = std::abs(t - hint);
+      best = t;
+    }
+  }
+  return best;
+}
+
+TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop,
+                             const gp_Ax1* snapAxis) {
   const glm::vec3 n3 = plane.GetNormal();
   const gp_Dir normal(n3.x, n3.y, n3.z);
   auto toPnt = [&](const glm::vec2& uv) { return ProfilePoint(plane, uv); };
@@ -362,10 +392,26 @@ TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
 
     BRep_Builder builder;
     std::vector<TopoDS_Vertex> joints(n); // joints[i]: edge i -> edge i+1
+    std::vector<bool> onAxis(n, false);   // joints[i] was snapped to snapAxis
     for (size_t i = 0; i < n; i++) {
       const size_t next = (i + 1) % n;
       const glm::vec2 mid = (loop.edges[i].b + loop.edges[next].a) * 0.5f;
-      const gp_Pnt p = toPnt(mid);
+      gp_Pnt p = toPnt(mid);
+      // A joint on a revolve's axis goes exactly ON it. An arc that ends on
+      // the axis ends a float32 hair either side of it, and a vertex 1e-6
+      // off the axis is not a pole: MakeRevol sweeps it into a sliver and
+      // fails, at one size in several. The tolerance below grows to cover
+      // the arc's own end, as it does for any other joint.
+      if (snapAxis != nullptr) {
+        const gp_Lin axis(*snapAxis);
+        if (axis.Distance(p) < kChainTol) {
+          const gp_Vec along(snapAxis->Location(), p);
+          p = snapAxis->Location().Translated(
+              gp_Vec(snapAxis->Direction()) *
+              along.Dot(gp_Vec(snapAxis->Direction())));
+          onAxis[i] = true;
+        }
+      }
       double tol = Precision::Confusion();
       // The joint must lie on each adjacent curve within its tolerance. Two
       // terms per neighbour: the distance to the traversal endpoint (angular
@@ -419,10 +465,31 @@ TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
         glm::vec3 u = plane.GetUAxis();
         gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(u.x, u.y, u.z));
         gp_Circ circ(axis, e.radius);
-        BRepBuilderAPI_MakeEdge me(circ, forward[i] ? from : to,
-                                   forward[i] ? to : from);
-        if (!addEdge(me))
-          return TopoDS_Wire();
+        const TopoDS_Vertex& v1 = forward[i] ? from : to;
+        const TopoDS_Vertex& v2 = forward[i] ? to : from;
+        const bool snap1 = onAxis[forward[i] ? (i + n - 1) % n : i];
+        const bool snap2 = onAxis[forward[i] ? i : (i + n - 1) % n];
+        if (!snap1 && !snap2) {
+          BRepBuilderAPI_MakeEdge me(circ, v1, v2);
+          if (!addEdge(me))
+            return TopoDS_Wire();
+        } else {
+          // An end on the revolve's axis is trimmed where the CIRCLE meets
+          // the axis, not where the vertex projects onto it: the projection
+          // can land a hair past the axis, and MakeRevol refuses an edge
+          // that crosses it anywhere inside its range.
+          auto param = [&](const TopoDS_Vertex& v, bool snapped) {
+            const double t = ElCLib::Parameter(circ, BRep_Tool::Pnt(v));
+            return snapped ? CircleMeetsLine(circ, gp_Lin(*snapAxis), t) : t;
+          };
+          const double t1 = param(v1, snap1);
+          double t2 = param(v2, snap2);
+          while (t2 <= t1)
+            t2 += 2.0 * M_PI;
+          BRepBuilderAPI_MakeEdge me(new Geom_Circle(circ), v1, v2, t1, t2);
+          if (!addEdge(me))
+            return TopoDS_Wire();
+        }
       } else if (e.ellipseArc) {
         // Trim a gp_Elips built on the major-axis frame (its parametrisation
         // matches EllipseArc's), ordered to the canonical sweep like the arc.
@@ -465,12 +532,13 @@ TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
   return fix.Wire();
 }
 
-TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
+TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop,
+                         const gp_Ax1* snapAxis = nullptr) {
   // OCCT edge/wire construction can throw (StdFail_NotDone and friends), and
   // several callers sit outside any try (offset, loft, sweep profiles) — an
   // escaping exception aborts the app. Contain it: a throw is a failed wire.
   try {
-    return MakeLoopWireImpl(plane, loop);
+    return MakeLoopWireImpl(plane, loop, snapAxis);
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Sketch profile: wire construction: OCCT error: {}",
               e.GetMessageString());
@@ -642,9 +710,11 @@ TopoDS_Wire OrientWire(const SketchPlane& plane, const TopoDS_Wire& wire,
 
 // Builds the planar face for one profile group (outer boundary + its holes).
 // Null face on failure. Shared by BuildPrism (extrude) and BuildRevolve.
+// `snapAxis`, for a revolve: joints within kChainTol of it land on it.
 TopoDS_Face BuildGroupFace(const SketchPlane& plane,
                            const std::vector<Loop>& loops,
-                           const ProfileGroup& group) {
+                           const ProfileGroup& group,
+                           const gp_Ax1* snapAxis = nullptr) {
   glm::vec3 o = plane.GetOrigin();
   glm::vec3 nrm = plane.GetNormal();
   glm::vec3 u = plane.GetUAxis();
@@ -652,12 +722,12 @@ TopoDS_Face BuildGroupFace(const SketchPlane& plane,
              gp_Dir(u.x, u.y, u.z));
   gp_Pln pln(ax3);
 
-  TopoDS_Wire outerWire = MakeLoopWire(plane, loops[group.outer]);
+  TopoDS_Wire outerWire = MakeLoopWire(plane, loops[group.outer], snapAxis);
   if (outerWire.IsNull())
     return TopoDS_Face();
   BRepBuilderAPI_MakeFace faceMaker(pln, OrientWire(plane, outerWire, true));
   for (size_t i : group.holes) {
-    TopoDS_Wire hole = MakeLoopWire(plane, loops[i]);
+    TopoDS_Wire hole = MakeLoopWire(plane, loops[i], snapAxis);
     if (hole.IsNull())
       return TopoDS_Face();
     faceMaker.Add(OrientWire(plane, hole, false));
@@ -956,7 +1026,7 @@ CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
     builder.MakeCompound(compound);
     TopoDS_Shape single;
     for (const ProfileGroup& group : groups) {
-      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      TopoDS_Face face = BuildGroupFace(plane, loops, group, &ax);
       if (face.IsNull()) {
         return CADShape();
       }
@@ -1326,7 +1396,7 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
     TopoDS_Shape single;
     int faceOffset = 0;
     for (const ProfileGroup& group : groups) {
-      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      TopoDS_Face face = BuildGroupFace(plane, loops, group, &ax);
       if (face.IsNull()) {
         ProfileFail(error, "failed to build a face for the profile "
                            "(bad wire geometry, see log)");

@@ -156,7 +156,7 @@ void Solver::Load(const SketchFeature& sketch) {
   }
   (void)nParams; // deque addresses are stable; no reservation needed
 
-  auto addPoint = [&](uint32_t entity, uint8_t which, glm::vec2 p) {
+  auto addPoint = [&](uint32_t entity, uint8_t which, glm::dvec2 p) {
     im.params.push_back(p.x);
     im.params.push_back(p.y);
     GCS::Point gp(&im.params[im.params.size() - 2],
@@ -217,8 +217,17 @@ void Solver::Load(const SketchFeature& sketch) {
       // coincident/distance/fixed on an arc endpoint need no arc-specific code.
       GCS::Arc ga;
       ga.center = addPoint(id, 0, ar->center);
-      ga.start = addPoint(id, 1, ArcPointUV(*ar, 1));
-      ga.end = addPoint(id, 2, ArcPointUV(*ar, 2));
+      // The endpoints in double, from the same centre, radius and angles the
+      // arc rules read: through float32 (ArcPointUV) they start ~1e-6 off
+      // the rules, the solve "corrects" the ANGLES to match, and the write-
+      // back keeps it -- an expression-driven sketch drifted a little on
+      // every regen until its arcs no longer met their neighbours.
+      auto onArc = [&](double a) {
+        return glm::dvec2(ar->center) +
+               ar->radius * glm::dvec2(std::cos(a), std::sin(a));
+      };
+      ga.start = addPoint(id, 1, onArc(ar->startAngle));
+      ga.end = addPoint(id, 2, onArc(ar->endAngle));
       im.radii.push_back(ar->radius);
       ga.rad = &im.radii.back();
       im.angles.push_back(ar->startAngle);
