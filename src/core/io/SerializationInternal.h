@@ -18,7 +18,8 @@
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
     134; // v134: a drawing view's `rotation_deg` -- the view turned on the
-         //      sheet about its own direction (absent = 0).
+         //      sheet about its own direction (absent = 0); a dimension
+         //      ref's `extreme` (left/right/top/bottom, absent = none).
          // v133: a Derived's `configuration` -- the source configuration the
          //      copy is taken in (absent = the source's active one).
          // v132: how a machine's rotary is INSTALLED (`rotary`: along,

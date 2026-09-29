@@ -136,13 +136,18 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Projected 2D curves of a view (for picking/dimensioning).", "view",
      remote::NoFlags,
      "geometry[]{kind,source_id,ref,visible,source_feature?,type?,center?,"
-     "radius?,closed?,p1?,p2?}"},
+     "radius?,closed?,p1?,p2?,bbox?}"},
     {"add_drawing_dim",
      "Add a driven dimension between picked view geometry {view, kind, refs: "
-     "[{edge | sil_face: {feature_id, element}, end?: 1 | 2, occurrence?}]}. "
+     "[{edge | sil_face: {feature_id, element}, end?: 1 | 2, extreme?, "
+     "occurrence?}]}. "
      "Each ref is a curve list_drawing_geometry gives (a silhouette as "
      "`sil_face`); `end` 1 is its first point (p1), 2 its last (p2), and "
      "without one a circle means its centre and anything else its midpoint. "
+     "`extreme` (left | right | top | bottom, on the sheet) is instead the "
+     "curve's point furthest that way -- the top of a curved outline, which "
+     "is neither end (the curve's `bbox` in list_drawing_geometry says "
+     "where). "
      "`offset` is the "
      "label's placement in SHEET millimetres from the measured geometry (not "
      "model mm — the view's scale sits between them); omit it and it is "
@@ -971,6 +976,14 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
           e["type"] = c.curveType == 0 ? "line" : "curve";
           e["p1"] = {c.points.front().x, c.points.front().y};
           e["p2"] = {c.points.back().x, c.points.back().y};
+          // Where the curve reaches, for a ref's `extreme`: a curved
+          // outline's top is neither p1 nor p2.
+          glm::dvec2 lo(1e30), hi(-1e30);
+          for (const glm::dvec2& q : c.points) {
+            lo = glm::min(lo, q);
+            hi = glm::max(hi, q);
+          }
+          e["bbox"] = {{lo.x, lo.y}, {hi.x, hi.y}};
         }
       };
       const auto found = seen.find(key);
@@ -1031,6 +1044,14 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       ProjRef r;
       r.viewId = viewId;
       r.end = rj.value("end", 0);
+      r.extreme = rj.value("extreme", std::string{});
+      if (!IsProjRefExtreme(r.extreme))
+        throw std::runtime_error("extreme is left, right, top or bottom (the "
+                                 "sheet's sides) -- got '" +
+                                 r.extreme + "'");
+      if (!r.extreme.empty() && r.end != 0)
+        throw std::runtime_error(
+            "a ref takes `end` or `extreme`, not both: one names a point");
       if (r.end < 0 || r.end > 2)
         throw std::runtime_error(
             "end is 1 (the curve's first point, p1) or 2 (its last, p2); "

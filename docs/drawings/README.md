@@ -182,9 +182,14 @@ it and the two parameters that act on it (`hidden`, `quality`).
 ## Dimensions and annotation
 
 A dimension references projected geometry through `ProjRef {viewId,
-occurrenceId, edge | silFace, end}`: a sharp or smooth edge by its source
-edge's `ElementRef`, a silhouette by its generating face's, `occurrenceId`
-for an assembly source, `end` 0 for the whole edge or 1/2 for an endpoint.
+occurrenceId, edge | silFace, end, extreme}`: a sharp or smooth edge by its
+source edge's `ElementRef`, a silhouette by its generating face's,
+`occurrenceId` for an assembly source, `end` 0 for the whole edge or 1/2 for
+an endpoint, or `extreme` (`left`, `right`, `top`, `bottom`) for the curve's
+point furthest toward that side of the sheet. That last is the top of a
+curved outline — a knight's head, a dome — which is neither end of its curve
+nor its midpoint; `list_drawing_geometry` gives each curve's `bbox` so a
+caller can see where it reaches.
 `drawing::ResolveDim` (`src/core/drawing/DrawingDimension.{h,cpp}`) matches
 the refs against the view's current curves on every update and measures. A
 reference that no longer resolves is **dangling**: flagged, drawn in the

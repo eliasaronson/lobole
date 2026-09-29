@@ -54,6 +54,17 @@ bool RefPoint(const SheetView& v, const ProjRef& r, glm::dvec2& out) {
       }
   if (pts.empty())
     return false;
+  // The point furthest toward one side of the sheet, over every segment of
+  // the curve, hidden ones too: an extreme is the shape's, not what shows.
+  if (!r.extreme.empty()) {
+    const bool alongX = r.extreme == "left" || r.extreme == "right";
+    const double sign = r.extreme == "left" || r.extreme == "bottom" ? -1 : 1;
+    out = pts.front();
+    for (const glm::dvec2& p : pts)
+      if (sign * (alongX ? p.x - out.x : p.y - out.y) > 0.0)
+        out = p;
+    return true;
+  }
   // An end is an end of the curve list_drawing_geometry REPORTS: the first
   // visible segment of the ref (else its first), whose front and back are
   // p1 and p2 there. Taken off every segment joined, the ends of a circle

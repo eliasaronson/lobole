@@ -142,6 +142,11 @@ void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up) {
   up = v->up;
 }
 
+bool IsProjRefExtreme(const std::string& s) {
+  return s.empty() || s == "left" || s == "right" || s == "top" ||
+         s == "bottom";
+}
+
 void ViewAxes(const DrawingView& view, glm::dvec3& viewDir, glm::dvec3& up) {
   OrientationAxes(view.orientation, viewDir, up);
   if (view.rotationDeg == 0.0)

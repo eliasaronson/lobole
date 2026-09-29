@@ -1721,6 +1721,8 @@ json ProjRefJson(const ProjRef& r) {
     j["edge"] = ElementRefJson(r.edge);
   if (r.silFace.IsSet())
     j["sil_face"] = ElementRefJson(r.silFace);
+  if (!r.extreme.empty()) // v134
+    j["extreme"] = r.extreme;
   return j;
 }
 
@@ -1729,6 +1731,10 @@ ProjRef ProjRefFromJson(const json& j) {
   r.viewId = j.value("view", uint64_t{0});
   r.occurrenceId = j.value("occurrence", uint64_t{0});
   r.end = j.value("end", 0);
+  r.extreme = j.value("extreme", std::string{});
+  if (!IsProjRefExtreme(r.extreme))
+    throw std::runtime_error("unknown dimension ref extreme '" + r.extreme +
+                             "' (expected left, right, top or bottom)");
   if (j.contains("edge"))
     r.edge = ElementRefFromJson(j.at("edge"));
   if (j.contains("sil_face"))

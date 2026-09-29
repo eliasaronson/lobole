@@ -43,6 +43,35 @@
       "hidden": []
     }
   ],
-  "dims": [],
+  "dims": [
+    {
+      "id": 3,
+      "kind": "distance_x",
+      "view": 1,
+      "refs": [
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0"
+          }
+        },
+        {
+          "view": 1,
+          "end": 0,
+          "sil_face": {
+            "feature_id": 2,
+            "element": "2/g5"
+          },
+          "extreme": "top"
+        }
+      ],
+      "label_offset": [
+        12.0,
+        0.0
+      ]
+    }
+  ],
   "notes": []
 }

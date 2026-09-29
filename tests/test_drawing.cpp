@@ -315,6 +315,39 @@ TEST_CASE("A circle's end is its end, not its centre", "[drawing][dimension]") {
   CHECK_THAT(r.value, Catch::Matchers::WithinAbs(19.0, 1e-9)); // centre to top
 }
 
+// The top of a knight's head is the interior of its outline curve: both ends
+// sit on the base, and the midpoint is the bbox centre. `extreme` is the
+// curve's point furthest toward a side of the sheet.
+TEST_CASE("A ref's extreme is the curve's furthest point that way",
+          "[drawing][dimension]") {
+  drawing::SheetView view;
+  view.viewId = 1;
+  view.hasGeometry = true;
+  drawing::SheetCurve base; // the base's top, a line at x = 19.4
+  base.edge = ElementRef{2, "base"};
+  base.sourceId = 1;
+  base.points = {{19.4, -8}, {19.4, 8}};
+  base.visible = true;
+  drawing::SheetCurve head = base; // an arch out to x = 54.4 and back
+  head.edge = ElementRef{2, "head"};
+  head.curveType = 1;
+  head.points = {{19.4, -5}, {40, -4}, {54.4, 1}, {45, 4}, {19.4, 5}};
+  view.curves = {base, head};
+  ProjRef from = EdgeRef(2, "base"), to = EdgeRef(2, "head");
+  to.extreme = "right";
+  const drawing::ResolvedDim d =
+      drawing::ResolveDim(MakeDim(DrawingDimKind::DistanceX, {from, to}), view);
+  REQUIRE(d.resolved);
+  CHECK_THAT(d.value, Catch::Matchers::WithinAbs(35.0, 1e-9));
+  to.extreme = "top";
+  const drawing::ResolvedDim y = drawing::ResolveDim(
+      MakeDim(DrawingDimKind::DistanceY, {EdgeRef(2, "base"), to}), view);
+  REQUIRE(y.resolved);
+  CHECK_THAT(y.value, Catch::Matchers::WithinAbs(5.0, 1e-9)); // 0 to 5
+  CHECK(IsProjRefExtreme("bottom"));
+  CHECK_FALSE(IsProjRefExtreme("up"));
+}
+
 TEST_CASE("A fastener callout names the standard part it points at",
           "[drawing][dimension][parts]") {
   // docs/parts/README.md#bom-and-drawings. The text is not composed here and
@@ -1166,6 +1199,10 @@ TEST_CASE("Drawing golden loads and round-trips (v134 view rotation)",
   REQUIRE(dwg->ViewCount() == 2);
   CHECK(dwg->GetViews()[0].rotationDeg == 90.0);
   CHECK(dwg->GetViews()[1].rotationDeg == 0.0);
+  // ...and a dimension ref's `extreme`, beside one that has none.
+  REQUIRE(dwg->DimCount() == 1);
+  CHECK(dwg->GetDims()[0].refs[0].extreme.empty());
+  CHECK(dwg->GetDims()[0].refs[1].extreme == "top");
 
   const fs::path tmp = fs::temp_directory_path() / "dwg_v134_rt.json";
   REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
@@ -1173,7 +1210,20 @@ TEST_CASE("Drawing golden loads and round-trips (v134 view rotation)",
   REQUIRE(reloaded != nullptr);
   CHECK(reloaded->GetViews()[0].rotationDeg == 90.0);
   CHECK(reloaded->GetViews()[1].rotationDeg == 0.0);
+  CHECK(reloaded->GetDims()[0].refs[1].extreme == "top");
   fs::remove(tmp);
+
+  // An extreme this build does not know is refused, not read as none.
+  std::ifstream in(golden);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  std::string text = ss.str();
+  const std::string from = "\"extreme\": \"top\"";
+  text.replace(text.find(from), from.size(), "\"extreme\": \"up\"");
+  const fs::path bad = fs::temp_directory_path() / "dwg_v134_bad.json";
+  std::ofstream(bad) << text;
+  CHECK(testio::LoadDrawing(bad.string()) == nullptr);
+  fs::remove(bad);
 }
 
 TEST_CASE("A view's rotation turns what it draws, not where it looks",

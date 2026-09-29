@@ -88,11 +88,8 @@ def fits(app):
 
 
 def drawing(app):
-    # read on the part's own tab: list_configurations answers for the
-    # active one only
-    app.part("piece", create=False).activate()
     piece_cfgs = {c["name"]: c["id"] for c in app.call(
-        "list_configurations")["configurations"]}
+        "list_configurations", part="piece")["configurations"]}
     d = app.call("create_drawing", name="Pieces",
                  sheet={"size": "a3", "landscape": True,
                         "title_block": {"project": "Chess set",
@@ -101,41 +98,36 @@ def drawing(app):
                                         "notes": "king_h = 85; every size "
                                                  "follows it"}})
     views = {}
-    # The pieces lie along X, so each view is as wide as its piece is tall:
-    # two columns of three at 1:1, each view clear of the next by room for
-    # its dimensions.
-    slots = [(40.0, 245.0), (40.0, 165.0), (40.0, 90.0),
-             (230.0, 245.0), (230.0, 165.0), (230.0, 90.0)]
-    for kind, pos in zip(["king", "queen", "bishop", "knight", "rook",
-                          "pawn"], slots):
+    # The pieces lie along X; each front view is turned 90 so it stands
+    # upright, one row of six at 1:1 with room between for the dimensions.
+    for i, kind in enumerate(["king", "queen", "bishop", "knight", "rook",
+                              "pawn"]):
         v = app.call("add_drawing_view", source="piece", orientation="front",
-                     scale=1.0, position=list(pos),
-                     configuration=piece_cfgs[kind])
+                     scale=1.0, position=[45.0 + 62.0 * i, 160.0],
+                     rotation_deg=90.0, configuration=piece_cfgs[kind])
         views[kind] = v["id"]
     app.call("update_drawing", budget_s=120)
-    # Each view's height and base: the underside is its longest line at the
-    # low X end, the top whatever reaches furthest along X.
+    # Each view's height and base: the underside is the long level line at
+    # the bottom; the top is the highest point of whatever curve reaches
+    # it -- an `extreme`, because on a ball, a dome or the knight's head it
+    # is neither end of its curve.
     for kind, vid in views.items():
         # edges and silhouettes both: a turned part's outline in a side view
         # is mostly silhouette. A silhouette is picked as `sil_face`.
         geo = [g for g in app.call("list_drawing_geometry", view=vid)
-               ["geometry"] if g.get("visible") and "p1" in g
+               ["geometry"] if g.get("visible") and "bbox" in g
                and g.get("kind") in ("edge", "silhouette")]
-        # Each extreme is an edge's END, picked as such: a distance from an
-        # edge alone measures from its midpoint, and the edge that reaches
-        # the top is often a slope that only ends there.
-        ends = [(g, k, g["p1" if k == 0 else "p2"]) for g in geo
-                for k in (0, 1)]
-        ref = lambda g, k: {("sil_face" if g["kind"] == "silhouette"
-                             else "edge"): g["ref"],
-                            "occurrence": g["source_id"], "end": k + 1}
-        xmin = min(p[0] for _, _, p in ends)
-        base = [(g, k, p) for g, k, p in ends if abs(p[0] - xmin) < 1e-3]
-        lo = min(base, key=lambda e: e[2][1])
-        hi = max(base, key=lambda e: e[2][1])
-        top = max(ends, key=lambda e: e[2][0])
-        for kind_, refs in (("distance_x", [ref(*lo[:2]), ref(*top[:2])]),
-                            ("distance_y", [ref(*lo[:2]), ref(*hi[:2])])):
+        ref = lambda g, **k: dict({("sil_face" if g["kind"] == "silhouette"
+                                    else "edge"): g["ref"],
+                                   "occurrence": g["source_id"]}, **k)
+        ymin = min(g["bbox"][0][1] for g in geo)
+        under = max((g for g in geo if abs(g["bbox"][1][1] - ymin) < 1e-3),
+                    key=lambda g: g["bbox"][1][0] - g["bbox"][0][0])
+        top = max(geo, key=lambda g: g["bbox"][1][1])
+        for kind_, refs in (("distance_y", [ref(under),
+                                            ref(top, extreme="top")]),
+                            ("distance_x", [ref(under, end=1),
+                                            ref(under, end=2)])):
             try:
                 app.call("add_drawing_dim", view=vid, kind=kind_, refs=refs)
             except Exception as e:

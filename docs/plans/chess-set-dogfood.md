@@ -32,13 +32,6 @@ Phase 1's profile change lands before this, so the pawn needs no rest pass.
   inside radius is at least 1.6 mm. Verified: each blank's `cam_verify` with
   rough and finish only leaves nothing over the finish's cusp, and the rest
   op is dropped from the jobs.
-- **The knight's head can be dimensioned.** Its filleted outline's edges have
-  no element names, so `list_drawing_geometry` skips them. Find where the
-  fillet leaves edges unnamed (`topo::EdgeBlendNamed`, the `U`/`L` passes in
-  `ElementHistory.cpp`) and name them. Test: every edge of a filleted spline
-  extrude has a name, and a drawing height dimension to the knight's top
-  reads 54.4.
-
 ## 2. Picking faces by what made them
 
 The round's biggest cost was face picking: every operation needed a filter by

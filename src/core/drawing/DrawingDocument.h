@@ -75,7 +75,15 @@ struct ProjRef {
   ElementRef edge;    // set for sharp/smooth edges
   ElementRef silFace; // set for silhouettes (the generating face)
   int end = 0;        // 0 = whole edge, 1|2 = an endpoint vertex
+  // The curve's point furthest toward one side of the sheet: "left",
+  // "right", "top" or "bottom"; empty = `end` decides (v134). The top of a
+  // turned piece is the interior of its outline curve -- no end and no
+  // midpoint of anything -- and is what a height dimension measures to.
+  std::string extreme;
 };
+
+// Whether `s` is a ProjRef extreme a file or a caller may name ("" too).
+[[nodiscard]] bool IsProjRefExtreme(const std::string& s);
 
 // A view on the sheet: a base view of a source document in a named
 // orientation, or an orthographically-folded child kept aligned to its base.
