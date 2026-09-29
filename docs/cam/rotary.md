@@ -89,7 +89,11 @@ the axis out to the centre's radius over its length, then the body's radius.
   tailstock, widened by the tool's radius and the clearance, by
   `ClipToMachine`'s clip-retract-reenter (which carries A across a split).
   What it leaves out is `Toolpath::holdingClippedMm`; an operation whose
-  whole cut lies in the holding fails, saying so.
+  whole cut lies in the holding fails, saying so. Both it and `CutLength`
+  (`cut_length_mm`) measure the TIP's path (`SegmentLength`): a move that
+  turns the part counts the arc it turns under the tool, so a spiral's
+  clipped turns count as turns — in XYZ alone they came to their axial
+  advance, and a ring at one X to nothing.
 - **Verifier.** The tool is a cylinder of its radius from the tip up; it
   collides where its nearest approach to the axis over its X slab is inside
   the envelope's radius there (`CheckHolding`, in `Inspect` and
@@ -167,11 +171,18 @@ the full kernel's`), and a smooth turned surface visits a fraction of it.
 - **`parallel`** (default): passes along X, one A each, the part turning
   between them — a rotary raster. `stepover` is a fraction of the cutter
   converted to millimetres of arc at the part's widest radius.
-- **`spiral`**: one helix end to end, A turning while the tool cuts —
+- **`spiral`**: one helix end to end (one per band on a rest pass,
+  [Rest bands](#rest-bands)), A turning while the tool cuts —
   continuous 4-axis. Pitch is `stepover` measured along the surface: the
   axial advance per turn shrinks by `1/sqrt(1 + s²)`, with `s` the steepest
   slope within a pitch either side of the cutter (looking both ways, or the
-  pitch springs back at the foot of each wall). Angular step is derived so one
+  pitch springs back at the foot of each wall) — but never below one cell of
+  the CL map per turn, which is as close as the map can tell two turns apart.
+  A wall one cell wide is a slope in the hundreds, and without the floor it
+  spaced the turns microns apart across the whole window round it; a part
+  that is not round has such a wall at some angle almost everywhere
+  (`cam spiral: turns bunch on a wall, but never closer than a cell`).
+  Angular step is derived so one
   step's arc at the widest radius is no longer than the sample step (or the
   cell). Radius by bilinear lookup wrapping in θ; cells the tool reaches
   nothing in ride at the blank radius (a spiral cannot break without a
@@ -225,12 +236,43 @@ the full kernel's`), and a smooth turned surface visits a fraction of it.
   left is found on ITS OWN grid, exactly: both cutters' surfaces and
   envelopes (`ToolEnvelope`) there, the leftover where the larger one's
   stands more than the tolerance above both the part and the smaller one's,
-  grown by the smaller cutter's radius and read onto the rest pass's grid by
-  the nearest cell. The raster's `RestMask` bounds the envelopes over blocks
+  grown by the smaller cutter's radius — round the axis in the arc of the
+  leftover cell's OWN radius, not one pitch for the whole map (the middle
+  cell's, which on a turned part may be a neck or off the part) — and read
+  onto the rest pass's grid by the nearest cell. It is then cut
+  [band by band](#rest-bands). The raster's `RestMask` bounds the envelopes over blocks
   instead (the larger tip the highest in each, the smaller the lowest), which
   overstates the leftover by a block's rise; a turned part is slopes end to
   end, and on the chess pawn blank that made the rest pass cut 135 m, twice
   its finish.
+
+### Rest bands
+
+A rest pass is cut per **band**: each run of columns along the axis where the
+rest mask has a cell anywhere round the part, with runs closer than the
+cutter's radius joined into one. Each band gets its own pass set and the tool
+retracts to the safe radius between bands; where nothing is left there is no
+cut at all.
+
+- **`spiral`**: one helix per band, rings at the band's ends. Inside the band
+  it follows the WHOLE contact surface round the axis — a spiral cannot break,
+  so cells the finish already reached are re-cut at the surface rather than
+  crossed in the air and fed back down beside the leftover. Wound over the
+  whole length, as it was, a 1.5 mm ball's rest spiral on a chess blank turned
+  the axis at its top speed through every millimetre the finish had cleaned.
+  A band is walls either side, and the spiral's pitch shrinks on walls (the
+  steepest slope within a pitch either side), so a band costs more turns per
+  millimetre than a flat.
+- **`parallel`** and **`helical`**: the band's passes over the masked surface,
+  breaking where the mask is empty as before; grouping them by band keeps a
+  pass set from rapiding between two leftovers at every angle. A zigzag link
+  is checked against the whole surface, not the masked one — an emptied cell
+  read as zero let a link turn A with the tool down through the lobe between
+  two leftovers.
+
+`cam rotary: a rest pass cuts only the bands its finish left` holds both
+patterns to it on a shaft with two grooves.
+
 - **Add operation** in the panel adds another rotary pass on a setup that
   already holds one (`cam::AddOperationType`); a 4th-axis machine with a plate
   clamped to the bed is still a 3-axis job and gets the whole-part cut-out.

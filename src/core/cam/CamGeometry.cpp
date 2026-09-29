@@ -4,6 +4,7 @@
 
 #include "core/Measure.h"
 #include "core/cam/CamAdaptive.h"
+#include "core/cam/CamRotaryFeed.h"
 
 #include <clipper2/clipper.h>
 
@@ -618,8 +619,13 @@ double Toolpath::CutLength() const {
     // Plunges too. A plunge IS cutting — `CuttingMinutes` has always counted
     // one, reading the feed off the move — so leaving it out here made a job
     // of drilled holes report 0 mm of cutting and a real number of minutes.
+    //
+    // The TIP's path (SegmentLength): a cut that turns the part travels the
+    // arc it turns under the tool as well as its XYZ. Measured in XYZ alone
+    // a spiral was its axial advance -- a few centimetres for hours of
+    // cutting -- and a ring at one X was nothing at all.
     if (moves[i].kind == Move::Kind::Cut || moves[i].kind == Move::Kind::Plunge)
-      total += glm::length(moves[i].to - moves[i - 1].to);
+      total += SegmentLength(SegmentOf(moves[i - 1], moves[i]));
   return total;
 }
 

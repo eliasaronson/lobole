@@ -112,6 +112,48 @@ TEST_CASE("cam spiral: one pitch per turn, with a closed ring at each end",
   }
 }
 
+TEST_CASE("cam spiral: turns bunch on a wall, but never closer than a cell",
+          "[cam]") {
+  // docs/cam/rotary.md#patterns-rotary_pattern. A step of 5 mm in ONE column
+  // is a slope of 100 on a 0.05 mm grid, and the turns within a pitch either
+  // side were spaced by the pitch over that: a hundredth of a millimetre, 200
+  // turns for a wall a 1 mm pitch crosses in five. A chess knight has such a
+  // wall at some angle nearly everywhere along it.
+  cam::RadiusMap map = cam::MakeRotaryStock(0.0, 10.0, 15.0, 0.05);
+  for (int j = 0; j < map.nTheta; j++)
+    for (int i = 0; i < map.nx / 2; i++)
+      map.Set(i, j, 10.0f);
+  cam::RotarySpiralRequest req;
+  req.pitch_mm = 1.0;
+  req.airRadius = 20.0;
+  const std::vector<cam::RotaryPathPoint> path =
+      cam::RotarySpiralPath(map, req);
+  REQUIRE(path.size() > 2);
+  const double turns =
+      (path.back().thetaDeg - path.front().thetaDeg) / 360.0 - 2.0; // rings
+  INFO(turns << " turns over " << map.nx * map.res << " mm");
+  // Bunched: far more than the 10 a flat of this length gets...
+  CHECK(turns > 30.0);
+  // ...and at most one a cell across the two pitches round the wall, plus
+  // the flat's one a pitch.
+  CHECK(turns <= 2.0 * req.pitch_mm / map.res + 10.0 + 1.0);
+  // Never closer than a cell, anywhere: each turn advances at least one. A
+  // turn is `perTurn` samples (the low ring's count; nothing is decimated).
+  size_t perTurn = 0;
+  while (path[perTurn].thetaDeg < 360.0 - 1e-9)
+    perTurn++;
+  size_t closest = 0;
+  double tightest = 1e9;
+  for (size_t k = perTurn; k + perTurn < path.size(); k++)
+    if (path[k + perTurn].x < map.CellX(map.nx - 1) - 1e-9 &&
+        path[k + perTurn].x - path[k].x < tightest) {
+      tightest = path[k + perTurn].x - path[k].x;
+      closest = k;
+    }
+  INFO("closest turns " << tightest << " mm apart at x " << path[closest].x);
+  CHECK(tightest >= map.res - 1e-6);
+}
+
 TEST_CASE("cam spiral: an empty cell is crossed in the air, a floor holds out",
           "[cam]") {
   cam::RadiusMap map = Uniform();

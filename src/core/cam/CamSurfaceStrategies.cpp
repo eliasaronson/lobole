@@ -249,10 +249,17 @@ std::vector<float> ToolEnvelope(int nx, int ny, double resX, SpanY spanY,
 // cell, NaN where there is none. Off the part both envelopes are just tool
 // undersides over air, and their difference -- a big ball rolling off an
 // outside edge -- is not material anyone left.
+//
+// `spanY(i, j)` is the pitch across AT that cell. On the rotary it is arc
+// length, which grows with the radius, so a leftover is grown round the axis
+// by its OWN cell's arc. One pitch for the whole map -- the middle cell's,
+// which on a turned part can be a neck or a cell off the part entirely --
+// grew a leftover near the rim most of the way round the axis.
+template <class SpanY>
 std::vector<bool> RestCells(const std::vector<float>& leftBig,
                             const std::vector<float>& leftSmall,
                             const std::vector<float>& part, int nx, int ny,
-                            double resX, double spanY, bool wrapY,
+                            double resX, SpanY spanY, bool wrapY,
                             double tolerance, double growBy) {
   std::vector<bool> left(leftBig.size(), false);
   for (size_t k = 0; k < left.size(); k++)
@@ -260,11 +267,13 @@ std::vector<bool> RestCells(const std::vector<float>& leftBig,
               leftBig[k] - std::max(leftSmall[k], part[k]) > tolerance;
   std::vector<bool> out(left.size(), false);
   const int gx = static_cast<int>(std::ceil(growBy / resX));
-  const int gy = std::min(static_cast<int>(std::ceil(growBy / spanY)), ny / 2);
   for (int j = 0; j < ny; j++)
     for (int i = 0; i < nx; i++) {
       if (!left[static_cast<size_t>(j) * nx + i])
         continue;
+      const int gy = std::min(
+          static_cast<int>(std::ceil(growBy / std::max(1e-6, spanY(i, j)))),
+          ny / 2);
       for (int dj = -gy; dj <= gy; dj++) {
         int jj = j + dj;
         if (wrapY)
@@ -359,9 +368,8 @@ RestMask(int nx, int ny, double resX, SpanY spanY, bool wrapY, BigTip bigTip,
   // Grown by the small radius and half a block's diagonal, since a block's
   // leftover may sit anywhere in it.
   const double grow = rSmall + 0.5 * std::hypot(cRes, cSpan(cx / 2, cy / 2));
-  const std::vector<bool> coarse =
-      RestCells(leftBig, leftSmall, part, cx, cy, cRes, cSpan(cx / 2, cy / 2),
-                wrapY, tolerance, grow);
+  const std::vector<bool> coarse = RestCells(
+      leftBig, leftSmall, part, cx, cy, cRes, cSpan, wrapY, tolerance, grow);
   std::vector<bool> out(static_cast<size_t>(nx) * ny, false);
   for (int j = 0; j < ny; j++)
     for (int i = 0; i < nx; i++)
@@ -426,6 +434,24 @@ double FootprintMax(const std::vector<float>& top, int nx, int ny, double resX,
     }
   }
   return best;
+}
+
+// Columns `i0`..`i1` of a rotary map, all the way round: one band of it
+// along the axis, as a map of its own that every pattern takes whole.
+RadiusMap Columns(const RadiusMap& m, int i0, int i1) {
+  if (i0 == 0 && i1 == m.nx - 1)
+    return m;
+  RadiusMap out;
+  out.x0 = m.x0 + i0 * m.res;
+  out.res = m.res;
+  out.nx = i1 - i0 + 1;
+  out.nTheta = m.nTheta;
+  out.rMax = m.rMax;
+  out.r.resize(static_cast<size_t>(out.nx) * out.nTheta);
+  for (int j = 0; j < m.nTheta; j++)
+    for (int i = i0; i <= i1; i++)
+      out.Set(i - i0, j, m.At(i, j));
+  return out;
 }
 
 // 4-axis finishing (docs/cam/rotary.md#continuous-surface_rotary), by the op's
@@ -528,6 +554,12 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
   std::vector<float> restTop;
   double restAbove = 0.0;
   bool restKnown = false;
+  // The whole contact surface, before a rest mask empties the cells with
+  // nothing left: what a spiral follows inside a leftover band, where it
+  // cannot break (below). And the columns along the axis that have any
+  // leftover at all -- empty when this is not a rest pass.
+  const RadiusMap clWhole = cl;
+  std::vector<bool> restCols;
 
   // Rest machining: cut only where the larger cutter that finished before
   // could not reach -- where its envelope stands proud of this one's.
@@ -579,7 +611,7 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     const double tol = std::max(0.02, 2.0 * cusp);
     const double midSpan = bigSpan(bnx / 2, bny / 2);
     const std::vector<bool> coarse =
-        RestCells(leftBig, leftSmall, partBig, bnx, bny, bigRes, midSpan, true,
+        RestCells(leftBig, leftSmall, partBig, bnx, bny, bigRes, bigSpan, true,
                   tol, 0.5 * tool.diameter + 0.5 * std::hypot(bigRes, midSpan));
     // Onto this pass's grid, nearest cell; and how high the leftover stands
     // where there is some, for the entries.
@@ -599,12 +631,15 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
       }
     }
     size_t kept = 0;
+    restCols.assign(static_cast<size_t>(cl.nx), false);
     for (int j = 0; j < cl.nTheta; j++)
       for (int i = 0; i < cl.nx; i++) {
         if (!cut[static_cast<size_t>(j) * cl.nx + i])
           cl.Set(i, j, 0.0f);
-        else if (cl.At(i, j) > 0.0f)
+        else if (cl.At(i, j) > 0.0f) {
           kept++;
+          restCols[static_cast<size_t>(i)] = true;
+        }
       }
     if (kept == 0) {
       tp.error = "nothing is left for it: T" + std::to_string(op.restFromTool) +
@@ -705,6 +740,30 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     go(Move::Kind::Plunge, x, r, a, tool.feedPlunge);
   };
 
+  // The BANDS along the axis a pass set is cut over
+  // (docs/cam/rotary.md#rest-bands): the whole map, or on a rest pass each
+  // run of columns where the rest mask has a cell, each cut on its own and
+  // retracted between. A spiral cannot break, and wound over the whole length
+  // it turned the axis at its top speed through every millimetre the finish
+  // had already cleaned -- a 1.5 mm ball's rest pass on a chess blank spent
+  // 697 of its 828 minutes in the air. Two runs closer than the tool's radius
+  // are one band: a retract and a re-entry cost more than the turns between.
+  std::vector<std::pair<int, int>> bands;
+  if (restCols.empty()) {
+    bands.push_back({0, cl.nx - 1});
+  } else {
+    const int bridge =
+        static_cast<int>(std::floor(0.5 * tool.diameter / cl.res));
+    for (int i = 0; i < cl.nx; i++) {
+      if (!restCols[static_cast<size_t>(i)])
+        continue;
+      if (!bands.empty() && i - bands.back().second - 1 <= bridge)
+        bands.back().second = i;
+      else
+        bands.push_back({i, i});
+    }
+  }
+
   // Where the last layer's spiral left the axis, in unwound part degrees.
   // The next one starts on the same turn rather than back at zero: a spiral
   // winds the axis hundreds of turns, and restarting at theta = 0 would ask
@@ -737,126 +796,146 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     // riding along it at the cutting feed: half the rotary sampler's rough
     // was that.
     const double before = li == 0 ? blankR : floors[li - 1];
-    RadiusMap layer = cl;
-    for (float& v : layer.r) {
-      if (v <= 0.0f)
-        continue;
-      const double target =
-          floorR > 0.0 ? std::max(static_cast<double>(v), floorR) : v;
-      if (std::max(static_cast<double>(v), before) <= target + 1e-3)
-        v = 0.0f;
-      else
-        v = static_cast<float>(target);
-    }
+    const auto layerOf = [&](const RadiusMap& from) {
+      RadiusMap layer = from;
+      for (float& v : layer.r) {
+        if (v <= 0.0f)
+          continue;
+        const double target =
+            floorR > 0.0 ? std::max(static_cast<double>(v), floorR) : v;
+        if (std::max(static_cast<double>(v), before) <= target + 1e-3)
+          v = 0.0f;
+        else
+          v = static_cast<float>(target);
+      }
+      return layer;
+    };
+    const RadiusMap layerAll = layerOf(cl);
+    // A spiral cannot break, so inside a band it follows the WHOLE surface
+    // round the axis -- cells the finish already reached re-cut at the
+    // surface -- rather than climbing out to the air at every turn and
+    // feeding back down beside the leftover.
+    const bool spiral = op.rotaryPattern == RotaryPattern::Spiral;
+    const RadiusMap spiralAll =
+        spiral && !restCols.empty() ? layerOf(clWhole) : RadiusMap{};
 
-    if (op.rotaryPattern == RotaryPattern::Spiral) {
-      RotarySpiralRequest req;
-      req.pitch_mm = pitch;
-      req.sampleStep_mm = op.sampleStep;
-      req.tolerance_mm = cusp * 0.25;
-      // Where the tool reaches nothing, the helix crosses outside the blank.
-      req.airRadius = blankR + 1.0;
-      std::vector<RotaryPathPoint> path = RotarySpiralPath(layer, req);
-      if (path.size() < 2)
-        continue;
-      const double shift = std::ceil(thetaCarry / 360.0) * 360.0;
-      for (RotaryPathPoint& q : path)
-        q.thetaDeg += shift;
-      thetaCarry = path.back().thetaDeg;
-      const RotaryPathPoint& p0 = path.front();
-      enter(li, p0.x, p0.r, p0.thetaDeg);
-      for (size_t k = 1; k < path.size(); k++)
-        go(Move::Kind::Cut, path[k].x, path[k].r, 90.0 - path[k].thetaDeg,
-           tool.feedCut);
-      go(Move::Kind::Rapid, path.back().x, safeR, 90.0 - path.back().thetaDeg,
-         0.0);
-      continue;
-    }
+    for (const auto& [b0, b1] : bands) {
+      const RadiusMap layer = Columns(layerAll, b0, b1);
 
-    if (lead != 0.0) {
-      RotaryHelicalRequest req;
-      req.lead_mm = lead;
+      if (spiral) {
+        RotarySpiralRequest req;
+        req.pitch_mm = pitch;
+        req.sampleStep_mm = op.sampleStep;
+        req.tolerance_mm = cusp * 0.25;
+        // Where the tool reaches nothing, the helix crosses outside the blank.
+        req.airRadius = blankR + 1.0;
+        std::vector<RotaryPathPoint> path = RotarySpiralPath(
+            restCols.empty() ? layer : Columns(spiralAll, b0, b1), req);
+        if (path.size() < 2)
+          continue;
+        const double shift = std::ceil(thetaCarry / 360.0) * 360.0;
+        for (RotaryPathPoint& q : path)
+          q.thetaDeg += shift;
+        thetaCarry = path.back().thetaDeg;
+        const RotaryPathPoint& p0 = path.front();
+        enter(li, p0.x, p0.r, p0.thetaDeg);
+        for (size_t k = 1; k < path.size(); k++)
+          go(Move::Kind::Cut, path[k].x, path[k].r, 90.0 - path[k].thetaDeg,
+             tool.feedCut);
+        go(Move::Kind::Rapid, path.back().x, safeR, 90.0 - path.back().thetaDeg,
+           0.0);
+        continue;
+      }
+
+      if (lead != 0.0) {
+        RotaryHelicalRequest req;
+        req.lead_mm = lead;
+        req.stepover_mm = pitch;
+        req.sampleStep_mm = op.sampleStep;
+        req.tolerance_mm = cusp * 0.25;
+        std::vector<std::vector<RotaryPathPoint>> passes =
+            RotaryHelicalPasses(layer, req);
+        if (passes.empty())
+          continue;
+        // Each layer starts on the turn the last one ended on: a pass winds A
+        // by the twist's turns and zigzag unwinds it, but an odd number of
+        // passes leaves the axis a turn or two round.
+        const double shift =
+            360.0 *
+            std::round((thetaCarry - passes.front().front().thetaDeg) / 360.0);
+        for (std::vector<RotaryPathPoint>& pass : passes) {
+          for (RotaryPathPoint& q : pass)
+            q.thetaDeg += shift;
+          const RotaryPathPoint& p0 = pass.front();
+          enter(li, p0.x, p0.r, p0.thetaDeg);
+          for (size_t k = 1; k < pass.size(); k++)
+            go(Move::Kind::Cut, pass[k].x, pass[k].r, 90.0 - pass[k].thetaDeg,
+               tool.feedCut);
+          go(Move::Kind::Rapid, pass.back().x, safeR,
+             90.0 - pass.back().thetaDeg, 0.0);
+          thetaCarry = pass.back().thetaDeg;
+        }
+        continue;
+      }
+
+      RotaryParallelRequest req;
       req.stepover_mm = pitch;
       req.sampleStep_mm = op.sampleStep;
-      req.tolerance_mm = cusp * 0.25;
-      std::vector<std::vector<RotaryPathPoint>> passes =
-          RotaryHelicalPasses(layer, req);
-      if (passes.empty())
-        continue;
-      // Each layer starts on the turn the last one ended on: a pass winds A
-      // by the twist's turns and zigzag unwinds it, but an odd number of
-      // passes leaves the axis a turn or two round.
-      const double shift =
-          360.0 *
-          std::round((thetaCarry - passes.front().front().thetaDeg) / 360.0);
-      for (std::vector<RotaryPathPoint>& pass : passes) {
-        for (RotaryPathPoint& q : pass)
-          q.thetaDeg += shift;
-        const RotaryPathPoint& p0 = pass.front();
-        enter(li, p0.x, p0.r, p0.thetaDeg);
-        for (size_t k = 1; k < pass.size(); k++)
-          go(Move::Kind::Cut, pass[k].x, pass[k].r, 90.0 - pass[k].thetaDeg,
-             tool.feedCut);
-        go(Move::Kind::Rapid, pass.back().x, safeR, 90.0 - pass.back().thetaDeg,
-           0.0);
-        thetaCarry = pass.back().thetaDeg;
+      // Neighbouring passes LINKED at depth: a zigzag pass ends at the end the
+      // next one starts, a stepover round, and turning A there with the tool
+      // down cuts only the strip that pass cuts anyway. Retracting to the safe
+      // radius and plunging again for every pass was 55 m of rapids on the
+      // rotary sampler. Only within a layer, only between ends that meet, and
+      // only where the arc between them stays clear of the part's surface.
+      bool down = false;
+      double lastX = 0.0, lastR = 0.0, lastTheta = 0.0;
+      // Checked against the WHOLE surface: a rest mask empties the cells the
+      // finish reached, and read as zero those let a link turn A with the
+      // tool down through a lobe standing between two leftovers.
+      const auto clearArc = [&](double x, double r0, double t0, double r1,
+                                double t1) {
+        const int i =
+            std::clamp(static_cast<int>((x - clWhole.x0) / clWhole.res), 0,
+                       clWhole.nx - 1);
+        constexpr int kSteps = 16;
+        for (int k = 0; k <= kSteps; k++) {
+          const double f = static_cast<double>(k) / kSteps;
+          const double th = glm::radians(t0 + (t1 - t0) * f);
+          const double step = 2.0 * std::numbers::pi / clWhole.nTheta;
+          int j = static_cast<int>(std::floor(th / step));
+          j = ((j % clWhole.nTheta) + clWhole.nTheta) % clWhole.nTheta;
+          if (clWhole.At(i, j) > r0 + (r1 - r0) * f + 1e-3)
+            return false;
+        }
+        return true;
+      };
+      for (const RotaryPass& pass : RotaryParallelPasses(layer, req)) {
+        if (pass.pts.size() < 2)
+          continue;
+        const double a = 90.0 - pass.thetaDeg;
+        const glm::dvec2 start = pass.pts.front();
+        const bool link =
+            down && std::abs(start.x - lastX) <= tool.diameter * 0.5 &&
+            std::abs(glm::radians(pass.thetaDeg - lastTheta)) * blankR <=
+                2.0 * pitch + 1e-6 &&
+            clearArc(start.x, lastR, lastTheta, start.y, pass.thetaDeg);
+        if (link) {
+          go(Move::Kind::Cut, start.x, start.y, a, tool.feedCut);
+        } else {
+          if (down)
+            go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
+          enter(li, start.x, start.y, pass.thetaDeg);
+        }
+        for (size_t k = 1; k < pass.pts.size(); k++)
+          go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
+        down = true;
+        lastX = pass.pts.back().x;
+        lastR = pass.pts.back().y;
+        lastTheta = pass.thetaDeg;
       }
-      continue;
-    }
-
-    RotaryParallelRequest req;
-    req.stepover_mm = pitch;
-    req.sampleStep_mm = op.sampleStep;
-    // Neighbouring passes LINKED at depth: a zigzag pass ends at the end the
-    // next one starts, a stepover round, and turning A there with the tool
-    // down cuts only the strip that pass cuts anyway. Retracting to the safe
-    // radius and plunging again for every pass was 55 m of rapids on the
-    // rotary sampler. Only within a layer, only between ends that meet, and
-    // only where the arc between them stays clear of the part's surface.
-    bool down = false;
-    double lastX = 0.0, lastR = 0.0, lastTheta = 0.0;
-    const auto clearArc = [&](double x, double r0, double t0, double r1,
-                              double t1) {
-      const int i = std::clamp(static_cast<int>((x - layer.x0) / layer.res), 0,
-                               layer.nx - 1);
-      constexpr int kSteps = 16;
-      for (int k = 0; k <= kSteps; k++) {
-        const double f = static_cast<double>(k) / kSteps;
-        const double th = glm::radians(t0 + (t1 - t0) * f);
-        const double step = 2.0 * std::numbers::pi / layer.nTheta;
-        int j = static_cast<int>(std::floor(th / step));
-        j = ((j % layer.nTheta) + layer.nTheta) % layer.nTheta;
-        if (cl.At(i, j) > r0 + (r1 - r0) * f + 1e-3)
-          return false;
-      }
-      return true;
-    };
-    for (const RotaryPass& pass : RotaryParallelPasses(layer, req)) {
-      if (pass.pts.size() < 2)
-        continue;
-      const double a = 90.0 - pass.thetaDeg;
-      const glm::dvec2 start = pass.pts.front();
-      const bool link =
-          down && std::abs(start.x - lastX) <= tool.diameter * 0.5 &&
-          std::abs(glm::radians(pass.thetaDeg - lastTheta)) * blankR <=
-              2.0 * pitch + 1e-6 &&
-          clearArc(start.x, lastR, lastTheta, start.y, pass.thetaDeg);
-      if (link) {
-        go(Move::Kind::Cut, start.x, start.y, a, tool.feedCut);
-      } else {
-        if (down)
-          go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
-        enter(li, start.x, start.y, pass.thetaDeg);
-      }
-      for (size_t k = 1; k < pass.pts.size(); k++)
-        go(Move::Kind::Cut, pass.pts[k].x, pass.pts[k].y, a, tool.feedCut);
-      down = true;
-      lastX = pass.pts.back().x;
-      lastR = pass.pts.back().y;
-      lastTheta = pass.thetaDeg;
-    }
-    if (down)
-      go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
+      if (down)
+        go(Move::Kind::Rapid, lastX, safeR, 90.0 - lastTheta, 0.0);
+    } // bands
   }
   if (tp.moves.empty())
     tp.error = "this part gives no rotary passes — check the cutter against "

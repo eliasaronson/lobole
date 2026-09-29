@@ -13,6 +13,8 @@
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
 
+#include <catch2/generators/catch_generators.hpp>
+
 #include <chrono>
 
 namespace {
@@ -770,7 +772,7 @@ TEST_CASE("cam rotary: the pruned CL equals the full kernel's",
       if (x > 18.0 && x < 18.4)
         r += 1.5; // a thin ridge
       if (x > 26.0)
-        r = 0.0; // off the part
+        r = 0.0;                 // off the part
       if (x > 21.0 && x <= 26.0) // a SQUARE section: corners, flat faces
         r = 9.0 / std::max(std::abs(std::cos(th)), std::abs(std::sin(th)));
       model.Set(i, j, static_cast<float>(std::max(0.0, r)));
@@ -1307,5 +1309,191 @@ TEST_CASE("cam rotary: indices are refused where nothing can turn the part",
   REQUIRE(paths.size() == 1);
   CHECK(paths[0].moves.empty());
   CHECK(paths[0].error.find("no rotary axis") != std::string::npos);
+}
+
+namespace {
+
+// A Phi 30 shaft 60 long with two narrow grooves turned in it, 3 mm wide
+// and 1 mm deep, at x 15 and x 42: square-cornered coves whose floor a 6 mm
+// ball sags only 0.4 mm into and a 2 mm one reaches, far enough apart that
+// nothing lies between. Shallow, so their walls do not dominate a spiral.
+std::unique_ptr<Document> GroovedShaftDoc(const double (&at)[2], double width) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 60.0));
+  uint64_t shaft = doc->GetFeature(0)->GetId();
+  for (double x : at) {
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Groove", glm::vec3(x, 0, 0), glm::vec3(1, 0, 0), 15.0, width));
+    const uint64_t groove = doc->GetFeatures().back()->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>("Cut", shaft, groove,
+                                                     BooleanOp::Subtract));
+    shaft = doc->GetFeatures().back()->GetId();
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Core", glm::vec3(x, 0, 0), glm::vec3(1, 0, 0), 14.0, width));
+    const uint64_t core = doc->GetFeatures().back()->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>("Shaft", shaft, core,
+                                                     BooleanOp::Union));
+    shaft = doc->GetFeatures().back()->GetId();
+  }
+  return doc;
+}
+
+} // namespace
+
+TEST_CASE("cam rotary: a rest pass cuts only the bands its finish left",
+          "[cam][slow]") {
+  // docs/cam/rotary.md#rest-bands. A rest spiral wound ONE helix over the
+  // whole turned length, through the air where the finish had left nothing:
+  // a 1.5 mm ball's on a chess blank was 697 of its 828 minutes in the air.
+  // And its mask was grown round the axis by the arc at the map's middle
+  // cell, not the leftover's own, which marked far more than was left.
+  const double at[2] = {15.0, 42.0};
+  const double width = 3.0;
+  auto doc = GroovedShaftDoc(at, width);
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  setup.safeZ = 30.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Tool small = ShapedTool(cam::ToolType::Ball, 2.0);
+  small.number = 2;
+  setup.tools.push_back(small);
+
+  cam::Operation f = cam::DeriveOperation(setup, doc->GetBodies(),
+                                          cam::OpType::SurfaceRotary, {}, 1)
+                         .op;
+  f.id = 1;
+  f.stepover = 0.25;
+  setup.operations.push_back(f);
+  const cam::DerivedOp derived = cam::DeriveRest(setup, doc->GetBodies(), 2);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+
+  const auto pattern =
+      GENERATE(cam::RotaryPattern::Parallel, cam::RotaryPattern::Spiral);
+  INFO("pattern " << static_cast<int>(pattern));
+  cam::Operation rest = derived.op;
+  rest.id = 2;
+  rest.stepover = 0.25;
+  rest.rotaryPattern = pattern;
+  // The same cutter over the whole part: what the rest pass is measured
+  // against.
+  cam::Operation whole = rest;
+  whole.restFromTool = 0;
+
+  cam::Setup withRest = setup;
+  withRest.operations.push_back(rest);
+  cam::Setup withWhole = setup;
+  withWhole.operations.push_back(whole);
+  const auto r = cam::GenerateAll(withRest, doc->GetBodies());
+  const auto w = cam::GenerateAll(withWhole, doc->GetBodies());
+  REQUIRE(r.size() == 2);
+  REQUIRE(w.size() == 2);
+  INFO(r[1].error);
+  REQUIRE(r[1].error.empty());
+  REQUIRE(w[1].error.empty());
+
+  // Every move that is not a retract stays within a groove, grown by the
+  // small ball's radius and a cell of the big one's grid.
+  const double reach = 0.5 * small.diameter + 1.0;
+  std::set<int> visited;
+  for (size_t k = 1; k < r[1].moves.size(); k++) {
+    const cam::Move& m = r[1].moves[k];
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    int band = -1;
+    for (int b = 0; b < 2; b++)
+      if (m.to.x >= at[b] - reach && m.to.x <= at[b] + width + reach)
+        band = b;
+    INFO("cut at x " << m.to.x);
+    CHECK(band >= 0);
+    visited.insert(band);
+  }
+  CHECK(visited.size() == 2); // both grooves, and nothing between them
+
+  // A small fraction of the full-length pass: two bands of ~6 mm on 66. The
+  // spiral's is the larger share (a third, against a fifth) because its
+  // turns bunch up on every wall, and a band is walls either side.
+  const double restLen = r[1].CutLength(), wholeLen = w[1].CutLength();
+  INFO("rest " << restLen << " mm, whole " << wholeLen << " mm");
+  CHECK(restLen < 0.4 * wholeLen);
+  CHECK(restLen > 0.0);
+
+  // ...and still cleans the grooves the finish could not.
+  std::string gcode, error;
+  const std::vector<cam::Toolpath> finishOnly = {r[0]};
+  REQUIRE(
+      cam::PostProcess("linuxcnc", withRest, finishOnly, {}, gcode, &error));
+  const cam::Verdict v0 =
+      cam::VerifyGcode(gcode, withRest, doc->GetBodies(), 0.5);
+  REQUIRE(cam::PostProcess("linuxcnc", withRest, r, {}, gcode, &error));
+  const cam::Verdict v1 =
+      cam::VerifyGcode(gcode, withRest, doc->GetBodies(), 0.5);
+  INFO("leftover " << v0.maxLeftover << " -> " << v1.maxLeftover << ", gouge "
+                   << v1.maxGouge << ", rapids through stock "
+                   << v1.rapidsThroughStock);
+  CHECK(v1.maxGouge < 0.1);
+  CHECK(v1.rapidsThroughStock == 0);
+  CHECK(v1.maxLeftover < v0.maxLeftover - 0.3);
+}
+
+TEST_CASE("cam rotary: what the chuck clips off a spiral is counted along "
+          "the tip's path",
+          "[cam]") {
+  // docs/cam/rotary.md#chuck-and-tailstock. A spiral's move turns the part
+  // while X barely moves, and `holding_clipped_mm` counted the clipped moves
+  // in XYZ alone: the turns lying in the chuck came to their axial advance,
+  // a millimetre or two for what was metres of cutting.
+  auto doc = BarDoc(20.0, 120.0);
+  cam::Setup s = BasicSetup();
+  RotaryMachine(s);
+  s.machine.holding.chuckDiameter = 80.0;
+  s.machine.holding.gripLength = 15.0;
+  s.stock.margin = {0.0, 1.0, 1.0};
+  s.safeZ = 30.0;
+  s.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceRotary;
+  op.rotaryPattern = cam::RotaryPattern::Spiral;
+  op.stepover = 0.5; // a 3 mm pitch
+  s.operations.push_back(op);
+
+  const auto loose = cam::GenerateAll(s, doc->GetBodies());
+  s.chuck = 1;
+  s.tailstock = 1;
+  const auto held = cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(loose.size() == 1);
+  REQUIRE(held.size() == 1);
+  REQUIRE(loose[0].error.empty());
+  INFO(held[0].error);
+  REQUIRE(held[0].error.empty());
+  CHECK(loose[0].holdingClippedMm == 0.0);
+
+  // A spiral is its turns: ~2 pi r a turn, a turn every 3 mm.
+  const double turn = 2.0 * std::numbers::pi * 20.0;
+  CHECK(loose[0].CutLength() > 0.9 * turn * 120.0 / 3.0);
+
+  // What was clipped is what is missing -- less the plunges the clip adds to
+  // come back in.
+  const auto plunged = [](const cam::Toolpath& tp) {
+    double s = 0.0;
+    for (size_t k = 1; k < tp.moves.size(); k++)
+      if (tp.moves[k].kind == cam::Move::Kind::Plunge)
+        s += glm::length(tp.moves[k].to - tp.moves[k - 1].to);
+    return s;
+  };
+  const double missing =
+      loose[0].CutLength() -
+      (held[0].CutLength() - plunged(held[0]) + plunged(loose[0]));
+  INFO("clipped " << held[0].holdingClippedMm << " mm, missing " << missing
+                  << " mm");
+  CHECK_THAT(held[0].holdingClippedMm,
+             WithinAbs(missing, 0.02 * held[0].holdingClippedMm));
+
+  // And it is turns, not an axial advance: at least the chuck's grip of
+  // them, 15 mm of a 3 mm pitch.
+  CHECK(held[0].holdingClippedMm > 0.8 * turn * 15.0 / 3.0);
 }
 #endif

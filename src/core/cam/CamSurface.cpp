@@ -746,7 +746,15 @@ std::vector<RotaryPathPoint> RotarySpiralPath(const RadiusMap& cl,
   const double flatStep = req.pitch_mm / perTurn;
   while (x < xHi) {
     const double s = slopeNear(x);
-    const double dx = flatStep / std::sqrt(1.0 + s * s);
+    // Never closer than a cell of the map a turn: the map cannot tell two
+    // turns nearer than that apart, and a wall one cell wide -- a jump of
+    // millimetres in one column, a slope in the hundreds -- asked for a turn
+    // every few microns across the whole window round it. On a part that is
+    // not round there is such a wall at some angle in nearly every window:
+    // a 1.5 mm ball's spiral over a pair of chess knights wound ~90,000
+    // turns, 7 km of cutting.
+    const double dx = flatStep / std::min(std::sqrt(1.0 + s * s),
+                                          std::max(1.0, req.pitch_mm / cl.res));
     if (x + dx >= xHi) {
       // The last step lands ON the end, turning only its share of a step,
       // so the helix meets the ring where it should.

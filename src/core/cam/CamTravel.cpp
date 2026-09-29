@@ -1,5 +1,6 @@
 #include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
+#include "core/cam/CamRotaryFeed.h"
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamToolpathInternal.h"
@@ -515,7 +516,14 @@ void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
   };
   for (size_t i = 1; i < tp.moves.size(); i++) {
     const Move& m = tp.moves[i];
-    const double length = glm::length(m.to - prev);
+    // The tip's path, as CutLength measures it: a spiral's move turns the
+    // part under the tool, and counted in XYZ alone the turns of a spiral
+    // lying in the chuck came to its axial advance -- a ring at one X, to
+    // nothing -- so the clipped length said a millimetre where a metre went.
+    // A cut part-way is taken as that share of it; the turn is linear in
+    // the move's parameter as X is.
+    const double length = prevHasA && m.hasA ? TipLength(prev, prevA, m.to, m.a)
+                                             : glm::length(m.to - prev);
     double t0, t1;
     if (!clip(prev, m.to, t0, t1)) {
       if (!outside)
