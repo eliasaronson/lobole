@@ -93,14 +93,15 @@ free notes are set over RPC.
 create_drawing {name?, sheet?: {size, landscape, title_block: {project, document, author, date}}}
 set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
-                  configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names]}
+                  configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names],
+                  rotation_deg?}
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
-                  base_view?, configuration?, hidden?}
+                  base_view?, configuration?, hidden?, rotation_deg?}
 update_drawing {budget_s?}     # re-project; per-view curve counts and errors
 list_drawing_views             # placement, stale, and what each projection cost
 list_drawing_geometry {view}   # a view's curves, with the ref to dimension each
 add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},
-                                     occurrence?, end?}], offset?}
+                                     occurrence?, end? | extreme?}], offset?}
 list_drawing_dims / remove_drawing_dim {id}
 add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element},
                   table?: "bends"}
@@ -118,8 +119,12 @@ left overlapping.
 
 `list_drawing_geometry` returns, for each projected edge or circle, its `ref`
 (`{feature_id, element}`) and `source_id` (pass as `occurrence`) to hand
-straight to `add_drawing_dim`. `end` selects a vertex: `0` the whole edge,
-`1`/`2` an endpoint.
+straight to `add_drawing_dim`, and each curve's `bbox`. `end` selects a
+vertex: `0` the whole edge (a circle's centre, anything else's midpoint),
+`1`/`2` an endpoint. `extreme` (`left`, `right`, `top`, `bottom`) is instead
+the curve's furthest point that way on the sheet -- the top of a turned
+piece, which is neither end of its outline. `rotation_deg` turns a view on
+the sheet ([rotation](README.md#rotation)).
 
 A dimensioned drawing of a part, headless:
 

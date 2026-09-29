@@ -236,9 +236,13 @@ every later measurement — `CADShape::IsValid` is only a null check.
 
 ## Finding and naming geometry
 
-- `list_elements {body?, part?, max_faces?}` — stable face and edge names per
-  body, the handles `measure`, fillets and mates use. `unnamed_faces` counts
-  faces the element map never named; zero is what makes the list complete.
+- `list_elements {body?, part?, max_faces?, made_by?, role?, entity?, via?}`
+  — stable face and edge names per body, the handles `measure`, fillets and
+  mates use, each with the feature that made it (`made_by`) and its `role`;
+  the filters ask for a feature's faces in a role (a pocket's floor), and an
+  empty answer says `why` ([toponaming](../modeling/toponaming.md)).
+  `unnamed_faces` counts faces the element map never named; zero is what
+  makes the list complete.
 - `query_geometry` — declarative filters (`geometry_type`, `normal`/`axis`
   with `angle_tol_deg`, `radius` ± `radius_tol`, area and length bounds,
   `near_point`) and `expected_count`, which turns the query into a one-call

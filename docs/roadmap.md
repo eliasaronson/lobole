@@ -28,8 +28,9 @@ command/document layer, of which the GUI is one client
 A drawing today has projected views, driven dimensions, callouts, notes, a
 title block and SVG/PDF export. Missing, in the order a shop asks for them:
 
-- **Section and detail views.** A `DrawingView` is an orientation (plus a
-  projected child); nothing cuts or magnifies.
+- **Section and detail views.** A `DrawingView` is an orientation and a
+  rotation on the sheet (plus a projected child); nothing cuts or
+  magnifies.
 - **A parts list and balloons** on an assembly drawing.
 - **Title-block fields** for material, finish and general tolerance
   (`TitleBlock` holds project, document, author, date and notes), and a

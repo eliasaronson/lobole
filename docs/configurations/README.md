@@ -134,7 +134,8 @@ and its `.expect.json`.
 
 The RPCs are in `src/remote/RemoteConfigurations.cpp`. They act on the
 active tab, whether it holds a part or an assembly. On a drawing tab they
-refuse with guidance.
+refuse with guidance -- except `list_configurations` with `part`, which reads
+that part's from any tab.
 
 | method | params | returns / notes |
 |---|---|---|

@@ -13,7 +13,7 @@ baked geometry and autosave are in [README.md](README.md).
 ```json
 {
   "format": "designer-document",
-  "version": 130,
+  "version": 134,
   "parameters": [ {"name": "width", "expression": "40", "comment": "…"} ],
   "features":   [ {"type": "Box", "id": 1, "name": "Box 1", "…": "…"} ]
 }

@@ -26,10 +26,9 @@ class HoleFeature;
 
 namespace drawing {
 
-// Every feature id a MappedName mentions, in encounter order: leading
-// "<id>/" base segments (tool faces/seams: "4/face1;U2", "4/seam0"), and
-// ";M<id>" / ";G<id>" modifier suffixes ("2/cap0;G4.0" — G ordinals after
-// '.' are stripped). Duplicates preserved; parse failures skipped.
+// Every feature id a MappedName mentions, in encounter order: each comma
+// part's leading "<id>/" and every M and G step. It is
+// topo::FeatureIdsMentioned (core/ElementOrigin.h), the one grammar reader.
 std::vector<uint64_t> MappedNameFeatureIds(const std::string& mappedName);
 
 // The HoleFeature that made the circle this element belongs to, or null.

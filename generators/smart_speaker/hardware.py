@@ -45,7 +45,7 @@ def dowel(app, p):
     sk = part.sketch(Plane.xy(0), name="dowel")
     sk.circle((0, 0), d=p["plug_dia"])
     part.extrude(sk.add(), distance=p["plug_length"], name="dowel")
-    part.material("wood_oak")   # beech, really; oak is the nearest slug
+    part.material("wood_beech")
     return part
 
 

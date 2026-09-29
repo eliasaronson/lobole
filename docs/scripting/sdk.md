@@ -91,7 +91,8 @@ Only what `describe` cannot express:
 
 Rules the hand-written layer follows: every method is a composition of
 documented RPCs and never sends a field the RPC does not have; every method
-returns the ids it made; a default with a unit is derived from what it acts
+returns what it made (a Body, or a `Feature` that reads like the response
+dict); a default with a unit is derived from what it acts
 on (CLAUDE.md, "Defaults"). A coordinate, a radius (a circle's or an
 arc's) or a spline pole given as a string or a `Param` rides on the entity as
 its `*_expr` field and the document evaluates it, so there is no second

@@ -20,8 +20,8 @@ namespace {
 
 // One instance's names: the source's, with an instance suffix ("4/g7" ->
 // "4/g7#2", a mirror's "#m"), so a face of the third bar is as referenceable
-// as one of the first. Nothing parses a MappedName — it is compared whole —
-// so the suffix is opaque everywhere else.
+// as one of the first. topo::DecodeElementName reads the suffix as the
+// element's pattern instance.
 ElementMap Suffixed(const ElementMap& src, const std::string& tag) {
   ElementMap m;
   for (const auto& [i, n] : src.names)

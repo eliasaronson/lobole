@@ -102,9 +102,10 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "tool_id": <feature id>, "op": "union"|"subtract"|"intersect"}}
 - Pattern: {{"type": "Pattern", "name": str,
   "kind": "mirror"|"linear"|"circular", "source_id": <feature id>, ...}}
-  source either CREATES a body (Box, Revolve, an additive Extrude, ...) — the
-  bodies are replicated — or IS a cut Extrude, in which case its cutter is
-  replicated and each copy subtracted, so a hole patterns as a hole.
+  source either CREATES a new body (Box, Revolve, a new-body Extrude, ...) —
+  the bodies are replicated — or is a cut or add Extrude or a Hole, whose
+  tool is replicated and each copy cut or fused, so a hole patterns as a
+  hole.
   mirror: "parent_id"?: <DatumPlane id> or "base_plane": "xy"|"xz"|"yz"
   linear: "axis": <axis ref>, "count": int, "count_expr"?: str,
           "spacing": num, "spacing_expr"?: str
@@ -910,25 +911,39 @@ def measure(a: dict, b: dict | None = None,
 
 @mcp.tool(description="Stable element names (topological naming) for each "
           "body's faces and edges, plus the body's created_by feature id. "
-          "Every face carries kind ('plane'|'cylinder'|'cone'|'sphere'|"
-          "'other'), area, `centroid` [x,y,z], and outward `normal` [x,y,z] "
-          "— find 'the back face' or 'the +Z pocket floors' by geometry "
-          "directly, NO select_face probe loop needed; every edge carries "
-          "kind ('line'|'circle'|'arc'|'other'), length, `midpoint`, and "
-          "radius when circular — identify bore rims / "
-          "seams directly instead of measure-probing names. This is how "
-          "Fillet/Chamfer edge refs are built: edges: "
-          "[{feature_id: <created_by>, element: <edge name>}]. Names survive "
-          "upstream edits; re-query after changing the feature history. "
-          "Optional body index restricts to one body; optional `part` (slot "
-          "name or stable id) reads another part WITHOUT switching the "
-          "active tab — works from an assembly tab too.")
-def list_elements(body: int = -1, part: str | int | None = None) -> dict:
+          "Every face and edge says what MADE it: `made_by` (a feature id) "
+          "and `role` -- start_cap | end_cap (a cut's floor) | side (swept "
+          "from sketch `entity`) | generated (a fillet's or chamfer's face) "
+          "| bore | bottom | counterbore | counterbore_floor | countersink "
+          "(a Hole's) | positional (a feature that names by index) | "
+          "boundary | pole | seam; `instance` for a pattern copy, `derived` "
+          "for one that came in through a Derived feature. ASK for faces "
+          "by what made them rather than by geometry: made_by (feature id "
+          "or name; a pattern means its copies), role (also floor = "
+          "end_cap, walls = side), entity, and via (a Derived feature: "
+          "made_by then names a feature of its SOURCE part) -- 'the "
+          "pocket's floor' is made_by='Pocket', role='floor'. A filter that "
+          "matches nothing answers `why`. Every face also carries kind, "
+          "area, `centroid` and outward `normal`; every edge kind, length, "
+          "`midpoint` and radius when circular. This is how Fillet/Chamfer "
+          "edge refs are built: edges: [{feature_id: <created_by>, element: "
+          "<edge name>}]. Names survive upstream edits; re-query after "
+          "changing the feature history. Optional body index restricts to "
+          "one body; optional `part` (slot name or stable id) reads another "
+          "part WITHOUT switching the active tab — works from an assembly "
+          "tab too.")
+def list_elements(body: int = -1, part: str | int | None = None,
+                  made_by: str | int | None = None, role: str | None = None,
+                  entity: int | None = None, via: str | int | None = None,
+                  max_faces: int | None = None) -> dict:
     params = {}
     if body >= 0:
         params["body"] = body
-    if part is not None:
-        params["part"] = part
+    for key, value in (("part", part), ("made_by", made_by), ("role", role),
+                       ("entity", entity), ("via", via),
+                       ("max_faces", max_faces)):
+        if value is not None:
+            params[key] = value
     return _call("list_elements", **params)
 
 
@@ -1192,12 +1207,14 @@ def remove_configuration(id: int) -> dict:
 
 
 @_reference(description="List the active part's or assembly's configurations "
-          "and which is active (0 = base, the model as authored). A part's "
+          "and which is active (0 = base, the model as authored) -- or "
+          "`part`'s (id or name) from any tab. A part's "
           "carry parameter overrides and suppressed feature ids; an "
           "assembly's carry suppressed occurrence, mate and relation ids and "
           "the mate DOFs they hold (mate_overrides).")
-def list_configurations() -> dict:
-    return _call("list_configurations")
+def list_configurations(part: str | int | None = None) -> dict:
+    return _call("list_configurations",
+                 **({} if part is None else {"part": part}))
 
 
 @_reference(description="Edit a configuration (by id). On a PART: "
@@ -2025,12 +2042,17 @@ def list_drawings() -> dict:
           "(D2b). configuration = the name of one of the part's "
           "configurations to draw (default: whatever it has active) — 'Flat' "
           "draws a sheet-metal part's blank with its bend lines. "
+          "rotation_deg turns the view on the sheet, counter-clockwise "
+          "(a part modelled lying along X drawn upright is front at 90). "
           "The view is added but NOT projected — call update_drawing. "
           "Returns the new view id.")
 def add_drawing_view(source: str, orientation: str = "", scale: float = 1.0,
                      position: list | None = None, name: str = "",
-                     base_view: int = 0, configuration: str = "") -> dict:
+                     base_view: int = 0, configuration: str = "",
+                     rotation_deg: float = 0.0) -> dict:
     params = {"source": source, "scale": scale}
+    if rotation_deg:
+        params["rotation_deg"] = rotation_deg
     if configuration:
         params["configuration"] = configuration
     if orientation:
@@ -2053,15 +2075,19 @@ def remove_drawing_view(id: int) -> dict:
           "name, show_hidden, quality ('exact'|'fast'), configuration (a "
           "configuration of the source part, by name; '' leaves it alone and "
           "'base' draws whatever the part has active), base_view (0 clears "
-          "folding). Re-projects. A "
+          "folding), rotation_deg (the view turned on the sheet, "
+          "counter-clockwise). Re-projects. A "
           "folded child's shared axis follows its base — the reply's "
           "effective_position/folded_axes say when a requested coordinate "
           "was overridden.")
 def set_drawing_view(id: int, position: list | None = None, scale: float = 0,
                      name: str = "", show_hidden: int = -1,
                      base_view: int = -1, quality: str = "",
-                     configuration: str = "") -> dict:
+                     configuration: str = "",
+                     rotation_deg: float | None = None) -> dict:
     params = {"id": id}
+    if rotation_deg is not None:
+        params["rotation_deg"] = rotation_deg
     if quality:
         params["quality"] = quality
     if configuration:
@@ -2134,7 +2160,9 @@ def export_drawing(path: str) -> dict:
 @_reference(description="List a projected view's dimensionable geometry: each "
           "distinct source edge / silhouette with the `ref` to pass to "
           "add_drawing_dim, its type (line/circle/curve), sheet-mm endpoints "
-          "or circle centre+radius, `visible`, `closed` (a full circle = a "
+          "p1/p2 and `bbox` [[min],[max]] (how far a curve reaches -- a "
+          "curved outline's top is neither end), or circle centre+radius, "
+          "`visible`, `closed` (a full circle = a "
           "bore rim; false = an arc such as a corner fillet — do NOT put a "
           "diameter dim on those), and `source_feature` {type,name} (part "
           "sources). Call update_drawing first.")
@@ -2146,7 +2174,9 @@ def list_drawing_geometry(view: int) -> dict:
           "kind = 'distance'|'distance_x'|'distance_y'|'radius'|'diameter'|"
           "'angle'|'hole_callout'|'pattern_callout'. refs = a list of {edge OR "
           "sil_face: {feature_id, element} (from list_drawing_geometry), "
-          "occurrence?: source_id, end?: 0 whole / 1|2 endpoint}: two refs for "
+          "occurrence?: source_id, end?: 0 whole / 1|2 endpoint, extreme?: "
+          "'left'|'right'|'top'|'bottom' -- the curve's furthest point that "
+          "way on the sheet, e.g. a piece's top; not with end}: two refs for "
           "distance/angle, one for radius/diameter, ONE closed circle of a "
           "drilled hole for hole_callout ('Ø4.5 THRU', 'Ø4.5 CSK Ø9.5 × 90°' "
           "— text derived from the Hole feature; part sources only), 2+ "
