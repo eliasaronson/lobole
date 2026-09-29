@@ -134,7 +134,12 @@ static constexpr MethodDoc DrawingMethods[] = {
      "geometry[]{kind,source_id,ref,visible,source_feature?,type?,center?,"
      "radius?,closed?,p1?,p2?}"},
     {"add_drawing_dim",
-     "Add a driven dimension between picked view geometry. `offset` is the "
+     "Add a driven dimension between picked view geometry {view, kind, refs: "
+     "[{edge | sil_face: {feature_id, element}, end?: 1 | 2, occurrence?}]}. "
+     "Each ref is a curve list_drawing_geometry gives (a silhouette as "
+     "`sil_face`); `end` 1 is its first point (p1), 2 its last (p2), and "
+     "without one a circle means its centre and anything else its midpoint. "
+     "`offset` is the "
      "label's placement in SHEET millimetres from the measured geometry (not "
      "model mm — the view's scale sits between them); omit it and it is "
      "auto-placed clear of the views and the title block.",
@@ -1019,6 +1024,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       ProjRef r;
       r.viewId = viewId;
       r.end = rj.value("end", 0);
+      if (r.end < 0 || r.end > 2)
+        throw std::runtime_error(
+            "end is 1 (the curve's first point, p1) or 2 (its last, p2); "
+            "leave it out for the whole curve -- got " +
+            std::to_string(r.end));
       r.occurrenceId = rj.value("occurrence", uint64_t{0});
       if (rj.contains("edge"))
         r.edge = ElementRef{rj.at("edge").value("feature_id", uint64_t{0}),

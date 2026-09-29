@@ -40,15 +40,18 @@ bool RefPoint(const SheetView& v, const ProjRef& r, glm::dvec2& out) {
   const auto cs = Match(v, r);
   if (cs.empty())
     return false;
-  for (const SheetCurve* c : cs)
-    if (c->conicRadius > 0.0) {
-      out = c->conicCenter;
-      return true;
-    }
-
   std::vector<glm::dvec2> pts;
   for (const SheetCurve* c : cs)
     pts.insert(pts.end(), c->points.begin(), c->points.end());
+  // An END asked for is that end, whatever the curve is. A circle answered
+  // with its centre first, and a circle seen EDGE-ON is drawn as a line: the
+  // two ends of a turned chess piece's underside measured its radius.
+  if (r.end == 0)
+    for (const SheetCurve* c : cs)
+      if (c->conicRadius > 0.0) {
+        out = c->conicCenter;
+        return true;
+      }
   if (pts.empty())
     return false;
   if (r.end == 1) {

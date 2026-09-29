@@ -275,6 +275,38 @@ ProjRef EdgeRef(uint64_t fid, const std::string& name) {
 
 } // namespace
 
+// An END is that end, even of a circle: a circle seen edge-on is drawn as a
+// line, and its ends answered with the circle's centre -- the two ends of a
+// turned chess piece's underside measured its radius. Without `end` a circle
+// still means its centre.
+TEST_CASE("A circle's end is its end, not its centre", "[drawing][dimension]") {
+  drawing::SheetView view;
+  view.viewId = 1;
+  view.hasGeometry = true;
+  drawing::SheetCurve underside; // a Phi 38 circle seen edge-on
+  underside.edge = ElementRef{3, "under"};
+  underside.sourceId = 1;
+  underside.curveType = 1;
+  underside.conicCenter = {40, 245};
+  underside.conicRadius = 19.0;
+  underside.points = {{40, 264}, {40, 245}, {40, 226}};
+  view.curves.push_back(underside);
+  ProjRef a = EdgeRef(3, "under"), b = EdgeRef(3, "under");
+  a.end = 1;
+  b.end = 2;
+  const drawing::ResolvedDim d =
+      drawing::ResolveDim(MakeDim(DrawingDimKind::DistanceY, {a, b}), view);
+  REQUIRE(d.resolved);
+  CHECK_THAT(d.value, Catch::Matchers::WithinAbs(38.0, 1e-9));
+  ProjRef whole = EdgeRef(3, "under");
+  ProjRef top = EdgeRef(3, "under");
+  top.end = 1;
+  const drawing::ResolvedDim r = drawing::ResolveDim(
+      MakeDim(DrawingDimKind::DistanceY, {whole, top}), view);
+  REQUIRE(r.resolved);
+  CHECK_THAT(r.value, Catch::Matchers::WithinAbs(19.0, 1e-9)); // centre to top
+}
+
 TEST_CASE("A fastener callout names the standard part it points at",
           "[drawing][dimension][parts]") {
   // docs/parts/README.md#bom-and-drawings. The text is not composed here and
