@@ -5,6 +5,7 @@
 #include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
+#include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
 #include "core/FitStandards.h"
@@ -30,6 +31,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h"
@@ -831,10 +833,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`role` (also `floor` = end_cap, `walls` = side), `entity`, and `via` "
      "(a Derived feature: then `made_by` names a feature of ITS source "
      "part) -- the faces a feature made in a role, instead of a filter by "
-     "normal and position. A filter that matches nothing says why. Each "
+     "normal and position. A filter that matches nothing says why. "
+     "{part, configuration: name|id} lists the part as it is in that "
+     "configuration -- what a placement or a job part in it is made of. Each "
      "edge lists the `faces` it joins, by name: the edges where a top "
      "meets its walls are the ones whose faces include one of each.",
-     "body, entity, made_by, max_faces, part, role, via", remote::NoFlags,
+     "body, configuration, entity, made_by, max_faces, part, role, via",
+     remote::NoFlags,
      "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
      "role,entity?,instance?,derived?,kind,area,centroid,normal,radius?,"
      "axis?},edges[]{...,faces},unnamed_faces}, matched_faces?, "
@@ -3698,8 +3703,38 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         p.contains("part")     ? ResolvePartParam(state, p.at("part"))
         : state.job != nullptr ? nullptr
                                : &RequirePartDoc(doc, "list_elements");
+    // {configuration}: the part as it is in one of its configurations --
+    // what a job part or a placement in it is made of, whose faces carry
+    // that configuration's features (v135).
+    const Document* shown = listed;
+    if (p.contains("configuration")) {
+      if (!p.contains("part"))
+        throw std::runtime_error("configuration needs `part`: whose?");
+      const json& c = p.at("configuration");
+      uint64_t cfg = 0;
+      std::string known;
+      for (const Configuration& k : listed->GetConfigurations()) {
+        known += (known.empty() ? "" : ", ") + k.name;
+        if ((c.is_number() && k.id == c.get<uint64_t>()) ||
+            (c.is_string() && k.name == c.get<std::string>()))
+          cfg = k.id;
+      }
+      if (cfg == 0)
+        throw std::runtime_error(
+            "no configuration " + c.dump() +
+            " in that part. Known: " + (known.empty() ? "(none)" : known));
+      uint64_t slotId = 0; // the slot `listed` is
+      for (const ui::PartSlot& slot : state.parts)
+        if (slot.kind == ui::DocKind::Part &&
+            ui::PartDocById(state, slot.id) == listed)
+          slotId = slot.id;
+      std::string why;
+      shown = ui::ConfiguredPartDocument(state, slotId, cfg, &why);
+      if (shown == nullptr)
+        throw std::runtime_error(why);
+    }
     const auto& bodies =
-        listed != nullptr ? listed->GetBodies() : ui::JobBodies(state);
+        shown != nullptr ? shown->GetBodies() : ui::JobBodies(state);
     const ElementFilter filter = ParseElementFilter(state, listed, p);
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))

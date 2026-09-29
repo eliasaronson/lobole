@@ -188,14 +188,14 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,
       "Walnut"};
   materials[MaterialType::WOOD_MAPLE] = {
-      glm::vec3(0.66f, 0.55f, 0.40f), // Pale cream, less yellow than pine
+      glm::vec3(0.50f, 0.39f, 0.25f), // Pale cream, less yellow than pine
       0.0f,
       0.5f,
       0.4f,
       0.04f,
       "Maple"};
   materials[MaterialType::WOOD_BEECH] = {
-      glm::vec3(0.58f, 0.42f, 0.28f), // Pinkish tan
+      glm::vec3(0.47f, 0.32f, 0.21f), // Pinkish tan
       0.0f,
       0.55f,
       0.4f,
@@ -319,7 +319,7 @@ void MaterialLibrary::InitializeMaterials() {
   pattern(MaterialType::WOOD_OAK, SP::Wood, 0.15f, 0.35f);
   pattern(MaterialType::WOOD_PINE, SP::Wood, 0.09f, 0.5f);   // wide, strong
   pattern(MaterialType::WOOD_WALNUT, SP::Wood, 0.22f, 0.3f); // fine, figured
-  pattern(MaterialType::WOOD_MAPLE, SP::Wood, 0.2f, 0.18f);  // faint, fine
+  pattern(MaterialType::WOOD_MAPLE, SP::Wood, 0.2f, 0.25f);  // faint, fine
   pattern(MaterialType::WOOD_BEECH, SP::Wood, 0.25f, 0.22f); // fine, even
   pattern(MaterialType::PLYWOOD_BIRCH, SP::Plywood, 0.7f, 0.3f); // plies/mm
   pattern(MaterialType::PLYWOOD_PINE, SP::Plywood, 0.5f, 0.35f);

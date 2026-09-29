@@ -866,11 +866,13 @@ class Feature:
         return f"Feature({self.id}, {self.name!r})"
 
     def _ask(self, role, entity, edges, via=None, on=None,
-             raw_made_by=False):
+             raw_made_by=False, configuration=None):
         on = on or self.part
         made_by = self.id if raw_made_by else self
-        r = on.app.list_elements(part=on.id,
-                                 **_made_filter(made_by, role, via, entity))
+        kw = _made_filter(made_by, role, via, entity)
+        if configuration is not None:
+            kw["configuration"] = configuration
+        r = on.app.list_elements(part=on.id, **kw)
         out = []
         for row in r["bodies"]:
             body = Body(on, row["body"], {"name": row["name"],
@@ -1987,13 +1989,16 @@ class Part(_Tab):
     def faces(self, **kw):
         """Every body's faces, filtered as Body.faces. With `made_by=`,
         `role=`, `via=` or `entity=` it is one question of the whole part,
-        and one with no answer raises with the app's why."""
-        made = {k: kw.pop(k) for k in ("made_by", "role", "via", "entity")
-                if k in kw}
+        and one with no answer raises with the app's why; `configuration=`
+        asks it of the part as it is in that configuration (what a job part
+        or a placement in it is made of)."""
+        made = {k: kw.pop(k) for k in ("made_by", "role", "via", "entity",
+                                       "configuration") if k in kw}
         if made:
             got = Feature(self, {"id": made.get("made_by")})._ask(
                 made.get("role"), made.get("entity"), edges=False,
-                via=made.get("via"), raw_made_by=True)
+                via=made.get("via"), raw_made_by=True,
+                configuration=made.get("configuration"))
             return [f for f in got if _face_passes(f, **kw)] if kw else got
         return [f for b in self.bodies() for f in b.faces(**kw)]
 

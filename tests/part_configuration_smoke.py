@@ -98,6 +98,14 @@ def main():
         expect(near(by_cfg["big"]["unit_volume"], 3000.0),
                f"a non-active configuration's edit reaches the BOM: {by_cfg}")
 
+        # A part's faces as they are in a configuration nobody has active.
+        cap = d.call("list_elements", part="cube", configuration="big",
+                     made_by="Cube", role="end_cap")["bodies"][0]["faces"]
+        expect(len(cap) == 1 and near(cap[0]["centroid"][2], 30.0),
+               f"the big cube's top, listed in its configuration: {cap}")
+        refused(d, "list_elements", "Known: big", part="cube",
+                configuration="huge")
+
         # Refusals, each naming what it would take.
         refused(d, "set_occurrence_configuration", "Known: big",
                 id=small_occ, configuration="huge")

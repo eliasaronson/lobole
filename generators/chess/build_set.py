@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))
 from designer_sdk import connect  # noqa: E402
 from build_piece import SIZES, ORDER  # noqa: E402
-from build_board import SLAB_T, KING_H  # noqa: E402
+from build_board import SLAB_T, KING_H, WOODS  # noqa: E402
 
 BACK = ["rook", "knight", "bishop", "queen", "king", "bishop", "knight",
         "rook"]
@@ -65,8 +65,9 @@ def assemble(app):
                 pos = [frame + sq * (f + 0.5), frame + sq * (rank + 0.5),
                        SLAB_T]
                 name = f"{kind} {'abcdefgh'[f]}{rank + 1}"
-                r = app.call("add_occurrence", part=f"{kind}_{wood}",
-                             name=name,
+                # the one piece part, as this rank, in this side's wood
+                r = app.call("add_occurrence", part="piece", name=name,
+                             configuration=kind, material=WOODS[wood],
                              transform={"position": pos,
                                         "orientation": list(turn)})
                 placed.append((name, r["id"]))
@@ -154,13 +155,12 @@ def main():
     report["occurrences"] = len(placed)
     bom = app.call("bom")
     report["bom"] = bom
-    rows = {r.get("name") or r.get("part"): r.get("quantity") or r.get("qty")
-            for r in bom.get("rows", bom.get("items", []))}
+    # one line per rank and wood, all of them the piece part
+    rows = {f"{r['part']} ({r['configuration']}) {r['material']}":
+            r["quantity"] for r in bom["rows"]}
     print("BOM:", json.dumps(rows))
-    try:
-        app.call("export_bom", path=str(OUT / "chess_bom.csv"))
-    except Exception as e:
-        print("export_bom:", e)
+    assert len(rows) == 13 and sum(rows.values()) == 33, rows
+    app.call("export_bom", path=str(OUT / "chess_bom.csv"))
     asm.render(str(OUT / "chess_set.png"), view="iso")
     try:
         views, chk = drawing(app)

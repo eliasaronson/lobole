@@ -80,9 +80,10 @@ VERIFY_KEYS = ("ok", "rotary", "max_gouge_mm", "gouge_at", "max_leftover_mm",
 
 
 class Job:
-    def __init__(self, app, part_name, label):
+    def __init__(self, app, part_name, label, configuration=None):
         self.app, self.label = app, label
-        r = app.machine_part(part=part_name, name=label)
+        kw = {} if configuration is None else {"configuration": configuration}
+        r = app.machine_part(part=part_name, name=label, **kw)
         self.job = r.get("job") or r.get("id") or label
         self.said = {}
         self.setups = []
@@ -340,18 +341,23 @@ def undersides_jig_job(app):
     import build_board
     sizes = build_piece_sizes()
     order = [k for k, n in build_board.SIDE.items() for _ in range(n)]
-    first = f"{order[0]}_light"
-    job = Job(app, first, "Undersides in the jig")
-    jparts = [job_part_of(app, job, first)]
+    # the piece part itself, one job part per piece, each in its rank's
+    # configuration
+    job = Job(app, "piece", "Undersides in the jig", configuration=order[0])
+    jparts = [app.list_job_parts(job=job.job)["parts"][0]["id"]]
     for kind in order[1:]:
-        jparts.append(app.add_job_part(job=job.job, part=f"{kind}_light")["id"])
+        jparts.append(app.add_job_part(job=job.job, part="piece",
+                                       configuration=kind)["id"])
     holes = jig_holes()
     faces = {}
+    piece = app.part("piece", create=False)
     for kind in build_board.SIDE:
-        # the piece came into its part as the Derived feature named `kind`
-        part = f"{kind}_light"
-        recess, = made(app, part, "Felt recess", kind, role="floor")
-        bore, = made(app, part, "Weight bore", kind, role="floor")
+        # asked of the piece as it is in this rank: its body is made by the
+        # rank's own revolve, so the faces carry that feature's id
+        recess, = piece.faces(made_by="Felt recess", role="floor",
+                              configuration=kind)
+        bore, = piece.faces(made_by="Weight bore", role="floor",
+                            configuration=kind)
         # laid up by the recess's floor, which faces the way the underside
         # does
         faces[kind] = (recess.ref, [recess, bore])
@@ -378,13 +384,6 @@ def undersides_jig_job(app):
                              "element": f.ref["element"], "part": jp}
                             for jp in mine])
     return job
-
-
-def job_part_of(app, job, part_name):
-    for p in app.list_job_parts(job=job.job)["parts"]:
-        if p["name"] == part_name:
-            return p["id"]
-    raise RuntimeError(f"{part_name} is not in {job.label}")
 
 
 def jig_holes():

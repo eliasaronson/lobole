@@ -12,8 +12,8 @@ Base jig: an MDF plate the turned pieces hang in, upside down, seated on
 their coves, so their undersides (felt recess, weight bore) can be cut on
 the bed. One hole per piece of one colour.
 
-Piece parts: one Derived per rank and wood, the piece part's configuration,
-for the assembly and the undersides job.
+There are no piece parts per rank and wood: the set places the one piece
+part in a rank's configuration and a side's material (v135).
 """
 import argparse
 import math
@@ -35,7 +35,7 @@ SLAB_T = 19.0   # the board as bought: 3/4 in
 POCKET = 2.0    # epoxy depth, mm
 CORNER_R = 1.0  # a dark square's inside corner: what a 2 mm cutter leaves
 PLATE_T = 18.0  # the jig's MDF
-WOODS = {"light": "wood_oak", "dark": "wood_walnut"}
+WOODS = {"light": "wood_maple", "dark": "wood_walnut"}
 # the ranks of one side, and how many of each
 SIDE = {"king": 1, "queen": 1, "bishop": 2, "knight": 2, "rook": 2,
         "pawn": 8}
@@ -88,23 +88,6 @@ def board(app):
     return part
 
 
-def pieces(app, piece_id):
-    """One part per rank and wood: the piece part's configuration, derived."""
-    out = {}
-    for wood, slug in WOODS.items():
-        for kind in ORDER:
-            name = f"{kind}_{wood}"
-            p = app.part(name)
-            p.activate()
-            r = app.add_feature(feature={
-                "type": "Derived", "name": kind, "source_part": piece_id,
-                "configuration": kind, "reference": False})
-            assert r["regen"]["ok"], r["regen"]
-            p.material(slug)
-            out[(kind, wood)] = p
-    return out
-
-
 def jig(app):
     """The plate for one side's sixteen pieces, hanging upside down."""
     part = app.part("base_jig")
@@ -155,7 +138,6 @@ def main():
     piece = app.part("piece", create=False)
     b = board(app)
     print("board:", app.call("get_state")["regen"], b.bbox())
-    parts = pieces(app, piece.id)
     j, holes = jig(app)
     print("jig:", app.call("get_state")["regen"]["ok"], j.bbox(), len(holes))
     app.save_project(path=str(OUT / "set.dsgn"))

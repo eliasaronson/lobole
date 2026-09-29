@@ -14,8 +14,8 @@ Each stage opens the project the one before saved; all of it lands in
 |---|---|---|
 | `build_piece.py` | the `piece` part: a configuration per rank | `piece.dsgn` |
 | `build_blanks.py` | the four rotary blanks, pieces Derived in their configurations on necks | `blanks.dsgn` |
-| `build_board.py` | the board, a Derived part per rank and wood, the base jig | `set.dsgn` |
-| `build_set.py` | the assembled set, its BOM, the pieces' drawing (views turned upright, each height to its top's `extreme`) | `set.dsgn` |
+| `build_board.py` | the board and the base jig | `set.dsgn` |
+| `build_set.py` | the assembled set -- the piece part placed 32 times, each in its rank's configuration and its side's wood (maple, walnut) -- its BOM, the pieces' drawing (views turned upright, each height to its top's `extreme`) | `set.dsgn` |
 | `cam.py` | every job, verified and posted | `chess.dsgn`, `nc/` |
 
 `profiles.py` holds the turned profiles.
