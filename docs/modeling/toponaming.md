@@ -116,9 +116,10 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
 A MappedName is compared whole almost everywhere. The one reader of the
 grammar is `topo::DecodeElementName` (`src/core/ElementOrigin.h`): it says
 which feature made an element (the seed's, or the last G step's), its role
-(start or end cap, side and its sketch entity, blend, a hole's roles,
-positional, or boundary for an L face), the Derived copies it came in through,
-its pattern instances and what modified it since. Drawing provenance and a
+(start or end cap; side, and its sketch entity; generated -- a fillet's or
+chamfer's face, or one a boolean made along a seam; a hole's roles;
+positional; or boundary for an L face), the Derived copies it came in
+through, its pattern instances and what modified it since. Drawing provenance and a
 tapped hole's thread record read names through it.
 
 `list_elements` reports each element's `made_by` and `role` from it, and

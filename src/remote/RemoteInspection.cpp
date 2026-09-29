@@ -122,11 +122,34 @@ Feature* FeatureParam(Document& doc, const json& j, const char* what) {
                              j.dump() + " in this part (get_state lists them)");
   }
   if (j.is_string()) {
+    // A sketch is often named for the feature it drives ("Slab", and the
+    // Slab extrude): it makes no faces, so it is not what a face was made
+    // by. Anything else sharing a name is ambiguous and said so.
+    std::vector<Feature*> hits;
     for (size_t i = 0; i < doc.FeatureCount(); i++)
-      if (doc.GetFeature(i)->GetName() == j.get<std::string>())
-        return doc.GetFeature(i);
-    throw std::runtime_error(std::string(what) + ": no feature named " +
-                             j.dump() + " in this part (get_state lists them)");
+      if (doc.GetFeature(i)->GetName() == j.get<std::string>() &&
+          doc.GetFeature(i)->TypeName() != "Sketch")
+        hits.push_back(doc.GetFeature(i));
+    if (hits.size() == 1)
+      return hits.front();
+    if (hits.empty()) {
+      for (size_t i = 0; i < doc.FeatureCount(); i++)
+        if (doc.GetFeature(i)->GetName() == j.get<std::string>())
+          throw std::runtime_error(
+              std::string(what) + ": " + j.dump() +
+              " is a Sketch, which makes no faces -- name the feature that "
+              "used it (an extrude, a cut, a hole)");
+      throw std::runtime_error(std::string(what) + ": no feature named " +
+                               j.dump() +
+                               " in this part (get_state lists them)");
+    }
+    std::string ids;
+    for (const Feature* f : hits)
+      ids += (ids.empty() ? "" : ", ") + std::to_string(f->GetId()) + " (" +
+             f->TypeName() + ")";
+    throw std::runtime_error(
+        std::string(what) + ": " + std::to_string(hits.size()) +
+        " features are named " + j.dump() + ": " + ids + " -- pass the id");
   }
   throw std::runtime_error(std::string(what) +
                            " is a feature id or a feature name");
@@ -762,7 +785,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "there is no such count for them. "
      "Every face and edge says what MADE it (`made_by`, a feature id) and "
      "its `role`: start_cap | end_cap (a cut's floor) | side (swept from "
-     "sketch `entity`) | blend (a fillet's or chamfer's) | bore | bottom | "
+     "sketch `entity`) | generated (a fillet's or chamfer's face, or one a "
+     "boolean made along a seam) | bore | bottom | "
      "counterbore | counterbore_floor | countersink (a Hole's) | positional "
      "(a feature that names by index: shell, loft, sweep, import...) | "
      "boundary (named from its edges; no role) | pole | seam; plus "

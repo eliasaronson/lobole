@@ -721,7 +721,7 @@ class Element:
         self.kind = raw.get("kind", "other")
         self.feature_id = body.created_by
         # What MADE it (a feature id; for a Derived copy's, one of the source
-        # part's) and in what role: end_cap, side, blend, bore...
+        # part's) and in what role: end_cap, side, generated, bore...
         # (docs/modeling/toponaming.md). `feature_id` is the body's, which a
         # ref needs; this is the answer to "which cut is this the floor of".
         self.made_by = raw.get("made_by")
@@ -786,6 +786,20 @@ class Edge(Element):
         return self.frame().origin
 
 
+def _face_passes(f, kind=None, where=None, normal=None, radius=None,
+                 tol=0.01, radius_tol=0.05):
+    """Body.faces' geometric filters, for one face."""
+    if kind and f.kind != kind:
+        return False
+    if normal is not None and not (
+            f.normal and f.normal.dot(V(normal).unit()) > 1 - tol):
+        return False
+    if radius is not None and (f.radius is None
+                               or abs(f.radius - radius) >= radius_tol):
+        return False
+    return not where or where(f)
+
+
 def _made_filter(made_by, role, via, entity):
     kw = {}
     if made_by is not None:
@@ -842,10 +856,12 @@ class Feature:
     def __repr__(self):
         return f"Feature({self.id}, {self.name!r})"
 
-    def _ask(self, role, entity, edges, via=None, on=None):
+    def _ask(self, role, entity, edges, via=None, on=None,
+             raw_made_by=False):
         on = on or self.part
+        made_by = self.id if raw_made_by else self
         r = on.app.list_elements(part=on.id,
-                                 **_made_filter(self, role, via, entity))
+                                 **_made_filter(made_by, role, via, entity))
         out = []
         for row in r["bodies"]:
             body = Body(on, row["body"], {"name": row["name"],
@@ -861,7 +877,7 @@ class Feature:
 
     def faces(self, role=None, entity=None):
         """The faces this feature made, in `role` if given: start_cap,
-        end_cap (floor), side (walls; `entity=` the sketch line), blend,
+        end_cap (floor), side (walls; `entity=` the sketch line), generated,
         bore, bottom, counterbore, counterbore_floor, countersink,
         positional, boundary."""
         return self._ask(role, entity, edges=False)
@@ -1948,6 +1964,16 @@ class Part(_Tab):
         return bs[0]
 
     def faces(self, **kw):
+        """Every body's faces, filtered as Body.faces. With `made_by=`,
+        `role=`, `via=` or `entity=` it is one question of the whole part,
+        and one with no answer raises with the app's why."""
+        made = {k: kw.pop(k) for k in ("made_by", "role", "via", "entity")
+                if k in kw}
+        if made:
+            got = Feature(self, {"id": made.get("made_by")})._ask(
+                made.get("role"), made.get("entity"), edges=False,
+                via=made.get("via"), raw_made_by=True)
+            return [f for f in got if _face_passes(f, **kw)] if kw else got
         return [f for b in self.bodies() for f in b.faces(**kw)]
 
     def feature(self, name):

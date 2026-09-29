@@ -17,7 +17,7 @@ constexpr RoleSpelling kRoles[] = {
     {ElementRole::StartCap, "start_cap"},
     {ElementRole::EndCap, "end_cap"},
     {ElementRole::Side, "side"},
-    {ElementRole::Blend, "blend"},
+    {ElementRole::Generated, "generated"},
     {ElementRole::Pole, "pole"},
     {ElementRole::Seam, "seam"},
     {ElementRole::Positional, "positional"},
@@ -216,7 +216,7 @@ ElementOrigin DecodeElementName(const std::string& name) {
     case 'G':
       if (const auto id = LeadingId(step, pos)) {
         o.madeBy = *id;
-        o.role = ElementRole::Blend;
+        o.role = ElementRole::Generated;
         o.entity = 0;
       } else {
         return o;

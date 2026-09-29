@@ -52,7 +52,7 @@ ElementOrigin {
   madeBy    the feature that MADE it, in the innermost document: the seed's
             tag, or the last G step's tag when there is one (a blend face is
             the fillet's, not the edge's)
-  role      start_cap | end_cap | side | blend | pole | seam | positional
+  role      start_cap | end_cap | side | generated | pole | seam | positional
             | boundary (the L fallback: made of other faces' edges, no role)
             | bore | bottom | counterbore | counterbore_floor | countersink
   entity    the sketch entity a side face was swept from (0 when none)

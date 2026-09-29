@@ -38,7 +38,7 @@ TEST_CASE("A name says which feature made it and how", "[toponaming]") {
   REQUIRE(blend.ok);
   CHECK(blend.madeBy == 7);
   CHECK(blend.seedTag == 2);
-  CHECK(blend.role == ElementRole::Blend);
+  CHECK(blend.role == ElementRole::Generated);
 
   const auto split = DecodeElementName("2/cap1;M4.1");
   REQUIRE(split.ok);

@@ -94,8 +94,7 @@ def main():
         none = d.call("list_elements", made_by="Holes", role="countersink")
         expect(none["matched_faces"] == 0 and "made bore" in none["why"],
                none)
-        sketch = d.call("list_elements", made_by="Outline")
-        expect("made no face" in sketch["why"], sketch)
+        refused(d, "list_elements", "is a Sketch", made_by="Outline")
         refused(d, "list_elements", "is not one of", made_by="Pocket",
                 role="lid")
         refused(d, "list_elements", "no feature named", made_by="Nope")
