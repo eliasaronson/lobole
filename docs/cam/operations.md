@@ -188,6 +188,14 @@ is scrap.
   an inner wire with material standing in it (sectioned just above the floor)
   is kept whatever the option says — no flag may point the cutter at
   material.
+- **Open edges.** An edge of the floor with nothing standing just above the
+  floor beside it -- a step down, the part's outside, the end of a dome -- is
+  not a wall: the region grows by the tool's radius across it
+  (`TargetPaths`), so the cutter runs over it, and a wall, which stands above
+  the floor, trims the growth back. Every edge taken as a wall, a notch open
+  at one end was refused by its length: the chess queen's crown notch, 3.4 mm
+  wide with a floor 2.3 mm long before the dome falls away, was "2.3 mm
+  across" for a 3 mm cutter.
 - **Inside out, walls last** (`GeneratePocket`). The inset loops of a
   depth are linked into a tree: each loop's parent is the nearest loop one
   level nearer the wall. The tree is cut depth-first, every loop after the

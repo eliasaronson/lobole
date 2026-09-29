@@ -132,6 +132,29 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
   Clipper2Lib::Paths64 outer, islands;
   for (const Loop& l : region.loops)
     (l.hole ? islands : outer).push_back(ToClipper(l.pts));
+  // An OPEN edge is not a wall. Where the floor's edge has nothing standing
+  // just above the floor beside it -- a step down, the part's outside, the
+  // end of a dome -- the cutter may run over it, so the region clearing
+  // reads grows by the tool's radius across it; a wall stands above the
+  // floor and trims the growth back. Treated as walled, the queen's crown
+  // notch -- 3.4 mm wide, its floor 2.3 mm along the axis before the dome
+  // falls away -- was refused for a 3 mm cutter as "2.3 mm across".
+  if (holesToo && toolRadius > 0.0) {
+    Clipper2Lib::Paths64 section;
+    for (const Loop& l : SectionLoops(bodies, region.z + kIslandProbe))
+      section.push_back(ToClipper(l.pts));
+    const Clipper2Lib::Paths64 standing = Clipper2Lib::InflatePaths(
+        Clipper2Lib::Union(section, Clipper2Lib::FillRule::EvenOdd),
+        0.02 * kScale, Clipper2Lib::JoinType::Round,
+        Clipper2Lib::EndType::Polygon);
+    const Clipper2Lib::Paths64 reach = Clipper2Lib::InflatePaths(
+        outer, toolRadius * kScale, Clipper2Lib::JoinType::Round,
+        Clipper2Lib::EndType::Polygon);
+    const Clipper2Lib::Paths64 open = Clipper2Lib::Difference(
+        reach, standing, Clipper2Lib::FillRule::NonZero);
+    if (!open.empty())
+      outer = Clipper2Lib::Union(outer, open, Clipper2Lib::FillRule::NonZero);
+  }
   if (!holesToo || islands.empty())
     return outer;
   // `useOutline` passes over the OPENINGS in a floor. An inner wire is only

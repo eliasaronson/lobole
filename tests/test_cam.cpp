@@ -480,6 +480,63 @@ TEST_CASE("cam: a cut too narrow for the cutter says SO, with the numbers",
   CHECK(fits.error.empty());
 }
 
+// A notch OPEN at one end: its floor's edge there has nothing standing above
+// the floor beside it, so the cutter may run over it. Every edge treated as a
+// wall, the queen's crown notch -- 3.4 wide, its floor 2.3 long before the
+// dome fell away -- was refused for a 3 mm cutter as "2.3 mm across". The
+// same notch walled at both ends still is: the growth is only where the
+// floor's edge is open.
+TEST_CASE("cam: a pocket's open edge does not hold the cutter back", "[cam]") {
+  const auto notched = [](double endWall) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+    const uint64_t block = doc->GetFeature(0)->GetId();
+    // 2.3 mm long along X, 3.4 wide, down to z = 12; with endWall = 0 it
+    // runs out of the block's +X face.
+    doc->AddFeature(std::make_unique<BoxFeature>(
+        "Notch", glm::vec3(37.7f - static_cast<float>(endWall), 13.0f, 12.0f),
+        2.3 + (endWall > 0.0 ? 0.0 : 5.0), 3.4, 20));
+    const uint64_t notch = doc->GetFeature(1)->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>("Cut", block, notch,
+                                                     BooleanOp::Subtract));
+    return doc;
+  };
+  cam::Setup setup = BasicSetup();
+  cam::Tool three;
+  three.number = 2;
+  three.diameter = 3.0;
+  setup.tools.push_back(three);
+  cam::Operation op;
+  op.id = 11;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 2;
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+
+  auto open = notched(0.0);
+  op.targets = {cam::Target{0, UpFaceAt(*open, 12.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  const cam::Toolpath cut = cam::Generate(setup, op, open->GetBodies());
+  INFO(cut.error);
+  REQUIRE_FALSE(cut.Empty());
+  // ...and it stays inside the notch: nothing gouged into its walls.
+  cam::Setup job = setup;
+  job.operations = {op};
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", job, {cut}, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, job, open->GetBodies(), 0.1);
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.maxGouge < 0.06);
+
+  auto walled = notched(1.0); // a wall 1 mm thick left at the end
+  op.targets = {cam::Target{0, UpFaceAt(*walled, 12.0)}};
+  REQUIRE(op.targets[0].ref.IsSet());
+  const cam::Toolpath refused = cam::Generate(setup, op, walled->GetBodies());
+  CHECK(refused.Empty());
+  CHECK(refused.error.find("2.3 mm across") != std::string::npos);
+}
+
 TEST_CASE("cam: stock to leave can be what does not fit, and says so",
           "[cam]") {
   // The tool fits the slot; the tool PLUS the stock being left does not. Two
