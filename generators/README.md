@@ -26,6 +26,7 @@ the one announced instance or take `--port`; they never guess:
 | `waveguide.py`, `waveguide_job.py` | a constant-directivity waveguide for the Alpair 7MS, and its 3-axis surfacing job on the 6090 | CAM |
 | `rotary/` | a file handle and a barley-twist rolling pin, and their 4-axis jobs | CAM |
 | `bike/` | a roadster bicycle modelled from photographs | [README](bike/README.md) |
+| `chess/` | a Staunton chess set: turned pieces from rotary blanks, board, jig, and every CAM job | [README](chess/README.md) |
 | `chassis/` | the FS chassis: a Formula Student space frame read from the team's SolidWorks CAD, and its shop order | [README](chassis/README.md) |
 | `cncest6090/` | provisional layout and Z-axis fixture of a CNC router | [README](cncest6090/README.md) |
 | `fpv_drone/` | a 5-inch FPV quadcopter, with sheets, loads and G-code | [README](fpv_drone/README.md) |

@@ -1,7 +1,8 @@
 # Chess set dogfood: what is left
 
-The set is designed and every program is generated (`scratch/chess/`,
-`run_all.sh PORT` rebuilds all of it from nothing): one `piece` part with a
+The set is designed and every program is generated
+([generators/chess](../../generators/chess/README.md); `run_all.sh PORT`
+rebuilds all of it from nothing into `scratch/chess/`): one `piece` part with a
 configuration per rank, a Derived part per rank and wood, four rotary blanks,
 the board, the base jig and the assembled set. What remains is the machine,
 one design change the machining asked for, and the app work the round found
@@ -12,7 +13,7 @@ but did not do.
 1. **Step 0: the rotary as installed.** Jog A +90 and watch which way a mark
    on the chuck's top moves; read the axis letter and steps/degree from
    Mach3's motor tuning; measure the chuck's diameter, its grip, and the
-   chuck-to-centre length. They go into `MACHINE` in `scratch/chess/cam.py`
+   chuck-to-centre length. They go into `MACHINE` in `generators/chess/cam.py`
    (`rotary`, `holding`, `a_max_deg_min`, and `rapid_feed`, whose 1500 mm/min
    is a placeholder every feed check reads). Until then no rotary program is
    for the machine.
