@@ -225,13 +225,17 @@ def rook_bishop(app):
     job = Job(app, "blank_rook_bishop", "Rook and bishop")
     turned(job)
     blank = "blank_rook_bishop"
-    # Crenellations: the four notch floors, one index each.
-    crenels = made(app, blank, "Crenels", "rook 1", role="floor")
-    for a, fs in sorted(by_a(crenels).items()):
-        sid = job.setup(f"Crenel A{a:g}", a=a)
-        job.op(sid, "Crenel", type="pocket", tool=4, targets=[
-            {"feature_id": f.ref["feature_id"], "element": f.ref["element"]}
-            for f in fs])
+    # Crenellations: the four notch floors, ONE operation at the four indices
+    # that face them -- each floor is cut at the index that turns it up. Each
+    # notch is extruded ACROSS the rim, so its end caps are its walls and its
+    # floor a side face: the one facing away from the axis, as the crown's.
+    # (`role="floor"` took the caps, a wall 3 mm past the axis: 21 mm deep,
+    # refused, and every earlier run cut no crenel at all.)
+    crenels = outward(made(app, blank, "Crenels", "rook 1"))
+    assert len(crenels) == 4, [f.name for f in crenels]
+    sid = job.setup("Crenels")
+    job.op(sid, "Crenels", type="pocket", tool=4, targets=target_list(crenels),
+           index_a_deg=sorted(by_a(crenels)))
     # The mitre: a notch down across the head. Its floor is a side face --
     # swept from the notch sketch's bottom line -- and the one of its three
     # that faces away from the axis.
@@ -256,19 +260,18 @@ def queen_king(app):
     # The crown: eight notch floors, one index each. Each notch is cut
     # sideways, so its caps are its walls and its floor a side face.
     crown = outward(made(app, blank, "Crown notches", "queen 1"))
-    for a, fs in sorted(by_a(crown).items()):
-        sid = job.setup(f"Crown A{a:g}", a=a)
-        # the notch floor runs only 2.3 mm along the axis before the dome
-        # falls away; that end is OPEN, so a 3 mm cutter clears it
-        job.op(sid, "Crown notch", type="pocket", tool=5,
-               targets=target_list(fs))
+    sid = job.setup("Crown")
+    # the notch floor runs only 2.3 mm along the axis before the dome
+    # falls away; that end is OPEN, so a 3 mm cutter clears it
+    job.op(sid, "Crown notches", type="pocket", tool=5,
+           targets=target_list(crown), index_a_deg=sorted(by_a(crown)))
     # The cross: its bar's faces are the floors -- the bar's top and bottom
     # from above and below, its flats from either side.
     cross = outward(made(app, blank, "Cross corners", "king 2") +
                     made(app, blank, "Cross flats", "king 2"))
-    for a, fs in sorted(by_a(cross).items()):
-        sid = job.setup(f"Cross A{a:g}", a=a)
-        job.op(sid, "Cross", type="pocket", tool=5, targets=target_list(fs))
+    sid = job.setup("Cross")
+    job.op(sid, "Cross", type="pocket", tool=5, targets=target_list(cross),
+           index_a_deg=sorted(by_a(cross)))
     return job
 
 
