@@ -3,14 +3,12 @@
 The set is designed and every program is generated
 ([generators/chess](../../generators/chess/README.md); `run_all.sh PORT`
 rebuilds all of it from nothing into `scratch/chess/`). What remains is the
-machine, one design change the machining asked for, and the app work the
-round found. The two large items -- picking faces by what made them, and a
+machine and the app work the round found. The two large items -- picking faces by what made them, and a
 configuration per occurrence -- are the ones that would have saved most of the
 round's scripting; the rest are bugs and CAM gaps. Text is last.
 
-Phases 1 and 4 touch disjoint code (modelling/drawings vs CAM) and can run in
-parallel worktrees; phases 2 and 3 both reach element resolution and the SDK,
-so they go in order, 2 first.
+Phases 2 and 3 both reach element resolution and the SDK, so they go in
+order, 2 first.
 
 ## 0. At the machine (the user)
 
@@ -23,18 +21,6 @@ so they go in order, 2 first.
    calipers on the first pawn against the drawing.
 
 The pawn blank has no rest pass: its profile is finishable by the 3 mm ball.
-
-## 1. Small fixes
-
-- **The rotary finish leaves patches at one angle.** The profiles are
-  finishable by the 3 mm ball everywhere (every inside radius is at least
-  1.6 mm), yet each blank's verify lists 0.16-0.45 mm regions, each at ONE
-  rotary angle rather than a ring -- the finish toolpath misses or lifts
-  there, or the verifier samples wrongly. Test: a turned cove finished by a
-  ball leaves nothing past its cusp at any A.
-- **The mitre's pocket both errors and posts.** The bishop's 3.2 mm notch,
-  derived as adaptive for a 3 mm cutter, reports "could not lead into the
-  cut" and still produces 9229 moves; the outcome must be one or the other.
 
 ## 2. Picking faces by what made them
 
