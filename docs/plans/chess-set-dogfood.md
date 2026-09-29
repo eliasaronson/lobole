@@ -43,6 +43,10 @@ and every groove at least 3.4 mm, and the finish alone makes the part.
   noise at one size in several (`profiles.TOP_R` works round it).
 - **A blind slot's floor measured 1 mm across** where the model says 3.2 (the
   bishop's first mitre; redesigned as a notch, not diagnosed).
+- **The knight's head can't be dimensioned.** Its outline (a spline
+  extrusion, filleted) is drawn in the view, but its edges carry no element
+  names, so `list_drawing_geometry` skips them and the height dimension
+  stops at the collar (19.4 instead of 54.4).
 - **A spiral rest pass** winds the whole length at the rotary's speed limit,
   air included, and its `holding_clipped_mm` reads as nearly all of it.
 
