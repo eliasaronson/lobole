@@ -118,20 +118,22 @@ def main():
         expect(out["products"] == 2 and out["instances"] == 2,
                f"two products, two placements: {out}")
 
-        # A job cuts the part in a configuration.
-        job = d.call("machine_part", part="cube", configuration="big")
-        expect(job["part"]["configuration"] == big, job)
-        parts = d.call("list_job_parts")["parts"]
-        expect(parts[0]["configuration"] == big and
-               parts[0]["configuration_name"] == "big" and
-               not parts[0]["missing"], parts)
-        faces = [f for b in d.call("list_elements")["bodies"]
-                 for f in b["faces"]]
-        top = max(f["centroid"][2] for f in faces)
-        expect(near(top, 30.0),
-               f"the job's part is the configuration it cuts: top at {top}")
-        refused(d, "add_job_part", "Known: big", part="cube",
-                configuration="huge")
+        # A job cuts the part in a configuration -- in a build that has CAM
+        # (`ping` says; -DENABLE_CAM=OFF has no job methods at all).
+        if d.call("ping").get("features", {}).get("cam", True):
+            job = d.call("machine_part", part="cube", configuration="big")
+            expect(job["part"]["configuration"] == big, job)
+            parts = d.call("list_job_parts")["parts"]
+            expect(parts[0]["configuration"] == big and
+                   parts[0]["configuration_name"] == "big" and
+                   not parts[0]["missing"], parts)
+            faces = [f for b in d.call("list_elements")["bodies"]
+                     for f in b["faces"]]
+            top = max(f["centroid"][2] for f in faces)
+            expect(near(top, 30.0),
+                   f"the job's part is the configuration it cuts: top at {top}")
+            refused(d, "add_job_part", "Known: big", part="cube",
+                    configuration="huge")
         print("part_configuration_smoke: ok")
     finally:
         app.terminate()
