@@ -41,7 +41,9 @@ instead of running the suite.
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 
-**A .cpp costs 6-13 s to rebuild; a widely-included header costs ~90 s.** So
+**A .cpp costs 10-17 s to rebuild; a real edit to `core/Feature.h` ~3.5 min, a
+narrower header ~2 min** (a touch, revert or branch switch ~12 s, from ccache;
+keep project headers out of PCHs: docs/architecture.md#precompiled-headers). So
 edit headers in BATCHES — one rebuild for five header edits, not five — and
 keep iterating in the .cpp where you can. (Editing a header mid-`ninja` also
 fails with a bogus `redefinition of class`.)

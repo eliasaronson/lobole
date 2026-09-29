@@ -873,24 +873,20 @@ set_source_files_properties(
     ${IMGUI_DIR}/imgui_widgets.cpp
     PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-# Precompiled header. designer_core has had one since the 2026-08-24 round for
-# the same reason; the app target never got one, and it is the larger half.
-#
-# What it is paying for: ui/AppState.h preprocesses to 224k lines and 65 files
-# include it, because core/Document.h behind it drags in the whole OpenCASCADE
-# tree (146k lines on its own -- 53% of a typical UI translation unit).
-#
-# It is also the counterpart to splitting the big files. A split makes N
-# translation units re-parse what one used to parse once, so the split alone
-# raises total CPU while it lowers the critical path; the PCH is what pays that
-# back. Do not remove one without the other
-# (docs/architecture.md#precompiled-headers, section 2).
+# Precompiled header: the STABLE headers only -- cad/CADKernel.h (the
+# OpenCASCADE tree, 146k preprocessed lines, over half of a UI translation
+# unit) and third-party and standard headers. It used to be ui/AppState.h,
+# whose closure is 775 project headers; GCC's .gch is not byte-reproducible,
+# so any touch of any of them regenerated it and every app source then missed
+# ccache -- a `touch core/Feature.h` rebuilt 240 sources in 177 s, now 12 s
+# from the cache (docs/architecture.md#precompiled-headers). A split still
+# needs a PCH to pay back its re-parsing; this one pays for most of it.
 #
 # PRIVATE, like designer_core's: it applies to this target's own sources, not
 # to everything that links it.
 
 target_precompile_headers(designer_app PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/ui/AppState.h"
+    "${CMAKE_SOURCE_DIR}/src/cad/CADKernel.h"
     <glm/glm.hpp>
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <map> <set> <algorithm> <cmath>

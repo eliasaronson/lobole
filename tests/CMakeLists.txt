@@ -148,12 +148,16 @@ target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # same headers five times, so test_cam.cpp's split cost 21 s of duplicated
 # parsing before this line existed (docs/architecture.md#precompiled-headers
 # — split first, PCH second, and never one without the other).
+#
+# Stable headers only: cad/CADKernel.h rather than core/Document.h and
+# core/Feature.h, which change often. GCC's .gch is not byte-reproducible,
+# so a project header in it made every touch of it a full, uncached rebuild
+# of all 112 test sources.
 target_precompile_headers(designer_tests PRIVATE
     <catch2/catch_test_macros.hpp>
     <catch2/matchers/catch_matchers_floating_point.hpp>
     <catch2/matchers/catch_matchers_string.hpp>
-    "${CMAKE_SOURCE_DIR}/src/core/Document.h"
-    "${CMAKE_SOURCE_DIR}/src/core/Feature.h"
+    "${CMAKE_SOURCE_DIR}/src/cad/CADKernel.h"
     <glm/glm.hpp>
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <map> <set> <filesystem> <cmath>

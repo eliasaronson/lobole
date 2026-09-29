@@ -14,6 +14,7 @@
 
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamPicks.h" // OutlineRequest
 #include "core/cam/CamSurface.h"
 
 #include <string>
