@@ -176,7 +176,7 @@ the right name is scrap.
 | fixtures | `add_job_fixture`, `set_job_fixture`, `remove_job_fixture` |
 | setups | `add_cam_setup`, `list_cam_setups`, `set_cam_setup` (also edits a tool: `{id, tool: {number, …}}`), `remove_cam_setup` |
 | operations | `add_cam_op`, `set_cam_op`, `move_cam_op`, `remove_cam_op`, `cam_derive_op` (the dry run) |
-| output | `cam_toolpath` (`async` hands slow passes to a `cam` background job), `cam_verify`, `cam_simulate`, `cam_post` |
+| output | `cam_toolpath` (`async` hands slow passes to a `cam` background job), `cam_verify`, `cam_simulate`, `cam_post` -- each waits off the frame ([requests that wait](#requests-that-wait)) |
 
 `add_cam_op` without `top_z`/`bottom_z` derives them through the same
 `cam::DeriveOperation` the GUI verbs use, so a script and a person get the
@@ -212,11 +212,49 @@ job ([4th axis](rotary.md#one-operation-at-several-indices)):
 
 A toolpath waiting on a pass is `pending`; post, verify and simulate refuse
 while any is pending, saying why. `cam_toolpath {async: true}` returns at once
-with `pending` and `queued_passes`; otherwise the RPC settles first. The
+with `pending` and `queued_passes`; otherwise the RPC waits for the passes,
+off the frame ([below](#requests-that-wait)). The
 panel's verification of the posted file runs on its own `cam-verify`
 background job (inline in the GUI suite, which turns deferral off). The worker is thread-safe
 because the sectioning booleans are non-destructive (`BuildQuery`) and it
 works on copies of the framed bodies.
+
+## Requests that wait
+
+`cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` answer as they
+always did -- complete toolpaths, the same response -- but they no longer
+compute on the frame, where a real job held the app for minutes. The server
+PARKS such a request (`ParkCamRequest`, `src/remote/RemoteCam.cpp`):
+
+- it queues every pass the request reads on the `cam` worker
+  (`QueueCamPassesFor`, deferred whatever `camDeferPasses` says) -- the
+  setup, and for `cam_verify` every other setup of the job;
+- when the worker is idle and nothing is owed, it dispatches the ordinary
+  handler, which now finds everything in the caches. `cam_verify` instead runs
+  the handler's own three steps (`PrepareVerify`, `ComputeVerify`,
+  `VerifyAnswer`) with the middle one -- the other setups' stock and the
+  simulation of the posted file -- on a `cam-verify` background job;
+- a request whose passes are all cached and whose worker is idle is not
+  parked at all, except `cam_verify`, whose simulation always goes to the
+  worker.
+
+Meanwhile the frame keeps drawing and every other connection is answered; a
+request on the SAME connection waits behind the parked one, so each
+connection gets its answers in the order it asked
+([architecture.md](../architecture.md#requests-that-wait)). The answer
+describes the job as it stands when it is given: an edit from another
+connection while one waits queues that edit's passes, and the request waits
+for those too. After four rounds of "idle, and still owed" (a cache too small
+for the whole job) it stops waiting and runs synchronously, which is what it
+always did.
+
+What refuses a waiting request: `cancel_background_job cam` (the passes it
+waited for will not land; re-queueing them behind the caller's back would
+undo the cancel) and `cancel_background_job cam-verify`, each saying so. A
+request the handler would refuse -- no job, no such setup, a setup that does
+not post, a wrong type -- is not parked, so the refusal is the handler's word
+for word. A `batch` never parks: its calls run inline, one transaction.
+Headless the pump is the same loop, so the behaviour is the same.
 
 ## Building without CAM
 

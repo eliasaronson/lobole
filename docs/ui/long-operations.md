@@ -143,12 +143,15 @@ passes are still queued is named as not yet compared, and the verification
 runs again when they land
 ([simulation.md](../cam/simulation.md#leftover-another-setup-removes)).
 
-**RPC semantics: synchronous by default.** `cam_toolpath`, `cam_post` and
-`cam_verify` generate through `GenerateCamToolpathsNow` (join the pass in
-flight, then the cache, then compute the rest inline; `cam_verify` does so
-for every setup of the job), and `cam_simulate`
-settles first, so a script gets complete toolpaths. `cam_toolpath
-{async: true}` defers instead and answers `{pending, queued_passes, job}`,
+**RPC semantics: synchronous, off the frame.** `cam_toolpath`, `cam_post`,
+`cam_verify` and `cam_simulate` answer with complete toolpaths, but the
+server parks them while the passes they read cut on the worker (and
+`cam_verify`'s simulation on a `cam-verify` job), answering when those land
+([cam/README.md](../cam/README.md#requests-that-wait)). The handlers
+themselves still generate through `GenerateCamToolpathsNow` (join the pass in
+flight, then the cache, then compute the rest inline), which is what a
+`batch` and the parked request's fallback run. `cam_toolpath
+{async: true}` answers at once with `{pending, queued_passes, job}`,
 where `queued_passes` counts all three queues, for a client that would rather
 poll `background_jobs`. Mutating RPCs (`set_cam_op`, `set_job_placement`, …)
 defer as the panel does, so an agent editing a job on a windowed instance does
