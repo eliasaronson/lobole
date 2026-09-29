@@ -69,7 +69,10 @@ Only what `describe` cannot express:
   `entity=` and `via=` (a Derived feature; `made_by` then names a feature of
   the source part, `source.feature("Crenel")`). A question with no answer
   raises with the app's why ("made side x4 -- none end_cap"). Every `Face`
-  and `Edge` carries `made_by` and `role`
+  and `Edge` carries `made_by` and `role`, an `Edge` the names of the
+  `faces` it joins, and `edges(between=(a, b))` keeps the ones joining a
+  face of `a` to one of `b` -- a slab's top edge is
+  `edges(between=(slab.end_cap(), slab.walls()))`
   ([toponaming](../modeling/toponaming.md)).
 - **Plane arithmetic.** `Plane.xy(z)`, `.xz(y)`, `.yz(x)`, a face's
   `.plane()`, `plane.uv(world_point)` and `plane.world(u, v)`. Sketch UV is

@@ -90,6 +90,16 @@ def main():
                all(abs(f["radius"] - 2.5) < 1e-6 for f in faces(bores)),
                bores)
 
+        # Each edge names the faces it joins.
+        edges = [e for b in d.call("list_elements")["bodies"]
+                 for e in b["edges"]]
+        # two for an ordinary edge, one for a seam (a bore's cylinder meets
+        # itself along it)
+        odd = [e for e in edges if len(e["faces"]) != 2
+               and not (len(e["faces"]) == 1 and e["role"] == "bore")]
+        expect(edges and not odd,
+               f"an edge lists the faces it joins: {odd[:2]}")
+
         # Nothing matched: said why, not an empty list to puzzle over.
         none = d.call("list_elements", made_by="Holes", role="countersink")
         expect(none["matched_faces"] == 0 and "made bore" in none["why"],

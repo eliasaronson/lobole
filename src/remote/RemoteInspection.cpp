@@ -34,7 +34,11 @@
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_DataMapOfShapeInteger.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -270,6 +274,38 @@ ElementFilter ParseElementFilter(ui::AppState& state, Document* listed,
   }
   f.entity = p.value("entity", uint32_t{0});
   return f;
+}
+
+// For each edge of the body (ElementMap::edgeNames order), the names of the
+// faces it bounds -- two for an ordinary edge, one for a seam. An unnamed
+// face is left out.
+std::vector<std::vector<std::string>> EdgeFaceNames(const Body& body) {
+  const TopoDS_Shape& shape = body.shape.GetShape();
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape parents;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, parents);
+  // face -> its index in explorer order, the element map's face order
+  TopTools_DataMapOfShapeInteger faceIndex;
+  int k = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), k++)
+    if (!faceIndex.IsBound(ex.Current()))
+      faceIndex.Bind(ex.Current(), k);
+  std::vector<std::vector<std::string>> out(edges.Extent());
+  for (int e = 1; e <= edges.Extent(); e++) {
+    const int at = parents.FindIndex(edges(e));
+    if (at == 0)
+      continue;
+    for (const TopoDS_Shape& f : parents(at)) {
+      if (!faceIndex.IsBound(f))
+        continue;
+      const std::string* n = body.elementMap.NameOf(faceIndex.Find(f));
+      if (n != nullptr && std::find(out[e - 1].begin(), out[e - 1].end(), *n) ==
+                              out[e - 1].end())
+        out[e - 1].push_back(*n);
+    }
+  }
+  return out;
 }
 
 // What made an element, on its list_elements row.
@@ -795,11 +831,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`role` (also `floor` = end_cap, `walls` = side), `entity`, and `via` "
      "(a Derived feature: then `made_by` names a feature of ITS source "
      "part) -- the faces a feature made in a role, instead of a filter by "
-     "normal and position. A filter that matches nothing says why.",
+     "normal and position. A filter that matches nothing says why. Each "
+     "edge lists the `faces` it joins, by name: the edges where a top "
+     "meets its walls are the ones whose faces include one of each.",
      "body, entity, made_by, max_faces, part, role, via", remote::NoFlags,
      "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
      "role,entity?,instance?,derived?,kind,area,centroid,normal,radius?,"
-     "axis?},edges[]{...},unnamed_faces}, matched_faces?, matched_edges?, "
+     "axis?},edges[]{...,faces},unnamed_faces}, matched_faces?, "
+     "matched_edges?, "
      "why?"},
     {"curve_points",
      "The polyline a Curve3D actually BUILT, sampled to `deflection_mm` "
@@ -3726,6 +3765,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         faces.push_back(f);
       }
+      const std::vector<std::vector<std::string>> joins =
+          bodies[i].elementMap.edgeNames.empty()
+              ? std::vector<std::vector<std::string>>{}
+              : EdgeFaceNames(bodies[i]);
       for (const auto& [idx, name] : bodies[i].elementMap.edgeNames) {
         const topo::ElementOrigin origin = topo::DecodeElementName(name);
         if (!filter.Matches(origin))
@@ -3733,6 +3776,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         matchedEdges++;
         json e = {{"index", idx}, {"name", name}};
         OriginJson(origin, e);
+        // The faces it joins, by name: "the edges where the top meets the
+        // walls" is what a fillet or a chamfer is, and an edge's own name
+        // comes from whichever face named it first, so it cannot say.
+        if (idx >= 0 && static_cast<size_t>(idx) < joins.size())
+          e["faces"] = joins[static_cast<size_t>(idx)];
         if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
           e["kind"] = ei->kind;
           e["length"] = ei->length;

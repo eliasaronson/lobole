@@ -253,6 +253,15 @@ def check_faces_by_maker(app):
     expect(len(part.body().faces(made_by="Pocket", role="walls")) == 4,
            "Body.faces takes made_by and role")
     expect(part.feature("Pocket").id == pocket.id, "a feature by name")
+    # The edges where the plate's top meets its walls: not the pocket's
+    # rims, which join the top to the POCKET's walls.
+    rim = part.body().edges(between=(plate.feature.end_cap(),
+                                     plate.feature.walls()))
+    expect(len(rim) == 4 and all(abs(e.midpoint.z - 20.0) < 1e-6
+                                 for e in rim),
+           f"the top's four outer edges: {[e.name for e in rim]}")
+    part.chamfer(rim, 1.0, name="Top edge")
+    part.check()
 
     other = app.part("maker copy")
     other.activate()

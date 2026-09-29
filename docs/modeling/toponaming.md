@@ -128,7 +128,10 @@ filters by them: `made_by` (a feature id or name; a pattern means its
 source's faces, every copy), `role` (`floor` and `walls` read as `end_cap`
 and `side`), `entity`, and `via` -- a Derived feature, with `made_by` then
 naming a feature of the source part. A filter that matches nothing answers
-`why`: the roles that feature did make, or that it made no face here.
+`why`: the roles that feature did make, or that it made no face here. Each
+edge also lists the `faces` it joins by name (one for a seam): an edge's own
+name comes from whichever face named it first, so "the edges where the top
+meets the walls" is asked of those, not of the edge's name.
 
 An unnamed face cannot be picked, threaded, filleted, fitted or measured by
 reference, and `list_elements` omits it; its `unnamed_faces` count is what says

@@ -774,6 +774,8 @@ class Edge(Element):
         super().__init__(part, body, raw)
         self.length = raw.get("length", 0.0)
         self.midpoint = V(raw["midpoint"]) if "midpoint" in raw else None
+        # the names of the faces it joins
+        self.faces = list(raw.get("faces", []))
         self.radius = raw.get("radius")
 
     @property
@@ -784,6 +786,13 @@ class Edge(Element):
             raise SdkError(f"edge {self.name!r} is a {self.kind}; only a "
                            f"circle or arc has a centre")
         return self.frame().origin
+
+
+def _face_names(faces):
+    """Face names from a Face, a list of Faces, or names."""
+    if isinstance(faces, (Face, str)):
+        faces = [faces]
+    return {f.name if isinstance(f, Face) else f for f in faces}
 
 
 def _face_passes(f, kind=None, where=None, normal=None, radius=None,
@@ -1030,7 +1039,8 @@ class Body:
         return out
 
     def edges(self, kind=None, where=None, radius=None, circular=None,
-              tol=0.05, made_by=None, role=None, via=None, entity=None):
+              tol=0.05, made_by=None, role=None, via=None, entity=None,
+              between=None):
         """Edges, filtered.
 
         `circular=True` means "a round rim" — circle OR arc. Whether the
@@ -1045,6 +1055,12 @@ class Body:
 
         `made_by=`, `role=`, `via=`, `entity=` as for faces(): an edge's
         origin is the face it was named from's.
+
+        `between=(a, b)` keeps the edges joining a face of `a` to a face of
+        `b` -- each a Face, a list of them, or names: the edges where a
+        slab's top meets its walls are
+        `edges(between=(slab.end_cap(), slab.walls()))`. An edge's own name
+        comes from whichever face named it first, so it cannot say this.
         """
         if made_by is not None or role is not None or via is not None \
                 or entity is not None:
@@ -1052,6 +1068,11 @@ class Body:
         else:
             self._load()
             out = self._edges
+        if between is not None:
+            a, b = (_face_names(x) for x in between)
+            out = [e for e in out
+                   if any(x in a and y in b and x != y
+                          for x in e.faces for y in e.faces)]
         if circular:
             out = [e for e in out if e.kind in ("circle", "arc")]
         if kind:
