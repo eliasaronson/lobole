@@ -152,15 +152,17 @@ def faces_of(app, part_name):
     return app.part(part_name, create=False).bodies()[0]
 
 
-def turn(job, sid):
-    """Rough, finish and rest the whole turned length."""
+def turn(job, sid, rest=False):
+    """Rough and finish the whole turned length. The turned profiles need no
+    rest pass: every inside radius is at least 1.6 mm (profiles.FILLET_R),
+    so the 3 mm finishing ball reaches all of it. The knight's head does --
+    its outline turns tighter than that at the mouth and under the chin."""
     job.op(sid, "Rough", type="surface_rotary", tool=1, stepdown=3.0,
            stock_to_leave=0.5, rotary_pattern="parallel")
     job.op(sid, "Finish", type="surface_rotary", tool=2,
            rotary_pattern="parallel")
-    # Parallel, not spiral: a spiral winds the whole length at the rotary's
-    # speed limit, air and all -- 697 of the pawn blank's 828 minutes.
-    job.op(sid, "Rest", type="surface_rotary", tool=7, rest_from_tool=2)
+    if rest:
+        job.op(sid, "Rest", type="surface_rotary", tool=7, rest_from_tool=2)
 
 
 def body(app, part_name):
@@ -197,13 +199,13 @@ def by_a(faces):
     return groups
 
 
-def turned(job):
-    """Rough and finish on the rotary; the rest pass in the same setup but a
-    program of its own (split_output), because it is hours for the corners
-    only and the operator may skip it."""
+def turned(job, rest=False):
+    """Rough and finish on the rotary; a rest pass, when there is one, is a
+    program of its own (split_output): hours, and for the corners only."""
     sid = job.setup("Turn")
-    job.app.set_cam_setup(job=job.job, id=sid, split_output=True)
-    turn(job, sid)
+    if rest:
+        job.app.set_cam_setup(job=job.job, id=sid, split_output=True)
+    turn(job, sid, rest)
     return sid
 
 
@@ -269,7 +271,7 @@ def queen_king(app):
 
 def knights(app):
     job = Job(app, "blank_knights", "Knights")
-    turned(job)
+    turned(job, rest=True)
     # No side setups: the turning passes are 4-axis surfacing all the way
     # round, so they carve the head wherever a radial cutter reaches -- and
     # the check says what, if anything, they could not.

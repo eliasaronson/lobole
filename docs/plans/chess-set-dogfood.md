@@ -32,6 +32,7 @@ Phase 1's profile change lands before this, so the pawn needs no rest pass.
   inside radius is at least 1.6 mm. Verified: each blank's `cam_verify` with
   rough and finish only leaves nothing over the finish's cusp, and the rest
   op is dropped from the jobs.
+
 ## 2. Picking faces by what made them
 
 The round's biggest cost was face picking: every operation needed a filter by

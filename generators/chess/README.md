@@ -26,10 +26,12 @@ Each stage opens the project the one before saved; all of it lands in
 diameter are FIDE fractions of it, set by its configuration; the square is
 twice the pawn's base. Profiles are drawn against two anchors, the base
 radius and the top (`piece_h - a * u`, `u = king_h / 85`), so an arc stays an
-arc at any size; the set rebuilds from 70 to 110 mm. Concave line-to-line
-corners are rounded to 1.6 mm (`FILLET_R`), more than the 3 mm finishing
-ball's radius; the ones with no room are listed on the run (`tight inside
-corner`).
+arc at any size; the set rebuilds from 70 to 110 mm. Every concave
+junction -- line or arc either side -- is rounded to 1.6 mm (`FILLET_R`),
+more than the 3 mm finishing ball's radius, and the grooves (the foot's, the
+necks) are coves of at least 1.8 mm, so the finishing ball reaches every
+surface and no rest pass is needed at the nominal size. A corner with no
+room is listed on the run (`tight inside corner`).
 
 ## Blanks
 
@@ -42,9 +44,11 @@ the blank: the rotary cannot reach an end face.
 
 ## Jobs
 
-- Blanks: turned (rough 6 mm flat, finish 3 mm ball, and an optional rest
-  pass with a 1.5 mm ball, a program of its own), then indexed head cuts:
-  crenels, the mitre, crown notches, the cross.
+- Blanks: turned (rough 6 mm flat, finish 3 mm ball), then indexed head
+  cuts: crenels, the mitre, crown notches, the cross. The knights' blank
+  alone adds a rest pass with a 1.5 mm ball, a program of its own: the
+  head's outline turns tighter than the 3 mm ball at the mouth and under
+  the chin.
 - Board: dark-square pockets, a 2 mm pass round each square's corners, the
   frame's chamfer (V-bit), cut-out; a second setup faces it after the epoxy.
 - Base jig: the seats and the cut-out; then one side's sixteen pieces in it,
