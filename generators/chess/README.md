@@ -48,7 +48,9 @@ and the finishing ball left a ring at each of its corners.
 ## Jobs
 
 - Blanks: turned (rough 6 mm flat, finish 3 mm ball), then indexed head
-  cuts: crenels, the mitre, crown notches, the cross. The knights' blank
+  cuts: crenels, the mitre, crown notches, the cross -- each ONE operation
+  at the indices that face its floors (`index_a_deg`), with its top derived
+  from what the turning left. The knights' blank
   alone adds a rest pass with a 1.5 mm ball, a program of its own: the
   head's outline turns tighter than the 3 mm ball at the mouth and under
   the chin.
@@ -58,10 +60,11 @@ and the finishing ball left a ring at each of its corners.
   a setup per rank, felt recess and weight bore.
 
 Every face an operation targets is asked for by what made it
-(docs/modeling/toponaming.md): a crenel's floors are `made(..., "Crenels",
-"rook 1", role="floor")` -- the piece part's pattern, through the rook's
-Derived copy -- and a radial cut's floors are its faces that face away from
-the axis. The board's chamfered edges are the ones joining the slab's top
+(docs/modeling/toponaming.md): a crenel's floors are the faces
+`made(..., "Crenels", "rook 1")` -- the piece part's pattern, through the
+rook's Derived copy -- that face away from the axis. Every radial cut here is
+extruded ACROSS the part, so its end caps (`role="floor"`) are its walls, and
+its floor is a side face. The board's chamfered edges are the ones joining the slab's top
 to its sides (`edges(between=...)`).
 
 `MACHINE` in `cam.py` holds the rotary's mount as TEST values: the 6090's axis
