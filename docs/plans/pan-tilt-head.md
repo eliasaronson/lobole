@@ -34,7 +34,7 @@ per part, a `run_all.sh PORT [--from STAGE]`, and a log ending in `done` or
 - **Both worm pairs:** single start, about 40:1, and self-locking: the lead
   angle is under the friction angle for the printed pair, and the check says
   so.
-- **The rest is printed**, with the clearances a printer needs.
+- **The rest is printed in PETG**, with the clearances a printer needs.
 
 ## Phases
 
