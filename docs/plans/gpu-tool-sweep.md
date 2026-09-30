@@ -66,12 +66,44 @@ implementation.** Two findings carry on:
   dispatch are what made it fast (310 ms to 45 ms). The candidates that could
   earn a kernel are the ones not yet measured.
 
+## What step 1b measured: the planar verify
+
+The planar carve with its rapid checks, swept-cell marks and bite volumes, as
+the same kind of kernel (branch `gpu-planar-carve-prototype`:
+`src/shaders/planar_carve.comp`, the hidden `[planar_gpu]` bench). The chess
+board's check is no longer about 35 s. On today's code a whole `Inspect` is
+0.2 to 0.35 s at the panel's 0.4 mm and 0.4 to 0.9 s at 0.25 mm. The carve is
+30 to 60% of that. Every check also inspects the other setup
+(`OtherSetupsOf`).
+
+| carve, Top / Face | 0.25 mm | 0.4 mm (the panel) |
+|---|---|---|
+| CPU, 1 thread | 255 / 325 ms | 90 / 137 ms |
+| CPU, bands of rows on 22 cores | 48 / 62 ms | 27 / 33 ms |
+| RTX 4060, total | 14 / 15 ms | 7 / 7 ms |
+| llvmpipe, total | about 55 ms | – |
+
+- **The maps agree** to 2.5e-5 mm on every device. So do the swept cells and
+  every verdict field.
+- **The rapids agree** with the wall tolerance, including on a stress file of
+  3,222 rapids through stock: the same count, lines and deepest cells. Without
+  the tolerance, one rapid's deepest cell moved by 1.9 mm, the same tie the
+  rotary check showed.
+- **Uncached readback was most of a transfer.** Reading through the storage
+  buffer's own mapping cost 170 ms for 8 MB; a cached readback copy costs
+  5 ms. The rotary numbers above carried that cost unseen.
+
+**The GPU saves 20 to 50 ms in a check of 0.2 to 1.3 s, and the band split
+takes the carve most of the way with one implementation.** Neither verify
+earns the library. What remains on the planar check is CPU work: split the
+carve into bands like the rotary one, parallelize `SampleModel` (70 to 120 ms,
+serial), and stop re-inspecting the other setup on every check.
+
 ## What comes next, if anything
 
-Measure the next candidate the same way before building the library: the
-planar verify (the chess board's is about 35 s) or the CL surfaces
-(`RotaryCL` and the planar drop-cutter, most of a surfacing generate). Step 2
-and on stand only if one of them shows a gain the CPU cannot reach.
+The CL surfaces are the one candidate not yet measured (`RotaryCL` and the
+planar drop-cutter, most of a surfacing generate). Step 2 and on stand only if
+they show a gain the CPU cannot reach.
 
 ## Constraints the design has to meet
 
