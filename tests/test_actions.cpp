@@ -2453,6 +2453,54 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
   PumpUntil(state, [&] { return !AnyPending(state); });
   CHECK(SameMoves(state.camToolpaths[0], ref[0]));
 }
+
+TEST_CASE("a pass is keyed on the job, not on which setup the tab shows",
+          "[actions][cam][jobs]") {
+  // docs/ui/long-operations.md#cam-toolpath-passes: a parked cam_toolpath
+  // queues its passes as soon as it selects the job, before the tab shows
+  // any setup; the tab then shows one. With the shown setup in the key,
+  // every pass was owed again under the second key and cut twice -- the
+  // chess knights' turning, 250 s of a 380 s cam_toolpath.
+  if (!cam::AdaptiveAvailable())
+    return;
+  ui::AppState state = MakeHeadlessState();
+  Document& doc = *state.document;
+  const uint64_t block = AddBox(doc, glm::vec3(0, 0, 0), 40, 30, 20);
+  const uint64_t voidId = AddBox(doc, glm::vec3(10, 8, 12), 20, 14, 20);
+  doc.AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                  BooleanOp::Subtract));
+  doc.Regenerate();
+  ui::CreateJobForPart(state, state.parts[state.activePart].id);
+  REQUIRE(state.job != nullptr);
+  cam::Setup& setup = state.job->AddSetup("Job");
+  cam::Tool tool;
+  tool.number = 1;
+  tool.diameter = 6.0;
+  tool.feedCut = 600.0;
+  tool.feedPlunge = 200.0;
+  setup.tools.push_back(tool);
+  setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+  const ElementRef floor = UpFaceAtZ(ui::JobBodies(state), 12.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op =
+      cam::DeriveOperation(setup, ui::JobBodies(state), cam::OpType::Pocket,
+                           ui::TargetFor(state, floor))
+          .op;
+  op.id = state.job->AllocateId();
+  op.type = cam::OpType::Adaptive;
+  setup.operations.push_back(op);
+
+  state.camActiveSetup = 0; // the tab shows no setup yet
+  REQUIRE(ui::QueueCamPassesFor(state, setup));
+  const size_t queued = state.camPassBatchTotal;
+  REQUIRE(queued >= 2);
+  state.camActiveSetup = setup.id; // ...and now it does
+  CHECK(ui::QueueCamPassesFor(state, setup));
+  CHECK(state.camPassBatchTotal == queued); // nothing owed twice
+  PumpUntil(state, [&] { return !ui::CamPassesBusy(state); });
+  CHECK_FALSE(ui::QueueCamPassesFor(state, setup)); // all of it landed
+  CHECK(state.camAdaptiveCache.Size() == queued);
+}
 #endif // HAVE_CAM
 
 TEST_CASE(

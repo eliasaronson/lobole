@@ -124,6 +124,16 @@ void StartJobBoundsWarm(AppState& state);
 // one of the parts reaches the viewport.
 uint64_t JobRenderVersion(AppState& state);
 
+// The same, less which setup the tab SHOWS: the geometry fingerprint the CAM
+// pass caches key on (`GenerateContext::bodiesKey`). A pass is framed by the
+// setup it is cut in, and its key hashes that setup's framing already
+// (`cam::FramingKey`); the one the tab happens to show is not an input. With
+// it in, a request parked right after a job tab opened queued every pass
+// under "no setup shown", the tab then showed the setup, and every pass was
+// owed again under a second key -- the knights' turning cut twice, 250 s of
+// a 380 s cam_toolpath (docs/ui/long-operations.md#cam-toolpath-passes).
+uint64_t JobPassesKey(AppState& state);
+
 // The machining selection for a picked element: the ref, plus which job part
 // it is on.
 //

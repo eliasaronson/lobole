@@ -79,8 +79,8 @@ struct GenerateContext {
   // adaptive levels does.
   SurfaceCache* surfaceCache = nullptr;
   // The caller's fingerprint of the geometry these toolpaths are cut from.
-  // The core cannot take one cheaply; the UI already keeps exactly this in
-  // `JobRenderVersion`. Zero means "do not cache surfacing" -- an honest
+  // The core cannot take one cheaply; the UI keeps exactly this in
+  // `JobPassesKey`. Zero means "do not cache surfacing" -- an honest
   // answer for a caller that has no such key, and the default, so nothing
   // silently reads a result cut from other geometry.
   uint64_t bodiesKey = 0;

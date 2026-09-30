@@ -125,7 +125,7 @@ struct OutlineResult {
 };
 
 // `bodiesKey` is the caller's fingerprint of the geometry, as for surfacing
-// (`JobRenderVersion`), and `framingKey` how the setup turns it
+// (`JobPassesKey`), and `framingKey` how the setup turns it
 // (`FramingKey`): one fingerprint covers every setup of a job, and every
 // index of one operation, whose outlines differ. The rest are
 // ProjectedOutlines' own arguments.

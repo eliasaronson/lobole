@@ -120,19 +120,26 @@ const std::vector<Body>& JobPlacedBodies(AppState& state) {
 }
 
 uint64_t JobRenderVersion(AppState& state) {
+  const uint64_t key = JobPassesKey(state);
+  if (key == 0)
+    return 0;
+  // Which setup is shown decides where the bodies are drawn.
+  return (key ^ state.camActiveSetup) * 1099511628211ull;
+}
+
+uint64_t JobPassesKey(AppState& state) {
   const cam::JobDocument* job = ActiveJob(state);
   if (job == nullptr)
     return 0;
   // The same mix JobBodies keys its cache on, plus everything that decides
-  // where a body LANDS: the active setup, how it is fixtured, and every
-  // placement. None of those bump the job's version -- the panel and the
-  // picks write them in place -- so leaving them out meant laying a face up
-  // redrew nothing at all, and the backplot was the only thing that moved.
+  // where a body LANDS: how each setup is fixtured, and every placement.
+  // None of those bump the job's version -- the panel and the picks write
+  // them in place -- so leaving them out meant laying a face up redrew
+  // nothing at all, and the backplot was the only thing that moved.
   uint64_t key = JobBodiesKey(state, *job);
   const auto mix = [&key](double v) {
     key = (key ^ static_cast<uint64_t>(v * 4096.0)) * 1099511628211ull;
   };
-  key = (key ^ state.camActiveSetup) * 1099511628211ull;
   for (const cam::Setup& setup : job->GetSetups()) {
     mix(setup.frame.x);
     mix(setup.frame.y);

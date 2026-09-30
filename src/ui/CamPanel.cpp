@@ -97,10 +97,11 @@ cam::GenerateContext ContextOf(AppState& state, const cam::Setup& setup) {
   ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
-  // The fingerprint the surfacing key needs of the geometry. `JobRenderVersion`
-  // is already the mix of the job, its sources, the active setup, the
-  // fixturing and every placement -- which is exactly "which bodies, where".
-  ctx.bodiesKey = JobRenderVersion(state);
+  // The fingerprint the surfacing key needs of the geometry. `JobPassesKey`
+  // is the mix of the job, its sources, the fixturing and every placement --
+  // "which bodies, where" -- and not which setup the tab shows, which is no
+  // input to a pass (FramingKey keys the setup it is cut in).
+  ctx.bodiesKey = JobPassesKey(state);
   ctx.outlineCache = &state.camOutlineCache;
   ctx.defer = state.camDeferPasses;
   return ctx;

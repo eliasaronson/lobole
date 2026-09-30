@@ -330,7 +330,7 @@ std::vector<cam::Toolpath> GenerateCamToolpathsNow(AppState& state,
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
-  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.bodiesKey = JobPassesKey(state);
   ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = false; // the reader's path: compute what is missing, now
   return cam::GenerateAll(setup, JobBodies(state), &ctx);
@@ -342,7 +342,7 @@ CamToolpathsQueued(AppState& state, const cam::Setup& setup, bool& pending) {
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
-  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.bodiesKey = JobPassesKey(state);
   ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = state.camDeferPasses;
   std::vector<cam::Toolpath> paths =
@@ -367,7 +367,7 @@ bool QueueCamPassesFor(AppState& state, const cam::Setup& setup) {
   ctx.cache = &state.camAdaptiveCache;
   ctx.surfaceCache = &state.camSurfaceCache;
   ctx.outlineCache = &state.camOutlineCache;
-  ctx.bodiesKey = JobRenderVersion(state);
+  ctx.bodiesKey = JobPassesKey(state);
   ctx.sketchCurves = JobSketchCurves(state, setup);
   ctx.defer = true; // never cut on the frame: that is what the caller avoids
   const std::vector<cam::Toolpath> paths =
