@@ -175,27 +175,28 @@ that once ran at one frame a second: a job tab asking OCC for the exact box of
 a turned part's toroidal faces every frame, and a job-tab switch that paid
 3-7 s (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape). It turns a stepped shaft with
 six rounded rims, holds it in the rotary at A = 30 (no quarter turn reaches
-it, so every framed copy starts cold and only `CachedStockView` in
-`ui/CamTool.cpp` keeps the idle frame cheap), and asserts the median idle
-`ui` phase over 30 frames. It then adds jobs at A = 90 and 180, which carry
-their source's box through the quarter turn, and switches among the three
-tabs three times, bounding the worst `update` + `ui` of the six frames after
-each switch. The bounds are CPU phases so llvmpipe's drawing time does not
-count against them. Measured on the GUI runner:
+it, so every framed copy is a new shape, and only the memos -- `CachedStockView`
+in `ui/CamTool.cpp`, and the exact box remembered by shape identity and
+location, docs/cam/gui.md#job-tab-frame-cost -- keep the frame cheap), and
+asserts the median idle `ui` phase over 30 frames. It then adds jobs at
+A = 90 and 180, which carry their source's box through the quarter turn, and
+switches among the three tabs three times, bounding the worst `update` + `ui`
+of the six frames after each switch. The bounds are CPU phases so llvmpipe's
+drawing time does not count against them. Measured on the GUI runner, the
+machine at a load of about 20 from other work:
 
 | what | healthy | bound | broken |
 |---|---|---|---|
 | idle `ui`, median | 0.5 ms | 15 ms | 88 ms (memo never hits) |
-| switch to a quarter-turned job | 25 ms | 120 ms | 240 ms (box not carried) |
-| switch to the A = 30 job | 210 ms | 1000 ms | |
+| switch to a quarter-turned job | 15-21 ms | 120 ms | 240 ms (box not carried) |
+| switch to the A = 30 job | 16-21 ms | 120 ms | 193-234 ms (box not remembered) |
 
-With every core loaded by `tools/with-cpu-load.sh`, the healthy numbers were
-0.7, 58 and 354 ms.
-
-The A = 30 job pays its exact boxes again on every visit: its framed copies
-are new shapes at an angle nothing carries, and the stock memo holds one
-job. That is today's cost, held to the second the regression broke, not a
-target.
+With `tools/with-cpu-load.sh -n 22` on top of that, the healthy numbers were
+0.7, 51 and 45 ms. The last row's broken column is the negative control: the
+same test with the shared box memo's lookup switched off. The A = 30 job used
+to pay its exact boxes again on every visit and was held only to a second;
+revisiting it now costs what a quarter-turned one does, and it is held to the
+same bound.
 
 ## Idle throttle
 

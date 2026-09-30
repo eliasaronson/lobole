@@ -187,34 +187,39 @@ draws and the backplot stay in `CamPanel.cpp`). Three `SectionHeader`s with
 counts, each row a `ListRow`:
 
 - **Parts** — a cube glyph, the part's name, its configuration as the tail
-  (else its material). A part whose source is gone, or whose configuration
+  (else its material's name, "Oak", not the slug "wood_oak"). A part whose source is gone, or whose configuration
   no longer exists or does not build, is red with the reason in the tooltip;
   one that does not fit the active setup's stock (`CheckPlacements`) says so
   as its tail ("hangs over the edge"). Dimmed when the active setup leaves it
-  on the sheet. Click selects it, which gives it the placement gizmo;
+  on the sheet. Click selects it (`SelectionItem::Kind::JobPart`) and its
+  bodies, which gives it the placement gizmo;
   double-click edits its placement in the tool window
   (`DrawCamPartEditor`: its configuration, Cut, X, Y and turn). Right-click:
   Edit placement, **Configuration** (a submenu of the part's configurations,
-  `###cam_part_cfg_<id>`, 0 = its active one), Place or Cut, Remove. The
+  `###cam_part_cfg_<id>`, 0 = its active one), Place or Cut, Remove (the
+  selected parts, `RemoveJobParts`). The
   header's `+` (`###cam_parts_add`, shown on hover) offers each project part;
   one with configurations is a submenu of them (`###cam_part_add_cfg_<id>`),
   so one part can be cut in several (the chess undersides).
 - **Setups** — each a row with a disclosure (`###cam_setup_open_<id>`) over
-  its operations and fixtures, so several setups are open at once. The
-  selected row is the **active setup** (a click makes it active and opens
-  it); what the toolpaths, verbs and editors act on. The active setup's tail
+  its operations and fixtures, so several setups are open at once. A plain
+  click selects the row (`Kind::CamSetup`) and makes it the **active setup**,
+  opening it; what the toolpaths, verbs and editors act on. The lit rows are
+  the selected setups, or the active one while none is. The active setup's tail
   is the run status as a glyph (`###cam_run_status`: not generated,
   generated, verified ok, warnings, failed, working), which opens the
   Generate window; another setup's tail counts its operations.
   Double-click opens its settings in the tool window (`DrawCamSetupEditor`:
   name, machine and its reconciliation, stock and safety, post, the rotary,
   its fixtures). Right-click: Settings, Rename (in place), Flip, Duplicate,
-  Add operation (`cam::AddOperationType`), Add fixture (a submenu), Delete.
-  The header's `+` adds a setup.
+  Add operation (`cam::AddOperationType`), Add fixture (a submenu), Delete
+  (the selected setups, `RemoveCamSetups`). The header's `+` adds a setup.
 - **Tools** — the active setup's, one `ListRow` each (number and type glyph,
-  description, diameter as the tail); double-click edits in the tool window.
-  Delete is disabled while an operation uses the tool, with those operations
-  named, and `RemoveCamTool` refuses with the same sentence. An edit that
+  description, diameter as the tail; `Kind::CamTool`, by number); double-click
+  edits in the tool window. Delete is disabled while an operation uses the
+  one tool right-clicked, with those operations named, and `RemoveCamTool`
+  refuses with the same sentence; of several selected, `RemoveCamTools`
+  removes the free ones and says why the rest stay. An edit that
   would drive the tool's shank into a wall in one of those operations is
   taken back, the reason in `camRefusal` ([CAM setup](../cam/setup.md#reach)).
   The header's `+` offers the machine's library, then a blank tool.
@@ -228,8 +233,14 @@ Under a setup:
   A disabled operation is dimmed. The summary is type-aware (a rotary
   operation states its pattern, lead and stepover). Editing an operation of
   another setup makes that setup active first.
-- **Fixtures** — a glyph, the name, where it sits as the tail; right-click
-  Edit, Check, Move to, Remove.
+- **Fixtures** — a glyph, the name, where it sits as the tail
+  (`Kind::Fixture`); right-click Edit, Check, Move to, Remove (the selected
+  fixtures, `RemoveCamFixtures`).
+
+Every row kind is a list's row (docs/ui/selection.md#lists-one-gesture-one-delete):
+Ctrl toggles, Shift spans, and the **Delete key** removes whatever of the five
+kinds is selected, as one undo step. A plain click on one kind lets go of the
+others (`ui::CamRowClicked`), so what Delete takes is what is lit.
 
 A job with no setup yet shows the setup step instead
 ([gui.md](../cam/gui.md#making-a-job)). **Generate** is a window, not a panel

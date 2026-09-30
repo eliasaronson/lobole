@@ -356,15 +356,26 @@ carried: it is bounded in the frame it was taken in. A job's bodies are warmed
 on their SOURCE documents' bodies (`ui::JobBodies`), which outlive the job's
 copies, so returning to a job tab framed by quarter turns pays nothing; the
 stock and machine boxes a job tab draws every frame are memoized in
-`CamTool.cpp` on the job's geometry and the setup less its operations. A setup
-at any other angle (a rotary index of 30 degrees) pays its framed copies' boxes
-again on every return, since the memo holds one job.
+`CamTool.cpp` on the job's geometry and the setup less its operations.
+
+A copy at any other angle (a rotary index of 30 degrees) is a new object each
+time a job tab frames it, so the TIGHT box of a LOCATED shape is also
+remembered beside the object, keyed on its TShape and its location's
+transformation: the same TShape at the same placement is the same point set,
+so a framing done again reads the box the first one paid for, and returning to
+such a job costs what a quarter-turned one does
+(docs/cam/gui.md#job-tab-frame-cost). `CADShape::RememberTightBox` puts a box
+computed elsewhere -- by the worker that pays a project's job tabs off the
+frame, on detached copies -- under a framing's identity.
 `frametime/job_tab_idle_and_switch` bounds both costs
 (docs/rendering/frame-pacing.md#tests).
 
-The memo lives inside the object, not in a cache beside it: a shape's
-address-based id is recycled by the allocator, so an outside cache keyed on it
-could hand a freed shape's box to whatever lands at that address next.
+The per-shape memo lives inside the object: a shape's address-based id is
+recycled by the allocator, so an outside cache keyed on the address alone
+could hand a freed shape's box to whatever lands at that address next. The
+located-box memo beside it holds a handle to each TShape it keys on, as the
+volume cache does, so an address it keys on is never reused while the entry
+lives; it is a bounded ring (1024), and opening a project empties it.
 
 The conservative box uses `BRepBndLib::Add` with `useTriangulation = false` and
 the tight one `AddOptimal`. Neither is mesh-derived: a box from the

@@ -12,7 +12,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 
 | field | meaning |
 |---|---|
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -229,7 +229,10 @@ stays up across the part → assembly tab switch
   project's.
 - `AdoptProject(state, LoadedProject&&)` swaps the slots in, activates,
   syncs the project scope, solves an assembly and frames — milliseconds, on
-  the main thread.
+  the main thread, except that framing a job tab builds the bodies it cuts
+  (a configured part is a regeneration), which its first frame would
+  otherwise do: 2 s for the chess set's undersides job, sixteen
+  configurations of one piece.
 
 `OpenProject` is their composition and stays synchronous for the RPC
 (`open_project`), restore, merge, branch switch and sync. The opens a person
@@ -260,6 +263,14 @@ the same element names and the same feature errors (the chain hash only where
 it is reproducible: a sketch that projects external geometry mints fresh
 entity ids on every rebuild). GUI: `file/a_slow_open_shows_progress_and_cancels`
 (slowed by `OpenJobOptions::delayEachMs`, tests only).
+
+Once adopted, a project with job tabs starts a `job-warm` job
+(`ui::StartJobBoundsWarm`): the exact boxes of every other job tab's framed
+parts, on deep copies (`CADShape::DetachedUnlocated`) the frame never meshes,
+handed to the shape memo in its `finish`, so the first visit to a job tab
+reads them instead of stalling (docs/cam/gui.md#job-tab-frame-cost). On the
+chess set: 10 bodies, 17 ms on the frame to prepare, 4 s on the worker, and a
+first visit to a turning job down from 0.6-0.9 s to under a millisecond.
 
 ## Motion studies
 

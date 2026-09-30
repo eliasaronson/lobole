@@ -11,10 +11,13 @@ which change on every regeneration.
 ```cpp
 struct SelectionItem {
   enum class Kind { Face, Edge, Body, Feature, Occurrence, Mate, Relation,
-                    SketchRegion, Connector, Operation, SketchCurve };
+                    SketchRegion, Connector, Operation, SketchCurve,
+                    CamSetup, JobPart, Fixture, CamTool };
   Kind kind;
-  uint64_t id;         // feature/occurrence/mate/relation/operation id;
-                       // Body: its createdBy; Connector: the occurrence
+  uint64_t id;         // feature/occurrence/mate/relation/operation/
+                       // setup/job part/fixture id; CamTool: the active
+                       // setup's tool NUMBER; Body: its createdBy;
+                       // Connector: the occurrence
   ElementRef element;  // Face/Edge/SketchRegion/Connector: {featureId, name};
                        // SketchCurve: {sketch id, "g<entity id>"}
   // Connector only: snapElement(2) for an edge/corner snap, innerPath inside
@@ -125,7 +128,8 @@ behind the cut, `solid = false`); GUI `section/a_cut_picks_what_you_can_see`.
 ## Lists: one gesture, one Delete
 
 Features in a part, occurrences, mates and relations in an assembly, and
-operations in a CAM job share the gesture and the verb
+every row of a CAM job -- operations, setups, parts, fixtures and tools --
+share the gesture and the verb
 (`src/ui/ListSelection.{h,cpp}`), not the row widget:
 
 - `ListRowClicked(state, kind, id, order, ownKindOnly, clickClears)`: a plain
@@ -149,7 +153,14 @@ operations in a CAM job share the gesture and the verb
   by every list's menu. Features go through `RemoveFeaturesCommand` (one undo
   step, one regeneration); on an assembly, mates and occurrences go together
   in one snapshot (`DeleteSelectedOccurrences(state, takeSnapshot=false)`);
-  CAM operations through `RemoveCamOperations`.
+  on a job, operations, tools, fixtures, parts and setups, in that order, in
+  one undo step (`RemoveCamOperations`, `RemoveCamTools`, `RemoveCamFixtures`,
+  `RemoveJobParts`, `RemoveCamSetups`, each also a step of its own when
+  called alone). A CAM row menu's Delete takes only its own kind, since it
+  names it; a plain click on a CAM row lets go of the panel's other row kinds
+  (`ui::CamRowClicked`), so a setup clicked a moment ago does not go with the
+  tool Delete was pressed for. A tool selection is the active setup's, and
+  goes when another setup is made active.
 
 A range delete that leaves a dependent broken (an extrude whose sketch went)
 does so, and the row turns red with the reason, as a single delete always has.
@@ -158,7 +169,8 @@ Delete does not yet reach relations.
 GUI: `selection/survives_sibling_delete`,
 `assembly/shift_click_selects_the_rows_between`,
 `assembly/a_mate_row_closes_and_deletes`,
-`cam/operations_select_like_a_list_and_delete_together`.
+`cam/operations_select_like_a_list_and_delete_together`,
+`cam/delete_reaches_every_row_kind`.
 
 ## Not built
 

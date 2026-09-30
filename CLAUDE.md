@@ -345,6 +345,11 @@ docs/architecture.md#the-ui-actions-layer describes how the code is organised.
   `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
   fails otherwise, because a wrong unit is invisible in the answer
   (docs/conventions.md#units-and-angles).
+- **A CAM job edit calls `ui::MarkJobEdited`.** The job's undo guard records
+  on that counter, not on the job's content (serializing it every frame was
+  8% of an idle frame), so an edit that skips it does not undo; the GUI suite
+  audits every guard against the content and fails the test that forgot
+  (docs/cam/gui.md#undo).
 - Serialization: `src/core/io/Serialize{Features,Assembly,Studies,Configurations}.cpp`.
 - Core is split by domain: `src/core/{features,sketch,drawing,fem,io}/`; the
   document model (Document/Feature/Command/Expression) stays flat in `src/core/`.

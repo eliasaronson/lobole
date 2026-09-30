@@ -101,6 +101,11 @@ while its pick is armed.
   verb window, a playback — so none is left pointing at a job that is gone.
 - The window follows the viewport and re-anchors when it reopens; fitting the
   camera keeps the model in the band the window leaves.
+- **It keeps a bounded height and scrolls past it**: half the viewport's
+  height (never less than eight rows). It grew with what it lists, and
+  Engrave's -- an operation per label, the verdict's every line -- grew down
+  over the curves it was asking to be clicked
+  (`cam/the_engrave_window_keeps_its_height`).
 
 ## Engrave from the viewport
 
@@ -157,6 +162,14 @@ decision is made.
   grey — handed to the renderer's cached channel
   (`SketchRenderer::SetCachedPrimitives`, a shared immutable list uploaded
   only when it changes, never copied per frame).
+- **Framing.** Fit (`job.fit`, F), the first visit to a job tab, and opening
+  a project whose active tab is a job frame the parts laid out, by their
+  EXACT boxes, with the stock round them and the fixtures
+  (`ui::VisibleSceneBounds`, the stock from `ui::CamStockBox`). The
+  conservative box bounds a turned blank's B-splines by their control points
+  and framed the chess jig's piece far bigger than it is; a project opened on
+  a job tab was not framed at all
+  (`cam/a_job_tab_frames_its_parts_and_stock`).
 - **While a verb is armed:** a hover preview of the region the click would
   clear.
 - **At the pick:** the tool to scale where it first enters the material (will
@@ -177,14 +190,16 @@ Tools headers with counts, rows with a glyph, a name and a dim tail, the
 create verbs on the headers' `+`, the rest in each row's menu, settings in
 the tool window.
 
-- **Parts:** each job part with its configuration (or material) as the tail;
+- **Parts:** each job part with its configuration (or its material's name,
+  "Oak", not the slug the file stores) as the tail;
   a part whose source is gone, or whose configuration is gone or does not
   build, is red with the reason. Right-click: Edit placement,
   **Configuration** (a submenu of the part's configurations, through
   `ui::SetJobPartConfiguration`: one undo step, and every setup's origin,
   safe Z and targeted depths re-derived as a re-clamp re-derives them; the
   RPC's `set_job_part` is the same call), Place (a part without a placement
-  in the active setup) or Cut (off leaves it on the sheet), Remove.
+  in the active setup) or Cut (off leaves it on the sheet), Remove (the
+  selected parts; their placements go, and no operation cuts them any more).
   Double-click edits the placement in the tool window: the configuration,
   Cut, and its X, Y and turn, named inside the fields, with the fit said
   under them. The header's `+` opens a menu of the project's parts: one
@@ -193,14 +208,15 @@ the tool window.
   once per configuration (the chess undersides: one piece part, a blank per
   rank).
 - **Setups:** a row per setup with a disclosure over its operations and
-  fixtures; the selected row is the active setup (it was a combo), and a
-  click on another makes it active and opens it. The active setup's tail is
+  fixtures; a click on one selects it, makes it the active setup (it was a
+  combo) and opens it. The lit rows are the selected setups, or the active
+  one while none is selected, so what Delete would take is what is lit. The active setup's tail is
   the run's state as a glyph — not generated, generated but not verified,
   verified ok, warnings, failed, working — and a click on it opens the
   Generate window as it stands. Right-click: Settings, Rename, **Flip** (the
   other side, derived), Duplicate (operations, fixtures and placements
-  included, each with a new id), Add operation, Add fixture, Delete. The
-  header's `+` adds a setup.
+  included, each with a new id), Add operation, Add fixture, Delete (the
+  selected setups). The header's `+` adds a setup.
 - **A setup's settings** (double-click, or Settings) open in the tool
   window: its name; the machine combo, and under it the reconciliation line
   when the embedded machine differs from yours or is not one of yours (*Use
@@ -216,11 +232,13 @@ the tool window.
 - **Fixtures,** under their setup: one row per fixture — a glyph, its name,
   where it sits as a dim tail ("−X side", "over the −X edge", or "its seat
   is gone: …"), greyed when not checked; right-click Edit, Check, Move to
-  (−X, +X, −Y, +Y, Centre, Top) and Remove. The setup's **Add fixture**
+  (−X, +X, −Y, +Y, Centre, Top) and Remove (the selected fixtures). The setup's **Add fixture**
   offers the keep-out box first, then "Hold it with a part:" and the project
   parts the job does not cut; each item's tooltip says what the choice does,
   so cutting a part and clamping with it are not confused.
-- **Tools:** the active setup's, rows in the list style (right-click Edit),
+- **Tools:** the active setup's, rows in the list style (right-click Edit,
+  Delete -- disabled for one an operation cuts with; of several selected, the
+  free ones go and the rest are refused in words),
   the header's `+` offering the machine's library first, then a blank tool.
   Feeds and speeds are asked for, and the panel says why: they are the one
   number that is genuinely the user's. The editor has the shank's width
@@ -250,11 +268,87 @@ the tool window.
   that already cuts on the 4th axis, else the whole-part cut-out) through
   `DeriveOperation`, and shows a refusal instead of adding a dead operation.
 
+**Every row kind is selected and deleted as a list's rows are**
+([selection.md](../ui/selection.md#lists-one-gesture-one-delete)): a click
+selects, Ctrl toggles, Shift spans, and the Delete key removes what is
+selected -- operations, tools, fixtures, parts and setups, in that order, as
+ONE undo step (`ui::DeleteSelection` over `RemoveCamOperations`,
+`RemoveCamTools`, `RemoveCamFixtures`, `RemoveJobParts`, `RemoveCamSetups`).
+A row menu's Delete or Remove takes its own kind only, since it names it. A
+plain click lets go of the panel's other row kinds -- a setup picked a moment
+ago must not go with the tool Delete was pressed for -- and keeps picked
+faces, which the verb windows are aimed at (`ui::CamRowClicked`). A tool row
+is the active setup's, so making another setup active lets go of selected
+tools.
+
 Combos with an empty label cannot be addressed by the GUI test engine, so
 choices a test must make (add menus, the rotary pattern, tool buttons) are
 popups, buttons or radio pairs. No two visible widgets may share an ImGui id:
 ImGui reports a collision in a popup no test sees, so
 `cam/panel_widgets_have_distinct_ids` draws the whole panel and fails on one.
+
+## Undo
+
+Every job edit is one undo step (router-round R7): a verb, a pick, a panel
+field, a drag, a menu verb, a Delete. The panel, the setup and part editors
+and each verb draw under a `ui::JobUndoGuard`, which copies the job and, when
+it closes, pushes the copy if the job was edited in between; only the
+outermost guard records, so an action with a guard of its own called under
+another is still one step. A drag (`coalesce`) is one step from where it
+started, unless it came back there.
+
+**"Edited" is a counter, not the job's content.** Every job edit calls
+`ui::MarkJobEdited` (it bumps `AppState::jobEdits` and marks the project
+unsaved), and the guard compares the counter. It compared the job serialized
+to JSON before and after every frame -- 8% of an idle frame, for an answer
+that was almost always "no". Nothing a frame reads moves the counter
+(`tests/test_actions.cpp`, "a job edit bumps the edit counter and a draw does
+not"). The RPC guard compares the content (`compareContent`): it runs once
+per call, not per frame, and wraps a hundred handlers, none of which then has
+to say it changed something.
+
+**The GUI suite audits the rule.** Under `--gui-tests` every guard also
+compares the content (`ui::SetJobEditAudit`), and a test in which the job
+changed without the counter moving fails, naming the first difference in the
+job's JSON: that edit would not undo.
+
+`RemoveCamOperations` and `RemoveCamTool` hold a guard rather than taking a
+snapshot. They used to snapshot, and under the panel's guard a delete from
+the panel's menu was two steps, the first of which brought back nothing
+(`cam/a_delete_from_the_panel_is_one_undo`).
+
+## Job tab frame cost
+
+A job tab draws its parts laid out in the active setup, and the stock, the
+machine's box and the camera fit read their EXACT bounding boxes -- on a
+turned blank's tori, a search per face. The box is memoized on the shape
+(docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape), and a copy moved by
+a quarter turn carries it, but a part indexed at any other angle is a new
+shape each time the tab frames it: a job at A = 30 paid its boxes again on
+every visit, 210 ms on the frame-time test's shaft and most of a second on
+the chess blanks.
+
+- **The tight box is also remembered by shape identity and location**
+  (`CADShape::GetBoundingBox`, `src/cad/CADKernel.cpp`): the same TShape at
+  the same placement is the same point set whichever `CADShape` holds it, so
+  a framing done again -- the tab revisited, the stock derived from a fresh
+  framing, the machine's box, a region pick -- reads the box the first one
+  paid for. Only located shapes are stored; each entry holds its TShape, so an
+  address is never reused under it, and the ring is bounded (1024), as the
+  volume cache's is. Opening a project forgets them.
+- **The first visit's cost is paid off the frame.** Opening a project starts
+  a `job-warm` background job (`ui::StartJobBoundsWarm`): every job tab but
+  the active one is framed in each of its setups on the main thread (a
+  `Moved`, no geometry), each source body is deep-copied once
+  (`CADShape::DetachedUnlocated`, so the worker never reads a TShape the
+  frame may be meshing), and the worker bounds the copies at the framings'
+  locations (`CADShape::ExactBoxUnmemoized`). Its `finish` hands the boxes to
+  the memo under the real framings' identity (`CADShape::RememberTightBox`).
+  A part in a configuration not built yet is left to the visit, which builds
+  it: building it at open would be a stall of its own.
+
+`frametime/job_tab_idle_and_switch` holds the revisit to a bound
+([frame-pacing.md](../rendering/frame-pacing.md#tests)).
 
 ## Generate window
 
@@ -325,7 +419,13 @@ edit),
 `cam/the_rotary_verbs_rough_then_finish`, `cam/a_rotary_pass_limits_to_a_face`,
 `cam/backplot_is_not_copied_per_frame`, `cam/a_job_edit_undoes`,
 `cam/two_setups_are_open_at_once`, `cam/one_part_in_two_configurations`
-(one part added twice in two configurations, one pocketed and generated). A test that
+(one part added twice in two configurations, one pocketed and generated),
+`cam/delete_reaches_every_row_kind` (a tool, two tools at once, a fixture, a
+part and a setup, each by the Delete key, each one undo step that brings it
+back), `cam/a_delete_from_the_panel_is_one_undo`,
+`cam/the_engrave_window_keeps_its_height`,
+`cam/a_job_tab_frames_its_parts_and_stock` (the first visit, and a project
+opened on the job). A test that
 leaves a CAM window open, or a docked tab switched, breaks later tests' clicks,
 so cleanup that matters to other tests comes right after the last interaction
 that needs it.
