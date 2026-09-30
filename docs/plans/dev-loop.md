@@ -64,6 +64,23 @@ together compiled four whole trees and ran the machine out of memory
   `build/CMakeCache.txt`, Release by default.
 - `max_size` is raised, or other projects' caches are moved out, so one
   full tree of both configurations fits without eviction.
+- The **commit is a compile flag on 409 of 427 files**: `DESIGNER_GIT_COMMIT`
+  is a PUBLIC define on `designer_core` (CMakeLists.txt, near line 571), and
+  only `src/common/BuildInfo.cpp` reads it. Every reconfigure at a new commit
+  changes every file's flags. That happens when a merge adds a source file,
+  or on an explicit `cmake .`. Ninja then recompiles 409 files and ccache
+  can hit none of them. A worktree is configured at its own commit, so it
+  misses on every file whatever `base_dir` says. This, more than the build
+  type, is why agents compiled cold. The define goes on `BuildInfo.cpp`
+  alone (a generated header or `set_source_files_properties`).
+- **Main's `build/` compiles against stale store paths.** Its compiler and
+  its spdlog, fmt, nlohmann_json, Eigen and Boost include paths are older
+  than what a fresh configure of `shell.nix` resolves. A new worktree
+  therefore uses a different compiler and different headers, and cannot
+  share a single object. It is also the setup for the garbage-collected
+  store path breakage CLAUDE.md warns about. `tools/fix-stale-nix-cache.sh`
+  should run on `build/` once. Worktree builds should take main's toolchain
+  from the same `shell.nix` evaluation, so the two agree.
 - `watchdog_smoke` should still pass in a Debug build, because a developer
   debugging a stall builds Debug on purpose. Find out why its stack shows
   `RunHeadless` rather than `StallSelfTest` there.
@@ -212,6 +229,28 @@ most of the answer. The rest:
 - **Harness rejections.** 44 commands in worktrees were rejected as too
   complex to verify, and 36 more failed with an exit code, mostly builds
   killed for memory. Each costs a round trip.
+
+## 10. What else holds the machine and the suite
+
+- **clangd indexes every worktree.** It held 5.4 GB, the largest user
+  after Chrome (7.7 GB) and ahead of the Claude process (3.8 GB). Its errors
+  in this session came from `.claude/worktrees/agent-*/src`. The worktrees
+  sit inside the repo, each with its own `compile_commands.json`, so an
+  editor's clangd indexes each as another copy of the project. Change: a
+  `.clangd` rule that skips `.claude/worktrees/` from the background index,
+  or worktrees outside the repo (the `../designer-wt*` shape CLAUDE.md
+  describes).
+- **Entering `nix-shell` costs 5 s**, measured three times against the 3 s
+  in CLAUDE.md. About 400 entries in the round came to roughly 33 minutes.
+  Change: `nix print-dev-env` into a cached env file, keyed on `shell.nix`'s
+  hash, which the tool scripts source. A second nested shell is then also no
+  longer possible to get wrong.
+- **The headless suite cannot finish faster than `watch_smoke` (73 s).** The
+  next longest are `cam_parked_smoke` (49 s, tagged slow) and
+  `om615_accessories_smoke` (37 s). `watch_smoke` is not tagged `slow`, so
+  it is also in `tools/test-fast.sh`, whose "~55 s" it cannot meet. Change:
+  tag it `slow`, or find what its 73 s is (it builds the whole watch
+  generator), and correct the CLAUDE.md figures to measured ones.
 
 ## Smaller, recurring friction
 
