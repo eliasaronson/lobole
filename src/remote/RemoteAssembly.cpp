@@ -2762,7 +2762,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     for (ClearanceAssertion& a : asmDoc.GetAssertions()) {
       if (one && a.id != only)
         continue;
+      const ClearanceAssertion before = a;
       VerifyAssertion(state, asmDoc, a, receipt);
+      // The verdict is saved with the assembly, and moves no version (it
+      // changes nothing a solve or a render reads): an unsaved change.
+      if (a.verdict != before.verdict || a.note != before.note ||
+          a.measuredMm != before.measuredMm ||
+          a.checkedKey != before.checkedKey)
+        asmDoc.MarkEdited();
       rows.push_back(AssertionRow(state, a));
     }
     json out{{"assertions", std::move(rows)}};

@@ -483,7 +483,7 @@ Document MakeTopoDoc() {
 TEST_CASE("RunTopology optimizes the loaded body end to end",
           "[topopt][mesh][slow]") {
   Document doc = MakeTopoDoc();
-  fem::Study& s = doc.GetStudies()[0];
+  fem::Study& s = *doc.StudyForRun(doc.GetStudies()[0].id);
   fem::StudyRuntime rt;
   std::string err;
   REQUIRE(fem::RunTopology(doc, s, rt, &err));
@@ -539,7 +539,7 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   const uint64_t studyId = doc.GetStudies()[0].id;
   fem::StudyRuntime rt;
   std::string err;
-  REQUIRE(fem::RunTopology(doc, doc.GetStudies()[0], rt, &err));
+  REQUIRE(fem::RunTopology(doc, *doc.StudyForRun(studyId), rt, &err));
   rt.solvedAtVersion = doc.Version();
   const std::vector<double> density = rt.bodies[0].density; // copy to compare
   doc.StoreStudyResults(studyId, std::move(rt));

@@ -2024,7 +2024,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   LOG_INFO("Offscreen: stop requested, shutting down");
   server.Stop();
   // Clean exit with nothing unsaved: drop the sidecar. Dirty exits keep it.
-  if (g_App.document && g_App.document->Version() == g_App.lastSavedVersion) {
+  if (g_App.document && !ui::ProjectDirty(g_App)) {
     Autosaver::Clear(g_App.projectPath);
   }
 
@@ -3088,7 +3088,7 @@ int main(int argc, char** argv) {
 
   // Clean exit with nothing unsaved: the sidecar has no recovery value.
   // A dirty exit deliberately KEEPS it (safety over tidiness).
-  if (g_App.document && g_App.document->Version() == g_App.lastSavedVersion) {
+  if (g_App.document && !ui::ProjectDirty(g_App)) {
     Autosaver::Clear(g_App.projectPath);
   }
 

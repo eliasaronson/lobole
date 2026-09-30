@@ -824,7 +824,7 @@ struct PartSlot {
   // The drawing document's version the renders above were built at, so
   // UpdateDrawingRenders can skip views that cannot have changed (U11).
   uint64_t drawingRendersVersion = 0;
-  uint64_t lastSavedVersion = 0; // per-document dirty tracking
+  uint64_t lastSavedVersion = 0; // save stamp at the last save (dirty check)
   // Assembly tabs only (A4): referenced parts' stamps (ui::PartStamp: the
   // Version and the configurations' revision) at this assembly's last solve,
   // stashed while inactive. See AppState field.
@@ -2056,17 +2056,16 @@ struct AppState {
   nlohmann::json
       editBaseline; // parameter-edit snapshot while a widget is active
 
-  // Where the document lives on disk ("" = never saved) and the document
-  // version at the last clean save/open — dirty = Version() != lastSaved.
-  // Drives autosave (core/Autosaver) and its recovery sidecars.
+  // Where the document lives on disk ("" = never saved) and the document's
+  // SAVE STAMP (Document::SaveStamp, not Version) at the last clean save/open
+  // — dirty = stamp != lastSaved. Drives autosave (core/Autosaver) and its
+  // recovery sidecars.
   std::string projectPath;
   uint64_t lastSavedVersion = 0;
-  // Edits that must be SAVED but must not bump a document version. Tab
-  // folders and tab renames live in project.json and belong to no document
-  // at all; display units (U13e) do live in the document, but bumping its
-  // version for them would mark every solved study stale over a change that
-  // cannot move a vertex. Either way this flag is what keeps them
-  // save-prompt visible. Cleared on save/open (StampAllSaved).
+  // Edits that must be SAVED and belong to no document: tab folders, tab
+  // renames and catalogs live in project.json. An edit INSIDE a document that
+  // moves no version (units, a tolerance, a study) moves its save stamp
+  // instead and needs no flag. Cleared on save/open (StampAllSaved).
   bool projectMetaDirty = false;
   // Bumped whenever the project is replaced (opened, recovered). The
   // autosaver is a loop local rather than state, so this is how it learns

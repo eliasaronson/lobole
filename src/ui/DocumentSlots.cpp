@@ -515,6 +515,19 @@ void SnapshotDrawing(AppState& state) {
   state.drawingHistory.redoStamps.clear();
 }
 
+namespace {
+// A snapshot keeps the version it was taken at, which an edit since may have
+// passed and a save may have stamped: restored as it is, an undo can land on
+// the saved version and read clean (and a cache keyed on it can serve the
+// wrong picture). So a restore moves the version past the current one.
+void RestoreDrawing(AppState& state, DrawingDocument restored) {
+  const uint64_t current = state.drawing->Version();
+  while (restored.Version() <= current)
+    restored.BumpVersion();
+  *state.drawing = std::move(restored);
+}
+} // namespace
+
 bool UndoDrawing(AppState& state) {
   if (!state.drawing || state.drawingHistory.undo.empty())
     return false;
@@ -522,7 +535,7 @@ bool UndoDrawing(AppState& state) {
   state.drawingHistory.redoStamps.push_back(
       state.drawingHistory.undoStamps.back());
   state.drawingHistory.undoStamps.pop_back();
-  *state.drawing = std::move(state.drawingHistory.undo.back());
+  RestoreDrawing(state, std::move(state.drawingHistory.undo.back()));
   state.drawingHistory.undo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
   return true;
@@ -535,7 +548,7 @@ bool RedoDrawing(AppState& state) {
   state.drawingHistory.undoStamps.push_back(
       state.drawingHistory.redoStamps.back());
   state.drawingHistory.redoStamps.pop_back();
-  *state.drawing = std::move(state.drawingHistory.redo.back());
+  RestoreDrawing(state, std::move(state.drawingHistory.redo.back()));
   state.drawingHistory.redo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
   return true;
@@ -558,18 +571,19 @@ void SnapshotJob(AppState& state) {
 namespace {
 // Put a restored copy in place: its version has to move PAST the current
 // one, or a cache keyed on the version (the placed bodies, the render) can
-// serve the state the copy was taken from. Then the toolpaths, which are a
-// picture of the job that just changed.
+// serve the state the copy was taken from — and so does its save stamp, or
+// an undo could land on the stamp the last save took and read clean. Then
+// the toolpaths, which are a picture of the job that just changed.
 void RestoreJob(AppState& state, cam::JobDocument restored) {
   const uint64_t current = state.job->Version();
-  while (restored.Version() <= current)
+  const uint64_t currentStamp = state.job->SaveStamp();
+  while (restored.Version() <= current || restored.SaveStamp() <= currentStamp)
     restored.BumpVersion();
   *state.job = std::move(restored);
   state.camActiveSetup = 0; // re-resolved: the setup may be gone
   state.camGhostOp = 0;
   state.camVerbOp = 0;
   state.syncedDocumentVersion = UINT64_MAX;
-  state.projectMetaDirty = true;
   RefreshCamToolpaths(state);
   RunCamVerification(state);
 }
@@ -619,7 +633,8 @@ std::string FirstDifference(const std::string& a, const std::string& b) {
 
 void MarkJobEdited(AppState& state) {
   state.jobEdits++;
-  state.projectMetaDirty = true;
+  if (state.job)
+    state.job->MarkEdited(); // unsaved now: ProjectDirty, autosave
 }
 
 void SetJobEditAudit(bool on) { g_jobEditAudit = on; }
@@ -671,6 +686,10 @@ JobUndoGuard::~JobUndoGuard() {
       moved = true;
     }
   }
+  // Whatever records an undo step is an edit to save — the RPCs' guards
+  // compare content and call nothing else, so this is where they count.
+  if (moved)
+    state.job->MarkEdited();
   JobHistory& h = state.jobHistory;
   if (m_coalesce && ImGui::IsAnyItemActive()) {
     // Mid-drag: hold the FIRST pre-edit copy, whatever this frame did.

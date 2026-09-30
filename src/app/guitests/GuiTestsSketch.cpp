@@ -2173,7 +2173,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
 
     // Pretend the project was just saved, so the dirty check below means
     // something: opening a sketch must not modify anything.
-    s_App->lastSavedVersion = Doc()->Version();
+    s_App->lastSavedVersion = Doc()->SaveStamp();
     IM_CHECK(!ui::ProjectDirty(*s_App));
 
     s_App->sketchEdit = ui::SketchEditState{};

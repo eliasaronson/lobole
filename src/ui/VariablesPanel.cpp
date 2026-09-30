@@ -108,10 +108,10 @@ void DrawUnitsSection(AppState& state, Document& doc) {
         });
 
   if (changed) {
+    // Not a version bump — units are display-only, and bumping would mark
+    // every solved study stale over a change that moves nothing — but a
+    // saved change all the same: SetUnits moves the save stamp.
     doc.SetUnits(sys);
-    // Not a document version bump: units are display-only, and bumping would
-    // mark every solved study stale over a change that moves nothing.
-    state.projectMetaDirty = true;
   }
   ImGui::Spacing();
 }

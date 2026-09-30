@@ -60,8 +60,10 @@ public:
   static void Clear(const std::string& projectPath);
 
   // Call regularly with a monotonic clock. Saves when enabled (interval > 0),
-  // dirty (doc version != savedVersion), changed since the last autosave, and
-  // the interval elapsed. Returns true when a save happened.
+  // dirty (doc.SaveStamp() != savedVersion — the stamp, not Version(), so an
+  // edit that regenerates nothing still counts), changed since the last
+  // autosave, and the interval elapsed. Returns true when a save happened.
+  // NeedsSave below takes the same stamps.
   //
   // For a project that is ONE document. A project with several is autosaved
   // by ui::AutosaveProject, which owns the iteration because only the UI

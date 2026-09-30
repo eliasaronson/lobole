@@ -132,17 +132,47 @@ whether it survives. `commit_geometry: false` in a part's `index.json` turns
 it off: `geometry/` is deleted and a `.gitignore` keeps it out. Adding a git
 remote sets this on every part (see [history.md](history.md#sharing-through-a-remote)).
 
-## Dirty tracking
+## Unsaved changes
 
-`Document::Version()` increments on every mutation. Each document slot
-remembers the version it was saved at (`AppState::lastSavedVersion` for the
-active tab, `PartSlot::lastSavedVersion` for the rest), and
-`ui::ProjectDirty` is true when any slot's version differs or
-`projectMetaDirty` is set: project-level changes (adding, deleting or
-renaming a document, folders, catalogs, display units, CAM machine edits) do
-not move any document's version, and without the flag closing would lose
-them without a prompt. The window title shows `*`
-when dirty. `MarkProjectSaved` / `MarkProjectOpened` re-stamp every slot.
+Whether the project is dirty is one question — the close prompt, the
+window title's `*`, `ping.dirty` and autosave all ask `ui::ProjectDirty` —
+and it is answered by each document's **save stamp**, not its version.
+
+`Document::Version()` moves only when the model regenerates, and a part
+carries saved state that regenerates nothing: its tolerances, units, tube
+rules and print process, its studies, a configuration that is not the
+active one, its image assets. Compared by version, an edit to any of those
+read clean and was dropped on close without a prompt. So
+`Document::SaveStamp()` is the version plus a count of those edits
+(`MarkEdited`), and the rule has three backstops:
+
+- **Every mutator of saved state regenerates or calls `MarkEdited`.**
+  `test_conventions.cpp` scans `Document.h` and fails on a new `Set*`/
+  `Add*`/`Remove*`/... that does neither, or on a new non-const accessor
+  into saved state — the way round every mutator. Studies and
+  configurations are read-only from outside (`ReplaceStudy`,
+  `ReplaceConfiguration` edit them); `StudyForRun` is the one write door,
+  for a solve's transient fields.
+- **Every command, undo and redo stamps** (`CommandStack`), whatever it
+  touched. An undo back to exactly the saved content still reads dirty: the
+  stamp only grows, which errs towards one prompt too many.
+- **The other document kinds have their own**: `AssemblyDocument::SaveStamp`
+  (its units, a verdict `verify_assertions` records), `cam::JobDocument::
+  SaveStamp` (a job's `Version()` is only a cache key; `MarkJobEdited` and
+  every `JobUndoGuard` that records a step count the edit, which is how the
+  CAM RPCs reach it), and a drawing's `Version()`, which every drawing edit
+  bumps. An assembly, drawing or job undo restores a snapshot, so the
+  restore moves its version and stamp PAST the current ones — the snapshot's
+  own could equal the stamp the last save took.
+
+Each slot remembers the stamp it was saved at (`AppState::lastSavedVersion`
+for the active tab, `PartSlot::lastSavedVersion` for the rest), and
+`ProjectDirty` is true when any slot's stamp differs or `projectMetaDirty`
+is set — which is now only for what belongs to no document: adding,
+deleting or renaming a document, folders, catalogs. `MarkProjectSaved` /
+`MarkProjectOpened` re-stamp every slot. Opening a sketch moves the view
+rollback and regenerates without being an edit, so it re-stamps a clean
+document (`SetViewRollbackKeepingDirt`).
 
 A version number is not an identity: versions restart at 0 whenever a
 document is replaced, so anything that tracks "this document at this
@@ -153,7 +183,10 @@ version" also keys on `Document::InstanceId()`.
 `Autosaver` (`src/core/io/Autosaver.{h,cpp}`) is pumped from both the GUI
 frame loop and the headless loop; `--autosave <seconds>` sets the interval
 (default 60, 0 = off). A document is written when the interval has elapsed,
-it is dirty, and it changed since its last autosave.
+it is dirty, and it changed since its last autosave — all three measured by
+the save stamp ([above](#unsaved-changes)), so a tolerance-only edit is
+autosaved like any other. A clean exit (the stamp at the last save, every
+slot) removes the sidecar; a dirty one keeps it.
 
 Where it goes:
 
@@ -257,6 +290,9 @@ History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
 | `tests/test_serialization.cpp` `[io]` | round trips, directory form; duplicate id files, duplicate index ids and conflict markers refused; unknown feature, entity and mate types refused by name |
 | `tests/test_baked_geometry.cpp` `[baked]` | a baked open executes nothing; a recipe edited behind the app's back and a broken blob rebuild; a failed model is not baked; datums, warnings and bends survive a baked open; `commit_geometry` off |
 | `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves |
+| `tests/test_save_stamp.cpp` `[savestamp]` | each kind of saved edit that regenerates nothing (tolerance, units, tube, print process, configuration, study, asset; assembly units and undo; drawing undo; a job's GUI and RPC edits and undo) reads dirty and clean after a save; a study run is not an edit; autosave writes them |
+| `tests/test_conventions.cpp` | every `Document` mutator regenerates or marks the edit; no new mutable accessor |
+| `tests/unsaved_edits_smoke.py` | the same edits over the RPC read `ping.dirty` until saved; reading the model does not |
 | `tests/test_projectstamp.cpp` `[stamp]` | stability, external edits, `.git/` and `geometry/` ignored at every depth, invalid never matching |
 | `tests/test_command_modify.cpp` | a modified feature keeps its id; no id-0 item is written |
 | `tests/headless_smoke.py` | autosave across a SIGKILL, the disk guard end to end with `force` and Save As |

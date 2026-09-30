@@ -704,7 +704,7 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
 }
 
 // Everything below the study list, for either host.
-void DrawStudyBody(AppState& state, fem::Study* s) {
+void DrawStudyBody(AppState& state, const fem::Study* s) {
   ImGui::Spacing();
   char name[128];
   std::snprintf(name, sizeof(name), "%s", s->name.c_str());
@@ -885,7 +885,7 @@ void DrawSimulationToolWindow(AppState& state) {
   // panel); a part's are listed in its dock, and edited here.
   if (host.IsAssembly())
     DrawStudyList(state);
-  if (fem::Study* s = host.Find(state.simulation.activeStudyId))
+  if (const fem::Study* s = host.Find(state.simulation.activeStudyId))
     DrawStudyBody(state, s);
   else
     ImGui::TextColored(kMuted, "Select or add a study.");
@@ -1061,7 +1061,8 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
   const StudyHost host = StudyHostOf(state);
   if (!sim.IsActive() || !host)
     return false;
-  fem::Study* study = host.Find(sim.activeStudyId);
+  // Mutable for the drag's live preview; the release records the edit.
+  fem::Study* study = host.FindForRun(sim.activeStudyId);
   if (study == nullptr)
     return false;
 
@@ -1591,7 +1592,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   const StudyHost host = StudyHostOf(state);
   if (!host || sim.tool == SimulationState::Tool::None)
     return;
-  fem::Study* s = host.Find(sim.activeStudyId);
+  const fem::Study* s = host.Find(sim.activeStudyId);
   if (!s)
     return;
   sim.placeRefusal.clear();

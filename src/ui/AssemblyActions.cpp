@@ -97,6 +97,20 @@ void SnapshotAssembly(AppState& state) {
   state.assemblyHistory.redoStamps.clear();
 }
 
+namespace {
+// A snapshot keeps the version and save stamp it was taken at, which later
+// edits may have passed and a save may have recorded: restored as it is, an
+// undo can land on the saved stamp and read clean. So a restore moves both
+// past the current ones (RestoreJob's rule).
+void RestoreAssembly(AppState& state, AssemblyDocument restored) {
+  const uint64_t current = state.assembly->Version();
+  const uint64_t currentStamp = state.assembly->SaveStamp();
+  while (restored.Version() <= current || restored.SaveStamp() <= currentStamp)
+    restored.BumpVersion();
+  *state.assembly = std::move(restored);
+}
+} // namespace
+
 bool UndoAssembly(AppState& state) {
   if (!state.assembly || state.assemblyHistory.undo.empty())
     return false;
@@ -104,7 +118,7 @@ bool UndoAssembly(AppState& state) {
   state.assemblyHistory.redoStamps.push_back(
       state.assemblyHistory.undoStamps.back());
   state.assemblyHistory.undoStamps.pop_back();
-  *state.assembly = std::move(state.assemblyHistory.undo.back());
+  RestoreAssembly(state, std::move(state.assemblyHistory.undo.back()));
   state.assemblyHistory.undo.pop_back();
   state.syncedDocumentVersion =
       UINT64_MAX; // restored state may share a version
@@ -118,7 +132,7 @@ bool RedoAssembly(AppState& state) {
   state.assemblyHistory.undoStamps.push_back(
       state.assemblyHistory.redoStamps.back());
   state.assemblyHistory.redoStamps.pop_back();
-  *state.assembly = std::move(state.assemblyHistory.redo.back());
+  RestoreAssembly(state, std::move(state.assemblyHistory.redo.back()));
   state.assemblyHistory.redo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
   return true;

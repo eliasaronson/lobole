@@ -176,9 +176,12 @@ public:
                                    std::string(field));
     }
     m_generator = std::move(stamp);
+    MarkEdited();
   }
 
   const catalog::Json& GetCatalogs() const { return m_catalogs; }
+  // Save scaffolding, like SetParametersRaw below: the project's catalogs go
+  // in for a write and come straight back out, so neither stamps.
   void SetCatalogsRaw(const catalog::Json& entries) {
     m_catalogs = catalog::Deserialize(entries);
   }
@@ -280,10 +283,16 @@ public:
   // it — so they are deliberately OUTSIDE the regen chain hash (a new setup
   // must not rebuild the geometry).
 
+  // Read-only on purpose: a study is saved and does not move Version(), so an
+  // edit through a mutable reference would never reach SaveStamp(). Edit one
+  // with ReplaceStudy.
   const std::vector<fem::Study>& GetStudies() const { return m_studies; }
-  std::vector<fem::Study>& GetStudies() { return m_studies; }
   const fem::Study* FindStudy(uint64_t id) const;
-  fem::Study* FindStudy(uint64_t id);
+  // Write access for a RUN, not an edit: meshing and solving refresh a
+  // study's transient fields (its error, its evaluated expressions), and a
+  // load drag previews on it until its ModifyStudyCommand lands. None of that
+  // is a saved change, so this does not stamp.
+  fem::Study* StudyForRun(uint64_t id);
 
   // Appends a new study with a document-unique id and returns it. `name`
   // empty means an auto-generated "Study N".
@@ -360,7 +369,10 @@ public:
   // Document-level rather than a preference because a part authored in
   // inches has to display in inches for whoever opens it (core/Units.h).
   const units::System& Units() const { return m_units; }
-  void SetUnits(const units::System& u) { m_units = u; }
+  void SetUnits(const units::System& u) {
+    m_units = u;
+    MarkEdited();
+  }
 
   // ---- Sheet metal (docs/sheetmetal/README.md) -----------------------------
   // The stock this part is made from and how it bends: one per document,
@@ -395,6 +407,7 @@ public:
   const std::optional<tube::TubeRules>& Tube() const { return m_tube; }
   void SetTube(std::optional<tube::TubeRules> rules) {
     m_tube = std::move(rules);
+    MarkEdited();
   }
 
   // How this part is PRINTED — the process and the material it is printed in
@@ -411,6 +424,7 @@ public:
   }
   void SetPrintProcess(std::optional<printfit::Process> p) {
     m_print = std::move(p);
+    MarkEdited();
   }
 
   // ---- Configurations ---------------------------------------------------
@@ -424,9 +438,9 @@ public:
   const std::vector<Configuration>& GetConfigurations() const {
     return m_configurations;
   }
-  std::vector<Configuration>& GetConfigurations() { return m_configurations; }
+  // Read-only for the reason GetStudies is: edit one with
+  // ReplaceConfiguration, which stamps.
   const Configuration* FindConfiguration(uint64_t id) const;
-  Configuration* FindConfiguration(uint64_t id);
 
   // Appends a configuration with a doc-unique id (auto-named "Configuration N"
   // when empty) and returns it. Does not change the active configuration.
@@ -455,7 +469,8 @@ public:
   uint64_t ActiveConfiguration() const { return m_activeConfiguration; }
   bool SetActiveConfiguration(uint64_t id);
   // Loader hook: set the active id without regenerating (the load's own regen
-  // rebuilds bodies once).
+  // rebuilds bodies once). Does not stamp: a loader sets its baseline after,
+  // and a motion run sets it on a throwaway copy.
   void SetActiveConfigurationRaw(uint64_t id) { m_activeConfiguration = id; }
   // The active configuration, or nullptr when base (0) or unknown.
   const Configuration* ActiveConfig() const;
@@ -517,7 +532,10 @@ public:
   // Persisted with the project; turning it off also writes a .gitignore, for
   // people who would rather keep the repo small and pay the rebuild.
   bool CommitGeometry() const { return m_commitGeometry; }
-  void SetCommitGeometry(bool on) { m_commitGeometry = on; }
+  void SetCommitGeometry(bool on) {
+    m_commitGeometry = on;
+    MarkEdited();
+  }
 
   // `warnings` maps feature id -> the advisory that feature raised when the
   // geometry was built. Warnings are a product of EXECUTION, and a baked open
@@ -540,6 +558,7 @@ public:
   // image actually references.
   void SetAsset(const std::string& name, std::vector<unsigned char> bytes) {
     m_assets[name] = std::move(bytes);
+    MarkEdited();
   }
   const std::vector<unsigned char>* GetAsset(const std::string& name) const {
     auto it = m_assets.find(name);
@@ -552,6 +571,21 @@ public:
   // Incremented on every regeneration; lets the UI detect when to re-upload
   // render meshes without observing individual edits.
   uint64_t Version() const { return m_version; }
+
+  // Whether the document has changed since it was saved, as one number: it
+  // moves on every regeneration AND on every edit to saved state that
+  // regenerates nothing — a tolerance, the units, the tube or print process,
+  // a study, a configuration that is not the active one, an asset. Dirty
+  // tracking and autosave compare THIS against the stamp taken at the save,
+  // never Version(): those edits leave Version() where it was, and a project
+  // that reads clean is closed without a prompt.
+  //
+  // Both counters only grow, so the sum moves whenever either does. An undo
+  // is an edit too — undoing back to the saved state reads dirty, which is
+  // the safe direction. Every non-const mutator of saved state either
+  // regenerates or calls MarkEdited(); tests/test_conventions.cpp holds new
+  // ones to that (docs/versioning/README.md#unsaved-changes).
+  uint64_t SaveStamp() const { return m_version + m_edits; }
 
   // Which document this is, as opposed to how far it has been edited. Unique
   // per instance for the life of the process and never reused.
@@ -623,6 +657,13 @@ private:
   // The one copy implementation; both public forms delegate to it.
   Document(const Document& other, bool reuseGeometry);
 
+  // Records an edit to saved state that does not regenerate (SaveStamp()).
+  // CommandStack calls it too: whatever a command, its undo or its redo
+  // did, it was an edit — the backstop for a command that changes saved
+  // state some way the mutators above do not see.
+  void MarkEdited() { ++m_edits; }
+  friend class CommandStack;
+
   // Topo-sorts m_parameters by expression dependency and evaluates them into
   // m_symbols. Failures (parse error, unknown name, cycle) set the affected
   // parameters' `error` and keep their last good values.
@@ -654,6 +695,7 @@ private:
   const std::vector<Parameter>* m_projectParameters = nullptr;
   uint64_t m_version = 0;
   uint64_t m_configurationsRevision = 0;
+  uint64_t m_edits = 0; // saved-state edits that did not regenerate
   // Handed out once per instance by NextInstanceId(); see InstanceId().
   const uint64_t m_instanceId = NextInstanceId();
   uint64_t m_nextId = 1;

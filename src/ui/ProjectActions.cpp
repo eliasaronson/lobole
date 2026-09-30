@@ -666,15 +666,21 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
 }
 
 namespace {
-// The version a slot's dirty check compares against: whichever document kind
-// the slot holds. 0 for an empty slot.
+// The stamp a slot's dirty check (and its autosave) compares against:
+// whichever document kind the slot holds. 0 for an empty slot. A part's,
+// an assembly's and a job's is its SaveStamp, not its Version: a tolerance,
+// the units, a study, a configuration that is not the active one, a job's
+// operation list are all saved and none of them regenerates anything. A
+// drawing bumps its version on every edit, so that is its stamp.
 uint64_t SlotVersion(AppState& state, size_t i) {
   if (Document* d = SlotDoc(state, i))
-    return d->Version();
+    return d->SaveStamp();
   if (AssemblyDocument* a = SlotAssembly(state, i))
-    return a->Version();
+    return a->SaveStamp();
   if (DrawingDocument* dr = SlotDrawing(state, i))
     return dr->Version();
+  if (cam::JobDocument* j = SlotJob(state, i))
+    return j->SaveStamp();
   return 0;
 }
 // SaveProject writes every slot, so a clean save stamps every slot — the
@@ -689,7 +695,7 @@ void StampAllSaved(AppState& state) {
       state.parts[i].lastSavedVersion = v;
   }
   if (state.parts.empty())
-    state.lastSavedVersion = state.document ? state.document->Version() : 0;
+    state.lastSavedVersion = state.document ? state.document->SaveStamp() : 0;
   state.projectMetaDirty = false;
 }
 
@@ -720,16 +726,16 @@ uint64_t* SavedVersionFor(AppState& state, const Document* doc) {
 // Moves a document's VIEW rollback without changing whether it counts as
 // modified. Opening a sketch to look at it must not dirty the project: the
 // marker never reaches the file, but SetViewRollback regenerates, every
-// Regenerate bumps Version(), and dirty is measured as Version() != saved.
+// Regenerate bumps Version(), and dirty is measured as SaveStamp() != saved.
 // So a document that was clean is re-stamped at its new version; one that was
 // already dirty (the user has edited something) is left alone, in both
 // directions.
 void SetViewRollbackKeepingDirt(AppState& state, Document* doc, int index) {
   uint64_t* saved = SavedVersionFor(state, doc);
-  const bool wasClean = saved != nullptr && doc->Version() == *saved;
+  const bool wasClean = saved != nullptr && doc->SaveStamp() == *saved;
   doc->SetViewRollback(index);
   if (wasClean)
-    *saved = doc->Version();
+    *saved = doc->SaveStamp();
 }
 
 // Every document this app holds, active slot included.
@@ -789,7 +795,7 @@ bool ProjectDirty(AppState& state) {
     return true;
   if (state.parts.empty())
     return state.document &&
-           state.document->Version() != state.lastSavedVersion;
+           state.document->SaveStamp() != state.lastSavedVersion;
   for (size_t i = 0; i < state.parts.size(); i++) {
     const uint64_t saved = static_cast<int>(i) == state.activePart
                                ? state.lastSavedVersion
@@ -1226,7 +1232,7 @@ void MarkProjectRecovered(AppState& state, const std::string& path) {
   state.projectPath = path;
   // Never equal to the live version: the recovered changes are unsaved.
   state.lastSavedVersion =
-      state.document ? state.document->Version() - 1 : UINT64_MAX;
+      state.document ? state.document->SaveStamp() - 1 : UINT64_MAX;
 }
 
 } // namespace ui

@@ -10,7 +10,12 @@ A **study** (`fem::Study`, `src/core/fem/FemStudy.h`) is a document-level
 object, not a `Feature`. It consumes the finished bodies and produces no
 geometry, so it lives beside the parameter table (`Document::GetStudies()`,
 `AssemblyDocument::GetStudies()`) and never enters regeneration, rollback or
-suppression. Its analysis `type` is `static`, `modal` or `topology`.
+suppression. On a part the list is read-only: an edit is a command
+(`ModifyStudyCommand` → `ReplaceStudy`), which moves the part's save stamp
+though not its version, so it reads unsaved
+([versioning](../versioning/README.md#unsaved-changes)); a solve writes the
+study's transient fields through `StudyForRun`. Its analysis `type` is
+`static`, `modal` or `topology`.
 
 A study holds:
 

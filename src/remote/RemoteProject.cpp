@@ -814,9 +814,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       if (asmDoc != nullptr)
         asmDoc->SetUnits(sys);
       else
-        doc->SetUnits(sys);
-      // Saved, but no version bump: see AppState::projectMetaDirty.
-      state.projectMetaDirty = true;
+        doc->SetUnits(sys); // saved, no version: moves the save stamp
     }
     return json{{"length", units::ToString(sys.length)},
                 {"mass", units::ToString(sys.mass)},
