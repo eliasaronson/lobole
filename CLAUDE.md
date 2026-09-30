@@ -142,6 +142,11 @@ list kept elsewhere drifts.
   `ping` reports which optional subsystems a build has (`features`), and the
   smokes gate on that rather than on catching "unknown method", which would
   equally swallow a real typo.
+- **A solver's test checks the outcome, not the formula.** Apply the answer
+  through the real pipeline (`BodiesInSetupFrame`, the post, the verifier) and
+  assert what it was for: `SolveIndexA`'s test compared its formula with its
+  own number while the framing turned by R_x(−A), and "Turn a face up"
+  machined the far side of the part.
 - Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". Anything else
   "flaky under load" is worth one look for a mechanism before it earns that
   label: the ones that looked like it here were real bugs (a version number
@@ -164,6 +169,8 @@ list kept elsewhere drifts.
   `.terminate()` on it) orphans the Xvfb child AND the app; kill the announced
   app pid (`headless-preview.sh --stop`), and the GUI runner reaps orphaned
   Xvfb on its next run.
+- **Quote globs in shell commands** (`grep --include='*.cpp'`): zsh fails an
+  unquoted one with "no matches found" before the command runs.
 - **Wait on a pid or a marker, kill by a pid — never by a pattern.** A
   `pgrep -f PATTERN` loop matches its own command line and waits forever; the
   same pattern given to `pkill -f` kills the shell that ran it (exit 144). A
