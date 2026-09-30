@@ -9,7 +9,7 @@
 # Stages, in order: piece, blanks, board, set, cam. `--from` starts at one and
 # reuses what the earlier ones left in scratch/chess/; `--only` names the CAM
 # jobs to run (cam.py's own flag). The full run is the acceptance check after
-# a change; one stage, one job, is the loop (docs/plans/dev-loop.md).
+# a change; one stage, one job, is the loop (docs/architecture.md#the-development-loop).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/../../scratch/chess"

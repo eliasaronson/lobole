@@ -9,7 +9,7 @@
 # tools/merge-branch.sh takes before it changes the tree: a merge that lands
 # while a build is compiling gives a binary whose objects saw two versions of
 # a header -- it died on its first autosave with a bad_alloc that looked like
-# heap corruption (docs/plans/dev-loop.md). Prints FAILED lines and exits
+# heap corruption (docs/architecture.md#the-development-loop). Prints FAILED lines and exits
 # non-zero on a failed build.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

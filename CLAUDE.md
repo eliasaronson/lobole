@@ -144,9 +144,11 @@ list kept elsewhere drifts.
   equally swallow a real typo.
 - **A solver's test checks the outcome, not the formula.** Apply the answer
   through the real pipeline (`BodiesInSetupFrame`, the post, the verifier) and
-  assert what it was for: `SolveIndexA`'s test compared its formula with its
-  own number while the framing turned by R_x(−A), and "Turn a face up"
-  machined the far side of the part.
+  assert what it was for. `SolveIndexA`'s test compared its formula with its
+  own number, and the toolpath framing turned the part the opposite way to the
+  post, the rotary check and playback. Two fixes each made one side agree
+  before a test through the pipeline showed which was right, and an indexed
+  cut would have landed on the far side of the part.
 - Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". Anything else
   "flaky under load" is worth one look for a mechanism before it earns that
   label: the ones that looked like it here were real bugs (a version number

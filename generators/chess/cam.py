@@ -445,7 +445,7 @@ def main():
     # Fail LOUDLY, so run_all.sh does not print `done` over a job that is not
     # one. A refused op never reaches the file, and a setup whose program
     # cuts nothing verifies "clean": the rook's crenels were both, in every
-    # run for a day (docs/plans/dev-loop.md). `complete` is not required --
+    # run for a day (docs/architecture.md#the-development-loop). `complete` is not required --
     # a turning leaves its end faces, correctly.
     problems = []
     for name, rep in reports.items():

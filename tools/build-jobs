@@ -8,7 +8,7 @@
 #
 # Memory, not cores, is what runs out here: four worktree builds at one job
 # per core (22) got the OOM killer to take 58 compilers and then the agent
-# host itself (docs/plans/dev-loop.md).
+# host itself (docs/architecture.md#the-development-loop).
 set -euo pipefail
 per_mb="${1:-1536}"
 avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"

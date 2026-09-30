@@ -4,7 +4,7 @@ The set is designed and every program is generated
 ([generators/chess](../../generators/chess/README.md); `run_all.sh PORT`
 rebuilds all of it from nothing into `scratch/chess/`, every setup verifying
 clean, the board engraved a-h and 1-8). What remains is the machine. What the
-round taught about the development loop is [dev-loop.md](dev-loop.md).
+round taught about the development loop is [the development loop](../architecture.md#the-development-loop).
 
 ## 0. At the machine (the user)
 

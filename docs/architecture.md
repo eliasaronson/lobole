@@ -119,6 +119,37 @@ a define (`DESIGNER_SOURCE_DIR`).
 **Headers include what they use.** Turning the PCH off found two sources that
 compiled only because it supplied their includes.
 
+## The development loop
+
+What builds and tests here run on, and why each piece is the shape it is.
+The numbers were measured on this 22-core, 30 GB machine.
+
+- **Memory, not cores, limits parallel work.** A compiler takes 0.6 to
+  1.8 GB. Four agent worktrees building at one job per core got the OOM
+  killer to take 58 compilers and then the agent host. `tools/build-jobs`
+  sizes `-j` from free memory (about 1.5 GB a compile, 700 MB a test that
+  starts the app), and worktree agents start two at a time.
+- **One way to build, under a lock.** `tools/build.sh` builds with an
+  `flock` on the build directory. `tools/merge-branch.sh` takes the same lock
+  before it cherry-picks, then builds, tests and removes the worktree. A
+  merge that landed mid-build once linked objects that saw two versions of
+  `AppState.h`, and the binary died with a `bad_alloc` that looked like heap
+  corruption.
+- **Trees share one ccache** ([precompiled headers](#precompiled-headers)): a
+  fresh worktree builds in about 2 minutes, where it took 11.5.
+- **`tools/nix-run`** runs a command with what `nix-shell` adds to the
+  environment, cached and keyed on `shell.nix` and nixpkgs: ~0.1 s against
+  ~5 s to enter. It caches `nix-shell`'s own additions, because `nix
+  print-dev-env` resolved a different nixpkgs, and it keeps the caller's
+  `TMPDIR` and `DISPLAY`.
+- **Wait on a pid or a marker.** `tools/wait-for.sh` waits with a deadline
+  under the tool's 600 s cap. A `pgrep -f` loop matches its own command line
+  and never ends, and `pkill -f` kills the shell that ran it.
+- **The fast loop skips `slow`.** `tools/test-fast.sh` runs in about 65 s.
+  The suite's floor was `watch_smoke` (73 s) until it was tagged.
+- **clangd** skips `.claude/worktrees/` (`.clangd`). Each worktree is
+  another copy of the project, and the index held 5.4 GB.
+
 ## The document model and regeneration
 
 A project holds documents of four kinds (`ui::DocKind`): **Part**

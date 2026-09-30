@@ -4,7 +4,7 @@
 #   tools/nix-run 'cd build && ninja designer'
 #
 # Entering nix-shell costs ~5 s, every time; a round of work entered it about
-# 400 times (docs/plans/dev-loop.md). This sources the same environment from a
+# 400 times (docs/architecture.md#the-development-loop). This sources the same environment from a
 # cache of what `nix-shell shell.nix` adds to the environment, in ~0.01 s. The cache is keyed on
 # shell.nix and the nixpkgs it resolves, so either moving makes a new one, and
 # it is remade if a garbage collection took a store path it points at.

@@ -817,7 +817,7 @@ add_test(NAME watch_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/watch_smoke.py
                  $<TARGET_FILE:designer>)
 # 73 s: the whole watch generator. It set the headless suite's floor and kept
-# tools/test-fast.sh from its figure, so it is `slow` (docs/plans/dev-loop.md).
+# tools/test-fast.sh from its figure, so it is `slow` (docs/architecture.md#the-development-loop).
 set_tests_properties(watch_smoke PROPERTIES LABELS slow TIMEOUT 300)
 
 add_test(NAME generators_smoke
