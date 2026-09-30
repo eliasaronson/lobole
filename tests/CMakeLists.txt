@@ -813,7 +813,9 @@ set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
 add_test(NAME watch_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/watch_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(watch_smoke PROPERTIES TIMEOUT 300)
+# 73 s: the whole watch generator. It set the headless suite's floor and kept
+# tools/test-fast.sh from its figure, so it is `slow` (docs/plans/dev-loop.md).
+set_tests_properties(watch_smoke PROPERTIES LABELS slow TIMEOUT 300)
 
 add_test(NAME generators_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generators_smoke.py
@@ -877,7 +879,8 @@ set_tests_properties(component_update_smoke PROPERTIES TIMEOUT 120)
 add_test(NAME om615_accessories_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_accessories_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(om615_accessories_smoke PROPERTIES TIMEOUT 180)
+# 37 s, the next longest after watch_smoke.
+set_tests_properties(om615_accessories_smoke PROPERTIES LABELS slow TIMEOUT 180)
 
 add_test(NAME om615_mounting_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_mounting_smoke.py
