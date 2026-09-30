@@ -167,7 +167,10 @@ passes, no move into the chuck or tailstock, and a file that read straight —
 the flag to gate on. `complete` means nothing is left standing. They are separate
 because a height map cannot watch a slug drop out of a through cut, so a
 correct job can be `ok` and not `complete`; tabs do not count against
-`complete`. `cam_verify` also reports how much is left over and where
+`complete`. A program that never touches the stock is `cuts_nothing` and not
+`complete`: leftover is measured only where the tool went, so it used to read
+as complete, and a setup whose operation was refused posted a file that
+"verified clean". `cam_verify` also reports how much is left over and where
 (`leftover_area_mm2`, `leftover_regions`, `leftover_biggest`, largest first):
 several tiny regions are inside corners a round cutter cannot reach and are
 correct, one large region is a missing operation. `failed_ops` names the

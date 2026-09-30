@@ -546,7 +546,9 @@ constexpr MethodDoc kCamMethods[] = {
      "worst_holding: chuck|tailstock, and holding_defaults naming the sizes "
      "the machine did not state -- moves into what holds a rotary setup), "
      "below_stock_mm, tabs, reliefs, grooves, groove_shallow_mm, "
-     "narrow_grooves, ok, complete, says}. `grooves` counts the engraved "
+     "narrow_grooves, ok, complete, cuts_nothing, says}. `cuts_nothing`: the "
+     "program never touches the stock -- safe, and not a job, so `complete` "
+     "is false with it. `grooves` counts the engraved "
      "strokes checked against the groove each declares: a cut inside one is "
      "engraving, a cut below or beside it is gouge; groove_shallow_mm is how "
      "far short of its groove an engraving stopped (it counts against "
@@ -1269,7 +1271,8 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       // through cut, so a correct job can still report material
       // left over. Tabs no longer count against it.
       {"ok", v.Safe(tol)},
-      {"complete", v.Complete(tol)}};
+      {"complete", v.Complete(tol)},
+      {"cuts_nothing", v.CutsNothing()}};
   // The typical scallop, where the worst cell is an end face no rotary
   // pass can reach. Rotary only: the height map does not compute it, and
   // a zero here would read as a measurement.

@@ -442,6 +442,32 @@ def main():
     app.save_project(path=str(OUT / f"{args.out}.dsgn"))
     (OUT / f"{args.out}_report.json").write_text(
         json.dumps(reports, indent=1, default=str))
+    # Fail LOUDLY, so run_all.sh does not print `done` over a job that is not
+    # one. A refused op never reaches the file, and a setup whose program
+    # cuts nothing verifies "clean": the rook's crenels were both, in every
+    # run for a day (docs/plans/dev-loop.md). `complete` is not required --
+    # a turning leaves its end faces, correctly.
+    problems = []
+    for name, rep in reports.items():
+        for label, said in rep["ops"].items():
+            if isinstance(said, str) and said.startswith("REFUSED"):
+                problems.append(f"{name} / {label}: {said}")
+        for sname, s in rep["setups"].items():
+            v = s.get("verify", {})
+            if not v.get("ok", False):
+                problems.append(f"{name} / {sname}: not safe")
+            if v.get("cuts_nothing"):
+                problems.append(f"{name} / {sname}: its program cuts nothing")
+            if v.get("failed_ops"):
+                problems.append(f"{name} / {sname}: {v['failed_ops']} op(s) "
+                                "produced no toolpath")
+            if "refused" in s.get("post", {}):
+                problems.append(f"{name} / {sname}: post refused")
+    if problems:
+        print("\nNOT DONE:")
+        for p in problems:
+            print("  " + p)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

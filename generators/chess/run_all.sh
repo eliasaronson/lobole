@@ -12,5 +12,11 @@ python3 "$HERE/build_piece.py" --port "$P" > "$OUT/build_piece.log" 2>&1
 python3 "$HERE/build_blanks.py" --port "$P" > "$OUT/build_blanks.log" 2>&1
 python3 "$HERE/build_board.py" --port "$P" > "$OUT/build_board.log" 2>&1
 python3 "$HERE/build_set.py" --port "$P" > "$OUT/build_set.log" 2>&1
-python3 -u "$HERE/cam.py" --port "$P" --out chess > "$OUT/cam_all.log" 2>&1
-echo done >> "$OUT/cam_all.log"
+# The log ends in `done` or `failed`, a marker to wait on
+# (tools/wait-for.sh --file scratch/chess/cam_all.log --line '^(done|failed)$').
+if python3 -u "$HERE/cam.py" --port "$P" --out chess > "$OUT/cam_all.log" 2>&1; then
+  echo done >> "$OUT/cam_all.log"
+else
+  echo failed >> "$OUT/cam_all.log"
+  exit 1
+fi

@@ -358,6 +358,12 @@ TEST_CASE("cam verify: a program that cuts nothing is reported as such",
   const std::vector<cam::VerdictLine> lines = cam::Explain(v, 0.5, 0.0);
   REQUIRE(lines.size() == 1);
   CHECK(lines[0].text.find("cuts nothing") != std::string::npos);
+  // Safe -- and not a job. With no leftover measured it read as complete,
+  // which is how the chess rook's crenel setups "verified clean" for a day
+  // while posting files that cut nothing.
+  CHECK(v.CutsNothing());
+  CHECK(v.Safe(0.5));
+  CHECK_FALSE(v.Complete(0.5));
 }
 
 // --- G4: the verdict, in words --------------------------------------------

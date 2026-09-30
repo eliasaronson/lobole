@@ -340,8 +340,14 @@ struct Verdict {
   // are the corners a round cutter cannot reach, one large one is an
   // operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
-    return maxLeftover <= tolerance && grooveShallow <= tolerance;
+    return maxLeftover <= tolerance && grooveShallow <= tolerance &&
+           !CutsNothing();
   }
+  // The program never touches the stock. Leftover is measured only where the
+  // tool went, so such a program has none and read as complete -- the chess
+  // rook's crenel setups posted seven-line files for every run of a day, each
+  // "verified clean". Safe, and not a job: `complete` is false.
+  [[nodiscard]] bool CutsNothing() const { return untouchedFraction >= 0.999; }
 };
 
 // `touched` (optional, same grid) restricts the comparison to the cells the
