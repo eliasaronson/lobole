@@ -65,7 +65,7 @@ fi
 if [ -n "$wt" ] && [ -d "$wt" ]; then
   picked="$(git rev-parse --git-dir)/merge-branch/$branch"
   left="$(git rev-list --cherry-pick --right-only --no-merges main..."$branch" \
-          | { if [ -f "$picked" ]; then grep -vxF -f "$picked"; else cat; fi; } | wc -l)"
+          | { if [ -f "$picked" ]; then grep -vxF -f "$picked" || true; else cat; fi; } | wc -l)"
   dirty="$(git -C "$wt" status --porcelain --untracked-files=no)"
   if [ "$left" -eq 0 ] && [ -z "$dirty" ]; then
     git worktree unlock "$wt" 2>/dev/null || true
