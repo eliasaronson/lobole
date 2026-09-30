@@ -129,6 +129,16 @@ constexpr MethodDoc kCamMethods[] = {
      "brackets out of one sheet expressible; before v73 a setup could only "
      "ever be about one part.",
      "configuration, job, part"},
+    {"set_job_part",
+     "Change which configuration of its source a job part is cut in {id, "
+     "configuration: name or id; null, 0 or \"\" = the source's active one}. "
+     "Refused for a configuration the part does not have (naming the ones it "
+     "has) or one it does not build in. One undo step; every setup's origin, "
+     "safe Z and targeted operations' depths follow the new geometry, as a "
+     "re-clamp does, and `moved` says how many operations' depths did -- the "
+     "same action as the CAM panel's Parts row > Configuration.",
+     "configuration, id, job", remote::NoFlags,
+     "id, configuration, configuration_name?, moved"},
     {"remove_job_part",
      "Drop a part from the job {id}. Every placement and every operation "
      "target that named it goes with it -- a target on a part the job no "
@@ -1435,6 +1445,33 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"source", sourceId},
                 {"name", sourceName},
                 {"configuration", cfg}};
+  }
+
+  if (m == "set_job_part") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
+    const uint64_t id = p.at("id").get<uint64_t>();
+    const cam::JobPart* part = job->FindPart(id);
+    if (part == nullptr)
+      throw std::runtime_error("no job part with id " + std::to_string(id) +
+                               "; list_job_parts shows the ones that exist");
+    if (!p.contains("configuration"))
+      throw std::runtime_error(
+          "set_job_part needs {id, configuration: name or id, or null for "
+          "the part's active one}");
+    const uint64_t cfg = SourceConfiguration(state, part->sourceDocId,
+                                             part->name, p.at("configuration"));
+    std::string why;
+    int moved = 0;
+    if (!ui::SetJobPartConfiguration(state, id, cfg, &why, &moved))
+      throw std::runtime_error(why);
+    json out{{"id", id}, {"configuration", cfg}, {"moved", moved}};
+    if (cfg != 0)
+      if (const Document* src = ui::JobSourceDocument(state, part->sourceDocId))
+        if (const Configuration* c = src->FindConfiguration(cfg))
+          out["configuration_name"] = c->name;
+    return out;
   }
 
   if (m == "remove_job_part") {

@@ -51,7 +51,10 @@ JobDocument                        core/cam/JobDocument.h
   blank of pawns and one of rooks are one part in two configurations. A job
   part whose source is deleted, or does not build in that configuration, is
   reported (`list_job_parts`: `missing` and `why`, beside `configuration`
-  and `configuration_name`), never substituted.
+  and `configuration_name`), never substituted. The configuration is set
+  when the part is added (`add_job_part`, the CAM panel's Parts `+`) and
+  changed in place by `set_job_part` or the part row's Configuration menu,
+  both through `ui::SetJobPartConfiguration`.
 - A **target** is `cam::Target{jobPartId, ElementRef}`. Two parts in one job
   can own the same feature id and element name, so a bare `ElementRef` is not
   an answer; an operation names the PART, and is cut wherever that part is

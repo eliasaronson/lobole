@@ -3,6 +3,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include "ui/AppState.h"
+#include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 
@@ -516,6 +517,69 @@ cam::Setup* ActiveCamSetup(AppState& state) {
       return &s;
   state.camActiveSetup = setups.front().id;
   return &setups.front();
+}
+
+bool SetJobPartConfiguration(AppState& state, uint64_t jobPartId,
+                             uint64_t configuration, std::string* why,
+                             int* moved) {
+  const auto refuse = [why](std::string text) {
+    if (why)
+      *why = std::move(text);
+    return false;
+  };
+  if (moved)
+    *moved = 0;
+  cam::JobDocument* job = ActiveJob(state);
+  cam::JobPart* part = job != nullptr ? job->FindPart(jobPartId) : nullptr;
+  if (part == nullptr)
+    return refuse("no job part with id " + std::to_string(jobPartId) +
+                  " in this job");
+  if (configuration != 0) {
+    // Refused naming what IS there: a configuration id from another part, or
+    // one deleted since, is not quietly the active one.
+    const Document* src = JobSourceDocument(state, part->sourceDocId);
+    if (src == nullptr)
+      return refuse("'" + part->name + "': its source part is gone");
+    if (src->FindConfiguration(configuration) == nullptr) {
+      std::string known;
+      for (const Configuration& c : src->GetConfigurations())
+        known += (known.empty() ? "" : ", ") + c.name;
+      return refuse("'" + part->name + "' has no configuration " +
+                    std::to_string(configuration) +
+                    ". Known: " + (known.empty() ? "(none)" : known));
+    }
+    std::string bad;
+    if (ConfiguredPartDocument(state, part->sourceDocId, configuration, &bad) ==
+        nullptr)
+      return refuse("'" + part->name + "': " + bad);
+  }
+  if (part->configuration == configuration)
+    return true;            // nothing to do, and no undo step for it
+  JobUndoGuard undo(state); // one step, whoever calls
+  part->configuration = configuration;
+  job->BumpVersion();
+  // What follows the geometry follows it, as a re-clamp does: the box every
+  // derived number is measured from has changed shape.
+  int count = 0;
+#ifdef HAVE_CAM
+  const std::vector<Body>& bodies = JobBodies(state);
+  for (cam::Setup& setup : job->GetSetups()) {
+    (void)cam::RecomputeOrigin(setup, bodies);
+    count += cam::RederiveDepths(
+        setup, bodies, cam::EarlierSetups(job->GetSetups(), setup.id));
+    setup.safeZ = DeriveJobSafeZ(state, setup);
+  }
+  if (const cam::Setup* active = ActiveCamSetup(state))
+    state.camSafeZEdit = static_cast<float>(active->safeZ);
+#endif
+  if (moved)
+    *moved = count;
+  state.projectMetaDirty = true;
+  RefreshCamToolpaths(state);
+  // A verdict about the part as it WAS is worse than none.
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+  return true;
 }
 
 } // namespace ui

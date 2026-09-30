@@ -134,6 +134,18 @@ def main():
                    f"the job's part is the configuration it cuts: top at {top}")
             refused(d, "add_job_part", "Known: big", part="cube",
                     configuration="huge")
+            # ...and changes it in place: the part's active one, then back,
+            # refusing one it does not have.
+            pid = parts[0]["id"]
+            got = d.call("set_job_part", id=pid, configuration=None)
+            expect(got["configuration"] == 0, got)
+            parts = d.call("list_job_parts")["parts"]
+            expect(parts[0]["configuration"] == 0, parts)
+            got = d.call("set_job_part", id=pid, configuration="big")
+            expect(got["configuration"] == big and
+                   got["configuration_name"] == "big", got)
+            refused(d, "set_job_part", "Known: big", id=pid,
+                    configuration="huge")
         print("part_configuration_smoke: ok")
     finally:
         app.terminate()

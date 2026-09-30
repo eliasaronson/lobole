@@ -599,8 +599,18 @@ bool RedoJob(AppState& state) {
   return true;
 }
 
+namespace {
+int g_openJobGuards = 0; // JobUndoGuards alive, outermost first
+} // namespace
+
 JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce)
     : m_state(state), m_coalesce(coalesce) {
+  // Only the outermost guard records: an action with a guard of its own
+  // (SetJobPartConfiguration), called under the panel's or an RPC's, is
+  // still one step. Counted here rather than on the history, which moves
+  // with its tab.
+  if (g_openJobGuards++ > 0)
+    return;
   if (state.job) {
     m_before = *state.job;
     m_fingerprint = DocumentIO::JobFingerprint(*state.job);
@@ -609,6 +619,7 @@ JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce)
 
 JobUndoGuard::~JobUndoGuard() {
   AppState& state = m_state;
+  g_openJobGuards--;
   if (!state.job || !m_before)
     return;
   // Undo itself replaces the job under a guard (the panel is drawing while

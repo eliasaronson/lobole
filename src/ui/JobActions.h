@@ -158,4 +158,17 @@ int FindJobForPart(AppState& state, uint64_t sourcePartId);
 // selected in the combo, else the first). Null when there is none.
 cam::Setup* ActiveCamSetup(AppState& state);
 
+// Which configuration of its source a job part is cut in
+// (docs/cam/README.md#the-model): `configuration` 0 is the source's active
+// one. REFUSED, false with the reason in `why`, for a part the job does not
+// hold, a configuration the source does not have (naming the ones it has) or
+// one it does not build in. One undo step, and what follows the geometry
+// follows it, as a re-clamp does: every setup's origin, targeted operations'
+// depths (`cam::RederiveDepths`) and safe Z, then the toolpaths. `moved`, when
+// given, receives how many operations' depths moved. The panel's Parts rows,
+// its add menu and the `set_job_part` RPC all come through here.
+bool SetJobPartConfiguration(AppState& state, uint64_t jobPartId,
+                             uint64_t configuration, std::string* why = nullptr,
+                             int* moved = nullptr);
+
 } // namespace ui
