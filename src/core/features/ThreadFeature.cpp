@@ -202,6 +202,12 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
         return false;
       overlay.cut = true;
     }
+    // What the thread IS, on the body, for whatever reads bodies rather than
+    // features: the CAM thread mill (docs/cam/operations.md#thread-mill).
+    body->threads.push_back(
+        {face, GetId(), resolved ? resolved->standard.designation : designation,
+         resolved ? resolved->standard.majorDia : 0.0, pitch, cls, rightHanded,
+         external, length, modeled});
     if (allowEngagement) {
       if (!resolved || minimumEngagement < 0 ||
           !std::isfinite(minimumEngagement)) {

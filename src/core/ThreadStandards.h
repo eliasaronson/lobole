@@ -68,4 +68,34 @@ std::optional<Standard> Lookup(const std::string& designation);
 [[nodiscard]] std::string
 ClassError(const Standard& s, const std::string& threadClass, bool external);
 
+// The pitch-diameter band a tolerance class allows
+// (docs/modeling/holes-and-threads.md#pitch-diameter-bands), in mm: what a
+// thread is MADE to, as the class says, where the basic profile is only what
+// it is drawn at. Computed from the standards' own formulas rather than
+// tabulated -- ISO 965-1 (the grade's Td2 / TD2 off the diameter range and
+// the pitch, the position's fundamental deviation) and ASME B1.1 (the 2A PD
+// tolerance 0.0015 D^1/3 + 0.0015 (9P)^1/2 + 0.015 P^2/3 inch, scaled by
+// class, and the 1A/2A allowance of 0.3 of it) -- so every row and every
+// class has one. The published tables round each term; these land within
+// a few microns of them (3/8-16 UNC-2B: 8.494 / 8.645 against 8.494 /
+// 8.639).
+struct PitchBand {
+  double min = 0.0, max = 0.0; // mm
+  std::string threadClass;     // the class it is for
+  [[nodiscard]] double Mid() const { return 0.5 * (min + max); }
+};
+// Basic pitch diameter, D - 0.649519 P (ISO 68-1 / ASME B1.1 D2).
+[[nodiscard]] double BasicPitchDiameter(double majorDia, double pitch);
+// The band of `threadClass` on a thread of this series, major diameter and
+// pitch. nullopt, with `error`, for a class the series does not have on
+// that side -- refused, never read as another class. An EMPTY class is not
+// a class: the caller says which one it is aiming at (DefaultClass).
+[[nodiscard]] std::optional<PitchBand>
+PitchDiameterBand(Series series, double majorDia, double pitch,
+                  const std::string& threadClass, bool external,
+                  std::string* error);
+// The general-purpose class of a series on one side: 6g / 6H, 2A / 2B -- the
+// first each Classes list names.
+[[nodiscard]] std::string DefaultClass(Series series, bool external);
+
 } // namespace threads

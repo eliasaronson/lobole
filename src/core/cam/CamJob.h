@@ -36,6 +36,12 @@ enum class ToolType {
   Ball,  // ball nose; tip radius = diameter/2
   VBit,  // engraving/chamfer cone, `tipAngleDeg` INCLUDED angle
   Drill, // twist drill, `tipAngleDeg` point angle (118° typical)
+  // A single-profile thread mill (v145, docs/cam/operations.md#thread-mill):
+  // a disc whose rim is a V of `tipAngleDeg` INCLUDED angle (60° for ISO
+  // and unified threads) truncated by `tipFlat`, on a neck of
+  // `neckDiameter` x `neckLength`. `diameter` is the cutting diameter, at
+  // the flat; `fluteLength` is the head's axial length, the V's own width.
+  ThreadMill,
 };
 
 struct Tool {
@@ -91,8 +97,50 @@ struct Tool {
   // than the thing being driven into it. Narrower is a necked tool, made to
   // reach past its flutes (docs/cam/setup.md#reach).
   double shankDiameter = 0.0;
+  // A thread mill's head (ToolType::ThreadMill, v145): the flat its V is
+  // truncated to at the cutting diameter, and the neck the head sits on --
+  // narrower than the head, so it passes inside the thread's crests, and
+  // long enough to reach the thread's bottom. Read by nothing else.
+  double tipFlat = 0.0;      // mm, axial width of the flat at the rim
+  double neckDiameter = 0.0; // mm
+  double neckLength = 0.0;   // mm, from the top of the head up
   bool operator==(const Tool&) const = default;
 };
+
+// How deep a tool reaches before something wider than what it cut follows it
+// down: the flutes, and for a thread mill the neck above its head as well
+// (docs/cam/setup.md#reach). The reach check and the shank probe read this.
+[[nodiscard]] inline double ReachLength(const Tool& t) {
+  return t.fluteLength + (t.type == ToolType::ThreadMill ? t.neckLength : 0.0);
+}
+
+// A thread mill's profile depth: how far its V stands out from its neck,
+// (diameter - neck) / 2. The deepest thread it can cut, and the reason the
+// neck clears the crests (docs/cam/operations.md#thread-mill).
+[[nodiscard]] inline double ProfileDepth(const Tool& t) {
+  return std::max(0.0, (t.diameter - t.neckDiameter) * 0.5);
+}
+
+// What a thread mill's shape is when nobody has said, from its cutting
+// diameter (docs/cam/operations.md#the-thread-mill-cutter): a 60° V, a flat
+// of a sixtieth of the diameter (0.1 mm on a 6 mm head, a common grind), a
+// neck of 0.6 of it (a profile 0.2 of the diameter deep, which reaches the
+// full depth of a thread whose tap drill is a little over the head), three
+// diameters of neck, and the head's own axial length as its flute. Only the
+// fields that are 0 are filled, so a measured number is never replaced;
+// `angleStated` false also sets the 60° (a Tool's default angle is a V-bit's).
+inline void FillThreadMillShape(Tool& t, bool angleStated) {
+  if (!angleStated)
+    t.tipAngleDeg = 60.0;
+  if (t.tipFlat <= 0.0)
+    t.tipFlat = t.diameter / 60.0;
+  if (t.neckDiameter <= 0.0)
+    t.neckDiameter = t.diameter * 0.6;
+  if (t.neckLength <= 0.0)
+    t.neckLength = t.diameter * 3.0;
+  const double half = glm::radians(t.tipAngleDeg * 0.5);
+  t.fluteLength = t.tipFlat + 2.0 * ProfileDepth(t) * std::tan(half);
+}
 
 // How the rotary is INSTALLED (docs/cam/rotary.md#how-the-rotary-is-installed).
 // Inside the app the part's axis is setup +X, the chuck at its low end, and A
@@ -189,6 +237,17 @@ struct Machine {
     const double half = glm::radians(t.tipAngleDeg * 0.5);
     const double tanHalf = std::tan(half);
     return tanHalf > 1e-9 ? d / tanHalf : 0.0;
+  }
+  case ToolType::ThreadMill: {
+    // The head's lower flank: flat out to the neck, then rising at half the
+    // V's angle from the radial to the rim. A height map sees the head from
+    // BELOW, so this is everything the carve can know of it -- the upper
+    // flank and the crests it leaves stand in the column the carve clears,
+    // which is why a thread is judged on its own terms
+    // (docs/cam/simulation.md#threads).
+    const double neck = t.neckDiameter * 0.5;
+    return d <= neck ? 0.0
+                     : (d - neck) * std::tan(glm::radians(t.tipAngleDeg * 0.5));
   }
   default:
     return 0.0;
@@ -291,6 +350,11 @@ enum class OpType {
   // on (v138, docs/cam/operations.md#engrave): a label, a line, an arc. The
   // one type whose target is not a face of a body.
   Engrave,
+  // Mill a thread (v145, docs/cam/operations.md#thread-mill): a helix of
+  // half-turn arcs, Z advancing half a pitch each, in the bore (or round the
+  // boss) a Thread feature -- or a tapped Hole -- is on. Driven by the thread,
+  // not by typed numbers: its size, pitch, hand, side and class.
+  ThreadMill,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
   // reloaded as a full-depth contour round the part -- the silent
@@ -471,6 +535,13 @@ struct Operation {
   // ball takes a depth only. 0 = not stated.
   double engraveWidth = 0.0;
   double engraveDepth = 0.0;
+
+  // ThreadMill only (v145): how many radial passes take the thread's depth,
+  // each removing the same area of it. 0 = derive it from the cutter: the
+  // first pass takes at most half its profile depth
+  // (docs/cam/operations.md#thread-mill). `climb` and `leadArcs` are the
+  // direction and the semicircle entry and exit.
+  int threadPasses = 0;
 
   bool enabled = true;
 
@@ -850,6 +921,46 @@ struct Toolpath {
     Tool tool;
   };
   std::vector<Groove> grooves;
+  // Moves that are ONE exact arc, for the post to write as one G2/G3 --
+  // helical when Z changes along it (docs/cam/post.md#arcs-and-line-merging).
+  // Moves [first, last] are chords of the arc that starts where move
+  // first - 1 ends, round `centre` (setup XY), Z linear in the angle. The
+  // moves stay the polyline everything else reads; the post checks each run
+  // still is one before trusting it (a clip or a merge may have moved them)
+  // and writes the chords when it is not.
+  struct Arc {
+    size_t first = 0, last = 0;
+    glm::dvec2 centre{0.0};
+    bool clockwise = false;
+  };
+  std::vector<Arc> arcs;
+  // A thread this path cuts (docs/cam/simulation.md#threads), as the
+  // generator aimed it: the verifier cannot see a flank that faces sideways
+  // in a height map, so it judges the thread from the posted file against
+  // this -- the helix's pitch and hand, the diameter its tip reached against
+  // the class's band, the span of full thread, the bore it runs in -- and
+  // excuses the carve inside the thread's radius down to its lowest tip.
+  struct Thread {
+    uint64_t op = 0;        // the operation, as the file's `(op N)` names it
+    glm::dvec2 centre{0.0}; // setup XY
+    bool internal = true;
+    bool rightHand = true;
+    double pitch = 0.0;      // mm
+    std::string designation; // "3/8-16 UNC"
+    std::string threadClass; // the class aimed at
+    bool classStated = true; // false: the thread named none, the default used
+    double pdMin = 0.0, pdMax = 0.0; // the class's pitch-diameter band
+    double pdAim = 0.0;              // what the last pass is set to cut
+    double boreDia = 0.0;        // the face: the tap drill's bore, or the boss
+    double zLo = 0.0, zHi = 0.0; // the threaded span, setup Z
+    bool through = false;        // open below: overtravel past the last turn
+    // The span of FULL thread the ends allow: all of [zLo, zHi] where the
+    // helix may run past them, less what a blind floor keeps the head from
+    // (its V is `fluteLength` tall) or a thread that stops mid-bore.
+    double fullLo = 0.0, fullHi = 0.0;
+    Tool tool;
+  };
+  std::vector<Thread> threads;
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;

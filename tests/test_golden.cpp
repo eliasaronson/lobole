@@ -71,15 +71,47 @@ void AssertCamShapes(const std::vector<cam::Setup>& setups,
     std::vector<std::string> got;
     for (const cam::Setup& setup : setups)
       for (const cam::Tool& t : setup.tools)
-        got.push_back(t.type == cam::ToolType::Ball    ? "ball"
-                      : t.type == cam::ToolType::VBit  ? "vbit"
-                      : t.type == cam::ToolType::Drill ? "drill"
-                                                       : "flat");
+        // Through the name table, which refuses a type with no row rather
+        // than censusing it as a flat mill.
+        got.push_back(cam::ToolTypeName(t.type));
     REQUIRE(got.size() == want.size());
     for (size_t i = 0; i < got.size(); i++) {
       INFO("tool " << i);
       CHECK(got[i] == want[i]);
     }
+  }
+  if (expect.contains("cam_tool_thread_heads")) {
+    // v145: a thread mill's head -- its flat, its neck and the neck's length.
+    // A head that reloads without its neck is a cutter the thread mill
+    // refuses, and one whose flat reloads as 0 aims every thread a flat's
+    // reach too deep.
+    const auto want = expect.at("cam_tool_thread_heads")
+                          .get<std::vector<std::vector<double>>>();
+    std::vector<std::vector<double>> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Tool& t : setup.tools)
+        got.push_back({t.tipFlat, t.neckDiameter, t.neckLength});
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("tool " << i);
+      CHECK(got[i] == want[i]);
+    }
+  }
+  if (expect.contains("cam_op_thread_passes")) {
+    const auto want = expect.at("cam_op_thread_passes").get<std::vector<int>>();
+    std::vector<int> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(op.threadPasses);
+    CHECK(got == want);
+  }
+  if (expect.contains("cam_op_climb")) {
+    const auto want = expect.at("cam_op_climb").get<std::vector<bool>>();
+    std::vector<bool> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(op.climb);
+    CHECK(got == want);
   }
   if (expect.contains("cam_op_types")) {
     const auto want = expect.at("cam_op_types").get<std::vector<std::string>>();

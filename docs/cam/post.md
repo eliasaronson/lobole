@@ -99,6 +99,23 @@ before any arc so a tangentially-leaving arc keeps its first points. With
 The verifier parses `G2`/`G3` into chords, so the check is exact for what it
 sees; posting with arcs on and off must give the same verdict.
 
+### Helical arcs
+
+A path that is made of arcs says so: a thread mill declares each of its arcs
+(`Toolpath::Arc`: the moves that are chords of it, the centre, the
+direction), and the post writes each as ONE `G2`/`G3`, with a `Z` word when Z
+moves along it -- a helix, which every dialect here interpolates (Mach3's
+helical interpolation, LinuxCNC's third axis linear along the arc, GRBL 1.1;
+the `helical` column of `kDialects`, `PostWritesHelicalArcs`). The declaration
+is checked before it is trusted (`ExactArc`): every chord on the circle,
+turning one way, Z linear in the angle, one feed and one A, short of a full
+turn. A run that a clip or a merge has changed since is written as its
+chords, which cut the same. A declaring path is not run through the fitter,
+which knows only flat arcs and would take a flat lead-in and the first chords
+of a helix for one circle. A thread mill is refused on a machine set to post
+no arcs, and on a post without helical arcs
+([operations.md](operations.md#thread-mill)).
+
 ## Tool changes
 
 A tool change is emitted on every change of tool number in the order the

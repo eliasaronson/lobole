@@ -7,6 +7,7 @@
 #include "cad/FaceSelector.h" // Ray
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamToolpath.h"
+#include "core/features/HoleFeature.h"
 #include "core/io/Serialization.h"
 #include "ui/AssemblyActions.h" // the placement gizmo
 #include "ui/BackgroundJobs.h"
@@ -1938,6 +1939,98 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::HandleGizmoInput(*s_App, moved, false, false, true));
     IM_CHECK(!live().FindFixture(clamp.id)->seat.has_value());
     ctx->ItemClick("//###ToolWindow/**/###cam_fixture_editor_close");
+    ctx->Yield(2);
+  };
+
+  // docs/cam/gui.md#milling-a-thread: a thread on the part is milled from
+  // its setup's menu, driven by the Thread; the op editor takes its passes.
+  t = IM_REGISTER_TEST(engine, "cam", "a_thread_is_milled_from_the_setup_menu");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Document* part = CamPart();
+    // A 40 x 40 x 10 plate, a 3/8-16 UNC tapped hole through it, and a
+    // Thread of class 2B on the hole's bore.
+    auto pad =
+        std::make_unique<SketchFeature>("Plate", SketchPlane(PlaneType::XY));
+    pad->AddRectangle({-20, -20}, {20, 20});
+    part->AddFeature(std::move(pad));
+    part->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Pad", part->GetFeature(0)->GetId(), 10.0, ExtrudeMode::NewBody));
+    auto centre = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(glm::vec3(0, 0, 10), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+    centre->AddEntity(sketch::Point{{0, 0}, 1});
+    part->AddFeature(std::move(centre));
+    auto hole = std::make_unique<HoleFeature>(
+        "Tripod", part->GetFeature(2)->GetId(), HoleKind::Simple, 7.9375, 10.0);
+    hole->through = true;
+    hole->fitThread = "3/8-16 UNC";
+    hole->fitKind = "tapped";
+    part->AddFeature(std::move(hole));
+    ctx->Yield(2);
+    ElementRef bore;
+    for (const auto& [index, name] : part->GetBodies().at(0).elementMap.names)
+      if (name.find("/bore") != std::string::npos)
+        bore = ElementRef{part->GetBodies()[0].createdBy, name};
+    IM_CHECK(bore.IsSet());
+    part->AddFeature(std::make_unique<ThreadFeature>(
+        "Tripod thread", bore, "3/8-16 UNC-2B", 25.4 / 16.0));
+    ctx->Yield(2);
+
+    cam::Setup& made = MakeJob()->AddSetup("Tapped");
+    const uint64_t sid = made.id;
+    made.stock.bottomMargin = 0.0;
+    cam::Tool mill;
+    mill.number = 2;
+    mill.name = "6 mm thread mill";
+    mill.diameter = 6.0;
+    mill.type = cam::ToolType::ThreadMill;
+    cam::FillThreadMillShape(mill, false);
+    made.tools.push_back(mill);
+    s_App->camActiveSetup = sid;
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    const auto live = [&]() -> cam::Setup& { return *Job()->FindSetup(sid); };
+
+    // Add operation > Mill a thread: the job's one thread, by its name.
+    ctx->ItemClick(CamSetupRow(sid).c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_add_thread");
+    ctx->Yield(2);
+    // A submenu is a window of its own, "<label>###Menu_00".
+    ctx->ItemClick("//###Menu_00/###cam_thread_0");
+    ctx->Yield(3);
+    IM_CHECK_EQ(live().operations.size(), (size_t)1);
+    const cam::Operation& op = live().operations[0];
+    IM_CHECK(op.type == cam::OpType::ThreadMill);
+    IM_CHECK_EQ(op.toolNumber, 2); // the thread mill, not tool 1
+    IM_CHECK(op.climb && op.leadArcs);
+    IM_CHECK_EQ(op.targets.size(), (size_t)1);
+    const uint64_t opId = op.id;
+
+    // Cut: the helix is declared, as the verifier will read it.
+    const std::vector<cam::Toolpath> paths =
+        ui::GenerateCamToolpathsNow(*s_App, live());
+    IM_CHECK_EQ(paths.size(), (size_t)1);
+    IM_CHECK(paths[0].error.empty());
+    IM_CHECK_EQ(paths[0].threads.size(), (size_t)1);
+    IM_CHECK(!paths[0].arcs.empty());
+
+    // The op editor takes its passes, and not its depths (the thread's).
+    ctx->ItemDoubleClick(
+        ("**/$$" + std::to_string(static_cast<int>(opId)) + "/###op_row")
+            .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditOp, opId);
+    ctx->ItemInputValue("//###ToolWindow/**/###threadpasses", 2);
+    ctx->Yield(3);
+    IM_CHECK_EQ(live().operations[0].threadPasses, 2);
+    ctx->ItemClick("//###ToolWindow/###cam_edit_done");
     ctx->Yield(2);
   };
 

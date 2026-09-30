@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "core/ThreadStandards.h"
 #include "core/parts/FastenerTable.h"
 
 #include "cad/CADKernel.h"
@@ -304,15 +305,30 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 // not a thread. The region carries no length, so it is the whole bore, and
 // no minimum engagement, so the standard's pitch stands.
 void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
+  // What the tap cuts, for whatever reads the bodies (the CAM thread mill):
+  // the table's thread at the fit's pitch, right-handed, no class stated.
+  const std::optional<threads::Standard> table = threads::Lookup(fitThread);
+  const double pitch = fitPitch > 0.0 ? fitPitch : (table ? table->pitch : 0.0);
+  std::string designation = table ? table->designation : fitThread;
+  if (table && fitPitch > 0.0 && std::abs(fitPitch - table->pitch) > 1e-9) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%sx%g", fitThread.c_str(), fitPitch);
+    designation = buf;
+  }
   for (Body& body : bodies) {
     if (body.reference || !body.shape.IsValid())
       continue;
     for (const auto& [index, name] : body.elementMap.names) {
       const topo::ElementOrigin o = topo::DecodeElementName(name);
       if (o.ok && o.derived.empty() && o.madeBy == GetId() &&
-          o.role == topo::ElementRole::Bore)
+          o.role == topo::ElementRole::Bore) {
         body.threadRegions.push_back(
             {ElementRef{body.createdBy, name}, fitThread, 0.0, 0.0, false});
+        if (pitch > 0.0)
+          body.threads.push_back({ElementRef{body.createdBy, name}, GetId(),
+                                  designation, table ? table->majorDia : 0.0,
+                                  pitch, "", true, false, 0.0, false});
+      }
     }
   }
 }

@@ -140,6 +140,12 @@ json ToolToJson(const cam::Tool& t) {
   // took it before, the cutter's width all the way up.
   if (t.shankDiameter > 0.0)
     tj["shank_diameter"] = t.shankDiameter;
+  // A thread mill's head (v145): its flat and its neck, only on one.
+  if (t.type == cam::ToolType::ThreadMill) {
+    tj["tip_flat"] = t.tipFlat;
+    tj["neck_diameter"] = t.neckDiameter;
+    tj["neck_length"] = t.neckLength;
+  }
   return tj;
 }
 
@@ -160,6 +166,9 @@ cam::Tool ToolFromJson(const json& tj) {
   t.overallLength = tj.value("overall_length", 0.0);
   t.collarDiameter = tj.value("collar_diameter", 0.0);
   t.shankDiameter = tj.value("shank_diameter", 0.0);
+  t.tipFlat = tj.value("tip_flat", 0.0);
+  t.neckDiameter = tj.value("neck_diameter", 0.0);
+  t.neckLength = tj.value("neck_length", 0.0);
   return t;
 }
 

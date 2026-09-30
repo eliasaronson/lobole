@@ -159,7 +159,10 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
   // said "the last 0.0 mm is cut by the shank", a sentence that reads as
   // nonsense. Same trap as the low-top_z warning
   // (docs/cam/README.md#invariants).
-  const double over = out.depth - t.fluteLength;
+  // A thread mill reaches with its neck as well as its head (ReachLength):
+  // its "flute" is the head's own width.
+  const double reach = ReachLength(t);
+  const double over = out.depth - reach;
   const bool wider = t.shankDiameter > t.diameter + 1e-6;
   // A V-bit is widest at the top of its cone, so with no shank stated the
   // one above it can only be narrower: necked, the nut's height unknown.
@@ -169,10 +172,10 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
     out.level = Reach::Level::Collides;
     out.text =
         who + " cuts " + Fmt("%.1f", out.depth) + " mm deep and has " +
-        Fmt("%.1f", t.fluteLength) + " mm of flute, and above the flutes it " +
-        "is " + Fmt("%.1f", t.shankDiameter) +
+        Fmt("%.1f", reach) + " mm of flute, and above the flutes it " + "is " +
+        Fmt("%.1f", t.shankDiameter) +
         " mm across -- wider than the cut it is in. Below " +
-        Fmt("%.1f", t.fluteLength) +
+        Fmt("%.1f", reach) +
         " mm that shank does not rub the wall, it is driven into it. Use a "
         "cutter with flutes at least " +
         Fmt("%.1f", out.depth) +
@@ -184,7 +187,7 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
     // holder into it.
     out.level = Reach::Level::Rubs;
     out.text = who + " cuts " + Fmt("%.1f", out.depth) + " mm deep and has " +
-               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
+               Fmt("%.1f", reach) + " mm of flute, so the last " +
                Fmt("%.1f", over) +
                " mm is cut by the shank and the holder is in the work. Use a "
                "longer cutter, or take the depth in two setups";
@@ -197,7 +200,7 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
                  // nut touches the work".
              t.overallLength > 0.0 ? t.overallLength
              : necked              ? std::numeric_limits<double>::max()
-                                   : t.fluteLength;
+                                   : reach;
              over <= 1e-3 && out.depth > collet - CollarClearance(t)) {
     // MARGIN, not just overrun. The first version of this check fired only
     // when the cut was DEEPER than the flute, so a 25.0 mm cut with a
@@ -212,7 +215,7 @@ Reach ReachCheck(const Operation& op, const Tool& t) {
                                  ? "the collet nut " +
                                        Fmt("%.1f", t.overallLength) +
                                        " mm above the tip"
-                                 : Fmt("%.1f", t.fluteLength) + " mm of flute";
+                                 : Fmt("%.1f", reach) + " mm of flute";
     out.text = who + " cuts " + Fmt("%.1f", out.depth) + " mm deep with " +
                from + " -- only " +
                Fmt("%.1f", std::max(0.0, collet - out.depth)) +

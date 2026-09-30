@@ -278,7 +278,9 @@ void Revolve(StockMesh& m, const std::vector<glm::dvec2>& profile,
 StockMesh BuildToolMesh(const Tool& tool) {
   StockMesh mesh;
   const double r = std::max(0.05, tool.diameter * 0.5);
-  const double flutes = std::max(r, tool.fluteLength);
+  // A thread mill's cutting part is its head and the neck above it
+  // (ReachLength): the shank starts where the neck ends.
+  const double flutes = std::max(r, ReachLength(tool));
   // A holder wide enough to read as one, and SHORT. It used to run
   // `flutes + max(20, r*6)` — 49 mm of Ø16 slug for an 8 mm cutter, longer
   // than most of what it was cutting. Its length carries no information (the
@@ -319,12 +321,27 @@ StockMesh BuildToolMesh(const Tool& tool) {
   const bool shaped = tool.type == ToolType::Ball ||
                       tool.type == ToolType::VBit ||
                       tool.type == ToolType::Drill;
-  const int tipSteps = shaped ? 12 : 1;
-  for (int i = 1; i <= tipSteps; i++) {
-    const double d = r * i / tipSteps;
-    profile.push_back({d, TipHeight(tool, d)});
+  if (tool.type == ToolType::ThreadMill && tool.neckDiameter > 0.0 &&
+      tool.neckDiameter < tool.diameter) {
+    // The head as it is (docs/cam/operations.md#the-thread-mill-cutter): out
+    // along its flat bottom to the neck, up the lower flank to the rim, the
+    // flat, the upper flank back in, and the neck up to the shank.
+    const double neckR = tool.neckDiameter * 0.5;
+    const double rise =
+        ProfileDepth(tool) * std::tan(glm::radians(tool.tipAngleDeg * 0.5));
+    profile.push_back({neckR, 0.0});
+    profile.push_back({r, rise});
+    profile.push_back({r, rise + tool.tipFlat});
+    profile.push_back({neckR, 2.0 * rise + tool.tipFlat});
+    profile.push_back({neckR, flutes});
+  } else {
+    const int tipSteps = shaped ? 12 : 1;
+    for (int i = 1; i <= tipSteps; i++) {
+      const double d = r * i / tipSteps;
+      profile.push_back({d, TipHeight(tool, d)});
+    }
+    profile.push_back({r, flutes});
   }
-  profile.push_back({r, flutes});
   // Above the flutes, the shank as stated: the 6 mm a 3 mm bit steps out to
   // is the thing the reach check refuses to drive into a wall
   // (docs/cam/setup.md#reach). Unstated, the cutter's width, as always.

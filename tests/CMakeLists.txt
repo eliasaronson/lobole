@@ -97,6 +97,7 @@ add_executable(designer_tests
     test_cam_spiral.cpp
     test_cam_helical.cpp
     test_cam_engrave.cpp
+    test_cam_thread.cpp
     test_command_modify.cpp
     test_reorder.cpp
     test_remove_features.cpp

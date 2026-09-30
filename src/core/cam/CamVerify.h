@@ -6,6 +6,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -101,6 +102,59 @@ private:
 };
 
 // --- the verdict ----------------------------------------------------------
+
+// A milled thread, judged on its own terms (docs/cam/simulation.md#threads).
+// A height map cannot see a flank that faces sideways -- the carve clears
+// the whole column the head sweeps, crests and all -- so the thread is read
+// from the posted file's helix against what the toolpath declared
+// (Toolpath::Thread): its pitch and hand, the pitch diameter the last pass's
+// tip reached against the class's band, the span of FULL thread it leaves,
+// the bore it runs in (cut before it, and wide enough for the neck).
+struct ThreadVerdict {
+  uint64_t op = 0;
+  std::string designation;
+  std::string threadClass;
+  bool classStated = true;
+  bool internal = true;
+  // False when the file could not be judged -- no helix of this op in it, a
+  // file that turns A -- and `why` says so. Counts against Complete.
+  bool judged = false;
+  std::string why;
+  double pitch = 0.0;         // what the thread is
+  double pitchMeasured = 0.0; // what the last pass's helix advances a turn
+  bool rightHand = true;      // what the thread is
+  bool handMeasured = true;   // the helix's own hand
+  double pdMin = 0.0, pdMax = 0.0, pdReached = 0.0; // mm
+  int passes = 0;
+  double zLo = 0.0, zHi = 0.0;         // the threaded span
+  double fullFrom = 0.0, fullTo = 0.0; // where the thread is full depth
+  double shortMm = 0.0; // span left short of full, past what a floor forces
+  bool floorLimited = false; // a blind floor stops the head short
+  double tipLowest = 0.0;    // the lowest the head's tip went in the file
+  // Material standing in the bore (round the boss, external) when the op
+  // starts, above the lowest the head goes: the tap drill not cut first.
+  double boreStanding = 0.0;
+  glm::dvec2 boreStandingAt{0.0};
+  // How far the neck stays off the bore's wall at the deepest pass; negative
+  // is the neck rubbing the crests.
+  double neckClearance = 0.0;
+  [[nodiscard]] bool PitchOk() const {
+    return std::abs(pitchMeasured - pitch) <= 1e-3 * std::max(1.0, pitch);
+  }
+  [[nodiscard]] bool InBand() const {
+    return pdReached >= pdMin - 1e-3 && pdReached <= pdMax + 1e-3;
+  }
+  // Nothing breaks: the head does not plunge into a bore that is not
+  // there, and the neck does not rub the crests.
+  [[nodiscard]] bool Safe(double tolerance) const {
+    return boreStanding <= tolerance && neckClearance >= -1e-6;
+  }
+  // The thread is the thread the part asks for.
+  [[nodiscard]] bool Good(double tolerance) const {
+    return judged && PitchOk() && handMeasured == rightHand && InBand() &&
+           shortMm <= tolerance;
+  }
+};
 
 struct Verdict {
   double maxGouge = 0.0; // mm cut BELOW the designed surface (scrap)
@@ -307,6 +361,11 @@ struct Verdict {
   int narrowGrooves = 0;
   double narrowestGroove = 0.0;
   double grooveCells = 0.0;
+  // Every milled thread the program declared, judged
+  // (docs/cam/simulation.md#threads). The carve inside a thread's radius,
+  // down to its head's lowest tip, is not gouge; this is what says whether
+  // the thread is right.
+  std::vector<ThreadVerdict> threads;
   int firstBadLine = 0; // the G-code line of the first such rapid
   size_t cells = 0;
   // How much of the stock the program never passed over. A pocket-only job
@@ -353,7 +412,10 @@ struct Verdict {
     return maxGouge <= tolerance && rapidsThroughStock == 0 &&
            outsideTravel == 0 && holderCollisions == 0 &&
            fixtureCollisions == 0 && overBites == 0 && shankCollisions == 0 &&
-           holdingCollisions == 0 && fileErrors == 0;
+           holdingCollisions == 0 && fileErrors == 0 &&
+           std::all_of(
+               threads.begin(), threads.end(),
+               [&](const ThreadVerdict& t) { return t.Safe(tolerance); });
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of
@@ -367,7 +429,10 @@ struct Verdict {
   // operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
     return maxLeftover <= tolerance && grooveShallow <= tolerance &&
-           !CutsNothing();
+           !CutsNothing() &&
+           std::all_of(
+               threads.begin(), threads.end(),
+               [&](const ThreadVerdict& t) { return t.Good(tolerance); });
   }
   // The program never touches the stock. Leftover is measured only where the
   // tool went, so such a program has none and read as complete -- the chess
@@ -407,7 +472,8 @@ Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<Toolpath::Tab>& tabs = {},
         const std::vector<FixtureSolid>& fixtures = {},
         const OtherSetups* others = nullptr,
-        const std::vector<Toolpath::Groove>& grooves = {});
+        const std::vector<Toolpath::Groove>& grooves = {},
+        const std::vector<Toolpath::Thread>& threads = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -426,7 +492,8 @@ VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<Toolpath::Tab>& tabs = {},
             const std::vector<FixtureSolid>& fixtures = {},
             const OtherSetups* others = nullptr,
-            const std::vector<Toolpath::Groove>& grooves = {});
+            const std::vector<Toolpath::Groove>& grooves = {},
+            const std::vector<Toolpath::Thread>& threads = {});
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/simulation.md#verdict). Empty only when there is nothing to say.

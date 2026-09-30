@@ -224,6 +224,7 @@ here; the golden corpus and git history cover them.
 | 140 | Thread `hand` (`right` or `left`; absent = right, and any other value is refused), and `modeled: true` now cuts the real helical groove instead of erroring; the designation may name a unified thread (`3/8-16 UNC`) or carry a class suffix (`3/8-16 UNC-2B`) ([modelled threads](../modeling/holes-and-threads.md#modelled-threads)) |
 | 141 | Feature type `Bearing` {`designation`}: an ISO 15 deep-groove ball bearing generated from its designation (618/619/60/62/63, bores 3 to 30 mm), the whole of a generated standard part ([bearings](../parts/README.md#bearings)) |
 | 143 | A part's `print` {`process`, `material`}: how it is printed (`fdm` + `petg` is what the table carries; any other pair is refused on load, naming what is), which `check_fit`, `check_fits` and a Thread's report read for the allowance to model. Drives no geometry; written only when set ([printed parts](../tolerances/README.md#printed-parts)) |
+| 145 | CAM tool type `thread_mill` with `tip_flat`, `neck_diameter` and `neck_length` (mm; written only on a thread mill), and operation type `thread_mill` with `passes` (0 or absent = derived); its depths and everything else come from the Thread on its target face ([thread mill](../cam/operations.md#thread-mill)) |
 
 ## The directory form
 

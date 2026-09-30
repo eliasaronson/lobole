@@ -77,6 +77,11 @@ in `set_cam_setup` for every op that cuts with the tool, its own or as its
 `finish_tool` (`ReachChecks`). The panel's operation and tool editors call
 the same function.
 
+A thread mill reaches with its neck as well as its head: its reach is
+`flute_length` (the head's width) plus `neck_length` (`ReachLength`), and the
+shank probe starts above both ([the thread-mill
+cutter](operations.md#the-thread-mill-cutter)).
+
 Above its flutes a tool is `shank_diameter` wide (v131). Left at 0, the tool
 is taken to be the cutter's width all the way up, as every check assumed
 before the field existed. Graded by what happens:

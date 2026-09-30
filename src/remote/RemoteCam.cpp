@@ -263,9 +263,16 @@ constexpr MethodDoc kCamMethods[] = {
      "margin?: [x,y,z], bottom_margin?}} or "
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
-     "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
+     "flat|ball|vbit|drill|thread_mill, tip_angle?, feed_cut?, feed_plunge?, "
      "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?, "
-     "overall_length?, collar_diameter?, shank_diameter?}} "
+     "overall_length?, collar_diameter?, shank_diameter?, tip_flat?, "
+     "neck_diameter?, neck_length?}} "
+     "(a thread_mill is a single-profile head: diameter is its cutting "
+     "diameter at the flat, tip_angle its V (60 when not given), tip_flat "
+     "the flat's width in mm, neck_diameter and neck_length the neck under "
+     "it in mm; each left 0 is derived from the diameter -- a flat of 1/60, "
+     "a neck of 0.6 of it, three diameters long -- and its flute_length is "
+     "the head's own width, derived and refused if typed) "
      "— `id` and `tool` are SIBLING parameters, not a nested object, and "
      "`number` is required because it says WHICH tool. The tool is "
      "added when the number is new. chipload_min/max are mm per tooth THIS "
@@ -370,7 +377,7 @@ constexpr MethodDoc kCamMethods[] = {
      "the tool diameter (0.05-0.9), so 0.45 steps over by 45% of the cutter. "
      "and feeds are mm/min on the TOOL, not here. {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round|surface_parallel|"
-     "surface_waterline|surface_rotary|engrave, "
+     "surface_waterline|surface_rotary|engrave|thread_mill, "
      "tool?, target? (one pick, as cam_derive_op takes it -- the same as a "
      "one-entry targets; not both), top_z?, bottom_z?, stepdown?, peck? "
      "(drill: retract between "
@@ -434,14 +441,29 @@ constexpr MethodDoc kCamMethods[] = {
      "the cutter (a text label's: its cap height / 8), a flat's or ball's "
      "depth a quarter of the cutter. Strokes are cut nearest first, reversed "
      "where that is shorter, the tool staying down where one stroke ends on "
-     "the next.",
+     "the next. Thread_mill: target the cylindrical face a Thread (or a Hole "
+     "with a tapped fit) is on, with a thread_mill tool (the setup's first, "
+     "when `tool` is left out). Everything comes from the thread -- size, "
+     "pitch, hand, inside or outside, and the class, whose pitch-diameter "
+     "band's MIDDLE the last pass aims at (the series' general-purpose class, "
+     "said in `warnings`, when the Thread states none). It cuts a helix of "
+     "half-turn G2/G3 arcs, Z advancing half a pitch each, a partial last "
+     "arc, in `passes` radial passes of equal area (0 derives them: the "
+     "first takes at most half the cutter's profile depth), climb by "
+     "default, entering and leaving on semicircles (lead_arcs); a through "
+     "thread runs a pitch past its last full turn, a blind one stops the "
+     "head's tip on the floor. top_z/bottom_z are the thread's and are "
+     "refused. Refused: a face with no thread, a cutter that with twice the "
+     "thread's depth does not fit the tap-drill bore, a flat wider than the "
+     "thread's root (P/8: too fine a thread), a profile shallower than the "
+     "thread (the neck would rub), and a machine that posts no arcs.",
      "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
      "enabled, finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, "
      "name, "
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields, whose lengths — "
      "stepdown, edge_size and the rest — are MILLIMETRES, while stepover is a "
@@ -458,7 +480,7 @@ constexpr MethodDoc kCamMethods[] = {
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -482,7 +504,7 @@ constexpr MethodDoc kCamMethods[] = {
      "peck, rest_from_tool, rotary_pattern, "
      "sample_step_mm, setup, side, stepdown, stepover, job, drilled_bores, "
      "stock_to_leave, tabs, target, targets, tool, top_z, type, use_outline, "
-     "width_mm, z_step_mm"},
+     "passes, width_mm, z_step_mm"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm, the tool TIP's path: "
@@ -546,7 +568,20 @@ constexpr MethodDoc kCamMethods[] = {
      "worst_holding: chuck|tailstock, and holding_defaults naming the sizes "
      "the machine did not state -- moves into what holds a rotary setup), "
      "below_stock_mm, tabs, reliefs, grooves, groove_shallow_mm, "
-     "narrow_grooves, ok, complete, cuts_nothing, says}. `cuts_nothing`: the "
+     "narrow_grooves, threads, ok, complete, cuts_nothing, says}. `threads` "
+     "judges every milled thread on its own terms, since a height map cannot "
+     "see a flank that faces sideways: per thread {op, designation, class, "
+     "judged (false, with why, when the file has no helix for it -- which "
+     "counts against complete), pitch_mm and pitch_measured_mm (what the "
+     "last pass's helix advances a turn), hand and hand_measured, "
+     "pitch_diameter_band_mm [min, max] of its class and pitch_diameter_mm "
+     "the last pass's tip reached, in_band, passes, span_mm and "
+     "full_thread_mm (Z of the thread and of its full-depth part), "
+     "short_mm, floor_limited, bore_standing_mm (stock standing where the "
+     "head goes when the op starts: the tap drill not cut first -- not ok), "
+     "neck_clearance_mm (negative: the neck rubs the crests -- not ok), ok, "
+     "good}; the carve inside a thread down to its head's lowest tip is not "
+     "gouge. `cuts_nothing`: the "
      "program never touches the stock -- safe, and not a job, so `complete` "
      "is false with it. `grooves` counts the engraved "
      "strokes checked against the groove each declares: a cut inside one is "
@@ -748,6 +783,15 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     if (!cam::Retool(setup, op, p.at("tool").get<int>(), why))
       throw std::runtime_error(why);
   }
+  // A thread mill's depths are its thread's: the helix runs over the span the
+  // Thread says, past its open ends, and stops on a floor
+  // (docs/cam/operations.md#thread-mill). A typed one would steer nothing.
+  if (op.type == cam::OpType::ThreadMill &&
+      (p.contains("top_z") || p.contains("bottom_z")))
+    throw std::runtime_error(
+        "a thread_mill's depths are its thread's -- the span of the Thread "
+        "on its face, past the ends that open onto air -- so top_z and "
+        "bottom_z are not set on one");
   if (p.contains("top_z"))
     op.topZ = p.at("top_z").get<double>();
   if (p.contains("bottom_z"))
@@ -839,21 +883,28 @@ json ToolJson(const cam::Tool& t) {
   // chipload pair used to go in and vanish, so a caller could not read back
   // what it had just written -- and flute_length in particular decides a
   // safety finding, which makes it worth seeing.
-  return json{{"number", t.number},
-              {"name", t.name},
-              {"diameter", t.diameter},
-              {"tool_type", cam::ToolTypeName(t.type)},
-              {"tip_angle", t.tipAngleDeg},
-              {"flutes", t.flutes},
-              {"flute_length", t.fluteLength},
-              {"overall_length", t.overallLength},
-              {"collar_diameter", t.collarDiameter},
-              {"shank_diameter", t.shankDiameter},
-              {"feed_cut", t.feedCut},
-              {"feed_plunge", t.feedPlunge},
-              {"spindle_rpm", t.spindleRpm},
-              {"chipload_min", t.chiploadMin},
-              {"chipload_max", t.chiploadMax}};
+  json j = json{{"number", t.number},
+                {"name", t.name},
+                {"diameter", t.diameter},
+                {"tool_type", cam::ToolTypeName(t.type)},
+                {"tip_angle", t.tipAngleDeg},
+                {"flutes", t.flutes},
+                {"flute_length", t.fluteLength},
+                {"overall_length", t.overallLength},
+                {"collar_diameter", t.collarDiameter},
+                {"shank_diameter", t.shankDiameter},
+                {"feed_cut", t.feedCut},
+                {"feed_plunge", t.feedPlunge},
+                {"spindle_rpm", t.spindleRpm},
+                {"chipload_min", t.chiploadMin},
+                {"chipload_max", t.chiploadMax}};
+  // A thread mill's head (v145): only on one, as in the file.
+  if (t.type == cam::ToolType::ThreadMill) {
+    j["tip_flat"] = t.tipFlat;
+    j["neck_diameter"] = t.neckDiameter;
+    j["neck_length"] = t.neckLength;
+  }
+  return j;
 }
 
 // Whether an op's tools reach its depth (cam::ReachCheck,
@@ -1026,6 +1077,7 @@ struct VerifyRun {
   std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
   std::vector<cam::Toolpath::Groove> grooves; // engraving: not gouge
   std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
+  std::vector<cam::Toolpath::Thread> threads; // judged on their own terms
   std::string gcode;
   double res = 0.25;
   // The job's other setups and their files, so what one of them removes is
@@ -1059,6 +1111,7 @@ PrepareVerify(ui::AppState& state, cam::JobDocument& job, const RpcParams& p) {
     w->reliefs.insert(w->reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
     w->tabs.insert(w->tabs.end(), tp.tabs.begin(), tp.tabs.end());
     w->grooves.insert(w->grooves.end(), tp.grooves.begin(), tp.grooves.end());
+    w->threads.insert(w->threads.end(), tp.threads.begin(), tp.threads.end());
   }
   std::string error;
   if (!cam::PostProcess(setup.machine.post, setup, w->paths, PostOptsOf(setup),
@@ -1097,8 +1150,9 @@ void ComputeVerify(VerifyRun& w) {
       cam::OtherSetupsOf(w.setup, programs, w.bodies, w.res);
   others.notChecked.insert(others.notChecked.end(), w.unposted.begin(),
                            w.unposted.end());
-  w.verdict = cam::VerifyGcode(w.gcode, w.setup, w.bodies, w.res, w.reliefs,
-                               w.tabs, w.fixtures, &others, w.grooves);
+  w.verdict =
+      cam::VerifyGcode(w.gcode, w.setup, w.bodies, w.res, w.reliefs, w.tabs,
+                       w.fixtures, &others, w.grooves, w.threads);
 }
 
 // Step three: the answer, in the same sentences the panel shows.
@@ -1273,6 +1327,43 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       {"ok", v.Safe(tol)},
       {"complete", v.Complete(tol)},
       {"cuts_nothing", v.CutsNothing()}};
+  // Every milled thread, judged on its own terms
+  // (docs/cam/simulation.md#threads): a height map cannot see a flank that
+  // faces sideways, so these are read from the file's helix.
+  if (!v.threads.empty()) {
+    json threads = json::array();
+    for (const cam::ThreadVerdict& t : v.threads) {
+      json tj = {{"op", t.op},
+                 {"designation", t.designation},
+                 {"class", t.threadClass},
+                 {"class_stated", t.classStated},
+                 {"internal", t.internal},
+                 {"judged", t.judged}};
+      if (!t.judged) {
+        tj["why"] = t.why;
+      } else {
+        tj["pitch_mm"] = t.pitch;
+        tj["pitch_measured_mm"] = t.pitchMeasured;
+        tj["hand"] = t.rightHand ? "right" : "left";
+        tj["hand_measured"] = t.handMeasured ? "right" : "left";
+        tj["pitch_diameter_band_mm"] = {t.pdMin, t.pdMax};
+        tj["pitch_diameter_mm"] = t.pdReached;
+        tj["in_band"] = t.InBand();
+        tj["passes"] = t.passes;
+        tj["span_mm"] = {t.zLo, t.zHi};
+        tj["full_thread_mm"] = {std::max(t.fullFrom, t.zLo),
+                                std::min(t.fullTo, t.zHi)};
+        tj["short_mm"] = t.shortMm;
+        tj["floor_limited"] = t.floorLimited;
+        tj["bore_standing_mm"] = t.boreStanding;
+        tj["neck_clearance_mm"] = t.neckClearance;
+        tj["ok"] = t.Safe(tol);
+        tj["good"] = t.Good(tol);
+      }
+      threads.push_back(std::move(tj));
+    }
+    out["threads"] = std::move(threads);
+  }
   // The typical scallop, where the worst cell is an end face no rotary
   // pass can reach. Rotary only: the height map does not compute it, and
   // a zero here would read as a measurement.
@@ -2218,6 +2309,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       cam::Tool* tool = &next;
       tool->name = tj.value("name", tool->name);
       tool->diameter = tj.value("diameter", tool->diameter);
+      const bool wasThreadMill = tool->type == cam::ToolType::ThreadMill;
       if (tj.contains("tool_type"))
         tool->type = ToolTypeFrom(tj.at("tool_type").get<std::string>());
       tool->tipAngleDeg = tj.value("tip_angle", tool->tipAngleDeg);
@@ -2231,8 +2323,39 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       tool->overallLength = tj.value("overall_length", tool->overallLength);
       tool->collarDiameter = tj.value("collar_diameter", tool->collarDiameter);
       tool->shankDiameter = tj.value("shank_diameter", tool->shankDiameter);
+      tool->tipFlat = tj.value("tip_flat", tool->tipFlat);
+      tool->neckDiameter = tj.value("neck_diameter", tool->neckDiameter);
+      tool->neckLength = tj.value("neck_length", tool->neckLength);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
+      if (tool->type == cam::ToolType::ThreadMill) {
+        // A thread mill's head (docs/cam/operations.md#the-thread-mill-cutter):
+        // what nobody measured is derived from the diameter, and its flute
+        // is the head's own width -- derived, so a typed one is refused
+        // rather than silently replaced.
+        if (tj.contains("flute_length"))
+          throw std::runtime_error(
+              "a thread mill's flute_length is its head's axial width, "
+              "derived from diameter, neck_diameter, tip_flat and tip_angle; "
+              "neck_length is how far it reaches above the head");
+        if (tool->tipFlat < 0.0 || tool->neckDiameter < 0.0 ||
+            tool->neckLength < 0.0)
+          throw std::runtime_error(
+              "tip_flat, neck_diameter and neck_length are sizes, and cannot "
+              "be negative; 0 derives each from the diameter");
+        cam::FillThreadMillShape(*tool,
+                                 wasThreadMill || tj.contains("tip_angle"));
+        if (tool->neckDiameter >= tool->diameter)
+          throw std::runtime_error(
+              "neck_diameter must be narrower than the head (diameter): the "
+              "head stands out from its neck by the depth it can cut");
+      } else if (tj.contains("tip_flat") || tj.contains("neck_diameter") ||
+                 tj.contains("neck_length")) {
+        throw std::runtime_error(
+            "tip_flat, neck_diameter and neck_length describe a thread "
+            "mill's head; this tool is a " +
+            std::string(cam::ToolTypeName(tool->type)));
+      }
       if (tool->fluteLength <= 0.0)
         throw std::runtime_error(
             "flute_length must be positive: it is how deep this cutter can "
@@ -2312,6 +2435,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
+    // A thread is milled with a thread mill: without a `tool`, the setup's
+    // first one rather than its first tool of any kind.
+    if (!p.contains("tool") &&
+        p.value("type", std::string()) ==
+            cam::OpTypeNameOrThrow(cam::OpType::ThreadMill))
+      for (const cam::Tool& t : setup.tools)
+        if (t.type == cam::ToolType::ThreadMill) {
+          op.toolNumber = t.number;
+          break;
+        }
     if (p.contains("tool"))
       op.toolNumber = p.at("tool").get<int>();
     // Derive when no depth was typed. This is the door the GUI's verbs go
@@ -2673,7 +2806,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
               ") -- the hops between its strokes pass through that stock; "
               "face it down to the surface in an operation before this "
               "one");
-        else if (op.topZ < here - kTopSlack)
+        // A thread mill enters down its bore at the elevator, a rapid only
+        // to the stock top (docs/cam/operations.md#thread-mill): its top_z is
+        // the helix's, and whether the bore is open is the verifier's
+        // bore_standing_mm.
+        else if (op.type != cam::OpType::ThreadMill &&
+                 op.topZ < here - kTopSlack)
           warnings.push_back(
               "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
               zfmt(op.topZ) + " is " + zfmt(here - op.topZ) +

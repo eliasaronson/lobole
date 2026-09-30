@@ -42,6 +42,26 @@ struct ThreadRegion {
   bool external = false;
 };
 
+// A thread a feature put on a face of this body, whatever it is for: a
+// `Thread` feature, or a Hole with a tapped fit, on each bore it drilled.
+// Written down by the feature that knows it, as a bend is, so a consumer
+// that has only the bodies -- the CAM thread mill
+// (docs/cam/operations.md#thread-mill) -- reads the thread rather than
+// guessing it back from a diameter. Unlike `ThreadRegion` it claims nothing
+// about engagement. Transient: stamped every regeneration, never saved.
+struct ThreadMark {
+  ElementRef face;         // the cylindrical face
+  uint64_t featureId = 0;  // the Thread (or Hole) that says so
+  std::string designation; // canonical when the tables know it
+  double majorDia = 0.0;   // D, mm (0 = custom: from the face)
+  double pitch = 0.0;      // P, mm
+  std::string threadClass; // "2B", "6H"; empty = not stated
+  bool rightHand = true;
+  bool external = false;
+  double length = 0.0; // threaded length from the face's start; 0 = all
+  bool modeled = false;
+};
+
 // A bend a sheet feature MADE, written down rather than measured back off the
 // cylindrical faces afterwards
 // (docs/sheetmetal/README.md#bends-are-recorded-never-recognised). Unfolding is
@@ -163,6 +183,8 @@ struct Body {
   std::vector<ThreadRegion> threadRegions; // derived opt-in contact semantics
   // The bends this body carries, in the order the features made them.
   std::vector<BendRegion> bends;
+  // Every thread on this body's faces (ThreadMark, above).
+  std::vector<ThreadMark> threads;
 };
 
 class Feature;

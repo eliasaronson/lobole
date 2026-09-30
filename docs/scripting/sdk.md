@@ -84,7 +84,9 @@ Only what `describe` cannot express:
   and `flip=True`.
 - **Compositions** of several RPCs: `revolve_profile`, `bolt_circle`,
   `polyline`, `slot`, `polygon`, `arc_through`, `project`, `pattern`,
-  `fillet(edges=...)`, `hole`, `thread`, and a sketch builder that
+  `fillet(edges=...)`, `hole`, `thread` (whose `Thread.mill(setup)` adds a
+  CAM thread mill driven by it,
+  [operations](../cam/operations.md#thread-mill)), and a sketch builder that
   constrains (`concentric=`, driven by a variable) rather than placing by
   number, and places text labels (`text(s, at, height, font=)`,
   [sketching](../sketching/README.md#text)).

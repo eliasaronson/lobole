@@ -8,7 +8,8 @@ orphaning it. That is the reason to have CAM in the CAD rather than downstream
 of a STEP export.
 
 Scope: 2.5D milling (profile, pocket, adaptive clearing, face, drill, edge
-break, engraving along sketch curves and text), 3-axis surface finishing and
+break, engraving along sketch curves and text, thread milling), 3-axis
+surface finishing and
 roughing, an indexed 4th axis (one operation at several indices), and
 continuous 4-axis finishing on a rotary axis. Three post dialects: `mach3`,
 `linuxcnc`, `grbl`. The posted file is verified by simulating it through a
@@ -166,7 +167,7 @@ as `belowStock` / `below_stock_mm`, not as a gouge.
 | framing, stock, origin, fixtures, seats | `CamSetup.cpp` |
 | picks | `CamPicks.{h,cpp}`, `CamGeometry.cpp` (`PickedFaceRegion`, `PickedWallContour`, `PickedSurfaceRegion`, `ProjectedOutlines`), `CamSurfacePick.cpp` |
 | derivation | `CamDerive.cpp` (`DeriveOperation`, `DeriveSafeZ`, `DeriveSurfaceRough`, `DeriveRest`, `DeriveRotaryRough`, `AddOperationType`, `CuttingMinutes`) |
-| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamSurfaceStore.{h,cpp}` (surfacing passes kept on disk), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving) |
+| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamSurfaceStore.{h,cpp}` (surfacing passes kept on disk), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving), `CamThreadMill.{h,cpp}` (thread milling, and judging a thread) |
 | sketch curves | `CamSketchCurves.cpp` (`SketchEntityCurves`, the one resolver from a sketch entity to curves in model space, and the engraving's groove, frame, surface probe and stroke order; built with CAM off too), `ui::JobSketchCurves` in `JobActions.cpp` |
 | layout, order, travel | `CamTravel.cpp` (`CheckPlacements`, `PlacementRefusal`, `CuttingOrder`, `MachineWarning`, `ClipToMachine`, `GenerateAll`) |
 | post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}` |
@@ -316,7 +317,9 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   `test_cam_spiral.cpp`, `test_cam_helical.cpp`), clipping to the machine
   (`test_cam_travel.cpp`), tools (`test_cam_tools.cpp`), workholding
   (`test_cam_workholding.cpp`), engraving and its grooves in the verifier
-  (`test_cam_engrave.cpp`), and the capability table enforced
+  (`test_cam_engrave.cpp`), thread milling -- FreeCAD's numbers, the posted
+  helix, the refusals and the verifier's thread report
+  (`test_cam_thread.cpp`), and the capability table enforced
   (`test_cam_capability.cpp`: every field a type does not declare is poked,
   and the moves must not change; every field round-trips through save and
   load).
@@ -346,7 +349,13 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   the part), no picked-vertex origin (`ElementMap` has no vertex kind).
 - **Several setups in one file.** `PostProcess` posts one setup; a flip job is
   two files.
-- **Helical arcs.** Only flat `G2`/`G3` are fitted.
+- **Helical arcs fitted.** The post writes a helix only where the toolpath
+  declares one (a thread mill, [post.md](post.md#helical-arcs)); arcs fitted
+  back onto a polyline are flat `G2`/`G3`, so a bore's or a pocket's helical
+  entry posts as lines.
+- **Tapping.** No G84: the 6090 has no spindle encoder to rigid-tap with,
+  and a thread is milled instead ([thread mill](operations.md#thread-mill)).
+  Multi-tooth thread mills are not modelled.
 - **Planning around fixtures.** Operations are told they hit a fixture, not
   steered away; nothing holds a part down on 3D operations (tabs are
   profile-only); fixtures are not checked on a rotary setup (the chuck and

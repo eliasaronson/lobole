@@ -38,7 +38,10 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
 - **A tapped fit threads the bore.** `RecordTapping` adds an internal thread
   region on every bore the hole cut, so a screw in it engages rather than
   reading as interference (see [Thread engagement](#thread-engagement)), and a
-  fastener joint ends at the end of that thread.
+  fastener joint ends at the end of that thread. It also writes the thread on
+  the body (a `ThreadMark`: the table's thread at the fit's pitch,
+  right-handed, no class), which is what a CAM thread mill reads
+  ([thread mill](../cam/operations.md#thread-mill)).
 - **Empty-space warning.** A hole checks, per centre, whether any point down
   the bore (clipped to the bodies' bounding box) is inside a non-reference
   body; centres that meet no material are listed in the feature's warning.
@@ -96,6 +99,14 @@ parts area).
   rather than one winning. A class drives no geometry: a modelled thread is
   the basic profile. On a custom thread it is not checked, and the feature
   warns so.
+- **On the body.** Every regeneration writes the thread on the body it is
+  on (`Body::threads`, a `ThreadMark`: the face, the canonical designation,
+  major diameter, pitch, class, hand, side, length and whether it is
+  modelled), transient like a bend. It is what a consumer that has only the
+  bodies reads -- the CAM thread mill -- rather than guessing a thread back
+  from a diameter. A Thread on a tapped Hole's bore comes after the Hole's
+  own mark and is the one read. Unlike a `ThreadRegion` it claims nothing
+  about engagement.
 - GUI: `###tb_thread`, then pick a cylindrical face. The editor has the
   designation combo (both tables, then Custom), the class combo (the
   series' classes for the face's side), **Modeled** and **Hand**.
@@ -121,6 +132,33 @@ parts area).
   pitch written out (`M8x1.25` is `M8`), a number size without its `#`
   (`10-32 UNF`), and any of these with a class suffix. `Lookup` is the same
   without the error, for callers that only ask "is this a known thread".
+
+## Pitch-diameter bands
+
+A class is a band of pitch diameters the thread may be made to
+(`threads::PitchDiameterBand`, `src/core/ThreadStandards.cpp`): what a thread
+mill aims its last pass at (the middle) and what the verifier holds the cut
+thread to. Computed from the standards' own formulas, so every row and every
+class has one, rather than tabulated:
+
+- **ISO 965-1** (metric): `Td2(6) = 90 P^0.4 d^0.1` um, `d` the geometric
+  mean of the nominal diameter's range (5.6 to 11.2 mm for an M8);
+  `TD2(6) = 1.32 Td2(6)`; grades 3 to 8 scale both by 0.5, 0.63, 0.8, 1,
+  1.25, 1.6. The fundamental deviation is 0 for H and h, `+(15 + 11P)` um for
+  G and `-(15 | 30 | 50 + 11P)` for g, f, e. Internal: `[D2 + EI, + TD2]`;
+  external: `[d2 + es - Td2, d2 + es]`. M8 6H is 7.188 to 7.348.
+- **ASME B1.1** (unified), in inches: the 2A tolerance
+  `0.0015 D^1/3 + 0.0015 (9P)^1/2 + 0.015 P^2/3`; 1A x 1.5, 3A x 0.75, 1B
+  x 1.95, 2B x 1.3, 3B x 0.975. Every B class starts at basic; 1A and 2A sit
+  an allowance of 0.3 of the 2A tolerance below it, 3A at it. 3/8-16 UNC-2B
+  is 8.494 to 8.645 mm.
+
+Basic pitch diameter is `D - 0.649519 P`. The published tables round each
+term, and these land within a few hundredths of a millimetre of them at worst
+(3/8-16 2B's maximum is 8.639 in the table; M8 6g's minimum 7.042 against
+7.038). An empty class is not a class: a caller that has none says which it
+aims at (`DefaultClass`: 6H/6g, 2B/2A), and a class of the other side or
+series is refused.
 
 ## Modelled threads
 
@@ -211,6 +249,8 @@ threads: an M8 in either hand by the Pappus volume and by following the
 groove, a shoulder left whole, a 3/8-16 UNC-2B in a tapped wall, a failure
 that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 `tests/test_parts.cpp` (the hole tables, fits and their refusals),
+`tests/test_cam_thread.cpp` (the pitch-diameter bands against the tables,
+and a tapped hole's thread on its body),
 `tests/test_derived.cpp` (a hole on a projected derived hole edge),
 `tests/test_drawing.cpp` (hole callouts), goldens `v36-thread-rib` and
 `v71-hole-fit` and `v140-modeled-thread`.

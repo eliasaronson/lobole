@@ -193,15 +193,19 @@ struct Dialect {
   const char* id;
   ToolChange change;
   const char* end; // program end word
+  // G2/G3 with a Z word interpolates a helix (docs/cam/post.md#helical-arcs):
+  // Mach3's helical interpolation, LinuxCNC's G2/G3 with the third axis
+  // linear, GRBL 1.1's arcs with Z.
+  bool helical;
 };
 
 constexpr Dialect kDialects[] = {
-    {"mach3", ToolChange::Manual, "M30"},
-    {"linuxcnc", ToolChange::Table, "M2"},
+    {"mach3", ToolChange::Manual, "M30", true},
+    {"linuxcnc", ToolChange::Table, "M2", true},
     // Every G word in the preamble is GRBL-legal (G91.1 included, since 1.1),
     // and the drill posts plain moves, so nothing needs translating -- the
     // difference is only the tool change and the end word.
-    {"grbl", ToolChange::Pause, "M2"},
+    {"grbl", ToolChange::Pause, "M2", true},
 };
 
 // --- C7: fitting arcs back onto the polyline -------------------------------
@@ -442,6 +446,50 @@ size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
   return last - first + 1 >= kMinArcSegments ? last : first - 1;
 }
 
+// Is the run a generator declared as ONE arc (Toolpath::Arc) still one? A
+// clip, a holding cut or a merge may have moved the moves since it was
+// declared, so the declaration is a claim this checks before writing it as a
+// G2/G3: every chord on the circle, turning one way, Z linear in the angle,
+// one feed, one A, and short of a full turn (a G2 whose ends coincide is
+// ambiguous). A run that fails is written as its chords -- the same cut.
+bool ExactArc(const std::vector<Move>& moves, const Toolpath::Arc& arc) {
+  if (arc.first == 0 || arc.last < arc.first || arc.last >= moves.size())
+    return false;
+  constexpr double kOn = 1e-4; // mm: the generator puts every chord ON it
+  const Move& before = moves[arc.first - 1];
+  const glm::dvec3 start = before.to;
+  const double radius = glm::length(glm::dvec2(start) - arc.centre);
+  if (radius < 1e-6)
+    return false;
+  const double feed = moves[arc.first].feed;
+  std::vector<double> swept;
+  swept.reserve(arc.last - arc.first + 1);
+  double total = 0.0;
+  glm::dvec2 at(start);
+  for (size_t k = arc.first; k <= arc.last; k++) {
+    const Move& m = moves[k];
+    if (m.kind != Move::Kind::Cut || std::abs(m.feed - feed) > 1e-9 ||
+        m.hasA != before.hasA || (m.hasA && Emitter::Differs(m.a, before.a)))
+      return false;
+    if (std::abs(glm::length(glm::dvec2(m.to) - arc.centre) - radius) > kOn)
+      return false;
+    const double step = SweptAngle(arc.centre, at, glm::dvec2(m.to));
+    if (std::abs(step) < 1e-12 || (step < 0.0) != arc.clockwise)
+      return false;
+    total += step;
+    swept.push_back(total);
+    at = glm::dvec2(m.to);
+  }
+  if (std::abs(total) >= 2.0 * std::numbers::pi - 1e-6)
+    return false;
+  const double rise = moves[arc.last].to.z - start.z;
+  for (size_t k = arc.first; k <= arc.last; k++)
+    if (std::abs(moves[k].to.z - start.z -
+                 rise * swept[k - arc.first] / total) > kOn)
+      return false;
+  return true;
+}
+
 const Dialect* Find(const std::string& id) {
   for (const Dialect& d : kDialects)
     if (id == d.id)
@@ -459,6 +507,11 @@ std::vector<std::string> PostIds() {
 }
 
 bool PostExists(const std::string& id) { return Find(id) != nullptr; }
+
+bool PostWritesHelicalArcs(const std::string& id) {
+  const Dialect* d = Find(id);
+  return d != nullptr && d->helical;
+}
 
 bool PostProcess(const std::string& postId, const Setup& setup,
                  const std::vector<Toolpath>& paths, const PostOptions& opts,
@@ -619,13 +672,34 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     // chose is worth a line, and not one per move.
     size_t capped = 0;
     double cappedWanted = 0.0, cappedRadius = 1e18;
+    // A path that DECLARES its arcs (a thread mill's helix) is written from
+    // them and not fitted: the fitter knows only flat arcs, and would take a
+    // flat lead-in and the helix's first chords for one circle. Everything
+    // else in such a path is a straight move.
+    const bool declared = !tp.arcs.empty();
+    size_t nextArc = 0;
     for (size_t i = 0; i < tp.moves.size();) {
       const Move& m = tp.moves[i];
+      if (declared) {
+        while (nextArc < tp.arcs.size() && tp.arcs[nextArc].first < i)
+          nextArc++;
+        if (opts.fitArcs && nextArc < tp.arcs.size() &&
+            tp.arcs[nextArc].first == i &&
+            ExactArc(tp.moves, tp.arcs[nextArc])) {
+          const Toolpath::Arc& arc = tp.arcs[nextArc];
+          e.Arc(arc.clockwise, tp.moves[arc.last].to, arc.centre,
+                tp.moves[i].feed);
+          i = arc.last + 1;
+          nextArc++;
+          continue;
+        }
+      }
       Circle circle;
       bool clockwise = false;
-      const size_t last =
-          opts.fitArcs ? FitArc(tp.moves, i, circle, clockwise) : i - 1;
-      if (opts.fitArcs && i > 0 && last >= i) {
+      const size_t last = opts.fitArcs && !declared
+                              ? FitArc(tp.moves, i, circle, clockwise)
+                              : i - 1;
+      if (opts.fitArcs && !declared && i > 0 && last >= i) {
         e.Arc(clockwise, tp.moves[last].to, circle.centre, tp.moves[i].feed);
         i = last + 1;
         continue;
@@ -653,7 +727,11 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       // the fitter — which is only ever asked at the run's far end — lost the
       // arc: 3633 arcs became 3317. Ask at every index the run covers, which
       // is exactly what this loop did before the merge existed.
-      if (opts.fitArcs)
+      // ...nor into a declared arc, which is written whole from its first.
+      if (declared && nextArc < tp.arcs.size() && tp.arcs[nextArc].first > i &&
+          straightTo >= tp.arcs[nextArc].first)
+        straightTo = tp.arcs[nextArc].first - 1;
+      if (opts.fitArcs && !declared)
         for (size_t k = i + 1; k <= straightTo; k++) {
           Circle ahead;
           bool aheadCw = false;
