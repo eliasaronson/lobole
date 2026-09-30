@@ -202,6 +202,29 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
   j["tube"] = std::move(m);
 }
 
+// How the part is printed (v143). Refused on load when the table does not
+// carry the pair, naming what it does: a document that says "sla" or "abs"
+// was written by a build that had data this one lacks, and reading it as
+// unprinted — or as PETG — would report the wrong thing to model.
+std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
+  if (!j.contains("print"))
+    return std::nullopt;
+  const json& m = j.at("print");
+  printfit::Process p{m.value("process", std::string{}),
+                      m.value("material", std::string{})};
+  if (const std::string why = printfit::Validate(p); !why.empty())
+    throw std::runtime_error("print process: " + why);
+  return p;
+}
+
+// Written only when the part IS printed, so every other document re-saves
+// byte-identically and the goldens stay valid.
+void PrintToEnvelope(const std::optional<printfit::Process>& p, json& j) {
+  if (!p)
+    return;
+  j["print"] = {{"process", p->process}, {"material", p->material}};
+}
+
 // The same three keys, written only when they differ from the default.
 void UnitsToEnvelope(const units::System& u, json& j) {
   if (u.IsDefault())
@@ -275,6 +298,7 @@ json DocumentEnvelope(const Document& doc) {
   // Sheet-metal rules (v108), omitted when the part is not sheet metal.
   SheetMetalToEnvelope(doc.SheetMetal(), j);
   TubeToEnvelope(doc.Tube(), j);
+  PrintToEnvelope(doc.PrintProcess(), j); // v143
   return j;
 }
 
@@ -815,6 +839,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // gauge during Execute, and AddFeature below regenerates.
     doc->SetSheetMetal(SheetMetalFromEnvelope(index));
     doc->SetTube(TubeFromEnvelope(index));
+    doc->SetPrintProcess(PrintFromEnvelope(index));
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
     std::map<uint64_t, fs::path> byId;
@@ -1507,6 +1532,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     // Sheet-metal rules (v108) BEFORE the features, for the reason above.
     doc->SetSheetMetal(SheetMetalFromEnvelope(j));
     doc->SetTube(TubeFromEnvelope(j));
+    doc->SetPrintProcess(PrintFromEnvelope(j));
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64
     // "assets" map into the doc store BEFORE the features regenerate — a
     // Derived feature reads its B-Reps from it during Execute.

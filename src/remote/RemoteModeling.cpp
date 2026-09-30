@@ -9,15 +9,18 @@
 #include "core/Expression.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteInspection.h" // PrintedThreadJson
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
+#include "ui/ToleranceActions.h" // PrintedThreadFor
 
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
 
@@ -229,7 +232,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Append a feature (see feature_types for the JSON dialect, and for the "
      "fields every type accepts — including `material`, whose slug is "
      "refused if unrecognised) and regenerate; returns {index, id, "
-     "entity_ids?, regen}.",
+     "entity_ids?, regen}. A Thread on a PRINTED part (set_print_process) "
+     "also returns `print`: what the print wants it modelled at, since the "
+     "basic profile it cuts prints tight (docs/tolerances/README.md).",
      "feature", remote::NeedsPart | remote::Deferrable},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
@@ -248,7 +253,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "regen, digest}.",
      "bodies, body_names, name, occurrence, reference", remote::NeedsPart},
     {"modify_feature",
-     "Change a feature to `feature` JSON; one undo step; returns {regen}. "
+     "Change a feature to `feature` JSON; one undo step; returns {regen} "
+     "(and `print` for a Thread on a printed part, as add_feature). "
      "Name it by `feature_id` (what every other call hands you) or by "
      "`index` (its position in the tree). REPLACES the whole spec rather "
      "than patching it, so `feature` must be complete and carry its `type`; "
@@ -501,6 +507,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (auto* w = dynamic_cast<const WormWheelFeature*>(doc->GetFeature(index)))
       if (json rep = w->ReportJson(); !rep.is_null())
         resp["report"] = rep;
+    // A Thread on a PRINTED part says, in the call that made it, what the
+    // print wants it modelled at (docs/tolerances/README.md#printed-parts) —
+    // the basic profile it cuts prints tight.
+    if (auto* th = dynamic_cast<const ThreadFeature*>(doc->GetFeature(index)))
+      if (const auto r = ui::PrintedThreadFor(*doc, *th))
+        resp["print"] = PrintedThreadJson(*r);
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
@@ -650,8 +662,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           "document is unchanged (its regeneration failed where the original "
           "succeeded). Check the JSON against describe feature_types[].params");
     }
-    return json{{"regen", RegenSummaryJson(*doc)},
-                {"digest", DigestJson(preDigest, *doc)}};
+    json resp{{"regen", RegenSummaryJson(*doc)},
+              {"digest", DigestJson(preDigest, *doc)}};
+    if (auto* th = dynamic_cast<const ThreadFeature*>(doc->GetFeature(index)))
+      if (const auto r = ui::PrintedThreadFor(*doc, *th))
+        resp["print"] = PrintedThreadJson(*r);
+    return resp;
   }
   if (m == "set_material") {
     // Assign a material to a body-creating feature — by feature_id (the

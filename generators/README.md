@@ -23,6 +23,7 @@ the one announced instance or take `--port`; they never guess:
 | `slider_crank.py` | block, crank, rod and piston closing a loop; a 360° study checks the stroke is 2R with no clash | `--crank`, `--rod` |
 | `single_cylinder.py`, `aircooled_engine.py`, `carburettor.py` | a single-cylinder four-stroke on primitives, the same engine from sketches only, and its carburettor as a subassembly | [below](#single-cylinder-and-air-cooled-engines) |
 | `toolmakers_clamp.py` | an eight-part toolmaker's clamp from a published drawing | [below](#toolmakers-clamp) |
+| `print_coupon.py` | a printable coupon of bores, pins and threads at the print allowance table's sizes and ± steps, each engraved with its modelled diameter, to calibrate the table | [printed parts](../docs/tolerances/README.md#the-coupon) |
 | `waveguide.py`, `waveguide_job.py` | a constant-directivity waveguide for the Alpair 7MS, and its 3-axis surfacing job on the 6090 | CAM |
 | `rotary/` | a file handle and a barley-twist rolling pin, and their 4-axis jobs | CAM |
 | `bike/` | a roadster bicycle modelled from photographs | [README](bike/README.md) |

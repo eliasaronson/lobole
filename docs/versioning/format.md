@@ -31,7 +31,8 @@ baked geometry and autosave are in [README.md](README.md).
 - `features` is ordered: it IS the regeneration history.
 - Optional envelope keys, each written only off its default so older
   documents re-save byte-identically: `rollback`, `commit_geometry: false`,
-  `generator`, `catalogs`, `sheet_metal`, `tube`, `units`, `tolerances`,
+  `generator`, `catalogs`, `sheet_metal`, `tube`, `print`, `units`,
+  `tolerances`,
   `active_configuration`, and
   `assets` (base64 blobs, single-file form only).
 
@@ -223,6 +224,7 @@ here; the golden corpus and git history cover them.
 | 140 | Thread `hand` (`right` or `left`; absent = right, and any other value is refused), and `modeled: true` now cuts the real helical groove instead of erroring; the designation may name a unified thread (`3/8-16 UNC`) or carry a class suffix (`3/8-16 UNC-2B`) ([modelled threads](../modeling/holes-and-threads.md#modelled-threads)) |
 | 141 | Feature type `Bearing` {`designation`}: an ISO 15 deep-groove ball bearing generated from its designation (618/619/60/62/63, bores 3 to 30 mm), the whole of a generated standard part ([bearings](../parts/README.md#bearings)) |
 | 142 | Feature types `Worm` {`face`, `module`?, `module_expr`?, `starts`?, `pressure_angle_deg`?, `hand`?, `backlash`?, `length`?} and `WormWheel` {`face`, `teeth`?, `module`?, `module_expr`?, `starts`?, `worm_diameter`?, `pressure_angle_deg`?, `hand`?}: a ZA worm and its hobbed wheel cut from cylindrical blanks, an unknown hand refused; and the relation kind `worm` ([worm gears](../modeling/worm-gears.md), [relations](../assemblies/relations.md#worm)) |
+| 143 | A part's `print` {`process`, `material`}: how it is printed (`fdm` + `petg` is what the table carries; any other pair is refused on load, naming what is), which `check_fit`, `check_fits` and a Thread's report read for the allowance to model. Drives no geometry; written only when set ([printed parts](../tolerances/README.md#printed-parts)) |
 
 ## The directory form
 

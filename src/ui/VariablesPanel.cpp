@@ -125,6 +125,7 @@ void DrawVariablesPanel(AppState& state) {
   PanelHeading(kPanelVariables);
   DrawSheetMetalSection(state);
   DrawTolerancesSection(state);
+  DrawPrintProcessSection(state);
   DrawCatalogSection(state);
   // NOT `if (!state.document) return`, which is what this did until
   // 2026-09-01 — the same defect that made File > Save a silent no-op

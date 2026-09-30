@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    142; // v142: feature types `Worm` and `WormWheel` (a ZA worm and its
+    143; // v143: a part's `print` {process, material} -- how it is printed,
+         //      which the fit checks read for the allowance to model
+         //      (fdm/petg). Drives no geometry.
+         // v142: feature types `Worm` and `WormWheel` (a ZA worm and its
          //      hobbed wheel cut from cylindrical blanks), and relation kind
          //      `worm` (docs/modeling/worm-gears.md).
          // v141: feature type `Bearing` {designation}: an ISO 15

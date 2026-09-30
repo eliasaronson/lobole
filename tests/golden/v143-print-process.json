@@ -1,0 +1,27 @@
+{
+  "format": "designer-document",
+  "version": 143,
+  "print": {
+    "process": "fdm",
+    "material": "petg"
+  },
+  "features": [
+    {
+      "type": "Cylinder",
+      "name": "Pin",
+      "id": 1,
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "radius": 4,
+      "height": 20
+    }
+  ]
+}

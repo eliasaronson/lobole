@@ -66,11 +66,7 @@ Built: see docs/parts/README.md#bearings.
 
 ### 4. Printed clearances
 
-A process allowance that fits and threads read: FDM hole shrink and XY
-growth per material. It is reported by `check_fit` and `check_fits`, for
-example "H7 on a printed bore: model +0.15 mm". Like a tolerance, it drives
-no geometry; the generator applies it where the part is modelled. Refused
-for a process or material it has no data for.
+Built: see docs/tolerances/README.md#printed-parts.
 
 ### 5. The head, assembled
 

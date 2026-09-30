@@ -312,6 +312,7 @@ set(core_sources
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
+    src/core/PrintAllowance.cpp
     src/core/SheetMetal.cpp
     src/core/features/BaseFlangeFeature.cpp
     src/core/features/EdgeFlangeFeature.cpp

@@ -127,7 +127,8 @@ So a read-only RPC takes `part` (a slot name, a stable part id, or a slot
 index) and answers about that part without switching: `ResolvePartParam` and
 `SubjectPart` in `RemoteHelpers.h`. `get_state`, `list_elements`, `frame`,
 `mass_properties`, `measure`, `section`, `query_geometry`, `curve_points`,
-`tube_schedule`, `check_fit`, `list_tolerances` and the sheet-metal reads
+`tube_schedule`, `check_fit`, `list_tolerances`, `get_print_process`,
+`print_allowance` and the sheet-metal reads
 (`get_sheet_metal_rules`, `check_sheet_metal`, `list_bends`, `export_dxf`)
 all do; the SDK's read paths pass `part=` and never activate. With `part`,
 `get_state`'s tab-wide fields (selection, camera, undo/redo) still describe

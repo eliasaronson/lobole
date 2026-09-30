@@ -265,6 +265,26 @@ void SetSheetMetalRulesCommand::Undo(Document& doc) {
   doc.SetSheetMetal(m_before);
 }
 
+SetPrintProcessCommand::SetPrintProcessCommand(
+    std::optional<printfit::Process> process)
+    : m_after(std::move(process)) {}
+
+std::string SetPrintProcessCommand::Description() const {
+  if (!m_after)
+    return "Clear print process";
+  return "Print in " + m_after->process + " " + m_after->material;
+}
+
+bool SetPrintProcessCommand::Execute(Document& doc) {
+  m_before = doc.PrintProcess();
+  doc.SetPrintProcess(m_after);
+  return true;
+}
+
+void SetPrintProcessCommand::Undo(Document& doc) {
+  doc.SetPrintProcess(m_before);
+}
+
 ClearToleranceCommand::ClearToleranceCommand(uint64_t toleranceId)
     : m_id(toleranceId) {}
 

@@ -5,6 +5,7 @@
 #include "ui/CamTool.h"
 #include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
+#include "ui/ToleranceActions.h" // PrintedThreadFor
 #include <functional>
 #include <utility>
 
@@ -2099,6 +2100,15 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
     PickSlotRow(state, feature, PickSlot::ThreadFace,
                 th->face.name.empty() ? "" : th->face.name);
+    // On a printed part: what the print wants this thread modelled at, the
+    // same report add_feature returns
+    // (docs/tolerances/README.md#printed-parts).
+    if (state.document != nullptr)
+      if (const auto r = PrintedThreadFor(*state.document, *th)) {
+        ImGui::TextWrapped("%s", r->Sentence().c_str());
+        for (const std::string& n : r->notes)
+          ImGui::TextDisabled("%s", n.c_str());
+      }
   } else if (auto* rb = dynamic_cast<RibFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", rb->thicknessExpr,
             rb->thickness);
