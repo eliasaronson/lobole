@@ -48,14 +48,7 @@ to avoid, in this plan's phase notes. No code.
 
 ### 1. Threads: modelled, and imperial
 
-- Build `docs/plans/modeled-thread.md`: a helical sweep-cut when `modeled`
-  is set. It stays opt-in, and a failure keeps the body and the overlay.
-- UNC and UNF tables next to the ISO ones (`ThreadStandards.h`), with the
-  2A/2B/3A/3B classes. A designation such as `3/8-16 UNC` resolves as `M8`
-  does today. This must be refused, not guessed, when the designation is not
-  in the table.
-- The profile's hand (right or left) and the thread's internal or external
-  side come from the face, as today.
+Built: see docs/modeling/holes-and-threads.md.
 
 ### 2. The worm pair
 

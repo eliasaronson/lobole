@@ -690,7 +690,7 @@ class DatumPlane(Plane):
 
 
 class Thread:
-    """Persistent cosmetic thread feature, usable as a screw relation's source."""
+    """Persistent thread feature (cosmetic or modelled), usable as a screw relation's source."""
 
     def __init__(self, part, id):
         self.part, self.id = part, id
@@ -1845,12 +1845,18 @@ class Part(_Tab):
         f.update(kw)
         return self._feature(f)
 
-    def thread(self, face, designation, allow_engagement=False, minimum_engagement=0):
+    def thread(self, face, designation, allow_engagement=False, minimum_engagement=0,
+               modeled=False, hand="right"):
         """Annotate actual manufacturing geometry; engagement is explicit opt-in.
 
         Matching coaxial threads relieve only their common axial span during
-        exact contact checks. No geometry or STEP machining diameter is changed.
+        exact contact checks. Cosmetic by default: no geometry or STEP
+        machining diameter is changed. ``modeled=True`` cuts the real helical
+        groove (``hand`` "right" or "left"); a cut that fails is the
+        feature's error and keeps the body.
         """
+        if hand not in ("right", "left"):
+            raise SdkError(f"thread hand must be 'right' or 'left', not {hand!r}")
         if not isinstance(face, Face) or face.kind != "cylinder":
             raise SdkError("thread needs a cylindrical Face")
         if face._part.id != self.id or face._part.app is not self.app:
@@ -1863,6 +1869,8 @@ class Part(_Tab):
                 designation=designation,
                 allow_engagement=allow_engagement,
                 minimum_engagement=minimum_engagement,
+                modeled=bool(modeled),
+                hand=hand,
             )
         )
         return Thread(self, feature["id"])

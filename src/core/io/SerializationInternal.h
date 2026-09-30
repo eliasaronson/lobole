@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    139; // v139: a setup's own `rapid_feed` (mm/min), saved with the setup;
+    140; // v140: a Thread's `hand` (right | left; absent = right), and a
+         //      modelled thread cuts real geometry.
+         // v139: a setup's own `rapid_feed` (mm/min), saved with the setup;
          //      absent = 0, not stated. Only the machine's copy was before.
          // v138: an operation of type `engrave` -- sketch curves followed
          //      on the curve -- and its `width_mm` / `depth_mm`.

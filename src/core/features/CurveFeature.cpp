@@ -1,4 +1,5 @@
 #include "core/features/CurveFeature.h"
+#include "core/HelicalSweep.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -6,13 +7,10 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
-#include <BRepLib.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GC_MakeArcOfCircle.hxx>
-#include <Geom2d_Line.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <Geom_BSplineCurve.hxx>
-#include <Geom_CylindricalSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <Standard_Failure.hxx>
 #include <TColStd_Array1OfInteger.hxx>
@@ -25,7 +23,6 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
-#include <gp_Dir2d.hxx>
 #include <gp_Lin2d.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
@@ -327,22 +324,10 @@ bool CurveFeature::Execute(RegenContext& ctx) {
       const glm::dvec3 ref = HelixReference(glm::dvec3(d));
       gp_Ax3 axis(ToPnt(axisOrigin), gp_Dir(d.x, d.y, d.z),
                   gp_Dir(ref.x, ref.y, ref.z));
-      Handle(Geom_CylindricalSurface) cyl =
-          new Geom_CylindricalSurface(axis, radius);
-      // Helix as a straight line in the cylinder's (u=angle, v=height) param
-      // space: slope k = pitch/2pi rises v by `pitch` per 2pi of angle. A unit
-      // 2D direction means the line's own parameter w maps u = w/|(1,k)|, so we
-      // run w to 2pi*turns*|(1,k)| to sweep exactly `turns` turns. Left-handed
-      // reverses the angular sense (u decreases while height still rises).
-      const double k = pitch / (2.0 * M_PI);
-      const double norm = std::sqrt(1.0 + k * k);
-      const double wLast = 2.0 * M_PI * turns * norm;
-      gp_Dir2d dir(rightHanded ? 1.0 : -1.0, k);
-      const double u0 = angles::ToRadians(startDeg);
-      Handle(Geom2d_Line) line2d = new Geom2d_Line(gp_Pnt2d(u0, 0.0), dir);
-      edge = BRepBuilderAPI_MakeEdge(line2d, cyl, 0.0, wLast).Edge();
-      BRepLib::BuildCurve3d(
-          edge); // materialize the 3D curve for downstream use
+      // The one helix builder, shared with the modelled thread
+      // (core/HelicalSweep.h).
+      edge = HelixEdge(axis, radius, pitch, turns, rightHanded,
+                       angles::ToRadians(startDeg));
       break;
     }
     }

@@ -3,15 +3,18 @@
 #include "core/Feature.h"
 
 #include <glm/glm.hpp>
+#include <gp_Cylinder.hxx>
 
-// Cosmetic thread (docs/modeling/holes-and-threads.md#thread): an annotation on
-// a cylindrical face — external boss or hole wall — that leaves the geometry
-// untouched and draws the drafting convention instead (dashed thread-depth
-// circles + crest lines, rendered by the UI from the session `overlay` this
-// feature computes each regeneration). The designation drives pitch via the
-// ISO tables (core/ThreadStandards); a custom designation keeps the manual
-// pitch. `modeled` (a real helical cut) is reserved in the schema but not
-// implemented yet — setting it errors the feature without touching bodies.
+// Thread (docs/modeling/holes-and-threads.md#thread) on a cylindrical face —
+// external boss or hole wall. Cosmetic by default: the geometry is untouched
+// and the UI draws the drafting convention (dashed thread-depth circles +
+// crest lines) from the session `overlay` this feature computes each
+// regeneration. `modeled` cuts the real 60-degree helical groove instead
+// (docs/modeling/holes-and-threads.md#modelled-threads); a cut that fails is
+// a feature error that keeps the body and the overlay. The designation drives
+// the pitch via the ISO metric and unified tables (core/ThreadStandards); a
+// custom designation keeps the manual pitch, and one that claims a series
+// the tables do not carry is refused.
 class ThreadFeature : public Feature {
 public:
   ThreadFeature(const std::string& name, ElementRef face,
@@ -35,12 +38,15 @@ public:
   ElementRef face;         // a cylindrical face, by stable toponame
   std::string designation; // "M8", "M8x1", or free text (custom)
   double pitch = 1.25;
-  std::string threadClass; // display only ("6H", "6g"); no geometry meaning
-  double length = 0.0;     // threaded length from the face's start; 0 = full
+  // "6g"/"6H", "2A"/"2B": checked against the series and the side, drives
+  // no geometry (a modelled thread is the basic profile).
+  std::string threadClass;
+  double length = 0.0; // threaded length from the face's start; 0 = full
   std::string lengthExpr;
   bool allowEngagement = false;
   double minimumEngagement = 0.0;
-  bool modeled = false; // reserved: real helical cut (not implemented)
+  bool modeled = false;    // cut the real helical groove
+  bool rightHanded = true; // JSON "hand": "right" | "left"
 
   // Session-only, rebuilt by Execute (never serialized): what the UI draws.
   struct Overlay {
@@ -51,6 +57,14 @@ public:
     float faceRadius = 0.0f; // the face's own radius (crest lines)
     float v0 = 0.0f, v1 = 0.0f; // threaded span along dir, relative to origin
     bool external = true;       // boss (true) vs hole wall (false)
+    bool cut = false; // the modelled groove was cut: the real geometry shows
+                      // the thread, so the UI draws no convention over it
   };
   Overlay overlay;
+
+private:
+  // Cuts the modelled groove from `body` over [v0, v1] of the face's axis.
+  // False with the feature's error set, and `body` untouched, on a failure.
+  bool CutModeled(Body& body, const gp_Cylinder& cyl, bool external, double v0,
+                  double v1, double faceV1, double tableMajor);
 };

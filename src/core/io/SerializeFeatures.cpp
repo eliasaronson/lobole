@@ -1265,7 +1265,9 @@ json FeatureToJson(const Feature& feature) {
       j["guide_id"] = sw->guideId;
     j["mode"] = ExtrudeModeToString(sw->mode);
     if (sw->frame != SweepFrame::CorrectedFrenet) // v43; omit the default
-      j["frame"] = sw->frame == SweepFrame::Frenet ? "frenet" : "fixed";
+      j["frame"] = sw->frame == SweepFrame::Frenet  ? "frenet"
+                   : sw->frame == SweepFrame::Fixed ? "fixed"
+                                                    : "corrected_frenet";
   } else if (auto* pi = dynamic_cast<const PipeFeature*>(&feature)) { // v43
     j["path_id"] = pi->pathId;
     j["outer_diameter"] = pi->outerDiameter;
@@ -1300,6 +1302,8 @@ json FeatureToJson(const Feature& feature) {
       j["length_expr"] = th->lengthExpr;
     if (th->modeled)
       j["modeled"] = true;
+    if (!th->rightHanded)
+      j["hand"] = "left"; // v140; absent = right, as every thread before it
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
     j["hole_kind"] = HoleKindToString(ho->kind);
@@ -1570,9 +1574,15 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "it joins; default the nearest one the rib's slab overlaps, else the "
      "newest)"},
     {"Thread", 36,
-     "face {feature_id, element} (cylindrical), designation (e.g. \"M8\"), "
-     "pitch?, thread_class?, length (+_expr), modeled?, allow_engagement?, "
-     "minimum_engagement?"},
+     "face {feature_id, element} (cylindrical), designation: ISO metric "
+     "(\"M8\", \"M8x1\") or unified (\"3/8-16 UNC\", \"#10-32 UNF\"), "
+     "optionally with a class suffix (\"M8-6g\", \"3/8-16 UNC-2B\"); one "
+     "naming a series the tables lack is refused, other text is a custom "
+     "thread with its own pitch (mm); thread_class? (6g/6H..., 1A-3A "
+     "external, 1B-3B internal); length (mm, +_expr; 0 = the whole face); "
+     "modeled? (cut the real 60-degree helical groove; a failure keeps the "
+     "body); hand?: right|left (default right); allow_engagement?, "
+     "minimum_engagement? (mm)"},
     {"Hole", 21,
      "hole_kind: simple|counterbore|countersink, sketch_id (centres: its "
      "points and its circles' centres, so a projected hole edge places a hole; "
@@ -2396,6 +2406,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->length = j.value("length", 0.0);
     th->lengthExpr = j.value("length_expr", std::string{});
     th->modeled = j.value("modeled", false);
+    // v140. A hand we do not know is refused: read as right-handed, a left
+    // thread would load, look right and never go on its bolt.
+    const std::string hand = j.value("hand", std::string("right"));
+    if (hand != "right" && hand != "left")
+      throw std::runtime_error("Thread '" + name + "': unknown hand '" + hand +
+                               "' (accepted: right, left)");
+    th->rightHanded = hand == "right";
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);

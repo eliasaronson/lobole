@@ -641,7 +641,10 @@ void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines) {
   const glm::vec3 col(0.82f, 0.74f, 0.45f); // muted brass, drafting-thin
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     auto* th = dynamic_cast<ThreadFeature*>(state.document->GetFeature(i));
-    if (th == nullptr || !th->overlay.valid || th->IsSuppressed())
+    // A modelled thread that cut its groove shows it as geometry; drawing
+    // the convention over the real flanks would only hide them.
+    if (th == nullptr || !th->overlay.valid || th->overlay.cut ||
+        th->IsSuppressed())
       continue;
     const auto& ov = th->overlay;
     const glm::vec3 ref =

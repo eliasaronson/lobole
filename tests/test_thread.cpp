@@ -16,13 +16,16 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
+#include "core/parts/FastenerTable.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 
+#include <cmath>
 #include <filesystem>
+#include <optional>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -307,4 +310,339 @@ TEST_CASE("a hole drilled FOR a thread is threaded", "[thread][hole]") {
   REQUIRE(clash.has_value());
   CHECK(clash->engagedThreadPairs == 0);
   CHECK(clash->volume > 1.0);
+}
+
+// --- unified tables (docs/modeling/holes-and-threads.md#thread-standards) ---
+
+TEST_CASE("unified thread table lookups", "[thread]") {
+  // A camera's 1/4-20 and a tripod's 3/8-16: the two threads the pan/tilt
+  // head is built around.
+  const auto quarter = threads::Lookup("1/4-20 UNC");
+  REQUIRE(quarter.has_value());
+  CHECK(quarter->series == threads::Series::UNC);
+  CHECK_THAT(quarter->majorDia, WithinAbs(6.35, 1e-9));
+  CHECK_THAT(quarter->pitch, WithinAbs(1.27, 1e-9));
+  CHECK_THAT(threads::TapDrill(*quarter), WithinAbs(5.1054, 1e-4)); // #7
+  const auto tripod = threads::Lookup("3/8-16 UNC");
+  REQUIRE(tripod.has_value());
+  CHECK_THAT(tripod->majorDia, WithinAbs(9.525, 1e-9));
+  CHECK_THAT(tripod->pitch, WithinAbs(1.5875, 1e-9));
+  CHECK_THAT(threads::TapDrill(*tripod), WithinAbs(7.9375, 1e-9)); // 5/16
+  // Basic minor (the 2B minimum minor): 7.807 mm, the table the survey read
+  // gives 7.798 for the 2B/3B minimum.
+  CHECK_THAT(threads::MinorDiameter(*tripod), WithinAbs(7.807, 0.01));
+  // The metric tap drill is still D - P.
+  CHECK_THAT(threads::TapDrill(*threads::Lookup("M8")), WithinAbs(6.75, 1e-9));
+
+  // The series reaches from #0 to 1" on both sides.
+  for (const char* d : {"#4-40 UNC", "#10-24 UNC", "1-8 UNC", "#0-80 UNF",
+                        "#10-32 UNF", "1/4-28 UNF", "1-12 UNF"}) {
+    INFO(d);
+    CHECK(threads::Lookup(d).has_value());
+  }
+  // Spellings of the same row: a number size without '#', a metric coarse
+  // pitch written out, and a class suffix.
+  CHECK(threads::Lookup("10-32 UNF")->designation == "#10-32 UNF");
+  CHECK(threads::Lookup("M8x1.25")->designation == "M8");
+  std::string why;
+  const auto classed = threads::Resolve("3/8-16 UNC-2B", &why);
+  REQUIRE(classed.has_value());
+  CHECK(classed->standard.designation == "3/8-16 UNC");
+  CHECK(classed->threadClass == "2B");
+  CHECK(threads::Resolve("M8-6g", &why)->threadClass == "6g");
+  // Free text is a custom thread: no row, and no error either.
+  CHECK_FALSE(threads::Resolve("Tr16x4", &why).has_value());
+  CHECK(why.empty());
+}
+
+TEST_CASE("a thread the tables do not carry is refused, naming what is",
+          "[thread]") {
+  std::string why;
+  // Claims to be unified, is not a row: refused with the accepted list.
+  CHECK_FALSE(threads::Resolve("3/8-17 UNC", &why).has_value());
+  CHECK(why.find("3/8-16 UNC") != std::string::npos);
+  // A size and TPI with no series: the row that exists is named, not picked.
+  CHECK_FALSE(threads::Resolve("1/4-20", &why).has_value());
+  CHECK(why.find("did you mean '1/4-20 UNC'") != std::string::npos);
+  // An M size that is not in ISO 262's preferred list.
+  CHECK_FALSE(threads::Resolve("M7", &why).has_value());
+  CHECK(why.find("M8") != std::string::npos);
+  // A metric class on a unified thread.
+  CHECK_FALSE(threads::Resolve("3/8-16 UNC-6H", &why).has_value());
+  CHECK(why.find("2B") != std::string::npos);
+  // A class of the wrong side, and one the series has not got.
+  const auto tripod = *threads::Lookup("3/8-16 UNC");
+  CHECK(threads::ClassError(tripod, "2B", /*external=*/false).empty());
+  CHECK(threads::ClassError(tripod, "2B", true).find("internal") !=
+        std::string::npos);
+  CHECK(threads::ClassError(tripod, "2C", false).find("1B") !=
+        std::string::npos);
+  CHECK(threads::ClassError(*threads::Lookup("M8"), "6H", true).find("6g") !=
+        std::string::npos);
+}
+
+TEST_CASE("a tapped hole takes a unified thread and its tabulated drill",
+          "[thread][hole]") {
+  std::string why;
+  const auto drill =
+      parts::HoleDiameter("3/8-16 UNC", parts::Fit::Tapped, 0.0, &why);
+  INFO(why);
+  REQUIRE(drill.has_value());
+  CHECK_THAT(*drill, WithinAbs(7.9375, 1e-9));
+  // The TPI is in the designation; a different pitch is a different thread.
+  CHECK_FALSE(parts::HoleDiameter("3/8-16 UNC", parts::Fit::Tapped, 1.5, &why));
+  CHECK(why.find("1.5875") != std::string::npos);
+  // The metric path is untouched.
+  CHECK_THAT(*parts::HoleDiameter("M6", parts::Fit::Tapped, 0.0, &why),
+             WithinAbs(5.0, 1e-9));
+}
+
+TEST_CASE("a Thread refuses a designation or class the tables do not carry",
+          "[thread]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.7625, 10.0));
+  const uint64_t by = doc.GetBodies()[0].createdBy;
+  const std::string side = CylFaceName(doc.GetBodies()[0]);
+  doc.AddFeature(std::make_unique<ThreadFeature>("Typo", ElementRef{by, side},
+                                                 "3/8-17 UNC", 1.5));
+  CHECK(doc.GetFeature(1)->GetError().find("3/8-16 UNC") != std::string::npos);
+  // An internal class on a boss.
+  doc.AddFeature(std::make_unique<ThreadFeature>("Side", ElementRef{by, side},
+                                                 "3/8-16 UNC-2B", 1.5));
+  CHECK(doc.GetFeature(2)->GetError().find("internal") != std::string::npos);
+  // The designation and the class field disagreeing.
+  auto both = std::make_unique<ThreadFeature>("Both", ElementRef{by, side},
+                                              "3/8-16 UNC-2A", 1.5);
+  both->threadClass = "3A";
+  doc.AddFeature(std::move(both));
+  CHECK(doc.GetFeature(3)->GetError().find("give one") != std::string::npos);
+  // The right one resolves and takes the table's pitch.
+  doc.AddFeature(std::make_unique<ThreadFeature>("Good", ElementRef{by, side},
+                                                 "3/8-16 UNC-2A", 1.0));
+  auto* good = dynamic_cast<ThreadFeature*>(doc.GetFeature(4));
+  CHECK(good->GetError().empty());
+  CHECK_THAT(good->pitch, WithinAbs(1.5875, 1e-9));
+  REQUIRE(doc.GetBodies().size() == 1); // refusals never take the body
+
+  // A hand that is neither is refused on load, not read as right-handed.
+  nlohmann::json j = DocumentIO::FeatureToJson(*good);
+  j["hand"] = "sideways";
+  CHECK_THROWS(DocumentIO::FeatureFromJson(j));
+  j["hand"] = "left";
+  auto left = DocumentIO::FeatureFromJson(j);
+  CHECK_FALSE(dynamic_cast<ThreadFeature*>(left.get())->rightHanded);
+}
+
+// --- modelled threads (docs/modeling/holes-and-threads.md#modelled-threads)
+
+namespace {
+
+// The volume a screw-invariant cutter removes from a blank it passes all the
+// way through: Pappus-Guldin holds for the screw motion, so each turn takes
+// 2*pi*rbar*A and a length L takes L/P turns' worth. A and rbar are the
+// groove's section INSIDE the blank, a trapezoid between radii r0 < r1 with
+// widths w0 (at r0) and w1 (at r1).
+double ScrewCutVolume(double r0, double w0, double r1, double w1, double L,
+                      double P) {
+  const double h = r1 - r0;
+  const double area = 0.5 * (w0 + w1) * h;
+  const double fromR0 = h * (w0 + 2.0 * w1) / (3.0 * (w0 + w1));
+  return 2.0 * M_PI * (r0 + fromR0) * area * L / P;
+}
+
+// A point at `radius` and `angleRad` round +Z at height z.
+glm::vec3 Polar(double radius, double angleRad, double z) {
+  return glm::vec3(radius * std::cos(angleRad), radius * std::sin(angleRad), z);
+}
+
+// Follows a helix of either hand at `radius` from a point the groove removed:
+// along the groove's own hand every sample is removed; along the other hand
+// the track crosses the teeth. Returns how many of 16 samples over a turn
+// are still material.
+int SolidAlongHelix(const Body& body, double radius, double z, double pitch,
+                    bool rightHanded) {
+  int solid = 0;
+  for (int k = 1; k <= 16; k++) {
+    const double t = k / 16.0;
+    const double a = (rightHanded ? 1.0 : -1.0) * 2.0 * M_PI * t;
+    if (body.shape.ContainsPoint(Polar(radius, a, z + pitch * t)))
+      solid++;
+  }
+  return solid;
+}
+
+// A height near mid-boss where the point at angle 0 and `radius` is removed.
+std::optional<double> GrooveHeight(const Body& body, double radius, double z0,
+                                   double pitch) {
+  for (int i = 0; i < 40; i++) {
+    const double z = z0 + pitch * i / 40.0;
+    if (!body.shape.ContainsPoint(Polar(radius, 0.0, z)))
+      return z;
+  }
+  return std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("a modelled M8x1.25 cuts the ISO groove in either hand",
+          "[thread][slow]") {
+  const double P = 1.25, H = P * std::sqrt(3.0) / 2.0, R = 4.0;
+  const auto build = [&](bool right) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Boss", glm::vec3(0), glm::vec3(0, 0, 1), R, 20.0));
+    const Body& body = doc->GetBodies()[0];
+    auto th = std::make_unique<ThreadFeature>(
+        "Thread", ElementRef{body.createdBy, CylFaceName(body)}, "M8", P);
+    th->modeled = true;
+    th->rightHanded = right;
+    doc->AddFeature(std::move(th));
+    return doc;
+  };
+  const double blank = M_PI * R * R * 20.0;
+  // Both ends open, so the groove runs out through both: the removed volume
+  // is exact. The section inside the blank runs from the basic minor (root
+  // flat P/4) to the major (7P/8 wide), 5H/8 deep.
+  const double groove =
+      ScrewCutVolume(R - 5.0 * H / 8.0, P / 4.0, R, 7.0 * P / 8.0, 20.0, P);
+
+  auto right = build(true);
+  const auto* th = right->GetFeature(1);
+  INFO(th->GetError());
+  REQUIRE(th->GetError().empty());
+  REQUIRE(right->GetBodies().size() == 1);
+  const Body& rb = right->GetBodies()[0];
+  const double vr = rb.shape.Volume();
+  CHECK(vr < blank);
+  CHECK_THAT(blank - vr, WithinRel(groove, 5e-3));
+  // Regenerated twice, the same solid.
+  right->Regenerate();
+  right->Regenerate();
+  CHECK_THAT(right->GetBodies()[0].shape.Volume(), WithinRel(vr, 1e-9));
+  CHECK(dynamic_cast<const ThreadFeature*>(right->GetFeature(1))->overlay.cut);
+
+  auto left = build(false);
+  REQUIRE(left->GetFeature(1)->GetError().empty());
+  const Body& lb = left->GetBodies()[0];
+  CHECK_THAT(lb.shape.Volume(), WithinRel(vr, 1e-4));
+
+  // The hand, read off the solid: from a removed point just above the root,
+  // a helix of the thread's own hand stays in the groove for a whole turn,
+  // and one of the other hand crosses the teeth.
+  const double probe = R - 5.0 * H / 8.0 + 0.1;
+  const auto zr = GrooveHeight(rb, probe, 8.0, P);
+  REQUIRE(zr.has_value());
+  CHECK(SolidAlongHelix(rb, probe, *zr, P, true) == 0);
+  CHECK(SolidAlongHelix(rb, probe, *zr, P, false) > 4);
+  const auto zl = GrooveHeight(lb, probe, 8.0, P);
+  REQUIRE(zl.has_value());
+  CHECK(SolidAlongHelix(lb, probe, *zl, P, false) == 0);
+  CHECK(SolidAlongHelix(lb, probe, *zl, P, true) > 4);
+}
+
+TEST_CASE("a modelled thread stops square at a shoulder", "[thread]") {
+  // A bolt-like part: a boss standing on a plate. The groove runs out
+  // through the free end and stops square at the plate, cutting nothing of
+  // the plate.
+  Document doc;
+  auto plate =
+      std::make_unique<SketchFeature>("Plate", SketchPlane(PlaneType::XY));
+  plate->AddRectangle({-10, -10}, {10, 10});
+  doc.AddFeature(std::move(plate));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "PlatePad", doc.GetFeature(0)->GetId(), 5.0, ExtrudeMode::NewBody));
+  auto boss = std::make_unique<SketchFeature>(
+      "BossSketch",
+      SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  boss->AddEntity(sketch::Circle{{0, 0}, 4.0});
+  doc.AddFeature(std::move(boss));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "BossPad", doc.GetFeature(2)->GetId(), 12.0, ExtrudeMode::Add));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  const double before = body.shape.Volume();
+  auto th = std::make_unique<ThreadFeature>(
+      "Thread", ElementRef{body.createdBy, CylFaceName(body)}, "M8-6g", 1.0);
+  th->modeled = true;
+  doc.AddFeature(std::move(th));
+  INFO(doc.GetFeature(4)->GetError());
+  REQUIRE(doc.GetFeature(4)->GetError().empty());
+  const Body& cut = doc.GetBodies()[0];
+  const double P = 1.25, H = P * std::sqrt(3.0) / 2.0;
+  const double groove =
+      ScrewCutVolume(4.0 - 5.0 * H / 8.0, P / 4.0, 4.0, 7.0 * P / 8.0, 12.0, P);
+  CHECK_THAT(before - cut.shape.Volume(), WithinRel(groove, 5e-3));
+  // The plate is whole: a point just under its top face, inside the groove's
+  // radial band, is still material all the way round.
+  for (int k = 0; k < 12; k++)
+    CHECK(cut.shape.ContainsPoint(Polar(3.6, k * M_PI / 6.0, 4.95)));
+}
+
+TEST_CASE("a modelled 3/8-16 UNC-2B cuts the groove in a tapped hole wall",
+          "[thread][hole]") {
+  // A 10 mm plate, the tripod thread tapped through it.
+  Document doc;
+  auto pad =
+      std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+  pad->AddRectangle({-15, -15}, {15, 15});
+  doc.AddFeature(std::move(pad));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Pad", doc.GetFeature(0)->GetId(), 10.0, ExtrudeMode::NewBody));
+  auto centre = std::make_unique<SketchFeature>(
+      "Centre",
+      SketchPlane(glm::vec3(0, 0, 10), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  centre->AddEntity(sketch::Point{{0, 0}, 1});
+  doc.AddFeature(std::move(centre));
+  auto hole = std::make_unique<HoleFeature>(
+      "Tapping", doc.GetFeature(2)->GetId(), HoleKind::Simple, 1.0, 10.0);
+  hole->through = true;
+  hole->fitThread = "3/8-16 UNC";
+  hole->fitKind = "tapped";
+  doc.AddFeature(std::move(hole));
+  INFO(doc.GetFeature(3)->GetError());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  const Body& drilled = doc.GetBodies()[0];
+  const double before = drilled.shape.Volume();
+  CHECK_THAT(before,
+             WithinRel(30.0 * 30.0 * 10.0 - M_PI * 3.96875 * 3.96875 * 10.0,
+                       1e-6)); // the 5/16" drill
+
+  auto th = std::make_unique<ThreadFeature>(
+      "Tripod", ElementRef{drilled.createdBy, CylFaceName(drilled)},
+      "3/8-16 UNC-2B", 1.0);
+  th->modeled = true;
+  doc.AddFeature(std::move(th));
+  const auto* feature = doc.GetFeature(4);
+  INFO(feature->GetError());
+  REQUIRE(feature->GetError().empty());
+  CHECK_FALSE(dynamic_cast<const ThreadFeature*>(feature)->overlay.external);
+  // The section inside the wall: from the drilled radius (widest) out to
+  // the major, where the internal root flat is P/8.
+  const double P = 1.5875, R = 4.7625, r = 3.96875;
+  const double tan30 = std::tan(M_PI / 6.0);
+  const double groove =
+      ScrewCutVolume(r, P / 8.0 + 2.0 * (R - r) * tan30, R, P / 8.0, 10.0, P);
+  const double after = doc.GetBodies()[0].shape.Volume();
+  CHECK_THAT(before - after, WithinRel(groove, 5e-3));
+}
+
+TEST_CASE("a modelled thread that cannot be cut keeps the body", "[thread]") {
+  // A custom 3 mm pitch on a 2 mm boss: the root of that groove would sit
+  // below the axis. The feature errors, the body and the overlay stay.
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Pin", glm::vec3(0), glm::vec3(0, 0, 1), 1.0, 10.0));
+  const Body& body = doc.GetBodies()[0];
+  const double before = body.shape.Volume();
+  auto th = std::make_unique<ThreadFeature>(
+      "Coarse", ElementRef{body.createdBy, CylFaceName(body)}, "custom", 3.0);
+  th->modeled = true;
+  doc.AddFeature(std::move(th));
+  const auto* feature = dynamic_cast<const ThreadFeature*>(doc.GetFeature(1));
+  CHECK_FALSE(feature->GetError().empty());
+  CHECK(feature->overlay.valid);
+  CHECK_FALSE(feature->overlay.cut);
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].shape.Volume() == before);
 }

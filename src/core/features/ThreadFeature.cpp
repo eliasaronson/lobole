@@ -1,6 +1,9 @@
 #include "core/features/ThreadFeature.h"
 
 #include "common/Logger.h"
+#include "core/BodyMode.h"
+#include "core/ElementHistory.h"
+#include "core/HelicalSweep.h"
 #include "core/ThreadStandards.h"
 
 #include <BRepAdaptor_Surface.hxx>
@@ -9,12 +12,54 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
+#include <gp_Ax3.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+
+namespace {
+
+// The groove a modelled thread cuts, as an axial profile for HelicalSweep:
+// the space between two teeth of the ISO 68-1 / ASME B1.1 basic profile
+// (60 degree flanks, fundamental triangle H = P*sqrt(3)/2), in the half-plane
+// through the axis, x = radius and y = height about the helix point.
+//
+// External (a boss): the root flat P/4 wide at the basic minor radius
+// D/2 - 5H/8, the flanks opening outward past the crest to `reach` so the
+// cut leaves no sliver of the blank. Internal (a hole wall): the root flat
+// P/8 at the major radius D/2, the flanks opening inward past the wall.
+// Either way the groove is capped just under a pitch wide, so neighbouring
+// turns never touch.
+std::vector<gp_Pnt2d> GrooveProfile(double pitch, double rootRadius,
+                                    double reach, bool external) {
+  const double tan30 = std::tan(M_PI / 6.0);
+  const double halfRoot = external ? pitch / 8.0 : pitch / 16.0;
+  const double halfCap = 0.475 * pitch;      // 0.95 P: clear of the next turn
+  const double sign = external ? 1.0 : -1.0; // which way the groove opens
+  const double span = std::abs(reach - rootRadius);
+  const double toCap = (halfCap - halfRoot) / tan30; // flank meets the cap
+  std::vector<gp_Pnt2d> out;
+  out.emplace_back(rootRadius, -halfRoot);
+  if (toCap < span) {
+    out.emplace_back(rootRadius + sign * toCap, -halfCap);
+    out.emplace_back(reach, -halfCap);
+    out.emplace_back(reach, halfCap);
+    out.emplace_back(rootRadius + sign * toCap, halfCap);
+  } else {
+    const double h = halfRoot + span * tan30;
+    out.emplace_back(reach, -h);
+    out.emplace_back(reach, h);
+  }
+  out.emplace_back(rootRadius, halfRoot);
+  return out;
+}
+
+} // namespace
 
 ThreadFeature::ThreadFeature(const std::string& name, ElementRef face,
                              std::string designation, double pitch)
@@ -66,16 +111,35 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     const gp_Cylinder cyl = surf.Cylinder();
     const double r = cyl.Radius();
 
+    // A designation that names a series we carry must be in its table; one
+    // that names none is a custom thread with its own pitch.
+    std::string why;
+    const auto resolved = threads::Resolve(designation, &why);
+    if (!resolved && !why.empty()) {
+      SetError(why);
+      return false;
+    }
+    std::string cls = threadClass;
+    if (resolved && !resolved->threadClass.empty()) {
+      if (!cls.empty() && cls != resolved->threadClass) {
+        SetError("the designation says class " + resolved->threadClass +
+                 " and thread_class says " + cls + "; give one");
+        return false;
+      }
+      cls = resolved->threadClass;
+    }
+
     // A known designation must roughly fit the face it annotates.
-    if (const auto std_ = threads::Lookup(designation)) {
-      pitch = std_->pitch; // the table is authoritative for known series
-      const double lo = threads::MinorDiameter(*std_) * 0.5 * 0.8;
-      const double hi = std_->majorDia * 0.5 * 1.2;
+    if (resolved) {
+      const threads::Standard& std_ = resolved->standard;
+      pitch = std_.pitch; // the table is authoritative for known series
+      const double lo = threads::MinorDiameter(std_) * 0.5 * 0.8;
+      const double hi = std_.majorDia * 0.5 * 1.2;
       if (r < lo || r > hi) {
-        char buf[128];
+        char buf[160];
         snprintf(buf, sizeof(buf),
                  "%s does not fit this face (face %.3f, thread %.3f dia)",
-                 designation.c_str(), 2.0 * r, std_->majorDia);
+                 designation.c_str(), 2.0 * r, std_.majorDia);
         SetError(buf);
         return false;
       }
@@ -98,9 +162,11 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
 
     // The threaded span along the axis: the face's V range (V is axial for a
     // cylinder), optionally clipped to `length` from the V-min end.
-    double v0 = surf.FirstVParameter(), v1 = surf.LastVParameter();
-    if (v1 < v0)
-      std::swap(v0, v1);
+    double faceV0 = surf.FirstVParameter(), faceV1 = surf.LastVParameter();
+    if (faceV1 < faceV0)
+      std::swap(faceV0, faceV1);
+    const double v0 = faceV0;
+    double v1 = faceV1;
     if (length > 1e-9)
       v1 = std::min(v1, v0 + length);
 
@@ -119,15 +185,25 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     overlay.v1 = static_cast<float>(v1);
     overlay.external = external;
 
+    if (resolved) {
+      const std::string bad =
+          threads::ClassError(resolved->standard, cls, external);
+      if (!bad.empty()) {
+        SetError(bad);
+        return false;
+      }
+    }
+
     if (modeled) {
-      // Reserved (docs/modeling/holes-and-threads.md#thread): the helical cut
-      // ships as a follow-up. The error never takes the document down and the
-      // cosmetic overlay above stays drawn.
-      SetError("modeled threads are not implemented yet (cosmetic only)");
-      return false;
+      // The real groove. Any failure is this feature's error: the body stays
+      // as it was and the cosmetic overlay above stays drawn.
+      const double major = resolved ? resolved->standard.majorDia : 0.0;
+      if (!CutModeled(*body, cyl, external, v0, v1, faceV1, major))
+        return false;
+      overlay.cut = true;
     }
     if (allowEngagement) {
-      if (!threads::Lookup(designation) || minimumEngagement < 0 ||
+      if (!resolved || minimumEngagement < 0 ||
           !std::isfinite(minimumEngagement)) {
         SetError("engagement needs a known thread designation and nonnegative "
                  "minimum length");
@@ -136,10 +212,119 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
       body->threadRegions.push_back(
           {face, designation, length, minimumEngagement, external});
     }
-    return true; // cosmetic: manufacturing geometry untouched
+    return true;
   } catch (const Standard_Failure& e) {
     SetError(std::string("thread failed: ") + e.GetMessageString());
     LOG_ERROR("ThreadFeature '{}': {}", m_name, GetError());
     return false;
   }
+}
+
+bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
+                               bool external, double v0, double v1,
+                               double faceV1, double tableMajor) {
+  const auto t0 = std::chrono::steady_clock::now();
+  const double r = cyl.Radius();
+  const double H = pitch * std::sqrt(3.0) / 2.0;
+  // The major diameter: the table's, else the face's own on a boss, and the
+  // face taken as the basic minor in a hole.
+  const double major = tableMajor > 0.0 ? tableMajor
+                       : external       ? 2.0 * r
+                                        : 2.0 * r + 1.0825 * pitch;
+  const double margin = 0.1 * pitch; // past the blank, so no sliver is left
+  double root = 0.0, reach = 0.0, probe = 0.0;
+  char buf[160];
+  if (external) {
+    root = major / 2.0 - 5.0 * H / 8.0;
+    reach = std::max(r, major / 2.0) + margin;
+    probe = 0.5 * (root + r);
+    if (root <= 1e-6 || root >= r) {
+      snprintf(buf, sizeof(buf),
+               "the modelled thread's root (%.3f dia) is not inside this "
+               "%.3f mm boss",
+               2.0 * root, 2.0 * r);
+      SetError(buf);
+      return false;
+    }
+  } else {
+    root = major / 2.0;
+    reach = std::min(r, major / 2.0 - 5.0 * H / 8.0) - margin;
+    probe = 0.5 * (r + root);
+    if (root <= r || reach <= 1e-6) {
+      snprintf(buf, sizeof(buf),
+               "the modelled thread's root (%.3f dia) is not outside this "
+               "%.3f mm hole",
+               2.0 * root, 2.0 * r);
+      SetError(buf);
+      return false;
+    }
+  }
+
+  // A span end that is the face's own end and opens onto air is left open:
+  // the groove runs out through the end face instead of stopping flush with
+  // it (coincident faces are what booleans get wrong), and the tool needs no
+  // clip there. An end against material — a boss's shoulder, a blind hole's
+  // floor — or a `length` that stops mid-face is cut square. "Air" is asked
+  // of the body over the whole reach an open end's cutter has (up to two
+  // pitches past it) at four angles, in the groove's radial band.
+  const gp_Pnt o = cyl.Location();
+  const gp_Dir d = cyl.Axis().Direction();
+  const gp_Dir x = cyl.Position().XDirection();
+  const gp_Dir y = cyl.Position().YDirection();
+  const auto opensOnAir = [&](double v, double outward) {
+    for (int k = 1; k <= 4; k++)
+      for (int a = 0; a < 4; a++) {
+        const gp_Vec radial = gp_Vec(x) * std::cos(a * M_PI / 2.0) +
+                              gp_Vec(y) * std::sin(a * M_PI / 2.0);
+        const gp_Pnt p = o.Translated(
+            gp_Vec(d) * (v + outward * 0.5 * k * pitch) + radial * probe);
+        if (body.shape.ContainsPoint(glm::vec3(p.X(), p.Y(), p.Z())))
+          return false;
+      }
+    return true;
+  };
+  const bool openStart = opensOnAir(v0, -1.0);
+  const bool openEnd = std::abs(v1 - faceV1) < 1e-9 && opensOnAir(v1, 1.0);
+
+  HelicalSweepSpec spec;
+  spec.frame = gp_Ax3(o, d, x);
+  spec.z0 = v0;
+  spec.z1 = v1;
+  spec.squareStart = !openStart;
+  spec.squareEnd = !openEnd;
+  spec.lead = pitch;
+  spec.starts = 1;
+  spec.rightHanded = rightHanded;
+  // Not on the face's seam (u = 0): a cutter face in the seam plane makes the
+  // boolean intersect along the seam edge.
+  spec.startRad = 0.5 * M_PI;
+  spec.profile = GrooveProfile(pitch, root, reach, external);
+  std::string why;
+  CADShape tool = HelicalSweep(spec, &why);
+  if (!tool.IsValid()) {
+    SetError("the modelled thread could not be built (" + why +
+             "); the thread stays cosmetic");
+    return false;
+  }
+  ElementMap toolMap;
+  topo::NamePrimitiveElements(tool, std::to_string(GetId()), toolMap);
+  CheckedBoolean cut =
+      CheckedBooleanNamed(m_name, BooleanOp::Subtract, body.name, body.shape,
+                          body.elementMap, tool, toolMap, GetId());
+  if (!cut.refusal.empty() || !cut.shape.IsValid()) {
+    SetError("the modelled thread's cut failed (" +
+             (cut.refusal.empty() ? cut.error : cut.refusal) +
+             "); the thread stays cosmetic");
+    return false;
+  }
+  if (cut.fuzzy > 0.0)
+    SetWarning(cut.warning);
+  body.shape = std::move(cut.shape);
+  body.elementMap = std::move(cut.map);
+  LOG_INFO("ThreadFeature '{}': modelled {:.1f} turns in {} ms", m_name,
+           (v1 - v0) / pitch,
+           std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - t0)
+               .count());
+  return true;
 }

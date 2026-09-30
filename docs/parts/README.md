@@ -267,7 +267,8 @@ ghost count tracks the options, place, joined, check). Goldens
 
 - Phillips/Pozidriv drives (the Phillips table is vendored but unused), and
   any imperial sizes.
-- Modelled helical threads (the thread is cosmetic).
+- Modelled helical threads on generated fasteners (their thread is
+  cosmetic; a `Thread` feature on a part can model one).
 - Bearings, extrusions, motors, o-rings as generated parts; a searchable
   parts browser.
 - Balloons and a parts-list block on a drawing sheet.

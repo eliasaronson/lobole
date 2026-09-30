@@ -53,7 +53,8 @@ std::string SweepPathError(const RegenContext& ctx, uint64_t pathId,
 
 CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
                                  const TopoDS_Wire& spine, SweepFrame frame,
-                                 const TopoDS_Wire& guide, bool scaleToGuide) {
+                                 const TopoDS_Wire& guide, bool scaleToGuide,
+                                 const gp_Dir& binormal) {
   if (profiles.empty() || spine.IsNull())
     return CADShape();
   try {
@@ -82,6 +83,9 @@ CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
         break;
       case SweepFrame::Fixed:
         break; // leave OCC's default discrete trihedron
+      case SweepFrame::Binormal:
+        shell.SetMode(binormal);
+        break;
       }
     }
     for (const TopoDS_Wire& p : profiles) {
@@ -100,9 +104,11 @@ CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
 
 CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
                                 const TopoDS_Wire& spine, SweepFrame frame,
-                                const TopoDS_Wire& guide) {
+                                const TopoDS_Wire& guide,
+                                const gp_Dir& binormal) {
   return SweepSectionsAlongSpine(std::vector<TopoDS_Wire>{profile}, spine,
-                                 frame, guide, /*scaleToGuide=*/false);
+                                 frame, guide, /*scaleToGuide=*/false,
+                                 binormal);
 }
 
 SweepFeature::SweepFeature(const std::string& name, uint64_t profileSketchId,

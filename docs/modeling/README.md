@@ -11,7 +11,8 @@ Topic pages:
 - [toponaming.md](toponaming.md) — how a face or edge keeps its name across
   regenerations, which is what every face/edge reference relies on.
 - [holes-and-threads.md](holes-and-threads.md) — the Hole feature and what it
-  records (fit, tapping), the cosmetic Thread, and thread engagement.
+  records (fit, tapping), the Thread (cosmetic or modelled), the metric and
+  unified thread tables, and thread engagement.
 - [derived.md](derived.md) — the Derived feature: another part's bodies copied
   into this one as a snapshot.
 
@@ -204,11 +205,12 @@ walls. A profile that never reaches the body is an error. The target is
 
 ### Thread
 
-`ThreadFeature` is a cosmetic thread: an annotation on a cylindrical face
-that changes no geometry, with pitch and diameters from the ISO metric table
-in `src/core/ThreadStandards.{h,cpp}`. Its `modeled` flag (a real helical cut)
-is reserved and errors. Details, and how threads engage in interference
-checks: [holes-and-threads.md](holes-and-threads.md#thread).
+`ThreadFeature` is an annotation on a cylindrical face, with pitch and
+diameters from the ISO metric and unified (UNC/UNF) tables in
+`src/core/ThreadStandards.{h,cpp}`. Cosmetic by default, it changes no
+geometry; `modeled` cuts the real helical groove, right- or left-handed, and
+a cut that fails keeps the body. Details, and how threads engage in
+interference checks: [holes-and-threads.md](holes-and-threads.md#thread).
 
 ### 3D curves, sweep, loft and pipe
 
@@ -455,8 +457,8 @@ document or refuses visibly.
   shell that names a piece binds to the first; a body sub-ordinal would tell
   them apart. Splitting by a sketch (sketch as knife) is not built.
 
-- A modelled (helical) thread: the `Thread` feature's `modeled` flag is
-  reserved and errors — [../plans/modeled-thread.md](../plans/modeled-thread.md).
+- A thread runout (DIN 76) or a faded end on a modelled thread, and a
+  blind tapped hole's thread trimmed by its drill point: the ends are square.
 - Draft angle on an extrude or a rib; per-side rib thickness; multi-profile
   rib networks.
 - Up-to-face against a curved face (only planar targets).
