@@ -149,7 +149,8 @@ CamOtherSetups.cpp):
   from their posted files like the check; in the panel a pass of theirs not
   yet cut refuses the playback in words, as its own would, and `cam_simulate`
   generates it first. Reading a turning's file is the rotary carve of all of
-  it (40 s before the chess rook and bishop's mitre), so the panel reads on a
+  it (40 s on one core before the chess rook and bishop's mitre; it runs on
+  every core now, [rotary.md](rotary.md#on-every-core)), so the panel reads on a
   worker ("Reading what the earlier setups left") and the transport opens
   when it lands, unless the file changed meanwhile; `cam_simulate` parks for
   it ([README.md](README.md#requests-that-wait)). `cam_simulate` names what

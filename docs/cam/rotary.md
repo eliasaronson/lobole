@@ -394,11 +394,45 @@ panel's verification routes the same way.
   finding skips `surface_rotary`: its Z span is the blank's diameter, not a
   depth.
 
+### On every core
+
+The walk over the program (`WalkRotaryProgram`) is most of a turning's
+check, and it runs on every core by splitting the radius map into **bands
+along the rotary axis**. It can be split because of what the walk does to a
+cell. A cut lowers each cell it passes, `r = min(r, cut)`, so the final map
+does not depend on the order. A rapid is checked against the stock as it
+stands at that line of the file, with every earlier cut applied and no later
+one. That part does depend on the order, and it is the failure a shape
+comparison cannot see, so it stays exact.
+
+- **Each band walks every move in file order** and touches only its own
+  cells, so every cell sees the sequence a serial walk gives it, and no two
+  workers write the same cell. The map is shared, not copied per worker. A
+  move keeps its whole step count whatever the band, so each cell's
+  arithmetic is the serial walk's. The stretch of a move whose tip, plus the
+  cutter's radius, lies outside the band is solved for (the tip is linear in
+  the step) and skipped rather than walked.
+- **A rapid's hit is merged** as the deepest any band found. On a tie it is
+  the earliest step, then the lowest band, which is the order the serial walk
+  met them in. The count, the first bad line and the worst line and position
+  are then read from the merged hits in file order.
+- **Bands outnumber the workers** (four per worker, none narrower than four
+  cells), because the cutting is uneven along a part. `parallel::For` hands
+  them out as a queue. A handful of moves, such as a playback frame's, stays
+  on one thread.
+
+The answer is the serial one bit for bit whatever the band or thread count
+(`cam rotary: the check on every core is the serial check to the bit`, which
+includes rapids through stock). The chess knights' turning verified in 48–58 s
+on one core and 7–8 s on 22.
+
 ## The rotary picture
 
 The part turns; the tool stays where the machine keeps it. Playback carves
-with the verifier's `CarveSweepRotary` on the verifier's blank
-(`RotaryStockSim`), so the last frame is the verdict's stock cell for cell.
+with the verifier's own banded walk ([On every core](#on-every-core)) on the
+verifier's blank (`RotaryStockSim`), so the last frame is the verdict's stock
+cell for cell. A seek carves in runs that end at each snapshot boundary, so a
+snapshot sees every cut before it and none after.
 Backward seeks restore a snapshot: one is kept every `KeyframeEvery()`
 segments, derived from a memory budget and the grid's size, and taken only on
 the first forward visit (when it holds "every segment before this one carved,
