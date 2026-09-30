@@ -10,15 +10,6 @@ measured, not remembered.
 Each change is small enough to do on its own. The saving is this round's
 cost of not having it.
 
-## 2. What is left of sharing ccache
-
-Worktrees now share main's cache (docs/architecture.md#precompiled-headers).
-A fresh tree builds in about 2 minutes, where it took 11.5. Still open:
-
-- **`watchdog_smoke` in Debug.** A developer debugging a stall builds Debug on
-  purpose, and the smoke failed in every Debug tree: its stack shows
-  `RunHeadless` rather than `StallSelfTest`.
-
 ## 8. A test checks the contract, not the formula
 
 **What happened.** `SolveIndexA`'s test compared the formula with its own
@@ -35,6 +26,6 @@ audit of the other solvers (`SolveFaceUp` already does this, and
 
 ## Verification
 
-Item 2 by `watchdog_smoke` passing in a Debug tree and a Release one. Item 8 is the
+Item 8 is the
 `SolveIndexA` contract test, which is already in, and the audit of the other
 solvers.

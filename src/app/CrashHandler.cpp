@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <new>
 #include <string>
 #include <thread>
@@ -18,8 +19,13 @@
 #include <windows.h>
 #else
 #include <csignal>
+#include <cxxabi.h>
+#include <elf.h>
+#include <fcntl.h>
+#include <link.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <vector>
 // std::stacktrace (C++23) needs libstdc++'s experimental archive (-lstdc++exp),
 // which some toolchains ship without (e.g. the Freedesktop Flatpak SDK's gcc).
 // CMake probes for it and defines HAVE_STDCXX_STACKTRACE when it links; without
@@ -172,6 +178,140 @@ void OnStackRequest(int) {
 }
 #endif
 
+#if defined(HAVE_STDCXX_STACKTRACE)
+// The function a return address lies in, by the executable's own symbol
+// table. std::stacktrace names a frame from the debug info, and there a frame
+// inside an inlined call is named by the INNERMOST function: an -O2 -g build
+// stalled in StallSelfTest's inlined sleep_for reports `sleep_for at
+// this_thread_sleep.h:82`, and the function that stalled appears nowhere. The
+// symbol table has one entry per real function, so it names the frame's owner.
+// Main executable only (the libraries are not built with our debug info);
+// read once, on the watchdog's thread, never in the signal handler.
+class ExeSymbols {
+public:
+  // Empty when the address is not in the executable or not in a function.
+  std::string Owner(uintptr_t address) {
+    std::call_once(m_once, [this] { Load(); });
+    if (address < m_bias)
+      return {};
+    const uintptr_t at = address - m_bias;
+    auto it = std::upper_bound(
+        m_functions.begin(), m_functions.end(), at,
+        [](uintptr_t a, const Function& f) { return a < f.start; });
+    if (it == m_functions.begin())
+      return {};
+    --it;
+    if (at >= it->start + it->size)
+      return {};
+    const char* mangled = m_names.c_str() + it->name;
+    int status = 0;
+    char* demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
+    std::string out = status == 0 && demangled ? demangled : mangled;
+    std::free(demangled);
+    return out;
+  }
+
+private:
+  struct Function {
+    uintptr_t start, size;
+    size_t name; // offset into m_names
+  };
+
+  void Load() {
+    // The executable is the first object dl_iterate_phdr reports; its
+    // dlpi_addr is the load bias a PIE's symbol values are relative to.
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* self) {
+          static_cast<ExeSymbols*>(self)->m_bias = info->dlpi_addr;
+          return 1;
+        },
+        this);
+    const int fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+      return;
+    auto readAt = [fd](void* out, size_t n, off_t at) {
+      return pread(fd, out, n, at) == static_cast<ssize_t>(n);
+    };
+    Elf64_Ehdr eh{};
+    std::vector<Elf64_Shdr> sections;
+    if (readAt(&eh, sizeof eh, 0) &&
+        std::memcmp(eh.e_ident, ELFMAG, SELFMAG) == 0 &&
+        eh.e_ident[EI_CLASS] == ELFCLASS64 &&
+        eh.e_shentsize == sizeof(Elf64_Shdr)) {
+      sections.resize(eh.e_shnum);
+      if (!readAt(sections.data(), sections.size() * sizeof(Elf64_Shdr),
+                  static_cast<off_t>(eh.e_shoff)))
+        sections.clear();
+    }
+    for (const Elf64_Shdr& s : sections) {
+      if (s.sh_type != SHT_SYMTAB || s.sh_link >= sections.size())
+        continue;
+      const Elf64_Shdr& str = sections[s.sh_link];
+      std::vector<Elf64_Sym> symbols(s.sh_size / sizeof(Elf64_Sym));
+      m_names.resize(str.sh_size);
+      if (!readAt(symbols.data(), symbols.size() * sizeof(Elf64_Sym),
+                  static_cast<off_t>(s.sh_offset)) ||
+          !readAt(m_names.data(), m_names.size(),
+                  static_cast<off_t>(str.sh_offset))) {
+        m_names.clear();
+        break;
+      }
+      for (const Elf64_Sym& sym : symbols)
+        if (ELF64_ST_TYPE(sym.st_info) == STT_FUNC && sym.st_size > 0 &&
+            sym.st_name < m_names.size())
+          m_functions.push_back({sym.st_value, sym.st_size, sym.st_name});
+      break;
+    }
+    close(fd);
+    std::sort(
+        m_functions.begin(), m_functions.end(),
+        [](const Function& a, const Function& b) { return a.start < b.start; });
+  }
+
+  std::once_flag m_once;
+  uintptr_t m_bias = 0;
+  std::vector<Function> m_functions;
+  std::string m_names;
+};
+
+// "f() [clone .cold]" is still f.
+std::string WithoutClone(std::string name) {
+  const size_t clone = name.find(" [clone ");
+  if (clone != std::string::npos)
+    name.resize(clone);
+  return name;
+}
+
+// The bare name of a function, for telling whether two spellings are the same
+// one: debug info may give `StallSelfTest` where the symbol table demangles to
+// `watchdog::(anonymous namespace)::StallSelfTest()`, and a template carries
+// its return type and arguments.
+std::string BareName(const std::string& full) {
+  std::string name = WithoutClone(full);
+  const std::string anon = "(anonymous namespace)::";
+  for (size_t at; (at = name.find(anon)) != std::string::npos;)
+    name.erase(at, anon.size());
+  name = name.substr(0, name.find('('));
+  std::string flat; // template arguments dropped
+  int depth = 0;
+  for (const char c : name) {
+    if (c == '<')
+      ++depth;
+    else if (c == '>')
+      depth = std::max(0, depth - 1);
+    else if (depth == 0)
+      flat += c;
+  }
+  const size_t scope = flat.rfind("::");
+  if (scope != std::string::npos)
+    flat.erase(0, scope + 2);
+  const size_t space = flat.rfind(' ');
+  if (space != std::string::npos)
+    flat.erase(0, space + 1);
+  return flat;
+}
+#endif
+
 } // namespace
 
 void InstallStallCapture() {
@@ -210,6 +350,9 @@ std::string CaptureMainThreadStack(double timeoutSeconds) {
 #if defined(HAVE_STDCXX_STACKTRACE)
   // Name and, where debug info has it, file:line — a release build has
   // names only, so "at :0" is left off rather than printed on every frame.
+  // A frame whose name is an inlined callee also names the function it was
+  // inlined into (ExeSymbols says why).
+  static ExeSymbols symbols;
   size_t shown = 0;
   for (size_t i = 0; i < g_frameCount; ++i) {
     const std::stacktrace_entry& e = g_frames[i];
@@ -218,6 +361,12 @@ std::string CaptureMainThreadStack(double timeoutSeconds) {
       continue; // the signal trampoline, the end of the stack
     if (!e.source_file().empty())
       name += " at " + e.source_file() + ":" + std::to_string(e.source_line());
+    // A return address, so one back to stay inside the call instruction's
+    // function when the call was its last.
+    const std::string owner = WithoutClone(
+        symbols.Owner(static_cast<uintptr_t>(e.native_handle()) - 1));
+    if (!owner.empty() && BareName(e.description()) != BareName(owner))
+      name += ", inlined in " + owner;
     out += "  #" + std::to_string(shown++) + " " + name + "\n";
   }
 #else

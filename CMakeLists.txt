@@ -11,6 +11,21 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
 
+# A Debug build names its optimisation level. CMake's Debug passes only `-g`,
+# trusting the compiler's default of -O0, but nix's cc-wrapper puts `-O2` in
+# front of every compile (its fortify hardening needs an optimiser), so a
+# Debug build under nix-shell was an -O2 build: inlined, sibling-called, its
+# variables "optimized out", and its stall stacks missing the very frames a
+# developer built Debug to see. -Og rather than -O0: it is GCC's level for the
+# edit-compile-debug loop, keeps every call frame, and still counts as
+# optimising for fortify, which at -O0 warns once per translation unit. A
+# level given explicitly (tools/coverage.sh passes -O0) is left alone.
+foreach(lang C CXX)
+  if(NOT "${CMAKE_${lang}_FLAGS} ${CMAKE_${lang}_FLAGS_DEBUG}" MATCHES "(^| )-O")
+    string(APPEND CMAKE_${lang}_FLAGS_DEBUG " -Og")
+  endif()
+endforeach()
+
 set(CMAKE_CXX_STANDARD 23)
 # std::stacktrace (CrashHandler) lives in libstdc++'s experimental archive
 # until GCC ships it in the main library; harmless on compilers that don't

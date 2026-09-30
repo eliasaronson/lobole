@@ -319,7 +319,12 @@ by the same name drift apart without any test noticing:
   arena for `std::basic_stacktrace`), because the thread may be slow rather
   than stuck — inside `malloc`, say — and a handler that allocated there
   would deadlock it for good. The watchdog symbolizes the capture on its own
-  thread; a release build names functions but has no file:line.
+  thread; a release build names functions but has no file:line. With debug
+  info, a frame inside an inlined call is named by the innermost function
+  (`sleep_for at this_thread_sleep.h:82`), so the executable's symbol table
+  adds the function it lies in (`, inlined in StallSelfTest()`); without
+  that an optimised build with `-g` (RelWithDebInfo, the TSan tree) showed
+  the stall's helper and never the function that stalled.
 - `DESIGNER_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
   debugger stopping the process is not a hang); a value that is not seconds
   is refused at start-up. `designer --stall-test` stalls the loop for 4 s once,
@@ -371,7 +376,11 @@ called from our workers).
 
 ## C++ usage
 
-- C++23 (`CMAKE_CXX_STANDARD 23`); the default build type is Debug.
+- C++23 (`CMAKE_CXX_STANDARD 23`); the default build type is Debug, which
+  compiles at `-Og`. It has to name a level: nix's cc-wrapper puts `-O2` in
+  front of every compile for its fortify hardening, and CMake's Debug passes
+  none, so a Debug build under nix-shell was silently `-O2`. A level given in
+  `CMAKE_CXX_FLAGS` (coverage's `-O0`) is left alone.
 - **Logging goes through the `LOG_*` macros** (`common/Logger.h`, spdlog).
   The only direct stdout/stderr writes are `main.cpp`'s command-line usage
   and argument errors, which are program output and must not carry a log
