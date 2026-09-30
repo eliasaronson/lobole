@@ -20,14 +20,58 @@ compute in `src/femgpu/` (`ComputeContext`: device choice, storage buffers,
 SPIR-V pipelines, dispatch), which the topology solver runs on. One kernel
 family there could serve all of these.
 
-## What it would buy, and what is not known
+## What step 1 measured
 
-These are estimates, not measurements. With the CPU band split, a rotary
-check of the knights blank takes about 7 s on 22 cores; a GPU might take under
-one. Over a whole chess run that saves tens of seconds. The real gain is
-interactive: verify and playback of a big turned or surfaced part becoming
-near instant, and generation's CL surfaces with them. **Step 1 measures this
-before anything else is built.**
+The rotary carve, with its rapid checks, as one float32 compute shader
+(branch `gpu-rotary-carve-prototype`: `src/shaders/rotary_carve.comp`, and the
+hidden `[rotary_gpu]` bench in femgpu_tests). One thread per cell. The host
+bins the moves per axis bin and theta tile in file order, and the kernel runs
+as a single dispatch. Knights Turn: 156,409 moves, 9,151 rapids.
+
+| | 0.5 mm (the panel) | 0.25 mm (the RPC default) |
+|---|---|---|
+| CPU walk, 22 cores | 0.98 s | about 6 s |
+| RTX 4060, total with binning and transfers | about 0.1 s | about 0.3 s |
+| Arc iGPU kernel | – | 1.15 s |
+| llvmpipe, 22 threads | 1.5 s | 5.5 s |
+
+- **Where it is used most, the gain is modest.** At the panel's 0.5 mm the
+  rest of `InspectRotary` (parse, blank, sampling, compare) is 0.47 s, so the
+  whole check would go from 1.45 s to about 0.55 s. The large gain, 6 s to
+  0.3 s, is at 0.25 mm, which is RPC and agent use.
+- **The verdicts agree, the maps nearly do.** Gouge and leftover are
+  identical. Map cells differ by at most 4e-4 mm at 0.25 mm. At 0.5 mm, two
+  cells differ by up to 0.22 mm where a ray runs along a ball's wall, and
+  replaying that cell in float on the host reproduces the GPU's value.
+- **Rapids did not agree.** At 0.25 mm the GPU counted 2 rapids through
+  stock that the CPU does not. The toolpath lies on the grid's own lattice,
+  so a cutter's wall lands EXACTLY on cell centres, and which side a cell
+  falls is decided by the last bit of rounding. Shrinking every cutter by
+  1e-4 mm on both sides made the rapids identical at both resolutions, and
+  under a 16,513-rapid stress test.
+- **The Arc iGPU's faster trig** puts cells up to 1.1e-3 mm off. That is
+  under the verdict thresholds but over this plan's 1e-4 mm, so the
+  tolerance would depend on the device.
+- **CI gains nothing:** llvmpipe is 1 to 1.5 times slower than the CPU walk.
+
+**Conclusion: the rotary check alone does not earn a second
+implementation.** Two findings carry on:
+
+- **The CPU reference has the same tie.** Its rapid verdict at a wall that
+  lands on a cell centre is decided by rounding. A wall tolerance, the
+  cutter's radius less 1e-4 mm, in `WalkSweepRotary` (and the planar
+  `CarveSweep`) makes it a decision. That is worth doing whatever happens to
+  the GPU.
+- **The kernel shape carries over.** Per-tile, file-order lists and one
+  dispatch are what made it fast (310 ms to 45 ms). The candidates that could
+  earn a kernel are the ones not yet measured.
+
+## What comes next, if anything
+
+Measure the next candidate the same way before building the library: the
+planar verify (the chess board's is about 35 s) or the CL surfaces
+(`RotaryCL` and the planar drop-cutter, most of a surfacing generate). Step 2
+and on stand only if one of them shows a gain the CPU cannot reach.
 
 ## Constraints the design has to meet
 
@@ -51,17 +95,13 @@ before anything else is built.**
   or be skipped by `ping`'s `features`. The CPU path is what CI trusts, and an
   agreement test compares the two on the same inputs wherever a GPU runs.
 
-## Steps
+## Steps, if a candidate earns them
 
-1. **Measure.** One kernel, the rotary carve with rapids, against the CPU band
-   split, on the knights blank. Time it with uploads, and compare the map
-   within tolerance. Stop here if the gain is not worth a second
-   implementation.
-2. **The library.** Generalize `fem_gpu` into the shared compute library. Add
-   a `SweepKernel` interface (tool profile, move list, grid, mode: carve / CL
-   max / check), and a CPU implementation behind the same interface.
-3. **Rotary and planar verify and playback** on it, with the agreement tests.
-4. **The CL surfaces** (`RotaryCL`, planar drop-cutter) on it.
+1. **The library.** Generalize `fem_gpu` into the shared compute library.
+   Add a `SweepKernel` interface (tool profile, move list, grid, mode: carve,
+   CL max, or check) with a CPU implementation behind the same interface.
+2. **The candidate that earned it** on that library, with agreement tests.
+   Then the others, one at a time, each measured first.
 
 ## Verification
 
