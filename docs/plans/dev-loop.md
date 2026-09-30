@@ -34,25 +34,46 @@ in a retry loop.
 "compiler Terminated" failures that agents otherwise misread as code
 problems.
 
-## 2. A worktree builds the same configuration main does
+## 2. A worktree hits the same ccache main fills
 
-**What happened.** `worktree-build.sh` runs `cmake` with no build type, and
-`CMakeLists.txt` defaults to Debug. Main's `build/` is Release. Every
-agent's full suite failed `watchdog_smoke` because its stall stack differs
-in Debug: 13 times across 7 agents. Each agent investigated it and reported
-it as not its fault. Worktree CAM runs were about 1.6 times slower (the
-chess CAM run took 49.5 minutes against about 30). And ccache cannot share
-objects between the two configurations.
+**What happened.** CLAUDE.md promises a fresh worktree "~75 s to a working
+binary (ccache-warm)". None did. The nine build agents spent 13 to 79
+minutes each building, and a docs-only agent spent 23 of its 37 minutes
+compiling. Since its stats were last reset, ccache shows a hit rate of 8%:
+1,441 hits against 16,219 misses. The store sits at its 40 GB cap after 476
+cleanups. Three things keep a worktree from ever hitting main's objects:
 
-**Change.** `worktree-build.sh` configures `-DCMAKE_BUILD_TYPE=` with the
-type of main's `build/` (read from its `CMakeCache.txt`), Release by
-default. `watchdog_smoke` should also pass in a Debug build, since a
-developer debugging a stall builds Debug on purpose. Find out why the stack
-shows `RunHeadless` rather than `StallSelfTest` there, and fix the test's
-expectation or the self-test.
+- `base_dir` is unset. Every include path is absolute
+  (`-I…/.claude/worktrees/agent-…/src`), so it is part of the key.
+- `worktree-build.sh` configures with no build type, and `CMakeLists.txt`
+  defaults to Debug. Main's `build/` is Release, so the flags differ.
+- Debug adds `-g`, and with `hash_dir = true` ccache also hashes the working
+  directory.
 
-**Saving.** 13 false failures and their investigations, faster worktree
-runs, and shared ccache between agents.
+The same mismatch made `watchdog_smoke` fail in every agent's full suite
+(its stall stack differs in Debug): 13 times across 7 agents, each one
+investigated and reported. It also made worktree CAM runs about 1.6 times
+slower (49.5 minutes against about 30), and it is why four fresh worktrees
+together compiled four whole trees and ran the machine out of memory
+(item 1).
+
+**Change.**
+- `~/.config/ccache/ccache.conf` gets `base_dir = /home/elias/Documents`,
+  which covers `build/`, `.claude/worktrees/*` and `../designer-wt*`.
+- `worktree-build.sh` configures with main's `CMAKE_BUILD_TYPE`, read from
+  `build/CMakeCache.txt`, Release by default.
+- `max_size` is raised, or other projects' caches are moved out, so one
+  full tree of both configurations fits without eviction.
+- `watchdog_smoke` should still pass in a Debug build, because a developer
+  debugging a stall builds Debug on purpose. Find out why its stack shows
+  `RunHeadless` rather than `StallSelfTest` there.
+- Measure it: a fresh worktree's first build and its `ccache -s` hit rate,
+  before and after. The CLAUDE.md figure gets corrected to whatever this
+  measures.
+
+**Saving.** Most of the agents' 4.9 hours of building (an estimate; with
+warm hits a worktree build is the 75 s CLAUDE.md claims). Also the 13 false
+failures, and most of the memory pressure behind the crash.
 
 ## 3. Wait on a pid or a marker, never on a pattern
 
@@ -154,6 +175,43 @@ audit of the other solvers (`SolveFaceUp` already does this, and
 `DeriveRotaryTwist`, the lead and index solvers are the ones to check).
 
 **Saving.** One wrong-side-of-the-part program that nothing flagged.
+
+## 9. What the agents spent their time on
+
+The build agents (nine worktree agents, not the fifteen Explore agents,
+which averaged 3 minutes and cost 40 minutes between them) were active for
+about 11.5 hours. 9.0 hours of that was inside tools, and 2.5 hours was the
+model thinking and writing. Their tool time:
+
+| activity | hours | share |
+|---|---|---|
+| compiling, often with a test run in the same call | 4.9 | 54% |
+| tests without a build (suites, `-L cam`, smokes) | 1.7 | 19% |
+| waiting on their own background tasks (`until` loops) | 1.3 | 14% |
+| driving the app and the generator | 0.55 | 6% |
+| reading code | 0.23 | 2.5% |
+| git (a commit whose hook built, a rebase) | 0.20 | 2% |
+| editing | 0.13 | 1.4% |
+
+So the agents spent three quarters of their time on the build, and a
+twentieth reading and writing the code they were sent to change. Item 2 is
+most of the answer. The rest:
+
+- **A docs-only change needs no worktree.** The phase-3 docs agent built a
+  whole tree (23 minutes) to run the docs gate, and the doc audit that ran
+  in main needed only an incremental build. Docs agents should work in main,
+  after the code agents have merged.
+- **Waiting in a loop is 14%.** One agent kept five `until` waiters alive
+  on one CAM run. With item 3, an agent waits on the completion notice
+  rather than a poll.
+- **Rework after a rebase.** Every rebase onto a moved main rebuilt 9 to 12
+  minutes, and the stock agent rebased three times. Merging agents in the
+  order they finish, rather than asking each to rebase onto the last, saves
+  the rebuild. The integrator resolves the one-line conflicts (the
+  `kVersion` line, the format row, appended tests) in one pass.
+- **Harness rejections.** 44 commands in worktrees were rejected as too
+  complex to verify, and 36 more failed with an exit code, mostly builds
+  killed for memory. Each costs a round trip.
 
 ## Smaller, recurring friction
 
