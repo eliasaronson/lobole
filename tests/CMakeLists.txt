@@ -13,6 +13,7 @@ if(NOT Catch2_FOUND)
 endif()
 
 add_executable(designer_tests
+    TestPaths.cpp
     test_actions.cpp
     test_conventions.cpp
     test_frame_pacer.cpp
@@ -168,12 +169,14 @@ target_precompile_headers(designer_tests PRIVATE
 )
 endif()
 
-target_compile_definitions(designer_tests PRIVATE
-    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-    # So a test can compare its own mtime against the source it was built
-    # from: a stale binary fails like a regression, and twice in one round
-    # it was one.
-    DESIGNER_TEST_BINARY="$<TARGET_FILE:designer_tests>")
+# The source tree and this binary's path, on the ONE file that reads them
+# (TestPaths.cpp; the tests call TestSourceDir() / TestBinaryPath()). On every
+# test source they were a different flag in every tree, and a worktree missed
+# ccache on each file that expanded them. The binary's path is there so a test
+# can compare its own mtime against the source it was built from: a stale
+# binary fails like a regression, and twice in one round it was one.
+set_source_files_properties(TestPaths.cpp PROPERTIES COMPILE_DEFINITIONS
+    "DESIGNER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\";DESIGNER_TEST_BINARY=\"$<TARGET_FILE:designer_tests>\"")
 
 include(CTest)
 include(Catch)

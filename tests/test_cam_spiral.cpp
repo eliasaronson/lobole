@@ -9,6 +9,7 @@
 // end-to-end cases here hold the new generator to the verifier and the
 // simulator that already existed, rather than to numbers of its own.
 
+#include "TestPaths.h"
 #include "cam_fixtures.h"
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSim.h"
@@ -623,9 +624,8 @@ TEST_CASE("cam spiral: layers are asked for, never inherited", "[cam]") {
 
   // A v122 file that stored the derivation's 3 mm reloads as a finish; a
   // v123 file keeps the layers it asked for.
-  const std::filesystem::path golden =
-      std::filesystem::path(DESIGNER_SOURCE_DIR) /
-      "tests/golden/job/v122-cam-rotary.json";
+  const std::filesystem::path golden = std::filesystem::path(TestSourceDir()) /
+                                       "tests/golden/job/v122-cam-rotary.json";
   std::ifstream in(golden);
   REQUIRE(in.good());
   nlohmann::json j = nlohmann::json::parse(in);
@@ -672,7 +672,7 @@ TEST_CASE("cam surfacing: a raster's layers are asked for, never inherited",
   CHECK(r.op.stepdown == 3.0);
 
   const std::filesystem::path golden =
-      std::filesystem::path(DESIGNER_SOURCE_DIR) /
+      std::filesystem::path(TestSourceDir()) /
       "tests/golden/job/v118-cam-surfacing.json";
   std::ifstream in(golden);
   REQUIRE(in.good());

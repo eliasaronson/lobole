@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -101,8 +102,7 @@ struct TempTables {
 // looks" are different claims and only one of them is about the data.
 struct SourceTables {
   SourceTables() {
-    parts::SetDataDirForTesting(std::string(DESIGNER_SOURCE_DIR) +
-                                "/assets/parts");
+    parts::SetDataDirForTesting(std::string(TestSourceDir()) + "/assets/parts");
   }
   ~SourceTables() { parts::SetDataDirForTesting(""); }
 };

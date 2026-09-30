@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -175,7 +176,7 @@ TEST_CASE("Drawing round-trips through single-file and directory formats",
 
 TEST_CASE("Drawing golden loads and round-trips (v30)",
           "[drawing][serialization][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v30-drawing.json";
   REQUIRE(fs::exists(golden));
 
@@ -629,7 +630,7 @@ TEST_CASE("Drawing loaders reject the wrong document kind",
 
   // A part file is not a drawing.
   const fs::path partGolden =
-      fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" / "v17-full.json";
+      fs::path(TestSourceDir()) / "tests" / "golden" / "v17-full.json";
   if (fs::exists(partGolden)) {
     const auto asDrawing = DocumentIO::LoadDrawing(partGolden.string());
     CHECK_FALSE(asDrawing.has_value());
@@ -1102,7 +1103,7 @@ TEST_CASE("ResolveDim callout kinds", "[drawing][callout][dimension]") {
 
 TEST_CASE("Drawing golden loads and round-trips (v53 callouts)",
           "[drawing][serialization][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v53-callouts.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
@@ -1127,7 +1128,7 @@ TEST_CASE("Drawing golden loads and round-trips (v89 view quality)",
   // matter: one view saying "exact", one saying "fast", and one saying
   // NOTHING — a view written before v89, which must read as exact rather
   // than as an empty string that matches neither branch.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v89-view-quality.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
@@ -1154,7 +1155,7 @@ TEST_CASE("Drawing golden loads and round-trips (v115 flat pattern sheet)",
   // a view of the part as it is (no key: whatever it has active) beside a
   // view of its Flat configuration, a bend table on that view, and a plain
   // note that says nothing about tables.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v115-flat-pattern-sheet.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
@@ -1192,7 +1193,7 @@ TEST_CASE("Drawing golden loads and round-trips (v134 view rotation)",
           "[drawing][serialization][golden]") {
   // v134 added a view's `rotation_deg`: a piece modelled along X drawn
   // upright. The second view has no key, which is 0.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v134-view-rotation.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());
@@ -1251,7 +1252,7 @@ TEST_CASE("Drawing golden loads and round-trips (v90 hidden occurrences)",
   // v90 added a view's `hidden`. The golden carries a view that drops two
   // occurrences and two that drop none, because "absent" and "empty" must
   // both read as draw-everything.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "drawing" / "v90-view-hidden.json";
   REQUIRE(fs::exists(golden));
   auto dwg = testio::LoadDrawing(golden.string());

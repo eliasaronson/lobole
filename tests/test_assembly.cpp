@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -138,7 +139,7 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // with roles, a load whose anchor is a CONTACT rather than a face, and a
 // pressure that says whose face it is on.
 TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v106-assembly-study.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -183,7 +184,7 @@ TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
 // own face rather than on a contact.
 TEST_CASE("Frozen v107 assembly golden carries a bonded participant",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v107-bonded-study.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -202,7 +203,7 @@ TEST_CASE("Frozen v107 assembly golden carries a bonded participant",
 // on another, which is how a fastener travels with the part it is bolted to.
 TEST_CASE("Frozen v72 assembly golden carries an attachment",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v72-attachment.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -233,7 +234,7 @@ TEST_CASE("Frozen v23 assembly golden loads at the exact schema",
   // Assembly goldens live in a subdirectory so the part golden harness
   // (which scans tests/golden/ non-recursively for {features,bodies,volumes})
   // does not try to load them as parts.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v23-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
@@ -267,7 +268,7 @@ TEST_CASE("Frozen v23 assembly golden loads at the exact schema",
 // value() call.
 TEST_CASE("Frozen v55 sub-assembly golden loads at the exact schema",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v55-subassembly.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -297,7 +298,7 @@ TEST_CASE("Frozen v55 sub-assembly golden loads at the exact schema",
 // active one".
 TEST_CASE("Frozen v56 per-occurrence configuration golden",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v56-occurrence-config.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -314,7 +315,7 @@ TEST_CASE("Frozen v56 per-occurrence configuration golden",
 
 TEST_CASE("A pre-v56 assembly golden means 'the active configuration'",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v55-subassembly.json";
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
@@ -327,7 +328,7 @@ TEST_CASE("A pre-v56 assembly golden means 'the active configuration'",
 // because it has to survive a rename and be unambiguous when one unit is
 // placed twice.
 TEST_CASE("Frozen v57 inner-path mate golden", "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v57-inner-mate.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -347,7 +348,7 @@ TEST_CASE("Frozen v57 inner-path mate golden", "[assembly][golden]") {
 // vertices. Both halves must survive the round trip or the mate silently
 // falls back to one edge's midpoint, which is a different place.
 TEST_CASE("Frozen v65 corner-snap mate golden", "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v65-corner-mate.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -373,7 +374,7 @@ TEST_CASE("Frozen v65 corner-snap mate golden", "[assembly][golden]") {
 // Every mate written before v65 has no second edge, and must stay a
 // single-edge snap: the field is additive and its absence is the norm.
 TEST_CASE("A pre-v65 mate golden has no corner edge", "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v26-assembly.json";
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
@@ -387,7 +388,7 @@ TEST_CASE("A pre-v65 mate golden has no corner edge", "[assembly][golden]") {
 // An older mate has no path and must stay a plain part anchor — the field is
 // additive, and its absence is the overwhelmingly common case.
 TEST_CASE("A pre-v57 mate golden has no inner path", "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v24-assembly.json";
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
@@ -402,7 +403,7 @@ TEST_CASE("A pre-v57 mate golden has no inner path", "[assembly][golden]") {
 // checked against a file that predates the field entirely.
 TEST_CASE("A pre-v55 assembly golden reads as part references",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v26-assembly.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -522,7 +523,7 @@ TEST_CASE("Assembly with mates round-trips (single-file + directory)",
 
 TEST_CASE("A v23 assembly (no mates) still loads under v24", "[assembly]") {
   // Additive bump: the frozen v23 golden must still load, with zero mates.
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v23-assembly.json";
   std::string error;
   auto asmDoc = testio::LoadAssembly(golden.string());
@@ -533,7 +534,7 @@ TEST_CASE("A v23 assembly (no mates) still loads under v24", "[assembly]") {
 
 TEST_CASE("Frozen v24 assembly golden loads at the exact schema",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v24-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
@@ -558,7 +559,7 @@ TEST_CASE("Frozen v24 assembly golden loads at the exact schema",
 
 TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v25-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
@@ -624,7 +625,7 @@ TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
 
 TEST_CASE("Frozen v26 golden: connector snap-edge schema",
           "[assembly][golden]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
                           "assembly" / "v26-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;

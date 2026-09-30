@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -922,7 +923,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 // default (docs/cam/operations.md#the-capability-table-and-the-field-table)
 // exists for.
 TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
-  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path root = fs::path(TestSourceDir()) / "tests" / "golden";
   const fs::path dir = root / "job";
   REQUIRE(fs::exists(dir));
 
@@ -1008,7 +1009,7 @@ TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
 }
 
 TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
-  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path root = fs::path(TestSourceDir()) / "tests" / "golden";
   int newest = 0;
   std::string newestFile;
   // Four corpora, not three. The comment above warns that forgetting one is
@@ -1060,7 +1061,7 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
   // which had shipped its golden correctly. A policy nobody checks is a
   // wish.
   const fs::path doc =
-      fs::path(DESIGNER_SOURCE_DIR) / "docs" / "versioning" / "format.md";
+      fs::path(TestSourceDir()) / "docs" / "versioning" / "format.md";
   REQUIRE(fs::exists(doc));
   std::ifstream in(doc);
   REQUIRE(in);
@@ -1087,7 +1088,7 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
 }
 
 TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
-  const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
   REQUIRE(fs::exists(dir));
 
   std::vector<fs::path> goldens;
@@ -1129,7 +1130,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
 
 TEST_CASE("Golden corpus round-trips through the directory format (F3)",
           "[golden][dirformat]") {
-  const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
   std::vector<fs::path> goldens;
   for (const auto& entry : fs::directory_iterator(dir)) {
     const fs::path& p = entry.path();

@@ -5,6 +5,7 @@
 // placement; inside a loop it is one residual row beside the six per cut
 // mate. Both halves are pinned here, and so is the document round trip.
 
+#include "TestPaths.h"
 #include "core/Angles.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -296,7 +297,7 @@ TEST_CASE("A configuration suppresses mates, relations and occurrences and "
 TEST_CASE("Configuration overlays round-trip, and the v101 golden loads",
           "[assembly][relations][configurations][golden]") {
   const fs::path golden =
-      fs::path(DESIGNER_SOURCE_DIR) /
+      fs::path(TestSourceDir()) /
       "tests/golden/assembly/v101-configuration-overlay.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
@@ -500,7 +501,7 @@ TEST_CASE("Relations round-trip through the file, and the v83 golden loads",
                     Catch::Matchers::ContainsSubstring("gear, rack, screw"));
   CHECK_THROWS(DocumentIO::MateDofFromString("twist"));
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v83-gear-relation.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
@@ -820,7 +821,7 @@ TEST_CASE("A turning cam round-trips, and the v102 golden drives",
   if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v102-rotating-cam.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
@@ -1174,7 +1175,7 @@ TEST_CASE("A click and a toothed clutch round-trip, and the v105 golden "
   CHECK(dj.at("ride").at("dof") == "offset");
   CHECK_FALSE(DocumentIO::RelationToJson(click).contains("teeth"));
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v105-click-and-dogs.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
@@ -1239,8 +1240,8 @@ TEST_CASE("A freewheel round-trips with its history, and the v104 golden "
   CHECK_THROWS_WITH(DocumentIO::FreewheelDrivesFromString("forward"),
                     Catch::Matchers::ContainsSubstring("positive or negative"));
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
-                          "tests/golden/assembly/v104-freewheel.json";
+  const fs::path golden =
+      fs::path(TestSourceDir()) / "tests/golden/assembly/v104-freewheel.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
   REQUIRE((*g)->RelationCount() == 1);
@@ -1300,7 +1301,7 @@ TEST_CASE("Chain and cam round-trip, and the v88 golden loads",
 
   if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v88-chain-and-cam.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());

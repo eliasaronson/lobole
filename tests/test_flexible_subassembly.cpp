@@ -4,6 +4,7 @@
 // relation into its inner mate, posed per placement, checked leaf by leaf —
 // while the sub-assembly's shared document is never written.
 
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -425,7 +426,7 @@ TEST_CASE("An origin anchor with an inner path is the origin it names",
 TEST_CASE("The v129 golden: a flexible placement and mates named by path",
           "[assembly][io]") {
   const fs::path golden =
-      fs::path(DESIGNER_SOURCE_DIR) /
+      fs::path(TestSourceDir()) /
       "tests/golden/assembly/v129-flexible-subassembly.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
@@ -465,7 +466,7 @@ TEST_CASE("The v129 golden: a flexible placement and mates named by path",
 
 TEST_CASE("The v130 golden: an explode step inside a flexible placement",
           "[assembly][io]") {
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v130-explode-inner-part.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());

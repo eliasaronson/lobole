@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include "ui/CreateActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -448,7 +449,7 @@ TEST_CASE("HLR projection rejects bad input cleanly", "[drawing][hlr]") {
 TEST_CASE("HLR timing: real part (v17-full golden)", "[drawing][hlr][perf]") {
   namespace fs = std::filesystem;
   const fs::path golden =
-      fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" / "v17-full.json";
+      fs::path(TestSourceDir()) / "tests" / "golden" / "v17-full.json";
   REQUIRE(fs::exists(golden));
   std::string error;
   auto doc = testio::Load(golden.string());

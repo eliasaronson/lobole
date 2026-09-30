@@ -29,6 +29,7 @@
 // ones can do — provided it is NAMED into the family, which is the one way
 // FromSlug escaped. A new string-to-enum parser goes in as `*FromString`.
 
+#include "TestPaths.h"
 #include "core/cam/CamNames.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -56,7 +57,7 @@ struct SourceFile {
 std::vector<SourceFile> SourcesUnder(const std::string& subdir,
                                      const std::string& ext) {
   std::vector<SourceFile> out;
-  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / subdir;
+  const fs::path root = fs::path(TestSourceDir()) / subdir;
   REQUIRE(fs::exists(root));
   for (const auto& e : fs::recursive_directory_iterator(root)) {
     if (!e.is_regular_file() || e.path().extension() != ext)
@@ -73,7 +74,7 @@ std::vector<SourceFile> SourcesUnder(const std::string& subdir,
 }
 
 std::string Relative(const fs::path& p) {
-  return fs::relative(p, fs::path(DESIGNER_SOURCE_DIR)).string();
+  return fs::relative(p, fs::path(TestSourceDir())).string();
 }
 
 } // namespace
@@ -283,8 +284,7 @@ TEST_CASE("the RPC's op-type list matches the table", "[convention]") {
   // -time literal, so it cannot call OpTypeNameList(); this is what keeps the
   // two from drifting. Adding a type without touching the row leaves the
   // agent-facing documentation quietly wrong about what it may ask for.
-  const fs::path path =
-      fs::path(DESIGNER_SOURCE_DIR) / "src/remote/RemoteCam.cpp";
+  const fs::path path = fs::path(TestSourceDir()) / "src/remote/RemoteCam.cpp";
   std::ifstream f(path);
   REQUIRE(f.good());
   std::stringstream ss;
@@ -315,7 +315,7 @@ TEST_CASE("the adaptive key covers every field the pass reads",
   // here: every such field read anywhere in the file appears inside
   // AdaptiveKey.
   const fs::path path =
-      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamAdaptive.cpp";
+      fs::path(TestSourceDir()) / "src/core/cam/CamAdaptive.cpp";
   std::ifstream f(path);
   REQUIRE(f.good());
   std::stringstream ss;
@@ -363,9 +363,9 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   // hashing the fields a profile reads would be a key that invalidates on
   // things surfacing never looks at.
   const fs::path strategies =
-      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamSurfaceStrategies.cpp";
+      fs::path(TestSourceDir()) / "src/core/cam/CamSurfaceStrategies.cpp";
   const fs::path surface =
-      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamSurface.cpp";
+      fs::path(TestSourceDir()) / "src/core/cam/CamSurface.cpp";
   const auto slurp = [](const fs::path& p) {
     std::ifstream f(p);
     REQUIRE(f.good());
@@ -406,7 +406,7 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   // source, the way this gate reads everything else.
   if (key.find("OpFieldValues(op)") != std::string::npos) {
     const std::string table =
-        slurp(fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamOpFields.cpp");
+        slurp(fs::path(TestSourceDir()) / "src/core/cam/CamOpFields.cpp");
     const std::regex member(R"(&Operation::([A-Za-z_][A-Za-z0-9_]*))");
     size_t named = 0;
     for (auto it = std::sregex_iterator(table.begin(), table.end(), member);
@@ -494,7 +494,7 @@ TEST_CASE("every tool-session sentinel is in the registry", "[convention]") {
   // session from being half-registered — the same move, and the same reason,
   // as the scene-renderer registry below.
   const auto read = [](const char* rel) {
-    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::ifstream f(fs::path(TestSourceDir()) / rel);
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
@@ -568,7 +568,7 @@ TEST_CASE("every scene renderer is in the draw-order registry",
   // make that mistake.) The prepass renderers — shadow, SSAO, ray tracing —
   // do not implement it and are correctly absent.
   const std::string main = [] {
-    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / "src/app/main.cpp");
+    std::ifstream f(fs::path(TestSourceDir()) / "src/app/main.cpp");
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
@@ -625,14 +625,14 @@ TEST_CASE("conventions: this binary is not older than the source",
   //
   // Rebuilds here are ccache-warm, so a false positive costs seconds and a
   // false negative costs what it cost twice.
-  const fs::path exe = fs::path(DESIGNER_TEST_BINARY);
+  const fs::path exe = fs::path(TestBinaryPath());
   if (!fs::exists(exe))
     return; // installed or relocated: nothing to compare against
   const auto built = fs::last_write_time(exe);
   fs::path newest;
   fs::file_time_type newestAt{};
   for (const char* dir : {"src", "tests"}) {
-    const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / dir;
+    const fs::path root = fs::path(TestSourceDir()) / dir;
     if (!fs::exists(root))
       continue;
     for (const auto& e : fs::recursive_directory_iterator(root)) {
@@ -756,7 +756,7 @@ TEST_CASE("CADShape replaces its shape only through SetShape", "[convention]") {
   // added later would keep a box describing the shape it USED to be — and
   // that number reaches CAM as a stock size, which is the wrong place to
   // discover it.
-  const fs::path src = fs::path(DESIGNER_SOURCE_DIR) / "src/cad/CADKernel.cpp";
+  const fs::path src = fs::path(TestSourceDir()) / "src/cad/CADKernel.cpp";
   REQUIRE(fs::exists(src));
   std::ifstream f(src);
   std::stringstream ss;
@@ -908,7 +908,7 @@ TEST_CASE("no boolean asks to be non-destructive after it has built",
 TEST_CASE("every boolean in Measure.cpp is built through BuildQuery",
           "[convention]") {
   const fs::path path =
-      fs::path(DESIGNER_SOURCE_DIR) / "src" / "core" / "Measure.cpp";
+      fs::path(TestSourceDir()) / "src" / "core" / "Measure.cpp";
   REQUIRE(fs::exists(path));
   std::ifstream f(path);
   std::stringstream ss;
@@ -1007,7 +1007,7 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
   // tree answers through CommandIcon, so it cannot disagree with the button,
   // and what is left to check is the table itself.
   auto read = [](const char* rel) {
-    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::ifstream f(fs::path(TestSourceDir()) / rel);
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
@@ -1105,7 +1105,7 @@ TEST_CASE("a command's icon comes from ui/Icons.cpp alone", "[convention]") {
   // glyph is now CommandIcon's, and nothing else may name one for a command:
   // not a toolbar button, a flyout variant, or the three tree-row tables.
   const auto read = [](const char* rel) {
-    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::ifstream f(fs::path(TestSourceDir()) / rel);
     std::stringstream ss;
     ss << f.rdbuf();
     REQUIRE(!ss.str().empty());
@@ -1154,7 +1154,7 @@ TEST_CASE("a command's icon comes from ui/Icons.cpp alone", "[convention]") {
 // nothing (docs/README.md says how the docs are organised).
 TEST_CASE("every doc a file cites exists, down to its heading",
           "[convention][docs]") {
-  const fs::path repo(DESIGNER_SOURCE_DIR);
+  const fs::path repo(TestSourceDir());
   const auto slurp = [](const fs::path& p) {
     std::ifstream f(p);
     std::stringstream ss;

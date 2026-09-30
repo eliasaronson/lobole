@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -400,7 +401,7 @@ TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128"))
     REQUIRE(testio::Save(doc, out));
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/v128-custom-axis-helix-start.json";
   auto g = testio::Load(golden.string());
   REQUIRE(g != nullptr);

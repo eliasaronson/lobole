@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/Document.h"
@@ -116,7 +117,7 @@ TEST_CASE("What is not a name does not decode", "[toponaming]") {
 
 TEST_CASE("Every element name in the golden corpus decodes",
           "[toponaming][golden]") {
-  const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
   std::vector<fs::path> files;
   for (const auto& entry : fs::directory_iterator(dir))
     if (entry.path().extension() == ".json" &&

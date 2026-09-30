@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include "TestIO.h"
@@ -54,7 +55,7 @@ struct ScopedThreads {
 // feature code on several threads at once.
 fs::path GoldenProject(const char* name, size_t* parts) {
   const fs::path proj = TempProject(name);
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden";
   nlohmann::json docs = nlohmann::json::array();
   uint64_t id = 1;
   for (const auto& entry : fs::directory_iterator(golden)) {

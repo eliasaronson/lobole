@@ -5,6 +5,7 @@
 // that does not solve is reported unsolved, never drawn as the last good
 // pose.
 
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -245,8 +246,8 @@ TEST_CASE("A motion study round-trips, and the v87 golden loads",
   // loaded here every time.
   if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
-                          "tests/golden/assembly/v87-motion-study.json";
+  const fs::path golden =
+      fs::path(TestSourceDir()) / "tests/golden/assembly/v87-motion-study.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
   REQUIRE((*g)->GetMotionStudies().size() == 1);
@@ -521,7 +522,7 @@ TEST_CASE("The v128 golden: a study that names its configuration",
   if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128_ASM"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
 
-  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+  const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v128-study-configuration.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());

@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/Document.h"
@@ -82,7 +83,7 @@ std::vector<std::string> Signature(const Document& doc) {
 // Every golden document, which is every format era we still load.
 std::vector<fs::path> GoldenDocuments() {
   std::vector<fs::path> files;
-  const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path dir = fs::path(TestSourceDir()) / "tests" / "golden";
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(dir, ec)) {
     const std::string name = entry.path().filename().string();

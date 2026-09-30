@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include "cad/CADKernel.h"
 #ifdef HAVE_CAM
 
@@ -265,7 +266,7 @@ void FreezeProgram(const cam::Setup& setup, const std::vector<Body>& bodies,
     INFO(error);
     REQUIRE(cam::PostProcess(post, setup, paths, {}, gcode, &error));
     const std::filesystem::path golden =
-        std::filesystem::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+        std::filesystem::path(TestSourceDir()) / "tests" / "golden" /
         (stem + "-" + post + ".nc");
 
     if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {
@@ -312,7 +313,7 @@ TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
     std::string gcode, error;
     REQUIRE(cam::PostProcess(post, setup, paths, {}, gcode, &error));
     const std::filesystem::path golden =
-        std::filesystem::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+        std::filesystem::path(TestSourceDir()) / "tests" / "golden" /
         ("cam-block-" + post + ".nc");
 
     if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {

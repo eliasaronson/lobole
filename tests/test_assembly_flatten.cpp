@@ -1,3 +1,4 @@
+#include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -331,7 +332,7 @@ TEST_CASE("The v135 golden: part placements in configurations and materials",
           "[assembly][io][configuration]") {
   // One piece part placed as pawns and a rook, in maple and walnut, and a
   // king in whatever the part has active and made of its own material.
-  const std::string golden = std::string(DESIGNER_SOURCE_DIR) +
+  const std::string golden = std::string(TestSourceDir()) +
                              "/tests/golden/assembly/v135-part-"
                              "configurations.json";
   auto g = DocumentIO::LoadAssembly(golden);
