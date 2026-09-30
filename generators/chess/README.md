@@ -5,7 +5,8 @@ from rotary blanks, a board with epoxy-filled dark squares, and a jig that
 holds the pieces upside down for their undersides. The plan and what is left
 to do: [docs/plans/chess-set-dogfood.md](../../docs/plans/chess-set-dogfood.md).
 
-    generators/chess/run_all.sh PORT      # everything, ~45 min
+    generators/chess/run_all.sh PORT      # everything, ~9 min
+    generators/chess/run_all.sh PORT --from cam --only board   # one job, ~40 s
 
 Each stage opens the project the one before saved; all of it lands in
 `scratch/chess/` (projects, `nc/` programs, renders, reports, logs):
