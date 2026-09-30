@@ -13,7 +13,10 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dir="$root/.nix-env"
 mkdir -p "$dir"
 nixpkgs="$(nix-instantiate --find-file nixpkgs 2>/dev/null || echo none)"
-key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; } | sha256sum | cut -c1-16)"
+# FORMAT versions what the cache holds: a file written by an older nix-run
+# (the whole environment, DISPLAY and TMPDIR frozen in) must not be read.
+FORMAT=2
+key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; echo "format $FORMAT"; } | sha256sum | cut -c1-16)"
 env="$dir/$key.sh"
 alive() { # every store path on the cached PATH still exists
   local p
