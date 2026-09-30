@@ -36,7 +36,20 @@ cache, but nothing survives a restart or a new run.
 - **A true Debug build (`-Og`) prints 9 warnings**, among them
   `-Wformat-truncation` in `CurveFeature.cpp` and `-Wunused-result` in
   `test_gitvault.cpp`. Fix them.
-- **`gui-tests-xvfb.sh` and `worktree-build.sh` enter `nix-shell` directly**;
-  `tools/nix-run` saves ~5 s each time.
 
 **Verified by:** a Debug build with no warnings, and both scripts' runs.
+
+## 4. Two bugs the GUI round found
+
+- **Editor field edits do not undo.** The op, tool and fixture editors in the
+  tool window draw under no undo guard, so a changed depth, tool or fixture
+  size cannot be taken back (the fixture editor's explicit snapshots aside).
+  Each committed field edit should be one undo step, as the setup editor's
+  are.
+- **A setup's `rapidFeed` is not saved.** Only the machine's copy is, so a
+  setup's own rapid rate is lost on reload. It goes in the setup's JSON, which
+  is a format bump.
+
+**Verified by:** a GUI test per editor (edit a field, undo, the value is
+back), and a golden round-trip of a setup's rapid feed.
+
