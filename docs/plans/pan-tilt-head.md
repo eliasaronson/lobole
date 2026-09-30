@@ -40,11 +40,7 @@ per part, a `run_all.sh PORT [--from STAGE]`, and a log ending in `done` or
 
 ### 0. Survey
 
-How others build worm pairs and thread-mill: `~/Documents/CAD` (FreeCAD's
-gear workbench, if present, and `Mod/CAM/Path/Op/ThreadMilling.py` with its
-generator and thread CSV tables; OpenSCAD and CadQuery gear libraries under
-`parts/`; the slicers' hole compensation). One page of what to copy and what
-to avoid, in this plan's phase notes. No code.
+Done: see [pan-tilt-survey.md](pan-tilt-survey.md).
 
 ### 1. Threads: modelled, and imperial
 
