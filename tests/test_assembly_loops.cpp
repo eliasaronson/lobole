@@ -10,6 +10,7 @@
 #include "core/features/SketchFeature.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -848,6 +849,31 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
   for (const Mate& m : asmDoc.GetMates()) {
     CHECK(m.error.empty());
     CHECK(m.residualMm == 0.0);
+  }
+  // Closed as APPLIED: the occurrences written back put each mate's two
+  // frames on one another -- the cut mate's too -- read from the placements
+  // everything downstream uses, not from the loop solver's own matrices.
+  const auto worldFrame = [&](uint64_t occ, size_t part, size_t i) {
+    const Occurrence* o = asmDoc.FindById(occ);
+    REQUIRE(o != nullptr);
+    return glm::translate(glm::mat4(1.0f), o->position) *
+           glm::mat4_cast(o->orientation) * FrameOf(*parts[part], i).Matrix();
+  };
+  const struct {
+    uint64_t oa;
+    size_t pa, fa;
+    uint64_t ob;
+    size_t pb, fb;
+  } joints[] = {{g, 0, 0, c, 1, 0},
+                {c, 1, 1, k, 2, 0},
+                {k, 2, 1, r, 3, 1},
+                {g, 0, 1, r, 3, 0}};
+  for (const auto& j : joints) {
+    const glm::mat4 a = worldFrame(j.oa, j.pa, j.fa);
+    const glm::mat4 b = worldFrame(j.ob, j.pb, j.fb);
+    INFO("joint " << j.oa << "/" << j.fa << " to " << j.ob << "/" << j.fb);
+    CHECK(glm::length(glm::vec3(a[3]) - glm::vec3(b[3])) < 1e-3f);
+    CHECK(glm::dot(glm::vec3(a[2]), glm::vec3(b[2])) > 0.9999f);
   }
 
   // Now the crank pin's frame is tilted 30 degrees about its Y.

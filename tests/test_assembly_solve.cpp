@@ -4,8 +4,10 @@
 #include "core/AssemblyLoopSolve.h" // MateAdjustFor, DeriveMateDofs
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -592,4 +594,158 @@ TEST_CASE("Unresolvable connector names its side and suggests near misses",
   INFO(err2);
   CHECK(err2.find("connector B (LobeBearing1)") != std::string::npos);
   CHECK(err2.find("similar:") == std::string::npos);
+}
+
+namespace {
+// The planar face of `doc`'s one body whose outward normal is `dir`.
+ElementRef FaceFacingDir(const Document& doc, const glm::vec3& dir) {
+  const Body& b = doc.GetBodies().front();
+  for (const auto& [index, name] : b.elementMap.names) {
+    glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+    if (b.shape.FacePlane(index, c, n, u) && glm::dot(n, dir) > 0.999f)
+      return ElementRef{b.createdBy, name};
+  }
+  return {};
+}
+
+glm::mat4 PlacementOf(const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), o.position) *
+         glm::mat4_cast(o.orientation);
+}
+} // namespace
+
+// The mate solve's contract is not the transform it writes but what that
+// transform does to the faces: two faces mated face to face -- `flipped`,
+// the RPC's default -- TOUCH, measured by the measure tool in world space,
+// with opposed normals, and the mated part sits on the other rather than
+// inside it. And a revolute's `rotation` turns the part right-handed about
+// the seat's outward normal, measured on a side face. Every other test here
+// mates a face to an origin and reads back `position`.
+TEST_CASE("A face-to-face mate puts the faces together as measured",
+          "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext); // 4 x 4 x 3
+  const assembly::PartResolver resolve = [&](uint64_t, uint64_t) {
+    return box.get();
+  };
+  const std::vector<Body>& bodies = box->GetBodies();
+  const ElementRef top = FaceFacingDir(*box, {0, 0, 1});
+  const ElementRef bottom = FaceFacingDir(*box, {0, 0, -1});
+  const ElementRef side = FaceFacingDir(*box, {1, 0, 0});
+  REQUIRE(top.IsSet());
+  REQUIRE(bottom.IsSet());
+  REQUIRE(side.IsSet());
+
+  for (const MateType type : {MateType::Fastened, MateType::Revolute}) {
+    AssemblyDocument asmDoc;
+    asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true));
+    Occurrence loose = MakeOcc(1, {100, 50, 20});
+    loose.orientation =
+        glm::angleAxis(glm::radians(70.0f), glm::normalize(glm::vec3(1, 2, 3)));
+    asmDoc.AddOccurrence(loose);
+    Mate m;
+    m.type = type;
+    m.a.occurrenceId = 1;
+    m.a.anchor.face = top;
+    m.b.occurrenceId = 2;
+    m.b.anchor.face = bottom;
+    m.flipped = true;
+    asmDoc.AddMate(m);
+    const assembly::SolveReport rep = assembly::Solve(asmDoc, resolve);
+    INFO("mate type " << static_cast<int>(type));
+    REQUIRE(rep.erroredMates == 0);
+
+    const glm::mat4 xa = PlacementOf(*asmDoc.FindById(1));
+    const glm::mat4 xb = PlacementOf(*asmDoc.FindById(2));
+    const auto gap =
+        Measure::DistanceDetailed(bodies, top, xa, bodies, bottom, xb);
+    REQUIRE(gap.has_value());
+    CHECK(gap->distance < 1e-4);
+    const auto angle = Measure::Angle(bodies, top, xa, bodies, bottom, xb);
+    REQUIRE(angle.has_value());
+    CHECK_THAT(angle->degrees, WithinAbs(180.0, 1e-3)); // face to face
+    // On it, not through it: b's own top is a box height above a's.
+    const auto stack =
+        Measure::DistanceDetailed(bodies, top, xa, bodies, top, xb);
+    REQUIRE(stack.has_value());
+    CHECK_THAT(stack->distance, WithinAbs(3.0, 1e-4));
+
+    if (type != MateType::Revolute)
+      continue;
+    // A quarter turn of the free rotation: b's side face turns +90 about
+    // a's seat normal (world +Z), right-handed.
+    const auto sideDir = Measure::DirectionOf(bodies, side);
+    REQUIRE(sideDir.has_value());
+    const glm::vec3 before = glm::mat3(xb) * glm::vec3(sideDir->dir);
+    asmDoc.FindMateById(3)->rotation = glm::radians(90.0f);
+    REQUIRE(assembly::Solve(asmDoc, resolve).erroredMates == 0);
+    const glm::mat4 turned = PlacementOf(*asmDoc.FindById(2));
+    const glm::vec3 after = glm::mat3(turned) * glm::vec3(sideDir->dir);
+    INFO("side normal before " << before.x << " " << before.y << " " << before.z
+                               << " after " << after.x << " " << after.y << " "
+                               << after.z);
+    CHECK(glm::length(after - glm::vec3(-before.y, before.x, before.z)) <
+          1e-4f);
+    // ...and still seated.
+    const auto still =
+        Measure::DistanceDetailed(bodies, top, xa, bodies, bottom, turned);
+    REQUIRE(still.has_value());
+    CHECK(still->distance < 1e-4);
+  }
+}
+
+// A Frame's `rotation_deg` is read by whatever mates to it, so its contract
+// is where a part mated there ends up facing: Rx then Ry then Rz in the
+// parent's axes (parent . T . Rx . Ry . Rz), right-handed. [0, 0, 90] turns a
+// mated part's +X side to +Y; [90, 0, 90] turns it to +Z, which the other
+// order (+Y) and the other hand (-Z) both miss. Nothing tested the field.
+TEST_CASE("A part mated to a turned frame faces the way the frame says",
+          "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const ElementRef side = FaceFacingDir(*box, {1, 0, 0});
+  REQUIRE(side.IsSet());
+  const auto sideDir = Measure::DirectionOf(box->GetBodies(), side);
+  REQUIRE(sideDir.has_value());
+
+  struct Case {
+    glm::dvec3 rotationDeg;
+    glm::vec3 want;
+  };
+  for (const Case& c :
+       {Case{{0, 0, 90}, {0, 1, 0}}, Case{{90, 0, 90}, {0, 0, 1}},
+        Case{{0, -90, 0}, {0, 0, 1}}}) {
+    Document base;
+    auto fr = std::make_unique<FrameFeature>("Seat", FrameKind::Offset);
+    fr->offset[0] = 10.0;
+    for (int i = 0; i < 3; i++)
+      fr->rotationDeg[i] = c.rotationDeg[i];
+    base.AddFeature(std::move(fr));
+    REQUIRE(base.Regenerate());
+    const uint64_t frameId = base.GetFeature(0)->GetId();
+    const assembly::PartResolver resolve = [&](uint64_t partId, uint64_t) {
+      return partId == 1 ? &base : box.get();
+    };
+
+    AssemblyDocument asmDoc;
+    asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true));
+    asmDoc.AddOccurrence(MakeOcc(2, {50, 60, 70}));
+    Mate m;
+    m.type = MateType::Fastened;
+    m.a.occurrenceId = 1;
+    m.a.anchor.frameId = frameId;
+    m.b.occurrenceId = 2;
+    m.b.anchor.origin = true;
+    m.flipped = false;
+    asmDoc.AddMate(m);
+    INFO("rotation_deg " << c.rotationDeg.x << " " << c.rotationDeg.y << " "
+                         << c.rotationDeg.z);
+    REQUIRE(assembly::Solve(asmDoc, resolve).erroredMates == 0);
+    const Occurrence& placed = *asmDoc.FindById(2);
+    const glm::vec3 faces =
+        glm::mat3(PlacementOf(placed)) * glm::vec3(sideDir->dir);
+    INFO("side faces " << faces.x << " " << faces.y << " " << faces.z);
+    CHECK(glm::length(faces - c.want) < 1e-4f);
+    CHECK(glm::length(placed.position - glm::vec3(10, 0, 0)) < 1e-4f);
+  }
 }

@@ -171,6 +171,73 @@ TEST_CASE("Named view orientations agree with the model's up axis",
   CHECK(frontUp == conv::kWorldUp); // named views stand up in the world frame
 }
 
+// The contract of a view's rotation_deg, checked on what the projector DRAWS
+// rather than on the formula that turns `up`: at +90 the picture turns
+// COUNTER-clockwise on the sheet. The part is asymmetric in both directions
+// so a clockwise turn, a mirror or a swapped axis each fail: an 80 x 60 x 8
+// plate with a 10 mm post at its +X end standing 30 tall. Unturned, the
+// front view draws the post at the RIGHT, rising UP; turned CCW by 90 what
+// was right is up and what was up is left, so the post is at the TOP,
+// reaching LEFT.
+TEST_CASE("A view turned by 90 degrees draws its part turned counter-clockwise",
+          "[drawing][hlr]") {
+  CADShape part = CADKernel::Instance()
+                      .CreateBox(glm::vec3(0, 0, 0), glm::vec3(80, 60, 8))
+                      .Union(CADKernel::Instance().CreateBox(
+                          glm::vec3(70, 0, 0), glm::vec3(80, 60, 30)));
+  REQUIRE(part.IsValid());
+
+  const auto project = [&](double rotationDeg) {
+    DrawingView v;
+    v.orientation = ViewOrientation::Front;
+    v.rotationDeg = rotationDeg;
+    glm::dvec3 dir, up;
+    ViewAxes(v, dir, up); // what every projection of a view goes through
+    std::string err;
+    auto result = ProjectView(One(part), dir, up, {}, &err);
+    INFO(err);
+    REQUIRE(result.has_value());
+    return result->curves;
+  };
+  // Where the post is, in a view's own bounding box: the extent of the
+  // points lying in the top tenth and the right tenth of the picture.
+  struct Reach {
+    Box2 box;
+    double topMinX = 1e30;    // leftmost point near the top edge
+    double bottomMinX = 1e30; // leftmost point near the bottom edge
+    double rightMaxY = -1e30; // highest point near the right edge
+  };
+  const auto reachOf = [](const std::vector<ProjectedCurve>& curves) {
+    Reach r;
+    r.box = BoundsOf(curves, true);
+    for (const auto& c : curves)
+      for (const glm::dvec2& p : c.points) {
+        if (p.y > r.box.max.y - 0.1 * r.box.H())
+          r.topMinX = std::min(r.topMinX, p.x);
+        if (p.y < r.box.min.y + 0.1 * r.box.H())
+          r.bottomMinX = std::min(r.bottomMinX, p.x);
+        if (p.x > r.box.max.x - 0.1 * r.box.W())
+          r.rightMaxY = std::max(r.rightMaxY, p.y);
+      }
+    return r;
+  };
+
+  // Unturned: 80 across, 30 up, the post at the right reaching the top.
+  const Reach flat = reachOf(project(0.0));
+  CHECK_THAT(flat.box.W(), WithinAbs(80.0, 1e-6));
+  CHECK_THAT(flat.box.H(), WithinAbs(30.0, 1e-6));
+  CHECK_THAT(flat.rightMaxY, WithinAbs(flat.box.max.y, 1e-6));
+
+  // Turned +90: 30 across, 80 up, and the post -- now along the top edge --
+  // reaches the LEFT side, while the bottom is the plate's 8 mm edge at the
+  // RIGHT. Clockwise puts the post at the bottom and the plate at the left.
+  const Reach turned = reachOf(project(90.0));
+  CHECK_THAT(turned.box.W(), WithinAbs(30.0, 1e-6));
+  CHECK_THAT(turned.box.H(), WithinAbs(80.0, 1e-6));
+  CHECK_THAT(turned.topMinX, WithinAbs(turned.box.min.x, 1e-6));
+  CHECK_THAT(turned.bottomMinX, WithinAbs(turned.box.max.x - 8.0, 1e-6));
+}
+
 TEST_CASE("HLR box front view traces every curve to a source edge",
           "[drawing][hlr]") {
   CADShape box = CADKernel::Instance().CreateBox(100.0, 40.0, 40.0);

@@ -4,12 +4,14 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/features/DraftFeature.h"
 #include "core/io/Serialization.h"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <numbers>
 
 using Catch::Matchers::WithinRel;
 
@@ -44,6 +46,51 @@ TEST_CASE("Draft tapers a box's side faces (volume drops)", "[draft]") {
   const double after = doc.GetBodies()[0].shape.Volume();
   CHECK(after < before);       // tapered inward going up
   CHECK(after > before * 0.6); // 5-degree taper, not collapsed
+}
+
+// The angle is the contract, so it is measured, not inferred from a volume
+// that merely went down: every drafted face stands at 90 - 5 degrees to the
+// top cap, by the measure tool, leaning in (its normal has a +Z component,
+// so the part narrows going up the pull), and the solid is exactly the
+// frustum a 5-degree taper from a 10 mm square at the neutral plane makes.
+TEST_CASE("Draft turns each face by its angle as measured", "[draft]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  std::vector<ElementRef> refs;
+  for (const std::string& f : SideFaces(doc.GetBodies()[0]))
+    refs.push_back(ElementRef{id, f});
+  REQUIRE(refs.size() == 4);
+  doc.AddFeature(
+      std::make_unique<DraftFeature>("Taper", id, refs, 5.0, PlaneType::XY));
+  REQUIRE(doc.Regenerate());
+  const Body& b = doc.GetBodies()[0];
+
+  ElementRef top;
+  std::vector<ElementRef> sides;
+  for (const auto& [idx, name] : b.elementMap.names) {
+    glm::vec3 c, n, u;
+    if (!b.shape.FacePlane(idx, c, n, u))
+      continue;
+    if (n.z > 0.99f)
+      top = ElementRef{b.createdBy, name};
+    else if (std::abs(n.z) < 0.5f) {
+      sides.push_back(ElementRef{b.createdBy, name});
+      INFO("side normal " << n.x << " " << n.y << " " << n.z);
+      CHECK(n.z > 0.0f); // leaning in: the part narrows going up
+    }
+  }
+  REQUIRE(top.IsSet());
+  REQUIRE(sides.size() == 4);
+  for (const ElementRef& s : sides) {
+    const auto a = Measure::Angle(doc.GetBodies(), s, top);
+    REQUIRE(a.has_value());
+    CHECK_THAT(a->degrees, Catch::Matchers::WithinAbs(85.0, 1e-6));
+  }
+  const double inset = 10.0 * std::tan(5.0 * std::numbers::pi / 180.0);
+  const double a1 = 100.0, a2 = (10.0 - 2.0 * inset) * (10.0 - 2.0 * inset);
+  const double frustum = 10.0 / 3.0 * (a1 + a2 + std::sqrt(a1 * a2));
+  CHECK_THAT(b.shape.Volume(), WithinRel(frustum, 1e-6));
 }
 
 TEST_CASE("Draft rejects a cap face perpendicular to the pull", "[draft]") {

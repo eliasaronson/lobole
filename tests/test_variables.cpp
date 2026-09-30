@@ -4,6 +4,7 @@
 #include "TestIO.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -137,6 +138,59 @@ TEST_CASE("Expression-driven sketch dimension re-solves during regeneration",
 
   doc.SetParameter("r", "4");
   CHECK_THAT(circleRadius(), WithinRel(4.0, 1e-9));
+}
+
+// An ANGLE dimension through everything that carries it: the expression in
+// degrees, VisitExprs' conversion to the radians the solver takes, the
+// solve, the extrude, and the measure tool on the solid. The two faces a
+// 30-degree corner makes stand at 180 - 30 between their outward normals,
+// on the side of the base line the sketch was drawn on -- and at 130 when
+// the variable says 50. The solver's own test checks |angle| only.
+TEST_CASE("An angle dimension's variable is the angle the solid measures",
+          "[variables][sketch]") {
+  Document doc;
+  doc.SetParameter("theta", "30");
+  auto skOwned = std::make_unique<SketchFeature>("Sketch1", kXY);
+  const uint32_t base = skOwned->AddEntity(sketch::Line{{0, 0}, {40, 0}});
+  const uint32_t leg = skOwned->AddEntity(sketch::Line{{0, 0}, {30, 20}});
+  const uint32_t close = skOwned->AddEntity(sketch::Line{{40, 0}, {30, 20}});
+  using K = sketch::ConstraintKind;
+  skOwned->constraints.push_back({K::Coincident, {leg, 0}, {base, 0}});
+  skOwned->constraints.push_back({K::Coincident, {close, 0}, {base, 1}});
+  skOwned->constraints.push_back({K::Coincident, {close, 1}, {leg, 1}});
+  skOwned->constraints.push_back({K::Horizontal, {base, 0}});
+  skOwned->constraints.push_back({K::Vertical, {close, 0}});
+  sketch::Constraint angle{K::Angle, {base, 0}, {leg, 0}, 0.5};
+  angle.valueExpr = "theta";
+  skOwned->constraints.push_back(angle);
+  doc.AddFeature(std::move(skOwned));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketchId, 5.0,
+                                                  ExtrudeMode::NewBody));
+  REQUIRE(doc.Regenerate());
+
+  const auto measured = [&] {
+    REQUIRE(doc.GetBodies().size() == 1);
+    const Body& b = doc.GetBodies()[0];
+    ElementRef under, slope;
+    for (const auto& [idx, name] : b.elementMap.names) {
+      glm::vec3 c, n, u;
+      if (!b.shape.FacePlane(idx, c, n, u) || std::abs(n.z) > 0.5f)
+        continue;
+      if (n.y < -0.99f)
+        under = ElementRef{b.createdBy, name}; // the base line's face
+      else if (n.x < -0.01f)
+        slope = ElementRef{b.createdBy, name}; // the leg's
+    }
+    REQUIRE(under.IsSet()); // still below: drawn above the base, kept there
+    REQUIRE(slope.IsSet());
+    const auto a = Measure::Angle(doc.GetBodies(), under, slope);
+    REQUIRE(a.has_value());
+    return a->degrees;
+  };
+  CHECK_THAT(measured(), Catch::Matchers::WithinAbs(150.0, 1e-4));
+  doc.SetParameter("theta", "50");
+  CHECK_THAT(measured(), Catch::Matchers::WithinAbs(130.0, 1e-4));
 }
 #endif
 
