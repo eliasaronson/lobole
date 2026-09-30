@@ -1876,6 +1876,54 @@ class Part(_Tab):
         )
         return Thread(self, feature["id"])
 
+    def _gear_blank(self, face, what):
+        if not isinstance(face, Face) or face.kind != "cylinder":
+            raise SdkError(f"{what} needs the blank's cylindrical Face")
+        if face._part.id != self.id or face._part.app is not self.app:
+            raise SdkError(f"{what} face belongs to a different part or connection")
+
+    def worm(self, face, module=None, starts=1, hand="right", backlash=0.0,
+             length=0.0, pressure_angle_deg=20.0, name="Worm"):
+        """Cut a ZA worm into a cylindrical blank (docs/modeling/worm-gears.md).
+
+        The blank's outside is the worm's tip: its pitch diameter is the tip
+        less two modules, and ``module`` omitted is tip / 12 (a diameter
+        quotient of 10). ``backlash`` (mm, axial) thins each flank by half of
+        it. The response's ``report`` carries the lead angle and whether the
+        pair self-locks dry and greased.
+        """
+        if hand not in ("right", "left"):
+            raise SdkError(f"worm hand must be 'right' or 'left', not {hand!r}")
+        self._gear_blank(face, "worm")
+        f = dict(type="Worm", name=name, face=face.ref, starts=starts,
+                 hand=hand, pressure_angle_deg=pressure_angle_deg)
+        if module:
+            f["module"] = module
+        if backlash:
+            f["backlash"] = backlash
+        if length:
+            f["length"] = length
+        return self._feature(f)
+
+    def worm_wheel(self, face, teeth=40, module=None, starts=1,
+                   worm_diameter=None, hand="right", pressure_angle_deg=20.0,
+                   name="Worm wheel"):
+        """Hob a worm wheel from a cylindrical blank: its rim is the face,
+        its length the face width. Give the mating worm's starts, pitch
+        diameter (``worm_diameter``; omitted = 10 modules) and hand; the
+        ``report`` carries the centre distance to mount the worm at, the
+        ratio, the throat and self-locking."""
+        if hand not in ("right", "left"):
+            raise SdkError(f"worm wheel hand must be 'right' or 'left', not {hand!r}")
+        self._gear_blank(face, "worm_wheel")
+        f = dict(type="WormWheel", name=name, face=face.ref, teeth=teeth,
+                 starts=starts, hand=hand, pressure_angle_deg=pressure_angle_deg)
+        if module:
+            f["module"] = module
+        if worm_diameter:
+            f["worm_diameter"] = worm_diameter
+        return self._feature(f)
+
     def fillet(self, edges, r, name="Fillet"):
         return self._blend("Fillet", edges, r, name)
 
@@ -2551,6 +2599,18 @@ class Asm(_Tab):
         return self.app.add_relation(type="gear", **_mate_ref("a", mate_a),
                                      **_mate_ref("b", mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
+
+    def worm(self, worm_mate, wheel_mate, starts, teeth, hand, **kw):
+        """Couple a worm's revolute to its wheel's on crossed axes. The ratio
+        is starts/teeth; its sign is read from the hand and from where the
+        worm sits (docs/assemblies/relations.md#worm) — a gear relation's
+        fixed sign is wrong for half of the ways a pair goes together."""
+        if hand not in ("right", "left"):
+            raise SdkError(f"worm hand must be 'right' or 'left', not {hand!r}")
+        self.activate()
+        return self.app.add_relation(type="worm", **_mate_ref("a", worm_mate),
+                                     **_mate_ref("b", wheel_mate), starts=starts,
+                                     teeth=teeth, hand=hand, **kw)
 
     def thread_engagement(self, a, b):
         """Check that a declared thread joint exists, not merely that it is clash-free.

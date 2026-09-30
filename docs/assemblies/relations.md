@@ -36,6 +36,7 @@ or `offset`). Most kinds are one equation:
 | `cam` | rotation → offset or rotation | none: a lift table |
 | `freewheel` | rotation → rotation | a bare `ratio`, plus `drives` and `lead` |
 | `click` | one mate's rotation (a = b) | none: a one-way hold |
+| `worm` | the worm's rotation → the wheel's, on crossed axes | `±starts / teeth`, the sign from the hand and the geometry ([Worm](#worm)) |
 
 The ratio is derived from the kind's own numbers when they are given (tooth
 counts, pitch radius, pitch) and otherwise taken as a bare `ratio`; a relation
@@ -46,7 +47,7 @@ fastened mate's `rotation` is an authored twist, not a DOF); a rack whose
 slider runs *along* the pinion's axis (a slider slides along its connector
 Z, and origin frames are Z-up). A gear pair whose axles are more than 5° off
 parallel is accepted with a `warnings` entry (bevel and crossed pairs are
-real).
+real), and so is a worm pair more than 5° off square.
 
 ## Enforcement
 
@@ -167,6 +168,38 @@ drove it is left disagreeing, which that relation's own residual check
 reports. What rides over the teeth the click holds is a cam, which follows
 their shape. Like a freewheel, it is left out of loop rows.
 
+## Worm
+
+A worm drives its wheel on crossed axes, `a` the worm's revolute and `b` the
+wheel's: `add_relation {type: "worm", a, b, starts, teeth, hand: right|left}`.
+A `ratio` is refused, and so is a pair whose axes are parallel or meet.
+
+The size of the ratio is starts/teeth. Its **sign** is what a gear relation
+cannot give. A right-hand worm turned +φ about its axis u screws its thread
+back along u and carries the wheel's tooth with it. The wheel, on axis w,
+therefore turns −φ·z1/z2 when the worm sits on the side c (from the wheel's
+axis to the worm's) where (u × w)·c > 0, and the other way on the other side.
+A left hand reverses it again.
+
+A mate's DOF turns its B side about its A frame's Z. So a gear that is its
+mate's A side (the carrier on B) turns the other way about that axis. The
+carrier is taken as the occurrence the two mates share, else the fixed one,
+else the A side.
+
+`gear`'s fixed −za/zb is right for one of the ways a pair can be put
+together. The pan/tilt head proved it wrong for the rest: the worm meshing
+test with the sign reversed clashes within a quarter turn. That is why this
+is a kind of its own (`worm::RelationRatio` in `src/core/WormGear.cpp`).
+
+The ratio is derived once, when the relation is made, from the mates' frames
+as they stand. Moving a mate's frame afterwards does not re-derive it. Once
+made, it is an ordinary equality relation, propagated in a tree and a row in
+a loop. Proved on real geometry in `tests/test_worm.cpp`: a motion study
+turns the worm 1¼ turns, checks every sample exactly, and finds no clash,
+right- and left-handed. Self-locking is reported by the features
+([../modeling/worm-gears.md](../modeling/worm-gears.md#self-locking)), not
+simulated.
+
 ## Surface
 
 - `add_relation {type, a, b, …}` — kind-specific parameters as above;
@@ -179,7 +212,7 @@ their shape. Like a freewheel, it is left out of loop rows.
 - `set_mate` and a drag within a mate propagate from the mate they changed.
 - The occurrence panel lists relations with ratio and phase editable (a
   freewheel's `lead` read-only) and a remove button; creation is RPC or SDK
-  only (`Asm.gear/chain/rack/screw/cam/freewheel/click`).
+  only (`Asm.gear/chain/rack/screw/cam/freewheel/click/worm`).
 - Stored in the assembly's `relations/` directory, one file per relation
   ([../versioning/format.md](../versioning/format.md)).
 

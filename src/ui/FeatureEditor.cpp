@@ -43,6 +43,7 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/UnfoldFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
 #include "core/sketch/SketchProfile.h"
@@ -922,6 +923,18 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       return true;
     }
     return false;
+  case PickSlot::GearBlank:
+    if (item.kind != SelectionItem::Kind::Face)
+      return false;
+    if (auto* wo = dynamic_cast<WormFeature*>(&f)) {
+      wo->face = item.element;
+      return true;
+    }
+    if (auto* ww = dynamic_cast<WormWheelFeature*>(&f)) {
+      ww->face = item.element;
+      return true;
+    }
+    return false;
   case PickSlot::FlatPatternBody:
     if (auto* fp = dynamic_cast<FlatPatternFeature*>(&f);
         fp != nullptr && item.kind == SelectionItem::Kind::Body) {
@@ -1127,6 +1140,14 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {{PickSlot::ThreadFace, "Face", kFace, false,
              "Pick the cylindrical face to thread"}};
   }
+  if (dynamic_cast<const WormFeature*>(&feature) != nullptr) {
+    return {{PickSlot::GearBlank, "Blank", kFace, false,
+             "Pick the worm blank's cylindrical outside: its tip"}};
+  }
+  if (dynamic_cast<const WormWheelFeature*>(&feature) != nullptr) {
+    return {{PickSlot::GearBlank, "Blank", kFace, false,
+             "Pick the wheel blank's cylindrical rim"}};
+  }
   if (dynamic_cast<const EdgeFlangeFeature*>(&feature) != nullptr) {
     return {{PickSlot::EdgeFlangeEdges, "Edges", kEdge, true,
              "Click STRAIGHT edges of a flat panel (click again to remove). "
@@ -1232,6 +1253,12 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::ThreadFace: {
     auto* th = dynamic_cast<const ThreadFeature*>(&feature);
     return th != nullptr && !th->face.name.empty();
+  }
+  case PickSlot::GearBlank: {
+    if (auto* wo = dynamic_cast<const WormFeature*>(&feature))
+      return !wo->face.name.empty();
+    auto* ww = dynamic_cast<const WormWheelFeature*>(&feature);
+    return ww != nullptr && !ww->face.name.empty();
   }
   case PickSlot::EdgeFlangeEdges: {
     auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature);
@@ -1462,6 +1489,83 @@ void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
     if (const std::string why = UpdateDerived(state, d.GetId()); !why.empty())
       state.sketchEdit.actionMsg = why;
   }
+}
+
+// The worm's and the wheel's rows (docs/modeling/worm-gears.md): the pair's
+// numbers, with what the blank derived and what the pair does — its lead
+// angle and whether it self-locks — read back from the last regeneration.
+static void DrawWormRows(AppState& state, Feature& feature, size_t index,
+                         bool commit) {
+  auto* wo = dynamic_cast<WormFeature*>(&feature);
+  auto* ww = dynamic_cast<WormWheelFeature*>(&feature);
+  double& module = wo ? wo->module : ww->module;
+  std::string& moduleExpr = wo ? wo->moduleExpr : ww->moduleExpr;
+  int& starts = wo ? wo->starts : ww->starts;
+  double& pressure = wo ? wo->pressureDeg : ww->pressureDeg;
+  bool& right = wo ? wo->rightHanded : ww->rightHanded;
+  const nlohmann::json rep = wo ? wo->ReportJson() : ww->ReportJson();
+
+  ExprDim(state, feature, index, commit, "Module", moduleExpr, module);
+  if (module <= 0.0 && rep.is_object())
+    ImGui::TextDisabled("from the blank: %.3f", rep.at("module").get<double>());
+  const auto count = [&](const char* label, int& v, int lo, int hi) {
+    LeftLabel(label);
+    const std::string id = std::string("##") + label;
+    const bool changed = ExprInputInt(state, id.c_str(), &v);
+    v = std::clamp(v, lo, hi);
+    HandleEdit(state, feature, changed, index, commit);
+  };
+  const auto length = [&](const char* label, double& v, const char* zero) {
+    LeftLabel(label);
+    const std::string id = std::string("##") + label;
+    HandleEdit(state, feature,
+               ExprDragDouble(state, id.c_str(), &v, 0.01f, 0.0, 1e4,
+                              v <= 0.0 ? zero : "%.3f"),
+               index, commit);
+  };
+  if (ww)
+    count("Teeth", ww->teeth, 8, 400);
+  count("Starts", starts, 1, 8);
+  HandleEdit(state, feature, DragDim(state, "Pressure angle", &pressure), index,
+             commit);
+  {
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    const char* hands[] = {"Right", "Left"};
+    int hand = right ? 0 : 1;
+    if (LabeledCombo("Hand", &hand, hands, 2)) {
+      right = hand == 0;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  }
+  if (wo) {
+    length("Backlash", wo->backlash, "none");
+    length("Length", wo->length, "full face");
+  } else {
+    length("Worm dia", ww->wormDiameter, "10 modules");
+  }
+  if (rep.is_object()) {
+    if (ww)
+      ImGui::TextDisabled("Centre distance %.3f, ratio %.0f:1, throat arc "
+                          "%.0f deg",
+                          rep.at("centre_distance").get<double>(),
+                          rep.at("ratio").get<double>(),
+                          rep.at("throat_arc_deg").get<double>());
+    else
+      ImGui::TextDisabled("Pitch dia %.3f, lead %.3f",
+                          rep.at("pitch_diameter").get<double>(),
+                          rep.at("lead").get<double>());
+    const nlohmann::json& lk = rep.at("locking");
+    ImGui::TextDisabled("Lead angle %.2f deg: %s dry, %s greased",
+                        rep.at("lead_angle_deg").get<double>(),
+                        lk.at(0).at("self_locking").get<bool>() ? "self-locking"
+                                                                : "back-drives",
+                        lk.at(1).at("self_locking").get<bool>()
+                            ? "self-locking"
+                            : "back-drives");
+  }
+  const ElementRef& face = wo ? wo->face : ww->face;
+  PickSlotRow(state, feature, PickSlot::GearBlank,
+              face.name.empty() ? "" : face.name);
 }
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
@@ -1915,6 +2019,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                         /*allowNone=*/true, AcceptPathLike);
     DrawFeatureRefCombo(state, feature, "Guide", &lo->guideId, index, commit,
                         /*allowNone=*/true, AcceptPathLike);
+  } else if (dynamic_cast<WormFeature*>(&feature) != nullptr ||
+             dynamic_cast<WormWheelFeature*>(&feature) != nullptr) {
+    DrawWormRows(state, feature, index, commit);
   } else if (auto* th = dynamic_cast<ThreadFeature*>(&feature)) {
     // Designation combo: the ISO series + Custom (manual pitch).
     const auto& series = threads::All();

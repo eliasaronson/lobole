@@ -147,10 +147,15 @@ constexpr std::pair<const char*, MateType> kMateTypes[] = {
     {"planar", MateType::Planar},     {"ball", MateType::Ball}};
 
 constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
-    {"gear", RelationKind::Gear},           {"rack", RelationKind::Rack},
-    {"screw", RelationKind::Screw},         {"linear", RelationKind::Linear},
-    {"chain", RelationKind::Chain},         {"cam", RelationKind::Cam},
-    {"freewheel", RelationKind::Freewheel}, {"click", RelationKind::Click}};
+    {"gear", RelationKind::Gear},
+    {"rack", RelationKind::Rack},
+    {"screw", RelationKind::Screw},
+    {"linear", RelationKind::Linear},
+    {"chain", RelationKind::Chain},
+    {"cam", RelationKind::Cam},
+    {"freewheel", RelationKind::Freewheel},
+    {"click", RelationKind::Click},
+    {"worm", RelationKind::Worm}};
 
 template <typename T, size_t N>
 std::string NameList(const std::pair<const char*, T> (&table)[N]) {
@@ -376,6 +381,8 @@ const char* RelationKindToString(RelationKind kind) {
     return "freewheel";
   case RelationKind::Click:
     return "click";
+  case RelationKind::Worm:
+    return "worm";
   }
   return "gear";
 }
@@ -397,6 +404,8 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Freewheel;
   if (s == "click")
     return RelationKind::Click;
+  if (s == "worm")
+    return RelationKind::Worm;
   throw std::runtime_error("unknown relation type '" + s +
                            "' (expected one of: " + NameList(kRelationKinds) +
                            ")");

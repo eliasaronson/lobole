@@ -60,6 +60,7 @@ add_executable(designer_tests
     test_loft.cpp
     test_rib.cpp
     test_thread.cpp
+    test_worm.cpp
     test_sheetmetal.cpp
     test_flange.cpp
     test_unfold.cpp

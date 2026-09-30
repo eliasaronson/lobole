@@ -13,6 +13,9 @@ Topic pages:
 - [holes-and-threads.md](holes-and-threads.md) — the Hole feature and what it
   records (fit, tapping), the Thread (cosmetic or modelled), the metric and
   unified thread tables, and thread engagement.
+- [worm-gears.md](worm-gears.md) — the Worm and the hobbed WormWheel, cut
+  from cylindrical blanks: sizes, how the wheel's envelope is computed, the
+  phase a pair meshes at, and self-locking.
 - [derived.md](derived.md) — the Derived feature: another part's bodies copied
   into this one as a snapshot.
 
@@ -120,6 +123,7 @@ The authoritative list, with every field, is `kFeatureTypes` in
 | `Refine` | merges coplanar faces and boolean seams |
 | `Rib` | see [Rib](#rib) |
 | `Hole`, `Thread` | see [holes-and-threads.md](holes-and-threads.md) |
+| `Worm`, `WormWheel` | see [worm-gears.md](worm-gears.md) |
 | `Curve3D`, `Sweep`, `Loft`, `Pipe` | see [3D curves, sweep, loft and pipe](#3d-curves-sweep-loft-and-pipe) |
 | `Derived` | see [derived.md](derived.md) |
 | `Fastener` | a generated standard part; only in a part of its own, placed in an assembly (the parts area) |
@@ -439,7 +443,7 @@ tooltip. View > Show Element Names labels the hovered face with its name.
 Headless, one file per feature (`tests/test_extrude.cpp`, `test_revolve`,
 `test_datum`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
-`test_hole`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
+`test_hole`, `test_worm`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
 `test_derived`, `test_toponaming`); the boolean check in
 `tests/test_boolean_volume.cpp`, with the intake flange reduced to a block,
 two swept bores and the slot, and the same case over the RPC in

@@ -69,6 +69,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
@@ -416,6 +417,20 @@ void CreateFillet(AppState& state) {
 
 void CreateChamfer(AppState& state) {
   CreateEdgeBlend(state, EdgeBlendOp::Chamfer);
+}
+
+void CreateWorm(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<WormFeature>(
+                                 NextName(state, "Worm"), ElementRef{}));
+}
+
+void CreateWormWheel(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<WormWheelFeature>(
+                                 NextName(state, "Worm wheel"), ElementRef{}));
 }
 
 void CreateThread(AppState& state) {

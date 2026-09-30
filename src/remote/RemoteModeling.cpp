@@ -9,6 +9,7 @@
 #include "core/Expression.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
@@ -95,7 +96,7 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   // (index/error state stamped AROUND the dialect), so a read-modify-write of
   // a get_state feature entry — a legitimate agent pattern — stays valid.
   static const std::set<std::string> kAllow = {
-      "type", "index", "error", "warning", "after_earlier_failure"};
+      "type", "index", "error", "warning", "after_earlier_failure", "report"};
   // The round trip alone is not enough: a key whose value is EMPTY
   // serializes back to nothing, so `"external": []` on a sketch (a filter
   // that found no edges — the SO-101 gripper's) was refused as an unknown
@@ -493,6 +494,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         imp != nullptr && imp->Shift() != glm::vec3(0.0f))
       resp["recentred_by"] =
           json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+    // A worm or a wheel says what it built, in the call that built it.
+    if (auto* w = dynamic_cast<const WormFeature*>(doc->GetFeature(index)))
+      if (json rep = w->ReportJson(); !rep.is_null())
+        resp["report"] = rep;
+    if (auto* w = dynamic_cast<const WormWheelFeature*>(doc->GetFeature(index)))
+      if (json rep = w->ReportJson(); !rep.is_null())
+        resp["report"] = rep;
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;

@@ -219,6 +219,21 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   {{"type": "Rib", "name": str, "sketch_id": <open-profile sketch id>,
   "thickness": num, "thickness_expr"?: str, "flip"?: bool,
   "body_id"?: <target body's created_by id>}}
+- Worm (a ZA worm cut into a cylindrical blank; its outside is the tip):
+  {{"type": "Worm", "name": str, "face": {{"feature_id", "element"}},
+  "module"?: num (mm, axial; omitted = tip dia / 12), "starts"?: int,
+  "pressure_angle_deg"?: num (20), "hand"?: "right"|"left",
+  "backlash"?: num (mm axial, half off each flank), "length"?: num (mm)}}
+  — the response's "report" gives the lead angle and self-locking.
+- WormWheel (hobbed from a cylindrical blank; the rim is the face and its
+  length the face width): {{"type": "WormWheel", "name": str, "face":
+  {{"feature_id", "element"}}, "teeth"?: int (40), "module"?: num (mm;
+  omitted = rim dia / (teeth + 3)), "starts"?: int, "worm_diameter"?: num
+  (mm, the worm's pitch diameter; omitted = 10 modules),
+  "pressure_angle_deg"?: num, "hand"?: "right"|"left"}} — "report" gives
+  the centre distance to mount the worm at. Couple the pair with
+  add_relation type "worm" {{a: worm mate, b: wheel mate, starts, teeth,
+  hand}}, not "gear": its sign depends on the hand and the side.
 - Thread (cosmetic or modeled thread on a cylindrical face):
   {{"type": "Thread", "name": str, "face": {{"feature_id", "element"}},
   "designation"?: str (ISO "M8"/"M8x1" or unified "3/8-16 UNC", "#10-32

@@ -19,6 +19,7 @@
 #include "core/drawing/DrawingExport.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
@@ -1180,6 +1181,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         const std::optional<bool> stale = ui::DerivedStale(state, *d);
         f["stale"] = stale.has_value() ? json(*stale) : json(nullptr);
       }
+      // A worm or a wheel says what it built: the sizes that follow from
+      // its blank, the lead angle and whether the pair self-locks.
+      if (auto* w = dynamic_cast<const WormFeature*>(stateDoc->GetFeature(i)))
+        if (json rep = w->ReportJson(); !rep.is_null())
+          f["report"] = rep;
+      if (auto* w =
+              dynamic_cast<const WormWheelFeature*>(stateDoc->GetFeature(i)))
+        if (json rep = w->ReportJson(); !rep.is_null())
+          f["report"] = rep;
       features.push_back(f);
     }
     json bodies = json::array();

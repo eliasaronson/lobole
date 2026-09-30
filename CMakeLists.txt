@@ -404,7 +404,9 @@ set(core_sources
     src/core/features/LoftFeature.cpp
     src/core/features/RibFeature.cpp
     src/core/features/ThreadFeature.cpp
+    src/core/features/WormFeature.cpp
     src/core/HelicalSweep.cpp
+    src/core/WormGear.cpp
     src/core/features/SweepFeature.cpp
     src/core/features/PipeFeature.cpp
     src/core/features/CopeFeature.cpp

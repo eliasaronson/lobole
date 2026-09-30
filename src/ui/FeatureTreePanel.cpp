@@ -111,6 +111,8 @@ const char* FeatureIcon(const std::string& type) {
       {"Chamfer", "part.chamfer"},
       {"Rib", "part.rib"},
       {"Thread", "part.thread"},
+      {"Worm", "part.worm"},
+      {"WormWheel", "part.worm_wheel"},
       {"Hole", "part.hole"},
       {"Shell", "part.shell"},
       {"Draft", "part.draft"},

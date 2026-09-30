@@ -114,12 +114,20 @@ CADShape HelicalSweep(const HelicalSweepSpec& spec, std::string* why) {
     const double hs = spec.z0 - yMax - spec.lead;
     const double he = spec.z1 - yMin + spec.lead;
     const double turns = (he - hs) / spec.lead;
+    // The helix is at height hs at startRad and rises a lead per turn in the
+    // hand's sense, so at angle 0 it stands at hs - s*lead*startRad/2pi.
+    double startRad = spec.startRad;
+    if (spec.pinPhase) {
+      const double s = spec.rightHanded ? 1.0 : -1.0;
+      startRad = std::fmod(s * 2.0 * M_PI * (hs - spec.phaseHeight) / spec.lead,
+                           2.0 * M_PI);
+    }
     // The spine runs through the profile's middle; any radius would do (the
     // binormal frame carries the section rigidly), but inside the profile
     // keeps the sweep's own approximation local to it.
     const double rh = 0.5 * (xMin + xMax);
     const TopoDS_Wire spine = HelixWire(spec.frame, rh, spec.lead, turns,
-                                        spec.rightHanded, spec.startRad, hs);
+                                        spec.rightHanded, startRad, hs);
     if (spine.IsNull()) {
       Fail(why, "the helix could not be built");
       return CADShape();
@@ -128,9 +136,8 @@ CADShape HelicalSweep(const HelicalSweepSpec& spec, std::string* why) {
     // The section at the spine's start, in the axial half-plane there.
     const gp_Pnt o = spec.frame.Location();
     const gp_Dir d = spec.frame.Direction();
-    const gp_Vec radial =
-        gp_Vec(spec.frame.XDirection()) * std::cos(spec.startRad) +
-        gp_Vec(spec.frame.YDirection()) * std::sin(spec.startRad);
+    const gp_Vec radial = gp_Vec(spec.frame.XDirection()) * std::cos(startRad) +
+                          gp_Vec(spec.frame.YDirection()) * std::sin(startRad);
     BRepBuilderAPI_MakePolygon poly;
     for (const gp_Pnt2d& p : spec.profile)
       poly.Add(o.Translated(gp_Vec(d) * (hs + p.Y()) + radial * p.X()));

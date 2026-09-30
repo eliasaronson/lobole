@@ -1353,6 +1353,95 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < blank - 1.0);
   };
 
+  // The worm editor (docs/modeling/worm-gears.md): the blank is picked in
+  // the viewport, its module derived from it, and the hand and the starts
+  // set in the window reach the feature that is kept — which cuts the worm
+  // and reads back its lead angle.
+  t = IM_REGISTER_TEST(engine, "worm", "editor_picks_the_blank_and_sets_hand");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Blank", glm::vec3(0.0f), glm::vec3(0, 0, 1), 12.0, 40.0));
+    ctx->Yield();
+    const double blank = Doc()->GetBodies()[0].shape.Volume();
+    ToolbarClick(ctx, "###tb_worm");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 20));
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 20) +
+                               glm::normalize(glm::vec3(1, 1, 0.3f)) * 90.0f);
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(
+        glm::normalize(glm::vec3(1, 1, 0)) * 12.0f + glm::vec3(0, 0, 20)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    auto* wo = dynamic_cast<WormFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(wo != nullptr);
+    IM_CHECK(!wo->face.name.empty());
+    IM_CHECK(wo->rightHanded);
+    ctx->SetRef("//Worm###ToolWindow");
+    ctx->ComboClick("###Hand/Left");
+    ctx->ItemInputValue("##Starts", 2);
+    ctx->Yield(3);
+    wo = dynamic_cast<WormFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(wo != nullptr);
+    IM_CHECK(!wo->rightHanded);
+    IM_CHECK_EQ(wo->starts, 2);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const auto* kept = dynamic_cast<const WormFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(kept != nullptr);
+    IM_CHECK_STR_EQ(kept->GetError().c_str(), "");
+    IM_CHECK(kept->report.valid);
+    // Module 2 from the 24 mm blank, two starts on a 20 mm pitch diameter:
+    // tan(gamma) = 2 * 2 / 20.
+    IM_CHECK(std::abs(kept->report.spec.module - 2.0) < 1e-9);
+    IM_CHECK(std::abs(std::tan(kept->report.sizes.leadAngle) - 0.2) < 1e-9);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < blank - 100.0);
+  };
+
+  // The wheel editor: picked the same way, its rows show what the hob made
+  // (the centre distance, the ratio, the throat) once it has regenerated.
+  t = IM_REGISTER_TEST(engine, "worm", "wheel_editor_reports_the_pair");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Blank", glm::vec3(0.0f), glm::vec3(0, 0, 1), 43.0, 13.0));
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_worm_wheel");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 6.5f));
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 6.5f) +
+                               glm::normalize(glm::vec3(1, 1, 0.3f)) * 250.0f);
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(
+        glm::normalize(glm::vec3(1, 1, 0)) * 43.0f + glm::vec3(0, 0, 6.5f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    auto* ww =
+        dynamic_cast<WormWheelFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ww != nullptr);
+    IM_CHECK(!ww->face.name.empty());
+    IM_CHECK_STR_EQ(ww->GetError().c_str(), "");
+    IM_CHECK(ww->report.valid);
+    ctx->SetRef("//Worm wheel###ToolWindow");
+    IM_CHECK(ctx->ItemExists("##Teeth"));
+    IM_CHECK(ctx->ItemExists("###Hand"));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    const auto* kept =
+        dynamic_cast<const WormWheelFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(kept != nullptr);
+    IM_CHECK_STR_EQ(kept->GetError().c_str(), "");
+    IM_CHECK(std::abs(kept->report.sizes.centreDistance - 50.0) < 1e-9);
+  };
+
   // Repro for the reported circular-pattern segfault (dogfooding backlog):
   // preview a pattern on a body, switch it to Circular, and work the axis/
   // count/angle widgets across frames — the crash lived in this flow.

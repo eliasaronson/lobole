@@ -149,6 +149,10 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       // A bearing: two or four per assembly, placed from the toolbar beside
       // the fastener, which has F. Not a verb repeated mid-flow.
       "assembly.bearing",
+      // A worm pair: two parts made once each, from the toolbar beside the
+      // thread they are made like. Not a verb repeated mid-flow.
+      "part.worm",
+      "part.worm_wheel",
       // Sheet metal: three tools used in sequence on a part that IS sheet
       // metal, in the order they appear on the toolbar — not typed mid-flow
       // the way a fillet or a hole is. Every free letter left is worth more

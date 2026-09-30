@@ -164,7 +164,10 @@ only need the callout.
   the real flanks.
 - **`HelicalSweep`** takes an axis frame, a span, a lead, a number of
   starts, a hand and any closed axial profile, and returns the swept tool,
-  so a worm is the same call with a gear's axial profile.
+  so a worm is the same call with a gear's axial profile
+  ([worm-gears.md](worm-gears.md)). `pinPhase` pins the phase by a height
+  at the frame's X instead of a start angle, which is how a worm's tooth
+  is put where its wheel expects it.
 - **Cost**, on this machine: an M8×1.25 through a free 20 mm boss (16
   turns, both ends open) about 2.6 s; a 3/8-16 UNC through a 10 mm plate
   about 0.6 s; an M8 12 mm on a shoulder (one end squared) about 1.7 s. The

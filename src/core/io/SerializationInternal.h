@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    141; // v141: feature type `Bearing` {designation}: an ISO 15
+    142; // v142: feature types `Worm` and `WormWheel` (a ZA worm and its
+         //      hobbed wheel cut from cylindrical blanks), and relation kind
+         //      `worm` (docs/modeling/worm-gears.md).
+         // v141: feature type `Bearing` {designation}: an ISO 15
          //      deep-groove ball bearing as a generated standard part.
          // v140: a Thread's `hand` (right | left; absent = right), and a
          //      modelled thread cuts real geometry.

@@ -36,6 +36,7 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/UnfoldFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/sketch/SketchText.h"
 
 #include <nlohmann/json.hpp>
@@ -1307,6 +1308,33 @@ json FeatureToJson(const Feature& feature) {
       j["modeled"] = true;
     if (!th->rightHanded)
       j["hand"] = "left"; // v140; absent = right, as every thread before it
+  } else if (auto* wo = dynamic_cast<const WormFeature*>(&feature)) {
+    j["face"] = {{"feature_id", wo->face.featureId},
+                 {"element", wo->face.name}};
+    if (wo->module > 0.0)
+      j["module"] = wo->module;
+    if (!wo->moduleExpr.empty())
+      j["module_expr"] = wo->moduleExpr;
+    j["starts"] = wo->starts;
+    j["pressure_angle_deg"] = wo->pressureDeg;
+    j["hand"] = wo->rightHanded ? "right" : "left";
+    if (wo->backlash > 0.0)
+      j["backlash"] = wo->backlash;
+    if (wo->length > 0.0)
+      j["length"] = wo->length;
+  } else if (auto* ww = dynamic_cast<const WormWheelFeature*>(&feature)) {
+    j["face"] = {{"feature_id", ww->face.featureId},
+                 {"element", ww->face.name}};
+    if (ww->module > 0.0)
+      j["module"] = ww->module;
+    if (!ww->moduleExpr.empty())
+      j["module_expr"] = ww->moduleExpr;
+    j["teeth"] = ww->teeth;
+    j["starts"] = ww->starts;
+    if (ww->wormDiameter > 0.0)
+      j["worm_diameter"] = ww->wormDiameter;
+    j["pressure_angle_deg"] = ww->pressureDeg;
+    j["hand"] = ww->rightHanded ? "right" : "left";
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
     j["hole_kind"] = HoleKindToString(ho->kind);
@@ -1423,6 +1451,22 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/README.md)"},
+    {"Worm", 142,
+     "face (the blank's cylindrical OUTSIDE: the worm's tip), module? "
+     "(+_expr) mm (axial; omitted = tip dia / 12, a diameter quotient of 10), "
+     "starts? (1), pressure_angle_deg? (20), hand? right|left, backlash? mm "
+     "(axial; each flank thinned by half), length? mm (0 = the whole face). "
+     "Cuts a ZA worm into the blank; the pitch diameter is the tip less two "
+     "modules. get_state reports the lead angle and whether it self-locks "
+     "(docs/modeling/worm-gears.md)"},
+    {"WormWheel", 142,
+     "face (the blank's cylindrical OUTSIDE: the rim; its length is the face "
+     "width), teeth? (40), module? (+_expr) mm (omitted = rim dia / (teeth + "
+     "3)), and the mating worm's starts? (1), worm_diameter? mm (its pitch "
+     "diameter; omitted = 10 modules), pressure_angle_deg? (20), hand? "
+     "right|left. Hobs the wheel: throat, tip and enveloping teeth. "
+     "get_state reports the centre distance, the ratio and self-locking "
+     "(docs/modeling/worm-gears.md)"},
     {"Bearing", 141,
      "designation: an ISO 15 deep-groove ball bearing, 618/619/60/62/63 "
      "series, bores 3 to 30 mm (\"6200\", \"608\", \"618/4\"). d, D, B and "
@@ -2429,6 +2473,37 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
+  } else if (type == "Worm" || type == "WormWheel") { // v142
+    const json& fj = j.at("face");
+    const ElementRef face{fj.at("feature_id").get<uint64_t>(),
+                          fj.at("element").get<std::string>()};
+    // A hand we do not know is refused, never read as right: a left worm
+    // made right meshes with nothing it was drawn for.
+    const std::string hand = j.value("hand", std::string("right"));
+    if (hand != "right" && hand != "left")
+      throw std::runtime_error(type + " '" + name + "': unknown hand '" + hand +
+                               "' (accepted: right, left)");
+    if (type == "Worm") {
+      auto wo = std::make_unique<WormFeature>(name, face);
+      wo->module = j.value("module", 0.0);
+      wo->moduleExpr = j.value("module_expr", std::string{});
+      wo->starts = j.value("starts", 1);
+      wo->pressureDeg = j.value("pressure_angle_deg", 20.0);
+      wo->rightHanded = hand == "right";
+      wo->backlash = j.value("backlash", 0.0);
+      wo->length = j.value("length", 0.0);
+      out = std::move(wo);
+    } else {
+      auto ww = std::make_unique<WormWheelFeature>(name, face);
+      ww->module = j.value("module", 0.0);
+      ww->moduleExpr = j.value("module_expr", std::string{});
+      ww->teeth = j.value("teeth", 40);
+      ww->starts = j.value("starts", 1);
+      ww->wormDiameter = j.value("worm_diameter", 0.0);
+      ww->pressureDeg = j.value("pressure_angle_deg", 20.0);
+      ww->rightHanded = hand == "right";
+      out = std::move(ww);
+    }
   } else if (type == "Hole") { // v21
     const HoleKind kind =
         HoleKindFromString(j.value("hole_kind", std::string("simple")));

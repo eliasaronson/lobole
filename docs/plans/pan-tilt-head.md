@@ -52,20 +52,13 @@ Built: see docs/modeling/holes-and-threads.md.
 
 ### 2. The worm pair
 
-- **The worm** is a modelled thread with a gear's axial profile: module,
-  pressure angle and number of starts. It shares phase 1's helix sweep.
-- **The wheel** is built the way it is cut: the worm swept through the mesh
-  motion (the wheel turns 1/N for each turn of the worm) and subtracted at
-  enough steps to converge. This gives the throated, enveloping tooth. If the
-  booleans do not converge or take too long, a helical involute wheel at the
-  worm's lead angle is the fallback: point contact, adequate in plastic. The
-  measurement decides, and the decision is recorded.
-- It starts as a generator (`generators/worm.py`, next to `gear.py`) and
-  becomes a feature only if the generator shows it must.
-- **The relation:** the existing `gear` relation with ratio starts/teeth on
-  crossed axes. It has never been driven on a 90° pair, so this phase proves
-  it. A `worm` kind is added only if the gear relation turns out wrong.
-  Self-locking is reported, not simulated.
+Built: see docs/modeling/worm-gears.md and docs/assemblies/relations.md#worm.
+Measured: hobbing by booleans does not scale (8 hob placements in one
+multi-tool common took 105 s, about ×7 per doubling), so the wheel is the
+same hob's envelope computed point by point and lofted — throated, converging
+as 1/n² in the hob's steps, 15–23 s a wheel; neither fallback was needed. The
+`gear` relation's fixed sign is wrong for half the ways a pair goes together,
+so the pair is coupled by a `worm` relation.
 
 ### 3. Bearings as standard parts
 

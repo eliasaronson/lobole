@@ -48,6 +48,13 @@ struct HelicalSweepSpec {
   int starts = 1;    // each start is the profile turned 2*pi/starts further
   bool rightHanded = true;
   double startRad = 0.0; // phase of start 0 about the axis
+  // Pin the phase by height instead of `startRad`: the profile's y = 0 passes
+  // the frame's XDirection (angle 0) at `phaseHeight`, and every lead/starts
+  // above and below it. What a worm and the hob that cuts its wheel need, so
+  // a tooth stands where the pair's conventions say
+  // (docs/modeling/worm-gears.md#phase).
+  bool pinPhase = false;
+  double phaseHeight = 0.0;
   // The closed axial profile, in the half-plane at the start angle: x is the
   // distance from the axis (> 0), y the height relative to the helix point.
   // Its x range is the solid's radius range. Straight segments between the

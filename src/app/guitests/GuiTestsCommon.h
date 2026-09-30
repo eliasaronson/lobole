@@ -30,6 +30,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/features/WormFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
@@ -161,7 +162,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[35];
+extern const ToolCase kToolCases[37];
 const ToolCase* FindToolCase(const char* testName);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

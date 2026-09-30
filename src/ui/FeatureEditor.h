@@ -64,6 +64,9 @@ enum class PickSlot : int {
   // Standard parts: the round SEAT a bearing goes on — a cylindrical face or
   // the rim where it meets its shoulder (docs/parts/README.md#bearings).
   BearingSeat,
+  // A worm's or a worm wheel's blank: its cylindrical outside face
+  // (docs/modeling/worm-gears.md).
+  GearBlank,
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

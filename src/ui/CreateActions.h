@@ -78,6 +78,11 @@ void CreateRib(AppState& state);
 
 void CreateThread(AppState& state);
 
+// A worm, or a worm wheel, cut from a cylindrical blank: pick its outside
+// face (docs/modeling/worm-gears.md).
+void CreateWorm(AppState& state);
+void CreateWormWheel(AppState& state);
+
 // Body-modifying tools whose parameters/slots already existed but that had no
 // creation path outside the script API. Each opens the normal preview with
 // the most recent body pre-targeted (Draft takes its body from the first face

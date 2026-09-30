@@ -266,6 +266,9 @@ struct ExplodedView {
 //        (v104, docs/assemblies/relations.md#freewheel):
 //        b = ratio * a + phase + lead
 // click: ONE mate's DOF that may only travel one way — a pawl (v105)
+// worm:  rotation -> rotation on crossed axes, ratio +-starts/teeth with the
+//        sign from the worm's hand and where it sits (v142,
+//        docs/assemblies/relations.md#worm)
 enum class RelationKind {
   Gear,
   Rack,
@@ -274,7 +277,8 @@ enum class RelationKind {
   Chain,
   Cam,
   Freewheel,
-  Click
+  Click,
+  Worm
 };
 enum class MateDof { Rotation, Offset };
 

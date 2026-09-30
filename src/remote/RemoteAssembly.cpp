@@ -7,6 +7,7 @@
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
+#include "core/WormGear.h"
 #include "core/catalog/Catalog.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
@@ -194,7 +195,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "status,dx?,dy?,ball_rotation?,error?,residual_mm?,suppressed?,held?}"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
-     "gear|chain|rack|screw|linear|cam|freewheel|click, a: mate id, b: "
+     "gear|chain|rack|screw|linear|cam|freewheel|click|worm, a: mate id, b: "
      "mate id}: "
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
      "own numbers when given (screw may instead reference thread_part and "
@@ -203,7 +204,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "but the ratio KEEPS its sign, because a chain or belt turns both "
      "sprockets the same way; rack: {pitch_radius} mm (a's rotation drives "
      "b's slide); screw: {pitch} mm per turn on ONE cylindrical mate (pass "
-     "the same id as a and b); linear: a bare {ratio}. CAM is the exception "
+     "the same id as a and b); linear: a bare {ratio}; WORM: {starts, teeth, "
+     "hand: right|left}, a the worm's mate and b the wheel's, on crossed "
+     "axes — the ratio is starts/teeth and its SIGN is read from the hand "
+     "and the side the worm sits on (a ratio is refused; `warnings` names "
+     "axes more than 5 degrees off square; "
+     "docs/assemblies/relations.md#worm). CAM is the exception "
      "— a's rotation drives b's slide OR turn through a LIFT TABLE, not a "
      "ratio: {lift: [[angle_deg, lift], ...]} spanning one turn, the lift in "
      "mm for a sliding follower and in DEGREES for a turning one, or {rise "
@@ -249,10 +255,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "an engine's chain driving its pump's camshaft; refused for a "
      "freewheel or a click, whose history would be per placement.",
      "thread_part, thread_feature, a, a_path, b, b_path, dof_b, drives, "
-     "duration_deg, lead, "
+     "duration_deg, hand, lead, "
      "lift, name, ride_deg, ride_dof, ride_mate, ride_mm, teeth, "
      "phase, pitch, pitch_radius, ratio, "
-     "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
+     "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type"},
     {"set_relation",
      "Edit a relation's {ratio?, phase?, name?} by {id}; a freewheel's "
      "{lead?} too (b's unit, radians), which moves b onto a's drive line "
@@ -1911,6 +1917,31 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                    "for a slide, ride_deg for a turn)");
       }
       break;
+    case RelationKind::Worm:
+      // A worm drives its wheel on crossed axes. The size of the ratio is
+      // starts/teeth; its SIGN is the hand and the side the worm sits on,
+      // read from the mates' frames below — a gear relation's fixed
+      // -za/zb is right for one of the four ways a pair can be assembled.
+      r.dofA = r.dofB = MateDof::Rotation;
+      if (p.contains("ratio"))
+        throw std::runtime_error(
+            "a worm's ratio follows from starts, teeth, hand and where the "
+            "worm sits; give those, not a ratio");
+      if (!p.contains("starts") || !p.contains("teeth") || !p.contains("hand"))
+        throw std::runtime_error(
+            "a worm relation needs starts (the worm's), teeth (the wheel's) "
+            "and hand: right or left — a is the worm's mate, b the wheel's");
+      {
+        const int z1 = p.at("starts").get<int>(), z2 = p.at("teeth").get<int>();
+        if (z1 <= 0 || z2 <= 0)
+          throw std::runtime_error("starts and teeth are positive counts");
+        const std::string hand = p.at("hand").get<std::string>();
+        if (hand != "right" && hand != "left")
+          throw std::runtime_error("unknown hand '" + hand +
+                                   "' (accepted: right, left)");
+        r.ratio = static_cast<double>(z1) / z2 * (hand == "right" ? 1.0 : -1.0);
+      }
+      break;
     case RelationKind::Click:
       // A pawl: one mate's rotation, free one way and held the other.
       r.dofA = r.dofB = MateDof::Rotation;
@@ -2036,6 +2067,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (p.contains("ratio") && r.kind != RelationKind::Cam)
       r.ratio = p.at("ratio").get<double>();
     else if (r.kind != RelationKind::Cam && r.kind != RelationKind::Click &&
+             r.kind != RelationKind::Worm &&
              !(p.contains("teeth_a") || p.contains("pitch_radius") ||
                p.contains("pitch") || r.threadPart))
       throw std::runtime_error(
@@ -2086,6 +2118,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     {
       const auto fa = ui::MateConnectorWorldAt(state, r.mateAPath, a->a);
       const auto fb = ui::MateConnectorWorldAt(state, r.mateBPath, b->a);
+      if (r.kind == RelationKind::Worm && !(fa && fb))
+        throw std::runtime_error(
+            "a worm relation reads its sign from where the two mates' axes "
+            "are, and these mates' frames cannot be resolved");
       if (fa && fb) {
         const glm::vec3 za = glm::normalize(glm::vec3((*fa)[2]));
         const glm::vec3 zb = glm::normalize(glm::vec3((*fb)[2]));
@@ -2098,6 +2134,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               "rack by faces whose normal is the direction it travels "
               "(a slider slides along its connector frames' Z), not by "
               "origin frames, which are Z-up");
+        if (r.kind == RelationKind::Worm) {
+          if (along > 0.0872f) // > 5 degrees off square
+            warnings.push_back(
+                "a worm and its wheel turn on axes at 90 degrees; these are " +
+                std::to_string(glm::degrees(std::acos(along))) +
+                " degrees apart");
+          std::string whyNot;
+          const double ratio = worm::RelationRatio(
+              *state.assembly, *a, *b, r.mateAPath == r.mateBPath,
+              r.mateAPath.empty() && r.mateBPath.empty(), *fa, *fb,
+              p.at("starts").get<int>(), p.at("teeth").get<int>(),
+              r.ratio > 0.0, &whyNot);
+          if (ratio == 0.0)
+            throw std::runtime_error(whyNot);
+          r.ratio = ratio;
+        }
         if (r.kind == RelationKind::Gear && along < 0.9962f) // > 5 degrees
           warnings.push_back(
               "the two axles are not parallel (" +
