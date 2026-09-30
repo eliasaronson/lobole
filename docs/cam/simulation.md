@@ -333,8 +333,12 @@ scene renderer. It takes the scene's light directions, colours and ambient from
 The tool is a `MeshRenderer` instance — static geometry that moves, built once
 per tool number and placed by transform each frame. Its mesh revolves the
 `TipHeight` profile (so it shares its shape with the removal math), with the
-flute at full length, the stated shank above it, a short collar, and the
-stated holder collar when there is one. Normals are per segment, blended only across joints within a crease
+flute at full length and the stated shank above it. A holder is drawn only
+when the tool states one (`overall_length` and `collar_diameter`), where it is:
+unstated, nothing says where the nut is, and one drawn on the flutes showed a
+cutter buried in the part wherever it reached past its flutes -- a collision
+nothing checked. The shank then runs on at its width for a length that reads
+as a shank. Normals are per segment, blended only across joints within a crease
 angle, so a flat shoulder shades flat and a ball's tip stays round; every
 triangle winds the way its normals point (gated for all four shapes and for
 the stock mesh). The material is matte: a mirror finish slides reflections

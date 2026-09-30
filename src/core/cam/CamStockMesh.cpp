@@ -294,14 +294,20 @@ StockMesh BuildToolMesh(const Tool& tool) {
   // simulation plays is the answer. One source for both, as with everything
   // else here.
   const bool stated = HasHolder(tool);
-  const double holderR =
-      stated ? tool.collarDiameter * 0.5 : std::max(r * 1.6, r + 2.0);
-  // Where the collar's underside sits. Unstated, it sits straight on top of
-  // the flutes as it always has; stated, the SHANK runs between them, which
-  // is the gap the whole check is about -- a stickout is only worth typing
-  // because it can be longer than the cutting part.
-  const double collarZ = stated ? std::max(flutes, tool.overallLength) : flutes;
-  const double holderZ = collarZ + std::max(4.0, r * 1.5);
+  const double shankR = tool.shankDiameter > 0.0 ? tool.shankDiameter * 0.5 : r;
+  // Unstated, NO holder: nothing says where the nut is, and one drawn on top
+  // of the flutes was a claim the verifier never checks -- the chess
+  // knights' 1.5 mm ball, 6 mm of flute, showed a 5.5 mm holder buried in
+  // the part wherever the rest pass reached deeper than 6 mm, a collision
+  // that was not there on a cutter with a long 3.175 mm shank. So the shank,
+  // at its stated width, for a length that reads as a shank and not a stub.
+  const double holderR = stated ? tool.collarDiameter * 0.5 : shankR;
+  // Where the collar's underside sits: stated, the SHANK runs between it and
+  // the flutes, which is the gap the whole check is about -- a stickout is
+  // only worth typing because it can be longer than the cutting part.
+  const double collarZ = stated ? std::max(flutes, tool.overallLength)
+                                : flutes + std::max(12.0, 8.0 * shankR);
+  const double holderZ = stated ? collarZ + std::max(4.0, r * 1.5) : collarZ;
 
   std::vector<glm::dvec2> profile;
   profile.push_back({0.0, 0.0});
@@ -322,14 +328,15 @@ StockMesh BuildToolMesh(const Tool& tool) {
   // Above the flutes, the shank as stated: the 6 mm a 3 mm bit steps out to
   // is the thing the reach check refuses to drive into a wall
   // (docs/cam/setup.md#reach). Unstated, the cutter's width, as always.
-  const double shankR = tool.shankDiameter > 0.0 ? tool.shankDiameter * 0.5 : r;
   if (std::abs(shankR - r) > 1e-9)
     profile.push_back({shankR, flutes});
   if (collarZ > flutes)
     profile.push_back({shankR, collarZ});
-  profile.push_back({holderR, collarZ});
-  profile.push_back({holderR, holderZ});
-  profile.push_back({0.0, holderZ}); // cap, so the holder is closed
+  if (stated) {
+    profile.push_back({holderR, collarZ});
+    profile.push_back({holderR, holderZ});
+  }
+  profile.push_back({0.0, holderZ}); // cap, so the top is closed
 
   Revolve(mesh, profile, 32);
 

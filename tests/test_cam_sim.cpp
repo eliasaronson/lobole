@@ -816,6 +816,10 @@ TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
   t.number = 1;
   t.diameter = 6.0;
   t.fluteLength = 20.0;
+  // A holder is drawn only when the tool states one (below), so this one
+  // does: its collar sits right on the flutes, the shoulder under test.
+  t.overallLength = 20.0;
+  t.collarDiameter = 16.0;
   const cam::StockMesh m = cam::BuildToolMesh(t);
   REQUIRE(m.vertices.size() > 100);
   // Measured off the mesh, not copied from the geometry: the holder got
@@ -862,6 +866,35 @@ TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
     }
   }
   CHECK(distinctTipNormals > 4); // a curve, not one flat disc
+}
+
+TEST_CASE("cam tool mesh: no holder is drawn where none is stated", "[cam]") {
+  // Nothing says where the nut of an unstated tool is, and one drawn on the
+  // flutes showed the chess knights' 1.5 mm ball buried in the part wherever
+  // its rest pass reached past 6 mm -- a collision the verifier never
+  // checked and the cutter's long 3.175 mm shank does not have.
+  cam::Tool t;
+  t.number = 7;
+  t.type = cam::ToolType::Ball;
+  t.diameter = 1.5;
+  t.fluteLength = 6.0;
+  t.shankDiameter = 3.175;
+  const cam::StockMesh m = cam::BuildToolMesh(t);
+  double widest = 0.0, top = 0.0;
+  for (const cam::StockVertex& v : m.vertices) {
+    widest = std::max<double>(widest, std::hypot(v.position.x, v.position.y));
+    top = std::max<double>(top, v.position.z);
+  }
+  CHECK_THAT(widest, WithinAbs(3.175 * 0.5, 1e-3)); // the shank, no wider
+  CHECK(top > 6.0 + 12.0 - 1e-3); // a shank, not a stub on the flutes
+  // Stated, the collar is drawn where it is, and it is wider.
+  t.overallLength = 25.0;
+  t.collarDiameter = 16.0;
+  const cam::StockMesh h = cam::BuildToolMesh(t);
+  widest = 0.0;
+  for (const cam::StockVertex& v : h.vertices)
+    widest = std::max<double>(widest, std::hypot(v.position.x, v.position.y));
+  CHECK_THAT(widest, WithinAbs(8.0, 1e-3));
 }
 
 TEST_CASE("cam stock mesh: merging keeps a machined block small", "[cam]") {
