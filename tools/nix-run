@@ -5,7 +5,7 @@
 #
 # Entering nix-shell costs ~5 s, every time; a round of work entered it about
 # 400 times (docs/plans/dev-loop.md). This sources the same environment from a
-# cache, `nix print-dev-env` of shell.nix, in ~0.01 s. The cache is keyed on
+# cache of `nix-shell shell.nix --run 'export -p'`, in ~0.01 s. The cache is keyed on
 # shell.nix and the nixpkgs it resolves, so either moving makes a new one, and
 # it is remade if a garbage collection took a store path it points at.
 set -euo pipefail
@@ -17,16 +17,19 @@ key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; } | sha256sum | cut -c1-
 env="$dir/$key.sh"
 alive() { # every store path on the cached PATH still exists
   local p
-  for p in $(sed -n 's/^PATH=.\(.*\).$/\1/p' "$env" | tr ':' ' '); do
+  for p in $(sed -n 's/^declare -x PATH="\(.*\)"$/\1/p' "$env" | tr ':' ' '); do
     case "$p" in /nix/store/*) [ -e "$p" ] || return 1 ;; esac
   done
 }
 if [ ! -s "$env" ] || ! alive; then
   tmp="$(mktemp "$dir/.new.XXXXXX")"
-  (cd "$root" && nix print-dev-env -f shell.nix) > "$tmp"
+  # nix-shell's OWN environment, not `nix print-dev-env`'s: that resolved a
+  # different nixpkgs here (fmt 12.2 and the spdlog built on it, against
+  # nix-shell's 12.1), and a binary linked through it loaded one spdlog and
+  # the other fmt. What `export -p` prints is exactly what `nix-shell --run`
+  # would have had, so the two cannot disagree.
+  (cd "$root" && nix-shell shell.nix --run 'export -p') > "$tmp"
   mv "$tmp" "$env"
   find "$dir" -name '*.sh' ! -name "$key.sh" -delete 2>/dev/null || true
 fi
-# The env makes a fresh NIX_BUILD_TOP (and points TMPDIR at it) each time it
-# is sourced; nix-shell removes its own, so this does too.
-exec bash -c 'source "$1" >/dev/null 2>&1; trap "rm -rf \"$NIX_BUILD_TOP\"" EXIT; shift; eval "$*"' _ "$env" "$@"
+exec bash -c 'source "$1" >/dev/null 2>&1; shift; eval "$*"' _ "$env" "$@"
