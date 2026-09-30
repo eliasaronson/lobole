@@ -30,7 +30,7 @@ if ! flock -n 9; then
   flock 9
 fi
 status=0
-nix-shell "$root/shell.nix" --run "ninja -C '$dir' -j$jobs ${targets[*]:-}" > "$log" 2>&1 || status=$?
+"$root/tools/nix-run" "ninja -C '$dir' -j$jobs ${targets[*]:-}" > "$log" 2>&1 || status=$?
 grep -E 'FAILED|error:|Terminated signal' "$log" | head -40 || true
 if [ "$status" -ne 0 ]; then
   echo "build: FAILED (see above; -j$jobs)" >&2

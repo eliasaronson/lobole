@@ -123,7 +123,10 @@ by name, while you iterate on it.
 `-LE 'gui|slow'`. Tag a new heavy test `[slow]` where you write it — a by-name
 list kept elsewhere drifts.
 
-- Each `nix-shell` costs ~5 s to enter, so batch commands into one invocation
+- Entering `nix-shell` costs ~5 s; `tools/nix-run 'cmd'` runs a command in
+  the same environment from a cache (`nix print-dev-env`, keyed on shell.nix
+  and nixpkgs) in ~0.1 s, and `tools/build.sh` and `tools/test-fast.sh` use
+  it. Where `nix-shell` is still used, batch commands into one invocation
   rather than one each. Run the full headless suite before committing.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 4 parallel shards.
   `--fast` drops the slowest few, `-j 8` more shards, `-f <pattern>` one case,

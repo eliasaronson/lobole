@@ -92,3 +92,4 @@ AGENTS.md
 .claude/
 .direnv/
 .envrc
+.nix-env/

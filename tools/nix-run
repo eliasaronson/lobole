@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run a command in shell.nix's environment, without entering nix-shell.
+#
+#   tools/nix-run 'cd build && ninja designer'
+#
+# Entering nix-shell costs ~5 s, every time; a round of work entered it about
+# 400 times (docs/plans/dev-loop.md). This sources the same environment from a
+# cache, `nix print-dev-env` of shell.nix, in ~0.01 s. The cache is keyed on
+# shell.nix and the nixpkgs it resolves, so either moving makes a new one, and
+# it is remade if a garbage collection took a store path it points at.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+dir="$root/.nix-env"
+mkdir -p "$dir"
+nixpkgs="$(nix-instantiate --find-file nixpkgs 2>/dev/null || echo none)"
+key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; } | sha256sum | cut -c1-16)"
+env="$dir/$key.sh"
+alive() { # every store path on the cached PATH still exists
+  local p
+  for p in $(sed -n 's/^PATH=.\(.*\).$/\1/p' "$env" | tr ':' ' '); do
+    case "$p" in /nix/store/*) [ -e "$p" ] || return 1 ;; esac
+  done
+}
+if [ ! -s "$env" ] || ! alive; then
+  tmp="$(mktemp "$dir/.new.XXXXXX")"
+  (cd "$root" && nix print-dev-env -f shell.nix) > "$tmp"
+  mv "$tmp" "$env"
+  find "$dir" -name '*.sh' ! -name "$key.sh" -delete 2>/dev/null || true
+fi
+# The env makes a fresh NIX_BUILD_TOP (and points TMPDIR at it) each time it
+# is sourced; nix-shell removes its own, so this does too.
+exec bash -c 'source "$1" >/dev/null 2>&1; trap "rm -rf \"$NIX_BUILD_TOP\"" EXIT; shift; eval "$*"' _ "$env" "$@"
