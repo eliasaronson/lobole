@@ -45,6 +45,20 @@ const ImVec4 kError(0.95f, 0.5f, 0.4f, 1.0f);
 const ImVec4 kStale(0.95f, 0.75f, 0.35f, 1.0f);
 const ImVec4 kMuted(0.6f, 0.6f, 0.6f, 1.0f);
 
+// A message line, wrapped at the width the participants legend uses. The
+// Simulation window sizes itself to its content, so ONE unwrapped sentence
+// (a contact planner's refusal, a missing material) set its width: it grew
+// to the whole app and covered the viewport it asks you to click in. And its
+// rows' right-aligned tails then hold the width they were given, so the next
+// tool session opened just as wide (docs/ui/panels.md#floating-windows).
+void MessageText(const ImVec4& color, const std::string& text) {
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 22.0f);
+  ImGui::PushStyleColor(ImGuiCol_Text, color);
+  ImGui::TextUnformatted(text.c_str());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
+}
+
 // Runs one study edit as an undoable ModifyStudyCommand: snapshot before,
 // apply `mutate` to a copy, snapshot after, execute. Mirrors the RPC path.
 const char* LoadLabel(fem::LoadType t) {
@@ -163,10 +177,8 @@ void DrawMaterialCheck(AppState& state) {
     // the control that unblocks a user's first study. One combo per body, so
     // the id carries the feature it edits.
     const std::string comboId = "###material_" + std::to_string(body.createdBy);
-    ImGui::TextColored(kError,
-                       ICON_FA_TRIANGLE_EXCLAMATION " %s has no "
-                                                    "material",
-                       body.name.c_str());
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + body.name +
+                            " has no material");
     ImGui::TextDisabled("A study needs stiffness data to solve.");
     LeftLabel("Material");
     std::vector<const char*> labels;
@@ -243,7 +255,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     return;
   }
   if (!sim.placeRefusal.empty())
-    ImGui::TextColored(kError, "%s", sim.placeRefusal.c_str());
+    MessageText(kError, sim.placeRefusal);
   const StudyHost host = StudyHostOf(state);
   // Rows, as every list (ui::ListRow): the face as the label, the magnitude
   // as the tail, and Remove in the row's menu instead of a trash button.
@@ -674,8 +686,8 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   // an interpenetration) is shown here rather than after a solve.
   SimulationContacts(state);
   if (!state.simulation.contactError.empty())
-    ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION " %s",
-                       state.simulation.contactError.c_str());
+    MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " +
+                            state.simulation.contactError);
   // Materials come from the parts: say so when the meshed one has none.
   for (const fem::Participant& pt : s.participants) {
     if (pt.role != fem::ParticipantRole::Meshed)
@@ -684,11 +696,9 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
       const auto& mp =
           CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
       if (mp.youngGPa <= 0.0f)
-        ImGui::TextColored(kError,
-                           ICON_FA_TRIANGLE_EXCLAMATION
-                           " %s has no material with stiffness data; assign "
-                           "one on its part tab",
-                           b.name.c_str());
+        MessageText(kError, ICON_FA_TRIANGLE_EXCLAMATION " " + b.name +
+                                " has no material with stiffness data; "
+                                "assign one on its part tab");
     }
   }
 }

@@ -3,6 +3,8 @@
 #include "ui/AppState.h"
 #include "ui/Theme.h" // ElevatedWindowBorder, DrawWindowShadow
 
+#include "imgui_internal.h" // ImGuiWindow: forget a reappearing window's size
+
 #include <algorithm>
 
 namespace ui {
@@ -45,12 +47,38 @@ bool BeginFloatingWindow(AppState& state, const std::string& title, bool* open,
   // doing before: it may have been dragged, or closed in one layout and
   // reopened in another.
   const int frame = ImGui::GetFrameCount();
-  if (placement.lastFrame + 1 != frame)
+  const bool reappearing = placement.lastFrame + 1 != frame;
+  if (reappearing)
     placement.anchor = glm::vec2(-1.0f, -1.0f);
+  // ...and SIZED afresh. The tool window is one ImGui window shared by every
+  // session, and an auto-resized window measures the content it laid out
+  // LAST frame -- at its old width, which a row aligned to the right edge
+  // (ListRow's tail) fills whatever that width was. So the width outlived the
+  // session: a Thread window opened after a wide Simulation window came up
+  // 454 px wide, and its left edge covered the flank the user (and
+  // thread/face_pick_fills_the_slot) was about to click. ImGui does this for
+  // a reappearing popup: forget the size and the measured content, and hide
+  // the frames that measure the new content. TWO of them: laid out at no
+  // width, text wrapped to the window is one word a line, and the first fit
+  // is far too tall.
+  const bool remeasure =
+      reappearing && (flags & ImGuiWindowFlags_AlwaysAutoResize) != 0;
+  if (remeasure)
+    if (ImGuiWindow* w = ImGui::FindWindowByName(title.c_str())) {
+      w->Size = w->SizeFull = ImVec2(0.0f, 0.0f);
+      w->ContentSize = w->ContentSizeIdeal = ImVec2(0.0f, 0.0f);
+      // What Begin measures the content from (CalcWindowContentSizes).
+      w->DC.CursorMaxPos = w->DC.IdealMaxPos = w->DC.CursorStartPos;
+      w->HiddenFramesCannotSkipItems = 2;
+    }
   placement.lastFrame = frame;
   if (glm::distance(placement.anchor, target) > 1.0f) {
     placement.anchor = target;
-    placement.anchorFrames = 2;
+    // Placed on every frame until the size has settled, then left alone so a
+    // drag sticks. The clamp below moves a window that is too tall for a
+    // frame, and an anchor that stopped one frame early left the tool window
+    // over the toolbar at the top of the app for the rest of its session.
+    placement.anchorFrames = remeasure ? 3 : 2;
   }
   const ImGuiCond cond =
       placement.anchorFrames > 0 ? ImGuiCond_Always : ImGuiCond_Appearing;

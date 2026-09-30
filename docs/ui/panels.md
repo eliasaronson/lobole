@@ -50,7 +50,11 @@ The app's patterns, which every panel follows:
 `ui::BeginFloatingWindow` (`src/ui/FloatingWindow.{h,cpp}`) places every
 floating window the same way: anchored to a viewport corner (`TopRight`,
 `BelowToolWindow`, `BottomCenter`), re-anchored when the viewport moves or the
-window reappears, clamped inside the app every frame, with the elevated
+window reappears, sized afresh when an auto-resized one reappears (the tool
+window is one ImGui window shared by every session, and its right-aligned
+rows kept the previous session's width, so a Thread window opened after a
+wide Simulation window covered the viewport it asks you to click in),
+clamped inside the app every frame, with the elevated
 border and a drawn shadow (`DrawWindowShadow`; ImGui has no shadow
 primitive), and `NoSavedSettings`. A window anchored `BelowToolWindow` stacks
 under the tool window (`state.toolWindowRect`) instead of opening on top of

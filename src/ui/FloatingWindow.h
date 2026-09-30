@@ -24,6 +24,9 @@ struct AppState;
 //    moves (docking a panel, closing the terminal) or the window reappears --
 //    two frames, one to learn an auto-resized window's size and one to place
 //    it; a drag sticks until the anchor moves again;
+//  - an auto-resized window that reappears is also SIZED afresh, measured
+//    over two hidden frames: the tool window is shared by every session, and
+//    otherwise kept the last session's width;
 //  - clamped inside the app window every frame;
 //  - the elevated border and the soft shadow that say "above the model";
 //  - no docking, no collapsing, no saved settings, so a stale imgui.ini
