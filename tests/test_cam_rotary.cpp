@@ -21,6 +21,7 @@
 #include <TopoDS.hxx>
 
 #include <chrono>
+#include <cstring>
 
 namespace {
 
@@ -900,6 +901,191 @@ TEST_CASE("cam rotary: the model samples the same on one thread and on many",
       differ++;
   }
   CHECK(differ == 0);
+}
+
+namespace {
+
+// A turned part with several passes -- a rough in layers, then a finish --
+// and rapids THROUGH the stock spliced in at three points: into the untouched
+// blank along the axis (where a cutter buried in a cylinder is equally deep
+// at many steps and cells, so ties are real), between the rough and the
+// finish, and near the end.
+std::string TurningWithBadRapids(const cam::Setup& setup, const Document& doc) {
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc.GetBodies());
+  REQUIRE(paths.size() == 2);
+  for (const cam::Toolpath& tp : paths) {
+    INFO(tp.error);
+    REQUIRE(tp.error.empty());
+  }
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+
+  std::vector<std::string> lines;
+  for (size_t at = 0; at < gcode.size();) {
+    const size_t nl = gcode.find('\n', at);
+    const size_t end = nl == std::string::npos ? gcode.size() : nl;
+    lines.push_back(gcode.substr(at, end - at));
+    at = end + 1;
+  }
+  // Spliced only in front of a line that states its own G1, so the modal
+  // motion a following bare coordinate relies on is restated by it.
+  std::vector<size_t> g1;
+  for (size_t k = 0; k < lines.size(); k++)
+    if (lines[k].rfind("G1 ", 0) == 0)
+      g1.push_back(k);
+  REQUIRE(g1.size() > 10);
+  const std::string bad[3] = {
+      "G0 Z21 A0\nG0 X2 Y0\nG0 X58\nG0 Z40",
+      "G0 Z17 A45\nG0 X10 Y1\nG0 X50 A135\nG0 Z40",
+      "G0 Z16 A200\nG0 X30 Y0\nG0 A260\nG0 Z40",
+  };
+  const size_t where[3] = {g1[1], g1[g1.size() / 2], g1[g1.size() - 3]};
+  std::string out;
+  for (size_t k = 0; k < lines.size(); k++) {
+    for (int b = 0; b < 3; b++)
+      if (k == where[b])
+        out += bad[b] + "\n";
+    out += lines[k] + "\n";
+  }
+  return out;
+}
+
+std::vector<cam::RotaryMove> RotaryMovesOf(const cam::GProgram& p,
+                                           const cam::Setup& setup) {
+  std::vector<cam::RotaryMove> moves;
+  glm::dvec3 from(0.0);
+  double a = 0.0;
+  for (size_t k = 0; k < p.moves.size(); k++) {
+    const cam::GMove& m = p.moves[k];
+    const double to = m.hasA ? m.a : a;
+    if (k > 0)
+      moves.push_back({from, m.to, a, to, setup.FindTool(m.tool), m.rapid});
+    from = m.to;
+    a = to;
+  }
+  return moves;
+}
+
+bool SameBytes(const cam::RadiusMap& a, const cam::RadiusMap& b) {
+  return a.r.size() == b.r.size() &&
+         std::memcmp(a.r.data(), b.r.data(), a.r.size() * sizeof(float)) == 0;
+}
+
+} // namespace
+
+TEST_CASE("cam rotary: the check on every core is the serial check to the bit",
+          "[cam][slow]") {
+  // docs/cam/rotary.md#on-every-core. The map is split into bands along the
+  // axis, each walking every move and touching only its own cells. A cut is
+  // a min(), so its order cannot show -- but a RAPID is asked about the
+  // stock as it stands at that line, and a rapid through material is the one
+  // failure a shape comparison cannot see. So the answer must not be close
+  // to the serial one: it must BE it, for any number of bands and threads.
+  auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {0.0, 4.0, 4.0};
+  setup.safeZ = 40.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  const cam::DerivedOp rough = cam::DeriveRotaryRough(setup, doc->GetBodies());
+  REQUIRE(rough.ok);
+  const cam::DerivedOp finish = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::SurfaceRotary, cam::Target{});
+  REQUIRE(finish.ok);
+  cam::Operation op1 = rough.op, op2 = finish.op;
+  op1.id = 1;
+  op1.stepover = 0.25;
+  op2.id = 2;
+  op2.stepover = 0.25;
+  setup.operations = {op1, op2};
+  const std::string gcode = TurningWithBadRapids(setup, *doc);
+
+  constexpr double kRes = 0.5;
+  const std::vector<Body> bodies =
+      cam::BodiesInSetupFrame(setup, doc->GetBodies());
+  const cam::RadiusMap blank = cam::MakeRotaryBlank(setup, bodies, kRes);
+  REQUIRE(blank.nx > 64);
+  const std::vector<cam::RotaryMove> moves =
+      RotaryMovesOf(cam::ProgramInSetupSpace(gcode, setup), setup);
+  REQUIRE(moves.size() > 1000);
+
+  // The serial walk: one band, the whole map.
+  cam::RadiusMap serial = blank;
+  const std::vector<cam::RotaryRapidHit> serialHits =
+      cam::WalkRotaryProgram(moves, serial, 1);
+  // ...which carves what the one-move carve carves, move after move.
+  {
+    cam::RadiusMap byMove = blank;
+    for (const cam::RotaryMove& m : moves)
+      if (!m.rapid)
+        cam::CarveSweepRotary(m.from, m.to, m.aFrom, m.aTo, m.tool, byMove);
+    CHECK(SameBytes(byMove, serial));
+  }
+  size_t buried = 0;
+  for (const cam::RotaryRapidHit& h : serialHits)
+    if (h.depth > 1e-3)
+      buried++;
+  INFO(serialHits.size() << " rapids, " << buried << " through stock");
+  REQUIRE(buried >= 3); // or this is not testing the rapids
+
+  for (const size_t bands :
+       {size_t{3}, size_t{61}, static_cast<size_t>(blank.nx)}) {
+    for (const char* threads : {"1", "8"}) {
+      ScopedThreads pin(threads);
+      cam::RadiusMap banded = blank;
+      const std::vector<cam::RotaryRapidHit> hits =
+          cam::WalkRotaryProgram(moves, banded, bands);
+      INFO(bands << " bands on " << threads << " threads");
+      CHECK(SameBytes(banded, serial));
+      REQUIRE(hits.size() == serialHits.size());
+      size_t differ = 0;
+      for (size_t k = 0; k < hits.size(); k++)
+        if (hits[k].depth != serialHits[k].depth ||
+            hits[k].at != serialHits[k].at)
+          differ++;
+      CHECK(differ == 0);
+    }
+  }
+
+  // The whole check, as a caller sees it: one thread against many.
+  cam::RotaryInspection one, many;
+  {
+    ScopedThreads pin("1");
+    one = cam::InspectRotary(gcode, setup, doc->GetBodies(), kRes);
+  }
+  {
+    ScopedThreads pin("8");
+    many = cam::InspectRotary(gcode, setup, doc->GetBodies(), kRes);
+  }
+  REQUIRE(one.ok);
+  REQUIRE(many.ok);
+  CHECK(SameBytes(one.machined, serial));
+  CHECK(SameBytes(one.machined, many.machined));
+  const cam::Verdict& a = one.verdict;
+  const cam::Verdict& b = many.verdict;
+  INFO("rapids " << a.rapidsThroughStock << " first line " << a.firstBadLine
+                 << " worst " << a.worstRapidDepth << " at line "
+                 << a.worstRapidLine);
+  CHECK(a.rapidsThroughStock >= 3);
+  CHECK(a.rapidsThroughStock == b.rapidsThroughStock);
+  CHECK(a.firstBadLine == b.firstBadLine);
+  CHECK(a.worstRapidDepth == b.worstRapidDepth);
+  CHECK(a.worstRapidAt == b.worstRapidAt);
+  CHECK(a.worstRapidLine == b.worstRapidLine);
+  CHECK(a.maxGouge == b.maxGouge);
+  CHECK(a.maxLeftover == b.maxLeftover);
+  CHECK(a.leftoverArea == b.leftoverArea);
+
+  // ...and the playback, on every core, ends on that same stock.
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ProgramInSetupSpace(gcode, setup), 0.0);
+  REQUIRE(tl.rotary);
+  ScopedThreads pin("8");
+  cam::RotaryStockSim sim;
+  sim.Begin(tl, setup, blank);
+  sim.SeekTo(tl.End());
+  CHECK(SameBytes(sim.Stock(), many.machined));
 }
 
 TEST_CASE("cam rotary: the CL surface at the rolling pin's size",

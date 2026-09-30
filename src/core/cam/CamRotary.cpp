@@ -188,13 +188,24 @@ namespace {
 struct SweepHit {
   double depth = 0.0; // mm of material the tool is buried in
   glm::dvec2 at{0.0}; // (x mm, theta degrees)
+  int step = 0;       // the step it was found at: the bands' tie-break
+};
+
+// The cells [iLo, iHi) along the axis -- a BAND -- are all a walk touches.
+// The whole map is one band; `WalkRotaryProgram` splits it into several.
+struct Band {
+  int iLo = 0, iHi = 0;
 };
 
 SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
                          double aFrom, double aTo, const Tool* tool,
-                         RadiusMap& stock, bool apply) {
+                         RadiusMap& stock, bool apply, Band band) {
   SweepHit hit;
   if (stock.nx <= 0 || stock.nTheta <= 0)
+    return hit;
+  band.iLo = std::max(band.iLo, 0);
+  band.iHi = std::min(band.iHi, stock.nx);
+  if (band.iLo >= band.iHi)
     return hit;
   const double toolR = tool != nullptr ? tool->diameter * 0.5 : 1.0;
   // The blank's radius, not a scan for the current widest: see `rMax`.
@@ -208,13 +219,45 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
   // stock's widest point, because that is where a given rotation moves the
   // most metal past the cutter -- stepping by the ANGLE instead would sample
   // a 200 mm blank as finely as a 20 mm one.
+  //
+  // The count is the WHOLE move's, whatever the band: a band that stepped
+  // its own stretch more coarsely or more finely would put the tip somewhere
+  // else, and its cells would come out different from the serial walk's.
   const double travel = glm::length(to - from);
   const double turn = std::abs(aTo - aFrom) / 360.0 * kTwoPi * rMax;
   const int steps = std::clamp(
       static_cast<int>(std::ceil(std::max(travel, turn) / (0.5 * stock.res))),
       1, 100000);
 
-  for (int s = 0; s <= steps; s++) {
+  // ...and only the steps whose tool reaches the band. A cell is touched
+  // when |CellX(i) - tip.x| <= toolR, and tip.x is linear in the step, so
+  // the stretch is solved for rather than walked and discarded: a pass along
+  // the whole part is most of its length outside any one band. A step of
+  // margin either side covers the rounding; the exact test below still
+  // decides each cell.
+  int sFirst = 0, sLast = steps;
+  if (band.iLo > 0 || band.iHi < stock.nx) {
+    const double xLo = stock.CellX(band.iLo) - toolR;
+    const double xHi = stock.CellX(band.iHi - 1) + toolR;
+    const double dx = to.x - from.x;
+    if (std::abs(dx) < 1e-9) {
+      // The move stands still along the axis: all of it or none.
+      if (from.x < xLo - 1e-6 || from.x > xHi + 1e-6)
+        return hit;
+    } else {
+      double t0 = (xLo - from.x) / dx, t1 = (xHi - from.x) / dx;
+      if (t0 > t1)
+        std::swap(t0, t1);
+      if (t1 < -1e-9 || t0 > 1.0 + 1e-9)
+        return hit;
+      sFirst = std::max(
+          0, static_cast<int>(std::floor(std::max(t0, 0.0) * steps)) - 1);
+      sLast = std::min(
+          steps, static_cast<int>(std::ceil(std::min(t1, 1.0) * steps)) + 1);
+    }
+  }
+
+  for (int s = sFirst; s <= sLast; s++) {
     const double t = static_cast<double>(s) / steps;
     const glm::dvec3 tip = from + (to - from) * t;
     const double aRad = glm::radians(aFrom + (aTo - aFrom) * t);
@@ -222,12 +265,14 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
     // Only the cells the tool can touch. Along X that is its own radius; in
     // theta it is every cell whose ray can rise into the cutter, which is the
     // half turn facing the spindle -- the other half is below the axis and
-    // out of reach of a tool that only comes down.
-    const int i0 =
-        std::max(0, static_cast<int>((tip.x - toolR - stock.x0) / stock.res));
+    // out of reach of a tool that only comes down. Clipped to the band.
+    const int i0 = std::max(
+        band.iLo, static_cast<int>((tip.x - toolR - stock.x0) / stock.res));
     const int i1 =
-        std::min(stock.nx - 1,
+        std::min(band.iHi - 1,
                  static_cast<int>((tip.x + toolR - stock.x0) / stock.res) + 1);
+    if (i0 > i1)
+      continue;
 
     // ...and in theta, only the BAND the cutter can reach. It walked every
     // row, and a 6 mm cutter over a 25 mm radius touches about fourteen of
@@ -278,6 +323,7 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
         } else if (const double into = r0 - cut; into > hit.depth) {
           hit.depth = into;
           hit.at = {x, glm::degrees(theta)};
+          hit.step = s;
         }
       }
     }
@@ -285,12 +331,88 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
   return hit;
 }
 
+// How many bands to split a map `nx` cells long into. More than the
+// workers, because the cutting is uneven along a part -- a head, a neck --
+// and `parallel::For` hands the bands out as a queue, so a worker that drew
+// an easy one takes another. Performance only: every count gives the same
+// answer.
+size_t DeriveBands(int nx, size_t moves) {
+  // A playback frame's handful of moves is not worth waking a thread for.
+  constexpr size_t kMinMovesToSplit = 32;
+  // A band narrower than this spends more on the steps it shares with its
+  // neighbours (the tip, the theta range) than on its own cells.
+  constexpr int kMinBandCells = 4;
+  const size_t workers = parallel::Workers();
+  if (workers <= 1 || moves < kMinMovesToSplit || nx < 2 * kMinBandCells)
+    return 1;
+  return std::min(4 * workers, static_cast<size_t>(nx / kMinBandCells));
+}
+
 } // namespace
 
 void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
                       double aFrom, double aTo, const Tool* tool,
                       RadiusMap& stock) {
-  WalkSweepRotary(from, to, aFrom, aTo, tool, stock, /*apply=*/true);
+  WalkSweepRotary(from, to, aFrom, aTo, tool, stock, /*apply=*/true,
+                  Band{0, stock.nx});
+}
+
+std::vector<RotaryRapidHit>
+WalkRotaryProgram(const std::vector<RotaryMove>& moves, RadiusMap& stock,
+                  size_t bands) {
+  // Which rapid each move is, so the bands' hits can be gathered per rapid.
+  std::vector<size_t> rapidOf(moves.size(), 0);
+  size_t rapids = 0;
+  for (size_t m = 0; m < moves.size(); m++)
+    if (moves[m].rapid)
+      rapidOf[m] = rapids++;
+  std::vector<RotaryRapidHit> out(rapids);
+  if (stock.nx <= 0 || stock.nTheta <= 0 || moves.empty())
+    return out;
+  if (bands == 0)
+    bands = DeriveBands(stock.nx, moves.size());
+  bands = std::clamp<size_t>(bands, 1, static_cast<size_t>(stock.nx));
+
+  // Each band walks EVERY move in file order and touches only its own
+  // cells. A cut lowers a cell to min(r, cut); a rapid reads the cells as
+  // every earlier cut left them; and no cell is in two bands -- so each cell
+  // sees exactly the serial walk's sequence, and no two workers write the
+  // same cell.
+  struct BandHit {
+    size_t rapid;
+    SweepHit hit;
+  };
+  std::vector<std::vector<BandHit>> found(bands);
+  const size_t nx = static_cast<size_t>(stock.nx);
+  parallel::For(bands, [&](size_t b) {
+    const Band band{static_cast<int>(b * nx / bands),
+                    static_cast<int>((b + 1) * nx / bands)};
+    for (size_t m = 0; m < moves.size(); m++) {
+      const RotaryMove& mv = moves[m];
+      const SweepHit hit =
+          WalkSweepRotary(mv.from, mv.to, mv.aFrom, mv.aTo, mv.tool, stock,
+                          /*apply=*/!mv.rapid, band);
+      if (mv.rapid && hit.depth > 0.0)
+        found[b].push_back({rapidOf[m], hit});
+    }
+  });
+
+  // A rapid's hit is the deepest any band found. On a tie the serial walk
+  // kept the FIRST it met -- the earliest step, and within a step the lowest
+  // cell along the axis, which is the lowest band -- so ties are broken in
+  // that order, and the hit is the serial one exactly, not merely as deep.
+  std::vector<int> bestStep(rapids, 0);
+  for (size_t b = 0; b < bands; b++)
+    for (const BandHit& h : found[b]) {
+      RotaryRapidHit& best = out[h.rapid];
+      if (h.hit.depth > best.depth ||
+          (h.hit.depth == best.depth && h.hit.step < bestStep[h.rapid])) {
+        best.depth = h.hit.depth;
+        best.at = h.hit.at;
+        bestStep[h.rapid] = h.hit.step;
+      }
+    }
+  return out;
 }
 
 RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
@@ -765,47 +887,50 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   out.designed = SampleModelRotary(bodies, out.machined);
 
   const GProgram program = ProgramInSetupSpace(gcode, setup);
+  // A rapid is checked against the stock and removes nothing from it; a
+  // cut removes and is not checked. Same rule as the height map, and the
+  // same reason: a rapid is only safe over air, and it is the one failure
+  // a shape comparison cannot make -- the part can come out perfect and
+  // the tool still be broken. The waveguide round is why this is not
+  // optional: the check found 121 rapids through material on a job whose
+  // gouge was zero, and the fix took them to 16.
+  std::vector<RotaryMove> moves;
+  std::vector<int> rapidLines; // each rapid's file line, in file order
+  moves.reserve(program.moves.size());
   bool have = false;
   glm::dvec3 from(0.0);
   double aFrom = 0.0;
-  int rapids = 0, firstBadLine = 0, worstLine = 0;
-  double worstDepth = 0.0;
-  glm::dvec2 worstAt(0.0);
   for (const GMove& m : program.moves) {
     const double aTo = m.hasA ? m.a : aFrom;
-    if (!have) {
-      from = m.to;
-      aFrom = aTo;
-      have = true;
-      continue;
-    }
-    // A rapid is checked against the stock and removes nothing from it; a
-    // cut removes and is not checked. Same rule as the height map, and the
-    // same reason: a rapid is only safe over air, and it is the one failure
-    // a shape comparison cannot make -- the part can come out perfect and
-    // the tool still be broken. The waveguide round is why this is not
-    // optional: the check found 121 rapids through material on a job whose
-    // gouge was zero, and the fix took them to 16.
-    if (m.rapid) {
-      const SweepHit hit =
-          WalkSweepRotary(from, m.to, aFrom, aTo, setup.FindTool(m.tool),
-                          out.machined, /*apply=*/false);
-      if (hit.depth > kRotaryGrazeTolerance) {
-        rapids++;
-        if (firstBadLine == 0)
-          firstBadLine = m.line;
-        if (hit.depth > worstDepth) {
-          worstDepth = hit.depth;
-          worstAt = hit.at;
-          worstLine = m.line;
-        }
-      }
-    } else {
-      CarveSweepRotary(from, m.to, aFrom, aTo, setup.FindTool(m.tool),
-                       out.machined);
+    if (have) {
+      moves.push_back(
+          {from, m.to, aFrom, aTo, setup.FindTool(m.tool), m.rapid});
+      if (m.rapid)
+        rapidLines.push_back(m.line);
     }
     from = m.to;
     aFrom = aTo;
+    have = true;
+  }
+  // The walk, on every core; its hits are the serial walk's, one per rapid,
+  // and they are counted here in file order exactly as that walk counted.
+  const std::vector<RotaryRapidHit> hits =
+      WalkRotaryProgram(moves, out.machined);
+  int rapids = 0, firstBadLine = 0, worstLine = 0;
+  double worstDepth = 0.0;
+  glm::dvec2 worstAt(0.0);
+  for (size_t k = 0; k < hits.size(); k++) {
+    const RotaryRapidHit& hit = hits[k];
+    if (hit.depth <= kRotaryGrazeTolerance)
+      continue;
+    rapids++;
+    if (firstBadLine == 0)
+      firstBadLine = rapidLines[k];
+    if (hit.depth > worstDepth) {
+      worstDepth = hit.depth;
+      worstAt = hit.at;
+      worstLine = rapidLines[k];
+    }
   }
 
   out.verdict = CompareRotary(out.machined, out.designed, others);

@@ -282,6 +282,15 @@ double RotaryStockSim::RemovedVolume() const {
 
 void RotaryStockSim::Carve(SimCursor from, SimCursor to) {
   const GProgram& p = m_timeline->program;
+  // The cuts are gathered and carved in runs through `WalkRotaryProgram`,
+  // the verifier's own walk, on every core -- a run ending at each snapshot
+  // boundary, since a snapshot must see every cut before it and none after.
+  std::vector<RotaryMove> run;
+  const auto flush = [&] {
+    if (!run.empty())
+      (void)WalkRotaryProgram(run, m_stock);
+    run.clear();
+  };
   for (size_t seg = from.seg; seg <= to.seg && seg < m_timeline->Segments();
        seg++) {
     // A snapshot at every m_every-th segment boundary on the way past it.
@@ -291,8 +300,10 @@ void RotaryStockSim::Carve(SimCursor from, SimCursor to) {
     // snapshot is exactly "all of [0, seg) carved".
     if (m_every > 0 && seg % m_every == 0) {
       const size_t k = seg / m_every;
-      if (k == m_keys.size())
+      if (k == m_keys.size()) {
+        flush();
         m_keys.push_back(m_stock.r);
+      }
     }
     const double t1 = seg == to.seg ? to.t : 1.0;
     if (t1 <= 0.0)
@@ -303,10 +314,11 @@ void RotaryStockSim::Carve(SimCursor from, SimCursor to) {
       continue;
     const double a0 = AngleOf(p.moves[seg]);
     const double a1 = AngleOf(p.moves[seg + 1]);
-    CarveSweepRotary(p.moves[seg].to, Lerp(p, seg, t1), a0,
-                     a0 + (a1 - a0) * std::clamp(t1, 0.0, 1.0),
-                     m_setup.FindTool(p.moves[seg + 1].tool), m_stock);
+    run.push_back({p.moves[seg].to, Lerp(p, seg, t1), a0,
+                   a0 + (a1 - a0) * std::clamp(t1, 0.0, 1.0),
+                   m_setup.FindTool(p.moves[seg + 1].tool), false});
   }
+  flush();
 }
 
 void RotaryStockSim::SeekTo(SimCursor to) {

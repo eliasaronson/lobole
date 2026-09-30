@@ -1879,9 +1879,9 @@ struct AppState {
   cam::Timeline camTimeline;
   cam::StockSim camStockSim;
   // The same, for a program whose part TURNS: a radius field, carved by the
-  // verifier's own `CarveSweepRotary`, with snapshots for scrubbing back
-  // (docs/cam/rotary.md#the-rotary-picture). Exactly one of the two is armed
-  // while a playback is open, chosen by `camTimeline.rotary`.
+  // verifier's own walk (`WalkRotaryProgram`), with snapshots for scrubbing
+  // back (docs/cam/rotary.md#the-rotary-picture). Exactly one of the two is
+  // armed while a playback is open, chosen by `camTimeline.rotary`.
   cam::RotaryStockSim camRotarySim;
   cam::SimCursor camCursor;
   // Grid for the picture. Verification runs at 0.4 mm; a visual wants finer,

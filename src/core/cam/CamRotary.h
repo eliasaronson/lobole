@@ -108,6 +108,34 @@ void CarveSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
                       double aFrom, double aTo, const Tool* tool,
                       RadiusMap& stock);
 
+// One move of a program on the radius map, in setup space.
+struct RotaryMove {
+  glm::dvec3 from{0.0}, to{0.0};
+  double aFrom = 0.0, aTo = 0.0; // degrees
+  const Tool* tool = nullptr;    // null: the 2 mm flat `CarveSweepRotary` says
+  bool rapid = false; // CHECKED against the stock as it stands, not applied
+};
+
+// How deep one rapid went into the stock, and where: zero when it stayed in
+// air.
+struct RotaryRapidHit {
+  double depth = 0.0; // mm
+  glm::dvec2 at{0.0}; // (x mm, theta degrees)
+};
+
+// Walks `moves` in file order: a cut is carved as `CarveSweepRotary` carves
+// it, a rapid is asked how deep it went into the stock as every earlier cut
+// left it. Returns one hit per RAPID, in file order.
+//
+// On every core, by BANDS ALONG THE AXIS (docs/cam/rotary.md#on-every-core):
+// each band walks every move and touches only its own cells, so every cell
+// sees the sequence a serial walk gives it, and the answer -- map and hits --
+// is the serial one bit for bit whatever `bands` is. 0 derives the count from
+// the machine; the tests pass one to compare against.
+[[nodiscard]] std::vector<RotaryRapidHit>
+WalkRotaryProgram(const std::vector<RotaryMove>& moves, RadiusMap& stock,
+                  size_t bands = 0);
+
 // The cutter-location RADIUS surface: for each (x, theta), the radius at
 // which this tool's TIP must sit for the cutter to touch the part without
 // cutting into it. The rotary twin of `DropCut`, and the same arithmetic --

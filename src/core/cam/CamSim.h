@@ -160,9 +160,10 @@ private:
 // The stock at a cursor, for a program whose part TURNS
 // (docs/cam/rotary.md#the-rotary-picture).
 //
-// The twin of `StockSim` over a radius field, carving with the same
-// `CarveSweepRotary` the verifier uses -- which is what makes the last frame
-// of a rotary playback the stock `InspectRotary` reads its verdict from.
+// The twin of `StockSim` over a radius field, carving with the same walk the
+// verifier uses (`WalkRotaryProgram`, banded along the axis on every core) --
+// which is what makes the last frame of a rotary playback the stock
+// `InspectRotary` reads its verdict from.
 //
 // One thing the planar class only anticipates, this one needs: SNAPSHOTS.
 // Backward still cannot un-cut, and the planar header says what to do when
