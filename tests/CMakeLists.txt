@@ -156,6 +156,7 @@ target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # core/Feature.h, which change often. GCC's .gch is not byte-reproducible,
 # so a project header in it made every touch of it a full, uncached rebuild
 # of all 112 test sources.
+if(ENABLE_PCH)
 target_precompile_headers(designer_tests PRIVATE
     <catch2/catch_test_macros.hpp>
     <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -165,6 +166,8 @@ target_precompile_headers(designer_tests PRIVATE
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <map> <set> <filesystem> <cmath>
 )
+endif()
+
 target_compile_definitions(designer_tests PRIVATE
     DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     # So a test can compare its own mtime against the source it was built

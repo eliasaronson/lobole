@@ -20,6 +20,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
 
+# Precompiled headers, OFF by default. GCC's .gch is not byte-reproducible,
+# ccache folds its bytes into the key of every source that uses one, and each
+# tree builds its own: so with them on, a worktree shared NO object with main
+# (391 of 428 sources missed, measured) and main shared none with an agent's
+# branch it was merging. Off, they cost 5-10% on the file actually being
+# recompiled (-O3 dominates, not parsing: 5.8 s against 6.1 s for CamPanel.cpp,
+# 29.8 against 33.3 over four test files) and every other file is a hit.
+# docs/architecture.md#precompiled-headers.
+option(ENABLE_PCH "Precompiled headers (stops ccache sharing across trees)" OFF)
+
 # Use ccache when available (no-op otherwise) for fast unchanged-TU rebuilds.
 # CCACHE_BASEDIR is THIS source tree: every path under it is hashed relative
 # to the build directory (`../src/...`), so a worktree's compile of a file is
@@ -651,12 +661,14 @@ endif()
 # dominates compile time. PRIVATE so it applies to designer_core's own sources
 # only (not dependents). Kept off the app target, whose ImGui sources shouldn't
 # be forced to include OCC.
+if(ENABLE_PCH)
 target_precompile_headers(designer_core PRIVATE
     "${CMAKE_SOURCE_DIR}/src/cad/CADKernel.h"
     <glm/glm.hpp>
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <variant> <map> <array>
 )
+endif()
 
 # Application: windowing, rendering, UI.
 set(app_sources
@@ -910,12 +922,14 @@ set_source_files_properties(
 # PRIVATE, like designer_core's: it applies to this target's own sources, not
 # to everything that links it.
 
+if(ENABLE_PCH)
 target_precompile_headers(designer_app PRIVATE
     "${CMAKE_SOURCE_DIR}/src/cad/CADKernel.h"
     <glm/glm.hpp>
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <map> <set> <algorithm> <cmath>
 )
+endif()
 if(ENABLE_TEST_ENGINE)
   # PUBLIC, not PRIVATE: GuiTests*.cpp and the app both switch on it, and a
   # consumer linking this library must agree about ImGui's ABI.

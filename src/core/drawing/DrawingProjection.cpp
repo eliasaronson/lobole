@@ -1,4 +1,5 @@
 #include "core/drawing/DrawingProjection.h"
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 
 #include <algorithm>
 #include <list>
