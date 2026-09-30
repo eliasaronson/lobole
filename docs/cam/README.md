@@ -166,7 +166,7 @@ as `belowStock` / `below_stock_mm`, not as a gouge.
 | framing, stock, origin, fixtures, seats | `CamSetup.cpp` |
 | picks | `CamPicks.{h,cpp}`, `CamGeometry.cpp` (`PickedFaceRegion`, `PickedWallContour`, `PickedSurfaceRegion`, `ProjectedOutlines`), `CamSurfacePick.cpp` |
 | derivation | `CamDerive.cpp` (`DeriveOperation`, `DeriveSafeZ`, `DeriveSurfaceRough`, `DeriveRest`, `DeriveRotaryRough`, `AddOperationType`, `CuttingMinutes`) |
-| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving) |
+| generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamSurfaceStore.{h,cpp}` (surfacing passes kept on disk), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving) |
 | sketch curves | `CamSketchCurves.cpp` (`SketchEntityCurves`, the one resolver from a sketch entity to curves in model space, and the engraving's groove, frame, surface probe and stroke order; built with CAM off too), `ui::JobSketchCurves` in `JobActions.cpp` |
 | layout, order, travel | `CamTravel.cpp` (`CheckPlacements`, `PlacementRefusal`, `CuttingOrder`, `MachineWarning`, `ClipToMachine`, `GenerateAll`) |
 | post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}` |
@@ -228,7 +228,16 @@ job ([4th axis](rotary.md#one-operation-at-several-indices)):
 - a profile's projected outlines (`QueueOutlinePasses`, started first: every
   profile waits on its own);
 - adaptive clearing passes;
-- surfacing operations (one entry per operation).
+- surfacing operations (one entry per operation), which are also kept on
+  disk between runs, keyed on the geometry itself and the build that cut
+  them ([long-operations.md](../ui/long-operations.md#passes-kept-on-disk)):
+  a restart, or a rerun of an unchanged job, reads a turning's passes back
+  in half a second instead of cutting them for a minute.
+
+The geometry fingerprint these keys take from the UI (`JobPassesKey`) leaves
+out which setup the job tab shows: a pass is framed by the setup it is cut
+in, which `FramingKey` already keys, and with the shown setup in it a parked
+request cut every pass twice.
 
 A toolpath waiting on a pass is `pending`; post, verify and simulate refuse
 while any is pending, saying why. `cam_toolpath {async: true}` returns at once
@@ -302,7 +311,8 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   regenerated with `DESIGNER_REFRESH_CAM_GOLDEN=1` and the diff read before
   committing), the verifier (`test_cam_verify.cpp`), the simulation
   (`test_cam_sim.cpp`), surfacing (`test_cam_surface.cpp`), rough and rest
-  (`test_cam_rough_rest.cpp`), rotary (`test_cam_rotary.cpp`,
+  (`test_cam_rough_rest.cpp`), surfacing passes on disk
+  (`test_cam_surface_store.cpp`), rotary (`test_cam_rotary.cpp`,
   `test_cam_spiral.cpp`, `test_cam_helical.cpp`), clipping to the machine
   (`test_cam_travel.cpp`), tools (`test_cam_tools.cpp`), workholding
   (`test_cam_workholding.cpp`), engraving and its grooves in the verifier

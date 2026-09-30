@@ -2460,7 +2460,7 @@ TEST_CASE("a pass is keyed on the job, not on which setup the tab shows",
   // queues its passes as soon as it selects the job, before the tab shows
   // any setup; the tab then shows one. With the shown setup in the key,
   // every pass was owed again under the second key and cut twice -- the
-  // chess knights' turning, 250 s of a 380 s cam_toolpath.
+  // chess knights' cam_toolpath took 286 s for 131 s of passes.
   if (!cam::AdaptiveAvailable())
     return;
   ui::AppState state = MakeHeadlessState();

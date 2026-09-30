@@ -179,6 +179,16 @@ outward from its centre and stops once the best contact stands within
 `TipHeight` of the highest cell under the cutter (a per-block maximum): the
 answer is the full kernel's, cell for cell (`cam rotary: the pruned CL equals
 the full kernel's`), and a smooth turned surface visits a fraction of it.
+Each column of the kernel is bounded again by its OWN highest cell over the
+rows the footprint covers there (a per-column strip maximum): on a part that
+is not round the block's maximum is a nose or an ear most columns never come
+near, and the knights blank's finish went from 18 s to 7 and its rest pass
+from 99 s to 54, the passes unchanged to the byte. `RotaryCL` and the
+model's radius field it dilates (`SampleModelRotary`, which splats
+triangles and raises a cell by compare-and-swap) both run on every core,
+and neither depends on the thread count: a cell is a maximum, whatever
+order its samples land in (`cam rotary: the model samples the same on one
+thread and on many`).
 
 ### Patterns (`rotary_pattern`)
 
@@ -244,6 +254,17 @@ the full kernel's`), and a smooth turned surface visits a fraction of it.
   derives no stepdown. The pattern is in the op's settings. Over the RPC, a
   script sets `stepdown` and `stock_to_leave` on the op, which is what the
   rough verb derives.
+- **A rough is planned on the grid its skin needs** (`cam::RotaryPassGrid`).
+  An op with a stepdown and a stock to leave (and no `rest_from_tool`) is
+  not a surface anybody keeps, so its cusp is half the skin rather than the
+  finish's 2% of the cutter, and its cell is never wider than half the skin
+  -- a grid misplaces the cutter beside a wall by up to 0.71 of a cell, a
+  third of the skin at most -- nor finer than the finish's. The knights'
+  6 mm rough went from 0.15 mm cells to 0.25 and from 189,185 moves to
+  113,911, and the finish after it verifies the same. `cam rotary: a rough
+  is planned on the grid its skin needs, and still leaves an even skin`
+  carves the rough and the same op in one layer on the finish's grid and
+  holds their skins together.
 - `rest_from_tool` works on the rotary op as on the raster
   ([operations.md](operations.md#rough-a-surface-and-rest-machining)), with
   radius for height and arc length across the axis. What the larger cutter

@@ -130,8 +130,9 @@ uint64_t JobRenderVersion(AppState& state);
 // (`cam::FramingKey`); the one the tab happens to show is not an input. With
 // it in, a request parked right after a job tab opened queued every pass
 // under "no setup shown", the tab then showed the setup, and every pass was
-// owed again under a second key -- the knights' turning cut twice, 250 s of
-// a 380 s cam_toolpath (docs/ui/long-operations.md#cam-toolpath-passes).
+// owed again under a second key -- the knights' turning cut twice, a
+// 286 s cam_toolpath for 131 s of passes
+// (docs/ui/long-operations.md#cam-toolpath-passes).
 uint64_t JobPassesKey(AppState& state);
 
 // The machining selection for a picked element: the ref, plus which job part

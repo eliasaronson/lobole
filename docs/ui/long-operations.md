@@ -93,13 +93,21 @@ inputs, so it has no tab, no operation index and no document version:
 - undo and re-open are cache hits.
 
 The core cannot fingerprint geometry cheaply, so the caller supplies
-`GenerateContext::bodiesKey`, which the UI fills from `JobRenderVersion` (the
-job, its sources, the active setup, the fixturing and every placement). That
+`GenerateContext::bodiesKey`, which the UI fills from `JobPassesKey` (the
+job, its sources, the fixturing and every placement). That
 fingerprint is one per job, while an operation cut at several indices, or a
 second setup, frames the same bodies differently, so the outline and surface
 keys also hash `FramingKey` (the fixture frame, the index and every
 placement of the setup the pass is cut in,
 [rotary.md](../cam/rotary.md#one-operation-at-several-indices)).
+
+**Which setup the tab shows is not an input.** `JobRenderVersion`, which the
+renderer resyncs on, is `JobPassesKey` plus the shown setup; the pass keys
+leave it out. With it in, a parked `cam_toolpath` queued its passes the
+moment it selected the job, while the tab showed no setup, and the tab then
+showed one: every pass was owed again under a second key and cut twice. The
+chess knights' `cam_toolpath` took 286 s for 131 s of passes (`a pass is
+keyed on the job, not on which setup the tab shows`).
 
 **The keys must cover every field the pass reads.** A field read but not
 hashed is a stale result nobody can see, so `test_conventions.cpp` has "the
@@ -174,6 +182,35 @@ and cancel against a synchronous generate.
 Not deferred: Pocket's and Face's per-pass `SectionLoops` and the section
 loops adaptive takes before queueing — one section per pass each; the outline
 cache is the natural home if one ever holds a frame.
+
+### Passes kept on disk
+
+A surfacing pass is also kept on DISK, under `$XDG_CACHE_HOME/designer/cam/`
+(`cam::SurfaceStore`, `core/cam/CamSurfaceStore.h`), so a restart or a
+rerun of an unchanged job reads it instead of cutting it again: the knights
+blank's three turning passes, a minute cold, come back in half a second.
+The in-memory cache stays in front; whoever would cut a pass it misses --
+the worker, or the inline path -- reads the store first
+(`SurfacePassStored`), and writes what it cuts.
+
+- **Keyed on the geometry itself.** The store's key is `SurfaceKey` with
+  `BodiesContentKey` for the geometry: the bodies' exact B-rep (no
+  triangulation) and the names a pick resolves through. The session's
+  `bodiesKey` is made of version counters, which say "unchanged since" inside
+  one run and nothing across two.
+- **Salted by the build.** The key covers a pass's inputs, not the code that
+  cut it, so every file also carries a hash of the executable that wrote it,
+  and another build's file is a miss. The hash is taken on first use, not
+  at startup.
+- **Bounded, least recently read out.** 2 GiB (a turning is ~50 MB); a read
+  touches its file, and after a write the oldest untouched ones go. Writes
+  land whole (a temporary, then a rename); a torn or foreign file is a miss
+  and is removed.
+- **Opened by the app, not by the core.** `ui::OpenCamSurfaceStore` at
+  startup, windowed, offscreen and headless alike -- not under the GUI suite,
+  which runs on defaults. An offscreen or headless instance does not isolate
+  `XDG_CACHE_HOME`, so a test that reaches the store builds its own on a
+  scratch directory (`tests/test_cam_surface_store.cpp`).
 
 ## FEM: meshing and solving
 
