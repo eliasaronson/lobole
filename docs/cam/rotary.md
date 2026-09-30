@@ -283,7 +283,7 @@ cut at all.
 `cam rotary: a rest pass cuts only the bands its finish left` holds both
 patterns to it on a shaft with two grooves.
 
-- **Add operation** in the panel adds another rotary pass on a setup that
+- **Add operation** in a setup's menu adds another rotary pass on a setup that
   already holds one (`cam::AddOperationType`); a 4th-axis machine with a plate
   clamped to the bed is still a 3-axis job and gets the whole-part cut-out.
 

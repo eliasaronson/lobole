@@ -49,7 +49,7 @@ is the one place a setup's machine is assigned; it seeds `rapidFeed`, zeroes
 the rotary index on a machine without the axis, and, on a
 setup with nothing cut yet, copies the library into `tools` — an operation
 names its tool by number, so replacing the table under existing operations
-would re-point every cut. The panel's Add tool offers the library first.
+would re-point every cut. The Tools header's `+` offers the library first.
 
 ## Setups
 

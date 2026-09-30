@@ -25,6 +25,33 @@
 #include "ui/CamPlayback.h"
 #endif
 
+#ifdef HAVE_CAM
+namespace {
+// The CAM panel is a tree (docs/ui/panels.md#cam-job-tab-the-cam-panel): a
+// setup is a row, drawn under PushID("setup<id>"), and its verbs are in its
+// menu. Right-click it and click one of them.
+std::string CamSetupRow(uint64_t setupId) {
+  return "//CAM###CamPanel/**/###cam_setup_" + std::to_string(setupId);
+}
+void CamSetupMenu(ImGuiTestContext* ctx, uint64_t setupId, const char* item) {
+  ctx->ItemClick(CamSetupRow(setupId).c_str(), ImGuiMouseButton_Right);
+  ctx->Yield();
+  ctx->ItemClick((std::string("//$FOCUSED/") + item).c_str());
+  ctx->Yield(2);
+}
+// A job part's row, and one of its menu's items.
+std::string CamPartRow(uint64_t jobPartId) {
+  return "//CAM###CamPanel/parts/###cam_part_" + std::to_string(jobPartId);
+}
+void CamPartMenu(ImGuiTestContext* ctx, uint64_t jobPartId, const char* item) {
+  ctx->ItemClick(CamPartRow(jobPartId).c_str(), ImGuiMouseButton_Right);
+  ctx->Yield();
+  ctx->ItemClick((std::string("//$FOCUSED/") + item).c_str());
+  ctx->Yield(2);
+}
+} // namespace
+#endif
+
 // Cam GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
@@ -194,28 +221,33 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // the pair.
     ImGuiWindow* panel = ImGui::FindWindowByName("CAM###CamPanel");
     IM_CHECK(panel != nullptr);
-    // The setup row's combo is the MACHINE since round two; the post dialect
-    // moved under "Stock and safety" as one of the machine's own fields.
-    // Save G-code moved to the Generate window
-    // (docs/ui/panels.md#cam-job-tab-the-cam-panel); the panel's run line is
-    // the widget that took its place.
-    const ImGuiID machineCombo = panel->GetID("###cam_machine");
-    const ImGuiID runStatus = panel->GetID("###cam_run_status");
-    IM_CHECK(machineCombo != runStatus);
-    ImGuiTestItemList items;
-    ctx->GatherItems(&items, "//CAM###CamPanel");
-    bool sawCombo = false, sawRun = false;
-    for (const ImGuiTestItemInfo& item : items) {
-      sawCombo |= item.ID == machineCombo;
-      sawRun |= item.ID == runStatus;
-    }
-    IM_CHECK(sawCombo); // the machine…
-    IM_CHECK(sawRun);   // …and the run line, as two separate widgets
-    // ...and the post combo is still reachable, under its header.
+    // The panel is a tree now (docs/ui/panels.md#cam-job-tab-the-cam-panel):
+    // Parts, Setups and Tools headers, the setup a row whose tail is the run
+    // status (the line that replaced Save G-code), its operation under it.
+    // The machine and the post dialect are the setup's settings, in the tool
+    // window.
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemOpen("###cam_stock");
+    for (const char* id :
+         {"###cam_parts", "###cam_setups", "###cam_tools", "###cam_parts_add",
+          "###cam_setups_add", "###cam_tools_add"})
+      IM_CHECK(ctx->ItemExists(id));
+    IM_CHECK(ctx->ItemExists("**/###cam_run_status"));
+    IM_CHECK(ctx->ItemExists(
+        ("**/$$" + std::to_string(static_cast<int>(op.id)) + "/###op_row")
+            .c_str()));
+    IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
+    // Its settings: the machine and the post, two separate widgets.
+    ctx->ItemDoubleClick(CamSetupRow(setup.id).c_str());
     ctx->Yield(2);
-    IM_CHECK(ctx->ItemExists("###cam_post"));
+    IM_CHECK_EQ(s_App->camEditSetup, setup.id);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###cam_machine"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###cam_post"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###cam_safez"));
+    ctx->ItemClick("//###ToolWindow/###cam_setup_editor_close");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditSetup, (uint64_t)0);
+    IM_CHECK(!s_App->camToolOpen);
+    IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
   };
 
   // An operation can be removed from the window that makes them. Removing was
@@ -640,11 +672,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemOpen(
-        "###cam_stock"); // OPEN, not toggle (a header keeps its state)
-    ctx->Yield(2);
 
-    // Move zero to the stock's centre by clicking, and the origin follows.
+    // Move zero to the stock's centre, and the origin follows.
     Job()->FindSetup(setup.id)->originAt = cam::OriginAt::StockCentre;
     IM_CHECK(cam::RecomputeOrigin(*Job()->FindSetup(setup.id),
                                   CamPart()->GetBodies()));
@@ -655,7 +684,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // And the FILE measures from it: post a real operation and read the
     // extremes back. This is the assertion that fails if the origin goes back
     // to being a label.
-    ctx->ItemClick("###cam_add_op");
+    CamSetupMenu(ctx, setup.id, "###cam_add_op");
     ctx->Yield(2);
     // Generate is a toolbar tool with its own window now
     // (docs/ui/panels.md#cam-job-tab-the-cam-panel); closed again so it cannot
@@ -1154,7 +1183,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("###cam_add_op");
+    CamSetupMenu(ctx, added.id, "###cam_add_op");
 
     int frames = 0;
     const auto t0 = std::chrono::steady_clock::now();
@@ -1214,8 +1243,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("###cam_add_op");
-    ctx->Yield(2);
+    CamSetupMenu(ctx, added.id, "###cam_add_op");
     setup = Job()->FindSetup(added.id);
     IM_CHECK(setup != nullptr);
     IM_CHECK_EQ(setup->operations.size(), (size_t)2);
@@ -1923,12 +1951,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemOpen("###cam_fixtures");
-    ctx->Yield(2);
 
-    ctx->ItemClick("**/###cam_fixture_add_menu");
-    ctx->Yield(2);
-    ctx->ItemClick("//$FOCUSED/###cam_fixture_box");
+    // Fixtures are under their setup, added from its menu.
+    CamSetupMenu(ctx, sid, "###cam_fixture_add_menu");
+    ctx->ItemClick("//###Menu_00/###cam_fixture_box");
     ctx->Yield(2);
     const auto live = [&]() -> cam::Setup& { return *Job()->FindSetup(sid); };
     IM_CHECK_EQ(live().fixtures.size(), (size_t)1);
@@ -2077,8 +2103,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // than defaulting to zeros — the u10 rule: a default that cuts nothing
     // (or everything) is a bug.
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("###cam_add_op");
-    ctx->Yield(2);
+    CamSetupMenu(ctx, setup.id, "###cam_add_op");
     cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK(live != nullptr);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
@@ -2097,8 +2122,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemOpen(
         "###cam_tools"); // OPEN, not toggle (a header keeps its state)
     ctx->Yield();
-    ctx->ItemClick("###cam_add_tool");
-    ctx->ItemClick("###cam_add_op");
+    ctx->ItemClick("###cam_tools_add");
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_add_tool");
+    ctx->Yield();
+    ctx->SetRef("//CAM###CamPanel");
+    CamSetupMenu(ctx, setup.id, "###cam_add_op");
     ctx->Yield(3);
     IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
 
@@ -2216,8 +2245,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("###cam_add_op");
-    ctx->Yield(2);
+    CamSetupMenu(ctx, setup.id, "###cam_add_op");
     // Generate is a toolbar tool with its own window now
     // (docs/ui/panels.md#cam-job-tab-the-cam-panel); closed again so it cannot
     // take the clicks of what follows.
@@ -2378,32 +2406,29 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemOpen("###cam_parts");
-    ctx->ItemOpen("###cam_fixtures");
     ctx->Yield(2);
 
-    // The two parts the job does not hold, and not the one it does.
-    const auto menuCount = [&](const char* button, const char* item) {
-      ctx->SetRef("//CAM###CamPanel");
-      ctx->ItemClick((std::string("**/") + button).c_str());
-      ctx->Yield(2);
+    // The two parts the job does not hold, and not the one it does: the
+    // Parts header's "+", and the setup menu's Add fixture.
+    const auto countIn = [&](const char* window, const char* item) {
       ImGuiTestItemList items;
-      ctx->GatherItems(&items, "//$FOCUSED", 2);
+      ctx->GatherItems(&items, window, 2);
       int n = 0;
       for (int i = 0; i < items.GetSize(); i++)
         if (std::strstr(items[i]->DebugLabel, item) != nullptr)
           n++;
-      ctx->KeyPress(ImGuiKey_Escape);
-      ctx->Yield(2);
       return n;
     };
-    IM_CHECK_EQ(menuCount("###cam_part_add_menu", "###cam_part_add"), 2);
-    IM_CHECK_EQ(menuCount("###cam_fixture_add_menu", "###cam_fixture_add"), 2);
+    ctx->ItemClick("###cam_parts_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(countIn("//$FOCUSED", "###cam_part_add"), 2);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    CamSetupMenu(ctx, sid, "###cam_fixture_add_menu");
+    IM_CHECK_EQ(countIn("//###Menu_00", "###cam_fixture_add"), 2);
 
     // Hold it with the jaw, from the menu's part group.
-    ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("**/###cam_fixture_add_menu");
-    ctx->Yield(2);
-    ctx->ItemClick(("//$FOCUSED/$$" +
+    ctx->ItemClick(("//###Menu_00/$$" +
                     std::to_string(static_cast<int>(s_App->parts[jaw].id)) +
                     "/###cam_fixture_add")
                        .c_str());
@@ -2445,8 +2470,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemOpen("###cam_parts");
     ctx->Yield(2);
 
-    // Add the second part from the section's one Add menu.
-    ctx->ItemClick("**/###cam_part_add_menu");
+    // Add the second part from the header's "+".
+    ctx->ItemClick("###cam_parts_add");
     ctx->Yield(2);
     // The popup's items sit under the part's id (PushID), as the op rows do.
     ctx->ItemClick(("//$FOCUSED/$$" +
@@ -2456,21 +2481,31 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK_EQ(Job()->GetParts().size(), (size_t)2);
 
-    // Place it: the button appears per unplaced part, so clicking the first
-    // one places the part that has none yet.
-    ctx->ItemClick("**/###cam_place");
-    ctx->Yield(2);
+    // Place it, from its row's menu.
+    const uint64_t added = Job()->GetParts().back().id;
+    CamPartMenu(ctx, added, "###cam_place");
     const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK(live != nullptr);
     IM_CHECK_EQ(live->placements.size(), (size_t)1);
 
-    // And it names a part the job actually holds — a placement for anything
+    // And it names the part it was placed for -- a placement for anything
     // else would put a ghost in the stock.
-    IM_CHECK(Job()->FindPart(live->placements[0].jobPartId) != nullptr);
+    IM_CHECK_EQ(live->placements[0].jobPartId, added);
+
+    // A double-click edits the placement in the tool window.
+    ctx->ItemDoubleClick(CamPartRow(added).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditPart, added);
+    ctx->ItemInputValue("//###ToolWindow/###cam_place_x", "12");
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Job()->FindSetup(setup.id)->placements[0].pos.x - 12.0) <
+             1e-6);
+    ctx->ItemClick("//###ToolWindow/###cam_part_editor_close");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditPart, (uint64_t)0);
 
     // Removing a part takes its placement with it.
-    ctx->ItemClick("**/###cam_part_remove");
-    ctx->Yield(2);
+    CamPartMenu(ctx, added, "###cam_part_remove");
     IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1);
     IM_CHECK(Job()->FindSetup(setup.id)->placements.size() <= 1);
 
@@ -2479,6 +2514,238 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         ctx->ItemClick(modelWin->TabId);
         ctx->Yield(2);
       }
+  };
+
+  // Setups are rows of a tree, each a disclosure over its operations and
+  // fixtures (docs/ui/panels.md#cam-job-tab-the-cam-panel). They were a
+  // combo, so a job's structure, setup by setup, was never on screen at once.
+  t = IM_REGISTER_TEST(engine, "cam", "two_setups_are_open_at_once");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    const uint64_t top = MakeJob()->AddSetup("Top").id;
+    const uint64_t back = Job()->AddSetup("Back").id;
+    std::vector<uint64_t> ops;
+    for (const uint64_t sid : {top, back}) {
+      cam::Operation op;
+      op.id = Job()->AllocateId();
+      op.name = sid == top ? "Outline" : "Face";
+      op.type = cam::OpType::Profile;
+      op.topZ = 13.0;
+      op.bottomZ = -1.0;
+      Job()->FindSetup(sid)->operations.push_back(op);
+      ops.push_back(op.id);
+    }
+    s_App->camActiveSetup = top;
+    ctx->Yield(2);
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    const auto opRow = [&](size_t i) {
+      return "**/$$" + std::to_string(static_cast<int>(ops[i])) + "/###op_row";
+    };
+    const auto isOpen = [&](uint64_t sid) {
+      const ImGuiTestItemInfo info = ctx->ItemInfo(
+          ("**/###cam_setup_open_" + std::to_string(sid)).c_str());
+      return info.ID != 0 &&
+             (info.StatusFlags & ImGuiItemStatusFlags_Opened) != 0;
+    };
+    // The active setup is open, the other closed; opening it is not
+    // activating it.
+    IM_CHECK(isOpen(top));
+    IM_CHECK(!isOpen(back));
+    IM_CHECK(ctx->ItemExists(opRow(0).c_str()));
+    IM_CHECK(!ctx->ItemExists(opRow(1).c_str()));
+    ctx->ItemOpen(("**/###cam_setup_open_" + std::to_string(back)).c_str());
+    ctx->Yield(2);
+    IM_CHECK(isOpen(top));
+    IM_CHECK(isOpen(back));
+    IM_CHECK_EQ(s_App->camActiveSetup, top);
+    IM_CHECK(ctx->ItemExists(opRow(0).c_str()));
+    IM_CHECK(ctx->ItemExists(opRow(1).c_str()));
+    // The run status is the ACTIVE setup's, and only one row carries it.
+    IM_CHECK(ctx->ItemExists("**/###cam_run_status"));
+
+    // A click on the other row makes it the active setup; the first stays
+    // open, and both operations stay listed.
+    ctx->ItemClick(CamSetupRow(back).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camActiveSetup, back);
+    IM_CHECK(isOpen(top));
+    IM_CHECK(isOpen(back));
+    // An operation of the setup that is not active makes it active when it is
+    // edited: its settings are the active setup's.
+    ctx->ItemDoubleClick(opRow(0).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camActiveSetup, top);
+    IM_CHECK_EQ(s_App->camEditOp, ops[0]);
+    ctx->ItemClick("//###ToolWindow/###cam_edit_done");
+    ctx->Yield(2);
+    IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
+
+    // Rename and Duplicate, from the menu.
+    CamSetupMenu(ctx, back, "###cam_setup_rename");
+    ctx->KeyCharsReplaceEnter("Underside");
+    ctx->Yield(2);
+    IM_CHECK(Job()->FindSetup(back)->name == "Underside");
+    CamSetupMenu(ctx, back, "###cam_setup_duplicate");
+    IM_CHECK_EQ(Job()->GetSetups().size(), (size_t)3);
+    const cam::Setup& copy = Job()->GetSetups().back();
+    IM_CHECK_EQ(copy.operations.size(), (size_t)1);
+    IM_CHECK(copy.operations[0].id != ops[1]);
+    IM_CHECK_EQ(s_App->camActiveSetup, copy.id);
+  };
+
+  // The chess undersides job, by hand (docs/cam/gui.md#the-cam-panel): ONE
+  // part in two configurations -- a blank, and the same blank with a pocket
+  // -- added twice, placed side by side, and the pocketed one cut. A job
+  // part's configuration had no door but the RPC.
+  t = IM_REGISTER_TEST(engine, "cam", "one_part_in_two_configurations");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
+    const uint64_t plate = CamPart()->GetFeature(0)->GetId();
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Void", glm::vec3(15, 10, 12), 30, 20, 20));
+    const uint64_t voidId = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Pocket", plate, voidId, BooleanOp::Subtract));
+    const uint64_t pocketId = CamPart()->GetFeature(2)->GetId();
+    const uint64_t blank = [&] {
+      Configuration& c = CamPart()->AddConfiguration("blank");
+      c.suppressedFeatures = {voidId, pocketId};
+      return c.id;
+    }();
+    const uint64_t pocketed = CamPart()->AddConfiguration("pocketed").id;
+    ctx->Yield(2);
+    const uint64_t sourceId = s_App->parts[0].id;
+    const uint64_t sid = MakeJob()->AddSetup("Undersides").id;
+    s_App->camActiveSetup = sid;
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1);
+    const uint64_t first = Job()->GetParts()[0].id;
+    IM_CHECK_EQ(Job()->GetParts()[0].configuration, (uint64_t)0);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+
+    // The first one is the blank: its row's Configuration submenu, one undo
+    // step.
+    ctx->ItemClick(CamPartRow(first).c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_part_cfg");
+    ctx->Yield(2);
+    ctx->ItemClick(
+        ("//###Menu_00/###cam_part_cfg_" + std::to_string(blank)).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindPart(first)->configuration, blank);
+    IM_CHECK_EQ(ui::JobBodies(*s_App).size(), (size_t)1); // no pocket, one box
+    IM_CHECK(ui::CanGlobalUndo(*s_App));
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindPart(first)->configuration, (uint64_t)0);
+    ui::GlobalRedo(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindPart(first)->configuration, blank);
+
+    // The second, from the Parts header's "+": the part is a submenu of its
+    // configurations, since the job may cut it in more than one.
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_parts_add");
+    ctx->Yield(2);
+    ctx->ItemClick(("//$FOCUSED/$$" +
+                    std::to_string(static_cast<int>(sourceId)) +
+                    "/###cam_part_add_cfgs")
+                       .c_str());
+    ctx->Yield(2);
+    ctx->ItemClick(
+        ("//###Menu_00/###cam_part_add_cfg_" + std::to_string(pocketed))
+            .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)2);
+    const uint64_t second = Job()->GetParts()[1].id;
+    IM_CHECK_EQ(Job()->GetParts()[1].sourceDocId, sourceId);
+    IM_CHECK_EQ(Job()->GetParts()[1].configuration, pocketed);
+
+    // Side by side: each placed from its row, the second moved in its editor.
+    CamPartMenu(ctx, first, "###cam_place");
+    CamPartMenu(ctx, second, "###cam_place");
+    ctx->ItemDoubleClick(CamPartRow(second).c_str());
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###ToolWindow/###cam_place_x", "80");
+    ctx->Yield(3);
+    ctx->ItemClick("//###ToolWindow/###cam_part_editor_close");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(sid)->placements.size(), (size_t)2);
+    IM_CHECK(
+        cam::PlacementRefusal(*Job()->FindSetup(sid), ui::JobBodies(*s_App))
+            .empty());
+
+    // Cut the pocketed one: the pocket verb, and its floor -- which only the
+    // second part has.
+    ToolbarClick(ctx, "###tb_job_pocket");
+    ctx->Yield(2);
+    ui::SelectionItem floor;
+    floor.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : ui::JobBodies(*s_App))
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.jobPartId == second && b.shape.FacePlane(index, o, n, u) &&
+            n.z > 0.99f && std::abs(o.z - 12.0f) < 1e-4f) {
+          floor.element = ElementRef{b.createdBy, name};
+          floor.jobPartId = second;
+        }
+      }
+    IM_CHECK(floor.element.IsSet());
+    ui::CamFacePicked(*s_App, floor);
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+    const cam::Setup* live = Job()->FindSetup(sid);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    IM_CHECK_EQ(live->operations[0].targets.size(), (size_t)1);
+    IM_CHECK_EQ(live->operations[0].targets[0].jobPartId, second);
+
+    // Generated: a toolpath that cuts, no refusal.
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(2);
+    const auto t0 = std::chrono::steady_clock::now();
+    while ((ui::BackgroundJobRunning(*s_App, "cam") ||
+            ui::CamToolpathsPending(*s_App)) &&
+           std::chrono::steady_clock::now() - t0 < std::chrono::seconds(60))
+      ctx->Yield();
+    s_App->camGenerateOpen = false;
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camToolpaths.size(), (size_t)1);
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+
+    // A configuration the part no longer has is said, not substituted.
+    IM_CHECK(CamPart() != nullptr);
+    Document* src = ui::JobSourceDocument(*s_App, sourceId);
+    IM_CHECK(src != nullptr);
+    IM_CHECK(src->RemoveConfiguration(blank));
+    ctx->Yield(2);
+    std::string why;
+    IM_CHECK(ui::JobPartDocument(*s_App, *Job()->FindPart(first), &why) ==
+             nullptr);
+    IM_CHECK(!why.empty());
+    IM_CHECK(ctx->ItemExists(CamPartRow(first).c_str()));
+    // ...and a door the RPC shares refuses one the part does not have.
+    std::string refused;
+    IM_CHECK(!ui::SetJobPartConfiguration(*s_App, first, blank, &refused));
+    IM_CHECK(refused.find("pocketed") != std::string::npos);
+    IM_CHECK(ui::SetJobPartConfiguration(*s_App, first, 0, &refused));
+    ctx->Yield(2);
+    IM_CHECK(ui::JobPartDocument(*s_App, *Job()->FindPart(first)) != nullptr);
   };
 
   // A click on a job tab knows WHICH placed part it landed on. Two parts in
@@ -3703,7 +3970,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
     ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//CAM###CamPanel");
+    // The machine is one of the setup's settings, in the tool window.
+    ctx->ItemDoubleClick(CamSetupRow(setup.id).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditSetup, setup.id);
+    ctx->SetRef("//###ToolWindow");
     ctx->ItemClick("###cam_machine");
     ctx->ItemClick("//$FOCUSED/Test shop router");
     ctx->Yield(2);
@@ -3714,9 +3985,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
              cam::MachineMatch::Global);
     IM_CHECK(!ctx->ItemExists("###cam_machine_use_mine"));
 
-    // Edit the JOB'S copy: it now differs, and the panel offers mine back.
-    ctx->ItemOpen("###cam_stock");
-    ctx->Yield();
+    // Edit the JOB'S copy: it now differs, and the settings offer mine back.
     ctx->ItemClick("###cam_arcs");
     ctx->Yield(2);
     live = Job()->FindSetup(setup.id);
@@ -3742,6 +4011,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
              cam::MachineMatch::Global);
     IM_CHECK(ui::DeleteMachine(*s_App, "Test shop router"));
+    ctx->ItemClick("###cam_setup_editor_close");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolOpen);
   };
 
   // The stock and the machine's work area are drawn on a job tab whether or
@@ -4121,15 +4393,17 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemOpen("###cam_stock");
+    ctx->ItemDoubleClick(CamSetupRow(setupId).c_str());
     ctx->Yield(2);
     const double safeBefore = Job()->FindSetup(setupId)->safeZ;
-    ctx->ItemInputValue("###cam_safez", "77");
+    ctx->ItemInputValue("//###ToolWindow/###cam_safez", "77");
     ctx->Yield(4);
     IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - 77.0) < 1e-6);
     ui::GlobalUndo(*s_App);
     ctx->Yield(3);
     IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - safeBefore) < 1e-6);
+    ctx->ItemClick("//###ToolWindow/###cam_setup_editor_close");
+    ctx->Yield(2);
   };
 
   // The terminal panel (docs/ui/terminal.md). Off by default, docked

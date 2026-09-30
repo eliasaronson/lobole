@@ -23,8 +23,7 @@ the setup step:
 2. **Stock** — *Around the parts* (the parts' box plus margins) or *A sheet
    you own*, whose size defaults to the machine's bed and whose thickness
    follows the parts. No literal anywhere.
-3. **Parts** — the project's parts, added with the same buttons the Parts
-   section has.
+3. **Parts** — the project's parts, each added with a button.
 4. **Create setup.**
 
 `machine_part` is the RPC composite of making a job and adding a part.
@@ -172,58 +171,84 @@ decision is made.
 ## The CAM panel
 
 The panel is the job's STRUCTURE and exists only on a job tab; the run is a
-tool.
+tool. It is a Model tree like the part and assembly panels
+([panels.md](../ui/panels.md#cam-job-tab-the-cam-panel)): Parts, Setups and
+Tools headers with counts, rows with a glyph, a name and a dim tail, the
+create verbs on the headers' `+`, the rest in each row's menu, settings in
+the tool window.
 
-- **Setup row:** the setup combo, `+` (new setup), **Flip** (the other side,
-  derived), `x` (delete). The machine combo, and under it the reconciliation
-  line when the embedded machine differs from yours or is not one of yours
-  (*Use mine*, *Save as mine* / *Save it*; [setup.md](setup.md#machine-profiles)).
-- **Parts:** each job part with its verbs on the name line (Remove, or Place
-  for a part without a placement) and its X, Y and turn on the next line,
-  named inside the fields; a part whose source is gone says so. **+ Add part**
-  opens a menu of the project parts the job does not hold (disabled, saying
-  why, when there are none).
-- **Fixtures:** one row per fixture of the active setup — a glyph, its name,
-  where it sits as a dim tail ("−X side", "over the −X edge", or "its seat is
-  gone: …"), greyed when not checked; right-click Edit, Check, Move to (−X, +X,
-  −Y, +Y, Centre, Top) and Remove. **+ Add fixture** offers the keep-out box
-  first, then "Hold it with a part:" and the project parts the job does not
-  cut; each item's tooltip says what the choice does, so cutting a part and
-  clamping with it are not confused. An empty section says that verify checks
-  no clamps.
-- **Stock and safety:** safe Z; the stock mode (Around the part / A fixed
+- **Parts:** each job part with its configuration (or material) as the tail;
+  a part whose source is gone, or whose configuration is gone or does not
+  build, is red with the reason. Right-click: Edit placement,
+  **Configuration** (a submenu of the part's configurations, through
+  `ui::SetJobPartConfiguration`: one undo step, and every setup's origin,
+  safe Z and targeted depths re-derived as a re-clamp re-derives them; the
+  RPC's `set_job_part` is the same call), Place (a part without a placement
+  in the active setup) or Cut (off leaves it on the sheet), Remove.
+  Double-click edits the placement in the tool window: the configuration,
+  Cut, and its X, Y and turn, named inside the fields, with the fit said
+  under them. The header's `+` opens a menu of the project's parts: one
+  without configurations while the job does not hold it, one with them as a
+  submenu of its active one and each configuration, so a part can be added
+  once per configuration (the chess undersides: one piece part, a blank per
+  rank).
+- **Setups:** a row per setup with a disclosure over its operations and
+  fixtures; the selected row is the active setup (it was a combo), and a
+  click on another makes it active and opens it. The active setup's tail is
+  the run's state as a glyph — not generated, generated but not verified,
+  verified ok, warnings, failed, working — and a click on it opens the
+  Generate window as it stands. Right-click: Settings, Rename, **Flip** (the
+  other side, derived), Duplicate (operations, fixtures and placements
+  included, each with a new id), Add operation, Add fixture, Delete. The
+  header's `+` adds a setup.
+- **A setup's settings** (double-click, or Settings) open in the tool
+  window: its name; the machine combo, and under it the reconciliation line
+  when the embedded machine differs from yours or is not one of yours (*Use
+  mine*, *Save as mine* / *Save it*; [setup.md](setup.md#machine-profiles));
+  **stock and safety**: safe Z; the stock mode (Around the part / A fixed
   sheet) with margins or size and place; where zero is (Stock corner, Stock
-  centre, Part corner) with the resulting origin printed beside it; and the
-  job's copy of the machine's post, arcs, 4th axis and A index; on a 4th-axis
-  machine, *Part held*, *In the chuck*, *mm in the jaws* and *Tailstock
-  engaged* ([rotary.md](rotary.md#chuck-and-tailstock)).
-- **Tools:** rows in the list style (right-click Edit), **Add tool** offering
-  the machine's library first. Feeds and speeds are asked for, and the panel
-  says why: they are the one number that is genuinely the user's. The editor
-  has the shank's width beside stickout and collar; an edit that would leave
-  an operation with its shank driven into a wall is taken back, with the
-  reason shown ([setup.md](setup.md#reach)).
-- **Operations:** rows in the feature list's style, reorderable by the grip
-  (the order is the cutting sequence); double-click opens the op's settings in
-  the CAM tool window; right-click Edit, Enable/Disable, Show what it removes,
-  Delete. A depth or tool its cutter cannot reach is taken back with the
-  reason shown, and a reach that is only just, or rubs, is said under the
-  settings ([setup.md](setup.md#reach)). The settings show only the fields
-  the type has (the capability table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
-  corner relief, finish tool, Over openings, the rotary pattern as a radio
-  pair, an engraving's width (for a V-bit) and depth, and so on. On a
-  machine with a rotary axis the indices the operation is cut at are
-  **chips**, `A0 A90 A180 A270` (`###index_chip_<angle>`), each with an x
-  that stops cutting there; empty says the setup's own index
+  centre, Part corner) with the resulting origin printed beside it; the
+  job's copy of the machine's post, arcs, 4th axis and A index; on a
+  4th-axis machine, *Part held*, *In the chuck*, *mm in the jaws* and
+  *Tailstock engaged* ([rotary.md](rotary.md#chuck-and-tailstock)); and the
+  fixtures it has (none: verify checks no clamps). Each edit is one undo
+  step, as it was in the panel.
+- **Fixtures,** under their setup: one row per fixture — a glyph, its name,
+  where it sits as a dim tail ("−X side", "over the −X edge", or "its seat
+  is gone: …"), greyed when not checked; right-click Edit, Check, Move to
+  (−X, +X, −Y, +Y, Centre, Top) and Remove. The setup's **Add fixture**
+  offers the keep-out box first, then "Hold it with a part:" and the project
+  parts the job does not cut; each item's tooltip says what the choice does,
+  so cutting a part and clamping with it are not confused.
+- **Tools:** the active setup's, rows in the list style (right-click Edit),
+  the header's `+` offering the machine's library first, then a blank tool.
+  Feeds and speeds are asked for, and the panel says why: they are the one
+  number that is genuinely the user's. The editor has the shank's width
+  beside stickout and collar; an edit that would leave an operation with its
+  shank driven into a wall is taken back, with the reason shown
+  ([setup.md](setup.md#reach)).
+- **Operations,** under their setup: rows in the feature list's style,
+  reorderable by the grip within their setup (the order is the cutting
+  sequence); double-click opens the op's settings in the CAM tool window;
+  right-click Edit, Enable/Disable, Show what it removes, Delete. A depth or
+  tool its cutter cannot reach is taken back with the reason shown, and a
+  reach that is only just, or rubs, is said under the settings
+  ([setup.md](setup.md#reach)). The settings show only the fields the type
+  has (the capability table): tool as `T1 T2 …` buttons, depths,
+  stepdown/stepover, leave, tabs, corner relief, finish tool, Over openings,
+  the rotary pattern as a radio pair, an engraving's width (for a V-bit) and
+  depth, and so on. On a machine with a rotary axis the indices the
+  operation is cut at are **chips**, `A0 A90 A180 A270`
+  (`###index_chip_<angle>`), each with an x that stops cutting there; empty
+  says the setup's own index
   ([rotary.md](rotary.md#one-operation-at-several-indices)). They come from
   picks ([above](#indices-from-picks)); a small **edit** (`###index_edit`)
   opens the typed list (`0 90 180 270`, `###index_a`) for an angle no face can
   be picked at. The row's summary ends "at A0/90/180/270"; an engraving's says
-  its labels, width and depth. **Add operation** adds what the setup calls for
-  (`cam::AddOperationType`: another rotary pass on a setup that already cuts
-  on the 4th axis, else the whole-part cut-out) through `DeriveOperation`, and
-  shows a refusal instead of adding a dead operation.
-- A one-line **status** that opens the Generate window.
+  its labels, width and depth. A setup's **Add operation** adds what the
+  setup calls for (`cam::AddOperationType`: another rotary pass on a setup
+  that already cuts on the 4th axis, else the whole-part cut-out) through
+  `DeriveOperation`, and shows a refusal instead of adding a dead operation.
 
 Combos with an empty label cannot be addressed by the GUI test engine, so
 choices a test must make (add menus, the rotary pattern, tool buttons) are
@@ -233,7 +258,7 @@ ImGui reports a collision in a popup no test sees, so
 
 ## Generate window
 
-The toolbar's Generate (and the panel's status line) opens a tool window with the run and what it
+The toolbar's Generate (and the active setup's status glyph) opens a tool window with the run and what it
 found: generate and verify, the verdict sentences (Good/Warn/Bad, the same
 text `cam_verify` returns as `says`) with the cutter findings and machine
 lines, the output options — cutting order (`Cut`: authored/tool/part) and
@@ -298,7 +323,9 @@ fits, no two verbs share a glyph), `cam/a_job_is_made_from_the_tab_bar`,
 `cam/four_floors_picked_are_one_op` (the chips, and the typed list behind
 edit),
 `cam/the_rotary_verbs_rough_then_finish`, `cam/a_rotary_pass_limits_to_a_face`,
-`cam/backplot_is_not_copied_per_frame`, `cam/a_job_edit_undoes`. A test that
+`cam/backplot_is_not_copied_per_frame`, `cam/a_job_edit_undoes`,
+`cam/two_setups_are_open_at_once`, `cam/one_part_in_two_configurations`
+(one part added twice in two configurations, one pocketed and generated). A test that
 leaves a CAM window open, or a docked tab switched, breaks later tests' clicks,
 so cleanup that matters to other tests comes right after the last interaction
 that needs it.

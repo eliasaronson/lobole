@@ -1777,6 +1777,17 @@ void DrawCamToolWindow(AppState& state) {
       state.slotPick = {};
     return;
   }
+  // A setup's settings and a part's placement (CamTree.cpp) hold the window
+  // only while no verb and no other editor asked for it.
+  if (state.camVerb != CamVerb::None || state.camEditOp != 0 ||
+      state.camEditTool != 0 || state.camEditFixture != 0) {
+    state.camEditSetup = 0;
+    state.camEditPart = 0;
+  } else if (state.camEditSetup != 0 && DrawCamSetupEditor(state)) {
+    return;
+  } else if (state.camEditPart != 0 && DrawCamPartEditor(state)) {
+    return;
+  }
   if (state.camEditOp != 0 && DrawOperationEditor(state))
     return;
   if (state.camEditTool != 0 && DrawToolEditor(state))

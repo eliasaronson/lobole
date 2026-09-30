@@ -81,6 +81,16 @@ void EditCamOperation(AppState& state, uint64_t opId);
 void EditCamTool(AppState& state, int number);
 // Opens a fixture of the active setup in the tool window.
 void EditCamFixture(AppState& state, uint64_t fixtureId);
+// Opens a setup's settings (machine, how the part is held, stock and safety,
+// the rotary) in the tool window, making it the active setup: the toolpaths
+// its edits regenerate are the active setup's.
+void EditCamSetup(AppState& state, uint64_t setupId);
+// Opens a job part's placement in the active setup in the tool window.
+void EditCamJobPart(AppState& state, uint64_t jobPartId);
+// Lets go of every CAM editor (operation, tool, fixture, setup, part): the one
+// place that knows the list, so a verb or another editor taking the window
+// cannot leave one of them holding it.
+void CloseCamEditors(AppState& state);
 // A fixture of `setup` was added, moved, changed or removed: the one place
 // that answers it -- safe Z clears it (or no longer has to), the job is
 // dirty, and the toolpaths and the verdict follow, as a placement change

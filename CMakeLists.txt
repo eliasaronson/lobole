@@ -700,6 +700,7 @@ set(app_sources
     src/ui/CamPanel.cpp
     src/ui/CamPlayback.cpp
     src/ui/CamTool.cpp
+    src/ui/CamTree.cpp
     src/ui/CamGenerate.cpp
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp

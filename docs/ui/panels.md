@@ -181,29 +181,62 @@ browsed and switched as a part's are.
 
 ## CAM job tab: the CAM panel
 
-`src/ui/CamPanel.cpp` holds the job's structure: the setup and machine, then
-Parts, Fixtures, Stock and safety, Tools, and the operations.
+The job as a Model tree, like the part and assembly panels
+(`src/ui/CamTree.cpp`; the operation row, the settings forms the tool window
+draws and the backplot stay in `CamPanel.cpp`). Three `SectionHeader`s with
+counts, each row a `ListRow`:
+
+- **Parts** — a cube glyph, the part's name, its configuration as the tail
+  (else its material). A part whose source is gone, or whose configuration
+  no longer exists or does not build, is red with the reason in the tooltip;
+  one that does not fit the active setup's stock (`CheckPlacements`) says so
+  as its tail ("hangs over the edge"). Dimmed when the active setup leaves it
+  on the sheet. Click selects it, which gives it the placement gizmo;
+  double-click edits its placement in the tool window
+  (`DrawCamPartEditor`: its configuration, Cut, X, Y and turn). Right-click:
+  Edit placement, **Configuration** (a submenu of the part's configurations,
+  `###cam_part_cfg_<id>`, 0 = its active one), Place or Cut, Remove. The
+  header's `+` (`###cam_parts_add`, shown on hover) offers each project part;
+  one with configurations is a submenu of them (`###cam_part_add_cfg_<id>`),
+  so one part can be cut in several (the chess undersides).
+- **Setups** — each a row with a disclosure (`###cam_setup_open_<id>`) over
+  its operations and fixtures, so several setups are open at once. The
+  selected row is the **active setup** (a click makes it active and opens
+  it); what the toolpaths, verbs and editors act on. The active setup's tail
+  is the run status as a glyph (`###cam_run_status`: not generated,
+  generated, verified ok, warnings, failed, working), which opens the
+  Generate window; another setup's tail counts its operations.
+  Double-click opens its settings in the tool window (`DrawCamSetupEditor`:
+  name, machine and its reconciliation, stock and safety, post, the rotary,
+  its fixtures). Right-click: Settings, Rename (in place), Flip, Duplicate,
+  Add operation (`cam::AddOperationType`), Add fixture (a submenu), Delete.
+  The header's `+` adds a setup.
+- **Tools** — the active setup's, one `ListRow` each (number and type glyph,
+  description, diameter as the tail); double-click edits in the tool window.
+  Delete is disabled while an operation uses the tool, with those operations
+  named, and `RemoveCamTool` refuses with the same sentence. An edit that
+  would drive the tool's shank into a wall in one of those operations is
+  taken back, the reason in `camRefusal` ([CAM setup](../cam/setup.md#reach)).
+  The header's `+` offers the machine's library, then a blank tool.
+
+Under a setup:
 
 - **Operations** are rows (`CamOperationRow`) with the feature list's
-  gestures: click selects, drag reorders, double-click opens the operation's
-  settings (`DrawCamOpSettings`) in the tool window, right-click offers Edit,
-  Enable/Disable, "Show what it removes" and Delete. A disabled operation is
-  dimmed. The summary is type-aware (a rotary operation states its pattern,
-  lead and stepover).
-- **Tools** are `ListRow`s (number and type glyph, description, diameter as
-  the tail); double-click edits in the tool window. Delete is disabled while
-  an operation uses the tool, with those operations named, and
-  `RemoveCamTool` refuses with the same sentence. An edit that would drive
-  the tool's shank into a wall in one of those operations is taken back, the
-  reason in `camRefusal` ([CAM setup](../cam/setup.md#reach)).
-- **Generate** is a window, not a panel block (`src/ui/CamGenerate.cpp`):
-  the toolbar's gears (`job.generate`, G) always regenerate and open it; it
-  shows progress, the verdict, the cut order, one-file-per-tool, Show path
-  and Save G-code. The panel keeps one status line under the operations
-  (`###cam_run_status`) that opens the window as it stands.
+  gestures: click selects, drag reorders within the setup, double-click
+  opens the operation's settings (`DrawCamOpSettings`) in the tool window,
+  right-click offers Edit, Enable/Disable, "Show what it removes" and Delete.
+  A disabled operation is dimmed. The summary is type-aware (a rotary
+  operation states its pattern, lead and stepover). Editing an operation of
+  another setup makes that setup active first.
+- **Fixtures** — a glyph, the name, where it sits as the tail; right-click
+  Edit, Check, Move to, Remove.
 
-The CAM verbs themselves (docs/cam) run in the tool window. Starting a verb
-closes an open operation or tool editor.
+A job with no setup yet shows the setup step instead
+([gui.md](../cam/gui.md#making-a-job)). **Generate** is a window, not a panel
+block (`src/ui/CamGenerate.cpp`): the toolbar's gears (`job.generate`, G)
+always regenerate and open it; the status glyph opens it as it stands. The
+CAM verbs themselves (docs/cam) run in the tool window. Starting a verb
+closes an open editor; an editor takes the window from a verb.
 
 ## Simulation: the Study panel and window
 
@@ -264,5 +297,7 @@ Conflicts, the CAM panel on a job tab, and the Terminal (right-hand node,
 The Configurations panel's checkbox columns and the History panel's row
 buttons do not yet follow the row pattern; a shared radio row for 2–4 choices
 (the feature editor, CAM, Settings) is not built; Delete does not reach
-assembly relations; a placed simulation load cannot be edited in place, only
+assembly relations, nor the CAM panel's setups, parts, fixtures and tools
+(only its operations are in the shared list selection; the others delete
+from their menus); a placed simulation load cannot be edited in place, only
 removed and replaced.

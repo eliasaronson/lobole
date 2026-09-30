@@ -1796,6 +1796,14 @@ struct AppState {
   // (docs/cam/setup.md#workholding-fixtures), 0 = none; like camEditTool, one
   // editor holds the window at a time.
   uint64_t camEditFixture = 0;
+  // The setup whose settings the tool window is editing -- machine, how the
+  // part is held, stock and safety, the rotary (a double-click on its row in
+  // the CAM panel's tree); 0 = none. They were inline forms in the panel
+  // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
+  uint64_t camEditSetup = 0;
+  // The job part whose placement the tool window is editing (a double-click
+  // on its Parts row), 0 = none.
+  uint64_t camEditPart = 0;
   // Why a seated fixture could not solve, by fixture id: its face gone, the
   // stock gone. Filled by RefreshFixtureSeats, read by the row.
   std::map<uint64_t, std::string> camSeatRefusals;

@@ -47,6 +47,13 @@ bool DrawJobProgress(const JobProgress& job);
 // test engine sees it as openable, so `ItemOpen` works on it as before.
 // Returns whether it is open.
 bool SectionHeader(const char* label, int count = -1, bool defaultOpen = false);
+// The same header with a "+" at its right edge, shown while the header is
+// hovered and always submitted, so a test can click it (the CAM panel's Parts
+// and Setups). True in `*addClicked` on the frame it is pressed; `addTip` is
+// its tooltip.
+bool SectionHeader(const char* label, int count, bool defaultOpen,
+                   const char* addId, bool* addClicked,
+                   const char* addTip = nullptr);
 
 // One row of a list in the feature tree's style: a glyph, the label as a
 // full-width selectable, a dim tail at the right, dimmed when `dimmed`, and --
@@ -59,6 +66,9 @@ struct ListRowSpec {
   std::string label;             // "text###id"
   bool selected = false;
   bool dimmed = false;
+  // The label's colour, alpha 0 = the text colour: red for a row whose thing
+  // is broken (a job part whose source is gone). The menu keeps the theme's.
+  ImVec4 labelColor{0, 0, 0, 0};
   std::string tail;                // dim text at the right; may be empty
   const char* tailGlyph = nullptr; // a glyph before the tail (e.g. an anchor)
   enum class Eye { None, Shown, Hidden } eye = Eye::None;
@@ -67,13 +77,29 @@ struct ListRowSpec {
   // Drawn as the row's context menu when it is right-clicked; may be empty.
   std::function<void()> menu;
   std::string menuId; // "###occ_ctx_7"
+  // A disclosure chevron before the glyph, for a row that holds rows (a CAM
+  // setup over its operations): its id, and whether it starts open. The
+  // state is kept where SectionHeader keeps its own, and it is an openable
+  // item to the test engine, so `ItemOpen` works on it.
+  std::string disclosureId; // "###cam_setup_open_7"; empty = none
+  bool disclosureDefaultOpen = false;
+  // The tail glyph as a button rather than text (a setup's run status, which
+  // opens the Generate window): its id, and its colour (alpha 0 = dim).
+  std::string tailGlyphId;
+  ImVec4 tailGlyphColor{0, 0, 0, 0};
+  std::string tailGlyphTip;
 };
 struct ListRowResult {
   bool clicked = false;       // a single click on the row
   bool doubleClicked = false; // a double-click: edit
   bool eyeClicked = false;
   bool hovered = false;
+  bool open = false;        // the disclosure, when the row has one
+  bool tailClicked = false; // the tail glyph, when it is a button
 };
 ListRowResult ListRow(const ListRowSpec& row);
+// Opens or closes a row's disclosure (by its `disclosureId`) in the current
+// window: a click that makes a setup the active one also shows what is in it.
+void SetListRowOpen(const std::string& disclosureId, bool open);
 
 } // namespace ui

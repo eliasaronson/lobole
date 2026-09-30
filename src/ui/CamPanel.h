@@ -82,6 +82,7 @@ int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids);
 // Inside the caller's PushID(op.id). The caller applies what it asks for,
 // because it is walking the list those would change.
 struct CamOpRowResult {
+  bool clicked = false;         // any click on the row, or its menu opening
   bool deleteSelection = false; // the menu's Delete
   bool edit = false;            // double-click, or the menu's Edit
   bool toggleEnabled = false;   // the menu's Enable / Disable
@@ -125,5 +126,13 @@ void ApplyCamToolEdit(AppState& state);
 // those too would lose work, and leaving them naming a missing number is a
 // silent substitution.
 bool RemoveCamTool(AppState& state, int number, std::string* why = nullptr);
+
+// The tool window's editors for the two things the panel's tree lists that
+// have settings but are not an operation, a tool or a fixture
+// (docs/ui/panels.md#cam-job-tab-the-cam-panel): the setup being edited
+// (`camEditSetup`) and a job part's placement (`camEditPart`). False when
+// there is nothing to edit, so the caller draws the next thing.
+bool DrawCamSetupEditor(AppState& state);
+bool DrawCamPartEditor(AppState& state);
 
 } // namespace ui

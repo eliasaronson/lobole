@@ -39,10 +39,11 @@ nothing at all, and the post skips it with a comment saying why.
 
 `cam::DeriveOperation(setup, bodies, type, target, toolNumber)` is the one
 place an operation's numbers come from, for the GUI verbs, for `add_cam_op`
-without depths, for the panel's Add operation and for `cam_derive_op` (the dry
+without depths, for a setup's Add operation and for `cam_derive_op` (the dry
 run). Every depth is derived from the face, the stock and the tool, so a
 depth pair like "top 2, bottom −0" that produces nothing cannot be expressed.
-The panel's **Add operation** asks `cam::AddOperationType` what the setup
+A setup's **Add operation** (its row's menu in the CAM panel) asks
+`cam::AddOperationType` what the setup
 calls for — another `surface_rotary` on a setup that already cuts on the 4th
 axis, the whole-part cut-out otherwise — rather than adding one type
 everywhere: a 3-axis contour round a turned part means nothing.
