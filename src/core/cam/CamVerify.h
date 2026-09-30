@@ -361,20 +361,6 @@ struct Verdict {
   [[nodiscard]] bool CutsNothing() const { return untouchedFraction >= 0.999; }
 };
 
-// `touched` (optional, same grid) restricts the comparison to the cells the
-// program actually swept — see Verdict::untouchedFraction. Null compares
-// every cell.
-// Leftover deeper than this counts toward `leftoverArea`/`leftoverRegions`.
-// Zero takes the grid's own quantisation (one and a half cells).
-// `floorZ` is the bottom of the STOCK. Material removed below it is the
-// spoilboard, not the part, so it lands in `belowStock` instead of `maxGouge`
-// (see that field). Callers that genuinely have no workpiece bottom can pass
-// -infinity, which restores a plain cell-to-cell comparison.
-[[nodiscard]] Verdict Compare(const HeightMap& machined,
-                              const HeightMap& designed, double floorZ,
-                              const std::vector<uint8_t>* touched = nullptr,
-                              double leftoverTolerance = 0.0);
-
 // Everything the check produced, for a caller that wants to SHOW it rather
 // than just pass or fail (the leftover painted on the part,
 // docs/cam/gui.md#what-the-viewport-draws).

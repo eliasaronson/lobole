@@ -304,6 +304,15 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
   return out;
 }
 
+// `touched` (optional, same grid) restricts the comparison to the cells the
+// program actually swept — see Verdict::untouchedFraction. Null compares
+// every cell.
+// Leftover deeper than this counts toward `leftoverArea`/`leftoverRegions`.
+// Zero takes the grid's own quantisation (one and a half cells).
+// `floorZ` is the bottom of the STOCK. Material removed below it is the
+// spoilboard, not the part, so it lands in `belowStock` instead of `maxGouge`
+// (see that field). Callers that genuinely have no workpiece bottom can pass
+// -infinity, which restores a plain cell-to-cell comparison.
 Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 double floorZ, const std::vector<uint8_t>* touched,
                 double leftoverTolerance = 0.0,
