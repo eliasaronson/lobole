@@ -834,6 +834,74 @@ TEST_CASE("cam rotary: the pruned CL equals the full kernel's",
   }
 }
 
+namespace {
+// Pins parallel::Workers() for one scope, restoring what was there.
+struct ScopedThreads {
+  explicit ScopedThreads(const char* n) {
+    if (const char* was = std::getenv("DESIGNER_SWEEP_THREADS"))
+      m_was = was;
+    setenv("DESIGNER_SWEEP_THREADS", n, 1);
+  }
+  ~ScopedThreads() {
+    if (m_was.empty())
+      unsetenv("DESIGNER_SWEEP_THREADS");
+    else
+      setenv("DESIGNER_SWEEP_THREADS", m_was.c_str(), 1);
+  }
+  std::string m_was;
+};
+} // namespace
+
+TEST_CASE("cam rotary: the model samples the same on one thread and on many",
+          "[cam]") {
+  // SampleModelRotary splats triangles on every core, raising cells with a
+  // compare-and-swap; a cell's answer is a maximum, so the order the samples
+  // land in cannot show. The whole pass is then the same moves in the same
+  // order whatever the thread count.
+  auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {0.0, 0.0, 0.0};
+  setup.safeZ = 40.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::SurfaceRotary, cam::Target{});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.stepover = 0.25;
+  setup.operations = {op};
+
+  const cam::RadiusMap grid = cam::MakeRotaryStock(-3.0, 63.0, 20.0, 0.1);
+  cam::RadiusMap one, many;
+  std::vector<cam::Toolpath> pathsOne, pathsMany;
+  {
+    ScopedThreads pin("1");
+    one = cam::SampleModelRotary(doc->GetBodies(), grid);
+    pathsOne = cam::GenerateAll(setup, doc->GetBodies());
+  }
+  {
+    ScopedThreads pin("8");
+    many = cam::SampleModelRotary(doc->GetBodies(), grid);
+    pathsMany = cam::GenerateAll(setup, doc->GetBodies());
+  }
+  REQUIRE(one.r.size() == many.r.size());
+  CHECK(one.r == many.r);
+  REQUIRE(pathsOne.size() == 1);
+  REQUIRE(pathsMany.size() == 1);
+  REQUIRE(pathsOne[0].error.empty());
+  REQUIRE(pathsOne[0].moves.size() > 500);
+  REQUIRE(pathsOne[0].moves.size() == pathsMany[0].moves.size());
+  size_t differ = 0;
+  for (size_t k = 0; k < pathsOne[0].moves.size(); k++) {
+    const cam::Move& a = pathsOne[0].moves[k];
+    const cam::Move& b = pathsMany[0].moves[k];
+    if (a.kind != b.kind || a.to != b.to || a.a != b.a || a.feed != b.feed)
+      differ++;
+  }
+  CHECK(differ == 0);
+}
+
 TEST_CASE("cam rotary: the CL surface at the rolling pin's size",
           "[cam][.bench]") {
   // Not a gate -- hidden by `.` -- a stopwatch. The pin's finishing grid:

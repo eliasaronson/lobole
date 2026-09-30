@@ -6,6 +6,7 @@
 #include "core/cam/CamToolpath.h" // BodiesInSetupFrame
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <numbers>
 
@@ -102,6 +103,14 @@ RadiusMap SampleModelRotary(const std::vector<Body>& bodies,
     return out;
 
   const double deflection = like.res > 0.0 ? like.res * 0.25 : 0.0;
+  // Over triangles, on every core: this walk was serial, and at a fine
+  // finishing grid it was a fifth of a turning's generate -- 25 s of one core
+  // for the knights' rest pass while twenty-one others waited. Two
+  // triangles can land in the same cell, so a cell is raised with a
+  // compare-and-swap. The answer is each cell's MAXIMUM over every sample,
+  // which does not depend on the order the samples arrive in: any thread
+  // count gives the same map, bit for bit (`cam rotary: the model samples
+  // the same on one thread and on many`).
   const auto splat = [&](const glm::dvec3& p) {
     const double rad = std::hypot(p.y, p.z);
     const int i = static_cast<int>((p.x - out.x0) / out.res);
@@ -112,8 +121,14 @@ RadiusMap SampleModelRotary(const std::vector<Body>& bodies,
       theta += kTwoPi;
     int j = static_cast<int>(theta / kTwoPi * out.nTheta);
     j = std::clamp(j, 0, out.nTheta - 1);
-    if (rad > out.At(i, j))
-      out.Set(i, j, static_cast<float>(rad));
+    std::atomic_ref<float> cell(
+        out.r[static_cast<size_t>(j) * static_cast<size_t>(out.nx) +
+              static_cast<size_t>(i)]);
+    const float want = static_cast<float>(rad);
+    float have = cell.load(std::memory_order_relaxed);
+    while (want > have &&
+           !cell.compare_exchange_weak(have, want, std::memory_order_relaxed))
+      ;
   };
 
   for (const Body& body : bodies) {
@@ -123,37 +138,42 @@ RadiusMap SampleModelRotary(const std::vector<Body>& bodies,
     // rides on the shared TShape, so meshing the body itself at the CHECK's
     // tolerance would make the renderer's mesh of the same part fine too.
     const CADShape::Mesh mesh = body.shape.GenerateMeshDetached(deflection);
-    for (size_t tri = 0; tri + 2 < mesh.indices.size(); tri += 3) {
-      const glm::dvec3 p0(mesh.vertices[mesh.indices[tri]].position);
-      const glm::dvec3 p1(mesh.vertices[mesh.indices[tri + 1]].position);
-      const glm::dvec3 p2(mesh.vertices[mesh.indices[tri + 2]].position);
-      // How finely to walk this triangle: half a cell, measured in the
-      // coarser of the two directions it spans. A triangle near the axis
-      // needs fewer angular samples than one at the rim, which is exactly
-      // what measuring the ARC rather than the angle gives.
-      const double rad =
-          std::max({std::hypot(p0.y, p0.z), std::hypot(p1.y, p1.z),
-                    std::hypot(p2.y, p2.z)});
-      const double step = std::max(0.25 * out.res, 0.5 * out.ArcAt(rad));
-      // One count per EDGE, not one for the triangle. A cylinder's side
-      // meshes as long thin triangles -- 60 mm by a fraction of one -- and a
-      // single count from the longest edge either samples the short direction
-      // absurdly finely or, once clamped, leaves whole cells between samples
-      // along the long one. That is how a plain bar first sampled as a
-      // radius of ZERO in places.
-      const int nu = std::clamp(
-          static_cast<int>(std::ceil(glm::length(p1 - p0) / step)), 1, 4096);
-      const int nv = std::clamp(
-          static_cast<int>(std::ceil(glm::length(p2 - p0) / step)), 1, 4096);
-      for (int a = 0; a <= nu; a++)
-        for (int b = 0; b <= nv; b++) {
-          const double u = static_cast<double>(a) / nu;
-          const double v = static_cast<double>(b) / nv;
-          if (u + v > 1.0)
-            continue; // outside the triangle
-          splat(p0 + (p1 - p0) * u + (p2 - p0) * v);
-        }
-    }
+    constexpr size_t kTrisPerTask = 256;
+    const size_t tris = mesh.indices.size() / 3;
+    parallel::For((tris + kTrisPerTask - 1) / kTrisPerTask, [&](size_t task) {
+      const size_t end = std::min(tris, (task + 1) * kTrisPerTask) * 3;
+      for (size_t tri = task * kTrisPerTask * 3; tri + 2 < end; tri += 3) {
+        const glm::dvec3 p0(mesh.vertices[mesh.indices[tri]].position);
+        const glm::dvec3 p1(mesh.vertices[mesh.indices[tri + 1]].position);
+        const glm::dvec3 p2(mesh.vertices[mesh.indices[tri + 2]].position);
+        // How finely to walk this triangle: half a cell, measured in the
+        // coarser of the two directions it spans. A triangle near the axis
+        // needs fewer angular samples than one at the rim, which is exactly
+        // what measuring the ARC rather than the angle gives.
+        const double rad =
+            std::max({std::hypot(p0.y, p0.z), std::hypot(p1.y, p1.z),
+                      std::hypot(p2.y, p2.z)});
+        const double step = std::max(0.25 * out.res, 0.5 * out.ArcAt(rad));
+        // One count per EDGE, not one for the triangle. A cylinder's side
+        // meshes as long thin triangles -- 60 mm by a fraction of one -- and a
+        // single count from the longest edge either samples the short direction
+        // absurdly finely or, once clamped, leaves whole cells between samples
+        // along the long one. That is how a plain bar first sampled as a
+        // radius of ZERO in places.
+        const int nu = std::clamp(
+            static_cast<int>(std::ceil(glm::length(p1 - p0) / step)), 1, 4096);
+        const int nv = std::clamp(
+            static_cast<int>(std::ceil(glm::length(p2 - p0) / step)), 1, 4096);
+        for (int a = 0; a <= nu; a++)
+          for (int b = 0; b <= nv; b++) {
+            const double u = static_cast<double>(a) / nu;
+            const double v = static_cast<double>(b) / nv;
+            if (u + v > 1.0)
+              continue; // outside the triangle
+            splat(p0 + (p1 - p0) * u + (p2 - p0) * v);
+          }
+      }
+    });
   }
   return out;
 }
