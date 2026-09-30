@@ -91,44 +91,33 @@ build. `-Werror` is otherwise off.
 
 ## Precompiled headers
 
-`designer_core`, `designer_app` and `designer_tests` each precompile
-`cad/CADKernel.h` (the OpenCASCADE tree, ~146k preprocessed lines, over half
-of a UI translation unit) and third-party and standard headers (glm, json,
-Catch2 for the tests), and nothing else of the project's. Each is `PRIVATE`
-to its target. Vendored ImGui/NFD sources skip the PCH, because ImGui's own
-`.cpp` files must define `IMGUI_DEFINE_MATH_OPERATORS` before `imgui.h` and
-the PCH would include it first.
+**Off by default** (`ENABLE_PCH`, CMakeLists.txt). GCC's `.gch` is not
+byte-reproducible, and ccache folds its bytes into the key of every source
+that uses one. Each build tree makes its own, so with a PCH no two trees share
+an object. A fresh worktree missed 391 of 428 sources with every flag
+otherwise identical, and main missed the objects an agent had just built for
+the branch it was merging. Under `-O3` compiling dominates and parsing does
+not, and the PCH saved only 5-10% on a file being recompiled: 5.8 s against
+6.1 s for `ui/CamPanel.cpp`, 29.8 s against 33.3 s over four test files.
 
-**No frequently edited header goes in a PCH.** GCC's `.gch` is not
-byte-reproducible and ccache keys on its bytes, so regenerating a PCH makes
-every source of its target miss the cache, content change or not. The app's
-PCH used to be `ui/AppState.h` (775 project headers) and the tests' included
-`core/Document.h` and `core/Feature.h`. Measured on 22 cores, `designer` plus
-`designer_tests`, ccache warm:
+What makes a worktree share main's cache:
 
-| | AppState.h PCH | stable PCH |
-|---|---|---|
-| clean build, ccache off | 243 s | 281 s |
-| `touch core/Feature.h` | 177 s | 12 s |
-| edit `core/Feature.h` | 246 s | 205 s |
-| revert that edit | 201 s | 12 s |
-| edit `core/cam/CamRotary.h` | 143 s | 129 s |
-| edit a `.cpp` | 15 s | 17 s |
+- **One flag set.** Nothing tree-specific is on the command line of the
+  sources. The commit was a PUBLIC define on 409 files, so every reconfigure
+  at a new commit recompiled them all. It is now on `common/BuildInfo.cpp`
+  alone. A worktree builds main's build type (`tools/worktree-build.sh`).
+- **Relative paths.** The compiler launcher sets `CCACHE_BASEDIR` to the
+  source tree, so `-I…/src` hashes as `../src` in every tree.
+- **One toolchain.** A tree configured before `shell.nix` moved keeps the old
+  compiler and headers. `tools/fix-stale-nix-cache.sh` reconfigures it.
 
-A branch switch, a rebase, a merge and an edit that is later undone all
-look like the touch. The clean build pays 16% for the project headers each
-source now parses itself. A real edit to `core/Feature.h` stays expensive
-because nearly every source includes it; that is fan-out, not the cache.
+Measured on 22 cores, `designer` plus `designer_tests` in a fresh worktree:
+**2 min 8 s, 404 of 423 compiles from the cache.** It was 11 min 30 s before.
+The misses are `BuildInfo.cpp` and the sources that carry the tree's path in
+a define (`DESIGNER_SOURCE_DIR`).
 
-A PCH also hid a missing include: `ui/CamJobs.h` used `cam::OutlineRequest`
-without including `core/cam/CamPicks.h`, and compiled only because
-`AppState.h` brought it in. Headers include what they use; the PCH is a
-speed-up, never a dependency.
-
-Splitting a big file and having a PCH go together. A split makes N
-translation units re-parse what one parsed once, so it raises total CPU while
-it lowers the critical path and the cost of touching one subject; the PCH
-pays most of that back.
+**Headers include what they use.** Turning the PCH off found two sources that
+compiled only because it supplied their includes.
 
 ## The document model and regeneration
 

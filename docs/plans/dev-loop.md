@@ -22,10 +22,9 @@ noticed. Agents then retried at `-j6`, then `-j4`, and one spent 24 minutes
 in a retry loop.
 
 **Change.**
-- A `tools/build-jobs` helper prints a `-j` from `MemAvailable` at about
-  1.5 GB per job, capped at the core count.
-- `worktree-build.sh`, `tools/test-fast.sh` and the build line in CLAUDE.md
-  use it.
+- `worktree-build.sh` sizes its `-j` from `MemAvailable` at about 1.5 GB a
+  job (done). The same rule belongs in `tools/test-fast.sh` and the build line
+  in CLAUDE.md, through one `tools/build-jobs` helper.
 - CLAUDE.md says to start worktree agents two at a time. A second pair waits
   for the first pair's first build to finish, because a warm ccache build is
   memory-light.
@@ -34,63 +33,19 @@ in a retry loop.
 "compiler Terminated" failures that agents otherwise misread as code
 problems.
 
-## 2. A worktree hits the same ccache main fills
+## 2. What is left of sharing ccache
 
-**What happened.** CLAUDE.md promises a fresh worktree "~75 s to a working
-binary (ccache-warm)". None did. The nine build agents spent 13 to 79
-minutes each building, and a docs-only agent spent 23 of its 37 minutes
-compiling. Since its stats were last reset, ccache shows a hit rate of 8%:
-1,441 hits against 16,219 misses. The store sits at its 40 GB cap after 476
-cleanups. Three things keep a worktree from ever hitting main's objects:
+Worktrees now share main's cache (docs/architecture.md#precompiled-headers).
+A fresh tree builds in about 2 minutes, where it took 11.5. Still open:
 
-- `base_dir` is unset. Every include path is absolute
-  (`-I…/.claude/worktrees/agent-…/src`), so it is part of the key.
-- `worktree-build.sh` configures with no build type, and `CMakeLists.txt`
-  defaults to Debug. Main's `build/` is Release, so the flags differ.
-- Debug adds `-g`, and with `hash_dir = true` ccache also hashes the working
-  directory.
-
-The same mismatch made `watchdog_smoke` fail in every agent's full suite
-(its stall stack differs in Debug): 13 times across 7 agents, each one
-investigated and reported. It also made worktree CAM runs about 1.6 times
-slower (49.5 minutes against about 30), and it is why four fresh worktrees
-together compiled four whole trees and ran the machine out of memory
-(item 1).
-
-**Change.**
-- `~/.config/ccache/ccache.conf` gets `base_dir = /home/elias/Documents`,
-  which covers `build/`, `.claude/worktrees/*` and `../designer-wt*`.
-- `worktree-build.sh` configures with main's `CMAKE_BUILD_TYPE`, read from
-  `build/CMakeCache.txt`, Release by default.
-- `max_size` is raised, or other projects' caches are moved out, so one
-  full tree of both configurations fits without eviction.
-- The **commit is a compile flag on 409 of 427 files**: `DESIGNER_GIT_COMMIT`
-  is a PUBLIC define on `designer_core` (CMakeLists.txt, near line 571), and
-  only `src/common/BuildInfo.cpp` reads it. Every reconfigure at a new commit
-  changes every file's flags. That happens when a merge adds a source file,
-  or on an explicit `cmake .`. Ninja then recompiles 409 files and ccache
-  can hit none of them. A worktree is configured at its own commit, so it
-  misses on every file whatever `base_dir` says. This, more than the build
-  type, is why agents compiled cold. The define goes on `BuildInfo.cpp`
-  alone (a generated header or `set_source_files_properties`).
-- **Main's `build/` compiles against stale store paths.** Its compiler and
-  its spdlog, fmt, nlohmann_json, Eigen and Boost include paths are older
-  than what a fresh configure of `shell.nix` resolves. A new worktree
-  therefore uses a different compiler and different headers, and cannot
-  share a single object. It is also the setup for the garbage-collected
-  store path breakage CLAUDE.md warns about. `tools/fix-stale-nix-cache.sh`
-  should run on `build/` once. Worktree builds should take main's toolchain
-  from the same `shell.nix` evaluation, so the two agree.
-- `watchdog_smoke` should still pass in a Debug build, because a developer
-  debugging a stall builds Debug on purpose. Find out why its stack shows
-  `RunHeadless` rather than `StallSelfTest` there.
-- Measure it: a fresh worktree's first build and its `ccache -s` hit rate,
-  before and after. The CLAUDE.md figure gets corrected to whatever this
-  measures.
-
-**Saving.** Most of the agents' 4.9 hours of building (an estimate; with
-warm hits a worktree build is the 75 s CLAUDE.md claims). Also the 13 false
-failures, and most of the memory pressure behind the crash.
+- **The last 19 misses.** Some sources carry the tree's absolute path in a
+  define (`DESIGNER_SOURCE_DIR`, for the test fixtures). A path computed at run
+  time, or relative to the binary, removes them.
+- **`watchdog_smoke` in Debug.** A developer debugging a stall builds Debug on
+  purpose, and the smoke failed in every Debug tree: its stack shows
+  `RunHeadless` rather than `StallSelfTest`.
+- **The 40 GB store is full and evicting** (476 cleanups). Either raise
+  `max_size`, or move other projects' caches out.
 
 ## 3. Wait on a pid or a marker, never on a pattern
 

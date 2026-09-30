@@ -42,8 +42,9 @@ ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 
 **A .cpp costs 10-17 s to rebuild; a real edit to `core/Feature.h` ~3.5 min, a
-narrower header ~2 min** (a touch, revert or branch switch ~12 s, from ccache;
-keep project headers out of PCHs: docs/architecture.md#precompiled-headers). So
+narrower header ~2 min** (a touch, revert or branch switch ~12 s, from ccache; precompiled headers
+are off because they stop trees sharing ccache:
+docs/architecture.md#precompiled-headers). So
 edit headers in BATCHES — one rebuild for five header edits, not five — and
 keep iterating in the .cpp where you can. (Editing a header mid-`ninja` also
 fails with a bogus `redefinition of class`.)
@@ -117,7 +118,7 @@ by name, while you iterate on it.
 `-LE 'gui|slow'`. Tag a new heavy test `[slow]` where you write it — a by-name
 list kept elsewhere drifts.
 
-- Each `nix-shell` costs ~3 s to enter, so batch commands into one invocation
+- Each `nix-shell` costs ~5 s to enter, so batch commands into one invocation
   rather than one each. Run the full headless suite before committing.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 4 parallel shards.
   `--fast` drops the slowest few, `-j 8` more shards, `-f <pattern>` one case,
@@ -247,8 +248,11 @@ overlapping edits just move the cost to merge. Setup:
 git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/worktree-build.sh)
 ```
 `worktree-build.sh` handles the gotcha: a fresh worktree has EMPTY submodules
-(cmake fails without `git submodule update --init`). ~75 s to a working binary
-(ccache-warm). It then **picks and prints a scratch port** for that worktree
+(cmake fails without `git submodule update --init`), builds main's build type
+at a `-j` sized by free memory, and hits main's ccache: ~2 min for `designer`
+plus `designer_tests` in a fresh tree (docs/architecture.md#precompiled-headers).
+If it compiles everything, main's `build/` is on an old toolchain:
+`tools/fix-stale-nix-cache.sh`. It then **picks and prints a scratch port** for that worktree
 (`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
 instances, and never the human's). Integrate SERIALLY: merge one branch to
 main, run suites, then the next — and REMOVE the worktree as soon as its
