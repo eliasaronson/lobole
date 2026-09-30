@@ -68,7 +68,7 @@ r̄) swept by screw motion removes exactly 2π·r̄·A per turn, because
 Pappus–Guldin holds for screw motion. A screw-invariant cutter that passes
 through both ends of a length L removes exactly 2π·r̄·A·L/P. Phase 1's test
 can therefore assert the volume to a tight tolerance, rather than the "loose
-band" in docs/plans/modeled-thread.md.
+band" in the modelled-thread plan (now built: docs/modeling/holes-and-threads.md).
 
 ### Phase 1 recommendation
 
