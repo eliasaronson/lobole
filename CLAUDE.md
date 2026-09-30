@@ -98,7 +98,7 @@ are upper bounds on a loaded machine; the suites print their own counts.
 | what | command | cost |
 |---|---|---|
 | headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~110 s |
-| **inner loop** | `tools/test-fast.sh` | **~55 s** |
+| **inner loop** | `tools/test-fast.sh` | **~65 s** |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 

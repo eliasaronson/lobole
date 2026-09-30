@@ -10,29 +10,6 @@ measured, not remembered.
 Each change is small enough to do on its own. The saving is this round's
 cost of not having it.
 
-## 1. Memory decides how many builds run, not cores
-
-**What happened.** Four worktree agents started at once, each running
-`worktree-build.sh` at the default `-j`: one job per core, 22 of them. Each
-cc1plus is 0.6 to 1.8 GB, and the machine also runs a kind cluster, Chrome
-and Slack. earlyoom killed 58 compilers in the round, 30 of them in four
-minutes. Then it killed the Claude process itself: `earlyoom: sending
-SIGTERM to process … "claude"`. Nothing ran for 1 h 49 m, until the human
-noticed. Agents then retried at `-j6`, then `-j4`, and one spent 24 minutes
-in a retry loop.
-
-**Change.**
-- `worktree-build.sh` sizes its `-j` from `MemAvailable` at about 1.5 GB a
-  job (done). The same rule belongs in `tools/test-fast.sh` and the build line
-  in CLAUDE.md, through one `tools/build-jobs` helper.
-- CLAUDE.md says to start worktree agents two at a time. A second pair waits
-  for the first pair's first build to finish, because a warm ccache build is
-  memory-light.
-
-**Saving.** The crash and about 20 minutes of retries. Also the class of
-"compiler Terminated" failures that agents otherwise misread as code
-problems.
-
 ## 2. What is left of sharing ccache
 
 Worktrees now share main's cache (docs/architecture.md#precompiled-headers).
@@ -46,49 +23,6 @@ A fresh tree builds in about 2 minutes, where it took 11.5. Still open:
   `RunHeadless` rather than `StallSelfTest`.
 - **The 40 GB store is full and evicting** (476 cleanups). Either raise
   `max_size`, or move other projects' caches out.
-
-## 3. Wait on a pid or a marker, never on a pattern
-
-**What happened.** The tool caps a call at 600 s. About 400 calls asked for
-more and were silently capped. 37 hit the cap and were moved to the
-background, where they stayed alive and stacked up: one pipeline run had
-three waiters, one agent had five. `pgrep -f` and `pkill -f` matched the
-calling shell's own command line in 7 of 16 uses, which killed the caller
-(exit 144). A `pgrep -f "ninja designer"` wait loop matched itself and never
-ended, costing 33 minutes. The first retro of the round had already written
-this lesson down, and it recurred four more times.
-
-**Change.**
-- A `tools/wait-for.sh` waits on a pid file or a marker line in a log, with
-  a deadline under 600 s. It exits non-zero on timeout, so the next call
-  decides.
-- `run_all.sh` and the other long scripts write a pid file and a `done`
-  marker.
-- CLAUDE.md gets one line: long runs go through `run_in_background` and the
-  completion notice, never an `until pgrep` loop. Kill by the pid a script
-  announced, never by `-f` pattern.
-
-**Saving.** About 1 hour of self-inflicted waiting, and the stacked
-notifications.
-
-## 4. A program that cuts nothing is not "ok"
-
-**What happened.** The rook's crenel op picked the notch's end cap, which
-is a wall 3 mm past the axis, and it was refused as too deep. Each crenel
-setup then posted a seven-line file that cuts nothing. `cam_verify` said
-`ok: true` with the line "This program never touches the stock". Every
-full run for about 20 hours reported the crenels as clean.
-
-**Change.**
-- A setup with an enabled operation whose program touches no stock gets
-  `ok: false`, because the job is incomplete. The same goes for an op that
-  was refused at `add_cam_op`, where the file never mentions it.
-- The verdict carries `cuts_nothing`, following "refuse, don't substitute".
-- `cam.py` exits non-zero when any op is refused or any setup is not ok, so
-  `run_all.sh` fails loudly instead of printing `done`.
-
-**Saving.** The 20-hour blind spot, and every future pipeline run that
-"passes" while doing nothing.
 
 ## 5. The acceptance run is not the inner loop
 
@@ -111,7 +45,7 @@ build was compiling. Half the objects saw the old layout and half the new,
 and the binary died on the first autosave with a `bad_alloc` that looked
 like heap corruption. That cost ten minutes of valgrind and a rebuild.
 
-**Change.** The build helper from item 1 takes an `flock` on the build
+**Change.** `tools/build-jobs`'s callers take an `flock` on the build
 directory for the length of a build. A small `tools/merge-branch.sh`
 (cherry-pick, then build, then the headless suite, then remove the
 worktree) takes the same lock before it touches the tree. It also does the
@@ -174,7 +108,7 @@ most of the answer. The rest:
   in main needed only an incremental build. Docs agents should work in main,
   after the code agents have merged.
 - **Waiting in a loop is 14%.** One agent kept five `until` waiters alive
-  on one CAM run. With item 3, an agent waits on the completion notice
+  on one CAM run. With `tools/wait-for.sh`, an agent waits on the completion notice
   rather than a poll.
 - **Rework after a rebase.** Every rebase onto a moved main rebuilt 9 to 12
   minutes, and the stock agent rebased three times. Merging agents in the
@@ -185,27 +119,12 @@ most of the answer. The rest:
   complex to verify, and 36 more failed with an exit code, mostly builds
   killed for memory. Each costs a round trip.
 
-## 10. What else holds the machine and the suite
+## 10. What else holds the machine
 
-- **clangd indexes every worktree.** It held 5.4 GB, the largest user
-  after Chrome (7.7 GB) and ahead of the Claude process (3.8 GB). Its errors
-  in this session came from `.claude/worktrees/agent-*/src`. The worktrees
-  sit inside the repo, each with its own `compile_commands.json`, so an
-  editor's clangd indexes each as another copy of the project. Change: a
-  `.clangd` rule that skips `.claude/worktrees/` from the background index,
-  or worktrees outside the repo (the `../designer-wt*` shape CLAUDE.md
-  describes).
-- **Entering `nix-shell` costs 5 s**, measured three times against the 3 s
-  in CLAUDE.md. About 400 entries in the round came to roughly 33 minutes.
-  Change: `nix print-dev-env` into a cached env file, keyed on `shell.nix`'s
-  hash, which the tool scripts source. A second nested shell is then also no
-  longer possible to get wrong.
-- **The headless suite cannot finish faster than `watch_smoke` (73 s).** The
-  next longest are `cam_parked_smoke` (49 s, tagged slow) and
-  `om615_accessories_smoke` (37 s). `watch_smoke` is not tagged `slow`, so
-  it is also in `tools/test-fast.sh`, whose "~55 s" it cannot meet. Change:
-  tag it `slow`, or find what its 73 s is (it builds the whole watch
-  generator), and correct the CLAUDE.md figures to measured ones.
+- **Entering `nix-shell` costs 5 s.** About 400 entries in a round came to
+  roughly 33 minutes. Change: `nix print-dev-env` into a cached env file,
+  keyed on `shell.nix`'s hash, which the tool scripts source. A second nested
+  shell is then also no longer possible to get wrong.
 
 ## Smaller, recurring friction
 
@@ -215,8 +134,6 @@ most of the answer. The rest:
 - **Commands too complex to verify.** 36 commands in worktrees were
   rejected by the harness as too complex to verify. Splitting a pipeline
   into steps avoids the retry.
-- **nix-shell entry.** Each entry costs about 3 s, and 396 of them came to
-  about 20 minutes. Keep batching; `test-fast.sh` already does.
 - **Idle waiting on agents.** Main waited about 2 hours. A phase that
   delegates everything leaves it waiting, so it should hold back work that
   is file-disjoint from the agents' (the next phase's plan, the generator,
@@ -224,9 +141,8 @@ most of the answer. The rest:
 
 ## Verification
 
-Items 1, 2, 3 and 6 are measured by the next round with agents: no earlyoom
-kills of cc1plus or Claude in the journal, no `watchdog_smoke` failure in a
-worktree, no exit 144, and no waiter notifications beyond one per run. Items
-4 and 7 each come with the test that would have failed this round: the
-crenel's refused op, and the job tab's idle frame. Item 8 is the
-`SolveIndexA` contract test, which is already in.
+Items 2 and 6 are measured by the next round with agents: every fresh
+worktree near all-hits in `ccache -s`, and no merge that builds against a
+half-compiled tree. Item 7 comes with the test that would have failed this
+round, the job tab's idle frame. Item 8 is the `SolveIndexA` contract test,
+which is already in, and the audit of the other solvers.
