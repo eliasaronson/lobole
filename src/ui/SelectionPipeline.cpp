@@ -1082,6 +1082,30 @@ void PruneSelection(AppState& state) {
                     return false;
               return true;
             }
+            case SelectionItem::Kind::CamSetup:
+              return !state.job || state.job->FindSetup(it.id) == nullptr;
+            case SelectionItem::Kind::JobPart:
+              return !state.job || state.job->FindPart(it.id) == nullptr;
+            case SelectionItem::Kind::Fixture: {
+              if (!state.job)
+                return true;
+              for (const cam::Setup& s : state.job->GetSetups())
+                for (const cam::Fixture& f : s.fixtures)
+                  if (f.id == it.id)
+                    return false;
+              return true;
+            }
+            case SelectionItem::Kind::CamTool: {
+              // A tool row is the ACTIVE setup's: another setup made active
+              // is a different list, whose T3 is not the one selected.
+              const cam::Setup* s = state.job ? ActiveJobSetup(state) : nullptr;
+              if (s == nullptr)
+                return true;
+              for (const cam::Tool& t : s->tools)
+                if (static_cast<uint64_t>(t.number) == it.id)
+                  return false;
+              return true;
+            }
             default:
               return false; // geometry refs resolve lazily; stale = no-op
             }

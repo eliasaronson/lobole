@@ -110,6 +110,15 @@ std::optional<cam::VerdictLine> FixtureTravelLine(AppState& state,
 // clamp taller than the stock cannot be forgotten by one of them.
 double DeriveJobSafeZ(AppState& state, const cam::Setup& setup);
 
+// Pays every job's first-visit exact boxes off the frame
+// (docs/cam/gui.md#job-tab-frame-cost): each job tab other than the active
+// one is framed in each of its setups, and a worker bounds detached copies of
+// those framings, handing the boxes back to the shared memo
+// (CADShape::RememberTightBox) so the first visit reads them. A "job-warm"
+// background job; a new call cancels a running one. Parts in a
+// configuration not built yet are left to the visit, which builds them.
+void StartJobBoundsWarm(AppState& state);
+
 // A change counter for everything a job TAB draws: the job itself plus every
 // source part it references. The renderer resyncs on it, so a model edit in
 // one of the parts reaches the viewport.

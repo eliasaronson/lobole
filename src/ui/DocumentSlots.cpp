@@ -601,10 +601,37 @@ bool RedoJob(AppState& state) {
 
 namespace {
 int g_openJobGuards = 0; // JobUndoGuards alive, outermost first
+bool g_jobEditAudit = false;
+int g_jobEditAuditMisses = 0;
+std::string g_jobEditAuditLastMiss;
+
+// Where two fingerprints first differ, with some context either side: what
+// an audit miss prints, so the edit that forgot MarkJobEdited can be found.
+std::string FirstDifference(const std::string& a, const std::string& b) {
+  size_t i = 0;
+  while (i < a.size() && i < b.size() && a[i] == b[i])
+    i++;
+  const size_t from = i > 60 ? i - 60 : 0;
+  return "..." + a.substr(from, 120) + "... became ..." + b.substr(from, 120) +
+         "...";
+}
 } // namespace
 
-JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce)
-    : m_state(state), m_coalesce(coalesce) {
+void MarkJobEdited(AppState& state) {
+  state.jobEdits++;
+  state.projectMetaDirty = true;
+}
+
+void SetJobEditAudit(bool on) { g_jobEditAudit = on; }
+int JobEditAuditMisses() { return g_jobEditAuditMisses; }
+std::string JobEditAuditLastMiss() { return g_jobEditAuditLastMiss; }
+void ResetJobEditAudit() {
+  g_jobEditAuditMisses = 0;
+  g_jobEditAuditLastMiss.clear();
+}
+
+JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce, bool compareContent)
+    : m_state(state), m_coalesce(coalesce), m_compareContent(compareContent) {
   // Only the outermost guard records: an action with a guard of its own
   // (SetJobPartConfiguration), called under the panel's or an RPC's, is
   // still one step. Counted here rather than on the history, which moves
@@ -612,8 +639,11 @@ JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce)
   if (g_openJobGuards++ > 0)
     return;
   if (state.job) {
+    m_job = state.job.get();
+    m_edits = state.jobEdits;
     m_before = *state.job;
-    m_fingerprint = DocumentIO::JobFingerprint(*state.job);
+    if (m_compareContent || g_jobEditAudit)
+      m_fingerprint = DocumentIO::JobFingerprint(*state.job);
   }
 }
 
@@ -622,26 +652,40 @@ JobUndoGuard::~JobUndoGuard() {
   g_openJobGuards--;
   if (!state.job || !m_before)
     return;
-  // Undo itself replaces the job under a guard (the panel is drawing while
-  // Ctrl+Z lands): a history that just changed is not an edit to record.
-  const std::string now = DocumentIO::JobFingerprint(*state.job);
-  const bool moved = now != m_fingerprint;
+  // Another tab's job now (an action switched tabs under the guard): its
+  // history is not the one this copy belongs on.
+  if (state.job.get() != m_job)
+    return;
+  bool moved = state.jobEdits != m_edits;
+  if (m_compareContent || g_jobEditAudit) {
+    const std::string now = DocumentIO::JobFingerprint(*state.job);
+    const bool changed = now != m_fingerprint;
+    if (m_compareContent) {
+      moved = moved || changed;
+    } else if (changed && !moved) {
+      // An edit that did not say so: it would not undo. Recorded anyway, so
+      // the audit changes nothing but the count.
+      g_jobEditAuditMisses++;
+      g_jobEditAuditLastMiss = FirstDifference(m_fingerprint, now);
+      LOG_ERROR("job edited without MarkJobEdited: {}", g_jobEditAuditLastMiss);
+      moved = true;
+    }
+  }
   JobHistory& h = state.jobHistory;
   if (m_coalesce && ImGui::IsAnyItemActive()) {
     // Mid-drag: hold the FIRST pre-edit copy, whatever this frame did.
-    if (moved && !h.pending) {
+    if (moved && !h.pending)
       h.pending = std::move(*m_before);
-      h.pendingFingerprint = m_fingerprint;
-    }
     return;
   }
   if (h.pending) {
     // The drag let go. One step, from before it started -- unless it came
-    // back to exactly where it began.
-    if (now != h.pendingFingerprint)
+    // back to exactly where it began, which only the content can say (once,
+    // at the release, not every frame of the drag).
+    if (DocumentIO::JobFingerprint(*state.job) !=
+        DocumentIO::JobFingerprint(*h.pending))
       PushJobUndo(state, *h.pending);
     h.pending.reset();
-    h.pendingFingerprint.clear();
     return;
   }
   if (moved)

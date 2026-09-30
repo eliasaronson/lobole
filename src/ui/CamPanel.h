@@ -127,6 +127,28 @@ void ApplyCamToolEdit(AppState& state);
 // silent substitution.
 bool RemoveCamTool(AppState& state, int number, std::string* why = nullptr);
 
+// The rest of what the panel lists, by the ids its rows select
+// (SelectionItem::Kind::CamSetup / JobPart / Fixture / CamTool), for Delete
+// and the rows' menus (docs/ui/selection.md#lists-one-gesture-one-delete).
+// Each is ONE undo step however many rows, lets go of the selection, the
+// editors and the toolpaths of what went, and returns how many went.
+// A job part takes its placements and the operations aimed at it along, as
+// the row's Remove always did. Tools are the ACTIVE setup's, by number; one
+// an operation still cuts with is refused as RemoveCamTool refuses it, the
+// reasons joined in `why`, and the others go.
+int RemoveCamSetups(AppState& state, const std::vector<uint64_t>& ids);
+// A click on one of the panel's rows (ListRowClicked's gesture). A PLAIN
+// click also lets go of the panel's other row kinds -- a setup picked a moment
+// ago must not go with the tool Delete was meant for -- and keeps picked
+// faces, which the verb windows are aimed at. Ctrl and Shift extend, across
+// kinds too, as a person asked. True for a plain click.
+bool CamRowClicked(AppState& state, SelectionItem::Kind kind, uint64_t id,
+                   const std::vector<uint64_t>& order);
+int RemoveJobParts(AppState& state, const std::vector<uint64_t>& ids);
+int RemoveCamFixtures(AppState& state, const std::vector<uint64_t>& ids);
+int RemoveCamTools(AppState& state, const std::vector<uint64_t>& numbers,
+                   std::string* why = nullptr);
+
 // The tool window's editors for the two things the panel's tree lists that
 // have settings but are not an operation, a tool or a fixture
 // (docs/ui/panels.md#cam-job-tab-the-cam-panel): the setup being edited

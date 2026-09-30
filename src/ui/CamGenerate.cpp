@@ -12,6 +12,7 @@
 #include "ui/CamPanel.h"
 #include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
+#include "ui/DocumentSlots.h" // MarkJobEdited
 #include "ui/JobActions.h"
 #include "ui/Theme.h" // ElevatedWindowBorder
 #include "ui/Widgets.h"
@@ -286,7 +287,7 @@ void DrawCamGenerateWindow(AppState& state) {
     // The order and the split change the FILE, not a toolpath -- but the
     // verdict is about the file, so it is re-run rather than left describing
     // the previous one.
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     RefreshCamToolpaths(state);
     state.camVerdict.clear();
     state.camLeftover.clear();

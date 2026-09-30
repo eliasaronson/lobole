@@ -34,6 +34,8 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <algorithm>
+#include <cfloat>
 #include <limits>
 #include <optional>
 
@@ -508,7 +510,7 @@ cam::Setup* EnsureCamSetup(AppState& state) {
   (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
   fresh.safeZ = ui::DeriveJobSafeZ(state, fresh);
   state.camSafeZEdit = static_cast<float>(fresh.safeZ);
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   return &fresh;
 }
 
@@ -687,7 +689,7 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
   // The tool this cut with is the one in the spindle: the next verb derives
   // for it unless told otherwise.
   state.camVerbTool = op.toolNumber;
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   // Just the new one: the operations already in the job did not change, and
   // one of them may be an adaptive pocket that takes seconds to re-cut.
   RefreshCamToolpath(state, op.id);
@@ -756,7 +758,7 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   RetopForTargets(state, setup, *op);
   state.camRefusal.clear();
   state.camGhostOp = id;
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpath(state, id);
   // Same rule as making one: a tool the cut cannot be made with is refused,
   // and the cut stays as it was rather than becoming a dead row.
@@ -837,7 +839,7 @@ Merge MergeIntoVerbOp(AppState& state, cam::Setup& setup, cam::OpType type,
     return Merge::Refused;
   }
   RetopForTargets(state, setup, *op);
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpath(state, op->id);
   if (const std::string why = ToolpathError(state, op->id); !why.empty()) {
     *op = before;
@@ -896,7 +898,7 @@ void CamOrientationChanged(AppState& state, cam::Setup& setup) {
   state.camNote = note;
 
   state.slotPick = {};
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpaths(state);
   RunCamVerification(state);
 }
@@ -1046,7 +1048,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
         if (op.topZ > hi.z)
           op.topZ = hi.z;
     state.slotPick = {};
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     RefreshCamToolpaths(state);
     RunCamVerification(state);
     return;
@@ -1435,7 +1437,7 @@ void OperationList(AppState& state, cam::Setup& setup) {
     ImGui::PopID();
   }
   if (moveOp != 0 && cam::MoveOperation(setup, moveOp, moveTo)) {
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     state.camVerdict.clear();
     state.camLeftover.clear();
   }
@@ -1465,7 +1467,7 @@ bool DrawOperationEditor(AppState& state) {
   ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
   if (ImGui::InputText("Name###op_name", name, sizeof(name))) {
     op->name = name; // a name changes no toolpath
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
   }
   ImGui::TextDisabled("%s", CamOpSummary(*setup, *op).c_str());
   ImGui::Separator();
@@ -1892,16 +1894,23 @@ void DrawCamToolWindow(AppState& state) {
   if (!state.camRefusal.empty())
     RefusalText(state.camRefusal);
 
+  // What grows -- the operations and the verdict -- scrolls in a region of
+  // bounded height (docs/cam/gui.md#verb-windows): the window grew with them,
+  // and Engrave's, an operation per label and a line per finding, grew down
+  // over the very curves it was asking to be clicked. At most two fifths of
+  // the viewport, from the viewport: the rest is where the part is. The
+  // prompt above and Close below stay put.
+  ImGui::SetNextWindowSizeConstraints(
+      ImVec2(0.0f, 0.0f),
+      ImVec2(FLT_MAX, std::max(ImGui::GetFrameHeightWithSpacing() * 6.0f,
+                               state.viewportSize.y * 0.4f)));
+  ImGui::BeginChild("cam_tool_list", ImVec2(0.0f, 0.0f),
+                    ImGuiChildFlags_AutoResizeY);
   // The job so far: for the machining verbs and the plain window. The
   // orientation picks are one question each, and the list under them was
   // noise.
   if (setup != nullptr && (verb == nullptr || verb->cutter))
     OperationList(state, *setup);
-
-  ImGui::Separator();
-  ImGui::Checkbox("Show path###cam_tool_show", &state.camShowToolpath);
-  ImGui::SameLine();
-  ImGui::Checkbox("Stock###cam_tool_stock", &state.camShowStock);
 
   for (const cam::VerdictLine& line : state.camVerdict) {
     const ImVec4 color = line.level == cam::VerdictLine::Level::Bad
@@ -1919,6 +1928,12 @@ void DrawCamToolWindow(AppState& state) {
                        line.text.c_str());
     ImGui::PopTextWrapPos();
   }
+  ImGui::EndChild();
+
+  ImGui::Separator();
+  ImGui::Checkbox("Show path###cam_tool_show", &state.camShowToolpath);
+  ImGui::SameLine();
+  ImGui::Checkbox("Stock###cam_tool_stock", &state.camShowStock);
 
   ImGui::Separator();
   if (ImGui::Button("Close###cam_tool_done")) {
@@ -1979,6 +1994,18 @@ void EditCamFixture(AppState& state, uint64_t fixtureId) {
   state.camToolOpen = true;
 }
 
+bool CamStockBox(AppState& state, glm::dvec3& lo, glm::dvec3& hi) {
+  const cam::Setup* setup = ActiveJobSetup(state);
+  if (setup == nullptr)
+    return false;
+  const StockView& view = CachedStockView(state, *setup);
+  if (!view.stock)
+    return false;
+  lo = view.lo;
+  hi = view.hi;
+  return true;
+}
+
 void CamFixturesChanged(AppState& state, cam::Setup& setup) {
   if (!state.job)
     return;
@@ -1989,7 +2016,7 @@ void CamFixturesChanged(AppState& state, cam::Setup& setup) {
   // clears it too.
   setup.safeZ = ui::DeriveJobSafeZ(state, setup);
   state.camSafeZEdit = static_cast<float>(setup.safeZ);
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpaths(state);
   // A verdict about the fixtures as they WERE is worse than none.
   state.camVerdict.clear();
@@ -2447,6 +2474,7 @@ void EditCamOperation(AppState&, uint64_t) {}
 void EditCamTool(AppState&, int) {}
 void EditCamFixture(AppState&, uint64_t) {}
 void CamFixturesChanged(AppState&, cam::Setup&) {}
+bool CamStockBox(AppState&, glm::dvec3&, glm::dvec3&) { return false; }
 void StartCamVerb(AppState&, AppState::CamVerb) {}
 int VerbTool(const AppState&, const cam::Setup&) { return 0; }
 void LookDownTheSpindle(AppState&) {}

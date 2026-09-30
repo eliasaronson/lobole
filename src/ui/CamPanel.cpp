@@ -983,7 +983,7 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
 void ApplyCamToolEdit(AppState& state) {
   // A tool is shared by every operation that names it, so all of them are
   // re-cut, as the panel's inline fields always did.
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpaths(state);
   state.camVerdict.clear();
   state.camLeftover.clear();
@@ -1023,11 +1023,17 @@ bool RemoveCamTool(AppState& state, int number, std::string* why) {
       *why = "no tool T" + std::to_string(number) + " in this setup";
     return false;
   }
-  SnapshotJob(state);
+  // A guard, not a snapshot: under the panel's own guard a snapshot here was
+  // a SECOND undo step for one delete (the outermost guard records).
+  JobUndoGuard undo(state);
   tools.erase(it);
   if (state.camEditTool == number)
     state.camEditTool = 0;
-  state.projectMetaDirty = true;
+  std::erase_if(state.selection.items, [number](const SelectionItem& s) {
+    return s.kind == SelectionItem::Kind::CamTool &&
+           s.id == static_cast<uint64_t>(number);
+  });
+  MarkJobEdited(state);
   return true;
 }
 
@@ -1035,17 +1041,19 @@ void ApplyCamOpEdit(AppState& state, uint64_t opId) {
   // One operation changed: re-cut it alone, as the panel's edits always did
   // (`test_cam` pins one-at-a-time against all-at-once), and drop a verdict
   // about the toolpath it replaces.
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpath(state, opId);
   state.camVerdict.clear();
   state.camLeftover.clear();
 }
 
 int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
-  if (!ids.empty())
-    SnapshotJob(state); // one undo step per removal, however many rows (R7)
   if (!state.job || ids.empty())
     return 0;
+  // One undo step per removal, however many rows (R7). A guard, so that under
+  // the panel's guard it is still one: this used to snapshot here as well,
+  // and a Delete from the panel's menu took two Ctrl+Z to bring back.
+  JobUndoGuard undo(state);
   int removed = 0;
   for (const uint64_t id : ids) {
     bool found = false;
@@ -1081,10 +1089,146 @@ int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
   }
   if (removed == 0)
     return 0;
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   // A verdict about the PREVIOUS job is worse than no verdict: re-run it
   // against what is left, as the tool window always did.
   RunCamVerification(state);
+  return removed;
+}
+
+namespace {
+// Drops every selection item of `kind` whose id is in `ids`.
+void Deselect(AppState& state, SelectionItem::Kind kind,
+              const std::vector<uint64_t>& ids) {
+  std::erase_if(state.selection.items, [&](const SelectionItem& it) {
+    return it.kind == kind &&
+           std::find(ids.begin(), ids.end(), it.id) != ids.end();
+  });
+}
+
+// What follows a structural edit that may move the stock and every derived
+// number: the active setup's origin, its toolpaths, and no verdict about the
+// job as it was.
+void AfterStructuralEdit(AppState& state) {
+  MarkJobEdited(state);
+  if (cam::Setup* active = ActiveCamSetup(state)) {
+    (void)cam::RecomputeOrigin(*active, JobBodies(state));
+    state.camSafeZEdit = static_cast<float>(active->safeZ);
+  }
+  RefreshCamToolpaths(state);
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+}
+} // namespace
+
+bool CamRowClicked(AppState& state, SelectionItem::Kind kind, uint64_t id,
+                   const std::vector<uint64_t>& order) {
+  const ImGuiIO& io = ImGui::GetIO();
+  const bool plain = !io.KeyCtrl && !io.KeyShift;
+  if (plain)
+    std::erase_if(state.selection.items, [kind](const SelectionItem& it) {
+      using K = SelectionItem::Kind;
+      return it.kind != kind &&
+             (it.kind == K::Operation || it.kind == K::CamSetup ||
+              it.kind == K::JobPart || it.kind == K::Fixture ||
+              it.kind == K::CamTool);
+    });
+  ListRowClicked(state, kind, id, order, /*ownKindOnly=*/true);
+  return plain;
+}
+
+int RemoveCamSetups(AppState& state, const std::vector<uint64_t>& ids) {
+  if (!state.job || ids.empty())
+    return 0;
+  JobUndoGuard undo(state);
+  int removed = 0;
+  for (const uint64_t id : ids) {
+    if (!state.job->RemoveSetup(id))
+      continue;
+    removed++;
+    if (state.camActiveSetup == id)
+      state.camActiveSetup = 0;
+    if (state.camEditSetup == id)
+      state.camEditSetup = 0;
+  }
+  if (removed == 0)
+    return 0;
+  Deselect(state, SelectionItem::Kind::CamSetup, ids);
+  // Its operations' toolpaths are the ones in hand when it was the active
+  // one, and the ids they carry are gone with it.
+  state.camToolpaths.clear();
+  state.camGhostOp = 0;
+  state.camVerbOp = 0;
+  AfterStructuralEdit(state);
+  return removed;
+}
+
+int RemoveJobParts(AppState& state, const std::vector<uint64_t>& ids) {
+  if (!state.job || ids.empty())
+    return 0;
+  JobUndoGuard undo(state);
+  int removed = 0;
+  for (const uint64_t id : ids) {
+    if (!state.job->RemovePart(id))
+      continue;
+    removed++;
+    if (state.camEditPart == id)
+      state.camEditPart = 0;
+    // Its bodies were the placement gizmo's selection.
+    std::erase_if(state.selection.items,
+                  [id](const SelectionItem& it) { return it.jobPartId == id; });
+  }
+  if (removed == 0)
+    return 0;
+  state.job->BumpVersion(); // what the job's bodies are built from moved
+  Deselect(state, SelectionItem::Kind::JobPart, ids);
+  AfterStructuralEdit(state);
+  return removed;
+}
+
+int RemoveCamFixtures(AppState& state, const std::vector<uint64_t>& ids) {
+  if (!state.job || ids.empty())
+    return 0;
+  JobUndoGuard undo(state);
+  int removed = 0;
+  for (cam::Setup& setup : state.job->GetSetups()) {
+    const size_t had = setup.fixtures.size();
+    std::erase_if(setup.fixtures, [&](const cam::Fixture& f) {
+      return std::find(ids.begin(), ids.end(), f.id) != ids.end();
+    });
+    if (setup.fixtures.size() == had)
+      continue;
+    removed += static_cast<int>(had - setup.fixtures.size());
+    // Safe Z was raised to clear them; the seats and the verdict read them.
+    CamFixturesChanged(state, setup);
+  }
+  if (removed == 0)
+    return 0;
+  if (std::find(ids.begin(), ids.end(), state.camEditFixture) != ids.end())
+    state.camEditFixture = 0;
+  Deselect(state, SelectionItem::Kind::Fixture, ids);
+  MarkJobEdited(state);
+  return removed;
+}
+
+int RemoveCamTools(AppState& state, const std::vector<uint64_t>& numbers,
+                   std::string* why) {
+  if (!state.job || numbers.empty())
+    return 0;
+  JobUndoGuard undo(state);
+  int removed = 0;
+  std::string refused;
+  for (const uint64_t n : numbers) {
+    std::string w;
+    if (RemoveCamTool(state, static_cast<int>(n), &w))
+      removed++;
+    else if (!w.empty())
+      refused += (refused.empty() ? "" : " ") + w;
+  }
+  if (why)
+    *why = refused;
+  // Nothing cut with any of them (RemoveCamTool refuses one that is), so no
+  // toolpath moved.
   return removed;
 }
 
@@ -1278,7 +1422,7 @@ CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
     else
       // Own kind only: a plain click keeps the faces picked on the job --
       // they are what the verb windows are aimed at.
-      ListRowClicked(state, kKind, op.id, order, /*ownKindOnly=*/true);
+      CamRowClicked(state, kKind, op.id, order);
   }
   if (!op.enabled)
     ImGui::PopStyleColor();
@@ -1370,6 +1514,16 @@ void RefreshCamToolpaths(AppState&) {}
 void RefreshCamToolpath(AppState&, uint64_t) {}
 void DropCamToolpath(AppState&, uint64_t) {}
 int RemoveCamOperations(AppState&, const std::vector<uint64_t>&) { return 0; }
+int RemoveCamSetups(AppState&, const std::vector<uint64_t>&) { return 0; }
+bool CamRowClicked(AppState&, SelectionItem::Kind, uint64_t,
+                   const std::vector<uint64_t>&) {
+  return true;
+}
+int RemoveJobParts(AppState&, const std::vector<uint64_t>&) { return 0; }
+int RemoveCamFixtures(AppState&, const std::vector<uint64_t>&) { return 0; }
+int RemoveCamTools(AppState&, const std::vector<uint64_t>&, std::string*) {
+  return 0;
+}
 CamOpRowResult CamOperationRow(AppState&, const cam::Setup&,
                                const cam::Operation&,
                                const std::vector<uint64_t>&) {

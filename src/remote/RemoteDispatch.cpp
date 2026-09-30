@@ -1261,14 +1261,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     json selectionItems = json::array();
     for (const ui::SelectionItem& it : state.selection.items) {
       const char* kind =
-          it.kind == ui::SelectionItem::Kind::Face         ? "face"
-          : it.kind == ui::SelectionItem::Kind::Edge       ? "edge"
-          : it.kind == ui::SelectionItem::Kind::Body       ? "body"
-          : it.kind == ui::SelectionItem::Kind::Feature    ? "feature"
-          : it.kind == ui::SelectionItem::Kind::Occurrence ? "occurrence"
-          : it.kind == ui::SelectionItem::Kind::Mate       ? "mate"
-          : it.kind == ui::SelectionItem::Kind::Relation   ? "relation"
-                                                           : "sketch_region";
+          it.kind == ui::SelectionItem::Kind::Face          ? "face"
+          : it.kind == ui::SelectionItem::Kind::Edge        ? "edge"
+          : it.kind == ui::SelectionItem::Kind::Body        ? "body"
+          : it.kind == ui::SelectionItem::Kind::Feature     ? "feature"
+          : it.kind == ui::SelectionItem::Kind::Occurrence  ? "occurrence"
+          : it.kind == ui::SelectionItem::Kind::Mate        ? "mate"
+          : it.kind == ui::SelectionItem::Kind::Relation    ? "relation"
+          : it.kind == ui::SelectionItem::Kind::Connector   ? "connector"
+          : it.kind == ui::SelectionItem::Kind::Operation   ? "operation"
+          : it.kind == ui::SelectionItem::Kind::SketchCurve ? "sketch_curve"
+          : it.kind == ui::SelectionItem::Kind::CamSetup    ? "cam_setup"
+          : it.kind == ui::SelectionItem::Kind::JobPart     ? "job_part"
+          : it.kind == ui::SelectionItem::Kind::Fixture     ? "fixture"
+          : it.kind == ui::SelectionItem::Kind::CamTool     ? "cam_tool"
+                                                            : "sketch_region";
       json entry = {{"kind", kind}};
       if (it.id != 0)
         entry["id"] = it.id;

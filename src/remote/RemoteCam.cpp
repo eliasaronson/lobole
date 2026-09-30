@@ -1409,7 +1409,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   // nothing and records nothing.
   std::optional<ui::JobUndoGuard> undoGuard;
   if (job != nullptr)
-    undoGuard.emplace(state);
+    undoGuard.emplace(state, /*coalesce=*/false, /*compareContent=*/true);
   if (job == nullptr)
     throw std::runtime_error(
         "CAM works on a job, not a part: a setup stopped being part of the "

@@ -1,6 +1,7 @@
 #include "app/GuiTests.h"
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/DocumentSlots.h" // SetJobEditAudit
 
 // The GUI suite's entry point. The 175 registrations used to live here in one
 // 8,036-line function that took 40 s to compile; they are now one file per
@@ -12,6 +13,10 @@
 // rather than silently disappearing.
 void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   s_App = state;
+  // Every job undo guard also compares the job's content while the suite
+  // runs, and RunTestWithReset fails a test that edited a job without saying
+  // so (ui::SetJobEditAudit).
+  ui::SetJobEditAudit(true);
 
   RegisterShellGuiTests(engine);
   RegisterModelingGuiTests(engine);

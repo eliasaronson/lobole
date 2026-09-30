@@ -595,6 +595,9 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     size_t wantActive = static_cast<size_t>(index.value("active", 0));
     if (wantActive >= state.parts.size())
       wantActive = 0;
+    // Exact boxes remembered by shape identity belong to the project that
+    // was open: its shapes are gone (CADShape::RememberTightBox).
+    CADShape::ForgetSharedTightBoxes();
     ActivateSlot(state, wantActive);
     ResetActiveTabUiState(state);
 
@@ -624,12 +627,19 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // `state.document` alone, which is null when the active tab is an
     // ASSEMBLY — so opening an assembly project left the camera at its
     // default, inside a 5 m dock, and the app looked empty.
-    if (state.document || state.assembly) {
+    // A JOB tab too: opening a project whose active tab was a job left the
+    // camera wherever the last project had it -- the chess set opened
+    // looking at a corner of the jig from underneath it.
+    if (state.document || state.assembly || state.job) {
       FitCameraToDocument(state);
       if (state.activePart >= 0 &&
           static_cast<size_t>(state.activePart) < state.parts.size())
         state.parts[state.activePart].everFramed = true;
     }
+    // The other job tabs' exact boxes, off the frame, so the first visit to
+    // one is not a second of CPU (docs/cam/gui.md#job-tab-frame-cost). The
+    // last project's were let go above.
+    StartJobBoundsWarm(state);
     // F8: we just READ this from disk, so memory and disk agree by
     // definition. Stamping here rather than in each caller is what makes
     // every reload path — restore, branch switch, finishing a merge, the

@@ -2574,3 +2574,150 @@ TEST_CASE("Simulation glyph labels carry a value and a unit", "[sim][ui]") {
   CHECK(ui::SimulationGravityLabel(glm::dvec3(0.0, 0.0, -9.81)) ==
         "g 9.81 m/s^2");
 }
+
+#ifdef HAVE_CAM
+// The job's undo guard records on an edit COUNTER, not on the job's content
+// serialized twice a frame (docs/cam/gui.md#undo). So every edit must move
+// it and nothing a frame reads may: a read that bumped it would put a step on
+// the stack every frame, an edit that did not would not undo.
+TEST_CASE("a job edit bumps the edit counter and a draw does not",
+          "[actions][cam]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0, 0, 0), 40, 30, 20);
+  state.document->Regenerate();
+  const uint64_t partId = state.parts[state.activePart].id;
+  ui::CreateJobForPart(state, partId);
+  REQUIRE(state.job != nullptr);
+  cam::Setup& setup = state.job->AddSetup("Job");
+  const uint64_t setupId = setup.id;
+  state.camActiveSetup = setupId;
+  cam::Tool spare = setup.tools.front();
+  spare.number = 7;
+  setup.tools.push_back(spare);
+  cam::Operation op;
+  op.id = state.job->AllocateId();
+  op.name = "Outline";
+  op.type = cam::OpType::Profile;
+  op.toolNumber = setup.tools.front().number;
+  setup.operations.push_back(op);
+  const auto undoDepth = [&] { return state.jobHistory.undo.size(); };
+
+  // What a frame reads: the bodies, laid out, the render key, the stock and
+  // the camera's bounds. None of it is an edit.
+  const uint64_t before = state.jobEdits;
+  (void)ui::JobBodies(state);
+  (void)ui::JobPlacedBodies(state);
+  (void)ui::JobRenderVersion(state);
+  (void)ui::ActiveCamSetup(state);
+  glm::dvec3 lo(0.0), hi(0.0);
+  CHECK(ui::CamStockBox(state, lo, hi));
+  glm::vec3 fLo(0.0f), fHi(0.0f);
+  CHECK(ui::VisibleSceneBounds(state, fLo, fHi));
+  // ...and the stock is in what a fit frames, not only the parts.
+  CHECK(fLo.x <= static_cast<float>(lo.x) + 1e-3f);
+  CHECK(fHi.z >= static_cast<float>(hi.z) - 1e-3f);
+  CHECK(state.jobEdits == before);
+  {
+    ui::JobUndoGuard idle(state); // a frame that edits nothing
+  }
+  CHECK(undoDepth() == 0);
+
+  // An edit bumps it, and the guard around it records one step.
+  {
+    ui::JobUndoGuard guard(state);
+    state.job->FindSetup(setupId)->safeZ += 5.0;
+    ui::MarkJobEdited(state);
+  }
+  CHECK(state.jobEdits == before + 1);
+  CHECK(undoDepth() == 1);
+
+  // Deleting under an outer guard -- the panel draws under one -- is ONE
+  // step. RemoveCamOperations and RemoveCamTool used to snapshot as well:
+  // two Ctrl+Z for one delete.
+  {
+    ui::JobUndoGuard panel(state);
+    CHECK(ui::RemoveCamOperations(state, {op.id}) == 1);
+  }
+  CHECK(undoDepth() == 2);
+  {
+    ui::JobUndoGuard panel(state);
+    CHECK(ui::RemoveCamTool(state, 7));
+  }
+  CHECK(undoDepth() == 3);
+  CHECK(state.jobEdits > before + 1);
+  CHECK(ui::UndoJob(state));
+  CHECK(state.job->FindSetup(setupId)->FindTool(7) != nullptr);
+  CHECK(ui::UndoJob(state));
+  CHECK(state.job->FindSetup(setupId)->operations.size() == 1);
+
+  // The GUI suite's audit: an edit that does not say so is counted, and
+  // still recorded.
+  ui::ResetJobEditAudit();
+  ui::SetJobEditAudit(true);
+  const size_t depth = undoDepth();
+  {
+    ui::JobUndoGuard guard(state);
+    state.job->FindSetup(setupId)->name += " renamed"; // no MarkJobEdited
+  }
+  CHECK(ui::JobEditAuditMisses() == 1);
+  CHECK(undoDepth() == depth + 1);
+  {
+    ui::JobUndoGuard guard(state); // a frame that edits nothing, audited
+  }
+  CHECK(ui::JobEditAuditMisses() == 1);
+  ui::SetJobEditAudit(false);
+  ui::ResetJobEditAudit();
+
+  // The RPC guard compares content, so a handler cannot forget.
+  {
+    ui::JobUndoGuard rpc(state, /*coalesce=*/false, /*compareContent=*/true);
+    state.job->FindSetup(setupId)->name += " again";
+  }
+  CHECK(undoDepth() == depth + 2);
+}
+
+// Delete reaches every row the CAM panel lists (docs/ui/selection.md), each
+// kind one undo step that brings back what went.
+TEST_CASE("the CAM panel's rows are removed as one undo step each",
+          "[actions][cam]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0, 0, 0), 40, 30, 20);
+  state.document->Regenerate();
+  const uint64_t partId = state.parts[state.activePart].id;
+  ui::CreateJobForPart(state, partId);
+  REQUIRE(state.job != nullptr);
+  cam::Setup& a = state.job->AddSetup("A");
+  const uint64_t aId = a.id;
+  cam::Fixture clamp;
+  clamp.id = state.job->AllocateId();
+  clamp.name = "Clamp";
+  clamp.box = glm::dvec3(10.0, 10.0, 30.0);
+  a.fixtures.push_back(clamp);
+  const uint64_t bId = state.job->AddSetup("B").id;
+  state.camActiveSetup = aId;
+  const uint64_t jobPart = state.job->GetParts().front().id;
+
+  const auto undoDepth = [&] { return state.jobHistory.undo.size(); };
+  CHECK(ui::RemoveCamFixtures(state, {clamp.id}) == 1);
+  CHECK(state.job->FindSetup(aId)->fixtures.empty());
+  CHECK(undoDepth() == 1);
+  CHECK(ui::UndoJob(state));
+  CHECK(state.job->FindSetup(aId)->fixtures.size() == 1);
+
+  CHECK(ui::RemoveJobParts(state, {jobPart}) == 1);
+  CHECK(state.job->GetParts().empty());
+  CHECK(ui::UndoJob(state));
+  CHECK(state.job->GetParts().size() == 1);
+
+  CHECK(ui::RemoveCamSetups(state, {aId, bId}) == 2);
+  CHECK(state.job->GetSetups().empty());
+  CHECK(ui::UndoJob(state));
+  CHECK(state.job->GetSetups().size() == 2);
+
+  // Unknown ids remove nothing and record nothing.
+  const size_t depth = undoDepth();
+  CHECK(ui::RemoveCamSetups(state, {987654}) == 0);
+  CHECK(ui::RemoveCamTools(state, {99}) == 0);
+  CHECK(undoDepth() == depth);
+}
+#endif // HAVE_CAM

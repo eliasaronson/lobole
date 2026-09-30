@@ -188,9 +188,17 @@ std::unordered_map<ImGuiTest*, void (*)(ImGuiTestContext*)> g_origTestFunc;
 
 void RunTestWithReset(ImGuiTestContext* ctx) {
   ResetAppForTest();
+  ui::ResetJobEditAudit();
   const auto it = g_origTestFunc.find(ctx->Test);
   if (it != g_origTestFunc.end() && it->second)
     it->second(ctx);
+  // Every test is also an audit of the job-undo rule (DocumentSlots.h): an
+  // edit to a job that did not call MarkJobEdited would not undo, and the
+  // guards counted it while this test ran.
+  if (ui::JobEditAuditMisses() > 0)
+    ctx->LogError("a job edit did not call MarkJobEdited: %s",
+                  ui::JobEditAuditLastMiss().c_str());
+  IM_CHECK_EQ(ui::JobEditAuditMisses(), 0);
 }
 
 // Window position of a world point, mapped through the central-node viewport

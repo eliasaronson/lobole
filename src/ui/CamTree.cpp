@@ -20,6 +20,7 @@
 
 #ifdef HAVE_CAM
 
+#include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamMount.h"
@@ -376,7 +377,7 @@ void NewSetup(AppState& state) {
   (void)cam::RecomputeOrigin(fresh, JobBodies(state));
   fresh.safeZ = DeriveJobSafeZ(state, fresh);
   state.camSafeZEdit = static_cast<float>(fresh.safeZ);
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
 }
 
 // The other side of the same part. A flip job is two setups on ONE part --
@@ -404,7 +405,7 @@ void FlipSetup(AppState& state, uint64_t setupId) {
   (void)cam::RecomputeOrigin(other, JobBodies(state));
   state.camActiveSetup = other.id;
   state.camSafeZEdit = static_cast<float>(other.safeZ);
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
 }
 
 // A copy of a setup, operations, fixtures and placements included, each with
@@ -430,19 +431,7 @@ void DuplicateSetup(AppState& state, uint64_t setupId) {
   state.camActiveSetup = made.id;
   state.camSafeZEdit = static_cast<float>(made.safeZ);
   state.job->BumpVersion();
-  state.projectMetaDirty = true;
-}
-
-void DeleteSetup(AppState& state, uint64_t setupId) {
-  state.job->RemoveSetup(setupId);
-  if (state.camActiveSetup == setupId)
-    state.camActiveSetup = 0;
-  if (state.camEditSetup == setupId)
-    state.camEditSetup = 0;
-  state.camToolpaths.clear();
-  state.camVerdict.clear();
-  state.camLeftover.clear();
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
 }
 
 // ONE derivation, two entry points: the same engine call the verbs use
@@ -558,7 +547,7 @@ void DrawSetupStep(AppState& state) {
     state.camSafeZEdit = static_cast<float>(fresh.safeZ);
     // CAM edits live in the document but bump no document version (the same
     // as study edits), so this is what keeps the save prompt honest.
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     state.camNewSetup = {};
   }
   ImGui::EndDisabled();
@@ -579,37 +568,70 @@ void DrawSetupStep(AppState& state) {
             ("Add " + slot->name + "###cam_new_part_add").c_str())) {
       state.job->AddPart(slot->id, slot->name);
       state.job->BumpVersion();
-      state.projectMetaDirty = true;
+      MarkJobEdited(state);
     }
     ImGui::PopID();
   }
 }
 
-// Selects a job part the way a click on it in the viewport does: its bodies,
-// which gives it the placement gizmo (docs/cam/gui.md#gizmos).
-void SelectJobPart(AppState& state, uint64_t jobPartId) {
+// The part rows that are selected, selected the way a click in the viewport
+// selects a part: its bodies, which gives it the placement gizmo
+// (docs/cam/gui.md#gizmos).
+void SelectJobPartBodies(AppState& state) {
+  const std::vector<uint64_t> parts =
+      SelectedIds(state, SelectionItem::Kind::JobPart);
   auto& items = state.selection.items;
   std::erase_if(items, [](const SelectionItem& it) {
     return it.kind == SelectionItem::Kind::Body ||
            it.kind == SelectionItem::Kind::Face ||
            it.kind == SelectionItem::Kind::Edge;
   });
-  for (const Body& b : JobPlacedBodies(state))
-    if (b.jobPartId == jobPartId && !b.reference) {
-      SelectionItem item;
-      item.kind = SelectionItem::Kind::Body;
-      item.id = b.createdBy;
-      item.jobPartId = jobPartId;
-      items.push_back(item);
-      break;
-    }
+  for (const uint64_t jobPartId : parts)
+    for (const Body& b : JobPlacedBodies(state))
+      if (b.jobPartId == jobPartId && !b.reference) {
+        SelectionItem item;
+        item.kind = SelectionItem::Kind::Body;
+        item.id = b.createdBy;
+        item.jobPartId = jobPartId;
+        items.push_back(item);
+        break;
+      }
 }
 
 bool JobPartSelected(const AppState& state, uint64_t jobPartId) {
+  if (IsSelected(state, SelectionItem::Kind::JobPart, jobPartId))
+    return true;
   for (const SelectionItem& it : state.selection.items)
     if (it.jobPartId == jobPartId && it.kind == SelectionItem::Kind::Body)
       return true;
   return false;
+}
+
+// Deletes what is selected of one of the panel's row kinds -- a row menu's
+// Delete, which names the kind it removes and so removes only that kind.
+// The Delete KEY takes every kind at once (DeleteSelection).
+void DeleteSelectedOf(AppState& state, SelectionItem::Kind kind) {
+  const std::vector<uint64_t> ids = SelectedIds(state, kind);
+  switch (kind) {
+  case SelectionItem::Kind::CamSetup:
+    RemoveCamSetups(state, ids);
+    break;
+  case SelectionItem::Kind::JobPart:
+    RemoveJobParts(state, ids);
+    break;
+  case SelectionItem::Kind::Fixture:
+    RemoveCamFixtures(state, ids);
+    break;
+  case SelectionItem::Kind::CamTool: {
+    std::string why;
+    RemoveCamTools(state, ids, &why);
+    if (!why.empty())
+      state.camRefusal = why;
+    break;
+  }
+  default:
+    break;
+  }
 }
 
 // What a placement fit says about the part, or null when it sits well.
@@ -717,15 +739,23 @@ void DrawCamPanel(AppState& state) {
 
   cam::Setup* active = ActiveCamSetup(state);
   // Something changed that the active setup's toolpaths read: they are
-  // regenerated once, after the tree is drawn.
+  // regenerated once, after the tree is drawn. `dirty` is an EDIT to the job
+  // (one undo step); `switched` only another setup made the active one,
+  // which reads the job and changes none of it.
   bool dirty = false;
+  bool switched = false;
   // Makes `s` the active setup: the one the toolpaths, the verbs and the
   // editors act on.
   const auto activate = [&](const cam::Setup& s) {
     if (state.camActiveSetup == s.id)
       return;
     state.camActiveSetup = s.id;
-    dirty = true;
+    switched = true;
+    // The tool rows are the active setup's: a T3 selected in the last one is
+    // not this one's T3.
+    std::erase_if(state.selection.items, [](const SelectionItem& it) {
+      return it.kind == SelectionItem::Kind::CamTool;
+    });
   };
 
   // --- Parts -------------------------------------------------------------
@@ -750,7 +780,10 @@ void DrawCamPanel(AppState& state) {
     const std::vector<cam::PlacementFit> fits =
         active != nullptr ? cam::CheckPlacements(*active, JobBodies(state))
                           : std::vector<cam::PlacementFit>{};
-    uint64_t removePart = 0;
+    bool removeParts = false; // a row menu's Remove (the selected parts)
+    std::vector<uint64_t> partOrder;
+    for (const cam::JobPart& part : state.job->GetParts())
+      partOrder.push_back(part.id);
     ImGui::PushID("parts"); // PushID(int) below shares an id space
     for (const cam::JobPart& part : state.job->GetParts()) {
       const std::string pid = std::to_string(part.id);
@@ -791,7 +824,11 @@ void DrawCamPanel(AppState& state) {
       else if (const Document* src = JobPartDocument(state, part))
         for (const Body& b : src->GetBodies())
           if (!b.reference && !b.material.empty()) {
-            row.tail = b.material;
+            // Its name ("Oak"), as the Material menu shows it -- not the
+            // slug the file stores ("wood_oak").
+            row.tail =
+                CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material)
+                    .name;
             break;
           }
       row.tooltip =
@@ -807,6 +844,8 @@ void DrawCamPanel(AppState& state) {
           "\nDouble-click to edit its placement";
       row.menuId = "###cam_part_ctx_" + pid;
       row.menu = [&, partId = part.id] {
+        ListRowContext(state, SelectionItem::Kind::JobPart, partId,
+                       /*ownKindOnly=*/true);
         const cam::JobPart* live = state.job->FindPart(partId);
         if (live == nullptr)
           return;
@@ -843,31 +882,35 @@ void DrawCamPanel(AppState& state) {
           }
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###cam_part_remove"))
-          removePart = partId;
-        ImGui::SetItemTooltip("Take this part out of the job (its operations "
-                              "go with it)");
+        const std::string remove =
+            std::string(ICON_FA_TRASH_CAN " ") +
+            RowActionLabel(
+                "Remove",
+                SelectedIds(state, SelectionItem::Kind::JobPart).size(),
+                "part") +
+            "###cam_part_remove";
+        if (ImGui::MenuItem(remove.c_str()))
+          removeParts = true;
+        ImGui::SetItemTooltip("Take it out of the job: its placements go "
+                              "with it, and no operation cuts it any more");
       };
       const ListRowResult res = ListRow(row);
-      if (res.clicked)
-        SelectJobPart(state, part.id);
+      if (res.clicked) {
+        CamRowClicked(state, SelectionItem::Kind::JobPart, part.id, partOrder);
+        SelectJobPartBodies(state);
+      }
       if (res.doubleClicked)
         EditCamJobPart(state, part.id);
     }
     ImGui::PopID(); // "parts"
-    if (removePart != 0) {
-      state.job->RemovePart(removePart);
-      state.job->BumpVersion();
-      if (state.camEditPart == removePart)
-        state.camEditPart = 0;
-      dirty = true;
-    }
+    if (removeParts)
+      DeleteSelectedOf(state, SelectionItem::Kind::JobPart);
   }
 
   // --- Setups ------------------------------------------------------------
   // Each a row over its operations and fixtures. A setup was a combo, so a
   // job's structure, setup by setup, was never visible at once.
-  enum class SetupAct { None, Flip, Duplicate, Delete, AddOp, Edit };
+  enum class SetupAct { None, Flip, Duplicate, AddOp, Edit };
   SetupAct act = SetupAct::None;
   uint64_t actOn = 0;
   std::optional<cam::Fixture> fixtureToAdd;
@@ -878,8 +921,17 @@ void DrawCamPanel(AppState& state) {
   uint64_t moveIn = 0;         // … in which setup
   uint64_t toggleOp = 0;       // Enable / Disable
   uint64_t editOp = 0;
-  uint64_t fixtureRemove = 0;
+  bool removeFixtures = false; // a fixture row's Remove (the selection)
+  bool removeSetups = false;   // a setup row's Delete (the selection)
   bool fixturesChanged = false;
+  std::vector<uint64_t> setupOrder;
+  for (const cam::Setup& s : setups)
+    setupOrder.push_back(s.id);
+  // A setup row is lit when it is SELECTED; with none selected, the active
+  // one is. Lit both ways at once, a Ctrl-clicked setup and the active one
+  // looked alike and only one of them was what Delete would take.
+  const bool anySetupSelected =
+      !SelectedIds(state, SelectionItem::Kind::CamSetup).empty();
 
   bool addSetup = false;
   const bool setupsOpen =
@@ -918,7 +970,7 @@ void DrawCamPanel(AppState& state) {
         if (entered || ImGui::IsItemDeactivatedAfterEdit()) {
           if (g_rename.buf[0] != '\0' && s.name != g_rename.buf) {
             s.name = g_rename.buf;
-            state.projectMetaDirty = true;
+            MarkJobEdited(state);
           }
           g_rename.setup = 0;
         } else if (ImGui::IsItemDeactivated()) {
@@ -928,7 +980,10 @@ void DrawCamPanel(AppState& state) {
         ListRowSpec row;
         row.glyph = ICON_FA_LAYER_GROUP;
         row.label = s.name + "###cam_setup_" + sid;
-        row.selected = isActive;
+        row.selected =
+            anySetupSelected
+                ? IsSelected(state, SelectionItem::Kind::CamSetup, s.id)
+                : isActive;
         row.disclosureId = SetupOpenId(s.id);
         row.disclosureDefaultOpen = isActive;
         // The run's state is the active setup's: its toolpaths are the ones
@@ -954,6 +1009,8 @@ void DrawCamPanel(AppState& state) {
             "\nDouble-click for its settings";
         row.menuId = "###cam_setup_ctx_" + sid;
         row.menu = [&, setupId = s.id] {
+          ListRowContext(state, SelectionItem::Kind::CamSetup, setupId,
+                         /*ownKindOnly=*/true);
           cam::Setup* live = state.job->FindSetup(setupId);
           if (live == nullptr)
             return;
@@ -989,15 +1046,26 @@ void DrawCamPanel(AppState& state) {
           ImGui::SetItemTooltip("What holds the stock. Verify reports every "
                                 "move of the cutter or holder into it.");
           ImGui::Separator();
-          if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###cam_del_setup"))
-            act = SetupAct::Delete, actOn = setupId;
+          const std::string del =
+              std::string(ICON_FA_TRASH_CAN " ") +
+              DeleteLabel(
+                  SelectedIds(state, SelectionItem::Kind::CamSetup).size(),
+                  "setup") +
+              "###cam_del_setup";
+          if (ImGui::MenuItem(del.c_str()))
+            removeSetups = true;
         };
         const ListRowResult res = ListRow(row);
         open = res.open;
         // The active setup is the one you are looking into: it opens. And
         // what is shown is kept, so a setup that was open because it was
         // active stays open when another one becomes active.
-        if (res.clicked && !isActive) {
+        // A plain click selects it and makes it the active one; Ctrl and
+        // Shift only select, for Delete.
+        if (res.clicked &&
+            CamRowClicked(state, SelectionItem::Kind::CamSetup, s.id,
+                          setupOrder) &&
+            !isActive) {
           activate(s);
           open = true;
         }
@@ -1049,13 +1117,17 @@ void DrawCamPanel(AppState& state) {
         // (docs/cam/setup.md#workholding-fixtures). The numbers are in the
         // tool window, the verbs in the row's menu.
         ImGui::PushID("fixtures");
+        std::vector<uint64_t> fixtureOrder;
+        for (const cam::Fixture& f : s.fixtures)
+          fixtureOrder.push_back(f.id);
         for (cam::Fixture& f : s.fixtures) {
           const std::vector<Body> model = FixtureModelBodies(state, f);
           const bool missing = model.empty();
           ListRowSpec row;
           row.glyph = f.IsBox() ? ICON_FA_BOX : ICON_FA_LOCK;
           row.label = f.name + "###cam_fixture_" + std::to_string(f.id);
-          row.selected = state.camEditFixture == f.id;
+          row.selected = state.camEditFixture == f.id ||
+                         IsSelected(state, SelectionItem::Kind::Fixture, f.id);
           row.dimmed = !f.enabled || missing;
           // A seated one is placed by the stock, and says which edge -- or
           // why it no longer can (docs/cam/setup.md#seats).
@@ -1085,6 +1157,8 @@ void DrawCamPanel(AppState& state) {
           row.menuId = "###cam_fixture_ctx_" + std::to_string(f.id);
           row.menu = [&] {
             activate(s);
+            ListRowContext(state, SelectionItem::Kind::Fixture, f.id,
+                           /*ownKindOnly=*/true);
             if (ImGui::MenuItem("Edit###cam_fixture_edit"))
               EditCamFixture(state, f.id);
             if (ImGui::MenuItem("Check###cam_fixture_check", nullptr,
@@ -1101,12 +1175,19 @@ void DrawCamPanel(AppState& state) {
               ImGui::EndMenu();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_TRASH_CAN
-                                " Remove###cam_fixture_remove"))
-              fixtureRemove = f.id;
+            const std::string remove =
+                std::string(ICON_FA_TRASH_CAN " ") +
+                RowActionLabel(
+                    "Remove",
+                    SelectedIds(state, SelectionItem::Kind::Fixture).size(),
+                    "fixture") +
+                "###cam_fixture_remove";
+            if (ImGui::MenuItem(remove.c_str()))
+              removeFixtures = true;
           };
           const ListRowResult res = ListRow(row);
-          if (res.clicked)
+          if (res.clicked && CamRowClicked(state, SelectionItem::Kind::Fixture,
+                                           f.id, fixtureOrder))
             activate(s);
           if (res.doubleClicked) {
             activate(s);
@@ -1123,18 +1204,11 @@ void DrawCamPanel(AppState& state) {
   // Applied after the walk, which the vector they change was.
   if (cam::Setup* s = active != nullptr
                           ? state.job->FindSetup(state.camActiveSetup)
-                          : nullptr) {
-    if (fixtureRemove != 0) {
-      std::erase_if(s->fixtures, [fixtureRemove](const cam::Fixture& f) {
-        return f.id == fixtureRemove;
-      });
-      if (state.camEditFixture == fixtureRemove)
-        state.camEditFixture = 0;
-      fixturesChanged = true;
-    }
-    if (fixturesChanged)
-      CamFixturesChanged(state, *s);
-  }
+                          : nullptr;
+      s != nullptr && fixturesChanged)
+    CamFixturesChanged(state, *s);
+  if (removeFixtures)
+    DeleteSelectedOf(state, SelectionItem::Kind::Fixture);
   if (fixtureToAdd)
     if (cam::Setup* s = state.job->FindSetup(fixtureSetup)) {
       state.camActiveSetup = s->id;
@@ -1161,7 +1235,7 @@ void DrawCamPanel(AppState& state) {
       // Reordering changes no toolpath -- only the sequence they are cut in
       // and where the tool changes fall -- so nothing is regenerated. The
       // posted file does change, which is what the dirty flag is for.
-      state.projectMetaDirty = true;
+      MarkJobEdited(state);
       state.camVerdict.clear();
       state.camLeftover.clear();
     }
@@ -1181,20 +1255,16 @@ void DrawCamPanel(AppState& state) {
     DuplicateSetup(state, actOn);
     dirty = true;
     break;
-  case SetupAct::Delete:
-    DeleteSetup(state, actOn);
-    dirty = true;
-    break;
   case SetupAct::AddOp:
     if (cam::Setup* s = state.job->FindSetup(actOn)) {
       if (state.camActiveSetup != s->id) {
         state.camActiveSetup = s->id;
-        dirty = true;
+        switched = true;
       }
       if (const uint64_t made = AddOperation(state, *s); made != 0) {
         OpenSetupRow(s->id);
-        if (!dirty) {
-          state.projectMetaDirty = true;
+        MarkJobEdited(state);
+        if (!dirty && !switched) {
           RefreshCamToolpath(state, made);
           state.camVerdict.clear();
           state.camLeftover.clear();
@@ -1203,6 +1273,8 @@ void DrawCamPanel(AppState& state) {
     }
     break;
   }
+  if (removeSetups)
+    DeleteSelectedOf(state, SelectionItem::Kind::CamSetup);
   // `active` may be stale past this point: a setup was added or removed.
   active = ActiveCamSetup(state);
 
@@ -1269,7 +1341,10 @@ void DrawCamPanel(AppState& state) {
       // Namespaced: a tool number and an operation id are both small ints,
       // and PushID(int) hashes them into the same id space.
       ImGui::PushID("tools");
-      int deleteTool = 0;
+      bool deleteTools = false;
+      std::vector<uint64_t> toolOrder;
+      for (const cam::Tool& t : active->tools)
+        toolOrder.push_back(static_cast<uint64_t>(t.number));
       for (const cam::Tool& t : active->tools) {
         const std::vector<std::string> users =
             CamOpsUsingTool(*active, t.number);
@@ -1277,19 +1352,30 @@ void DrawCamPanel(AppState& state) {
         row.glyph = CamToolGlyph(t.type);
         row.label = "T" + std::to_string(t.number) + "  " + t.name +
                     "###cam_tool_" + std::to_string(t.number);
-        row.selected = state.camEditTool == t.number;
+        row.selected = state.camEditTool == t.number ||
+                       IsSelected(state, SelectionItem::Kind::CamTool,
+                                  static_cast<uint64_t>(t.number));
         row.tail = CamToolTail(t);
         row.tooltip = CamToolSummary(t) +
                       (users.empty() ? std::string("\nNo operation uses it.")
                                      : "\nUsed by " + JoinNames(users) + ".");
         row.menuId = "###cam_tool_ctx_" + std::to_string(t.number);
-        row.menu = [&state, &t, &users, &deleteTool] {
+        row.menu = [&state, &t, &users, &deleteTools] {
+          ListRowContext(state, SelectionItem::Kind::CamTool,
+                         static_cast<uint64_t>(t.number),
+                         /*ownKindOnly=*/true);
           if (ImGui::MenuItem("Edit###cam_tool_edit"))
             EditCamTool(state, t.number);
           ImGui::Separator();
-          if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###cam_tool_delete",
-                              nullptr, false, users.empty()))
-            deleteTool = t.number;
+          const size_t n =
+              SelectedIds(state, SelectionItem::Kind::CamTool).size();
+          const std::string del = std::string(ICON_FA_TRASH_CAN " ") +
+                                  DeleteLabel(n, "tool") + "###cam_tool_delete";
+          // One tool still cut with is disabled here, with the reason; of
+          // several, the free ones go and the rest are refused in words.
+          if (ImGui::MenuItem(del.c_str(), nullptr, false,
+                              users.empty() || n > 1))
+            deleteTools = true;
           if (!users.empty() &&
               ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("Used by %s. Give those operations another "
@@ -1297,17 +1383,17 @@ void DrawCamPanel(AppState& state) {
                               JoinNames(users).c_str());
         };
         const ListRowResult res = ListRow(row);
+        if (res.clicked)
+          CamRowClicked(state, SelectionItem::Kind::CamTool,
+                        static_cast<uint64_t>(t.number), toolOrder);
         if (res.doubleClicked)
           EditCamTool(state, t.number);
       }
       if (active->tools.empty())
         TextDisabledWrapped("No cutters -- + adds one.");
       ImGui::PopID(); // "tools"
-      if (deleteTool != 0) {
-        std::string why;
-        if (!RemoveCamTool(state, deleteTool, &why))
-          state.camRefusal = why; // cannot happen from the menu; the RPC's
-      }
+      if (deleteTools)
+        DeleteSelectedOf(state, SelectionItem::Kind::CamTool);
     }
   }
 
@@ -1324,11 +1410,14 @@ void DrawCamPanel(AppState& state) {
     ImGui::PopStyleColor();
   }
 
-  if (dirty && active != nullptr) {
-    state.projectMetaDirty = true;
+  if ((dirty || switched) && active != nullptr) {
     // The stock box may have moved, and the work origin is derived from it --
-    // so is every coordinate in the posted file.
+    // so is every coordinate in the posted file. A setup made active has its
+    // origin derived again too, and when that moves it, it is an edit.
+    const glm::dvec3 origin = active->origin;
     (void)cam::RecomputeOrigin(*active, JobBodies(state));
+    if (dirty || active->origin != origin)
+      MarkJobEdited(state);
     state.camSafeZEdit = static_cast<float>(active->safeZ);
     RefreshCamToolpaths(state);
     // A verdict about the PREVIOUS toolpath is worse than no verdict.
@@ -1357,7 +1446,7 @@ bool DrawCamSetupEditor(AppState& state) {
   if (ImGui::InputText("Name###cam_setup_name", name, sizeof(name)) &&
       name[0] != '\0') {
     setup->name = name; // a name changes no toolpath
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
   }
 
   // WHICH MACHINE (round two). The combo lists the store; picking one copies
@@ -1625,7 +1714,7 @@ bool DrawCamSetupEditor(AppState& state) {
     // so is every coordinate in the posted file.
     (void)cam::RecomputeOrigin(*setup, JobBodies(state));
     state.job->BumpVersion();
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     RefreshCamToolpaths(state);
     state.camVerdict.clear();
     state.camLeftover.clear();
@@ -1747,21 +1836,16 @@ bool DrawCamPartEditor(AppState& state) {
 
   if (dirty && setup != nullptr) {
     (void)cam::RecomputeOrigin(*setup, JobBodies(state));
-    state.projectMetaDirty = true;
+    MarkJobEdited(state);
     RefreshCamToolpaths(state);
     state.camVerdict.clear();
     state.camLeftover.clear();
   }
   ImGui::Separator();
   if (ImGui::Button(ICON_FA_TRASH_CAN " Remove###cam_part_editor_remove")) {
-    state.job->RemovePart(partId);
-    state.job->BumpVersion();
+    RemoveJobParts(state, {partId});
     state.camEditPart = 0;
     state.camToolOpen = false;
-    state.projectMetaDirty = true;
-    RefreshCamToolpaths(state);
-    state.camVerdict.clear();
-    state.camLeftover.clear();
     ImGui::End();
     return true;
   }

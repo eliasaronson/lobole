@@ -461,7 +461,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
       if (state.job) {
         // Where it landed is what the job cuts: the fit states, the
         // toolpaths and the verdict all follow the drop.
-        state.projectMetaDirty = true;
+        MarkJobEdited(state);
         RefreshCamToolpaths(state);
         RunCamVerification(state);
       }

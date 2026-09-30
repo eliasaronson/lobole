@@ -3,15 +3,20 @@
 #include "core/cam/CamToolpath.h"
 
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 
 #include "cad/CADKernel.h"
+#include "common/Logger.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
+#include <memory>
+#include <thread>
 #include <tuple>
 
 namespace ui {
@@ -106,7 +111,10 @@ const std::vector<Body>& JobPlacedBodies(AppState& state) {
   state.jobPlacedKey = key;
   // Framed bodies are NEW shapes. One moved by quarter turns carries its
   // source's tight box (CADShape::Transformed permutes it); at any other
-  // angle its memo is cold even though the one it came from is warm.
+  // angle its memo is cold even though the one it came from is warm -- and
+  // then it is read from the box remembered by shape and location, which the
+  // last visit, or the warm when the project opened, paid for
+  // (docs/cam/gui.md#job-tab-frame-cost).
   WarmTightBounds(state.jobPlacedBodies);
   return state.jobPlacedBodies;
 }
@@ -574,12 +582,134 @@ bool SetJobPartConfiguration(AppState& state, uint64_t jobPartId,
 #endif
   if (moved)
     *moved = count;
-  state.projectMetaDirty = true;
+  MarkJobEdited(state);
   RefreshCamToolpaths(state);
   // A verdict about the part as it WAS is worse than none.
   state.camVerdict.clear();
   state.camLeftover.clear();
   return true;
+}
+
+namespace {
+// A job part's document when it can be had WITHOUT a regeneration: its source
+// in the configuration it has active, or a configured copy already built and
+// still fresh. The warm below must not build one on the main thread -- that
+// is a stall of its own, which the visit pays as it always did.
+const Document* BuiltJobPartDocument(AppState& state,
+                                     const cam::JobPart& part) {
+  const Document* live = JobSourceDocument(state, part.sourceDocId);
+  if (live == nullptr)
+    return nullptr;
+  if (part.configuration == 0 ||
+      live->ActiveConfiguration() == part.configuration)
+    return live;
+  const auto hit =
+      state.configuredSources.find({part.sourceDocId, part.configuration});
+  if (hit == state.configuredSources.end() || !hit->second.doc ||
+      hit->second.sourceInstance != live->InstanceId() ||
+      hit->second.sourceVersion != live->Version() ||
+      hit->second.configurationsRevision != live->ConfigurationsRevision())
+    return nullptr;
+  return hit->second.doc.get();
+}
+
+// One framed body to bound off the frame: the real framed shape, whose
+// identity the box is remembered under, and the worker's own copy of it.
+struct WarmItem {
+  CADShape key;
+  CADShape copy;
+  glm::vec3 lo{0.0f}, hi{0.0f};
+  bool ok = false;
+};
+} // namespace
+
+void StartJobBoundsWarm(AppState& state) {
+  constexpr const char* kKind = "job-warm";
+  CancelBackgroundJobs(state, kKind);
+  const auto started = std::chrono::steady_clock::now();
+  auto items = std::make_shared<std::vector<WarmItem>>();
+  // One deep copy per source shape, shared by its framings (the copy is
+  // located again for each, which copies no geometry).
+  std::map<const void*, CADShape> detached;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const PartSlot& slot = state.parts[i];
+    // The active tab is framed by the frame that draws it; the warm is for
+    // the tabs not yet visited.
+    if (slot.kind != DocKind::Job || static_cast<int>(i) == state.activePart ||
+        !slot.job)
+      continue;
+    std::vector<Body> bodies;
+    for (const cam::JobPart& part : slot.job->GetParts()) {
+      const Document* doc = BuiltJobPartDocument(state, part);
+      if (doc == nullptr)
+        continue;
+      for (const Body& b : doc->GetBodies()) {
+        if (b.reference || !b.shape.IsValid())
+          continue;
+        bodies.push_back(b);
+        bodies.back().jobPartId = part.id;
+      }
+    }
+    for (const cam::Setup& setup : slot.job->GetSetups())
+      for (const Body& framed : cam::BodiesInSetupFrame(setup, bodies)) {
+        // A quarter turn carries its source's box (CADShape::Transformed),
+        // and an unmoved body is its source.
+        if (framed.shape.HasTightBox())
+          continue;
+        const void* id = framed.shape.GeometryId();
+        auto it = detached.find(id);
+        if (it == detached.end())
+          it = detached.emplace(id, framed.shape.DetachedUnlocated()).first;
+        if (!it->second.IsValid())
+          continue;
+        WarmItem item;
+        item.key = framed.shape;
+        item.copy = it->second.LocatedLike(framed.shape);
+        items->push_back(std::move(item));
+      }
+  }
+  if (items->empty())
+    return;
+  const double prepMs = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - started)
+                            .count();
+  auto job = std::make_unique<BackgroundJob>();
+  job->kind = kKind;
+  job->label = "Framing the job tabs";
+  job->cancellable = false;
+  BackgroundJob* raw = job.get();
+  job->thread = std::thread([items, raw] {
+    ArmOccSignalHandlers();
+    // Every shape here is the worker's own (DetachedUnlocated): the frame may
+    // mesh the originals meanwhile (docs/ui/long-operations.md).
+    for (size_t k = 0; k < items->size() && !raw->cancel.load(); k++) {
+      WarmItem& w = (*items)[k];
+      try {
+        w.copy.ExactBoxUnmemoized(w.lo, w.hi);
+        w.ok = true;
+      } catch (...) {
+        w.ok = false; // left to the visit, which asks again
+      }
+      raw->fraction.store(static_cast<double>(k + 1) /
+                          static_cast<double>(items->size()));
+    }
+    raw->done.store(true); // last
+  });
+  job->finish = [items, raw, prepMs](AppState&) -> bool {
+    if (raw->cancel.load())
+      return true;
+    for (const WarmItem& w : *items)
+      if (w.ok)
+        CADShape::RememberTightBox(w.key, w.lo, w.hi);
+    LOG_INFO("Job tabs framed off the frame: {} bodies, {:.0f} ms to prepare "
+             "on the frame, {:.0f} s on the worker",
+             items->size(), prepMs,
+             std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                           raw->started)
+                 .count());
+    return true;
+  };
+  StartBackgroundJob(state, std::move(job));
 }
 
 } // namespace ui

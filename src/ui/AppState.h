@@ -758,7 +758,6 @@ struct JobHistory {
   // A pre-edit copy held back while a drag is still in progress (R7): one
   // undo step per drag, not one per frame of it.
   std::optional<cam::JobDocument> pending;
-  std::string pendingFingerprint;
 };
 
 struct DrawingHistory {
@@ -877,9 +876,18 @@ struct SelectionItem {
     // A job part's sketch entity drawn on a job tab, as an engraving target
     // (docs/cam/gui.md#engrave-from-the-viewport): element = {sketch id,
     // "g<entity id>"}, jobPartId = the part it lies on.
-    SketchCurve
+    SketchCurve,
+    // The CAM panel's other rows
+    // (docs/ui/selection.md#lists-one-gesture-one-delete), so Delete and the
+    // list's multi-select reach them as they reach an operation: a setup (id =
+    // its id), a job part (id = the JobPart's id), a fixture (id = its id) and
+    // a tool of the ACTIVE setup (id = its number).
+    CamSetup,
+    JobPart,
+    Fixture,
+    CamTool
   };
-  static constexpr int kKindCount = static_cast<int>(Kind::SketchCurve) + 1;
+  static constexpr int kKindCount = static_cast<int>(Kind::CamTool) + 1;
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
@@ -971,6 +979,11 @@ struct AppState {
   // made every job about one part (docs/cam/README.md#the-model).
   std::unique_ptr<cam::JobDocument> job;
   JobHistory jobHistory;
+  // How many edits have been made to a job (ui::MarkJobEdited), ever, on any
+  // tab. The undo guard compares it before and after a frame's panel instead
+  // of serializing the whole job twice a frame to see whether anything moved
+  // (docs/cam/gui.md#undo). Every job edit bumps it; drawing never does.
+  uint64_t jobEdits = 0;
   // The active job's assembled bodies and the key they were built at
   // (ui::JobBodies). Derived, never serialized: this is where
   // `document->GetBodies()` used to be read from, and some of those reads are

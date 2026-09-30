@@ -290,12 +290,24 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
   } else if (state.job) {
     // A job tab draws the parts LAID OUT, so the camera has to frame the
     // layout rather than one part -- otherwise the first look at a sheet is
-    // from inside whichever part happens to sit at the origin.
+    // from inside whichever part happens to sit at the origin. Their TIGHT
+    // boxes, which the placed bodies already hold (JobPlacedBodies warms
+    // them): the conservative one bounds a turned blank's B-splines by their
+    // control points, and the chess jig's view was framed round a piece that
+    // much bigger than it is, the jig pushed up against the top edge.
     for (const Body& body : JobPlacedBodies(state)) {
       glm::vec3 bmin, bmax;
-      body.shape.GetBoundingBox(bmin, bmax);
+      body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
+      any = true;
+    }
+    // ...and the stock they are cut from, which is drawn round them and is
+    // what a person is setting up.
+    glm::dvec3 stockLo(0.0), stockHi(0.0);
+    if (CamStockBox(state, stockLo, stockHi)) {
+      min = glm::min(min, glm::vec3(stockLo));
+      max = glm::max(max, glm::vec3(stockHi));
       any = true;
     }
     // ...and what holds them, which is drawn too. The MODEL shape's box
@@ -316,7 +328,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
           if (body.reference || !body.shape.IsValid())
             continue;
           glm::vec3 bmin, bmax;
-          body.shape.GetBoundingBox(bmin, bmax);
+          body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
           for (int c = 0; c < 8; c++) {
             const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
                                    (c & 2) ? bmax.y : bmin.y,

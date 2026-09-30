@@ -11,14 +11,17 @@
 #include "ui/AssemblyActions.h" // the placement gizmo
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
+#include "ui/CamTool.h" // CamStockBox
 #include "ui/DragMath.h" // GizmoScale
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
+#include "ui/ProjectActions.h"    // SaveProject, OpenProject
 #include "ui/SelectionPipeline.h" // ArmedPrompt
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cfloat>
 #include <chrono>
 #include <filesystem>
 
@@ -40,6 +43,14 @@ void CamSetupMenu(ImGuiTestContext* ctx, uint64_t setupId, const char* item) {
   ctx->Yield();
   ctx->ItemClick((std::string("//$FOCUSED/") + item).c_str());
   ctx->Yield(2);
+}
+// The verb window's operations and verdict scroll in a child region of their
+// own (docs/cam/gui.md#verb-windows). A child window's path is mangled, so it
+// is reached through WindowInfo, and a row is then "$$<op id>/###op_row".
+void RefToolWindowList(ImGuiTestContext* ctx, const char* window) {
+  ctx->SetRef(
+      ctx->WindowInfo((std::string("//") + window + "/cam_tool_list").c_str())
+          .Window);
 }
 // A job part's row, and one of its menu's items.
 std::string CamPartRow(uint64_t jobPartId) {
@@ -286,9 +297,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // Removed from its row's menu, as a feature is: the rows lost their x
     // buttons to the feature list's gestures
     // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
-    const std::string ref = "//CAM###ToolWindow/$$" +
-                            std::to_string(static_cast<int>(first)) +
-                            "/###op_row";
+    const std::string ref =
+        "$$" + std::to_string(static_cast<int>(first)) + "/###op_row";
+    RefToolWindowList(ctx, "CAM###ToolWindow");
     ctx->ItemClick(ref.c_str(), ImGuiMouseButton_Right);
     ctx->Yield();
     ctx->ItemClick("//$FOCUSED/###op_delete");
@@ -327,9 +338,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     }
     s_App->camToolOpen = true;
     ctx->Yield(4);
+    RefToolWindowList(ctx, "CAM###ToolWindow");
     const auto row = [&](size_t i) {
-      return "//CAM###ToolWindow/$$" +
-             std::to_string(static_cast<int>(ids[i])) + "/###op_row";
+      return "$$" + std::to_string(static_cast<int>(ids[i])) + "/###op_row";
     };
     const auto picked = [&]() {
       return ui::SelectedIds(*s_App, ui::SelectionItem::Kind::Operation);
@@ -4408,6 +4419,339 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // Delete reaches every row the CAM panel lists
+  // (docs/ui/selection.md#lists-one-gesture-one-delete): a setup, a part, a
+  // fixture and a tool are each clicked and deleted with the KEY, each as one
+  // undo step that brings back what went -- as an operation always was, and
+  // as a feature is. Before, only their menus could remove them.
+  t = IM_REGISTER_TEST(engine, "cam", "delete_reaches_every_row_kind");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    const size_t second = ui::AddPart(*s_App, "Spacer");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Blk", glm::vec3(0, 0, 0), 20, 20, 12));
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    cam::JobDocument* job = MakeJob();
+    job->AddPart(s_App->parts[second].id, "Spacer");
+    job->BumpVersion();
+    const uint64_t spacer = job->GetParts().back().id;
+    cam::Setup& a = job->AddSetup("A");
+    const uint64_t aId = a.id;
+    for (int n = 2; n <= 3; n++) {
+      cam::Tool spare = a.tools.front();
+      spare.number = n;
+      spare.name = "spare " + std::to_string(n);
+      a.tools.push_back(spare);
+    }
+    cam::Fixture clamp;
+    clamp.id = job->AllocateId();
+    clamp.name = "Clamp";
+    clamp.box = glm::dvec3(10.0, 10.0, 30.0);
+    clamp.pos = glm::dvec3(-20.0, 0.0, 0.0);
+    a.fixtures.push_back(clamp);
+    const uint64_t bId = job->AddSetup("B").id;
+    s_App->camActiveSetup = aId;
+    ctx->Yield(3);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+
+    const auto undoDepth = [] { return s_App->jobHistory.undo.size(); };
+    // Click a row, press Delete: gone, in one step, and back on Ctrl+Z.
+    const auto clickDelete = [&](const std::string& row) {
+      ctx->ItemClick(row.c_str());
+      ctx->Yield();
+      const size_t depth = undoDepth();
+      ctx->KeyPress(ImGuiKey_Delete);
+      ctx->Yield(3);
+      return undoDepth() - depth;
+    };
+
+    // A tool (the active setup's).
+    IM_CHECK_EQ(clickDelete("tools/###cam_tool_2"), (size_t)1);
+    IM_CHECK(Job()->FindSetup(aId)->FindTool(2) == nullptr);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(aId)->FindTool(2) != nullptr);
+
+    // Two tools, Ctrl-clicked: both go, as ONE step.
+    ctx->ItemClick("tools/###cam_tool_2");
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick("tools/###cam_tool_3");
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(
+        ui::SelectedIds(*s_App, ui::SelectionItem::Kind::CamTool).size(),
+        (size_t)2);
+    size_t depth = undoDepth();
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(undoDepth() - depth, (size_t)1);
+    IM_CHECK_EQ(Job()->FindSetup(aId)->tools.size(), (size_t)1);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->FindSetup(aId)->tools.size(), (size_t)3);
+
+    // A fixture.
+    IM_CHECK_EQ(clickDelete("**/###cam_fixture_" + std::to_string(clamp.id)),
+                (size_t)1);
+    IM_CHECK(Job()->FindSetup(aId)->fixtures.empty());
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->FindSetup(aId)->fixtures.size(), (size_t)1);
+
+    // A part.
+    IM_CHECK_EQ(clickDelete(CamPartRow(spacer)), (size_t)1);
+    IM_CHECK(Job()->FindPart(spacer) == nullptr);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindPart(spacer) != nullptr);
+
+    // A setup -- the one that is not active, so the click makes it so.
+    IM_CHECK_EQ(clickDelete(CamSetupRow(bId)), (size_t)1);
+    IM_CHECK(Job()->FindSetup(bId) == nullptr);
+    IM_CHECK(Job()->FindSetup(aId) != nullptr);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(bId) != nullptr);
+
+    // A plain click on one kind lets go of the others: a setup clicked a
+    // moment ago does not go with the tool Delete was pressed for.
+    ctx->ItemClick(CamSetupRow(aId).c_str());
+    ctx->Yield();
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield();
+    IM_CHECK_EQ(clickDelete("tools/###cam_tool_3"), (size_t)1);
+    IM_CHECK(Job()->FindSetup(aId) != nullptr);
+    IM_CHECK(Job()->FindSetup(aId)->FindTool(3) == nullptr);
+
+    s_App->selection.Clear();
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
+  // Deleting an operation or a tool from the PANEL is one undo step. Both
+  // snapshotted the job themselves and were then recorded again by the guard
+  // the panel draws under: one Ctrl+Z brought back nothing.
+  t = IM_REGISTER_TEST(engine, "cam", "a_delete_from_the_panel_is_one_undo");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    const uint64_t sid = setup.id;
+    cam::Tool spare = setup.tools.front();
+    spare.number = 2;
+    spare.name = "spare";
+    setup.tools.push_back(spare);
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 12.0;
+    op.bottomZ = -1.0;
+    setup.operations.push_back(op);
+    s_App->camActiveSetup = sid;
+    ctx->Yield(3);
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+    const auto undoDepth = [] { return s_App->jobHistory.undo.size(); };
+
+    size_t depth = undoDepth();
+    ctx->ItemClick(
+        ("**/$$" + std::to_string(static_cast<int>(op.id)) + "/###op_row")
+            .c_str(),
+        ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###op_delete");
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(sid)->operations.empty());
+    IM_CHECK_EQ(undoDepth() - depth, (size_t)1);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->FindSetup(sid)->operations.size(), (size_t)1);
+
+    depth = undoDepth();
+    ctx->ItemClick("tools/###cam_tool_2", ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###cam_tool_delete");
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(sid)->FindTool(2) == nullptr);
+    IM_CHECK_EQ(undoDepth() - depth, (size_t)1);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(sid)->FindTool(2) != nullptr);
+
+    s_App->selection.Clear();
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
+  // The verb window keeps a bounded height and scrolls
+  // (docs/cam/gui.md#verb-windows). It grew with what it listed, and
+  // Engrave's -- an operation per label, the verdict's lines -- grew down
+  // over the curves it was asking to be clicked.
+  t = IM_REGISTER_TEST(engine, "cam", "the_engrave_window_keeps_its_height");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Top");
+    const uint64_t sid = setup.id;
+    setup.tools[0].type = cam::ToolType::VBit;
+    setup.tools[0].diameter = 6.0;
+    setup.tools[0].tipAngleDeg = 90.0;
+    for (int i = 0; i < 40; i++) {
+      cam::Operation op;
+      op.id = Job()->AllocateId();
+      op.name = "Label " + std::to_string(i + 1);
+      op.type = cam::OpType::Engrave;
+      op.toolNumber = setup.tools[0].number;
+      setup.operations.push_back(op);
+    }
+    s_App->camActiveSetup = sid;
+    ctx->Yield(3);
+    ToolbarClick(ctx, "###tb_job_engrave");
+    ctx->Yield(2);
+    for (int i = 0; i < 30; i++)
+      s_App->camVerdict.push_back(
+          {cam::VerdictLine::Level::Warn,
+           "a line of the verdict, number " + std::to_string(i + 1)});
+    ctx->Yield(4);
+    ImGuiWindow* win = ImGui::FindWindowByName("Engrave###ToolWindow");
+    IM_CHECK(win != nullptr);
+    if (win == nullptr)
+      return;
+    // The list scrolls in a region of its own, so the prompt and Close stay
+    // on screen.
+    ImGuiWindow* list = nullptr;
+    for (ImGuiWindow* child : win->DC.ChildWindows)
+      if (std::string(child->Name).find("cam_tool_list") != std::string::npos)
+        list = child;
+    IM_CHECK(list != nullptr);
+    if (list == nullptr)
+      return;
+    const float vp = s_App->viewportSize.y;
+    ctx->LogInfo("engrave window %.0f px tall, its list %.0f of %.0f, "
+                 "viewport %.0f",
+                 win->Size.y, list->Size.y, list->ContentSize.y, vp);
+    IM_CHECK(list->ContentSize.y > 0.4f * vp);   // more than fits...
+    IM_CHECK_LE(list->Size.y, 0.4f * vp + 1.0f); // ...in a bounded list...
+    IM_CHECK(list->ScrollMax.y > 0.0f);          // ...that scrolls to it
+    IM_CHECK(ctx->ItemExists("//Engrave###ToolWindow/###cam_tool_done"));
+    // ...and more of it does not grow the window by a pixel.
+    const float tall = win->Size.y;
+    for (int i = 0; i < 30; i++)
+      s_App->camVerdict.push_back({cam::VerdictLine::Level::Bad,
+                                   "and another, " + std::to_string(i + 1)});
+    ctx->Yield(4);
+    IM_CHECK(std::abs(win->Size.y - tall) < 1.0f);
+
+    s_App->camVerdict.clear();
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    if (s_App->slotPick.featureId == ui::kCamToolSlot)
+      s_App->slotPick = {};
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // A job tab is framed to its parts AND its stock, on the first visit and
+  // when the project opens on it (docs/cam/gui.md#what-the-viewport-draws).
+  // Opening a project whose active tab was a job framed nothing at all, and the
+  // fit left the stock out.
+  t = IM_REGISTER_TEST(engine, "cam", "a_job_tab_frames_its_parts_and_stock");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Blk", glm::vec3(0, 0, 0), 20, 20, 10));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Wide");
+    // A stock much bigger than the part, all round: framing the part alone
+    // puts the stock's corners off the screen.
+    setup.stock.mode = cam::StockMode::Relative;
+    setup.stock.margin = glm::dvec3(60.0, 45.0, 5.0);
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(3);
+
+    // Every corner of the stock and of the part lands inside the viewport,
+    // and the job is not a speck in the middle of it.
+    const auto framed = [&](const char* when) {
+      if (s_App->camera)
+        s_App->camera->FinishAnimation();
+      ctx->Yield(2);
+      glm::dvec3 lo(0.0), hi(0.0);
+      IM_CHECK(ui::CamStockBox(*s_App, lo, hi));
+      const glm::vec2 vp0 = s_App->viewportPos;
+      const glm::vec2 vp1 = vp0 + s_App->viewportSize;
+      glm::vec2 sLo(FLT_MAX), sHi(-FLT_MAX);
+      for (int c = 0; c < 8; c++) {
+        const glm::vec3 p((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y,
+                          (c & 4) ? hi.z : lo.z);
+        const glm::vec2 s = ui::WorldToScreen(*s_App, p);
+        sLo = glm::min(sLo, s);
+        sHi = glm::max(sHi, s);
+      }
+      ctx->LogInfo("%s: stock on screen %.0f,%.0f .. %.0f,%.0f in viewport "
+                   "%.0f,%.0f .. %.0f,%.0f",
+                   when, sLo.x, sLo.y, sHi.x, sHi.y, vp0.x, vp0.y, vp1.x,
+                   vp1.y);
+      IM_CHECK(sLo.x >= vp0.x - 1.0f && sLo.y >= vp0.y - 1.0f);
+      IM_CHECK(sHi.x <= vp1.x + 1.0f && sHi.y <= vp1.y + 1.0f);
+      const glm::vec2 span = sHi - sLo;
+      IM_CHECK(span.x > 0.4f * s_App->viewportSize.x ||
+               span.y > 0.4f * s_App->viewportSize.y);
+    };
+
+    // The first visit.
+    const size_t jobTab = static_cast<size_t>(s_App->activePart);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    s_App->parts[jobTab].everFramed = false;
+    ui::SetActivePart(*s_App, jobTab);
+    framed("first visit");
+
+    // Opening a project with the job tab active.
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_test_job_framing")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+    if (s_App->camera) // look somewhere else entirely first
+      s_App->camera->SetPosition(glm::vec3(900.0f, -700.0f, -500.0f));
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    IM_CHECK(s_App->job != nullptr);
+    framed("opened on the job");
+    std::filesystem::remove_all(dir);
+
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+  };
+
   // Frame time on a job tab (docs/rendering/frame-pacing.md#tests). A job tab
   // asked OCC for the tight box of every framed body three times a frame, and
   // on a turned blank's tori that is a search per face: the chess undersides
@@ -4483,18 +4827,21 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     };
 
     // The idle frame, at an index no quarter turn reaches: every framed copy
-    // of the part starts cold, so only the job tab's memo (CamTool.cpp's
-    // CachedStockView) stands between this frame and three exact boxes.
+    // of the part is a new shape, so only the memos (CamTool.cpp's
+    // CachedStockView, and the box remembered by shape and location) stand
+    // between this frame and three exact boxes.
     const size_t indexed = rotaryJob("Indexed", 30.0);
     ctx->Yield(2);
     {
-      // What one of those boxes costs here, for the log.
+      // What one of those boxes costs here, for the log: computed, since
+      // asked through GetBoundingBox a framing at this angle is now a memo
+      // hit (CADShape::RememberTightBox).
       const CADShape cold =
           ui::JobBodies(*s_App).at(0).shape.Transformed(glm::rotate(
               glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(1, 0, 0)));
       glm::vec3 lo(0.0f), hi(0.0f);
       const auto t0 = std::chrono::steady_clock::now();
-      cold.GetBoundingBox(lo, hi, /*tight=*/true);
+      cold.ExactBoxUnmemoized(lo, hi);
       ctx->LogInfo("one cold exact box of the part: %.1f ms", msSince(t0));
     }
     ctx->Yield(20); // settled: the first visit's framing and meshing are done
@@ -4536,10 +4883,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->LogInfo("worst switch: %.1f ms quarter-turned, %.1f ms indexed 30",
                  worstQuarter, worstIndexed);
     IM_CHECK_LE(worstQuarter, 120.0);
-    // A job at an angle no quarter turn reaches pays its exact boxes again on
-    // every visit (its framed copies are new shapes, and the memo holds one
-    // job), so it is held to the second the plan named, not to the above.
-    IM_CHECK_LE(worstIndexed, 1000.0);
+    // A job at an angle no quarter turn reaches: its framed copies are new
+    // shapes each visit, and paid their exact boxes again every time (210 ms
+    // here, most of a second on the chess blanks) until the box was
+    // remembered by shape identity and location. Now it costs what a
+    // quarter-turned one does, and is held to the same bound.
+    IM_CHECK_LE(worstIndexed, 120.0);
   };
 
   // The terminal panel (docs/ui/terminal.md). Off by default, docked

@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
+#include "ui/DocumentSlots.h" // JobUndoGuard
 #include "ui/SelectionPipeline.h"
 
 #include <imgui.h>
@@ -165,9 +166,28 @@ int DeleteSelection(AppState& state) {
       SolveActiveAssembly(state); // the parts a mate held are free again
     return removed;
   }
-  if (state.job)
-    return RemoveCamOperations(
+  if (state.job) {
+    // Every row kind the CAM panel lists, in ONE undo step (the Remove*
+    // functions' own guards nest inside this one). Operations first, so a
+    // tool they were the last users of is free to go in the same Delete;
+    // setups last, since their fixtures and tools are inside them.
+    JobUndoGuard undo(state);
+    int removed = RemoveCamOperations(
         state, SelectedIds(state, SelectionItem::Kind::Operation));
+    std::string refused;
+    removed += RemoveCamTools(
+        state, SelectedIds(state, SelectionItem::Kind::CamTool), &refused);
+    removed += RemoveCamFixtures(
+        state, SelectedIds(state, SelectionItem::Kind::Fixture));
+    removed +=
+        RemoveJobParts(state, SelectedIds(state, SelectionItem::Kind::JobPart));
+    removed += RemoveCamSetups(
+        state, SelectedIds(state, SelectionItem::Kind::CamSetup));
+    // A tool still cut with stays, and says why where Delete was pressed.
+    if (!refused.empty())
+      state.camRefusal = refused;
+    return removed;
+  }
   return 0;
 }
 

@@ -64,6 +64,11 @@ void CamFacePicked(AppState& state, const SelectionItem& item);
 void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
                             std::vector<LineVertex3D>& quads);
 
+// The active setup's stock box, in setup space -- what the job tab draws,
+// from the same memo (CachedStockView). False with no setup, or nothing to
+// derive a stock from. The camera fit frames it with the parts.
+bool CamStockBox(AppState& state, glm::dvec3& lo, glm::dvec3& hi);
+
 // Depth as a label on the part, so a derived number is visible without
 // reading a field. 2D, so it runs with the other ImGui overlays.
 void DrawCamLabels(AppState& state);

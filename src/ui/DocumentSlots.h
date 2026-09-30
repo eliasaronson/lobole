@@ -125,14 +125,27 @@ bool UndoJob(AppState& state);
 bool RedoJob(AppState& state);
 
 // The one way the CAM panel's forty-nine edit sites and every mutating RPC
-// get onto the undo stack without each saying so: hold a copy and the job's
-// fingerprint at construction; at destruction -- every return path -- push
-// the copy if the fingerprint moved. `coalesce`: while an ImGui item is
-// still active (a drag), hold the copy back and push it once when the item
-// lets go, so a drag is one undo step and not sixty.
+// get onto the undo stack without each saying so: hold a copy of the job at
+// construction; at destruction -- every return path -- push the copy if the
+// job was edited in between. `coalesce`: while an ImGui item is still active
+// (a drag), hold the copy back and push it once when the item lets go, so a
+// drag is one undo step and not sixty.
+//
+// "Edited" is `state.jobEdits` moving (MarkJobEdited), not the job's content:
+// the panel's guards run every frame, and serializing the whole job twice a
+// frame to compare was 8% of an idle frame (docs/cam/gui.md#undo).
+// `compareContent` is for the RPC guard, which runs once per call and wraps
+// a hundred handlers: there the content IS compared, so a handler cannot
+// forget to say it changed something.
+//
+// Under the GUI suite (SetJobEditAudit) every guard compares the content
+// too, and an edit that did not bump the counter is counted
+// (JobEditAuditMisses) -- the suite fails on one, since that edit would
+// silently not undo.
 class JobUndoGuard {
 public:
-  explicit JobUndoGuard(AppState& state, bool coalesce = false);
+  explicit JobUndoGuard(AppState& state, bool coalesce = false,
+                        bool compareContent = false);
   ~JobUndoGuard();
   JobUndoGuard(const JobUndoGuard&) = delete;
   JobUndoGuard& operator=(const JobUndoGuard&) = delete;
@@ -140,9 +153,25 @@ public:
 private:
   AppState& m_state;
   bool m_coalesce;
+  bool m_compareContent;
+  const cam::JobDocument* m_job = nullptr;
+  uint64_t m_edits = 0;
   std::optional<cam::JobDocument> m_before;
-  std::string m_fingerprint;
+  std::string m_fingerprint; // only when content is compared
 };
+
+// The job changed: bumps `state.jobEdits` (what JobUndoGuard records on) and
+// marks the project unsaved. Every job edit calls this -- a panel field, a
+// menu verb, a pick, a drag.
+void MarkJobEdited(AppState& state);
+
+// The GUI suite's audit of the rule above: while on, every JobUndoGuard also
+// compares the job's content, and counts an edit that moved it without
+// moving the counter.
+void SetJobEditAudit(bool on);
+[[nodiscard]] int JobEditAuditMisses();
+[[nodiscard]] std::string JobEditAuditLastMiss();
+void ResetJobEditAudit();
 
 // The tab index of the slot with a stable id (nullopt when gone) — the
 // in-context banner's Return button and RPCs resolve slots through this.
