@@ -303,6 +303,10 @@ by the same name drift apart without any test noticing:
 - `core/Parallel.h` is the one parallel-for: flat batches of independent
   OpenCASCADE work, results collected per index and merged in order so a
   response is reproducible. `DESIGNER_SWEEP_THREADS` pins the thread count.
+  A `For` nested in another's body gets its worker's share of the threads
+  (`Workers()` is that share inside a `For`), so the other setups of a job
+  inspected at once, each split into bands, divide the machine rather than
+  multiply it.
 - **OpenCASCADE is not safe to share between threads.** It fills caches
   lazily on the shape (bounding boxes, tolerances, triangulation), so every
   caller of `parallel::For` warms those single-threaded first. That is not

@@ -31,7 +31,10 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
   approach, a descending move left cells it went on to cut up to its whole
   descent too high, which read as leftover on ramps and as rapids through
   material when the tool lifted out. It returns the volume it took (what
-  [the bite](#bite) is measured from), and is the one carve: `Simulate`, `Inspect` and the playback all call it, carving
+  [the bite](#bite) is measured from), summed over its cells as integers in
+  units of 2^-30 mm so that a volume taken band by band is the same number
+  ([On every core](#on-every-core)), and is the one carve: `Simulate`,
+  `Inspect` and the playback all call it, carving
   each segment from its own start so a program played in pieces ends
   bit-identical to one played whole.
 - **The designed surface** is sampled on the same grid (`SampleModel`, a
@@ -39,7 +42,11 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
   (`GenerateMeshDetached`) at a quarter of a cell, because the default mesh
   deflection scales with the part and would be coarser than the grid
   measuring it, and because meshing a shared shape would re-mesh the
-  document behind the renderer's back.
+  document behind the renderer's back. Each triangle is handed to the bands
+  of rows it covers and the bands are sampled on every core; a cell is the
+  highest any triangle stands over it, so the map does not depend on the
+  count. By rows rather than by triangles, because a planar part's faces
+  mesh as a few triangles hundreds of millimetres across.
 - **One simulator, not two.** The picture comes from the same map, fed by the
   same posted file, as the verdict: `StockSim::SeekTo(End())` equals
   `Inspect`'s machined map bit for bit (a test), so every pixel on screen is a
@@ -63,6 +70,57 @@ too ([rotary.md](rotary.md#the-cutters-wall)). The pin is `cam verify: a cell
 on the cutter's wall is outside by a decision, not by rounding`: a plunge and
 a traverse on the lattice carve the same metal with the stock's x0 nudged by
 ±1e-12 mm.
+
+### On every core
+
+The planar check runs on every core, and its answer is the one-thread answer
+bit for bit whatever the band or thread count (`cam verify: the check on
+every core is the serial check to the bit`: rapids through stock, bites,
+plunges, the shank, the holder, a clamp, two tools).
+
+- **The walk over the program** (`Inspect`) splits the map into **bands of
+  rows**, as the rotary walk splits its map along the axis
+  ([rotary.md](rotary.md#on-every-core)). Each band walks every move in file
+  order over its own rows only. A cut lowers a cell to the lowest the tool
+  reaches, so the final map does not depend on the order, but a rapid, the
+  shank and the holder are checked against the stock as it stands at that
+  line, and each cell still sees exactly the serial sequence. No two
+  workers write a cell.
+- **What a band finds is merged per move, in band order.** A hit (rapid,
+  shank, holder) is the deepest any band found, a tie going to the lowest
+  row as the serial scan's did; the count, first line and worst line and
+  place are then read in file order. A move's removed volume and a plunge's
+  bite are sums over cells, taken as integers, so the bands' shares add to
+  the serial number exactly, and the bite windows are judged from them in
+  file order afterwards. Fixture hits read only the fixtures' own field,
+  never the stock, so each move is tested on its own.
+- **Bands outnumber the workers** (four per worker, none under four rows),
+  because the cutting is uneven over a part; a handful of moves stays on one
+  thread. `ScopedInspectBands` pins the count for a test.
+- **The compare** (`Compare`) runs in bands of rows too, each keeping its own
+  worsts, merged in band order; the area another setup cuts is counted in
+  cells. `SeedFromEarlier` walks its columns on every core.
+
+A leftover cell asks the other setups whether they remove its excess
+(`OtherSetups::Claims`), and on the chess board's face after the epoxy that
+is half of its four million cells at 0.25 mm: the pockets the top setup cut
+for the epoxy stand in the face setup's model as 3 mm of excess. Taking each
+sample of each column through two 4x4 maps into model space and out, with a
+count allocated per cell, cost 330 ms of that check (21 ms on the top
+setup, which asks 1,761 times). The column's ends are now mapped into each
+setup's frame once, and a column that stays in one cell of a height map (a
+face-up and a flipped setup of one block) is decided from its two ends: a
+sample is removed when its z lies in one interval, and z is monotone along
+the column. That check's compare is 27 ms now.
+
+On the chess board, on 22 threads, a whole check (the other setup read,
+then this one) went from 0.94 s to 0.36 s on the top setup at 0.25 mm and
+from 1.35 s to 0.35 s on the face after the epoxy; at the panel's 0.4 mm
+from 0.47 s to 0.22 s and 0.56 s to 0.23 s. With the other setup read back
+([below](#each-other-setup-inspected-once)) it is 0.10 to 0.18 s, of which
+about 40 ms is meshing the part for `SampleModel`. The chess set's CAM
+(`generators/chess/run_all.sh PORT --from cam`) went from 5 min 02 s to
+3 min 07 s with every verdict the same.
 
 ## The verifier
 
@@ -177,6 +235,29 @@ CamOtherSetups.cpp):
   (`starts_from`, and `earlier_setups_not_read` for a setup that does not
   post), and the transport says "Starts from what 'Turn' left". A setup that
   cannot be read leaves its stock in place, which errs toward a finding.
+
+#### Each other setup inspected once
+
+What another setup leaves depends on its posted file, the setup itself, the
+part and the grid, and on nothing about the setup asking. So `OtherSetupsOf`
+keeps each answer (the machined map, or why it could not be read)
+process-wide, under a key of exactly those: the file's text, the setup as it
+is saved (`CamSetupToJson`: its framing, stock, placements, tools, machine
+and name), the part's exact B-rep with the ids its bodies are placed by
+(`BodiesContentKey`), and the resolution. The key is compared whole, not by
+hash alone. An edit to any of them misses; where the setup stands in the
+job's order is the asker's and is applied on the way out. The memo keeps
+256 MB, least recently used out first. On the chess board a second check
+reads the other setup back in about 3 ms instead of inspecting it again.
+
+The setups that miss are inspected at once, each on its own copy of the
+bodies (a body's bounding box is cached on the object, and two threads
+would fill the same cache). Each of those inspections is itself split into
+bands, and a `parallel::For` nested in another's body shares its worker's
+part of the machine (`core/Parallel.h`), so the two levels divide the cores
+rather than multiply the threads. `cam verify: each other setup is inspected
+once, until it changes` pins the hits, the misses after an edit to the
+program, the stock, the part or the grid, and two misses inspected together.
 
 ### Verdict
 
@@ -409,7 +490,12 @@ simulation did something without owning a renderer.
 same map; the mesh is the map (bounds, volume, below-stock cuts, the triangle
 budget); the distance axis is monotonic and ends at the total; the parser keeps
 feed, tool change and operation; a rapid is not counted as time nobody
-stated; a zeroed-on-corner job plays its own verdict. The GUI cases
+stated; a zeroed-on-corner job plays its own verdict; the check, the compare
+and the designed surface are the one-thread answer on every core, and the
+other setups' memo hits and misses as it should. The hidden
+`cam verify: the board's planar check, timed` (`[.bench]`, `PLANAR_BENCH_DIR`
+names a directory holding `chess.dsgn` and the posted files) times the parts
+of a check on a job on disk. The GUI cases
 `cam/simulation_plays_and_gives_it_back`, `cam/simulate_says_why_at_the_click`
 and `cam/a_rotary_part_turns_as_it_plays` run windowed, because an offscreen
 instance has no panels and a renderer drawing into the wrong sub-region looks

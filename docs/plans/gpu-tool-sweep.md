@@ -95,9 +95,10 @@ board's check is no longer about 35 s. On today's code a whole `Inspect` is
 
 **The GPU saves 20 to 50 ms in a check of 0.2 to 1.3 s, and the band split
 takes the carve most of the way with one implementation.** Neither verify
-earns the library. What remains on the planar check is CPU work: split the
-carve into bands like the rotary one, parallelize `SampleModel` (70 to 120 ms,
-serial), and stop re-inspecting the other setup on every check.
+earns the library. The CPU work that remained on the planar check is done:
+the carve runs in bands like the rotary one, `SampleModel` and the compare
+run on every core, and each other setup is inspected once
+([simulation.md](../cam/simulation.md#on-every-core)).
 
 ## What comes next, if anything
 
