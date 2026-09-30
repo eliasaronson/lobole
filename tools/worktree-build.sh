@@ -58,7 +58,7 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="$("$ROOT/tools/build-jobs")"
 
 echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build ($BUILD_TYPE like main, -j$JOBS by free memory; ccache shared)"
-nix-shell "$ROOT/shell.nix" --run \
+"$ROOT/tools/nix-run" \
   "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE >/dev/null && ninja -C '$ROOT/build' -j$JOBS $TARGETS"
 echo "worktree-build: done."
 if PORT="$("$ROOT/tools/scratch_port.py")"; then

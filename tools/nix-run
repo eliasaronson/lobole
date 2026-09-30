@@ -5,7 +5,7 @@
 #
 # Entering nix-shell costs ~5 s, every time; a round of work entered it about
 # 400 times (docs/plans/dev-loop.md). This sources the same environment from a
-# cache of `nix-shell shell.nix --run 'export -p'`, in ~0.01 s. The cache is keyed on
+# cache of what `nix-shell shell.nix` adds to the environment, in ~0.01 s. The cache is keyed on
 # shell.nix and the nixpkgs it resolves, so either moving makes a new one, and
 # it is remade if a garbage collection took a store path it points at.
 set -euo pipefail
@@ -17,18 +17,40 @@ key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; } | sha256sum | cut -c1-
 env="$dir/$key.sh"
 alive() { # every store path on the cached PATH still exists
   local p
-  for p in $(sed -n 's/^declare -x PATH="\(.*\)"$/\1/p' "$env" | tr ':' ' '); do
+  for p in $(sed -n "s/^export PATH='\\(.*\\)'\$/\\1/p" "$env" | tr ':' ' '); do
     case "$p" in /nix/store/*) [ -e "$p" ] || return 1 ;; esac
   done
 }
 if [ ! -s "$env" ] || ! alive; then
   tmp="$(mktemp "$dir/.new.XXXXXX")"
-  # nix-shell's OWN environment, not `nix print-dev-env`'s: that resolved a
-  # different nixpkgs here (fmt 12.2 and the spdlog built on it, against
-  # nix-shell's 12.1), and a binary linked through it loaded one spdlog and
-  # the other fmt. What `export -p` prints is exactly what `nix-shell --run`
-  # would have had, so the two cannot disagree.
-  (cd "$root" && nix-shell shell.nix --run 'export -p') > "$tmp"
+  # What nix-shell ADDS to this environment, and nothing else: its own
+  # variables, captured inside and diffed against outside. Not `nix
+  # print-dev-env` (it resolved a different nixpkgs here: fmt 12.2 and its
+  # spdlog against nix-shell's 12.1, and a binary linked through it loaded one
+  # and the other). Not the whole `export -p` either: that froze DISPLAY (an
+  # xvfb-run display would be overwritten) and TMPDIR (a directory the
+  # generating nix-shell deleted on exit).
+  outer="$(mktemp)"; inner="$(mktemp)"
+  env -0 > "$outer"
+  (cd "$root" && nix-shell shell.nix --run 'env -0') > "$inner"
+  python3 - "$outer" "$inner" > "$tmp" <<'PY'
+import shlex, sys
+def load(p):
+    out = {}
+    for item in open(p, 'rb').read().split(b'\0'):
+        if b'=' in item:
+            k, v = item.split(b'=', 1)
+            out[k.decode()] = v.decode(errors='surrogateescape')
+    return out
+outer, inner = load(sys.argv[1]), load(sys.argv[2])
+skip = {'TMPDIR', 'TMP', 'TEMP', 'TEMPDIR', 'NIX_BUILD_TOP', 'PWD', 'OLDPWD',
+        'SHLVL', '_', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY'}
+for k in sorted(inner):
+    if k in skip or not k.replace('_', 'a').isalnum() or inner[k] == outer.get(k):
+        continue
+    print(f'export {k}={shlex.quote(inner[k])}')
+PY
+  rm -f "$outer" "$inner"
   mv "$tmp" "$env"
   find "$dir" -name '*.sh' ! -name "$key.sh" -delete 2>/dev/null || true
 fi

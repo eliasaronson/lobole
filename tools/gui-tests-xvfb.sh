@@ -91,7 +91,7 @@ run_shard() {
   mkdir -p "$3"
   # $4: extra args (the shuffle seed for this shard, when --shuffle is on).
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
-    nix-shell "$ROOT/shell.nix" --run \
+    "$ROOT/tools/nix-run" \
     "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
      ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-}"
 }
@@ -131,7 +131,7 @@ while [ "$#" -gt 0 ]; do
       # at all because it looks like one.
       FLOG="$(mktemp -t designer-gui-f-XXXXXX.log)"
       "$XVFB_RUN" -a -s "$SCREEN" \
-        nix-shell "$ROOT/shell.nix" --run \
+        "$ROOT/tools/nix-run" \
         "cd '$ROOT/build' && ./designer --gui-tests --hidden \
          --gui-test-filter '$2'" > "$FLOG" 2>&1 || true
       cat "$FLOG"
@@ -158,7 +158,7 @@ while [ "$#" -gt 0 ]; do
       # the display and holds the GPU lock, so the per-test xvfb-exec.sh
       # wrapper must not start a second Xvfb inside this one.
       exec "$XVFB_RUN" -a -s "$SCREEN" \
-        nix-shell "$ROOT/shell.nix" --run \
+        "$ROOT/tools/nix-run" \
         "cd '$ROOT/build' && DESIGNER_NO_XVFB=1 ctest $* --output-on-failure"
       ;;
   esac
@@ -172,7 +172,7 @@ trap 'rm -rf "$WORK"' EXIT
 # does not (an unrecorded test still runs, at the default weight).
 if [ "$RECORD" = "1" ]; then
   echo "Recording per-test times (serial, ~6 min)..."
-  "$XVFB_RUN" -a -s "$SCREEN" nix-shell "$ROOT/shell.nix" --run \
+  "$XVFB_RUN" -a -s "$SCREEN" "$ROOT/tools/nix-run" \
     "cd '$ROOT/build' && ./designer --gui-tests --hidden" 2>&1 |
     python3 -u "$ROOT/tools/gui_shard_record.py" "$TIMES"
   exit $?
@@ -181,7 +181,7 @@ fi
 # The suite's OWN inventory decides who runs — scraping IM_REGISTER_TEST out
 # of the source would drift, and a test missing from the partition would be
 # silently skipped. Listing needs no display and no GPU.
-nix-shell "$ROOT/shell.nix" --run \
+"$ROOT/tools/nix-run" \
   "cd '$ROOT/build' && ./designer --gui-test-list" > "$WORK/list" 2>/dev/null
 python3 "$ROOT/tools/gui_shard.py" --list "$WORK/list" --times "$TIMES" \
   --shards "$SHARDS" ${SLOWER_THAN:+--slower-than "$SLOWER_THAN"} \
