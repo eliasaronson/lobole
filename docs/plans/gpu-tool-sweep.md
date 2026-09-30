@@ -7,8 +7,9 @@ over a grid of cells.
   (`CarveSweep`, CamVerify.h; `StockSim`, CamSim.h). The chess board's verify
   took about 35 s.
 - **Rotary verification and playback** carve a radius map
-  (`CarveSweepRotary`, CamRotary.h). On every core by bands:
-  docs/plans/rotary-verify-parallel.md.
+  (`CarveSweepRotary`, CamRotary.h), already on every core by bands
+  (docs/cam/rotary.md#on-every-core): the knights blank's check went from
+  about 50 s to 7.
 - **Surfacing generation** builds the cutter-location surface: the highest
   point under the cutter at each cell (`RotaryCL` for the rotary,
   `CamDropCutter.h` for planar). It was 85% of a rotary generate.
@@ -21,9 +22,9 @@ family there could serve all of these.
 
 ## What it would buy, and what is not known
 
-These are estimates, not measurements. After the CPU band split, a rotary
-check of one blank should take a few seconds on 22 cores, and a GPU might take
-under one. Over a whole chess run that saves tens of seconds. The real gain is
+These are estimates, not measurements. With the CPU band split, a rotary
+check of the knights blank takes about 7 s on 22 cores; a GPU might take under
+one. Over a whole chess run that saves tens of seconds. The real gain is
 interactive: verify and playback of a big turned or surfaced part becoming
 near instant, and generation's CL surfaces with them. **Step 1 measures this
 before anything else is built.**
