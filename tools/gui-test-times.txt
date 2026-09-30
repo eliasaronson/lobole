@@ -33,6 +33,7 @@
 0.98	terminal/drag_selects_and_copies_text
 1.61	terminal/hover_decides_who_gets_the_keys
 0.42	frametime/frame_stats_measure_hud_stays_hidden
+3.00	frametime/job_tab_idle_and_switch
 2.72	sim/a_static_run_matches_beam_theory
 5.64	sim/topology_holds_its_volume_target
 1.07	sim/new_document_leaves_the_mode

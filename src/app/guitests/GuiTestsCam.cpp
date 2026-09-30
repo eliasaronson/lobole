@@ -17,6 +17,8 @@
 #include "ui/MachineActions.h"
 #include "ui/SelectionPipeline.h" // ArmedPrompt
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <chrono>
 #include <filesystem>
 
@@ -4404,6 +4406,140 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - safeBefore) < 1e-6);
     ctx->ItemClick("//###ToolWindow/###cam_setup_editor_close");
     ctx->Yield(2);
+  };
+
+  // Frame time on a job tab (docs/rendering/frame-pacing.md#tests). A job tab
+  // asked OCC for the tight box of every framed body three times a frame, and
+  // on a turned blank's tori that is a search per face: the chess undersides
+  // job ran at one frame a second doing nothing, and switching job tabs cost
+  // 3-7 s. Nothing measured frame time, so a human found it. The bounds are
+  // CPU time (the `update` and `ui` phases), which a software rasteriser does
+  // not move, and sit many times above a healthy frame and far below a broken
+  // one.
+  t = IM_REGISTER_TEST(engine, "frametime", "job_tab_idle_and_switch");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A stepped shaft with its circular edges rounded: six toroidal faces,
+    // the surfaces whose exact box is the expensive one.
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Blank", glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), 15.0, 60.0));
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Journal", glm::vec3(60, 0, 0), glm::vec3(1, 0, 0), 10.0, 20.0));
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Shaft", CamPart()->GetFeature(0)->GetId(),
+        CamPart()->GetFeature(1)->GetId(), BooleanOp::Union));
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Spigot", glm::vec3(80, 0, 0), glm::vec3(1, 0, 0), 6.0, 10.0));
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Stepped", CamPart()->GetFeature(2)->GetId(),
+        CamPart()->GetFeature(3)->GetId(), BooleanOp::Union));
+    ctx->Yield(2);
+    IM_CHECK_EQ(CamPart()->GetBodies().size(), (size_t)1);
+    std::vector<ElementRef> rims;
+    {
+      const std::vector<Body>& bodies = CamPart()->GetBodies();
+      for (const auto& [index, name] : bodies[0].elementMap.edgeNames) {
+        const ElementRef ref{bodies[0].createdBy, name};
+        const auto eb = Measure::ElementBounds(bodies, ref);
+        if (eb && eb->max.y - eb->min.y > 1.0f) // a circle, not the seam
+          rims.push_back(ref);
+      }
+    }
+    IM_CHECK_EQ(rims.size(), (size_t)6);
+    CamPart()->AddFeature(std::make_unique<FilletFeature>("Rounds", rims, 1.5));
+    ctx->Yield(2);
+    IM_CHECK(CamPart()->GetFeature(5)->GetError().empty());
+    const uint64_t partId = s_App->parts[s_App->activePart].id;
+    const size_t partTab = static_cast<size_t>(s_App->activePart);
+
+    // Jobs on it, each held in the rotary and indexed.
+    const auto rotaryJob = [&](const char* name, double indexDeg) {
+      ui::SetActivePart(*s_App, partTab);
+      const size_t tab = ui::CreateJobForPart(*s_App, partId, name);
+      cam::Setup& added = Job()->AddSetup(name);
+      added.machine.hasRotaryAxis = true;
+      added.machine.rotary.along = 'x';
+      added.machine.rotary.chuckEnd = -1;
+      added.machine.rotary.word = 'A';
+      added.machine.rotary.topAxis = 'y';
+      added.machine.rotary.topSign = -1;
+      added.heldIn = cam::Setup::HeldIn::Rotary;
+      added.rotationA = indexDeg;
+      added.stock.margin = {0.0, 1.0, 1.0};
+      s_App->camActiveSetup = added.id;
+      return tab;
+    };
+    // CPU time of the frame just finished: what the app did, not what the
+    // GPU (or llvmpipe) took to draw it.
+    const auto lastCpuMs = [] {
+      const render::FrameTimer::Stats fs = s_App->frameTimer.Snapshot(1);
+      return fs.phaseMs[static_cast<size_t>(render::FramePhase::Update)] +
+             fs.phaseMs[static_cast<size_t>(render::FramePhase::BuildUI)];
+    };
+    const auto msSince = [](std::chrono::steady_clock::time_point t0) {
+      return std::chrono::duration<double, std::milli>(
+                 std::chrono::steady_clock::now() - t0)
+          .count();
+    };
+
+    // The idle frame, at an index no quarter turn reaches: every framed copy
+    // of the part starts cold, so only the job tab's memo (CamTool.cpp's
+    // CachedStockView) stands between this frame and three exact boxes.
+    const size_t indexed = rotaryJob("Indexed", 30.0);
+    ctx->Yield(2);
+    {
+      // What one of those boxes costs here, for the log.
+      const CADShape cold =
+          ui::JobBodies(*s_App).at(0).shape.Transformed(glm::rotate(
+              glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(1, 0, 0)));
+      glm::vec3 lo(0.0f), hi(0.0f);
+      const auto t0 = std::chrono::steady_clock::now();
+      cold.GetBoundingBox(lo, hi, /*tight=*/true);
+      ctx->LogInfo("one cold exact box of the part: %.1f ms", msSince(t0));
+    }
+    ctx->Yield(20); // settled: the first visit's framing and meshing are done
+    std::vector<double> ui;
+    for (int i = 0; i < 30; i++) {
+      ctx->Yield();
+      ui.push_back(
+          s_App->frameTimer.Snapshot(1)
+              .phaseMs[static_cast<size_t>(render::FramePhase::BuildUI)]);
+    }
+    std::sort(ui.begin(), ui.end());
+    const double uiMedian = ui[ui.size() / 2];
+    ctx->LogInfo("idle job tab: ui median %.2f ms, worst %.2f ms", uiMedian,
+                 ui.back());
+    // Healthy is about a millisecond; the regression was a second.
+    IM_CHECK_LE(uiMedian, 15.0);
+
+    // Switching. Two more jobs framed by quarter turns, which carry their
+    // source's box: returning to one pays nothing. The first visit to each is
+    // behind us before the measuring starts.
+    const size_t flats = rotaryJob("Flats", 90.0);
+    ctx->Yield(10);
+    const size_t flipped = rotaryJob("Flipped", 180.0);
+    ctx->Yield(10);
+    double worstQuarter = 0.0, worstIndexed = 0.0;
+    for (int round = 0; round < 3; round++)
+      for (const size_t tab : {flats, flipped, indexed}) {
+        ui::SetActivePart(*s_App, tab);
+        double worst = 0.0;
+        for (int i = 0; i < 6; i++) {
+          ctx->Yield();
+          worst = std::max(worst, lastCpuMs());
+        }
+        ctx->LogInfo("to %s: worst frame %.1f ms of CPU",
+                     s_App->parts[tab].name.c_str(), worst);
+        double& into = tab == indexed ? worstIndexed : worstQuarter;
+        into = std::max(into, worst);
+      }
+    ctx->LogInfo("worst switch: %.1f ms quarter-turned, %.1f ms indexed 30",
+                 worstQuarter, worstIndexed);
+    IM_CHECK_LE(worstQuarter, 120.0);
+    // A job at an angle no quarter turn reaches pays its exact boxes again on
+    // every visit (its framed copies are new shapes, and the memo holds one
+    // job), so it is held to the second the plan named, not to the above.
+    IM_CHECK_LE(worstIndexed, 1000.0);
   };
 
   // The terminal panel (docs/ui/terminal.md). Off by default, docked

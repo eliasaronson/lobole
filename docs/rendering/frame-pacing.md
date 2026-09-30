@@ -170,6 +170,33 @@ HUD window does not exist until Ctrl+Shift+F opens it (the category is
 into a group this suite never queues). `tests/offscreen_smoke.py` asserts a
 capture produces per-pass numbers and no `fps`.
 
+`frametime/job_tab_idle_and_switch` holds frame TIME to a bound, on the case
+that once ran at one frame a second: a job tab asking OCC for the exact box of
+a turned part's toroidal faces every frame, and a job-tab switch that paid
+3-7 s (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape). It turns a stepped shaft with
+six rounded rims, holds it in the rotary at A = 30 (no quarter turn reaches
+it, so every framed copy starts cold and only `CachedStockView` in
+`ui/CamTool.cpp` keeps the idle frame cheap), and asserts the median idle
+`ui` phase over 30 frames. It then adds jobs at A = 90 and 180, which carry
+their source's box through the quarter turn, and switches among the three
+tabs three times, bounding the worst `update` + `ui` of the six frames after
+each switch. The bounds are CPU phases so llvmpipe's drawing time does not
+count against them. Measured on the GUI runner:
+
+| what | healthy | bound | broken |
+|---|---|---|---|
+| idle `ui`, median | 0.5 ms | 15 ms | 88 ms (memo never hits) |
+| switch to a quarter-turned job | 25 ms | 120 ms | 240 ms (box not carried) |
+| switch to the A = 30 job | 210 ms | 1000 ms | |
+
+With every core loaded by `tools/with-cpu-load.sh`, the healthy numbers were
+0.7, 58 and 354 ms.
+
+The A = 30 job pays its exact boxes again on every visit: its framed copies
+are new shapes at an angle nothing carries, and the stock memo holds one
+job. That is today's cost, held to the second the regression broke, not a
+target.
+
 ## Idle throttle
 
 A CAD app sits idle most of the time, and re-rendering the full pipeline at

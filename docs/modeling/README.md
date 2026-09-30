@@ -354,9 +354,13 @@ and CAM frames every body of a job through such moves (laid on a face, flipped,
 a placement turned). Any other angle starts cold. The conservative box is not
 carried: it is bounded in the frame it was taken in. A job's bodies are warmed
 on their SOURCE documents' bodies (`ui::JobBodies`), which outlive the job's
-copies, so returning to a job tab pays nothing; the stock and machine boxes a
-job tab draws every frame are memoized in `CamTool.cpp` on the job's geometry
-and the setup less its operations.
+copies, so returning to a job tab framed by quarter turns pays nothing; the
+stock and machine boxes a job tab draws every frame are memoized in
+`CamTool.cpp` on the job's geometry and the setup less its operations. A setup
+at any other angle (a rotary index of 30 degrees) pays its framed copies' boxes
+again on every return, since the memo holds one job.
+`frametime/job_tab_idle_and_switch` bounds both costs
+(docs/rendering/frame-pacing.md#tests).
 
 The memo lives inside the object, not in a cache beside it: a shape's
 address-based id is recycled by the allocator, so an outside cache keyed on it
