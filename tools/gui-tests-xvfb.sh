@@ -281,29 +281,38 @@ for c in $(seq 1 "$i"); do
     cp "$WORK/shard$c.log" "$ARCH/shard.log"
     sed -n "${c}p" "$WORK/filters" > "$ARCH/filter"
     SEEDLINE="$(grep -m1 'shuffled order, seed' "$WORK/shard$c.log" || true)"
+    # The order the tests RAN in, read from the log. The seed reproduces it
+    # only while the registered list is unchanged: it shuffles the whole
+    # list, so one test added since deals a different order and the replay
+    # passes for no reason. The log's order does not move
+    # (docs/ui/testing.md#replaying-a-failed-shard).
+    grep -ao "Test: '[^']*' '[^']*'" "$WORK/shard$c.log" |
+      awk '!seen[$0]++' |
+      sed "s/^Test: '\([^']*\)' '\([^']*\)'$/\1\/\2/" > "$ARCH/sequence"
     {
       echo "# $(date -Is)  shard $c of $i${line:+  ($line)}"
       echo "# ${SEEDLINE:-not shuffled: the order is the filter order}"
       echo "#"
-      echo "# Reproduce THIS process — same tests, same order:"
+      echo "# Reproduce THIS process — the same tests in the order they ran"
+      echo "# (the list is ./sequence; delete a line to bisect)."
       # A shard runs under xvfb-run, so the reproduction has to as well:
       # without a display the app prints its help and exits, which reads as
       # "the bug went away".
+      echo "HERE=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\""
       echo "cd '$ROOT/build' && $XVFB_RUN -a ./designer --gui-tests --hidden \\"
-      printf "  --gui-test-filter '%s'" "$(sed -n "${c}p" "$WORK/filters")"
+      echo "  --gui-test-sequence \"\$(paste -sd, \"\$HERE/sequence\")\""
+      echo "#"
+      echo "# The filter and seed that dealt it (the same order only while the"
+      echo "# registered tests are the ones this run had):"
+      printf "#   --gui-test-filter '%s'" "$(sed -n "${c}p" "$WORK/filters")"
       if [ -n "$SEEDLINE" ]; then
-        # Two statements, not one printf: `printf " \\\n"` puts a LITERAL
-        # backslash-n in the file (bash leaves \n alone in double quotes, and
-        # printf then renders the pair), so every archived script ever written
-        # ended in an argument the app could not parse.
-        echo " \\"
-        printf "  --gui-test-shuffle %s" \
+        printf " --gui-test-shuffle %s" \
           "$(echo "$SEEDLINE" | sed -n 's/.*seed[ =]*\([0-9]*\).*/\1/p')"
       fi
       echo
     } > "$ARCH/reproduce.sh"
     chmod +x "$ARCH/reproduce.sh"
-    echo "    archived: $ARCH  (reproduce.sh has the filter and seed)"
+    echo "    archived: $ARCH  (reproduce.sh replays its order)"
   fi
 done
 

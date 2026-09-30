@@ -66,6 +66,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <thread>
@@ -1405,6 +1406,9 @@ void printUsage(const char* programName) {
   std::cout << "  --gui-test-filter <pattern>  Run only matching GUI tests "
                "(e.g. \"fillet\", \"selection_,tree_\"; implies --gui-tests)"
             << std::endl;
+  std::cout << "  --gui-test-sequence <cat/name,...>  Run exactly these GUI "
+               "tests, in this order (replays a failed shard)"
+            << std::endl;
   std::cout << "  --gui-test-list      List GUI tests as category/name and "
                "exit (no GPU needed)"
             << std::endl;
@@ -1446,6 +1450,9 @@ struct CommandLineArgs {
   bool runGuiTests = false;
   bool listGuiTests = false;
   std::string guiTestFilter = "all";
+  // --gui-test-sequence: exactly these tests ("category/name", comma-
+  // separated), in exactly this order. Empty = not asked for.
+  std::string guiTestSequence;
   // -1 = run in registration order. >= 0 = shuffle with this seed; 0 means
   // "pick one and tell me". See --gui-test-shuffle.
   long guiTestShuffle = -1;
@@ -1507,6 +1514,15 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
         args.runGuiTests = true;
       } else {
         std::cerr << "--gui-test-filter requires a pattern" << std::endl;
+        exit(1);
+      }
+    } else if (arg == "--gui-test-sequence") {
+      if (i + 1 < argc) {
+        args.guiTestSequence = argv[++i];
+        args.runGuiTests = true;
+      } else {
+        std::cerr << "--gui-test-sequence requires a list of category/name"
+                  << std::endl;
         exit(1);
       }
     } else if (arg == "--gui-test-list") {
@@ -2623,7 +2639,42 @@ int main(int argc, char** argv) {
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
   RegisterGuiTests(testEngine, &g_App);
-  if (args.runGuiTests) {
+  if (args.runGuiTests && !args.guiTestSequence.empty()) {
+    // A failed shard's order, replayed as it ran. The seed alone cannot do
+    // that for long: it shuffles the WHOLE registered list, so a test added
+    // since the failure deals every shard a different order, and the replay
+    // passes for no reason (docs/ui/testing.md#replaying-a-failed-shard).
+    if (args.guiTestShuffle >= 0 || args.guiTestFilter != "all") {
+      std::cerr << "--gui-test-sequence fixes both the tests and their order; "
+                   "it takes no --gui-test-filter or --gui-test-shuffle"
+                << std::endl;
+      return 1;
+    }
+    std::vector<ImGuiTest*> sequence;
+    std::string unknown;
+    std::stringstream entries(args.guiTestSequence);
+    for (std::string entry; std::getline(entries, entry, ',');) {
+      if (entry.empty())
+        continue;
+      ImGuiTest* found = nullptr;
+      for (ImGuiTest* test : testEngine->TestsAll)
+        if (entry == std::string(test->Category) + "/" + test->Name)
+          found = test;
+      if (found == nullptr)
+        unknown += (unknown.empty() ? "" : ", ") + entry;
+      else
+        sequence.push_back(found);
+    }
+    // Refused, not skipped: a replay without one of its tests is another
+    // order.
+    if (!unknown.empty()) {
+      std::cerr << "--gui-test-sequence: no such test: " << unknown
+                << " (--gui-test-list prints every category/name)" << std::endl;
+      return 1;
+    }
+    for (ImGuiTest* test : sequence)
+      ImGuiTestEngine_QueueTest(testEngine, test);
+  } else if (args.runGuiTests) {
     if (args.guiTestShuffle >= 0) {
       // Shuffle the engine's own test list rather than the queue: QueueTests
       // walks TestsAll in order, so reordering it here leaves the filter

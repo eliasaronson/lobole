@@ -90,9 +90,21 @@ without cleaning up, immediately before a test that reads the model tree.
 
 **2. Shuffled by default.** `--gui-test-shuffle` randomises the order within
 each shard and prints a seed derived from one base; `--shuffle <seed>`
-replays a failure exactly. That is the difference between a randomised suite
-and a flaky one. `--serial` puts every test in one process when hunting a
-leak; a green sharded run is not evidence of independence.
+replays a failure exactly — while the registered tests are the same (see
+below). That is the difference between a randomised suite and a flaky one.
+`--serial` puts every test in one process when hunting a leak; a green
+sharded run is not evidence of independence.
+
+### Replaying a failed shard
+
+A failed shard is archived under `~/.local/state/designer/gui-failures/`:
+its log, its filter, `sequence` (the tests in the order they ran, read from
+the log) and `reproduce.sh`, which runs that sequence with
+`--gui-test-sequence cat/name,...` — exactly those tests, in that order, an
+unknown name refused. The seed is kept as a comment only: it shuffles the
+whole registered list, so after one test is added the same seed deals a
+different order and the replay passes for no reason. To find the test that
+leaks, delete lines from `sequence` (keep the failing one last) and rerun.
 
 **3. A failed lookup poisons the rest of the test.** `ImGuiTestContext`'s
 `WindowInfo` and `ItemInfo` log an error when they do not find their target,
