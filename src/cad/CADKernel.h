@@ -191,6 +191,14 @@ public:
   // around the bore can begin INSIDE a boss and report the boss absent.
   [[nodiscard]] bool ContainsPoint(const glm::vec3& p,
                                    double tol = 1.0e-6) const;
+  // The same question for many points, with ONE classifier: building it walks
+  // every face of the solid, and a caller asking point by point paid that per
+  // point -- the chess board's engraving probed 7,700 points through
+  // `ContainsPoint` and spent two minutes building classifiers. Points outside
+  // the shape's box are answered without asking.
+  [[nodiscard]] std::vector<bool>
+  ContainsPoints(const std::vector<glm::vec3>& points,
+                 double tol = 1.0e-6) const;
 
   // Identity INCLUDING placement: the underlying geometry plus where this
   // copy of it sits. `GeometryId` alone is the TShape, which a rigid
@@ -517,6 +525,10 @@ public:
   bool CornerPoint(int, int, glm::vec3&) const { return false; }
   bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
   bool ContainsPoint(const glm::vec3&, double = 1.0e-6) const { return false; }
+  std::vector<bool> ContainsPoints(const std::vector<glm::vec3>& p,
+                                   double = 1.0e-6) const {
+    return std::vector<bool>(p.size(), false);
+  }
   uint64_t PlacementId() const { return 0; }
 };
 

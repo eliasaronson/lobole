@@ -821,6 +821,32 @@ bool CADShape::ContainsPoint(const glm::vec3& p, double tol) const {
   return state == TopAbs_IN || state == TopAbs_ON;
 }
 
+std::vector<bool> CADShape::ContainsPoints(const std::vector<glm::vec3>& points,
+                                           double tol) const {
+  std::vector<bool> out(points.size(), false);
+  if (m_shape.IsNull() || points.empty())
+    return out;
+  glm::vec3 lo(0.0f), hi(0.0f);
+  GetBoundingBox(lo, hi, /*tight=*/false);
+  const float pad = static_cast<float>(tol) + 1e-4f;
+  BRepClass3d_SolidClassifier classifier;
+  bool loaded = false;
+  for (size_t i = 0; i < points.size(); i++) {
+    const glm::vec3& p = points[i];
+    if (glm::any(glm::lessThan(p, lo - pad)) ||
+        glm::any(glm::greaterThan(p, hi + pad)))
+      continue; // outside the box: outside the solid
+    if (!loaded) {
+      classifier.Load(m_shape);
+      loaded = true;
+    }
+    classifier.Perform(gp_Pnt(p.x, p.y, p.z), tol);
+    const TopAbs_State state = classifier.State();
+    out[i] = state == TopAbs_IN || state == TopAbs_ON;
+  }
+  return out;
+}
+
 bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {
   if (!IsValid() || edgeIndex < 0)
     return false;

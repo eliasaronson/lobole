@@ -149,14 +149,19 @@ void GenerateEngrave(const Setup& setup, const Operation& op, const Tool& tool,
     const auto hopClear = [&](const glm::dvec2& a, const glm::dvec2& b) {
       const double len = glm::length(b - a);
       const int steps = std::max(1, static_cast<int>(std::ceil(len / 0.5)));
+      std::vector<glm::vec3> probes;
+      probes.reserve(static_cast<size_t>(steps) + 1);
       for (int i = 0; i <= steps; i++) {
         const glm::dvec2 p = a + (b - a) * (static_cast<double>(i) / steps);
-        const glm::vec3 q(static_cast<float>(p.x), static_cast<float>(p.y),
-                          static_cast<float>(hopZ));
-        for (const Body& body : bodies)
-          if (body.shape.IsValid() && body.shape.ContainsPoint(q, 1e-6))
-            return false;
+        probes.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y),
+                            static_cast<float>(hopZ));
       }
+      // One classifier per body for the whole hop (CADShape::ContainsPoints).
+      for (const Body& body : bodies)
+        if (body.shape.IsValid())
+          for (const bool in : body.shape.ContainsPoints(probes, 1e-6))
+            if (in)
+              return false;
       return true;
     };
     const auto enter = [&](const glm::dvec2& start) {

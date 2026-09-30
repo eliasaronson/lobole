@@ -406,17 +406,26 @@ std::string EngraveSurfaceRefusal(const std::vector<Body>& framed,
     }
     at.push_back(s.back());
   }
-  const auto solid = [&](const glm::dvec2& p, double z) {
-    const glm::vec3 q(static_cast<float>(p.x), static_cast<float>(p.y),
-                      static_cast<float>(z));
-    for (const Body& b : framed)
-      if (b.shape.IsValid() && b.shape.ContainsPoint(q, 1e-6))
-        return true;
-    return false;
-  };
-  for (const glm::dvec2& p : at) {
-    const bool under = solid(p, frame.surfaceZ - kProbe);
-    const bool over = solid(p, frame.surfaceZ + kProbe);
+  // Every probe in one batch per body: one classifier each, not one per
+  // point (CADShape::ContainsPoints).
+  std::vector<glm::vec3> probes;
+  probes.reserve(at.size() * 2);
+  for (const glm::dvec2& p : at)
+    for (const double dz : {-kProbe, kProbe})
+      probes.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y),
+                          static_cast<float>(frame.surfaceZ + dz));
+  std::vector<bool> inside(probes.size(), false);
+  for (const Body& b : framed) {
+    if (!b.shape.IsValid())
+      continue;
+    const std::vector<bool> in = b.shape.ContainsPoints(probes, 1e-6);
+    for (size_t i = 0; i < in.size(); i++)
+      inside[i] = inside[i] || in[i];
+  }
+  for (size_t k = 0; k < at.size(); k++) {
+    const glm::dvec2& p = at[k];
+    const bool under = inside[2 * k];
+    const bool over = inside[2 * k + 1];
     if (under && !over)
       continue;
     return std::string("the curve is not on the part's surface at X") +
