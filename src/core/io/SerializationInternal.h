@@ -17,15 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    145; // v145: CAM tool type `thread_mill` {tip_flat, neck_diameter,
+    146; // v146: feature types `Worm` and `WormWheel` (a ZA worm and its
+         //      hobbed wheel cut from cylindrical blanks), and relation kind
+         //      `worm` (docs/modeling/worm-gears.md).
+         // v145: CAM tool type `thread_mill` {tip_flat, neck_diameter,
          //      neck_length} and operation type `thread_mill` {passes}: a
          //      helix milled from the Thread on its face.
          // v143: a part's `print` {process, material} -- how it is printed,
          //      which the fit checks read for the allowance to model
          //      (fdm/petg). Drives no geometry.
-         // v142: feature types `Worm` and `WormWheel` (a ZA worm and its
-         //      hobbed wheel cut from cylindrical blanks), and relation kind
-         //      `worm` (docs/modeling/worm-gears.md).
          // v141: feature type `Bearing` {designation}: an ISO 15
          //      deep-groove ball bearing as a generated standard part.
          // v140: a Thread's `hand` (right | left; absent = right), and a

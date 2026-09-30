@@ -1451,7 +1451,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/README.md)"},
-    {"Worm", 142,
+    {"Worm", 146,
      "face (the blank's cylindrical OUTSIDE: the worm's tip), module? "
      "(+_expr) mm (axial; omitted = tip dia / 12, a diameter quotient of 10), "
      "starts? (1), pressure_angle_deg? (20), hand? right|left, backlash? mm "
@@ -1459,7 +1459,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "Cuts a ZA worm into the blank; the pitch diameter is the tip less two "
      "modules. get_state reports the lead angle and whether it self-locks "
      "(docs/modeling/worm-gears.md)"},
-    {"WormWheel", 142,
+    {"WormWheel", 146,
      "face (the blank's cylindrical OUTSIDE: the rim; its length is the face "
      "width), teeth? (40), module? (+_expr) mm (omitted = rim dia / (teeth + "
      "3)), and the mating worm's starts? (1), worm_diameter? mm (its pitch "
@@ -2473,7 +2473,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
-  } else if (type == "Worm" || type == "WormWheel") { // v142
+  } else if (type == "Worm" || type == "WormWheel") { // v146
     const json& fj = j.at("face");
     const ElementRef face{fj.at("feature_id").get<uint64_t>(),
                           fj.at("element").get<std::string>()};

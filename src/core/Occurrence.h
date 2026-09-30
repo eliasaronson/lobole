@@ -267,7 +267,7 @@ struct ExplodedView {
 //        b = ratio * a + phase + lead
 // click: ONE mate's DOF that may only travel one way — a pawl (v105)
 // worm:  rotation -> rotation on crossed axes, ratio +-starts/teeth with the
-//        sign from the worm's hand and where it sits (v142,
+//        sign from the worm's hand and where it sits (v146,
 //        docs/assemblies/relations.md#worm)
 enum class RelationKind {
   Gear,
