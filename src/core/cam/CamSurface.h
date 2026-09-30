@@ -157,6 +157,17 @@ struct RotaryParallelRequest {
 [[nodiscard]] std::vector<RotaryPass>
 RotaryParallelPasses(const RadiusMap& cl, const RotaryParallelRequest& req);
 
+// The grid a rotary pass is planned on, in mm along the axis (and of arc at
+// the part's widest radius round it), and the cusp it was derived from. A
+// finish's is `DerivedDropRes` at the cutter's own cusp; a ROUGH's -- layers
+// down to a skin -- is derived from the skin it leaves, and is coarser
+// (docs/cam/rotary.md#layers-rest-and-the-rough-verb).
+struct RotaryGrid {
+  double res = 0.0;
+  double cusp = 0.0;
+};
+[[nodiscard]] RotaryGrid RotaryPassGrid(const Tool& tool, const Operation& op);
+
 // Continuous 4-axis (docs/cam/rotary.md#continuous-surface_rotary): ONE helix
 // from the low end of the map to the high end, the part turning while the tool
 // cuts. FreeCAD's `rotary_spiral` and Kiri:Moto's lathe mode are the two

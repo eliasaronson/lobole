@@ -382,10 +382,12 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   REQUIRE(keyEnd != std::string::npos);
   const std::string key = keyText.substr(keyAt, keyEnd - keyAt);
 
-  // The two generators, from their signatures to the next one.
+  // The generators, from their signatures to the next one.
   std::string bodies;
-  for (const char* fn : {"void GenerateSurface(const Setup& setup",
-                         "void GenerateRotarySurface("}) {
+  // ...and the grid a rotary pass is planned on, which reads the op.
+  for (const char* fn :
+       {"void GenerateSurface(const Setup& setup",
+        "void GenerateRotarySurface(", "RotaryGrid RotaryPassGrid("}) {
     const size_t at = text.find(fn);
     REQUIRE(at != std::string::npos);
     const size_t end = text.find("\n}\n", at);

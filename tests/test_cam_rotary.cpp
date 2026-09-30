@@ -1070,6 +1070,98 @@ TEST_CASE("cam rotary: the rough verb cuts in layers and leaves a skin",
   CHECK(none.why.find("4th axis") != std::string::npos);
 }
 
+TEST_CASE("cam rotary: a rough is planned on the grid its skin needs, and "
+          "still leaves an even skin",
+          "[cam]") {
+  // docs/cam/rotary.md#layers-rest-and-the-rough-verb: a rough's grid comes
+  // from its skin, not from the finish's cusp -- coarser, never finer than
+  // the finish's, and never wider than half the skin.
+  cam::Tool flat = ShapedTool(cam::ToolType::Flat, 6.0);
+  cam::Operation finish;
+  finish.type = cam::OpType::SurfaceRotary;
+  const cam::RotaryGrid fine = cam::RotaryPassGrid(flat, finish);
+  cam::Operation rough = finish;
+  rough.stepdown = 3.0;
+  rough.stockToLeave = 0.5;
+  const cam::RotaryGrid coarse = cam::RotaryPassGrid(flat, rough);
+  CHECK(coarse.res > fine.res);
+  CHECK(coarse.res <= 0.5 * rough.stockToLeave + 1e-12);
+  // Derived from the skin, so a thicker skin is a coarser grid...
+  rough.stockToLeave = 0.8;
+  CHECK(cam::RotaryPassGrid(flat, rough).res > coarse.res);
+  // ...and a skin too thin to gain anything keeps the finish's.
+  rough.stockToLeave = 0.1;
+  CHECK(cam::RotaryPassGrid(flat, rough).res == fine.res);
+  // A rest pass is not a rough, whatever it leaves.
+  rough.stockToLeave = 0.5;
+  rough.restFromTool = 2;
+  CHECK(cam::RotaryPassGrid(flat, rough).res == fine.res);
+
+  // And the skin it leaves is the skin the finish would have met. The same
+  // op cut as ONE layer (no stepdown) is planned on the finish's grid and
+  // ends at the same surface -- its last layer IS that surface -- so the two
+  // carved blanks, measured against the part, must leave the same skin: no
+  // thinner where the finish plunges in, no thicker where it has to take
+  // more than one pass's worth.
+  auto doc = NeckedShaftDoc(20.0, 60.0, 20.0, 20.0, 15.0);
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.stock.margin = {0.0, 4.0, 4.0};
+  setup.safeZ = 40.0;
+  setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
+  const cam::DerivedOp d = cam::DeriveRotaryRough(setup, doc->GetBodies());
+  REQUIRE(d.ok);
+  const double skin = d.op.stockToLeave;
+  const auto skinOf = [&](double stepdown, double& thin, double& median,
+                          double& thick) {
+    cam::Setup s = setup;
+    cam::Operation op = d.op;
+    op.id = 1;
+    op.stepover = 0.25;
+    op.stepdown = stepdown;
+    s.operations = {op};
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+    const cam::RotaryInspection in =
+        cam::InspectRotary(gcode, s, doc->GetBodies(), 0.5);
+    REQUIRE(in.ok);
+    // The skin on the turned surfaces, off the shoulders and the ends: a
+    // cell whose neighbours along the axis agree with it.
+    std::vector<double> skins;
+    for (int j = 0; j < in.designed.nTheta; j++)
+      for (int i = 2; i + 2 < in.designed.nx; i++) {
+        const double want = in.designed.At(i, j);
+        bool flat = want > 0.0;
+        for (int di = -2; di <= 2 && flat; di++)
+          flat = std::abs(in.designed.At(i + di, j) - want) < 0.05;
+        if (flat)
+          skins.push_back(in.machined.At(i, j) - want);
+      }
+    REQUIRE(skins.size() > 1000);
+    std::sort(skins.begin(), skins.end());
+    thin = skins[skins.size() / 100];
+    median = skins[skins.size() / 2];
+    thick = skins[skins.size() * 99 / 100];
+  };
+  double roughThin = 0, roughMedian = 0, roughThick = 0;
+  double oneThin = 0, oneMedian = 0, oneThick = 0;
+  skinOf(d.op.stepdown, roughThin, roughMedian, roughThick);
+  skinOf(0.0, oneThin, oneMedian, oneThick);
+  INFO("skin " << skin << ": rough grid " << roughThin << " / " << roughMedian
+               << " / " << roughThick << ", finish grid " << oneThin << " / "
+               << oneMedian << " / " << oneThick);
+  // Even: the thinnest percent keeps most of the skin, as the finish's grid
+  // does, and the typical skin is the skin.
+  CHECK(roughThin > 0.6 * skin);
+  CHECK(roughThin > oneThin - skin / 3.0);
+  CHECK(std::abs(roughMedian - oneMedian) < 0.25 * skin);
+  CHECK(roughThick < oneThick + 0.25 * skin);
+}
+
 TEST_CASE("cam rotary: the file is written for the rotary as installed, and "
           "read back the same",
           "[cam]") {

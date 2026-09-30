@@ -473,9 +473,11 @@ void GenerateRotarySurface(const Setup& setup, const Operation& op,
     return;
   }
   // The grid: fine enough for the cusp this cutter is allowed to leave, the
-  // same derivation the planar drop cutter uses.
-  const double cusp = DerivedCusp(tool, 0.0);
-  const double res = DerivedDropRes(tool, 0.0, cusp);
+  // same derivation the planar drop cutter uses -- or, for a rough, the
+  // coarser one its skin allows (RotaryPassGrid).
+  const RotaryGrid gridOf = RotaryPassGrid(tool, op);
+  const double cusp = gridOf.cusp;
+  const double res = gridOf.res;
 
   double x0 = 1e18, x1 = -1e18, rad = 0.0;
   for (const Body& b : bodies) {
@@ -1257,6 +1259,33 @@ void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
 }
 
 } // namespace
+
+RotaryGrid RotaryPassGrid(const Tool& tool, const Operation& op) {
+  RotaryGrid g;
+  g.cusp = DerivedCusp(tool, 0.0);
+  g.res = DerivedDropRes(tool, 0.0, g.cusp);
+  // A ROUGH -- layers down to a skin, and no rest to find -- is not the
+  // surface anybody keeps: the finish after it takes the skin off, and all
+  // the rough owes it is a skin even enough to take in one pass. So its
+  // cusp is half the skin rather than the finish's 2% of the cutter, and
+  // its cell never wider than half the skin either: a grid misplaces the
+  // cutter beside a wall by up to half a cell's diagonal, 0.71 of a cell,
+  // which then takes at most about a third of the skin. The knights' rough
+  // went from 0.15 mm cells to 0.25
+  // (docs/cam/rotary.md#layers-rest-and-the-rough-verb). Never finer than
+  // the finish's own grid: a thin skin gets no worse a grid than a finish
+  // would.
+  if (op.stepdown > 0.0 && op.stockToLeave > 0.0 && op.restFromTool == 0) {
+    const double cusp = 0.5 * op.stockToLeave;
+    const double res =
+        std::min(DerivedDropRes(tool, 0.0, cusp), 0.5 * op.stockToLeave);
+    if (res > g.res) {
+      g.cusp = std::max(g.cusp, cusp);
+      g.res = res;
+    }
+  }
+  return g;
+}
 
 namespace detail {
 
