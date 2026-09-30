@@ -72,8 +72,38 @@ print('\n'.join(dict.fromkeys(names)))
 PY
 }
 
+# The other staleness: nothing was collected, but shell.nix now resolves a
+# DIFFERENT toolchain than the one the tree was configured with. The tree
+# still builds -- against the old compiler and headers -- and shares no ccache
+# entry with a tree configured today (a worktree), and it is the tree the
+# next GC breaks. CMake throws its whole cache away when the compiler
+# changes, options included, so the options are carried over by hand.
+current_cxx="$(nix-shell shell.nix --run 'command -v g++' 2>/dev/null | tail -1)"
+
 fixed=0
 for d in "${dirs[@]}"; do
+  cached_cxx="$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$d/CMakeCache.txt")"
+  if [ -n "$current_cxx" ] && [ -n "$cached_cxx" ] && [ "$cached_cxx" != "$current_cxx" ]; then
+    keep="$(grep -E '^(CMAKE_BUILD_TYPE|ENABLE_[A-Z_]+|CMAKE_EXPORT_COMPILE_COMMANDS):' "$d/CMakeCache.txt" \
+            | grep -v ':[A-Z]*=$' | sed -E 's/^([^:]+):[A-Z]+=(.*)$/-D\1=\2/' | tr '\n' ' ')"
+    printf '%-28s toolchain moved: %s\n%-28s   -> %s\n' "$d" "$cached_cxx" "" "$current_cxx"
+    if [ "$dry" = 1 ]; then
+      printf '   would reconfigure fresh with: %s\n' "$keep"
+      continue
+    fi
+    rm -rf "$d/CMakeCache.txt" "$d/CMakeFiles"
+    if nix-shell shell.nix --run "cmake -S . -B $d -G Ninja $keep" > /tmp/fsnc.$$.log 2>&1; then
+      echo "   reconfigured fresh (everything recompiles once, then shares ccache)"
+      fixed=$((fixed+1))
+    else
+      tail -20 /tmp/fsnc.$$.log
+      echo "   RECONFIGURE FAILED for $d" >&2
+      rm -f /tmp/fsnc.$$.log
+      exit 1
+    fi
+    rm -f /tmp/fsnc.$$.log
+    continue
+  fi
   vars="$(stale_vars "$d/CMakeCache.txt")"
   if [ -z "$vars" ]; then
     printf '%-28s clean\n' "$d"

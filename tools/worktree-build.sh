@@ -46,9 +46,23 @@ if [ ! -f "$ROOT/deps/imgui/imgui.cpp" ]; then
   git -C "$ROOT" submodule update --init --recursive
 fi
 
-echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build (ccache shared)"
+# The SAME configuration as main's build/, or no object is shared: a Debug
+# worktree beside a Release main missed ccache on every file, and ran the
+# suite slower and differently (watchdog_smoke failed in every Debug tree).
+MAIN="$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"
+BUILD_TYPE="$(sed -n 's/^CMAKE_BUILD_TYPE:[A-Z]*=//p' "$MAIN/build/CMakeCache.txt" 2>/dev/null)"
+BUILD_TYPE="${BUILD_TYPE:-Release}"
+# Memory, not cores, is what runs out: about 1.5 GB a compiler. Four
+# worktrees at one job per core got the machine's OOM killer to take the
+# agent host itself.
+AVAIL_KB="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
+JOBS=$(( AVAIL_KB / 1572864 ))
+[ "$JOBS" -lt 1 ] && JOBS=1
+[ "$JOBS" -gt "$(nproc)" ] && JOBS="$(nproc)"
+
+echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build ($BUILD_TYPE like main, -j$JOBS by free memory; ccache shared)"
 nix-shell "$ROOT/shell.nix" --run \
-  "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja >/dev/null && ninja -C '$ROOT/build' $TARGETS"
+  "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE >/dev/null && ninja -C '$ROOT/build' -j$JOBS $TARGETS"
 echo "worktree-build: done."
 if PORT="$("$ROOT/tools/scratch_port.py")"; then
   echo "  scratch port for this worktree: $PORT   (8799 is main's dev-watch)"

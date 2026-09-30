@@ -21,11 +21,18 @@ set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
 
 # Use ccache when available (no-op otherwise) for fast unchanged-TU rebuilds.
+# CCACHE_BASEDIR is THIS source tree: every path under it is hashed relative
+# to the build directory (`../src/...`), so a worktree's compile of a file is
+# the same key as main's and hits what main already built. Without it the
+# absolute `-I…/.claude/worktrees/agent-…/src` was part of every key, and no
+# worktree ever reused an object (docs/architecture.md#precompiled-headers).
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
-  set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-  set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-  message(STATUS "ccache enabled: ${CCACHE_PROGRAM}")
+  set(CMAKE_CXX_COMPILER_LAUNCHER
+      "${CMAKE_COMMAND};-E;env;CCACHE_BASEDIR=${CMAKE_SOURCE_DIR};${CCACHE_PROGRAM}")
+  set(CMAKE_C_COMPILER_LAUNCHER
+      "${CMAKE_COMMAND};-E;env;CCACHE_BASEDIR=${CMAKE_SOURCE_DIR};${CCACHE_PROGRAM}")
+  message(STATUS "ccache enabled: ${CCACHE_PROGRAM} (base_dir ${CMAKE_SOURCE_DIR})")
 endif()
 
 # Opt-in AddressSanitizer + UndefinedBehaviorSanitizer build
@@ -567,8 +574,12 @@ set_source_files_properties(${cam_sources} PROPERTIES COMPILE_OPTIONS
 
 add_library(designer_core STATIC ${core_sources})
 target_compile_definitions(designer_core PUBLIC
-    DESIGNER_VERSION="${PROJECT_VERSION}"
-    DESIGNER_GIT_COMMIT="${DESIGNER_GIT_COMMIT}")
+    DESIGNER_VERSION="${PROJECT_VERSION}")
+# The commit on the ONE file that reads it. As a PUBLIC define it was on 409
+# of 427 sources, so every reconfigure at a new commit recompiled all of them
+# and no worktree (configured at its own commit) could hit ccache.
+set_source_files_properties(src/common/BuildInfo.cpp PROPERTIES
+    COMPILE_DEFINITIONS "DESIGNER_GIT_COMMIT=\"${DESIGNER_GIT_COMMIT}\"")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
 if(HAVE_CAM)
