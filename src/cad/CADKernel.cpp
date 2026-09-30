@@ -1,5 +1,6 @@
 #include "cad/CADKernel.h"
 
+#include <array>
 #include <cmath>
 #include <deque>
 #include <filesystem>
@@ -169,7 +170,140 @@ VolumeCache& TheVolumeCache() {
   return cache;
 }
 
+// The TIGHT box by shape IDENTITY and LOCATION: the same TShape at the same
+// placement is the same point set, whichever CADShape object holds it. The
+// memo on the object is lost with it, and a job tab frames its parts afresh
+// every time it is visited -- a new CADShape, the same TShape, the same
+// location -- so a job indexed at an angle no quarter turn reaches paid its
+// exact boxes again on every return: 210 ms on the frame-time test's shaft,
+// most of a second on the chess blanks (docs/cam/gui.md#job-tab-frame-cost).
+// Only LOCATED shapes are stored: an unlocated one's box is on the object,
+// and is usually a regeneration's intermediate nobody asks about twice. The
+// handle keeps the TShape alive, as the volume cache's does, so an address
+// is never recycled under an entry; the ring bounds what it holds.
+struct LocatedBoxCache {
+  struct Key {
+    const TopoDS_TShape* tshape = nullptr;
+    std::array<double, 12> trsf{};
+    bool operator==(const Key& o) const {
+      return tshape == o.tshape && trsf == o.trsf;
+    }
+  };
+  struct KeyHash {
+    size_t operator()(const Key& k) const {
+      size_t h = std::hash<const void*>{}(k.tshape);
+      for (const double v : k.trsf)
+        h = (h ^ std::hash<double>{}(v)) * 1099511628211ull;
+      return h;
+    }
+  };
+  struct Entry {
+    Handle(TopoDS_TShape) keepAlive;
+    glm::vec3 min{0.0f}, max{0.0f};
+  };
+  static constexpr size_t kCapacity = 1024;
+  std::mutex mutex;
+  std::unordered_map<Key, Entry, KeyHash> entries;
+  std::deque<Key> order; // insertion order, for eviction
+
+  static Key KeyOf(const TopoDS_Shape& shape) {
+    Key k;
+    k.tshape = shape.TShape().get();
+    const gp_Trsf t = shape.Location().Transformation();
+    for (int r = 1; r <= 3; r++)
+      for (int c = 1; c <= 4; c++)
+        k.trsf[(r - 1) * 4 + (c - 1)] = t.Value(r, c);
+    return k;
+  }
+  bool Find(const TopoDS_Shape& shape, glm::vec3& min, glm::vec3& max) {
+    const Key k = KeyOf(shape);
+    std::lock_guard<std::mutex> lock(mutex);
+    const auto it = entries.find(k);
+    if (it == entries.end())
+      return false;
+    min = it->second.min;
+    max = it->second.max;
+    return true;
+  }
+  void Store(const TopoDS_Shape& shape, const glm::vec3& min,
+             const glm::vec3& max) {
+    const Key k = KeyOf(shape);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (entries.find(k) == entries.end()) {
+      order.push_back(k);
+      while (order.size() > kCapacity) {
+        entries.erase(order.front());
+        order.pop_front();
+      }
+    }
+    entries[k] = {shape.TShape(), min, max};
+  }
+  size_t Size() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return entries.size();
+  }
+  void Clear() {
+    std::lock_guard<std::mutex> lock(mutex);
+    entries.clear();
+    order.clear();
+  }
+};
+
+LocatedBoxCache& TheLocatedBoxCache() {
+  static LocatedBoxCache cache;
+  return cache;
+}
+
 } // namespace
+
+void CADShape::RememberTightBox(const CADShape& shape, const glm::vec3& min,
+                                const glm::vec3& max) {
+  if (!shape.IsValid())
+    return;
+  shape.m_boxMin[1] = min;
+  shape.m_boxMax[1] = max;
+  shape.m_boxValid[1] = true;
+  TheLocatedBoxCache().Store(shape.m_shape, min, max);
+}
+
+bool CADShape::HasTightBox() const { return m_boxValid[1]; }
+
+void CADShape::ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const {
+  min = max = glm::vec3(0.0f);
+  if (m_shape.IsNull())
+    return;
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(m_shape, box, /*useTriangulation=*/Standard_False,
+                         /*useShapeTolerance=*/Standard_False);
+  if (box.IsVoid())
+    return;
+  double xmin, ymin, zmin, xmax, ymax, zmax;
+  box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  min = glm::vec3(xmin, ymin, zmin);
+  max = glm::vec3(xmax, ymax, zmax);
+}
+
+size_t CADShape::SharedTightBoxCount() { return TheLocatedBoxCache().Size(); }
+
+void CADShape::ForgetSharedTightBoxes() { TheLocatedBoxCache().Clear(); }
+
+CADShape CADShape::DetachedUnlocated() const {
+  if (m_shape.IsNull())
+    return CADShape();
+  try {
+    BRepBuilderAPI_Copy copier(m_shape.Located(TopLoc_Location()));
+    if (copier.IsDone())
+      return CADShape(copier.Shape());
+  } catch (const Standard_Failure&) {
+  }
+  return CADShape();
+}
+
+CADShape CADShape::LocatedLike(const CADShape& like) const {
+  if (m_shape.IsNull() || like.m_shape.IsNull())
+    return CADShape();
+  return CADShape(m_shape.Located(like.m_shape.Location()));
+}
 
 const void* CADShape::GeometryId() const {
   return m_shape.IsNull() ? nullptr
@@ -261,6 +395,15 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
     return;
   }
 
+  // Another object holding this TShape at this location may have paid for
+  // it already (TheLocatedBoxCache).
+  if (tight && TheLocatedBoxCache().Find(m_shape, min, max)) {
+    m_boxMin[slot] = min;
+    m_boxMax[slot] = max;
+    m_boxValid[slot] = true;
+    return;
+  }
+
   Bnd_Box box;
   // NOT from the triangulation. `Add` uses one when the shape has been meshed
   // and inflates the box by its deflection, so a part with a single curved
@@ -301,6 +444,8 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
   m_boxMin[slot] = min;
   m_boxMax[slot] = max;
   m_boxValid[slot] = true;
+  if (tight && !m_shape.Location().IsIdentity())
+    TheLocatedBoxCache().Store(m_shape, min, max);
 }
 
 CADShape CADShape::Union(const CADShape& other) const {

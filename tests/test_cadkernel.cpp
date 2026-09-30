@@ -418,6 +418,64 @@ TEST_CASE("a quarter-turned copy carries the tight box, and it is exact",
   }
 }
 
+TEST_CASE("a shape framed again reads the exact box another framing paid for",
+          "[kernel][bbox]") {
+  // A job tab frames its parts afresh on every visit: a new CADShape, the
+  // same TShape, the same location. At an angle no quarter turn reaches, the
+  // memo on the object was cold every time; the box is now remembered by
+  // identity and location too (docs/cam/gui.md#job-tab-frame-cost).
+  CADShape::ForgetSharedTightBoxes();
+  const CADShape source = CADKernel::Instance().CreateCylinder(
+      glm::vec3(3, -2, 7), glm::vec3(1, 0, 0), 4.0, 25.0);
+  const glm::mat4 at30 =
+      glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(1, 0, 0));
+  const CADShape first = source.Transformed(at30);
+  REQUIRE_FALSE(first.HasTightBox());
+  glm::vec3 lo(0.0f), hi(0.0f);
+  first.GetBoundingBox(lo, hi, /*tight=*/true);
+  CHECK(CADShape::SharedTightBoxCount() == 1);
+
+  // Framed again: cold on the object, answered from the shared memo, to the
+  // bit.
+  const CADShape again = source.Transformed(at30);
+  REQUIRE_FALSE(again.HasTightBox());
+  glm::vec3 aLo(0.0f), aHi(0.0f);
+  again.GetBoundingBox(aLo, aHi, /*tight=*/true);
+  CHECK(aLo == lo);
+  CHECK(aHi == hi);
+  CHECK(CADShape::SharedTightBoxCount() == 1);
+
+  // Another angle is another entry, and another answer.
+  const CADShape at40 = source.Transformed(
+      glm::rotate(glm::mat4(1.0f), glm::radians(40.0f), glm::vec3(1, 0, 0)));
+  glm::vec3 bLo(0.0f), bHi(0.0f);
+  at40.GetBoundingBox(bLo, bHi, /*tight=*/true);
+  CHECK(CADShape::SharedTightBoxCount() == 2);
+  CHECK(bHi.z != hi.z);
+
+  // A worker's answer, from a detached copy placed where the framing is, is
+  // the framing's own box -- and remembered under the framing's identity it
+  // serves the next framing.
+  CADShape::ForgetSharedTightBoxes();
+  const CADShape copy = source.DetachedUnlocated().LocatedLike(first);
+  REQUIRE(copy.IsValid());
+  CHECK(copy.GeometryId() != first.GeometryId());
+  glm::vec3 cLo(0.0f), cHi(0.0f);
+  copy.ExactBoxUnmemoized(cLo, cHi);
+  CHECK(CADShape::SharedTightBoxCount() == 0); // unmemoized: nothing kept
+  for (int a = 0; a < 3; a++) {
+    CHECK_THAT(cLo[a], WithinAbs(lo[a], 1e-4f));
+    CHECK_THAT(cHi[a], WithinAbs(hi[a], 1e-4f));
+  }
+  CADShape::RememberTightBox(first, cLo, cHi);
+  const CADShape third = source.Transformed(at30);
+  glm::vec3 tLo(0.0f), tHi(0.0f);
+  third.GetBoundingBox(tLo, tHi, /*tight=*/true);
+  CHECK(tLo == cLo);
+  CHECK(tHi == cHi);
+  CADShape::ForgetSharedTightBoxes();
+}
+
 TEST_CASE("GenerateMesh honours a stated deflection", "[kernel][mesh]") {
   // The deflection argument used to be decoration: the size-scaling rule
   // (0.2% of the bounding diagonal) overwrote it whenever the shape had a

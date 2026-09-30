@@ -106,6 +106,31 @@ public:
   // one would be remembered from before the mesh existed and quietly disagree
   // with the same call made after.
   void GetBoundingBox(glm::vec3& min, glm::vec3& max, bool tight = false) const;
+  // The tight box is ALSO remembered by shape identity and location, for
+  // LOCATED shapes: every CADShape holding the same TShape at the same
+  // placement is the same point set, so a copy framed again -- a job tab
+  // revisited, a stock box derived from a fresh framing -- reads the box
+  // another copy paid for (docs/cam/gui.md#job-tab-frame-cost). Bounded, and
+  // the entries hold their TShapes, as the volume cache's do.
+  //
+  // `RememberTightBox` puts a box computed ELSEWHERE -- on a detached copy,
+  // by a worker -- on `shape` and under its identity. The caller vouches that
+  // it is `shape`'s box.
+  static void RememberTightBox(const CADShape& shape, const glm::vec3& min,
+                               const glm::vec3& max);
+  [[nodiscard]] bool HasTightBox() const;
+  // The tight box, computed, reading and writing no memo -- for a worker
+  // bounding a detached copy whose answer belongs to another shape.
+  void ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const;
+  [[nodiscard]] static size_t SharedTightBoxCount();
+  static void ForgetSharedTightBoxes();
+  // A deep copy (BRepBuilderAPI_Copy) at NO location: it shares no TShape
+  // with this one, so a worker may evaluate it while the frame meshes the
+  // original. `LocatedLike` puts a shape at another's location without
+  // copying geometry -- together they give a worker its own copy of a framed
+  // shape (docs/ui/long-operations.md).
+  [[nodiscard]] CADShape DetachedUnlocated() const;
+  [[nodiscard]] CADShape LocatedLike(const CADShape& like) const;
   // Disjoint-lump count (V2 digest): a body that silently split into two
   // solids is invisible in a volume total but not in this.
   int SolidCount() const;
@@ -482,6 +507,16 @@ public:
   bool IsValid() const { return false; }
   const void* GeometryId() const { return nullptr; }
   bool SameGeometryAs(const CADShape&) const { return false; }
+  static void RememberTightBox(const CADShape&, const glm::vec3&,
+                               const glm::vec3&) {}
+  bool HasTightBox() const { return false; }
+  void ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const {
+    min = max = glm::vec3(0);
+  }
+  static size_t SharedTightBoxCount() { return 0; }
+  static void ForgetSharedTightBoxes() {}
+  CADShape DetachedUnlocated() const { return CADShape(); }
+  CADShape LocatedLike(const CADShape&) const { return CADShape(); }
   double Volume() const { return 0.0; }
   int SolidCount() const { return 0; }
   int FaceCount() const { return 0; }
