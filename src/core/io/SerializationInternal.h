@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    138; // v138: an operation of type `engrave` -- sketch curves followed
+    139; // v139: a setup's own `rapid_feed` (mm/min), saved with the setup;
+         //      absent = 0, not stated. Only the machine's copy was before.
+         // v138: an operation of type `engrave` -- sketch curves followed
          //      on the curve -- and its `width_mm` / `depth_mm`.
          // v137: the sketch `text` entity -- a one-line label regenerated
          //      from its fields (font, cap height, anchor, alignment).

@@ -1,0 +1,47 @@
+{
+  "format": "designer-document",
+  "version": 139,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Plate"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Its own rapid",
+      "safe_z": 5.0,
+      "rapid_feed": 3000.0,
+      "machine": {
+        "name": "Shop router",
+        "post": "mach3",
+        "rapid_feed": 5000.0
+      },
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Not stated",
+      "safe_z": 5.0,
+      "machine": {
+        "name": "Shop router",
+        "post": "mach3",
+        "rapid_feed": 5000.0
+      },
+      "placements": [
+        {
+          "id": 11,
+          "part": 1
+        }
+      ]
+    }
+  ]
+}

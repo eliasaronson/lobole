@@ -417,6 +417,11 @@ json CamSetupToJson(const cam::Setup& setup) {
   // block (the v73-v76 goldens carry them).
   j["machine"] = MachineToJson(setup.machine);
   j["safe_z"] = setup.safeZ;
+  // The setup's own traverse rate (v139), seeded from the machine's but its
+  // own from then on: before it was saved a reload fell back to 0, "not
+  // stated", and the time estimates left the rapids out. Absent = 0.
+  if (setup.rapidFeed != 0.0)
+    j["rapid_feed"] = setup.rapidFeed;
   // DERIVED (v68): recomputed from the stock, the fixture and the picked face
   // on load, so it is written for a reader rather than read back. The RULE is
   // saved instead — the corner, not the coordinate — which is what stays right
@@ -576,6 +581,17 @@ cam::Setup CamSetupFromJson(const json& j) {
   setup.id = j.value("id", uint64_t{0});
   setup.name = j.value("name", std::string("Setup"));
   setup.safeZ = j.value("safe_z", 5.0);
+  // Refused rather than read as 0: a rate that is not a number, or is
+  // negative, is a damaged file, and 0 would quietly drop the rapids from
+  // every time estimate.
+  if (j.contains("rapid_feed")) {
+    const json& r = j.at("rapid_feed");
+    if (!r.is_number() || r.get<double>() < 0.0)
+      throw std::runtime_error("setup rapid_feed must be a number of mm/min, "
+                               "0 or more; got " +
+                               r.dump());
+    setup.rapidFeed = r.get<double>();
+  }
   if (j.contains("top_face"))
     setup.topFace = TargetFromJson(j["top_face"]);
   if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)

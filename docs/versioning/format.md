@@ -219,6 +219,7 @@ here; the golden corpus and git history cover them.
 | 136 | CAM operation `index_a_deg`: the rotary indices one operation is cut at, generated once per angle and joined by a retract; absent = the setup's `rotation_a` ([4th axis](../cam/rotary.md#one-operation-at-several-indices)) |
 | 137 | Sketch entity `text`: a one-line label (`text`, `font` sans/hershey, CAP `height`, `anchor`, `angle`/`angle_deg`, `halign`, `valign`, `spacing`), its glyphs regenerated from the fields and never saved ([sketching](../sketching/README.md#text)) |
 | 138 | CAM operation type `engrave` (sketch curves followed on the curve; a target is `{feature_id: <sketch>, element: "g<entity id>"}`) and its groove, `width_mm` or `depth_mm`; absent = not stated ([engrave](../cam/operations.md#engrave)) |
+| 139 | CAM setup `rapid_feed` (mm/min): the setup's own traverse rate, seeded from the machine's and saved with the setup (only the machine's copy was); absent = 0, not stated, and a negative or non-numeric one is refused ([post](../cam/post.md)) |
 
 ## The directory form
 

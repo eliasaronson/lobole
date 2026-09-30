@@ -1,0 +1,13 @@
+{
+  "job_parts": [
+    "Plate"
+  ],
+  "cam_setup_rapid_feeds": [
+    3000.0,
+    0.0
+  ],
+  "cam_machine_rapid_feeds": [
+    5000.0,
+    5000.0
+  ]
+}

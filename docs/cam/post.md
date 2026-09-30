@@ -48,7 +48,8 @@ dialect needs canned cycles translated. The post id is the machine's
   the end: retract, `M5`, end word.
 - **Spindle** `S<rpm> M3` is restated after every pause even when the speed
   has not changed — a manual change is done with the spindle stopped.
-- **Rapids** are `G0`. `Setup::rapidFeed` (seeded from the machine) is the
+- **Rapids** are `G0`. `Setup::rapidFeed` (seeded from the machine, and
+  saved with the setup as its own `rapid_feed` since v139) is the
   traverse rate the cycle time is clocked with, and the feed of adaptive's
   links through cleared material (still `G1`, a straight line); when it is
   zero rapids are left out of the clock rather than invented, and the links

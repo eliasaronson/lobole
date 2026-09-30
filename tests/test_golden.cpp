@@ -96,6 +96,29 @@ void AssertCamShapes(const std::vector<cam::Setup>& setups,
       CHECK(got[i] == want[i]);
     }
   }
+  // v139: each setup's own traverse rate, and its machine's beside it -- the
+  // setup's used to reload as 0 while the machine's copy survived, and the
+  // two differing in the golden is what shows which one was read.
+  if (expect.contains("cam_setup_rapid_feeds")) {
+    const auto want =
+        expect.at("cam_setup_rapid_feeds").get<std::vector<double>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK_THAT(setups[i].rapidFeed,
+                 Catch::Matchers::WithinAbs(want[i], 1e-9));
+    }
+  }
+  if (expect.contains("cam_machine_rapid_feeds")) {
+    const auto want =
+        expect.at("cam_machine_rapid_feeds").get<std::vector<double>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK_THAT(setups[i].machine.rapidFeed,
+                 Catch::Matchers::WithinAbs(want[i], 1e-9));
+    }
+  }
 }
 
 // The workpiece and where zero is on it (v68). The stock box is what every

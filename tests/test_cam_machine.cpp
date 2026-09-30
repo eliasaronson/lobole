@@ -405,6 +405,35 @@ TEST_CASE("cam machine: a setup embeds it, and a v76 file still reads",
                     Catch::Matchers::ContainsSubstring("haas"));
 }
 
+// v139: the setup's own traverse rate is saved with it -- only the machine's
+// copy was, so a setup's rate reloaded as 0 and the clock dropped its rapids.
+// Absent is 0 ("not stated"); a rate that is not a rate is refused, not 0.
+TEST_CASE("cam machine: a setup's own rapid feed survives a reload",
+          "[cam][machine][job]") {
+  cam::Setup setup;
+  setup.name = "Sheet";
+  setup.machine.rapidFeed = 5000.0;
+  setup.rapidFeed = 3000.0; // its own, not the machine's
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK(j.at("rapid_feed").get<double>() == 3000.0);
+  const cam::Setup back = DocumentIO::CamSetupFromJson(j);
+  CHECK(back.rapidFeed == 3000.0);
+  CHECK(back.machine.rapidFeed == 5000.0);
+
+  setup.rapidFeed = 0.0; // not stated: not written, and read back as 0
+  const auto unstated = DocumentIO::CamSetupToJson(setup);
+  CHECK(!unstated.contains("rapid_feed"));
+  CHECK(DocumentIO::CamSetupFromJson(unstated).rapidFeed == 0.0);
+
+  for (const nlohmann::json& bad :
+       {nlohmann::json(-10.0), nlohmann::json("fast"), nlohmann::json()}) {
+    nlohmann::json damaged = j;
+    damaged["rapid_feed"] = bad;
+    CHECK_THROWS_WITH(DocumentIO::CamSetupFromJson(damaged),
+                      Catch::Matchers::ContainsSubstring("rapid_feed"));
+  }
+}
+
 TEST_CASE("cam machine: the store saves, lists, refuses and deletes",
           "[cam][machine]") {
   namespace fs = std::filesystem;
