@@ -485,7 +485,7 @@ struct NoGlobalGitConfig {
 void SetGitConfig(const ScratchRepo& repo, const char* key, const char* value) {
   const std::string cmd = "git -C '" + repo.path() + "' config " + key + " '" +
                           value + "' 2>/dev/null";
-  (void)std::system(cmd.c_str());
+  [[maybe_unused]] const int rc = std::system(cmd.c_str());
 }
 
 } // namespace
@@ -563,7 +563,7 @@ struct BareRemote {
     fs::create_directories(dir);
     const std::string cmd =
         "git init --bare -q '" + dir.string() + "' 2>/dev/null";
-    (void)std::system(cmd.c_str());
+    [[maybe_unused]] const int rc = std::system(cmd.c_str());
   }
   ~BareRemote() {
     std::error_code ec;

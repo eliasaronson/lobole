@@ -189,7 +189,7 @@ TEST_CASE("every hole of a sketch is cut as one body, not one at a time",
   auto sk = std::make_unique<SketchFeature>(
       "Holes",
       SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
-  int entity = 1;
+  uint32_t entity = 1;
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 3; j++)
       sk->AddEntity(sketch::Circle{grid(i, j), 2.0, entity++});

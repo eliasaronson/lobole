@@ -341,8 +341,11 @@ void BeginDockspace(AppState& state) {
       // them into the saved layout, and they are what draws the triangle.
       ImGuiDockNodeFlags want =
           node->LocalFlags &
-          ~(ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_AutoHideTabBar |
-            ImGuiDockNodeFlags_HiddenTabBar);
+          // ImGui splits these over a public and a private enum; OR-ing the
+          // two enums directly is deprecated in C++20, so as the flag type.
+          ~(static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_NoTabBar) |
+            static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_AutoHideTabBar) |
+            static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_HiddenTabBar));
       if (node->Windows.Size == 1)
         want |= ImGuiDockNodeFlags_NoTabBar;
       // Guarded, or SetLocalFlags marks the .ini dirty on every frame.

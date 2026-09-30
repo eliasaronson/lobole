@@ -31,14 +31,6 @@ cache, but nothing survives a restart or a new run.
 **Verified by:** the knights generate time before and after, the same verdict
 (no gouge, same leftover), `ctest -L cam`, and the chess set's CAM stage time.
 
-## 3. Build hygiene
-
-- **A true Debug build (`-Og`) prints 9 warnings**, among them
-  `-Wformat-truncation` in `CurveFeature.cpp` and `-Wunused-result` in
-  `test_gitvault.cpp`. Fix them.
-
-**Verified by:** a Debug build with no warnings, and both scripts' runs.
-
 ## 4. Two bugs the GUI round found
 
 - **Editor field edits do not undo.** The op, tool and fixture editors in the

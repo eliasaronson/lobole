@@ -1943,7 +1943,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const double bboxIou = boxUnion > 1e-9 ? boxInter / boxUnion : 0.0;
 
     std::vector<std::string> verdicts;
-    char buf[160];
+    // Room for the longest sentence below: at 160 the census line lost its
+    // ending ("...to compare the SHAPES") whenever the round-trip note was on.
+    char buf[320];
     // A shape verdict needs the overlap. Without it this says what it CAN
     // support — size, placement, topology — and never "match", which only a
     // boolean can earn.

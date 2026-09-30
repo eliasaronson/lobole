@@ -155,7 +155,7 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     const double need =
         corners[i].tangent + (i + 2 < p.size() ? corners[i + 1].tangent : 0.0);
     if (need > run + 1e-9) {
-      char buf[160];
+      char buf[256]; // the sentence with two point numbers and two lengths
       std::snprintf(buf, sizeof buf,
                     "the straight between points %zu and %zu is %.3g mm and "
                     "the bends at its ends need %.3g mm of it: use a longer "

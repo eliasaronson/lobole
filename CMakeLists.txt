@@ -152,6 +152,12 @@ option(ENABLE_TEST_ENGINE
        "Build with Dear ImGui Test Engine (GUI tests + remote ui_action)" ON)
 
 set(IMGUI_TEST_ENGINE_DIR deps/imgui_test_engine/imgui_test_engine)
+# Vendored: its fread/system calls ignore their results, which -Og -Wall flags.
+# Not ours to edit, so not ours to warn about.
+set_source_files_properties(
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_perftool.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_utils.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-result")
 if(ENABLE_TEST_ENGINE)
   include_directories(SYSTEM ${IMGUI_TEST_ENGINE_DIR})
 endif()
