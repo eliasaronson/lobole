@@ -55,10 +55,7 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
 # Memory, not cores, is what runs out: about 1.5 GB a compiler. Four
 # worktrees at one job per core got the machine's OOM killer to take the
 # agent host itself.
-AVAIL_KB="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
-JOBS=$(( AVAIL_KB / 1572864 ))
-[ "$JOBS" -lt 1 ] && JOBS=1
-[ "$JOBS" -gt "$(nproc)" ] && JOBS="$(nproc)"
+JOBS="$("$ROOT/tools/build-jobs")"
 
 echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build ($BUILD_TYPE like main, -j$JOBS by free memory; ccache shared)"
 nix-shell "$ROOT/shell.nix" --run \

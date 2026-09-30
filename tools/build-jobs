@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# How many parallel jobs this machine can take right now, by MEMORY: about
+# 1.5 GB a compiler by default, or the MB per job given as $1 (an app-driving
+# test is less). Never more than the cores, never fewer than one.
+#
+#   ninja -j"$(tools/build-jobs)"            # compiles
+#   ctest -j"$(tools/build-jobs 700)"        # tests that each start the app
+#
+# Memory, not cores, is what runs out here: four worktree builds at one job
+# per core (22) got the OOM killer to take 58 compilers and then the agent
+# host itself (docs/plans/dev-loop.md).
+set -euo pipefail
+per_mb="${1:-1536}"
+avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
+jobs=$(( avail_kb / (per_mb * 1024) ))
+cores="$(nproc)"
+[ "$jobs" -lt 1 ] && jobs=1
+[ "$jobs" -gt "$cores" ] && jobs="$cores"
+echo "$jobs"

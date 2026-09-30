@@ -1,0 +1,8 @@
+# Agent worktrees (.claude/worktrees/*) are whole copies of the project, each
+# with its own compile_commands.json: indexed, each is another project's worth
+# of symbols -- clangd held 5.4 GB with a few of them present, the largest
+# process on the machine after the browser (docs/plans/dev-loop.md).
+If:
+  PathMatch: \.claude/worktrees/.*
+Index:
+  Background: Skip

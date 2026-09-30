@@ -31,10 +31,12 @@ Bare `ninja`/`cmake` fail outside the nix env (missing glm/vulkan/OCC headers).
 Always wrap:
 
 ```
-nix-shell shell.nix --run "cd build && ninja designer designer_tests"
+nix-shell shell.nix --run "cd build && ninja -j$(tools/build-jobs) designer designer_tests"
 ```
 
-That pair is the inner loop. A *fresh* build dir needs plain `ninja` — the
+That pair is the inner loop. **`-j` comes from free memory, not cores**
+(`tools/build-jobs`, ~1.5 GB a compiler): at one job per core, parallel
+builds got the OOM killer to take the agent host itself. A *fresh* build dir needs plain `ninja` — the
 pair skips `femgpu_tests`, and ctest then fails on a missing executable
 instead of running the suite.
 
@@ -156,6 +158,13 @@ list kept elsewhere drifts.
   `.terminate()` on it) orphans the Xvfb child AND the app; kill the announced
   app pid (`headless-preview.sh --stop`), and the GUI runner reaps orphaned
   Xvfb on its next run.
+- **Wait on a pid or a marker, kill by a pid — never by a pattern.** A
+  `pgrep -f PATTERN` loop matches its own command line and waits forever; the
+  same pattern given to `pkill -f` kills the shell that ran it (exit 144). A
+  long run goes through `run_in_background` and its completion notice, or
+  `tools/wait-for.sh --pid N` / `--file F --line REGEX`, whose deadline sits
+  under the 600 s tool cap so a waiter is never left running in the
+  background.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
   **`--pixel` is the third**: the gui-suite job's byte-exact render gate, in a
@@ -243,7 +252,9 @@ The app must own a real renderer to screenshot; true `--headless` has none.
 ## Parallel work in git worktrees
 
 Worth it only for genuinely **file-disjoint** work (different subsystems);
-overlapping edits just move the cost to merge. Setup:
+overlapping edits just move the cost to merge. **Start worktree agents two at
+a time**: memory runs out before cores do. A docs-only change needs no
+worktree; it goes in main after the code has merged. Setup:
 ```
 git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/worktree-build.sh)
 ```

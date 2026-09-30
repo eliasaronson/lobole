@@ -33,5 +33,8 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Parallel by memory, not cores: each app-driving test is its own process
+# (tools/build-jobs).
+jobs="$("$root/tools/build-jobs" 700)"
 exec nix-shell "$root/shell.nix" --run \
-  "cd '$root/build' && ctest -LE 'gui|slow' -j\$(nproc) --output-on-failure $*"
+  "cd '$root/build' && ctest -LE 'gui|slow' -j$jobs --output-on-failure $*"
