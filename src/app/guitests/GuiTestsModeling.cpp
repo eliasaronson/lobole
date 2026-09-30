@@ -1304,6 +1304,55 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
   };
 
+  // The editor's Modeled checkbox and Hand combo reach the feature: ticking
+  // it cuts the real groove (the body loses volume, the overlay stops being
+  // drawn over it), and Left is what the saved feature holds.
+  t = IM_REGISTER_TEST(engine, "thread", "modeled_checkbox_cuts_the_groove");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A short M8 boss: 8 turns, so the preview's cut is quick.
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 10.0));
+    ctx->Yield();
+    const double blank = Doc()->GetBodies()[0].shape.Volume();
+
+    ToolbarClick(ctx, "###tb_thread");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 5));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 5) +
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+                                   30.0f);
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(
+        glm::normalize(glm::vec3(1, 1, 0)) * 4.0f + glm::vec3(0, 0, 5)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    auto* th = dynamic_cast<ThreadFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(th != nullptr);
+    IM_CHECK(!th->face.name.empty());
+    IM_CHECK(!th->modeled);
+
+    ctx->SetRef("//Thread###ToolWindow");
+    ctx->ItemClick("Modeled");
+    ctx->ComboClick("###Hand/Left");
+    ctx->Yield(3);
+    th = dynamic_cast<ThreadFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(th != nullptr);
+    IM_CHECK(th->modeled);
+    IM_CHECK(!th->rightHanded);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const auto* kept = dynamic_cast<const ThreadFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(kept != nullptr);
+    IM_CHECK_STR_EQ(kept->GetError().c_str(), "");
+    IM_CHECK(kept->overlay.cut);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < blank - 1.0);
+  };
+
   // Repro for the reported circular-pattern segfault (dogfooding backlog):
   // preview a pattern on a body, switch it to Circular, and work the axis/
   // count/angle widgets across frames — the crash lived in this flow.

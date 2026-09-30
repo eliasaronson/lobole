@@ -2,8 +2,8 @@
 
 A hole records what it is **for**, not only how wide it is, so the drawing, the
 fastener derivation and the interference check can read the intent instead of
-reverse-engineering a diameter. Threads are cosmetic: an annotation on a
-cylindrical face that changes no geometry.
+reverse-engineering a diameter. A thread is an annotation on a cylindrical
+face, cosmetic by default; a modelled one cuts the real helical groove.
 
 ## Hole
 
@@ -29,6 +29,12 @@ cylindrical face that changes no geometry.
   configuration override and an expression on the thread. A thread or fit the
   tables do not carry is refused; nothing is interpolated or rounded to a
   neighbour. A hole without a fit behaves and serializes as a plain diameter.
+- **A unified thread taps too.** `fit: {thread: "3/8-16 UNC", kind:
+  "tapped"}` drills the unified table's own tap drill (5/16" here, see
+  [Thread standards](#thread-standards)), because the vendored tap table is
+  metric only. The TPI is part of the designation, so a `pitch` that differs
+  from it is refused. A clearance fit for a unified size is refused: the
+  clearance table is metric.
 - **A tapped fit threads the bore.** `RecordTapping` adds an internal thread
   region on every bore the hole cut, so a screw in it engages rather than
   reading as interference (see [Thread engagement](#thread-engagement)), and a
@@ -64,26 +70,110 @@ parts area).
 
 `ThreadFeature` (`src/core/features/ThreadFeature.{h,cpp}`), JSON type
 `Thread`: `face` (a cylindrical face by `ElementRef`), `designation` (`M8`,
-`M8x1`, or free text), `pitch`, `thread_class` (display only), `length` (0 =
-the whole face), `modeled`, `allow_engagement`, `minimum_engagement`.
+`M8x1`, `3/8-16 UNC`, optionally with a class suffix, or free text), `pitch`,
+`thread_class`, `length` (0 = the whole face), `modeled`, `hand` (`right` or
+`left`, absent = right), `allow_engagement`, `minimum_engagement`.
 
-- **Cosmetic.** The body is untouched; volume, STEP, mass and CAM see no
-  thread. Each regeneration resolves the face, checks it is cylindrical,
-  infers internal or external from the face normal, checks a known
-  designation fits the face's diameter, and computes an overlay the UI
-  draws: dashed circles at the thread depth (minor diameter on a boss, major
-  inside a hole, from the pitch by the ISO 68 profile) and crest lines. A
-  missing or non-cylindrical face is a feature error.
-- **Standards** (`src/core/ThreadStandards.{h,cpp}`, namespace `threads`): the
-  ISO metric coarse and fine series, `designation → {majorDia, pitch}`, with
-  `MinorDiameter` (D − 1.0825·P; M8 → 6.647) and `TapDrill` (D − P). A known
-  designation fills the pitch; a custom one keeps the typed pitch.
-- `modeled: true` is reserved and errors ("modeled threads are not implemented
-  yet") while the cosmetic overlay stays drawn —
-  [../plans/modeled-thread.md](../plans/modeled-thread.md).
-- GUI: `###tb_thread`, then pick a cylindrical face.
+- **Cosmetic** (the default). The body is untouched; volume, STEP, mass and
+  CAM see no thread. Each regeneration resolves the face, checks it is
+  cylindrical, infers internal or external from the face normal, checks a
+  known designation fits the face's diameter, and computes an overlay the
+  UI draws: dashed circles at the thread depth (minor diameter on a boss,
+  major inside a hole, from the pitch by the ISO 68 profile) and crest
+  lines. A missing or non-cylindrical face is a feature error.
+- **The designation** is resolved against the tables below. One that names
+  a series we carry — an `M` size, a size-TPI pair such as `1/4-20`, or a
+  `UNC`/`UNF` suffix — and is not a row is **refused**, naming the rows that
+  are (`1/4-20` alone is refused with "did you mean '1/4-20 UNC'?": the
+  series is not guessed). Any other text is a custom thread that keeps its
+  typed pitch.
+- **The class** (`thread_class`, or the designation's suffix: `M8-6g`,
+  `3/8-16 UNC-2B`) must be one the series has on the face's side: ISO 965
+  `6g`, `4h`, `6h`, `4g`, `8g`, `6e`, `6f` external and `6H`, `4H`, `5H`,
+  `7H`, `8H`, `5G`, `6G`, `7G` internal; unified `1A`/`2A`/`3A` external
+  and `1B`/`2B`/`3B` internal. `2B` on a boss is refused as the internal
+  class it is, and a suffix and a `thread_class` that disagree are refused
+  rather than one winning. A class drives no geometry: a modelled thread is
+  the basic profile. On a custom thread it is not checked, and the feature
+  warns so.
+- GUI: `###tb_thread`, then pick a cylindrical face. The editor has the
+  designation combo (both tables, then Custom), the class combo (the
+  series' classes for the face's side), **Modeled** and **Hand**.
 - Drawing notes can read a thread's `feature_<id>_pitch`, `_major` and
   `_tap_drill` (and a hole's `_diameter`, `_depth`) as note variables.
+
+## Thread standards
+
+`src/core/ThreadStandards.{h,cpp}`, namespace `threads`: rows of
+`{designation, majorDia, pitch, series, tapDrill}` in millimetres.
+
+- **ISO metric** (ISO 262): the coarse series M1.6 to M30 and the common fine
+  pitches. `TapDrill` is D − P (M8 → 6.75).
+- **Unified** (ASME B1.1): UNC `#1-64` to `1-8` and UNF `#0-80` to `1-12`,
+  entered in the units their standard uses (inches, TPI) and converted once.
+  Each row carries the 75%-thread tap drill a shop chart gives — a number,
+  letter or fractional drill (1/4-20 → #7, 5.105 mm; 3/8-16 → 5/16",
+  7.938 mm) — which D − P only approximates.
+- Both series share the 60° basic profile (ISO 68-1 = the UTS profile), so
+  `MinorDiameter` (D − 1.0825·P; M8 → 6.647, 3/8-16 → 7.807) and everything
+  derived from D and P serve either.
+- `Resolve` accepts each row's own spelling, a metric coarse thread with its
+  pitch written out (`M8x1.25` is `M8`), a number size without its `#`
+  (`10-32 UNF`), and any of these with a class suffix. `Lookup` is the same
+  without the error, for callers that only ask "is this a known thread".
+
+## Modelled threads
+
+`modeled: true` cuts the thread's groove from the body. It stays opt-in: a
+helical sweep-cut is the slowest boolean the kernel does, and most parts
+only need the callout.
+
+- **The groove** is the space between two teeth of the basic profile
+  (H = √3/2·P), drawn in the half-plane through the axis. External: the root
+  flat P/4 wide at the basic minor D/2 − 5H/8, the flanks opening outward to
+  P/10 past the face. Internal: the root flat P/8 at the major D/2, the
+  flanks opening inward to P/10 inside the wall (a tapped hole's wall is the
+  tap drill, so the crests are the drill's). D is the table's; a custom
+  thread takes the face as the major on a boss and as the basic minor in a
+  hole. The groove is capped at 0.95 P wide so neighbouring turns never
+  touch.
+- **The helix** (`src/core/HelicalSweep.{h,cpp}`) is one edge per
+  turn on a cylinder: one B-spline over many turns loses accuracy turn by
+  turn. It starts a quarter turn off the face's seam. `HelixEdge` is also
+  the Curve3D helix's builder.
+- **The sweep** is `MakePipeShell` with the axis as a fixed binormal
+  (`SweepFrame::Binormal` in `SweepProfileAlongSpine`): the exact screw
+  motion, which keeps the section in the axial plane. Frenet on OCC's
+  approximated helix tilts the section as it goes; it is only the fallback.
+  A solid that comes out inside-out is reversed.
+- **The ends.** An end that is the face's own end and opens onto air (asked
+  of the body over two pitches past it, at four angles) is left open, and
+  the groove runs out through it. An end against material — a boss's
+  shoulder, a blind hole's floor — or a `length` that stops mid-face is cut
+  square: the tool is clipped there by a cylinder. There is no runout. A
+  square end on a shoulder leaves the groove's footprint drawn as edges on
+  the shoulder's face (the tool's end lies on that face; the edges bound no
+  volume). A `Refine` merges them, at the price of renaming the body's
+  faces.
+- **The cut** is one checked subtract on the face's own body
+  (`CheckedBooleanNamed`), with the tool's faces named as a primitive's
+  (per-flank naming is not done). Any failure — a groove whose root would be
+  outside the boss, a sweep or a boolean the kernel refuses — is the
+  feature's error: the body stays as it was and the overlay stays drawn. A
+  cut that succeeds sets `overlay.cut`, and the UI draws no convention over
+  the real flanks.
+- **`HelicalSweep`** takes an axis frame, a span, a lead, a number of
+  starts, a hand and any closed axial profile, and returns the swept tool,
+  so a worm is the same call with a gear's axial profile.
+- **Cost**, on this machine: an M8×1.25 through a free 20 mm boss (16
+  turns, both ends open) about 2.6 s; a 3/8-16 UNC through a 10 mm plate
+  about 0.6 s; an M8 12 mm on a shoulder (one end squared) about 1.7 s. The
+  sweep itself takes tens of milliseconds; the time is the checked cut, and
+  the clip where an end is squared.
+- **Checked by volume.** A cutter that is screw-invariant and passes through
+  both ends of a length L removes exactly 2π·r̄·A·L/P (Pappus holds for the
+  screw motion), with A and r̄ the groove section's area and centroid radius
+  inside the blank. The tests assert that to 0.5%.
 
 ## Thread engagement
 
@@ -110,9 +200,13 @@ collision is geometric only and applies no relief.
 ## Tests
 
 `tests/test_hole.cpp` (kinds, a bolt pattern from one sketch, the
-empty-space warning), `tests/test_thread.cpp` (table lookups, cosmetic volume
-unchanged, bad faces, engagement relief, a tapped hole is threaded),
+empty-space warning), `tests/test_thread.cpp` (metric and unified table
+lookups and their refusals, cosmetic volume unchanged, bad faces, engagement
+relief, a tapped hole is threaded and takes a unified thread, modelled
+threads: an M8 in either hand by the Pappus volume and by following the
+groove, a shoulder left whole, a 3/8-16 UNC-2B in a tapped wall, a failure
+that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 `tests/test_parts.cpp` (the hole tables, fits and their refusals),
 `tests/test_derived.cpp` (a hole on a projected derived hole edge),
 `tests/test_drawing.cpp` (hole callouts), goldens `v36-thread-rib` and
-`v71-hole-fit`.
+`v71-hole-fit` and `v140-modeled-thread`.

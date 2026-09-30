@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 
 #include <TopoDS_Wire.hxx>
+#include <gp_Dir.hxx>
 
 #include <cstdint>
 #include <string>
@@ -12,8 +13,14 @@
 // How the swept profile is carried along the spine (OCC MakePipeShell trihedron
 // mode). CorrectedFrenet is the robust default — the section stays normal to
 // the path and can't self-twist on a helix; Frenet is the raw Frenet frame;
-// Fixed keeps the profile's world orientation constant.
-enum class SweepFrame { CorrectedFrenet, Frenet, Fixed };
+// Fixed keeps the profile's world orientation constant. Binormal holds the
+// trihedron's binormal on a given direction: along a helix with its axis as
+// the binormal, that is the exact screw motion, which keeps a section drawn in
+// the axial plane in the axial plane (the modelled thread and the worm,
+// core/HelicalSweep.h). Frenet on OCC's approximated helix, only C1,
+// tilts the section as it goes. Binormal is not a Sweep feature's option: it
+// needs a direction the feature does not carry.
+enum class SweepFrame { CorrectedFrenet, Frenet, Fixed, Binormal };
 
 // Resolves a sweep path id to an open spine wire: a SketchFeature (chain of
 // lines/arcs/splines) or a CurveFeature (3D curve). Null wire if unusable.
@@ -37,17 +44,20 @@ TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId);
 // the "two directions" sweep/loft: when `scaleToGuide` the sections grow/shrink
 // to keep contact with the guide (BRepFill_ContactOnBorder), else the guide
 // only reorients them (BRepFill_NoContact). `frame` applies only when there is
-// no guide. Null CADShape on failure; throws no OCC exception. Shared by
-// SweepFeature, PipeFeature, and LoftFeature (curves-3d Phase 2/3).
+// no guide; `binormal` only with SweepFrame::Binormal. Null CADShape on
+// failure; throws no OCC exception. Shared by SweepFeature, PipeFeature,
+// LoftFeature (curves-3d Phase 2/3) and HelicalSweep.
 CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
                                  const TopoDS_Wire& spine, SweepFrame frame,
                                  const TopoDS_Wire& guide = TopoDS_Wire(),
-                                 bool scaleToGuide = false);
+                                 bool scaleToGuide = false,
+                                 const gp_Dir& binormal = gp_Dir(0, 0, 1));
 
 // Single-profile convenience over SweepSectionsAlongSpine (orient-only guide).
 CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
                                 const TopoDS_Wire& spine, SweepFrame frame,
-                                const TopoDS_Wire& guide = TopoDS_Wire());
+                                const TopoDS_Wire& guide = TopoDS_Wire(),
+                                const gp_Dir& binormal = gp_Dir(0, 0, 1));
 
 // Sweeps a closed profile sketch along an open path (modeling M8):
 // BRepOffsetAPI_MakePipeShell skins the profile down the spine — a pipe from a

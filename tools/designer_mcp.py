@@ -221,8 +221,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "body_id"?: <target body's created_by id>}}
 - Thread (cosmetic or modeled thread on a cylindrical face):
   {{"type": "Thread", "name": str, "face": {{"feature_id", "element"}},
-  "designation"?: str (e.g. "M8x1.25"), "pitch": num, "length"?: num,
-  "length_expr"?: str, "modeled"?: bool (true cuts real helical threads)}}
+  "designation"?: str (ISO "M8"/"M8x1" or unified "3/8-16 UNC", "#10-32
+  UNF", optionally with a class suffix "-6g"/"-2B"; a series the tables
+  lack is REFUSED, other text is a custom thread), "pitch": num (mm, custom
+  only), "thread_class"?: str, "length"?: num (mm), "length_expr"?: str,
+  "modeled"?: bool (true cuts the real 60-degree helical groove, slow;
+  a failure keeps the body), "hand"?: "right"|"left"}}
 - Split (cut a body in two, keeping chosen sides): {{"type": "Split",
   "name": str, "body_id": <created_by id>, "knife"?: "plane" (default) |
   "face", plane: "datum_id"?: <DatumPlane id> or "base_plane":

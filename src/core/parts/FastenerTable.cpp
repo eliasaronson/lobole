@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/ThreadStandards.h"
 #include "core/parts/FastenerProfile.h"
 
 #include <algorithm>
@@ -621,6 +622,24 @@ std::optional<double> HoleDiameter(const std::string& thread, Fit fit,
       return std::nullopt;
     }
     return it->second;
+  }
+
+  // A unified thread ("3/8-16 UNC") names its pitch in its designation, and
+  // its tap drill is the number, letter or fraction drill the thread table
+  // carries — the vendored tap table is metric only.
+  if (const auto unified = threads::Lookup(thread);
+      unified && unified->series != threads::Series::Metric) {
+    if (pitch > 0.0 && std::abs(pitch - unified->pitch) > 1e-6) {
+      if (error) {
+        std::ostringstream msg;
+        msg << thread << " has a pitch of " << unified->pitch
+            << " mm (its TPI); a pitch of " << pitch
+            << " is a different thread";
+        *error = msg.str();
+      }
+      return std::nullopt;
+    }
+    return threads::TapDrill(*unified);
   }
 
   // Tapped: the drill depends on the PITCH as well as the size, and the two

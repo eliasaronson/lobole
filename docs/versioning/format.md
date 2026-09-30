@@ -220,7 +220,8 @@ here; the golden corpus and git history cover them.
 | 137 | Sketch entity `text`: a one-line label (`text`, `font` sans/hershey, CAP `height`, `anchor`, `angle`/`angle_deg`, `halign`, `valign`, `spacing`), its glyphs regenerated from the fields and never saved ([sketching](../sketching/README.md#text)) |
 | 138 | CAM operation type `engrave` (sketch curves followed on the curve; a target is `{feature_id: <sketch>, element: "g<entity id>"}`) and its groove, `width_mm` or `depth_mm`; absent = not stated ([engrave](../cam/operations.md#engrave)) |
 | 139 | CAM setup `rapid_feed` (mm/min): the setup's own traverse rate, seeded from the machine's and saved with the setup (only the machine's copy was); absent = 0, not stated, and a negative or non-numeric one is refused ([post](../cam/post.md)) |
-| 140 | Feature type `Bearing` {`designation`}: an ISO 15 deep-groove ball bearing generated from its designation (618/619/60/62/63, bores 3 to 30 mm), the whole of a generated standard part ([bearings](../parts/README.md#bearings)) |
+| 140 | Thread `hand` (`right` or `left`; absent = right, and any other value is refused), and `modeled: true` now cuts the real helical groove instead of erroring; the designation may name a unified thread (`3/8-16 UNC`) or carry a class suffix (`3/8-16 UNC-2B`) ([modelled threads](../modeling/holes-and-threads.md#modelled-threads)) |
+| 141 | Feature type `Bearing` {`designation`}: an ISO 15 deep-groove ball bearing generated from its designation (618/619/60/62/63, bores 3 to 30 mm), the whole of a generated standard part ([bearings](../parts/README.md#bearings)) |
 
 ## The directory form
 

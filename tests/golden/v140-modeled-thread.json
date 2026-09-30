@@ -1,0 +1,12 @@
+{
+  "format": "designer-document",
+  "version": 140,
+  "features": [
+    {"type": "Cylinder", "name": "Boss", "id": 1, "center": [0, 0, 0],
+     "direction": [0, 0, 1], "radius": 4.0, "height": 8.0},
+    {"type": "Thread", "name": "M8 left", "id": 2,
+     "face": {"feature_id": 1, "element": "1/face0"},
+     "designation": "M8", "pitch": 1.25, "thread_class": "6g",
+     "modeled": true, "hand": "left"}
+  ]
+}

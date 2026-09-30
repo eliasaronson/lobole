@@ -1953,6 +1953,43 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                                 lmax, th->length <= 0.0 ? "full face" : "%.3f"),
                  index, commit);
     }
+    // The class: the series' own classes for the side the face is on (the
+    // overlay knows which once the face resolves), or none.
+    if (const auto spec = threads::Lookup(th->designation)) {
+      const bool external = !th->overlay.valid || th->overlay.external;
+      const auto& classes = threads::Classes(spec->series, external);
+      LeftLabel("Class");
+      if (ImGui::BeginCombo("###ThreadClass", th->threadClass.empty()
+                                                  ? "(none)"
+                                                  : th->threadClass.c_str())) {
+        if (ImGui::Selectable("(none)", th->threadClass.empty())) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*th);
+          th->threadClass.clear();
+          CommitDiscrete(state, feature, before, index, commit);
+        }
+        for (const std::string& c : classes) {
+          if (ImGui::Selectable(c.c_str(), th->threadClass == c)) {
+            nlohmann::json before = DocumentIO::FeatureToJson(*th);
+            th->threadClass = c;
+            CommitDiscrete(state, feature, before, index, commit);
+          }
+        }
+        ImGui::EndCombo();
+      }
+    }
+    {
+      // Modelled cuts the real helical groove (slow on a long thread, which
+      // is why cosmetic stays the default); the hand is the helix's.
+      nlohmann::json before = DocumentIO::FeatureToJson(*th);
+      if (ImGui::Checkbox("Modeled", &th->modeled))
+        CommitDiscrete(state, feature, before, index, commit);
+      const char* hands[] = {"Right", "Left"};
+      int hand = th->rightHanded ? 0 : 1;
+      if (LabeledCombo("Hand", &hand, hands, 2)) {
+        th->rightHanded = hand == 0;
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+    }
     PickSlotRow(state, feature, PickSlot::ThreadFace,
                 th->face.name.empty() ? "" : th->face.name);
   } else if (auto* rb = dynamic_cast<RibFeature*>(&feature)) {

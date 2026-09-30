@@ -262,7 +262,7 @@ are a supplier's, not the standard's; they come from an imported catalog
 ([catalogs.md](catalogs.md)).
 
 **The body** (`BearingFeature`, `src/core/features/BearingFeature.{h,cpp}`,
-JSON type `Bearing`, format v140) is one solid of revolution drawn as a
+JSON type `Bearing`, format v141) is one solid of revolution drawn as a
 shielded bearing: an inner and an outer ring standing proud of a recessed
 shield on each side, the four outer corners chamfered at r_s min, and the
 ball space an internal toroidal void. One solid rather than rings and balls
@@ -339,7 +339,7 @@ bands, the body's named faces and its volume by Pappus, round trip, placing
 on a journal by face and by rim, a housing bore, a part-tab refusal, the BOM,
 `check_fits` on a k5 journal, `check_seat` with a square shoulder, a fillet
 too large and a catalog), GUI `parts/a_bearing_is_placed_on_a_picked_shaft`.
-Golden `v140-bearing`.
+Golden `v141-bearing`.
 
 ## RPCs
 
@@ -370,7 +370,8 @@ ghost count tracks the options, place, joined, check). Goldens
 
 - Phillips/Pozidriv drives (the Phillips table is vendored but unused), and
   any imperial sizes.
-- Modelled helical threads (the thread is cosmetic).
+- Modelled helical threads on generated fasteners (their thread is
+  cosmetic; a `Thread` feature on a part can model one).
 - Extrusions, motors, o-rings as generated parts; a searchable parts
   browser.
 - Bearings beyond deep-groove ball bearings at bores 3 to 30 mm; shield and
