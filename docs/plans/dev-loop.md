@@ -19,20 +19,6 @@ A fresh tree builds in about 2 minutes, where it took 11.5. Still open:
   purpose, and the smoke failed in every Debug tree: its stack shows
   `RunHeadless` rather than `StallSelfTest`.
 
-## 7. Performance has a test
-
-**What happened.** The human found a job tab running at 1 to 10 fps idle.
-It was computing OCC's exact bounding box three times a frame on the chess
-blanks' tori, and no test measures frame time.
-
-**Change.** A GUI test opens a job on a turned part (a torus-faced blank)
-and asserts the idle frame's `ui` phase is under a bound, read from
-`frame_stats`. It also switches job tabs and asserts the worst frame stays
-under a second, so the same cache regression fails the suite.
-
-**Saving.** One user-found regression, 24 minutes to diagnose, and the next
-one.
-
 ## 8. A test checks the contract, not the formula
 
 **What happened.** `SolveIndexA`'s test compared the formula with its own
@@ -49,8 +35,6 @@ audit of the other solvers (`SolveFaceUp` already does this, and
 
 ## Verification
 
-Item 2 by `watchdog_smoke` passing in a Debug tree and a Release one. Item 7
-comes with the test that would have failed this round, the job tab's idle
-frame, failing against a build without the stock-view cache. Item 8 is the
+Item 2 by `watchdog_smoke` passing in a Debug tree and a Release one. Item 8 is the
 `SolveIndexA` contract test, which is already in, and the audit of the other
 solvers.
