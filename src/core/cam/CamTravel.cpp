@@ -277,7 +277,8 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
 }
 
 DerivedReach DeriveReachOffset(const Setup& setup,
-                               const std::vector<Body>& bodies) {
+                               const std::vector<Body>& bodies,
+                               const std::vector<SketchCurves>& sketchCurves) {
   DerivedReach out;
   const Machine& m = setup.machine;
   if (!m.HasWorkArea()) {
@@ -295,6 +296,7 @@ DerivedReach DeriveReachOffset(const Setup& setup,
   // Where the window goes is decided by what the job actually CUTS, and this
   // build has no toolpath generator to ask. Refusing says so; guessing from
   // the stock would place the window over a sheet that is mostly overhang.
+  (void)sketchCurves;
   out.why = "this build cannot generate toolpaths, so there is nothing to "
             "measure the reach window against";
   return out;
@@ -306,7 +308,9 @@ DerivedReach DeriveReachOffset(const Setup& setup,
   glm::dvec2 lo(std::numeric_limits<double>::max());
   glm::dvec2 hi(std::numeric_limits<double>::lowest());
   bool any = false;
-  for (const Toolpath& tp : GenerateAll(probe, bodies)) {
+  GenerateContext ctx;
+  ctx.sketchCurves = sketchCurves; // an engraving is cut too
+  for (const Toolpath& tp : GenerateAll(probe, bodies, &ctx)) {
     for (const Move& mv : tp.moves) {
       lo = glm::min(lo, glm::dvec2(mv.to));
       hi = glm::max(hi, glm::dvec2(mv.to));

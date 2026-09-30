@@ -379,8 +379,12 @@ struct DerivedReach {
   bool ok = false;
   std::string why;
 };
-[[nodiscard]] DerivedReach DeriveReachOffset(const Setup& setup,
-                                             const std::vector<Body>& bodies);
+// `sketchCurves`: what the setup's engravings follow (JobSketchCurves), as
+// GenerateContext takes them -- without them an engraving cuts nothing and
+// the window was placed as if it were not there.
+[[nodiscard]] DerivedReach
+DeriveReachOffset(const Setup& setup, const std::vector<Body>& bodies,
+                  const std::vector<SketchCurves>& sketchCurves = {});
 // The stock against the travel, when the parts themselves fit: empty, or a
 // sentence saying which way the sheet hangs off the bed.
 [[nodiscard]] std::string MachineOverhang(const Setup& setup,

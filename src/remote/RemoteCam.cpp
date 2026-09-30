@@ -2069,8 +2069,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (p.contains("reach_offset")) {
       const json& r = p.at("reach_offset");
       if (r.is_string() && r.get<std::string>() == "auto") {
-        const cam::DerivedReach d =
-            cam::DeriveReachOffset(setup, ui::JobBodies(state));
+        const cam::DerivedReach d = cam::DeriveReachOffset(
+            setup, ui::JobBodies(state), ui::JobSketchCurves(state, setup));
         if (!d.ok)
           throw std::runtime_error(d.why);
         setup.reachOffset = d.offset;

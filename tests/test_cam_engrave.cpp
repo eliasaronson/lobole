@@ -505,4 +505,39 @@ TEST_CASE("cam: the job tab offers the sketches that mark, not the ones that "
     CHECK(cam::SketchEntityCurves(*doc, r).why.empty());
 }
 
+TEST_CASE("cam: the reach window is placed over an engraving", "[cam]") {
+  // DeriveReachOffset generates the setup's toolpaths to see where the
+  // cutting is, and generated them with no sketch curves: an engraving cut
+  // nothing, and a setup that only engraved was "cutting nothing yet".
+  uint32_t line = 0;
+  Engraved e = EngravedBlock([&](SketchFeature& sk) {
+    line = sk.AddEntity(sketch::Line{{25.0f, 5.0f}, {35.0f, 5.0f}});
+  });
+  cam::Operation op = Derived(e, {TargetOf(e, line)});
+  e.setup.operations.push_back(op);
+  // 12 mm of X travel against a 44 mm stock: the window has to be placed.
+  e.setup.machine.name = "Stubby";
+  e.setup.machine.travelMin = {0.0, 0.0, -100.0};
+  e.setup.machine.travelMax = {12.0, 600.0, 0.0};
+  const std::vector<cam::SketchCurves> curves = CurvesOf(e, op.targets);
+
+  const cam::DerivedReach blind =
+      cam::DeriveReachOffset(e.setup, e.doc->GetBodies());
+  CHECK_FALSE(blind.ok); // without the curves there is nothing to reach
+
+  const cam::DerivedReach reach =
+      cam::DeriveReachOffset(e.setup, e.doc->GetBodies(), curves);
+  INFO(reach.why);
+  REQUIRE(reach.ok);
+  e.setup.reachOffset = reach.offset;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::MachineBounds(e.setup, e.doc->GetBodies(), lo, hi));
+  CHECK(lo.x <= 25.0 + 1e-6); // the whole groove is inside the window
+  CHECK(hi.x >= 35.0 - 1e-6);
+  const cam::Toolpath tp = Cut(e, op);
+  INFO(tp.error);
+  CHECK(tp.error.empty());
+  CHECK(tp.clippedMm == 0.0);
+}
+
 #endif // HAVE_CAM
