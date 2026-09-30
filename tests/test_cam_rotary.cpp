@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <numbers>
 
 namespace {
 
@@ -370,6 +371,58 @@ TEST_CASE("cam rotary: a rapid through the bar is found", "[cam]") {
   // out exactly the bar it started as.
   CHECK_THAT(crash.maxLeftover, WithinAbs(0.0, 0.1));
   CHECK_THAT(crash.maxGouge, WithinAbs(0.0, 0.1));
+}
+
+TEST_CASE("cam rotary: a cell on the cutter's wall is outside by a decision, "
+          "not by rounding",
+          "[cam]") {
+  // docs/cam/rotary.md#the-cutters-wall. A toolpath lies on the grid's own
+  // lattice, so a 6 mm cutter over a 0.25 mm grid puts its wall EXACTLY on a
+  // column of cell centres -- and whether |dx| <= R there was the last bit
+  // of the blank's x0. On the chess knights a float32 walk counted two
+  // rapids 3 mm through stock that the double walk did not. Here the same
+  // move is asked with the grid nudged a picometre each way. Everything the
+  // cutter reaches is already cut below it except the column on its +X
+  // wall, so that column is the ONLY material in play.
+  cam::Tool flat;
+  flat.diameter = 6.0;
+  flat.type = cam::ToolType::Flat;
+  const double res = 0.25;
+  const double tipX = (40 + 0.5) * res; // over cell 40's centre
+  const auto walk = [&](double nudge, bool carve) {
+    cam::RadiusMap stock = cam::MakeRotaryStock(nudge, 20.0 + nudge, 10.0, res);
+    for (int i = 0; i < stock.nx; i++)
+      if ((i + 0.5) * res - tipX < 3.0 - 0.5 * res)
+        for (int j = 0; j < stock.nTheta; j++)
+          stock.Set(i, j, 5.0f);
+    // Turned so one row's ray points straight up the spindle: it stays on
+    // y = 0 its whole length, so on the wall it is wall from end to end.
+    const int jUp = stock.nTheta / 4;
+    cam::RotaryMove m;
+    m.from = m.to = glm::dvec3(tipX, 0.0, 7.0);
+    m.aFrom = m.aTo =
+        glm::degrees(0.5 * std::numbers::pi - stock.CellTheta(jUp));
+    m.tool = &flat;
+    m.rapid = !carve;
+    const std::vector<cam::RotaryRapidHit> hits =
+        cam::WalkRotaryProgram({m}, stock, 1);
+    if (carve) {
+      double sum = 0.0;
+      for (float v : stock.r)
+        sum += v;
+      return sum;
+    }
+    REQUIRE(hits.size() == 1);
+    return hits[0].depth;
+  };
+  for (const bool carve : {false, true}) {
+    INFO((carve ? "carve" : "rapid"));
+    const double nominal = walk(0.0, carve);
+    CHECK(walk(1e-12, carve) == nominal);
+    CHECK(walk(-1e-12, carve) == nominal);
+  }
+  // ...and the decision is OUTSIDE: the wall is where the cutter stops.
+  CHECK(walk(0.0, false) == 0.0);
 }
 
 TEST_CASE("cam rotary: turning the part takes time", "[cam]") {

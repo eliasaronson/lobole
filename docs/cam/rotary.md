@@ -394,6 +394,22 @@ panel's verification routes the same way.
   finding skips `surface_rotary`: its Z span is the blank's diameter, not a
   depth.
 
+### The cutter's wall
+
+The walk takes a cell as inside the cutter only within
+`R - kCutterWallTolerance` of its axis, as the planar carve does
+([simulation.md](simulation.md#the-cutters-wall)). On a radius map the tie
+it removes is worse than on a height map. A ray pointing straight up the
+spindle stays on the tool's centre plane for its whole length, so if its
+cell sits exactly on the wall the whole ray above the tip is wall. On the
+chess knights at 0.25 mm, a float32 walk counted two rapids 3 mm through
+stock that the double walk did not, decided only by how the blank's x0
+rounded. With the wall moved inside by 1e-4 mm, the two walks agreed at both
+resolutions and on a 16,513-rapid stress test. The pin is `cam rotary: a
+cell on the cutter's wall is outside by a decision, not by rounding`: the
+same rapid and carve, with the blank nudged by ±1e-12 mm, give the same
+answer.
+
 ### On every core
 
 The walk over the program (`WalkRotaryProgram`) is most of a turning's

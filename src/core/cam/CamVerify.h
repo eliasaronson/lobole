@@ -56,6 +56,17 @@ struct HeightMap {
 [[nodiscard]] HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max,
                                   double res);
 
+// How far inside its nominal radius a cutter's wall is taken to stand, mm,
+// wherever the verifier asks whether a cell is within reach of the tool --
+// the planar carve and rapid check here, the rotary walk in CamRotary.cpp
+// (docs/cam/simulation.md#the-cutters-wall). Toolpaths lie on the grid's own
+// lattice, so a cutter's wall lands EXACTLY on cell centres, and whether such
+// a cell was inside was decided by the last bit of rounding of the stock's
+// origin: a rapid 3 mm through stock on one side of an ulp, none on the
+// other. A tenth of a micron moves the wall off the lattice, and is a
+// hundredth of the thresholds any verdict is judged at.
+inline constexpr double kCutterWallTolerance = 1e-4;
+
 // Lowers `stock` where a tool sweeping from `from` to `to` passes. THE one
 // place material is removed: `Simulate`, the rapid probe in `Inspect` and the
 // playback in CamSim.h all funnel through it, so the picture on screen cannot

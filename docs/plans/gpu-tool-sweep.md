@@ -57,11 +57,11 @@ as a single dispatch. Knights Turn: 156,409 moves, 9,151 rapids.
 **Conclusion: the rotary check alone does not earn a second
 implementation.** Two findings carry on:
 
-- **The CPU reference has the same tie.** Its rapid verdict at a wall that
-  lands on a cell centre is decided by rounding. A wall tolerance, the
-  cutter's radius less 1e-4 mm, in `WalkSweepRotary` (and the planar
-  `CarveSweep`) makes it a decision. That is worth doing whatever happens to
-  the GPU.
+- **The CPU reference had the same tie**, and now decides it: the rotary
+  walk and the planar carve reach `R - kCutterWallTolerance` (1e-4 mm), so a
+  cell on the wall is outside by a decision
+  ([simulation.md](../cam/simulation.md#the-cutters-wall)). A kernel uses the
+  same reach.
 - **The kernel shape carries over.** Per-tile, file-order lists and one
   dispatch are what made it fast (310 ms to 45 ms). The candidates that could
   earn a kernel are the ones not yet measured.

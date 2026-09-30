@@ -634,4 +634,34 @@ TEST_CASE("cam verify: a through cut is not a gouge", "[cam]") {
   CHECK_FALSE(shallow.Safe(0.1));
 }
 
+TEST_CASE("cam verify: a cell on the cutter's wall is outside by a decision, "
+          "not by rounding",
+          "[cam]") {
+  // docs/cam/simulation.md#the-cutters-wall. A toolpath on the grid's own
+  // lattice puts a 6 mm cutter's wall EXACTLY on cell centres over a
+  // 0.25 mm grid, and whether d <= R there was the last bit of the stock's
+  // x0: nudged a picometre one way the +X wall cell was cut and the -X one
+  // was not, the other way round the reverse. Plunged, and traversed along
+  // Y, the carve must take the same metal whichever way the grid rounds.
+  cam::Tool flat;
+  flat.diameter = 6.0;
+  flat.type = cam::ToolType::Flat;
+  const double res = 0.25;
+  const double c = (40 + 0.5) * res; // over cell (40, 40)'s centre
+  const auto carve = [&](double nudge, bool traverse) {
+    cam::HeightMap stock =
+        cam::MakeStock(glm::dvec3(nudge, 0.0, -10.0),
+                       glm::dvec3(20.0 + nudge, 20.0, 0.0), res);
+    const glm::dvec3 from(c, c, 5.0);
+    const glm::dvec3 to(c, traverse ? c + 2.0 : c, -3.0);
+    return cam::CarveSweep(from, to, &flat, stock);
+  };
+  for (const bool traverse : {false, true}) {
+    INFO((traverse ? "traverse" : "plunge"));
+    const double nominal = carve(0.0, traverse);
+    CHECK_THAT(carve(1e-12, traverse), WithinAbs(nominal, 1e-6));
+    CHECK_THAT(carve(-1e-12, traverse), WithinAbs(nominal, 1e-6));
+  }
+}
+
 #endif // HAVE_CAM

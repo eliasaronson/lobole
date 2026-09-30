@@ -42,7 +42,11 @@ bool InsideTool(double x, double cphi, double sphi, double rad,
   const double z = rad * sphi;
   const double dx = x - tip.x, dy = y - tip.y;
   const double d = std::hypot(dx, dy);
-  if (d > toolR)
+  // The wall itself is outside, by kCutterWallTolerance and not by rounding:
+  // a toolpath on the grid's lattice puts it exactly on cell centres, and a
+  // ray straight up the spindle there is wall from end to end -- 3 mm of
+  // "rapid through stock" on one side of an ulp of the blank's x0.
+  if (d > toolR - kCutterWallTolerance)
     return false;
   const double surface = tip.z + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
   return z > surface;
@@ -301,7 +305,7 @@ SweepHit WalkSweepRotary(const glm::dvec3& from, const glm::dvec3& to,
     }
     for (int i = i0; i <= i1; i++) {
       const double x = stock.CellX(i);
-      if (std::abs(x - tip.x) > toolR)
+      if (std::abs(x - tip.x) > toolR - kCutterWallTolerance)
         continue;
       for (int k = 0; k < jCount; k++) {
         const int j = ((jFirst + k) % n + n) % n;

@@ -45,6 +45,25 @@ playback stock), `CamStockMesh.{h,cpp}` (meshes), `src/render/StockRenderer`,
   `Inspect`'s machined map bit for bit (a test), so every pixel on screen is a
   number the panel can also state.
 
+### The cutter's wall
+
+A cell is within the cutter's reach when its centre is at most
+`R - kCutterWallTolerance` from the tool's axis (1e-4 mm, `CamVerify.h`),
+not `R`. Toolpaths lie on the grid's own lattice, so a 6 mm cutter on a
+0.25 mm grid puts its wall exactly on cell centres, and whether those cells
+were inside was decided by the last bit of rounding of the stock's origin.
+Moving the wall a tenth of a micron inward takes it off the lattice: a cell
+on the wall is outside by a decision. The verdict thresholds are around
+0.01 mm, a hundred times larger, so no real answer moves.
+
+The same reach is used by every test that asks whether a cell is under the
+tool: `CarveSweep`, the rapid check, the coverage that decides where leftover
+counts (`touched`) and the nominal engraved grooves. The rotary walk uses it
+too ([rotary.md](rotary.md#the-cutters-wall)). The pin is `cam verify: a cell
+on the cutter's wall is outside by a decision, not by rounding`: a plunge and
+a traverse on the lattice carve the same metal with the stock's x0 nudged by
+±1e-12 mm.
+
 ## The verifier
 
 `Inspect` (and `VerifyGcode`, which routes a file whose A moves to

@@ -80,7 +80,8 @@ std::vector<float> GrooveFloor(const HeightMap& grid,
           double t = 0.0;
           const double d =
               DistToSegment({grid.CellX(i), grid.CellY(j)}, a, b, t);
-          if (d > r)
+          // The carve's own reach, so a cell on the wall is outside both.
+          if (d > r - kCutterWallTolerance)
             continue;
           const size_t k =
               static_cast<size_t>(j) * static_cast<size_t>(grid.nx) +
@@ -116,7 +117,7 @@ void MarkSwept(const glm::dvec3& from, const GMove& m, const Setup& setup,
     for (int i = i0; i <= i1; i++) {
       double t = 0.0;
       const glm::dvec2 c(grid.CellX(i), grid.CellY(j));
-      if (DistToSegment(c, a, b, t) <= radius)
+      if (DistToSegment(c, a, b, t) <= radius - kCutterWallTolerance)
         touched[static_cast<size_t>(j) * static_cast<size_t>(grid.nx) +
                 static_cast<size_t>(i)] = 1;
     }
@@ -162,7 +163,9 @@ double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
       double t = 0.0;
       const glm::dvec2 c(stock.CellX(i), stock.CellY(j));
       const double d = DistToSegment(c, a, b, t);
-      if (d > radius)
+      // Not `d > radius`: a toolpath on the grid's lattice puts the wall ON
+      // cell centres, and rounding would decide them (kCutterWallTolerance).
+      if (d > radius - kCutterWallTolerance)
         continue;
       // The tool's own shape, cut by cut: flat mills are still the
       // interpolated Z everywhere under them (TipHeight is 0), a ball
@@ -703,7 +706,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
             double t = 0.0;
             const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
             const double d = DistToSegment(c, a, b, t);
-            if (d > radius)
+            // The reach CarveSweep cuts to, wall and all: a cell the carve
+            // left standing on the wall is not one this rapid runs into.
+            if (d > radius - kCutterWallTolerance)
               continue;
             // The tool's SHAPE, not a cylinder around it -- the same
             // TipHeight the cut uses. A drill retracting straight up the hole
