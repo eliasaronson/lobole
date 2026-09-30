@@ -11,11 +11,12 @@ which change on every regeneration.
 ```cpp
 struct SelectionItem {
   enum class Kind { Face, Edge, Body, Feature, Occurrence, Mate, Relation,
-                    SketchRegion, Connector, Operation };
+                    SketchRegion, Connector, Operation, SketchCurve };
   Kind kind;
   uint64_t id;         // feature/occurrence/mate/relation/operation id;
                        // Body: its createdBy; Connector: the occurrence
-  ElementRef element;  // Face/Edge/SketchRegion/Connector: {featureId, name}
+  ElementRef element;  // Face/Edge/SketchRegion/Connector: {featureId, name};
+                       // SketchCurve: {sketch id, "g<entity id>"}
   // Connector only: snapElement(2) for an edge/corner snap, innerPath inside
   // a sub-assembly. jobPartId: which job part a pick on a CAM job tab hit.
 };
@@ -59,6 +60,10 @@ then body):
   cycles** through the stacked candidates: edge → face → body. Shift+click
   also aligns the camera to the picked face.
 - **Escape** clears an armed filter first, then the selection.
+
+`Kind::SketchCurve` is a job part's sketch entity drawn on a job tab, armed
+only by the Engrave verb: the nearest drawn curve on screen, not one the part
+hides ([cam/gui.md](../cam/gui.md#engrave-from-the-viewport)).
 
 `Candidates()` never emits `Kind::Feature`: a sketch or a feature is picked
 from the feature tree, not the viewport. A tool that needs a sketch resolves

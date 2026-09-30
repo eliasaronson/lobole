@@ -3022,6 +3022,271 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // Engrave from the viewport (docs/cam/gui.md#engrave-from-the-viewport):
+  // the job tab draws a part's labels where the part sits, a click on one
+  // derives an engraving, a second label joins the same op, and it
+  // generates with nothing refused.
+  t = IM_REGISTER_TEST(engine, "cam", "a_label_is_engraved_by_clicking_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Document* part = CamPart();
+    part->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 20));
+    auto sk = std::make_unique<SketchFeature>(
+        "Marks", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+    sketch::Text a;
+    a.anchor = {4.0f, 18.0f};
+    a.text = "a1";
+    a.font = "hershey";
+    a.height = 6.0;
+    const uint32_t first = sk->AddEntity(a);
+    sketch::Text b = a;
+    b.anchor = {4.0f, 6.0f};
+    b.text = "b2";
+    const uint32_t second = sk->AddEntity(b);
+    part->AddFeature(std::move(sk));
+    const uint64_t sketchId = part->GetFeature(1)->GetId();
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("Top");
+    s_App->camActiveSetup = added.id;
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    setup->tools[0].type = cam::ToolType::VBit;
+    setup->tools[0].diameter = 6.0;
+    setup->tools[0].tipAngleDeg = 90.0;
+    // The stock's top IS the engraved surface: nothing to face first.
+    setup->stock.margin.z = 0.0;
+    setup->safeZ = 30.0; // clear of the 20 mm plate
+    ctx->Yield(3);
+
+    ToolbarClick(ctx, "###tb_job_fit"); // the part in view, to click on
+    ctx->Yield(3);
+    ToolbarClick(ctx, "###tb_job_engrave");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+    IM_CHECK_EQ(s_App->slotPick.slot,
+                static_cast<int>(ui::PickSlot::CamEngraveCurve));
+    IM_CHECK_EQ(s_App->camRefusal, std::string());
+
+    // The label is DRAWN where the part sits, and a click on it is a pick:
+    // a point of its first stroke, laid out as the job tab lays out the
+    // part, is where the pick finds it.
+    const cam::JobPart& jp = Job()->GetParts().front();
+    const cam::SketchCurves curves = cam::SketchEntityCurves(
+        *part, ElementRef{sketchId, "g" + std::to_string(first)});
+    IM_CHECK(curves.why.empty() && !curves.strokes.empty());
+    const glm::dvec3 model = curves.strokes.front().pts.front();
+    const glm::dvec4 laid =
+        cam::BodyToSetup(*Job()->FindSetup(added.id), jp.id) *
+        glm::dvec4(model, 1.0);
+    const glm::vec2 at =
+        ui::WorldToScreen(*s_App, glm::vec3(laid.x, laid.y, laid.z));
+    ui::SelectionItem hit;
+    IM_CHECK(ui::CamEngraveCurveAt(*s_App, at, glm::vec3(0.0f),
+                                   glm::vec3(0.0f, 0.0f, -1.0f), -1.0f, hit));
+    IM_CHECK(hit.kind == ui::SelectionItem::Kind::SketchCurve);
+    IM_CHECK_EQ(hit.element.featureId, sketchId);
+    IM_CHECK_EQ(hit.jobPartId, jp.id);
+
+    ui::SelectionItem label;
+    label.kind = ui::SelectionItem::Kind::SketchCurve;
+    label.element = ElementRef{sketchId, "g" + std::to_string(first)};
+    label.jobPartId = jp.id;
+    ui::CamFacePicked(*s_App, label);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.miss, std::string());
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)1);
+    // The second label joins the same engraving.
+    label.element.name = "g" + std::to_string(second);
+    ui::CamFacePicked(*s_App, label);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.miss, std::string());
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)1);
+    if (setup->operations.size() == 1) {
+      const cam::Operation& op = setup->operations[0];
+      IM_CHECK(op.type == cam::OpType::Engrave);
+      IM_CHECK_EQ(op.targets.size(), (size_t)2);
+      // A label's groove is its cap height / 8.
+      IM_CHECK(std::abs(op.engraveWidth - 6.0 / 8.0) < 1e-9);
+    }
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    for (const cam::Toolpath& tp : s_App->camToolpaths) {
+      IM_CHECK_EQ(tp.error, std::string());
+      IM_CHECK(tp.skipped.empty());
+      IM_CHECK(!tp.grooves.empty());
+    }
+    for (const cam::VerdictLine& line : s_App->camVerdict) {
+      ctx->LogInfo("verdict: %s", line.text.c_str());
+      IM_CHECK(line.level != cam::VerdictLine::Level::Bad);
+    }
+
+    s_App->camGenerateOpen = false;
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // Without a V-bit the verb refuses where it was pressed, naming the tools
+  // the setup has, and arms nothing
+  // (docs/ui/tool-sessions.md#defaults-and-refusals).
+  t = IM_REGISTER_TEST(engine, "cam", "engrave_without_a_v_bit_refuses");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Document* part = CamPart();
+    part->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 20));
+    auto sk = std::make_unique<SketchFeature>(
+        "Marks", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+    sketch::Text a;
+    a.anchor = {4.0f, 10.0f};
+    a.text = "a1";
+    a.font = "hershey";
+    a.height = 6.0;
+    (void)sk->AddEntity(a);
+    part->AddFeature(std::move(sk));
+    ctx->Yield(2);
+    cam::Setup& added = MakeJob()->AddSetup("Top");
+    s_App->camActiveSetup = added.id;
+    IM_CHECK(Job()->FindSetup(added.id)->tools[0].type != cam::ToolType::VBit);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_job_engrave");
+    ctx->Yield(2);
+    IM_CHECK(s_App->slotPick.featureId != ui::kCamToolSlot);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(s_App->camRefusal.find("V-bit") != std::string::npos);
+    IM_CHECK(s_App->camRefusal.find("T1") != std::string::npos);
+    IM_CHECK(Job()->FindSetup(added.id)->operations.empty());
+    // Where it was pressed: the verb's own window says it.
+    IM_CHECK(ImGui::FindWindowByName("###ToolWindow") != nullptr);
+
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    s_App->camRefusal.clear();
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
+  // Indices from picks (docs/cam/rotary.md#one-operation-at-several-indices):
+  // a square bar in the rotary with a recess in each side. Four floors,
+  // picked with one verb, are ONE pocket at 0/90/180/270 -- the setup's
+  // own index for the one facing up, the index that turns it up for each of
+  // the others -- and its settings show them as chips.
+  t = IM_REGISTER_TEST(engine, "cam", "four_floors_picked_are_one_op");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Document* part = CamPart();
+    part->AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, -12, -12),
+                                                  60.0, 24.0, 24.0));
+    uint64_t body = part->GetFeature(0)->GetId();
+    const glm::vec3 recesses[4][2] = {
+        {{22, -5, 8}, {16, 10, 4}},   // +Z: faces up at A0
+        {{22, 8, -5}, {16, 4, 10}},   // +Y
+        {{22, -5, -12}, {16, 10, 4}}, // -Z
+        {{22, -12, -5}, {16, 4, 10}}, // -Y
+    };
+    for (const auto& r : recesses) {
+      part->AddFeature(
+          std::make_unique<BoxFeature>("Recess", r[0], r[1].x, r[1].y, r[1].z));
+      const uint64_t tool = part->GetFeature(part->FeatureCount() - 1)->GetId();
+      part->AddFeature(std::make_unique<BooleanFeature>("Cut", body, tool,
+                                                        BooleanOp::Subtract));
+      body = part->GetFeature(part->FeatureCount() - 1)->GetId();
+    }
+    ctx->Yield(2);
+    IM_CHECK_EQ(part->GetBodies().size(), (size_t)1);
+
+    // The four floors: flat, 8 mm off the axis, facing round it.
+    const Body& bar = part->GetBodies()[0];
+    std::vector<std::pair<glm::vec3, ui::SelectionItem>> floors;
+    for (const auto& [index, name] : bar.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!bar.shape.FacePlane(index, o, n, u) || std::abs(n.x) > 0.1f ||
+          std::abs(std::abs(glm::dot(o, n)) - 8.0f) > 1e-3f)
+        continue;
+      ui::SelectionItem f;
+      f.kind = ui::SelectionItem::Kind::Face;
+      f.element = ElementRef{bar.createdBy, name};
+      floors.push_back({n, f});
+    }
+    IM_CHECK_EQ(floors.size(), (size_t)4);
+    // Picked +Z first, the one already facing the spindle.
+    std::sort(floors.begin(), floors.end(), [](const auto& l, const auto& r) {
+      return l.first.z > r.first.z;
+    });
+
+    MakeJob();
+    cam::Setup& added = Job()->AddSetup("On the trunnion");
+    s_App->camActiveSetup = added.id;
+    cam::Setup* setup = Job()->FindSetup(added.id);
+    setup->machine.hasRotaryAxis = true;
+    setup->heldIn = cam::Setup::HeldIn::Rotary;
+    setup->chuck = 0;
+    setup->safeZ = 30.0;
+    setup->stock.margin = {0.0, 1.0, 1.0};
+    setup->tools[0].diameter = 4.0;
+    ctx->Yield(3);
+
+    ToolbarClick(ctx, "###tb_job_pocket");
+    ctx->Yield();
+    for (const auto& [n, f] : floors) {
+      ui::CamFacePicked(*s_App, f);
+      ctx->Yield(2);
+      IM_CHECK_EQ(s_App->slotPick.miss, std::string());
+    }
+    setup = Job()->FindSetup(added.id);
+    IM_CHECK_EQ(setup->operations.size(), (size_t)1);
+    if (setup->operations.size() != 1) {
+      s_App->camToolOpen = false;
+      ui::SetActivePart(*s_App, 0);
+      return;
+    }
+    const uint64_t opId = setup->operations[0].id;
+    IM_CHECK(setup->operations[0].indexA ==
+             (std::vector<double>{0.0, 90.0, 180.0, 270.0}));
+    IM_CHECK_EQ(setup->operations[0].targets.size(), (size_t)4);
+    for (const cam::Toolpath& tp : s_App->camToolpaths) {
+      IM_CHECK_EQ(tp.error, std::string());
+      for (const std::string& why : tp.skipped)
+        ctx->LogError("skipped: %s", why.c_str());
+      IM_CHECK(tp.skipped.empty());
+    }
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+
+    // The settings: a chip per index, and the typed list behind "edit".
+    ui::EditCamOperation(*s_App, opId);
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    for (const char* chip : {"**/###index_chip_0", "**/###index_chip_90",
+                             "**/###index_chip_180", "**/###index_chip_270"})
+      IM_CHECK(ctx->ItemInfo(chip, ImGuiTestOpFlags_NoError).ID != 0);
+    IM_CHECK_EQ(ctx->ItemInfo("**/###index_a", ImGuiTestOpFlags_NoError).ID,
+                (ImGuiID)0);
+    ctx->ItemClick("**/###index_chip_270");
+    ctx->Yield(2);
+    IM_CHECK(Job()->FindSetup(added.id)->operations[0].indexA ==
+             (std::vector<double>{0.0, 90.0, 180.0}));
+    ctx->ItemClick("**/###index_edit");
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemInfo("**/###index_a", ImGuiTestOpFlags_NoError).ID != 0);
+    ctx->ItemClick("**/###index_edit");
+    ctx->Yield();
+
+    s_App->camEditOp = 0;
+    s_App->camToolOpen = false;
+    s_App->camVerb = ui::AppState::CamVerb::None;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
   // The rotary verbs: no pick, only on a machine with the axis, a rough in
   // layers that leaves a skin and a finish that takes it.
   t = IM_REGISTER_TEST(engine, "cam", "the_rotary_verbs_rough_then_finish");

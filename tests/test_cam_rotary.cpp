@@ -1723,4 +1723,40 @@ TEST_CASE("cam rotary: an op at several indices derives where its floor "
       cam::IndexFrameFor(setup, bodies, cam::OpType::SurfaceRotary, side, four)
           .rotationA == 0.0);
 }
+TEST_CASE("cam rotary: a picked index joins its operation's list",
+          "[cam][rotary]") {
+  // docs/cam/rotary.md#one-operation-at-several-indices: the four crenel
+  // floors, picked one by one, are one op at 0/90/180/270.
+  CHECK(cam::NormalizeIndexDeg(-90.0) == 270.0);
+  CHECK(cam::NormalizeIndexDeg(360.0) == 0.0);
+  CHECK(cam::NormalizeIndexDeg(89.99999999) == 90.0);
+  CHECK(cam::NormalizeIndexDeg(-1e-9) == 0.0);
+  CHECK(cam::NormalizeIndexDeg(450.0) == 90.0);
+
+  const auto target = [](const char* name) {
+    return cam::Target{7, ElementRef{3, name}};
+  };
+  cam::Operation op;
+  op.targets = {target("f1")};
+  // A second floor at the setup's own index: a target, and no list.
+  CHECK(cam::AddIndexedTarget(op, target("f2"), 0.0, 0.0));
+  CHECK(op.indexA.empty());
+  CHECK(op.targets.size() == 2);
+  // One at another index: the setup's own and that one.
+  CHECK(cam::AddIndexedTarget(op, target("f3"), 270.0, 0.0));
+  CHECK(op.indexA == std::vector<double>{0.0, 270.0});
+  CHECK(cam::AddIndexedTarget(op, target("f4"), -270.0, 0.0)); // = 90
+  CHECK(cam::AddIndexedTarget(op, target("f5"), 180.0, 360.0));
+  CHECK(op.indexA == std::vector<double>{0.0, 90.0, 180.0, 270.0});
+  // The same floor again is no change.
+  CHECK_FALSE(cam::AddIndexedTarget(op, target("f5"), 180.0, 0.0));
+  CHECK(op.targets.size() == 5);
+
+  // An op made at an index of its own takes the setup's when a floor there
+  // is added.
+  cam::Operation turned;
+  turned.indexA = {90.0};
+  CHECK(cam::AddIndexedTarget(turned, target("g"), 30.0, 30.0));
+  CHECK(turned.indexA == std::vector<double>{30.0, 90.0});
+}
 #endif

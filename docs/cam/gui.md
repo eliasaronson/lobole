@@ -45,6 +45,7 @@ Button ids are `###tb_job_*`.
 | | Cut it out | `job.profile` | C | the wall to follow |
 | | Drill a hole | `job.drill` | D | inside the hole |
 | | Break an edge | `job.edge` | B | the wall whose top edge to break |
+| | Engrave | `job.engrave` | E | a label or a curve drawn on the part ([below](#engrave-from-the-viewport)) |
 | | Cut out the whole part | `job.whole` | Shift+C | none |
 | | Face the top | `job.face` | Shift+T | none |
 | | Rough a surface | `job.surface_rough` | Shift+S | none |
@@ -102,12 +103,54 @@ while its pick is armed.
 - The window follows the viewport and re-anchors when it reopens; fitting the
   camera keeps the model in the band the window leaves.
 
+## Engrave from the viewport
+
+A job tab draws each job part's **sketches that hold a text label or an open
+curve** (`cam::EngravableEntities`: a curve no closed profile of its sketch
+uses) — every cuttable entity in such a sketch, laid out through the part's
+placement in the active setup (`BodyToSetup`, the transform its bodies take)
+as thin lines in the sketch colour. A sketch of closed profiles only is some
+feature's outline, not a marking, and is not drawn. The lines are pickable,
+not editable: the sketch is edited in its part.
+
+**Engrave** (`job.engrave`) arms a pick of those lines
+(`SelectionItem::Kind::SketchCurve`: the nearest drawn curve within a few
+pixels, not one the part hides; the hovered one lights). A click derives the
+operation (`DeriveOperation` for `engrave`: the groove's width from the
+label's cap height, its depth from the V-bit,
+[operations.md](operations.md#engrave)); a click on another label adds it to
+the same operation, and while the window shows it its labels are drawn in the
+ghost's colour. The verb cuts with the setup's V-bit (the verb's tool when it
+is one, else the first) and its tool row offers only V-bits. **A setup with
+no V-bit is refused where the verb was pressed**, naming the tools it does
+have, and nothing is armed.
+
+## Indices from picks
+
+On a setup held in the rotary (`cam::HeldInRotary`), a floor verb (Clear a
+pocket) or Engrave whose pick does not face the spindle at the setup's index
+is not refused as a wall: the index that turns it up is solved
+(`cam::SolveIndexA` on its normal in the setup's frame at A = 0, as **Turn a
+face up** reads it; an engraving's by its sketch plane) and the operation is
+derived in that frame, cut at that index. A further pick of the same verb at
+another index adds the index and the target to the same operation
+(`cam::AddIndexedTarget`: the setup's own index and the new one, sorted,
+`cam::NormalizeIndexDeg` into [0, 360)), so four crenel floors picked one
+after another are one pocket at `[0, 90, 180, 270]`
+([rotary.md](rotary.md#one-operation-at-several-indices)). A floor joins the
+operation only when it is the same cut — its depth, derived where it faces
+the spindle, is the operation's own, since every index is cut to one depth;
+another depth makes an operation of its own. A tool change in the verb's
+window re-derives in the frame of the first index and keeps every target and
+index.
+
 ## What the viewport draws
 
 Show only the consequence of the decision being made, and drop it when the
 decision is made.
 
-- **Always, on a job tab:** the parts laid out in setup space; the stock as a
+- **Always, on a job tab:** the parts' labels and open sketch curves, thin in
+  the sketch colour ([above](#engrave-from-the-viewport)); the parts laid out in setup space; the stock as a
   translucent box; the machine's work area as a dimmer box (red when the job
   does not fit it; never resized); the fixtures, ghosted grey (outside the
   document's body list, so picking and selection indices are untouched); the
@@ -169,10 +212,14 @@ tool.
   the type has (the capability table): tool as `T1 T2 …` buttons, depths, stepdown/stepover, leave, tabs,
   corner relief, finish tool, Over openings, the rotary pattern as a radio
   pair, an engraving's width (for a V-bit) and depth, and so on. On a
-  machine with a rotary axis, **at A** takes the indices the operation is cut
-  at, typed as one list (`0 90 180 270`; empty = the setup's own index,
-  [rotary.md](rotary.md#one-operation-at-several-indices)), and the row's
-  summary ends "at A0/90/180/270". **Add operation** adds what the setup calls for
+  machine with a rotary axis the indices the operation is cut at are
+  **chips**, `A0 A90 A180 A270` (`###index_chip_<angle>`), each with an x
+  that stops cutting there; empty says the setup's own index
+  ([rotary.md](rotary.md#one-operation-at-several-indices)). They come from
+  picks ([above](#indices-from-picks)); a small **edit** (`###index_edit`)
+  opens the typed list (`0 90 180 270`, `###index_a`) for an angle no face can
+  be picked at. The row's summary ends "at A0/90/180/270"; an engraving's says
+  its labels, width and depth. **Add operation** adds what the setup calls for
   (`cam::AddOperationType`: another rotary pass on a setup that already cuts
   on the 4th axis, else the whole-part cut-out) through `DeriveOperation`, and
   shows a refusal instead of adding a dead operation.
@@ -247,6 +294,9 @@ fits, no two verbs share a glyph), `cam/a_job_is_made_from_the_tab_bar`,
 `cam/a_placement_is_dragged_in_the_viewport`,
 `cam/a_clamp_is_dragged_onto_the_stock`, `cam/add_menus_offer_the_right_parts`,
 `cam/the_surface_verbs_take_a_curved_face`,
+`cam/a_label_is_engraved_by_clicking_it`, `cam/engrave_without_a_v_bit_refuses`,
+`cam/four_floors_picked_are_one_op` (the chips, and the typed list behind
+edit),
 `cam/the_rotary_verbs_rough_then_finish`, `cam/a_rotary_pass_limits_to_a_face`,
 `cam/backplot_is_not_copied_per_frame`, `cam/a_job_edit_undoes`. A test that
 leaves a CAM window open, or a docked tab switched, breaks later tests' clicks,

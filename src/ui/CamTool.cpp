@@ -5,7 +5,9 @@
 
 #include "common/Logger.h"
 #include "core/Document.h"
+#include "core/cam/CamEngrave.h"
 #include "core/cam/CamFeeds.h"
+#include "core/cam/CamMount.h" // HeldInRotary, NormalizeIndexDeg
 #include "core/cam/CamNames.h"
 #include "core/cam/CamOtherSetups.h"
 #include "core/cam/CamPost.h"
@@ -13,6 +15,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h" // CamSetupToJson: the stock view's key
+#include "ui/AppActionsInternal.h" // kSketchColor
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
@@ -32,6 +35,7 @@
 #include "imgui.h"
 
 #include <limits>
+#include <optional>
 
 #include <cmath>
 
@@ -154,9 +158,113 @@ const StockView& CachedStockView(AppState& state, const cam::Setup& setup) {
   return view;
 }
 
+// The sketch curves a job tab draws and an engraving can be pointed at
+// (docs/cam/gui.md#engrave-from-the-viewport): each job part's sketches that
+// hold a label or an open curve (cam::EngravableEntities), laid out through
+// the part's placement in the active setup -- BodyToSetup, the transform its
+// bodies take -- so a curve is drawn ON the part it marks. CACHED: resolving
+// a label lays its glyphs out, which is not per-frame work. The key is what
+// the job tab draws (every part's version, the active setup, every frame and
+// placement), so a sketch edited in its part, or a re-clamp, rebuilds it.
+const cam::Operation* FindOp(const cam::Setup& setup, uint64_t id);
+
+struct EngraveCandidate {
+  uint64_t jobPartId = 0;
+  ElementRef ref;
+  std::vector<std::vector<glm::vec3>> strokes; // job-tab (setup) space
+};
+
+const std::vector<EngraveCandidate>& EngraveCandidates(AppState& state) {
+  static const std::vector<EngraveCandidate> kNone;
+  static std::vector<EngraveCandidate> cache;
+  static uint64_t cacheKey = 0;
+  static const cam::JobDocument* cacheJob = nullptr;
+  const cam::JobDocument* job = ActiveJob(state);
+  if (job == nullptr)
+    return kNone;
+  const uint64_t key = JobRenderVersion(state);
+  if (key == cacheKey && job == cacheJob)
+    return cache;
+  cacheKey = key;
+  cacheJob = job;
+  cache.clear();
+  const cam::Setup* setup = ActiveJobSetup(state);
+  for (const cam::JobPart& part : job->GetParts()) {
+    const Document* doc = JobPartDocument(state, part);
+    if (doc == nullptr)
+      continue;
+    const glm::dmat4 m =
+        setup != nullptr ? cam::BodyToSetup(*setup, part.id) : glm::dmat4(1.0);
+    for (const ElementRef& ref : cam::EngravableEntities(*doc)) {
+      const cam::SketchCurves curves = cam::SketchEntityCurves(*doc, ref);
+      if (!curves.why.empty())
+        continue;
+      EngraveCandidate c;
+      c.jobPartId = part.id;
+      c.ref = ref;
+      // Drawn a hair off the face it lies on, towards the viewer's side of
+      // it: exactly ON the face, the depth test broke the letters up.
+      const glm::dvec3 lift =
+          0.02 * glm::normalize(glm::dmat3(m) * curves.planeNormal);
+      for (const cam::SketchStroke& stroke : curves.strokes) {
+        std::vector<glm::vec3> pts;
+        pts.reserve(stroke.pts.size() + 1);
+        for (const glm::dvec3& p : stroke.pts)
+          pts.emplace_back(glm::dvec3(m * glm::dvec4(p, 1.0)) + lift);
+        if (stroke.closed && pts.size() > 2 && pts.front() != pts.back())
+          pts.push_back(pts.front());
+        c.strokes.push_back(std::move(pts));
+      }
+      cache.push_back(std::move(c));
+    }
+  }
+  return cache;
+}
+
+// The drawn curves: thin, in the sketch colour; the one a click would take,
+// in the hover colour; an engraving's targets while it is shown, in the
+// ghost's -- "this is what comes off".
+void AppendEngraveCurves(AppState& state, const cam::Setup& setup,
+                         std::vector<PrimVertex>& prims) {
+  const std::vector<EngraveCandidate>& all = EngraveCandidates(state);
+  if (all.empty())
+    return;
+  const cam::Operation* ghost = state.camToolOpen && state.camGhostOp != 0
+                                    ? FindOp(setup, state.camGhostOp)
+                                    : nullptr;
+  if (ghost != nullptr && ghost->type != cam::OpType::Engrave)
+    ghost = nullptr;
+  const bool armed =
+      state.slotPick.featureId == kCamToolSlot &&
+      state.slotPick.slot == static_cast<int>(PickSlot::CamEngraveCurve);
+  const glm::vec4 plain(kSketchColor, 0.85f);
+  for (const EngraveCandidate& c : all) {
+    const auto same = [&c](const ElementRef& r, uint64_t part) {
+      return r.featureId == c.ref.featureId && r.name == c.ref.name &&
+             (part == 0 || part == c.jobPartId);
+    };
+    bool target = false;
+    if (ghost != nullptr)
+      for (const cam::Target& t : ghost->targets)
+        target = target || same(t.ref, t.jobPartId);
+    const bool hovered =
+        armed && same(state.pick.hoverCurve, state.pick.hoverCurvePart) &&
+        state.pick.hoverCurve.IsSet();
+    const glm::vec4 color = hovered ? kHoverLine : target ? kGhostLine : plain;
+    const float halfPx = hovered ? 2.2f : target ? 1.6f : 0.9f;
+    for (const std::vector<glm::vec3>& stroke : c.strokes)
+      for (size_t i = 0; i + 1 < stroke.size(); i++)
+        AppendPrimLine(stroke[i], stroke[i + 1], halfPx, color, prims);
+  }
+}
+
 void OperationGhost(AppState& state, const cam::Setup& setup,
                     const cam::Operation& op, std::vector<PrimVertex>& prims,
                     std::vector<LineVertex3D>& quads) {
+  // An engraving's target is a sketch curve, drawn by the curves' own
+  // overlay (AppendEngraveCurves), not a face with a region.
+  if (op.type == cam::OpType::Engrave)
+    return;
   // Setup space: op.topZ/bottomZ are, so the boundary must be too (C9).
   std::vector<cam::Loop> loops;
   if (!op.targets.empty()) {
@@ -216,10 +324,12 @@ struct Verb {
   Derive derive = Derive::Standard;
 };
 
-cam::DerivedOp DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
-                             const std::vector<Body>& bodies, cam::OpType type,
-                             const cam::Target& target, int tool,
-                             const std::vector<const cam::Setup*>& earlier) {
+cam::DerivedOp
+DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
+              const std::vector<Body>& bodies, cam::OpType type,
+              const cam::Target& target, int tool,
+              const std::vector<const cam::Setup*>& earlier,
+              const std::vector<cam::SketchCurves>& curves = {}) {
   switch (derive) {
   case Verb::Derive::RotaryRough:
     return cam::DeriveRotaryRough(setup, bodies, tool);
@@ -230,7 +340,8 @@ cam::DerivedOp DeriveForVerb(Verb::Derive derive, const cam::Setup& setup,
   case Verb::Derive::Standard:
     break;
   }
-  return cam::DeriveOperation(setup, bodies, type, target, tool, earlier);
+  return cam::DeriveOperation(setup, bodies, type, target, tool, earlier,
+                              curves);
 }
 
 using CamVerb = AppState::CamVerb;
@@ -281,6 +392,15 @@ constexpr Verb kVerbs[] = {
      "over, a V-bit chamfers it. The TOOL decides which, so a flat end mill "
      "is refused rather than ploughing a square step. The size of the break "
      "comes from the tool and the wall unless the operation says otherwise."},
+    // The one verb whose pick is not a face: a label or a curve of a part's
+    // sketch, drawn on the job tab (docs/cam/gui.md#engrave-from-the-viewport).
+    {CamVerb::Engrave, "Engrave", cam::OpType::Engrave,
+     PickSlot::CamEngraveCurve, true, true,
+     "Click a label or a curve drawn on the part",
+     "Cut a groove along a sketch's lines with a V-bit: a text label, or a "
+     "line or curve drawn on the part. The groove's width comes from the "
+     "label's height, its depth from the V-bit. Each click adds a label to "
+     "the same engraving."},
     {CamVerb::Whole, "Cut out the whole part", cam::OpType::Profile,
      PickSlot::CamProfileOutline, false, true, "",
      "Follow the part's own outline — no pick needed."},
@@ -353,8 +473,13 @@ const Verb* FindVerb(CamVerb verb) {
 
 void ArmCamPick(AppState& state, PickSlot slot, const char* prompt) {
   state.camRefusal.clear();
+  // An engraving points at a sketch curve drawn on the job tab, which is
+  // not a face; every other CAM pick is one.
+  const SelectionItem::Kind kind = slot == PickSlot::CamEngraveCurve
+                                       ? SelectionItem::Kind::SketchCurve
+                                       : SelectionItem::Kind::Face;
   state.slotPick = {kCamToolSlot, static_cast<int>(slot),
-                    SelectionKindBit(SelectionItem::Kind::Face),
+                    SelectionKindBit(kind),
                     /*multi=*/false, prompt};
 }
 
@@ -402,9 +527,106 @@ std::string ToolpathError(const AppState& state, uint64_t opId) {
 // `hint` is the job part the click landed on; 0 means "work it out", which is
 // only an answer while the element name is unique across the job.
 // Returns the new operation's id, 0 when refused.
+// The V-bit an engraving is cut with: the verb's tool when that is one, else
+// the setup's first. 0, and `why` naming the tools the setup does have, when
+// it has none -- an engraving's groove is the cone's
+// (docs/cam/operations.md#engrave), and the verb refuses rather than ploughing
+// a square slot with an end mill.
+int EngraveTool(const AppState& state, const cam::Setup& setup,
+                std::string* why = nullptr) {
+  const int verbTool = VerbTool(state, setup);
+  if (const cam::Tool* t = setup.FindTool(verbTool);
+      t != nullptr && t->type == cam::ToolType::VBit)
+    return verbTool;
+  for (const cam::Tool& t : setup.tools)
+    if (t.type == cam::ToolType::VBit)
+      return t.number;
+  if (why != nullptr) {
+    std::string have;
+    for (const cam::Tool& t : setup.tools) {
+      char one[160];
+      std::snprintf(one, sizeof(one), "%sT%d, a %.3g mm %s",
+                    have.empty() ? "" : "; ", t.number, t.diameter,
+                    cam::ToolTypeName(t.type));
+      have += one;
+    }
+    *why = "Engraving cuts with a V-bit, and this setup has none" +
+           (have.empty() ? std::string(": it has no tools at all")
+                         : " -- it has " + have) +
+           ". Add a V-bit in the CAM panel's Tools.";
+  }
+  return 0;
+}
+
+// Where a picked target faces the spindle on a setup held in the rotary
+// (docs/cam/rotary.md#one-operation-at-several-indices): the setup's own
+// index when it already faces up there, else the index `SolveIndexA` turns
+// it to -- read in the setup's frame at A = 0, as "Turn a face up" reads it.
+// Only for a target that is a FLOOR (a clearing's) or a sketch plane (an
+// engraving's): a wall or a bore is followed at any index. Nothing when the
+// setup is not in the rotary, or nothing turns the target up -- the
+// derivation then refuses it in its own words.
+std::optional<double> PresentingIndex(AppState& state, const cam::Setup& setup,
+                                      cam::OpType type,
+                                      const cam::Target& target,
+                                      const cam::SketchCurves* curves) {
+  if (!setup.machine.hasRotaryAxis || !cam::HeldInRotary(setup) ||
+      !target.IsSet() || !cam::OpTypeHas(type, cam::OpField::Indexed))
+    return std::nullopt;
+  const double own = cam::NormalizeIndexDeg(setup.rotationA);
+  cam::Setup unturned = setup;
+  unturned.rotationA = 0.0;
+  glm::dvec3 normal(0.0);
+  if (type == cam::OpType::Engrave) {
+    if (curves == nullptr || !curves->why.empty())
+      return std::nullopt;
+    if (cam::EngraveFrameOf(setup, *curves).ok)
+      return own;
+    normal = glm::normalize(
+        glm::dmat3(cam::BodyToSetup(unturned, target.jobPartId)) *
+        curves->planeNormal);
+  } else if (cam::OpTypeHas(type, cam::OpField::NeedsFlatFloor)) {
+    const std::vector<Body>& bodies = ui::JobBodies(state);
+    glm::vec3 n(0.0f);
+    if (cam::FaceNormalOf(cam::BodiesInSetupFrame(setup, bodies), target.ref, n,
+                          target.jobPartId) &&
+        n.z > 0.99f)
+      return own;
+    if (!cam::FaceNormalOf(cam::BodiesInSetupFrame(unturned, bodies),
+                           target.ref, n, target.jobPartId))
+      return std::nullopt; // curved: the derivation says why
+    normal = glm::dvec3(n);
+  } else {
+    return std::nullopt;
+  }
+  double degrees = 0.0;
+  if (!cam::SolveIndexA(normal, degrees))
+    return std::nullopt;
+  return cam::NormalizeIndexDeg(degrees);
+}
+
+// A derived top over several targets or indices: the top of what the
+// earlier setups left over ALL of them, as add_cam_op takes it -- the
+// derivation read only the first.
+void RetopForTargets(AppState& state, const cam::Setup& setup,
+                     cam::Operation& op) {
+  if ((op.targets.size() < 2 && !cam::CutAtIndices(op)) ||
+      !cam::TopFromStock(op.type))
+    return;
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!cam::StockBounds(setup, ui::JobBodies(state), lo, hi))
+    return;
+  const double top = cam::StockTopOver(
+      setup, cam::EarlierSetups(state.job->GetSetups(), setup.id),
+      ui::JobBodies(state), op, hi.z);
+  if (top > op.bottomZ)
+    op.topZ = top;
+}
+
 uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
                              const ElementRef& target, uint64_t hint = 0,
-                             Verb::Derive derive = Verb::Derive::Standard) {
+                             Verb::Derive derive = Verb::Derive::Standard,
+                             std::optional<double> atIndex = std::nullopt) {
   state.camRefusal.clear();
   if (!state.job)
     return 0;
@@ -421,18 +643,39 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
     state.camRefusal = why;
     return 0;
   }
-  const cam::DerivedOp derived =
-      DeriveForVerb(derive, *setup, ui::JobBodies(state), type, picked,
-                    VerbTool(state, *setup),
-                    cam::EarlierSetups(state.job->GetSetups(), setup->id));
+  // An engraving's pick is a sketch's curves, resolved from the part
+  // documents, and it is cut with a V-bit or not at all.
+  std::vector<cam::SketchCurves> curves;
+  int tool = VerbTool(state, *setup);
+  if (type == cam::OpType::Engrave) {
+    tool = EngraveTool(state, *setup, &why);
+    if (tool == 0) {
+      state.camRefusal = why;
+      return 0;
+    }
+    curves = ui::JobSketchCurves(state, *setup, {picked});
+  }
+  // Derived where the target faces the spindle: at an index of its own, the
+  // setup turned to it (docs/cam/rotary.md#one-operation-at-several-indices).
+  cam::Setup frame = *setup;
+  const bool ownIndex =
+      !atIndex ||
+      std::abs(*atIndex - cam::NormalizeIndexDeg(setup->rotationA)) < 1e-6;
+  if (!ownIndex)
+    frame.rotationA = *atIndex;
+  const cam::DerivedOp derived = DeriveForVerb(
+      derive, frame, ui::JobBodies(state), type, picked, tool,
+      cam::EarlierSetups(state.job->GetSetups(), setup->id), curves);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return 0;
   }
   cam::Operation op = derived.op;
   op.id = state.job->AllocateId();
+  if (!ownIndex)
+    op.indexA = {*atIndex};
   // "Then finish with" (R6): the window's second tool row.
-  if (state.camVerbFinishTool != 0 &&
+  if (state.camVerbFinishTool != 0 && op.type != cam::OpType::Engrave &&
       state.camVerbFinishTool != op.toolNumber &&
       setup->FindTool(state.camVerbFinishTool) != nullptr) {
     op.finishTool = state.camVerbFinishTool;
@@ -485,13 +728,17 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   JobUndoGuard undoGuard(state);
   const cam::Target target =
       op->targets.empty() ? cam::Target{} : op->targets.front();
-  cam::DerivedOp derived =
-      DeriveForVerb(verb.derive, setup, ui::JobBodies(state), verb.type, target,
-                    tool, cam::EarlierSetups(state.job->GetSetups(), setup.id));
-  // A rotary pass limited to a face keeps the face across a change of tool
-  // (the rough's derivation takes no target of its own).
-  if (derived.ok && target.ref.IsSet() && derived.op.targets.empty())
-    derived.op.targets = {target};
+  // An engraving's curves, and an op cut at its own indices derived where
+  // its first target faces the spindle -- as it was made.
+  const std::vector<cam::SketchCurves> curves =
+      verb.type == cam::OpType::Engrave
+          ? ui::JobSketchCurves(state, setup, op->targets)
+          : std::vector<cam::SketchCurves>{};
+  const cam::Setup frame = cam::IndexFrameFor(
+      setup, ui::JobBodies(state), verb.type, target, op->indexA, curves);
+  cam::DerivedOp derived = DeriveForVerb(
+      verb.derive, frame, ui::JobBodies(state), verb.type, target, tool,
+      cam::EarlierSetups(state.job->GetSetups(), setup.id), curves);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return;
@@ -500,6 +747,13 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
   const cam::Operation before = *op;
   *op = derived.op;
   op->id = id;
+  // Every target the op had, and its indices: a tool change re-derives the
+  // numbers, not what is cut. (A rotary pass limited to a face keeps the
+  // face this way too; the rough's derivation takes no target of its own.)
+  if (!before.targets.empty())
+    op->targets = before.targets;
+  op->indexA = before.indexA;
+  RetopForTargets(state, setup, *op);
   state.camRefusal.clear();
   state.camGhostOp = id;
   state.projectMetaDirty = true;
@@ -513,6 +767,88 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
     state.camRefusal = why;
   }
   RunCamVerification(state);
+}
+
+// A further pick of an armed verb, taken into the operation it already made
+// rather than making another: a second label into the same engraving
+// (docs/cam/operations.md#engrave), and on a setup held in the rotary a floor
+// at another index -- that index and that floor added to the same op, so the
+// rook's four crenels are one pocket at 0/90/180/270
+// (docs/cam/rotary.md#one-operation-at-several-indices). A floor is taken in
+// only when it is the same cut: its depth, derived where it faces the
+// spindle, the op's own, since every index is cut to the op's one depth.
+enum class Merge { NotHere, Merged, Refused };
+Merge MergeIntoVerbOp(AppState& state, cam::Setup& setup, cam::OpType type,
+                      const cam::Target& picked,
+                      const std::vector<cam::SketchCurves>& curves,
+                      std::optional<double> atIndex) {
+  cam::Operation* op = nullptr;
+  // The verb's op, by id: what it derived may be another type of the same
+  // cut (a pocket is derived as an adaptive clearing), so only the kind of
+  // target is checked.
+  for (cam::Operation& o : setup.operations)
+    if (o.id == state.camVerbOp &&
+        (type == cam::OpType::Engrave
+             ? o.type == cam::OpType::Engrave
+             : cam::OpTypeHas(o.type, cam::OpField::NeedsFlatFloor)))
+      op = &o;
+  if (op == nullptr)
+    return Merge::NotHere;
+  const bool engrave = type == cam::OpType::Engrave;
+  if (!engrave && !atIndex)
+    return Merge::NotHere; // a floor on the bed: an op of its own, as ever
+  if (!engrave) {
+    cam::Setup frame = setup;
+    frame.rotationA = *atIndex;
+    const cam::DerivedOp derived = cam::DeriveOperation(
+        frame, ui::JobBodies(state), type, picked, op->toolNumber,
+        cam::EarlierSetups(state.job->GetSetups(), setup.id));
+    if (!derived.ok) {
+      state.camRefusal = derived.why;
+      return Merge::Refused;
+    }
+    if (std::abs(derived.op.bottomZ - op->bottomZ) > 1e-3)
+      return Merge::NotHere;
+  } else {
+    const cam::SketchCurves* c = cam::FindSketchCurves(curves, picked);
+    if (c == nullptr || !c->why.empty()) {
+      state.camRefusal =
+          c != nullptr ? c->why : "that curve cannot be read from its part";
+      return Merge::Refused;
+    }
+    // A label no index of the op would turn up is refused here, not left for
+    // the generator to skip.
+    cam::Setup frame = setup;
+    if (atIndex)
+      frame.rotationA = *atIndex;
+    if (const cam::EngraveFrame f = cam::EngraveFrameOf(frame, *c); !f.ok) {
+      state.camRefusal = f.why;
+      return Merge::Refused;
+    }
+  }
+  JobUndoGuard undoGuard(state);
+  const cam::Operation before = *op;
+  const bool changed =
+      atIndex ? cam::AddIndexedTarget(*op, picked, *atIndex, setup.rotationA)
+              : cam::AddIndexedTarget(*op, picked, setup.rotationA,
+                                      setup.rotationA);
+  if (!changed) {
+    state.camRefusal = "that is already in this operation";
+    return Merge::Refused;
+  }
+  RetopForTargets(state, setup, *op);
+  state.projectMetaDirty = true;
+  RefreshCamToolpath(state, op->id);
+  if (const std::string why = ToolpathError(state, op->id); !why.empty()) {
+    *op = before;
+    RefreshCamToolpath(state, op->id);
+    state.camRefusal = why;
+    RunCamVerification(state);
+    return Merge::Refused;
+  }
+  state.camGhostOp = op->id;
+  RunCamVerification(state);
+  return Merge::Merged;
 }
 
 // The picked face's plane, in MODEL space. Both orientation picks need it,
@@ -802,6 +1138,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
                ? cam::OpType::SurfaceWaterline
                : cam::OpType::SurfaceParallel;
     break;
+  case PickSlot::CamEngraveCurve:
+    type = cam::OpType::Engrave;
+    break;
   default:
     LOG_WARN("CAM: pick slot {} has no operation type; treating it as a "
              "profile",
@@ -815,11 +1154,55 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   // per hole spent saying something already said. Escape disarms, and so does
   // pressing the verb again.
   const std::string prompt = state.slotPick.prompt;
+  // Where the pick faces the spindle, on a setup in the rotary, and whether
+  // it belongs in the op this verb already made.
+  std::optional<double> atIndex;
+  if (cam::Setup* setup = ActiveCamSetup(state);
+      setup != nullptr &&
+      (type == cam::OpType::Engrave ||
+       cam::OpTypeHas(type, cam::OpField::NeedsFlatFloor))) {
+    std::string why;
+    const cam::Target picked =
+        ui::TargetFor(state, item.element, item.jobPartId, &why);
+    const std::vector<cam::SketchCurves> curves =
+        type == cam::OpType::Engrave && picked.jobPartId != 0
+            ? ui::JobSketchCurves(state, *setup, {picked})
+            : std::vector<cam::SketchCurves>{};
+    if (picked.jobPartId != 0) {
+      atIndex = PresentingIndex(state, *setup, type, picked,
+                                cam::FindSketchCurves(curves, picked));
+      state.camRefusal.clear();
+      switch (MergeIntoVerbOp(state, *setup, type, picked, curves, atIndex)) {
+      case Merge::Merged:
+        state.slotPick.miss.clear();
+        state.camNote = type == cam::OpType::Engrave
+                            ? "added to the same engraving -- keep clicking, "
+                              "or press Escape when done"
+                            : "added to the same operation, at the index "
+                              "that turns it up -- keep clicking, or press "
+                              "Escape when done";
+        state.slotPick.prompt = prompt;
+        return;
+      case Merge::Refused:
+        state.slotPick.miss = state.camRefusal;
+        state.camRefusal.clear();
+        state.slotPick.prompt = prompt;
+        return;
+      case Merge::NotHere:
+        break;
+      }
+    }
+  }
   if (const uint64_t made =
-          CreateVerbOperation(state, type, item.element, item.jobPartId)) {
+          CreateVerbOperation(state, type, item.element, item.jobPartId,
+                              Verb::Derive::Standard, atIndex)) {
     state.camVerbOp = made; // the one a tool change in the window re-derives
     state.slotPick.miss.clear();
-    state.camNote = "added — keep clicking faces, or press Escape when done";
+    state.camNote = type == cam::OpType::Engrave
+                        ? "added — keep clicking labels to add them to it, "
+                          "or press Escape when done"
+                        : "added — keep clicking faces, or press Escape when "
+                          "done";
   } else {
     // The pick's own line is where the refusal shows; the window used to
     // print it a second time from camRefusal directly under it.
@@ -904,6 +1287,20 @@ void StartCamVerb(AppState& state, AppState::CamVerb verb) {
   state.camEditOp = 0;
   state.camEditTool = 0;
   state.camEditFixture = 0;
+  // An engraving is a V-bit's cut. Without one the verb says so where it
+  // was pressed, naming the tools the setup does have, and arms nothing: a
+  // pick that could only be refused is a click wasted
+  // (docs/ui/tool-sessions.md#defaults-and-refusals).
+  if (verb == CamVerb::Engrave)
+    if (const cam::Setup* setup = ActiveCamSetup(state)) {
+      std::string why;
+      if (EngraveTool(state, *setup, &why) == 0) {
+        if (state.slotPick.featureId == kCamToolSlot)
+          state.slotPick = {};
+        state.camRefusal = why;
+        return;
+      }
+    }
   if (v->picks) {
     // Any pick button switches to itself: greying the others out while one
     // was armed meant Escape between every change of verb.
@@ -926,9 +1323,14 @@ namespace {
 void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
   if (setup.tools.empty())
     return;
-  const int active = VerbTool(state, setup);
+  // An engraving is offered the V-bits only (EngraveTool).
+  const bool engrave = verb.type == cam::OpType::Engrave;
+  const int active =
+      engrave ? EngraveTool(state, setup) : VerbTool(state, setup);
   ImGui::TextDisabled("Tool");
   for (const cam::Tool& tool : setup.tools) {
+    if (engrave && tool.type != cam::ToolType::VBit)
+      continue;
     ImGui::SameLine();
     const bool on = tool.number == active;
     if (on)
@@ -952,8 +1354,9 @@ void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
   ImGui::SameLine();
   ImGui::TextDisabled("(more: CAM panel › Tools)");
   // Then finish with (R6): only offered when there is a second tool to
-  // finish with. "none" is a button too, so the choice can be undone.
-  if (setup.tools.size() < 2)
+  // finish with. "none" is a button too, so the choice can be undone. An
+  // engraving is one pass of the cone: nothing to finish.
+  if (setup.tools.size() < 2 || engrave)
     return;
   ImGui::TextDisabled("Then finish with");
   ImGui::SameLine();
@@ -1419,6 +1822,11 @@ void DrawCamToolWindow(AppState& state) {
       else
         ImGui::TextDisabled("A 0° (3-axis)");
       break;
+    case CamVerb::Engrave:
+      if (armedHere)
+        ImGui::TextDisabled("click labels or curves… Escape, or the button "
+                            "again, when done");
+      break;
     default:
       if (armedHere)
         // The slot stays armed after a pick: one verb is almost never one
@@ -1628,6 +2036,9 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     }
   }
 
+  // The parts' labels and open curves, to engrave.
+  AppendEngraveCurves(state, *setup, prims);
+
   // What the selected operation removes.
   if (session && state.camGhostOp != 0)
     if (const cam::Operation* op = FindOp(*setup, state.camGhostOp))
@@ -1657,6 +2068,61 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
                   glm::vec4(0.95f, 0.25f, 0.20f, 1.0f), prims);
 }
 
+bool CamEngraveCurveAt(AppState& state, const glm::vec2& mouse,
+                       const glm::vec3& rayOrigin, const glm::vec3& rayDir,
+                       float occluder, SelectionItem& out) {
+  if (!state.job || state.camera == nullptr)
+    return false;
+  // A few pixels either side of a hairline: close enough to mean it, not so
+  // wide that the letters of a label crowd each other out.
+  constexpr float kPickPx = 7.0f;
+  const glm::mat4 viewProj =
+      state.camera->GetProjectionMatrix() * state.camera->GetViewMatrix();
+  // WorldToScreen's mapping, with the point behind the eye refused.
+  const auto toScreen = [&](const glm::vec3& p, glm::vec2& at) {
+    const glm::vec4 clip = viewProj * glm::vec4(p, 1.0f);
+    if (clip.w <= 1e-6f)
+      return false;
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    at = state.viewportPos +
+         glm::vec2((ndc.x + 1.0f) * 0.5f * state.viewportSize.x,
+                   (ndc.y + 1.0f) * 0.5f * state.viewportSize.y);
+    return true;
+  };
+  const glm::vec3 dir = glm::normalize(rayDir);
+  // A curve lies ON its face, so it is behind the part only when it is
+  // clearly further than the face the ray meets.
+  const float slack = std::max(0.5f, occluder * 0.02f);
+  float best = kPickPx;
+  bool found = false;
+  for (const EngraveCandidate& c : EngraveCandidates(state))
+    for (const std::vector<glm::vec3>& stroke : c.strokes)
+      for (size_t i = 0; i + 1 < stroke.size(); i++) {
+        glm::vec2 a(0.0f), b(0.0f);
+        if (!toScreen(stroke[i], a) || !toScreen(stroke[i + 1], b))
+          continue;
+        const glm::vec2 ab = b - a;
+        const float len2 = glm::dot(ab, ab);
+        const float t =
+            len2 > 1e-9f
+                ? std::clamp(glm::dot(mouse - a, ab) / len2, 0.0f, 1.0f)
+                : 0.0f;
+        const float d = glm::length(mouse - (a + ab * t));
+        if (d >= best)
+          continue;
+        const glm::vec3 p = glm::mix(stroke[i], stroke[i + 1], t);
+        if (occluder >= 0.0f && glm::dot(p - rayOrigin, dir) > occluder + slack)
+          continue;
+        best = d;
+        found = true;
+        out = SelectionItem{};
+        out.kind = SelectionItem::Kind::SketchCurve;
+        out.element = c.ref;
+        out.jobPartId = c.jobPartId;
+      }
+  return found;
+}
+
 void DrawCamLabels(AppState& state) {
   if (!state.camToolOpen || !state.job || state.camGhostOp == 0)
     return;
@@ -1664,7 +2130,7 @@ void DrawCamLabels(AppState& state) {
   if (setup == nullptr)
     return;
   const cam::Operation* op = FindOp(*setup, state.camGhostOp);
-  if (op == nullptr || op->targets.empty())
+  if (op == nullptr || op->targets.empty() || op->type == cam::OpType::Engrave)
     return;
   const cam::FaceRegion region = cam::PickedFaceRegion(
       cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)),
@@ -1978,6 +2444,10 @@ void CamFacePicked(AppState&, const SelectionItem&) {}
 void AppendCamVisualisation(AppState&, std::vector<PrimVertex>&,
                             std::vector<LineVertex3D>&) {}
 void DrawCamLabels(AppState&) {}
+bool CamEngraveCurveAt(AppState&, const glm::vec2&, const glm::vec3&,
+                       const glm::vec3&, float, SelectionItem&) {
+  return false;
+}
 void RunCamVerification(AppState&) {}
 } // namespace ui
 

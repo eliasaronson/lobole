@@ -73,7 +73,7 @@ or Shift binding can shadow them. The unbound rows are a named list in
 | Sketch | `L` line, `C` circle, `Shift+C` ellipse, `G`/`Shift+G` rectangle/centre rectangle, `A`/`Shift+A`/`Ctrl+Shift+A` arcs, `S` spline, `.` point, `Shift+T` text, `X` project, `Shift+I` image, `M` trim, `O` offset, `Shift+F` fillet, `Shift+M` mirror, `P` pattern, `D` dimension, `Q` construction, `Y` glyphs, `Shift+S` auto-constrain, `F7` slice, `Shift+E`/`Shift+R`/`Shift+H` extrude/revolve/hole; constraints `H V N B Shift+B T E Shift+N`, five rare ones unbound |
 | Assembly | `I` insert, `1`..`6` mate types, `F` fastener, `X` exploded views, `M` motion, `B` bill of materials, `Q` simulation, `H` hide, `Shift+H` show all |
 | Drawing | `I` add view, `U` update, `E` export, `D`/`X`/`Y` distances, `R`/`Shift+R` radius/diameter, `A` angle, `H` hole callout, `P` pattern callout, `L` part note |
-| Job (CAM) | `Z` top face, `L` lay face up, `A` index face, `T` look down the spindle, `P` pocket, `C` profile, `D` drill, `B` edge, `Shift+C` whole, `Shift+T` face, `R` surface, `W` walls, `Shift+R`/`Shift+O` rotary finish/rough, `Shift+S` surface rough, `Shift+E` rest, `G` generate, `S` simulate |
+| Job (CAM) | `Z` top face, `L` lay face up, `A` index face, `T` look down the spindle, `P` pocket, `C` profile, `D` drill, `B` edge, `E` engrave, `Shift+C` whole, `Shift+T` face, `R` surface, `W` walls, `Shift+R`/`Shift+O` rotary finish/rough, `Shift+S` surface rough, `Shift+E` rest, `G` generate, `S` simulate |
 | Simulation | `1` fixed, `2` force, `3` pressure, `R` run |
 
 `Keymap.cpp` is the source of truth; `get_keymap` reports the live table.

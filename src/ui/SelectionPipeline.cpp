@@ -6,6 +6,7 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
+#include "ui/CamTool.h"            // CamEngraveCurveAt (a job tab's sketches)
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureEditor.h" // SlotPickClicked (U3)
 #include "ui/FlexibleActions.h" // a moving part of a flexible unit
@@ -127,6 +128,18 @@ std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray);
 std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
                                   uint32_t kinds) {
   std::vector<Candidate> out;
+  // A job part's sketch curve, for an engraving
+  // (docs/cam/gui.md#engrave-from-the-viewport): nearest on screen, and not
+  // one the part hides.
+  if ((kinds & KindBit(SelectionItem::Kind::SketchCurve)) && state.job) {
+    const RayHit occluder = state.faceSelector->PickFace(ray);
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    SelectionItem item;
+    if (CamEngraveCurveAt(state, glm::vec2(mouse.x, mouse.y), ray.origin,
+                          ray.direction,
+                          occluder.hit ? occluder.distance : -1.0f, item))
+      out.push_back({std::move(item), 0, 0});
+  }
   if (kinds & KindBit(SelectionItem::Kind::SketchRegion)) {
     if (auto region = RegionCandidate(state, ray))
       out.push_back(*region);
@@ -411,6 +424,8 @@ void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
   state.pick.regionHoverIds.clear();
   state.pick.hoverFace = {};
+  state.pick.hoverCurve = {};
+  state.pick.hoverCurvePart = 0;
   state.pick.hoverCap = false;
   // The measure tool's hover measurable (M3), cleared on every path that
   // clears a hover — including the off-viewport early return, which is how a
@@ -572,6 +587,9 @@ void HandleSelectionInput(AppState& state, bool overViewport,
     }
     if (top.item.kind == SelectionItem::Kind::SketchRegion) {
       state.pick.regionHoverIds = ParseRegionIds(top.item.element.name);
+    } else if (top.item.kind == SelectionItem::Kind::SketchCurve) {
+      state.pick.hoverCurve = top.item.element;
+      state.pick.hoverCurvePart = top.item.jobPartId;
     } else if (top.item.kind == SelectionItem::Kind::Edge) {
       state.pick.edgeHover = true;
       state.pick.edgeHoverMesh = top.meshId;

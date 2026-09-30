@@ -457,4 +457,51 @@ TEST_CASE("cam: an engraving refuses a sketch whose plane does not face the "
   CHECK_THAT(unresolved.error, Catch::Matchers::ContainsSubstring("resolved"));
 }
 
+TEST_CASE("cam: the job tab offers the sketches that mark, not the ones that "
+          "outline",
+          "[cam]") {
+  // docs/cam/gui.md#engrave-from-the-viewport: a sketch holding a label or
+  // an open curve is a marking, and every cuttable entity in it is offered;
+  // a sketch of closed profiles only is some feature's outline.
+  auto doc = BlockDoc();
+  auto outline = std::make_unique<SketchFeature>(
+      "Outline", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+  const glm::vec2 c[4] = {{2, 2}, {12, 2}, {12, 8}, {2, 8}};
+  for (int i = 0; i < 4; i++)
+    (void)outline->AddEntity(sketch::Line{c[i], c[(i + 1) % 4]});
+  doc->AddFeature(std::move(outline));
+
+  auto marks = std::make_unique<SketchFeature>(
+      "Marks", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+  sketch::Text label;
+  label.anchor = {4.0f, 10.0f};
+  label.text = "a1";
+  label.font = "hershey";
+  label.height = 6.0;
+  const uint32_t text = marks->AddEntity(label);
+  const uint32_t ring = marks->AddEntity(sketch::Circle{{30, 20}, 3.0});
+  const uint32_t tick = marks->AddEntity(sketch::Line{{30, 5}, {36, 5}});
+  sketch::Line guide{{0, 0}, {40, 0}};
+  guide.construction = true;
+  (void)marks->AddEntity(guide);
+  (void)marks->AddEntity(sketch::Point{{20, 20}});
+  doc->AddFeature(std::move(marks));
+  const uint64_t marksId = doc->GetFeature(2)->GetId();
+
+  const std::vector<ElementRef> offered = cam::EngravableEntities(*doc);
+  std::vector<std::string> names;
+  for (const ElementRef& r : offered) {
+    CHECK(r.featureId == marksId); // the outline sketch is not offered
+    names.push_back(r.name);
+  }
+  // The label, the closed ring beside it and the open tick; never the
+  // construction line or the point.
+  CHECK(names == std::vector<std::string>{"g" + std::to_string(text),
+                                          "g" + std::to_string(ring),
+                                          "g" + std::to_string(tick)});
+  // Every one resolves: what is offered can be cut.
+  for (const ElementRef& r : offered)
+    CHECK(cam::SketchEntityCurves(*doc, r).why.empty());
+}
+
 #endif // HAVE_CAM

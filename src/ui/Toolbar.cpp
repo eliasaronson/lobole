@@ -1266,6 +1266,9 @@ void DrawJobToolbar(AppState& state) {
   btn("###tb_job_edge", "job.edge",
       "Break an edge: click the wall whose top edge to round or chamfer",
       armedFor(PickSlot::CamEdgeWall));
+  btn("###tb_job_engrave", "job.engrave",
+      "Engrave: click a label or a curve drawn on the part (a V-bit)",
+      armedFor(PickSlot::CamEngraveCurve));
   btn("###tb_job_whole", "job.whole", "Cut out the whole part (no pick)");
   btn("###tb_job_face", "job.face",
       "Face the top: skim the material above the part (no pick)");

@@ -137,6 +137,8 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"job.drill", ICON_FA_BULLSEYE},
     // Breaking an edge IS a fillet, cut rather than modelled.
     {"job.edge", ICON_DS_FILLET},
+    // A pen's nib: the V-bit draws the sketch's lines into the part.
+    {"job.engrave", ICON_FA_PEN_NIB},
     {"job.whole", ICON_FA_BORDER_ALL},
     {"job.face", ICON_DS_CAM_FACE},
     {"job.surface_rough", ICON_DS_CAM_SURFACE_ROUGH},

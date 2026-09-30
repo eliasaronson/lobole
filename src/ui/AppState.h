@@ -873,9 +873,13 @@ struct SelectionItem {
     Relation,     // a relation row in an assembly's Model panel
     SketchRegion, // U2
     Connector,    // U7c: mate connector — id = occurrence, element = face
-    Operation     // a CAM operation row (job tabs); id = the operation's id
+    Operation,    // a CAM operation row (job tabs); id = the operation's id
+    // A job part's sketch entity drawn on a job tab, as an engraving target
+    // (docs/cam/gui.md#engrave-from-the-viewport): element = {sketch id,
+    // "g<entity id>"}, jobPartId = the part it lies on.
+    SketchCurve
   };
-  static constexpr int kKindCount = static_cast<int>(Kind::Operation) + 1;
+  static constexpr int kKindCount = static_cast<int>(Kind::SketchCurve) + 1;
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
@@ -1255,6 +1259,10 @@ struct AppState {
     // model it is, and a preview of "the region that would be cleared" has to
     // ask the B-Rep.
     ElementRef hoverFace;
+    // The job-tab sketch curve a click would take while an engraving pick is
+    // armed ({sketch id, "g<entity id>"}), and the job part it lies on.
+    ElementRef hoverCurve;
+    uint64_t hoverCurvePart = 0;
     // The cursor is on a SECTION CAP: the cut face, which is not a B-Rep
     // face and so is never the hovered face. Where on it, and the cut
     // plane's normal pointing out of the kept material (toward the viewer):
@@ -1747,6 +1755,7 @@ struct AppState {
     RotaryRough,
     SurfaceRough, // docs/cam/operations.md#rough-a-surface-and-rest-machining
     Rest,
+    Engrave, // docs/cam/gui.md#engrave-from-the-viewport
   };
   CamVerb camVerb = CamVerb::None;
   // The operation the no-pick verbs (Whole, Face) just made, so the window

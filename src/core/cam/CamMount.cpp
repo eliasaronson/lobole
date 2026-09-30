@@ -28,6 +28,47 @@ bool HeldInRotary(const Setup& setup) {
   return false;
 }
 
+double NormalizeIndexDeg(double degrees) {
+  double d = std::fmod(degrees, 360.0);
+  if (d < 0.0)
+    d += 360.0;
+  // A millionth of a degree: what the solver's arithmetic leaves on an index
+  // a person would call 90, and far below anything a rotary can resolve.
+  d = std::round(d * 1e6) / 1e6;
+  return d >= 360.0 ? 0.0 : d;
+}
+
+bool AddIndexedTarget(Operation& op, const Target& target, double atDeg,
+                      double setupDeg) {
+  const double at = NormalizeIndexDeg(atDeg);
+  const double own = NormalizeIndexDeg(setupDeg);
+  bool changed = false;
+  const auto has = [](const std::vector<double>& list, double a) {
+    for (const double b : list)
+      if (std::abs(NormalizeIndexDeg(b) - a) < 1e-6)
+        return true;
+    return false;
+  };
+  if (!op.indexA.empty() || std::abs(at - own) >= 1e-6) {
+    std::vector<double> list = op.indexA;
+    if (list.empty())
+      list.push_back(own);
+    if (!has(list, at))
+      list.push_back(at);
+    std::sort(list.begin(), list.end());
+    if (list != op.indexA) {
+      op.indexA = std::move(list);
+      changed = true;
+    }
+  }
+  if (target.IsSet() && std::find(op.targets.begin(), op.targets.end(),
+                                  target) == op.targets.end()) {
+    op.targets.push_back(target);
+    changed = true;
+  }
+  return changed;
+}
+
 namespace {
 glm::dvec2 Turn(int quarter, const glm::dvec2& v) {
   switch (((quarter % 4) + 4) % 4) {

@@ -59,7 +59,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
 | Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
-| (`add_cam_op` type `engrave`; no verb yet) | a sketch entity, `{feature_id: <sketch>, element: "g<entity id>"}` | top = the sketch's plane in the setup; a V-bit's `width_mm` a quarter of the cutter (a text label's: its cap height / 8), a flat's or ball's `depth_mm` a quarter of the cutter; bottom = top minus the depth ([Engrave](#engrave)) |
+| Engrave (`job.engrave`; `add_cam_op` type `engrave`) | a sketch entity, `{feature_id: <sketch>, element: "g<entity id>"}` | top = the sketch's plane in the setup; a V-bit's `width_mm` a quarter of the cutter (a text label's: its cap height / 8), a flat's or ball's `depth_mm` a quarter of the cutter; bottom = top minus the depth ([Engrave](#engrave)) |
 
 **The stock top is what the earlier setups left.** `DeriveOperation` takes
 the job's setups cut before this one (`EarlierSetups`: the job's order is the
@@ -380,9 +380,14 @@ operation, every stroke of every one ordered together.
   [simulation.md](simulation.md#engraved-grooves).
 
 The capability row is `width_mm`, `depth_mm` and `index_a_deg`; every other
-field is refused by name. There is no GUI verb yet: the job tab does not draw
-sketches to pick from, so an engraving is made over the RPC and edited in the
-panel (its type in the combo, its width and depth as widgets).
+field is refused by name. In the GUI the job tab draws the parts' labels and
+open curves, and **Engrave** (`job.engrave`) is a click on one: the operation
+derived with the setup's V-bit, a further click adding a label to it, and a
+setup with no V-bit refused where the verb was pressed, naming the tools it
+has ([gui.md](gui.md#engrave-from-the-viewport)). On a setup in the rotary a
+label on a side is turned up by the index its plane solves
+([gui.md](gui.md#indices-from-picks)). Its width and depth are edited in the
+op's settings.
 
 ## Rough then finish
 

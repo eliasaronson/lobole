@@ -124,9 +124,16 @@ standing still. Arc fitting works on indexed jobs.
 degrees; every op type but `surface_rotary`, capability `OpField::Indexed`),
 cuts one operation at each of those indices: the rook's four crenels are one
 pocket at `[0, 90, 180, 270]`, not four setups that each repeat it. Empty
-cuts at the setup's `rotation_a`. The panel offers it as "at A" on a machine
-with a rotary axis; a machine without one is refused in the operation's own
-error. A `surface_rotary` does not take it (the RPC refuses it by name), and
+cuts at the setup's `rotation_a`. In the GUI the list comes from PICKS: on a
+setup held in the rotary, a floor (or an engraving's label) that does not face
+the spindle solves its own index (`SolveIndexA`), and a further pick at
+another index adds that index and that target to the same operation, so the
+four crenel floors, clicked, are one pocket at `[0, 90, 180, 270]`
+([gui.md](gui.md#indices-from-picks)). The op's settings show the list as
+chips (`A0 A90 ...`, each with an x to remove it), with the typed list behind
+a small "edit" for an angle nobody can pick; they are offered on a machine
+with a rotary axis, and a machine without one is refused in the operation's
+own error. A `surface_rotary` does not take it (the RPC refuses it by name), and
 a list carried onto one from another route changes nothing (`CutAtIndices`).
 
 `GenerateAtIndices` runs the ordinary generation once per angle, on a copy of

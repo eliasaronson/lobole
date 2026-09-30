@@ -1814,50 +1814,85 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     ImGui::SameLine();
   }
   // Cut at several indices
-  // (docs/cam/rotary.md#one-operation-at-several-indices): a list of
-  // degrees, typed as one -- "0 90 180 270". Offered
-  // only where the machine can turn the part; a list that does not parse
-  // is left as it was rather than read as far as it went.
+  // (docs/cam/rotary.md#one-operation-at-several-indices): each index a
+  // chip, "A90 x", whose x stops cutting there. The indices come from picks
+  // -- a floor at another index adds its own (docs/cam/gui.md) -- so the
+  // typed list is behind a small "edit", for an angle nobody can pick. A
+  // typed list that does not parse is left as it was rather than read as
+  // far as it went. Offered only where the machine can turn the part.
   if (cam::OpTypeHas(op.type, cam::OpField::Indexed) &&
       setup->machine.hasRotaryAxis) {
-    std::string text;
-    for (const double a : op.indexA) {
-      char one[32];
-      std::snprintf(one, sizeof(one), "%s%g", text.empty() ? "" : " ", a);
-      text += one;
+    // Which op's typed list is open: one editor at a time, like the window.
+    static uint64_t typingIndicesOf = 0;
+    // A row of its own: the field before it may have left the line open.
+    if (ImGui::GetCursorPosX() > ImGui::GetCursorStartPos().x + 1.0f)
+      ImGui::NewLine();
+    ImGui::TextDisabled("at");
+    if (op.indexA.empty()) {
+      ImGui::SameLine();
+      ImGui::TextDisabled("the setup's own A%g", setup->rotationA);
     }
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "%s", text.c_str());
-    ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::InputText("at A###index_a", buf, sizeof(buf),
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
-      std::vector<double> list;
-      bool ok = true;
-      std::string word;
-      const std::string all = std::string(buf) + " ";
-      for (const char c : all) {
-        if (c == ' ' || c == ',') {
-          if (word.empty())
-            continue;
-          char* end = nullptr;
-          const double v = std::strtod(word.c_str(), &end);
-          ok = ok && end != nullptr && *end == '\0';
-          list.push_back(v);
-          word.clear();
-        } else {
-          word += c;
+    size_t removeAt = op.indexA.size();
+    for (size_t i = 0; i < op.indexA.size(); i++) {
+      ImGui::SameLine();
+      char chip[64];
+      // Keyed by the angle, not the position: removing one leaves the
+      // others' ids where they were.
+      std::snprintf(chip, sizeof(chip), "A%g " ICON_FA_XMARK "###index_chip_%g",
+                    op.indexA[i], op.indexA[i]);
+      if (ImGui::SmallButton(chip))
+        removeAt = i;
+      ImGui::SetItemTooltip("Stop cutting this operation at A%g", op.indexA[i]);
+    }
+    if (removeAt < op.indexA.size()) {
+      op.indexA.erase(op.indexA.begin() + static_cast<long>(removeAt));
+      touched(op.id);
+    }
+    ImGui::SameLine();
+    const bool typing = typingIndicesOf == op.id;
+    if (ImGui::SmallButton(typing ? "done###index_edit" : "edit###index_edit"))
+      typingIndicesOf = typing ? 0 : op.id;
+    ImGui::SetItemTooltip("Type the indices, for an angle no face can be "
+                          "picked at");
+    if (typingIndicesOf == op.id) {
+      std::string text;
+      for (const double a : op.indexA) {
+        char one[32];
+        std::snprintf(one, sizeof(one), "%s%g", text.empty() ? "" : " ", a);
+        text += one;
+      }
+      char buf[128];
+      std::snprintf(buf, sizeof(buf), "%s", text.c_str());
+      ImGui::SetNextItemWidth(140.0f);
+      if (ImGui::InputText("at A###index_a", buf, sizeof(buf),
+                           ImGuiInputTextFlags_EnterReturnsTrue)) {
+        std::vector<double> list;
+        bool ok = true;
+        std::string word;
+        const std::string all = std::string(buf) + " ";
+        for (const char c : all) {
+          if (c == ' ' || c == ',') {
+            if (word.empty())
+              continue;
+            char* end = nullptr;
+            const double v = std::strtod(word.c_str(), &end);
+            ok = ok && end != nullptr && *end == '\0';
+            list.push_back(v);
+            word.clear();
+          } else {
+            word += c;
+          }
+        }
+        if (ok && list != op.indexA) {
+          op.indexA = list;
+          touched(op.id);
         }
       }
-      if (ok && list != op.indexA) {
-        op.indexA = list;
-        touched(op.id);
-      }
+      ImGui::SetItemTooltip(
+          "Cut this operation at each of these indices, in degrees -- the "
+          "four crenels of a rook are one operation at 0 90 180 270. Empty "
+          "cuts at the setup's own index.");
     }
-    ImGui::SetItemTooltip(
-        "Cut this operation at each of these indices, in degrees -- the "
-        "four crenels of a rook are one operation at 0 90 180 270. Empty "
-        "cuts at the setup's own index.");
-    ImGui::SameLine();
   }
   if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
     ImGui::SetNextItemWidth(70.0f);
@@ -2247,13 +2282,30 @@ std::string CamOpSummary(const cam::Setup& setup, const cam::Operation& op) {
                   dia, op.topZ - op.bottomZ);
     return buf;
   }
-  const int passes = static_cast<int>(cam::DepthPasses(op).size());
-  std::snprintf(buf, sizeof(buf), "%.3g mm tool, %.3g mm deep in %d pass%s%s",
-                dia, op.topZ - op.bottomZ, passes, passes == 1 ? "" : "es",
-                cam::OpTypeHas(op.type, cam::OpField::Climb)
-                    ? (op.climb ? ", climb" : ", conventional")
-                    : "");
-  std::string out = buf;
+  std::string out;
+  if (op.type == cam::OpType::Engrave) {
+    // A groove: its width and depth are one statement (EngraveGrooveFor),
+    // and the labels are what it follows.
+    const cam::EngraveGroove g = tool != nullptr
+                                     ? cam::EngraveGrooveFor(op, *tool)
+                                     : cam::EngraveGroove{};
+    std::snprintf(buf, sizeof(buf), "%.3g mm tool, %zu label%s", dia,
+                  op.targets.size(), op.targets.size() == 1 ? "" : "s");
+    out = buf;
+    if (g.ok) {
+      std::snprintf(buf, sizeof(buf), ", %.3g mm wide, %.3g mm deep", g.width,
+                    g.depth);
+      out += buf;
+    }
+  } else {
+    const int passes = static_cast<int>(cam::DepthPasses(op).size());
+    std::snprintf(buf, sizeof(buf), "%.3g mm tool, %.3g mm deep in %d pass%s%s",
+                  dia, op.topZ - op.bottomZ, passes, passes == 1 ? "" : "es",
+                  cam::OpTypeHas(op.type, cam::OpField::Climb)
+                      ? (op.climb ? ", climb" : ", conventional")
+                      : "");
+    out = buf;
+  }
   if (!op.indexA.empty()) {
     out += ", at A";
     for (size_t i = 0; i < op.indexA.size(); i++) {

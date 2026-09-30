@@ -58,6 +58,9 @@ enum class PickSlot : int {
   UnfoldBody,       // Body
   HemEdges,         // Edge, multi
   CornerReliefBody, // Body
+  // CAM: a job part's sketch label or curve to engrave (a SketchCurve item,
+  // not a face; docs/cam/gui.md#engrave-from-the-viewport).
+  CamEngraveCurve,
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

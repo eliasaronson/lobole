@@ -539,6 +539,7 @@ const std::vector<Command>& Table() {
     verb("job.profile", AppState::CamVerb::Profile);
     verb("job.drill", AppState::CamVerb::Drill);
     verb("job.edge", AppState::CamVerb::Edge);
+    verb("job.engrave", AppState::CamVerb::Engrave);
     verb("job.whole", AppState::CamVerb::Whole);
     verb("job.face", AppState::CamVerb::Face);
     // 3D and 4D finishing (docs/cam/gui.md#the-job-toolbar). The two surface

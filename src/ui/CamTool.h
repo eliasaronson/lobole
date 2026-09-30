@@ -47,6 +47,17 @@ void ArmCamPick(AppState& state, PickSlot slot, const char* prompt);
 // Every CAM pick lands here; the armed slot says what the face MEANS.
 void CamFacePicked(AppState& state, const SelectionItem& item);
 
+// The job part's sketch curve a click at `mouse` (screen pixels) would take
+// as an engraving target (docs/cam/gui.md#engrave-from-the-viewport): the
+// nearest drawn curve within a few pixels, as a SketchCurve item. One that
+// lies further along the pick ray than `occluder` (the face hit's distance;
+// negative for none) is behind the part and is not offered. False when
+// nothing is near.
+[[nodiscard]] bool CamEngraveCurveAt(AppState& state, const glm::vec2& mouse,
+                                     const glm::vec3& rayOrigin,
+                                     const glm::vec3& rayDir, float occluder,
+                                     SelectionItem& out);
+
 // G3, the visualisation ladder. `prims` takes lines and dots (the ghost
 // outline, the hover candidate, the leftover marks); `quads` takes the
 // translucent surfaces (the stock box, the walls of the removed volume).

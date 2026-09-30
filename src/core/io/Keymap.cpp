@@ -381,6 +381,7 @@ const Binding kDefaults[] = {
     {"job.profile", Context::Job, "Cut it out", "Machine", "C"},
     {"job.drill", Context::Job, "Drill a hole", "Machine", "D"},
     {"job.edge", Context::Job, "Break an edge", "Machine", "B"},
+    {"job.engrave", Context::Job, "Engrave a label or a curve", "Machine", "E"},
     {"job.whole", Context::Job, "Cut out the whole part", "Machine", "Shift+C"},
     {"job.face", Context::Job, "Face the top", "Machine", "Shift+T"},
     {"job.surface", Context::Job, "Finish a surface", "Machine", "R"},

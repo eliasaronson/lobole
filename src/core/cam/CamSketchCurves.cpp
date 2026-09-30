@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 #include "core/cam/CamToolpath.h" // BodyToSetup
 #include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h" // BuildLoops: which curves are open
 #include "core/sketch/SketchText.h"
 
 #include <glm/gtc/constants.hpp>
@@ -239,6 +240,36 @@ SketchCurves SketchEntityCurves(const Document& doc, const ElementRef& ref) {
   if (out.strokes.empty())
     out.why = ref.name + " of sketch '" + sketch->GetName() +
               "' has no length to follow";
+  return out;
+}
+
+std::vector<ElementRef> EngravableEntities(const Document& doc) {
+  std::vector<ElementRef> out;
+  for (const std::unique_ptr<Feature>& f : doc.GetFeatures()) {
+    const auto* sketch = dynamic_cast<const SketchFeature*>(f.get());
+    if (sketch == nullptr || sketch->IsSuppressed())
+      continue;
+    // Which entities close a profile: the rest are open curves.
+    std::vector<uint32_t> inLoops;
+    for (const sketch::Loop& loop : sketch::BuildLoops(sketch->entities))
+      for (const uint32_t id : sketch::LoopEntityIds(loop))
+        inLoops.push_back(id);
+    const auto closesAProfile = [&inLoops](uint32_t id) {
+      return std::find(inLoops.begin(), inLoops.end(), id) != inLoops.end();
+    };
+    bool marking = false;
+    std::vector<ElementRef> cuttable;
+    for (const sketch::Entity& e : sketch->entities) {
+      if (sketch::IsConstruction(e) || std::holds_alternative<sketch::Point>(e))
+        continue;
+      const uint32_t id = sketch::EntityId(e);
+      if (std::holds_alternative<sketch::Text>(e) || !closesAProfile(id))
+        marking = true;
+      cuttable.push_back(ElementRef{sketch->GetId(), "g" + std::to_string(id)});
+    }
+    if (marking)
+      out.insert(out.end(), cuttable.begin(), cuttable.end());
+  }
   return out;
 }
 

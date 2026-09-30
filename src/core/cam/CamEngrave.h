@@ -55,6 +55,15 @@ struct SketchCurves {
 [[nodiscard]] SketchCurves SketchEntityCurves(const Document& doc,
                                               const ElementRef& ref);
 
+// The sketch entities of `doc` a job tab offers to engrave
+// (docs/cam/gui.md#engrave-from-the-viewport): in every sketch that holds a
+// text label or an open curve -- one no closed profile of the sketch uses --
+// each entity `SketchEntityCurves` would resolve (not construction, not a
+// point), as {sketch id, "g<entity id>"}, in feature then entity order. A
+// sketch of closed profiles only is some feature's outline, not a marking,
+// and is left out; so is a suppressed one.
+[[nodiscard]] std::vector<ElementRef> EngravableEntities(const Document& doc);
+
 // The resolved curves for one target, or null when nobody resolved them.
 [[nodiscard]] const SketchCurves*
 FindSketchCurves(const std::vector<SketchCurves>& curves, const Target& t);

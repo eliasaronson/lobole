@@ -24,6 +24,19 @@ namespace cam {
 // rotary op, an op with its own index list, or a non-zero index.
 [[nodiscard]] bool HeldInRotary(const Setup& setup);
 
+// A rotary index in degrees as an operation's list holds it
+// (docs/cam/rotary.md#one-operation-at-several-indices): in [0, 360), and
+// what `SolveIndexA` returns as 89.99999999 read as the 90 it is.
+[[nodiscard]] double NormalizeIndexDeg(double degrees);
+
+// Adds `target`, presented to the spindle at index `atDeg`, to `op`, cut at
+// the setup's own index `setupDeg` until now when its list is empty: the
+// list becomes the setup's index and `atDeg` (sorted, each once), unless
+// both are the same index, when the list stays empty. The target is added
+// once. False when the op already held both.
+[[nodiscard]] bool AddIndexedTarget(Operation& op, const Target& target,
+                                    double atDeg, double setupDeg);
+
 // From setup space to the machine: `quarter` turns of +90 degrees about Z,
 // A multiplied by `sign`, written as `word`. Identity for a setup on the bed
 // and for a machine that does not state its mount.
