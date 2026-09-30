@@ -519,6 +519,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
                              src/core/cam/CamDropCutter.cpp
                              src/core/cam/CamSurface.cpp
                              src/core/cam/CamSurfacePick.cpp
+                             src/core/cam/CamSurfaceStore.cpp
                              src/core/cam/CamStrategies.cpp
                              src/core/cam/CamEngrave.cpp
                              src/core/cam/CamSurfaceStrategies.cpp

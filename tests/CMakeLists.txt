@@ -91,6 +91,7 @@ add_executable(designer_tests
     test_cam_capability.cpp
     test_cam_travel.cpp
     test_cam_rotary.cpp
+    test_cam_surface_store.cpp
     test_cam_spiral.cpp
     test_cam_helical.cpp
     test_cam_engrave.cpp

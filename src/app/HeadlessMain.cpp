@@ -10,6 +10,7 @@
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "ui/AppState.h"
+#include "ui/CamJobs.h" // OpenCamSurfaceStore
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h"
 #include "ui/MachineActions.h"
@@ -55,6 +56,11 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // ceiling on exactly the surface an agent drives
   // (docs/cam/setup.md#machine-profiles).
   ui::ReloadMachines(state);
+#ifdef HAVE_CAM
+  // ...and the surfacing passes kept between runs, as main() opens them
+  // (docs/ui/long-operations.md#passes-kept-on-disk).
+  ui::OpenCamSurfaceStore(state);
+#endif
   // All renderer/selector pointers stay null: SyncDocumentRenderers no-ops,
   // and RemoteServer degrades the GUI-dependent methods with specific errors.
 

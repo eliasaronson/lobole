@@ -1,4 +1,7 @@
 #include "ui/CamJobs.h"
+#include "common/BuildInfo.h"
+#include "common/RuntimePaths.h"
+#include "core/cam/CamSurfaceStore.h"
 #include "core/cam/CamToolpath.h"
 
 #include "ui/AppState.h"
@@ -7,8 +10,12 @@
 #include "ui/CamTool.h"
 #include "ui/JobActions.h"
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #ifdef HAVE_CAM
 
@@ -17,6 +24,17 @@ namespace ui {
 namespace {
 
 constexpr const char* kKind = "cam";
+
+// This process's executable, to fingerprint the build (OpenCamSurfaceStore).
+std::filesystem::path ExecutablePath() {
+#if defined(__linux__)
+  return "/proc/self/exe";
+#elif defined(_WIN32)
+  return RuntimePaths::ExecutableDir() / "designer.exe";
+#else
+  return RuntimePaths::ExecutableDir() / "designer";
+#endif
+}
 
 // What the worker and the main thread share: the request going in, the
 // result coming out. Owned by a shared_ptr so the thread lambda and the
@@ -136,8 +154,12 @@ void StartNextSurfacePass(AppState& state) {
                             : static_cast<double>(state.camPassBatchDone) /
                                   static_cast<double>(state.camPassBatchTotal));
     BackgroundJob* raw = job.get();
-    job->thread = std::thread([pass, raw] {
-      pass->result = cam::SurfacePass(pass->request);
+    // The disk store, by value: the worker holds it alive whatever the
+    // frame does to the cache meanwhile.
+    std::shared_ptr<const cam::SurfaceStore> store =
+        state.camSurfaceCache.Store();
+    job->thread = std::thread([pass, raw, store] {
+      pass->result = cam::SurfacePass(pass->request, store.get());
       raw->done.store(true); // last
     });
     job->finish = [pass, raw, key](AppState& s) -> bool {
@@ -244,6 +266,36 @@ void QueueAdaptivePasses(AppState& state,
     state.camPassBatchTotal++;
   }
   StartNextCamPass(state);
+}
+
+void OpenCamSurfaceStore(AppState& state) {
+  // Oldest out past this. A turning's three passes are ~50 MB on disk (the
+  // knights blank: 1.2 million moves at 42 bytes), so this keeps the last
+  // few dozen jobs' worth -- a cap on a cache, not a size anybody machines.
+  constexpr uint64_t kMaxBytes = 2ull << 30;
+  state.camSurfaceCache.SetStore(std::make_shared<cam::SurfaceStore>(
+      RuntimePaths::UserCacheDir() / "cam", kMaxBytes, [] {
+        // The build that cut them: the key covers a pass's inputs, not the
+        // generator's code, so a pass from another binary is not an answer.
+        // Its whole executable, hashed once -- a size and a date are not
+        // enough in a Nix store, where every file is dated 1970.
+        uint64_t h = 1469598103934665603ULL;
+        const auto mix = [&h](const char* p, size_t n) {
+          for (size_t i = 0; i < n; i++) {
+            h ^= static_cast<unsigned char>(p[i]);
+            h *= 1099511628211ULL;
+          }
+        };
+        const std::string version = BuildInfo::Version() + BuildInfo::Commit();
+        mix(version.data(), version.size());
+        std::ifstream exe(ExecutablePath(), std::ios::binary);
+        std::vector<char> buf(1 << 20);
+        while (exe) {
+          exe.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+          mix(buf.data(), static_cast<size_t>(exe.gcount()));
+        }
+        return h;
+      }));
 }
 
 void QueueSurfacePasses(AppState& state,

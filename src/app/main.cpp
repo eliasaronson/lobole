@@ -42,6 +42,7 @@
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/CamJobs.h" // OpenCamSurfaceStore
 #include "ui/CamPlayback.h"
 #include "ui/DocumentSlots.h"
 #include "ui/FastenerTool.h"
@@ -2087,6 +2088,14 @@ int main(int argc, char** argv) {
   // the GUI tests too: the runner points XDG_CONFIG_HOME at a scratch
   // directory, so the tests see an empty store rather than the desk's.
   ui::ReloadMachines(g_App);
+#ifdef HAVE_CAM
+  // Surfacing passes kept between runs
+  // (docs/ui/long-operations.md#passes-kept-on-disk). Not under the GUI
+  // tests, which run on defaults for the same reason as the settings: what
+  // an earlier run left must not decide what a test sees.
+  if (!args.runGuiTests)
+    ui::OpenCamSurfaceStore(g_App);
+#endif
   // A preference must not silently override an explicit flag, so the command
   // line wins where the two overlap.
   bool autosaveFromFlag = false;

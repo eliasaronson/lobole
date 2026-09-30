@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -279,7 +280,8 @@ struct SurfaceResult {
 //
 // `bodiesKey` is the caller's fingerprint of the geometry -- the core cannot
 // take one cheaply, and the UI already keeps exactly this in
-// `JobRenderVersion`. Everything else is the `setup.`/`op.`/`tool.` fields
+// `JobPassesKey`; the disk store passes `BodiesContentKey` instead
+// (CamSurfaceStore.h). Everything else is the `setup.`/`op.`/`tool.` fields
 // the surfacing strategies read, and the same gate the adaptive key has
 // applies: a field read but not hashed is a stale result nobody can see.
 [[nodiscard]] uint64_t SurfaceKey(const Setup& setup, const Operation& op,
@@ -293,23 +295,41 @@ struct SurfaceResult {
 [[nodiscard]] const Operation* FinishedBefore(const Setup& setup,
                                               const Operation& op);
 
-// The same pass, from a request -- the form a worker thread calls.
-[[nodiscard]] SurfaceResult SurfacePass(const SurfaceRequest& request);
+class SurfaceStore; // CamSurfaceStore.h
+
+// The same pass, from a request -- the form a worker thread calls. With a
+// store, it is read from there when it was cut before and written there
+// when it is cut now (SurfacePassStored).
+[[nodiscard]] SurfaceResult SurfacePass(const SurfaceRequest& request,
+                                        const SurfaceStore* store = nullptr);
 
 // Results by key. Same shape and same reasoning as `AdaptiveCache`, with a
 // smaller entry count because a surfacing result is much larger: the pin's
 // finishing pass alone is 531,432 moves.
+//
+// Memory only, keyed on the session's `bodiesKey`. The disk behind it is the
+// optional `store`, keyed on the geometry itself: a miss here is read from
+// there by whoever cuts the pass, never on the frame.
 class SurfaceCache {
 public:
   [[nodiscard]] const SurfaceResult* Find(uint64_t key);
   void Put(uint64_t key, SurfaceResult result);
   [[nodiscard]] bool Contains(uint64_t key) const;
   [[nodiscard]] size_t Size() const { return m_entries.size(); }
+  // Empties the memory; the store keeps what it has.
   void Clear();
   size_t hits = 0;
   size_t misses = 0;
 
+  void SetStore(std::shared_ptr<const SurfaceStore> store) {
+    m_store = std::move(store);
+  }
+  [[nodiscard]] const std::shared_ptr<const SurfaceStore>& Store() const {
+    return m_store;
+  }
+
 private:
+  std::shared_ptr<const SurfaceStore> m_store;
   static constexpr size_t kMaxEntries = 16;
   static constexpr size_t kMaxMoves = 4'000'000;
   std::unordered_map<uint64_t, SurfaceResult> m_entries;

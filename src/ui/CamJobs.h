@@ -38,6 +38,14 @@ void QueueAdaptivePasses(AppState& state,
 void QueueSurfacePasses(AppState& state,
                         std::vector<cam::SurfaceRequest> pending);
 
+// Put the disk store behind `state.camSurfaceCache`: finished surfacing
+// passes are kept under the user's cache directory (`$XDG_CACHE_HOME/
+// designer/cam`) and read back by a later run instead of being cut again
+// (docs/ui/long-operations.md#passes-kept-on-disk). The app calls it at
+// startup; a test that wants it points XDG_CACHE_HOME at a scratch
+// directory first, or builds its own `cam::SurfaceStore`.
+void OpenCamSurfaceStore(AppState& state);
+
 // The same, for the projected outlines a deferred profile skipped
 // (docs/cam/README.md#background-work). Started before the other two: an
 // outline is seconds and every profile waits on its own.

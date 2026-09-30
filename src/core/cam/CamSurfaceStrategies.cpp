@@ -5,6 +5,7 @@
 #include "core/cam/CamPicks.h"
 #include "core/cam/CamRotary.h"
 #include "core/cam/CamSurface.h"
+#include "core/cam/CamSurfaceStore.h"
 #include "core/cam/CamToolpathInternal.h"
 
 #include <algorithm>
@@ -1319,17 +1320,17 @@ void SurfaceThroughCache(const Setup& setup, const Operation& op,
       return;
     }
   }
-  if (op.type == OpType::SurfaceRotary)
-    GenerateRotarySurface(setup, op, tool, bodies, tp);
-  else
-    GenerateSurface(setup, op, tool, bodies, tp);
-  if (cached) {
-    SurfaceResult r;
-    r.moves = tp.moves;
-    r.error = tp.error;
-    r.strategy = tp.strategy;
+  // Cut here, on the caller's thread -- or read back from the disk store,
+  // when this pass was cut in an earlier run.
+  const SurfaceStore* store = ctx != nullptr && ctx->surfaceCache != nullptr
+                                  ? ctx->surfaceCache->Store().get()
+                                  : nullptr;
+  SurfaceResult r = SurfacePassStored(setup, op, tool, bodies, store);
+  tp.moves = r.moves;
+  tp.error = r.error;
+  tp.strategy = r.strategy;
+  if (cached)
     ctx->surfaceCache->Put(key, std::move(r));
-  }
 }
 
 } // namespace detail
@@ -1351,19 +1352,37 @@ const Operation* FinishedBefore(const Setup& setup, const Operation& op) {
   return nullptr;
 }
 
-SurfaceResult SurfacePass(const SurfaceRequest& request) {
+SurfaceResult SurfacePass(const SurfaceRequest& request,
+                          const SurfaceStore* store) {
   // The form a worker thread calls. It takes the strategy's own path with no
-  // context at all, so nothing here touches a cache another thread owns.
-  Toolpath tp;
-  const Tool& tool = request.tool;
-  if (request.op.type == OpType::SurfaceRotary)
-    GenerateRotarySurface(request.setup, request.op, tool, request.bodies, tp);
-  else
-    GenerateSurface(request.setup, request.op, tool, request.bodies, tp);
+  // context at all, so nothing here touches a cache another thread owns --
+  // the store is files, written whole and renamed.
+  return SurfacePassStored(request.setup, request.op, request.tool,
+                           request.bodies, store);
+}
+
+SurfaceResult SurfacePassStored(const Setup& setup, const Operation& op,
+                                const Tool& tool,
+                                const std::vector<Body>& bodies,
+                                const SurfaceStore* store) {
+  // The disk key: the pass's own, over the geometry's CONTENT rather than
+  // the session's version counters (CamSurfaceStore.h).
+  const uint64_t diskKey =
+      store != nullptr ? SurfaceKey(setup, op, tool, BodiesContentKey(bodies))
+                       : 0;
   SurfaceResult out;
+  if (store != nullptr && store->Load(diskKey, out))
+    return out;
+  Toolpath tp;
+  if (op.type == OpType::SurfaceRotary)
+    GenerateRotarySurface(setup, op, tool, bodies, tp);
+  else
+    GenerateSurface(setup, op, tool, bodies, tp);
   out.moves = std::move(tp.moves);
   out.error = std::move(tp.error);
   out.strategy = std::move(tp.strategy);
+  if (store != nullptr)
+    store->Save(diskKey, out);
   return out;
 }
 
