@@ -1000,9 +1000,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   if (!StartingStock(setup, rawBodies, res, others, machined))
     return out;
 
-  // Rapids through material: checked BEFORE the cut is applied, because a
-  // rapid is only safe over air. This is the check a shape comparison cannot
-  // make — the part can come out perfect and the tool still be broken.
+  // What the walk below finds, counted in file order (ProbeRapid and the
+  // others say what each is).
   int rapidsThroughStock = 0;
   double worstRapidDepth = 0.0;
   glm::dvec2 worstRapidAt(0.0);
