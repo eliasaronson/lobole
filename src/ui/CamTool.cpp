@@ -1459,6 +1459,9 @@ bool DrawOperationEditor(AppState& state) {
     state.camEditOp = 0; // deleted, or its setup is no longer the active one
     return false;
   }
+  // Every committed field is one undo step, a drag one from where it
+  // started (docs/cam/gui.md#undo) -- as the setup editor's are.
+  JobUndoGuard undoGuard(state, /*coalesce=*/true);
   BeginToolWindowFrame(state, "Edit operation");
   ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
 
@@ -1535,6 +1538,7 @@ bool DrawToolEditor(AppState& state) {
     state.camEditTool = 0; // deleted, or its setup is no longer active
     return false;
   }
+  JobUndoGuard undoGuard(state, /*coalesce=*/true); // one step per edit
   BeginToolWindowFrame(state, "Edit tool T" + std::to_string(tool->number));
   ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
   // The tool as the ops that use it need it: an edit that leaves one of
@@ -1606,6 +1610,9 @@ bool DrawFixtureEditor(AppState& state) {
     state.camEditFixture = 0; // removed, or its setup is no longer active
     return false;
   }
+  // One undo step per edit, a drag one: the guard records, so no button
+  // snapshots on its own (a snapshot under it would be a second step).
+  JobUndoGuard undoGuard(state, /*coalesce=*/true);
   BeginToolWindowFrame(state, "Fixture: " + f->name);
   bool changed = false;
   // How it moves: the arrows in the viewport (docs/cam/gui.md#gizmos). Said
@@ -1649,7 +1656,6 @@ bool DrawFixtureEditor(AppState& state) {
         ImGui::PushStyleColor(ImGuiCol_Button,
                               ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
       if (ImGui::SmallButton(label) && !on) {
-        SnapshotJob(state);
         f->seat->edge = edge;
         changed = true;
       }
@@ -1685,7 +1691,6 @@ bool DrawFixtureEditor(AppState& state) {
     ImGui::SetItemTooltip("Turned from pointing straight in");
     if (ImGui::Button("Unseat###cam_seat_unseat")) {
       // Keeps the pose it has: the bed position it stood at a moment ago.
-      SnapshotJob(state);
       f->seat.reset();
       changed = true;
     }

@@ -4609,6 +4609,123 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // The operation, tool and fixture editors in the tool window: a typed
+  // field is one Ctrl+Z, and so is a whole drag (docs/cam/gui.md#undo). They
+  // drew under no guard, so a changed depth, cutter or clamp size could not
+  // be taken back -- their edits bumped the counter with nothing to record it.
+  t = IM_REGISTER_TEST(engine, "cam", "an_editor_field_undoes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::JobDocument* job = MakeJob();
+    cam::Setup& setup = job->AddSetup("Job");
+    const uint64_t sid = setup.id;
+    cam::Operation op;
+    op.id = job->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 12.0;
+    op.bottomZ = -1.0;
+    setup.operations.push_back(op);
+    cam::Fixture clamp;
+    clamp.id = job->AllocateId();
+    clamp.name = "Clamp";
+    clamp.box = glm::dvec3(10.0, 10.0, 30.0);
+    clamp.pos = glm::dvec3(-20.0, 0.0, 0.0);
+    setup.fixtures.push_back(clamp);
+    s_App->camActiveSetup = sid;
+    ctx->Yield(3);
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+
+    const auto undoDepth = [] { return s_App->jobHistory.undo.size(); };
+    const auto undo = [&] {
+      ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
+      ctx->Yield(3);
+    };
+    // Typed, then dragged: each exactly one step, each undone by one Ctrl+Z.
+    const auto typedAndDragged = [&](const char* field, const char* typed,
+                                     double want, auto read) {
+      const double before = read();
+      size_t depth = undoDepth();
+      ctx->ItemInputValue(field, typed);
+      ctx->Yield(3);
+      IM_CHECK(std::abs(read() - want) < 1e-6);
+      IM_CHECK_EQ(undoDepth() - depth, (size_t)1);
+      undo();
+      IM_CHECK(std::abs(read() - before) < 1e-6);
+
+      // A drag held over several frames, each of which moves the value: the
+      // test engine's own ItemDragWithDelta lands in one frame, and would
+      // pass with a step per frame.
+      depth = undoDepth();
+      ctx->MouseMove(field);
+      const ImVec2 start = ImGui::GetIO().MousePos;
+      ctx->MouseDown(ImGuiMouseButton_Left);
+      double last = read();
+      int moves = 0;
+      for (int k = 1; k <= 4; k++) {
+        ctx->MouseMoveToPos(ImVec2(start.x + 15.0f * k, start.y));
+        ctx->Yield(2);
+        if (std::abs(read() - last) > 1e-9)
+          moves++;
+        last = read();
+      }
+      ctx->MouseUp(ImGuiMouseButton_Left);
+      ctx->Yield(3);
+      IM_CHECK_GT(moves, 1); // the value moved on more than one frame
+      IM_CHECK(std::abs(read() - before) > 1e-6);
+      IM_CHECK_EQ(undoDepth() - depth, (size_t)1);
+      undo();
+      IM_CHECK(std::abs(read() - before) < 1e-6);
+    };
+
+    // The operation's top.
+    ctx->ItemDoubleClick(
+        ("**/$$" + std::to_string(static_cast<int>(op.id)) + "/###op_row")
+            .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditOp, op.id);
+    typedAndDragged("//###ToolWindow/**/###top", "20", 20.0,
+                    [&] { return Job()->FindSetup(sid)->operations[0].topZ; });
+    ctx->ItemClick("//###ToolWindow/###cam_edit_done");
+    ctx->Yield(2);
+
+    // The tool's diameter.
+    ctx->ItemDoubleClick("tools/###cam_tool_1");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditTool, 1);
+    typedAndDragged("//###ToolWindow/**/###dia", "4", 4.0, [&] {
+      return Job()->FindSetup(sid)->FindTool(1)->diameter;
+    });
+    ctx->ItemClick("//###ToolWindow/###cam_tool_editor_close");
+    ctx->Yield(2);
+
+    // The fixture's spin.
+    ctx->ItemDoubleClick(
+        ("**/###cam_fixture_" + std::to_string(clamp.id)).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camEditFixture, clamp.id);
+    typedAndDragged("//###ToolWindow/**/###cam_fixture_rot", "30", 30.0,
+                    [&] { return Job()->FindSetup(sid)->fixtures[0].rotZdeg; });
+    ctx->ItemClick("//###ToolWindow/###cam_fixture_editor_close");
+    ctx->Yield(2);
+
+    s_App->selection.Clear();
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
   // The verb window keeps a bounded height and scrolls
   // (docs/cam/gui.md#verb-windows). It grew with what it listed, and
   // Engrave's -- an operation per label, the verdict's lines -- grew down

@@ -290,12 +290,16 @@ ImGui reports a collision in a popup no test sees, so
 ## Undo
 
 Every job edit is one undo step (router-round R7): a verb, a pick, a panel
-field, a drag, a menu verb, a Delete. The panel, the setup and part editors
-and each verb draw under a `ui::JobUndoGuard`, which copies the job and, when
+field, a drag, a menu verb, a Delete. The panel, every editor in the tool
+window (setup, part, operation, tool, fixture) and each verb draw under a
+`ui::JobUndoGuard`, which copies the job and, when
 it closes, pushes the copy if the job was edited in between; only the
 outermost guard records, so an action with a guard of its own called under
 another is still one step. A drag (`coalesce`) is one step from where it
-started, unless it came back there.
+started, unless it came back there. So nothing under a guard takes its own
+snapshot (`SnapshotJob`): that would be a second step for one edit. The
+operation, tool and fixture editors once drew under no guard, and a changed
+depth, cutter or clamp could not be taken back (`cam/an_editor_field_undoes`).
 
 **"Edited" is a counter, not the job's content.** Every job edit calls
 `ui::MarkJobEdited` (it bumps `AppState::jobEdits` and marks the project
