@@ -252,13 +252,21 @@ glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId) {
   // Fixture first, then the index: the part is clamped to the table, and the
   // table then turns the whole fixture with it. Composing them the other way
   // would index the part about an axis it is not sitting on.
+  //
+  // A positive A turns the PART right-handed about setup X -- its top toward
+  // -Y, which is what the mount, the rotary carve, the playback and every
+  // continuous strategy mean by A
+  // (docs/cam/rotary.md#how-the-rotary-is-installed): setup = R_x(A) * part, so
+  // part = R_x(-A) * setup. This composed R_x(+A) once, and an index was cut
+  // with the part turned the other way from the one the machine turns it: the
+  // +Y face's operation landed on -Y.
   glm::dmat3 m = glm::mat3_cast(FixtureFrame(setup, jobPartId));
   if (std::abs(setup.rotationA) > 1e-9) {
     const double a = glm::radians(setup.rotationA);
     const double c = std::cos(a), s = std::sin(a);
-    // Columns are the images of X, Y, Z: R_x(A).
-    m *= glm::dmat3(glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, c, s),
-                    glm::dvec3(0.0, -s, c));
+    // Columns are the images of X, Y, Z: R_x(-A).
+    m *= glm::dmat3(glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, c, -s),
+                    glm::dvec3(0.0, s, c));
   }
   return m;
 }

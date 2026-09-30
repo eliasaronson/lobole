@@ -207,7 +207,8 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   REQUIRE(a.error.empty());
 
   // The same block, rotated 90 degrees about X in the model, cut by a setup
-  // indexed 90 degrees the other way — which puts it back.
+  // indexed 90 degrees the other way — which puts it back: the index turns
+  // the part by R_x(A), the mount's right-hand turn.
   auto turned = std::make_unique<Document>();
   turned->AddFeature(
       std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
@@ -227,7 +228,7 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   // The machine has the axis, and is indexed on it. Both halves are needed:
   // a rotated FIXTURE never posts an A word (S3).
   RotaryMachine(indexed);
-  indexed.rotationA = 90.0;
+  indexed.rotationA = -90.0;
   indexed.operations.push_back(op);
   const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
   INFO(b.error);
@@ -246,7 +247,7 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   // way the part is facing rather than assuming.
   for (const cam::Move& m : b.moves) {
     CHECK(m.hasA);
-    CHECK_THAT(m.a, WithinAbs(90.0, 1e-9));
+    CHECK_THAT(m.a, WithinAbs(-90.0, 1e-9));
   }
   for (const cam::Move& m : a.moves)
     CHECK_FALSE(m.hasA); // a 3-axis job says nothing about A
@@ -254,7 +255,7 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   // And the posted file turns the table BEFORE it goes down.
   std::string gcode, error;
   REQUIRE(cam::PostProcess("linuxcnc", indexed, {b}, {}, gcode, &error));
-  const size_t aWord = gcode.find("A90");
+  const size_t aWord = gcode.find("A-90");
   REQUIRE(aWord != std::string::npos);
   const size_t firstCut = gcode.find("\nG1 ");
   REQUIRE(firstCut != std::string::npos);
@@ -375,15 +376,18 @@ cam::Operation ProfileOp() {
 
 TEST_CASE("cam: a fixture frame cuts what a rotary index would", "[cam]") {
   // The composition order, pinned. A setup whose FRAME is 90 degrees about X
-  // must cut exactly what a setup indexed to A=90 cuts: they are the same
-  // orientation stated two ways, and the only difference is what the file
-  // says about the machine (the next test). Getting the order wrong — the
-  // index composed before the fixture rather than after — fails here.
+  // (setup to model) must cut exactly what a setup indexed to A=-90 cuts:
+  // the frame says where the part's setup axes lie in the model, the index
+  // turns the part, so undoing a +90 model turn is a frame of +90 or an
+  // index of -90 -- the same orientation stated two ways, and the only
+  // difference is what the file says about the machine (the next test).
+  // Getting the order wrong — the index composed before the fixture rather
+  // than after — fails here.
   auto turned = TurnedBlockDoc();
 
   cam::Setup indexed = BasicSetup();
   RotaryMachine(indexed);
-  indexed.rotationA = 90.0;
+  indexed.rotationA = -90.0;
   indexed.operations.push_back(ProfileOp());
   const cam::Toolpath a = cam::GenerateAll(indexed, turned->GetBodies())[0];
   INFO(a.error);
@@ -504,6 +508,57 @@ TEST_CASE("cam: any flat face can be laid up, and twice is once", "[cam]") {
     const glm::dquat again = cam::SolveFaceUp(n, f);
     CHECK(glm::length(again - f) < 1e-9);
   }
+}
+
+namespace {
+// Every planar face of `doc`'s bodies, with its model-space normal.
+std::vector<std::pair<ElementRef, glm::dvec3>>
+PlanarFaces(const Document& doc) {
+  std::vector<std::pair<ElementRef, glm::dvec3>> out;
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        out.push_back({ElementRef{b.createdBy, name}, glm::dvec3(n)});
+    }
+  return out;
+}
+} // namespace
+
+// The contract, through the pipeline that cuts: every face of a real part,
+// clamped by the frame SolveFaceUp answers -- from whatever frame the setup
+// had, since `current` only picks the spin -- faces the spindle in
+// BodiesInSetupFrame, and is the TOP of the part there (a face "up" with the
+// part standing on it is the underside of a pocket, not the top).
+TEST_CASE("cam: a face laid up is the top of the part in the frame it is cut "
+          "in",
+          "[cam][setup]") {
+  auto doc = BlockDoc(40, 30, 20);
+  const auto faces = PlanarFaces(*doc);
+  REQUIRE(faces.size() == 6);
+  const glm::dquat spun =
+      glm::angleAxis(glm::radians(37.0), glm::dvec3(0.0, 0.0, 1.0));
+  const glm::dquat tilted = glm::angleAxis(
+      glm::radians(120.0), glm::normalize(glm::dvec3(1.0, -2.0, 0.5)));
+  for (const glm::dquat& had : {glm::dquat(1.0, 0.0, 0.0, 0.0), spun, tilted})
+    for (const auto& [face, normal] : faces) {
+      cam::Setup s = BasicSetup();
+      s.frame = had;
+      s.frame = cam::SolveFaceUp(normal, s.frame);
+      const std::vector<Body> framed =
+          cam::BodiesInSetupFrame(s, doc->GetBodies());
+      glm::vec3 up(0.0f);
+      REQUIRE(cam::FaceNormalOf(framed, face, up));
+      INFO("normal " << normal.x << " " << normal.y << " " << normal.z
+                     << " from frame " << had.w << " " << had.x << " " << had.y
+                     << " " << had.z);
+      CHECK(up.z > 0.999f);
+      const cam::FaceRegion region = cam::PickedFaceRegion(framed, face);
+      REQUIRE(region.ok);
+      glm::vec3 lo(0.0f), hi(0.0f);
+      framed.front().shape.GetBoundingBox(lo, hi, /*tight=*/true);
+      CHECK_THAT(region.z, WithinAbs(hi.z, 1e-4));
+    }
 }
 
 TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
@@ -1710,6 +1765,171 @@ TEST_CASE("A rotary setup's safe height clears the corners it turns",
   CHECK(inRotary > corner + 1.9);
   CHECK(onBed < corner); // the bed's is the top plus its clearance
   CHECK(inRotary > onBed);
+}
+
+// A rotary job's derived safe Z, through the file and the check that reads
+// it: an op cut at four indices turns the square bar's corners past the tool
+// at every index change, and the verifier finds no rapid through them. The
+// bed's safe Z -- the top plus clearance -- is the control: it sits inside
+// the corners' circle and the same check sees it.
+TEST_CASE("cam rotary: the derived safe Z clears the stock it turns in the "
+          "posted file",
+          "[cam][rotary]") {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Square bar", glm::vec3(0, -12, -12), 60.0, 24.0, 24.0));
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.heldIn = cam::Setup::HeldIn::Rotary;
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Face, cam::Target{});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.topZ = 18.0;
+  op.bottomZ = 12.0;
+  op.stepdown = 2.0;
+  op.indexA = {0.0, 90.0, 180.0, 270.0};
+  setup.operations.push_back(op);
+  REQUIRE(cam::RecomputeOrigin(setup, doc->GetBodies()));
+
+  const auto verdict = [&](double safeZ) {
+    cam::Setup s = setup;
+    s.safeZ = safeZ;
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    INFO(paths[0].error);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+    const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.5);
+    REQUIRE(v.rotary);
+    return v;
+  };
+  const double derived = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const cam::Verdict ok = verdict(derived);
+  INFO("derived safe Z " << derived << ": " << ok.rapidsThroughStock
+                         << " rapids through stock, worst "
+                         << ok.worstRapidDepth);
+  CHECK(ok.rapidsThroughStock == 0);
+
+  cam::Setup bed = BasicSetup();
+  bed.stock.margin = setup.stock.margin;
+  const double onBed = cam::DeriveSafeZ(bed, doc->GetBodies());
+  REQUIRE(onBed < derived);
+  const cam::Verdict low = verdict(onBed);
+  INFO("bed safe Z " << onBed);
+  CHECK(low.rapidsThroughStock > 0);
+}
+
+// RederiveDepths' contract is the cut, not the numbers: after the part
+// changes under a derived operation -- a configuration, an edit -- the
+// toolpath it generates must reach the part's NEW floor and not gouge it.
+// The pocket is 8 deep in a block that grows from 20 to 26 tall, so its
+// floor moves from z 12 to 18 and the stale op would cut 6 mm into it.
+TEST_CASE("cam: re-derived depths cut the changed part to its new floor",
+          "[cam][setup]") {
+  auto doc = PocketDoc();
+  cam::Setup job = PocketJob(*doc, PocketFloorRef(*doc), false);
+  REQUIRE_THAT(job.operations[0].bottomZ, WithinAbs(12.0, 1e-6));
+
+  auto* block = dynamic_cast<BoxFeature*>(doc->GetFeature(0));
+  auto* cavity = dynamic_cast<BoxFeature*>(doc->GetFeature(1));
+  REQUIRE(block != nullptr);
+  REQUIRE(cavity != nullptr);
+  block->depth = 26.0;
+  cavity->position.z = 18.0;
+  REQUIRE(doc->Regenerate());
+  const std::vector<Body>& bodies = doc->GetBodies();
+  REQUIRE_FALSE(PocketFloorRef(*doc).IsSet()); // no floor at 12 any more
+
+  const auto verify = [&](cam::Setup s) {
+    s.safeZ = cam::DeriveSafeZ(s, bodies);
+    const std::vector<cam::Toolpath> paths = cam::GenerateAll(s, bodies);
+    REQUIRE(paths.size() == 1);
+    INFO(paths[0].error);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+    return std::pair{paths[0].MinZ(), cam::VerifyGcode(gcode, s, bodies, 0.5)};
+  };
+  // Stale: the old depths, cut into the new part, go 6 mm through its floor.
+  const auto [staleMin, stale] = verify(job);
+  CHECK(stale.maxGouge > 5.0);
+
+  REQUIRE(cam::RederiveDepths(job, bodies) == 1);
+  const auto [minZ, v] = verify(job);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover);
+  CHECK_THAT(minZ, WithinAbs(18.0, 1e-6)); // down to the new floor...
+  CHECK(v.maxGouge < 0.1);                 // ...and not through it
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+// Every work origin through the post: the named point -- worked out here from
+// the stock and the model, not read back off RecomputeOrigin -- is where the
+// FILE says zero is. The picked top face is below the stock's top (the 1 mm
+// allowance), so a Z taken from the wrong one is 1 mm off in every word.
+TEST_CASE("cam: the posted file is zeroed on the point each origin names",
+          "[cam][setup]") {
+  auto doc = BlockDoc(40, 30, 20); // model 0..40, 0..30, 0..20
+  cam::Setup s = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  s.operations.push_back(op);
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  REQUIRE(hi.z > 20.5); // the allowance the top-face case is about
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  const auto cuts = [&](const cam::Setup& setup) {
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+    std::vector<glm::dvec3> out;
+    for (const cam::GMove& m : cam::ParseGcode(gcode).moves)
+      if (!m.rapid)
+        out.push_back(m.to);
+    return out;
+  };
+  cam::Setup zeroed = s;
+  zeroed.origin = glm::dvec3(0.0);
+  const std::vector<glm::dvec3> setupSpace = cuts(zeroed);
+  REQUIRE(setupSpace.size() > 20);
+
+  struct Case {
+    cam::OriginAt at;
+    glm::dvec2 xy;
+  };
+  const Case cases[] = {
+      {cam::OriginAt::StockMin, {lo.x, lo.y}},
+      {cam::OriginAt::StockCentre, {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2}},
+      {cam::OriginAt::StockMax, {hi.x, hi.y}},
+      {cam::OriginAt::ModelMin, {0.0, 0.0}},
+  };
+  const ElementRef top = UpFaceAt(*doc, 20.0);
+  REQUIRE(top.IsSet());
+  for (const Case& c : cases)
+    for (const bool onFace : {false, true}) {
+      cam::Setup setup = s;
+      setup.originAt = c.at;
+      if (onFace)
+        setup.topFace.ref = top;
+      REQUIRE(cam::RecomputeOrigin(setup, doc->GetBodies()));
+      const glm::dvec3 named(c.xy, onFace ? 20.0 : hi.z);
+      const std::vector<glm::dvec3> posted = cuts(setup);
+      REQUIRE(posted.size() == setupSpace.size());
+      INFO("origin " << static_cast<int>(c.at) << " on face " << onFace);
+      for (size_t i = 0; i < posted.size(); i++)
+        REQUIRE(glm::length(posted[i] - (setupSpace[i] - named)) < 2e-4);
+    }
 }
 
 #endif // HAVE_CAM

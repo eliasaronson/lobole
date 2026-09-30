@@ -399,9 +399,10 @@ TEST_CASE("cam: an engraving refuses a sketch whose plane does not face the "
   CHECK_THAT(d.why, Catch::Matchers::ContainsSubstring("90.00 degrees"));
 
   // ...and cut at the index that turns it up, it is cut there and only
-  // there: of four, the one that takes +Y to +Z (model to setup is R_x(-A)).
+  // there: of four, the one that takes +Y to +Z (the index turns the part
+  // by R_x(A)).
   RotaryMachine(e.setup);
-  const double a = 270.0;
+  const double a = 90.0;
   cam::Operation op;
   op.id = 1;
   op.type = cam::OpType::Engrave;

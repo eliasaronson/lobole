@@ -169,11 +169,11 @@ def turn(job, sid, rest=False):
 
 def a_for(normal):
     """The rotary index that turns a face with this outward normal to the
-    spindle: A = 0 presents +Z, 90 presents -Y (found by the pocket
-    derivation refusing every other pairing), so A = theta - 90 with theta
-    the normal's angle from +Y toward +Z."""
+    spindle: A turns the part right-handed about X (docs/cam/rotary.md#indexed),
+    so A = 0 presents +Z and 90 presents +Y: A = 90 - theta with theta the
+    normal's angle from +Y toward +Z."""
     th = math.degrees(math.atan2(normal[2], normal[1]))
-    return round((th - 90.0) % 360.0, 3)
+    return round((90.0 - th) % 360.0, 3)
 
 
 def made(app, part_name, piece_feature, via, **kw):

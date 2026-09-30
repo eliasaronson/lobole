@@ -35,7 +35,7 @@
 namespace cam {
 
 // The rotary axis is SETUP SPACE +X through (0, 0, 0). Not a choice made
-// here: `SetupToModel` composes `frame * R_x(A)`, so that is where the
+// here: `SetupToModel` composes `frame * R_x(-A)`, so that is where the
 // trunnion is, and the setup frame is what a job uses to put a part on it.
 //
 // `theta` is measured in the PART's own frame, from +Y toward +Z. At machine

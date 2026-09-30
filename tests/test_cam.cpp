@@ -1997,8 +1997,10 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   // The contract, and the only thing that matters: turned by the solved A,
   // the face points at the spindle IN THE FRAME THE TOOLPATHS ARE CUT IN.
   // The formula was once checked against its own number (+Y -> 90) while
-  // the framing turns by R_x(-A): at A90 a +Y face points DOWN, and "Turn a
-  // face up" machined the part's far side.
+  // the framing turned the part the other way, and "Turn a face up"
+  // machined the part's far side. The framing now turns it as the machine
+  // does, and "cam rotary: an indexed cut and the rotary check turn the
+  // part the same way" holds the two to one A.
   auto doc = BlockDoc(40, 30, 20);
   cam::Setup setup = BasicSetup();
   setup.machine.hasRotaryAxis = true;
@@ -2017,6 +2019,35 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
     INFO("wall at " << at.x << "," << at.y << " A " << degrees);
     CHECK(up.z > 0.999f);
   }
+  // ...and on a part CLAMPED some other way first: the normal is the one the
+  // rotary sees (the fixture frame applied, no index), as the index pick
+  // reads it, and turned by the answer the face still comes up. Every face
+  // of the block, clamped on its end so the old top and bottom are walls.
+  cam::Setup clamped = setup;
+  clamped.frame = cam::SolveFaceUp({1.0, 0.0, 0.0}, clamped.frame);
+  int solved = 0;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), mn(0.0f), u(0.0f);
+      if (!b.shape.FacePlane(index, c, mn, u))
+        continue;
+      const ElementRef face{b.createdBy, name};
+      glm::vec3 n(0.0f);
+      REQUIRE(cam::FaceNormalOf(
+          cam::BodiesInSetupFrame(clamped, doc->GetBodies()), face, n));
+      if (!cam::SolveIndexA(glm::dvec3(n), degrees))
+        continue; // the two faces now along the axis
+      solved++;
+      cam::Setup turned = clamped;
+      turned.rotationA = degrees;
+      glm::vec3 up(0.0f);
+      REQUIRE(cam::FaceNormalOf(
+          cam::BodiesInSetupFrame(turned, doc->GetBodies()), face, up));
+      INFO("model normal " << mn.x << " " << mn.y << " " << mn.z << " A "
+                           << degrees);
+      CHECK(up.z > 0.999f);
+    }
+  CHECK(solved == 4);
   // Along the rotary axis itself: no rotation about X can bring it up, and
   // the honest answer is to say so rather than pick the nearest angle.
   CHECK_FALSE(cam::SolveIndexA({1.0, 0.0, 0.0}, degrees));

@@ -10,6 +10,10 @@
 #include "core/cam/CamSim.h"
 #include "core/cam/CamSurface.h"
 
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <gp_Pnt.hxx>
+
 namespace {
 
 // A six-start twist: r = 18 + cos(6 (theta - rate x)), rate in degrees per mm.
@@ -174,6 +178,104 @@ TEST_CASE("cam helical: a stated lead turns while it cuts, and verifies "
     if (ri.machined.r[k] != sim.Stock().r[k])
       differ++;
   CHECK(differ == 0);
+}
+
+namespace {
+
+// A 20 mm square bar along +X, 0..60, twisted right-handed about +X by
+// `rateDegPerMm`: the section at x is the square turned by rate * x. A body
+// with a known twist, so a pass that follows it can be judged on the MODEL.
+std::vector<Body> TwistedBar(double rateDegPerMm) {
+  BRepOffsetAPI_ThruSections loft(/*isSolid=*/true, /*ruled=*/false);
+  for (int k = 0; k <= 12; k++) {
+    const double x = 5.0 * k;
+    const double phi = glm::radians(rateDegPerMm * x);
+    const double c = std::cos(phi), s = std::sin(phi);
+    BRepBuilderAPI_MakePolygon square;
+    for (const auto& [y, z] :
+         {std::pair{10.0, 10.0}, {-10.0, 10.0}, {-10.0, -10.0}, {10.0, -10.0}})
+      square.Add(gp_Pnt(x, y * c - z * s, y * s + z * c));
+    square.Close();
+    loft.AddWire(square.Wire());
+  }
+  loft.Build();
+  REQUIRE(loft.IsDone());
+  Body b;
+  b.name = "Twisted bar";
+  b.shape = CADShape(loft.Shape());
+  b.createdBy = 1;
+  return {b};
+}
+
+} // namespace
+
+// DeriveRotaryTwist's contract is not its number but the passes cut at it: a
+// helical pass at the derived lead follows the part's flutes. Judged on the
+// model through the setup's own framing -- the model point under the tool at
+// each cut is SetupToModel at that move's A -- a pass that follows the twist
+// stays at one phase of the square the whole length of the bar. The wrong
+// hand drifts by twice the twist, parallel passes by the twist itself.
+TEST_CASE("cam helical: passes at the derived lead follow the part's own "
+          "twist",
+          "[cam]") {
+  constexpr double kRate = 1.0; // degrees per mm: 60 over the bar
+  const std::vector<Body> bodies = TwistedBar(kRate);
+  cam::Setup setup = ShaftSetup();
+  cam::Operation op = RotaryOp(1, cam::RotaryPattern::Helical);
+  op.stepover = 2.0;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  INFO(paths[0].strategy);
+  REQUIRE(paths[0].strategy.empty()); // it found a twist to follow
+
+  // The square's phase under the tool, folded to its four-fold symmetry and
+  // returned as a point on the unit circle so a pass can be averaged.
+  const auto phaseAt = [&](const cam::Move& m) {
+    cam::Setup at = setup;
+    at.rotationA = m.a;
+    const glm::dvec3 p =
+        cam::SetupToModel(at) * glm::dvec3(m.to.x, 0.0, m.to.z);
+    const double psi = std::atan2(p.z, p.y) - glm::radians(kRate * p.x);
+    return glm::dvec2(std::cos(4.0 * psi), std::sin(4.0 * psi));
+  };
+  int passes = 0;
+  double worst = 0.0;
+  std::vector<glm::dvec2> pass;
+  double x0 = 0.0, x1 = 0.0;
+  const auto close = [&] {
+    if (pass.size() >= 10 && x1 - x0 > 30.0) {
+      glm::dvec2 mean(0.0);
+      for (const glm::dvec2& q : pass)
+        mean += q;
+      mean = glm::normalize(mean);
+      for (const glm::dvec2& q : pass)
+        worst = std::max(
+            worst, std::acos(std::clamp(glm::dot(q, mean), -1.0, 1.0)) / 4.0);
+      passes++;
+    }
+    pass.clear();
+  };
+  for (const cam::Move& m : paths[0].moves) {
+    if (m.kind != cam::Move::Kind::Cut || !m.hasA) {
+      close();
+      continue;
+    }
+    if (pass.empty())
+      x0 = x1 = m.to.x;
+    x0 = std::min(x0, m.to.x);
+    x1 = std::max(x1, m.to.x);
+    pass.push_back(phaseAt(m));
+  }
+  close();
+  INFO(passes << " long passes, worst phase drift " << glm::degrees(worst)
+              << " degrees");
+  REQUIRE(passes > 5);
+  // Following the flute: a few degrees of a 90-degree period. The wrong hand
+  // drifts 120 across the bar, parallel passes 60.
+  CHECK(glm::degrees(worst) < 5.0);
 }
 
 #endif // HAVE_CAM

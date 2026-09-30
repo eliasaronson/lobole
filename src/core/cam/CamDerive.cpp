@@ -1250,10 +1250,10 @@ bool SolveIndexA(const glm::dvec3& normal, double& degrees) {
   // cannot be brought to face the spindle.
   if (std::abs(n.x) > 1e-3)
     return false;
-  // The part is framed by R_x(-A) (SetupToModel is frame . R_x(A), undone
-  // by BodyToSetup), so the face points up when R_x(-A) * n = +Z:
-  // sin A = -ny and cos A = nz.
-  degrees = glm::degrees(std::atan2(-n.y, n.z));
+  // The index turns the part by R_x(A) (setup = R_x(A) * part, the mount's
+  // right-hand turn), so the face points up when R_x(A) * n = +Z:
+  // sin A = ny and cos A = nz.
+  degrees = glm::degrees(std::atan2(n.y, n.z));
   return true;
 }
 

@@ -512,8 +512,9 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 
 // The A that would turn `normal` to face the spindle, in degrees, with
 // `normal` as the rotary sees it: in the setup's frame at A = 0 (fixture and
-// placement applied). Turned by it, BodiesInSetupFrame shows the face up --
-// the contract its test checks, since the framing turns by R_x(-A). Returns
+// placement applied). Turned by it, BodiesInSetupFrame shows the face up and
+// the rotary check cuts the same face -- the contract its tests check; the
+// index turns the part by R_x(A), so a +Y face comes up at A = 90. Returns
 // false when there is none: a face pointing along X can never face +Z under
 // a rotation about X, and saying so beats rotating to the nearest wrong
 // thing.

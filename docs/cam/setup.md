@@ -151,8 +151,9 @@ Two different physical claims, two fields:
 A part is modelled where it belongs in its assembly — a speaker baffle stands
 upright — and clamping it flat is a statement about the job, not the model.
 `frame` is the rotation taking setup space to model space; `SetupToModel`
-composes `frame · R_x(A)`, and a test pins that a 90° frame and
-`rotationA = 90` cut the same toolpath, differing only in the A word.
+composes `frame · R_x(-A)` (the index turns the part, so it is undone going
+back to the model), and a test pins that a 90° frame and `rotationA = -90`
+cut the same toolpath, differing only in the A word.
 
 `rotationA` needs `machine.hasRotaryAxis`: an index on a machine without the
 axis is refused, and `EmitsRotary` (the axis exists AND the index is off zero)
@@ -171,8 +172,8 @@ hand, so a click changes as little as possible and repeating it is idempotent.
 **Turn a face up** (`SolveIndexA`) is the rotary path: the A that brings a
 face to +Z by rotating about X, refused for a face pointing along X. The face's
 normal is read in the setup's frame with no index (the fixture frame and the
-placement applied); the framing turns the part by R_x(-A), so a +Y face comes
-up at A = -90.
+placement applied); the index turns the part by R_x(A), as the mount, the
+rotary check and playback all do, so a +Y face comes up at A = 90.
 
 **Per-part fixturing.** `Placement::frame` is optional: set means "this part
 is clamped this way", unset means "as the setup says" (`cam::FixtureFrame` is

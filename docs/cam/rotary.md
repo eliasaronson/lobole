@@ -111,8 +111,10 @@ does.
 `Setup::rotationA` is the machine's index, separate from the fixturing frame
 ([setup.md](setup.md#fixturing-frame-and-rotary-index)). **Turn a face up**
 (`job.index_face`, `SolveIndexA`) solves the A that points a face at the
-spindle, refusing a face that points along X. Toolpaths are generated in the
-setup frame `frame · R_x(A)`, so the 2.5D pipeline, the verifier and the
+spindle, refusing a face that points along X: the index turns the part by
+R_x(A), the mount's right-hand turn, so a +Y face comes up at A = 90.
+Toolpaths are generated in the setup frame (`SetupToModel` is
+`frame · R_x(-A)`, setup to model), so the 2.5D pipeline, the verifier and the
 simulation run unchanged; every move carries the constant A, and the post
 writes one `G0 A…` at safe Z before the first operation. An indexed file
 verifies and plays on the ordinary height map: one constant A is a part

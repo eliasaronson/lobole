@@ -1759,4 +1759,66 @@ TEST_CASE("cam rotary: a picked index joins its operation's list",
   CHECK(cam::AddIndexedTarget(turned, target("g"), 30.0, 30.0));
   CHECK(turned.indexA == std::vector<double>{30.0, 90.0});
 }
+
+// One A, one way round. An index is cut through the setup framing
+// (BodiesInSetupFrame), and a file that turns is checked and played by the
+// rotary carve, whose part turns as the mount says: right-handed, the top
+// toward -Y on a positive A (docs/cam/rotary.md#how-the-rotary-is-installed).
+// If the two turn the part opposite ways, a face op at the index that
+// presents the +Y face cuts the -Y face instead -- invisible on a square bar,
+// whose sides are all alike, so this bar is not square: its +Y face is 8 from
+// the axis and its -Y face 12.
+TEST_CASE("cam rotary: an indexed cut and the rotary check turn the part the "
+          "same way",
+          "[cam][rotary]") {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, -12, -10),
+                                               60.0, 20.0, 20.0)); // y -12..8
+  const std::vector<Body>& bodies = doc->GetBodies();
+  cam::Setup setup = BasicSetup();
+  RotaryMachine(setup);
+  setup.heldIn = cam::Setup::HeldIn::Rotary;
+  setup.stock.margin = {0.0, 1.0, 1.0};
+  setup.safeZ = cam::DeriveSafeZ(setup, bodies);
+
+  // The +Y face, turned up the way "Turn a face up" turns it.
+  const ElementRef plusY = WallNear(*doc, 30.0, 8.0);
+  glm::vec3 n(0.0f);
+  REQUIRE(cam::FaceNormalOf(bodies, plusY, n));
+  REQUIRE(n.y > 0.999f);
+  double a = 0.0;
+  REQUIRE(cam::SolveIndexA(glm::dvec3(n), a));
+  a = cam::NormalizeIndexDeg(a);
+
+  // Face the top at A0 (the model's +Z face), then face the +Y face at its
+  // index: two angles, so the file is read by the rotary check.
+  const auto faceAt = [&](uint64_t id, double index) {
+    cam::Setup at = setup;
+    at.rotationA = index;
+    const cam::DerivedOp d =
+        cam::DeriveOperation(at, bodies, cam::OpType::Face, cam::Target{});
+    INFO(d.why);
+    REQUIRE(d.ok);
+    cam::Operation op = d.op;
+    op.id = id;
+    op.indexA = {index};
+    return op;
+  };
+  setup.operations = {faceAt(1, 0.0), faceAt(2, a)};
+  CHECK_THAT(setup.operations[1].bottomZ, WithinAbs(8.0, 1e-6));
+
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths.size() == 2);
+  for (const cam::Toolpath& tp : paths) {
+    INFO(tp.error);
+    REQUIRE(tp.error.empty());
+  }
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, bodies, 0.5);
+  INFO("A " << a << " gouge " << v.maxGouge << " at x " << v.gougeAt.x
+            << " theta " << v.gougeAt.y);
+  REQUIRE(v.rotary);
+  CHECK(v.maxGouge < 0.1);
+}
 #endif
