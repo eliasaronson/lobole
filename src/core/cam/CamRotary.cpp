@@ -341,6 +341,40 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
     }
     return static_cast<double>(m);
   };
+  // ...and the same one COLUMN wide: the highest the model stands in each
+  // strip of kStrip rows of one column. A block bounds the whole kernel;
+  // a strip bounds one column of it, over only the rows the cutter's
+  // footprint covers in that column. On a part that is not round -- the
+  // knights' heads -- the block's maximum is a nose or an ear that most
+  // columns of the kernel never come near, and bounding each column by its
+  // own maximum skips them. Still exact: a skipped cell is one that cannot
+  // raise the contact (`cam rotary: the pruned CL equals the full kernel's`).
+  constexpr int kStrip = 8;
+  const int st = (n + kStrip - 1) / kStrip;
+  std::vector<float> stripMax(static_cast<size_t>(st) * model.nx, 0.0f);
+  for (int j = 0; j < n; j++)
+    for (int i = 0; i < model.nx; i++) {
+      float& m = stripMax[static_cast<size_t>(j / kStrip) * model.nx + i];
+      m = std::max(m, model.At(i, j));
+    }
+  const auto columnMax = [&](int i, int j0, int j1) {
+    // j wrapping round the axis (j1 - j0 < n), as maxUnder.
+    float m = 0.0f;
+    const auto span = [&](int lo, int hi) {
+      for (int t = lo / kStrip; t <= hi / kStrip; t++)
+        m = std::max(m, stripMax[static_cast<size_t>(t) * model.nx + i]);
+    };
+    if (j0 < 0) {
+      span(j0 + n, n - 1);
+      span(0, std::min(j1, n - 1));
+    } else if (j1 >= n) {
+      span(j0, n - 1);
+      span(0, std::min(j1 - n, n - 1));
+    } else {
+      span(j0, j1);
+    }
+    return static_cast<double>(m);
+  };
 
   // Over THETA ROWS, each writing only its own: nothing is shared, so the
   // rows are independent exactly as the planar drop cutter's are, and it
@@ -383,6 +417,15 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
         const int ni = i + a;
         if (ni < 0 || ni >= model.nx)
           continue;
+        // The rows of this column under the footprint, and the highest the
+        // model stands in them: a column whose highest cannot beat `best`
+        // at this offset is passed over whole.
+        const int bj = std::min(
+            dj,
+            static_cast<int>(std::sqrt(R2 - ax2) / std::max(arc, 1e-6)) + 1);
+        const double ctop = columnMax(ni, j - bj, j + bj);
+        if (touched && ctop - TipHeight(tool, std::abs(ax)) <= best)
+          continue;
         for (int m = 0; m <= 2 * dj; m++) {
           const int b = (m & 1) ? (m + 1) / 2 : -(m / 2);
           // Squared, and the root taken only for a cell that is inside the
@@ -398,7 +441,7 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
             break;
           }
           const double drop = TipHeight(tool, std::sqrt(d2));
-          if (touched && top - drop <= best) {
+          if (touched && ctop - drop <= best) {
             if (m & 1)
               continue;
             break;
