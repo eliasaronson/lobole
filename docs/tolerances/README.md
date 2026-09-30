@@ -103,6 +103,89 @@ I/O, mirroring `ThreadStandards`:
 
 Worst case only: no statistical stack-up, no form or position tolerances.
 
+## Printed parts
+
+An FDM printer makes a hole smaller than its model and a shaft larger, so a
+fit on a printed part is **modelled** at its size plus a process allowance.
+`src/core/PrintAllowance.{h,cpp}` (namespace `printfit`) is that table, pure
+static data like `FitStandards`: per process and material, a signed allowance
+**on the diameter**, model = basic + allowance.
+
+| fdm, petg | size (the printed diameter) | allowance | source |
+|---|---|---|---|
+| hole | under Ø10 | +0.2 | 3dprintbounty.com tolerances guide (FDM holes 0.1-0.4 under, model 0.2 over); the pan-tilt survey's PETG reading (0.2-0.3 under on Ø10) |
+| hole | from Ø10 | +0.3 | as above |
+| shaft | any | −0.1 | sovol3d.com clearance guide (PETG sliding fit 0.2-0.3 per side, most of it the hole's) |
+| internal thread | any | +0.4 | FreeCAD Fasteners 3D-print nut 1.03·D + 0.10 (M8 → +0.34); BOSL2 4·`$slop` at 0.1 |
+| external thread | any | −0.1 | FreeCAD Fasteners 3D-print screw 0.99·d − 0.05 (M8 → −0.13) |
+
+It assumes a 0.4 mm nozzle and the slicers' XY and hole compensation at their
+default of 0 (Bambu Studio and PrusaSlicer ship no per-material values, so the
+allowance belongs in the model). Every number is community practice and CAD
+tool defaults, **to confirm with a test coupon** — `generators/print_coupon.py`
+prints the table's sizes and ± steps around them, and every report says so.
+PLA is not carried: the sources give PETG numbers, and PLA's differ by less
+than they disagree with each other, which is a coupon's job to settle.
+
+- **Where it lives: on the part.** `Document::PrintProcess()`, serialized as
+  the envelope's `print {process, material}` (v143), outside the regen chain
+  like a tolerance or the tube shop. A part is made one way, whichever machine
+  or tab opens it; a body's material is its appearance and density, and the
+  same PETG is printed or moulded with different allowances, so it is not the
+  material. It is not a preference, because a part printed on one machine is
+  printed on every one that opens it. `set_print_process` is an undoable
+  command that rebuilds nothing.
+- **Refused, never substituted.** An unknown process names the processes; a
+  material the process has no data for names the ones it has. The same
+  refusal on load, and in `check_fit`'s `print`.
+- **Drives no geometry.** The generator applies it where it models the part;
+  the checks say what to model.
+
+### What the checks say
+
+- **`check_fit`**: a measured face on a printed part is at the size it
+  PRINTS — the modelled diameter less the allowance (`size_from: printed`) —
+  so a PETG bore modelled Ø8.2 meets a steel Ø8 pin at one basic size, and
+  one modelled Ø8 is refused as two sizes, the reason saying "model the hole
+  8.2". `print.{hole,shaft}` gives each printed side's `basic`,
+  `allowance_mm`, `model`, `modelled`/`prints`/`compensated` when measured,
+  the row's `source` and a `band_note` when the class is finer than the
+  process holds (about ±0.2 mm on desktop FDM): "H7 on a printed Ø8 bore
+  (fdm petg): model Ø8.2". A side with no face may state `print: {process,
+  material}`, to ask before there is a model.
+- **`check_fits`** (`ui::CheckFits`) reads the printed side the same way,
+  bearing seats included, and a side's `print` carries the same fields. A
+  printed side modelled at the bare size is `unverified` with what to model.
+- **Threads.** `ui::PrintedThreadFor` reports a Thread on a printed part: the
+  modelled major (the table's, or a custom thread's from its face), what it
+  prints, and for a table thread what to model — as a custom thread on the
+  face it names (a boss's face is a custom thread's major, a bore's wall its
+  basic minor: M8 internal in PETG → a Ø7.047 bore, which prints the Ø8
+  major). It notes a cosmetic thread prints nothing, and that printed threads
+  are unreliable below M8 (tap a plain bore at the tap drill, or use an
+  insert). `add_feature` and `modify_feature` on a Thread return it as
+  `print`; `set_print_process` and `get_print_process` list every thread.
+- **`print_allowance`** answers one diameter — `{kind: hole|shaft|
+  internal_thread|external_thread, size_mm | designation}` against the part's
+  process or a stated one — with `model_mm` and what the STL export takes off
+  a round surface: its chords sit up to `deflection` inside it, so a hole can
+  lose twice that on the diameter (`printfit::ChordLossMm`; 0.2 at
+  `export_stl`'s default 0.1). The table came through somebody's export:
+  export the parts and the coupon at the same deflection and the coupon
+  calibrates both.
+
+### The coupon
+
+`generators/print_coupon.py --port PORT [--size 8 --steps 2 --step 0.05]`
+builds a printed part with bores and pins at the table's model sizes and
+`steps` either side, an internal and an external custom thread of the size's
+metric coarse pitch at the printed allowance, each engraved with its modelled
+diameter, and exports STL, the project and a JSON list into
+`scratch/print_coupon/`. Every size derives from `--size`, and every number
+comes from `print_allowance`, so the coupon tests the table the build
+carries. Print it, find the bore a Ø8 pin slides in and the pin that slides
+in a Ø8 reamed hole, and correct the table.
+
 ## Drawings
 
 - A **diameter** dimension on a toleranced bore reads its tolerance —
@@ -134,12 +217,20 @@ Worst case only: no statistical stack-up, no form or position tolerances.
   for a dangling ref, and a delete button per row.
 - **Check fits** (`###bom_check_fits`) beside Check fasteners in the Occurrence
   panel; run on demand, with a summary counting each status apart.
+- **Print process** as a section of the Variables panel
+  (`DrawPrintProcessSection`, `###print_process`): a picker over the carried
+  pairs and "Not printed", the table's rows with their sources as tooltips,
+  the confirm-with-a-coupon note, and the part's threads. The tolerance editor
+  says what a printed face prints at and what to model once a class is
+  chosen, and the Thread editor shows the printed-thread report.
 
 ## RPCs
 
 `set_tolerance {feature_id, element, class | lower+upper, b?, comment?}`,
 `list_tolerances {part?}`, `clear_tolerance {id}`, `check_fit`, `check_fits`,
-`stack_up` — all in `src/remote/RemoteInspection.cpp`. Tolerance edits are
+`stack_up`, `set_print_process {process, material | clear}`,
+`get_print_process {part?}`, `print_allowance` — all in
+`src/remote/RemoteInspection.cpp`. Tolerance edits are
 undoable commands (`src/core/Command.h`).
 
 ## Tests
@@ -148,7 +239,11 @@ undoable commands (`src/core/Command.h`).
 replace-per-subject, zero rebuilds, undo, round-trip, sizes and distances
 coexisting, stack signs and refusals), `tests/tolerances_smoke.py` (RPC:
 set/list/clear/undo, `check_fits` off mates including the sub-assembly walk),
-`tests/drawing_smoke.py` (callouts), GUI `tolerance/a_measured_bore_gets_a_class`,
+`tests/drawing_smoke.py` (callouts), `tests/test_print_allowance.cpp` (the
+table, its inverse, refusals, storage, the fit and thread sentences),
+`tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
+printed part, and the advised custom thread printing the right major), GUI
+`tolerance/print_process_from_the_panel`, `tolerance/a_measured_bore_gets_a_class`,
 `tolerance/a_plane_is_told_what_to_do`, `tolerance/the_panel_lists_and_clears`,
 `tolerance/check_fits_from_the_panel`.
 

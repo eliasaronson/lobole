@@ -2228,4 +2228,42 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
     ctx->Yield(2);
   };
+
+  // The print process is picked in the Variables panel beside the
+  // tolerances it qualifies (docs/tolerances/README.md#printed-parts): only
+  // the carried pairs are offered, choosing one rebuilds nothing, and "Not
+  // printed" takes it off again.
+  t = IM_REGISTER_TEST(engine, "tolerance", "print_process_from_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    ctx->Yield(2);
+    IM_CHECK(!Doc()->PrintProcess().has_value());
+    const uint64_t version = Doc()->Version();
+
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    // Open the section only if it is closed: its state lives in the ini and
+    // outlives the reset between tests (see the_panel_lists_and_clears).
+    if (ctx->ItemInfo("//###Variables/###print_process",
+                      ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Print process");
+      ctx->Yield(2);
+    }
+    // ComboClick resolves relative to the current ref, not from the root.
+    ctx->SetRef("//###Variables");
+    ctx->ComboClick("###print_process/###print_fdm_petg");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->PrintProcess().has_value());
+    IM_CHECK_EQ(Doc()->PrintProcess()->material, std::string("petg"));
+    IM_CHECK_EQ(Doc()->Version(), version); // drives no geometry
+
+    ctx->ComboClick("###print_process/###print_none");
+    ctx->Yield(2);
+    IM_CHECK(!Doc()->PrintProcess().has_value());
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
 }

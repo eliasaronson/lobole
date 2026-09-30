@@ -170,6 +170,10 @@ only need the callout.
   about 0.6 s; an M8 12 mm on a shoulder (one end squared) about 1.7 s. The
   sweep itself takes tens of milliseconds; the time is the checked cut, and
   the clip where an end is squared.
+- **Printed.** On a part with a print process the basic profile prints
+  tight, so `add_feature`/`modify_feature` on a Thread return `print`: what
+  it should be modelled at, as a custom thread on the face that gives it
+  ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 - **Checked by volume.** A cutter that is screw-invariant and passes through
   both ends of a length L removes exactly 2π·r̄·A·L/P (Pappus holds for the
   screw motion), with A and r̄ the groove section's area and centroid radius

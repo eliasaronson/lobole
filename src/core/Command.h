@@ -286,6 +286,23 @@ private:
   std::optional<sheet::SheetMetalRules> m_before;
 };
 
+// Sets (or clears, with nullopt) how the part is printed
+// (docs/tolerances/README.md#printed-parts). Drives no geometry, so unlike
+// the sheet's rules it rebuilds nothing — it changes what the fit checks
+// report.
+class SetPrintProcessCommand : public Command {
+public:
+  explicit SetPrintProcessCommand(std::optional<printfit::Process> process);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::optional<printfit::Process> m_after;
+  std::optional<printfit::Process> m_before;
+};
+
 // ---- Configurations (the study command trio, verbatim) --------------------
 
 // Adds a new (empty) configuration; the created id is captured for redo.

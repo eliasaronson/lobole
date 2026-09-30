@@ -5,6 +5,7 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/PrintAllowance.h"
 #include "core/SheetMetal.h"
 #include "core/Units.h"
 #include "core/fem/FemSolver.h"
@@ -396,6 +397,22 @@ public:
     m_tube = std::move(rules);
   }
 
+  // How this part is PRINTED — the process and the material it is printed in
+  // (docs/tolerances/README.md#printed-parts). Unset for a part that is not
+  // printed. It lives on the part, not on a body's material or a preference:
+  // a part is made one way, by one process, whichever machine or tab opens it,
+  // and the same PETG is printed or moulded with different allowances.
+  //
+  // Like a tolerance it drives NO geometry: it changes what check_fit,
+  // check_fits, print_allowance and the Thread editor say should be modelled,
+  // so it sits outside the regen chain and setting it rebuilds nothing.
+  const std::optional<printfit::Process>& PrintProcess() const {
+    return m_print;
+  }
+  void SetPrintProcess(std::optional<printfit::Process> p) {
+    m_print = std::move(p);
+  }
+
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
   // the parameter table like studies — not Features. The ACTIVE configuration
@@ -629,6 +646,7 @@ private:
   units::System m_units;
   std::optional<sheet::SheetMetalRules> m_sheetMetal;
   std::optional<tube::TubeRules> m_tube;
+  std::optional<printfit::Process> m_print;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.

@@ -57,6 +57,8 @@ Document::Document(const Document& other, bool reuseGeometry)
       m_rollback(other.m_rollback), m_commitGeometry(other.m_commitGeometry) {
   m_generator = other.m_generator;
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
+  m_tube = other.m_tube;             // what check_frame and the cut list read
+  m_print = other.m_print;           // what the fit checks model a print at
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());

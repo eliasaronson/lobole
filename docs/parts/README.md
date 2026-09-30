@@ -312,7 +312,10 @@ refused asking for the rim.
   interference on a bearing bore, which is why the band matters. A bearing
   fit is **reported**, never judged: which ring wants the tight fit depends on
   which one turns relative to the load, and the model does not say
-  ([../tolerances/README.md](../tolerances/README.md#checks)).
+  ([../tolerances/README.md](../tolerances/README.md#checks)). A seat on a
+  PRINTED part is read at what it prints, so a PETG housing's bore for a
+  Ø22 outside is modelled Ø22.3 and the fit says so
+  ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 - **`check_seat {occurrence}`** (`ui::CheckSeat`) checks a placed bearing
   against the seats its rings are mated to, read with the same `SeatOf`: the
   seat is the ring's basic size, the ring sits on its shoulder (within

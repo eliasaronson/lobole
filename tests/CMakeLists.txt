@@ -33,6 +33,7 @@ add_executable(designer_tests
     test_bearings.cpp
     test_fits.cpp
     test_tolerances.cpp
+    test_print_allowance.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
     test_open_project.cpp
@@ -562,6 +563,14 @@ add_test(NAME tolerances_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tolerances_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(tolerances_smoke PROPERTIES TIMEOUT 120)
+
+# The printing process allowance (docs/tolerances/README.md#printed-parts):
+# check_fit, check_fits, print_allowance and a Thread's answer on a printed
+# part say what to model, and the advice, followed, is accepted. Headless.
+add_test(NAME print_allowance_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/print_allowance_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(print_allowance_smoke PROPERTIES TIMEOUT 120)
 
 # V1 contact & connectivity: interference distance/state + contact_report
 # components/near-misses/clashes. Headless (no display).

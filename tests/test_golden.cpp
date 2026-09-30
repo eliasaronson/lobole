@@ -884,6 +884,17 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK_THAT(r.EffectiveMaxThinning(),
                WithinRel(want.at("max_thinning").get<double>(), 1e-9));
   }
+  // v143: how the part is printed. Drives no geometry, so the volumes above
+  // say nothing about it; a pair dropped on the way through the envelope
+  // would read back as an unprinted part and every fit report would stop
+  // naming the allowance.
+  if (expect.contains("print")) {
+    REQUIRE(doc.PrintProcess().has_value());
+    CHECK(doc.PrintProcess()->process ==
+          expect.at("print").at("process").get<std::string>());
+    CHECK(doc.PrintProcess()->material ==
+          expect.at("print").at("material").get<std::string>());
+  }
   // v97: whether an Import keeps the file's own coordinates. A flag that
   // round-trips as `false` is an import that silently moves — the whole
   // reason the flag exists — so the golden states it and the round-trip has

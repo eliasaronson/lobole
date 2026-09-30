@@ -6,11 +6,13 @@
 #include "core/FitStandards.h"
 #include "core/Measure.h"
 #include "core/Units.h"
+#include "core/features/ThreadFeature.h"
 #include "ui/AppState.h"
 #include "ui/ExprInput.h"
 
 #include <imgui.h>
 
+#include <cctype>
 #include <optional>
 #include <string>
 
@@ -154,6 +156,30 @@ void DrawBandPreview(const AppState& state, double nominal,
               units::FormatLength(band->Max(nominal), sys).c_str());
 }
 
+// On a printed part, what this face PRINTS at and what to model for the size
+// it measures — the same sentences check_fit gives
+// (docs/tolerances/README.md#printed-parts). Needs the class, because only
+// the class says whether the face is a bore or a shaft.
+void DrawPrintedPreview(const Document& doc, double modelled,
+                        const std::string& cls) {
+  const auto& proc = doc.PrintProcess();
+  if (!proc || cls.empty())
+    return;
+  const bool hole = std::isupper(static_cast<unsigned char>(cls[0])) != 0;
+  std::string why;
+  const auto printed = PrintedForModelled(*proc, hole, modelled, cls, &why);
+  const auto want = PrintedForBasic(*proc, hole, modelled, modelled, cls, &why);
+  if (!printed || !want) {
+    ImGui::TextWrapped("Printed: %s", why.c_str());
+    return;
+  }
+  ImGui::TextWrapped("Printed (%s %s): as modelled it prints %s %.3f mm. %s",
+                     proc->process.c_str(), proc->material.c_str(), "\xC3\x98",
+                     printed->basic, want->Sentence(cls).c_str());
+  if (!want->bandNote.empty())
+    ImGui::TextDisabled("%s", want->bandNote.c_str());
+}
+
 } // namespace
 
 void DrawTolerancePick(AppState& state) {
@@ -245,6 +271,7 @@ void DrawTolerancePick(AppState& state) {
     DrawBandPreview(state, nominal, sys);
     edit.isoClass = ClassOf(state);
     ready = !edit.isoClass.empty();
+    DrawPrintedPreview(doc, nominal, edit.isoClass);
   }
 
   if (ImGui::Button("Set tolerance###tol_set")) {
@@ -360,6 +387,71 @@ void DrawTolerancesSection(AppState& state) {
   }
   if (drop != 0 && state.commands != nullptr)
     state.commands->Execute(std::make_unique<ClearToleranceCommand>(drop), doc);
+}
+
+} // namespace ui
+
+namespace ui {
+
+void DrawPrintProcessSection(AppState& state) {
+  if (state.document == nullptr)
+    return;
+  Document& doc = *state.document;
+  const auto& have = doc.PrintProcess();
+  if (!SectionHeader("Print process", -1, have.has_value()))
+    return;
+  // Every carried pair, and "not printed". Nothing else is offered, so the
+  // picker cannot choose what set_print_process would refuse.
+  const std::string current =
+      have ? have->process + " " + have->material : std::string("Not printed");
+  ImGui::SetNextItemWidth(-1.0f);
+  if (ImGui::BeginCombo("###print_process", current.c_str())) {
+    if (ImGui::Selectable("Not printed###print_none", !have) && have &&
+        state.commands != nullptr)
+      state.commands->Execute(
+          std::make_unique<SetPrintProcessCommand>(std::nullopt), doc);
+    for (const printfit::Table& t : printfit::Tables()) {
+      const printfit::Process pr{t.process, t.material};
+      const std::string label = t.process + " " + t.material + "###print_" +
+                                t.process + "_" + t.material;
+      if (ImGui::Selectable(label.c_str(), have && *have == pr) &&
+          !(have && *have == pr) && state.commands != nullptr)
+        state.commands->Execute(std::make_unique<SetPrintProcessCommand>(pr),
+                                doc);
+    }
+    ImGui::EndCombo();
+  }
+  if (!have) {
+    ImGui::TextDisabled("Declare it and the fit checks say what to model "
+                        "for a print.");
+    return;
+  }
+  if (const printfit::Table* t = printfit::Find(*have)) {
+    for (const printfit::Row& r : t->rows) {
+      std::string range =
+          r.toMm >= 1e8    ? ("from " + units::FormatNumber(r.fromMm) + " mm")
+          : r.fromMm > 0.0 ? (units::FormatNumber(r.fromMm) + "-" +
+                              units::FormatNumber(r.toMm) + " mm")
+                           : ("under " + units::FormatNumber(r.toMm) + " mm");
+      if (r.fromMm == 0.0 && r.toMm >= 1e8)
+        range = "any size";
+      ImGui::TextWrapped("%s %s%s mm on the diameter (%s)",
+                         printfit::PrintedName(r.kind).c_str(),
+                         r.allowanceMm >= 0.0 ? "+" : "",
+                         units::FormatNumber(r.allowanceMm).c_str(),
+                         range.c_str());
+      ImGui::SetItemTooltip("%s", r.source.c_str());
+    }
+    ImGui::TextDisabled("%s", t->conditions.c_str());
+  }
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.35f, 1.0f));
+  ImGui::TextWrapped("%s", printfit::ConfirmNote().c_str());
+  ImGui::PopStyleColor();
+  // The part's threads, each with what the print wants it modelled at.
+  for (size_t i = 0; i < doc.FeatureCount(); i++)
+    if (const auto* th = dynamic_cast<const ThreadFeature*>(doc.GetFeature(i)))
+      if (const auto r = PrintedThreadFor(doc, *th))
+        ImGui::TextWrapped("%s", r->Sentence().c_str());
 }
 
 } // namespace ui

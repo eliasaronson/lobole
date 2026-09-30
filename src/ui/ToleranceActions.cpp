@@ -4,6 +4,8 @@
 #include "core/FitStandards.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/ThreadStandards.h"
+#include "core/features/ThreadFeature.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BearingActions.h"
@@ -27,9 +29,195 @@ struct Side {
   // (ISO 492 normal), not a stored tolerance, and it says which side of the
   // fit it is — a bore is the hole (docs/parts/README.md#bearings).
   std::optional<BearingRing> ring;
+  // The part is printed: its diameter is what it is MODELLED at, and the fit
+  // is at what that prints.
+  std::optional<printfit::Process> print;
 };
 
+// 8.2 -> "8.2", 8 -> "8", 7.0466 -> "7.047": millimetres as a person writes
+// them, to the micrometre and no further.
+std::string Fmt(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.3f", v);
+  std::string s(buf);
+  while (!s.empty() && s.back() == '0')
+    s.pop_back();
+  if (!s.empty() && s.back() == '.')
+    s.pop_back();
+  return s;
+}
+
+std::string Signed(double v) { return (v >= 0.0 ? "+" : "") + Fmt(v); }
+
+std::string ProcessName(const printfit::Process& p) {
+  return p.process + " " + p.material;
+}
+
 } // namespace
+
+std::string PrintedDiameter::Sentence(const std::string& cls) const {
+  std::string out = (cls.empty() ? std::string{} : cls + " on ") +
+                    "a printed Ø" + Fmt(basic) + (hole ? " bore" : " shaft") +
+                    " (" + ProcessName(process) + "): model Ø" + Fmt(model);
+  if (modelled && !Compensated())
+    out += " - it is modelled Ø" + Fmt(*modelled) + ", which prints Ø" +
+           Fmt(Prints());
+  return out;
+}
+
+bool PrintedDiameter::Compensated() const {
+  return !modelled || std::abs(*modelled - model) < 1e-3;
+}
+
+double PrintedDiameter::Prints() const {
+  return modelled ? *modelled - allowance : basic;
+}
+
+namespace {
+
+void AttachBandNote(PrintedDiameter& d, const std::string& cls) {
+  if (cls.empty())
+    return;
+  std::string why;
+  const auto band = fits::Limits(d.basic, cls, &why);
+  const double rep = printfit::ProcessRepeatabilityMm(d.process);
+  if (!band || rep <= 0.0 || band->it >= 2.0 * rep)
+    return;
+  d.bandNote = "the " + cls + " band (" + Fmt(band->it) +
+               " mm) is finer than " + d.process.process + " holds (±" +
+               Fmt(rep) +
+               " mm): a print will not meet it on its own, so "
+               "ream or drill it to size, or read the class as the intent (" +
+               printfit::ProcessRepeatabilitySource(d.process) + ")";
+}
+
+} // namespace
+
+std::optional<PrintedDiameter> PrintedForBasic(const printfit::Process& p,
+                                               bool hole, double basic,
+                                               std::optional<double> modelled,
+                                               const std::string& cls,
+                                               std::string* why) {
+  const auto a = printfit::ForBasic(
+      p, hole ? printfit::Printed::Hole : printfit::Printed::Shaft, basic, why);
+  if (!a)
+    return std::nullopt;
+  PrintedDiameter d;
+  d.process = p;
+  d.hole = hole;
+  d.basic = a->basicMm;
+  d.allowance = a->allowanceMm;
+  d.model = a->modelMm;
+  d.source = a->row != nullptr ? a->row->source : std::string{};
+  d.modelled = modelled;
+  AttachBandNote(d, cls);
+  return d;
+}
+
+std::optional<PrintedDiameter> PrintedForModelled(const printfit::Process& p,
+                                                  bool hole, double modelled,
+                                                  const std::string& cls,
+                                                  std::string* why) {
+  const auto a = printfit::ForModelled(
+      p, hole ? printfit::Printed::Hole : printfit::Printed::Shaft, modelled,
+      why);
+  if (!a)
+    return std::nullopt;
+  PrintedDiameter d;
+  d.process = p;
+  d.hole = hole;
+  d.basic = a->basicMm;
+  d.allowance = a->allowanceMm;
+  d.model = a->modelMm;
+  d.source = a->row != nullptr ? a->row->source : std::string{};
+  d.modelled = modelled;
+  AttachBandNote(d, cls);
+  return d;
+}
+
+std::string PrintedThread::Sentence() const {
+  std::string out = "Thread " + designation + " (" +
+                    (external ? "external" : "internal") + ", printed): ";
+  if (known)
+    out += "model its major Ø" + Fmt(modelMajor) + " (" + Signed(allowance) +
+           ") to print Ø" + Fmt(wantMajor) + "; as modelled (Ø" +
+           Fmt(modelledMajor) + ") it prints Ø" + Fmt(printsMajor);
+  else
+    out += "modelled at a Ø" + Fmt(modelledMajor) + " major, it prints Ø" +
+           Fmt(printsMajor) + " (" + Signed(allowance) + " allowance)";
+  return out;
+}
+
+std::optional<PrintedThread> PrintedThreadFor(const Document& doc,
+                                              const ThreadFeature& th) {
+  const auto& proc = doc.PrintProcess();
+  if (!proc || printfit::Find(*proc) == nullptr)
+    return std::nullopt;
+  PrintedThread r;
+  r.featureId = th.GetId();
+  r.name = th.GetName();
+  r.designation = th.designation;
+  r.modeled = th.modeled;
+  r.pitch = th.pitch;
+  r.resolved = th.overlay.valid;
+  r.external = th.overlay.external;
+  const auto row = threads::Lookup(th.designation);
+  r.known = row.has_value();
+  if (row) {
+    r.pitch = row->pitch;
+    r.modelledMajor = row->majorDia;
+  } else if (r.resolved) {
+    const double face = 2.0 * th.overlay.faceRadius;
+    r.modelledMajor = r.external ? face : face + 1.0825 * r.pitch;
+  }
+  if (!row && !r.resolved) {
+    r.notes.push_back("the thread's face does not resolve, so its size is "
+                      "unknown");
+    return r;
+  }
+  const printfit::Printed kind = r.external ? printfit::Printed::ExternalThread
+                                            : printfit::Printed::InternalThread;
+  std::string why;
+  const auto a = printfit::ForBasic(*proc, kind, r.modelledMajor, &why);
+  if (!a) {
+    r.notes.push_back(why);
+    return r;
+  }
+  r.allowance = a->allowanceMm;
+  r.printsMajor = r.modelledMajor - r.allowance;
+  if (row) {
+    r.wantMajor = row->majorDia;
+    r.modelMajor = row->majorDia + r.allowance;
+    r.modelFace =
+        r.external ? r.modelMajor : threads::MinorDiameter(*row) + r.allowance;
+    r.notes.push_back(
+        "the Thread cuts the table's basic profile, so an '" +
+        row->designation + "' prints tight. To print it at Ø" +
+        Fmt(r.wantMajor) +
+        ", model a Custom thread (a designation that names no series, pitch " +
+        Fmt(r.pitch) + ") on a Ø" + Fmt(r.modelFace) +
+        (r.external
+             ? " boss - a custom thread takes a boss's face as its major"
+             : " bore - a custom thread takes a bore's wall as its basic "
+               "minor"));
+  }
+  if (!r.modeled)
+    r.notes.push_back("cosmetic: the body has no groove, so nothing is "
+                      "printed - a printed thread needs `modeled: true`");
+  const double floor = printfit::MinReliableThreadMm(*proc);
+  if (floor > 0.0 && r.modelledMajor < floor)
+    r.notes.push_back(
+        "printed threads are unreliable below Ø" + Fmt(floor) + " in " +
+        proc->process + " (community practice)" +
+        (r.external ? std::string{}
+                    : std::string(": for a metal screw print a plain bore at "
+                                  "the tap drill") +
+                          (row ? " (Ø" + Fmt(threads::TapDrill(*row)) + ")"
+                               : std::string{}) +
+                          " and cut the thread with a tap, or use a heat-set "
+                          "insert"));
+  return r;
+}
 
 std::string FitCheck::Sentence() const {
   const std::string who =
@@ -44,6 +232,10 @@ std::string FitCheck::Sentence() const {
   std::string out(buf);
   if (!reason.empty())
     out += " - " + reason;
+  if (holePrint)
+    out += " - " + holePrint->Sentence(holeClass);
+  if (shaftPrint)
+    out += " - " + shaftPrint->Sentence(shaftClass);
   return out;
 }
 
@@ -113,6 +305,8 @@ std::vector<FitCheck> CheckFits(AppState& state) {
       return side;
     }
     side.part = pd;
+    if (pd->PrintProcess() && printfit::Find(*pd->PrintProcess()) != nullptr)
+      side.print = pd->PrintProcess();
     if (auto ring = BearingRingOf(pd, c.anchor.face)) {
       side.ring = ring;
       side.diameter = ring->nominal;
@@ -205,14 +399,40 @@ std::vector<FitCheck> CheckFits(AppState& state) {
           continue;
         }
       }
-      if (std::abs(ring.nominal - *other.diameter) > 1e-5) {
+      // A printed seat is at what it PRINTS: the model carries the
+      // allowance, and the ring meets the print.
+      std::optional<PrintedDiameter> otherPrint;
+      double seat = *other.diameter;
+      if (other.print) {
+        std::string why;
+        otherPrint = PrintedForModelled(*other.print, !ring.bore, seat,
+                                        other.tol->isoClass, &why);
+        if (!otherPrint) {
+          stop(why);
+          continue;
+        }
+        seat = otherPrint->basic;
+      }
+      if (std::abs(ring.nominal - seat) > 1e-5) {
         char buf[200];
         std::snprintf(buf, sizeof(buf),
                       "the seat is not the ring's basic size — the %s %s is "
                       "%.4f mm and the seat %.4f mm",
                       ring.designation.c_str(), ring.bore ? "bore" : "outside",
                       ring.nominal, *other.diameter);
-        stop(buf);
+        std::string reason = buf;
+        if (otherPrint) {
+          std::string why;
+          const auto want =
+              PrintedForBasic(*other.print, !ring.bore, ring.nominal,
+                              *other.diameter, other.tol->isoClass, &why);
+          reason += ", which prints " + Fmt(seat) + " mm (" +
+                    ProcessName(*other.print) + ")" +
+                    (want ? "; to print Ø" + Fmt(ring.nominal) + " model it Ø" +
+                                Fmt(want->model)
+                          : std::string{});
+        }
+        stop(reason);
         continue;
       }
       fits::Band otherBand;
@@ -260,6 +480,10 @@ std::vector<FitCheck> CheckFits(AppState& state) {
         e.shaftMin = ringMin;
         e.shaftMax = ringMax;
       }
+      if (ring.bore)
+        e.shaftPrint = otherPrint;
+      else
+        e.holePrint = otherPrint;
       e.minClearance = e.holeMin - e.shaftMax;
       e.maxClearance = e.holeMax - e.shaftMin;
       e.kind = fits::FitKindName(
@@ -300,25 +524,80 @@ std::vector<FitCheck> CheckFits(AppState& state) {
     }
     const Side& hole = aHole ? a : b;
     const Side& shaft = aHole ? b : a;
+    // A printed side is at what it PRINTS (the model carries the
+    // allowance), so a bore modelled Ø8.2 in PETG meets a Ø8 steel pin at
+    // one basic size — and one modelled Ø8 does not, and is told what to
+    // model instead.
+    std::optional<PrintedDiameter> holePrint, shaftPrint;
+    double holeBasic = *hole.diameter, shaftBasic = *shaft.diameter;
+    {
+      std::string why;
+      if (hole.print) {
+        holePrint = PrintedForModelled(*hole.print, true, holeBasic,
+                                       hole.tol->isoClass, &why);
+        if (!holePrint) {
+          stop(why);
+          continue;
+        }
+        holeBasic = holePrint->basic;
+      }
+      if (shaft.print) {
+        shaftPrint = PrintedForModelled(*shaft.print, false, shaftBasic,
+                                        shaft.tol->isoClass, &why);
+        if (!shaftPrint) {
+          stop(why);
+          continue;
+        }
+        shaftBasic = shaftPrint->basic;
+      }
+    }
     constexpr double kAgree = 1e-5;
-    if (std::abs(*hole.diameter - *shaft.diameter) > kAgree) {
+    if (std::abs(holeBasic - shaftBasic) > kAgree) {
       char buf[160];
       std::snprintf(buf, sizeof(buf),
                     "the two faces are not the same basic size — the bore "
                     "measures %.4f mm and the shaft %.4f mm",
                     *hole.diameter, *shaft.diameter);
-      stop(buf);
+      std::string reason = buf;
+      // Say what printing does to each, and what the printed side should be
+      // modelled at to meet the other — the one number a person needs.
+      const auto printedSay = [&](const std::optional<PrintedDiameter>& pd,
+                                  const char* which) {
+        if (pd)
+          reason += std::string("; the ") + which + " prints " +
+                    Fmt(pd->basic) + " mm (" + ProcessName(pd->process) + ")";
+      };
+      printedSay(holePrint, "bore");
+      printedSay(shaftPrint, "shaft");
+      if (holePrint && !shaftPrint) {
+        std::string why;
+        if (const auto want =
+                PrintedForBasic(*hole.print, true, shaftBasic, *hole.diameter,
+                                hole.tol->isoClass, &why))
+          reason += "; to print Ø" + Fmt(shaftBasic) + " model the bore Ø" +
+                    Fmt(want->model);
+      } else if (shaftPrint && !holePrint) {
+        std::string why;
+        if (const auto want =
+                PrintedForBasic(*shaft.print, false, holeBasic, *shaft.diameter,
+                                shaft.tol->isoClass, &why))
+          reason += "; to print Ø" + Fmt(holeBasic) + " model the shaft Ø" +
+                    Fmt(want->model);
+      }
+      stop(reason);
       continue;
     }
     std::string why;
-    const auto fit = fits::Fit(*hole.diameter, hole.tol->isoClass,
-                               shaft.tol->isoClass, &why);
+    const auto fit =
+        fits::Fit(holeBasic, hole.tol->isoClass, shaft.tol->isoClass, &why);
     if (!fit) {
       stop(why);
       continue;
     }
     e.computed = true;
-    e.size = *hole.diameter;
+    e.size = holeBasic;
+    e.holePrint = holePrint;
+    e.shaftPrint = shaftPrint;
     e.holeOccurrence = hole.occurrence;
     e.shaftOccurrence = shaft.occurrence;
     e.holeClass = hole.tol->isoClass;

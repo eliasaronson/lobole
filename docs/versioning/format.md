@@ -31,7 +31,8 @@ baked geometry and autosave are in [README.md](README.md).
 - `features` is ordered: it IS the regeneration history.
 - Optional envelope keys, each written only off its default so older
   documents re-save byte-identically: `rollback`, `commit_geometry: false`,
-  `generator`, `catalogs`, `sheet_metal`, `tube`, `units`, `tolerances`,
+  `generator`, `catalogs`, `sheet_metal`, `tube`, `print`, `units`,
+  `tolerances`,
   `active_configuration`, and
   `assets` (base64 blobs, single-file form only).
 
@@ -222,6 +223,7 @@ here; the golden corpus and git history cover them.
 | 139 | CAM setup `rapid_feed` (mm/min): the setup's own traverse rate, seeded from the machine's and saved with the setup (only the machine's copy was); absent = 0, not stated, and a negative or non-numeric one is refused ([post](../cam/post.md)) |
 | 140 | Thread `hand` (`right` or `left`; absent = right, and any other value is refused), and `modeled: true` now cuts the real helical groove instead of erroring; the designation may name a unified thread (`3/8-16 UNC`) or carry a class suffix (`3/8-16 UNC-2B`) ([modelled threads](../modeling/holes-and-threads.md#modelled-threads)) |
 | 141 | Feature type `Bearing` {`designation`}: an ISO 15 deep-groove ball bearing generated from its designation (618/619/60/62/63, bores 3 to 30 mm), the whole of a generated standard part ([bearings](../parts/README.md#bearings)) |
+| 143 | A part's `print` {`process`, `material`}: how it is printed (`fdm` + `petg` is what the table carries; any other pair is refused on load, naming what is), which `check_fit`, `check_fits` and a Thread's report read for the allowance to model. Drives no geometry; written only when set ([printed parts](../tolerances/README.md#printed-parts)) |
 
 ## The directory form
 

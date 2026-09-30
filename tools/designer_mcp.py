@@ -450,7 +450,9 @@ citing the source.
 MANUFACTURING (FDM defaults — apply unless told otherwise):
 - Walls >= 1.2 mm; any freestanding feature >= 0.4 mm (one nozzle width).
 - Holes mating with hardware: add 0.2-0.3 mm diametral clearance (printed
-  holes shrink); press-fits get 0.0-0.1 mm.
+  holes shrink); press-fits get 0.0-0.1 mm. For a fit that matters, declare
+  rpc('set_print_process', {process: 'fdm', material: 'petg'}) on the part
+  and ask rpc('print_allowance', {kind, size_mm}) or check_fit what to model.
 - Note the intended print orientation in your final answer (which face on the
   bed, where supports land, strength direction — layer bonds are the weak
   axis).

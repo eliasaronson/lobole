@@ -300,8 +300,9 @@ bodies are not counted twice.
 
 ## Tolerances and fits
 
-`check_fit`, `set_tolerance`, `list_tolerances`, `stack_up` and `check_fits`
-are described in [../tolerances/README.md](../tolerances/README.md). Declared clearances
+`check_fit`, `set_tolerance`, `list_tolerances`, `stack_up`, `check_fits`
+and the print allowance (`set_print_process`, `get_print_process`,
+`print_allowance`) are described in [../tolerances/README.md](../tolerances/README.md). Declared clearances
 between occurrences (`add_assertion`, `verify_assertions`) are assembly
 state.
 

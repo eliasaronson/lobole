@@ -15,12 +15,14 @@
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
+#include "core/ThreadStandards.h"
 #include "core/ToleranceStack.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 #include "core/tube/CutList.h"
 #include "core/tube/Rules.h"
@@ -683,12 +685,66 @@ static constexpr MethodDoc InspectionMethods[] = {
      "anyway is wrong by exactly one grade step. Worst case over independent "
      "limits — no distribution, no form or position error. "
      "`part` (on a side, or shared) resolves faces against another part "
-     "without switching tab, so a bore and its shaft can live in two.",
+     "without switching tab, so a bore and its shaft can live in two. "
+     "A PRINTED part (set_print_process) is judged at what it PRINTS: a "
+     "measured face there carries the process allowance in its model, so "
+     "its basic size is the modelled one less the allowance (`size_from: "
+     "printed`), and `print` says for each printed side what to MODEL — "
+     "\"H7 on a printed Ø8 bore (fdm petg): model Ø8.2\" — whether it is "
+     "(`compensated`) and whether the class is finer than the process holds. "
+     "A side with no face may say {print: {process, material}} to ask before "
+     "there is a model.",
      "hole, intent, part, shaft, size", remote::NoFlags,
      "size, size_from, hole{class,lower,upper,min,max,it_grade,it}, "
      "measured?{hole?,shaft?}, "
      "shaft?{class,lower,upper,min,max,it_grade,it}, kind?, min_clearance?, "
-     "max_clearance?, note?, intent?, intent_ok?"},
+     "max_clearance?, note?, intent?, intent_ok?, print?{hole?,shaft?}, "
+     "print_notes?"},
+    {"set_print_process",
+     "Declare how this PART is printed: {process, material} — `fdm` with "
+     "`petg` is what the table carries — or {clear: true} for a part that is "
+     "not printed. It lives on the part because a part is made one way, "
+     "whichever machine or tab opens it. It drives NO geometry and rebuilds "
+     "nothing: it changes what check_fit, check_fits and the Thread "
+     "reports say to MODEL, since a printer makes a hole smaller than its "
+     "model and a shaft larger (a PETG Ø8 H7 bore: model Ø8.2). An unknown "
+     "process, or a material the table has no data for, is REFUSED naming "
+     "what is carried — never borrowed from a neighbour. Undoable. The "
+     "answer lists every Thread on the part with what it should be modelled "
+     "at.",
+     "clear, material, process", remote::NeedsPart,
+     "print{process,material}, threads[]{feature_id,name,designation,"
+     "side,modeled,known,pitch,allowance_mm,modelled_major,prints_major,"
+     "want_major?,model_major?,model_face?,notes,sentence,confirm}"},
+    {"get_print_process",
+     "This part's print process (null when it is not printed) and the whole "
+     "allowance table: per process and material, the signed allowance ON "
+     "THE DIAMETER for a hole, a shaft, an internal and an external thread "
+     "(model = basic + allowance), the size range each row covers, the "
+     "conditions it assumes and where each number comes from. Every number "
+     "is community practice and CAD-tool defaults, to be confirmed with a "
+     "test coupon (generators/print_coupon.py). A printed part also lists "
+     "its Threads with what to model for each.",
+     "part", remote::Deferrable,
+     "print{process,material}, tables[]{process,material,conditions,"
+     "repeatability_mm,repeatability_source,min_reliable_thread_mm,rows[]{"
+     "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
+    {"print_allowance",
+     "What to MODEL for one printed diameter: {kind: hole|shaft|"
+     "internal_thread|external_thread, size_mm} (the size it should PRINT "
+     "at) or, for a thread, {designation: \"M8\"} for the table's major. "
+     "The process is the part's (set_print_process) or {process, material} "
+     "given here. Answers the signed `allowance_mm` on the diameter, "
+     "`model_mm`, the row's source, and what the STL export takes off a "
+     "round surface at `stl_deflection_mm` (export_stl's own default when "
+     "omitted). Drives no geometry: a generator applies it where it models "
+     "the part. Refused: an unknown kind, process or material, naming what "
+     "is accepted.",
+     "designation, kind, material, part, process, size_mm, stl_deflection_mm",
+     remote::Deferrable,
+     "process, material, kind, basic_mm, allowance_mm, model_mm, source, "
+     "confirm, stl_deflection_mm, stl_chord_loss_mm, stl_note, designation?, "
+     "pitch?, note?"},
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
@@ -745,9 +801,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "an anchor that is a frame rather than a face, one side untoleranced, "
      "two faces of different basic size, a side stating explicit deviations "
      "(which say nothing about which side is the bore), or both sides the "
-     "same case. The summary counts each kind apart.",
+     "same case. The summary counts each kind apart. A side on a PRINTED "
+     "part is at the size it prints (its model carries the allowance) and "
+     "carries `print` with what to model; one modelled at the bare size is "
+     "unverified as two basic sizes, and the reason says what to model.",
      "", remote::NoFlags,
-     "fits[]{mate,mate_name,mate_type,status,reason?,size?,hole?,shaft?,kind?,"
+     "fits[]{mate,mate_name,mate_type,status,reason?,size?,hole?{occurrence,"
+     "class,min,max,print?},shaft?{...},kind?,"
      "min_clearance?,max_clearance?,note?}, "
      "status, passed, warned, failed, reported, unverified, "
      "receipt{schema,standing,summary,claims}"},
@@ -1031,6 +1091,91 @@ static constexpr MethodDoc InspectionMethods[] = {
      "all, id"},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
+
+// A printed side of a fit on the wire
+// (docs/tolerances/README.md#printed-parts).
+json PrintedDiameterJson(const ui::PrintedDiameter& d, const std::string& cls) {
+  json j{{"process", d.process.process},      {"material", d.process.material},
+         {"kind", d.hole ? "bore" : "shaft"}, {"basic", d.basic},
+         {"allowance_mm", d.allowance},       {"model", d.model},
+         {"sentence", d.Sentence(cls)},       {"source", d.source},
+         {"confirm", printfit::ConfirmNote()}};
+  if (d.modelled) {
+    j["modelled"] = *d.modelled;
+    j["prints"] = d.Prints();
+    j["compensated"] = d.Compensated();
+  }
+  if (!d.bandNote.empty())
+    j["band_note"] = d.bandNote;
+  return j;
+}
+
+json PrintedThreadJson(const ui::PrintedThread& t) {
+  json j{{"feature_id", t.featureId},
+         {"name", t.name},
+         {"designation", t.designation},
+         {"side", t.external ? "external" : "internal"},
+         {"modeled", t.modeled},
+         {"known", t.known},
+         {"pitch", t.pitch},
+         {"allowance_mm", t.allowance},
+         {"modelled_major", t.modelledMajor},
+         {"prints_major", t.printsMajor},
+         {"notes", t.notes},
+         {"sentence", t.Sentence()},
+         {"confirm", printfit::ConfirmNote()}};
+  if (t.known) {
+    j["want_major"] = t.wantMajor;
+    j["model_major"] = t.modelMajor;
+    j["model_face"] = t.modelFace;
+  }
+  return j;
+}
+
+namespace {
+
+json PrintTablesJson() {
+  json tables = json::array();
+  for (const printfit::Table& t : printfit::Tables()) {
+    json rows = json::array();
+    for (const printfit::Row& r : t.rows) {
+      json row{{"kind", printfit::PrintedName(r.kind)},
+               {"from_mm", r.fromMm},
+               {"allowance_mm", r.allowanceMm},
+               {"source", r.source}};
+      row["to_mm"] = r.toMm >= 1e8 ? json(nullptr) : json(r.toMm);
+      rows.push_back(std::move(row));
+    }
+    const printfit::Process pr{t.process, t.material};
+    tables.push_back(
+        {{"process", t.process},
+         {"material", t.material},
+         {"conditions", t.conditions},
+         {"repeatability_mm", printfit::ProcessRepeatabilityMm(pr)},
+         {"repeatability_source", printfit::ProcessRepeatabilitySource(pr)},
+         {"min_reliable_thread_mm", printfit::MinReliableThreadMm(pr)},
+         {"rows", std::move(rows)}});
+  }
+  return tables;
+}
+
+json ProcessJson(const std::optional<printfit::Process>& p) {
+  if (!p)
+    return nullptr;
+  return {{"process", p->process}, {"material", p->material}};
+}
+
+// Every thread a printed part carries, reported.
+json PrintedThreadsJson(const Document& part) {
+  json out = json::array();
+  for (size_t i = 0; i < part.FeatureCount(); i++)
+    if (const auto* th = dynamic_cast<const ThreadFeature*>(part.GetFeature(i)))
+      if (const auto r = ui::PrintedThreadFor(part, *th))
+        out.push_back(PrintedThreadJson(*r));
+  return out;
+}
+
+} // namespace
 
 // "xy" | "xz" | "yz" -> 0 | 1 | 2. Anything else is REFUSED: every section
 // handler used to read an unknown plane — "zx", "XY", "front" — as xy, and
@@ -2603,6 +2748,139 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     return out;
   }
+  if (m == "set_print_process") {
+    // How the part is printed (docs/tolerances/README.md#printed-parts).
+    // Drives no geometry, so it rebuilds nothing; it is what the fit checks
+    // read for the allowance to model.
+    Document& part = RequirePartDoc(doc, "set_print_process");
+    std::optional<printfit::Process> next;
+    if (p.value("clear", false)) {
+      if (p.contains("process") || p.contains("material"))
+        throw std::runtime_error(
+            "set_print_process: `clear` or a {process, material}, not both");
+    } else {
+      if (!p.contains("process") || !p.contains("material"))
+        throw std::runtime_error(
+            "set_print_process needs both `process` and `material` (e.g. "
+            "fdm, petg) — an allowance is a property of the pair, and half "
+            "of one would be guessed. Or `clear: true` for a part that is not "
+            "printed. get_print_process lists what is carried.");
+      next = printfit::Process{p.at("process").get<std::string>(),
+                               p.at("material").get<std::string>()};
+      if (const std::string why = printfit::Validate(*next); !why.empty())
+        throw std::runtime_error("set_print_process: " + why);
+    }
+    state.commands->Execute(std::make_unique<SetPrintProcessCommand>(next),
+                            part);
+    return json{{"print", ProcessJson(part.PrintProcess())},
+                {"threads", PrintedThreadsJson(part)}};
+  }
+  if (m == "get_print_process") {
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "get_print_process");
+    json out{{"print", ProcessJson(part.PrintProcess())},
+             {"tables", PrintTablesJson()},
+             {"confirm", printfit::ConfirmNote()}};
+    if (part.PrintProcess())
+      out["threads"] = PrintedThreadsJson(part);
+    return out;
+  }
+  if (m == "print_allowance") {
+    // One printed diameter: what to MODEL for it. The process is the part's,
+    // or stated here ({process, material}) to ask before there is a part.
+    std::optional<printfit::Process> proc;
+    if (p.contains("process") || p.contains("material")) {
+      if (!p.contains("process") || !p.contains("material"))
+        throw std::runtime_error(
+            "print_allowance: `process` and `material` come as a pair");
+      proc = printfit::Process{p.at("process").get<std::string>(),
+                               p.at("material").get<std::string>()};
+      if (const std::string why = printfit::Validate(*proc); !why.empty())
+        throw std::runtime_error("print_allowance: " + why);
+    } else {
+      const Document& part = p.contains("part")
+                                 ? *ResolvePartParam(state, p.at("part"))
+                                 : RequirePartDoc(doc, "print_allowance");
+      proc = part.PrintProcess();
+      if (!proc)
+        throw std::runtime_error(
+            "print_allowance: this part declares no print process — "
+            "set_print_process {process, material} on it, or pass them here");
+    }
+    if (!p.contains("kind"))
+      throw std::runtime_error("print_allowance: `kind` is one of " +
+                               printfit::PrintedNames());
+    const std::string kindName = p.at("kind").get<std::string>();
+    const auto kind = printfit::PrintedFromName(kindName);
+    if (!kind)
+      throw std::runtime_error("print_allowance: unknown kind '" + kindName +
+                               "'. Accepted: " + printfit::PrintedNames());
+    const bool thread = *kind == printfit::Printed::InternalThread ||
+                        *kind == printfit::Printed::ExternalThread;
+    double basic = 0.0;
+    json out;
+    if (p.contains("designation")) {
+      if (!thread)
+        throw std::runtime_error(
+            "print_allowance: a `designation` names a thread; a " + kindName +
+            " takes `size_mm`");
+      if (p.contains("size_mm"))
+        throw std::runtime_error(
+            "print_allowance: `designation` or `size_mm`, not both — the "
+            "designation already says the major diameter");
+      const std::string des = p.at("designation").get<std::string>();
+      std::string why;
+      const auto res = threads::Resolve(des, &why);
+      if (!res)
+        throw std::runtime_error(
+            "print_allowance: " +
+            (why.empty() ? "'" + des +
+                               "' is not a thread the tables carry — pass its "
+                               "major as `size_mm`"
+                         : why));
+      basic = res->standard.majorDia;
+      out["designation"] = res->standard.designation;
+      out["pitch"] = res->standard.pitch;
+    } else if (p.contains("size_mm")) {
+      basic = p.at("size_mm").get<double>();
+    } else {
+      throw std::runtime_error(
+          "print_allowance: the diameter to print, as `size_mm`" +
+          std::string(thread ? " (the major) or a thread `designation`" : ""));
+    }
+    std::string why;
+    const auto a = printfit::ForBasic(*proc, *kind, basic, &why);
+    if (!a)
+      throw std::runtime_error("print_allowance: " + why);
+    const double deflection = p.value("stl_deflection_mm", 0.1);
+    out.update(json{{"process", proc->process},
+                    {"material", proc->material},
+                    {"kind", kindName},
+                    {"basic_mm", a->basicMm},
+                    {"allowance_mm", a->allowanceMm},
+                    {"model_mm", a->modelMm},
+                    {"source", a->row->source},
+                    {"confirm", printfit::ConfirmNote()},
+                    {"stl_deflection_mm", deflection},
+                    {"stl_chord_loss_mm", printfit::ChordLossMm(deflection)},
+                    {"stl_note",
+                     "an STL's chords sit inside a round surface by up to its "
+                     "deflection, so a hole's diameter can come out up to "
+                     "twice that small (a shaft's that large). The table "
+                     "came through somebody's export: export the parts and "
+                     "the print_coupon at the same deflection and the coupon "
+                     "calibrates both"}});
+    if (thread) {
+      const double floor = printfit::MinReliableThreadMm(*proc);
+      if (floor > 0.0 && basic < floor)
+        out["note"] = "printed threads are unreliable below this size in " +
+                      proc->process +
+                      " (community practice) — tap a plain bore or use a "
+                      "heat-set insert";
+    }
+    return out;
+  }
   if (m == "check_fit") {
     // ISO 286 limits and fits (docs/tolerances/README.md#checks). Two jobs in
     // one method because they are one question asked at two depths: `hole`
@@ -2615,8 +2893,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     //
     // params: {hole: {class, feature_id?, element?, part?}, shaft?: {...},
     //          size?, intent?}
-    const auto measureSide = [&](const json& s,
-                                 const char* which) -> std::optional<double> {
+    const auto measureSide =
+        [&](const json& s, const char* which,
+            const Document** measuredIn) -> std::optional<double> {
       const bool hasFeature = s.contains("feature_id");
       const bool hasElement = s.contains("element");
       if (!hasFeature && !hasElement)
@@ -2642,7 +2921,42 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             std::string("check_fit: ") + which + " is a " + el->shape +
             ", which has no diameter. A fit is between round things — a "
             "cylindrical face or a circular edge on each side");
+      *measuredIn = d2;
       return el->radius * 2.0;
+    };
+    // Whether a side is PRINTED (docs/tolerances/README.md#printed-parts): a
+    // measured face on a part that declares a print process is, and a side
+    // may say so itself with {print: {process, material}} — the way to ask
+    // "what do I model for an H7 bore in PETG" before there is a model. The
+    // two must agree: a face is printed one way.
+    const auto sidePrint =
+        [&](const json& s, const char* which,
+            const Document* measuredIn) -> std::optional<printfit::Process> {
+      std::optional<printfit::Process> declared;
+      if (s.contains("print")) {
+        const json& pj = s.at("print");
+        if (!pj.is_object() || !pj.contains("process") ||
+            !pj.contains("material"))
+          throw std::runtime_error(
+              std::string("check_fit: ") + which +
+              ".print is {process, material}, e.g. {process: \"fdm\", "
+              "material: \"petg\"}");
+        declared = printfit::Process{pj.at("process").get<std::string>(),
+                                     pj.at("material").get<std::string>()};
+        if (const std::string why = printfit::Validate(*declared); !why.empty())
+          throw std::runtime_error("check_fit: " + why);
+      }
+      std::optional<printfit::Process> part;
+      if (measuredIn != nullptr)
+        part = measuredIn->PrintProcess();
+      if (declared && part && !(*declared == *part))
+        throw std::runtime_error(
+            std::string("check_fit: ") + which + ".print says " +
+            declared->process + " " + declared->material +
+            " but the part it is measured on is printed in " + part->process +
+            " " + part->material +
+            " (set_print_process) — a face is printed one way");
+      return declared ? declared : part;
     };
 
     if (!p.contains("hole"))
@@ -2653,19 +2967,50 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(
           "check_fit: hole.class is required, e.g. \"H7\"");
     const std::string holeCls = holeJson.at("class").get<std::string>();
-    const std::optional<double> holeMeasured = measureSide(holeJson, "hole");
+    const Document* holeDoc = nullptr;
+    const std::optional<double> holeMeasured =
+        measureSide(holeJson, "hole", &holeDoc);
+    const std::optional<printfit::Process> holeProc =
+        sidePrint(holeJson, "hole", holeDoc);
 
     const bool hasShaft = p.contains("shaft");
     std::string shaftCls;
     std::optional<double> shaftMeasured;
+    std::optional<printfit::Process> shaftProc;
     if (hasShaft) {
       const json& shaftJson = p.at("shaft");
       if (!shaftJson.contains("class"))
         throw std::runtime_error(
             "check_fit: shaft.class is required, e.g. \"g6\"");
       shaftCls = shaftJson.at("class").get<std::string>();
-      shaftMeasured = measureSide(shaftJson, "shaft");
+      const Document* shaftDoc = nullptr;
+      shaftMeasured = measureSide(shaftJson, "shaft", &shaftDoc);
+      shaftProc = sidePrint(shaftJson, "shaft", shaftDoc);
     }
+    // A printed, measured side is at what it PRINTS: the model carries the
+    // allowance. The basic size below is decided from these.
+    std::optional<ui::PrintedDiameter> holeFromModel, shaftFromModel;
+    {
+      std::string why;
+      if (holeProc && holeMeasured) {
+        holeFromModel = ui::PrintedForModelled(*holeProc, true, *holeMeasured,
+                                               holeCls, &why);
+        if (!holeFromModel)
+          throw std::runtime_error("check_fit: hole: " + why);
+      }
+      if (shaftProc && shaftMeasured) {
+        shaftFromModel = ui::PrintedForModelled(*shaftProc, false,
+                                                *shaftMeasured, shaftCls, &why);
+        if (!shaftFromModel)
+          throw std::runtime_error("check_fit: shaft: " + why);
+      }
+    }
+    const std::optional<double> holeBasic =
+        holeFromModel ? std::optional<double>(holeFromModel->basic)
+                      : holeMeasured;
+    const std::optional<double> shaftBasic =
+        shaftFromModel ? std::optional<double>(shaftFromModel->basic)
+                       : shaftMeasured;
 
     // What nominal to work at. An explicit `size` wins; otherwise the model
     // is asked, and two answers that disagree are refused rather than
@@ -2680,22 +3025,35 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (p.contains("size")) {
       size = p.at("size").get<double>();
       sizeFrom = "given";
-    } else if (holeMeasured && shaftMeasured) {
+    } else if (holeBasic && shaftBasic) {
       constexpr double kAgree = 1e-5; // mm, far under the finest grade (3 um)
-      if (std::abs(*holeMeasured - *shaftMeasured) > kAgree)
+      if (std::abs(*holeBasic - *shaftBasic) > kAgree) {
+        std::string printed;
+        if (holeFromModel)
+          printed += "; the printed hole comes out " + mm(*holeBasic);
+        if (shaftFromModel)
+          printed += "; the printed shaft comes out " + mm(*shaftBasic);
+        if (holeFromModel && !shaftFromModel)
+          printed += " — to print " + mm(*shaftBasic) + " model the hole " +
+                     mm(*shaftBasic + holeFromModel->allowance);
+        else if (shaftFromModel && !holeFromModel)
+          printed += " — to print " + mm(*holeBasic) + " model the shaft " +
+                     mm(*holeBasic + shaftFromModel->allowance);
         throw std::runtime_error(
             "check_fit: the two faces are not the same basic size — the hole "
             "measures " +
             mm(*holeMeasured) + " and the shaft " + mm(*shaftMeasured) +
+            printed +
             ". An ISO fit is a band either side of ONE nominal, so a "
             "clearance already modelled into the geometry would be counted "
             "twice. Model both at the same size, or pass `size` to say which "
             "nominal the classes are against.");
-      size = *holeMeasured;
-      sizeFrom = "measured";
-    } else if (holeMeasured || shaftMeasured) {
-      size = holeMeasured ? *holeMeasured : *shaftMeasured;
-      sizeFrom = "measured";
+      }
+      size = *holeBasic;
+      sizeFrom = holeFromModel || shaftFromModel ? "printed" : "measured";
+    } else if (holeBasic || shaftBasic) {
+      size = holeBasic ? *holeBasic : *shaftBasic;
+      sizeFrom = holeFromModel || shaftFromModel ? "printed" : "measured";
     } else {
       throw std::runtime_error(
           "check_fit: no nominal size — pass `size`, or name a face on either "
@@ -2717,6 +3075,34 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (shaftMeasured)
         measured["shaft"] = *shaftMeasured;
       out["measured"] = std::move(measured);
+    }
+
+    // What to MODEL, per printed side, at the basic size decided above.
+    {
+      json print = json::object();
+      json sentences = json::array();
+      const auto printedSide = [&](const std::optional<printfit::Process>& pr,
+                                   bool hole, const std::string& cls,
+                                   const std::optional<double>& measured,
+                                   const char* key) {
+        if (!pr)
+          return;
+        std::string why;
+        const auto d =
+            ui::PrintedForBasic(*pr, hole, size, measured, cls, &why);
+        if (!d)
+          throw std::runtime_error(std::string("check_fit: ") + key + ": " +
+                                   why);
+        print[key] = PrintedDiameterJson(*d, cls);
+        sentences.push_back(d->Sentence(cls));
+      };
+      printedSide(holeProc, true, holeCls, holeMeasured, "hole");
+      if (hasShaft)
+        printedSide(shaftProc, false, shaftCls, shaftMeasured, "shaft");
+      if (!print.empty()) {
+        out["print"] = std::move(print);
+        out["print_notes"] = std::move(sentences);
+      }
     }
 
     std::string why;
@@ -3008,6 +3394,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                       {"class", c.shaftClass},
                       {"min", c.shaftMin},
                       {"max", c.shaftMax}};
+        if (c.holePrint)
+          e["hole"]["print"] = PrintedDiameterJson(*c.holePrint, c.holeClass);
+        if (c.shaftPrint)
+          e["shaft"]["print"] =
+              PrintedDiameterJson(*c.shaftPrint, c.shaftClass);
         e["kind"] = c.kind;
         e["min_clearance"] = c.minClearance;
         e["max_clearance"] = c.maxClearance;
