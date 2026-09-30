@@ -7,6 +7,13 @@
 
 #include "cam_fixtures.h"
 
+#include "core/Parallel.h"
+#include "core/cam/CamOtherSetups.h"
+
+#include <chrono>
+#include <cstring>
+#include <nlohmann/json.hpp>
+
 // --- C5: verifying the posted file ---------------------------------------
 
 TEST_CASE("cam verify: the parser READS the A word rather than judging it",
@@ -662,6 +669,563 @@ TEST_CASE("cam verify: a cell on the cutter's wall is outside by a decision, "
     CHECK_THAT(carve(1e-12, traverse), WithinAbs(nominal, 1e-6));
     CHECK_THAT(carve(-1e-12, traverse), WithinAbs(nominal, 1e-6));
   }
+}
+
+// --- The planar check on every core (docs/cam/simulation.md#on-every-core) --
+
+namespace {
+struct ScopedSweepThreads {
+  explicit ScopedSweepThreads(const char* n) {
+    if (const char* was = std::getenv("DESIGNER_SWEEP_THREADS"))
+      m_was = was;
+    setenv("DESIGNER_SWEEP_THREADS", n, 1);
+  }
+  ~ScopedSweepThreads() {
+    if (m_was.empty())
+      unsetenv("DESIGNER_SWEEP_THREADS");
+    else
+      setenv("DESIGNER_SWEEP_THREADS", m_was.c_str(), 1);
+  }
+  std::string m_was;
+};
+
+bool SameBytes(const cam::HeightMap& a, const cam::HeightMap& b) {
+  return a.nx == b.nx && a.ny == b.ny && a.x0 == b.x0 && a.y0 == b.y0 &&
+         a.res == b.res && a.z.size() == b.z.size() &&
+         std::memcmp(a.z.data(), b.z.data(), a.z.size() * sizeof(float)) == 0;
+}
+
+// Every number a verdict carries that the walk or the compare produces,
+// compared exactly.
+void CheckSameVerdict(const cam::Verdict& a, const cam::Verdict& b) {
+  CHECK(a.cells == b.cells);
+  CHECK(a.untouchedFraction == b.untouchedFraction);
+  CHECK(a.maxGouge == b.maxGouge);
+  CHECK(a.gougeAt == b.gougeAt);
+  CHECK(a.belowStock == b.belowStock);
+  CHECK(a.belowStockAt == b.belowStockAt);
+  CHECK(a.maxLeftover == b.maxLeftover);
+  CHECK(a.leftoverAt == b.leftoverAt);
+  CHECK(a.leftoverArea == b.leftoverArea);
+  CHECK(a.leftoverRegions == b.leftoverRegions);
+  REQUIRE(a.biggest.size() == b.biggest.size());
+  for (size_t k = 0; k < a.biggest.size(); k++) {
+    CHECK(a.biggest[k].area == b.biggest[k].area);
+    CHECK(a.biggest[k].at == b.biggest[k].at);
+    CHECK(a.biggest[k].depth == b.biggest[k].depth);
+  }
+  REQUIRE(a.leftoverOtherSetups.size() == b.leftoverOtherSetups.size());
+  for (size_t k = 0; k < a.leftoverOtherSetups.size(); k++) {
+    CHECK(a.leftoverOtherSetups[k].setup == b.leftoverOtherSetups[k].setup);
+    CHECK(a.leftoverOtherSetups[k].area == b.leftoverOtherSetups[k].area);
+  }
+  CHECK(a.rapidsThroughStock == b.rapidsThroughStock);
+  CHECK(a.firstBadLine == b.firstBadLine);
+  CHECK(a.worstRapidDepth == b.worstRapidDepth);
+  CHECK(a.worstRapidAt == b.worstRapidAt);
+  CHECK(a.worstRapidLine == b.worstRapidLine);
+  CHECK(a.overBites == b.overBites);
+  CHECK(a.worstBite == b.worstBite);
+  CHECK(a.worstBiteAt == b.worstBiteAt);
+  CHECK(a.worstBiteLine == b.worstBiteLine);
+  CHECK(a.worstBiteOp == b.worstBiteOp);
+  CHECK(a.biteByOp == b.biteByOp);
+  CHECK(a.shankCollisions == b.shankCollisions);
+  CHECK(a.worstShankDepth == b.worstShankDepth);
+  CHECK(a.worstShankAt == b.worstShankAt);
+  CHECK(a.worstShankLine == b.worstShankLine);
+  CHECK(a.holderCollisions == b.holderCollisions);
+  CHECK(a.worstHolderDepth == b.worstHolderDepth);
+  CHECK(a.worstHolderAt == b.worstHolderAt);
+  CHECK(a.worstHolderLine == b.worstHolderLine);
+  CHECK(a.fixtureCollisions == b.fixtureCollisions);
+  CHECK(a.worstFixtureDepth == b.worstFixtureDepth);
+  CHECK(a.worstFixtureAt == b.worstFixtureAt);
+  CHECK(a.worstFixtureLine == b.worstFixtureLine);
+  CHECK(a.worstFixtureName == b.worstFixtureName);
+}
+
+// A program that gives every part of the walk something to find: passes
+// that bite what they should and one that bites twice that, plunges, arcs
+// posted as chords, a tool whose shank and holder reach the walls, a clamp
+// beside the block, and then a long wander at random depths with a rapid
+// every few moves -- some over air, some through material an earlier line
+// left standing, and some through material a later line removes, which is
+// what the order of the file decides.
+std::string EveryFinding() {
+  std::string g = "(op 1)\nT1 M6\nG0 Z25\nG0 X-5 Y4\n";
+  char buf[160];
+  bool right = true;
+  for (const double z : {18.0, 16.0, 12.0, 10.0, 4.0}) {
+    std::snprintf(buf, sizeof buf, "G1 Z%.3f F200\nG1 X%.3f F600\n", z,
+                  right ? 45.0 : -5.0);
+    g += buf;
+    right = !right;
+  }
+  // An arc across the block, and a plunge in place off it.
+  g += "G0 Z25\nG0 X5 Y20\nG1 Z17 F200\nG2 X35 Y20 I15 J0 F600\n"
+       "G1 Z13 F200\nG0 Z25\n";
+  // Rapids into the block where nothing has cut yet.
+  g += "G0 X20 Y26\nG0 Z15\nG0 Z25\nG0 X-6 Y12\nG0 Z10\nG0 X3 Z10\nG0 Z25\n";
+  // The wander, from a fixed seed.
+  uint32_t seed = 12345;
+  const auto next = [&seed](double lo, double hi) {
+    seed = seed * 1664525u + 1013904223u;
+    return lo + (hi - lo) * static_cast<double>(seed >> 8) / 16777216.0;
+  };
+  for (int k = 0; k < 1400; k++) {
+    if (k == 700)
+      g += "G0 Z25\n(op 2)\nT2 M6\n";
+    const bool rapid = k % 7 == 3;
+    std::snprintf(buf, sizeof buf, "%s X%.4f Y%.4f Z%.4f%s\n",
+                  rapid ? "G0" : "G1", next(-4.0, 44.0), next(-4.0, 34.0),
+                  next(k < 700 ? 6.0 : 12.0, 21.0), rapid ? "" : " F600");
+    g += buf;
+  }
+  g += "G0 Z25\n";
+  return g;
+}
+
+cam::Setup EveryFindingSetup() {
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin = glm::dvec3(0.0);
+  cam::Tool& t1 = setup.tools[0];
+  t1.fluteLength = 7.0;
+  t1.shankDiameter = 8.0;
+  t1.overallLength = 14.0;
+  t1.collarDiameter = 20.0;
+  cam::Tool ball;
+  ball.number = 2;
+  ball.name = "3mm ball";
+  ball.type = cam::ToolType::Ball;
+  ball.diameter = 3.0;
+  ball.feedCut = 600.0;
+  ball.feedPlunge = 200.0;
+  ball.spindleRpm = 12000.0;
+  setup.tools.push_back(ball);
+  cam::Operation profile;
+  profile.id = 1;
+  profile.type = cam::OpType::Profile;
+  profile.toolNumber = 1;
+  profile.topZ = 20.0;
+  profile.bottomZ = 0.0;
+  profile.stepdown = 2.0;
+  cam::Operation pocket = profile;
+  pocket.id = 2;
+  pocket.type = cam::OpType::Pocket;
+  pocket.toolNumber = 2;
+  pocket.stepdown = 1.0;
+  setup.operations = {profile, pocket};
+  return setup;
+}
+} // namespace
+
+TEST_CASE("cam verify: the check on every core is the serial check to the bit",
+          "[cam]") {
+  // docs/cam/simulation.md#on-every-core. The map is split into bands of
+  // rows, each walking every move over its own rows. A cut lowers a cell to
+  // the lowest the tool reaches, so its order cannot show -- but a RAPID,
+  // the shank and the holder are asked about the stock as it stands at that
+  // line, and a bite is the volume a stretch of cutting took. So the answer
+  // must not be close to the serial one: it must BE it, for any number of
+  // bands and threads.
+  auto doc = BlockDoc(40, 30, 20);
+  const cam::Setup setup = EveryFindingSetup();
+  const std::string gcode = EveryFinding();
+  Document clampDoc;
+  clampDoc.AddFeature(std::make_unique<BoxFeature>(
+      "Clamp", glm::vec3(-9.0f, 8.0f, 0.0f), 5.0, 8.0, 24.0));
+  const std::vector<cam::FixtureSolid> fixtures = {
+      {1, "Clamp", clampDoc.GetBodies()}};
+  constexpr double kRes = 0.25;
+
+  cam::Inspection serial;
+  {
+    ScopedSweepThreads pin("1");
+    cam::ScopedInspectBands one(1);
+    serial =
+        cam::Inspect(gcode, setup, doc->GetBodies(), kRes, {}, {}, fixtures);
+  }
+  REQUIRE(serial.ok);
+  const cam::Verdict& sv = serial.verdict;
+  INFO("rapids " << sv.rapidsThroughStock << ", bites " << sv.overBites
+                 << ", shank " << sv.shankCollisions << ", holder "
+                 << sv.holderCollisions << ", fixture "
+                 << sv.fixtureCollisions);
+  // Or this is not testing what it says.
+  REQUIRE(sv.rapidsThroughStock >= 3);
+  REQUIRE(sv.overBites >= 1);
+  REQUIRE(sv.shankCollisions >= 1);
+  REQUIRE(sv.holderCollisions >= 1);
+  REQUIRE(sv.fixtureCollisions >= 1);
+  REQUIRE(sv.biteByOp.size() == 2);
+
+  const int rows = serial.machined.ny;
+  REQUIRE(rows > 100);
+  for (const size_t bands :
+       {size_t{0}, size_t{3}, size_t{61}, static_cast<size_t>(rows)}) {
+    for (const char* threads : {"1", "8"}) {
+      ScopedSweepThreads pin(threads);
+      cam::ScopedInspectBands split(bands);
+      INFO(bands << " bands (0: derived) on " << threads << " threads");
+      const cam::Inspection banded =
+          cam::Inspect(gcode, setup, doc->GetBodies(), kRes, {}, {}, fixtures);
+      REQUIRE(banded.ok);
+      CHECK(SameBytes(banded.machined, serial.machined));
+      CHECK(SameBytes(banded.designed, serial.designed));
+      CHECK(banded.touched == serial.touched);
+      CheckSameVerdict(banded.verdict, sv);
+    }
+  }
+}
+
+TEST_CASE("cam verify: what another setup cuts is the same on every core",
+          "[cam]") {
+  // The compare runs in bands of rows too, and the part of it that asks the
+  // other setups what they remove is the part that got heavy
+  // (docs/cam/simulation.md#on-every-core): a flip job, each side cutting
+  // half the outline, whose other half the compare hands to the other side.
+  cam::ForgetOtherSetups();
+  auto doc = BlockDoc(40, 30, 20);
+  const auto side = [&](const char* name, uint64_t id, bool flipped) {
+    cam::Setup s = BasicSetup();
+    s.id = id;
+    s.name = name;
+    s.stock.margin = {3.0, 3.0, 0.0};
+    s.stock.bottomMargin = 0.0;
+    if (flipped)
+      s.frame = cam::FlipFrame(s.frame);
+    s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Profile;
+    op.toolNumber = 1;
+    op.topZ = hi.z;
+    op.bottomZ = 0.5 * (lo.z + hi.z);
+    op.stepdown = 5.0;
+    s.operations.push_back(op);
+    return s;
+  };
+  const cam::Setup front = side("Front", 1, false);
+  const cam::Setup back = side("Back", 2, true);
+  const auto post = [&](const cam::Setup& s) {
+    const auto paths = cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+    return gcode;
+  };
+  const std::string frontFile = post(front), backFile = post(back);
+  const auto check = [&] {
+    const cam::OtherSetups others =
+        cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.25);
+    return cam::VerifyGcode(frontFile, front, doc->GetBodies(), 0.25, {}, {},
+                            {}, &others);
+  };
+  cam::Verdict one;
+  {
+    ScopedSweepThreads pin("1");
+    one = check();
+  }
+  REQUIRE(one.leftoverOtherSetups.size() == 1);
+  CHECK(one.leftoverOtherSetups[0].area > 100.0);
+  ScopedSweepThreads pin("8");
+  CheckSameVerdict(check(), one);
+}
+
+TEST_CASE("cam verify: the designed surface samples the same on every core",
+          "[cam]") {
+  // SampleModel hands each triangle to the bands of rows it covers; a cell
+  // is the highest any triangle stands over it, which no order can change.
+  auto doc = PocketDoc(true);
+  cam::Setup setup = BasicSetup();
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, doc->GetBodies(), lo, hi));
+  const cam::HeightMap grid = cam::MakeStock(lo, hi, 0.1);
+  cam::HeightMap one, many;
+  {
+    ScopedSweepThreads pin("1");
+    one = cam::SampleModel(doc->GetBodies(), grid, lo.z);
+  }
+  {
+    ScopedSweepThreads pin("8");
+    many = cam::SampleModel(doc->GetBodies(), grid, lo.z);
+  }
+  CHECK(SameBytes(one, many));
+  // Not a map of the floor: the part is in it.
+  CHECK(*std::max_element(one.z.begin(), one.z.end()) > lo.z + 10.0);
+}
+
+TEST_CASE("cam verify: each other setup is inspected once, until it changes",
+          "[cam]") {
+  // docs/cam/simulation.md#each-other-setup-inspected-once. What a setup
+  // leaves depends on its posted file, the setup, the part and the grid,
+  // and on nothing about the setup asking -- so a second check reads it
+  // back, and an edit to any of the four inspects it again.
+  cam::ForgetOtherSetups();
+  auto doc = BlockDoc(40, 30, 20);
+  const auto side = [&](const char* name, uint64_t id, bool flipped,
+                        double depth) {
+    cam::Setup s = BasicSetup();
+    s.id = id;
+    s.name = name;
+    s.stock.margin = {3.0, 3.0, 0.0};
+    s.stock.bottomMargin = 0.0;
+    if (flipped)
+      s.frame = cam::FlipFrame(s.frame);
+    s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+    glm::dvec3 lo(0.0), hi(0.0);
+    REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Profile;
+    op.toolNumber = 1;
+    op.topZ = hi.z;
+    op.bottomZ = hi.z - depth;
+    op.stepdown = 5.0;
+    s.operations.push_back(op);
+    return s;
+  };
+  const auto post = [&](const cam::Setup& s, const std::vector<Body>& b) {
+    const auto paths = cam::GenerateAll(s, b);
+    REQUIRE(paths.size() == 1);
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &error));
+    return gcode;
+  };
+  const cam::Setup front = side("Front", 1, false, 10.0);
+  cam::Setup back = side("Back", 2, true, 10.0);
+  const cam::Setup deep = side("Deep", 3, true, 15.0);
+  const std::string backFile = post(back, doc->GetBodies());
+  const std::string deepFile = post(deep, doc->GetBodies());
+  const auto fresh = [&](const cam::Setup& s, const std::string& file,
+                         const std::vector<Body>& bodies, double res) {
+    return cam::Inspect(file, s, bodies, res).machined;
+  };
+  const auto stats = [] { return cam::OtherSetupsMemo(); };
+
+  // The first check inspects; the second reads it back, the same map.
+  const cam::OtherSetups first =
+      cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.5);
+  CHECK(stats().misses == 1);
+  CHECK(stats().hits == 0);
+  REQUIRE(first.stocks.size() == 1);
+  CHECK(SameBytes(first.stocks[0].height,
+                  fresh(back, backFile, doc->GetBodies(), 0.5)));
+  const cam::OtherSetups again = cam::OtherSetupsOf(
+      front, {{&back, backFile, /*earlier=*/true}}, doc->GetBodies(), 0.5);
+  CHECK(stats().misses == 1);
+  CHECK(stats().hits == 1);
+  REQUIRE(again.stocks.size() == 1);
+  CHECK(SameBytes(again.stocks[0].height, first.stocks[0].height));
+  CHECK(again.stocks[0].earlier); // the asker's, not the memo's
+  CHECK_FALSE(first.stocks[0].earlier);
+
+  // Another program: inspected again, and it is that program's map.
+  const std::string edited =
+      post(side("Back", 2, true, 12.0), doc->GetBodies());
+  REQUIRE(edited != backFile);
+  const cam::OtherSetups byProgram =
+      cam::OtherSetupsOf(front, {{&back, edited}}, doc->GetBodies(), 0.5);
+  CHECK(stats().misses == 2);
+  CHECK(SameBytes(byProgram.stocks[0].height,
+                  fresh(back, edited, doc->GetBodies(), 0.5)));
+
+  // The same file under another stock: the setup is part of the key.
+  back.stock.margin.x = 5.0;
+  const cam::OtherSetups byStock =
+      cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.5);
+  CHECK(stats().misses == 3);
+  CHECK(SameBytes(byStock.stocks[0].height,
+                  fresh(back, backFile, doc->GetBodies(), 0.5)));
+  CHECK_FALSE(SameBytes(byStock.stocks[0].height, first.stocks[0].height));
+  back.stock.margin.x = 3.0;
+
+  // Another part.
+  auto taller = BlockDoc(40, 30, 22);
+  const cam::OtherSetups byPart =
+      cam::OtherSetupsOf(front, {{&back, backFile}}, taller->GetBodies(), 0.5);
+  CHECK(stats().misses == 4);
+  CHECK(SameBytes(byPart.stocks[0].height,
+                  fresh(back, backFile, taller->GetBodies(), 0.5)));
+
+  // Another grid.
+  (void)cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.4);
+  CHECK(stats().misses == 5);
+
+  // And back to the first: still kept.
+  (void)cam::OtherSetupsOf(front, {{&back, backFile}}, doc->GetBodies(), 0.5);
+  CHECK(stats().misses == 5);
+  CHECK(stats().hits == 2);
+
+  // Two that miss together are inspected at once, and come back in the
+  // job's order, each its own map.
+  cam::ForgetOtherSetups();
+  const cam::OtherSetups both = cam::OtherSetupsOf(
+      front, {{&deep, deepFile}, {&back, backFile}}, doc->GetBodies(), 0.25);
+  CHECK(stats().misses == 2);
+  REQUIRE(both.stocks.size() == 2);
+  CHECK(both.stocks[0].id == 3);
+  CHECK(both.stocks[1].id == 2);
+  CHECK(SameBytes(both.stocks[0].height,
+                  fresh(deep, deepFile, doc->GetBodies(), 0.25)));
+  CHECK(SameBytes(both.stocks[1].height,
+                  fresh(back, backFile, doc->GetBodies(), 0.25)));
+}
+
+// --- The planar check on a real job, timed -------------------------------
+
+namespace cam {
+// Defined in CamVerify.cpp; no header declares it, so the bench can time it
+// on its own.
+Verdict Compare(const HeightMap& machined, const HeightMap& designed,
+                double floorZ, const std::vector<uint8_t>* touched,
+                double leftoverTolerance,
+                const std::vector<Toolpath::Relief>& reliefs,
+                const std::vector<Toolpath::Tab>& tabs,
+                const OtherSetups* others,
+                const std::vector<float>* grooveFloor);
+} // namespace cam
+
+namespace {
+std::string BenchEnv(const char* name, const std::string& fallback) {
+  const char* v = std::getenv(name);
+  return v != nullptr && *v != '\0' ? std::string(v) : fallback;
+}
+std::string BenchRead(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+template <class F> double BestMs(int repeat, F&& f) {
+  double best = 1e300;
+  for (int k = 0; k < repeat; k++) {
+    const auto t0 = std::chrono::steady_clock::now();
+    f();
+    const auto t1 = std::chrono::steady_clock::now();
+    best = std::min(best,
+                    std::chrono::duration<double, std::milli>(t1 - t0).count());
+  }
+  return best;
+}
+} // namespace
+
+// Hidden: it needs a project on disk. The chess board's check, and its parts:
+//   PLANAR_BENCH_DIR    directory holding chess.dsgn and "<job> - <setup>.nc"
+//   PLANAR_BENCH_JOB    job directory (default Board)
+//   PLANAR_BENCH_PART   part directory (default board)
+//   PLANAR_BENCH_SETUP  the setup checked (default Top)
+//   PLANAR_BENCH_RES    grid resolution, mm (default 0.25, the RPC's)
+//   PLANAR_BENCH_REPEAT runs per timing, the best kept (default 3)
+TEST_CASE("cam verify: the board's planar check, timed", "[cam][.bench]") {
+  const std::string dir = BenchEnv("PLANAR_BENCH_DIR", "");
+  if (dir.empty())
+    SKIP("PLANAR_BENCH_DIR is not set");
+  const std::string jobName = BenchEnv("PLANAR_BENCH_JOB", "Board");
+  const std::string partName = BenchEnv("PLANAR_BENCH_PART", "board");
+  const std::string setupName = BenchEnv("PLANAR_BENCH_SETUP", "Top");
+  const double res = std::stod(BenchEnv("PLANAR_BENCH_RES", "0.25"));
+  const int repeat = std::stoi(BenchEnv("PLANAR_BENCH_REPEAT", "3"));
+
+  auto job = DocumentIO::LoadJob(dir + "/chess.dsgn/jobs/" + jobName);
+  REQUIRE(job.has_value());
+  // The project's variables first: the board is sized from the king.
+  std::vector<Parameter> projectParams;
+  {
+    const auto index = nlohmann::json::parse(
+        BenchRead(dir + "/chess.dsgn/project.json"), nullptr, false);
+    if (index.is_object())
+      for (const auto& pj : index.value("parameters", nlohmann::json::array()))
+        projectParams.push_back({pj.at("name").get<std::string>(),
+                                 pj.at("expression").get<std::string>(),
+                                 pj.value("comment", std::string{}),
+                                 0.0,
+                                 {}});
+  }
+  SymbolTable projectSymbols;
+  EvaluateParameterTable(projectParams, projectSymbols, nullptr, {});
+  auto part = DocumentIO::Load(dir + "/chess.dsgn/parts/" + partName,
+                               {&projectSymbols, &projectParams});
+  REQUIRE(part.has_value());
+  std::vector<Body> bodies;
+  for (const Body& b : (*part)->GetBodies()) {
+    if (b.reference)
+      continue;
+    bodies.push_back(b);
+    bodies.back().jobPartId = (*job)->GetParts().front().id;
+  }
+  REQUIRE(!bodies.empty());
+  const cam::Setup* setup = nullptr;
+  std::vector<cam::SetupProgram> programs;
+  std::string gcode;
+  {
+    bool before = true;
+    for (const cam::Setup& s : (*job)->GetSetups()) {
+      const std::string text =
+          BenchRead(dir + "/" + jobName + " - " + s.name + ".nc");
+      if (s.name == setupName) {
+        setup = &s;
+        gcode = text;
+        before = false;
+        continue;
+      }
+      if (!text.empty())
+        programs.push_back({&s, text, before});
+    }
+  }
+  REQUIRE(setup != nullptr);
+  REQUIRE(!gcode.empty());
+
+  cam::OtherSetups others;
+  cam::ForgetOtherSetups();
+  const double othersCold = BestMs(
+      1, [&] { others = cam::OtherSetupsOf(*setup, programs, bodies, res); });
+  const double othersWarm = BestMs(repeat, [&] {
+    others = cam::OtherSetupsOf(*setup, programs, bodies, res);
+  });
+  cam::Inspection insp;
+  const double inspect = BestMs(repeat, [&] {
+    insp = cam::Inspect(gcode, *setup, bodies, res, {}, {}, {}, &others, {});
+  });
+  REQUIRE(insp.ok);
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(*setup, bodies, lo, hi));
+  const std::vector<Body> framed = cam::BodiesInSetupFrame(*setup, bodies);
+  cam::HeightMap designed;
+  const double sample = BestMs(repeat, [&] {
+    designed = cam::SampleModel(framed, insp.machined, lo.z);
+  });
+  // Of which, meshing the part detached at the check's tolerance.
+  const double mesh = BestMs(repeat, [&] {
+    for (const Body& b : framed)
+      (void)b.shape.GenerateMeshDetached(res * 0.25);
+  });
+  std::printf("  (SampleModel's mesh alone: %.1f ms)\n", mesh);
+  cam::Verdict v;
+  const double compare = BestMs(repeat, [&] {
+    v = cam::Compare(insp.machined, designed, lo.z, &insp.touched, 0.0, {}, {},
+                     &others, nullptr);
+  });
+  std::printf("\n== %s / %s at %.2f mm, %zu other setups, map %d x %d, %zu "
+              "workers\n"
+              "  other setups: %.1f ms cold, %.1f ms memoized\n"
+              "  Inspect: %.1f ms (SampleModel %.1f, Compare %.1f, the rest "
+              "-- the carve, the start -- %.1f)\n"
+              "  whole check (other setups cold + Inspect): %.1f ms; "
+              "memoized: %.1f ms\n",
+              jobName.c_str(), setupName.c_str(), res, programs.size(),
+              insp.machined.nx, insp.machined.ny, parallel::Workers(),
+              othersCold, othersWarm, inspect, sample, compare,
+              inspect - sample - compare, othersCold + inspect,
+              othersWarm + inspect);
+  std::printf("  verdict: gouge %.6f, leftover %.6f in %d regions, rapids %d, "
+              "bites %d\n",
+              insp.verdict.maxGouge, insp.verdict.maxLeftover,
+              insp.verdict.leftoverRegions, insp.verdict.rapidsThroughStock,
+              insp.verdict.overBites);
 }
 
 #endif // HAVE_CAM

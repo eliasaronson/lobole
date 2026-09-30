@@ -82,8 +82,23 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock);
 
 // The designed part's top surface on the same grid: the highest point of the
 // bodies above each cell, or the stock floor where there is no material.
+// On every core; a cell is a maximum, so any thread count gives the same map.
 [[nodiscard]] HeightMap SampleModel(const std::vector<Body>& bodies,
                                     const HeightMap& like, double floorZ);
+
+// How many bands of rows `Inspect`'s walk splits the map into, on this
+// thread, while it lives (docs/cam/simulation.md#on-every-core). 0 derives
+// the count from the workers, which is the default. Every count gives the
+// same answer to the bit: this exists so a test can say so.
+struct ScopedInspectBands {
+  explicit ScopedInspectBands(size_t bands);
+  ~ScopedInspectBands();
+  ScopedInspectBands(const ScopedInspectBands&) = delete;
+  ScopedInspectBands& operator=(const ScopedInspectBands&) = delete;
+
+private:
+  size_t m_was = 0;
+};
 
 // --- the verdict ----------------------------------------------------------
 

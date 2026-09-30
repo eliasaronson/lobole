@@ -1,5 +1,6 @@
 #include "core/cam/CamVerify.h"
 
+#include "core/Parallel.h"
 #include "core/cam/CamMount.h"
 #include "core/cam/CamOtherSetups.h"
 
@@ -7,6 +8,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -94,24 +96,25 @@ std::vector<float> GrooveFloor(const HeightMap& grid,
   return floor;
 }
 
-// Flags every cell the swept tool covers on one cutting move. The same
-// culling Simulate uses, but recording coverage rather than depth: it is what
-// tells "the cutter left a corner" apart from "you have not programmed that
-// part of the block yet".
-void MarkSwept(const glm::dvec3& from, const GMove& m, const Setup& setup,
-               const HeightMap& grid, std::vector<uint8_t>& touched) {
-  const Tool* tool = setup.FindTool(m.tool);
+// Flags every cell the swept tool covers on one cutting move, in rows
+// [rowLo, rowHi). The same culling Simulate uses, but recording coverage
+// rather than depth: it is what tells "the cutter left a corner" apart from
+// "you have not programmed that part of the block yet".
+void MarkSwept(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
+               const HeightMap& grid, std::vector<uint8_t>& touched, int rowLo,
+               int rowHi) {
   const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
-  const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
   const int i0 = std::max(
       0, static_cast<int>((std::min(a.x, b.x) - radius - grid.x0) / grid.res));
   const int i1 = std::min(
       grid.nx - 1,
       static_cast<int>((std::max(a.x, b.x) + radius - grid.x0) / grid.res) + 1);
-  const int j0 = std::max(
-      0, static_cast<int>((std::min(a.y, b.y) - radius - grid.y0) / grid.res));
+  const int j0 =
+      std::max(rowLo, static_cast<int>((std::min(a.y, b.y) - radius - grid.y0) /
+                                       grid.res));
   const int j1 = std::min(
-      grid.ny - 1,
+      rowHi - 1,
       static_cast<int>((std::max(a.y, b.y) + radius - grid.y0) / grid.res) + 1);
   for (int j = j0; j <= j1; j++)
     for (int i = i0; i <= i1; i++) {
@@ -123,7 +126,26 @@ void MarkSwept(const glm::dvec3& from, const GMove& m, const Setup& setup,
     }
 }
 
+// Heights summed as integers, in units of 2^-30 mm (about a nanometre). A
+// sum of doubles depends on the order it is taken in, and the walk below
+// takes a move's cells band by band: summed as integers, a move's volume is
+// the same number whatever the bands (docs/cam/simulation.md#on-every-core).
+// Each cell rounds by half a quantum; a bite is judged to a tenth of a mm.
+constexpr double kHeightQuanta = 1073741824.0; // 2^30 per mm
+int64_t Quanta(double height) { return std::llround(height * kHeightQuanta); }
+double FromQuanta(int64_t quanta) {
+  return static_cast<double>(quanta) / kHeightQuanta;
+}
+
 } // namespace
+
+namespace {
+thread_local size_t tlInspectBands = 0;
+}
+ScopedInspectBands::ScopedInspectBands(size_t bands) : m_was(tlInspectBands) {
+  tlInspectBands = bands;
+}
+ScopedInspectBands::~ScopedInspectBands() { tlInspectBands = m_was; }
 
 HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max, double res) {
   HeightMap map;
@@ -137,9 +159,12 @@ HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max, double res) {
   return map;
 }
 
-double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
-                  const Tool* tool, HeightMap& stock) {
-  double removed = 0.0;
+namespace {
+// CarveSweep over rows [rowLo, rowHi) of `stock`, and the height it removed
+// there in quanta: one band's share of a carve.
+int64_t CarveRows(const glm::dvec3& from, const glm::dvec3& to,
+                  const Tool* tool, HeightMap& stock, int rowLo, int rowHi) {
+  int64_t removed = 0;
   const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
 
   // Cells the swept tool can touch, from the segment's bounding box grown
@@ -154,9 +179,10 @@ double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
   const int i0 = std::max(0, static_cast<int>((lo_x - stock.x0) / stock.res));
   const int i1 = std::min(stock.nx - 1,
                           static_cast<int>((hi_x - stock.x0) / stock.res) + 1);
-  const int j0 = std::max(0, static_cast<int>((lo_y - stock.y0) / stock.res));
-  const int j1 = std::min(stock.ny - 1,
-                          static_cast<int>((hi_y - stock.y0) / stock.res) + 1);
+  const int j0 =
+      std::max(rowLo, static_cast<int>((lo_y - stock.y0) / stock.res));
+  const int j1 =
+      std::min(rowHi - 1, static_cast<int>((hi_y - stock.y0) / stock.res) + 1);
 
   for (int j = j0; j <= j1; j++) {
     for (int i = i0; i <= i1; i++) {
@@ -216,12 +242,19 @@ double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
             surface = std::min(surface, at(t1 + (t2 - t1) * k / 8.0));
       }
       if (const double top = stock.At(i, j); top > surface) {
-        removed += top - surface;
+        removed += Quanta(top - surface);
         stock.Set(i, j, static_cast<float>(surface));
       }
     }
   }
-  return removed * stock.res * stock.res;
+  return removed;
+}
+} // namespace
+
+double CarveSweep(const glm::dvec3& from, const glm::dvec3& to,
+                  const Tool* tool, HeightMap& stock) {
+  return FromQuanta(CarveRows(from, to, tool, stock, 0, stock.ny)) * stock.res *
+         stock.res;
 }
 
 void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
@@ -238,10 +271,69 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
   }
 }
 
+namespace {
+// A triangle of a mesh, as the sampler needs it: its corners and the rows
+// its bounding box covers. Null when it stands edge-on and has no height to
+// give.
+struct Tri {
+  glm::vec3 p0, p1, p2; // float, as the mesh holds them and the serial
+                        // sampler did its arithmetic
+  double d = 0.0;       // twice its signed area in XY
+  int j0 = 0, j1 = -1;
+};
+Tri TriOf(const CADShape::Mesh& mesh, size_t tri, const HeightMap& out) {
+  Tri t;
+  t.p0 = mesh.vertices[mesh.indices[tri]].position;
+  t.p1 = mesh.vertices[mesh.indices[tri + 1]].position;
+  t.p2 = mesh.vertices[mesh.indices[tri + 2]].position;
+  t.d = (t.p1.y - t.p2.y) * (t.p0.x - t.p2.x) +
+        (t.p2.x - t.p1.x) * (t.p0.y - t.p2.y);
+  if (std::abs(t.d) < 1e-12)
+    return t; // edge-on triangle contributes no height
+  const double lo_y = std::min({t.p0.y, t.p1.y, t.p2.y});
+  const double hi_y = std::max({t.p0.y, t.p1.y, t.p2.y});
+  t.j0 = std::max(0, static_cast<int>((lo_y - out.y0) / out.res));
+  t.j1 = std::min(out.ny - 1, static_cast<int>((hi_y - out.y0) / out.res) + 1);
+  return t;
+}
+
+// One triangle into rows [rowLo, rowHi) of `out`: each cell under it raised
+// to the triangle's height there. Barycentric point-in-triangle, then the
+// height: dropping a ray per cell over the whole mesh would be the same work
+// with more code.
+void SampleTriangle(const Tri& t, HeightMap& out, int rowLo, int rowHi) {
+  const double lo_x = std::min({t.p0.x, t.p1.x, t.p2.x});
+  const double hi_x = std::max({t.p0.x, t.p1.x, t.p2.x});
+  const int i0 = std::max(0, static_cast<int>((lo_x - out.x0) / out.res));
+  const int i1 =
+      std::min(out.nx - 1, static_cast<int>((hi_x - out.x0) / out.res) + 1);
+  const int j0 = std::max(t.j0, rowLo);
+  const int j1 = std::min(t.j1, rowHi - 1);
+  const glm::vec3 &p0 = t.p0, &p1 = t.p1, &p2 = t.p2;
+  for (int j = j0; j <= j1; j++) {
+    for (int i = i0; i <= i1; i++) {
+      const double x = out.CellX(i), y = out.CellY(j);
+      const double l0 =
+          ((p1.y - p2.y) * (x - p2.x) + (p2.x - p1.x) * (y - p2.y)) / t.d;
+      const double l1 =
+          ((p2.y - p0.y) * (x - p2.x) + (p0.x - p2.x) * (y - p2.y)) / t.d;
+      const double l2 = 1.0 - l0 - l1;
+      if (l0 < -1e-9 || l1 < -1e-9 || l2 < -1e-9)
+        continue;
+      const double z = l0 * p0.z + l1 * p1.z + l2 * p2.z;
+      if (z > out.At(i, j))
+        out.Set(i, j, static_cast<float>(z));
+    }
+  }
+}
+} // namespace
+
 HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
                       double floorZ) {
   HeightMap out = like;
   out.z.assign(out.z.size(), static_cast<float>(floorZ));
+  if (out.nx <= 0 || out.ny <= 0)
+    return out;
 
   // Mesh the reference surface finer than the grid that samples it. This is
   // the surface every gouge and leftover figure is measured AGAINST, so its
@@ -255,6 +347,23 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
   // from, which asks the kernel for its own size-scaled default.
   const double deflection = like.res > 0.0 ? like.res * 0.25 : 0.0;
 
+  // In bands of rows, on every core. Each triangle is handed to the bands
+  // its rows fall in, and each band raises only its own rows, so no two
+  // workers write a cell. By rows and not by triangles: a planar part's
+  // faces mesh as a few triangles hundreds of millimetres across, and one
+  // of them is most of the work. A cell ends at its MAXIMUM over every
+  // triangle, which no order can change: any band or thread count gives the
+  // same map to the bit.
+  const size_t bands = parallel::Workers() <= 1
+                           ? 1
+                           : std::min<size_t>(static_cast<size_t>(out.ny),
+                                              4 * parallel::Workers());
+  std::vector<size_t> bandOfRow(static_cast<size_t>(out.ny));
+  for (size_t b = 0; b < bands; b++)
+    for (size_t j = b * static_cast<size_t>(out.ny) / bands;
+         j < (b + 1) * static_cast<size_t>(out.ny) / bands; j++)
+      bandOfRow[j] = b;
+
   for (const Body& body : bodies) {
     if (!body.shape.IsValid())
       continue;
@@ -262,44 +371,27 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
     // the body itself here would make the renderer's mesh of the same part
     // fine too, because the triangulation rides on the shared TShape.
     const CADShape::Mesh mesh = body.shape.GenerateMeshDetached(deflection);
+    std::vector<Tri> tris;
+    tris.reserve(mesh.indices.size() / 3);
+    std::vector<std::vector<uint32_t>> inBand(bands);
     for (size_t tri = 0; tri + 2 < mesh.indices.size(); tri += 3) {
-      const glm::vec3& p0 = mesh.vertices[mesh.indices[tri]].position;
-      const glm::vec3& p1 = mesh.vertices[mesh.indices[tri + 1]].position;
-      const glm::vec3& p2 = mesh.vertices[mesh.indices[tri + 2]].position;
-
-      const double lo_x = std::min({p0.x, p1.x, p2.x});
-      const double hi_x = std::max({p0.x, p1.x, p2.x});
-      const double lo_y = std::min({p0.y, p1.y, p2.y});
-      const double hi_y = std::max({p0.y, p1.y, p2.y});
-      const int i0 = std::max(0, static_cast<int>((lo_x - out.x0) / out.res));
-      const int i1 =
-          std::min(out.nx - 1, static_cast<int>((hi_x - out.x0) / out.res) + 1);
-      const int j0 = std::max(0, static_cast<int>((lo_y - out.y0) / out.res));
-      const int j1 =
-          std::min(out.ny - 1, static_cast<int>((hi_y - out.y0) / out.res) + 1);
-
-      // Barycentric point-in-triangle, then the height there: dropping a ray
-      // per cell over the whole mesh would be the same work with more code.
-      const double d =
-          (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
-      if (std::abs(d) < 1e-12)
-        continue; // edge-on triangle contributes no height
-      for (int j = j0; j <= j1; j++) {
-        for (int i = i0; i <= i1; i++) {
-          const double x = out.CellX(i), y = out.CellY(j);
-          const double l0 =
-              ((p1.y - p2.y) * (x - p2.x) + (p2.x - p1.x) * (y - p2.y)) / d;
-          const double l1 =
-              ((p2.y - p0.y) * (x - p2.x) + (p0.x - p2.x) * (y - p2.y)) / d;
-          const double l2 = 1.0 - l0 - l1;
-          if (l0 < -1e-9 || l1 < -1e-9 || l2 < -1e-9)
-            continue;
-          const double z = l0 * p0.z + l1 * p1.z + l2 * p2.z;
-          if (z > out.At(i, j))
-            out.Set(i, j, static_cast<float>(z));
-        }
-      }
+      const Tri t = TriOf(mesh, tri, out);
+      if (t.j0 > t.j1)
+        continue;
+      const uint32_t k = static_cast<uint32_t>(tris.size());
+      tris.push_back(t);
+      for (size_t b = bandOfRow[static_cast<size_t>(t.j0)];
+           b <= bandOfRow[static_cast<size_t>(t.j1)]; b++)
+        inBand[b].push_back(k);
     }
+    parallel::For(bands, [&](size_t b) {
+      const int rowLo =
+          static_cast<int>(b * static_cast<size_t>(out.ny) / bands);
+      const int rowHi =
+          static_cast<int>((b + 1) * static_cast<size_t>(out.ny) / bands);
+      for (const uint32_t k : inBand[b])
+        SampleTriangle(tris[k], out, rowLo, rowHi);
+    });
   }
   return out;
 }
@@ -323,119 +415,181 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
-  size_t untouched = 0;
   const size_t total =
       static_cast<size_t>(machined.nx) * static_cast<size_t>(machined.ny);
   const double leftTol =
       leftoverTolerance > 0.0 ? leftoverTolerance : machined.res * 1.5;
   std::vector<uint8_t> over(total, 0);
-  for (int j = 0; j < machined.ny; j++) {
-    for (int i = 0; i < machined.nx; i++) {
-      const size_t k =
-          static_cast<size_t>(j) * static_cast<size_t>(machined.nx) +
-          static_cast<size_t>(i);
-      if (touched != nullptr && touched->size() == total &&
-          (*touched)[k] == 0) {
-        untouched++;
-        continue; // nobody asked the program to cut here
-      }
-      const double rawGot = machined.At(i, j);
-      v.cells++;
-      // Below the stock there is no part to scrap: that is the spoilboard,
-      // and a through cut is SUPPOSED to reach it. Recorded separately and
-      // clamped out of the gouge test — see Verdict::belowStock for what
-      // conflating the two told the operator about correct G-code.
-      if (floorZ - rawGot > v.belowStock) {
-        v.belowStock = floorZ - rawGot;
-        v.belowStockAt = {machined.CellX(i), machined.CellY(j)};
-      }
-      const double got = std::max(rawGot, floorZ);
-      // A cell that straddles a vertical WALL has no single designed height:
-      // the tool runs tangent to the wall, and whether the cell counts as
-      // inside or outside is decided by where its centre happens to fall.
-      // Compared cell-to-cell, one such cell reported the wall's whole height
-      // as a gouge — the panel said "cuts 6.00 mm INTO the part, that is
-      // scrap" about a part the RPC's own check called clean, because their
-      // grids landed differently. So a cell is gouged only if it is below
-      // everything ITS NEIGHBOURS were designed to be, and left over only if
-      // it is above all of them. In the middle of a face all nine agree and
-      // nothing changes; on a wall the ambiguity resolves in favour of not
-      // crying wolf.
-      double wantLo = designed.At(i, j), wantHi = wantLo;
-      for (int dj = -1; dj <= 1; dj++)
-        for (int di = -1; di <= 1; di++) {
-          const int ni = i + di, nj = j + dj;
-          if (ni < 0 || nj < 0 || ni >= machined.nx || nj >= machined.ny)
-            continue;
-          const double w = designed.At(ni, nj);
-          wantLo = std::min(wantLo, w);
-          wantHi = std::max(wantHi, w);
+  // Cell by cell, in bands of rows on every core. Each band keeps its own
+  // worsts, and they are merged in band order with the serial scan's strict
+  // `>`, so a tie goes to the lowest row as it did on one thread; the area
+  // another setup cuts is counted in cells and multiplied once. Any band
+  // count gives the same verdict to the bit.
+  struct Part {
+    size_t untouched = 0, cells = 0;
+    double belowStock = 0.0, grooveShallow = 0.0, maxGouge = 0.0,
+           maxLeftover = 0.0;
+    glm::dvec2 belowStockAt{0.0}, grooveShallowAt{0.0}, gougeAt{0.0},
+        leftoverAt{0.0};
+    std::vector<std::pair<uint64_t, size_t>> otherCells; // first seen first
+  };
+  const size_t bands = parallel::Workers() <= 1
+                           ? 1
+                           : std::min<size_t>(static_cast<size_t>(machined.ny),
+                                              4 * parallel::Workers());
+  std::vector<Part> parts(bands);
+  parallel::For(bands, [&](size_t b) {
+    Part& v = parts[b];
+    const int rowLo = static_cast<int>(b * machined.ny / bands);
+    const int rowHi = static_cast<int>((b + 1) * machined.ny / bands);
+    for (int j = rowLo; j < rowHi; j++) {
+      for (int i = 0; i < machined.nx; i++) {
+        const size_t k =
+            static_cast<size_t>(j) * static_cast<size_t>(machined.nx) +
+            static_cast<size_t>(i);
+        if (touched != nullptr && touched->size() == total &&
+            (*touched)[k] == 0) {
+          v.untouched++;
+          continue; // nobody asked the program to cut here
         }
-      // Inside a corner relief's bite the cut below the model is the point
-      // (R4): a dogbone that read as scrap would teach the user to ignore
-      // the one line that matters.
-      bool relieved = false;
-      for (const Toolpath::Relief& r : reliefs)
-        if (glm::distance(r.at, glm::dvec2(machined.CellX(i),
-                                           machined.CellY(j))) <= r.radius) {
-          relieved = true;
-          break;
+        const double rawGot = machined.At(i, j);
+        v.cells++;
+        // Below the stock there is no part to scrap: that is the spoilboard,
+        // and a through cut is SUPPOSED to reach it. Recorded separately and
+        // clamped out of the gouge test — see Verdict::belowStock for what
+        // conflating the two told the operator about correct G-code.
+        if (floorZ - rawGot > v.belowStock) {
+          v.belowStock = floorZ - rawGot;
+          v.belowStockAt = {machined.CellX(i), machined.CellY(j)};
         }
-      // Inside an engraved groove the cut below the model is the point too,
-      // but only down to the groove the toolpath declared -- unlike a relief,
-      // which excuses any depth in its bite, a groove excuses its own shape
-      // and nothing under it or beside it
-      // (docs/cam/simulation.md#engraved-grooves). And it says how far short
-      // of that shape the cut stopped: a groove the program declares and
-      // does not reach is an engraving left shallow.
-      double want = wantLo;
-      if (grooveFloor != nullptr && grooveFloor->size() == total &&
-          (*grooveFloor)[k] != kNoGroove) {
-        const double floor = (*grooveFloor)[k];
-        if (floor < designed.At(i, j) - 1e-6) {
-          want = std::min(want, floor);
-          if (got - floor > v.grooveShallow) {
-            v.grooveShallow = got - floor;
-            v.grooveShallowAt = {machined.CellX(i), machined.CellY(j)};
+        const double got = std::max(rawGot, floorZ);
+        // A cell that straddles a vertical WALL has no single designed
+        // height: the tool runs tangent to the wall, and whether the cell
+        // counts as inside or outside is decided by where its centre happens
+        // to fall. Compared cell-to-cell, one such cell reported the wall's
+        // whole height as a gouge — the panel said "cuts 6.00 mm INTO the
+        // part, that is scrap" about a part the RPC's own check called clean,
+        // because their grids landed differently. So a cell is gouged only
+        // if it is below everything ITS NEIGHBOURS were designed to be, and
+        // left over only if it is above all of them. In the middle of a face
+        // all nine agree and nothing changes; on a wall the ambiguity
+        // resolves in favour of not crying wolf.
+        double wantLo = designed.At(i, j), wantHi = wantLo;
+        for (int dj = -1; dj <= 1; dj++)
+          for (int di = -1; di <= 1; di++) {
+            const int ni = i + di, nj = j + dj;
+            if (ni < 0 || nj < 0 || ni >= machined.nx || nj >= machined.ny)
+              continue;
+            const double w = designed.At(ni, nj);
+            wantLo = std::min(wantLo, w);
+            wantHi = std::max(wantHi, w);
+          }
+        // Inside a corner relief's bite the cut below the model is the point
+        // (R4): a dogbone that read as scrap would teach the user to ignore
+        // the one line that matters.
+        bool relieved = false;
+        for (const Toolpath::Relief& r : reliefs)
+          if (glm::distance(r.at, glm::dvec2(machined.CellX(i),
+                                             machined.CellY(j))) <= r.radius) {
+            relieved = true;
+            break;
+          }
+        // Inside an engraved groove the cut below the model is the point
+        // too, but only down to the groove the toolpath declared -- unlike a
+        // relief, which excuses any depth in its bite, a groove excuses its
+        // own shape and nothing under it or beside it
+        // (docs/cam/simulation.md#engraved-grooves). And it says how far
+        // short of that shape the cut stopped: a groove the program declares
+        // and does not reach is an engraving left shallow.
+        double want = wantLo;
+        if (grooveFloor != nullptr && grooveFloor->size() == total &&
+            (*grooveFloor)[k] != kNoGroove) {
+          const double floor = (*grooveFloor)[k];
+          if (floor < designed.At(i, j) - 1e-6) {
+            want = std::min(want, floor);
+            if (got - floor > v.grooveShallow) {
+              v.grooveShallow = got - floor;
+              v.grooveShallowAt = {machined.CellX(i), machined.CellY(j)};
+            }
           }
         }
-      }
-      if (!relieved && want - got > v.maxGouge) {
-        v.maxGouge = want - got;
-        v.gougeAt = {machined.CellX(i), machined.CellY(j)};
-      }
-      // A tab is material left standing ON PURPOSE, so it is not leftover --
-      // but only up to its own top. Excusing it by position alone, the way a
-      // relief is excused, would excuse a genuinely uncut slab sitting above
-      // it: the whole point of a tab is that it is SHORT.
-      bool tabbed = false;
-      for (const Toolpath::Tab& t : tabs)
-        if (got <= t.topZ + leftTol &&
-            glm::distance(t.at, glm::dvec2(machined.CellX(i),
-                                           machined.CellY(j))) <= t.radius) {
-          tabbed = true;
-          break;
+        if (!relieved && want - got > v.maxGouge) {
+          v.maxGouge = want - got;
+          v.gougeAt = {machined.CellX(i), machined.CellY(j)};
         }
-      // Excess another setup of the job removes is not left on the part: said
-      // as that setup's cut, and out of every leftover measure
-      // (docs/cam/simulation.md#leftover-another-setup-removes).
-      if (!tabbed && others != nullptr && got - wantHi > leftTol) {
-        const glm::dvec3 from(machined.CellX(i), machined.CellY(j),
-                              wantHi + leftTol);
-        if (const uint64_t by =
-                others->Claims(from, {from.x, from.y, got}, leftTol)) {
-          v.AddOtherCut(by, others->NameOf(by), machined.res * machined.res);
-          continue;
+        // A tab is material left standing ON PURPOSE, so it is not leftover
+        // -- but only up to its own top. Excusing it by position alone, the
+        // way a relief is excused, would excuse a genuinely uncut slab
+        // sitting above it: the whole point of a tab is that it is SHORT.
+        bool tabbed = false;
+        for (const Toolpath::Tab& t : tabs)
+          if (got <= t.topZ + leftTol &&
+              glm::distance(t.at, glm::dvec2(machined.CellX(i),
+                                             machined.CellY(j))) <= t.radius) {
+            tabbed = true;
+            break;
+          }
+        // Excess another setup of the job removes is not left on the part:
+        // said as that setup's cut, and out of every leftover measure
+        // (docs/cam/simulation.md#leftover-another-setup-removes).
+        if (!tabbed && others != nullptr && got - wantHi > leftTol) {
+          const glm::dvec3 from(machined.CellX(i), machined.CellY(j),
+                                wantHi + leftTol);
+          if (const uint64_t by =
+                  others->Claims(from, {from.x, from.y, got}, leftTol)) {
+            auto it =
+                std::find_if(v.otherCells.begin(), v.otherCells.end(),
+                             [by](const auto& c) { return c.first == by; });
+            if (it == v.otherCells.end())
+              v.otherCells.emplace_back(by, 1);
+            else
+              it->second++;
+            continue;
+          }
         }
+        if (!tabbed && got - wantHi > v.maxLeftover) {
+          v.maxLeftover = got - wantHi;
+          v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
+        }
+        if (!tabbed && got - wantHi > leftTol)
+          over[k] = 1;
       }
-      if (!tabbed && got - wantHi > v.maxLeftover) {
-        v.maxLeftover = got - wantHi;
-        v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
-      }
-      if (!tabbed && got - wantHi > leftTol)
-        over[k] = 1;
+    }
+  });
+  size_t untouched = 0;
+  std::vector<std::pair<uint64_t, size_t>> otherCells;
+  for (const Part& p : parts) {
+    untouched += p.untouched;
+    v.cells += p.cells;
+    if (p.belowStock > v.belowStock) {
+      v.belowStock = p.belowStock;
+      v.belowStockAt = p.belowStockAt;
+    }
+    if (p.grooveShallow > v.grooveShallow) {
+      v.grooveShallow = p.grooveShallow;
+      v.grooveShallowAt = p.grooveShallowAt;
+    }
+    if (p.maxGouge > v.maxGouge) {
+      v.maxGouge = p.maxGouge;
+      v.gougeAt = p.gougeAt;
+    }
+    if (p.maxLeftover > v.maxLeftover) {
+      v.maxLeftover = p.maxLeftover;
+      v.leftoverAt = p.leftoverAt;
+    }
+    for (const auto& [by, n] : p.otherCells) {
+      auto it =
+          std::find_if(otherCells.begin(), otherCells.end(),
+                       [by = by](const auto& c) { return c.first == by; });
+      if (it == otherCells.end())
+        otherCells.emplace_back(by, n);
+      else
+        it->second += n;
     }
   }
+  for (const auto& [by, n] : otherCells)
+    v.AddOtherCut(by, others->NameOf(by),
+                  static_cast<double>(n) * machined.res * machined.res);
   // How much, and in how many separate places. A flood fill over the cells
   // that are over: four corner radii are four regions of a square millimetre
   // each, and a forgotten pocket is one region of hundreds.
@@ -546,6 +700,279 @@ FixtureField BuildFixtureField(const std::vector<FixtureSolid>& fixtures,
       }
   }
   return field;
+}
+} // namespace
+
+namespace {
+// What one test of one move found in the cells it looked at: whether any cell
+// counted, and the deepest (the first of equals, in row order).
+struct Probe {
+  bool hit = false;
+  double deepest = 0.0;
+  glm::dvec2 at{0.0};
+};
+
+// The cells of rows [rowLo, rowHi) a tool of reach `r` sweeping a->b can
+// touch: the segment's bounding box grown by r, as every test here culls.
+struct CellBox {
+  int i0, i1, j0, j1;
+};
+CellBox BoxOf(const glm::dvec2& a, const glm::dvec2& b, double r,
+              const HeightMap& g, int rowLo, int rowHi) {
+  return {
+      std::max(0, static_cast<int>((std::min(a.x, b.x) - r - g.x0) / g.res)),
+      std::min(g.nx - 1,
+               static_cast<int>((std::max(a.x, b.x) + r - g.x0) / g.res) + 1),
+      std::max(rowLo,
+               static_cast<int>((std::min(a.y, b.y) - r - g.y0) / g.res)),
+      std::min(rowHi - 1,
+               static_cast<int>((std::max(a.y, b.y) + r - g.y0) / g.res) + 1)};
+}
+
+// Rapids through material: checked BEFORE the cut is applied, because a
+// rapid is only safe over air. This is the check a shape comparison cannot
+// make — the part can come out perfect and the tool still be broken.
+Probe ProbeRapid(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
+                 const HeightMap& probe, int rowLo, int rowHi) {
+  Probe out;
+  const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
+  const double zLow = std::min(from.z, to.z);
+  // Only the cells the swept tool can touch, exactly as Simulate does.
+  // Scanning the whole grid per rapid was O(moves x cells) and made
+  // verification too slow to run on every Generate — which is the
+  // difference between a check you remember to run and one you cannot
+  // avoid.
+  const CellBox box = BoxOf(a, b, radius, probe, rowLo, rowHi);
+  // No early-out now: the DEPTH is what makes the finding actionable, and
+  // the deepest cell may not be the first one found.
+  for (int j = box.j0; j <= box.j1; j++) {
+    for (int i = box.i0; i <= box.i1; i++) {
+      double t = 0.0;
+      const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
+      const double d = DistToSegment(c, a, b, t);
+      // The reach CarveSweep cuts to, wall and all: a cell the carve left
+      // standing on the wall is not one this rapid runs into.
+      if (d > radius - kCutterWallTolerance)
+        continue;
+      // The tool's SHAPE, not a cylinder around it -- the same TipHeight the
+      // cut uses. A drill retracting straight up the hole it has just made
+      // is the case: its point left a cone, and a cylinder of the drill's
+      // diameter reads that cone's wall as material in the way. Every
+      // through hole in a job then reported a rapid through stock, which is
+      // the kind of false alarm that teaches an operator to ignore the real
+      // one.
+      const double surface =
+          zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      if (const double into = probe.At(i, j) - surface;
+          into > kGrazeTolerance) {
+        out.hit = true;
+        if (into > out.deepest) {
+          out.deepest = into;
+          out.at = c;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// The holder, on EVERY move. Unlike the rapid check this is not about how
+// the tool is travelling -- a collet nut buried in a clamp is a crash at
+// 300 mm/min just as surely as at rapid, and the feed only decides how much
+// of the machine goes with it. `stockTop` is the uncut block's top.
+Probe ProbeHolder(const glm::dvec3& from, const glm::dvec3& to,
+                  const Tool& tool, const HeightMap& probe, double stockTop,
+                  int rowLo, int rowHi) {
+  Probe out;
+  const double rc = tool.collarDiameter * 0.5;
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
+  // The collar's underside over the whole move: the tip is lowest at zLow,
+  // so that is where the collar hangs lowest too.
+  const double zLow = std::min(from.z, to.z);
+  const double under = zLow + tool.overallLength;
+  // Nothing in this job can ever be taller than the uncut block, and a
+  // height map only ever comes DOWN -- so a collar riding above the stock's
+  // own top cannot hit anything, and the whole scan is skipped on one
+  // comparison. That is the common case and it matters: the collar's swept
+  // box is five times wider than the cutter's, which took the waveguide's
+  // verify from 1.5 s to 4.4 s before this line.
+  if (under >= stockTop - kGrazeTolerance)
+    return out;
+  const CellBox box = BoxOf(a, b, rc, probe, rowLo, rowHi);
+  for (int j = box.j0; j <= box.j1; j++) {
+    for (int i = box.i0; i <= box.i1; i++) {
+      double t = 0.0;
+      const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
+      const double d = DistToSegment(c, a, b, t);
+      const double top = probe.At(i, j);
+      // The same graze tolerance the rapid check uses, for the same reason:
+      // a cell standing a nanometre proud of the collar is quantisation, not
+      // a crash.
+      if (!FoulsHolder(tool, d, top - zLow - kGrazeTolerance))
+        continue;
+      const double into = top - under;
+      out.hit = true;
+      if (into > out.deepest) {
+        out.deepest = into;
+        out.at = c;
+      }
+    }
+  }
+  return out;
+}
+
+// A shank WIDER than the cutter, on every move: material within its radius
+// but outside the cutter's, standing above the top of the flutes, is a wall
+// the shank is being driven into
+// (docs/cam/simulation.md#shank-collisions). Inside the cutter's own radius
+// the tool is the tool, as for the holder: a cut deeper than the flutes is
+// stated at the op (cam::ReachCheck), in one vocabulary.
+Probe ProbeShank(const glm::dvec3& from, const glm::dvec3& to, const Tool& tool,
+                 const HeightMap& probe, double stockTop, int rowLo,
+                 int rowHi) {
+  Probe out;
+  const double rc = tool.diameter * 0.5;
+  const double rs = tool.shankDiameter * 0.5;
+  const double zLow = std::min(from.z, to.z);
+  // Above the uncut block, nothing can stand over the flutes.
+  if (zLow + tool.fluteLength >= stockTop - kGrazeTolerance)
+    return out;
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
+  const CellBox box = BoxOf(a, b, rs, probe, rowLo, rowHi);
+  for (int j = box.j0; j <= box.j1; j++) {
+    for (int i = box.i0; i <= box.i1; i++) {
+      double t = 0.0;
+      const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
+      const double d = DistToSegment(c, a, b, t);
+      // A cell's worth off the cutter's edge: the wall the cutter itself
+      // leaves stands exactly at its radius, and quantised to the grid half
+      // of it lands just outside.
+      if (d <= rc + probe.res || d > rs)
+        continue;
+      const double into = probe.At(i, j) - (zLow + tool.fluteLength);
+      if (into <= kGrazeTolerance)
+        continue;
+      out.hit = true;
+      if (into > out.deepest) {
+        out.deepest = into;
+        out.at = c;
+      }
+    }
+  }
+  return out;
+}
+
+// A plunge's bite is the mean depth under the cutter's face, read BEFORE it
+// cuts -- and without the face's outermost cell. An arc is simulated as
+// chords, whose sagitta leaves a ring of cells at the kerf's edge standing at
+// full stock height; a lateral stretch brushes that ring along its length,
+// but a plunge averages over the disc, and a tab exit that took 1.5 mm read
+// as 3.9. Rows [rowLo, rowHi): the sum in quanta and the cells it is over.
+struct PlungeSum {
+  int64_t quanta = 0;
+  int cells = 0;
+};
+PlungeSum PlungeRows(const glm::dvec3& from, const glm::dvec3& to,
+                     const Tool* tool, double dia, const HeightMap& probe,
+                     int rowLo, int rowHi) {
+  PlungeSum out;
+  const double inner = dia * 0.5 - 1.5 * probe.res;
+  if (inner <= 0.0)
+    return out;
+  const double zLow = std::min(from.z, to.z);
+  const glm::dvec2 at(to.x, to.y);
+  const CellBox box = BoxOf(at, at, inner, probe, rowLo, rowHi);
+  for (int j = box.j0; j <= box.j1; j++)
+    for (int i = box.i0; i <= box.i1; i++) {
+      const double d =
+          glm::length(glm::dvec2(probe.CellX(i) - to.x, probe.CellY(j) - to.y));
+      if (d > inner)
+        continue;
+      const double surface =
+          zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      out.quanta += Quanta(std::max(0.0, probe.At(i, j) - surface));
+      out.cells++;
+    }
+  return out;
+}
+
+// Fixtures, on EVERY move, like the holder: a cutter fed into a clamp breaks
+// just as a rapid through one does. The cutter is its TipHeight shape; beyond
+// its radius, out to the collar's, it is the collar's underside when the tool
+// states one. The tool's height is taken where the move passes closest to
+// the cell, not at the move's lowest Z, so a ramp past a clamp is not charged
+// a depth it never reached beside it. Reads only the fixtures' own field,
+// which nothing carves, so moves can be tested in any order.
+struct FixtureProbe {
+  Probe probe;
+  double top = 0.0;
+  int owner = -1;
+  bool byHolder = false;
+};
+FixtureProbe ProbeFixtures(const glm::dvec3& from, const glm::dvec3& to,
+                           const Tool* tool, const FixtureField& field) {
+  FixtureProbe out;
+  const double rc = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+  const bool holder = tool != nullptr && HasHolder(*tool);
+  const double reach = holder ? tool->collarDiameter * 0.5 : rc;
+  if (std::min(from.z, to.z) >= field.tallest - kGrazeTolerance)
+    return out; // above every fixture: the common case, one compare
+  const HeightMap& f = field.top;
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
+  const bool vertical = glm::length(b - a) < 1e-9;
+  const CellBox box = BoxOf(a, b, reach, f, 0, f.ny);
+  for (int j = box.j0; j <= box.j1; j++) {
+    for (int i = box.i0; i <= box.i1; i++) {
+      const float top = f.At(i, j);
+      if (top <= kNoFixture)
+        continue;
+      double t = 0.0;
+      const glm::dvec2 c(f.CellX(i), f.CellY(j));
+      const double d = DistToSegment(c, a, b, t);
+      if (d > reach)
+        continue;
+      const double z =
+          vertical ? std::min(from.z, to.z) : from.z + (to.z - from.z) * t;
+      const bool byHolder = d > rc;
+      const double under =
+          byHolder ? z + tool->overallLength
+                   : z + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      const double into = top - under;
+      if (into <= kGrazeTolerance)
+        continue;
+      out.probe.hit = true;
+      if (into > out.probe.deepest) {
+        out.probe.deepest = into;
+        out.probe.at = c;
+        out.top = top;
+        out.owner =
+            field.owner[static_cast<size_t>(j) * static_cast<size_t>(f.nx) +
+                        static_cast<size_t>(i)];
+        out.byHolder = byHolder;
+      }
+    }
+  }
+  return out;
+}
+
+// How many bands of rows to split a map `ny` rows tall into, for a program
+// of `moves` moves. More than the workers, because the cutting is uneven
+// over a part, and `parallel::For` hands the bands out as a queue. The
+// rotary walk's rule (CamRotary.cpp). Performance only: every count gives
+// the same answer.
+size_t DeriveRowBands(int ny, size_t moves) {
+  if (tlInspectBands > 0)
+    return std::clamp<size_t>(tlInspectBands, 1, static_cast<size_t>(ny));
+  // A playback frame's handful of moves is not worth waking a thread for.
+  constexpr size_t kMinMovesToSplit = 32;
+  // A band narrower than this spends more on culling the moves it shares
+  // with its neighbours than on its own cells.
+  constexpr int kMinBandRows = 4;
+  const size_t workers = parallel::Workers();
+  if (workers <= 1 || moves < kMinMovesToSplit || ny < 2 * kMinBandRows)
+    return 1;
+  return std::min(4 * workers, static_cast<size_t>(ny / kMinBandRows));
 }
 } // namespace
 
@@ -670,403 +1097,300 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
     winVol = winLen = 0.0;
   };
   {
-    HeightMap probe = machined;
-    glm::dvec3 from(0.0);
-    bool have = false;
-    for (const GMove& m : program.moves) {
-      if (!have) {
+    // docs/cam/simulation.md#on-every-core. The moves first, as the walk
+    // sees them: each one's tool, and for a cut how its bite is judged -- a
+    // plunge on its own, or a long move in pieces no longer than the window
+    // (one 50 mm move that starts and ends in air would otherwise average
+    // its bite over the air as well; carving the pieces removes exactly what
+    // carving the whole move would).
+    struct Step {
+      glm::dvec3 from{0.0}, to{0.0};
+      const GMove* move = nullptr;
+      const Tool* tool = nullptr;
+      double allowed = 0.0, dia = 0.0, len = 0.0;
+      // Steep enough to be a plunge. Not `len == 0`: the arc before a tab
+      // exit is re-expanded to chords here, and its last chord can end a few
+      // microns off the file's own point -- so the plunge off the tab read as
+      // a lateral move of no length carrying a whole disc of volume. The
+      // ramp is 3 degrees; this is anything past about 63.
+      bool plunge = false;
+      int pieces = 1;
+      size_t firstPiece = 0;
+      int rowLo = 0, rowHi = 0; // every row any test of this move can reach
+    };
+    std::vector<Step> steps;
+    steps.reserve(program.moves.size());
+    size_t pieceCount = 0;
+    {
+      glm::dvec3 from(0.0);
+      bool have = false;
+      for (const GMove& m : program.moves) {
+        if (!have) {
+          from = m.to;
+          have = true;
+          continue;
+        }
+        Step st;
+        st.from = from;
+        st.to = m.to;
+        st.move = &m;
+        st.tool = setup.FindTool(m.tool);
+        double reach = st.tool != nullptr ? st.tool->diameter * 0.5 : 1.0;
+        if (st.tool != nullptr) {
+          if (HasHolder(*st.tool))
+            reach = std::max(reach, st.tool->collarDiameter * 0.5);
+          reach = std::max(reach, st.tool->shankDiameter * 0.5);
+        }
+        if (!m.rapid) {
+          st.allowed = allowedBite(m.op);
+          st.dia = st.tool != nullptr ? st.tool->diameter : 2.0;
+          st.len = glm::length(glm::dvec2(m.to - from));
+          st.plunge = st.len < 1e-3 || from.z - m.to.z > 2.0 * st.len;
+          const double window = std::max(2.0, st.dia * 0.5);
+          st.pieces = st.allowed > 0.0 && !st.plunge && st.len > window
+                          ? static_cast<int>(std::ceil(st.len / window))
+                          : 1;
+          st.firstPiece = pieceCount;
+          pieceCount += static_cast<size_t>(st.pieces);
+          reach = std::max(reach, st.dia * 0.5);
+        }
+        const CellBox box = BoxOf(glm::dvec2(from), glm::dvec2(m.to), reach,
+                                  machined, 0, machined.ny);
+        st.rowLo = box.j0;
+        st.rowHi = box.j1 + 1;
+        steps.push_back(st);
         from = m.to;
-        have = true;
+      }
+    }
+
+    // Then the walk, in bands of rows on every core. Each band walks EVERY
+    // move in file order over its own rows only: a cut lowers a cell to the
+    // lowest the tool reaches, and a rapid, the holder and the shank read
+    // the cells as every earlier cut left them and no later one -- so each
+    // cell sees exactly the serial walk's sequence, and no two workers write
+    // the same cell. What a band finds is kept per move and merged below in
+    // band order.
+    enum class Kind : uint8_t { Rapid, Holder, Shank };
+    struct Found {
+      size_t step;
+      Kind kind;
+      Probe probe;
+    };
+    struct Plunged {
+      size_t step;
+      PlungeSum sum;
+    };
+    struct BandOut {
+      std::vector<Found> found;
+      std::vector<Plunged> plunged;
+    };
+    HeightMap& probe = machined;
+    const size_t bands = DeriveRowBands(probe.ny, steps.size());
+    std::vector<BandOut> bandOut(bands);
+    // Every band adds its share of a piece's volume into the same slot, so
+    // they are atomics; integer sums, so the order they land in cannot show.
+    std::vector<std::atomic<int64_t>> pieceSum(pieceCount);
+    const double stockTop = hi.z;
+    parallel::For(bands, [&](size_t band) {
+      const int rowLo =
+          static_cast<int>(band * static_cast<size_t>(probe.ny) / bands);
+      const int rowHi =
+          static_cast<int>((band + 1) * static_cast<size_t>(probe.ny) / bands);
+      BandOut& out = bandOut[band];
+      for (size_t si = 0; si < steps.size(); si++) {
+        const Step& st = steps[si];
+        if (st.rowHi <= rowLo || st.rowLo >= rowHi)
+          continue; // nothing this move tests reaches these rows
+        const GMove& m = *st.move;
+        if (m.rapid)
+          if (const Probe p =
+                  ProbeRapid(st.from, st.to, st.tool, probe, rowLo, rowHi);
+              p.hit)
+            out.found.push_back({si, Kind::Rapid, p});
+        // The holder and the shank are tested on every move, and each is a
+        // separate test, not an early-out: every move still has to be
+        // CARVED below.
+        if (st.tool != nullptr && HasHolder(*st.tool))
+          if (const Probe p = ProbeHolder(st.from, st.to, *st.tool, probe,
+                                          stockTop, rowLo, rowHi);
+              p.hit)
+            out.found.push_back({si, Kind::Holder, p});
+        if (st.tool != nullptr &&
+            st.tool->shankDiameter > st.tool->diameter + 1e-6)
+          if (const Probe p = ProbeShank(st.from, st.to, *st.tool, probe,
+                                         stockTop, rowLo, rowHi);
+              p.hit)
+            out.found.push_back({si, Kind::Shank, p});
+        if (m.rapid)
+          continue; // a rapid never carves
+        if (st.allowed > 0.0 && st.plunge)
+          if (const PlungeSum p = PlungeRows(st.from, st.to, st.tool, st.dia,
+                                             probe, rowLo, rowHi);
+              p.cells > 0)
+            out.plunged.push_back({si, p});
+        for (int k = 1; k <= st.pieces; k++) {
+          const glm::dvec3 a =
+              st.from + (st.to - st.from) * ((k - 1.0) / st.pieces);
+          const glm::dvec3 b =
+              st.from + (st.to - st.from) * (k / double(st.pieces));
+          if (const int64_t q = CarveRows(a, b, st.tool, probe, rowLo, rowHi);
+              q != 0)
+            pieceSum[st.firstPiece + static_cast<size_t>(k - 1)].fetch_add(
+                q, std::memory_order_relaxed);
+        }
+        MarkSwept(st.from, st.to, st.tool, probe, touched, rowLo, rowHi);
+      }
+    });
+    // Fixtures read only their own field, never the stock, so each move is
+    // tested on its own, on every core, and read back in file order.
+    std::vector<FixtureProbe> fixtureHits;
+    if (!field.top.z.empty()) {
+      fixtureHits.resize(steps.size());
+      constexpr size_t kStepsPerTask = 512;
+      parallel::For(
+          (steps.size() + kStepsPerTask - 1) / kStepsPerTask, [&](size_t task) {
+            const size_t end =
+                std::min(steps.size(), (task + 1) * kStepsPerTask);
+            for (size_t si = task * kStepsPerTask; si < end; si++)
+              fixtureHits[si] = ProbeFixtures(steps[si].from, steps[si].to,
+                                              steps[si].tool, field);
+          });
+    }
+
+    // The bands' findings per move. A hit is the deepest any band found; on
+    // a tie the serial scan kept the first it met, which is the lowest row,
+    // which is the lowest band -- so bands are merged in order with a strict
+    // `>`, and the hit is the serial one exactly, not merely as deep.
+    std::vector<Found> found;
+    std::vector<Plunged> plunged;
+    for (const BandOut& b : bandOut) {
+      found.insert(found.end(), b.found.begin(), b.found.end());
+      plunged.insert(plunged.end(), b.plunged.begin(), b.plunged.end());
+    }
+    std::stable_sort(
+        found.begin(), found.end(), [](const Found& x, const Found& y) {
+          return x.step < y.step || (x.step == y.step && x.kind < y.kind);
+        });
+    std::stable_sort(
+        plunged.begin(), plunged.end(),
+        [](const Plunged& x, const Plunged& y) { return x.step < y.step; });
+
+    // And the file, in order once more, to count what was found and judge
+    // the bites: those carry a window from one move to the next.
+    size_t nextFound = 0, nextPlunged = 0;
+    for (size_t si = 0; si < steps.size(); si++) {
+      const Step& st = steps[si];
+      const GMove& m = *st.move;
+      Probe hits[3];
+      for (; nextFound < found.size() && found[nextFound].step == si;
+           nextFound++) {
+        const Found& f = found[nextFound];
+        Probe& h = hits[static_cast<int>(f.kind)];
+        h.hit = true;
+        if (f.probe.deepest > h.deepest) {
+          h.deepest = f.probe.deepest;
+          h.at = f.probe.at;
+        }
+      }
+      if (const Probe& r = hits[static_cast<int>(Kind::Rapid)]; r.hit) {
+        rapidsThroughStock++;
+        if (firstBadLine == 0)
+          firstBadLine = m.line;
+        // Locals, like the count beside them: `out.verdict` is REPLACED by
+        // Compare() after this loop, so anything written into it here is
+        // thrown away -- which is exactly why the count is re-applied below
+        // rather than accumulated in place.
+        if (r.deepest > worstRapidDepth) {
+          worstRapidDepth = r.deepest;
+          worstRapidAt = r.at;
+          worstRapidLine = m.line;
+        }
+      }
+      if (const Probe& h = hits[static_cast<int>(Kind::Holder)]; h.hit) {
+        holderCollisions++;
+        if (h.deepest > worstHolderDepth) {
+          worstHolderDepth = h.deepest;
+          worstHolderAt = h.at;
+          worstHolderLine = m.line;
+        }
+      }
+      if (const Probe& h = hits[static_cast<int>(Kind::Shank)]; h.hit) {
+        shankCollisions++;
+        if (h.deepest > worstShankDepth) {
+          worstShankDepth = h.deepest;
+          worstShankAt = h.at;
+          worstShankLine = m.line;
+        }
+      }
+      if (!fixtureHits.empty())
+        if (const FixtureProbe& f = fixtureHits[si]; f.probe.hit) {
+          fixtureCollisions++;
+          if (f.probe.deepest > worstFixtureDepth) {
+            worstFixtureDepth = f.probe.deepest;
+            worstFixtureAt = f.probe.at;
+            worstFixtureZ = f.top;
+            worstFixtureLine = m.line;
+            worstFixtureOwner = f.owner;
+            worstFixtureByHolder = f.byHolder;
+          }
+        }
+      if (m.rapid) {
+        flushBite();
         continue;
       }
-      if (m.rapid) {
-        const Tool* tool = setup.FindTool(m.tool);
-        const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
-        const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
-        const double zLow = std::min(from.z, m.to.z);
-        // Only the cells the swept tool can touch, exactly as Simulate does.
-        // Scanning the whole grid per rapid was O(moves x cells) and made
-        // verification too slow to run on every Generate — which is the
-        // difference between a check you remember to run and one you cannot
-        // avoid.
-        const int i0 = std::max(
-            0, static_cast<int>((std::min(a.x, b.x) - radius - probe.x0) /
-                                probe.res));
-        const int i1 =
-            std::min(probe.nx - 1,
-                     static_cast<int>((std::max(a.x, b.x) + radius - probe.x0) /
-                                      probe.res) +
-                         1);
-        const int j0 = std::max(
-            0, static_cast<int>((std::min(a.y, b.y) - radius - probe.y0) /
-                                probe.res));
-        const int j1 =
-            std::min(probe.ny - 1,
-                     static_cast<int>((std::max(a.y, b.y) + radius - probe.y0) /
-                                      probe.res) +
-                         1);
-        bool hit = false;
-        double deepest = 0.0;
-        glm::dvec2 deepestAt(0.0);
-        // No early-out now: the DEPTH is what makes the finding actionable,
-        // and the deepest cell may not be the first one found.
-        for (int j = j0; j <= j1; j++) {
-          for (int i = i0; i <= i1; i++) {
-            double t = 0.0;
-            const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
-            const double d = DistToSegment(c, a, b, t);
-            // The reach CarveSweep cuts to, wall and all: a cell the carve
-            // left standing on the wall is not one this rapid runs into.
-            if (d > radius - kCutterWallTolerance)
-              continue;
-            // The tool's SHAPE, not a cylinder around it -- the same
-            // TipHeight the cut uses. A drill retracting straight up the hole
-            // it has just made is the case: its point left a cone, and a
-            // cylinder of the drill's diameter reads that cone's wall as
-            // material in the way. Every through hole in a job then reported
-            // a rapid through stock, which is the kind of false alarm that
-            // teaches an operator to ignore the real one.
-            const double surface =
-                zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-            if (const double into = probe.At(i, j) - surface;
-                into > kGrazeTolerance) {
-              hit = true;
-              if (into > deepest) {
-                deepest = into;
-                deepestAt = c;
-              }
-            }
-          }
-        }
-        if (hit) {
-          rapidsThroughStock++;
-          if (firstBadLine == 0)
-            firstBadLine = m.line;
-          // Locals, like the count beside them: `out.verdict` is REPLACED by
-          // Compare() after this loop, so anything written into it here is
-          // thrown away -- which is exactly why the count is re-applied
-          // below rather than accumulated in place.
-          if (deepest > worstRapidDepth) {
-            worstRapidDepth = deepest;
-            worstRapidAt = deepestAt;
-            worstRapidLine = m.line;
-          }
-        }
+      PlungeSum plungeSum;
+      for (; nextPlunged < plunged.size() && plunged[nextPlunged].step == si;
+           nextPlunged++) {
+        plungeSum.quanta += plunged[nextPlunged].sum.quanta;
+        plungeSum.cells += plunged[nextPlunged].sum.cells;
       }
-      // The holder, on EVERY move. Unlike the rapid check this is not about
-      // how the tool is travelling -- a collet nut buried in a clamp is a
-      // crash at 300 mm/min just as surely as at rapid, and the feed only
-      // decides how much of the machine goes with it.
-      //
-      // A lambda, and not the `continue` this shape invites: every move below
-      // still has to be CARVED, and an early-out at this level would quietly
-      // stop simulating the job it is checking.
-      if (const Tool* tool = setup.FindTool(m.tool);
-          tool != nullptr && HasHolder(*tool))
-        [&] {
-          const double rc = tool->collarDiameter * 0.5;
-          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
-          // The collar's underside over the whole move: the tip is lowest at
-          // zLow, so that is where the collar hangs lowest too.
-          const double zLow = std::min(from.z, m.to.z);
-          const double under = zLow + tool->overallLength;
-          // Nothing in this job can ever be taller than the uncut block, and a
-          // height map only ever comes DOWN -- so a collar riding above the
-          // stock's own top cannot hit anything, and the whole scan is skipped
-          // on one comparison. That is the common case and it matters: the
-          // collar's swept box is five times wider than the cutter's, which
-          // took the waveguide's verify from 1.5 s to 4.4 s before this line.
-          if (under >= hi.z - kGrazeTolerance)
-            return;
-          const int i0 = std::max(
-              0, static_cast<int>((std::min(a.x, b.x) - rc - probe.x0) /
-                                  probe.res));
-          const int i1 =
-              std::min(probe.nx - 1,
-                       static_cast<int>((std::max(a.x, b.x) + rc - probe.x0) /
-                                        probe.res) +
-                           1);
-          const int j0 = std::max(
-              0, static_cast<int>((std::min(a.y, b.y) - rc - probe.y0) /
-                                  probe.res));
-          const int j1 =
-              std::min(probe.ny - 1,
-                       static_cast<int>((std::max(a.y, b.y) + rc - probe.y0) /
-                                        probe.res) +
-                           1);
-          bool hit = false;
-          double deepest = 0.0;
-          glm::dvec2 deepestAt(0.0);
-          for (int j = j0; j <= j1; j++) {
-            for (int i = i0; i <= i1; i++) {
-              double t = 0.0;
-              const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
-              const double d = DistToSegment(c, a, b, t);
-              const double top = probe.At(i, j);
-              // The same graze tolerance the rapid check uses, for the same
-              // reason: a cell standing a nanometre proud of the collar is
-              // quantisation, not a crash.
-              if (!FoulsHolder(*tool, d, top - zLow - kGrazeTolerance))
-                continue;
-              const double into = top - under;
-              hit = true;
-              if (into > deepest) {
-                deepest = into;
-                deepestAt = c;
-              }
-            }
-          }
-          if (hit) {
-            holderCollisions++;
-            if (deepest > worstHolderDepth) {
-              worstHolderDepth = deepest;
-              worstHolderAt = deepestAt;
-              worstHolderLine = m.line;
-            }
-          }
-        }();
-      // A shank WIDER than the cutter, on every move: material within its
-      // radius but outside the cutter's, standing above the top of the
-      // flutes, is a wall the shank is being driven into
-      // (docs/cam/simulation.md#shank-collisions). Inside the cutter's own
-      // radius the tool is the tool, as for the holder: a cut deeper than
-      // the flutes is stated at the op (cam::ReachCheck), in one vocabulary.
-      if (const Tool* tool = setup.FindTool(m.tool);
-          tool != nullptr && tool->shankDiameter > tool->diameter + 1e-6)
-        [&] {
-          const double rc = tool->diameter * 0.5;
-          const double rs = tool->shankDiameter * 0.5;
-          const double zLow = std::min(from.z, m.to.z);
-          // Above the uncut block, nothing can stand over the flutes.
-          if (zLow + tool->fluteLength >= hi.z - kGrazeTolerance)
-            return;
-          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
-          const int i0 = std::max(
-              0, static_cast<int>((std::min(a.x, b.x) - rs - probe.x0) /
-                                  probe.res));
-          const int i1 =
-              std::min(probe.nx - 1,
-                       static_cast<int>((std::max(a.x, b.x) + rs - probe.x0) /
-                                        probe.res) +
-                           1);
-          const int j0 = std::max(
-              0, static_cast<int>((std::min(a.y, b.y) - rs - probe.y0) /
-                                  probe.res));
-          const int j1 =
-              std::min(probe.ny - 1,
-                       static_cast<int>((std::max(a.y, b.y) + rs - probe.y0) /
-                                        probe.res) +
-                           1);
-          bool hit = false;
-          double deepest = 0.0;
-          glm::dvec2 deepestAt(0.0);
-          for (int j = j0; j <= j1; j++) {
-            for (int i = i0; i <= i1; i++) {
-              double t = 0.0;
-              const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
-              const double d = DistToSegment(c, a, b, t);
-              // A cell's worth off the cutter's edge: the wall the cutter
-              // itself leaves stands exactly at its radius, and quantised to
-              // the grid half of it lands just outside.
-              if (d <= rc + probe.res || d > rs)
-                continue;
-              const double into = probe.At(i, j) - (zLow + tool->fluteLength);
-              if (into <= kGrazeTolerance)
-                continue;
-              hit = true;
-              if (into > deepest) {
-                deepest = into;
-                deepestAt = c;
-              }
-            }
-          }
-          if (hit) {
-            shankCollisions++;
-            if (deepest > worstShankDepth) {
-              worstShankDepth = deepest;
-              worstShankAt = deepestAt;
-              worstShankLine = m.line;
-            }
-          }
-        }();
-      // Fixtures, on EVERY move, like the holder: a cutter fed into a clamp
-      // breaks just as a rapid through one does. The cutter is its TipHeight
-      // shape; beyond its radius, out to the collar's, it is the collar's
-      // underside when the tool states one. The tool's height is taken where
-      // the move passes closest to the cell, not at the move's lowest Z, so a
-      // ramp past a clamp is not charged a depth it never reached beside it.
-      if (!field.top.z.empty())
-        [&] {
-          const Tool* tool = setup.FindTool(m.tool);
-          const double rc = tool != nullptr ? tool->diameter * 0.5 : 1.0;
-          const bool holder = tool != nullptr && HasHolder(*tool);
-          const double reach = holder ? tool->collarDiameter * 0.5 : rc;
-          if (std::min(from.z, m.to.z) >= field.tallest - kGrazeTolerance)
-            return; // above every fixture: the common case, one compare
-          const HeightMap& f = field.top;
-          const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
-          const bool vertical = glm::length(b - a) < 1e-9;
-          const int i0 = std::max(
-              0, static_cast<int>((std::min(a.x, b.x) - reach - f.x0) / f.res));
-          const int i1 = std::min(
-              f.nx - 1,
-              static_cast<int>((std::max(a.x, b.x) + reach - f.x0) / f.res) +
-                  1);
-          const int j0 = std::max(
-              0, static_cast<int>((std::min(a.y, b.y) - reach - f.y0) / f.res));
-          const int j1 = std::min(
-              f.ny - 1,
-              static_cast<int>((std::max(a.y, b.y) + reach - f.y0) / f.res) +
-                  1);
-          bool hit = false;
-          double deepest = 0.0;
-          glm::dvec2 deepestAt(0.0);
-          double deepestTop = 0.0;
-          int deepestOwner = -1;
-          bool deepestByHolder = false;
-          for (int j = j0; j <= j1; j++) {
-            for (int i = i0; i <= i1; i++) {
-              const float top = f.At(i, j);
-              if (top <= kNoFixture)
-                continue;
-              double t = 0.0;
-              const glm::dvec2 c(f.CellX(i), f.CellY(j));
-              const double d = DistToSegment(c, a, b, t);
-              if (d > reach)
-                continue;
-              const double z = vertical ? std::min(from.z, m.to.z)
-                                        : from.z + (m.to.z - from.z) * t;
-              const bool byHolder = d > rc;
-              const double under =
-                  byHolder ? z + tool->overallLength
-                           : z + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-              const double into = top - under;
-              if (into <= kGrazeTolerance)
-                continue;
-              hit = true;
-              if (into > deepest) {
-                deepest = into;
-                deepestAt = c;
-                deepestTop = top;
-                deepestOwner = field.owner[static_cast<size_t>(j) *
-                                               static_cast<size_t>(f.nx) +
-                                           static_cast<size_t>(i)];
-                deepestByHolder = byHolder;
-              }
-            }
-          }
-          if (hit) {
-            fixtureCollisions++;
-            if (deepest > worstFixtureDepth) {
-              worstFixtureDepth = deepest;
-              worstFixtureAt = deepestAt;
-              worstFixtureZ = deepestTop;
-              worstFixtureLine = m.line;
-              worstFixtureOwner = deepestOwner;
-              worstFixtureByHolder = deepestByHolder;
-            }
-          }
-        }();
-      // Apply every move (cuts remove material; rapids over air do nothing).
-      if (!m.rapid) {
-        const Tool* tool = setup.FindTool(m.tool);
-        const double allowed = allowedBite(m.op);
-        const double dia = tool != nullptr ? tool->diameter : 2.0;
-        const double len = glm::length(glm::dvec2(m.to - from));
-        // Steep enough to be a plunge. Not `len == 0`: the arc before a tab
-        // exit is re-expanded to chords here, and its last chord can end a
-        // few microns off the file's own point -- so the plunge off the tab
-        // read as a lateral move of no length carrying a whole disc of
-        // volume. The ramp is 3 degrees; this is anything past about 63.
-        const bool plunge = len < 1e-3 || from.z - m.to.z > 2.0 * len;
-        // A plunge's bite is the mean depth under the cutter's face, read
-        // BEFORE it cuts -- and without the face's outermost cell. An arc is
-        // simulated as chords, whose sagitta leaves a ring of cells at the
-        // kerf's edge standing at full stock height; a lateral stretch
-        // brushes that ring along its length, but a plunge averages over the
-        // disc, and a tab exit that took 1.5 mm read as 3.9.
-        double plungeBite = 0.0;
-        if (allowed > 0.0 && plunge) {
-          const double inner = dia * 0.5 - 1.5 * probe.res;
-          const double zLow = std::min(from.z, m.to.z);
-          double sum = 0.0;
-          int cells = 0;
-          const int i0 = std::max(
-              0, static_cast<int>((m.to.x - inner - probe.x0) / probe.res));
-          const int i1 = std::min(
-              probe.nx - 1,
-              static_cast<int>((m.to.x + inner - probe.x0) / probe.res) + 1);
-          const int j0 = std::max(
-              0, static_cast<int>((m.to.y - inner - probe.y0) / probe.res));
-          const int j1 = std::min(
-              probe.ny - 1,
-              static_cast<int>((m.to.y + inner - probe.y0) / probe.res) + 1);
-          for (int j = j0; j <= j1; j++)
-            for (int i = i0; i <= i1; i++) {
-              const double d = glm::length(
-                  glm::dvec2(probe.CellX(i) - m.to.x, probe.CellY(j) - m.to.y));
-              if (inner <= 0.0 || d > inner)
-                continue;
-              const double surface =
-                  zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-              sum += std::max(0.0, probe.At(i, j) - surface);
-              cells++;
-            }
-          plungeBite = cells > 0 ? sum / cells : 0.0;
-        }
-        // Judged in pieces no longer than the window: one 50 mm move that
-        // starts and ends in air would otherwise average its bite over the
-        // air as well. Carving the pieces removes exactly what carving the
-        // whole move would.
-        const double window = std::max(2.0, dia * 0.5);
-        const int pieces = allowed > 0.0 && !plunge && len > window
-                               ? static_cast<int>(std::ceil(len / window))
-                               : 1;
-        double removed = 0.0;
-        for (int k = 1; k <= pieces; k++) {
-          const glm::dvec3 a = from + (m.to - from) * ((k - 1.0) / pieces);
-          const glm::dvec3 b = from + (m.to - from) * (k / double(pieces));
-          const double took = CarveSweep(a, b, tool, probe);
-          if (pieces > 1) {
-            flushBite();
-            winOp = m.op;
-            winTool = m.tool;
-            winAllowed = allowed;
-            winDiameter = dia;
-            winVol = took;
-            winLen = len / pieces;
-            winAt = glm::dvec2(b);
-            winLine = m.line;
-            flushBite();
-          }
-          removed += took;
-        }
-        MarkSwept(from, m, setup, probe, touched);
-        if (m.op != winOp || m.tool != winTool)
+      const double plungeBite =
+          plungeSum.cells > 0 ? FromQuanta(plungeSum.quanta) / plungeSum.cells
+                              : 0.0;
+      const double cellArea = probe.res * probe.res;
+      const double window = std::max(2.0, st.dia * 0.5);
+      double removed = 0.0;
+      for (int k = 1; k <= st.pieces; k++) {
+        const double took =
+            FromQuanta(
+                pieceSum[st.firstPiece + static_cast<size_t>(k - 1)].load(
+                    std::memory_order_relaxed)) *
+            cellArea;
+        if (st.pieces > 1) {
           flushBite();
-        winOp = m.op;
-        winTool = m.tool;
-        winAllowed = allowed;
-        winDiameter = dia;
-        if (allowed > 0.0 && plunge) {
-          // A plunge, measured above; the window it interrupts carries on
-          // after it.
-          judgeBite(plungeBite, glm::dvec2(m.to), m.line, m.op, allowed);
-        } else if (allowed > 0.0 && pieces == 1) {
-          winVol += removed;
-          winLen += len;
-          winAt = glm::dvec2(m.to);
+          winOp = m.op;
+          winTool = m.tool;
+          winAllowed = st.allowed;
+          winDiameter = st.dia;
+          winVol = took;
+          winLen = st.len / st.pieces;
+          winAt =
+              glm::dvec2(st.from + (st.to - st.from) * (k / double(st.pieces)));
           winLine = m.line;
-          if (winLen >= window)
-            flushBite();
+          flushBite();
         }
-      } else {
-        flushBite();
+        removed += took;
       }
-      from = m.to;
+      if (m.op != winOp || m.tool != winTool)
+        flushBite();
+      winOp = m.op;
+      winTool = m.tool;
+      winAllowed = st.allowed;
+      winDiameter = st.dia;
+      if (st.allowed > 0.0 && st.plunge) {
+        // A plunge, measured above; the window it interrupts carries on
+        // after it.
+        judgeBite(plungeBite, glm::dvec2(m.to), m.line, m.op, st.allowed);
+      } else if (st.allowed > 0.0 && st.pieces == 1) {
+        winVol += removed;
+        winLen += st.len;
+        winAt = glm::dvec2(m.to);
+        winLine = m.line;
+        if (winLen >= window)
+          flushBite();
+      }
     }
     flushBite();
-    machined = probe;
   }
 
   out.designed = SampleModel(bodies, machined, lo.z);

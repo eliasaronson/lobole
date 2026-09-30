@@ -43,6 +43,8 @@ struct SetupStock {
   // its stock is not claimed -- two setups whose boxes disagree leave the
   // doubtful strip as leftover.
   [[nodiscard]] bool Removes(const glm::dvec3& model, double tol) const;
+  // The same, for a point already in this setup's frame.
+  [[nodiscard]] bool RemovesAt(const glm::dvec3& inSetup, double tol) const;
 };
 
 struct OtherSetups {
@@ -116,9 +118,26 @@ struct SetupProgram {
 
 // The job's other setups' final stock, from their posted programs: each
 // inspected as `VerifyGcode` would, its machined map kept.
+//
+// Each one is inspected ONCE per process for a given set of inputs
+// (docs/cam/simulation.md#each-other-setup-inspected-once): what a setup
+// leaves depends on its posted program, the setup itself (framing, stock,
+// tools, machine), the part's geometry and the resolution, and nothing about
+// the setup asking. So it is kept under a key made of exactly those, and an
+// edit to any of them misses. The ones that miss are inspected at once.
 [[nodiscard]] OtherSetups OtherSetupsOf(const Setup& self,
                                         const std::vector<SetupProgram>& others,
                                         const std::vector<Body>& rawBodies,
                                         double res);
+
+// The memo's counters since the process started (or the last
+// `ForgetOtherSetups`): what a test asserts a hit or a miss by.
+struct OtherSetupsMemoStats {
+  size_t hits = 0, misses = 0;
+  size_t entries = 0, bytes = 0;
+};
+[[nodiscard]] OtherSetupsMemoStats OtherSetupsMemo();
+// Empties the memo and zeroes its counters.
+void ForgetOtherSetups();
 
 } // namespace cam
