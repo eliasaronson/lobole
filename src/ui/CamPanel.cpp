@@ -1243,9 +1243,32 @@ CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
 
   const std::string name =
       op.name.empty() ? std::string(cam::OpTypeNameOrThrow(op.type)) : op.name;
+  // The tool's tail is measured FIRST, so the name can be elided to what is
+  // left: under a setup the row is indented, and "Frame chamfer" ran under
+  // "T8 12 mm". The whole name is in the row's tooltip.
+  char tail[64] = "";
+  if (const cam::Tool* tool = setup.FindTool(op.toolNumber))
+    std::snprintf(tail, sizeof(tail), "T%d %.3g mm", tool->number,
+                  tool->diameter);
+  const float tailW = tail[0] ? ImGui::CalcTextSize(tail).x : 0.0f;
+  const float room = ImGui::GetWindowContentRegionMax().x -
+                     ImGui::GetCursorPosX() - tailW -
+                     ImGui::GetStyle().ItemSpacing.x;
+  std::string shown = name;
+  if (room > 0.0f && ImGui::CalcTextSize(shown.c_str()).x > room) {
+    const char* ell = "\u2026";
+    while (!shown.empty() &&
+           ImGui::CalcTextSize((shown + ell).c_str()).x > room) {
+      shown.pop_back();
+      while (!shown.empty() && (static_cast<unsigned char>(shown.back()) &
+                                0xC0) == 0x80) // a UTF-8 continuation byte
+        shown.pop_back();
+    }
+    shown += ell;
+  }
   if (!op.enabled)
     ImGui::PushStyleColor(ImGuiCol_Text, dim);
-  if (ImGui::Selectable((name + "###op_row").c_str(),
+  if (ImGui::Selectable((shown + "###op_row").c_str(),
                         IsSelected(state, kKind, op.id),
                         ImGuiSelectableFlags_AllowDoubleClick |
                             ImGuiSelectableFlags_AllowOverlap)) {
@@ -1317,13 +1340,9 @@ CamOpRowResult CamOperationRow(AppState& state, const cam::Setup& setup,
 
   // The tool, dim, at the right: which cutter is the one thing a list of
   // operations is scanned for.
-  if (const cam::Tool* tool = setup.FindTool(op.toolNumber)) {
-    char tail[64];
-    std::snprintf(tail, sizeof(tail), "T%d %.3g mm", tool->number,
-                  tool->diameter);
-    const float w = ImGui::CalcTextSize(tail).x;
+  if (tail[0]) {
     const float right = ImGui::GetWindowContentRegionMax().x;
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - w));
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - tailW));
     ImGui::TextDisabled("%s", tail);
   }
   // A failure says why right under the row, not only in a tooltip: a job
