@@ -31,12 +31,15 @@ Bare `ninja`/`cmake` fail outside the nix env (missing glm/vulkan/OCC headers).
 Always wrap:
 
 ```
-nix-shell shell.nix --run "cd build && ninja -j$(tools/build-jobs) designer designer_tests"
+tools/build.sh            # = ninja -j$(tools/build-jobs) designer designer_tests, in nix
 ```
 
 That pair is the inner loop. **`-j` comes from free memory, not cores**
 (`tools/build-jobs`, ~1.5 GB a compiler): at one job per core, parallel
-builds got the OOM killer to take the agent host itself. A *fresh* build dir needs plain `ninja` — the
+builds got the OOM killer to take the agent host itself. `tools/build.sh`
+also holds `build/`'s lock, which `tools/merge-branch.sh` takes before it
+changes the tree: a merge that lands mid-build links objects that saw two
+versions of a header. A *fresh* build dir needs plain `ninja` — the
 pair skips `femgpu_tests`, and ctest then fails on a missing executable
 instead of running the suite.
 
@@ -265,8 +268,10 @@ plus `designer_tests` in a fresh tree (docs/architecture.md#precompiled-headers)
 If it compiles everything, main's `build/` is on an old toolchain:
 `tools/fix-stale-nix-cache.sh`. It then **picks and prints a scratch port** for that worktree
 (`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
-instances, and never the human's). Integrate SERIALLY: merge one branch to
-main, run suites, then the next — and REMOVE the worktree as soon as its
+instances, and never the human's). Integrate SERIALLY, in the order branches finish:
+`tools/merge-branch.sh BRANCH [--full]` cherry-picks under `build/`'s lock,
+builds, runs the suites and removes the worktree once every commit is on main
+and it holds nothing uncommitted. By hand, REMOVE the worktree as soon as its
 branch is in. `git worktree remove` REFUSES here ("working trees containing
 submodules cannot be moved or removed"), so it is:
 ```
