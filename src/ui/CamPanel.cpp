@@ -1113,8 +1113,8 @@ const char* OpGlyph(cam::OpType t) {
     return CommandIcon("job.walls");
   case cam::OpType::SurfaceRotary:
     return CommandIcon("job.rotary_finish");
-  case cam::OpType::Engrave: // no verb makes one yet: a curve, as sketched
-    return CommandIcon("sketch.spline");
+  case cam::OpType::Engrave: // the verb's own glyph, as every other type
+    return CommandIcon("job.engrave");
   case cam::OpType::Count:
     break;
   }

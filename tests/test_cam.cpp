@@ -3749,8 +3749,6 @@ TEST_CASE("cam profile: a target that cannot be followed is NAMED, and the "
         std::string::npos);
 }
 
-#endif // HAVE_CAM
-
 TEST_CASE("cam: a section is remembered for one generate and never confused",
           "[cam]") {
   // SectionMemoScope: the same (bodies, z) answered once per generate --
@@ -3779,3 +3777,5 @@ TEST_CASE("cam: a section is remembered for one generate and never confused",
   const std::vector<cam::Loop> higher = cam::SectionLoops(bodies, 25.0);
   CHECK(higher.empty()); // above the block
 }
+
+#endif // HAVE_CAM
