@@ -56,7 +56,12 @@ fi
 "$root/tools/build.sh"
 if [ "$full" = 1 ]; then
   nix-shell shell.nix --run "cd build && ctest -LE gui -j$("$root/tools/build-jobs" 700)" | grep -E 'tests passed|\(Failed\)'
-  "$root/tools/gui-tests-xvfb.sh" | tail -1
+  # The verdict, and on a failure what failed and where it is archived with
+  # its seed: the last line alone ("SOME FAILED") invites a re-run, which
+  # passes and hides an order-dependent failure the archive can replay.
+  "$root/tools/gui-tests-xvfb.sh" |
+    grep -E '^--- shard|test failed|Error |archived:|^GUI tests: [0-9]+/|^MISMATCH' |
+    sed 's/\x1b\[[0-9;]*m//g'
 else
   "$root/tools/test-fast.sh" | grep -E 'tests passed|\(Failed\)'
 fi
