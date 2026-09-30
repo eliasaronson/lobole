@@ -1,4 +1,5 @@
 #include "core/cam/CamEngrave.h"
+#include "core/cam/CamThreadMill.h"
 #include "core/cam/CamToolpath.h"
 
 #include "core/cam/CamDropCutter.h"
@@ -59,9 +60,12 @@ namespace detail {
 EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window) {
   EdgeBreak out;
   const double r = tool.diameter * 0.5;
-  if (tool.type == ToolType::Flat || tool.type == ToolType::Drill) {
+  if (tool.type == ToolType::Flat || tool.type == ToolType::Drill ||
+      tool.type == ToolType::ThreadMill) {
     out.why = "tool " + std::to_string(tool.number) + " is a " +
-              (tool.type == ToolType::Flat ? "flat end mill" : "drill") +
+              (tool.type == ToolType::Flat    ? "flat end mill"
+               : tool.type == ToolType::Drill ? "drill"
+                                              : "thread mill") +
               " — breaking an edge needs a ball nose (a roundover) or a V-bit "
               "(a chamfer). Set the tool's type.";
     return out;
@@ -184,7 +188,26 @@ DerivedOp DeriveOperation(const Setup& setup,
         "there is no tool " + std::to_string(toolNumber) + " in this setup";
     return out;
   }
-  const Tool& tool = named != nullptr ? *named : setup.tools.front();
+  // A thread is milled with a thread mill: with no tool named, the setup's
+  // first one, rather than its first tool of any kind.
+  const Tool* threadMill = nullptr;
+  if (named == nullptr && type == OpType::ThreadMill)
+    for (const Tool& t : setup.tools)
+      if (t.type == ToolType::ThreadMill) {
+        threadMill = &t;
+        break;
+      }
+  const Tool& tool = named != nullptr        ? *named
+                     : threadMill != nullptr ? *threadMill
+                                             : setup.tools.front();
+  // A thread mill cuts threads and nothing else: its head is a disc on a
+  // neck, and on a floor or a wall it would cut with the flank of a V.
+  if (tool.type == ToolType::ThreadMill && type != OpType::ThreadMill) {
+    out.why = "tool " + std::to_string(tool.number) +
+              " is a thread mill -- it cuts threads (a thread_mill "
+              "operation) and nothing else. Use another cutter";
+    return out;
+  }
   // A V-bit or a drill point is a CONE: run along a floor it leaves a groove
   // as deep as the pass, not a floor. A ball nose is fine — it leaves a cusp,
   // and `DerivedStepover` sizes the step so that cusp is a fifth of a percent
@@ -706,6 +729,35 @@ DerivedOp DeriveOperation(const Setup& setup,
           " mm above the surface this engraves: face it down to the surface "
           "in an operation before this one, or the hops between strokes "
           "pass through it");
+    break;
+  }
+  case OpType::ThreadMill: {
+    // docs/cam/operations.md#thread-mill: everything from the thread on the
+    // face -- its size, pitch, hand, side and class -- and the cutter. The
+    // depths are the tool TIP's range over the helix, for the reach check
+    // and the panel; the generator reads the thread again for each target.
+    op.leadArcs = true; // FreeCAD's semicircles: in and out tangentially
+    op.climb = true;
+    const ThreadPlan plan = PlanThread(setup, op, tool, bodies, target);
+    if (!plan.ok) {
+      out.why = plan.why;
+      return out;
+    }
+    op.name = "Thread " + plan.thread.designation;
+    op.targets = {target};
+    op.topZ = plan.tipHi;
+    op.bottomZ = plan.tipLo;
+    op.stepdown = 0.0;
+    op.threadPasses = 0; // derived at generation, from the cutter
+    out.notes = plan.notes;
+    out.notes.push_back(std::to_string(plan.passes.size()) + " pass" +
+                        (plan.passes.size() == 1 ? "" : "es") +
+                        ", the last aimed at pitch "
+                        "diameter " +
+                        Round2(plan.thread.pdAim) + " mm, the middle of " +
+                        plan.thread.threadClass + "'s " +
+                        Round2(plan.thread.pdMin) + " - " +
+                        Round2(plan.thread.pdMax));
     break;
   }
   case OpType::Count:

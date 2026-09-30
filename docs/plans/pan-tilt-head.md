@@ -93,17 +93,11 @@ Built: see docs/tolerances/README.md#printed-parts.
 
 - **The operations:** face, the pockets, the bearing bore (helical bore to a
   fit) and the tripod thread.
-- **A ThreadMill operation** (FreeCAD's shape): a helix of G2/G3 arcs with Z
-  advancing half a pitch per half turn, a lead-in arc, a lead-out, and a
-  partial last turn. It is driven by the Thread feature on the hole: size,
-  pitch, hand and internal/external. The helix radius is (thread diameter −
-  cutter diameter)/2 for an internal thread.
-- **A thread-mill cutter shape:** single-profile 60° first; multi-tooth only
-  if cheap.
-- **Verification judges a thread on its own terms.** The height map cannot
-  see a wall that faces sideways, so the check confirms the helix's pitch,
-  its depth against the class and that the cutter fits the tap-drill bore.
-  The playback draws the helix.
+- **The thread mill, its cutter and its verification:** built, see
+  [docs/cam/operations.md#thread-mill](../cam/operations.md#thread-mill)
+  (the cutter: [#the-thread-mill-cutter](../cam/operations.md#the-thread-mill-cutter);
+  the check: [simulation.md#threads](../cam/simulation.md#threads)).
+  Multi-tooth cutters are not modelled.
 - Workholding with the fixtures from v126.
 - Tapping (G84) is not built: the 6090's spindle has no encoder, so it cannot
   rigid-tap. An operation that needs a synchronised spindle is refused on a

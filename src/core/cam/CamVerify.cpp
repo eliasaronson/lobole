@@ -1,4 +1,5 @@
 #include "core/cam/CamVerify.h"
+#include "core/cam/CamThreadMill.h"
 
 #include "core/Parallel.h"
 #include "core/cam/CamMount.h"
@@ -48,6 +49,7 @@ double GrooveHalfWidth(const Toolpath::Groove& g) {
                ? r
                : std::sqrt(std::max(0.0, r * r - (r - depth) * (r - depth)));
   case ToolType::Flat:
+  case ToolType::ThreadMill: // engraving refuses one; the rim is the reach
     break;
   }
   return r;
@@ -411,7 +413,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 const std::vector<Toolpath::Relief>& reliefs = {},
                 const std::vector<Toolpath::Tab>& tabs = {},
                 const OtherSetups* others = nullptr,
-                const std::vector<float>* grooveFloor = nullptr) {
+                const std::vector<float>* grooveFloor = nullptr,
+                const std::vector<float>* threadFloor = nullptr) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -513,6 +516,13 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
             }
           }
         }
+        // Inside a milled thread the head clears the whole column a height
+        // map can see, crests and all, down to its lowest tip: that is the
+        // thread, judged on its own terms (docs/cam/simulation.md#threads).
+        // Below the tip, or outside the thread's radius, it is gouge.
+        if (threadFloor != nullptr && threadFloor->size() == total &&
+            (*threadFloor)[k] != kNoGroove)
+          want = std::min(want, static_cast<double>((*threadFloor)[k]));
         if (!relieved && want - got > v.maxGouge) {
           v.maxGouge = want - got;
           v.gougeAt = {machined.CellX(i), machined.CellY(j)};
@@ -836,7 +846,7 @@ Probe ProbeShank(const glm::dvec3& from, const glm::dvec3& to, const Tool& tool,
   const double rs = tool.shankDiameter * 0.5;
   const double zLow = std::min(from.z, to.z);
   // Above the uncut block, nothing can stand over the flutes.
-  if (zLow + tool.fluteLength >= stockTop - kGrazeTolerance)
+  if (zLow + ReachLength(tool) >= stockTop - kGrazeTolerance)
     return out;
   const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
   const CellBox box = BoxOf(a, b, rs, probe, rowLo, rowHi);
@@ -850,7 +860,7 @@ Probe ProbeShank(const glm::dvec3& from, const glm::dvec3& to, const Tool& tool,
       // of it lands just outside.
       if (d <= rc + probe.res || d > rs)
         continue;
-      const double into = probe.At(i, j) - (zLow + tool.fluteLength);
+      const double into = probe.At(i, j) - (zLow + ReachLength(tool));
       if (into <= kGrazeTolerance)
         continue;
       out.hit = true;
@@ -982,7 +992,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Toolpath::Tab>& tabs,
                    const std::vector<FixtureSolid>& fixtures,
                    const OtherSetups* others,
-                   const std::vector<Toolpath::Groove>& grooves) {
+                   const std::vector<Toolpath::Groove>& grooves,
+                   const std::vector<Toolpath::Thread>& threads) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -999,6 +1010,16 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   HeightMap machined;
   if (!StartingStock(setup, rawBodies, res, others, machined))
     return out;
+  // Each milled thread, from the file (docs/cam/simulation.md#threads): its
+  // helix, and the bore it runs in as the program leaves it when the thread
+  // starts -- read from the stock BEFORE the walk below cuts it.
+  std::vector<ThreadVerdict> threadVerdicts;
+  for (const Toolpath::Thread& t : threads) {
+    ThreadVerdict tv = JudgeThread(program, t);
+    if (tv.judged)
+      MeasureBoreBefore(program, setup, machined, lo.z, t, tv);
+    threadVerdicts.push_back(std::move(tv));
+  }
 
   // What the walk below finds, counted in file order (ProbeRapid and the
   // others say what each is).
@@ -1394,9 +1415,13 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
 
   out.designed = SampleModel(bodies, machined, lo.z);
   const std::vector<float> grooveFloor = GrooveFloor(machined, grooves);
+  const std::vector<float> threadFloor =
+      ThreadExcuse(machined, threads, threadVerdicts);
   out.verdict = Compare(machined, out.designed, lo.z, &touched,
                         /*leftoverTolerance=*/0.0, reliefs, tabs, others,
-                        grooves.empty() ? nullptr : &grooveFloor);
+                        grooves.empty() ? nullptr : &grooveFloor,
+                        threads.empty() ? nullptr : &threadFloor);
+  out.verdict.threads = std::move(threadVerdicts);
   out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.tabs = static_cast<int>(tabs.size());
   out.verdict.grooves = static_cast<int>(grooves.size());
@@ -1593,7 +1618,8 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Toolpath::Tab>& tabs,
                     const std::vector<FixtureSolid>& fixtures,
                     const OtherSetups* others,
-                    const std::vector<Toolpath::Groove>& grooves) {
+                    const std::vector<Toolpath::Groove>& grooves,
+                    const std::vector<Toolpath::Thread>& threads) {
   // The STOCK MODEL follows the file, not the setup. A program whose A moves
   // is cut from a cylinder that turns and one whose A does not is cut from a
   // block that does not, and asking the setup would get the answer wrong in
@@ -1608,6 +1634,16 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     Verdict v = InspectRotary(gcode, setup, bodies, res, others).verdict;
     if (others != nullptr)
       v.otherSetupsNotChecked = others->notChecked;
+    // A thread is judged against a height map's program; one whose file
+    // turns A is not judged, and says so (and is not complete).
+    for (const Toolpath::Thread& t : threads) {
+      ThreadVerdict tv;
+      tv.op = t.op;
+      tv.designation = t.designation;
+      tv.threadClass = t.threadClass;
+      tv.why = "the file turns A: a thread is judged on a 3-axis program";
+      v.threads.push_back(std::move(tv));
+    }
     v.fixturesSkippedRotary = !fixtures.empty();
     // The machine's travel, which a turning program was never checked
     // against. Spans, not positions: where the part sits on the rotary's
@@ -1640,7 +1676,7 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     return v;
   }
   Verdict v = Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures,
-                      others, grooves)
+                      others, grooves, threads)
                   .verdict;
   if (others != nullptr)
     v.otherSetupsNotChecked = others->notChecked;
@@ -1679,6 +1715,76 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.grooves, v.grooves == 1 ? "" : "s",
                   v.grooves == 1 ? "" : "s");
     out.push_back({VerdictLine::Level::Good, buf});
+  }
+  // Milled threads, judged on their own terms
+  // (docs/cam/simulation.md#threads): one line each when all is well, and a
+  // line per fault when it is not.
+  for (const ThreadVerdict& t : v.threads) {
+    const std::string name =
+        t.designation + (t.threadClass.empty() ? "" : "-" + t.threadClass);
+    if (!t.judged) {
+      std::snprintf(buf, sizeof(buf), "Thread %s (op %llu) was not judged: %s.",
+                    name.c_str(), static_cast<unsigned long long>(t.op),
+                    t.why.c_str());
+      out.push_back({VerdictLine::Level::Warn, buf});
+      continue;
+    }
+    if (t.boreStanding > tolerance) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: %.2f mm of stock stands where the head goes "
+                    "down, at X%.1f Y%.1f -- the %s is not cut before the "
+                    "thread. Drill or bore it in an earlier operation.",
+                    name.c_str(), t.boreStanding, t.boreStandingAt.x,
+                    t.boreStandingAt.y,
+                    t.internal ? "tap-drill bore" : "space round the boss");
+      out.push_back({VerdictLine::Level::Bad, buf});
+    }
+    if (t.neckClearance < -1e-6) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: the cutter's neck reaches %.3f mm into the "
+                    "%s at the last pass -- it rubs the crests.",
+                    name.c_str(), -t.neckClearance,
+                    t.internal ? "bore's wall" : "boss");
+      out.push_back({VerdictLine::Level::Bad, buf});
+    }
+    if (!t.PitchOk() || t.handMeasured != t.rightHand) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: the helix advances %.4f mm a turn, %s-handed "
+                    "-- the thread is %.4f mm, %s-handed.",
+                    name.c_str(), t.pitchMeasured,
+                    t.handMeasured ? "right" : "left", t.pitch,
+                    t.rightHand ? "right" : "left");
+      out.push_back({VerdictLine::Level::Bad, buf});
+    }
+    if (!t.InBand()) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: the last pass cuts pitch diameter %.3f mm, "
+                    "outside %s's %.3f - %.3f.",
+                    name.c_str(), t.pdReached, t.threadClass.c_str(), t.pdMin,
+                    t.pdMax);
+      out.push_back({VerdictLine::Level::Bad, buf});
+    }
+    if (t.shortMm > tolerance) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: full thread only from Z%.2f to Z%.2f of its "
+                    "Z%.2f - Z%.2f -- %.2f mm short.",
+                    name.c_str(), t.fullFrom, t.fullTo, t.zLo, t.zHi,
+                    t.shortMm);
+      out.push_back({VerdictLine::Level::Warn, buf});
+    }
+    if (t.Good(tolerance) && t.Safe(tolerance)) {
+      std::snprintf(buf, sizeof(buf),
+                    "Thread %s: %d pass%s, pitch %.4f mm %s-hand, pitch "
+                    "diameter %.3f in %s's %.3f - %.3f, full from Z%.2f to "
+                    "Z%.2f%s; bore clear, neck %.2f mm off the %s.",
+                    name.c_str(), t.passes, t.passes == 1 ? "" : "es",
+                    t.pitchMeasured, t.rightHand ? "right" : "left",
+                    t.pdReached, t.threadClass.c_str(), t.pdMin, t.pdMax,
+                    std::max(t.fullFrom, t.zLo), std::min(t.fullTo, t.zHi),
+                    t.floorLimited ? " (the floor stops the head)" : "",
+                    t.neckClearance, t.internal ? "wall" : "boss");
+      out.push_back({VerdictLine::Level::Good, buf});
+    }
   }
   if (v.grooveShallow > tolerance) {
     std::snprintf(buf, sizeof(buf),

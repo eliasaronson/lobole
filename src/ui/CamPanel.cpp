@@ -66,9 +66,10 @@ constexpr glm::vec4 kRapidColor(0.50f, 0.52f, 0.60f, 0.55f);
 // and indexes it by that enum at three more places, so a row out of step is
 // an out-of-bounds read and a row missing is the wrong label on every type
 // after it. Asserted rather than trusted.
-const char* kOpTypes[] = {
-    "Profile",    "Pocket",         "Face",         "Drill",         "Adaptive",
-    "Edge break", "Finish surface", "Finish walls", "Finish rotary", "Engrave"};
+const char* kOpTypes[] = {"Profile",        "Pocket",       "Face",
+                          "Drill",          "Adaptive",     "Edge break",
+                          "Finish surface", "Finish walls", "Finish rotary",
+                          "Engrave",        "Thread mill"};
 static_assert(IM_ARRAYSIZE(kOpTypes) == static_cast<int>(cam::OpType::Count),
               "kOpTypes must have one label per OpType, in enum order");
 
@@ -87,6 +88,8 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
   fresh.reliefs = previous.reliefs;
   fresh.tabs = previous.tabs;
   fresh.grooves = previous.grooves;
+  fresh.arcs = previous.arcs;
+  fresh.threads = previous.threads;
   fresh.strategy = previous.strategy;
 }
 
@@ -473,6 +476,11 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     op.type = static_cast<cam::OpType>(type);
     touched(op.id);
   }
+  // A thread mill's depths are the thread's
+  // (docs/cam/operations.md#thread-mill): shown, not edited -- the RPC refuses
+  // them too.
+  const bool threadDepths = op.type == cam::OpType::ThreadMill;
+  ImGui::BeginDisabled(threadDepths);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60.0f);
   float top = static_cast<float>(op.topZ);
@@ -490,6 +498,7 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     touched(op.id);
   }
   ImGui::SetItemTooltip("Bottom of the cut (Z)");
+  ImGui::EndDisabled();
   // Per-type from the ONE table (CamNames.h), not a predicate written
   // here. These guards disagreed with the serializer's and the RPC's, and
   // the unconditional ones offered a stepdown on an edge round and tabs
@@ -596,6 +605,18 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     }
     ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
                           "the chips clear (0 = one plunge)");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::ThreadPasses)) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);
+    int passes = op.threadPasses;
+    if (ExprDragInt(state, "Passes###threadpasses", &passes, 0.1f, 0, 64)) {
+      op.threadPasses = std::max(0, passes);
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip("Radial passes, each taking the same area of the "
+                          "thread (0 = derived: the first takes at most half "
+                          "the cutter's profile depth)");
   }
   if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
     ImGui::SetNextItemWidth(70.0f);
@@ -921,13 +942,61 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   // bevel or an arc.
   ImGui::SetNextItemWidth(90.0f);
   int shape = static_cast<int>(t.type);
-  if (ImGui::Combo("###tooltype", &shape, "flat\0ball\0V-bit\0drill\0")) {
+  if (ImGui::Combo("###tooltype", &shape,
+                   "flat\0ball\0V-bit\0drill\0thread mill\0")) {
+    const bool becameThreadMill =
+        static_cast<cam::ToolType>(shape) == cam::ToolType::ThreadMill &&
+        t.type != cam::ToolType::ThreadMill;
     t.type = static_cast<cam::ToolType>(shape);
+    // A thread mill's head, derived from its diameter where nobody has
+    // measured it (docs/cam/operations.md#the-thread-mill-cutter).
+    if (becameThreadMill)
+      cam::FillThreadMillShape(t, /*angleStated=*/false);
     changed = true;
   }
   ImGui::SetItemTooltip("End shape. A ball rounds an edge, a V-bit "
-                        "chamfers it; a flat mill does neither.");
-  if (t.type == cam::ToolType::VBit || t.type == cam::ToolType::Drill) {
+                        "chamfers it; a flat mill does neither. A thread "
+                        "mill cuts threads and nothing else.");
+  if (t.type == cam::ToolType::ThreadMill) {
+    // The head: its flat, its neck and how long the neck is. The flute
+    // length is the head's own width, derived from these.
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    float flat = static_cast<float>(t.tipFlat);
+    if (ExprDragFloat(state, "flat###tipflat", &flat, 0.005f, 0.0f, 2.0f,
+                      "%.3f")) {
+      t.tipFlat = flat;
+      cam::FillThreadMillShape(t, true);
+      changed = true;
+    }
+    ImGui::SetItemTooltip("The flat the V is ground to at the cutting "
+                          "diameter, mm. It must be no wider than a "
+                          "thread's root, P/8.");
+    ImGui::SetNextItemWidth(70.0f);
+    float neck = static_cast<float>(t.neckDiameter);
+    if (ExprDragFloat(state, "neck###neckdia", &neck, 0.05f, 0.1f,
+                      static_cast<float>(t.diameter), "%.2f")) {
+      t.neckDiameter = neck;
+      cam::FillThreadMillShape(t, true);
+      changed = true;
+    }
+    ImGui::SetItemTooltip("The neck under the head, mm. The head stands "
+                          "(cutter - neck) / 2 out from it: the deepest "
+                          "thread it can cut before the neck rubs the "
+                          "crests.");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    float neckLen = static_cast<float>(t.neckLength);
+    if (ExprDragFloat(state, "reach###necklen", &neckLen, 0.5f, 0.5f, 200.0f,
+                      "%.1f")) {
+      t.neckLength = neckLen;
+      changed = true;
+    }
+    ImGui::SetItemTooltip("How long the neck is above the head, mm: with "
+                          "the head, how deep a thread it reaches.");
+  }
+  if (t.type == cam::ToolType::VBit || t.type == cam::ToolType::Drill ||
+      t.type == cam::ToolType::ThreadMill) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
     float angle = static_cast<float>(t.tipAngleDeg);

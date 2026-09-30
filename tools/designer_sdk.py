@@ -692,8 +692,27 @@ class DatumPlane(Plane):
 class Thread:
     """Persistent thread feature (cosmetic or modelled), usable as a screw relation's source."""
 
-    def __init__(self, part, id):
-        self.part, self.id = part, id
+    def __init__(self, part, id, face=None):
+        self.part, self.id, self.face = part, id, face
+
+    def mill(self, setup, job=None, tool=None, **kw):
+        """A CAM thread mill for this thread (docs/cam/operations.md#thread-mill):
+        ``add_cam_op`` of type ``thread_mill`` on the threaded face, so its
+        size, pitch, hand, side and class come from the Thread rather than
+        being typed again. ``tool`` defaults to the setup's first thread
+        mill; ``job`` names the job (without it, the job tab in front).
+        Other keywords (``passes``, ``climb``, ``lead_arcs``, ``part``) pass
+        through. Returns the operation as ``add_cam_op`` answers it."""
+        if self.face is None:
+            raise SdkError("this Thread was not made by part.thread(), so it "
+                           "does not know its face")
+        params = dict(setup=setup, type="thread_mill", target=self.face.ref)
+        if job is not None:
+            params["job"] = job
+        if tool is not None:
+            params["tool"] = tool
+        params.update(kw)
+        return self.part.app.add_cam_op(**params)
 
 
 class ProjectedCurve:
@@ -1874,7 +1893,7 @@ class Part(_Tab):
                 hand=hand,
             )
         )
-        return Thread(self, feature["id"])
+        return Thread(self, feature["id"], face)
 
     def _gear_blank(self, face, what):
         if not isinstance(face, Face) or face.kind != "cylinder":

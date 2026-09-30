@@ -1086,7 +1086,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 const std::vector<Toolpath::Relief>& reliefs,
                 const std::vector<Toolpath::Tab>& tabs,
                 const OtherSetups* others,
-                const std::vector<float>* grooveFloor);
+                const std::vector<float>* grooveFloor,
+                const std::vector<float>* threadFloor);
 } // namespace cam
 
 namespace {
@@ -1207,7 +1208,7 @@ TEST_CASE("cam verify: the board's planar check, timed", "[cam][.bench]") {
   cam::Verdict v;
   const double compare = BestMs(repeat, [&] {
     v = cam::Compare(insp.machined, designed, lo.z, &insp.touched, 0.0, {}, {},
-                     &others, nullptr);
+                     &others, nullptr, nullptr);
   });
   std::printf("\n== %s / %s at %.2f mm, %zu other setups, map %d x %d, %zu "
               "workers\n"

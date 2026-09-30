@@ -95,6 +95,13 @@ constexpr OpTypeRow kRows[] = {
     {OpType::Engrave, "engrave", false,
      OpField::EngraveWidth | OpField::EngraveDepth | OpField::FullWidth |
          OpField::Indexed},
+    // Thread milling (v145, docs/cam/operations.md#thread-mill): the passes,
+    // the direction (climb) and the semicircle entry and exit (lead_arcs).
+    // Its depths are the thread's, derived from it. No stepdown (a helix is
+    // its own descent), no stepover, no side (the Thread says which), no
+    // finish, not indexed: one target at a time, each its own thread.
+    {OpType::ThreadMill, "thread_mill", true,
+     OpField::ThreadPasses | OpField::Climb | OpField::LeadArcs},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a
@@ -175,6 +182,7 @@ constexpr ToolTypeRow kToolRows[] = {
     {ToolType::Ball, "ball"},
     {ToolType::VBit, "vbit"},
     {ToolType::Drill, "drill"},
+    {ToolType::ThreadMill, "thread_mill"},
 };
 constexpr SideRow kSideRows[] = {
     {Side::Outside, "outside"},

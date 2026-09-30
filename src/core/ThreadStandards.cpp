@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 
 namespace threads {
 
@@ -299,6 +300,90 @@ std::string ClassError(const Standard& s, const std::string& threadClass,
            "; accepted: " + Join(ok);
   return "class " + threadClass + " is not " + side + " " +
          SeriesName(s.series) + " class; accepted: " + Join(ok);
+}
+
+double BasicPitchDiameter(double majorDia, double pitch) {
+  return majorDia - 0.649519 * pitch;
+}
+
+std::string DefaultClass(Series series, bool external) {
+  return Classes(series, external).front();
+}
+
+std::optional<PitchBand> PitchDiameterBand(Series series, double majorDia,
+                                           double pitch,
+                                           const std::string& threadClass,
+                                           bool external, std::string* error) {
+  const auto& ok = Classes(series, external);
+  if (std::find(ok.begin(), ok.end(), threadClass) == ok.end()) {
+    if (error != nullptr)
+      *error = "class '" + threadClass + "' is not " +
+               (external ? "an external " : "an internal ") +
+               SeriesName(series) + " class; accepted: " + Join(ok);
+    return std::nullopt;
+  }
+  const double d2 = BasicPitchDiameter(majorDia, pitch);
+  PitchBand band;
+  band.threadClass = threadClass;
+  if (IsUnified(series)) {
+    // ASME B1.1, in inches: the 2A pitch-diameter tolerance at a length of
+    // engagement of 9 pitches, then each class's multiple of it.
+    const double D = majorDia / kInch, P = pitch / kInch;
+    const double t2A = 0.0015 * std::cbrt(D) + 0.0015 * std::sqrt(9.0 * P) +
+                       0.015 * std::pow(P, 2.0 / 3.0);
+    const char grade = threadClass[0];
+    double factor = 1.0;
+    if (external)
+      factor = grade == '1' ? 1.5 : grade == '3' ? 0.75 : 1.0;
+    else
+      factor = grade == '1' ? 1.95 : grade == '3' ? 0.975 : 1.3;
+    const double tol = t2A * factor * kInch;
+    if (external) {
+      // 1A and 2A carry an allowance of 0.3 of the 2A tolerance; 3A none.
+      const double allowance = grade == '3' ? 0.0 : 0.3 * t2A * kInch;
+      band.max = d2 - allowance;
+      band.min = band.max - tol;
+    } else {
+      band.min = d2; // every B class starts at basic
+      band.max = d2 + tol;
+    }
+    return band;
+  }
+  // ISO 965-1. Td2(6) = 90 P^0.4 d^0.1 um, d the geometric mean of the
+  // nominal diameter's range; TD2(6) = 1.32 Td2(6); grades 3..8 scale both.
+  static constexpr double kRanges[] = {0.99, 1.4,  2.8,   5.6,   11.2, 22.4,
+                                       45.0, 90.0, 180.0, 355.0, 600.0};
+  double dMean = majorDia;
+  for (size_t i = 0; i + 1 < std::size(kRanges); i++)
+    if (majorDia > kRanges[i] && majorDia <= kRanges[i + 1]) {
+      dMean = std::sqrt(kRanges[i] * kRanges[i + 1]);
+      break;
+    }
+  const double td2 =
+      90.0 * std::pow(pitch, 0.4) * std::pow(dMean, 0.1) * 1e-3; // mm
+  const int grade = threadClass[0] - '0';
+  const double gradeFactor = grade == 3   ? 0.5
+                             : grade == 4 ? 0.63
+                             : grade == 5 ? 0.8
+                             : grade == 7 ? 1.25
+                             : grade == 8 ? 1.6
+                                          : 1.0;
+  const char position = threadClass[1];
+  // Fundamental deviations, um: G +(15 + 11P); e, f, g -(50|30|15 + 11P).
+  const double p11 = 11.0 * pitch;
+  if (external) {
+    const double es = position == 'e'   ? -(50.0 + p11)
+                      : position == 'f' ? -(30.0 + p11)
+                      : position == 'g' ? -(15.0 + p11)
+                                        : 0.0;
+    band.max = d2 + es * 1e-3;
+    band.min = band.max - td2 * gradeFactor;
+  } else {
+    const double ei = position == 'G' ? 15.0 + p11 : 0.0;
+    band.min = d2 + ei * 1e-3;
+    band.max = band.min + 1.32 * td2 * gradeFactor;
+  }
+  return band;
 }
 
 } // namespace threads

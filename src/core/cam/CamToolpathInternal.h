@@ -229,6 +229,12 @@ void GenerateEngrave(const Setup& setup, const Operation& op, const Tool& tool,
                      const std::vector<Body>& bodies, Toolpath& tp,
                      const GenerateContext* ctx);
 
+// A thread mill (CamThreadMill.cpp, docs/cam/operations.md#thread-mill): one
+// target, the thread its face carries, bodies in setup space.
+void GenerateThreadMill(const Setup& setup, const Operation& op,
+                        const Tool& tool, const std::vector<Body>& bodies,
+                        Toolpath& tp);
+
 } // namespace detail
 
 // Defined at `cam` scope in the .cpp files but NOT part of the public

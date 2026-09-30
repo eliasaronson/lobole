@@ -241,7 +241,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   lack is REFUSED, other text is a custom thread), "pitch": num (mm, custom
   only), "thread_class"?: str, "length"?: num (mm), "length_expr"?: str,
   "modeled"?: bool (true cuts the real 60-degree helical groove, slow;
-  a failure keeps the body), "hand"?: "right"|"left"}}
+  a failure keeps the body), "hand"?: "right"|"left"}}. It is also what a
+  CAM job mills: rpc('add_cam_op', {{type: "thread_mill", target: the
+  threaded face}}) with a thread_mill tool reads the size, pitch, hand,
+  side and class from it (a Hole with a tapped fit carries one too), and
+  cam_verify's `threads` judges the result.
 - Split (cut a body in two, keeping chosen sides): {{"type": "Split",
   "name": str, "body_id": <created_by id>, "knife"?: "plane" (default) |
   "face", plane: "datum_id"?: <DatumPlane id> or "base_plane":

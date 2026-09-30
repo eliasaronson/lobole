@@ -2363,6 +2363,92 @@ def main():
             # from a clean one rather than inheriting this one.
             d.call("new_project")
 
+        phase("A thread milled over the RPC")
+        # docs/cam/operations.md#thread-mill: a 3/8-16 UNC-2B tapped hole, the
+        # tap drill bored, the thread milled from the Thread on the bore and
+        # judged on its own terms by cam_verify.
+        if has_cam:
+            d.call("new_project")
+            sk = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Plate outline",
+                "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [{"type": "rect", "c1": [-20, -20],
+                              "c2": [20, 20]}]})
+            d.call("add_feature", feature={
+                "type": "Extrude", "name": "Plate", "sketch_id": sk["id"],
+                "distance": 10.0, "mode": "new_body"})
+            centre = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Tripod centre",
+                "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [{"type": "point", "p": [0, 0]}]})
+            d.call("add_feature", feature={
+                "type": "Hole", "name": "Tripod hole",
+                "sketch_id": centre["id"], "hole_kind": "simple",
+                "diameter": 7.9, "through": True,
+                "fit": {"thread": "3/8-16 UNC", "kind": "tapped"}})
+            bore = [{"feature_id": b["created_by"], "element": f["name"]}
+                    for b in d.call("list_elements")["bodies"]
+                    for f in b["faces"] if f.get("role") == "bore"]
+            expect(len(bore) == 1, f"the tapped hole has one bore: {bore}")
+            d.call("add_feature", feature={
+                "type": "Thread", "name": "Tripod thread", "face": bore[0],
+                "designation": "3/8-16 UNC-2B"})
+            d.call("machine_part")
+            ts = d.call("add_cam_setup", name="Tripod")["id"]
+            d.call("set_cam_setup", id=ts, stock={
+                "mode": "relative", "margin": [5.0, 5.0, 0.0],
+                "bottom_margin": 0.0})
+            d.call("set_cam_setup", id=ts, tool={
+                "number": 1, "name": "6 mm flat", "diameter": 6.0})
+            d.call("set_cam_setup", id=ts, tool={
+                "number": 2, "name": "6 mm thread mill", "diameter": 6.0,
+                "tool_type": "thread_mill"})
+            mill = [t for s_ in d.call("list_cam_setups")["setups"]
+                    if s_["id"] == ts for t in s_["tools"]
+                    if t["number"] == 2][0]
+            # The head, derived from the diameter where nobody measured it.
+            expect(mill["tool_type"] == "thread_mill", f"a thread mill: {mill}")
+            expect(abs(mill["tip_angle"] - 60.0) < 1e-9, f"60 degrees: {mill}")
+            expect(abs(mill["tip_flat"] - 0.1) < 1e-9, f"flat d/60: {mill}")
+            expect(abs(mill["neck_diameter"] - 3.6) < 1e-9, f"neck: {mill}")
+            expect(abs(mill["flute_length"] - 1.4856406) < 1e-6,
+                   f"its flute is the head's width: {mill}")
+            expect_error(d, "set_cam_setup", "flute_length", id=ts, tool={
+                "number": 2, "flute_length": 20.0})
+            d.call("add_cam_op", setup=ts, type="drill", tool=1,
+                   target=bore[0])
+            thread_op = d.call("add_cam_op", setup=ts, type="thread_mill",
+                               target=bore[0])
+            expect(thread_op["tool"] == 2,
+                   f"the setup's thread mill, not tool 1: {thread_op}")
+            expect(any("the middle of 2B" in w
+                       for w in thread_op.get("warnings", [])),
+                   f"it says what it aims at: {thread_op}")
+            expect_error(d, "set_cam_op", "depths are its thread's",
+                         id=thread_op["id"], top_z=12.0)
+            d.call("set_cam_op", id=thread_op["id"], passes=2)
+            v = d.call("cam_verify", setup=ts, resolution=0.1)
+            threads = v.get("threads", [])
+            expect(len(threads) == 1, f"one thread judged: {v.get('says')}")
+            t = threads[0]
+            expect(t["judged"] and t["in_band"] and t["good"] and t["ok"],
+                   f"the thread is right: {t}")
+            expect(t["passes"] == 2, f"the passes it was told: {t}")
+            expect(abs(t["pitch_measured_mm"] - 25.4 / 16) < 1e-3,
+                   f"16 threads an inch: {t}")
+            expect(v["ok"] and v["max_gouge_mm"] < 0.15,
+                   f"and nothing else is gouged: {v.get('says')}")
+            nc = os.path.join(tmp, "tripod.nc")
+            d.call("cam_post", setup=ts, path=nc)
+            with open(nc) as f:
+                text = f.read()
+            expect(any(line.startswith("G3") and " Z" in line
+                       for line in text.splitlines()),
+                   "the helix is posted as helical G3 arcs")
+            d.call("new_project")
+
         phase("Every op field set over the RPC reads back")
         # docs/cam/operations.md#the-capability-table-and-the-field-table. A field on an operation
         # goes through three hand-kept places on this surface -- the owned

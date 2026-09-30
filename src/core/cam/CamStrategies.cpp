@@ -1402,6 +1402,9 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
   case OpType::Engrave:
     GenerateEngrave(setup, op, tool, bodies, tp, ctx);
     break;
+  case OpType::ThreadMill:
+    GenerateThreadMill(setup, op, tool, bodies, tp);
+    break;
   case OpType::Count:
     // Not a type. Named so the switch stays exhaustive and a REAL new type
     // still breaks the build rather than landing here.
@@ -1431,6 +1434,13 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     tp.error = "the bottom of the cut must be below its top";
     return tp;
   }
+  // A thread mill's head is a disc on a neck: it cuts threads and nothing
+  // else (docs/cam/operations.md#thread-mill).
+  if (tool->type == ToolType::ThreadMill && op.type != OpType::ThreadMill) {
+    tp.error = "tool " + std::to_string(op.toolNumber) +
+               " is a thread mill -- it cuts threads and nothing else";
+    return tp;
+  }
 
   // ONE RUN PER TARGET, for the generators that resolve a single contour.
   // Before this they read targets.front() and dropped the rest in silence:
@@ -1457,6 +1467,14 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
       tp.pending = tp.pending || sub.pending;
       if (tp.strategy.empty())
         tp.strategy = sub.strategy;
+      // A declared arc names moves by index, so it moves with them.
+      for (Toolpath::Arc arc : sub.arcs) {
+        arc.first += tp.moves.size();
+        arc.last += tp.moves.size();
+        tp.arcs.push_back(arc);
+      }
+      tp.threads.insert(tp.threads.end(), sub.threads.begin(),
+                        sub.threads.end());
       tp.moves.insert(tp.moves.end(), sub.moves.begin(), sub.moves.end());
       tp.reliefs.insert(tp.reliefs.end(), sub.reliefs.begin(),
                         sub.reliefs.end());

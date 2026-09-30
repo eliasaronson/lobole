@@ -5,7 +5,8 @@ strategy turns it into moves. The data is `cam::Operation` in
 `src/core/cam/CamJob.h`; derivation is `CamDerive.cpp`; the 2.5D strategies
 are `CamStrategies.cpp` (with `CamGeometry.cpp` and `CamAdaptive.cpp`), the
 surfacing ones `CamSurfaceStrategies.cpp` over `CamSurface.cpp` and
-`CamDropCutter.cpp`, engraving `CamEngrave.cpp` over `CamSketchCurves.cpp`.
+`CamDropCutter.cpp`, engraving `CamEngrave.cpp` over `CamSketchCurves.cpp`,
+thread milling `CamThreadMill.cpp`.
 The 4th-axis operation is in [rotary.md](rotary.md).
 
 ## Operation types
@@ -22,6 +23,7 @@ The 4th-axis operation is in [rotary.md](rotary.md).
 | `SurfaceWaterline` | `surface_waterline` | constant-Z laps of a steep surface |
 | `SurfaceRotary` | `surface_rotary` | 4th-axis finishing and roughing ([rotary.md](rotary.md)) |
 | `Engrave` | `engrave` | follow a sketch's curves ON the curve: a groove, down from the surface the sketch lies on ([below](#engrave)) |
+| `ThreadMill` | `thread_mill` | mill the thread a Thread (or a tapped Hole) puts on a face: a helix of half-turn arcs ([below](#thread-mill)) |
 
 Common fields: `toolNumber`, `targets` (`Target{jobPartId, ElementRef}`),
 `topZ`/`bottomZ` (setup space; top is where the cut starts, usually the stock
@@ -60,6 +62,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
 | Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
+| Mill a thread (Add operation › Mill a thread; `add_cam_op` type `thread_mill`) | the threaded face (a Thread's, or a tapped Hole's bore) | everything from the thread: the helix aimed at the middle of its class's pitch-diameter band, passes from the cutter, a pitch of overtravel past an open end, the tip on a blind floor ([Thread mill](#thread-mill)) |
 | Engrave (`job.engrave`; `add_cam_op` type `engrave`) | a sketch entity, `{feature_id: <sketch>, element: "g<entity id>"}` | top = the sketch's plane in the setup; a V-bit's `width_mm` a quarter of the cutter (a text label's: its cap height / 8), a flat's or ball's `depth_mm` a quarter of the cutter; bottom = top minus the depth ([Engrave](#engrave)) |
 
 **The stock top is what the earlier setups left.** `DeriveOperation` takes
@@ -389,6 +392,107 @@ has ([gui.md](gui.md#engrave-from-the-viewport)). On a setup in the rotary a
 label on a side is turned up by the index its plane solves
 ([gui.md](gui.md#indices-from-picks)). Its width and depth are edited in the
 op's settings.
+
+### Thread mill
+
+`OpType::ThreadMill` (`thread_mill`) mills a thread with a single-profile
+cutter on the 6090 and routers like it: their spindles have no encoder, so
+they cannot rigid-tap, and no tapping (G84) operation exists. It is driven by
+the THREAD, not by typed numbers. Its target is the cylindrical face a
+`Thread` feature is on, or the bore of a Hole with a tapped fit (both write
+a `ThreadMark` on the body, [holes and
+threads](../modeling/holes-and-threads.md#thread)), and from that it reads
+the size, pitch, hand, inside or outside, the class and the threaded span.
+The code is `src/core/cam/CamThreadMill.{h,cpp}`; its numbers are FreeCAD's
+CAM ThreadMilling (`Path/Op/ThreadMilling.py`,
+`Path/Base/Generator/threadmilling.py`), which the tests pin to its own
+output for a 3/8-16 UNC.
+
+- **Where the last pass goes.** At the MIDDLE of the class's pitch-diameter
+  band ([pitch-diameter bands](../modeling/holes-and-threads.md#pitch-diameter-bands)):
+  3/8-16 UNC-2B's is 8.494 to 8.645 mm, so it aims at 8.569. The tool's rim
+  is put where the thread's sharp V would have its point for that pitch
+  diameter -- PD/2 + H/2 inside, PD/2 - H/2 outside, H = P / (2 tan 30°) --
+  less the flat's own reach, `flat / (2 tan 30°)` (FreeCAD's 0.866 crest
+  factor). The helix radius is that less the cutter's radius inside, plus it
+  outside. FreeCAD aims at the tip of a major diameter interpolated between
+  the table's limits by a fit percentage; the band's middle is the same kind
+  of number chosen by the class, which is what the drawing's callout states.
+  A thread that states no class is aimed at its series' general-purpose one
+  (2B, 6H; 2A, 6g outside), and the derivation says so.
+- **Passes.** Radial passes of equal chip area, the i-th of n at depth
+  `H sqrt((i + 1) / n)` from the bore (FreeCAD's `threadPasses`; its linear
+  `threadPassRadii` is dead code there and has no counterpart here). `passes`
+  0 derives n: the fewest whose first, and deepest, pass takes at most half
+  the cutter's profile depth -- three for a 3/8-16 with a 6 mm cutter.
+- **A pass.** From the "elevator", half a pitch in from the bore's wall
+  (FreeCAD's millimetre, taken from the thread), a semicircle out to the
+  helix at +Y, in the helix's own direction inside a hole and against it
+  round a boss, so it meets the helix on a tangent; then half-turn arcs, Z
+  moving half a pitch each, and a partial last arc to the end height; then a
+  semicircle back to the elevator's radius on the ray it ended on.
+  `lead_arcs` false makes both straight moves. Climb (the default) is G3 in
+  a hole and G2 round a boss, conventional the other; a right-hand helix
+  rises turning counter-clockwise, so a right-hand internal climb pass runs
+  bottom to top and a left-hand one top to bottom (FreeCAD's table, in
+  `ThreadDirection`). Inside, the next pass starts with one straight move
+  from where the last left the tool to the next entry, both on the
+  elevator's circle, so it stays in the bore's air; outside it goes up and
+  over.
+- **The ends.** Each end of the threaded span is probed at the thread's
+  wall a pitch beyond it. Air there (a through hole, a thread opening onto
+  the top): the helix runs past it, a PITCH past the last full thread below
+  -- FreeCAD runs exactly the span and leaves the last turn short -- and half
+  a pitch above. Metal where the face ends (a blind hole): the head's tip
+  stops on the floor, and the last half pitch and half a V above it are not
+  full thread, said in the derivation's notes. Metal where the thread stops
+  short of the face (`length`): the V stops at the thread's end. `top_z`
+  and `bottom_z` are the tool TIP's range over the helix, derived and not
+  settable (the RPC refuses them); with several targets each is cut over its
+  own thread's span.
+- **Feeds.** The helix at the feed that runs the cutter's RIM at `feed_cut`:
+  in a bore the rim travels `(R + d/2) / R` as far as the centre, so the
+  centre is slowed by that; round a boss it is held at `feed_cut`. The
+  descents into the bore are plunges at `EntryFeed`, after a rapid only to
+  the stock top ([rapids](README.md#rapids-profile-outlines-and-through-cuts)).
+- **Refused**, naming what to do: a face that carries no thread; a tool
+  that is not a thread mill, a V that is not 60°, or no neck narrower than
+  the head; a flat wider than the thread's root, P/8 (the thread is too fine
+  for the cutter); a cutter too large for the tap-drill bore -- the cutter
+  plus twice the thread's depth must fit the bore, or the helix has no room;
+  a profile shallower than the thread, where the neck would rub the crests
+  before the last pass reached the root; an axis that does not point at the
+  spindle; and a machine that posts no arcs or a post without helical arcs
+  (`HelicalArcRefusal`, [post.md](post.md#helical-arcs)).
+- **Posted** as helical G2/G3: each arc is declared on the toolpath
+  (`Toolpath::Arc`) and written whole, [post.md](post.md#helical-arcs).
+- **Told to the verifier.** Each thread is a `Toolpath::Thread` -- what was
+  aimed at, the band, the span, the bore, the tool -- and the verifier judges
+  the posted helix against it ([simulation.md](simulation.md#threads)).
+
+`thread_mill`'s capability row is `passes`, `climb` and `lead_arcs`. The
+derivation turns lead arcs and climb on and picks the setup's first thread
+mill when no tool is named. In the GUI a setup's menu has **Add operation ›
+Mill a thread**, listing every thread on the job's parts
+([gui.md](gui.md#milling-a-thread)); `Thread.mill(setup)` in the SDK adds
+one from a thread it made.
+
+#### The thread-mill cutter
+
+`ToolType::ThreadMill` (`thread_mill`): a disc whose rim is a V of
+`tip_angle` (60°), truncated to `tip_flat` at the cutting `diameter`, on a
+neck of `neck_diameter` and `neck_length`. Its **profile depth**,
+`(diameter - neck_diameter) / 2`, is the deepest thread it can cut; its
+`flute_length` is the head's own axial width, `flat + 2 x profile x tan 30°`,
+derived and refused if typed. Left 0, each is derived from the diameter
+(`FillThreadMillShape`): a flat of 1/60 of it (0.1 mm on 6 mm), a neck of 0.6
+of it (a 1.2 mm profile on 6 mm), three diameters of neck. Its `TipHeight`
+is the head seen from below -- flat to the neck, then the lower flank rising
+at 30° to the rim -- which is all a height map can know of it
+([simulation.md](simulation.md#threads)); the reach check and the shank probe
+take the neck as reach (`ReachLength`, [setup.md](setup.md#reach)); and the
+tool glyph draws the head, the neck and the shank above it. A thread mill
+cuts threads and nothing else: any other operation refuses it.
 
 ## Rough then finish
 

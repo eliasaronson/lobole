@@ -1,0 +1,82 @@
+{
+  "format": "designer-document",
+  "version": 145,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Base plate"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Tripod thread",
+      "safe_z": 15.0,
+      "machine": {
+        "name": "6090",
+        "post": "mach3"
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat",
+          "diameter": 6.0
+        },
+        {
+          "number": 2,
+          "name": "6 mm thread mill",
+          "diameter": 6.0,
+          "flute_length": 1.4856406,
+          "tool_type": "thread_mill",
+          "tip_angle": 60.0,
+          "tip_flat": 0.1,
+          "neck_diameter": 3.6,
+          "neck_length": 18.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Drill",
+          "type": "drill",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 0.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 2,
+              "element": "4/p1/bore;M4"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "name": "Thread 3/8-16 UNC",
+          "type": "thread_mill",
+          "tool": 2,
+          "top_z": 10.0509297,
+          "bottom_z": -2.3303203,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 2,
+              "element": "4/p1/bore;M4"
+            }
+          ],
+          "climb": false,
+          "lead_arcs": true,
+          "passes": 2
+        }
+      ]
+    }
+  ]
+}

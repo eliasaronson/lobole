@@ -179,6 +179,53 @@ statements like reliefs and tabs: a file that turns while cutting is checked
 by the rotary inspection, which reads none of them, and an operation cut at
 several indices does not carry them.
 
+### Threads
+
+A height map cannot see a flank that faces sideways. A thread mill's head
+seen from below is flat to its neck and then its lower flank
+(`TipHeight`), so the carve clears the whole column the head sweeps -- the
+crests between the grooves included -- down to where that flank ran. Judged
+as a surface, every milled thread would be a ring of gouge as deep as the
+plate; excused blindly, a helix at the wrong radius or pitch would pass. So a
+thread is judged ON ITS OWN TERMS, from the posted file, against what the
+toolpath declared (`Toolpath::Thread`: its centre, side and hand, pitch, the
+class and its pitch-diameter band, the span, the bore, the tool), in
+`JudgeThread` and `MeasureBoreBefore` (`CamThreadMill.cpp`):
+
+- **The helix.** The operation's moves (by the file's `(op N)`) are grouped
+  into runs that keep one radius round the thread's centre while Z moves --
+  the arcs re-expanded to chords by the parser -- and a run of at least a
+  half turn is a pass. The last pass (the widest inside, the narrowest
+  outside) gives the **pitch** (Z per turn), the **hand** (turning
+  counter-clockwise while rising is right-handed) and the **pitch diameter**
+  its tip reached: the rim at the pass's radius plus the cutter's radius,
+  the V's point a flat's reach past that, and PD = 2 x point - H inside
+  (+ H outside). That has to lie in the class's band.
+- **The span.** The V's middle ran over the last pass's Z range plus half
+  the head's width; full thread is from half a pitch inside each end of
+  that. Short of the span the thread allows (`fullLo`/`fullHi` of the
+  declaration: a blind floor keeps the head from the last half pitch and
+  half a V) is `short_mm`.
+- **The bore.** The map as the program leaves it when the thread STARTS:
+  the starting stock, carved by every move before the op's first, over the
+  bore inside the tap drill's wall (round the boss, outside). Stock standing
+  there above the head's lowest tip -- never below the stock's bottom, where
+  the spoilboard is -- is `bore_standing_mm`: the tap drill was not cut first,
+  and the head would plunge into metal.
+- **The neck.** How far the neck stays off the bore's wall at the last
+  pass, `neck_clearance_mm`; negative, it rubs the crests.
+
+The carve itself still runs, so everything else is judged as for any cut: a
+cell inside the widest tip radius the class allows (outside a boss, from the
+narrowest) is excused down to the head's lowest tip in the file, and
+nothing else -- a helix too wide shows as gouge beyond it, a head below it as
+gouge under it, the holder and the shank are probed on every move.
+`cam_verify` answers `threads`, one entry per thread (`ThreadVerdict`), and
+`Explain` says a line per thread. A bore not cut and a neck that rubs count
+against `ok`; a thread not judged (no helix of it in the file, or a file
+that turns A), out of its band, of the wrong pitch or hand, or short count
+against `complete`.
+
 ### Leftover another setup removes
 
 A setup verified from its own fresh stock reports a flip job's half-depth

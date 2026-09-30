@@ -92,6 +92,8 @@ enum class OpField : uint32_t {
   // An engraving's groove (v138): its width at the surface, or its depth.
   EngraveWidth = 1u << 23,
   EngraveDepth = 1u << 24,
+  // A thread mill's radial passes (v145).
+  ThreadPasses = 1u << 25,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

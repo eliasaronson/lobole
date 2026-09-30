@@ -69,6 +69,8 @@ const char* CamToolGlyph(cam::ToolType type) {
     return ICON_FA_CARET_DOWN;
   case cam::ToolType::Drill:
     return ICON_FA_ARROW_DOWN_LONG;
+  case cam::ToolType::ThreadMill:
+    return ICON_FA_SCREWDRIVER;
   }
   return ICON_FA_SQUARE_FULL;
 }
@@ -83,6 +85,8 @@ const char* CamToolShapeName(cam::ToolType type) {
     return "V-bit";
   case cam::ToolType::Drill:
     return "drill";
+  case cam::ToolType::ThreadMill:
+    return "thread mill";
   }
   return "flat";
 }
@@ -450,6 +454,25 @@ uint64_t AddOperation(AppState& state, cam::Setup& setup) {
   cam::Operation op = derived.op;
   op.id = state.job->AllocateId();
   op.name = "Operation " + std::to_string(setup.operations.size() + 1);
+  setup.operations.push_back(op);
+  state.camRefusal.clear();
+  return op.id;
+}
+
+// A thread mill for one thread of the job's parts, through the same
+// derivation `add_cam_op` uses: its tool is the setup's first thread mill,
+// and a refusal -- no thread mill, a cutter too big for the bore -- is shown.
+uint64_t AddThreadMill(AppState& state, cam::Setup& setup,
+                       const cam::Target& target) {
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, JobBodies(state), cam::OpType::ThreadMill, target, 0,
+      cam::EarlierSetups(state.job->GetSetups(), setup.id));
+  if (!derived.ok) {
+    state.camRefusal = derived.why;
+    return 0;
+  }
+  cam::Operation op = derived.op;
+  op.id = state.job->AllocateId();
   setup.operations.push_back(op);
   state.camRefusal.clear();
   return op.id;
@@ -910,7 +933,10 @@ void DrawCamPanel(AppState& state) {
   // --- Setups ------------------------------------------------------------
   // Each a row over its operations and fixtures. A setup was a combo, so a
   // job's structure, setup by setup, was never visible at once.
-  enum class SetupAct { None, Flip, Duplicate, AddOp, Edit };
+  enum class SetupAct { None, Flip, Duplicate, AddOp, AddThread, Edit };
+  // The thread "Add operation > Mill a thread" picked
+  // (docs/cam/gui.md#milling-a-thread).
+  cam::Target threadToAdd;
   SetupAct act = SetupAct::None;
   uint64_t actOn = 0;
   std::optional<cam::Fixture> fixtureToAdd;
@@ -1037,6 +1063,36 @@ void DrawCamPanel(AppState& state) {
           ImGui::SetItemTooltip("What this setup calls for, derived: another "
                                 "rotary pass on a setup that already turns, "
                                 "else the whole part cut out");
+          // Every thread on the job's parts, by its designation: a thread
+          // mill is added for the one picked, driven by it
+          // (docs/cam/operations.md#thread-mill).
+          if (ImGui::BeginMenu("Mill a thread###cam_add_thread")) {
+            int shown = 0;
+            for (const Body& b : JobBodies(state))
+              for (const ThreadMark& m : b.threads) {
+                // By its place in this list: a face's name has slashes in
+                // it, which an item id cannot carry.
+                char label[160];
+                std::snprintf(
+                    label, sizeof(label), "%s%s%s (%s)###cam_thread_%d",
+                    m.designation.c_str(), m.threadClass.empty() ? "" : "-",
+                    m.threadClass.c_str(), m.external ? "external" : "internal",
+                    shown);
+                if (ImGui::MenuItem(label)) {
+                  act = SetupAct::AddThread;
+                  actOn = setupId;
+                  threadToAdd = cam::Target{b.jobPartId, m.face};
+                }
+                shown++;
+              }
+            if (shown == 0)
+              ImGui::TextDisabled("No thread on this job's parts -- give a "
+                                  "hole a tapped fit, or add a Thread");
+            ImGui::EndMenu();
+          }
+          ImGui::SetItemTooltip("A thread mill for a thread on the part: its "
+                                "size, pitch, hand and class come from the "
+                                "Thread, the tool is the setup's thread mill");
           if (ImGui::BeginMenu("Add fixture###cam_fixture_add_menu")) {
             DrawFixtureAddMenu(state, *live, fixtureToAdd);
             if (fixtureToAdd)
@@ -1255,13 +1311,17 @@ void DrawCamPanel(AppState& state) {
     DuplicateSetup(state, actOn);
     dirty = true;
     break;
+  case SetupAct::AddThread:
   case SetupAct::AddOp:
     if (cam::Setup* s = state.job->FindSetup(actOn)) {
       if (state.camActiveSetup != s->id) {
         state.camActiveSetup = s->id;
         switched = true;
       }
-      if (const uint64_t made = AddOperation(state, *s); made != 0) {
+      const uint64_t made = act == SetupAct::AddThread
+                                ? AddThreadMill(state, *s, threadToAdd)
+                                : AddOperation(state, *s);
+      if (made != 0) {
         OpenSetupRow(s->id);
         MarkJobEdited(state);
         if (!dirty && !switched) {

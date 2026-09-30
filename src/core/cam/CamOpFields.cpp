@@ -39,6 +39,7 @@ const OpFieldRow kRows[] = {
     {"index_a_deg", OpField::Indexed, &Operation::indexA},
     {"width_mm", OpField::EngraveWidth, &Operation::engraveWidth},
     {"depth_mm", OpField::EngraveDepth, &Operation::engraveDepth},
+    {"passes", OpField::ThreadPasses, &Operation::threadPasses},
     {"enabled", OpField::None, &Operation::enabled},
 };
 

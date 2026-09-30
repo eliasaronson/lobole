@@ -297,6 +297,10 @@ EngraveGroove EngraveGrooveFor(const Operation& op, const Tool& tool) {
     g.why = who + " is a drill: its point is not an engraving tool. Use a "
                   "V-bit, or a flat or ball end mill with a depth_mm";
     return g;
+  case ToolType::ThreadMill:
+    g.why = who + " is a thread mill: it cuts threads and nothing else. Use "
+                  "a V-bit, or a flat or ball end mill with a depth_mm";
+    return g;
   case ToolType::VBit: {
     const double cone = TipHeight(tool, r);
     if (cone < 1e-6) {

@@ -32,6 +32,12 @@ struct PostOptions {
 // Every dialect this build can emit, by id ("mach3", "linuxcnc").
 [[nodiscard]] std::vector<std::string> PostIds();
 [[nodiscard]] bool PostExists(const std::string& id);
+// Whether this dialect's controller interpolates a HELIX: G2/G3 in G17 with a
+// Z word, the axis advancing along the arc (docs/cam/post.md#helical-arcs).
+// A thread mill is nothing else, so it is refused on a post without them.
+// Mach3, LinuxCNC and GRBL all do; the column exists so a controller that
+// does not is one row, and the refusal is already written.
+[[nodiscard]] bool PostWritesHelicalArcs(const std::string& id);
 
 // The G-code for `paths`, in the order given. Returns false and fills
 // `error` on an unknown post id; a toolpath carrying its own error is

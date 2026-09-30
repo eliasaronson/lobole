@@ -2213,6 +2213,7 @@ struct VerifyWork {
   std::vector<cam::Toolpath::Relief> reliefs;
   std::vector<cam::Toolpath::Tab> tabs;
   std::vector<cam::Toolpath::Groove> grooves; // engraving: not gouge
+  std::vector<cam::Toolpath::Thread> threads; // judged on their own terms
   std::vector<cam::FixtureSolid> fixtures; // bed space
   std::vector<std::string> missingFixtures;
   // The job's other setups and their posted files, and the ones that could
@@ -2269,7 +2270,7 @@ void InspectWork(VerifyWork& w) {
   }
   const cam::Inspection insp =
       cam::Inspect(w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs,
-                   w.fixtures, &others, w.grooves);
+                   w.fixtures, &others, w.grooves, w.threads);
   w.ok = insp.ok;
   w.verdict = insp.verdict;
   w.verdict.otherSetupsNotChecked = others.notChecked;
@@ -2381,6 +2382,8 @@ void RunCamVerification(AppState& state) {
     work->tabs.insert(work->tabs.end(), tp.tabs.begin(), tp.tabs.end());
     work->grooves.insert(work->grooves.end(), tp.grooves.begin(),
                          tp.grooves.end());
+    work->threads.insert(work->threads.end(), tp.threads.begin(),
+                         tp.threads.end());
   }
   work->setup = *setup;
   work->bodies = ui::JobBodies(state);

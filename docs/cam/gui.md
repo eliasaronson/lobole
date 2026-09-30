@@ -148,6 +148,22 @@ another depth makes an operation of its own. A tool change in the verb's
 window re-derives in the frame of the first index and keeps every target and
 index.
 
+## Milling a thread
+
+A thread has no verb on the toolbar: it is picked by what it is, not by
+where it is. A setup's menu in the CAM panel has **Add operation › Mill a
+thread**, listing every thread on the job's parts -- each Thread, and each
+bore of a Hole with a tapped fit -- by its designation, class and side
+(`###cam_thread_<n>`). Choosing one derives a `thread_mill` through the same
+`cam::DeriveOperation` the RPC uses, with the setup's first thread mill; a
+refusal (no thread mill in the setup, a cutter too large for the bore) is
+shown in the panel. In the operation's settings the depths are shown and not
+editable -- they are the thread's -- and **Passes** (0 = derived) sits beside
+the climb and lead-arc toggles ([operations.md](operations.md#thread-mill)).
+The tool's settings take the thread mill's **flat**, **neck** and **reach**
+when its shape is *thread mill*; switching a tool to it derives the head
+from its diameter. Playback draws the helix like any other path.
+
 ## What the viewport draws
 
 Show only the consequence of the decision being made, and drop it when the
@@ -418,6 +434,8 @@ fits, no two verbs share a glyph), `cam/a_job_is_made_from_the_tab_bar`,
 `cam/a_clamp_is_dragged_onto_the_stock`, `cam/add_menus_offer_the_right_parts`,
 `cam/the_surface_verbs_take_a_curved_face`,
 `cam/a_label_is_engraved_by_clicking_it`, `cam/engrave_without_a_v_bit_refuses`,
+`cam/a_thread_is_milled_from_the_setup_menu` (the menu's thread, the op's
+tool, its declared helix, and its passes edited),
 `cam/four_floors_picked_are_one_op` (the chips, and the typed list behind
 edit),
 `cam/the_rotary_verbs_rough_then_finish`, `cam/a_rotary_pass_limits_to_a_face`,

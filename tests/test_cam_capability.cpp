@@ -24,6 +24,7 @@
 
 #include "cam_fixtures.h"
 #include "core/cam/CamOpFields.h"
+#include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 #include <set>
 
@@ -109,6 +110,9 @@ constexpr FieldPoke kPokes[] = {
        o.engraveDepth = 0.4;
        o.engraveWidth = 0.0;
      }},
+    // A thread mill's passes, stated rather than derived (v145).
+    {cam::OpField::ThreadPasses, "passes",
+     [](cam::Operation& o) { o.threadPasses = 2; }},
 };
 // FullWidth, ClearsInside and NeedsFlatFloor are deliberately absent: they are
 // per-type FACTS the table also carries, not fields anything can set.
@@ -235,6 +239,14 @@ TypedJob JobFor(cam::OpType type) {
     j.setup.tools[0] = ShapedTool(cam::ToolType::Ball, 6.0);
   if (type == cam::OpType::Engrave)
     j.setup.tools[0] = ShapedTool(cam::ToolType::VBit, 6.0);
+  if (type == cam::OpType::ThreadMill) {
+    // An M12 in the Phi 10 bore (its tap drill is 10.2, near enough for a
+    // Thread to take), and a 6 mm single-profile thread mill to cut it.
+    j.doc->AddFeature(
+        std::make_unique<ThreadFeature>("M12", BoreWall(*j.doc), "M12", 1.75));
+    j.setup.tools[0] = ShapedTool(cam::ToolType::ThreadMill, 6.0);
+    cam::FillThreadMillShape(j.setup.tools[0], false);
+  }
   ElementRef target;
   switch (type) {
   case cam::OpType::Profile:
@@ -242,6 +254,7 @@ TypedJob JobFor(cam::OpType type) {
     target = WallNear(*j.doc, 0.0, 22.0); // the block's own outside wall
     break;
   case cam::OpType::Drill:
+  case cam::OpType::ThreadMill:
     target = BoreWall(*j.doc);
     break;
   case cam::OpType::Face:
