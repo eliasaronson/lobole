@@ -40,6 +40,10 @@ if [ "$pick" = 1 ]; then
     exec 9>"$root/build/.build.lock"
     flock -n 9 || { echo "merge-branch: waiting for build/'s lock"; flock 9; }
     echo "merge-branch: cherry-picking $(echo "$commits" | wc -l) commit(s)"
+    # What was picked, so a commit whose conflict was resolved by hand (its
+    # patch no longer matches the branch's) still counts as landed below.
+    mkdir -p "$(git rev-parse --git-dir)/merge-branch"
+    echo "$commits" > "$(git rev-parse --git-dir)/merge-branch/$branch"
     # shellcheck disable=SC2086
     if ! git cherry-pick $commits; then
       echo "merge-branch: CONFLICT. Resolve, 'git cherry-pick --continue', then: $0 $branch --no-pick" >&2
@@ -59,13 +63,16 @@ fi
 
 # Every commit of the branch now on main (by patch), and nothing uncommitted.
 if [ -n "$wt" ] && [ -d "$wt" ]; then
-  left="$(git rev-list --cherry-pick --right-only --no-merges main..."$branch" | wc -l)"
+  picked="$(git rev-parse --git-dir)/merge-branch/$branch"
+  left="$(git rev-list --cherry-pick --right-only --no-merges main..."$branch" \
+          | { if [ -f "$picked" ]; then grep -vxF -f "$picked"; else cat; fi; } | wc -l)"
   dirty="$(git -C "$wt" status --porcelain --untracked-files=no)"
   if [ "$left" -eq 0 ] && [ -z "$dirty" ]; then
     git worktree unlock "$wt" 2>/dev/null || true
     rm -rf "$wt"
     git worktree prune
     git branch -D "$branch" >/dev/null
+    rm -f "$picked"
     echo "merge-branch: $branch landed; worktree $wt removed"
   else
     echo "merge-branch: kept $wt ($left commit(s) not on main, uncommitted: ${dirty:+yes})"
