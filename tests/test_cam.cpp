@@ -3750,3 +3750,32 @@ TEST_CASE("cam profile: a target that cannot be followed is NAMED, and the "
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam: a section is remembered for one generate and never confused",
+          "[cam]") {
+  // SectionMemoScope: the same (bodies, z) answered once per generate --
+  // and a moved copy of the same shape, which shares its TShape, is a
+  // different question with a different answer.
+  auto doc = BlockDoc(40, 30, 20);
+  const std::vector<Body>& bodies = doc->GetBodies();
+  const std::vector<cam::Loop> fresh = cam::SectionLoops(bodies, 10.0);
+  REQUIRE(!fresh.empty());
+  std::vector<Body> moved = bodies;
+  moved[0].shape = bodies[0].shape.Transformed(
+      glm::translate(glm::mat4(1.0f), glm::vec3(100.0f, 0.0f, 0.0f)));
+  const cam::SectionMemoScope scope;
+  const std::vector<cam::Loop> first = cam::SectionLoops(bodies, 10.0);
+  const std::vector<cam::Loop> again = cam::SectionLoops(bodies, 10.0);
+  const std::vector<cam::Loop> other = cam::SectionLoops(moved, 10.0);
+  REQUIRE(first.size() == fresh.size());
+  REQUIRE(again.size() == fresh.size());
+  CHECK(again.front().pts == fresh.front().pts);
+  REQUIRE(!other.empty());
+  double minX = 1e9;
+  for (const glm::dvec2& p : other.front().pts)
+    minX = std::min(minX, p.x);
+  CHECK(minX > 99.0); // the moved block's section, not the memo's
+  // ...and a different height is a different section.
+  const std::vector<cam::Loop> higher = cam::SectionLoops(bodies, 25.0);
+  CHECK(higher.empty()); // above the block
+}

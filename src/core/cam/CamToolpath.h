@@ -35,6 +35,25 @@ namespace cam {
                                              double z,
                                              double deflection = 0.02);
 
+// While one is alive on this thread, `SectionLoops` answers a (bodies, z,
+// deflection) it has already answered from memory. A generate sections the
+// same heights over and over -- the chess board's corner pass has 32 wall
+// targets, each resolved at every depth pass, and the pocket as many floors:
+// 72% of a 92 s toolpath was the same boolean repeated. Scoped to one
+// generate, so a changed model is a new scope; entries hold the shapes'
+// handles, so a freed shape's address cannot come back as a false hit. A
+// nested scope uses the outer one. Other threads never see it.
+class SectionMemoScope {
+public:
+  SectionMemoScope();
+  ~SectionMemoScope();
+  SectionMemoScope(const SectionMemoScope&) = delete;
+  SectionMemoScope& operator=(const SectionMemoScope&) = delete;
+
+private:
+  bool owner_ = false;
+};
+
 // The Z levels a stepped operation visits: topZ - stepdown, … , bottomZ, with
 // the last pass landing exactly on bottomZ (a short final pass is correct; a
 // pass 0.02 mm deeper than asked is a scrapped part).

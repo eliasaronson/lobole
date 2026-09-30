@@ -1663,6 +1663,7 @@ std::vector<Toolpath> GenerateAtIndices(
 
 Toolpath Generate(const Setup& setup, const Operation& op,
                   const std::vector<Body>& bodies, GenerateContext* ctx) {
+  const SectionMemoScope sections;
   if (CutAtIndices(op))
     return GenerateAtIndices(
                setup, op, bodies,

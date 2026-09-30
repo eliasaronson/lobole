@@ -205,6 +205,11 @@ is for setup-wide edits (the stock, a tool, the frame), since one adaptive
 pocket can take seconds. A document edit ends playback rather than
 re-cutting inside the frame.
 
+Within one generate, a section of the framed bodies at a height is taken once
+(`SectionMemoScope` around `GenerateAll`, `GenerateOp` and `Generate`): a
+profile with many wall targets and a pocket with many floors section the same
+heights again and again, and the chess board's top setup went from 92 s to 8.
+
 The expensive steps of a generate run on a `cam` background job
 (`src/ui/CamJobs.cpp`), keyed by content so a result that lands after its
 inputs moved on is simply never read. The content includes how the part is

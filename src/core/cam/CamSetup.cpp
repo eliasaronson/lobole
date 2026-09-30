@@ -312,8 +312,52 @@ glm::dquat SolveFaceUp(const glm::dvec3& normal, const glm::dquat& current) {
 // OpenCASCADE, not Clipper2, and this file is built whether or not CAM is
 // enabled: a job document's setup has a section and depths whether or not the
 // build can turn them into moves (CMakeLists.txt).
+namespace {
+struct SectionMemoEntry {
+  std::vector<TopoDS_Shape> shapes; // handles: they keep the TShapes alive
+  double z = 0.0;
+  double deflection = 0.0;
+  std::vector<Loop> loops;
+};
+struct SectionMemo {
+  std::vector<SectionMemoEntry> entries;
+};
+thread_local SectionMemo* t_sectionMemo = nullptr;
+
+bool SameShapes(const std::vector<TopoDS_Shape>& a,
+                const std::vector<Body>& b) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t i = 0; i < a.size(); i++)
+    if (!a[i].IsEqual(
+            b[i].shape.GetShape())) // same TShape, location, orientation
+      return false;
+  return true;
+}
+} // namespace
+
+SectionMemoScope::SectionMemoScope() {
+  if (t_sectionMemo == nullptr) {
+    t_sectionMemo = new SectionMemo();
+    owner_ = true;
+  }
+}
+
+SectionMemoScope::~SectionMemoScope() {
+  if (owner_) {
+    delete t_sectionMemo;
+    t_sectionMemo = nullptr;
+  }
+}
+
 std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
                                double deflection) {
+  SectionMemo* memo = t_sectionMemo;
+  if (memo != nullptr)
+    for (const SectionMemoEntry& e : memo->entries)
+      if (e.z == z && e.deflection == deflection &&
+          SameShapes(e.shapes, bodies))
+        return e.loops;
   std::vector<Loop> loops;
   // The section machinery the Section TOOL already uses (I3): one plane, the
   // filled cut face per body. Reusing it means a toolpath cannot disagree
@@ -338,6 +382,15 @@ std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
         loops.push_back(std::move(loop));
       }
     }
+  }
+  if (memo != nullptr) {
+    SectionMemoEntry e;
+    for (const Body& b : bodies)
+      e.shapes.push_back(b.shape.GetShape());
+    e.z = z;
+    e.deflection = deflection;
+    e.loops = loops;
+    memo->entries.push_back(std::move(e));
   }
   return loops;
 }

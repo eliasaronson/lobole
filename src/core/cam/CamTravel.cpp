@@ -627,6 +627,7 @@ std::string PlacementRefusal(const Setup& setup,
 std::vector<Toolpath> GenerateAll(const Setup& setup,
                                   const std::vector<Body>& bodies,
                                   GenerateContext* ctx) {
+  const SectionMemoScope sections; // one section per height, this generate
   // An arrangement we cannot honestly cut stops here, in every operation's
   // own error, rather than at the machine.
   if (const std::string why = PlacementRefusal(setup, bodies); !why.empty()) {
@@ -736,6 +737,7 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
 std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
                                  const std::vector<Body>& bodies,
                                  GenerateContext* ctx) {
+  const SectionMemoScope sections;
   if (CutAtIndices(op))
     return GenerateAtIndices(
         setup, op, bodies,
