@@ -39,13 +39,27 @@ namespace parallel {
 // the gate sets it to 1 so a parallel answer can be diffed against a serial
 // one, and it is the escape hatch if OpenCASCADE ever misbehaves under
 // concurrency on somebody's machine.
-inline size_t Workers() {
+//
+// Inside a `For`, it is this worker's SHARE of them: a loop nested in
+// another's body (the other setups of a job inspected at once, each
+// inspection itself split into bands) divides the machine between the outer
+// loop's workers rather than each of them starting a machine's worth of
+// threads.
+namespace detail {
+inline thread_local size_t tlShare = 0; // 0: not inside a For
+} // namespace detail
+
+inline size_t MachineWorkers() {
   if (const char* env = std::getenv("DESIGNER_SWEEP_THREADS")) {
     const int want = std::atoi(env);
     if (want > 0)
       return static_cast<size_t>(want);
   }
   return std::max(1u, std::thread::hardware_concurrency());
+}
+
+inline size_t Workers() {
+  return detail::tlShare > 0 ? detail::tlShare : MachineWorkers();
 }
 
 // Calls `body(k)` for every k in [0, n). No ordering guarantee, so `body`
@@ -55,7 +69,20 @@ template <typename F> void For(size_t n, F&& body) {
   if (n == 0)
     return;
   std::atomic<size_t> next{0};
-  const auto worker = [&] {
+  const size_t budget = Workers();
+  const size_t threads = std::min<size_t>(n, budget);
+  // What a For nested in `body` may use: this loop's budget split between
+  // its threads, the remainder going to the first ones.
+  const auto shareOf = [&](size_t t) {
+    return std::max<size_t>(1, budget / threads + (t < budget % threads));
+  };
+  const auto worker = [&](size_t t) {
+    // Restored however `body` leaves, a throw included.
+    struct Share {
+      size_t was = detail::tlShare;
+      explicit Share(size_t now) { detail::tlShare = now; }
+      ~Share() { detail::tlShare = was; }
+    } share(shareOf(t));
     for (;;) {
       const size_t k = next.fetch_add(1, std::memory_order_relaxed);
       if (k >= n)
@@ -63,16 +90,15 @@ template <typename F> void For(size_t n, F&& body) {
       body(k);
     }
   };
-  const size_t threads = std::min<size_t>(n, Workers());
   if (threads <= 1) {
-    worker();
+    worker(0);
     return;
   }
   std::vector<std::thread> pool;
   pool.reserve(threads - 1);
   for (size_t t = 1; t < threads; ++t)
-    pool.emplace_back(worker);
-  worker(); // this thread pulls its share rather than idling
+    pool.emplace_back(worker, t);
+  worker(0); // this thread pulls its share rather than idling
   for (std::thread& t : pool)
     t.join();
 }
