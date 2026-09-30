@@ -6,6 +6,7 @@
 #include "core/Occurrence.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BearingActions.h"
 
 #include <cctype>
 #include <cmath>
@@ -22,6 +23,10 @@ struct Side {
   std::optional<double> diameter;
   std::string occurrence;
   std::string reason; // non-empty = this side stopped here
+  // A generated bearing's bore or outside: its band is the standard's
+  // (ISO 492 normal), not a stored tolerance, and it says which side of the
+  // fit it is — a bore is the hole (docs/parts/README.md#bearings).
+  std::optional<BearingRing> ring;
 };
 
 } // namespace
@@ -108,6 +113,11 @@ std::vector<FitCheck> CheckFits(AppState& state) {
       return side;
     }
     side.part = pd;
+    if (auto ring = BearingRingOf(pd, c.anchor.face)) {
+      side.ring = ring;
+      side.diameter = ring->nominal;
+      return side;
+    }
     side.tol = pd->ToleranceFor(c.anchor.face);
     if (!side.tol) {
       side.reason = std::string(which) + " (" + side.occurrence + ") face " +
@@ -170,6 +180,101 @@ std::vector<FitCheck> CheckFits(AppState& state) {
     const Side b = resolveSide(mate.b, "b");
     if (!a.reason.empty() || !b.reason.empty()) {
       stop(!a.reason.empty() ? a.reason : b.reason);
+      continue;
+    }
+    if (a.ring || b.ring) {
+      // A bearing ring: the ring's band is ISO 492's and the ring says which
+      // side it is, so the other side may be a class OR explicit deviations.
+      if (a.ring && b.ring) {
+        stop("both sides are bearing rings — a ring's fit is on the shaft or "
+             "the housing it sits on, not on another bearing");
+        continue;
+      }
+      const Side& ringSide = a.ring ? a : b;
+      const Side& other = a.ring ? b : a;
+      const BearingRing& ring = *ringSide.ring;
+      if (!other.tol->isoClass.empty()) {
+        const bool otherHole =
+            std::isupper(static_cast<unsigned char>(other.tol->isoClass[0])) !=
+            0;
+        if (otherHole == ring.bore) {
+          stop(other.occurrence + " is toleranced " + other.tol->isoClass +
+               ", a " + (otherHole ? "hole" : "shaft") + " class, but it " +
+               "meets the bearing's " + (ring.bore ? "bore" : "outside") +
+               " — it needs a " + (ring.bore ? "shaft" : "hole") + " class");
+          continue;
+        }
+      }
+      if (std::abs(ring.nominal - *other.diameter) > 1e-5) {
+        char buf[200];
+        std::snprintf(buf, sizeof(buf),
+                      "the seat is not the ring's basic size — the %s %s is "
+                      "%.4f mm and the seat %.4f mm",
+                      ring.designation.c_str(), ring.bore ? "bore" : "outside",
+                      ring.nominal, *other.diameter);
+        stop(buf);
+        continue;
+      }
+      fits::Band otherBand;
+      std::string otherClass;
+      if (other.tol->isoClass.empty()) {
+        otherBand.lower = other.tol->lower;
+        otherBand.upper = other.tol->upper;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%+.3f/%+.3f", other.tol->lower,
+                      other.tol->upper);
+        otherClass = buf;
+      } else {
+        std::string why;
+        const auto band = fits::Limits(ring.nominal, other.tol->isoClass, &why);
+        if (!band) {
+          stop(why);
+          continue;
+        }
+        otherBand = *band;
+        otherClass = other.tol->isoClass;
+      }
+      e.computed = true;
+      e.size = ring.nominal;
+      const std::string ringClass = ring.designation +
+                                    (ring.bore ? " bore" : " outside") +
+                                    " (ISO 492 normal)";
+      const double ringMin = ring.nominal + ring.band.lower;
+      const double ringMax = ring.nominal + ring.band.upper;
+      if (ring.bore) {
+        e.holeOccurrence = ringSide.occurrence;
+        e.shaftOccurrence = other.occurrence;
+        e.holeClass = ringClass;
+        e.shaftClass = otherClass;
+        e.holeMin = ringMin;
+        e.holeMax = ringMax;
+        e.shaftMin = otherBand.Min(e.size);
+        e.shaftMax = otherBand.Max(e.size);
+      } else {
+        e.holeOccurrence = other.occurrence;
+        e.shaftOccurrence = ringSide.occurrence;
+        e.holeClass = otherClass;
+        e.shaftClass = ringClass;
+        e.holeMin = otherBand.Min(e.size);
+        e.holeMax = otherBand.Max(e.size);
+        e.shaftMin = ringMin;
+        e.shaftMax = ringMax;
+      }
+      e.minClearance = e.holeMin - e.shaftMax;
+      e.maxClearance = e.holeMax - e.shaftMin;
+      e.kind = fits::FitKindName(
+          e.minClearance >= 0.0   ? fits::FitKind::Clearance
+          : e.maxClearance <= 0.0 ? fits::FitKind::Interference
+                                  : fits::FitKind::Transition);
+      // Not judged, whatever the mate type. Which ring wants the tight fit
+      // depends on which one turns relative to the LOAD, and the model says
+      // neither; a revolute mate on a one-body bearing is the balls turning,
+      // not the ring creeping in its seat.
+      e.status = "reported";
+      e.reason = "a bearing ring's fit depends on which ring turns relative "
+                 "to the load, which the model does not say — so the fit is "
+                 "reported, not judged";
+      out.push_back(std::move(e));
       continue;
     }
     // Which side is the bore is said by the CLASS, not guessed from the

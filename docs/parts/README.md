@@ -1,6 +1,6 @@
 # Standard parts
 
-Bought hardware — screws, nuts, washers — generated from vendored ISO
+Bought hardware — screws, nuts, washers, bearings — generated from vendored ISO
 dimension tables and placed in assemblies, so the BOM lists what to buy, mass
 properties include the hardware, and interference and contact checks see it.
 A fastener's size and length are **derived** from the hole it is picked in,
@@ -241,8 +241,111 @@ the occurrence's designation — the same string the BOM carries.
 - **Check fasteners** (`###bom_check_fasteners`) sits beside the Bill of
   materials in the Occurrence panel, with its findings listed under it.
 
+## Bearings
+
+Deep-groove ball bearings, generated from their designation the way a
+fastener is from its standard and size: one part per designation, named
+`ISO 15 6200`, filed in "Standard parts", placed as an occurrence, counted by
+`bom` as a bought row (`standard` `iso15`, `designation` `6200`).
+
+**The table** (`src/core/parts/BearingTable.{h,cpp}`) is ISO 15's boundary
+dimensions — d, D, B and the smallest chamfer r_s min — for series 618, 619,
+60, 62 and 63 at bores 3 to 30 mm, typed from the standard's tables
+and cross-checked against bd_warehouse's and BOSL2's bearing data. Like the
+fastener tables it is a fixed scope: an unknown designation is refused
+naming every one carried, and a shield or seal suffix (`6200-2Z`, `608ZZ`)
+is refused naming the bare designation, since the BOM would otherwise call a
+sealed bearing open. It also carries ISO 492's normal-class tolerances on
+the mean bore and outside diameter (0/−8 µm on a 6200's bore), which is what
+`check_fits` reads for a ring. Load ratings, speeds and abutment dimensions
+are a supplier's, not the standard's; they come from an imported catalog
+([catalogs.md](catalogs.md)).
+
+**The body** (`BearingFeature`, `src/core/features/BearingFeature.{h,cpp}`,
+JSON type `Bearing`, format v140) is one solid of revolution drawn as a
+shielded bearing: an inner and an outer ring standing proud of a recessed
+shield on each side, the four outer corners chamfered at r_s min, and the
+ball space an internal toroidal void. One solid rather than rings and balls
+because balls are a boolean each and hidden behind a shield anyway, two rings
+would be two disconnected solids, and the void keeps the mass honest (a steel
+608 weighs 12.2 g against a catalogue's 12 g, a 6200 31.0 g against 32 g).
+The proportions inside the envelope (lands 0.3 of the section, shields
+recessed 0.05 B, a ball space of 0.6 of the smaller of the section and B) are
+drawing choices, named once in the .cpp; none is an ISO 15 dimension. It
+cannot turn: a mechanism mates it rigidly to one seat and turns on the other.
+Its axis is local +Z with side A on z = 0.
+
+Its faces are named by what they are: `<id>/bore`, `/outside`,
+`/inner_side_a|b` and `/outer_side_a|b` (a shaft shoulder bears on the inner
+ring, a housing's on the outer), `/shield_a|b`.
+
+### Placing one on a seat
+
+`ui::FitBearing` (`src/ui/BearingActions.{h,cpp}`), RPC `fit_bearing`. The
+pick is the **seat**: a cylindrical face, or the circular rim where it meets
+its shoulder. `parts::SeatOf` (`src/core/parts/BearingSeat.{h,cpp}`) reads it
+off the part: shaft or housing bore (from the face's outward normal), its
+diameter, and at each end whether a square face stops a bearing there, how
+far it reaches, and any fillet into it — the bearing sits on the shoulder
+plane past the fillet. A face with a shoulder at both ends or neither is
+refused asking for the rim.
+
+- **Which bearing.** A shaft takes the rows whose d is its diameter, a
+  housing bore those whose D is. A Ø10 journal takes five (61800, 61900,
+  6000, 6200, 6300), so `designation` or `series` says which, and several
+  with neither is refused naming them; a designation of another size is
+  refused naming the ones that fit. A seat that is not a stocked size is
+  refused: a fit is a tolerance class on the seat, not a different diameter.
+- **The mate.** A fastened mate `Bearing seat` between the ring (bore to a
+  journal, outside to a housing bore) and the seat, its degrees of freedom
+  measured from the poses so the solve moves nothing — a fastener's `Bolted`
+  mate, done the same way. The other ring is mated by hand, revolute where
+  the housing turns about the shaft.
+- `dry_run` derives without placing; `candidates` lists what fits either way.
+
+### Fits and seats
+
+- **`check_fits`** reads a bearing ring as one side of a round mate with the
+  ring's own ISO 492 band, and the ring says which side it is (the bore is
+  the hole). The other side takes a class or explicit deviations; a class of
+  the wrong case is refused. k5 on a journal is transition in an H7 hole and
+  interference on a bearing bore, which is why the band matters. A bearing
+  fit is **reported**, never judged: which ring wants the tight fit depends on
+  which one turns relative to the load, and the model does not say
+  ([../tolerances/README.md](../tolerances/README.md#checks)).
+- **`check_seat {occurrence}`** (`ui::CheckSeat`) checks a placed bearing
+  against the seats its rings are mated to, read with the same `SeatOf`: the
+  seat is the ring's basic size, the ring sits on its shoulder (within
+  0.01 mm), the fillet does not exceed r_s min, and the shoulder reaches past
+  the ring's chamfer. How far a shoulder may reach is an abutment dimension
+  the standard does not give, so it is unverified unless an installed catalog
+  is passed (`catalog`, `revision`, `hash`, `designation?`), whose limits are
+  then checked against the same measurements. An unmated ring is unverified,
+  never a pass.
+
+### GUI
+
+**Bearing tool** (`###tb_bearing`, command `assembly.bearing`,
+`src/ui/BearingTool.{h,cpp}`): a tool session like the fastener's. It opens
+with the seat pick armed (a face or an edge); once a seat is picked the
+bearings its diameter takes are offered as buttons (`###bearing_des_6200`),
+the summary or refusal is shown live, a translucent ghost stands where Place
+would put it, and Place re-arms for the next seat.
+
+### Tests
+
+`tests/test_bearings.cpp` (the table against ISO 15, the refusals, ISO 492
+bands, the body's named faces and its volume by Pappus, round trip, placing
+on a journal by face and by rim, a housing bore, a part-tab refusal, the BOM,
+`check_fits` on a k5 journal, `check_seat` with a square shoulder, a fillet
+too large and a catalog), GUI `parts/a_bearing_is_placed_on_a_picked_shaft`.
+Golden `v140-bearing`.
+
 ## RPCs
 
+`add_bearing {designation, position?, orientation?}`, `fit_bearing {seat,
+designation?, series?, dry_run?}`, `check_seat {occurrence, catalog?,
+revision?, hash?, designation?}`;
 `add_fastener {standard, size, length?, drive?, position?, orientation?}`
 (places where told), `fit_fastener {rim, standard?, drive?, size?, nut?,
 washer_under_head?, washer_under_nut?, washer?, far_end?, dry_run?}`,
@@ -268,8 +371,10 @@ ghost count tracks the options, place, joined, check). Goldens
 - Phillips/Pozidriv drives (the Phillips table is vendored but unused), and
   any imperial sizes.
 - Modelled helical threads (the thread is cosmetic).
-- Bearings, extrusions, motors, o-rings as generated parts; a searchable
-  parts browser.
+- Extrusions, motors, o-rings as generated parts; a searchable parts
+  browser.
+- Bearings beyond deep-groove ball bearings at bores 3 to 30 mm; shield and
+  seal variants as their own designations; a bearing whose rings turn.
 - Balloons and a parts-list block on a drawing sheet.
 - Folding hardware in the Occurrences tree.
 - A ghost on hover before the rim is picked.

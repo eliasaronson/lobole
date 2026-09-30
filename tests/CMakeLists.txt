@@ -30,6 +30,7 @@ add_executable(designer_tests
     test_document_copy.cpp
     test_determinism.cpp
     test_parts.cpp
+    test_bearings.cpp
     test_fits.cpp
     test_tolerances.cpp
     test_serialization.cpp

@@ -84,7 +84,11 @@ I/O, mirroring `ThreadStandards`:
   side, two basic sizes, a side with explicit deviations (which cannot say which
   side is the bore), both sides the same case — is `unverified` with the
   reason, never a pass. It reaches into sub-assemblies, naming each side by its
-  path (`Rig/Housing`). The GUI and the RPC share this one walk.
+  path (`Rig/Housing`). The GUI and the RPC share this one walk. A
+  generated bearing's bore or outside is read with the ring's own ISO 492
+  band and says which side it is, so the other side may carry a class or
+  explicit deviations; such a fit is `reported`, not judged
+  ([../parts/README.md](../parts/README.md#fits-and-seats)).
 - **`stack_up`** (`tolstack::Sum`, `src/core/ToleranceStack.{h,cpp}`) — worst
   case along a **stated** ordered chain `{terms: [{tolerance, subtract?}]}`:
   the summed nominal and the min/max the bands allow. A subtracted term

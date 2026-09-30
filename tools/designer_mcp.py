@@ -318,6 +318,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "drive"?: str (omit for the drive the standard is made with)}} — in an
   ASSEMBLY, prefer the `add_fastener`/`fit_fastener` RPCs, which derive all
   of this from the hole you pick (docs/parts/README.md).
+- Bearing (an ISO 15 deep-groove ball bearing — d, D, B and the chamfer
+  come from the standard): {{"type": "Bearing", "name": str,
+  "designation": str (series 618/619/60/62/63, bores 3 to 30 mm: "6200",
+  "608", "618/4"; anything else is refused naming what is carried)}} — in
+  an ASSEMBLY, prefer `fit_bearing`, which reads the size off the shaft or
+  bore you pick and mates it there (docs/parts/README.md#bearings).
 
 Call the `describe` tool for the authoritative method/type/enum lists.
 
@@ -928,7 +934,8 @@ def measure(a: dict, b: dict | None = None,
           "and `role` -- start_cap | end_cap (a cut's floor) | side (swept "
           "from sketch `entity`) | generated (a fillet's or chamfer's face) "
           "| bore | bottom | counterbore | counterbore_floor | countersink "
-          "(a Hole's) | positional (a feature that names by index) | "
+          "(a Hole's) | outside | inner_side | outer_side | shield (a "
+          "bearing's) | positional (a feature that names by index) | "
           "boundary | pole | seam; `instance` for a pattern copy, `derived` "
           "for one that came in through a Derived feature. ASK for faces "
           "by what made them rather than by geometry: made_by (feature id "

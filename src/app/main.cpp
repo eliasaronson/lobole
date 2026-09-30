@@ -42,6 +42,7 @@
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/BearingTool.h"
 #include "ui/CamJobs.h" // OpenCamSurfaceStore
 #include "ui/CamPlayback.h"
 #include "ui/DocumentSlots.h"
@@ -2910,6 +2911,7 @@ int main(int argc, char** argv) {
     // Per frame on purpose: the resyncs are version-gated and
     // picking a rim or ticking a washer bumps no version.
     ui::SyncFastenerGhost(g_App);
+    ui::SyncBearingGhost(g_App);
 
     // S3 render-quality settings (View > Render Quality / set_render_options
     // RPC): recreate the GPU targets when they change. Both helpers wait for

@@ -76,11 +76,7 @@ to avoid, in this plan's phase notes. No code.
 
 ### 3. Bearings as standard parts
 
-Deep-groove ball bearings (ISO 15: the 6000, 6200 and 600 series, and 608) as
-generated standard parts, the way F1's fasteners are (`docs/parts/README.md`):
-the outer ring, the inner ring and the seat faces named for mates and fits.
-Placing one mates its bore and its outside diameter. `check_seat` reads a
-placed bearing directly instead of four typed numbers.
+Built: see docs/parts/README.md#bearings.
 
 ### 4. Printed clearances
 

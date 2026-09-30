@@ -27,6 +27,7 @@
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -151,6 +152,9 @@ BomTable ComputeBom(AppState& state) {
     if (const FastenerFeature* screw = SoleFastenerOf(part)) {
       fresh.standard = screw->standard;
       fresh.designation = screw->Designation();
+    } else if (const BearingFeature* bearing = SoleBearingOf(part)) {
+      fresh.standard = "iso15"; // docs/parts/README.md#bearings
+      fresh.designation = bearing->designation;
     }
     if (!part) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown

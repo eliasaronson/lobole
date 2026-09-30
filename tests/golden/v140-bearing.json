@@ -1,0 +1,12 @@
+{
+  "features": [
+    {
+      "designation": "6200",
+      "id": 1,
+      "name": "ISO 15 6200",
+      "type": "Bearing"
+    }
+  ],
+  "format": "designer-document",
+  "version": 140
+}

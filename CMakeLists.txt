@@ -370,6 +370,8 @@ set(core_sources
     src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
     src/core/parts/AxisStack.cpp
+    src/core/parts/BearingSeat.cpp
+    src/core/parts/BearingTable.cpp
     src/core/parts/FastenerProfile.cpp
     src/core/parts/FastenerTable.cpp
     src/core/io/AtomicWrite.cpp
@@ -388,6 +390,7 @@ set(core_sources
     src/core/sketch/SketchText.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp
+    src/core/features/BearingFeature.cpp
     src/core/features/FastenerFeature.cpp
     src/core/features/DerivedFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
@@ -750,6 +753,7 @@ set(app_sources
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp
+    src/ui/BearingTool.cpp
     src/ui/FastenerTool.cpp
     src/ui/DerivedActions.cpp
     src/ui/FileDialogs.cpp
@@ -777,6 +781,7 @@ set(app_sources
     src/ui/GizmoInput.cpp
     src/ui/FlexibleActions.cpp
     src/ui/TessellationCache.cpp
+    src/ui/BearingActions.cpp
     src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
     src/ui/MotionVideo.cpp

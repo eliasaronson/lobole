@@ -1594,6 +1594,28 @@ struct AppState {
   std::vector<uint32_t> fastenerGhostInstances;
   std::string fastenerGhostKey;
 
+  // The bearing session (docs/parts/README.md#bearings): pick a seat, choose
+  // among the bearings its diameter takes, place. Same shape as the fastener
+  // session above.
+  struct BearingTool {
+    bool open = false;
+    uint64_t seatOccurrence = 0;
+    ElementRef seatElement; // unset = nothing picked yet
+    // The chosen designation; empty until the seat takes only one or a
+    // candidate button says which.
+    std::string designation;
+    std::vector<std::string> candidates; // "6200 (10x30x9)", from the seat
+    // The last dry run: what Place would do, or why it cannot.
+    bool ok = false;
+    std::string summary;
+    std::string why;
+    glm::vec3 position{0.0f};
+    glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    int placed = 0;
+  } bearingTool;
+  uint32_t bearingGhostInstance = 0;
+  std::string bearingGhostKey;
+
   // The last "Check fasteners" answer, as the panel shows it (F1 p6 phase 4).
   // Kept here rather than in a static local inside the draw function: a
   // static would be shared by every document the process opens, and it would

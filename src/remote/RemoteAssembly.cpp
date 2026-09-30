@@ -7,6 +7,7 @@
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
+#include "core/catalog/Catalog.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -16,6 +17,7 @@
 
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BearingActions.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/FlexibleActions.h"
 #include <map>
@@ -386,6 +388,54 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "", remote::NoFlags,
      "ok, examined, skipped, findings[]{occurrence,part,why}, "
      "receipt{schema,standing,summary,claims}"},
+    {"add_bearing",
+     "Place an ISO 15 deep-groove ball bearing in the active assembly where "
+     "told (docs/parts/README.md#bearings). `designation` is what a supplier "
+     "calls it — \"6200\", \"608\", \"618/4\" — from series 618, 619, 60, "
+     "62 and 63, bores 3 to 30 mm; d, D, B and the chamfer are READ from the "
+     "standard's table, and anything else is refused naming what is carried "
+     "(a shield/seal suffix like 6200-2Z is refused naming the bare one). "
+     "One generated part per designation (\"ISO 15 6200\"), so `bom` "
+     "aggregates. Refused on a part tab. {position (model mm), orientation "
+     "[x,y,z,w]} place it: the bearing's axis is its local +Z, side A on "
+     "z = 0. `fit_bearing` derives all of that from a picked seat and is "
+     "what you usually want.",
+     "designation, orientation, position", remote::NoFlags, "occurrence, part"},
+    {"fit_bearing",
+     "Put a bearing on a picked SEAT and mate it there "
+     "(docs/parts/README.md#bearings). `seat` is {feature_id, element, "
+     "occurrence?, inner_path?} naming a CYLINDRICAL face — a shaft journal "
+     "(the bearing's bore goes on it) or a housing bore (its outside goes in "
+     "it) — or the circular RIM where that face meets its shoulder. The "
+     "bearing's diameter is the seat's: a Ø10 journal takes 61800, 61900, "
+     "6000, 6200 or 6300, so `designation` (\"6200\") or `series` (\"62\") "
+     "says which, and several candidates with neither is REFUSED naming "
+     "them. Its side sits against the shoulder (past any fillet); a face "
+     "with a shoulder at both ends or neither is refused asking for the rim. "
+     "Placing adds a FASTENED mate `Bearing seat` between the ring and the "
+     "seat as placed, so nothing moves and `check_fits` reads the fit off "
+     "it. {dry_run: true} derives without placing.",
+     "designation, dry_run, seat, series", remote::NoFlags,
+     "designation, candidates[], shaft, seat_diameter_mm, shoulder, "
+     "overhang_mm, summary, occurrence, mate"},
+    {"check_seat",
+     "Check a PLACED bearing's seats against the bearing "
+     "(docs/parts/README.md#bearings): its d, D, B and r_s min come from the "
+     "part, and the observations are MEASURED off the seats its bore and "
+     "outside are mated to — the journal/bore diameter (must be the ring's "
+     "basic size), whether the ring sits on its shoulder, the fillet into "
+     "the shoulder (must not exceed r_s min) and the shoulder's diameter "
+     "(must reach past the chamfer). All in mm. How far a shoulder may reach "
+     "is a supplier's abutment dimension, not ISO 15's: pass an installed "
+     "catalog {catalog, revision, hash, designation?} and its limits are "
+     "checked against the same measurements (designation defaults to the "
+     "bearing's). Each check is pass, fail or unverified with a reason; an "
+     "unmated ring is unverified, never a pass.",
+     "catalog, designation, hash, occurrence, revision", remote::NoFlags,
+     "occurrence, designation, d, D, B, r_min, seats[]{ring,mate,part?,"
+     "face?,diameter?,shoulder?,shoulder_diameter?,fillet_radius?,gap_mm?,"
+     "error?}, checks[]{characteristic,status,observed?,required?,minimum?,"
+     "maximum?,reason?}, measurements, catalog?, status, evidence"},
     {"export_bom",
      "Export the BOM as CSV {path}: the bom rows, with a `configuration` "
      "column after `part`.",
@@ -903,6 +953,70 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       if (o.id == id)
         placed = o.name;
     return json{{"occurrence", id}, {"part", placed}};
+  }
+  if (m == "add_bearing") {
+    glm::vec3 position(0.0f);
+    if (p.contains("position")) {
+      const auto& v = p.at("position");
+      position = glm::vec3(v.at(0).get<float>(), v.at(1).get<float>(),
+                           v.at(2).get<float>());
+    }
+    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+    if (p.contains("orientation")) {
+      const auto q = p.at("orientation");
+      orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                              q.at(1).get<float>(), q.at(2).get<float>());
+    }
+    std::string error;
+    const uint64_t id =
+        ui::AddBearing(state, p.at("designation").get<std::string>(), position,
+                       orientation, &error);
+    if (id == 0)
+      throw std::runtime_error(error);
+    const Occurrence* placed = state.assembly->FindById(id);
+    return json{{"occurrence", id},
+                {"part", placed != nullptr ? placed->name : std::string{}}};
+  }
+  if (m == "fit_bearing") {
+    ui::RimPick seat;
+    const auto& r = p.at("seat");
+    seat.element.featureId = r.at("feature_id").get<uint64_t>();
+    seat.element.name = r.at("element").get<std::string>();
+    seat.occurrence = r.value("occurrence", uint64_t{0});
+    if (r.contains("inner_path"))
+      seat.innerPath = r.at("inner_path").get<std::vector<uint64_t>>();
+    ui::BearingRequest request;
+    request.designation = p.value("designation", std::string{});
+    request.series = p.value("series", std::string{});
+    request.dryRun = p.value("dry_run", false);
+    const ui::BearingFit fit = ui::FitBearing(state, seat, request);
+    if (!fit.ok)
+      throw std::runtime_error(fit.why);
+    return json{{"designation", fit.designation},
+                {"candidates", fit.candidates},
+                {"shaft", fit.shaft},
+                {"seat_diameter_mm", fit.seatDiameter},
+                {"shoulder", fit.shoulder},
+                {"overhang_mm", fit.overhang},
+                {"summary", fit.summary},
+                {"occurrence", fit.occurrence},
+                {"mate", fit.mate}};
+  }
+  if (m == "check_seat") {
+    // rpc-returns-from: src/ui/BearingActions.cpp
+    const nlohmann::json* entry = nullptr;
+    if (p.contains("catalog")) {
+      entry = &catalog::Find(state.catalogs, p.at("catalog").get<std::string>(),
+                             p.at("revision").get<std::string>());
+      if (!p.contains("hash"))
+        throw std::runtime_error(
+            "hash is required to check against a catalog revision");
+      if (p.at("hash") != entry->at("hash"))
+        throw std::runtime_error(
+            "catalog handle is stale: content hash differs");
+    }
+    return ui::CheckSeat(state, p.at("occurrence").get<uint64_t>(), entry,
+                         p.value("designation", std::string{}));
   }
   if (m == "add_occurrence") {
     // Places a part OR another assembly (A5) in the active assembly. `part`

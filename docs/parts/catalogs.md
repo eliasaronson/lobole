@@ -119,18 +119,24 @@ are bundled by this feature.
 
 ## Interpreting checks
 
-`check_seat` returns independent `pass`, `fail` or `unverified` findings for
+`record.check_seat(...)` (RPC `catalog_requirements`) returns independent
+`pass`, `fail` or `unverified` findings for
 shaft, housing, shoulder and fillet dimensions, with the supplied limits and
 observations. Missing limits or observations are unverified. Any failed check
 makes the overall status fail; otherwise missing evidence makes it unverified.
 All supplied observations are in mm. The API accepts zero fillet radius; the GUI
 currently uses zero to mean unspecified. These observations are temporary and
-are not attached to geometry or saved as project requirements.
+are not saved as project requirements.
+
+`record.check_seat(occurrence=N)` (RPC `check_seat {occurrence, catalog,
+revision, hash}`) does the same for a PLACED bearing, with the observations
+measured off the seats it is mated to instead of typed, beside the checks
+ISO 15 itself supports ([README.md](README.md#fits-and-seats)).
 
 A passing report means only that these four supplied numbers satisfy these
 supplied limits. It does not evaluate loads, speed, temperature, bearing life,
-fit selection or the accuracy of the model's actual geometry. Persistent
-requirements and measurements bound to geometry are not built.
+fit selection or, for typed observations, the accuracy of the model's actual
+geometry. Persistent requirements are not built.
 
 ## Where the code is
 

@@ -1,5 +1,6 @@
 #include "ui/FeatureEditor.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BearingTool.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
 #include "ui/DerivedActions.h"
@@ -1350,6 +1351,11 @@ const ToolSession kToolSessions[] = {
        return s.assembly != nullptr && s.fastenerTool.open;
      },
      [](AppState& s, const SelectionItem& i) { FastenerRimPicked(s, i); }},
+    {kBearingToolSlot,
+     [](const AppState& s) {
+       return s.assembly != nullptr && s.bearingTool.open;
+     },
+     [](AppState& s, const SelectionItem& i) { BearingSeatPicked(s, i); }},
 };
 } // namespace
 

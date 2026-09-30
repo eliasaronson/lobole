@@ -102,6 +102,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"assembly.mate_planar", ICON_DS_MATE_PLANAR},
     {"assembly.mate_ball", ICON_DS_MATE_BALL},
     {"assembly.fastener", ICON_FA_SCREWDRIVER},
+    {"assembly.bearing", ICON_FA_LIFE_RING},
     {"assembly.explode", ICON_FA_EXPLOSION},
     {"assembly.motion", ICON_FA_CIRCLE_PLAY},
     {"assembly.simulation", ICON_FA_GAUGE_HIGH},

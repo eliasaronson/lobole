@@ -69,6 +69,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BearingTool.h"   // SyncBearingGhost (SyncRenderersToDocument)
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
 #include "ui/FastenerTool.h"  // SyncFastenerGhost (SyncRenderersToDocument)
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
@@ -489,6 +490,7 @@ void SyncRenderersToDocument(AppState& state) {
   SyncFieldRenderer(state);
   SyncCamPlayback(state);
   SyncFastenerGhost(state);
+  SyncBearingGhost(state);
   // Last: it reads the meshes the first step just rebuilt. Before them, it
   // would highlight ids that no longer exist.
   SyncSelectionHighlights(state);

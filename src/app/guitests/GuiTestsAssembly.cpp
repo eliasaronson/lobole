@@ -2236,6 +2236,97 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->assembly->FindById(ids[2]) != nullptr);
   };
 
+  // A bearing is placed by clicking the shaft it goes on
+  // (docs/parts/README.md#bearings): arm from the toolbar, click the journal
+  // in the viewport, choose among the bearings its diameter takes, place.
+  t = IM_REGISTER_TEST(engine, "parts",
+                       "a_bearing_is_placed_on_a_picked_shaft");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+
+    // A Ø20 collar with a Ø10 journal on it: a 6200's seat, and four more
+    // series'. Built through the document API; the fixture is not under test.
+    Document& doc = *Doc();
+    doc.AddFeature(std::make_unique<CylinderFeature>(
+        "Collar", glm::vec3(0.0f), glm::vec3(0, 0, 1), 10.0, 10.0));
+    doc.AddFeature(std::make_unique<CylinderFeature>(
+        "Journal", glm::vec3(0, 0, 10), glm::vec3(0, 0, 1), 5.0, 40.0));
+    doc.AddFeature(std::make_unique<BooleanFeature>(
+        "Join", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+        BooleanOp::Union));
+    doc.GetFeature(2)->SetMaterial("steel");
+    doc.Regenerate();
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Spindle"));
+    Occurrence o;
+    o.name = "Shaft";
+    o.partId = partId;
+    o.fixed = true;
+    s_App->assembly->AddOccurrence(o);
+    ctx->Yield(4);
+
+    // A point on the journal 45 degrees round from its seam, seen from that
+    // side: a FACE pick, not the seam edge.
+    const glm::vec3 onJournal(3.5355f, -3.5355f, 30.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(onJournal);
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(onJournal + glm::vec3(30.0f, -30.0f, 12.0f));
+    ctx->Yield(3);
+
+    ToolbarClick(ctx, "###tb_bearing");
+    ctx->Yield(2);
+    IM_CHECK(s_App->bearingTool.open);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kBearingToolSlot);
+    {
+      // Nothing picked: Place is refused, not absent (U10).
+      const ImGuiTestItemInfo place =
+          ctx->ItemInfo("//Bearing###ToolWindow/###bearing_place");
+      IM_CHECK((place.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    }
+
+    ctx->MouseMoveToPos(WorldToWindow(onJournal));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    IM_CHECK(s_App->bearingTool.seatElement.IsSet());
+    // Five bearings fit a Ø10 journal, and none is chosen for you.
+    IM_CHECK_EQ(s_App->bearingTool.candidates.size(), (size_t)5);
+    IM_CHECK(!s_App->bearingTool.ok);
+    IM_CHECK(s_App->bearingTool.why.find("Say which") != std::string::npos);
+
+    ctx->ItemClick("//Bearing###ToolWindow/###bearing_des_6200");
+    ctx->Yield(3);
+    IM_CHECK(s_App->bearingTool.ok);
+    IM_CHECK_STR_EQ(s_App->bearingTool.designation.c_str(), "6200");
+    IM_CHECK(s_App->bearingTool.summary.find("shoulder") != std::string::npos);
+    // The ghost stands where Place would put it.
+    IM_CHECK(s_App->bearingGhostInstance != 0);
+
+    const size_t before = s_App->assembly->GetOccurrences().size();
+    ctx->ItemClick("//Bearing###ToolWindow/###bearing_place");
+    ctx->Yield(4);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before + 1);
+    IM_CHECK_EQ(s_App->assembly->GetMates().size(), (size_t)1);
+    IM_CHECK_EQ(s_App->bearingTool.placed, 1);
+    // Re-armed for the next seat, and the ghost went with the pick.
+    IM_CHECK(s_App->bearingTool.open);
+    IM_CHECK(!s_App->bearingTool.seatElement.IsSet());
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kBearingToolSlot);
+    IM_CHECK_EQ(s_App->bearingGhostInstance, (uint32_t)0);
+    const Occurrence& placed = s_App->assembly->GetOccurrences().back();
+    IM_CHECK_STR_EQ(placed.name.c_str(), "ISO 15 6200");
+    IM_CHECK(std::abs(placed.position.z - 10.0f) < 1e-4f);
+
+    ctx->ItemClick("//Bearing###ToolWindow/###bearing_done");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->bearingTool.open);
+    IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0);
+  };
+
   // A fastener is placed by clicking a hole's rim (docs/parts/README.md).
   //
   // The whole verb: arm from the toolbar, click the rim in the viewport, and

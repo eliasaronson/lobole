@@ -890,7 +890,8 @@ class Feature:
         """The faces this feature made, in `role` if given: start_cap,
         end_cap (floor), side (walls; `entity=` the sketch line), generated,
         bore, bottom, counterbore, counterbore_floor, countersink,
-        positional, boundary."""
+        outside, inner_side, outer_side, shield (a bearing's), positional,
+        boundary."""
         return self._ask(role, entity, edges=False)
 
     def edges(self, role=None, entity=None):
@@ -3049,12 +3050,21 @@ class CatalogRecord:
         self.fields = dict(fields)
         self.designation = fields["designation"]
 
-    def check_seat(self, **measurements_mm):
+    def check_seat(self, occurrence=None, **measurements_mm):
         """Explicit observations, never an automatic fit choice or geometry edit.
 
         Returns pass/fail/unverified with individual requirements. Missing
         limits stay unverified; reading a nominal diameter cannot supply them.
+        With `occurrence` (a placed bearing) the observations are measured off
+        the seats it is mated to instead (docs/parts/catalogs.md).
         """
+        if occurrence is not None:
+            if measurements_mm:
+                raise SdkError("pass an occurrence OR typed measurements, "
+                               "not both")
+            return self.catalog.app.check_seat(
+                occurrence=occurrence, **self.catalog._ref,
+                designation=self.designation)
         return self.catalog.app.catalog_requirements(
             **self.catalog._ref, designation=self.designation,
             measurements=measurements_mm)

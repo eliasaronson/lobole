@@ -319,6 +319,8 @@ const Binding kDefaults[] = {
     // Standard parts. "F" for fastener; the mate verbs own 1-6.
     {"assembly.fastener", Context::Assembly, "Fastener (pick a hole's rim)",
      "Standard parts", "F"},
+    {"assembly.bearing", Context::Assembly,
+     "Bearing (pick the shaft or bore it goes on)", "Standard parts", ""},
 
     // The two viewport modes (docs/ui/panels.md#assembly-tab-the-model-panel).
     // "X" for the explode, "M" for motion; both open the floating tool window,

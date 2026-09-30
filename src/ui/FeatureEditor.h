@@ -61,6 +61,9 @@ enum class PickSlot : int {
   // CAM: a job part's sketch label or curve to engrave (a SketchCurve item,
   // not a face; docs/cam/gui.md#engrave-from-the-viewport).
   CamEngraveCurve,
+  // Standard parts: the round SEAT a bearing goes on — a cylindrical face or
+  // the rim where it meets its shoulder (docs/parts/README.md#bearings).
+  BearingSeat,
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
@@ -81,6 +84,10 @@ inline constexpr uint64_t kCamToolSlot = ~2ull;
 // OCCURRENCE in the assembly, not a feature in any document, so it needs the
 // same treatment. SlotPickClicked routes these to FastenerRimPicked.
 inline constexpr uint64_t kFastenerToolSlot = ~3ull;
+
+// And the bearing session, for the same reason: a bearing is an occurrence.
+// SlotPickClicked routes these to BearingSeatPicked.
+inline constexpr uint64_t kBearingToolSlot = ~4ull;
 
 // --- the tool-session registry ----------------------------------------------
 //

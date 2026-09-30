@@ -11,6 +11,7 @@
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"
 #include "render/RayTracingRenderer.h"
+#include "ui/BearingTool.h"
 #include "ui/CreateActions.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
@@ -699,6 +700,11 @@ const std::vector<Command>& Table() {
     add(
         "assembly.fastener", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) { OpenFastenerTool(s); });
+    // docs/parts/README.md#bearings — the same shape as the fastener: a
+    // tool session that opens asking for its pick.
+    add(
+        "assembly.bearing", [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) { OpenBearingTool(s); });
 
     // The two viewport modes (docs/ui/panels.md#assembly-tab-the-model-panel).
     // Each replaces the other rather than stacking: they both place the

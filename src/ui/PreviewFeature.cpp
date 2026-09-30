@@ -18,7 +18,8 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
 #include "core/io/Serialization.h"       // ConfigurationToJson
-#include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
+#include "ui/BearingTool.h"
+#include "ui/CamTool.h" // DrawCamToolWindow (CAM verbs)
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h"
 #include "ui/MeasureActions.h"
@@ -575,6 +576,8 @@ void DrawToolWindow(AppState& state) {
       DrawCamToolWindow(state); // the CAM verbs (docs/cam/gui.md#verb-windows)
     else if (state.fastenerTool.open)
       DrawFastenerToolWindow(state); // docs/parts/README.md
+    else if (state.bearingTool.open)
+      DrawBearingToolWindow(state); // docs/parts/README.md#bearings
     else if (state.assembly &&
              (state.asmEditOccurrence != 0 || state.asmEditRelation != 0))
       DrawAssemblyEditWindow(state); // docs/ui/panels.md

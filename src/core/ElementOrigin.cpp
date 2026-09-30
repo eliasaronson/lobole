@@ -27,6 +27,10 @@ constexpr RoleSpelling kRoles[] = {
     {ElementRole::Counterbore, "counterbore"},
     {ElementRole::CounterboreFloor, "counterbore_floor"},
     {ElementRole::Countersink, "countersink"},
+    {ElementRole::Outside, "outside"},
+    {ElementRole::InnerSide, "inner_side"},
+    {ElementRole::OuterSide, "outer_side"},
+    {ElementRole::Shield, "shield"},
 };
 
 bool AllDigits(const std::string& s) {
@@ -130,6 +134,21 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
     }
     if (Numbered(last, "seam")) {
       o.role = ElementRole::Seam;
+      return true;
+    }
+    // A generated bearing's faces by what they are, a side's two faces
+    // told apart by _a/_b (docs/parts/README.md#bearings).
+    const std::string side =
+        last.size() > 2 && (last.ends_with("_a") || last.ends_with("_b"))
+            ? last.substr(0, last.size() - 2)
+            : std::string{};
+    if (last == "bore" || last == "outside" || side == "inner_side" ||
+        side == "outer_side" || side == "shield") {
+      o.role = last == "bore"         ? ElementRole::Bore
+               : last == "outside"    ? ElementRole::Outside
+               : side == "inner_side" ? ElementRole::InnerSide
+               : side == "outer_side" ? ElementRole::OuterSide
+                                      : ElementRole::Shield;
       return true;
     }
   }

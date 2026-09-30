@@ -4,6 +4,7 @@
 #include "core/Angles.h"
 #include "core/Feature.h"
 #include "core/features/BaseFlangeFeature.h"
+#include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CopeFeature.h"
 #include "core/features/CornerReliefFeature.h"
@@ -937,6 +938,8 @@ json FeatureToJson(const Feature& feature) {
     // recess is ever corrected.
     if (!fastener->drive.empty())
       j["drive"] = fastener->drive;
+  } else if (auto* bearing = dynamic_cast<const BearingFeature*>(&feature)) {
+    j["designation"] = bearing->designation; // v140
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
     if (import->keepOrigin) // v97; absent = centred, as every older file was
@@ -1416,6 +1419,13 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/README.md)"},
+    {"Bearing", 140,
+     "designation: an ISO 15 deep-groove ball bearing, 618/619/60/62/63 "
+     "series, bores 3 to 30 mm (\"6200\", \"608\", \"618/4\"). d, D, B and "
+     "the chamfer are READ from the table; an unknown designation is refused "
+     "naming the ones carried. Faces are named <id>/bore, /outside, "
+     "/inner_side_a|b, /outer_side_a|b, /shield_a|b; side A on z = 0 "
+     "(docs/parts/README.md#bearings)"},
     {"BaseFlange", 109,
      "sketch_id, reversed?, regions? - the FIRST wall of a sheet part: the "
      "closed profile thickened by the document's sheet-metal thickness, so "
@@ -1978,6 +1988,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     fastener->lengthExpr = j.value("length_expr", std::string{});
     fastener->drive = j.value("drive", std::string{});
     out = std::move(fastener);
+  } else if (type == "Bearing") {
+    out = std::make_unique<BearingFeature>(
+        name, j.at("designation").get<std::string>());
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());

@@ -26,7 +26,12 @@ enum class ElementRole {
   Counterbore,      // a hole's
   CounterboreFloor, // a hole's
   Countersink,      // a hole's
-  Unknown,          // a seed this decoder does not know
+  // A generated bearing's (docs/parts/README.md#bearings); its bore is Bore.
+  Outside,   // the outer ring's outside diameter
+  InnerSide, // an inner-ring side face (a shaft shoulder bears on it)
+  OuterSide, // an outer-ring side face (a housing shoulder bears on it)
+  Shield,    // a recessed shield face
+  Unknown,   // a seed this decoder does not know
 };
 
 // "start_cap", "end_cap", "side", ... -- the spelling the RPC uses.

@@ -8,6 +8,7 @@
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/BearingTool.h"
 #include "ui/CamPanel.h" // ActiveCamSetup (the job bar's rotary button)
 #include "ui/Commands.h"
 #include "ui/DrawingActions.h"
@@ -1027,6 +1028,9 @@ void DrawAssemblyToolbar(AppState& state) {
   CommandButton(state, "###tb_fastener", "assembly.fastener",
                 "Fastener (pick a hole's rim; size and length derive)",
                 state.fastenerTool.open);
+  CommandButton(state, "###tb_bearing", "assembly.bearing",
+                "Bearing (pick the shaft or bore; the size derives)",
+                state.bearingTool.open);
   Divider();
   // The two viewport modes. They open the floating tool window rather than a
   // panel section, so they belong on the bar with the other tools that do

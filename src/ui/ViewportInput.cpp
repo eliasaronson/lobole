@@ -280,8 +280,8 @@ void HandleViewportInput(AppState& state) {
   // asking last.
   if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput &&
       !state.slotPick.Active() && !state.mateTool.active &&
-      !state.fastenerTool.open && !state.sketchEdit.IsEditing() &&
-      state.editFeatureId == 0) {
+      !state.fastenerTool.open && !state.bearingTool.open &&
+      !state.sketchEdit.IsEditing() && state.editFeatureId == 0) {
     DeleteSelection(state);
   }
 
