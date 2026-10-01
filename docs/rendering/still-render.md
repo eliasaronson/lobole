@@ -55,6 +55,11 @@ corners through the reported camera at that aspect, asserting all land in
 NDC — and first asserts that a plain `fit_view` does *not* already frame a
 tall picture, so the check cannot pass vacuously.
 
+An assembly renders as the viewport shows it, the active explode included
+(`SyncRayTracingScene` composes each occurrence's explode step as the raster
+sync does): the still of an exploded view used to be the assembled head,
+small in a frame `fit` had sized for the exploded one.
+
 The GUI dialog does not fit: it renders the view the user framed, and its
 default size is 1920x1080 whatever the viewport's shape, so a still can crop
 a part that is whole on screen.

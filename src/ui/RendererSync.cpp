@@ -504,8 +504,10 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     return false;
 
   // What to render: a part's bodies at identity, or — on an assembly tab —
-  // every visible occurrence's bodies at its SOLVED placement (the
-  // BuildVisualExportItems walk; never exploded).
+  // every visible occurrence's bodies at its SOLVED placement, moved by the
+  // active explode as the viewport moves them: a still of an exploded view
+  // was the assembled head, small in a frame `fit` had sized for the
+  // exploded one (docs/rendering/still-render.md#framing).
   struct RTItem {
     const Body* body;
     glm::mat4 xf;
@@ -534,11 +536,20 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       if (!inst.visible)
         continue;
       const auto& bodies = inst.part->GetBodies();
+      // The explode, as the raster sync composes it: the top-level
+      // occurrence's step, then a flexible unit's moving part's own.
+      const glm::mat4 world(
+          glm::translate(
+              glm::dmat4(1.0),
+              ExplodeInnerOffset(state, inst.rootOccurrenceId, inst.innerIds)) *
+          glm::translate(glm::dmat4(1.0),
+                         ExplodeOffset(state, inst.rootOccurrenceId)) *
+          inst.world);
       for (size_t bi = 0; bi < bodies.size(); bi++)
-        rtItems.push_back({&bodies[bi], inst.world, inst.partId,
+        rtItems.push_back({&bodies[bi], world, inst.partId,
                            inst.configurationId, inst.material,
                            PartStamp(*inst.part), bi});
-      capSources.push_back({&bodies, inst.world});
+      capSources.push_back({&bodies, world});
     }
   } else if (state.job) {
     // A job tab ray-traces what it draws: the parts laid out.
