@@ -376,6 +376,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
   stock remesh.
 - **A setup sheet.**
-- **Distance tolerances.** A band is read off a round face's size only
-  ([tolerance bands](operations.md#tolerance-bands)); a slot width or a
-  shoulder-to-seat length is cut as modelled.
+- **Distance tolerances between walls.** A round face's size band and a
+  level floor's or shoulder's distance band are aimed at
+  ([tolerance bands](operations.md#tolerance-bands)); a slot's width between
+  two walls is cut as modelled.

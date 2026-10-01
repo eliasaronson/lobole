@@ -25,39 +25,53 @@ command/document layer, of which the GUI is one client
 
 ## 1. What a shop needs from a drawing
 
-A drawing today has projected views, driven dimensions, callouts, notes, a
-title block and SVG/PDF export. Missing, in the order a shop asks for them:
+A drawing today has projected, section and detail views, driven
+dimensions, callouts, notes, a parts list with balloons, datum features and
+feature control frames, a title block and SVG/PDF export
+([drawings](drawings/README.md)). Missing, in the order a shop asks for
+them:
 
-- **Section and detail views.** A `DrawingView` is an orientation and a
-  rotation on the sheet (plus a projected child); nothing cuts or
-  magnifies.
-- **A parts list and balloons** on an assembly drawing.
-- **Title-block fields** for material, finish and general tolerance
-  (`TitleBlock` holds project, document, author, date and notes), and a
-  revision block.
+- **More view kinds:** broken, crop, offset- and half-section views; a
+  section plane off the seven orientations; a detail boundary other than a
+  circle.
+- **Title-block fields** for finish and a structured general tolerance
+  (`TitleBlock` holds project, document, material, scale, author, date and
+  free-text notes), and a revision block.
 - **Multi-sheet drawings** (a drawing document has one sheet).
-- **Symbols:** GD&T and datum symbols, surface finish, welds.
+- **Symbols:** surface finish and welds; datum targets, composite frames,
+  projected zones and datum modifiers (datum features and single frames
+  exist).
+- Balloons laid out round several views as one problem (each view's ring
+  is placed in turn).
 - **DXF export of a drawing** (`export_drawing` writes SVG and PDF; DXF exists
   only for a sheet-metal flat pattern).
 - Exploded views on a drawing.
 
 ## 2. Making what the modeller designs
 
-- **Threads fully specified:** a thread class that is more than display text,
-  imperial (UNC/UNF) sizes, left-hand threads, and modelled helical thread
-  geometry (the `modeled` flag on a thread is reserved and unimplemented).
-- **CAM operations for holes:** canned drilling cycles (pecking is expanded
-  into plain moves), tapping and thread milling — a hole the app derives as
-  tapped has no operation that taps it.
+- **Threads:** a modelled groove cut to its class rather than the basic
+  profile; modelled threads on generated fasteners; inch fasteners beyond
+  socket head cap screws (nuts, washers, hex heads, UNF) and deriving one
+  from its hole ([holes and threads](modeling/holes-and-threads.md),
+  [parts](parts/README.md)).
+- **CAM for holes:** canned drilling cycles (pecking is expanded into plain
+  moves); tapping (G84) for a machine with a spindle encoder (threads are
+  milled today, [thread mill](cam/operations.md#thread-mill)); multi-tooth
+  thread mills.
+- **Distance tolerances between walls** in CAM: a floor or shoulder is cut
+  to its band ([tolerance bands](cam/operations.md#tolerance-bands)), a
+  slot's width between two walls as modelled.
 - **Cutter radius compensation** (G41/G42) in the posts.
 - **Workholding follow-ons:** generated vises and toe clamps, the spindle nose
   as a collision body, holding the
   part down on 3D operations (tabs are profile-only), and a setup sheet.
-- **Other processes:** turning; laser, plasma and waterjet posts (the posts
-  are milling dialects); nesting sheet blanks.
-- **Procurement data:** a material has appearance, density and FEM constants
-  but no cost, stock form, temper or finish, and a BOM row has no price,
-  supplier, part number or lead time.
+- **Other processes:** lathe turning (4th-axis milling of a turned part
+  exists, [rotary](cam/rotary.md)); laser, plasma and waterjet posts (the
+  posts are milling dialects); nesting sheet blanks.
+- **Procurement data:** a material has a grade (alloy and temper), density
+  and FEM constants but no cost, stock form or finish, and a BOM row has a
+  standard and a designation but no price, supplier, part number or lead
+  time.
 
 ## 3. Assemblies and cross-part design
 
@@ -93,7 +107,8 @@ title block and SVG/PDF export. Missing, in the order a shop asks for them:
 ## 5. Interchange
 
 - **PMI in STEP** (AP242 GD&T and tolerances); tolerances stay in the app.
-- **IGES**, **mesh import beyond STL** (OBJ), and **3MF**.
+- **IGES**, **mesh import beyond STL** (OBJ, PLY and glTF are export-only),
+  and **3MF**.
 
 ## 6. The agent interface
 
@@ -126,8 +141,8 @@ title block and SVG/PDF export. Missing, in the order a shop asks for them:
 - Putting the current selection into an agent's prompt as context.
 - `design_audit`: perturb each parameter and report which perturbations break
   regeneration.
-- Benchmark tasks graded on mechanisms and relations, not only on static
-  geometry and fit.
+- Benchmark tasks graded on relations (gears, racks, cams); mechanisms are
+  graded only on their mates and a motion answer.
 
 ## 7. Platform and presentation
 
@@ -139,8 +154,8 @@ title block and SVG/PDF export. Missing, in the order a shop asks for them:
 - Shaded fill of sketch regions.
 - Glass in the viewport: a per-body transmission override, and panes sorted
   back to front.
-- **Packaging:** deb, rpm, Snap and macOS builds, and a Flathub submission
-  for the existing Flatpak.
+- **Packaging:** deb, rpm, AUR and macOS builds, Windows signing and
+  Netgen, and a Flathub submission for the existing Flatpak.
 
 ## 8. Code structure
 

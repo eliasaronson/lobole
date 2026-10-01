@@ -312,5 +312,8 @@ that is not the active one), GUI
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).
 - Statistical stack-up; geometric (form/position) tolerances.
-- Thread tolerance classes as anything but display text (`Thread.thread_class`).
+- A thread tolerance class driving modelled geometry: `Thread.thread_class`
+  aims the thread mill and sets the verifier's band
+  ([pitch-diameter bands](../modeling/holes-and-threads.md#pitch-diameter-bands)),
+  and a modelled groove is the basic profile.
 - A vendored general-tolerance table (ISO 2768) to seed a distance's band.
