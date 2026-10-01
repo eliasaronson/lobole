@@ -37,9 +37,13 @@ in the file; the UI and expressions show degrees.
 
 `SketchFeature::plane` is stored as a baked value. When `faceRef` is set the
 sketch is attached to a body face and `Execute` re-derives the plane from the
-resolved face every regeneration; when `planeRef` names a datum plane
-earlier in the history the plane is refreshed from it. Either failing to
-resolve is a regeneration error.
+resolved face every regeneration; when `planeRef` names a datum plane,
+another sketch (its plane) or a Frame (its XY plane, X as U) earlier in the
+history the plane is refreshed from it. A reference that is gone,
+suppressed or itself in error is a regeneration error naming it, never a
+fall-back to the last plane; an Extrude or Revolve of a failed sketch fails
+with it. The last two kinds are what a primitive placed on a sketch or a
+frame attaches by ([../modeling/README.md](../modeling/README.md#primitives)).
 
 The plane is an origin, a normal and a `uAxis`; V is normal × uAxis, and
 sketch UV is measured from the origin. A positive extrude runs along the

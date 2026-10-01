@@ -24,6 +24,13 @@ ignored.
   expression, reporting `{feature_id, field, value, variables: [names]}`.
 - Values compared within the model's length tolerance; unitless counts and
   angles compared only against variables of the same kind.
+- **A placement on a world plane while a face lies on it.** A sketch on a
+  base plane, or a primitive placed on Top/Front/Right
+  ([../modeling/README.md](../modeling/README.md#primitives)), whose plane
+  (offset included) coincides with a planar face of the part is reported
+  with that face, `{feature_id, face: {feature_id, element}}`: attached to
+  the face it would follow the part; attached to the world it floats or is
+  buried when the part changes.
 - A `describe` row with `returns`, and a line in the modeling-workflow
   prompt saying to run it after building a part from literals.
 
@@ -42,4 +49,6 @@ feature field walk shared with `extract_variables`, `tools/designer_mcp.py`
 A unit or smoke case: a part with a variable `wall_r = 52` and an extrude
 whose radius is the literal 52 is reported; the same extrude with
 `distance_expr: "wall_r"` is not; a literal 52 with no variable of that value
-is not; a count of 52 teeth is not reported against a length variable.
+is not; a count of 52 teeth is not reported against a length variable. A
+box placed on a datum plane at z = 10 over a 10 mm plate reports the plate's
+top face; the same box placed on that face is not reported.

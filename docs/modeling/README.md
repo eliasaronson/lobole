@@ -110,9 +110,9 @@ The authoritative list, with every field, is `kFeatureTypes` in
 
 | type | what it does |
 |---|---|
-| `Box`, `Sphere`, `Cylinder` | primitives; faces named `<id>/face<i>` |
+| `Box`, `Sphere`, `Cylinder` | a tool, not a stored type: `add_feature` expands one into a Sketch and an Extrude or Revolve ([Primitives](#primitives)) |
 | `Import` | STEP/STL/BREP bodies; centred on their bbox unless `keep_origin` |
-| `Sketch` | 2D profile on a base plane, a `DatumPlane` (`planeRef`) or a body face (`face_ref`); see the sketching area |
+| `Sketch` | 2D profile on a base plane, a `DatumPlane`, another `Sketch`'s plane or a `Frame` (`planeRef`), or a body face (`face_ref`); see the sketching area |
 | `Extrude` | see [Extrude](#extrude) |
 | `Revolve` | profile about an `AxisRef` (`x`, `y`, `z` through the world origin, `sketch_line`, `datum_axis`, `custom {origin, direction}`); `angle_deg`, `symmetric`, `reversed`. The axis must lie in the sketch plane and the profile must not cross it; a joint within 1e-4 mm of it is ON it, so an arc may end on the axis |
 | `DatumPlane` | `offset` from a plane, `angle` about an axis, or `through_points`; sketches that reference it move with it |
@@ -153,6 +153,63 @@ and without the warning the first sign is "no bodies" from `mass_properties`
 with no feature named. Every add and cut result is checked before it is kept
 ([below](#a-boolean-is-checked-before-it-is-kept)); a refused one leaves every
 body as it was.
+
+### Primitives
+
+A Box, Cylinder or Sphere is a one-call tool that stores what a person
+would have drawn: a Sketch on what it is placed on, constrained and
+dimensioned, and an Extrude (a Sphere: a Revolve) of it. A primitive placed
+at a world coordinate followed nothing (a boss at z = 24.7 stayed there when
+the plate became 30), read as a number instead of an intent, and was a
+second dialect a person had to rebuild to edit. It is for a fixture, a
+stand-in or a first rough block; a part is modelled on its faces and planes
+from sketches.
+
+- **It names what it is `on`**, and there is no other placement: a planar
+  face `{feature_id, element}`, `{feature_id}` of a `DatumPlane`, a `Sketch`
+  (its plane) or a `Frame` (its XY plane, X as u: a mate connector), or
+  `"Top"`/`"Front"`/`"Right"`. The sketch attaches the way any sketch does
+  (`face_ref`, `planeRef`, or a baked base plane), so it resolves the
+  reference's exact frame at every regeneration and moves with it. A face's
+  frame is the sketch-on-face frame: origin at its centroid, normal outward,
+  u from `CADShape::FacePlane`. A curved face is refused, pointing at a
+  Frame of it.
+- **The sketch is exactly determined (DOF 0).** Box: a rectangle
+  (`AddRectangle`, or `AddRectangleCentered` when `centered`, the default),
+  a `distance_x`/`distance_y` from the sketch origin to its centre or low
+  corner (`offset` [u, v]), and its width (u) and depth (v); the extrude's
+  distance is the height, along the normal (`reversed` the other way).
+  Cylinder: a circle with a diameter and the two offsets. Sphere: a half disc
+  over the u axis, its arc's ends on the straight side and its centre ON that
+  side (point-on-line, not midpoint, which would be redundant), revolved 360°
+  about that side, so the centre lies on the plane. Every dimension takes an
+  expression (`width_expr`, `offset_expr` [u, v], ...).
+- **Defaults derive from the reference**: half the face's smaller span on a
+  face (`CADShape::FaceExtent` samples its outline in the face frame), a
+  quarter of the part's largest dimension on a plane or a frame. On a plane
+  in an empty part there is nothing to measure, so the RPC refuses and asks
+  for the sizes; the GUI passes the viewport's reach.
+- **One undo step.** `add_feature` adds the sketch, then the solid, and
+  collapses both into one command (`primitive::Add`,
+  `src/core/Primitives.{h,cpp}`). It returns `id`/`index` of the solid
+  (the body's `created_by`) and `ids` [solid, sketch].
+- **Refused, naming what is accepted**: a missing or unknown `on`, the old
+  `position`/`center`/`direction`, an unknown field, a size given as both
+  diameter and radius, a size that is not positive, a feature that is not a
+  plane. `modify_feature` refuses `type: Box|Cylinder|Sphere`; a primitive
+  is changed through its sketch's dimensions or its extrude.
+- **A lost reference is the sketch's error**, never the world plane: a
+  deleted or suppressed datum, sketch or frame ("the plane this sketch is on
+  ... is gone"), a face that no longer resolves. An Extrude or Revolve whose
+  sketch failed fails too, rather than building from the sketch's last plane.
+
+The stored `BoxFeature`, `CylinderFeature` and `SphereFeature`
+(`src/core/Feature.h`) remain for two readers only: documents saved before
+this (they load, regenerate and save as they were; their faces keep the
+names `<id>/face<i>`, and the feature editor still edits one), and core
+tests that want a one-line solid. Nothing an agent or a person reaches
+creates one: not `add_feature`, `modify_feature`, the SDK, the MCP surface
+or the GUI. The saved form did not change, so this is not a format version.
 
 ### Extrude
 
@@ -427,7 +484,8 @@ pieces interfere fails outright.
 | where | what |
 |---|---|
 | `src/core/Document.{h,cpp}` | feature list, parameters, `Regenerate`, cache, rollback |
-| `src/core/Feature.h` | `Feature`, `Body`, `RegenContext`, primitives, `ImportFeature` |
+| `src/core/Feature.h` | `Feature`, `Body`, `RegenContext`, the stored (legacy) primitives, `ImportFeature` |
+| `src/core/Primitives.{h,cpp}` | the Box/Cylinder/Sphere tool: `on`, defaults, the sketch and solid it expands to |
 | `src/core/features/` | one file pair per feature type |
 | `src/core/BodyMode.{h,cpp}` | new-body/add/cut, pattern instance fusing |
 | `src/core/ElementMap.h`, `src/core/ElementHistory.{h,cpp}` | toponaming |
@@ -461,7 +519,7 @@ tooltip. View > Show Element Names labels the hovered face with its name.
 ## Tests
 
 Headless, one file per feature (`tests/test_extrude.cpp`, `test_revolve`,
-`test_datum`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
+`test_datum`, `test_primitives`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
 `test_hole`, `test_worm`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
 `test_derived`, `test_toponaming`); the boolean check in
