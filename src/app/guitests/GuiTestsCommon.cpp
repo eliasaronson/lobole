@@ -291,9 +291,9 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->ItemClick((std::string("//") + popup->Name + "/**/Steel").c_str());
   ctx->Yield(2);
 
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-  const glm::vec3 mid = (lo + hi) * 0.5f;
+  const glm::vec3 mid = (lo + hi) * 0.5;
   s_App->camera->StopAnimation();
   s_App->camera->SetTarget(mid);
   s_App->camera->SetUp(glm::vec3(0, 1, 0));
@@ -614,7 +614,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     // A rib grows a thin web from an open profile down onto a body, so the
     // gate needs both: the default box, and a line hanging above it.
     ToolbarCreateAccept(ctx, "###tb_box");
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     // The web grows along the sketch plane's NORMAL, so the profile has to
     // face the body: a plane hanging above the box, looking down at it.

@@ -721,7 +721,7 @@ TEST_CASE("cam: an elliptical opening can be cut out", "[cam]") {
   ElementRef wall;
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // planar: the plate's own sides and faces
       wall = ElementRef{b.createdBy, name};
@@ -810,7 +810,7 @@ TEST_CASE("cam: a splined opening can be cut out too", "[cam]") {
   ElementRef wall;
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         continue;
       wall = ElementRef{b.createdBy, name};
@@ -850,7 +850,7 @@ TEST_CASE("cam: a tapered wall is still refused", "[cam]") {
     if (contour.ok) {
       // It only counts as a pass if the face really did stay vertical (a
       // draft that OCC declined to apply).
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       REQUIRE(doc.GetBodies()[0].shape.FacePlane(
           *doc.GetBodies()[0].elementMap.Resolve(tapered.name), c, n, u));
       CHECK(std::abs(n.z) < 0.01f);
@@ -892,7 +892,7 @@ TEST_CASE("cam: a depth pass carries on from where the last one stopped",
   // prove nothing.
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // planar
       op.targets.push_back(cam::Target{0, ElementRef{b.createdBy, name}});
@@ -972,7 +972,7 @@ TEST_CASE("cam: a face that points down is not a floor to cut to", "[cam]") {
   ElementRef under;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u) && n.z < -0.99f)
         under = ElementRef{b.createdBy, name};
     }
@@ -1778,7 +1778,7 @@ TEST_CASE("cam: adaptive clears a face turned over, and falls back when it "
   ElementRef floor;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, o, n, u) && n.z < -0.99f &&
           std::abs(o.z - 8.0f) < 1e-3f)
         floor = ElementRef{b.createdBy, name};
@@ -2193,13 +2193,13 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   for (const glm::dvec2& at :
        {glm::dvec2(20.0, 30.0), glm::dvec2(20.0, 0.0), glm::dvec2(0.0, 15.0)}) {
     const ElementRef wall = WallNear(*doc, at.x, at.y);
-    glm::vec3 n(0.0f);
+    glm::dvec3 n(0.0);
     REQUIRE(cam::FaceNormalOf(doc->GetBodies(), wall, n));
     if (!cam::SolveIndexA(glm::dvec3(n), degrees))
       continue; // the X-facing wall: refused, below
     cam::Setup turned = setup;
     turned.rotationA = degrees;
-    glm::vec3 up(0.0f);
+    glm::dvec3 up(0.0);
     REQUIRE(cam::FaceNormalOf(cam::BodiesInSetupFrame(turned, doc->GetBodies()),
                               wall, up));
     INFO("wall at " << at.x << "," << at.y << " A " << degrees);
@@ -2214,11 +2214,11 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   int solved = 0;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), mn(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), mn(0.0), u(0.0);
       if (!b.shape.FacePlane(index, c, mn, u))
         continue;
       const ElementRef face{b.createdBy, name};
-      glm::vec3 n(0.0f);
+      glm::dvec3 n(0.0);
       REQUIRE(cam::FaceNormalOf(
           cam::BodiesInSetupFrame(clamped, doc->GetBodies()), face, n));
       if (!cam::SolveIndexA(glm::dvec3(n), degrees))
@@ -2226,7 +2226,7 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
       solved++;
       cam::Setup turned = clamped;
       turned.rotationA = degrees;
-      glm::vec3 up(0.0f);
+      glm::dvec3 up(0.0);
       REQUIRE(cam::FaceNormalOf(
           cam::BodiesInSetupFrame(turned, doc->GetBodies()), face, up));
       INFO("model normal " << mn.x << " " << mn.y << " " << mn.z << " A "
@@ -3380,12 +3380,12 @@ TEST_CASE("cam probe: what the front_wall section does by depth",
   const std::vector<Body> framed =
       cam::BodiesInSetupFrame(*setup, doc->GetBodies());
   REQUIRE(!framed.empty());
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   bool any = false;
   for (const Body& b : framed) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 bmin(0.0f), bmax(0.0f);
+    glm::dvec3 bmin(0.0), bmax(0.0);
     b.shape.GetBoundingBox(bmin, bmax);
     lo = any ? glm::min(lo, bmin) : bmin;
     hi = any ? glm::max(hi, bmax) : bmax;
@@ -3530,7 +3530,7 @@ TEST_CASE("cam probe: a bore that opens onto an edge", "[.][frontwall]") {
   doc->AddFeature(std::make_unique<ExtrudeFeature>("Bore", sid, 22.0,
                                                    ExtrudeMode::Cut, true));
   REQUIRE(doc->GetBodies().size() == 1);
-  glm::vec3 bmin(0.0f), bmax(0.0f);
+  glm::dvec3 bmin(0.0), bmax(0.0);
   doc->GetBodies()[0].shape.GetBoundingBox(bmin, bmax);
   std::printf("fixture bounds: x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f\n",
               (double)bmin.x, (double)bmax.x, (double)bmin.y, (double)bmax.y,
@@ -3771,7 +3771,7 @@ TEST_CASE("cam: a picked wall is re-resolved at every depth", "[cam]") {
   ElementRef wall;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 centre(0.0f), normal(0.0f), x(0.0f);
+      glm::dvec3 centre(0.0), normal(0.0), x(0.0);
       if (!b.shape.FacePlane(index, centre, normal, x))
         continue;
       if (std::abs(normal.y) > 0.99f && centre.y < -49.0)
@@ -3841,10 +3841,10 @@ std::vector<ElementRef> HoleWalls(const Document& doc) {
   std::vector<std::pair<double, ElementRef>> found;
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // a floor or a wall of the block, not a bore
-      glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+      glm::dvec3 o(0.0), axis(0.0), x(0.0);
       if (!b.shape.FaceAxis(index, o, axis, x))
         continue;
       bool seen = false;

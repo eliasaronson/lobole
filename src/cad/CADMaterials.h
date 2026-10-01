@@ -110,13 +110,13 @@ struct MaterialProperties {
   std::string name;
   // kg/m^3; 0 = unknown, so mass_properties reports no mass rather than a
   // guessed one (DEFAULT deliberately stays 0).
-  float density = 0.0f;
+  double density = 0.0;
   // Linear-elastic properties for FEM (same 0 = unknown convention as
   // density; DEFAULT stays 0 so a study on an unassigned body fails with
   // "material has no stiffness data" rather than guessing).
-  float youngGPa = 0.0f; // Young's modulus, GPa
-  float poisson = 0.0f;  // Poisson's ratio (dimensionless)
-  float yieldMPa = 0.0f; // yield strength, MPa (0 = no factor-of-safety)
+  double youngGPa = 0.0; // Young's modulus, GPa
+  double poisson = 0.0;  // Poisson's ratio (dimensionless)
+  double yieldMPa = 0.0; // yield strength, MPa (0 = no factor-of-safety)
 
   // Procedural surface figure. Both fields are pattern-relative, and are 0
   // exactly when pattern is Flat:

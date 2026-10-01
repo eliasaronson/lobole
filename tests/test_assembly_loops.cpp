@@ -19,15 +19,15 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-glm::mat4 AtX(float x) {
-  return glm::translate(glm::mat4(1.0f), glm::vec3(x, 0.0f, 0.0f));
+glm::dmat4 AtX(double x) {
+  return glm::translate(glm::dmat4(1.0), glm::dvec3(x, 0.0, 0.0));
 }
 
 // A revolute joint about Z between two connector frames, with no flip so its
 // adjustment is exactly Rz(rotation) — the algebra in the four-bar below is
 // then checkable by hand.
-assembly::LoopMate Revolute(uint64_t id, uint64_t a, const glm::mat4& fa,
-                            uint64_t b, const glm::mat4& fb, float seed) {
+assembly::LoopMate Revolute(uint64_t id, uint64_t a, const glm::dmat4& fa,
+                            uint64_t b, const glm::dmat4& fb, double seed) {
   assembly::LoopMate m;
   m.id = id;
   m.type = MateType::Revolute;
@@ -40,8 +40,8 @@ assembly::LoopMate Revolute(uint64_t id, uint64_t a, const glm::mat4& fa,
   return m;
 }
 
-assembly::LoopMate Fastened(uint64_t id, uint64_t a, const glm::mat4& fa,
-                            uint64_t b, const glm::mat4& fb) {
+assembly::LoopMate Fastened(uint64_t id, uint64_t a, const glm::dmat4& fa,
+                            uint64_t b, const glm::dmat4& fb) {
   assembly::LoopMate m;
   m.id = id;
   m.type = MateType::Fastened;
@@ -71,7 +71,7 @@ std::unique_ptr<Document> BuildBox() {
   return doc;
 }
 
-Occurrence MakeOcc(uint64_t partId, glm::vec3 pos, bool fixed = false) {
+Occurrence MakeOcc(uint64_t partId, glm::dvec3 pos, bool fixed = false) {
   Occurrence o;
   o.partId = partId;
   o.position = pos;
@@ -82,7 +82,7 @@ Occurrence MakeOcc(uint64_t partId, glm::vec3 pos, bool fixed = false) {
 // A fastened mate between two occurrence ORIGINS — no geometry to resolve, so
 // several of them between the same pair are exactly consistent by
 // construction. The flange case in miniature.
-Mate OriginMate(uint64_t a, uint64_t b, float offset = 0.0f) {
+Mate OriginMate(uint64_t a, uint64_t b, double offset = 0.0) {
   Mate m;
   m.type = MateType::Fastened;
   m.a.occurrenceId = a;
@@ -103,10 +103,9 @@ Mate OriginMate(uint64_t a, uint64_t b, float offset = 0.0f) {
 TEST_CASE("A loop-free problem never enters the numeric pass",
           "[assembly][solve][loops]") {
   assembly::LoopProblem p;
-  p.mates.push_back(
-      Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f), 0.0f));
+  p.mates.push_back(Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), 0.0));
   p.tree.push_back({0, 10, 20, false});
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   CHECK_FALSE(s.ran);
@@ -117,15 +116,15 @@ TEST_CASE("EvaluateTree places a chain the way the A3 pass does",
           "[assembly][solve][loops]") {
   assembly::LoopProblem p;
   // Ground -> crank about the origin, crank's far end 40 mm out.
-  p.mates.push_back(Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f),
-                             glm::half_pi<float>()));
+  p.mates.push_back(Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0),
+                             glm::half_pi<double>()));
   p.tree.push_back({0, 10, 20, false});
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const auto world = assembly::EvaluateTree(p, p.mates);
   REQUIRE(world.count(20) == 1);
   // A quarter turn about Z takes the crank's local +X to world +Y.
-  const glm::vec3 tip = glm::vec3(world.at(20) * glm::vec4(40, 0, 0, 1));
+  const glm::dvec3 tip = glm::dvec3(world.at(20) * glm::dvec4(40, 0, 0, 1));
   CHECK_THAT(tip.x, WithinAbs(0.0, 1e-4));
   CHECK_THAT(tip.y, WithinAbs(40.0, 1e-4));
 }
@@ -139,18 +138,18 @@ TEST_CASE("A four-bar linkage closes and reports one degree of freedom",
   //   occ 10 ground (fixed)   20 crank   30 coupler   40 rocker
   assembly::LoopProblem p;
   p.mates.push_back( // J1 ground-crank
-      Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f), 0.3f));
+      Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), 0.3));
   p.mates.push_back( // J2 crank-coupler
-      Revolute(2, 20, AtX(40.0f), 30, glm::mat4(1.0f), 0.0f));
+      Revolute(2, 20, AtX(40.0), 30, glm::dmat4(1.0), 0.0));
   p.mates.push_back( // J3 coupler-rocker
-      Revolute(3, 30, AtX(100.0f), 40, AtX(40.0f), 0.0f));
+      Revolute(3, 30, AtX(100.0), 40, AtX(40.0), 0.0));
   p.mates.push_back( // J4 rocker-ground
-      Revolute(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), 0.0f));
+      Revolute(4, 10, AtX(100.0), 40, glm::dmat4(1.0), 0.0));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({1, 20, 30, false});
   p.tree.push_back({2, 30, 40, false});
   p.cut.push_back(3); // J4 closes the loop
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -172,7 +171,7 @@ TEST_CASE("A four-bar linkage closes and reports one degree of freedom",
 
   // Closure: the rocker's ground pivot must sit on the ground pivot at x=100.
   REQUIRE(s.world.count(40) == 1);
-  const glm::vec3 pivot = glm::vec3(s.world.at(40)[3]);
+  const glm::dvec3 pivot = glm::dvec3(s.world.at(40)[3]);
   CHECK_THAT(pivot.x, WithinAbs(100.0, 1e-3));
   CHECK_THAT(pivot.y, WithinAbs(0.0, 1e-3));
   CHECK_THAT(pivot.z, WithinAbs(0.0, 1e-3));
@@ -195,18 +194,18 @@ TEST_CASE("A four-bar seeded on a branch stays on it",
   // the solver must recognise that and leave it alone rather than wander to
   // the crossed branch — "turn the crank and the rocker follows" depends on
   // the solve tracking the configuration it was given.
-  constexpr float kTheta = 0.3f;
+  constexpr double kTheta = 0.3;
   assembly::LoopProblem p;
   p.mates.push_back(
-      Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f), kTheta));
-  p.mates.push_back(Revolute(2, 20, AtX(40.0f), 30, glm::mat4(1.0f), -kTheta));
-  p.mates.push_back(Revolute(3, 30, AtX(100.0f), 40, AtX(40.0f), kTheta));
-  p.mates.push_back(Revolute(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), kTheta));
+      Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), kTheta));
+  p.mates.push_back(Revolute(2, 20, AtX(40.0), 30, glm::dmat4(1.0), -kTheta));
+  p.mates.push_back(Revolute(3, 30, AtX(100.0), 40, AtX(40.0), kTheta));
+  p.mates.push_back(Revolute(4, 10, AtX(100.0), 40, glm::dmat4(1.0), kTheta));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({1, 20, 30, false});
   p.tree.push_back({2, 30, 40, false});
   p.cut.push_back(3);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -214,7 +213,7 @@ TEST_CASE("A four-bar seeded on a branch stays on it",
   CHECK(s.dof == 1);
   CHECK(s.conflicting.empty());
 
-  const float t1 = s.solved[0].rotation;
+  const double t1 = s.solved[0].rotation;
   CHECK_THAT(t1, WithinAbs(kTheta, 1e-4));
   CHECK_THAT(s.solved[1].rotation, WithinAbs(-kTheta, 1e-4));
   CHECK_THAT(s.solved[2].rotation, WithinAbs(kTheta, 1e-4));
@@ -222,7 +221,7 @@ TEST_CASE("A four-bar seeded on a branch stays on it",
 
   // The coupler stays horizontal, which is what makes it a parallelogram.
   REQUIRE(s.world.count(30) == 1);
-  const glm::vec3 along = glm::vec3(s.world.at(30) * glm::vec4(1, 0, 0, 0));
+  const glm::dvec3 along = glm::dvec3(s.world.at(30) * glm::dvec4(1, 0, 0, 0));
   CHECK_THAT(along.x, WithinAbs(1.0, 1e-4));
   CHECK_THAT(along.y, WithinAbs(0.0, 1e-4));
 }
@@ -232,13 +231,13 @@ TEST_CASE("A redundant but consistent mate is named, not failed",
   // Two parts held by three identical fastened mates: the flange with three
   // bolts. Nothing is free, nothing conflicts, two mates say nothing new.
   assembly::LoopProblem p;
-  p.mates.push_back(Fastened(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f)));
-  p.mates.push_back(Fastened(2, 10, AtX(25.0f), 20, AtX(25.0f)));
-  p.mates.push_back(Fastened(3, 10, AtX(50.0f), 20, AtX(50.0f)));
+  p.mates.push_back(Fastened(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0)));
+  p.mates.push_back(Fastened(2, 10, AtX(25.0), 20, AtX(25.0)));
+  p.mates.push_back(Fastened(3, 10, AtX(50.0), 20, AtX(50.0)));
   p.tree.push_back({0, 10, 20, false});
   p.cut.push_back(1);
   p.cut.push_back(2);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -262,21 +261,20 @@ TEST_CASE("A hinge hanging off a loop keeps the angle it was posed at",
   // satisfied 0 = 0: the lid stood 443 degrees open while the loop closed to
   // a ten-thousandth of a millimetre.
   assembly::LoopProblem p;
-  p.mates.push_back(Fastened(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f)));
-  p.mates.push_back(Fastened(2, 10, AtX(25.0f), 20, AtX(25.0f)));
-  p.mates.push_back(
-      Revolute(3, 30, glm::mat4(1.0f), 10, glm::mat4(1.0f), 0.0f));
+  p.mates.push_back(Fastened(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0)));
+  p.mates.push_back(Fastened(2, 10, AtX(25.0), 20, AtX(25.0)));
+  p.mates.push_back(Revolute(3, 30, glm::dmat4(1.0), 10, glm::dmat4(1.0), 0.0));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({2, 10, 30, true});
   p.cut.push_back(1);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
   CHECK(s.converged);
   CHECK_THAT(s.solved[2].rotation, WithinAbs(0.0, 1e-9));
   // And a pose that is NOT zero is just as much a pose.
-  p.mates[2].rotation = 0.75f;
+  p.mates[2].rotation = 0.75;
   const assembly::LoopSolution posed = assembly::SolveLoops(p);
   REQUIRE(posed.unavailable.empty());
   CHECK(posed.converged);
@@ -287,11 +285,11 @@ TEST_CASE("A loop that cannot close reports how far off it is",
           "[assembly][solve][loops]") {
   // Same pair, two fastened mates demanding placements 10 mm apart.
   assembly::LoopProblem p;
-  p.mates.push_back(Fastened(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f)));
-  p.mates.push_back(Fastened(2, 10, AtX(10.0f), 20, glm::mat4(1.0f)));
+  p.mates.push_back(Fastened(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0)));
+  p.mates.push_back(Fastened(2, 10, AtX(10.0), 20, glm::dmat4(1.0)));
   p.tree.push_back({0, 10, 20, false});
   p.cut.push_back(1);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -314,14 +312,14 @@ TEST_CASE("A slider loop resolves its own offset", "[assembly][solve][loops]") {
   slide.aOcc = 10;
   slide.bOcc = 20;
   slide.flipped = false;
-  slide.offset = 0.0f; // seeded wrong on purpose
+  slide.offset = 0.0; // seeded wrong on purpose
   p.mates.push_back(slide);
   p.mates.push_back(
-      Fastened(2, 10, glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, 12.0f)),
-               20, glm::mat4(1.0f)));
+      Fastened(2, 10, glm::translate(glm::dmat4(1.0), glm::dvec3(0, 0, 12.0)),
+               20, glm::dmat4(1.0)));
   p.tree.push_back({0, 10, 20, false});
   p.cut.push_back(1);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -372,8 +370,8 @@ TEST_CASE("Solve still errors when a loop genuinely conflicts",
   AssemblyDocument asmDoc;
   const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
   const uint64_t b = asmDoc.AddOccurrence(MakeOcc(1, {50, 50, 50}));
-  asmDoc.AddMate(OriginMate(a, b, 0.0f));
-  const uint64_t bad = asmDoc.AddMate(OriginMate(a, b, 7.0f));
+  asmDoc.AddMate(OriginMate(a, b, 0.0));
+  const uint64_t bad = asmDoc.AddMate(OriginMate(a, b, 7.0));
 
   const assembly::SolveReport r = assembly::Solve(asmDoc, resolve);
 
@@ -414,7 +412,7 @@ TEST_CASE("Two rails on one slide leave a degree of freedom",
   // leaves one free DOF (slide them together) — and the cut mate is only
   // PARTLY dependent (five of its six rows are structurally zero), so it must
   // not be reported redundant either.
-  const auto rail = [](uint64_t id, float seed) {
+  const auto rail = [](uint64_t id, double seed) {
     assembly::LoopMate m;
     m.id = id;
     m.type = MateType::Slider;
@@ -425,11 +423,11 @@ TEST_CASE("Two rails on one slide leave a degree of freedom",
     return m;
   };
   assembly::LoopProblem p;
-  p.mates.push_back(rail(1, 0.0f));
-  p.mates.push_back(rail(2, 10.0f)); // disagrees with the first on purpose
+  p.mates.push_back(rail(1, 0.0));
+  p.mates.push_back(rail(2, 10.0)); // disagrees with the first on purpose
   p.tree.push_back({0, 10, 20, false});
   p.cut.push_back(1);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -447,7 +445,7 @@ TEST_CASE("Independent loops are solved independently",
   // occurrence, so they are two components and must not be assembled into one
   // system — a Jacobian spanning both is quadratic in the size of the model
   // for loops that are each four parts wide.
-  const auto rail = [](uint64_t id, uint64_t a, uint64_t b, float seed) {
+  const auto rail = [](uint64_t id, uint64_t a, uint64_t b, double seed) {
     assembly::LoopMate m;
     m.id = id;
     m.type = MateType::Slider;
@@ -458,16 +456,16 @@ TEST_CASE("Independent loops are solved independently",
     return m;
   };
   assembly::LoopProblem p;
-  p.mates.push_back(rail(1, 10, 20, 0.0f));
-  p.mates.push_back(rail(2, 10, 20, 10.0f));
-  p.mates.push_back(rail(3, 30, 40, 0.0f));
-  p.mates.push_back(rail(4, 30, 40, -6.0f));
+  p.mates.push_back(rail(1, 10, 20, 0.0));
+  p.mates.push_back(rail(2, 10, 20, 10.0));
+  p.mates.push_back(rail(3, 30, 40, 0.0));
+  p.mates.push_back(rail(4, 30, 40, -6.0));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({2, 30, 40, false});
   p.cut.push_back(1);
   p.cut.push_back(3);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
-  p.anchor.emplace_back(30, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  p.anchor.emplace_back(30, glm::dmat4(1.0));
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
   REQUIRE(s.unavailable.empty());
@@ -512,8 +510,8 @@ TEST_CASE("A loop leaves a mate tree elsewhere in the document alone",
   const Occurrence* od = asmDoc.FindById(d);
   REQUIRE(ob != nullptr);
   REQUIRE(od != nullptr);
-  CHECK(glm::length(ob->position) < 1e-3f);
-  CHECK(glm::length(od->position) < 1e-3f);
+  CHECK(glm::length(ob->position) < 1e-3);
+  CHECK(glm::length(od->position) < 1e-3);
 }
 
 TEST_CASE("A driven DOF is HELD while the loop closes around it",
@@ -528,16 +526,16 @@ TEST_CASE("A driven DOF is HELD while the loop closes around it",
   // The same four-bar, with J1 driven to a quarter turn.
   const auto build = [](double drive, bool pin) {
     assembly::LoopProblem p;
-    p.mates.push_back(Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f),
-                               static_cast<float>(drive)));
-    p.mates.push_back(Revolute(2, 20, AtX(40.0f), 30, glm::mat4(1.0f), 0.0f));
-    p.mates.push_back(Revolute(3, 30, AtX(100.0f), 40, AtX(40.0f), 0.0f));
-    p.mates.push_back(Revolute(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), 0.0f));
+    p.mates.push_back(
+        Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), drive));
+    p.mates.push_back(Revolute(2, 20, AtX(40.0), 30, glm::dmat4(1.0), 0.0));
+    p.mates.push_back(Revolute(3, 30, AtX(100.0), 40, AtX(40.0), 0.0));
+    p.mates.push_back(Revolute(4, 10, AtX(100.0), 40, glm::dmat4(1.0), 0.0));
     p.tree.push_back({0, 10, 20, false});
     p.tree.push_back({1, 20, 30, false});
     p.tree.push_back({2, 30, 40, false});
     p.cut.push_back(3);
-    p.anchor.emplace_back(10, glm::mat4(1.0f));
+    p.anchor.emplace_back(10, glm::dmat4(1.0));
     if (pin)
       p.pinned.push_back({0, MateDof::Rotation, drive});
     return p;
@@ -556,7 +554,7 @@ TEST_CASE("A driven DOF is HELD while the loop closes around it",
     // are correct, so what is pinned is the closure — the rocker's ground
     // pivot back on the ground pivot — not which mode it landed in.
     REQUIRE(s.world.count(40) == 1);
-    const glm::vec3 pivot = glm::vec3(s.world.at(40)[3]);
+    const glm::dvec3 pivot = glm::dvec3(s.world.at(40)[3]);
     CHECK_THAT(pivot.x, WithinAbs(100.0, 1e-3));
     CHECK_THAT(pivot.y, WithinAbs(0.0, 1e-3));
   }
@@ -576,8 +574,8 @@ TEST_CASE("A driven DOF is HELD while the loop closes around it",
 
 namespace {
 
-glm::mat4 Tilted(glm::vec3 axis, float degrees) {
-  return glm::rotate(glm::mat4(1.0f), glm::radians(degrees),
+glm::dmat4 Tilted(glm::dvec3 axis, double degrees) {
+  return glm::rotate(glm::dmat4(1.0), glm::radians(degrees),
                      glm::normalize(axis));
 }
 
@@ -590,25 +588,24 @@ glm::mat4 Tilted(glm::vec3 axis, float degrees) {
 //
 // `fault` is composed onto one connector frame; index = mate, side = a|b.
 assembly::LoopProblem CrankRocker(size_t faultMate = 99, char side = 'a',
-                                  const glm::mat4& fault = glm::mat4(1.0f)) {
+                                  const glm::dmat4& fault = glm::dmat4(1.0)) {
   assembly::LoopProblem p;
-  p.mates.push_back(
-      Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f), 1.2f));
-  p.mates.push_back(Revolute(2, 20, AtX(30.0f), 30, glm::mat4(1.0f), -0.8f));
-  p.mates.push_back(Revolute(3, 30, AtX(90.0f), 40, AtX(60.0f), 1.0f));
-  p.mates.push_back(Revolute(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), 1.0f));
+  p.mates.push_back(Revolute(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), 1.2));
+  p.mates.push_back(Revolute(2, 20, AtX(30.0), 30, glm::dmat4(1.0), -0.8));
+  p.mates.push_back(Revolute(3, 30, AtX(90.0), 40, AtX(60.0), 1.0));
+  p.mates.push_back(Revolute(4, 10, AtX(100.0), 40, glm::dmat4(1.0), 1.0));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({1, 20, 30, false});
   p.tree.push_back({2, 30, 40, false});
   p.cut.push_back(3);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
   // Seed at a closed pose of the CORRECT linkage, as a document that was
   // right until one connector moved would be.
   const assembly::LoopSolution closed = assembly::SolveLoops(p);
   for (size_t i = 0; i < p.mates.size(); i++)
     p.mates[i].rotation = closed.solved[i].rotation;
   if (faultMate < p.mates.size()) {
-    glm::mat4& f = side == 'b' ? p.mates[faultMate].fb : p.mates[faultMate].fa;
+    glm::dmat4& f = side == 'b' ? p.mates[faultMate].fb : p.mates[faultMate].fa;
     f = f * fault;
   }
   p.diagnose = true;
@@ -625,7 +622,7 @@ TEST_CASE("A tilted tree revolute is named, not the cut mate that fails",
   // unknowns as equations — but only as a rigid spatial linkage at one
   // pose. Undoing the fault at J2 gives back the four-bar's one DOF.
   const assembly::LoopSolution s =
-      assembly::SolveLoops(CrankRocker(1, 'a', Tilted({0, 1, 0}, 30.0f)));
+      assembly::SolveLoops(CrankRocker(1, 'a', Tilted({0, 1, 0}, 30.0)));
   REQUIRE(s.unavailable.empty());
   CHECK_FALSE(s.converged);
   REQUIRE(s.conflicting.size() == 1);
@@ -650,7 +647,7 @@ TEST_CASE("The diagnosis finds a tilt on either connector of any joint",
           "[assembly][solve][loops][diagnose]") {
   SECTION("the cut mate's own connector") {
     const assembly::LoopSolution s =
-        assembly::SolveLoops(CrankRocker(3, 'a', Tilted({1, 1, 0}, 30.0f)));
+        assembly::SolveLoops(CrankRocker(3, 'a', Tilted({1, 1, 0}, 30.0)));
     REQUIRE(s.diagnoses.size() == 1);
     REQUIRE(s.diagnoses[0].suspects.size() == 1);
     CHECK(s.diagnoses[0].suspects[0].mate == 4);
@@ -660,7 +657,7 @@ TEST_CASE("The diagnosis finds a tilt on either connector of any joint",
     // The rocker's end of J3. Tilting only A sides named J1 and J2 here —
     // both wrong — because neither can make the axes parallel again.
     const assembly::LoopSolution s =
-        assembly::SolveLoops(CrankRocker(2, 'b', Tilted({0, 1, 0}, 20.0f)));
+        assembly::SolveLoops(CrankRocker(2, 'b', Tilted({0, 1, 0}, 20.0)));
     REQUIRE(s.diagnoses.size() == 1);
     REQUIRE(s.diagnoses[0].suspects.size() == 1);
     CHECK(s.diagnoses[0].suspects[0].mate == 3);
@@ -673,7 +670,7 @@ TEST_CASE("The diagnosis finds a tilt on either connector of any joint",
     // as J1's crank connector turned the same way: both lie on that line.
     // Two suspects, and neither is claimed.
     const assembly::LoopSolution s =
-        assembly::SolveLoops(CrankRocker(1, 'a', Tilted({1, 0, 0}, 30.0f)));
+        assembly::SolveLoops(CrankRocker(1, 'a', Tilted({1, 0, 0}, 30.0)));
     REQUIRE(s.diagnoses.size() == 1);
     const auto& sus = s.diagnoses[0].suspects;
     REQUIRE(sus.size() == 2);
@@ -698,10 +695,10 @@ TEST_CASE("A rotation mismatch at one point names every joint that absorbs it",
   // ground-side connector is the same correction: the numbers cannot tell
   // them apart, and the diagnosis says so rather than picking one.
   assembly::LoopProblem p;
-  const glm::mat4 I(1.0f);
-  p.mates.push_back(Revolute(1, 10, I, 20, I, 0.0f));
-  p.mates.push_back(Revolute(2, 20, I, 30, I, 0.0f));
-  p.mates.push_back(Revolute(3, 10, Tilted({1, 0, 0}, 30.0f), 30, I, 0.0f));
+  const glm::dmat4 I(1.0);
+  p.mates.push_back(Revolute(1, 10, I, 20, I, 0.0));
+  p.mates.push_back(Revolute(2, 20, I, 30, I, 0.0));
+  p.mates.push_back(Revolute(3, 10, Tilted({1, 0, 0}, 30.0), 30, I, 0.0));
   p.tree.push_back({0, 10, 20, false});
   p.tree.push_back({1, 20, 30, false});
   p.cut.push_back(2);
@@ -726,7 +723,7 @@ TEST_CASE("A translation fault is not blamed on any axis",
   // rocker's plane back on the ground's, so there is no suspect and the
   // message stays the plain one.
   const assembly::LoopSolution s = assembly::SolveLoops(CrankRocker(
-      3, 'b', glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, 5.0f))));
+      3, 'b', glm::translate(glm::dmat4(1.0), glm::dvec3(0, 0, 5.0))));
   REQUIRE(s.unavailable.empty());
   CHECK_FALSE(s.converged);
   CHECK_THAT(s.residualMm, WithinAbs(5.0, 1e-3));
@@ -741,13 +738,13 @@ TEST_CASE("Each conflicting mate reports its own residual",
   // One pair, three fastened mates: the first places it, the other two
   // demand 7 mm and 3 mm. Each is off by its own amount, not the worst.
   assembly::LoopProblem p;
-  p.mates.push_back(Fastened(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f)));
-  p.mates.push_back(Fastened(2, 10, AtX(7.0f), 20, glm::mat4(1.0f)));
-  p.mates.push_back(Fastened(3, 10, AtX(3.0f), 20, glm::mat4(1.0f)));
+  p.mates.push_back(Fastened(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0)));
+  p.mates.push_back(Fastened(2, 10, AtX(7.0), 20, glm::dmat4(1.0)));
+  p.mates.push_back(Fastened(3, 10, AtX(3.0), 20, glm::dmat4(1.0)));
   p.tree.push_back({0, 10, 20, false});
   p.cut.push_back(1);
   p.cut.push_back(2);
-  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
   p.diagnose = true;
 
   const assembly::LoopSolution s = assembly::SolveLoops(p);
@@ -768,7 +765,7 @@ TEST_CASE("Each conflicting mate reports its own residual",
 namespace {
 
 // A link part: nothing but named Frame features, which is all a mate needs.
-std::unique_ptr<Document> Link(const std::vector<glm::vec3>& origins) {
+std::unique_ptr<Document> Link(const std::vector<glm::dvec3>& origins) {
   auto doc = std::make_unique<Document>();
   for (size_t i = 0; i < origins.size(); i++) {
     auto fr = std::make_unique<FrameFeature>("f" + std::to_string(i),
@@ -836,10 +833,10 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
   const uint64_t cut = asmDoc.AddMate(seed);
   // Start the crank up and the rocker back so the solve lands on an open
   // (non-folded) pose.
-  asmDoc.GetMates()[0].rotation = 1.2f;
-  asmDoc.GetMates()[1].rotation = -0.8f;
-  asmDoc.GetMates()[2].rotation = 1.0f;
-  asmDoc.GetMates()[3].rotation = 1.0f;
+  asmDoc.GetMates()[0].rotation = 1.2;
+  asmDoc.GetMates()[1].rotation = -0.8;
+  asmDoc.GetMates()[2].rotation = 1.0;
+  asmDoc.GetMates()[3].rotation = 1.0;
 
   // Built right: it closes, and the diagnosis has nothing to say.
   const assembly::SolveReport ok = assembly::Solve(asmDoc, resolve);
@@ -856,7 +853,7 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
   const auto worldFrame = [&](uint64_t occ, size_t part, size_t i) {
     const Occurrence* o = asmDoc.FindById(occ);
     REQUIRE(o != nullptr);
-    return glm::translate(glm::mat4(1.0f), o->position) *
+    return glm::translate(glm::dmat4(1.0), o->position) *
            glm::mat4_cast(o->orientation) * FrameOf(*parts[part], i).Matrix();
   };
   const struct {
@@ -869,18 +866,18 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
                 {k, 2, 1, r, 3, 1},
                 {g, 0, 1, r, 3, 0}};
   for (const auto& j : joints) {
-    const glm::mat4 a = worldFrame(j.oa, j.pa, j.fa);
-    const glm::mat4 b = worldFrame(j.ob, j.pb, j.fb);
+    const glm::dmat4 a = worldFrame(j.oa, j.pa, j.fa);
+    const glm::dmat4 b = worldFrame(j.ob, j.pb, j.fb);
     INFO("joint " << j.oa << "/" << j.fa << " to " << j.ob << "/" << j.fb);
-    CHECK(glm::length(glm::vec3(a[3]) - glm::vec3(b[3])) < 1e-3f);
-    CHECK(glm::dot(glm::vec3(a[2]), glm::vec3(b[2])) > 0.9999f);
+    CHECK(glm::length(glm::dvec3(a[3]) - glm::dvec3(b[3])) < 1e-3);
+    CHECK(glm::dot(glm::dvec3(a[2]), glm::dvec3(b[2])) > 0.9999);
   }
 
   // Now the crank pin's frame is tilted 30 degrees about its Y.
   FrameFeature& pin = FrameOf(*crank, 1);
-  const float t = glm::radians(30.0f);
-  pin.zAxis = glm::vec3(std::sin(t), 0.0f, std::cos(t));
-  pin.xAxis = glm::vec3(std::cos(t), 0.0f, -std::sin(t));
+  const double t = glm::radians(30.0);
+  pin.zAxis = glm::dvec3(std::sin(t), 0.0, std::cos(t));
+  pin.xAxis = glm::dvec3(std::cos(t), 0.0, -std::sin(t));
   crank->Regenerate();
 
   const assembly::SolveReport bad = assembly::Solve(asmDoc, resolve);

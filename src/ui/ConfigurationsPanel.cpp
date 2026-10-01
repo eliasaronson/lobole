@@ -140,7 +140,7 @@ void DrawAssemblyConfigs(AppState& state) {
       auto it =
           std::find_if(cc.mateOverrides.begin(), cc.mateOverrides.end(),
                        [&](const MateOverride& o) { return o.mate == mt.id; });
-      std::optional<float>* slot =
+      std::optional<double>* slot =
           it == cc.mateOverrides.end()
               ? nullptr
               : (rotation ? &it->rotation : &it->offset);
@@ -176,7 +176,7 @@ void DrawAssemblyConfigs(AppState& state) {
         if (ExprDragDouble(state, vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0,
                            0.0, rotation ? "%.2f deg" : "%.3f mm")) {
           SnapshotAssembly(state);
-          *slot = static_cast<float>(rotation ? angles::ToRadians(v) : v);
+          *slot = rotation ? angles::ToRadians(v) : v;
           changed = true;
         }
       }

@@ -296,7 +296,7 @@ TEST_CASE("cam rotary: a picked face bounds the pass along the axis", "[cam]") {
   std::vector<std::pair<double, double>> spans;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, o, n, u))
         continue;
       cam::Target target;

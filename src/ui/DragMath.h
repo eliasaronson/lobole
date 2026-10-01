@@ -64,11 +64,10 @@ inline double SnapLength(double v, bool snap) {
 }
 
 // The same, for the callers whose angle is radians (the mate DOFs are).
-inline float SnapAngleRad(float rad, bool snap) {
+inline double SnapAngleRad(double rad, bool snap) {
   if (!snap)
     return rad;
-  return static_cast<float>(
-      glm::radians(SnapAngleDeg(glm::degrees(static_cast<double>(rad)), snap)));
+  return glm::radians(SnapAngleDeg(glm::degrees(rad), snap));
 }
 
 } // namespace ui

@@ -15,7 +15,7 @@ using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 namespace {
-double PolylineLength(const std::vector<glm::vec3>& p) {
+double PolylineLength(const std::vector<glm::dvec3>& p) {
   double len = 0.0;
   for (size_t i = 1; i < p.size(); i++)
     len += glm::length(p[i] - p[i - 1]);
@@ -38,8 +38,8 @@ TEST_CASE("3D fit-spline interpolates through its points", "[curve3d]") {
   const auto& poly = c->Polyline();
   REQUIRE(poly.size() >= 2);
   // A fit spline passes through its first and last fit points exactly.
-  CHECK(glm::length(poly.front() - glm::vec3(0, 0, 0)) < 1e-4f);
-  CHECK(glm::length(poly.back() - glm::vec3(3, 3, 3)) < 1e-4f);
+  CHECK(glm::length(poly.front() - glm::dvec3(0, 0, 0)) < 1e-4);
+  CHECK(glm::length(poly.back() - glm::dvec3(3, 3, 3)) < 1e-4);
   CHECK_FALSE(c->EdgeShape().IsValid() == false); // built a real edge
 }
 
@@ -57,7 +57,7 @@ TEST_CASE("Helix has the expected height and length", "[curve3d]") {
   const auto& poly = c->Polyline();
   REQUIRE(poly.size() >= 2);
   // Starts on the reference X direction, one radius out.
-  CHECK(glm::length(poly.front() - glm::vec3(2, 0, 0)) < 1e-3f);
+  CHECK(glm::length(poly.front() - glm::dvec3(2, 0, 0)) < 1e-3);
   // Total rise = turns * pitch.
   CHECK_THAT(poly.back().z, WithinRel(3.0, 1e-2));
   // Length = turns * sqrt((2*pi*r)^2 + pitch^2).
@@ -78,8 +78,8 @@ TEST_CASE("Left-handed helix winds the opposite way", "[curve3d]") {
     return c->Polyline().back();
   };
   // After a quarter turn: RH goes to +Y, LH to -Y (both rise in +Z).
-  CHECK(build(true).y > 0.5f);
-  CHECK(build(false).y < -0.5f);
+  CHECK(build(true).y > 0.5);
+  CHECK(build(false).y < -0.5);
 }
 
 TEST_CASE("Control-poly spline is clamped to its end poles", "[curve3d]") {
@@ -92,8 +92,8 @@ TEST_CASE("Control-poly spline is clamped to its end poles", "[curve3d]") {
   REQUIRE(c->GetError().empty());
   const auto& poly = c->Polyline();
   REQUIRE(poly.size() >= 2);
-  CHECK(glm::length(poly.front() - glm::vec3(0, 0, 0)) < 1e-4f);
-  CHECK(glm::length(poly.back() - glm::vec3(5, 0, 2)) < 1e-4f);
+  CHECK(glm::length(poly.front() - glm::dvec3(0, 0, 0)) < 1e-4);
+  CHECK(glm::length(poly.back() - glm::dvec3(5, 0, 2)) < 1e-4);
 }
 
 TEST_CASE("Degenerate curves fail cleanly", "[curve3d]") {
@@ -130,8 +130,8 @@ TEST_CASE("Curve3D round-trips through JSON", "[curve3d]") {
   auto* cv = dynamic_cast<CurveFeature*>(back.get());
   REQUIRE(cv);
   CHECK(cv->kind == Curve3DKind::Helix);
-  CHECK(cv->axisOrigin == glm::vec3(1, 2, 3));
-  CHECK(cv->axisDir == glm::vec3(0, 1, 0));
+  CHECK(cv->axisOrigin == glm::dvec3(1, 2, 3));
+  CHECK(cv->axisDir == glm::dvec3(0, 1, 0));
   CHECK_THAT(cv->radius, WithinAbs(2.5, 1e-9));
   CHECK_THAT(cv->pitch, WithinAbs(1.5, 1e-9));
   CHECK_THAT(cv->turns, WithinAbs(4.0, 1e-9));
@@ -146,7 +146,7 @@ TEST_CASE("Curve3D round-trips through JSON", "[curve3d]") {
   REQUIRE(cv2);
   CHECK(cv2->points.size() == 3);
   CHECK(cv2->closed);
-  CHECK(cv2->points[1] == glm::vec3(1, 1, 1));
+  CHECK(cv2->points[1] == glm::dvec3(1, 1, 1));
   delete cv2;
 }
 
@@ -269,7 +269,7 @@ TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {
 }
 
 TEST_CASE("Helix start_deg turns its start round the axis", "[curve3d]") {
-  const auto start = [](glm::vec3 axis, double deg, bool rh = true) {
+  const auto start = [](glm::dvec3 axis, double deg, bool rh = true) {
     Document doc;
     auto cv = std::make_unique<CurveFeature>("H", Curve3DKind::Helix);
     cv->axisOrigin = {0, 0, 0};
@@ -284,24 +284,24 @@ TEST_CASE("Helix start_deg turns its start round the axis", "[curve3d]") {
     return c->Polyline().front();
   };
   // Unchanged default: a +Z axis starts on +X.
-  CHECK(glm::length(start({0, 0, 1}, 0.0) - glm::vec3(2, 0, 0)) < 1e-3f);
+  CHECK(glm::length(start({0, 0, 1}, 0.0) - glm::dvec3(2, 0, 0)) < 1e-3);
   // Right-handed about +Z: 90 degrees is +Y, 190 is just past -X.
-  CHECK(glm::length(start({0, 0, 1}, 90.0) - glm::vec3(0, 2, 0)) < 1e-3f);
-  const glm::vec3 p = start({0, 0, 1}, 190.0);
+  CHECK(glm::length(start({0, 0, 1}, 90.0) - glm::dvec3(0, 2, 0)) < 1e-3);
+  const glm::dvec3 p = start({0, 0, 1}, 190.0);
   CHECK_THAT(std::atan2(p.y, p.x) * 180.0 / M_PI, WithinAbs(-170.0, 1e-2));
   // The start does not depend on the winding.
-  CHECK(glm::length(start({0, 0, 1}, 90.0, false) - glm::vec3(0, 2, 0)) <
-        1e-3f);
+  CHECK(glm::length(start({0, 0, 1}, 90.0, false) - glm::dvec3(0, 2, 0)) <
+        1e-3);
   // The documented references for the world axes.
-  CHECK(glm::distance(glm::vec3(HelixReference({0, 0, -1})),
-                      glm::vec3(-1, 0, 0)) < 1e-9f);
-  CHECK(glm::distance(glm::vec3(HelixReference({1, 0, 0})),
-                      glm::vec3(0, 0, 1)) < 1e-9f);
-  CHECK(glm::distance(glm::vec3(HelixReference({0, 1, 0})),
-                      glm::vec3(0, 0, 1)) < 1e-9f);
-  CHECK(glm::distance(glm::vec3(HelixReference({0, -1, 0})),
-                      glm::vec3(0, 0, -1)) < 1e-9f);
-  CHECK(glm::length(start({0, 1, 0}, 0.0) - glm::vec3(0, 0, 2)) < 1e-3f);
+  CHECK(glm::distance(glm::dvec3(HelixReference({0, 0, -1})),
+                      glm::dvec3(-1, 0, 0)) < 1e-9);
+  CHECK(glm::distance(glm::dvec3(HelixReference({1, 0, 0})),
+                      glm::dvec3(0, 0, 1)) < 1e-9);
+  CHECK(glm::distance(glm::dvec3(HelixReference({0, 1, 0})),
+                      glm::dvec3(0, 0, 1)) < 1e-9);
+  CHECK(glm::distance(glm::dvec3(HelixReference({0, -1, 0})),
+                      glm::dvec3(0, 0, -1)) < 1e-9);
+  CHECK(glm::length(start({0, 1, 0}, 0.0) - glm::dvec3(0, 0, 2)) < 1e-3);
 }
 
 TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
@@ -328,5 +328,5 @@ TEST_CASE("Helix start_deg is an expression and round-trips", "[curve3d]") {
   cv2->startDegExpr = "phase + 15"; // 90
   CurveFeature* c = AddCurve(doc, std::move(cv2));
   REQUIRE(doc.Regenerate());
-  CHECK(glm::length(c->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3f);
+  CHECK(glm::length(c->Polyline().front() - glm::dvec3(0, 2, 0)) < 1e-3);
 }

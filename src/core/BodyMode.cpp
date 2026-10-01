@@ -4,7 +4,6 @@
 #include "core/ElementHistory.h"
 
 #include <BOPTools_AlgoTools3D.hxx>
-#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRep_Tool.hxx>
@@ -19,15 +18,14 @@
 #include <gp_Pnt2d.hxx>
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 
 namespace {
 // Do two axis-aligned bounding boxes overlap?
-bool BoxesOverlap(const glm::vec3& minA, const glm::vec3& maxA,
-                  const glm::vec3& minB, const glm::vec3& maxB) {
+bool BoxesOverlap(const glm::dvec3& minA, const glm::dvec3& maxA,
+                  const glm::dvec3& minB, const glm::dvec3& maxB) {
   return minA.x <= maxB.x && maxA.x >= minB.x && minA.y <= maxB.y &&
          maxA.y >= minB.y && minA.z <= maxB.z && maxA.z >= minB.z;
 }
@@ -81,7 +79,7 @@ std::string At(const gp_Pnt& p) {
 }
 
 Bnd_Box BoxOf(const CADShape& shape) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   shape.GetBoundingBox(lo, hi); // memoised on the shape
   Bnd_Box box;
   box.Update(lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
@@ -316,7 +314,7 @@ std::string Mm(double v) {
 
 double FuzzyTolerance(const CADShape& target, const CADShape& tool) {
   const auto diag = [](const CADShape& s) {
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     s.GetBoundingBox(lo, hi);
     return static_cast<double>(glm::length(hi - lo));
   };
@@ -398,7 +396,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // A reference body (a Derived ghost) is never a target: the first solid
     // drawn on a derived face becomes this part's own body, which is the
     // whole point of drawing there.
-    glm::vec3 pmin, pmax;
+    glm::dvec3 pmin, pmax;
     shape.GetBoundingBox(pmin, pmax);
     int target = -1;
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
@@ -406,7 +404,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
         continue;
       if (target < 0)
         target = i; // the last non-reference body, unless one overlaps
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (BoxesOverlap(pmin, pmax, bmin, bmax)) {
         target = i;
@@ -470,7 +468,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
       if (i == target || bodies[i].reference)
         continue;
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (!BoxesOverlap(pmin, pmax, bmin, bmax))
         continue;
@@ -590,50 +588,6 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
   }
   }
   return false;
-}
-
-double CoplanarStartSlack(const std::vector<Body>& bodies,
-                          const glm::dvec3& origin, const glm::dvec3& sweep,
-                          bool cut) {
-  const double len = glm::length(sweep);
-  if (len < 1e-12)
-    return 0.0;
-  const glm::dvec3 dir = sweep / len;
-  // Single-precision rounding at the plane's largest coordinate, and a
-  // little more for the arithmetic that placed the face.
-  const double scale = std::max(
-      {1.0, std::abs(origin.x), std::abs(origin.y), std::abs(origin.z)});
-  const double tol = 4.0 * FLT_EPSILON * scale;
-  // A face ON the plane to double precision needs nothing: OpenCASCADE cuts
-  // and fuses an exactly coplanar face cleanly, and a tool moved off it
-  // would leave the feature's own face a hair off the plane it was drawn on.
-  const double exact = 16.0 * DBL_EPSILON * scale;
-  for (const Body& b : bodies) {
-    if (b.reference || !b.shape.IsValid())
-      continue;
-    for (TopExp_Explorer ex(b.shape.GetShape(), TopAbs_FACE); ex.More();
-         ex.Next()) {
-      const TopoDS_Face face = TopoDS::Face(ex.Current());
-      const BRepAdaptor_Surface surface(face, false);
-      if (surface.GetType() != GeomAbs_Plane)
-        continue;
-      const gp_Pln pln = surface.Plane();
-      const gp_Dir n0 = pln.Axis().Direction();
-      glm::dvec3 n(n0.X(), n0.Y(), n0.Z());
-      if (face.Orientation() == TopAbs_REVERSED)
-        n = -n; // the face's outward normal
-      const double along = glm::dot(n, dir);
-      if (std::abs(std::abs(along) - 1.0) > 1e-9)
-        continue;
-      if (cut ? along > 0.0 : along < 0.0)
-        continue;
-      const gp_Pnt p = pln.Location();
-      const double d = glm::dot(glm::dvec3(p.X(), p.Y(), p.Z()) - origin, dir);
-      if (std::abs(d) > exact && std::abs(d) <= tol)
-        return 2.0 * tol;
-    }
-  }
-  return 0.0;
 }
 
 bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,

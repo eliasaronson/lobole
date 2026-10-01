@@ -18,8 +18,8 @@
 // authored — so leaving the configuration restores it.
 struct MateOverride {
   uint64_t mate = 0;
-  std::optional<float> rotation; // radians
-  std::optional<float> offset;   // mm: a slide, or a revolute's axial seat
+  std::optional<double> rotation; // radians
+  std::optional<double> offset;   // mm: a slide, or a revolute's axial seat
 };
 
 struct Configuration {

@@ -198,8 +198,8 @@ void ArmMateConnector(AppState& state, bool second);
 
 // The world frame of a connector (occurrence placement ∘ its part-local frame),
 // or nullopt if it doesn't resolve. For drawing the connector triad.
-std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
-                                             const Connector& c);
+std::optional<glm::dmat4> ConnectorWorldFrame(AppState& state,
+                                              const Connector& c);
 
 // Appends the mate tool's connector triads (picked connectors) to `lines`.
 void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
@@ -327,8 +327,8 @@ inline constexpr const char* kStandardPartsFolder = "Standard parts";
 // picked hole — which is the point of the feature — is phase 3.
 uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
-                     const std::string& drive, const glm::vec3& position,
-                     const glm::quat& orientation, std::string* error,
+                     const std::string& drive, const glm::dvec3& position,
+                     const glm::dquat& orientation, std::string* error,
                      uint64_t ridesOn = 0);
 
 // The rim, as a pick names it: WHICH occurrence, and which circular edge on
@@ -479,7 +479,7 @@ Document* PartDocById(AppState& state, uint64_t partId);
 
 // An occurrence's solved placement as a model matrix (translate ∘ rotate) —
 // the transform assembly measure / interference place part bodies with.
-glm::mat4 OccurrenceMatrix(const Occurrence& o);
+glm::dmat4 OccurrenceMatrix(const Occurrence& o);
 
 // A5 resolution: an occurrence's stable id names a part OR an assembly slot,
 // per its refKind.
@@ -531,7 +531,7 @@ std::vector<Body> OccurrenceSubtreeBodies(AppState& state,
 
 // The placement a mesh renders at (solved ∘ explode), exposed for tests and
 // for anything that has to reproduce the live-drag composition.
-glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
+glm::dmat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
 
 // Drops every cached part tessellation and releases the GPU assets it holds
 // (AppState::partRenderCache). MUST run while the renderers are still alive —

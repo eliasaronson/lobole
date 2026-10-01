@@ -1428,7 +1428,7 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
   Occurrence* top = occOf(topOcc);
   top->position += glm::vec3(0.0f, 5.0f, 3.0f);
   top->orientation =
-      glm::angleAxis(glm::radians(-21.432f), glm::vec3(0, 0, 1)) *
+      glm::angleAxis(glm::radians(-21.432), glm::dvec3(0, 0, 1)) *
       top->orientation;
   CHECK(ui::SolveActiveAssembly(state) == 0);
 
@@ -1886,7 +1886,7 @@ TEST_CASE(
     for (const Occurrence& o : state.assembly->GetOccurrences())
       if (o.id == id)
         return o.position;
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   };
   CHECK_THAT(at(fit.placed[0]).z, WithinAbs(12.0 + 1.6, 1e-3));  // screw
   CHECK_THAT(at(fit.placed[1]).z, WithinAbs(12.0, 1e-3));        // its washer
@@ -2339,7 +2339,7 @@ namespace {
 ElementRef UpFaceAtZ(const std::vector<Body>& bodies, double z) {
   for (const Body& b : bodies)
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
           std::abs(o.z - static_cast<float>(z)) < 1e-4f)
         return ElementRef{b.createdBy, name};

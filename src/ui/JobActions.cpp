@@ -79,7 +79,7 @@ void WarmTightBounds(const std::vector<Body>& bodies) {
   for (const Body& b : bodies) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
   }
 }
@@ -209,8 +209,8 @@ std::vector<Body> FixtureModelBodies(AppState& state, const cam::Fixture& f) {
     auto it = boxes.find(key);
     if (it == boxes.end())
       it = boxes
-               .emplace(key, CADKernel::Instance().CreateBox(glm::vec3(0.0f),
-                                                             glm::vec3(f.box)))
+               .emplace(key,
+                        CADKernel::Instance().CreateBox(glm::dvec3(0.0), f.box))
                .first;
     Body b;
     b.name = f.name;
@@ -276,7 +276,7 @@ std::optional<cam::VerdictLine> FixtureTravelLine(AppState& state,
   double tallest = hi.z;
   for (const cam::FixtureSolid& f : JobFixtureSolids(state, setup))
     for (const Body& b : f.bodies) {
-      glm::vec3 blo, bhi;
+      glm::dvec3 blo, bhi;
       b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
       if (bhi.z > tallest) {
         tallest = bhi.z;
@@ -310,7 +310,7 @@ JobFixtureSolids(AppState& state, const cam::Setup& setup, bool enabledOnly,
     }
     // Bed space straight from the part's own coordinates: never through
     // BodiesInSetupFrame, whose frame turns the PART and not the vise.
-    const glm::mat4 m(FixtureBedTransform(state, setup, f));
+    const glm::dmat4 m = FixtureBedTransform(state, setup, f);
     for (Body& b : bodies)
       b.shape = b.shape.Transformed(m);
     out.push_back({f.id, f.name, std::move(bodies)});
@@ -368,7 +368,7 @@ const std::vector<Body>& JobBodies(AppState& state) {
       // another job and back rebuilt it, and warming only the copies paid
       // the whole box again on every return -- seconds on the chess blanks.
       if (b.shape.IsValid()) {
-        glm::vec3 lo(0.0f), hi(0.0f);
+        glm::dvec3 lo(0.0), hi(0.0);
         b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
       }
       state.jobBodies.push_back(b);
@@ -585,7 +585,7 @@ bool SetJobPartConfiguration(AppState& state, uint64_t jobPartId,
     setup.safeZ = DeriveJobSafeZ(state, setup);
   }
   if (const cam::Setup* active = ActiveCamSetup(state))
-    state.camSafeZEdit = static_cast<float>(active->safeZ);
+    state.camSafeZEdit = active->safeZ;
 #endif
   if (moved)
     *moved = count;
@@ -625,7 +625,7 @@ const Document* BuiltJobPartDocument(AppState& state,
 struct WarmItem {
   CADShape key;
   CADShape copy;
-  glm::vec3 lo{0.0f}, hi{0.0f};
+  glm::dvec3 lo{0.0}, hi{0.0};
   bool ok = false;
 };
 } // namespace

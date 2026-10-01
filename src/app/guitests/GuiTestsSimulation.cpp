@@ -71,9 +71,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK(s_App->simulation.pendingMagnitude > 0.0);
 
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
@@ -153,9 +153,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // (Creating the box is itself an undo entry, so "can undo" is already
     // true here — what matters is that the DRAG adds exactly one more.)
     s_App->camera->StopAnimation();
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     body.shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
     s_App->camera->SetPosition(mid + glm::vec3(0.0f, 0.0f, 1.0f) * 14.0f);
@@ -444,7 +444,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     const auto fine =
         ui::SampleFace(*s_App, 0, face, std::sqrt(area / 16.0f), 160);
     IM_CHECK(fine.size() >= 12 && fine.size() <= 20);
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     body.shape.GetBoundingBox(lo, hi);
     for (const ui::FaceSample& fs : fine) {
       IM_CHECK(std::abs(glm::dot(fs.point - c, n)) < 1e-3f); // on the plane
@@ -465,7 +465,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     study->loads.push_back(load);
     ctx->Yield(2);
     s_App->camera->StopAnimation();
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->SetTarget(mid);
     s_App->camera->SetPosition(mid + n * 14.0f);
     ctx->Yield(2);
@@ -577,9 +577,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::AppendSimulationOverlayGlyphs(*s_App, prims);
     IM_CHECK(!prims.empty());
     // A box's centre of mass is its bounding-box centre.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     const glm::vec3 g = glm::normalize(glm::vec3(conv::kGravity));
     // The longest primitive that starts at the centre of mass is the arrow's
     // shaft, and it runs along g.

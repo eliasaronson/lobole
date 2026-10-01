@@ -1737,7 +1737,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ElementRef ref;
       ref.featureId = p.at("lay_face_up").value("feature_id", uint64_t{0});
       ref.name = p.at("lay_face_up").value("element", std::string());
-      glm::vec3 normal(0.0f);
+      glm::dvec3 normal(0.0);
       if (!cam::FaceNormalOf(ui::JobBodies(state), ref, normal, partId))
         throw std::runtime_error(
             "lay_face_up needs a FLAT face on this part; list_elements shows "
@@ -2239,7 +2239,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
               " — say which with lay_face_up.part");
         }
       }
-      glm::vec3 normal(0.0f);
+      glm::dvec3 normal(0.0);
       if (!cam::FaceNormalOf(ui::JobBodies(state), ref, normal, partId))
         throw std::runtime_error(
             "no planar face '" + ref.name + "' on feature " +

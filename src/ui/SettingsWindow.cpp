@@ -315,9 +315,9 @@ void DrawMachinesSection(AppState& state) {
   static const char* const kAxis[3] = {"X###mach_wa_x", "Y###mach_wa_y",
                                        "Z###mach_wa_z"};
   for (int a = 0; a < 3; a++) {
-    float size = static_cast<float>(m.travelMax[a] - m.travelMin[a]);
+    double size = m.travelMax[a] - m.travelMin[a];
     ImGui::SetNextItemWidth(ControlWidth() * 0.5f);
-    if (ExprDragFloat(state, kAxis[a], &size, 1.0f, 0.0f, 100000.0f, "%.0f")) {
+    if (ExprDragDouble(state, kAxis[a], &size, 1.0f, 0.0, 100000.0, "%.0f")) {
       m.travelMax[a] = m.travelMin[a] + size;
       edited = true;
     }
@@ -335,10 +335,10 @@ void DrawMachinesSection(AppState& state) {
     edited = true;
   if (ImGui::Checkbox("Has a 4th axis (A)###mach_rotary", &m.hasRotaryAxis))
     edited = true;
-  float rapid = static_cast<float>(m.rapidFeed);
+  double rapid = m.rapidFeed;
   ImGui::SetNextItemWidth(ControlWidth());
-  if (ExprDragFloat(state, "Rapid rate (mm/min, 0 = not stated)###mach_rapid",
-                    &rapid, 10.0f, 0.0f, 100000.0f, "%.0f")) {
+  if (ExprDragDouble(state, "Rapid rate (mm/min, 0 = not stated)###mach_rapid",
+                     &rapid, 10.0f, 0.0, 100000.0, "%.0f")) {
     m.rapidFeed = rapid;
     edited = true;
   }
@@ -348,11 +348,11 @@ void DrawMachinesSection(AppState& state) {
                       "ceiling the feed check compares against. Rapids are "
                       "always written as G0.");
   if (m.hasRotaryAxis) {
-    float amax = static_cast<float>(m.rotaryMaxFeed);
+    double amax = m.rotaryMaxFeed;
     ImGui::SetNextItemWidth(ControlWidth());
-    if (ExprDragFloat(state,
-                      "A top speed (deg/min, 0 = not stated)###mach_amax",
-                      &amax, 10.0f, 0.0f, 1000000.0f, "%.0f")) {
+    if (ExprDragDouble(state,
+                       "A top speed (deg/min, 0 = not stated)###mach_amax",
+                       &amax, 10.0f, 0.0, 1000000.0, "%.0f")) {
       m.rotaryMaxFeed = amax;
       edited = true;
     }
@@ -425,9 +425,9 @@ void DrawMachinesSection(AppState& state) {
     // most hardware stands in, which the verdict names.
     cam::RotaryHolding& h = m.holding;
     const auto size = [&](const char* label, double& v, const char* tip) {
-      float f = static_cast<float>(v);
+      double f = v;
       ImGui::SetNextItemWidth(ControlWidth());
-      if (ExprDragFloat(state, label, &f, 0.5f, 0.0f, 500.0f, "%.1f")) {
+      if (ExprDragDouble(state, label, &f, 0.5f, 0.0, 500.0, "%.1f")) {
         v = f;
         edited = true;
       }
@@ -462,16 +462,16 @@ void DrawMachinesSection(AppState& state) {
     ImGui::Text("T%d", t.number);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
-    float dia = static_cast<float>(t.diameter);
-    if (ExprDragFloat(state, "mm###libdia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
+    double dia = t.diameter;
+    if (ExprDragDouble(state, "mm###libdia", &dia, 0.1f, 0.1, 50.0, "%.3f")) {
       t.diameter = dia;
       edited = true;
     }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
-    float feed = static_cast<float>(t.feedCut);
-    if (ExprDragFloat(state, "F###libfeed", &feed, 10.0f, 1.0f, 10000.0f,
-                      "%.0f")) {
+    double feed = t.feedCut;
+    if (ExprDragDouble(state, "F###libfeed", &feed, 10.0f, 1.0, 10000.0,
+                       "%.0f")) {
       t.feedCut = feed;
       edited = true;
     }

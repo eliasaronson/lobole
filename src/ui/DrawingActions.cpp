@@ -200,8 +200,7 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
         if (std::find(view.hidden.begin(), view.hidden.end(),
                       inst.rootOccurrenceId) != view.hidden.end())
           continue;
-        AppendBodies(*inst.part, glm::dmat4(inst.world), inst.rootOccurrenceId,
-                     out);
+        AppendBodies(*inst.part, inst.world, inst.rootOccurrenceId, out);
       }
       return true;
     }

@@ -238,12 +238,9 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       ImGui::Checkbox("Custom direction###sim_custom_dir",
                       &sim.directionOverridden);
       if (sim.directionOverridden) {
-        float dir[3] = {(float)sim.pendingDirection.x,
-                        (float)sim.pendingDirection.y,
-                        (float)sim.pendingDirection.z};
         LeftLabel("Direction");
-        if (ExprInputFloat3(state, "###sim_direction", dir, "%.3f"))
-          sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
+        ExprInputDouble3(state, "###sim_direction", &sim.pendingDirection.x,
+                         "%.3f");
       } else {
         ImGui::TextDisabled("Direction: into the face you click");
       }
@@ -837,15 +834,14 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
                   [&](fem::Study& cs) { cs.gravity = g; });
     }
     if (on) {
-      float g[3] = {(float)s->gravity.x, (float)s->gravity.y,
-                    (float)s->gravity.z};
+      double g[3] = {s->gravity.x, s->gravity.y, s->gravity.z};
       LeftLabel("g (m/s^2)");
       // Commit on deactivation (Enter OR clicking away), like the mesh-size
       // field above. NOT EnterReturnsTrue: that flag is InputText-only —
       // InputScalar ASSERTS on it, so this line aborted every Debug build
       // (a fresh clone's default) the moment gravity was switched on.
       const bool gChanged =
-          ExprInputFloat3(state, "###study_gravity_vec", g, "%.2f");
+          ExprInputDouble3(state, "###study_gravity_vec", g, "%.2f");
       if (gChanged || ImGui::IsItemDeactivatedAfterEdit())
         ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
           cs.gravity = glm::dvec3(g[0], g[1], g[2]);
@@ -1646,7 +1642,7 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     // solved in.
     if (into && occurrenceId != 0 && host.asmDoc)
       if (const Occurrence* occ = host.asmDoc->FindById(occurrenceId))
-        into = glm::dvec3(glm::mat3_cast(occ->orientation) * glm::vec3(*into));
+        into = glm::mat3_cast(occ->orientation) * *into;
     load.direction =
         sim.directionOverridden || !into ? sim.pendingDirection : *into;
   }

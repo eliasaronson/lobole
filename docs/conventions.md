@@ -95,6 +95,54 @@ A full unit type system is not used: every unit defect sits where a JSON
 number becomes a struct field, and a quantity type is assigned there by fiat
 just as a double is.
 
+## The model is double
+
+**Everything that is a fact about the part is a double**: a primitive's
+position, a sketch plane and every coordinate on it, a frame, a curve's
+points, an occurrence's placement and attachment, a mate's values and a
+configuration's holds, the assembly solve and the frames it composes, a CAM
+setup's frame and the fields that place parts and fixtures in it, a physical
+material's density and stiffness, and every kernel query whose answer feeds a
+decision (a bounding box, a face's plane or axis, a snap point, a point
+classified against a solid). `glm::dvec3`, `glm::dquat`, `glm::dmat4`,
+`double`. A value typed as 24.7 that passes through float becomes
+24.70000076, and a face built from it sits 0.8 µm off the face it was meant
+to meet: a pocket kept a sealed skin, an add left two solids, and an
+occurrence moved by its own rounding on every save.
+
+**Bulk derived data is float, on purpose**: meshes and vertex buffers, edge
+polylines, CAM height maps and the simulated stock, FEM and topology fields,
+GPU kernels. fp64 runs at 1/64 rate on the GPU, and on the CPU it halves the
+SIMD width and doubles the memory, for data that is sampled from the model
+and never fed back into it. Camera, view and section state may be float too,
+and so may appearance (colour, roughness).
+
+**Conversion runs one way**, model to derived, at the boundary where a
+renderer, a mesh or a GPU buffer is filled — `RendererSync` composes an
+instance's placement in double and narrows the matrix it hands the renderer;
+`SketchPlane::GetPlaneMatrix` narrows the plane for the overlays. Nothing
+derived flows back: a value read off the screen (a pick ray, a drag) is
+widened where it enters, and the model math it feeds runs in double. A field
+in the UI that edits the model is a double field (`ExprDragDouble`,
+`ExprInputDouble`, the double `ExprDragFloat2/3`); `ExprDragFloat` is for view
+state alone ([ui/numeric-input.md](ui/numeric-input.md#the-widgets)). GLM
+converts between precisions implicitly, so the compiler does not catch a
+narrowing; the types and the gate below do.
+
+The saved form did not change: a JSON number is a double, and the readers
+read doubles.
+
+**Gate: `tests/test_conventions.cpp`, "the model is double".** It scans every
+header under `src/core` and `src/cad` for `float`, `glm::vec2/3/4`,
+`glm::mat2/3/4` and `glm::quat`, and fails on any line not on its allow-list;
+each entry names the derived or display value it is and why. Whole headers
+that are not the model (picking, mesh export, GLB animation, preferences) are
+listed separately. An entry that matches nothing fails too. The behaviour is
+pinned by `tests/test_model_precision.cpp` (primitives at awkward coordinates
+cut and fuse exactly; a placement and a mate save and load bit for bit; a
+solve and a regeneration repeated move nothing) and
+`tests/test_sketch_precision.cpp`.
+
 ## Defaults derive from what they act on
 
 A default that carries a unit — a length, an angle, a scale, a position — is
@@ -182,6 +230,7 @@ size, a wall thickness for an unknown method) is not built.
 `tests/test_conventions.cpp` checks the source itself, because a comment does
 not fail the build. Beyond the cases above:
 
+- no float type in a model header ([the model is double](#the-model-is-double));
 - no numeric field in `src/ui` bypasses `ui::ExprInput` (a raw ImGui numeric
   widget cannot take an expression);
 - every feature reference is reported by `VisitFeatureRefs`;

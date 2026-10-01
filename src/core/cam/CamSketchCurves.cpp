@@ -434,12 +434,11 @@ std::string EngraveSurfaceRefusal(const std::vector<Body>& framed,
   }
   // Every probe in one batch per body: one classifier each, not one per
   // point (CADShape::ContainsPoints).
-  std::vector<glm::vec3> probes;
+  std::vector<glm::dvec3> probes;
   probes.reserve(at.size() * 2);
   for (const glm::dvec2& p : at)
     for (const double dz : {-kProbe, kProbe})
-      probes.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y),
-                          static_cast<float>(frame.surfaceZ + dz));
+      probes.emplace_back(p.x, p.y, frame.surfaceZ + dz);
   std::vector<bool> inside(probes.size(), false);
   for (const Body& b : framed) {
     if (!b.shape.IsValid())

@@ -90,7 +90,7 @@ std::vector<DerivedSource> DerivedSourceCandidates(AppState& state) {
   // placement, which is what "derive this neighbour" has to mean for it.
   const Context ctx = InContext(state);
   if (ctx.asmDoc) {
-    const glm::mat4 inv = glm::inverse(OccurrenceMatrix(*ctx.edited));
+    const glm::dmat4 inv = glm::inverse(OccurrenceMatrix(*ctx.edited));
     auto flat = assembly::Flatten(*ctx.asmDoc, PartResolverFor(state),
                                   AssemblyResolverFor(state));
     if (flat) {
@@ -134,9 +134,9 @@ std::string PointDerivedAt(AppState& state, DerivedFeature& feature,
   trial.sourcePart = source.slotId;
   trial.sourceName = SlotName(state, source.slotId);
   if (source.occurrenceId != 0) {
-    trial.position = glm::vec3(source.placement[3]);
+    trial.position = glm::dvec3(source.placement[3]);
     trial.orientation =
-        glm::normalize(glm::quat_cast(glm::mat3(source.placement)));
+        glm::normalize(glm::quat_cast(glm::dmat3(source.placement)));
   }
   if (const std::string why =
           derived::TakeSnapshot(trial, *src, *state.document);

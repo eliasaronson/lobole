@@ -134,7 +134,7 @@ void Bore(Document& doc, double x, double y, double r) {
 
 struct Snapshot {
   double volume = 0.0;
-  glm::vec3 lo{0.0f}, hi{0.0f};
+  glm::dvec3 lo{0.0}, hi{0.0};
   std::vector<BendRegion> bends;
 };
 
@@ -167,7 +167,7 @@ void SameAs(const Snapshot& a, const Snapshot& b) {
 }
 
 double ThicknessOf(const Document& doc) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   return hi.z - lo.z;
 }
@@ -218,7 +218,7 @@ TEST_CASE("refold undoes unfold: a tree and a chain", "[sheetmetal][refold]") {
     Document doc;
     const uint64_t base = Blank(doc);
     FlangeAtY(doc, base, 0.0, 20.0);
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
     Flange(doc, base, {0, lo.y, hi.z}, {kW, lo.y, hi.z}, 10.0);
     const Snapshot folded = Take(doc);

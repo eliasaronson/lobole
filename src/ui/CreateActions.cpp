@@ -163,25 +163,25 @@ void CreateDatumPlane(AppState& state) {
   // quarter of the model's own extent keeps it visibly separate at any size.
   if (const auto parentPlane =
           ResolvePlaneForTool(state, dp->parentId, dp->basePlane)) {
-    const glm::vec3 n = parentPlane->GetNormal();
-    const glm::vec3 o = parentPlane->GetOrigin();
-    float lo = std::numeric_limits<float>::max();
-    float hi = std::numeric_limits<float>::lowest();
+    const glm::dvec3 n = parentPlane->GetNormal();
+    const glm::dvec3 o = parentPlane->GetOrigin();
+    double lo = std::numeric_limits<double>::max();
+    double hi = std::numeric_limits<double>::lowest();
     for (const Body& b :
          state.document ? state.document->GetBodies() : std::vector<Body>{}) {
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       b.shape.GetBoundingBox(bmin, bmax);
       for (int c = 0; c < 8; c++) {
-        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                               (c & 2) ? bmax.y : bmin.y,
-                               (c & 4) ? bmax.z : bmin.z);
-        const float d = glm::dot(corner - o, n);
+        const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                (c & 2) ? bmax.y : bmin.y,
+                                (c & 4) ? bmax.z : bmin.z);
+        const double d = glm::dot(corner - o, n);
         lo = std::min(lo, d);
         hi = std::max(hi, d);
       }
     }
     if (hi > lo)
-      dp->offset = static_cast<double>(hi + 0.25f * (hi - lo));
+      dp->offset = hi + 0.25 * (hi - lo);
     // else: an empty document has no size to derive from, so the feature's
     // own default (a base-plane grid square) stands.
   }
@@ -388,7 +388,7 @@ void CreatePattern(AppState& state) {
   for (const Body& b : state.document->GetBodies()) {
     if (b.createdBy != pat->sourceId)
       continue;
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     pat->spacing = std::max(3.0, (bmax.x - bmin.x) * 1.5);
     break;
@@ -612,13 +612,13 @@ void RecenterSplitOffset(AppState& state, SplitFeature& split) {
   // with this feature's id (together they are the source); on failure the
   // source is still there untouched. Take the bounds over either, or a plane
   // change from a working split would find nothing to center on.
-  glm::vec3 bmin(std::numeric_limits<float>::max());
-  glm::vec3 bmax(std::numeric_limits<float>::lowest());
+  glm::dvec3 bmin(std::numeric_limits<double>::max());
+  glm::dvec3 bmax(std::numeric_limits<double>::lowest());
   bool found = false;
   for (const Body& b : state.document->GetBodies()) {
     if (b.createdBy != split.bodyId && b.createdBy != split.GetId())
       continue;
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     b.shape.GetBoundingBox(lo, hi);
     bmin = glm::min(bmin, lo);
     bmax = glm::max(bmax, hi);

@@ -27,7 +27,7 @@ struct AppState;
 // as one row. Refused on a part tab, and an unknown designation is refused
 // naming the ones carried. Returns the occurrence id, or 0 with `error`.
 uint64_t AddBearing(AppState& state, const std::string& designation,
-                    const glm::vec3& position, const glm::quat& orientation,
+                    const glm::dvec3& position, const glm::dquat& orientation,
                     std::string* error);
 
 struct BearingRequest {
@@ -54,8 +54,8 @@ struct BearingFit {
   double seatDiameter = 0.0;
   bool shoulder = false;
   double overhang = 0.0; // mm past the end of the seat
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
   uint64_t occurrence = 0; // placed (not on a dry run)
   uint64_t mate = 0;       // the seat mate, 0 if none could be made
 };

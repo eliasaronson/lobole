@@ -201,7 +201,7 @@ struct SketchEditState {
   // Generative ops (Mirror/Fillet): "linked" adds constraints tying the result
   // to its source so it tracks edits; unchecked bakes an unlinked copy.
   bool linkGenerative = true;
-  float filletRadius = 0.5f;
+  double filletRadius = 0.5;
 
   // Mirror tool is two-step: collect geometry (false), then pick the axis
   // (true). Enter advances; Escape backs out. Selection carries the sources.
@@ -215,7 +215,7 @@ struct SketchEditState {
   int patternCount2 = 1;
   glm::dvec2 patternStep2{0.0, 2.0};
   glm::dvec2 patternCenter{0.0}; // circular centre
-  float patternAngleDeg = 60.0f; // circular step angle
+  double patternAngleDeg = 60.0; // circular step angle
   // Circular centre picking (v51): armed by the session's Pick button — the
   // next canvas click sets the centre; hitting an entity point stores its
   // REFERENCE so the pattern tracks it.
@@ -227,7 +227,7 @@ struct SketchEditState {
   // the tool derives it from the sketch's size when it arms
   // (docs/ui/tool-sessions.md#defaults-and-refusals).
   std::string textString = "A";
-  float textHeight = 0.0f;
+  double textHeight = 0.0;
   int textFont = 0;   // index into sketch::TextFontNames()
   int textHAlign = 0; // sketch::TextHAlign
   int textVAlign = 0; // sketch::TextVAlign
@@ -235,7 +235,7 @@ struct SketchEditState {
   std::string textError; // why the last edit was refused (shown in window)
 
   // Offset tool params (applied to the selected closed loop).
-  float offsetDistance = 0.5f;
+  double offsetDistance = 0.5;
   bool offsetJoinArc = true; // arcs at convex corners (else extend/trim)
 
   // Transient feedback shown in the toolbar (e.g. why a fillet no-op'd), so
@@ -323,7 +323,7 @@ struct SketchEditState {
   glm::dvec2 imageDragStartOrigin{0.0, 0.0};
   int calibStage = 0;
   bool calibAlignAxis = false; // also rotate so p1->p2 lands on the U axis
-  float calibDistance = 10.0f; // the typed real-world distance
+  double calibDistance = 10.0; // the typed real-world distance
   // The image feature as it was when an opacity drag STARTED. Opacity was a
   // live cosmetic edit with no undo entry at all — which is wrong for a
   // persisted field, and worse than it sounds: the slider writes every frame,
@@ -850,8 +850,8 @@ struct PlannedPart {
   std::string standard; // "iso4762", "iso7089", "iso4032"
   std::string size;     // "M12"
   double length = 0.0;  // 0 for a nut or a washer
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
   // Which occurrence this piece RIDES ON, so it follows when that part moves
   // (docs/parts/README.md). The fit decides it rather than the
   // placement guessing after the fact: the screw and the washer under its
@@ -1082,29 +1082,29 @@ struct AppState {
     bool active = false;
     int axis = -1;       // handle axis index (into the gizmo frame below)
     bool rotate = false; // false = translate along axis, true = rotate about it
-    glm::vec3 startPos{0}; // occurrence position at grab (free drag)
-    glm::quat startRot{1, 0, 0,
-                       0}; // occurrence orientation at grab (free drag)
-    float startParam =
-        0.0f; // axis coordinate (translate) / angle (rotate) at grab
+    glm::dvec3 startPos{0}; // occurrence position at grab (free drag)
+    glm::dquat startRot{1, 0, 0,
+                        0}; // occurrence orientation at grab (free drag)
+    double startParam =
+        0.0; // axis coordinate (translate) / angle (rotate) at grab
     // A rotate drag is UNWRAPPED: the mouse's angle about the axis comes
     // from atan2 and wraps at +-pi, and measuring from the grab angle made
     // the DOF jump a full turn when the cursor crossed that line — invisible
     // on a gear (every tooth is periodic), a 226 mm leap on the rack it
     // drives. `turned` accumulates the per-frame delta, each wrapped into
     // (-pi, pi], from the angle seen last frame.
-    float lastAngle = 0.0f;
-    float turned = 0.0f;
+    double lastAngle = 0.0;
+    double turned = 0.0;
     // The gizmo's frame: world axes at the occurrence origin for a free drag,
     // or the mate's connector-A world frame for a drag-within-mate (phase 3).
-    glm::vec3 frameOrigin{0};
-    glm::vec3 frameAxis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    glm::dvec3 frameOrigin{0};
+    glm::dvec3 frameAxis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
     // Drag-within-mate: non-zero → the drag writes this mate's DOF (offset/dx/
     // dy/rotation/ballRotation) instead of the occurrence transform. Only one
     // scalar DOF drags at a time (startDof); ball uses the quaternion.
     uint64_t mateId = 0;
-    float startDof = 0.0f;
-    glm::quat startBall{1, 0, 0, 0};
+    double startDof = 0.0;
+    glm::dquat startBall{1, 0, 0, 0};
     // A MOVING PART of a flexible placement (v129): non-zero -> the grabbed
     // thing is this occurrence of the placement's sub-assembly, and `mateId`
     // (when set) is the sub-assembly's mate that places it -- the drag writes
@@ -1115,14 +1115,14 @@ struct AppState {
     // ExplodeStep.offset in this exploded view (translate only; the solved
     // transform is untouched).
     uint64_t explodeView = 0;
-    glm::vec3 startOffset{0};
+    glm::dvec3 startOffset{0};
     // A JOB tab (round two, M5): non-zero -> the drag writes this job part's
     // placement in the active setup -- in-plane position along X/Y, spin
     // about Z. Fixturing (which face is up) stays a face pick.
     uint64_t jobPartId = 0;
     glm::dvec2 startPlace{0.0, 0.0};
     double startRotZ = 0.0;
-    glm::vec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
+    glm::dvec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
     // A FIXTURE on a job tab (docs/cam/gui.md#gizmos): non-zero ->
     // the drag moves this fixture, X/Y/Z and a spin about Z, snapping its
     // own flat faces to the stock's planes. `facePlanes[axis]` are those
@@ -1609,8 +1609,8 @@ struct AppState {
     bool ok = false;
     std::string summary;
     std::string why;
-    glm::vec3 position{0.0f};
-    glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::dvec3 position{0.0};
+    glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
     int placed = 0;
   } bearingTool;
   uint32_t bearingGhostInstance = 0;
@@ -1712,7 +1712,7 @@ struct AppState {
   struct CamNewSetup {
     std::string machine; // "" = not chosen yet
     bool fixedSheet = false;
-    glm::vec3 sheet{0.0f, 0.0f, 0.0f}; // derived when the step is drawn
+    glm::dvec3 sheet{0.0, 0.0, 0.0}; // derived when the step is drawn
   };
   CamNewSetup camNewSetup;
 
@@ -1764,7 +1764,7 @@ struct AppState {
   // (ui/BackgroundJobs.h). Polled from PollBackgroundJobs and nowhere else.
   std::vector<std::unique_ptr<BackgroundJob>> backgroundJobs;
   bool camShowToolpath = true;
-  float camSafeZEdit = 5.0f;
+  double camSafeZEdit = 5.0;
   std::string camLastPost;
   // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
   // viewport over, and modes have a known exit-bug class here (U11).

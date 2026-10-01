@@ -182,21 +182,20 @@ body as it was.
 - A cut that removes nothing, or an add that adds nothing, leaves the body as
   it was, with a warning: the boolean would still imprint the tool's outline
   where the two touch, splitting a face and renaming it.
-- **A tool starts a hair behind its plane when a face lies on it.** A sketch
-  plane is exact, and a face made from one lies on it; but a face can come
-  from a value that went through float — a primitive's position is a
-  `glm::vec3`, so a box placed at z = 24.7 sits at 24.70000076 — and a pocket
-  cut from a plane typed at that face's height kept a sub-micron skin over
-  itself, a sealed void that passed BRepCheck, while an add from a plane just
-  above a face left two solids. A blind or through-all cut or add whose plane
-  lies within single-precision rounding of a planar face it meets — a face
-  looking against the sweep for a cut, with it for an add — starts behind the
-  plane by twice that rounding (`CoplanarStartSlack`,
-  `src/core/BodyMode.cpp`); a Hole's bores and counterbores do the same. A
-  face on the plane to double precision gets none of it: OpenCASCADE fuses
-  and cuts an exactly coplanar face cleanly, and a tool moved behind it
-  leaves the feature's own face a hair off the plane it was drawn on — a
-  cap's underside that no longer met the tube end it was built on.
+- **A tool starts on its plane, and a face typed at the same height is on it
+  too.** The model is double
+  ([../conventions.md](../conventions.md#the-model-is-double)), so a box
+  placed at z = 24.7 has its face at the double nearest 24.7, where a sketch
+  plane typed at 24.7 is, and OpenCASCADE cuts and fuses an exactly coplanar
+  face cleanly. While primitives were placed in float the face sat at
+  24.70000076: a pocket cut from the plane kept a sealed skin over itself and
+  an add left two solids, and a cut or add then started a hair behind its
+  plane whenever a face lay within float rounding of it. Nothing model-side
+  is float any more, and that mitigation is gone with it
+  (`test_model_precision.cpp` cuts and adds at 126 awkward heights,
+  `test_hole.cpp` drills at six). An STL is float by its format: a plane typed
+  at the decimal height of one of its faces is off it by that rounding, so
+  sketch on the face, which takes its exact frame.
 
 ### Patterns
 

@@ -46,8 +46,8 @@ void DrawDatumLabels(AppState& state) {
     } else if (auto* fr = dynamic_cast<FrameFeature*>(f)) {
       if (!fr->GetError().empty())
         continue;
-      const glm::vec3 end =
-          fr->Origin() + fr->ZAxis() * FrameTriadLength(state);
+      const glm::vec3 end(fr->Origin() +
+                          fr->ZAxis() * double(FrameTriadLength(state)));
       glm::vec2 s = WorldToScreen(state, end);
       dl->AddText(ImVec2(s.x, s.y), col, fr->GetName().c_str());
     }

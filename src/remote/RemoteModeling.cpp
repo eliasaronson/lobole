@@ -498,7 +498,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // otherwise discovers the move by measuring, and reads the result as an
     // interference rather than a placement.
     if (auto* imp = dynamic_cast<const ImportFeature*>(doc->GetFeature(index));
-        imp != nullptr && imp->Shift() != glm::vec3(0.0f))
+        imp != nullptr && imp->Shift() != glm::dvec3(0.0))
       resp["recentred_by"] =
           json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
     // A worm or a wheel says what it built, in the call that built it.

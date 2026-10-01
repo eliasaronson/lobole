@@ -738,7 +738,7 @@ void Uniquify(ElementMap& map) {
 }
 
 double SizeOf(const CADShape& s) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   s.GetBoundingBox(lo, hi);
   return glm::length(hi - lo) * 4.0 + 100.0;
 }

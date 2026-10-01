@@ -472,59 +472,59 @@ void MaterializeImportedAssembly(AppState& state,
 // they are defined here now, with the assembly they describe.
 
 // An occurrence's placement as a model matrix (translate ∘ rotate).
-glm::mat4 OccurrenceMatrix(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 OccurrenceMatrix(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 
 // Exploded-view display (A4): the occurrence's factor-scaled world offset in
 // the active exploded view (zero when none / no step). PURE VIEW STATE —
 // composed into rendered/picked transforms only, never into the document.
-glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
+glm::dvec3 ExplodeOffset(const AppState& state, uint64_t occId) {
   if (!state.activeExplodedView || !state.assembly)
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   const ExplodedView* v =
       state.assembly->FindExplodedViewById(state.activeExplodedView);
   if (!v)
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   for (const ExplodeStep& s : v->steps)
     if (s.path.empty() && s.occurrenceId == occId)
-      return s.offset * state.explodeFactor;
-  return glm::vec3(0.0f);
+      return s.offset * double(state.explodeFactor);
+  return glm::dvec3(0.0);
 }
 
-glm::vec3 ExplodeInnerOffset(const AppState& state, uint64_t occId,
-                             const std::vector<uint64_t>& innerPath) {
+glm::dvec3 ExplodeInnerOffset(const AppState& state, uint64_t occId,
+                              const std::vector<uint64_t>& innerPath) {
   if (innerPath.empty() || !state.activeExplodedView || !state.assembly)
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   // Only a FLEXIBLE unit's parts explode one by one; a rigid one is a block.
   const Occurrence* unit = state.assembly->FindById(occId);
   if (unit == nullptr || !unit->flexible)
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   const ExplodedView* v =
       state.assembly->FindExplodedViewById(state.activeExplodedView);
   if (!v)
-    return glm::vec3(0.0f);
+    return glm::dvec3(0.0);
   for (const ExplodeStep& s : v->steps)
     if (s.path.size() == 1 && s.path.front() == occId &&
         s.occurrenceId == innerPath.front())
-      return s.offset * state.explodeFactor;
-  return glm::vec3(0.0f);
+      return s.offset * double(state.explodeFactor);
+  return glm::dvec3(0.0);
 }
 
 // What an occurrence renders (and picks) at: the solved placement, displaced
 // by the active exploded view.
-glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
+glm::dmat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
   // Motion playback (docs/ui/panels.md#assembly-tab-the-model-panel): the pose
   // a run recorded stands in for the solved placement, for display only.
-  glm::mat4 played;
+  glm::dmat4 played;
   if (MotionPlaybackWorld(state, o.id, played))
-    return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) * played;
-  return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) *
+    return glm::translate(glm::dmat4(1.0), ExplodeOffset(state, o.id)) * played;
+  return glm::translate(glm::dmat4(1.0), ExplodeOffset(state, o.id)) *
          OccurrenceMatrix(o);
 }
 
-glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o) {
+glm::dmat4 DisplayMatrixOf(const AppState& state, const Occurrence& o) {
   return DisplayMatrix(state, o);
 }
 

@@ -274,7 +274,7 @@ TEST_CASE("the names on the copy are the source's under the derived id, and a "
   CHECK_THAT(VolumeOf(host, did), WithinRel(1000.0, 1e-9)); // untouched
   CHECK_THAT(VolumeOf(host, footId), WithinRel(48.0, 1e-6));
   CHECK(!BodyNamed(host, "Foot")->reference);
-  glm::vec3 mn, mx;
+  glm::dvec3 mn, mx;
   BodyNamed(host, "Foot")->shape.GetBoundingBox(mn, mx);
   CHECK_THAT(mn.z, WithinAbs(5.0, 1e-4)); // sits ON the servo's top
 

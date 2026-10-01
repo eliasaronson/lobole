@@ -17,6 +17,9 @@ namespace ui {
 //
 // Evaluation errors keep the old value and surface via the prompt bar's
 // actionMsg channel.
+//
+// The float field is for view state alone -- a section's offset and tilt.
+// Anything the model holds is edited in double.
 bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
                    float vmin, float vmax, const char* fmt);
 // `exprOut`, where given, receives the expression TEXT that produced the
@@ -35,25 +38,19 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
 bool ExprInputDouble(AppState& state, const char* label, double* v,
                      const char* fmt, std::string* exprOut = nullptr);
 // Two or three components sharing one row + label (DragFloat2/3 drop-ins;
-// the label's visible part is everything before "##").
-bool ExprDragFloat2(AppState& state, const char* label, float v[2],
-                    float speed);
-bool ExprDragFloat3(AppState& state, const char* label, float v[3],
-                    float speed);
-// The same rows over doubles: a sketch coordinate or a datum point is a
-// double, and a row that went through float would round it on every edit.
+// the label's visible part is everything before "##"). Over doubles only:
+// what they edit is the model, and a row that went through float would round
+// it on every edit (docs/conventions.md#the-model-is-double).
 bool ExprDragFloat2(AppState& state, const char* label, double v[2],
                     float speed);
 bool ExprDragFloat3(AppState& state, const char* label, double v[3],
                     float speed);
-// InputFloat / InputInt / InputFloat3 drop-ins. These keep ImGui's own widget
-// (they are text fields already, with a buffer big enough to type into) and
-// only add the evaluation on commit.
-bool ExprInputFloat(AppState& state, const char* label, float* v,
-                    const char* fmt);
+// InputInt / InputScalarN drop-ins. These keep ImGui's own widget (they are
+// text fields already, with a buffer big enough to type into) and only add
+// the evaluation on commit.
 bool ExprInputInt(AppState& state, const char* label, int* v,
                   std::string* exprOut = nullptr);
-bool ExprInputFloat3(AppState& state, const char* label, float v[3],
-                     const char* fmt);
+bool ExprInputDouble3(AppState& state, const char* label, double v[3],
+                      const char* fmt);
 
 } // namespace ui

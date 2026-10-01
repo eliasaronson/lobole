@@ -384,7 +384,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       s_App->assembly->AddOccurrence(o);
     }
     ctx->Yield(3);
-    std::vector<glm::vec3> before;
+    std::vector<glm::dvec3> before;
     for (const Occurrence& o : s_App->assembly->GetOccurrences())
       before.push_back(o.position);
 
@@ -484,7 +484,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const uint64_t baseOcc = a.AddOccurrence(base);
     float height = 0.0f;
     {
-      glm::vec3 lo, hi;
+      glm::dvec3 lo, hi;
       ui::PartDocById(*s_App, partId)
           ->GetBodies()[0]
           .shape.GetBoundingBox(lo, hi);
@@ -612,7 +612,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // box, and origin-on-origin would make them coincide and clash at every
     // angle — which is what the first version of this test found.
     {
-      glm::vec3 lo, hi;
+      glm::dvec3 lo, hi;
       ui::PartDocById(*s_App, partId)
           ->GetBodies()[0]
           .shape.GetBoundingBox(lo, hi);
@@ -674,16 +674,16 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Playback: the viewport walks the run's poses; the DOCUMENT stays put.
     const Occurrence* armNow = s_App->assembly->FindById(armOcc);
-    const glm::mat4 docBefore = ui::OccurrenceMatrix(*armNow);
+    const glm::dmat4 docBefore = ui::OccurrenceMatrix(*armNow);
     ctx->ItemClick("//Motion###ToolWindow/###motion_play");
     IM_CHECK(s_App->motionPlaybackStudy == study.id && s_App->motionPlaying);
     for (int i = 0; i < 600 && s_App->motionPlaybackPos < 5.0; i++)
       ctx->Yield();
     IM_CHECK(s_App->motionPlaybackPos >= 5.0); // it advances on its own
     const glm::mat4 shown = ui::DisplayMatrixOf(*s_App, *armNow);
-    const glm::mat4 docNow = ui::OccurrenceMatrix(*armNow);
+    const glm::dmat4 docNow = ui::OccurrenceMatrix(*armNow);
     IM_CHECK(docNow == docBefore); // nothing solved, nothing edited
-    float moved = 0.0f;
+    double moved = 0.0;
     for (int c = 0; c < 4; c++)
       for (int k = 0; k < 4; k++)
         moved = std::max(moved, std::abs(shown[c][k] - docNow[c][k]));
@@ -790,7 +790,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     m.b.occurrenceId = armOcc;
     m.b.anchor.origin = true;
     {
-      glm::vec3 lo, hi;
+      glm::dvec3 lo, hi;
       ui::PartDocById(*s_App, partId)
           ->GetBodies()[0]
           .shape.GetBoundingBox(lo, hi);
@@ -813,7 +813,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     std::string err;
     IM_CHECK(ui::ApplyMotionPose(*s_App, study.id, 0.3, &err));
     ctx->Yield(2);
-    const glm::mat4 armBefore =
+    const glm::dmat4 armBefore =
         ui::OccurrenceMatrix(*s_App->assembly->FindById(armOcc));
 
     const std::filesystem::path dir =
@@ -1511,7 +1511,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
 
@@ -1528,14 +1528,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
 
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(mid +
                                glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
-                                   glm::length(max - min) * 6.0f);
+                                   float(glm::length(max - min)) * 6.0f);
     ui::StartMateTool(*s_App, MateType::Fastened);
     ctx->Yield();
 
@@ -1615,7 +1615,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
 
@@ -1632,14 +1632,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
 
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(mid +
                                glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
-                                   glm::length(max - min) * 6.0f);
+                                   float(glm::length(max - min)) * 6.0f);
     ctx->Yield();
 
     // Create a fastened mate via the session (top faces of both boxes).
@@ -1676,7 +1676,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(center +
                                glm::normalize(glm::vec3(0.15f, 0.35f, 1.0f)) *
-                                   glm::length(max - min) * 5.0f);
+                                   float(glm::length(max - min)) * 5.0f);
     ctx->Yield();
     ui::StartMateEdit(*s_App, mateId);
     ctx->Yield();
@@ -1708,7 +1708,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
 
@@ -1725,14 +1725,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
 
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(mid +
                                glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
-                                   glm::length(max - min) * 6.0f);
+                                   float(glm::length(max - min)) * 6.0f);
     ctx->Yield();
 
     // Fasten the two top faces through the session, as a human does.

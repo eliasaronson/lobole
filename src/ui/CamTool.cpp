@@ -509,7 +509,7 @@ cam::Setup* EnsureCamSetup(AppState& state) {
   state.camActiveSetup = fresh.id;
   (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
   fresh.safeZ = ui::DeriveJobSafeZ(state, fresh);
-  state.camSafeZEdit = static_cast<float>(fresh.safeZ);
+  state.camSafeZEdit = fresh.safeZ;
   MarkJobEdited(state);
   return &fresh;
 }
@@ -589,7 +589,7 @@ std::optional<double> PresentingIndex(AppState& state, const cam::Setup& setup,
         curves->planeNormal);
   } else if (cam::OpTypeHas(type, cam::OpField::NeedsFlatFloor)) {
     const std::vector<Body>& bodies = ui::JobBodies(state);
-    glm::vec3 n(0.0f);
+    glm::dvec3 n(0.0);
     if (cam::FaceNormalOf(cam::BodiesInSetupFrame(setup, bodies), target.ref, n,
                           target.jobPartId) &&
         n.z > 0.99f)
@@ -886,7 +886,7 @@ void CamOrientationChanged(AppState& state, cam::Setup& setup) {
       cam::RederiveDepths(setup, ui::JobBodies(state),
                           cam::EarlierSetups(state.job->GetSetups(), setup.id));
   setup.safeZ = ui::DeriveJobSafeZ(state, setup);
-  state.camSafeZEdit = static_cast<float>(setup.safeZ);
+  state.camSafeZEdit = setup.safeZ;
 
   std::string note;
   if (hadZero && !setup.topFace.IsSet())
@@ -997,7 +997,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // "Lay a face up" stays, for re-clamping WITHOUT re-answering Z zero — the
     // flip that machines the back off a reference you have already set.
     bool reclamped = false;
-    glm::vec3 normal(0.0f);
+    glm::dvec3 normal(0.0);
     const cam::Target picked =
         ui::TargetFor(state, item.element, item.jobPartId);
     if (cam::FaceNormalOf(ui::JobBodies(state), item.element, normal,
@@ -1039,7 +1039,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
     setup->safeZ = ui::DeriveJobSafeZ(state, *setup);
-    state.camSafeZEdit = static_cast<float>(setup->safeZ);
+    state.camSafeZEdit = setup->safeZ;
     // Operations that started above the stock come down to it — never up: an
     // operation asked for a shallower top than the stock is a choice.
     glm::dvec3 lo(0.0), hi(0.0);
@@ -1065,7 +1065,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       return;
     const uint64_t part =
         ui::TargetFor(state, item.element, item.jobPartId).jobPartId;
-    glm::vec3 normal(0.0f);
+    glm::dvec3 normal(0.0);
     if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal, part)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
@@ -1093,7 +1093,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // on its side was indexed for the way it was modelled.
     cam::Setup unturned = *setup;
     unturned.rotationA = 0.0;
-    glm::vec3 normal(0.0f);
+    glm::dvec3 normal(0.0);
     if (!cam::FaceNormalOf(
             cam::BodiesInSetupFrame(unturned, ui::JobBodies(state)),
             item.element, normal,
@@ -1664,9 +1664,9 @@ bool DrawFixtureEditor(AppState& state) {
     }
     const bool alongX = f->seat->edge == cam::StockEdge::MinusY ||
                         f->seat->edge == cam::StockEdge::PlusY;
-    float along = static_cast<float>(f->seat->alongMm);
-    if (ui::ExprDragFloat(state, "Along###cam_seat_along", &along, 0.5f, 0.0f,
-                          0.0f, "%.2f mm")) {
+    double along = f->seat->alongMm;
+    if (ui::ExprDragDouble(state, "Along###cam_seat_along", &along, 0.5f, 0.0,
+                           0.0, "%.2f mm")) {
       f->seat->alongMm = along;
       changed = true;
     }
@@ -1674,17 +1674,17 @@ bool DrawFixtureEditor(AppState& state) {
                                    "the face it rests on"
                                  : "From the stock's -Y end to the middle of "
                                    "the face it rests on");
-    float over = static_cast<float>(f->seat->overMm);
-    if (ui::ExprDragFloat(state, "Over the stock###cam_seat_over", &over, 0.5f,
-                          0.0f, 0.0f, "%.2f mm")) {
+    double over = f->seat->overMm;
+    if (ui::ExprDragDouble(state, "Over the stock###cam_seat_over", &over, 0.5f,
+                           0.0, 0.0, "%.2f mm")) {
       f->seat->overMm = over;
       changed = true;
     }
     ImGui::SetItemTooltip("How far it reaches in past the edge -- where its "
                           "nose presses");
-    float spin = static_cast<float>(f->seat->spinDeg);
-    if (ui::ExprDragFloat(state, "Spin###cam_seat_spin", &spin, 1.0f, -180.0f,
-                          180.0f, "%.1f°")) {
+    double spin = f->seat->spinDeg;
+    if (ui::ExprDragDouble(state, "Spin###cam_seat_spin", &spin, 1.0f, -180.0,
+                           180.0, "%.1f°")) {
       f->seat->spinDeg = spin;
       changed = true;
     }
@@ -1697,25 +1697,20 @@ bool DrawFixtureEditor(AppState& state) {
     ImGui::SetItemTooltip("Stand it on its own at this bed position; it will "
                           "no longer follow the stock");
   } else {
-    float xyz[3] = {static_cast<float>(f->pos.x), static_cast<float>(f->pos.y),
-                    static_cast<float>(f->pos.z)};
-    if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", xyz, 0.5f)) {
-      f->pos = {xyz[0], xyz[1], xyz[2]};
+    if (ui::ExprDragFloat3(state, "Position###cam_fixture_xyz", &f->pos.x,
+                           0.5f))
       changed = true;
-    }
     ImGui::SetItemTooltip("Where its origin sits on the bed (setup space, mm)");
-    float rot = static_cast<float>(f->rotZdeg);
-    if (ui::ExprDragFloat(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0f,
-                          360.0f, "%.1f°")) {
+    double rot = f->rotZdeg;
+    if (ui::ExprDragDouble(state, "Spin###cam_fixture_rot", &rot, 1.0f, -360.0,
+                           360.0, "%.1f°")) {
       f->rotZdeg = rot;
       changed = true;
     }
     if (f->IsBox()) {
-      float size[3] = {static_cast<float>(f->box.x),
-                       static_cast<float>(f->box.y),
-                       static_cast<float>(f->box.z)};
+      double size[3] = {f->box.x, f->box.y, f->box.z};
       if (ui::ExprDragFloat3(state, "Size###cam_fixture_size", size, 0.5f) &&
-          size[0] > 0.0f && size[1] > 0.0f && size[2] > 0.0f) {
+          size[0] > 0.0 && size[1] > 0.0 && size[2] > 0.0) {
         f->box = {size[0], size[1], size[2]};
         changed = true;
       }
@@ -2020,7 +2015,7 @@ void CamFixturesChanged(AppState& state, cam::Setup& setup) {
   // A clamp taller than the stock puts every rapid through it unless safe Z
   // clears it too.
   setup.safeZ = ui::DeriveJobSafeZ(state, setup);
-  state.camSafeZEdit = static_cast<float>(setup.safeZ);
+  state.camSafeZEdit = setup.safeZ;
   MarkJobEdited(state);
   RefreshCamToolpaths(state);
   // A verdict about the fixtures as they WERE is worse than none.

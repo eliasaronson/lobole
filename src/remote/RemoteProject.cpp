@@ -1432,7 +1432,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (doc->FeatureCount() > 0)
       if (const auto* imp = dynamic_cast<const ImportFeature*>(
               doc->GetFeature(doc->FeatureCount() - 1));
-          imp != nullptr && imp->Shift() != glm::vec3(0.0f))
+          imp != nullptr && imp->Shift() != glm::dvec3(0.0))
         out["recentred_by"] =
             json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
     return out;

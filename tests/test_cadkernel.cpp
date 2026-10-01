@@ -25,16 +25,16 @@ TEST_CASE("CreateBox produces a valid solid with correct volume",
   REQUIRE(box.IsValid());
   CHECK_THAT(box.Volume(), WithinRel(24.0, 1e-6));
 
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   box.GetBoundingBox(min, max);
-  CHECK_THAT(max.x - min.x, WithinRel(2.0f, 1e-4f));
-  CHECK_THAT(max.y - min.y, WithinRel(3.0f, 1e-4f));
-  CHECK_THAT(max.z - min.z, WithinRel(4.0f, 1e-4f));
+  CHECK_THAT(max.x - min.x, WithinRel(2.0, 1e-4));
+  CHECK_THAT(max.y - min.y, WithinRel(3.0, 1e-4));
+  CHECK_THAT(max.z - min.z, WithinRel(4.0, 1e-4));
 }
 
 TEST_CASE("CreateBox from two corners", "[kernel][primitives]") {
-  CADShape box = CADKernel::Instance().CreateBox(glm::vec3(-1, -1, -1),
-                                                 glm::vec3(1, 1, 1));
+  CADShape box = CADKernel::Instance().CreateBox(glm::dvec3(-1, -1, -1),
+                                                 glm::dvec3(1, 1, 1));
   REQUIRE(box.IsValid());
   CHECK_THAT(box.Volume(), WithinRel(8.0, 1e-6));
 }
@@ -46,7 +46,7 @@ TEST_CASE("CreateBox rejects degenerate dimensions", "[kernel][primitives]") {
 
 TEST_CASE("CreateSphere volume", "[kernel][primitives]") {
   const double r = 1.5;
-  CADShape sphere = CADKernel::Instance().CreateSphere(glm::vec3(0), r);
+  CADShape sphere = CADKernel::Instance().CreateSphere(glm::dvec3(0), r);
   REQUIRE(sphere.IsValid());
   const double expected = 4.0 / 3.0 * 3.14159265358979 * r * r * r;
   CHECK_THAT(sphere.Volume(), WithinRel(expected, 1e-4));
@@ -54,8 +54,8 @@ TEST_CASE("CreateSphere volume", "[kernel][primitives]") {
 
 TEST_CASE("CreateCylinder volume", "[kernel][primitives]") {
   const double r = 1.0, h = 2.0;
-  CADShape cyl = CADKernel::Instance().CreateCylinder(glm::vec3(0),
-                                                      glm::vec3(0, 0, 1), r, h);
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::dvec3(0), glm::dvec3(0, 0, 1), r, h);
   REQUIRE(cyl.IsValid());
   const double expected = 3.14159265358979 * r * r * h;
   CHECK_THAT(cyl.Volume(), WithinRel(expected, 1e-4));
@@ -65,15 +65,15 @@ TEST_CASE("FaceSnapPoints finds a cylinder's circle centre", "[kernel]") {
   // A cylinder about +Z at the origin: its flat cap faces each have one
   // circular edge, centered on the axis (A2.5 connector inference).
   const double r = 1.0, h = 2.0;
-  CADShape cyl = CADKernel::Instance().CreateCylinder(glm::vec3(0),
-                                                      glm::vec3(0, 0, 1), r, h);
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::dvec3(0), glm::dvec3(0, 0, 1), r, h);
   REQUIRE(cyl.IsValid());
 
   // Find a planar cap face (the flat end), and confirm it reports a circle
   // center on the Z axis.
   bool foundCap = false;
   for (int f = 0; f < 8 && !foundCap; f++) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (!cyl.FacePlane(f, c, n, u))
       continue; // skip the curved side
     std::vector<CADShape::FaceSnap> snaps;
@@ -88,7 +88,7 @@ TEST_CASE("FaceSnapPoints finds a cylinder's circle centre", "[kernel]") {
     CHECK_THAT(circle->point.y, WithinAbs(0.0, 1e-6));
     // EdgeSnapPoint — the single-edge path the solve still uses — agrees
     // with the batched one, so the two cannot drift.
-    glm::vec3 snap;
+    glm::dvec3 snap;
     REQUIRE(cyl.EdgeSnapPoint(circle->edgeIndex, snap));
     CHECK_THAT(snap.x, WithinAbs(circle->point.x, 1e-6));
     CHECK_THAT(snap.y, WithinAbs(circle->point.y, 1e-6));
@@ -103,7 +103,7 @@ TEST_CASE("FaceSnapPoints exposes box-edge midpoint snaps", "[kernel]") {
 
   bool foundFace = false;
   for (int face = 0; face < 8 && !foundFace; ++face) {
-    glm::vec3 center, normal, uAxis;
+    glm::dvec3 center, normal, uAxis;
     if (!box.FacePlane(face, center, normal, uAxis))
       continue;
     std::vector<CADShape::FaceSnap> snaps;
@@ -117,7 +117,7 @@ TEST_CASE("FaceSnapPoints exposes box-edge midpoint snaps", "[kernel]") {
       CHECK(std::isfinite(snap.point.x));
       CHECK(std::isfinite(snap.point.y));
       CHECK(std::isfinite(snap.point.z));
-      glm::vec3 midpoint;
+      glm::dvec3 midpoint;
       REQUIRE(box.EdgeSnapPoint(snap.edgeIndex, midpoint));
       CHECK_THAT(midpoint.x, WithinAbs(snap.point.x, 1e-9));
     }
@@ -144,7 +144,7 @@ TEST_CASE("FaceCorners names a corner by its two edges", "[kernel]") {
       CHECK(c.edgeA < c.edgeB); // normalised, so the pair is one key
       // The stored pair resolves back to the same point — this is the whole
       // premise: two named edges are enough to find the corner again.
-      glm::vec3 resolved;
+      glm::dvec3 resolved;
       REQUIRE(box.CornerPoint(c.edgeA, c.edgeB, resolved));
       CHECK_THAT(resolved.x, WithinAbs(c.point.x, 1e-9));
       CHECK_THAT(resolved.y, WithinAbs(c.point.y, 1e-9));
@@ -158,7 +158,7 @@ TEST_CASE("FaceCorners names a corner by its two edges", "[kernel]") {
 
   // Two edges that do not meet name no corner, and a degenerate pair is
   // refused rather than answered.
-  glm::vec3 nowhere;
+  glm::dvec3 nowhere;
   CHECK_FALSE(box.CornerPoint(0, 0, nowhere));
   CHECK_FALSE(box.CornerPoint(-1, 3, nowhere));
 }
@@ -169,12 +169,12 @@ TEST_CASE("FaceCorners refuses an ambiguous edge pair", "[kernel]") {
   // therefore neither. Not hypothetical — it is the first curved face anyone
   // hovers, which is why the refusal is day-one and not later hardening.
   CADShape cyl = CADKernel::Instance().CreateCylinder(
-      glm::vec3(0), glm::vec3(0, 0, 1), 5.0, 10.0);
+      glm::dvec3(0), glm::dvec3(0, 0, 1), 5.0, 10.0);
   REQUIRE(cyl.IsValid());
 
   bool sawWall = false;
   for (int f = 0; f < 3; f++) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (cyl.FacePlane(f, c, n, u))
       continue; // a flat cap
     sawWall = true;
@@ -183,7 +183,7 @@ TEST_CASE("FaceCorners refuses an ambiguous edge pair", "[kernel]") {
     // Whatever survives must be unambiguous: every reported pair resolves to
     // exactly one point.
     for (const CADShape::FaceCorner& corner : corners) {
-      glm::vec3 resolved;
+      glm::dvec3 resolved;
       CHECK(cyl.CornerPoint(corner.edgeA, corner.edgeB, resolved));
     }
   }
@@ -192,7 +192,7 @@ TEST_CASE("FaceCorners refuses an ambiguous edge pair", "[kernel]") {
   // A flat cap is bounded by ONE closed circular edge: no two edges meet, so
   // no corner. Its snap point is the circle centre, which it already had.
   for (int f = 0; f < 3; f++) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (!cyl.FacePlane(f, c, n, u))
       continue;
     std::vector<CADShape::FaceCorner> corners;
@@ -218,9 +218,9 @@ TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
   for (int i = 0; i < kPerSide; i++)
     for (int j = 0; j < kPerSide; j++) {
       const CADShape drill = CADKernel::Instance().CreateCylinder(
-          glm::vec3(20.0f + i * 360.0f / kPerSide, -5.0f,
-                    20.0f + j * 360.0f / kPerSide),
-          glm::vec3(0, 1, 0), 6.0, 30.0);
+          glm::dvec3(20.0 + i * 360.0 / kPerSide, -5.0,
+                     20.0 + j * 360.0 / kPerSide),
+          glm::dvec3(0, 1, 0), 6.0, 30.0);
       plate = plate.Difference(drill);
     }
   REQUIRE(plate.IsValid());
@@ -261,8 +261,8 @@ TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
 
 TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {
   CADKernel& k = CADKernel::Instance();
-  CADShape a = k.CreateBox(glm::vec3(0, 0, 0), glm::vec3(2, 2, 2));
-  CADShape b = k.CreateBox(glm::vec3(1, 0, 0), glm::vec3(3, 2, 2));
+  CADShape a = k.CreateBox(glm::dvec3(0, 0, 0), glm::dvec3(2, 2, 2));
+  CADShape b = k.CreateBox(glm::dvec3(1, 0, 0), glm::dvec3(3, 2, 2));
 
   CADShape u = a.Union(b);
   REQUIRE(u.IsValid());
@@ -272,8 +272,8 @@ TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {
 
 TEST_CASE("Boolean intersection of overlapping boxes", "[kernel][booleans]") {
   CADKernel& k = CADKernel::Instance();
-  CADShape a = k.CreateBox(glm::vec3(0, 0, 0), glm::vec3(2, 2, 2));
-  CADShape b = k.CreateBox(glm::vec3(1, 0, 0), glm::vec3(3, 2, 2));
+  CADShape a = k.CreateBox(glm::dvec3(0, 0, 0), glm::dvec3(2, 2, 2));
+  CADShape b = k.CreateBox(glm::dvec3(1, 0, 0), glm::dvec3(3, 2, 2));
 
   CADShape i = a.Intersection(b);
   REQUIRE(i.IsValid());
@@ -282,8 +282,8 @@ TEST_CASE("Boolean intersection of overlapping boxes", "[kernel][booleans]") {
 
 TEST_CASE("Boolean difference of overlapping boxes", "[kernel][booleans]") {
   CADKernel& k = CADKernel::Instance();
-  CADShape a = k.CreateBox(glm::vec3(0, 0, 0), glm::vec3(2, 2, 2));
-  CADShape b = k.CreateBox(glm::vec3(1, 0, 0), glm::vec3(3, 2, 2));
+  CADShape a = k.CreateBox(glm::dvec3(0, 0, 0), glm::dvec3(2, 2, 2));
+  CADShape b = k.CreateBox(glm::dvec3(1, 0, 0), glm::dvec3(3, 2, 2));
 
   CADShape d = a.Difference(b);
   REQUIRE(d.IsValid());
@@ -292,13 +292,13 @@ TEST_CASE("Boolean difference of overlapping boxes", "[kernel][booleans]") {
 
 TEST_CASE("Translate moves the bounding box", "[kernel][transform]") {
   CADShape box =
-      CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1, 1, 1));
-  box.Translate(glm::vec3(10, 0, 0));
+      CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1, 1, 1));
+  box.Translate(glm::dvec3(10, 0, 0));
 
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   box.GetBoundingBox(min, max);
-  CHECK_THAT(min.x, WithinRel(10.0f, 1e-3f));
-  CHECK_THAT(max.x, WithinRel(11.0f, 1e-3f));
+  CHECK_THAT(min.x, WithinRel(10.0, 1e-3));
+  CHECK_THAT(max.x, WithinRel(11.0, 1e-3));
   CHECK_THAT(box.Volume(), WithinRel(1.0, 1e-6));
 }
 
@@ -309,49 +309,49 @@ TEST_CASE("an in-place transform forgets the memoized bounding box",
   // a lie, so each is asked before and after: a memo that survived one of
   // them would report where the body USED to be, and CAM would cut it there.
   const auto span = [](const CADShape& s) {
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     s.GetBoundingBox(lo, hi);
-    return std::pair<glm::vec3, glm::vec3>(lo, hi);
+    return std::pair<glm::dvec3, glm::dvec3>(lo, hi);
   };
 
   SECTION("Translate") {
-    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
-    CHECK_THAT(span(b).first.x, WithinAbs(0.0f, 1e-4f)); // warms the memo
-    b.Translate(glm::vec3(10, 0, 0));
-    CHECK_THAT(span(b).first.x, WithinAbs(10.0f, 1e-3f));
-    CHECK_THAT(span(b).second.x, WithinAbs(11.0f, 1e-3f));
+    CADShape b = CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1));
+    CHECK_THAT(span(b).first.x, WithinAbs(0.0, 1e-4)); // warms the memo
+    b.Translate(glm::dvec3(10, 0, 0));
+    CHECK_THAT(span(b).first.x, WithinAbs(10.0, 1e-3));
+    CHECK_THAT(span(b).second.x, WithinAbs(11.0, 1e-3));
   }
   SECTION("Rotate") {
-    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
-    CHECK_THAT(span(b).second.x, WithinAbs(1.0f, 1e-4f));
-    b.Rotate(glm::vec3(0, 0, 1), 3.14159265358979 / 2.0);
+    CADShape b = CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1));
+    CHECK_THAT(span(b).second.x, WithinAbs(1.0, 1e-4));
+    b.Rotate(glm::dvec3(0, 0, 1), 3.14159265358979 / 2.0);
     // A quarter turn about +Z puts the x span where the y span was, negated.
-    CHECK_THAT(span(b).first.x, WithinAbs(-1.0f, 1e-3f));
-    CHECK_THAT(span(b).second.x, WithinAbs(0.0f, 1e-3f));
+    CHECK_THAT(span(b).first.x, WithinAbs(-1.0, 1e-3));
+    CHECK_THAT(span(b).second.x, WithinAbs(0.0, 1e-3));
   }
   SECTION("Scale") {
-    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
-    CHECK_THAT(span(b).second.z, WithinAbs(1.0f, 1e-4f));
+    CADShape b = CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1));
+    CHECK_THAT(span(b).second.z, WithinAbs(1.0, 1e-4));
     b.Scale(3.0);
-    CHECK_THAT(span(b).second.z, WithinAbs(3.0f, 1e-3f));
+    CHECK_THAT(span(b).second.z, WithinAbs(3.0, 1e-3));
   }
   SECTION("RotateAbout") {
-    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
-    CHECK_THAT(span(b).first.y, WithinAbs(0.0f, 1e-4f));
-    b.RotateAbout(glm::vec3(10, 0, 0), glm::vec3(0, 0, 1),
+    CADShape b = CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1));
+    CHECK_THAT(span(b).first.y, WithinAbs(0.0, 1e-4));
+    b.RotateAbout(glm::dvec3(10, 0, 0), glm::dvec3(0, 0, 1),
                   3.14159265358979 / 2.0);
     // A quarter turn about the pivot at (10,0,0) swings the unit box round
     // to x 9..10, y -10..-9.
-    CHECK_THAT(span(b).first.y, WithinAbs(-10.0f, 1e-3f));
-    CHECK_THAT(span(b).second.y, WithinAbs(-9.0f, 1e-3f));
-    CHECK_THAT(span(b).first.x, WithinAbs(9.0f, 1e-3f));
+    CHECK_THAT(span(b).first.y, WithinAbs(-10.0, 1e-3));
+    CHECK_THAT(span(b).second.y, WithinAbs(-9.0, 1e-3));
+    CHECK_THAT(span(b).first.x, WithinAbs(9.0, 1e-3));
   }
   SECTION("Mirror") {
-    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
-    CHECK_THAT(span(b).second.x, WithinAbs(1.0f, 1e-4f));
-    b.Mirror(glm::vec3(0), glm::vec3(1, 0, 0));
-    CHECK_THAT(span(b).first.x, WithinAbs(-1.0f, 1e-3f));
-    CHECK_THAT(span(b).second.x, WithinAbs(0.0f, 1e-3f));
+    CADShape b = CADKernel::Instance().CreateBox(glm::dvec3(0), glm::dvec3(1));
+    CHECK_THAT(span(b).second.x, WithinAbs(1.0, 1e-4));
+    b.Mirror(glm::dvec3(0), glm::dvec3(1, 0, 0));
+    CHECK_THAT(span(b).first.x, WithinAbs(-1.0, 1e-3));
+    CHECK_THAT(span(b).second.x, WithinAbs(0.0, 1e-3));
   }
 }
 
@@ -360,24 +360,24 @@ TEST_CASE("the two bounding-box flavours keep their own memo",
   // Conservative and tight are separate answers with separate slots. Asking
   // one must not hand back the other's box — on a swept or B-spline surface
   // they differ by tens of percent, which is exactly where it would matter.
-  CADShape s = CADKernel::Instance().CreateSphere(glm::vec3(0, 0, 0), 5.0);
-  CADShape fresh = CADKernel::Instance().CreateSphere(glm::vec3(0, 0, 0), 5.0);
+  CADShape s = CADKernel::Instance().CreateSphere(glm::dvec3(0, 0, 0), 5.0);
+  CADShape fresh = CADKernel::Instance().CreateSphere(glm::dvec3(0, 0, 0), 5.0);
 
-  glm::vec3 tLo(0.0f), tHi(0.0f), cLo(0.0f), cHi(0.0f);
+  glm::dvec3 tLo(0.0), tHi(0.0), cLo(0.0), cHi(0.0);
   s.GetBoundingBox(cLo, cHi, /*tight=*/false); // conservative first
   s.GetBoundingBox(tLo, tHi, /*tight=*/true);
-  glm::vec3 fLo(0.0f), fHi(0.0f);
+  glm::dvec3 fLo(0.0), fHi(0.0);
   fresh.GetBoundingBox(fLo, fHi, /*tight=*/true); // tight first, cold shape
-  CHECK_THAT(tLo.x, WithinAbs(fLo.x, 1e-9f));
-  CHECK_THAT(tHi.z, WithinAbs(fHi.z, 1e-9f));
+  CHECK_THAT(tLo.x, WithinAbs(fLo.x, 1e-9));
+  CHECK_THAT(tHi.z, WithinAbs(fHi.z, 1e-9));
 
   // Tight is never larger than conservative, and both bound the sphere.
-  CHECK(tLo.x >= cLo.x - 1e-6f);
-  CHECK(tHi.x <= cHi.x + 1e-6f);
-  CHECK_THAT(tHi.x, WithinAbs(5.0f, 1e-3f));
+  CHECK(tLo.x >= cLo.x - 1e-6);
+  CHECK(tHi.x <= cHi.x + 1e-6);
+  CHECK_THAT(tHi.x, WithinAbs(5.0, 1e-3));
 
   // A second ask is the memo, and it agrees with the first to the bit.
-  glm::vec3 again(0.0f), againHi(0.0f);
+  glm::dvec3 again(0.0), againHi(0.0);
   s.GetBoundingBox(again, againHi, /*tight=*/true);
   CHECK(again == tLo);
   CHECK(againHi == tHi);
@@ -391,29 +391,29 @@ TEST_CASE("a quarter-turned copy carries the tight box, and it is exact",
   // turn now carries the box, permuted; it must equal what a cold copy
   // computes, for turns that swap axes, flip them and translate.
   const auto make = [] {
-    return CADKernel::Instance().CreateCylinder(glm::vec3(3, -2, 7),
-                                                glm::vec3(1, 0, 0), 4.0, 25.0);
+    return CADKernel::Instance().CreateCylinder(glm::dvec3(3, -2, 7),
+                                                glm::dvec3(1, 0, 0), 4.0, 25.0);
   };
   CADShape warm = make();
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   warm.GetBoundingBox(lo, hi, /*tight=*/true);
-  const glm::mat4 moves[] = {
-      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1, 0, 0)),
-      glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(1, 0, 0)),
-      glm::translate(glm::mat4(1.0f), glm::vec3(40, -5, 2)) *
-          glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f),
-                      glm::vec3(0, 0, 1)),
-      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 1, 0)),
+  const glm::dmat4 moves[] = {
+      glm::rotate(glm::dmat4(1.0), glm::radians(90.0), glm::dvec3(1, 0, 0)),
+      glm::rotate(glm::dmat4(1.0), glm::radians(180.0), glm::dvec3(1, 0, 0)),
+      glm::translate(glm::dmat4(1.0), glm::dvec3(40, -5, 2)) *
+          glm::rotate(glm::dmat4(1.0), glm::radians(-90.0),
+                      glm::dvec3(0, 0, 1)),
+      glm::rotate(glm::dmat4(1.0), glm::radians(90.0), glm::dvec3(0, 1, 0)),
       // not a quarter turn: nothing carried, and still right
-      glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(1, 0, 0)),
+      glm::rotate(glm::dmat4(1.0), glm::radians(45.0), glm::dvec3(1, 0, 0)),
   };
-  for (const glm::mat4& m : moves) {
-    glm::vec3 cLo(0.0f), cHi(0.0f), fLo(0.0f), fHi(0.0f);
+  for (const glm::dmat4& m : moves) {
+    glm::dvec3 cLo(0.0), cHi(0.0), fLo(0.0), fHi(0.0);
     warm.Transformed(m).GetBoundingBox(cLo, cHi, /*tight=*/true);
     make().Transformed(m).GetBoundingBox(fLo, fHi, /*tight=*/true);
     for (int a = 0; a < 3; a++) {
-      CHECK_THAT(cLo[a], WithinAbs(fLo[a], 1e-3f));
-      CHECK_THAT(cHi[a], WithinAbs(fHi[a], 1e-3f));
+      CHECK_THAT(cLo[a], WithinAbs(fLo[a], 1e-3));
+      CHECK_THAT(cHi[a], WithinAbs(fHi[a], 1e-3));
     }
   }
 }
@@ -426,12 +426,12 @@ TEST_CASE("a shape framed again reads the exact box another framing paid for",
   // identity and location too (docs/cam/gui.md#job-tab-frame-cost).
   CADShape::ForgetSharedTightBoxes();
   const CADShape source = CADKernel::Instance().CreateCylinder(
-      glm::vec3(3, -2, 7), glm::vec3(1, 0, 0), 4.0, 25.0);
-  const glm::mat4 at30 =
-      glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(1, 0, 0));
+      glm::dvec3(3, -2, 7), glm::dvec3(1, 0, 0), 4.0, 25.0);
+  const glm::dmat4 at30 =
+      glm::rotate(glm::dmat4(1.0), glm::radians(30.0), glm::dvec3(1, 0, 0));
   const CADShape first = source.Transformed(at30);
   REQUIRE_FALSE(first.HasTightBox());
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   first.GetBoundingBox(lo, hi, /*tight=*/true);
   CHECK(CADShape::SharedTightBoxCount() == 1);
 
@@ -439,7 +439,7 @@ TEST_CASE("a shape framed again reads the exact box another framing paid for",
   // bit.
   const CADShape again = source.Transformed(at30);
   REQUIRE_FALSE(again.HasTightBox());
-  glm::vec3 aLo(0.0f), aHi(0.0f);
+  glm::dvec3 aLo(0.0), aHi(0.0);
   again.GetBoundingBox(aLo, aHi, /*tight=*/true);
   CHECK(aLo == lo);
   CHECK(aHi == hi);
@@ -447,8 +447,8 @@ TEST_CASE("a shape framed again reads the exact box another framing paid for",
 
   // Another angle is another entry, and another answer.
   const CADShape at40 = source.Transformed(
-      glm::rotate(glm::mat4(1.0f), glm::radians(40.0f), glm::vec3(1, 0, 0)));
-  glm::vec3 bLo(0.0f), bHi(0.0f);
+      glm::rotate(glm::dmat4(1.0), glm::radians(40.0), glm::dvec3(1, 0, 0)));
+  glm::dvec3 bLo(0.0), bHi(0.0);
   at40.GetBoundingBox(bLo, bHi, /*tight=*/true);
   CHECK(CADShape::SharedTightBoxCount() == 2);
   CHECK(bHi.z != hi.z);
@@ -460,16 +460,16 @@ TEST_CASE("a shape framed again reads the exact box another framing paid for",
   const CADShape copy = source.DetachedUnlocated().LocatedLike(first);
   REQUIRE(copy.IsValid());
   CHECK(copy.GeometryId() != first.GeometryId());
-  glm::vec3 cLo(0.0f), cHi(0.0f);
+  glm::dvec3 cLo(0.0), cHi(0.0);
   copy.ExactBoxUnmemoized(cLo, cHi);
   CHECK(CADShape::SharedTightBoxCount() == 0); // unmemoized: nothing kept
   for (int a = 0; a < 3; a++) {
-    CHECK_THAT(cLo[a], WithinAbs(lo[a], 1e-4f));
-    CHECK_THAT(cHi[a], WithinAbs(hi[a], 1e-4f));
+    CHECK_THAT(cLo[a], WithinAbs(lo[a], 1e-4));
+    CHECK_THAT(cHi[a], WithinAbs(hi[a], 1e-4));
   }
   CADShape::RememberTightBox(first, cLo, cHi);
   const CADShape third = source.Transformed(at30);
-  glm::vec3 tLo(0.0f), tHi(0.0f);
+  glm::dvec3 tLo(0.0), tHi(0.0);
   third.GetBoundingBox(tLo, tHi, /*tight=*/true);
   CHECK(tLo == cLo);
   CHECK(tHi == cHi);
@@ -487,7 +487,7 @@ TEST_CASE("GenerateMesh honours a stated deflection", "[kernel][mesh]") {
   // A cylinder, because only a curved face has a chord tolerance to observe.
   const auto cylinder = [] {
     return CADKernel::Instance().CreateCylinder(
-        glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 50.0, 200.0);
+        glm::dvec3(0.0), glm::dvec3(0.0, 0.0, 1.0), 50.0, 200.0);
   };
 
   // A FRESH shape per measurement. Meshing writes the triangulation into the
@@ -529,7 +529,7 @@ TEST_CASE("a detached mesh leaves the shape's own tessellation alone",
   // is meshed at 0.01 mm. Same hazard as the bounding box that disagreed with
   // itself once the shape had been meshed.
   CADShape shape = CADKernel::Instance().CreateCylinder(
-      glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 50.0, 200.0);
+      glm::dvec3(0.0), glm::dvec3(0.0, 0.0, 1.0), 50.0, 200.0);
   REQUIRE(shape.IsValid());
 
   CADShape sharer = shape; // what a Body hands around
@@ -610,7 +610,7 @@ TEST_CASE("Mass properties of a box match the analytic values",
   using Catch::Matchers::WithinAbs;
   const double a = 2.0, b = 3.0, c = 4.0;
   CADShape box =
-      CADKernel::Instance().CreateBox(glm::vec3(0, 0, 0), glm::vec3(a, b, c));
+      CADKernel::Instance().CreateBox(glm::dvec3(0, 0, 0), glm::dvec3(a, b, c));
   CADShape::MassProps mp;
   REQUIRE(box.ComputeMassProps(mp));
   CHECK_THAT(mp.volume, WithinRel(a * b * c, 1e-9));
@@ -632,8 +632,8 @@ TEST_CASE("Mass properties of a cylinder match the analytic values",
           "[kernel][massprops]") {
   using Catch::Matchers::WithinAbs;
   const double r = 1.5, h = 4.0;
-  CADShape cyl = CADKernel::Instance().CreateCylinder(glm::vec3(0),
-                                                      glm::vec3(0, 0, 1), r, h);
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::dvec3(0), glm::dvec3(0, 0, 1), r, h);
   CADShape::MassProps mp;
   REQUIRE(cyl.ComputeMassProps(mp));
   const double v = M_PI * r * r * h;
@@ -683,7 +683,7 @@ std::filesystem::path WriteRigStep() {
   CADKernel& k = CADKernel::Instance();
   CADShape box = k.CreateBox(2.0, 2.0, 2.0);
   CADShape cyl =
-      k.CreateCylinder(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 0.5, 3.0);
+      k.CreateCylinder(glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), 0.5, 3.0);
 
   Handle(TDocStd_Document) doc;
   XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
@@ -747,7 +747,7 @@ TEST_CASE("Import and export leave no XCAF document open", "[kernel][import]") {
 
   std::vector<MeshExport::Item> items;
   for (const auto& product : model.products)
-    items.push_back({product.shape, product.name, glm::mat4(1.0f)});
+    items.push_back({product.shape, product.name, glm::dmat4(1.0)});
   const auto glb = std::filesystem::temp_directory_path() /
                    ("designer_xcaf_" + std::to_string(::getpid()) + ".glb");
   REQUIRE(MeshExport::SaveVisual(glb.string(), items, 0.1));
@@ -776,14 +776,14 @@ TEST_CASE("Structured STEP import reads names, colors, and instances",
   REQUIRE(pin != model.products.end());
   CHECK_THAT(widget->shape.Volume(), WithinRel(8.0, 1e-4));
   CHECK(widget->hasColor);
-  CHECK_THAT(widget->color.r, WithinAbs(0.9f, 0.05f));
-  CHECK_THAT(widget->color.g, WithinAbs(0.1f, 0.05f));
+  CHECK_THAT(widget->color.r, WithinAbs(0.9, 0.05));
+  CHECK_THAT(widget->color.g, WithinAbs(0.1, 0.05));
 
   // Two Widget instances: one at identity, one rotated 90° about Z at
   // x=10 (rotation maps +X to +Y — read the transform's first column).
   const size_t widgetIdx = (size_t)(widget - model.products.begin());
-  std::vector<glm::mat4> widgetXf;
-  glm::mat4 pinXf(0.0f);
+  std::vector<glm::dmat4> widgetXf;
+  glm::dmat4 pinXf(0.0);
   for (const auto& inst : model.instances) {
     if (inst.product == widgetIdx)
       widgetXf.push_back(inst.transform);
@@ -791,13 +791,13 @@ TEST_CASE("Structured STEP import reads names, colors, and instances",
       pinXf = inst.transform;
   }
   REQUIRE(widgetXf.size() == 2);
-  if (glm::length(glm::vec3(widgetXf[0][3])) >
-      glm::length(glm::vec3(widgetXf[1][3])))
+  if (glm::length(glm::dvec3(widgetXf[0][3])) >
+      glm::length(glm::dvec3(widgetXf[1][3])))
     std::swap(widgetXf[0], widgetXf[1]);
-  CHECK_THAT(glm::length(glm::vec3(widgetXf[0][3])), WithinAbs(0.0f, 1e-4f));
-  CHECK_THAT(widgetXf[1][3].x, WithinAbs(10.0f, 1e-4f));
-  CHECK_THAT(widgetXf[1][0].y, WithinAbs(1.0f, 1e-4f)); // +X -> +Y
-  CHECK_THAT(pinXf[3].y, WithinAbs(10.0f, 1e-4f));
+  CHECK_THAT(glm::length(glm::dvec3(widgetXf[0][3])), WithinAbs(0.0, 1e-4));
+  CHECK_THAT(widgetXf[1][3].x, WithinAbs(10.0, 1e-4));
+  CHECK_THAT(widgetXf[1][0].y, WithinAbs(1.0, 1e-4)); // +X -> +Y
+  CHECK_THAT(pinXf[3].y, WithinAbs(10.0, 1e-4));
 
   std::filesystem::remove(path);
 }
@@ -826,17 +826,17 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
 
   SECTION("rotations at every angle, however the quaternion was built") {
     for (int deg = 0; deg <= 360; deg += 15) {
-      const float rad = glm::radians(static_cast<float>(deg));
+      const double rad = glm::radians(static_cast<double>(deg));
       // The app's own angle-axis path...
-      const glm::mat4 viaAxis = glm::mat4_cast(
-          glm::angleAxis(rad, glm::normalize(glm::vec3(0.3f, 1.0f, -0.2f))));
+      const glm::dmat4 viaAxis = glm::mat4_cast(
+          glm::angleAxis(rad, glm::normalize(glm::dvec3(0.3, 1.0, -0.2))));
       // ...and a quaternion a script posted by hand, which is where the
       // float error is worst.
-      const glm::mat4 viaHand = glm::mat4_cast(
-          glm::quat(std::cos(rad * 0.5f), 0.0f, std::sin(rad * 0.5f), 0.0f));
-      for (const glm::mat4& m : {viaAxis, viaHand}) {
+      const glm::dmat4 viaHand = glm::mat4_cast(
+          glm::dquat(std::cos(rad * 0.5), 0.0, std::sin(rad * 0.5), 0.0));
+      for (const glm::dmat4& m : {viaAxis, viaHand}) {
         const CADShape moved = box.Transformed(
-            glm::translate(glm::mat4(1.0f), glm::vec3(3, -4, 5)) * m);
+            glm::translate(glm::dmat4(1.0), glm::dvec3(3, -4, 5)) * m);
         INFO("angle " << deg << " deg, scale " << scaleOf(moved));
         REQUIRE(moved.IsValid());
         CHECK(scaleOf(moved) == 1.0);
@@ -851,8 +851,8 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
     // Determinant -1: not a rotation, and OCC represents it fine. The rigid
     // shortcut must not swallow it (a mirrored part would come back
     // unmirrored, which no test would notice until a drawing looked wrong).
-    glm::mat4 mirror(1.0f);
-    mirror[0][0] = -1.0f;
+    glm::dmat4 mirror(1.0);
+    mirror[0][0] = -1.0;
     const CADShape flipped = box.Transformed(mirror);
     REQUIRE(flipped.IsValid());
     // Same size, opposite handedness. Note what is NOT asserted: the SIGN of
@@ -868,7 +868,7 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
     // implementations (a location versus baked-in vertices) — three
     // incidentals I asserted in turn before landing on the one that is the
     // actual property: the box spanned x 0..10 and must now span -10..0.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     flipped.GetBoundingBox(lo, hi); // void: fills lo/hi
     INFO("bbox x " << lo.x << " .. " << hi.x);
     CHECK_THAT(lo.x, WithinAbs(-10.0, 1e-6));
@@ -898,7 +898,7 @@ TEST_CASE("An STL import is read in the unit it was drawn in",
     return doc;
   };
   const auto span = [](const Document& doc) {
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
     return hi - lo;
   };
@@ -906,7 +906,7 @@ TEST_CASE("An STL import is read in the unit it was drawn in",
   SECTION("read as inches, every side is 25.4x") {
     const auto doc = import(stl, units::Length::Inch);
     REQUIRE(doc->GetBodies().size() == 1);
-    const glm::vec3 s = span(*doc);
+    const glm::dvec3 s = span(*doc);
     CHECK_THAT(s.x, WithinAbs(2.0 * 25.4, 1e-3));
     CHECK_THAT(s.y, WithinAbs(3.0 * 25.4, 1e-3));
     CHECK_THAT(s.z, WithinAbs(4.0 * 25.4, 1e-3));
@@ -956,7 +956,7 @@ TEST_CASE("ImportFeature carries names and colors onto bodies",
     if (b.name == "Widget") {
       widgets++;
       CHECK(b.hasDisplayColor);
-      CHECK_THAT(b.displayColor.r, WithinAbs(0.9f, 0.05f));
+      CHECK_THAT(b.displayColor.r, WithinAbs(0.9, 0.05));
     } else if (b.name == "Pin") {
       pins++;
       CHECK_FALSE(b.hasDisplayColor);
@@ -968,7 +968,7 @@ TEST_CASE("ImportFeature carries names and colors onto bodies",
   // Instances keep their relative placement, centered as one unit. The box
   // is corner-at-origin, so the 90°-rotation puts instance B's center at
   // (-1,1,1)+x10 = (9,1,1) vs A's (1,1,1): centers 8 apart.
-  glm::vec3 minA, maxA, minB, maxB;
+  glm::dvec3 minA, maxA, minB, maxB;
   const Body* w[2] = {nullptr, nullptr};
   for (const auto& b : bodies)
     if (b.name == "Widget")
@@ -976,8 +976,8 @@ TEST_CASE("ImportFeature carries names and colors onto bodies",
   REQUIRE(w[1] != nullptr);
   w[0]->shape.GetBoundingBox(minA, maxA);
   w[1]->shape.GetBoundingBox(minB, maxB);
-  const glm::vec3 cA = (minA + maxA) * 0.5f, cB = (minB + maxB) * 0.5f;
-  CHECK_THAT(glm::length(cB - cA), WithinAbs(8.0f, 0.01f));
+  const glm::dvec3 cA = (minA + maxA) * 0.5, cB = (minB + maxB) * 0.5;
+  CHECK_THAT(glm::length(cB - cA), WithinAbs(8.0, 0.01));
 
   std::filesystem::remove(path);
 }
@@ -999,18 +999,18 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
   // centering is non-trivial) twice — identity and rotated-90°-at-x10 —
   // plus a "Pin" cylinder at y=10.
   CADKernel::ImportedModel model;
-  model.products.push_back({k.CreateBox(2.0, 2.0, 2.0), "Widget", true,
-                            glm::vec3(0.9f, 0.1f, 0.1f)});
   model.products.push_back(
-      {k.CreateCylinder(glm::vec3(0), glm::vec3(0, 0, 1), 0.5, 3.0), "Pin",
-       false, glm::vec3(0.0f)});
-  const glm::mat4 xfB =
-      glm::translate(glm::mat4(1.0f), glm::vec3(10, 0, 0)) *
-      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 0, 1));
-  model.instances.push_back({0, glm::mat4(1.0f), "W1"});
+      {k.CreateBox(2.0, 2.0, 2.0), "Widget", true, glm::dvec3(0.9, 0.1, 0.1)});
+  model.products.push_back(
+      {k.CreateCylinder(glm::dvec3(0), glm::dvec3(0, 0, 1), 0.5, 3.0), "Pin",
+       false, glm::dvec3(0.0)});
+  const glm::dmat4 xfB =
+      glm::translate(glm::dmat4(1.0), glm::dvec3(10, 0, 0)) *
+      glm::rotate(glm::dmat4(1.0), glm::radians(90.0), glm::dvec3(0, 0, 1));
+  model.instances.push_back({0, glm::dmat4(1.0), "W1"});
   model.instances.push_back({0, xfB, "W2"});
   model.instances.push_back(
-      {1, glm::translate(glm::mat4(1.0f), glm::vec3(0, 10, 0)), "P1"});
+      {1, glm::translate(glm::dmat4(1.0), glm::dvec3(0, 10, 0)), "P1"});
 
   const auto stepPath =
       std::filesystem::temp_directory_path() / "designer_test_asm.step";
@@ -1031,12 +1031,12 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
                    [](const auto& p) { return p.name == "Widget"; });
   REQUIRE(widget != plan.parts.end());
   CHECK(widget->hasColor);
-  CHECK_THAT(widget->color.r, WithinAbs(0.9f, 0.05f));
+  CHECK_THAT(widget->color.r, WithinAbs(0.9, 0.05));
   CADShape widgetShape;
   REQUIRE(k.LoadBREP(widget->brepPath, widgetShape));
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   widgetShape.GetBoundingBox(min, max);
-  CHECK_THAT(glm::length((min + max) * 0.5f), WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(glm::length((min + max) * 0.5), WithinAbs(0.0, 1e-4));
   CHECK_THAT(widgetShape.Volume(), WithinRel(8.0, 1e-4));
 
   // Occurrences: centered part + placement composes back to the file's
@@ -1051,16 +1051,16 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
   REQUIRE(pin != nullptr);
   if (glm::length(ws[0]->position) > glm::length(ws[1]->position))
     std::swap(ws[0], ws[1]);
-  CHECK_THAT(glm::length(ws[0]->position - glm::vec3(1, 1, 1)),
-             WithinAbs(0.0f, 1e-3f));
-  const glm::vec3 expectB = glm::vec3(xfB * glm::vec4(1, 1, 1, 1));
-  CHECK_THAT(glm::length(ws[1]->position - expectB), WithinAbs(0.0f, 1e-3f));
+  CHECK_THAT(glm::length(ws[0]->position - glm::dvec3(1, 1, 1)),
+             WithinAbs(0.0, 1e-3));
+  const glm::dvec3 expectB = glm::dvec3(xfB * glm::dvec4(1, 1, 1, 1));
+  CHECK_THAT(glm::length(ws[1]->position - expectB), WithinAbs(0.0, 1e-3));
   // W2's orientation is the 90°-about-Z rotation.
-  const glm::vec3 xAxis = ws[1]->orientation * glm::vec3(1, 0, 0);
-  CHECK_THAT(xAxis.y, WithinAbs(1.0f, 1e-3f));
+  const glm::dvec3 xAxis = ws[1]->orientation * glm::dvec3(1, 0, 0);
+  CHECK_THAT(xAxis.y, WithinAbs(1.0, 1e-3));
   // Pin: cylinder is axis-centered in XY, z spans [0,3] → center (0,0,1.5).
-  CHECK_THAT(glm::length(pin->position - glm::vec3(0, 10, 1.5f)),
-             WithinAbs(0.0f, 1e-3f));
+  CHECK_THAT(glm::length(pin->position - glm::dvec3(0, 10, 1.5)),
+             WithinAbs(0.0, 1e-3));
 
   // The preloaded-model overload must plan IDENTICALLY to the path one. It
   // exists so ImportCADFile can hand on the model it already parsed to decide
@@ -1081,14 +1081,14 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
     CHECK(plan2.parts[i].name == plan.parts[i].name);
     CHECK(plan2.parts[i].hasColor == plan.parts[i].hasColor);
     CHECK_THAT(glm::length(plan2.parts[i].color - plan.parts[i].color),
-               WithinAbs(0.0f, 1e-5f));
+               WithinAbs(0.0, 1e-5));
   }
   for (size_t i = 0; i < plan.occurrences.size(); i++) {
     CHECK(plan2.occurrences[i].part == plan.occurrences[i].part);
     CHECK(plan2.occurrences[i].name == plan.occurrences[i].name);
     CHECK_THAT(glm::length(plan2.occurrences[i].position -
                            plan.occurrences[i].position),
-               WithinAbs(0.0f, 1e-4f));
+               WithinAbs(0.0, 1e-4));
   }
 
   std::filesystem::remove(stepPath);
@@ -1122,12 +1122,12 @@ TEST_CASE("FacePlane's normal points out of the solid on a revolve's ends",
   const CADShape bar(revol.Shape());
   int planar = 0;
   for (int f = 0; f < 16; f++) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (!bar.FacePlane(f, c, n, u))
       continue;
     planar++;
     // A step along the normal from the face's centre is outside the solid.
-    const glm::vec3 out = c + n * 0.5f;
+    const glm::dvec3 out = c + n * 0.5;
     BRepClass3d_SolidClassifier probe(bar.GetShape(),
                                       gp_Pnt(out.x, out.y, out.z), 1e-6);
     INFO("face " << f << " normal " << n.x << "," << n.y << "," << n.z);

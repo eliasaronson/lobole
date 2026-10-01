@@ -194,7 +194,7 @@ uint64_t BuildStackedOnCap(Document& doc, double distA, uint64_t& extAid) {
 double BodyMinZ(const Document& doc, uint64_t createdBy) {
   for (const auto& b : doc.GetBodies()) {
     if (b.createdBy == createdBy) {
-      glm::vec3 mn, mx;
+      glm::dvec3 mn, mx;
       b.shape.GetBoundingBox(mn, mx);
       return mn.z;
     }
@@ -258,7 +258,7 @@ TEST_CASE("CADShape::FacePlane extracts planar faces and rejects curved ones",
   Document box;
   box.AddFeature(
       std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 2.0, 2.0, 2.0));
-  glm::vec3 c, n, u;
+  glm::dvec3 c, n, u;
   // A box's faces are all planar.
   CHECK(box.GetBodies()[0].shape.FacePlane(0, c, n, u));
   CHECK_THAT(glm::length(n), WithinAbs(1.0f, 1e-5f)); // unit normal

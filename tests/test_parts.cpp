@@ -353,7 +353,7 @@ TEST_CASE("parts: a generated screw measures what the standard says",
   // The head is dk across and k tall, and the shank runs `length` from under
   // it: a body that is the right volume but the wrong shape would pass a mass
   // check and fail this.
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   screw.shape.GetBoundingBox(lo, hi);
   CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
   CHECK_THAT(hi.y - lo.y, WithinAbs(dk, 1e-3));
@@ -551,7 +551,7 @@ TEST_CASE("parts: a nut and a washer are their standards' own numbers",
   Document nutDoc;
   const double nut = BuildVolume("iso4032", "M6", 0.0, nutDoc);
   REQUIRE(nutDoc.GetBodies().size() == 1);
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   nutDoc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   // A hexagon measures `s` across the flats and 2/sqrt(3) times that across
   // the corners, so its bounding box has one of each — which of the two lands
@@ -601,7 +601,7 @@ TEST_CASE("parts: the four head shapes each measure their standard",
   const SourceTables tables;
   std::string error;
   const double length = 20.0, shank = kPi * 9.0 * length;
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
 
   SECTION("a hex head is turned from the outside and has no recess") {
     const auto dims = parts::Dimensions("iso4017", "M6", &error);

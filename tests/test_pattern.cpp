@@ -352,7 +352,7 @@ TEST_CASE("Circular pattern about a custom axis off the origin", "[pattern]") {
   REQUIRE(doc.GetBodies().size() == 4);
   CHECK_THAT(TotalVolume(doc), WithinRel(4.0, 1e-4));
   for (const Body& b : doc.GetBodies()) {
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
     CHECK(std::abs((lo.x + hi.x) / 2 - 10.0) < 3.0);
     CHECK(std::abs((lo.y + hi.y) / 2) < 3.0);

@@ -214,12 +214,11 @@ std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
                                             resolved.faceIndex);
   if (!info)
     return std::nullopt;
-  const glm::vec3 n = info->normal;
-  if (glm::dot(n, n) < 1e-12f)
+  const glm::dvec3 n = info->normal;
+  if (glm::dot(n, n) < 1e-12)
     return std::nullopt;
   // Into the face: pushing on a face is what placing a force on it means.
-  const glm::vec3 into = -glm::normalize(n);
-  return glm::dvec3(into.x, into.y, into.z);
+  return -glm::normalize(n);
 }
 
 bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,

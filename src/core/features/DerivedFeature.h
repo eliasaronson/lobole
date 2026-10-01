@@ -84,8 +84,8 @@ public:
   std::vector<std::string> bodyNames;
   // Where the copy sits in THIS part. Identity unless made from an
   // in-context edit, where it is OccMatrix(edited)^-1 * OccMatrix(source).
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
   // true: a ghost to draw on — absent from mass, BOM, export, CAM and
   // booleans. false: an ordinary body of this part (a mould from its
   // casting).
@@ -96,7 +96,7 @@ public:
   size_t sourceChainHash = 0;
   std::vector<DerivedBody> snapshot;
 
-  glm::mat4 Placement() const;
+  glm::dmat4 Placement() const;
   bool IdentityPlacement() const;
 
   // "<this id>/<source created_by>/<source name>": the source's name under

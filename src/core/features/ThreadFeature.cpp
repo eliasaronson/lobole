@@ -345,7 +345,7 @@ bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
                               gp_Vec(y) * std::sin(a * M_PI / 2.0);
         const gp_Pnt p = o.Translated(
             gp_Vec(d) * (v + outward * 0.5 * k * pitch) + radial * probe);
-        if (body.shape.ContainsPoint(glm::vec3(p.X(), p.Y(), p.Z())))
+        if (body.shape.ContainsPoint(glm::dvec3(p.X(), p.Y(), p.Z())))
           return false;
       }
     return true;

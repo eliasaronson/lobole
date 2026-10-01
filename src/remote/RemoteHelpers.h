@@ -158,7 +158,7 @@ inline void AttachReceipt(nlohmann::json& out, const receipt::Receipt& r) {
   out["receipt"] = ReceiptJson(r);
 }
 
-inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
+inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
 
@@ -232,7 +232,7 @@ inline std::string IndexError(const char* what, long long given, size_t count,
 inline nlohmann::json BodyDigestJson(const Document& doc) {
   nlohmann::json arr = nlohmann::json::array();
   for (const Body& b : doc.GetBodies()) {
-    glm::vec3 mn(0.0f), mx(0.0f);
+    glm::dvec3 mn(0.0), mx(0.0);
     b.shape.GetBoundingBox(mn, mx);
     arr.push_back({{"name", b.name},
                    {"created_by", b.createdBy},

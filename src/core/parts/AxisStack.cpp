@@ -83,8 +83,8 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
   // and the ray is already in the body's local frame, so this is a slab test
   // against numbers already computed.
   const auto reaches = [&](const glm::dvec3& localOrigin,
-                           const glm::dvec3& localDir, const glm::vec3& lo,
-                           const glm::vec3& hi) {
+                           const glm::dvec3& localDir, const glm::dvec3& lo,
+                           const glm::dvec3& hi) {
     double tMin = 0.0, tMax = maxDist;
     for (int a = 0; a < 3; ++a) {
       const double d = localDir[a];
@@ -111,20 +111,20 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
     // The ray into the body's own frame, not the body into the world: these
     // placements are rigid, so the distances along the ray are identical and
     // this copies no geometry.
-    const glm::dmat4 toLocal = glm::inverse(glm::dmat4(p.world));
+    const glm::dmat4 toLocal = glm::inverse(p.world);
     const glm::dvec3 localDir =
         glm::normalize(glm::dvec3(toLocal * glm::dvec4(dir, 0.0)));
 
     // The union of what the bundle finds: a body is entered where the FIRST
     // ray enters it and left where the LAST leaves, so a counterbore or a
     // chamfer on one side does not shorten the plate.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     p.body->shape.GetBoundingBox(lo, hi);
     // A hair of slack: the bundle sits a hole-radius off the axis and a
     // conservative box is already generous, but a ray grazing a face at the
     // box boundary must not be pruned.
-    lo -= glm::vec3(1e-3f);
-    hi += glm::vec3(1e-3f);
+    lo -= glm::dvec3(1e-3);
+    hi += glm::dvec3(1e-3);
 
     // Every interval of MATERIAL the bundle finds, not one span from the
     // first entry to the last exit. A folded part is crossed twice by one

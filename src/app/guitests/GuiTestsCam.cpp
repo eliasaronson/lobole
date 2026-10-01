@@ -93,7 +93,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f) {
           ui::SelectionItem top;
           top.kind = ui::SelectionItem::Kind::Face;
@@ -146,7 +146,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem side;
     side.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (body.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.5f) {
         side.element = ElementRef{body.createdBy, name};
         break;
@@ -166,7 +166,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem top;
     top.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (body.shape.FacePlane(index, o, n, u) && n.z > 0.99f) {
         top.element = ElementRef{body.createdBy, name};
         break;
@@ -518,7 +518,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem big;
     big.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (body.shape.FacePlane(index, o, n, u) && n.y < -0.99f)
         big.element = ElementRef{body.createdBy, name};
     }
@@ -583,7 +583,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const Body& body = CamPart()->GetBodies()[0];
     ElementRef big;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (body.shape.FacePlane(index, o, n, u) && n.y < -0.99f)
         big = ElementRef{body.createdBy, name};
     }
@@ -848,7 +848,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     big.kind = ui::SelectionItem::Kind::Face;
     double best = 0.0;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!body.shape.FacePlane(index, o, n, u))
         continue;
       const double area = std::abs(n.y); // the two Y-facing faces are the big
@@ -928,7 +928,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     top.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f)
           top.element = ElementRef{b.createdBy, name};
       }
@@ -985,7 +985,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
           CamPart()->GetFeature(CamPart()->FeatureCount() - 1)->GetId())
         continue;
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u))
           continue; // planar: not the barrel
         ui::SelectionItem curved;
@@ -1006,7 +1006,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     floor.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
             std::abs(o.z - 12.0f) < 1e-4f)
           floor.element = ElementRef{b.createdBy, name};
@@ -1119,7 +1119,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     floor.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
             std::abs(o.z - 12.0f) < 1e-4f)
           floor.element = ElementRef{b.createdBy, name};
@@ -1634,7 +1634,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     wall.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
           wall.element = ElementRef{b.createdBy, name};
       }
@@ -1712,7 +1712,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     floor.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
             std::abs(o.z - 14.0f) < 1e-4f)
           floor.element = ElementRef{b.createdBy, name};
@@ -1729,7 +1729,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     wall.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
           wall.element = ElementRef{b.createdBy, name};
       }
@@ -2803,7 +2803,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     floor.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : ui::JobBodies(*s_App))
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.jobPartId == second && b.shape.FacePlane(index, o, n, u) &&
             n.z > 0.99f && std::abs(o.z - 12.0f) < 1e-4f) {
           floor.element = ElementRef{b.createdBy, name};
@@ -2893,9 +2893,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // Frame it deterministically rather than through a fit, the way every
     // other viewport-click test does: a fit animates, and an earlier test's
     // orbit leaks in through the shared camera.
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     placed[1].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 centre = (lo + hi) * 0.5f;
+    const glm::vec3 centre = (lo + hi) * 0.5;
     const float radius = glm::length(hi - lo) * 0.5f;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(centre);
@@ -2943,7 +2943,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     glm::vec3 up(0.0f);
     double best = 0.0;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (body.shape.FacePlane(index, o, n, u) && std::abs(n.y) > best) {
         best = std::abs(n.y);
         up = n;
@@ -2971,9 +2971,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // Where the part is DRAWN, and where the backplot is drawn. A profile
     // runs around the part, so the two must share a neighbourhood.
-    glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+    glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
     for (const Body& b : ui::JobPlacedBodies(*s_App)) {
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       b.shape.GetBoundingBox(bmin, bmax);
       lo = glm::min(lo, bmin);
       hi = glm::max(hi, bmax);
@@ -3264,7 +3264,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     wall.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (!b.shape.FacePlane(index, o, n, u)) // curved: the hole's wall
           wall.element = ElementRef{b.createdBy, name};
       }
@@ -3351,7 +3351,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem side;
     side.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!body.shape.FacePlane(index, o, n, u)) {
         side.element = ElementRef{body.createdBy, name};
         break;
@@ -3580,7 +3580,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const Body& bar = part->GetBodies()[0];
     std::vector<std::pair<glm::vec3, ui::SelectionItem>> floors;
     for (const auto& [index, name] : bar.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!bar.shape.FacePlane(index, o, n, u) || std::abs(n.x) > 0.1f ||
           std::abs(std::abs(glm::dot(o, n)) - 8.0f) > 1e-3f)
         continue;
@@ -3742,7 +3742,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem dome;
     dome.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!body.shape.FacePlane(index, o, n, u)) {
         dome.element = ElementRef{body.createdBy, name};
         break;
@@ -3833,7 +3833,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SelectionItem round;
     round.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!body.shape.FacePlane(index, o, n, u)) {
         round.element = ElementRef{body.createdBy, name};
         break;
@@ -3964,7 +3964,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const Body& body = ui::JobBodies(*s_App)[0];
     std::string px, nx;
     for (const auto& [index, name] : body.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!body.shape.FacePlane(index, o, n, u))
         continue;
       if (n.x > 0.99f)
@@ -4372,7 +4372,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->gizmoDrag.active);
     ctx->Yield(2);
     // The drawn part followed the drag.
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     ui::JobPlacedBodies(*s_App)[0].shape.GetBoundingBox(bmin, bmax);
     IM_CHECK(std::abs(bmin.x - 25.0f) < 0.5f);
     // ...and the handles moved with it.
@@ -5049,7 +5049,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       const CADShape cold =
           ui::JobBodies(*s_App).at(0).shape.Transformed(glm::rotate(
               glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(1, 0, 0)));
-      glm::vec3 lo(0.0f), hi(0.0f);
+      glm::dvec3 lo(0.0), hi(0.0);
       const auto t0 = std::chrono::steady_clock::now();
       cold.ExactBoxUnmemoized(lo, hi);
       ctx->LogInfo("one cold exact box of the part: %.1f ms", msSince(t0));

@@ -458,8 +458,8 @@ size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
   return checked;
 }
 
-SweepPlan PlanSweep(const std::vector<glm::vec3>& mins,
-                    const std::vector<glm::vec3>& maxs, double gapTol,
+SweepPlan PlanSweep(const std::vector<glm::dvec3>& mins,
+                    const std::vector<glm::dvec3>& maxs, double gapTol,
                     size_t maxPairs) {
   struct Cand {
     double gap;
@@ -469,8 +469,8 @@ SweepPlan PlanSweep(const std::vector<glm::vec3>& mins,
   SweepPlan plan;
   for (size_t i = 0; i < mins.size(); ++i)
     for (size_t j = i + 1; j < mins.size(); ++j) {
-      const glm::vec3 d = glm::max(
-          glm::max(mins[i] - maxs[j], mins[j] - maxs[i]), glm::vec3(0.0f));
+      const glm::dvec3 d = glm::max(
+          glm::max(mins[i] - maxs[j], mins[j] - maxs[i]), glm::dvec3(0.0));
       const double gap = static_cast<double>(glm::length(d));
       if (gap > gapTol) {
         plan.boxCleared++;
@@ -583,13 +583,13 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
   struct Ent {
     const Body* body;
     std::vector<Body> single;
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
   };
   std::vector<Ent> ents;
   for (const Body& b : doc.GetBodies()) {
     Ent e{&b, {}, {}, {}};
     e.single.push_back(b);
-    if (Measure::WorldBounds(e.single, glm::mat4(1.0f), e.min, e.max))
+    if (Measure::WorldBounds(e.single, glm::dmat4(1.0), e.min, e.max))
       ents.push_back(std::move(e));
   }
   std::vector<size_t> parent(ents.size());
@@ -600,9 +600,9 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
   };
   for (size_t i = 0; i < ents.size(); ++i)
     for (size_t j = i + 1; j < ents.size(); ++j) {
-      const glm::vec3 gap = glm::max(
+      const glm::dvec3 gap = glm::max(
           glm::max(ents[i].min - ents[j].max, ents[j].min - ents[i].max),
-          glm::vec3(0.0f));
+          glm::dvec3(0.0));
       if (glm::length(gap) > window)
         continue;
       // The TRIANGLES decide it, not a boolean. This is a yes/no — are these
@@ -617,16 +617,16 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
       // worse than a missed one at a tenth of a millimetre, and
       // contact_report gives the exact gaps when they matter.
       bool joined = false;
-      const Measure::Target ta{&ents[i].single, glm::mat4(1.0f), {}};
-      const Measure::Target tb{&ents[j].single, glm::mat4(1.0f), {}};
+      const Measure::Target ta{&ents[i].single, glm::dmat4(1.0), {}};
+      const Measure::Target tb{&ents[j].single, glm::dmat4(1.0), {}};
       const collide::Gap mesh = Measure::MeshGap(ta, tb);
       if (mesh.known) {
         joined = mesh.distance <= touchTol + mesh.tolerance;
       } else {
         // No triangles to ask (a shape that will not tessellate): the exact
         // answer is the only one there is.
-        const auto c = Measure::ContactBetween(ents[i].single, glm::mat4(1.0f),
-                                               ents[j].single, glm::mat4(1.0f));
+        const auto c = Measure::ContactBetween(ents[i].single, glm::dmat4(1.0),
+                                               ents[j].single, glm::dmat4(1.0));
         joined = c && (c->volume > 1e-9 || c->distance <= touchTol);
       }
       if (joined)
@@ -1344,15 +1344,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // Cross-section area where a plane cuts through all bodies (I3). Plane:
     // {base_plane: "xy"|"xz"|"yz", offset?: 0} OR {origin: [x,y,z],
     // normal: [x,y,z]}.
-    glm::vec3 origin(0.0f), normal(0.0f, 0.0f, 1.0f);
+    glm::dvec3 origin(0.0), normal(0.0, 0.0, 1.0);
     double usedOffset = 0.0;
     bool derived = false;
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
       const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
-      normal = basePlane == 1   ? glm::vec3(0, 1, 0)
-               : basePlane == 2 ? glm::vec3(1, 0, 0)
-                                : glm::vec3(0, 0, 1);
+      normal = basePlane == 1   ? glm::dvec3(0, 1, 0)
+               : basePlane == 2 ? glm::dvec3(1, 0, 0)
+                                : glm::dvec3(0, 0, 1);
       // Omitting `offset` means the same here as in set_section: the middle
       // of what this tab shows. Two readings of one word would be worse than
       // either.
@@ -1361,12 +1361,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           derived
               ? static_cast<double>(ui::CenteredSectionOffset(state, basePlane))
               : p.at("offset").get<double>();
-      origin = normal * static_cast<float>(usedOffset);
+      origin = normal * usedOffset;
     } else {
       const auto& o = p.at("origin");
       const auto& nrm = p.at("normal");
-      origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
-      normal = {nrm[0].get<float>(), nrm[1].get<float>(), nrm[2].get<float>()};
+      origin = {o[0].get<double>(), o[1].get<double>(), o[2].get<double>()};
+      normal = {nrm[0].get<double>(), nrm[1].get<double>(),
+                nrm[2].get<double>()};
     }
     // On an ASSEMBLY tab the same question is about the assembled thing, so
     // every visible occurrence's bodies are placed by its solved transform
@@ -1388,7 +1389,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
            ui::FlattenActiveAssembly(state)) {
         if (!inst.visible)
           continue;
-        const glm::mat4 xf = inst.world;
+        const glm::dmat4 xf = inst.world;
         for (const Body& b : inst.part->GetBodies()) {
           if (b.reference)
             continue; // a derived ghost is not the occurrence's matter
@@ -1593,16 +1594,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           throw std::runtime_error(
               "'" + (ta.bodies.empty() ? ta.label : tb.label) +
               "' resolves to no geometry (missing, hidden or empty)");
-        if (const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
-                                                   tb.bodies, glm::mat4(1.0f),
+        if (const auto c = Measure::ContactBetween(ta.bodies, glm::dmat4(1.0),
+                                                   tb.bodies, glm::dmat4(1.0),
                                                    /*wantDistance=*/false))
           return *c;
         // ContactBetween gives up on the set when one body pair's boolean
         // does not finish; InterferenceVolume skips that pair and weighs the
         // rest, which is the answer this sweep has always given. The site
         // is then not known, and is left out rather than guessed.
-        const auto v = Measure::InterferenceVolume(ta.bodies, glm::mat4(1.0f),
-                                                   tb.bodies, glm::mat4(1.0f));
+        const auto v = Measure::InterferenceVolume(ta.bodies, glm::dmat4(1.0),
+                                                   tb.bodies, glm::dmat4(1.0));
         if (!v)
           throw std::runtime_error(
               "interference check failed — an OpenCASCADE boolean/extrema "
@@ -1630,13 +1631,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (!t.bodies.empty())
             occs.push_back(std::move(t));
         }
-        std::vector<glm::vec3> mins(occs.size()), maxs(occs.size());
+        std::vector<glm::dvec3> mins(occs.size()), maxs(occs.size());
         std::vector<size_t> keep;
         for (size_t i = 0; i < occs.size(); ++i)
-          if (Measure::WorldBounds(occs[i].bodies, glm::mat4(1.0f), mins[i],
+          if (Measure::WorldBounds(occs[i].bodies, glm::dmat4(1.0), mins[i],
                                    maxs[i]))
             keep.push_back(i);
-        std::vector<glm::vec3> km, kx;
+        std::vector<glm::dvec3> km, kx;
         for (size_t i : keep) {
           km.push_back(mins[i]);
           kx.push_back(maxs[i]);
@@ -1726,8 +1727,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         nameSides(out, ta, tb);
         return out;
       }
-      const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
-                                             tb.bodies, glm::mat4(1.0f));
+      const auto c = Measure::ContactBetween(ta.bodies, glm::dmat4(1.0),
+                                             tb.bodies, glm::dmat4(1.0));
       if (!c)
         throw std::runtime_error(
             "interference check failed — an OpenCASCADE boolean/extrema "
@@ -1757,7 +1758,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     va[0] = bodies[ia];
     vb[0] = bodies[ib];
     const auto c =
-        Measure::ContactBetween(va, glm::mat4(1.0f), vb, glm::mat4(1.0f));
+        Measure::ContactBetween(va, glm::dmat4(1.0), vb, glm::dmat4(1.0));
     if (!c)
       throw std::runtime_error(
           "interference check failed — an OpenCASCADE boolean/extrema "
@@ -1796,10 +1797,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const double radiusTol = p.value("radius_tol", 0.01);
     const size_t maxResults = p.value("max_results", 50u);
     const auto vec3 = [](const json& a) {
-      return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
-                       a.at(2).get<float>());
+      return glm::dvec3(a.at(0).get<double>(), a.at(1).get<double>(),
+                        a.at(2).get<double>());
     };
-    std::optional<glm::vec3> wantNormal, wantAxis, nearPoint;
+    std::optional<glm::dvec3> wantNormal, wantAxis, nearPoint;
     if (p.contains("normal"))
       wantNormal = glm::normalize(vec3(p.at("normal")));
     if (p.contains("axis"))
@@ -1838,7 +1839,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         std::string kind;
         double area = 0.0, length = 0.0, radius = 0.0;
         bool hasRadius = false, hasAxis = false;
-        glm::vec3 point(0.0f), normal(0.0f), axis(0.0f);
+        glm::dvec3 point(0.0), normal(0.0), axis(0.0);
         if (wantFaces) {
           const auto fi = Measure::DescribeFaceAt(bodies[bi], idx);
           if (!fi)
@@ -1865,7 +1866,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         if (!geomType.empty() && kind != geomType)
           continue;
-        if (wantNormal && (glm::length(normal) < 0.5f ||
+        if (wantNormal && (glm::length(normal) < 0.5 ||
                            glm::dot(glm::normalize(normal), *wantNormal) <
                                std::cos(angleTol)))
           continue;
@@ -1998,7 +1999,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         if (pd == nullptr)
           throw std::runtime_error("occurrence part document is missing");
         std::vector<Body> placed;
-        const glm::mat4 xf = ui::OccurrenceMatrix(*found);
+        const glm::dmat4 xf = ui::OccurrenceMatrix(*found);
         for (const Body& b : pd->GetBodies()) {
           Body nb;
           nb.shape = b.shape.Transformed(xf);
@@ -2048,18 +2049,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "extra_path and materialize have nothing to write — ask for "
           "metrics \"all\"");
 
-    glm::mat4 alignB(1.0f);
+    glm::dmat4 alignB(1.0);
     if (p.value("align", false)) {
       // Centres of mass only — the probe never needed the booleans.
       const auto probe = Measure::CompareBodySets(
-          refA, glm::mat4(1.0f), candB, glm::mat4(1.0f), nullptr, nullptr,
+          refA, glm::dmat4(1.0), candB, glm::dmat4(1.0), nullptr, nullptr,
           /*overlap=*/false);
       if (probe)
-        alignB = glm::translate(glm::mat4(1.0f), glm::vec3(probe->comA) -
-                                                     glm::vec3(probe->comB));
+        alignB = glm::translate(glm::dmat4(1.0), glm::dvec3(probe->comA) -
+                                                     glm::dvec3(probe->comB));
     }
     const auto c = Measure::CompareBodySets(
-        refA, glm::mat4(1.0f), candB, alignB,
+        refA, glm::dmat4(1.0), candB, alignB,
         wantMissing ? &missingShape : nullptr,
         wantExtra ? &extraShape : nullptr, wantOverlap);
     if (!c)
@@ -2078,12 +2079,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         c->volumeA > 1e-9 ? c->volumeB / c->volumeA : 0.0;
     const double centerOffset =
         glm::length(glm::dvec3(c->comA) - glm::dvec3(c->comB));
-    const auto boxVol = [](const glm::vec3& mn, const glm::vec3& mx) {
-      const glm::vec3 d = glm::max(mx - mn, glm::vec3(0.0f));
+    const auto boxVol = [](const glm::dvec3& mn, const glm::dvec3& mx) {
+      const glm::dvec3 d = glm::max(mx - mn, glm::dvec3(0.0));
       return double(d.x) * d.y * d.z;
     };
-    const glm::vec3 imn = glm::max(c->minA, c->minB);
-    const glm::vec3 imx = glm::min(c->maxA, c->maxB);
+    const glm::dvec3 imn = glm::max(c->minA, c->minB);
+    const glm::dvec3 imx = glm::min(c->maxA, c->maxB);
     const double boxInter = boxVol(imn, imx);
     const double boxUnion =
         boxVol(c->minA, c->maxA) + boxVol(c->minB, c->maxB) - boxInter;
@@ -2270,7 +2271,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       struct BEnt {
         const Body* body;
         std::vector<Body> single; // ContactBetween takes body sets
-        glm::vec3 min, max;
+        glm::dvec3 min, max;
       };
       std::vector<BEnt> ents;
       json skipped = json::array();
@@ -2279,15 +2280,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           continue; // a derived ghost is not this part's matter
         BEnt e{&b, {}, {}, {}};
         e.single.push_back(b);
-        if (!Measure::WorldBounds(e.single, glm::mat4(1.0f), e.min, e.max)) {
+        if (!Measure::WorldBounds(e.single, glm::dmat4(1.0), e.min, e.max)) {
           skipped.push_back(b.name);
           continue;
         }
         ents.push_back(std::move(e));
       }
       const auto boxGap = [](const BEnt& a, const BEnt& b) {
-        const glm::vec3 gap =
-            glm::max(glm::max(a.min - b.max, b.min - a.max), glm::vec3(0.0f));
+        const glm::dvec3 gap =
+            glm::max(glm::max(a.min - b.max, b.min - a.max), glm::dvec3(0.0));
         return static_cast<double>(glm::length(gap));
       };
       std::vector<size_t> parent(ents.size());
@@ -2306,11 +2307,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           // slanted member's axis-aligned box is mostly air, so on a space
           // frame nearly every pair survives it and pays for an exact
           // boolean. An oriented box follows the member.
-          if (Measure::SeparatedByOBB(ents[i].single, glm::mat4(1.0f),
-                                      ents[j].single, glm::mat4(1.0f), nearTol))
+          if (Measure::SeparatedByOBB(ents[i].single, glm::dmat4(1.0),
+                                      ents[j].single, glm::dmat4(1.0), nearTol))
             continue;
           const auto c = Measure::ContactBetween(
-              ents[i].single, glm::mat4(1.0f), ents[j].single, glm::mat4(1.0f));
+              ents[i].single, glm::dmat4(1.0), ents[j].single, glm::dmat4(1.0));
           if (!c)
             continue;
           const char* st = ContactState(*c, touchTol);
@@ -2369,8 +2370,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     struct Ent {
       const Occurrence* occ;
       std::vector<Body> bodies; // already placed in world space
-      glm::mat4 xf{1.0f};       // identity: `bodies` carry the placement
-      glm::vec3 min, max;
+      glm::dmat4 xf{1.0};       // identity: `bodies` carry the placement
+      glm::dvec3 min, max;
       size_t faces = 0; // how heavy an exact boolean against it would be
     };
     std::vector<Ent> ents;
@@ -2419,7 +2420,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::set<std::pair<uint64_t, uint64_t>> touchingIds;
     // Closest first, and bounded: on a 253-occurrence arm this loop is
     // 31,878 pairs, and the ones sharing a PCB all pass the box test.
-    std::vector<glm::vec3> mins, maxs;
+    std::vector<glm::dvec3> mins, maxs;
     for (const Ent& e : ents) {
       mins.push_back(e.min);
       maxs.push_back(e.max);
@@ -2622,7 +2623,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       {
         const size_t which = only >= 0 ? static_cast<size_t>(only) : i;
         if (which < bodies.size()) {
-          glm::vec3 bmin, bmax;
+          glm::dvec3 bmin, bmax;
           bodies[which].shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
           entry["bbox_min"] = {bmin.x, bmin.y, bmin.z};
           entry["bbox_max"] = {bmax.x, bmax.y, bmax.z};
@@ -3499,7 +3500,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               "pass `occurrence`); use `part` for a part document");
         const json& v = r.at("occurrence");
         const Occurrence* occ = nullptr;
-        glm::mat4 world(1.0f);
+        glm::dmat4 world(1.0);
         std::string label;
         if (v.is_number_unsigned() || v.is_number_integer()) {
           occ = state.assembly->FindById(v.get<uint64_t>());
@@ -3579,10 +3580,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // id) resolves the elements against that part's bodies without switching
     // the active tab.
     const auto sideA = resolveSide(p.at("a"), "a");
-    const Measure::Target ta{sideA->bodies, glm::mat4(1.0f), sideA->ref};
+    const Measure::Target ta{sideA->bodies, glm::dmat4(1.0), sideA->ref};
     if (p.contains("b")) {
       const auto sideB = resolveSide(p.at("b"), "b");
-      const Measure::Target tb{sideB->bodies, glm::mat4(1.0f), sideB->ref};
+      const Measure::Target tb{sideB->bodies, glm::dmat4(1.0), sideB->ref};
       // What to measure between them. Refused, never substituted: a request
       // for an angle answered with a distance is plausible and wrong, and a
       // typo'd kind must not silently become the default.
@@ -3658,7 +3659,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         out["point_b"] = {d->pointB.x, d->pointB.y, d->pointB.z};
         // SIGNED, b - a. Which way it is matters: 40 mm in +X and 40 mm in
         // -X are a part and its mirror image.
-        const glm::vec3 delta = d->pointB - d->pointA;
+        const glm::dvec3 delta = d->pointB - d->pointA;
         out["delta"] = {delta.x, delta.y, delta.z};
         // Two WHOLE shapes that interpenetrate are 0 apart, which is true
         // and the least useful available fact. Say whether they clash.
@@ -3740,8 +3741,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return out;
   }
   if (m == "frame") {
-    const auto v3 = [](const glm::vec3& v) { return json{v.x, v.y, v.z}; };
-    const auto frameJson = [&](const glm::mat4& mtx, const char* space,
+    const auto v3 = [](const glm::dvec3& v) { return json{v.x, v.y, v.z}; };
+    const auto frameJson = [&](const glm::dmat4& mtx, const char* space,
                                const std::string& source) {
       json out{{"origin", v3(frame::Origin(mtx))},
                {"x", v3(frame::XAxis(mtx))},
@@ -3759,7 +3760,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // The frame in a PART's own space: a named Frame, an element, or the
     // origin. The same resolution a mate connector performs.
     const auto localFrame = [&](const Document& part,
-                                std::string& source) -> glm::mat4 {
+                                std::string& source) -> glm::dmat4 {
       if (p.contains("frame")) {
         const json& fv = p.at("frame");
         const FrameFeature* hit = nullptr;
@@ -3794,7 +3795,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               "get_state) and element (its name, list_elements)");
         const ElementRef ref{p.at("feature_id").get<uint64_t>(),
                              p.at("element").get<std::string>()};
-        glm::vec3 o, z, x;
+        glm::dvec3 o, z, x;
         bool circular = false;
         std::string why;
         if (!frame::ElementFrame(part.GetBodies(), ref, o, z, x, circular, why))
@@ -3803,7 +3804,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         return frame::Build(o, x, z);
       }
       source = "origin";
-      return glm::mat4(1.0f);
+      return glm::dmat4(1.0);
     };
     if (p.contains("occurrence")) {
       if (!state.assembly)
@@ -3813,7 +3814,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             "feature_id + element");
       const json& v = p.at("occurrence");
       const Occurrence* occ = nullptr;
-      glm::mat4 world(1.0f);
+      glm::dmat4 world(1.0);
       std::string label;
       bool placed = false;
       if (v.is_number_unsigned() || v.is_number_integer()) {
@@ -3861,7 +3862,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           world = ui::OccurrenceMatrix(*occ);
       }
       std::string source = "placement of " + label;
-      glm::mat4 local(1.0f);
+      glm::dmat4 local(1.0);
       if (p.contains("frame") || p.contains("feature_id") ||
           p.contains("element")) {
         if (occ->refKind == OccurrenceRef::Assembly)
@@ -3884,7 +3885,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                ? *ResolvePartParam(state, p.at("part"))
                                : RequirePartDoc(doc, "frame");
     std::string source;
-    const glm::mat4 local = localFrame(part, source);
+    const glm::dmat4 local = localFrame(part, source);
     return frameJson(local, "part", source);
   }
   const auto snapshotRevision = [](const Document& part, uint64_t partId) {

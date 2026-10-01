@@ -76,7 +76,7 @@ TEST_CASE("A draft that reshapes the body warns with the numbers",
   // A side face of the shelled body, tapered hard.
   std::string side;
   for (const auto& [index, name] : doc.GetBodies()[0].elementMap.names) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (doc.GetBodies()[0].shape.FacePlane(index, c, n, u) &&
         std::abs(n.z) < 0.1f) {
       side = name;

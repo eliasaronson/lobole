@@ -23,14 +23,14 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
     bm.material = materialOverride.empty() ? body.material : materialOverride;
     bm.volume = mp.volume;
     bm.surfaceArea = mp.surfaceArea;
-    bm.centerOfMass = glm::dvec3(mp.centerOfMass);
+    bm.centerOfMass = mp.centerOfMass;
     for (int r = 0; r < 3; r++)
       for (int c = 0; c < 3; c++)
         bm.inertia[r][c] = mp.inertia[r][c];
-    const float density =
+    const double density =
         CADMaterials::MaterialLibrary::GetMaterialOrDefault(bm.material)
             .density;
-    if (!bm.material.empty() && density > 0.0f) {
+    if (!bm.material.empty() && density > 0.0) {
       bm.density = density;
       bm.massKnown = true;
       bm.massG = density * mp.volume * 1e-6;

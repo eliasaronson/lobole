@@ -182,7 +182,7 @@ ElementRef WallNear(const Document& doc, double x, double y) {
   double best = 1e18;
   for (const Body& b : doc.GetBodies()) {
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (!b.shape.FacePlane(index, c, n, u))
         continue;
       if (std::abs(n.z) > 0.01f)
@@ -202,7 +202,7 @@ ElementRef WallNear(const Document& doc, double x, double y) {
 ElementRef UpFaceAt(const Document& doc, double z) {
   for (const Body& b : doc.GetBodies()) {
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (!b.shape.FacePlane(index, c, n, u))
         continue;
       if (n.z < 0.99f || std::abs(c.z - z) > 1e-6)
@@ -218,7 +218,7 @@ ElementRef UpFaceAt(const Document& doc, double z) {
 ElementRef SideWall(const Document& doc) {
   for (const Body& b : doc.GetBodies()) {
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (!b.shape.FacePlane(index, c, n, u))
         continue;
       if (std::abs(n.z) < 0.01f)
@@ -261,7 +261,7 @@ std::unique_ptr<Document> DrilledDoc() {
 ElementRef BoreWall(const Document& doc) {
   for (const Body& b : doc.GetBodies()) {
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+      glm::dvec3 o(0.0), axis(0.0), x(0.0);
       if (!b.shape.FaceAxis(index, o, axis, x))
         continue;
       if (std::abs(axis.z) > 0.99f)
@@ -280,7 +280,7 @@ ElementRef PocketFloorRef(const Document& doc) {
   ElementRef floor;
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u) && n.z > 0.99f &&
           std::abs(c.z - 12.0f) < 1e-3f)
         floor = ElementRef{b.createdBy, name};
@@ -336,7 +336,7 @@ std::unique_ptr<Document> HoleDoc(double dia, double height = 20.0) {
 ElementRef HoleWall(const Document& doc) {
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (!b.shape.FacePlane(index, o, n, u))
         return ElementRef{b.createdBy, name};
     }

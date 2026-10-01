@@ -31,13 +31,13 @@ cam::FixtureSolid PlacedBox(const Bench& b, const std::string& name,
   f.box = size;
   Body model;
   model.shape =
-      CADKernel::Instance().CreateBox(glm::vec3(0.0f), glm::vec3(size));
+      CADKernel::Instance().CreateBox(glm::dvec3(0.0), glm::dvec3(size));
   REQUIRE(cam::PlaceFixture(b.setup, b.part->GetBodies(), {model}, 0.0, side,
                             f.pos));
   if (placed != nullptr)
     *placed = f;
   Body bed = model;
-  bed.shape = model.shape.Transformed(glm::mat4(cam::FixtureTransform(f)));
+  bed.shape = model.shape.Transformed(glm::dmat4(cam::FixtureTransform(f)));
   return {1, name, {bed}};
 }
 
@@ -169,8 +169,8 @@ TEST_CASE("cam workholding: where a fixture goes is derived from the stock",
           "[cam][workholding]") {
   Bench b;
   Body model;
-  model.shape = CADKernel::Instance().CreateBox(glm::vec3(0.0f),
-                                                glm::vec3(10.0f, 8.0f, 25.0f));
+  model.shape = CADKernel::Instance().CreateBox(glm::dvec3(0.0),
+                                                glm::dvec3(10.0, 8.0, 25.0));
   const auto at = [&](cam::FixtureSide side) {
     glm::dvec3 pos;
     REQUIRE(cam::PlaceFixture(b.setup, b.part->GetBodies(), {model}, 0.0, side,
@@ -208,8 +208,8 @@ TEST_CASE("cam workholding: where a fixture goes is derived from the stock",
   CHECK(cam::DefaultFixtureSide(b.setup, b.part->GetBodies(), {model}, 0.0) ==
         cam::FixtureSide::MinusX);
   Body vise;
-  vise.shape = CADKernel::Instance().CreateBox(glm::vec3(0.0f),
-                                               glm::vec3(80.0f, 20.0f, 30.0f));
+  vise.shape = CADKernel::Instance().CreateBox(glm::dvec3(0.0),
+                                               glm::dvec3(80.0, 20.0, 30.0));
   CHECK(cam::DefaultFixtureSide(b.setup, b.part->GetBodies(), {vise}, 0.0) ==
         cam::FixtureSide::Centre);
 
@@ -243,19 +243,19 @@ namespace {
 std::unique_ptr<Document> StepClampDoc() {
   auto doc = std::make_unique<Document>();
   doc->AddFeature(
-      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 10), 100, 20, 8));
+      std::make_unique<BoxFeature>("Bar", glm::dvec3(0, 0, 10), 100, 20, 8));
   doc->AddFeature(
-      std::make_unique<BoxFeature>("Pad", glm::vec3(80, 0, 5), 20, 20, 5));
+      std::make_unique<BoxFeature>("Pad", glm::dvec3(80, 0, 5), 20, 20, 5));
   doc->AddFeature(
-      std::make_unique<BoxFeature>("Stud", glm::vec3(5, 5, -40), 10, 10, 50));
+      std::make_unique<BoxFeature>("Stud", glm::dvec3(5, 5, -40), 10, 10, 50));
   return doc;
 }
 
 // The named face of `body` whose outward normal is `n`.
-ElementRef FaceFacing(const Body& body, glm::vec3 n) {
+ElementRef FaceFacing(const Body& body, glm::dvec3 n) {
   for (const auto& [index, name] : body.elementMap.names) {
-    glm::vec3 c(0.0f), fn(0.0f), u(0.0f);
-    if (body.shape.FacePlane(index, c, fn, u) && glm::dot(fn, n) > 0.999f)
+    glm::dvec3 c(0.0), fn(0.0), u(0.0);
+    if (body.shape.FacePlane(index, c, fn, u) && glm::dot(fn, n) > 0.999)
       return ElementRef{body.createdBy, name};
   }
   return {};
@@ -271,10 +271,10 @@ Placed PlaceClamp(const std::vector<Body>& model, const glm::dvec3& pos,
   cam::Fixture f;
   f.pos = pos;
   f.rotZdeg = rotZdeg;
-  const glm::mat4 m(cam::FixtureTransform(f));
+  const glm::dmat4 m(cam::FixtureTransform(f));
   Placed out;
   for (size_t i = 0; i < model.size(); i++) {
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     model[i].shape.Transformed(m).GetBoundingBox(lo, hi, /*tight=*/true);
     if (i == 1) {
       out.padLo = glm::dvec3(lo);

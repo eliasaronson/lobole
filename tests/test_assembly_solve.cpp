@@ -54,7 +54,7 @@ std::unique_ptr<Document> BuildSteelBox(double height) {
   return doc;
 }
 
-Occurrence MakeOcc(uint64_t partId, glm::vec3 pos, bool fixed = false) {
+Occurrence MakeOcc(uint64_t partId, glm::dvec3 pos, bool fixed = false) {
   Occurrence o;
   o.partId = partId;
   o.position = pos;
@@ -91,12 +91,12 @@ TEST_CASE("Fastened mate aligns an origin connector to a face frame",
   // The arm's origin lands on the base's top-cap centroid (2, 2, 3).
   const Occurrence* arm = asmDoc.FindById(2);
   REQUIRE(arm != nullptr);
-  CHECK_THAT(arm->position.x, WithinAbs(2.0f, 1e-4f));
-  CHECK_THAT(arm->position.y, WithinAbs(2.0f, 1e-4f));
-  CHECK_THAT(arm->position.z, WithinAbs(3.0f, 1e-4f));
+  CHECK_THAT(arm->position.x, WithinAbs(2.0, 1e-4));
+  CHECK_THAT(arm->position.y, WithinAbs(2.0, 1e-4));
+  CHECK_THAT(arm->position.z, WithinAbs(3.0, 1e-4));
 
   // The fixed anchor is never moved.
-  CHECK(asmDoc.FindById(1)->position == glm::vec3(0, 0, 0));
+  CHECK(asmDoc.FindById(1)->position == glm::dvec3(0, 0, 0));
 }
 
 TEST_CASE("DeriveMateDofs inverts the adjust it is the inverse of",
@@ -104,34 +104,34 @@ TEST_CASE("DeriveMateDofs inverts the adjust it is the inverse of",
   // Every arrangement a fastened mate can hold, composed forwards and read
   // back. This is the arithmetic `add_mate derive:` runs, and the reason it
   // can answer "which way round" without trying all eight.
-  const glm::quat none(1.0f, 0.0f, 0.0f, 0.0f);
+  const glm::dquat none(1.0, 0.0, 0.0, 0.0);
   for (const bool flipped : {false, true}) {
-    for (const float turn : {0.0f, 0.7f, 1.5708f, 3.0f, -2.2f}) {
-      const glm::mat4 rel =
-          assembly::MateAdjustFor(flipped, turn, 12.0f, 3.0f, -4.0f, none);
+    for (const double turn : {0.0, 0.7, 1.5708, 3.0, -2.2}) {
+      const glm::dmat4 rel =
+          assembly::MateAdjustFor(flipped, turn, 12.0, 3.0, -4.0, none);
       bool gotFlip = !flipped;
-      float gotTurn = 0.0f, dx = 0.0f, dy = 0.0f, offset = 0.0f;
+      double gotTurn = 0.0, dx = 0.0, dy = 0.0, offset = 0.0;
       REQUIRE(assembly::DeriveMateDofs(rel, assembly::MateDerive::Pose, gotFlip,
                                        gotTurn, dx, dy, offset));
       CHECK(gotFlip == flipped);
-      CHECK_THAT(std::sin(gotTurn), WithinAbs(std::sin(turn), 1e-4f));
-      CHECK_THAT(std::cos(gotTurn), WithinAbs(std::cos(turn), 1e-4f));
-      CHECK_THAT(dx, WithinAbs(3.0f, 1e-4f));
-      CHECK_THAT(dy, WithinAbs(-4.0f, 1e-4f));
-      CHECK_THAT(offset, WithinAbs(12.0f, 1e-4f));
+      CHECK_THAT(std::sin(gotTurn), WithinAbs(std::sin(turn), 1e-4));
+      CHECK_THAT(std::cos(gotTurn), WithinAbs(std::cos(turn), 1e-4));
+      CHECK_THAT(dx, WithinAbs(3.0, 1e-4));
+      CHECK_THAT(dy, WithinAbs(-4.0, 1e-4));
+      CHECK_THAT(offset, WithinAbs(12.0, 1e-4));
 
       // `Twist` takes the same turn and drops the translation on purpose:
       // the anchors are meant to coincide, which is what makes it a joint
       // rather than a copy of a placement.
       bool tFlip = false;
-      float tTurn = 0.0f, tdx = 1.0f, tdy = 1.0f, toff = 1.0f;
+      double tTurn = 0.0, tdx = 1.0, tdy = 1.0, toff = 1.0;
       REQUIRE(assembly::DeriveMateDofs(rel, assembly::MateDerive::Twist, tFlip,
                                        tTurn, tdx, tdy, toff));
       CHECK(tFlip == flipped);
-      CHECK_THAT(std::sin(tTurn), WithinAbs(std::sin(turn), 1e-4f));
-      CHECK(tdx == 0.0f);
-      CHECK(tdy == 0.0f);
-      CHECK(toff == 0.0f);
+      CHECK_THAT(std::sin(tTurn), WithinAbs(std::sin(turn), 1e-4));
+      CHECK(tdx == 0.0);
+      CHECK(tdy == 0.0);
+      CHECK(toff == 0.0);
     }
   }
 }
@@ -142,19 +142,19 @@ TEST_CASE("DeriveMateDofs refuses frames that are not square to one axis",
   // degrees about X and no (flipped, rotation) pair composes to it — so the
   // answer is a refusal, not the nearest quarter turn, which would look
   // exactly like a joint that fits.
-  glm::mat4 skew = assembly::MateAdjustFor(false, 0.4f, 5.0f, 0.0f, 0.0f,
-                                           glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-  skew = skew * glm::rotate(glm::mat4(1.0f), 0.35f, glm::vec3(1, 0, 0));
+  glm::dmat4 skew = assembly::MateAdjustFor(false, 0.4, 5.0, 0.0, 0.0,
+                                            glm::dquat(1.0, 0.0, 0.0, 0.0));
+  skew = skew * glm::rotate(glm::dmat4(1.0), 0.35, glm::dvec3(1, 0, 0));
   bool flipped = false;
-  float turn = 0.0f, dx = 0.0f, dy = 0.0f, offset = 0.0f;
+  double turn = 0.0, dx = 0.0, dy = 0.0, offset = 0.0;
   CHECK_FALSE(assembly::DeriveMateDofs(skew, assembly::MateDerive::Pose,
                                        flipped, turn, dx, dy, offset));
   CHECK_FALSE(assembly::DeriveMateDofs(skew, assembly::MateDerive::Twist,
                                        flipped, turn, dx, dy, offset));
   // Untouched, so a caller that ignores the return value cannot end up with
   // half a joint.
-  CHECK(turn == 0.0f);
-  CHECK(offset == 0.0f);
+  CHECK(turn == 0.0);
+  CHECK(offset == 0.0);
 }
 
 TEST_CASE("Slider offset slides the placement along the connector axis",
@@ -176,17 +176,17 @@ TEST_CASE("Slider offset slides the placement along the connector axis",
   m.b.occurrenceId = 2;
   m.b.anchor.origin = true;
   m.flipped = false;
-  m.offset = 5.0f; // along the cap's +Z normal
+  m.offset = 5.0; // along the cap's +Z normal
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
-  CHECK_THAT(arm->position.z, WithinAbs(8.0f, 1e-4f)); // 3 (cap) + 5 (offset)
+  CHECK_THAT(arm->position.z, WithinAbs(8.0, 1e-4)); // 3 (cap) + 5 (offset)
 
   // Bumping the offset moves it further — the mechanism responds numerically.
-  asmDoc.FindMateById(3)->offset = 9.0f;
+  asmDoc.FindMateById(3)->offset = 9.0;
   assembly::Solve(asmDoc, resolve);
-  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(12.0f, 1e-4f));
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(12.0, 1e-4));
 }
 
 TEST_CASE("Revolute mate seats the part axially by its offset (finding #6a)",
@@ -210,18 +210,18 @@ TEST_CASE("Revolute mate seats the part axially by its offset (finding #6a)",
   m.b.occurrenceId = 2;
   m.b.anchor.origin = true;
   m.flipped = false;
-  m.offset = 5.0f; // seat 5 up the axis (cap at z=3 → z=8)
+  m.offset = 5.0; // seat 5 up the axis (cap at z=3 → z=8)
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
-  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(8.0f, 1e-4f));
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(8.0, 1e-4));
 
   // Spinning the free DOF keeps the axial seat fixed.
-  asmDoc.FindMateById(3)->rotation = glm::radians(90.0f);
+  asmDoc.FindMateById(3)->rotation = glm::radians(90.0);
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
-  CHECK_THAT(arm->position.z, WithinAbs(8.0f, 1e-4f)); // seat unchanged
-  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+  CHECK_THAT(arm->position.z, WithinAbs(8.0, 1e-4)); // seat unchanged
+  CHECK(std::abs(glm::dot(arm->orientation, glm::dquat(1, 0, 0, 0))) < 0.999);
 }
 
 TEST_CASE(
@@ -237,7 +237,7 @@ TEST_CASE(
     return box.get();
   };
 
-  auto placeWithOffset = [&](float offset) {
+  auto placeWithOffset = [&](double offset) {
     AssemblyDocument asmDoc;
     asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
     asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
@@ -254,9 +254,9 @@ TEST_CASE(
     return asmDoc.FindById(2)->position.z;
   };
 
-  CHECK_THAT(placeWithOffset(5.0f), WithinAbs(8.0f, 1e-4f));   // 3 + (+5)
-  CHECK_THAT(placeWithOffset(-5.0f), WithinAbs(-2.0f, 1e-4f)); // 3 + (-5)
-  CHECK_THAT(placeWithOffset(0.0f), WithinAbs(3.0f, 1e-4f));   // on the cap
+  CHECK_THAT(placeWithOffset(5.0), WithinAbs(8.0, 1e-4));   // 3 + (+5)
+  CHECK_THAT(placeWithOffset(-5.0), WithinAbs(-2.0, 1e-4)); // 3 + (-5)
+  CHECK_THAT(placeWithOffset(0.0), WithinAbs(3.0, 1e-4));   // on the cap
 }
 
 TEST_CASE("Assembly mass properties aggregate occurrences in world space "
@@ -319,20 +319,20 @@ TEST_CASE("Revolute rotation spins without translating an origin connector",
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
-  const glm::quat before = asmDoc.FindById(2)->orientation;
-  const glm::vec3 pos0 = asmDoc.FindById(2)->position;
+  const glm::dquat before = asmDoc.FindById(2)->orientation;
+  const glm::dvec3 pos0 = asmDoc.FindById(2)->position;
 
-  asmDoc.FindMateById(3)->rotation = glm::radians(90.0f);
+  asmDoc.FindMateById(3)->rotation = glm::radians(90.0);
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
 
   // Rotation about the axis through the connector origin: position pinned.
-  CHECK_THAT(arm->position.x, WithinAbs(pos0.x, 1e-4f));
-  CHECK_THAT(arm->position.y, WithinAbs(pos0.y, 1e-4f));
-  CHECK_THAT(arm->position.z, WithinAbs(pos0.z, 1e-4f));
+  CHECK_THAT(arm->position.x, WithinAbs(pos0.x, 1e-4));
+  CHECK_THAT(arm->position.y, WithinAbs(pos0.y, 1e-4));
+  CHECK_THAT(arm->position.z, WithinAbs(pos0.z, 1e-4));
   // ...but the orientation changed (the DOF moved).
-  const float dot = std::abs(glm::dot(before, arm->orientation));
-  CHECK(dot < 0.999f);
+  const double dot = std::abs(glm::dot(before, arm->orientation));
+  CHECK(dot < 0.999);
 }
 
 TEST_CASE("Payoff: editing the base part moves the mated occurrence",
@@ -357,7 +357,7 @@ TEST_CASE("Payoff: editing the base part moves the mated occurrence",
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
-  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(3.0f, 1e-4f));
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(3.0, 1e-4));
 
   // Edit the base: raise the pad 3 → 7. The named cap moves with the geometry,
   // and a re-solve carries the mated occurrence with it — the whole point of
@@ -368,7 +368,7 @@ TEST_CASE("Payoff: editing the base part moves the mated occurrence",
   box->Regenerate();
 
   assembly::Solve(asmDoc, resolve);
-  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(7.0f, 1e-4f));
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(7.0, 1e-4));
 }
 
 TEST_CASE("A floating component with no fixed anchor stays put",
@@ -395,10 +395,10 @@ TEST_CASE("A floating component with no fixed anchor stays put",
   assembly::Solve(asmDoc, resolve);
   // Lowest-id occurrence (1) anchors at its stored transform; 2 follows onto
   // it.
-  CHECK(asmDoc.FindById(1)->position == glm::vec3(5, 0, 0));
-  CHECK_THAT(asmDoc.FindById(2)->position.x, WithinAbs(5.0f, 1e-4f));
-  CHECK_THAT(asmDoc.FindById(2)->position.y, WithinAbs(0.0f, 1e-4f));
-  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(0.0f, 1e-4f));
+  CHECK(asmDoc.FindById(1)->position == glm::dvec3(5, 0, 0));
+  CHECK_THAT(asmDoc.FindById(2)->position.x, WithinAbs(5.0, 1e-4));
+  CHECK_THAT(asmDoc.FindById(2)->position.y, WithinAbs(0.0, 1e-4));
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(0.0, 1e-4));
 }
 
 TEST_CASE("An over-constrained loop is reported, not solved",
@@ -426,7 +426,7 @@ TEST_CASE("An over-constrained loop is reported, not solved",
   CHECK(rep.erroredMates == 1);
   CHECK_FALSE(asmDoc.FindMateById(mateId)->error.empty());
   // Placements stand (the fixed anchors are untouched).
-  CHECK(asmDoc.FindById(2)->position == glm::vec3(100, 0, 0));
+  CHECK(asmDoc.FindById(2)->position == glm::dvec3(100, 0, 0));
 }
 
 TEST_CASE("A dangling connector ref errors the mate", "[assembly][solve]") {
@@ -483,15 +483,15 @@ TEST_CASE("Cylindrical mate frees both rotation and offset",
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
   Mate m = FaceMate(ext, MateType::Cylindrical);
-  m.offset = 4.0f;                  // slides along the cap normal (+Z)
-  m.rotation = glm::radians(30.0f); // and spins about it
+  m.offset = 4.0;                  // slides along the cap normal (+Z)
+  m.rotation = glm::radians(30.0); // and spins about it
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
-  CHECK_THAT(arm->position.z, WithinAbs(7.0f, 1e-4f)); // 3 + 4
+  CHECK_THAT(arm->position.z, WithinAbs(7.0, 1e-4)); // 3 + 4
   // Rotation took effect (non-identity orientation).
-  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+  CHECK(std::abs(glm::dot(arm->orientation, glm::dquat(1, 0, 0, 0))) < 0.999);
 }
 
 TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
@@ -505,17 +505,17 @@ TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
   Mate m = FaceMate(ext, MateType::Planar);
-  m.dx = 5.0f; // along the cap frame's in-plane X (world +X for a +Z cap)
-  m.dy = 0.0f;
+  m.dx = 5.0; // along the cap frame's in-plane X (world +X for a +Z cap)
+  m.dy = 0.0;
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
   // Base cap centroid is (2,2,3); +5 along the frame X axis.
-  CHECK_THAT(arm->position.z, WithinAbs(3.0f, 1e-4f)); // stays on the plane
-  const float inPlane =
-      glm::length(glm::vec2(arm->position.x - 2.0f, arm->position.y - 2.0f));
-  CHECK_THAT(inPlane, WithinAbs(5.0f, 1e-4f)); // slid 5 units within the plane
+  CHECK_THAT(arm->position.z, WithinAbs(3.0, 1e-4)); // stays on the plane
+  const double inPlane =
+      glm::length(glm::dvec2(arm->position.x - 2.0, arm->position.y - 2.0));
+  CHECK_THAT(inPlane, WithinAbs(5.0, 1e-4)); // slid 5 units within the plane
 }
 
 TEST_CASE("Ball mate rotates freely without translating", "[assembly][solve]") {
@@ -536,17 +536,17 @@ TEST_CASE("Ball mate rotates freely without translating", "[assembly][solve]") {
   m.b.occurrenceId = 2;
   m.b.anchor.origin = true;
   m.flipped = false;
-  m.ballRotation = glm::angleAxis(glm::radians(60.0f), glm::vec3(0, 1, 0));
+  m.ballRotation = glm::angleAxis(glm::radians(60.0), glm::dvec3(0, 1, 0));
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
   const Occurrence* arm = asmDoc.FindById(2);
   // Origins coincide (ball is a point joint) — arm sits on the fixed origin.
-  CHECK_THAT(arm->position.x, WithinAbs(7.0f, 1e-4f));
-  CHECK_THAT(arm->position.y, WithinAbs(8.0f, 1e-4f));
-  CHECK_THAT(arm->position.z, WithinAbs(9.0f, 1e-4f));
+  CHECK_THAT(arm->position.x, WithinAbs(7.0, 1e-4));
+  CHECK_THAT(arm->position.y, WithinAbs(8.0, 1e-4));
+  CHECK_THAT(arm->position.z, WithinAbs(9.0, 1e-4));
   // ...but it's rotated by the ball DOF.
-  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+  CHECK(std::abs(glm::dot(arm->orientation, glm::dquat(1, 0, 0, 0))) < 0.999);
 }
 
 TEST_CASE("Unresolvable connector names its side and suggests near misses",
@@ -598,18 +598,18 @@ TEST_CASE("Unresolvable connector names its side and suggests near misses",
 
 namespace {
 // The planar face of `doc`'s one body whose outward normal is `dir`.
-ElementRef FaceFacingDir(const Document& doc, const glm::vec3& dir) {
+ElementRef FaceFacingDir(const Document& doc, const glm::dvec3& dir) {
   const Body& b = doc.GetBodies().front();
   for (const auto& [index, name] : b.elementMap.names) {
-    glm::vec3 c(0.0f), n(0.0f), u(0.0f);
-    if (b.shape.FacePlane(index, c, n, u) && glm::dot(n, dir) > 0.999f)
+    glm::dvec3 c(0.0), n(0.0), u(0.0);
+    if (b.shape.FacePlane(index, c, n, u) && glm::dot(n, dir) > 0.999)
       return ElementRef{b.createdBy, name};
   }
   return {};
 }
 
-glm::mat4 PlacementOf(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 PlacementOf(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 } // namespace
@@ -641,7 +641,7 @@ TEST_CASE("A face-to-face mate puts the faces together as measured",
     asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true));
     Occurrence loose = MakeOcc(1, {100, 50, 20});
     loose.orientation =
-        glm::angleAxis(glm::radians(70.0f), glm::normalize(glm::vec3(1, 2, 3)));
+        glm::angleAxis(glm::radians(70.0), glm::normalize(glm::dvec3(1, 2, 3)));
     asmDoc.AddOccurrence(loose);
     Mate m;
     m.type = type;
@@ -655,8 +655,8 @@ TEST_CASE("A face-to-face mate puts the faces together as measured",
     INFO("mate type " << static_cast<int>(type));
     REQUIRE(rep.erroredMates == 0);
 
-    const glm::mat4 xa = PlacementOf(*asmDoc.FindById(1));
-    const glm::mat4 xb = PlacementOf(*asmDoc.FindById(2));
+    const glm::dmat4 xa = PlacementOf(*asmDoc.FindById(1));
+    const glm::dmat4 xb = PlacementOf(*asmDoc.FindById(2));
     const auto gap =
         Measure::DistanceDetailed(bodies, top, xa, bodies, bottom, xb);
     REQUIRE(gap.has_value());
@@ -676,16 +676,16 @@ TEST_CASE("A face-to-face mate puts the faces together as measured",
     // a's seat normal (world +Z), right-handed.
     const auto sideDir = Measure::DirectionOf(bodies, side);
     REQUIRE(sideDir.has_value());
-    const glm::vec3 before = glm::mat3(xb) * glm::vec3(sideDir->dir);
-    asmDoc.FindMateById(3)->rotation = glm::radians(90.0f);
+    const glm::dvec3 before = glm::dmat3(xb) * glm::dvec3(sideDir->dir);
+    asmDoc.FindMateById(3)->rotation = glm::radians(90.0);
     REQUIRE(assembly::Solve(asmDoc, resolve).erroredMates == 0);
-    const glm::mat4 turned = PlacementOf(*asmDoc.FindById(2));
-    const glm::vec3 after = glm::mat3(turned) * glm::vec3(sideDir->dir);
+    const glm::dmat4 turned = PlacementOf(*asmDoc.FindById(2));
+    const glm::dvec3 after = glm::dmat3(turned) * glm::dvec3(sideDir->dir);
     INFO("side normal before " << before.x << " " << before.y << " " << before.z
                                << " after " << after.x << " " << after.y << " "
                                << after.z);
-    CHECK(glm::length(after - glm::vec3(-before.y, before.x, before.z)) <
-          1e-4f);
+    CHECK(glm::length(after - glm::dvec3(-before.y, before.x, before.z)) <
+          1e-4);
     // ...and still seated.
     const auto still =
         Measure::DistanceDetailed(bodies, top, xa, bodies, bottom, turned);
@@ -710,7 +710,7 @@ TEST_CASE("A part mated to a turned frame faces the way the frame says",
 
   struct Case {
     glm::dvec3 rotationDeg;
-    glm::vec3 want;
+    glm::dvec3 want;
   };
   for (const Case& c :
        {Case{{0, 0, 90}, {0, 1, 0}}, Case{{90, 0, 90}, {0, 0, 1}},
@@ -742,10 +742,10 @@ TEST_CASE("A part mated to a turned frame faces the way the frame says",
                          << c.rotationDeg.z);
     REQUIRE(assembly::Solve(asmDoc, resolve).erroredMates == 0);
     const Occurrence& placed = *asmDoc.FindById(2);
-    const glm::vec3 faces =
-        glm::mat3(PlacementOf(placed)) * glm::vec3(sideDir->dir);
+    const glm::dvec3 faces =
+        glm::dmat3(PlacementOf(placed)) * glm::dvec3(sideDir->dir);
     INFO("side faces " << faces.x << " " << faces.y << " " << faces.z);
-    CHECK(glm::length(faces - c.want) < 1e-4f);
-    CHECK(glm::length(placed.position - glm::vec3(10, 0, 0)) < 1e-4f);
+    CHECK(glm::length(faces - c.want) < 1e-4);
+    CHECK(glm::length(placed.position - glm::dvec3(10, 0, 0)) < 1e-4);
   }
 }

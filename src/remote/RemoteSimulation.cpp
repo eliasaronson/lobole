@@ -691,8 +691,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           // is solved in.
           if (l.occurrenceId != 0)
             if (const Occurrence* occ = host.asmDoc->FindById(l.occurrenceId))
-              l.direction = glm::dvec3(glm::mat3_cast(occ->orientation) *
-                                       glm::vec3(l.direction));
+              l.direction = glm::mat3_cast(occ->orientation) * l.direction;
         }
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
@@ -928,7 +927,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (b.results.maxVonMises > 0) {
         const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
             host.BodyMaterial(*s, b.bodyIndex));
-        const float yield =
+        const double yield =
             CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
         if (yield > 0) {
           const double fos = yield / b.results.maxVonMises;

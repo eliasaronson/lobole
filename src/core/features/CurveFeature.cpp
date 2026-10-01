@@ -34,13 +34,13 @@
 
 namespace {
 
-gp_Pnt ToPnt(const glm::vec3& v) { return gp_Pnt(v.x, v.y, v.z); }
+gp_Pnt ToPnt(const glm::dvec3& v) { return gp_Pnt(v.x, v.y, v.z); }
 
 // Tessellates a built edge into a world-space polyline with GCPnts adaptive
 // sampling (angular + curvature deflection), the same shape the viewport draws
 // and a good-enough representation for measure. Returns false on an empty
 // sampling.
-bool TessellateEdge(const TopoDS_Edge& edge, std::vector<glm::vec3>& out) {
+bool TessellateEdge(const TopoDS_Edge& edge, std::vector<glm::dvec3>& out) {
   BRepAdaptor_Curve adaptor(edge);
   GCPnts_TangentialDeflection tess(adaptor, /*angularDeflection=*/0.1,
                                    /*curvatureDeflection=*/0.05,
@@ -52,18 +52,17 @@ bool TessellateEdge(const TopoDS_Edge& edge, std::vector<glm::vec3>& out) {
   out.reserve(n);
   for (int i = 1; i <= n; i++) {
     const gp_Pnt p = tess.Value(i);
-    out.emplace_back(static_cast<float>(p.X()), static_cast<float>(p.Y()),
-                     static_cast<float>(p.Z()));
+    out.emplace_back(p.X(), p.Y(), p.Z());
   }
   return true;
 }
 
 // The same, for a wire of several edges: each edge sampled in order, without
 // repeating the point where two of them meet.
-bool TessellateWire(const TopoDS_Wire& wire, std::vector<glm::vec3>& out) {
+bool TessellateWire(const TopoDS_Wire& wire, std::vector<glm::dvec3>& out) {
   out.clear();
   for (TopExp_Explorer ex(wire, TopAbs_EDGE); ex.More(); ex.Next()) {
-    std::vector<glm::vec3> piece;
+    std::vector<glm::dvec3> piece;
     if (!TessellateEdge(TopoDS::Edge(ex.Current()), piece))
       return false;
     for (size_t i = 0; i < piece.size(); i++) {
@@ -78,7 +77,7 @@ bool TessellateWire(const TopoDS_Wire& wire, std::vector<glm::vec3>& out) {
 // Clamped-uniform B-spline through control poles in world space (the 3D twin of
 // SketchProfile's MakeBSplineCurve). Degree is reduced so few poles stay valid.
 Handle(Geom_BSplineCurve)
-    ControlPolyCurve(const std::vector<glm::vec3>& poles, int degree) {
+    ControlPolyCurve(const std::vector<glm::dvec3>& poles, int degree) {
   const int nPoles = static_cast<int>(poles.size());
   const int p = std::clamp(degree > 0 ? degree : 3, 1, nPoles - 1);
   TColgp_Array1OfPnt occPoles(1, nPoles);
@@ -104,7 +103,7 @@ Handle(Geom_BSplineCurve)
 // two corners closer together than that cannot both be made: the refusal says
 // which pair and by how much, because the fix is a longer straight or a
 // tighter former and the caller has to know which.
-TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
+TopoDS_Wire BendPathWire(const std::vector<glm::dvec3>& raw, double radius,
                          std::vector<CurveFeature::Bend>& bends, double& length,
                          std::string* why) {
   const auto fail = [&](const std::string& s) {
@@ -113,11 +112,9 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     return TopoDS_Wire();
   };
   std::vector<glm::dvec3> p;
-  for (const glm::vec3& v : raw) {
-    const glm::dvec3 d(v);
+  for (const glm::dvec3& d : raw)
     if (p.empty() || glm::length(d - p.back()) > 1e-9)
       p.push_back(d);
-  }
   if (p.size() < 2)
     return fail("a bent path needs at least two distinct points - the corners "
                 "the tube is bent at, in order");
@@ -173,9 +170,7 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     const glm::dvec3 a = p[i] - c.in * c.tangent;
     const glm::dvec3 b = p[i] + c.out * c.tangent;
     if (glm::length(a - from) > 1e-9) {
-      wire.Add(
-          BRepBuilderAPI_MakeEdge(ToPnt(glm::vec3(from)), ToPnt(glm::vec3(a)))
-              .Edge());
+      wire.Add(BRepBuilderAPI_MakeEdge(ToPnt(from), ToPnt(a)).Edge());
       straight += glm::length(a - from);
       length += glm::length(a - from);
     }
@@ -186,9 +181,7 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     const glm::dvec3 centre = p[i] + bisector * (radius / std::cos(c.turn / 2));
     const glm::dvec3 mid = centre + glm::normalize(p[i] - centre) * radius;
     const Handle(Geom_TrimmedCurve) arc =
-        GC_MakeArcOfCircle(ToPnt(glm::vec3(a)), ToPnt(glm::vec3(mid)),
-                           ToPnt(glm::vec3(b)))
-            .Value();
+        GC_MakeArcOfCircle(ToPnt(a), ToPnt(mid), ToPnt(b)).Value();
     if (arc.IsNull())
       return fail("the bend at point " + std::to_string(i + 1) +
                   " could not be made into an arc");
@@ -196,7 +189,7 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     length += radius * c.turn;
 
     CurveFeature::Bend bend;
-    bend.corner = glm::vec3(p[i]);
+    bend.corner = p[i];
     bend.angleDeg = angles::ToDegrees(c.turn);
     bend.radius = radius;
     bend.straightBefore = straight;
@@ -214,9 +207,7 @@ TopoDS_Wire BendPathWire(const std::vector<glm::vec3>& raw, double radius,
     straight = 0.0;
   }
   if (glm::length(p.back() - from) > 1e-9) {
-    wire.Add(BRepBuilderAPI_MakeEdge(ToPnt(glm::vec3(from)),
-                                     ToPnt(glm::vec3(p.back())))
-                 .Edge());
+    wire.Add(BRepBuilderAPI_MakeEdge(ToPnt(from), ToPnt(p.back())).Edge());
     length += glm::length(p.back() - from);
   }
   if (!wire.IsDone())
@@ -316,8 +307,8 @@ bool CurveFeature::Execute(RegenContext& ctx) {
         SetError("helix needs positive radius, pitch, and turns");
         return false;
       }
-      const glm::vec3 d = glm::length(axisDir) > 1e-9f ? glm::normalize(axisDir)
-                                                       : glm::vec3(0, 0, 1);
+      const glm::dvec3 d = glm::length(axisDir) > 1e-9 ? glm::normalize(axisDir)
+                                                       : glm::dvec3(0, 0, 1);
       // The reference is named (HelixReference) and the start turned from it,
       // right-handed about the axis: the parameter-space line starts at
       // u = start_deg instead of 0.

@@ -97,9 +97,18 @@ namespace ui {
 // ---- Occurrence drag gizmo (A2.5) -----------------------------------------
 
 namespace {
-const glm::vec3 kGizmoAxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-const glm::vec3 kGizmoColor[3] = {
-    {0.90f, 0.32f, 0.32f}, {0.35f, 0.82f, 0.38f}, {0.38f, 0.55f, 0.95f}};
+// The screen ray, widened once: the gizmo drags a placement, and a placement
+// is double (docs/conventions.md#the-model-is-double).
+struct DRay {
+  glm::dvec3 origin, direction;
+};
+DRay Widen(const Ray& r) {
+  return {glm::dvec3(r.origin), glm::dvec3(r.direction)};
+}
+
+const glm::dvec3 kGizmoAxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+const glm::dvec3 kGizmoColor[3] = {
+    {0.90, 0.32, 0.32}, {0.35, 0.82, 0.38}, {0.38, 0.55, 0.95}};
 
 // Ray/axis/plane/arc math shared with the preview handles: ui/RayMath.h
 // (PerpTo, RayAxisParam, RayPlane, PointRayDist, RotateAngle) and
@@ -145,8 +154,8 @@ Occurrence* GizmoOccurrence(AppState& state, uint64_t& inner) {
 // its origin with all 6 handles; a mated occurrence gets its mate's connector-A
 // world frame with only the mate's free DOF (drag-within-mate, phase 3).
 struct GizmoSpec {
-  glm::vec3 origin{0};
-  glm::vec3 axis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  glm::dvec3 origin{0};
+  glm::dvec3 axis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
   bool trans[3] = {false, false, false}; // translate arrow per axis
   bool rot[3] = {false, false, false};   // rotate arc per axis
 };
@@ -174,7 +183,7 @@ bool BuildInnerGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
   if (state.activeExplodedView) {
     if (!state.assembly->FindExplodedViewById(state.activeExplodedView))
       return false;
-    spec.origin = glm::vec3(InnerDisplayMatrix(state, *occ, *part)[3]);
+    spec.origin = glm::dvec3(InnerDisplayMatrix(state, *occ, *part)[3]);
     for (int i = 0; i < 3; i++) {
       spec.axis[i] = kGizmoAxis[i];
       spec.trans[i] = true;
@@ -188,12 +197,12 @@ bool BuildInnerGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
   if (!Wa)
     return false;
   for (int i = 0; i < 3; i++)
-    spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
+    spec.axis[i] = glm::normalize(glm::dvec3((*Wa)[i]));
   const double offset =
       assembly::MateDofAt(*state.assembly, {occ->id}, mate->id, MateDof::Offset,
                           AssemblyResolverFor(state))
           .value_or(mate->offset);
-  spec.origin = glm::vec3((*Wa)[3]) + spec.axis[2] * static_cast<float>(offset);
+  spec.origin = glm::dvec3((*Wa)[3]) + spec.axis[2] * offset;
   switch (mate->type) {
   case MateType::Revolute:
   case MateType::Planar:
@@ -246,12 +255,12 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
   if (!Wa)
     return false; // dangling connector → no meaningful DOF gizmo
   for (int i = 0; i < 3; i++)
-    spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
+    spec.axis[i] = glm::normalize(glm::dvec3((*Wa)[i]));
   // Where the DRIVEN part is, not where the mate's A frame is: the axial
   // offset seats B up or down the axis (a gear on a plate sits 6.5 mm above
   // the hole's mid-depth), and a ring drawn at the hole read as the gear
   // floating above it — reported as "the pinion moves away from the gears".
-  spec.origin = glm::vec3((*Wa)[3]) + spec.axis[2] * mate->offset;
+  spec.origin = glm::dvec3((*Wa)[3]) + spec.axis[2] * mate->offset;
   switch (mate->type) {
   case MateType::Revolute:
     spec.rot[2] = true;
@@ -279,31 +288,31 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, uint64_t inner,
 // The angle turned since the grab, unwrapped: the per-frame delta is
 // wrapped into (-pi, pi] and accumulated, so crossing atan2's seam is a small
 // step like any other rather than a full turn (see AppState::GizmoDrag).
-float UnwrappedTurn(AppState::GizmoDrag& g, float angleNow) {
-  float d = angleNow - g.lastAngle;
-  while (d > glm::pi<float>())
-    d -= 2.0f * glm::pi<float>();
-  while (d <= -glm::pi<float>())
-    d += 2.0f * glm::pi<float>();
+double UnwrappedTurn(AppState::GizmoDrag& g, double angleNow) {
+  double d = angleNow - g.lastAngle;
+  while (d > glm::pi<double>())
+    d -= 2.0 * glm::pi<double>();
+  while (d <= -glm::pi<double>())
+    d += 2.0 * glm::pi<double>();
   g.turned += d;
   g.lastAngle = angleNow;
   return g.turned;
 }
 
 // Ray vs the spec's enabled handles → (axis, rotate). Arrows win ties.
-bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
-                  int& axis, bool& rotate) {
-  const float scale = GizmoScale(state);
-  const float grab = 0.14f * scale, L = scale, R = 0.78f * scale;
-  float best = grab;
+bool GizmoHitTest(const AppState& state, const GizmoSpec& spec,
+                  const Ray& screenRay, int& axis, bool& rotate) {
+  const DRay ray = Widen(screenRay);
+  const double scale = GizmoScale(state);
+  const double grab = 0.14 * scale, L = scale, R = 0.78 * scale;
+  double best = grab;
   bool found = false;
   for (int i = 0; i < 3; i++) {
-    const glm::vec3 A = spec.axis[i];
+    const glm::dvec3 A = spec.axis[i];
     if (spec.trans[i]) {
-      float t =
-          std::clamp(RayAxisParam(ray.origin, ray.direction, spec.origin, A),
-                     0.15f * L, L);
-      const float da =
+      double t = std::clamp(
+          RayAxisParam(ray.origin, ray.direction, spec.origin, A), 0.15 * L, L);
+      const double da =
           PointRayDist(spec.origin + A * t, ray.origin, ray.direction);
       if (da < best) {
         best = da;
@@ -313,9 +322,9 @@ bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
       }
     }
     if (spec.rot[i]) {
-      glm::vec3 hit;
+      glm::dvec3 hit;
       if (RayPlane(ray.origin, ray.direction, spec.origin, A, hit)) {
-        const float dr = std::abs(glm::length(hit - spec.origin) - R);
+        const double dr = std::abs(glm::length(hit - spec.origin) - R);
         if (dr < best) {
           best = dr;
           axis = i;
@@ -336,7 +345,7 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
   const Occurrence* occ = state.assembly->FindById(occId);
   if (!occ)
     return;
-  const glm::mat4 base = DisplayMatrix(state, *occ);
+  const glm::dmat4 base = DisplayMatrix(state, *occ);
   for (const DocumentRenderMesh& m : state.documentMeshes) {
     if (m.occurrenceId != occId)
       continue;
@@ -344,21 +353,21 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
     // matrix alone piled every part of a dragged sub-assembly onto its
     // origin mid-drag — they snapped back only because the resync on release
     // recomputed the composition.
-    glm::mat4 xf = base * m.localXf;
+    glm::dmat4 xf = base * glm::dmat4(m.localXf);
     // Inside a flexible placement (v129) playback moves each moving leaf
     // on its own, not just the unit.
-    glm::mat4 played;
+    glm::dmat4 played;
     if (!m.innerPath.empty() &&
         MotionPlaybackLocal(state, *occ, m.innerPath, m.localXf, played))
       xf = base * played;
     // ...and an exploded view may displace it on its own (v130).
-    if (const glm::vec3 inner = ExplodeInnerOffset(state, occId, m.innerPath);
-        inner != glm::vec3(0.0f))
-      xf = glm::translate(glm::mat4(1.0f), inner) * xf;
+    if (const glm::dvec3 inner = ExplodeInnerOffset(state, occId, m.innerPath);
+        inner != glm::dvec3(0.0))
+      xf = glm::translate(glm::dmat4(1.0), inner) * xf;
     if (state.meshRenderer)
-      state.meshRenderer->SetInstanceTransform(m.meshId, xf);
+      state.meshRenderer->SetInstanceTransform(m.meshId, glm::mat4(xf));
     if (state.outlineRenderer)
-      state.outlineRenderer->SetMeshTransform(m.outlineId, xf);
+      state.outlineRenderer->SetMeshTransform(m.outlineId, glm::mat4(xf));
   }
 }
 
@@ -369,9 +378,9 @@ namespace {
 // (docs/ui/viewport-handles.md, ui/ViewportHandleDraw.h). Per-axis ids and
 // per-axis colour, so hovering X highlights X rather than the whole gizmo.
 // Nothing is drawn here: DrawViewportHandles draws the published record.
-void PublishGizmoHandles(AppState& state, const GizmoSpec& spec, float L) {
-  const float R = 0.78f * L;
-  const auto publish = [&](int axis, bool rotate, float len) {
+void PublishGizmoHandles(AppState& state, const GizmoSpec& spec, double L) {
+  const double R = 0.78 * L;
+  const auto publish = [&](int axis, bool rotate, double len) {
     ViewportHandle vh;
     vh.id = HandleId(HandleOwner::Gizmo, GizmoSub(axis, rotate));
     vh.kind = rotate ? HandleKind::Rotate : HandleKind::Linear;
@@ -416,12 +425,12 @@ bool BuildPlacementGizmoSpec(AppState& state, uint64_t jobPartId,
                              GizmoSpec& spec) {
   // At the top centre of the part as DRAWN, so the handles sit on the
   // material they move.
-  glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+  glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
   bool any = false;
   for (const Body& b : JobPlacedBodies(state)) {
     if (b.jobPartId != jobPartId)
       continue;
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
@@ -429,7 +438,7 @@ bool BuildPlacementGizmoSpec(AppState& state, uint64_t jobPartId,
   }
   if (!any)
     return false;
-  spec.origin = glm::vec3((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, hi.z);
+  spec.origin = glm::dvec3((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, hi.z);
   spec.axis[0] = {1, 0, 0};
   spec.axis[1] = {0, 1, 0};
   spec.axis[2] = {0, 0, 1};
@@ -450,8 +459,9 @@ cam::Placement* PlacementFor(AppState& state, uint64_t jobPartId) {
   return nullptr;
 }
 
-bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
+bool HandlePlacementGizmo(AppState& state, const Ray& screenRay, bool clicked,
                           bool down, bool released) {
+  const DRay ray = Widen(screenRay);
   auto& g = state.gizmoDrag;
   if (g.active) {
     cam::Placement* place = PlacementFor(state, g.jobPartId);
@@ -467,14 +477,15 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
       }
       return true;
     }
-    const glm::vec3 A = g.frameAxis[g.axis];
+    const glm::dvec3 A = g.frameAxis[g.axis];
     // Snapping, unless Ctrl says free: a part's edge to the sheet's edges
     // and to the other parts' -- which is how parts are butted together on
     // a board -- and a spin to the multiples of 45 degrees. The threshold
     // scales with the gizmo, so it is the same on screen at any zoom.
     const bool snap = !ImGui::GetIO().KeyCtrl;
     if (!g.rotate) {
-      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      const double t =
+          RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
       double d = static_cast<double>(t - g.startParam);
       if (snap) {
         // On screen, a fraction of the gizmo; on the board, never less than
@@ -497,7 +508,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
         for (const Body& b : JobPlacedBodies(state)) {
           if (b.jobPartId == g.jobPartId)
             continue;
-          glm::vec3 bmin, bmax;
+          glm::dvec3 bmin, bmax;
           b.shape.GetBoundingBox(bmin, bmax);
           lines.push_back(bmin[ax]);
           lines.push_back(bmax[ax]);
@@ -513,7 +524,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
       }
       place->pos = g.startPlace + glm::dvec2(A.x * d, A.y * d);
     } else {
-      float ang;
+      double ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
         const double deg =
             g.startRotZ +
@@ -535,7 +546,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
     return false;
   int axis = 0;
   bool rotate = false;
-  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+  if (!GizmoHitTest(state, spec, screenRay, axis, rotate))
     return false;
   cam::Setup* setup = ActiveCamSetup(state);
   SnapshotJob(state); // one undo step per drag (R7)
@@ -558,25 +569,25 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
   g.jobPartId = part;
   g.startPlace = place->pos;
   g.startRotZ = place->rotZdeg;
-  g.startBoxMin = glm::vec3(FLT_MAX);
-  g.startBoxMax = glm::vec3(-FLT_MAX);
+  g.startBoxMin = glm::dvec3(DBL_MAX);
+  g.startBoxMax = glm::dvec3(-DBL_MAX);
   for (const Body& b : JobPlacedBodies(state)) {
     if (b.jobPartId != part)
       continue;
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     g.startBoxMin = glm::min(g.startBoxMin, bmin);
     g.startBoxMax = glm::max(g.startBoxMax, bmax);
   }
-  const glm::vec3 A = spec.axis[axis];
+  const glm::dvec3 A = spec.axis[axis];
   if (!rotate) {
     g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
   } else {
-    float ang = 0.0f;
+    double ang = 0.0;
     (void)RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
     g.lastAngle = ang;
-    g.turned = 0.0f;
+    g.turned = 0.0;
   }
   return true;
 }
@@ -599,19 +610,19 @@ cam::Fixture* EditedFixture(AppState& state) {
 
 // The fixture as drawn, as a box: the model's own box (memoized on its shape)
 // with the fixture's transform applied to its corners.
-bool FixtureDrawnBox(AppState& state, const cam::Fixture& f, glm::vec3& lo,
-                     glm::vec3& hi) {
-  const glm::mat4 m(cam::FixtureTransform(f));
-  lo = glm::vec3(FLT_MAX);
-  hi = glm::vec3(-FLT_MAX);
+bool FixtureDrawnBox(AppState& state, const cam::Fixture& f, glm::dvec3& lo,
+                     glm::dvec3& hi) {
+  const glm::dmat4 m(cam::FixtureTransform(f));
+  lo = glm::dvec3(DBL_MAX);
+  hi = glm::dvec3(-DBL_MAX);
   bool any = false;
   for (const Body& b : FixtureModelBodies(state, f)) {
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     for (int c = 0; c < 8; c++) {
-      const glm::vec3 p((c & 1) ? bmax.x : bmin.x, (c & 2) ? bmax.y : bmin.y,
-                        (c & 4) ? bmax.z : bmin.z);
-      const glm::vec3 w(m * glm::vec4(p, 1.0f));
+      const glm::dvec3 p((c & 1) ? bmax.x : bmin.x, (c & 2) ? bmax.y : bmin.y,
+                         (c & 4) ? bmax.z : bmin.z);
+      const glm::dvec3 w(m * glm::dvec4(p, 1.0));
       lo = glm::min(lo, w);
       hi = glm::max(hi, w);
     }
@@ -622,10 +633,10 @@ bool FixtureDrawnBox(AppState& state, const cam::Fixture& f, glm::vec3& lo,
 
 bool BuildFixtureGizmoSpec(AppState& state, const cam::Fixture& f,
                            GizmoSpec& spec) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   if (!FixtureDrawnBox(state, f, lo, hi))
     return false;
-  spec.origin = glm::vec3((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, hi.z);
+  spec.origin = glm::dvec3((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, hi.z);
   spec.axis[0] = {1, 0, 0};
   spec.axis[1] = {0, 1, 0};
   spec.axis[2] = {0, 0, 1};
@@ -643,8 +654,9 @@ std::string FaceWords(const Body& b, int axis, int facing) {
   return whose + " " + kSide[axis][facing > 0 ? 1 : 0];
 }
 
-bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
+bool HandleFixtureGizmo(AppState& state, const Ray& screenRay, bool clicked,
                         bool down, bool released) {
+  const DRay ray = Widen(screenRay);
   auto& g = state.gizmoDrag;
   if (g.active && g.fixtureId == 0)
     return false; // a placement drag, not ours
@@ -676,11 +688,12 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
         planes.clear();
       return true;
     }
-    const glm::vec3 A = g.frameAxis[g.axis];
+    const glm::dvec3 A = g.frameAxis[g.axis];
     const bool snap = !ImGui::GetIO().KeyCtrl;
     g.snapLabel.clear();
     if (!g.rotate) {
-      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      const double t =
+          RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
       double d = static_cast<double>(t - g.startParam);
       glm::dvec3 slo(0.0), shi(0.0);
       if (snap && cam::StockBounds(*setup, JobBodies(state), slo, shi)) {
@@ -713,7 +726,7 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
       }
       f->pos = g.startFixturePos + glm::dvec3(A) * d;
     } else {
-      float ang;
+      double ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
         const double deg = SnapAngleDeg(
             g.startRotZ +
@@ -744,7 +757,7 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
     return false;
   int axis = 0;
   bool rotate = false;
-  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+  if (!GizmoHitTest(state, spec, screenRay, axis, rotate))
     return false;
   SnapshotJob(state); // one undo step per drag (R7)
   // Free while it moves: a seat would re-solve it back every sync. Where it is
@@ -762,22 +775,22 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
   g.startRotZ = f->rotZdeg;
   // Its flat faces as placed, once: the snap reads them every frame.
   std::vector<Body> placed = FixtureModelBodies(state, *f);
-  const glm::mat4 m(cam::FixtureTransform(*f));
+  const glm::dmat4 m(cam::FixtureTransform(*f));
   for (Body& b : placed)
     b.shape = b.shape.Transformed(m);
   const auto planes = cam::AxisFacePlanes(placed);
   for (int a = 0; a < 3; a++)
     for (const cam::AxisFacePlane& p : planes[a])
       g.facePlanes[a].push_back({p.at, FaceWords(placed[p.body], a, p.facing)});
-  const glm::vec3 A = spec.axis[axis];
+  const glm::dvec3 A = spec.axis[axis];
   if (!rotate) {
     g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
   } else {
-    float ang = 0.0f;
+    double ang = 0.0;
     (void)RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
     g.lastAngle = ang;
-    g.turned = 0.0f;
+    g.turned = 0.0;
   }
   return true;
 }
@@ -787,7 +800,9 @@ bool HandleFixtureGizmo(AppState& state, const Ray& ray, bool clicked,
 // placement's own pose of the sub-assembly mate that places it, written
 // through SetMateDofAt (set_mate {id, path}'s write) and solved holding it,
 // so the unit's mechanism and whatever the parent chains to it follow.
-bool DragInnerPart(AppState& state, const Ray& ray, bool down, bool released) {
+bool DragInnerPart(AppState& state, const Ray& screenRay, bool down,
+                   bool released) {
+  const DRay ray = Widen(screenRay);
   auto& g = state.gizmoDrag;
   Occurrence* F =
       state.assembly ? state.assembly->FindById(g.placement) : nullptr;
@@ -809,7 +824,7 @@ bool DragInnerPart(AppState& state, const Ray& ray, bool down, bool released) {
     }
     return true;
   }
-  const glm::vec3 A = g.frameAxis[g.axis];
+  const glm::dvec3 A = g.frameAxis[g.axis];
   if (g.explodeView) {
     ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
     ExplodeStep* step = nullptr;
@@ -824,8 +839,8 @@ bool DragInnerPart(AppState& state, const Ray& ray, bool down, bool released) {
       g.innerOcc = g.placement = 0;
       return true;
     }
-    const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
-    const float f = std::max(state.explodeFactor, 0.05f);
+    const double t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+    const double f = std::max(double(state.explodeFactor), 0.05);
     step->offset = g.startOffset + A * ((t - g.startParam) / f);
     PushOccurrenceLive(state, F->id);
     return true;
@@ -840,10 +855,10 @@ bool DragInnerPart(AppState& state, const Ray& ray, bool down, bool released) {
   const bool snap = !ImGui::GetIO().KeyCtrl;
   double value = 0.0;
   if (!g.rotate) {
-    const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+    const double t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
     value = g.startDof + (t - g.startParam);
   } else {
-    float ang;
+    double ang;
     if (!RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
       return true;
     // The absolute value snaps, as a top-level joint's does: the mate's own
@@ -884,15 +899,16 @@ void PublishGizmoHandles(AppState& state) {
   PublishGizmoHandles(state, spec, GizmoScale(state));
 }
 
-bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
-                      bool released) {
+bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
+                      bool down, bool released) {
+  const DRay ray = Widen(screenRay);
   if (state.job)
-    return HandleFixtureGizmo(state, ray, clicked, down, released) ||
-           HandlePlacementGizmo(state, ray, clicked, down, released);
+    return HandleFixtureGizmo(state, screenRay, clicked, down, released) ||
+           HandlePlacementGizmo(state, screenRay, clicked, down, released);
   auto& g = state.gizmoDrag;
 
   if (g.active && g.innerOcc != 0)
-    return DragInnerPart(state, ray, down, released);
+    return DragInnerPart(state, screenRay, down, released);
   if (g.active) {
     Occurrence* occ =
         state.assembly ? state.assembly->FindById(SelectedOccurrenceId(state))
@@ -908,7 +924,7 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       }
       return true;
     }
-    const glm::vec3 A = g.frameAxis[g.axis];
+    const glm::dvec3 A = g.frameAxis[g.axis];
     if (g.explodeView) {
       // Explode authoring: the drag writes the step's offset so that the
       // DISPLAYED position follows the mouse (offset scales by 1/factor).
@@ -924,9 +940,10 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         g.active = false;
         return true;
       }
-      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
-      const float f =
-          std::max(state.explodeFactor, 0.05f); // never divide by ~0
+      const double t =
+          RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      const double f =
+          std::max(double(state.explodeFactor), 0.05); // never divide by ~0
       step->offset = g.startOffset + A * ((t - g.startParam) / f);
       PushOccurrenceLive(state, occ->id);
       return true;
@@ -939,11 +956,11 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     if (!g.mateId) {
       // Free occurrence: drag its transform directly.
       if (!g.rotate) {
-        const float t =
+        const double t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         occ->position = g.startPos + A * (t - g.startParam);
       } else {
-        float ang;
+        double ang;
         // The TURN is what snaps here: a free occurrence's starting
         // orientation is arbitrary, so only the increment has a zero to
         // measure from.
@@ -962,9 +979,9 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                                        : (g.axis == 2 && hold->offset)))
         return true;
       if (!g.rotate) {
-        const float t =
+        const double t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
-        const float v = g.startDof + (t - g.startParam);
+        const double v = g.startDof + (t - g.startParam);
         if (g.axis == 0)
           mate->dx = v;
         else if (g.axis == 1)
@@ -972,9 +989,9 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         else
           mate->offset = v;
       } else {
-        float ang;
+        double ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
-          const float d = UnwrappedTurn(g, ang);
+          const double d = UnwrappedTurn(g, ang);
           // Here the ABSOLUTE value snaps: the mate's own frame is the zero,
           // so a joint lands on 90 degrees from its seat rather than 90 from
           // wherever this particular drag was grabbed. Ball has no single
@@ -1021,7 +1038,7 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     return false;
   int axis = 0;
   bool rotate = false;
-  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+  if (!GizmoHitTest(state, spec, screenRay, axis, rotate))
     return false;
 
   SnapshotAssembly(state); // one snapshot per drag
@@ -1050,29 +1067,29 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         break;
       }
     if (!step) {
-      view->steps.push_back({stepOcc, glm::vec3(0.0f), path});
+      view->steps.push_back({stepOcc, glm::dvec3(0.0), path});
       step = &view->steps.back();
     }
     g.startOffset = step->offset;
   }
   g.startPos = occ->position;
   g.startRot = occ->orientation;
-  const glm::vec3 A = spec.axis[axis];
+  const glm::dvec3 A = spec.axis[axis];
   if (!rotate)
     g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
   else {
-    float ang = 0.0f;
+    double ang = 0.0;
     RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
     g.lastAngle = ang;
-    g.turned = 0.0f;
+    g.turned = 0.0;
   }
   if (mate && inner != 0) { // this placement's pose of the inner mate
-    g.startDof = static_cast<float>(
+    g.startDof =
         assembly::MateDofAt(*state.assembly, {occ->id}, mate->id,
                             rotate ? MateDof::Rotation : MateDof::Offset,
                             AssemblyResolverFor(state))
-            .value_or(0.0));
+            .value_or(0.0);
   } else if (mate) { // capture the DOF value at grab
     g.startDof = rotate ? mate->rotation
                         : (axis == 0   ? mate->dx
@@ -1093,26 +1110,26 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
   // World-space center of every placed occurrence + the whole-assembly box.
   struct OccCenter {
     uint64_t id;
-    glm::vec3 center;
+    glm::dvec3 center;
   };
   std::vector<OccCenter> centers;
-  glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+  glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
   // A5: bound each TOP-LEVEL occurrence's whole subtree. A sub-assembly
   // explodes as one unit — spacing it by the bounds of its first part would
   // send a gangway the distance a single board deserves.
-  std::map<uint64_t, std::pair<glm::vec3, glm::vec3>> boxes;
+  std::map<uint64_t, std::pair<glm::dvec3, glm::dvec3>> boxes;
   for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
     if (!inst.visible)
       continue;
     for (const auto& body : inst.part->GetBodies()) {
       if (body.reference)
         continue; // a ghost does not set the assembly's extent
-      glm::vec3 mn, mx;
+      glm::dvec3 mn, mx;
       body.shape.GetBoundingBox(mn, mx);
       for (int c = 0; c < 8; c++) {
-        const glm::vec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
-                               (c & 4) ? mx.z : mn.z);
-        const glm::vec3 w = glm::vec3(inst.world * glm::vec4(corner, 1.0f));
+        const glm::dvec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
+                                (c & 4) ? mx.z : mn.z);
+        const glm::dvec3 w = glm::dvec3(inst.world * glm::dvec4(corner, 1.0));
         auto [it, fresh] =
             boxes.try_emplace(inst.rootOccurrenceId, std::make_pair(w, w));
         if (!fresh) {
@@ -1125,21 +1142,21 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
     }
   }
   for (const auto& [occId, box] : boxes)
-    centers.push_back({occId, (box.first + box.second) * 0.5f});
+    centers.push_back({occId, (box.first + box.second) * 0.5});
   if (centers.size() < 2)
     return false; // nothing to spread apart
 
-  glm::vec3 centroid(0.0f);
+  glm::dvec3 centroid(0.0);
   for (const OccCenter& c : centers)
     centroid += c.center;
-  centroid /= static_cast<float>(centers.size());
-  const float spread = 0.6f * glm::length(hi - lo);
+  centroid /= static_cast<double>(centers.size());
+  const double spread = 0.6 * glm::length(hi - lo);
 
   SnapshotAssembly(state);
   view->steps.clear();
   for (size_t i = 0; i < centers.size(); i++) {
-    glm::vec3 dir = centers[i].center - centroid;
-    if (glm::length(dir) < 1e-6f)
+    glm::dvec3 dir = centers[i].center - centroid;
+    if (glm::length(dir) < 1e-6)
       dir = kGizmoAxis[i % 3]; // concentric parts: cycle world axes
     else
       dir = glm::normalize(dir);

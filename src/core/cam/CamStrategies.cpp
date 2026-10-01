@@ -571,7 +571,7 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // to carry down is the model's own at its bottom.
       double modelBottom = std::numeric_limits<double>::max();
       for (const Body& b : bodies) {
-        glm::vec3 bmin, bmax;
+        glm::dvec3 bmin, bmax;
         b.shape.GetBoundingBox(bmin, bmax);
         modelBottom = std::min(modelBottom, static_cast<double>(bmin.z));
       }
@@ -1307,13 +1307,13 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
       const std::optional<int> idx = body.elementMap.Resolve(ref.name);
       if (!idx)
         continue;
-      glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
+      glm::dvec3 origin(0.0), axis(0.0), xAxis(0.0);
       if (!body.shape.FaceAxis(*idx, origin, axis, xAxis))
         continue; // not a cylinder: silently skipping would drill nothing
       // A plunge goes straight down, so a bore lying on its side is not a
       // hole this operation can make — it would be drilled somewhere the
       // part has no hole at all.
-      if (std::abs(axis.z) < 0.99f) {
+      if (std::abs(axis.z) < 0.99) {
         tp.error = "that hole does not point at the spindle — index the setup "
                    "to bring it up, or drill it in another setup";
         return;
@@ -1708,7 +1708,7 @@ std::vector<Toolpath> GenerateAtIndices(
     if (floors) {
       here.targets.clear();
       for (size_t i = 0; i < op.targets.size(); i++) {
-        glm::vec3 n(0.0f);
+        glm::dvec3 n(0.0);
         const SketchCurves* c = engraving && curves != nullptr
                                     ? FindSketchCurves(*curves, op.targets[i])
                                     : nullptr;
@@ -1716,7 +1716,7 @@ std::vector<Toolpath> GenerateAtIndices(
                                ? c != nullptr && EngraveFrameOf(turned, *c).ok
                                : FaceNormalOf(framed, op.targets[i].ref, n,
                                               op.targets[i].jobPartId) &&
-                                     n.z > 0.99f;
+                                     n.z > 0.99;
         if (faces) {
           here.targets.push_back(op.targets[i]);
           presented[i] = true;

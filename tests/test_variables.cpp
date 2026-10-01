@@ -174,7 +174,7 @@ TEST_CASE("An angle dimension's variable is the angle the solid measures",
     const Body& b = doc.GetBodies()[0];
     ElementRef under, slope;
     for (const auto& [idx, name] : b.elementMap.names) {
-      glm::vec3 c, n, u;
+      glm::dvec3 c, n, u;
       if (!b.shape.FacePlane(idx, c, n, u) || std::abs(n.z) > 0.5f)
         continue;
       if (n.y < -0.99f)

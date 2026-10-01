@@ -46,7 +46,7 @@ TEST_CASE("cam stock: the blank is the part's REAL size, not its control "
   doc.AddFeature(std::move(rev));
   REQUIRE(doc.GetBodies().size() == 1);
 
-  glm::vec3 looseLo(0.0f), looseHi(0.0f), tightLo(0.0f), tightHi(0.0f);
+  glm::dvec3 looseLo(0.0), looseHi(0.0), tightLo(0.0), tightHi(0.0);
   const CADShape& shape = doc.GetBodies()[0].shape;
   shape.GetBoundingBox(looseLo, looseHi);
   shape.GetBoundingBox(tightLo, tightHi, /*tight=*/true);
@@ -517,7 +517,7 @@ PlanarFaces(const Document& doc) {
   std::vector<std::pair<ElementRef, glm::dvec3>> out;
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         out.push_back({ElementRef{b.createdBy, name}, glm::dvec3(n)});
     }
@@ -547,7 +547,7 @@ TEST_CASE("cam: a face laid up is the top of the part in the frame it is cut "
       s.frame = cam::SolveFaceUp(normal, s.frame);
       const std::vector<Body> framed =
           cam::BodiesInSetupFrame(s, doc->GetBodies());
-      glm::vec3 up(0.0f);
+      glm::dvec3 up(0.0);
       REQUIRE(cam::FaceNormalOf(framed, face, up));
       INFO("normal " << normal.x << " " << normal.y << " " << normal.z
                      << " from frame " << had.w << " " << had.x << " " << had.y
@@ -555,7 +555,7 @@ TEST_CASE("cam: a face laid up is the top of the part in the frame it is cut "
       CHECK(up.z > 0.999f);
       const cam::FaceRegion region = cam::PickedFaceRegion(framed, face);
       REQUIRE(region.ok);
-      glm::vec3 lo(0.0f), hi(0.0f);
+      glm::dvec3 lo(0.0), hi(0.0);
       framed.front().shape.GetBoundingBox(lo, hi, /*tight=*/true);
       CHECK_THAT(region.z, WithinAbs(hi.z, 1e-4));
     }
@@ -1233,7 +1233,7 @@ TEST_CASE("cam job: two parts, clamped differently, one sheet", "[cam][job]") {
   const std::vector<Body> framed = cam::BodiesInSetupFrame(setup, bodies);
   REQUIRE(framed.size() == 2);
   const auto extent = [](const Body& b) {
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     b.shape.GetBoundingBox(lo, hi);
     return hi - lo;
   };

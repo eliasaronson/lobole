@@ -59,11 +59,11 @@ public:
   }
 
   // The resolved frame, part space: columns X, Y, Z, origin (frame::Build).
-  [[nodiscard]] const glm::mat4& Matrix() const { return m_frame; }
-  [[nodiscard]] glm::vec3 Origin() const { return glm::vec3(m_frame[3]); }
-  [[nodiscard]] glm::vec3 XAxis() const { return glm::vec3(m_frame[0]); }
-  [[nodiscard]] glm::vec3 YAxis() const { return glm::vec3(m_frame[1]); }
-  [[nodiscard]] glm::vec3 ZAxis() const { return glm::vec3(m_frame[2]); }
+  [[nodiscard]] const glm::dmat4& Matrix() const { return m_frame; }
+  [[nodiscard]] glm::dvec3 Origin() const { return glm::dvec3(m_frame[3]); }
+  [[nodiscard]] glm::dvec3 XAxis() const { return glm::dvec3(m_frame[0]); }
+  [[nodiscard]] glm::dvec3 YAxis() const { return glm::dvec3(m_frame[1]); }
+  [[nodiscard]] glm::dvec3 ZAxis() const { return glm::dvec3(m_frame[2]); }
 
   FrameKind kind = FrameKind::Explicit;
 
@@ -71,8 +71,8 @@ public:
   // distance/distanceExpr twin) and the axes as plain directions.
   double origin[3] = {0.0, 0.0, 0.0};
   std::string originExpr[3];
-  glm::vec3 zAxis{0.0f, 0.0f, 1.0f};
-  glm::vec3 xAxis{1.0f, 0.0f, 0.0f};
+  glm::dvec3 zAxis{0.0, 0.0, 1.0};
+  glm::dvec3 xAxis{1.0, 0.0, 0.0};
 
   // FromElement: one face/edge, or several circular ones (a bolt circle).
   std::vector<ElementRef> elements;
@@ -89,7 +89,7 @@ public:
   std::string rotationExpr[3];
 
 private:
-  glm::mat4 m_frame{1.0f};
+  glm::dmat4 m_frame{1.0};
 };
 
 namespace frame {
@@ -100,6 +100,6 @@ namespace frame {
 // names when a later feature extended this one). Shared by the Frame
 // feature and the `frame` query so both answer identically.
 bool ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
-                  glm::vec3& origin, glm::vec3& axis, glm::vec3& xHint,
+                  glm::dvec3& origin, glm::dvec3& axis, glm::dvec3& xHint,
                   bool& circular, std::string& why);
 } // namespace frame

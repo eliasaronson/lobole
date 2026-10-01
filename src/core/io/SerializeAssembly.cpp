@@ -53,11 +53,11 @@ json OccurrenceToJson(const Occurrence& o) {
     json dofs = json::array();
     for (const InnerMateDof& d : o.innerMateDofs) {
       json dj{{"mate", d.mate}, {"rotation", d.rotation}, {"offset", d.offset}};
-      if (d.dx != 0.0f || d.dy != 0.0f) {
+      if (d.dx != 0.0 || d.dy != 0.0) {
         dj["dx"] = d.dx;
         dj["dy"] = d.dy;
       }
-      if (d.ballRotation != glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+      if (d.ballRotation != glm::dquat(1.0, 0.0, 0.0, 0.0))
         dj["ball_rotation"] = QuatToJson(d.ballRotation);
       dofs.push_back(std::move(dj));
     }
@@ -99,13 +99,14 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.attachedTo = j.value("attached_to", uint64_t{0}); // v72
   if (const auto it = j.find("attach_offset");
       it != j.end() && it->is_array() && it->size() == 3) {
-    o.attachOffset = glm::vec3((*it)[0].get<float>(), (*it)[1].get<float>(),
-                               (*it)[2].get<float>());
+    o.attachOffset = glm::dvec3((*it)[0].get<double>(), (*it)[1].get<double>(),
+                                (*it)[2].get<double>());
   }
   if (const auto it = j.find("attach_rotation");
       it != j.end() && it->is_array() && it->size() == 4) {
-    o.attachRotation = glm::quat((*it)[3].get<float>(), (*it)[0].get<float>(),
-                                 (*it)[1].get<float>(), (*it)[2].get<float>());
+    o.attachRotation =
+        glm::dquat((*it)[3].get<double>(), (*it)[0].get<double>(),
+                   (*it)[1].get<double>(), (*it)[2].get<double>());
   }
   o.flexible = j.value("flexible", false); // v129
   for (const json& pj : j.value("inner_poses", json::array())) {
@@ -118,10 +119,10 @@ Occurrence OccurrenceFromJson(const json& j) {
   for (const json& dj : j.value("inner_mate_dofs", json::array())) {
     InnerMateDof d;
     d.mate = dj.at("mate").get<uint64_t>();
-    d.rotation = dj.value("rotation", 0.0f);
-    d.offset = dj.value("offset", 0.0f);
-    d.dx = dj.value("dx", 0.0f);
-    d.dy = dj.value("dy", 0.0f);
+    d.rotation = dj.value("rotation", 0.0);
+    d.offset = dj.value("offset", 0.0);
+    d.dx = dj.value("dx", 0.0);
+    d.dy = dj.value("dy", 0.0);
     if (dj.contains("ball_rotation"))
       d.ballRotation = QuatFromJson(dj.at("ball_rotation"));
     o.innerMateDofs.push_back(d);
@@ -280,11 +281,11 @@ json MateToJson(const Mate& m) {
   j["offset"] = m.offset;
   // Additive DOF for the wider mate set (v25); omit when zero/identity so
   // fastened/revolute/slider files stay byte-identical to v24.
-  if (m.dx != 0.0f)
+  if (m.dx != 0.0)
     j["dx"] = m.dx;
-  if (m.dy != 0.0f)
+  if (m.dy != 0.0)
     j["dy"] = m.dy;
-  if (m.ballRotation != glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+  if (m.ballRotation != glm::dquat(1.0, 0.0, 0.0, 0.0))
     j["ball_rotation"] = QuatToJson(m.ballRotation);
   return j;
 }
@@ -297,10 +298,10 @@ Mate MateFromJson(const json& j) {
   m.a = ConnectorFromJson(j.at("a"));
   m.b = ConnectorFromJson(j.at("b"));
   m.flipped = j.value("flipped", true);
-  m.rotation = j.value("rotation", 0.0f);
-  m.offset = j.value("offset", 0.0f);
-  m.dx = j.value("dx", 0.0f);
-  m.dy = j.value("dy", 0.0f);
+  m.rotation = j.value("rotation", 0.0);
+  m.offset = j.value("offset", 0.0);
+  m.dx = j.value("dx", 0.0);
+  m.dy = j.value("dy", 0.0);
   if (j.contains("ball_rotation"))
     m.ballRotation = QuatFromJson(j.at("ball_rotation"));
   return m;
@@ -332,8 +333,8 @@ ExplodedView ExplodedViewFromJson(const json& j) {
     ExplodeStep s;
     s.occurrenceId = sj.at("occurrence").get<uint64_t>();
     const auto& o = sj.at("offset");
-    s.offset = glm::vec3(o.at(0).get<float>(), o.at(1).get<float>(),
-                         o.at(2).get<float>());
+    s.offset = glm::dvec3(o.at(0).get<double>(), o.at(1).get<double>(),
+                          o.at(2).get<double>());
     if (sj.contains("path")) {
       s.path = sj.at("path").get<std::vector<uint64_t>>();
       if (s.path.size() > 1) // only one level moves; never half-applied

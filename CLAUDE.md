@@ -197,14 +197,14 @@ list kept elsewhere drifts.
   back-compat/migration is required (no users yet); fix any test that assumed
   old behavior. (Check the header for the current version — it moves.)
 
-## Benchmark — is the API still usable by an agent?
+## Benchmark — unfinished
 
 `benchmarks/` grades an agent that has ONLY the MCP surface (`--tools ""`, no
-shell, no repo) on described parts — static ones, mechanisms, and a Fit task
-graded against a host part the agent never sees — with a C++/OCCT oracle that
-reads the exported STEP back and links no designer_core. Changing a tool, a
-description, a refusal message or `help()` changes what this measures — **no
-benchmark, no claim**, and results are committed, never overwritten.
+shell, no repo) on described parts, with a C++/OCCT oracle that reads the
+exported STEP back. **It is unfinished and does not yet measure what it is
+for**, so it neither gates a change to a tool, a description or `help()` nor
+backs a claim about one. Results that are run are committed, never
+overwritten.
 
 - Free self-test, run it first: `python3 benchmarks/runners/reference.py`
   builds every task by hand and must score every check. It PRINTS the totals;
@@ -345,6 +345,11 @@ docs/architecture.md#the-ui-actions-layer describes how the code is organised.
   `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
   fails otherwise, because a wrong unit is invisible in the answer
   (docs/conventions.md#units-and-angles).
+- **The model is double; derived bulk data is float.** Positions, planes,
+  placements, mate values, parameters: `double`/`glm::dvec3`/`dmat4`. Meshes,
+  height maps, GPU buffers: float, narrowed once where a renderer is filled,
+  never fed back. `test_conventions.cpp` scans the model headers
+  (docs/conventions.md#the-model-is-double).
 - **A CAM job edit calls `ui::MarkJobEdited`.** The job's undo guard records
   on that counter, not on the job's content (serializing it every frame was
   8% of an idle frame), so an edit that skips it does not undo; the GUI suite

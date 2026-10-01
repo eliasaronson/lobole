@@ -93,7 +93,7 @@ struct SolveReport {
 // before — a rigid unit's inner face sits at a known place in the unit, and
 // a flexible one's where its own inner poses put it. An ORIGIN anchor with a
 // path is the origin of what the path names, not the unit's.
-std::optional<glm::mat4>
+std::optional<glm::dmat4>
 ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
                     const PartResolver& partById, std::string* whyNot = nullptr,
                     const AssemblyResolver& asmById = nullptr);
@@ -173,7 +173,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
 // Where an occurrence of `owner`'s sub-assembly stands in owner's frame: the
 // pose the placement keeps for it when `owner` is flexible and has one, else
 // the one its own document stores.
-glm::mat4 InnerPlacement(const Occurrence& owner, const Occurrence& inner);
+glm::dmat4 InnerPlacement(const Occurrence& owner, const Occurrence& inner);
 
 // Why `owner` cannot move as a flexible placement, or empty when it can:
 // it places a part, its sub-assembly is not loaded, has nothing fixed to
@@ -258,7 +258,7 @@ struct FlatInstance {
   // The placement's material, overriding every body's; "" = the part's own.
   std::string material;
   const Document* part = nullptr; // resolved, regenerated
-  glm::mat4 world{1.0f};          // composed down the tree
+  glm::dmat4 world{1.0};          // composed down the tree
   std::string path;               // "Gangway/Board 03" — display, not a key
   uint64_t rootOccurrenceId = 0;  // the TOP-LEVEL occurrence this belongs to
   // The occurrence ids BELOW the root, down to this leaf — the key form of
@@ -276,12 +276,12 @@ struct FlatInstance {
     uint64_t occurrenceId = 0;    // the placement, in its parent document
     uint64_t assemblyId = 0;      // the sub-assembly's slot id
     uint64_t configurationId = 0; // what the placement asked for (0 = active)
-    glm::mat4 local{1.0f};
+    glm::dmat4 local{1.0};
     std::string name;
   };
   std::vector<Level> levels;
   uint64_t occurrenceId = 0;
-  glm::mat4 local{1.0f};
+  glm::dmat4 local{1.0};
   std::string name;
 };
 
@@ -308,7 +308,7 @@ Flatten(const AssemblyDocument& top, const PartResolver& partById,
 struct PathHit {
   const AssemblyDocument* owner = nullptr; // the document holding it
   const Occurrence* occ = nullptr;
-  glm::mat4 world{1.0f}; // composed placement, in the top's space
+  glm::dmat4 world{1.0}; // composed placement, in the top's space
   uint64_t rootId = 0;   // the top-level occurrence it belongs to
   std::string path;      // canonical id chain, e.g. "12/47"
 };

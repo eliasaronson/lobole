@@ -550,9 +550,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     nlohmann::json b4 = DocumentIO::FeatureToJson(*sketch);
     // The default box sits at negative x, so a hole drilled along -X from the
     // YZ plane runs through it; centre it on the box's y/z.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     sketch->AddEntity(sketch::Point{{mid.y - 0.3f, mid.z - 0.3f}});
     sketch->AddEntity(sketch::Point{{mid.y + 0.3f, mid.z + 0.3f}});
     nlohmann::json af = DocumentIO::FeatureToJson(*sketch);
@@ -698,7 +698,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     // Straight down at the middle of the box's top face. Primitives are
     // placed by their min corner, so this must come from the bounding box —
     // a guessed centre lands on a corner edge, which outranks the face.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
     s_App->camera->StopAnimation();
@@ -750,7 +750,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
     s_App->camera->StopAnimation();
@@ -973,9 +973,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
 
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
@@ -1042,9 +1042,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
 
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
@@ -1094,9 +1094,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
     const double before = Doc()->GetBodies()[0].shape.Volume();
 
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 mid = (lo + hi) * 0.5;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
@@ -1172,7 +1172,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     auto* dp = dynamic_cast<DatumPlaneFeature*>(
         Doc()->FindFeatureById(s_App->pendingFeatureId));
     IM_CHECK(dp != nullptr);
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     Doc()->GetBodies()[0].shape.GetBoundingBox(bmin, bmax);
     dp->offset = bmax.z; // exactly the top face
     Doc()->Regenerate();
@@ -1730,9 +1730,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const double before = Doc()->GetBodies()[0].shape.Volume();
 
     // Frame the box deterministically (same recipe as the face-pick test).
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const float radius = glm::length(max - min) * 0.5f;
     // A camera animation left by an earlier flow would override these setters
     // every frame until it finishes — stop it first.
@@ -1814,9 +1814,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const double blank = Doc()->GetBodies()[0].shape.Volume();
     IM_CHECK(Doc()->GetBodies()[0].bends.empty());
 
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const float radius = glm::length(max - min) * 0.5f;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(center);
@@ -1944,7 +1944,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const auto thinnest = [&] {
       double lo = 1e300;
       for (const Body& b : part->GetBodies()) {
-        glm::vec3 mn, mx;
+        glm::dvec3 mn, mx;
         b.shape.GetBoundingBox(mn, mx, /*tight=*/true);
         const glm::vec3 size = mx - mn;
         lo = std::min({lo, double(size.x), double(size.y), double(size.z)});
@@ -2160,7 +2160,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     // Straight down at the middle of the top face, off the bounding box: a
     // guessed centre lands on a corner edge, which outranks the face.
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
     s_App->camera->StopAnimation();

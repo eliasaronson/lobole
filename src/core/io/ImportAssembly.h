@@ -26,8 +26,8 @@ struct PlannedPart {
 struct PlannedOccurrence {
   size_t part = 0; // index into parts
   std::string name;
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
 };
 
 struct AssemblyImportPlan {

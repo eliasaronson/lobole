@@ -9,8 +9,9 @@ document's and the project's variables when the field commits.
 
 | widget | use |
 |---|---|
-| `ExprDragFloat`, `ExprDragDouble`, `ExprDragInt`, `ExprDragFloat2`, `ExprDragFloat3` | drag fields with text entry |
-| `ExprInputDouble`, `ExprInputFloat`, `ExprInputInt`, `ExprInputFloat3` | plain input fields |
+| `ExprDragDouble`, `ExprDragInt`, `ExprDragFloat2`, `ExprDragFloat3` (both over doubles) | drag fields with text entry |
+| `ExprDragFloat` | the same, in float, for view state only (a section's offset and tilt) |
+| `ExprInputDouble`, `ExprInputInt`, `ExprInputDouble3` | plain input fields |
 | `FeatureEditor`'s `ExprDim` / `ExprCount` | a feature dimension with a persisted `*Expr` slot, shown as an `fx` row when it holds an expression |
 
 **Drag fields own their text.** The drag is drawn with
@@ -77,7 +78,7 @@ It reaches every field that owns its buffer: the drag fields, the `fx`
 expression rows, the Variables panel's definition column (not its name or
 comment columns — completion belongs in a definition, not in the name being
 defined), and both inline sketch-dimension editors (`##v` and the on-create
-`##docv`). It does not reach the `ExprInput{Float,Double,Int}` fields, which
+`##docv`). It does not reach the `ExprInput{Double,Int,Double3}` fields, which
 keep ImGui's buffer, or the Configurations panel's override cell, which
 refills a stack buffer from the model every frame.
 
@@ -121,6 +122,6 @@ text), `properties/dimension_field_opens_on_double_click`,
 ## Not built
 
 A visible affordance that a field takes text (Ctrl+click and double-click are
-not advertised in the field itself); completion in the `ExprInput{Float,
-Double,Int}` fields and the Configurations override cell; persisted
+not advertised in the field itself); completion in the `ExprInput{Double,
+Int,Double3}` fields and the Configurations override cell; persisted
 expressions for CAM parameters.

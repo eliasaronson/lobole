@@ -57,7 +57,7 @@ std::string BodySignature(const Body& b) {
     out << "invalid";
     return out.str();
   }
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   b.shape.GetBoundingBox(lo, hi);
   out << "createdBy=" << b.createdBy << " vol=" << b.shape.Volume() << " bbox=["
       << lo.x << "," << lo.y << "," << lo.z << ".." << hi.x << "," << hi.y

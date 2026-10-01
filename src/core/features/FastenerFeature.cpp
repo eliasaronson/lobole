@@ -56,18 +56,19 @@ CADShape HexPrism(double acrossFlats, double base, double height) {
   const double reach = acrossFlats * 2.0; // comfortably past the corners
   CADShape hex;
   for (int i = 0; i < 3; i++) {
-    CADShape slab = CADKernel::Instance().CreateBox(
-        glm::vec3(-half, -reach, base), glm::vec3(half, reach, base + height));
+    CADShape slab =
+        CADKernel::Instance().CreateBox(glm::dvec3(-half, -reach, base),
+                                        glm::dvec3(half, reach, base + height));
     if (!slab.IsValid())
       return {};
     if (i > 0) {
       const double angle =
           static_cast<double>(i) * std::numbers::pi / 3.0; // 60 degrees
-      glm::mat4 rot(1.0f);
-      rot[0][0] = static_cast<float>(std::cos(angle));
-      rot[0][1] = static_cast<float>(std::sin(angle));
-      rot[1][0] = static_cast<float>(-std::sin(angle));
-      rot[1][1] = static_cast<float>(std::cos(angle));
+      glm::dmat4 rot(1.0);
+      rot[0][0] = std::cos(angle);
+      rot[0][1] = std::sin(angle);
+      rot[1][0] = -std::sin(angle);
+      rot[1][1] = std::cos(angle);
       slab = slab.Transformed(rot);
       if (!slab.IsValid())
         return {};
@@ -94,19 +95,17 @@ CADShape HexPrism(double acrossFlats, double base, double height) {
 // and not the standard's profile, which is worth knowing before measuring one.
 CADShape TorxPrism(double A, double B, double Re, double base, double height) {
   CADKernel& kernel = CADKernel::Instance();
-  const glm::vec3 up(0.0f, 0.0f, 1.0f);
-  CADShape torx = kernel.CreateCylinder(
-      glm::vec3(0.0f, 0.0f, static_cast<float>(base)), up, B * 0.5, height);
+  const glm::dvec3 up(0.0, 0.0, 1.0);
+  CADShape torx =
+      kernel.CreateCylinder(glm::dvec3(0.0, 0.0, base), up, B * 0.5, height);
   if (!torx.IsValid())
     return {};
   const double ring = A * 0.5 - Re;
   for (int i = 0; i < 6; i++) {
     const double angle = static_cast<double>(i) * std::numbers::pi / 3.0;
     const CADShape lobe = kernel.CreateCylinder(
-        glm::vec3(static_cast<float>(ring * std::cos(angle)),
-                  static_cast<float>(ring * std::sin(angle)),
-                  static_cast<float>(base)),
-        up, Re, height);
+        glm::dvec3(ring * std::cos(angle), ring * std::sin(angle), base), up,
+        Re, height);
     if (!lobe.IsValid())
       return {};
     torx = torx.Union(lobe);
@@ -242,7 +241,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   }
 
   CADKernel& kernel = CADKernel::Instance();
-  const glm::vec3 up(0.0f, 0.0f, 1.0f);
+  const glm::dvec3 up(0.0, 0.0, 1.0);
   const auto missing = [&](std::initializer_list<const char*> columns) {
     SetError(profile->stem + " " + size + " has no " + Join(columns) +
              ", which a " + profile->what + " is built from");
@@ -266,10 +265,10 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
       missing({"d2_max", "d1_min", "h"});
       return false;
     }
-    CADShape disc = kernel.CreateCylinder(glm::vec3(0.0f, 0.0f, -*thickness),
-                                          up, *outer * 0.5, *thickness);
+    CADShape disc = kernel.CreateCylinder(glm::dvec3(0.0, 0.0, -*thickness), up,
+                                          *outer * 0.5, *thickness);
     const CADShape hole =
-        kernel.CreateCylinder(glm::vec3(0.0f, 0.0f, -*thickness - 0.001f), up,
+        kernel.CreateCylinder(glm::dvec3(0.0, 0.0, -*thickness - 0.001), up,
                               *bore * 0.5, *thickness + 0.002);
     if (!disc.IsValid() || !hole.IsValid()) {
       SetError("could not build " + Designation() + " from its dimensions");
@@ -288,7 +287,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
     // and is stated in the header rather than discovered from a mass report.
     CADShape body = HexPrism(*acrossFlats, -*height, *height);
     const CADShape thread =
-        kernel.CreateCylinder(glm::vec3(0.0f, 0.0f, -*height - 0.001f), up,
+        kernel.CreateCylinder(glm::dvec3(0.0, 0.0, -*height - 0.001), up,
                               *nominal * 0.5, *height + 0.002);
     if (!body.IsValid() || !thread.IsValid()) {
       SetError("could not build " + Designation() + " from its dimensions");
@@ -309,7 +308,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
       }
       headHeight = *k;
       head =
-          kernel.CreateCylinder(glm::vec3(0.0f, 0.0f, -*k), up, *dia * 0.5, *k);
+          kernel.CreateCylinder(glm::dvec3(0.0, 0.0, -*k), up, *dia * 0.5, *k);
       break;
     }
     case parts::Head::HexHead: {
@@ -335,8 +334,8 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
       // that does that has radius (r^2 + k^2) / 2k, with its apex at -k.
       const double r = *dia * 0.5;
       const double sphere = (r * r + *k * *k) / (2.0 * *k);
-      const CADShape ball = kernel.CreateSphere(
-          glm::vec3(0.0f, 0.0f, static_cast<float>(-*k + sphere)), sphere);
+      const CADShape ball =
+          kernel.CreateSphere(glm::dvec3(0.0, 0.0, -*k + sphere), sphere);
       // Clipped BELOW the apex rather than at it. The sphere reaches exactly
       // z = -k, so a box whose floor is -k is tangent to it, and a tangent
       // boolean is the one case OCC resolves badly here: it came back 0.36 mm
@@ -344,11 +343,8 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
       // plausible in a viewport. The extra room costs nothing — there is no
       // sphere down there to keep.
       const CADShape below =
-          kernel.CreateBox(glm::vec3(static_cast<float>(-sphere - 1.0),
-                                     static_cast<float>(-sphere - 1.0),
-                                     static_cast<float>(-*k - 1.0)),
-                           glm::vec3(static_cast<float>(sphere + 1.0),
-                                     static_cast<float>(sphere + 1.0), 0.0f));
+          kernel.CreateBox(glm::dvec3(-sphere - 1.0, -sphere - 1.0, -*k - 1.0),
+                           glm::dvec3(sphere + 1.0, sphere + 1.0, 0.0));
       if (!ball.IsValid() || !below.IsValid()) {
         SetError("could not build the domed head of " + Designation());
         return false;
@@ -369,7 +365,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
       // nominal length is measured over it (profile->lengthOverHead), which is
       // why the shank below runs the whole length rather than starting under
       // the head.
-      head = kernel.CreateCone(glm::vec3(0.0f), up, *dia * 0.5, *nominal * 0.5,
+      head = kernel.CreateCone(glm::dvec3(0.0), up, *dia * 0.5, *nominal * 0.5,
                                *k);
       break;
     }
@@ -384,7 +380,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
     }
 
     const CADShape shank =
-        kernel.CreateCylinder(glm::vec3(0.0f), up, *nominal * 0.5, length);
+        kernel.CreateCylinder(glm::dvec3(0.0), up, *nominal * 0.5, length);
     if (!shank.IsValid()) {
       SetError("could not build the shank of " + Designation());
       return false;

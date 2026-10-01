@@ -173,8 +173,8 @@ std::unique_ptr<Document> DomedDoc() {
 ElementRef DomeFace(const Document& doc) {
   for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
-      glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
+      glm::dvec3 o(0.0), axis(0.0), x(0.0);
       if (!b.shape.FacePlane(index, c, n, u) &&
           !b.shape.FaceAxis(index, o, axis, x))
         return ElementRef{b.createdBy, name};

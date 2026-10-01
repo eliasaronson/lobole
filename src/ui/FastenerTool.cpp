@@ -189,8 +189,8 @@ void SyncFastenerGhost(AppState& state) {
         CADMeshConverter::ConvertCADMeshToVertices(mesh), mesh.indices);
     if (asset == 0)
       continue;
-    const glm::mat4 xf = glm::translate(glm::mat4(1.0f), part.position) *
-                         glm::mat4_cast(part.orientation);
+    const glm::mat4 xf(glm::translate(glm::dmat4(1.0), part.position) *
+                       glm::mat4_cast(part.orientation));
     const uint32_t id = state.meshRenderer->AddInstance(asset, xf);
     state.meshRenderer->SetInstanceColor(id, kGhostTint);
     state.meshRenderer->SetInstanceGhost(id, 0.55f); // after colour: sets alpha

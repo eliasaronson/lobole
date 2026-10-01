@@ -97,7 +97,7 @@ TEST_CASE("Pipe follows a line-arc-line path whose joints are irrational",
   REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
   REQUIRE(doc.GetBodies().size() == 1);
   // One body, and long enough to be the whole path rather than one segment.
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   CHECK(hi.x - lo.x > 240.0f);
 }

@@ -300,7 +300,7 @@ TEST_CASE("Fillet follows an upstream height edit (the payoff)", "[fillet]") {
             .elementMap.Resolve(edge.name + ";G" + std::to_string(filletId))
             .has_value());
   // The blend sits at the new top.
-  glm::vec3 mn, mx;
+  glm::dvec3 mn, mx;
   doc.GetBodies()[0].shape.GetBoundingBox(mn, mx);
   CHECK_THAT(mx.z, WithinAbs(5.0f, 1e-3f));
 }

@@ -1207,7 +1207,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const bool renderMeshesCurrent = ui::RenderMeshesCurrent(state);
     for (size_t i = 0; i < stateDoc->GetBodies().size(); i++) {
       const auto& body = stateDoc->GetBodies()[i];
-      glm::vec3 min, max;
+      glm::dvec3 min, max;
       // The CHEAP box, which is conservative rather than exact: a swept
       // surface is bounded by its control points, so a helical spring reads
       // about sixty per cent bigger than it is. get_state is called after

@@ -82,9 +82,8 @@ face whose normal points into the assembly therefore reads as the "wrong"
 world sign; the convention is asserted by `test_assembly_solve.cpp`.
 
 `MateAdjustFor` (`AssemblyLoopSolve.cpp`) is the one definition of this
-composition; the placement pass and the loop solver both call it, via a
-template (`MateAdjustT<T>`) so the placement pass evaluates in float and the
-loop solver in double from the same code.
+composition; the placement pass and the loop solver both call it, in double
+like every placement ([../conventions.md](../conventions.md#the-model-is-double)).
 
 `DeriveMateDofs` inverts it: `add_mate {derive: "twist"}` reads `flipped` and
 `rotation` off where the two occurrences already lie (anchors coincident),
@@ -150,9 +149,10 @@ Jacobian and a factorization.
   spread of the component's occurrence origins at the seed, at least 1 mm — so
   every row is in mm and the tolerance means one thing. Relation rows and
   pinned-DOF rows (the driven DOF, configuration holds) are added beside them.
-- **Precision.** Evaluation runs in double and narrows once at the end. A
-  float chain of matrices carries ~1e-3 mm of noise at 100 mm scale, which a
-  finite difference at small h turns into a useless Jacobian.
+- **Precision.** Evaluation runs in double, as the placements and mate values
+  it starts from and writes back are. A float chain of matrices carried
+  ~1e-3 mm of noise at 100 mm scale, which a finite difference at small h
+  turns into a useless Jacobian.
 - **Jacobian:** forward differences, one tree walk per column
   (h = 1e-7 · max(1, |q|)). It cannot disagree with the forward map.
 - **Solve:** Levenberg–Marquardt from the stored values, at most 100

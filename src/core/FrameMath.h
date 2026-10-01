@@ -14,27 +14,27 @@
 // arbitrary-but-stable X is still a usable frame.
 namespace frame {
 
-inline glm::mat4 Build(const glm::vec3& origin, const glm::vec3& xHint,
-                       const glm::vec3& zAxis) {
-  const glm::vec3 z = glm::normalize(zAxis);
-  glm::vec3 x = xHint - glm::dot(xHint, z) * z;
-  if (glm::dot(x, x) < 1e-12f) {
-    x = std::abs(z.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+inline glm::dmat4 Build(const glm::dvec3& origin, const glm::dvec3& xHint,
+                        const glm::dvec3& zAxis) {
+  const glm::dvec3 z = glm::normalize(zAxis);
+  glm::dvec3 x = xHint - glm::dot(xHint, z) * z;
+  if (glm::dot(x, x) < 1e-12) {
+    x = std::abs(z.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
     x = x - glm::dot(x, z) * z;
   }
   x = glm::normalize(x);
-  const glm::vec3 y = glm::cross(z, x);
-  glm::mat4 m(1.0f);
-  m[0] = glm::vec4(x, 0.0f);
-  m[1] = glm::vec4(y, 0.0f);
-  m[2] = glm::vec4(z, 0.0f);
-  m[3] = glm::vec4(origin, 1.0f);
+  const glm::dvec3 y = glm::cross(z, x);
+  glm::dmat4 m(1.0);
+  m[0] = glm::dvec4(x, 0.0);
+  m[1] = glm::dvec4(y, 0.0);
+  m[2] = glm::dvec4(z, 0.0);
+  m[3] = glm::dvec4(origin, 1.0);
   return m;
 }
 
-inline glm::vec3 Origin(const glm::mat4& m) { return glm::vec3(m[3]); }
-inline glm::vec3 XAxis(const glm::mat4& m) { return glm::vec3(m[0]); }
-inline glm::vec3 YAxis(const glm::mat4& m) { return glm::vec3(m[1]); }
-inline glm::vec3 ZAxis(const glm::mat4& m) { return glm::vec3(m[2]); }
+inline glm::dvec3 Origin(const glm::dmat4& m) { return glm::dvec3(m[3]); }
+inline glm::dvec3 XAxis(const glm::dmat4& m) { return glm::dvec3(m[0]); }
+inline glm::dvec3 YAxis(const glm::dmat4& m) { return glm::dvec3(m[1]); }
+inline glm::dvec3 ZAxis(const glm::dmat4& m) { return glm::dvec3(m[2]); }
 
 } // namespace frame

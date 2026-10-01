@@ -34,19 +34,19 @@ enum class OccurrenceRef { Part, Assembly };
 // whole path below the placement.
 struct InnerPose {
   uint64_t occurrence = 0;
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
 };
 
 // A mate of a flexible placement's sub-assembly as THIS placement has it
 // posed (v129): every value a mate can move, by the mate's id there.
 struct InnerMateDof {
   uint64_t mate = 0;
-  float rotation = 0.0f;
-  float offset = 0.0f;
-  float dx = 0.0f;
-  float dy = 0.0f;
-  glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f};
+  double rotation = 0.0;
+  double offset = 0.0;
+  double dx = 0.0;
+  double dy = 0.0;
+  glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
 };
 
 struct Occurrence {
@@ -58,8 +58,8 @@ struct Occurrence {
 
   // Placement: translation + orientation (quaternion). Diffable, shear-free,
   // and how mate frames will think — not a raw mat4.
-  glm::vec3 position{0.0f};
-  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f}; // (w,x,y,z) identity
+  glm::dvec3 position{0.0};
+  glm::dquat orientation{1.0, 0.0, 0.0, 0.0}; // (w,x,y,z) identity
 
   bool visible = true;
   bool fixed = false; // grounded flag; an anchor for the placement pass
@@ -81,8 +81,8 @@ struct Occurrence {
   // `position` means for some occurrences, which is the kind of double duty
   // that has bitten this codebase before.
   uint64_t attachedTo = 0;
-  glm::vec3 attachOffset{0.0f};
-  glm::quat attachRotation{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::dvec3 attachOffset{0.0};
+  glm::dquat attachRotation{1.0, 0.0, 0.0, 0.0};
 
   // Which CONFIGURATION of the referenced document this placement uses
   // (A5, v56; a part's since v135); 0 = whatever that document's active
@@ -203,18 +203,18 @@ struct Mate {
 
   bool flipped = true;   // reverse b's Z against a's Z (two touching planar
                          // faces have opposing normals, hence default true)
-  float rotation = 0.0f; // twist about Z, radians: the revolute/cylindrical
+  double rotation = 0.0; // twist about Z, radians: the revolute/cylindrical
                          // DOF, and on every other type — FASTENED included
                          // — the authored twist about the connector axis.
                          // flipped says which side, this says which way up.
-  float offset = 0.0f;   // translation along +Z of a's connector frame (a's
+  double offset = 0.0;   // translation along +Z of a's connector frame (a's
                          // outward face normal): slider/cylindrical DOF, the
                          // revolute axial seat, the planar plane gap. A
                          // POSITIVE offset moves b along a's +Z — see the
                          // MateAdjust composition (T is applied in a's frame).
-  float dx = 0.0f;       // in-plane X translation (planar DOF)
-  float dy = 0.0f;       // in-plane Y translation (planar DOF)
-  glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f}; // free rotation (ball DOF)
+  double dx = 0.0;       // in-plane X translation (planar DOF)
+  double dy = 0.0;       // in-plane Y translation (planar DOF)
+  glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0}; // free rotation (ball DOF)
 
   // Transient solve status (mirrors Feature::m_error): stamped by the
   // placement pass, cleared on every solve, never serialized. Empty = ok.
@@ -228,7 +228,7 @@ struct Mate {
 // offset, scaled by the transient explode factor at render time.
 struct ExplodeStep {
   uint64_t occurrenceId = 0;
-  glm::vec3 offset{0.0f}; // world space, at factor 1.0
+  glm::dvec3 offset{0.0}; // world space, at factor 1.0
   // v130: a moving part INSIDE a flexible placement, named as a mate is
   // ({path, mate}, Relation::mateAPath): `path` is [the placement] and
   // `occurrenceId` the sub-assembly's id for the part. Empty = an occurrence

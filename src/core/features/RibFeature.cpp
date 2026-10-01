@@ -42,7 +42,7 @@ namespace {
 // along `dir`, for classifying cut components against the profile plane.
 void ProjectionSpan(const CADShape& shape, const glm::dvec3& dir, double& lo,
                     double& hi) {
-  glm::vec3 mn, mx;
+  glm::dvec3 mn, mx;
   shape.GetBoundingBox(mn, mx);
   lo = DBL_MAX;
   hi = -DBL_MAX;
@@ -164,9 +164,9 @@ bool RibFeature::Execute(RegenContext& ctx) {
     // Long enough to pass fully through anything it could hit: every body's
     // combined bbox plus the profile's distance to it (the hole through-all
     // recipe, with margin).
-    glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+    glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
     for (const Body& b : ctx.bodies) {
-      glm::vec3 mn, mx;
+      glm::dvec3 mn, mx;
       b.shape.GetBoundingBox(mn, mx);
       lo = glm::min(lo, mn);
       hi = glm::max(hi, mx);
@@ -189,11 +189,11 @@ bool RibFeature::Execute(RegenContext& ctx) {
 
     if (target < 0) {
       // Nearest overlapping body (the ApplyBodyMode::Add rule), else last.
-      glm::vec3 smin, smax;
+      glm::dvec3 smin, smax;
       slab.GetBoundingBox(smin, smax);
       target = static_cast<int>(ctx.bodies.size()) - 1;
       for (int i = static_cast<int>(ctx.bodies.size()) - 1; i >= 0; i--) {
-        glm::vec3 bmin, bmax;
+        glm::dvec3 bmin, bmax;
         ctx.bodies[i].shape.GetBoundingBox(bmin, bmax);
         const bool overlap = smin.x <= bmax.x && smax.x >= bmin.x &&
                              smin.y <= bmax.y && smax.y >= bmin.y &&

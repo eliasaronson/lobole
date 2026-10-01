@@ -28,7 +28,7 @@ DraftFeature::DraftFeature(const std::string& name, uint64_t bodyId,
 }
 
 namespace {
-glm::vec3 PlaneNormal(PlaneType t) {
+glm::dvec3 PlaneNormal(PlaneType t) {
   switch (t) {
   case PlaneType::XY:
     return {0, 0, 1};
@@ -72,13 +72,13 @@ bool DraftFeature::Execute(RegenContext& ctx) {
   }
 
   const TopoDS_Shape& shape = body->shape.GetShape();
-  const glm::vec3 n = PlaneNormal(neutralPlane);
+  const glm::dvec3 n = PlaneNormal(neutralPlane);
   const gp_Dir pull(n.x, n.y, n.z);
   // Neutral plane at the body's bbox min along the pull axis: the base stays
   // put and faces taper away from it.
-  glm::vec3 bmin, bmax;
+  glm::dvec3 bmin, bmax;
   body->shape.GetBoundingBox(bmin, bmax);
-  const glm::vec3 base = n * glm::dot(bmin, n); // point on the pull axis
+  const glm::dvec3 base = n * glm::dot(bmin, n); // point on the pull axis
   const gp_Pln neutral(gp_Pnt(base.x, base.y, base.z), pull);
   const double angleRad = angles::ToRadians(angleDeg);
   const double volumeBefore = body->shape.Volume();
@@ -97,7 +97,7 @@ bool DraftFeature::Execute(RegenContext& ctx) {
         continue;
       // A face perpendicular to the pull (normal parallel to it) can't be
       // tapered — DraftAngle silently no-ops it, so reject it up front.
-      glm::vec3 fc, fn, fu;
+      glm::dvec3 fc, fn, fu;
       if (body->shape.FacePlane(i, fc, fn, fu) &&
           std::abs(glm::dot(glm::normalize(fn), n)) > 0.99) {
         SetError("a drafted face is perpendicular to the pull direction "
@@ -111,7 +111,7 @@ bool DraftFeature::Execute(RegenContext& ctx) {
         if (!fbox.IsVoid()) {
           double xmin, ymin, zmin, xmax, ymax, zmax;
           fbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-          const glm::vec3 lo(xmin, ymin, zmin), hi(xmax, ymax, zmax);
+          const glm::dvec3 lo(xmin, ymin, zmin), hi(xmax, ymax, zmax);
           const double span = std::abs(glm::dot(hi - lo, n));
           maxTaper = std::max(maxTaper, span * std::tan(angleRad));
         }

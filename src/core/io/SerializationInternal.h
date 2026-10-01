@@ -421,12 +421,12 @@ inline glm::dvec3 Vec3FromJson(const nlohmann::json& j) {
 
 // Quaternion as [x, y, z, w] (glm stores (w,x,y,z); JSON order matches the
 // a2-design occurrence schema).
-inline nlohmann::json QuatToJson(const glm::quat& q) {
+inline nlohmann::json QuatToJson(const glm::dquat& q) {
   return nlohmann::json::array({q.x, q.y, q.z, q.w});
 }
-inline glm::quat QuatFromJson(const nlohmann::json& j) {
-  return glm::quat(j.at(3).get<float>(), j.at(0).get<float>(),
-                   j.at(1).get<float>(), j.at(2).get<float>()); // (w,x,y,z)
+inline glm::dquat QuatFromJson(const nlohmann::json& j) {
+  return glm::dquat(j.at(3).get<double>(), j.at(0).get<double>(),
+                    j.at(1).get<double>(), j.at(2).get<double>()); // (w,x,y,z)
 }
 
 inline nlohmann::json Vec2ToJson(const glm::dvec2& v) {

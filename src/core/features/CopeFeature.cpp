@@ -30,10 +30,12 @@ const CurveFeature* BentPathOf(const RegenContext& ctx, const Feature* f) {
 //
 // A joint does not belong on a bend: the tube there is a torus, it has been
 // thinned by the bending, and there is no straight to fit a cope against —
-// so a cut that finds nothing at a bend is a DESIGN answer, not a kernel
-// quirk, and blaming tangency sends the reader to open a gap that will not
-// help. A bend occupies the path from one tangent point to the other, which
-// is `radius * tan(angle/2)` either side of the corner it was drawn from.
+// so a cope there is refused as a DESIGN answer, whatever the kernel would
+// make of it, and never blamed on tangency, which sends the reader to open a
+// gap that will not help. A bend occupies the path from one tangent point to
+// the other, which is `radius * tan(angle/2)` either side of the corner it was
+// drawn from.
+//
 // The solid to remove for a MITRE: everything on the far side of the plane
 // through `at` whose normal is `keep`. A box big enough to swallow the
 // member, placed so its near face IS that plane.
@@ -42,9 +44,7 @@ CADShape MitreCutter(const glm::dvec3& at, const glm::dvec3& keep,
   // Built at the origin occupying -Z, so its top face is the cut plane, then
   // rotated to put -Z along -keep and moved to the joint.
   CADShape box = CADKernel::Instance().CreateBox(size, size, size);
-  box.Translate(glm::vec3(static_cast<float>(-size * 0.5),
-                          static_cast<float>(-size * 0.5),
-                          static_cast<float>(-size)));
+  box.Translate(glm::dvec3(-size * 0.5, -size * 0.5, -size));
   const glm::dvec3 z(0.0, 0.0, 1.0);
   const glm::dvec3 k = glm::normalize(keep);
   const double dot = glm::clamp(glm::dot(z, k), -1.0, 1.0);
@@ -52,10 +52,10 @@ CADShape MitreCutter(const glm::dvec3& at, const glm::dvec3& keep,
     glm::dvec3 axis = glm::cross(z, k);
     if (glm::length(axis) < 1e-12)
       axis = glm::dvec3(1.0, 0.0, 0.0); // antiparallel: any perpendicular
-    box.RotateAbout(glm::vec3(0.0f), glm::vec3(glm::normalize(axis)),
+    box.RotateAbout(glm::dvec3(0.0), glm::dvec3(glm::normalize(axis)),
                     std::acos(dot));
   }
-  box.Translate(glm::vec3(at));
+  box.Translate(glm::dvec3(at));
   return box;
 }
 
@@ -85,8 +85,8 @@ void SegmentClosest(const glm::dvec3& p0, const glm::dvec3& p1,
   s = a < 1e-12 ? 0.0 : std::clamp((b * t - d) / a, 0.0, 1.0);
 }
 
-Joint JointBetween(const std::vector<glm::vec3>& ours,
-                   const std::vector<glm::vec3>& theirs) {
+Joint JointBetween(const std::vector<glm::dvec3>& ours,
+                   const std::vector<glm::dvec3>& theirs) {
   Joint j;
   if (ours.size() < 2 || theirs.size() < 2)
     return j;
@@ -126,7 +126,7 @@ Joint JointBetween(const std::vector<glm::vec3>& ours,
   // DOWN on the other side, so a cross bar joining one foot was told the
   // hoop ran across the car — the same way the bar does — and the mitre was
   // refused as collinear.
-  const auto away = [&](const std::vector<glm::vec3>& line, size_t seg,
+  const auto away = [&](const std::vector<glm::dvec3>& line, size_t seg,
                         double at) {
     const glm::dvec3 a(line[seg]), b(line[seg + 1]);
     const glm::dvec3 here = a + at * (b - a);
@@ -150,11 +150,11 @@ std::string OnABend(const RegenContext& ctx, const CopeFeature& cope,
       dynamic_cast<const PipeFeature*>(ctx.FindById(cope.memberId));
   const double reach = pipe != nullptr ? pipe->outerDiameter * 0.5 : 0.0;
 
-  for (const glm::vec3& end : {ours->points.front(), ours->points.back()}) {
+  for (const glm::dvec3& end : {ours->points.front(), ours->points.back()}) {
     for (const CurveFeature::Bend& b : theirs->Bends()) {
       const double tangent =
           b.radius * std::tan(angles::ToRadians(b.angleDeg) * 0.5);
-      const double d = glm::length(glm::dvec3(end) - glm::dvec3(b.corner));
+      const double d = glm::length(end - b.corner);
       if (d < tangent + reach) {
         return "the joint lands on a BEND of '" + neighbour->GetName() +
                "'. A bend is a torus, thinned by the bending, with no "
@@ -256,7 +256,7 @@ bool CopeFeature::Execute(RegenContext& ctx) {
       // The bisecting plane: two tubes at 90 degrees are each cut at 45, and
       // the sharper the corner the further the heel reaches past the node.
       glm::dvec3 keep = glm::normalize(j.mine - j.theirs);
-      glm::vec3 lo{0.0f}, hi{0.0f};
+      glm::dvec3 lo{0.0}, hi{0.0};
       shape.GetBoundingBox(lo, hi);
       const double size = glm::length(glm::dvec3(hi - lo)) * 2.0 + 200.0;
       cutter = MitreCutter(j.at + keep * gap, keep, size);
@@ -265,6 +265,14 @@ bool CopeFeature::Execute(RegenContext& ctx) {
         return false;
       }
     } else if (pipe != nullptr) {
+      // Refused BEFORE cutting: on a bend the kernel can sometimes find a
+      // cut, and it is still not a joint. It used to be found only after
+      // the cut removed nothing, which it did while the bent path's arcs met
+      // their straights only to float precision.
+      if (const std::string bend = OnABend(ctx, *this, f); !bend.empty()) {
+        SetError("cope to '" + f->GetName() + "': " + bend);
+        return false;
+      }
       // A tube neighbour is rebuilt from its PATH as a solid, so the cut is
       // the outside of the tube and not its wall.
       std::string why;
@@ -308,7 +316,7 @@ bool CopeFeature::Execute(RegenContext& ctx) {
     // as done puts an unfitted tube in the order and a gap in the frame, and
     // both are found at the welding table.
     if (next.Volume() > was - 1e-9) {
-      glm::vec3 lo{0.0f}, hi{0.0f}, clo{0.0f}, chi{0.0f};
+      glm::dvec3 lo{0.0}, hi{0.0}, clo{0.0}, chi{0.0};
       shape.GetBoundingBox(lo, hi);
       cutter.GetBoundingBox(clo, chi);
       const bool apart = hi.x < clo.x || chi.x < lo.x || hi.y < clo.y ||
@@ -325,9 +333,6 @@ bool CopeFeature::Execute(RegenContext& ctx) {
         // that removes nothing has not reached its neighbour's surface, and
         // that is a gap in the frame.
         continue;
-      } else if (const std::string bend = OnABend(ctx, *this, f);
-                 !cut.asMitre && !bend.empty()) {
-        SetError("cope to '" + f->GetName() + "' removed nothing: " + bend);
       } else {
         SetError(
             std::string(what) + " to '" + f->GetName() +

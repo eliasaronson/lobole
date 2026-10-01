@@ -99,14 +99,15 @@ its node — and once it is, a corner and a tee look alike. Only mitred ends are
 drawn long: a cope's saddle reaches only to the node, so an overrun on a
 coped end would stand proud of the frame.
 
-A cut that changes nothing is refused, and says which of three things it is:
-the two members do not reach each other; the cut lands on the neighbour's
-BEND (a torus, thinned by bending, with no straight to fit against — move the
-joint clear, and the message names where the bend ends); or the cut is
-TANGENT, which is what every equal-diameter joint drawn exactly to its node
-is, and a boolean hands back what it was given. A `gap` of 0.05 mm makes the
-surfaces cross. A mitre that removes nothing because an earlier cut at the
-same end already took that material is accepted.
+A cope that lands on the neighbour's BEND is refused before it cuts: a
+bend is a torus, thinned by bending, with no straight to fit against, so move
+the joint clear (the message names where the bend ends). A cut that changes
+nothing is refused too, and says which of two things it is: the two members
+do not reach each other, or the cut is TANGENT, which is what every
+equal-diameter joint drawn exactly to its node is, and a boolean hands back
+what it was given. A `gap` of 0.05 mm makes the surfaces cross. A mitre that
+removes nothing because an earlier cut at the same end already took that
+material is accepted.
 
 An overlap between two members is the weld: body-scope `contact_report`
 counts it as a connecting clash, so never assert `clashes == []` at body

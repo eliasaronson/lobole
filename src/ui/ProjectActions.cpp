@@ -967,8 +967,8 @@ GeometryChange CompareVersionGeometry(AppState& state,
   // a shape, and the panel puts it straight on the model.
   CADShape removedShape, addedShape;
   const auto cmp = Measure::CompareBodySets(
-      (*older)->GetBodies(), glm::mat4(1.0f), current->GetBodies(),
-      glm::mat4(1.0f), &removedShape, &addedShape);
+      (*older)->GetBodies(), glm::dmat4(1.0), current->GetBodies(),
+      glm::dmat4(1.0), &removedShape, &addedShape);
   if (!cmp) {
     out.summary = "the shapes could not be compared";
     return out;

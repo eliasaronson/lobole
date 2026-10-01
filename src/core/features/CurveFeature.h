@@ -84,7 +84,7 @@ public:
 
   // Result of the last Execute (transient, rebuilt each regeneration, never
   // serialized — the defining parameters below are the persistent state).
-  [[nodiscard]] const std::vector<glm::vec3>& Polyline() const {
+  [[nodiscard]] const std::vector<glm::dvec3>& Polyline() const {
     return m_polyline;
   }
   // Holds a single TopoDS_Edge; downstream sweep/loft extract it. Null shape
@@ -94,14 +94,14 @@ public:
   Curve3DKind kind = Curve3DKind::FitSpline;
 
   // FitSpline: fit points to interpolate. ControlPoly: control poles.
-  std::vector<glm::vec3> points;
+  std::vector<glm::dvec3> points;
   int degree = 3;      // ControlPoly effective degree (clamped to points-1)
   bool closed = false; // FitSpline periodic (ControlPoly ignores in v1)
 
   // BentPath: one bend record per corner, filled by Execute — the schedule a
   // shop bends from, and what a check reads. Transient, like the polyline.
   struct Bend {
-    glm::vec3 corner{0.0f};
+    glm::dvec3 corner{0.0};
     double angleDeg = 0.0;       // how far the tube turns at this corner
     double radius = 0.0;         // the former's radius (the centreline's)
     double straightBefore = 0.0; // free length before it, mm
@@ -111,8 +111,8 @@ public:
   [[nodiscard]] double Length() const { return m_length; }
 
   // Helix parameters (axis frame + geometry).
-  glm::vec3 axisOrigin{0.0f};
-  glm::vec3 axisDir{0.0f, 0.0f, 1.0f};
+  glm::dvec3 axisOrigin{0.0};
+  glm::dvec3 axisDir{0.0, 0.0, 1.0};
   double radius = 1.0;
   double pitch = 1.0; // rise along the axis per full turn
   double turns = 1.0;
@@ -125,7 +125,7 @@ public:
   std::string startDegExpr;                     // v128
 
 private:
-  std::vector<glm::vec3> m_polyline;
+  std::vector<glm::dvec3> m_polyline;
   CADShape m_edgeShape;
   std::vector<Bend> m_bends;
   double m_length = 0.0;

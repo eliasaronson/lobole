@@ -523,13 +523,13 @@ DerivedOp DeriveOperation(const Setup& setup,
       const std::optional<int> idx = body.elementMap.Resolve(target.ref.name);
       if (!idx)
         continue;
-      glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
+      glm::dvec3 origin(0.0), axis(0.0), xAxis(0.0);
       if (!body.shape.FaceAxis(*idx, origin, axis, xAxis)) {
         out.why = "drilling picks cylindrical faces — that one is not a "
                   "cylinder (list_elements shows each face's kind)";
         return out;
       }
-      if (std::abs(axis.z) < 0.99f) {
+      if (std::abs(axis.z) < 0.99) {
         out.why = "that hole does not point at the spindle — lay a face up "
                   "to clamp the part so it does, or drill it in another setup";
         return out;
@@ -937,7 +937,7 @@ double MaxRadiusOver(const std::vector<Body>& framed, double a, double b,
   for (const Body& body : framed) {
     if (!body.shape.IsValid())
       continue;
-    glm::vec3 blo, bhi;
+    glm::dvec3 blo, bhi;
     body.shape.GetBoundingBox(blo, bhi);
     // GenerateMesh's own choice for a zero deflection (CADKernel.h).
     deflection = std::max(deflection, 0.002 * glm::length(bhi - blo));
@@ -1103,8 +1103,8 @@ double StockTopOver(const Setup& setup,
       const std::vector<Body> framed = BodiesInSetupFrame(turned, rawBodies);
       here.targets.clear();
       for (const Target& t : op.targets) {
-        glm::vec3 n(0.0f);
-        if (FaceNormalOf(framed, t.ref, n, t.jobPartId) && n.z > 0.99f)
+        glm::dvec3 n(0.0);
+        if (FaceNormalOf(framed, t.ref, n, t.jobPartId) && n.z > 0.99)
           here.targets.push_back(t);
       }
       if (here.targets.empty())
@@ -1141,10 +1141,10 @@ Setup IndexFrameFor(const Setup& setup, const std::vector<Body>& bodies,
     }
     if (!floor)
       return turned;
-    glm::vec3 n(0.0f);
+    glm::dvec3 n(0.0);
     if (FaceNormalOf(BodiesInSetupFrame(turned, bodies), target.ref, n,
                      target.jobPartId) &&
-        n.z > 0.99f)
+        n.z > 0.99)
       return turned;
   }
   return setup;
@@ -1405,7 +1405,7 @@ double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies,
   for (const Body& b : fixtureBodies) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 blo, bhi;
+    glm::dvec3 blo, bhi;
     b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
     top = std::max(top, static_cast<double>(bhi.z));
   }
@@ -1450,13 +1450,13 @@ bool SpunFixtureBox(const std::vector<Body>& fixtureModel, double rotZdeg,
                     glm::dvec3& flo, glm::dvec3& fhi) {
   Fixture spun;
   spun.rotZdeg = rotZdeg;
-  const glm::mat4 turn(FixtureTransform(spun));
+  const glm::dmat4 turn(FixtureTransform(spun));
   flo = glm::dvec3(1e30);
   fhi = glm::dvec3(-1e30);
   for (const Body& b : fixtureModel) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 blo, bhi;
+    glm::dvec3 blo, bhi;
     b.shape.Transformed(turn).GetBoundingBox(blo, bhi, /*tight=*/true);
     flo = glm::min(flo, glm::dvec3(blo));
     fhi = glm::max(fhi, glm::dvec3(bhi));

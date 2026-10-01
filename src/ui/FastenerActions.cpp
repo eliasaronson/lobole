@@ -93,8 +93,8 @@ namespace ui {
 
 uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
-                     const std::string& drive, const glm::vec3& position,
-                     const glm::quat& orientation, std::string* error,
+                     const std::string& drive, const glm::dvec3& position,
+                     const glm::dquat& orientation, std::string* error,
                      uint64_t ridesOn) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
@@ -157,7 +157,7 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
   // exact for a rigid placement and needs no decomposition.
   if (const Occurrence* parent =
           ridesOn != 0 ? state.assembly->FindById(ridesOn) : nullptr) {
-    const glm::quat inv = glm::inverse(parent->orientation);
+    const glm::dquat inv = glm::inverse(parent->orientation);
     occ.attachedTo = ridesOn;
     occ.attachOffset = inv * (position - parent->position);
     occ.attachRotation = inv * orientation;
@@ -171,15 +171,15 @@ namespace {
 // Written out rather than pulled from glm's experimental quaternion header,
 // which this file does not otherwise need and which errors unless a global
 // GLM_ENABLE_EXPERIMENTAL is defined.
-glm::quat AlignZTo(const glm::vec3& to) {
-  const glm::vec3 from(0.0f, 0.0f, 1.0f);
-  const float dot = glm::dot(from, to);
-  if (dot < -0.999999f)
-    return glm::quat(0.0f, 1.0f, 0.0f, 0.0f); // 180 degrees about X
-  if (dot > 0.999999f)
-    return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-  const glm::vec3 c = glm::cross(from, to);
-  return glm::normalize(glm::quat(1.0f + dot, c.x, c.y, c.z));
+glm::dquat AlignZTo(const glm::dvec3& to) {
+  const glm::dvec3 from(0.0, 0.0, 1.0);
+  const double dot = glm::dot(from, to);
+  if (dot < -0.999999)
+    return glm::dquat(0.0, 1.0, 0.0, 0.0); // 180 degrees about X
+  if (dot > 0.999999)
+    return glm::dquat(1.0, 0.0, 0.0, 0.0);
+  const glm::dvec3 c = glm::cross(from, to);
+  return glm::normalize(glm::dquat(1.0 + dot, c.x, c.y, c.z));
 }
 
 // One dimension of a companion part (a washer's thickness), refusing by name
@@ -228,34 +228,34 @@ std::optional<double> CompanionDim(const std::string& standard,
 // and the joint holds identically. The tiebreak decides which face the mate
 // is LABELLED with, not where anything ends up.
 std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
-                                         const glm::vec3& origin,
-                                         const glm::vec3& along, double t,
-                                         const glm::vec3& outward) {
+                                         const glm::dvec3& origin,
+                                         const glm::dvec3& along, double t,
+                                         const glm::dvec3& outward) {
   if (inst.part == nullptr)
     return std::nullopt;
-  constexpr float kSquare = 0.999f; // perpendicular enough to the axis
-  constexpr float kOnPlane = 0.05f; // mm off the expected station
-  const glm::vec3 at = origin + along * static_cast<float>(t);
+  constexpr double kSquare = 0.999; // perpendicular enough to the axis
+  constexpr double kOnPlane = 0.05; // mm off the expected station
+  const glm::dvec3 at = origin + along * t;
   std::optional<ElementRef> best;
-  float nearest = 0.0f;
+  double nearest = 0.0;
   for (const Body& body : inst.part->GetBodies()) {
     for (const auto& [faceIndex, name] : body.elementMap.names) {
-      glm::vec3 o, n, xHint;
+      glm::dvec3 o, n, xHint;
       if (!body.shape.FacePlane(faceIndex, o, n, xHint))
         continue; // not planar: FaceAxis would answer, a bolt face is a plane
-      const glm::vec3 nw =
-          glm::normalize(glm::vec3(inst.world * glm::vec4(n, 0.0f)));
+      const glm::dvec3 nw =
+          glm::normalize(glm::dvec3(inst.world * glm::dvec4(n, 0.0)));
       if (glm::dot(nw, outward) < kSquare)
         continue;
-      const glm::vec3 ow = glm::vec3(inst.world * glm::vec4(o, 1.0f));
+      const glm::dvec3 ow = glm::dvec3(inst.world * glm::dvec4(o, 1.0));
       if (std::abs(glm::dot(ow - at, along)) > kOnPlane)
         continue;
       const auto info = Measure::DescribeFaceAt(body, faceIndex);
       if (!info)
         continue;
-      const glm::vec3 c =
-          glm::vec3(inst.world * glm::vec4(info->centroid, 1.0f)) - at;
-      const float off = glm::length(c - glm::dot(c, along) * along);
+      const glm::dvec3 c =
+          glm::dvec3(inst.world * glm::dvec4(info->centroid, 1.0)) - at;
+      const double off = glm::length(c - glm::dot(c, along) * along);
       if (best && off >= nearest)
         continue;
       best = ElementRef{body.createdBy, name};
@@ -292,9 +292,9 @@ std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
 // one, and the fastener itself is placed either way.
 uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
                              double tA, const assembly::FlatInstance& b,
-                             double tB, const glm::vec3& centre,
-                             const glm::vec3& axis) {
-  const glm::vec3 into = -axis;
+                             double tB, const glm::dvec3& centre,
+                             const glm::dvec3& axis) {
+  const glm::dvec3 into = -axis;
   const std::optional<ElementRef> faceA =
       FaceAcrossAxis(a, centre, into, tA, into);
   const std::optional<ElementRef> faceB =
@@ -324,27 +324,27 @@ uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
     return 0;
 
   // What the solver will compose: world(b's frame) = world(a's frame) · adjust.
-  const glm::mat4 wa = OccurrenceMatrix(*occA) * *fa;
-  const glm::mat4 wb = OccurrenceMatrix(*occB) * *fb;
-  const glm::mat4 rel = glm::inverse(wa) * wb;
+  const glm::dmat4 wa = OccurrenceMatrix(*occA) * *fa;
+  const glm::dmat4 wb = OccurrenceMatrix(*occB) * *fb;
+  const glm::dmat4 rel = glm::inverse(wa) * wb;
 
   // Read the mate's DOFs off `rel`. A fastened adjust is T(dx,dy,offset) ·
   // Rz(rotation) · [Rx(180)], and both frames' Z lie along the same hole
   // axis, so it can express this transform exactly — but only if it really
   // is of that form, which the check below insists on rather than assumes.
-  mate.flipped = rel[2][2] < 0.0f;
+  mate.flipped = rel[2][2] < 0.0;
   mate.rotation = std::atan2(rel[0][1], rel[0][0]);
   mate.dx = rel[3][0];
   mate.dy = rel[3][1];
   mate.offset = rel[3][2];
-  glm::mat4 adjust(1.0f);
-  adjust = glm::translate(adjust, glm::vec3(mate.dx, mate.dy, mate.offset));
-  adjust = glm::rotate(adjust, mate.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
+  glm::dmat4 adjust(1.0);
+  adjust = glm::translate(adjust, glm::dvec3(mate.dx, mate.dy, mate.offset));
+  adjust = glm::rotate(adjust, mate.rotation, glm::dvec3(0.0, 0.0, 1.0));
   if (mate.flipped)
-    adjust = glm::rotate(adjust, glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+    adjust = glm::rotate(adjust, glm::pi<double>(), glm::dvec3(1.0, 0.0, 0.0));
   for (int c = 0; c < 4; c++)
     for (int r = 0; r < 4; r++)
-      if (std::abs(adjust[c][r] - rel[c][r]) > 1e-3f)
+      if (std::abs(adjust[c][r] - rel[c][r]) > 1e-3)
         return 0; // the two faces are not square to one axis: say nothing
 
   return state.assembly->AddMate(mate);
@@ -385,8 +385,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // visible instead of silently resolved.
   struct RimOn {
     const assembly::FlatInstance* inst;
-    glm::vec3 centre;
-    glm::vec3 axis;
+    glm::dvec3 centre;
+    glm::dvec3 axis;
     double radius;
   };
   std::vector<RimOn> candidates;
@@ -435,9 +435,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     }
     candidates.push_back(
         {&inst,
-         glm::vec3(inst.world * glm::vec4(glm::vec3(circle->centre), 1.0f)),
-         glm::normalize(
-             glm::vec3(inst.world * glm::vec4(glm::vec3(circle->axis), 0.0f))),
+         glm::dvec3(inst.world * glm::dvec4(glm::dvec3(circle->centre), 1.0)),
+         glm::normalize(glm::dvec3(inst.world *
+                                   glm::dvec4(glm::dvec3(circle->axis), 0.0))),
          circle->radius});
   }
   if (candidates.empty() && openRim) {
@@ -491,8 +491,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                 "same one; say which occurrence you mean. A pick in the "
                 "viewport carries it, a name on its own does not.");
   }
-  glm::vec3 centre = chosen->centre;
-  glm::vec3 axis = chosen->axis;
+  glm::dvec3 centre = chosen->centre;
+  glm::dvec3 axis = chosen->axis;
   const double radius = chosen->radius;
 
   // Which size the hole is for. ASK IT FIRST: a hole that records its fit
@@ -627,7 +627,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // above has always refused that; this said it resolved "the same way"
     // and did not.
     std::vector<const assembly::FlatInstance*> carry;
-    std::vector<glm::vec3> where;
+    std::vector<glm::dvec3> where;
     for (const assembly::FlatInstance& inst : flat) {
       if (inst.part == nullptr || !inst.visible)
         continue;
@@ -637,7 +637,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       if (!request.farEnd.innerPath.empty() &&
           inst.innerIds != request.farEnd.innerPath)
         continue;
-      if (const std::optional<glm::vec3> c = Measure::CentreOf(
+      if (const std::optional<glm::dvec3> c = Measure::CentreOf(
               inst.part->GetBodies(), request.farEnd.element)) {
         carry.push_back(&inst);
         where.push_back(*c);
@@ -654,17 +654,16 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                   "the same way the rim does.");
     }
     const assembly::FlatInstance* on = carry.empty() ? nullptr : carry.front();
-    std::optional<glm::vec3> local;
+    std::optional<glm::dvec3> local;
     if (!where.empty())
       local = where.front();
     if (!local)
       return fail("the far end you picked is not on any visible part — pick "
                   "the rim the fastener should stop at");
-    const glm::vec3 end = glm::vec3(on->world * glm::vec4(*local, 1.0f));
-    const glm::vec3 alongAxis = end - centre;
+    const glm::dvec3 end = glm::dvec3(on->world * glm::dvec4(*local, 1.0));
+    const glm::dvec3 alongAxis = end - centre;
     truncate = glm::dot(alongAxis, -axis);
-    const double offLine =
-        glm::length(alongAxis - (-axis) * static_cast<float>(truncate));
+    const double offLine = glm::length(alongAxis - (-axis) * truncate);
     if (offLine > 1.0)
       return fail("that far end is " + Mm(offLine) +
                   " off this hole's axis — the second pick says where the "
@@ -915,10 +914,10 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // Every fastener is built with its bearing face on z = 0 and its body
   // below, so all four of these are the same two questions: where is the
   // face, and which way is "away from the material".
-  const glm::vec3 into = -axis;          // down the hole
-  const glm::quat down = AlignZTo(into); // head end: body points back out
-  const glm::quat up = AlignZTo(axis); // far end: body points out the far side
-  const glm::vec3 exit = centre + into * static_cast<float>(extent.end);
+  const glm::dvec3 into = -axis;          // down the hole
+  const glm::dquat down = AlignZTo(into); // head end: body points back out
+  const glm::dquat up = AlignZTo(axis); // far end: body points out the far side
+  const glm::dvec3 exit = centre + into * extent.end;
 
   // Which occurrence each piece rides on. The head end bears on the part the
   // rim was picked in; the far end on the last part the JOINT reaches.
@@ -951,16 +950,14 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     }
 
   fit.plan.push_back({request.standard, fit.size, fit.length,
-                      centre - into * static_cast<float>(underHead), down,
-                      headOn});
+                      centre - into * underHead, down, headOn});
   if (underHead > 0.0)
     fit.plan.push_back({request.washer, fit.size, 0.0, centre, down, headOn});
   if (underNut > 0.0)
     fit.plan.push_back({request.washer, fit.size, 0.0, exit, up, farOn});
   if (!request.nut.empty())
-    fit.plan.push_back({request.nut, fit.size, 0.0,
-                        exit + axis * static_cast<float>(-underNut), up,
-                        farOn});
+    fit.plan.push_back(
+        {request.nut, fit.size, 0.0, exit + axis * -underNut, up, farOn});
 
   if (request.dryRun) {
     fit.ok = true;

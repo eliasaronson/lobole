@@ -288,12 +288,11 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
               "mate_overrides: give rotation (radians) OR rotation_deg, not "
               "both");
         if (oj.contains("rotation"))
-          o.rotation = oj.at("rotation").get<float>();
+          o.rotation = oj.at("rotation").get<double>();
         if (oj.contains("rotation_deg"))
-          o.rotation = static_cast<float>(
-              angles::ToRadians(oj.at("rotation_deg").get<double>()));
+          o.rotation = (angles::ToRadians(oj.at("rotation_deg").get<double>()));
         if (oj.contains("offset"))
-          o.offset = oj.at("offset").get<float>();
+          o.offset = oj.at("offset").get<double>();
         if (!o.rotation && !o.offset)
           throw std::runtime_error("mate_overrides: mate " +
                                    std::to_string(o.mate) +

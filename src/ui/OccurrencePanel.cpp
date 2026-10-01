@@ -336,9 +336,9 @@ void DrawMatesSection(AppState& state) {
 // per drag.
 void DrawMateDofFields(AppState& state, Mate* sel) {
   auto angleDof = [&](const char* label) {
-    float deg = glm::degrees(sel->rotation);
+    double deg = glm::degrees(sel->rotation);
     const bool changed =
-        ExprDragFloat(state, label, &deg, 1.0f, -FLT_MAX, FLT_MAX, "%.3f");
+        ExprDragDouble(state, label, &deg, 1.0f, -DBL_MAX, DBL_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
@@ -347,8 +347,8 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     }
   };
   auto offsetDof = [&](const char* label) {
-    const bool changed = ExprDragFloat(state, label, &sel->offset, 0.1f,
-                                       -FLT_MAX, FLT_MAX, "%.3f");
+    const bool changed = ExprDragDouble(state, label, &sel->offset, 0.1f,
+                                        -DBL_MAX, DBL_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed)
@@ -366,7 +366,7 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     offsetDof("Offset");
     break;
   case MateType::Planar: {
-    float dxy[2] = {sel->dx, sel->dy};
+    double dxy[2] = {sel->dx, sel->dy};
     const bool changed = ExprDragFloat2(state, "Slide (x,y)", dxy, 0.1f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
@@ -379,13 +379,13 @@ void DrawMateDofFields(AppState& state, Mate* sel) {
     break;
   }
   case MateType::Ball: {
-    glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
+    glm::dvec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
     const bool changed =
         ExprDragFloat3(state, "Rotation (deg)", &euler.x, 1.0f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
-      sel->ballRotation = glm::quat(glm::radians(euler));
+      sel->ballRotation = glm::dquat(glm::radians(euler));
       SolveActiveAssembly(state);
     }
     break;
@@ -515,8 +515,8 @@ void DrawMotionBody(AppState& state) {
         if (const Occurrence* o =
                 owner ? owner->FindById(driver->b.occurrenceId) : nullptr)
           if (const Document* pd = OccurrencePartDoc(state, *o)) {
-            glm::vec3 lo, hi;
-            if (Measure::WorldBounds(pd->GetBodies(), glm::mat4(1.0f), lo, hi))
+            glm::dvec3 lo, hi;
+            if (Measure::WorldBounds(pd->GetBodies(), glm::dmat4(1.0), lo, hi))
               reach = glm::length(hi - lo);
           }
         s.to = from + reach;
@@ -1390,15 +1390,15 @@ void DrawMateToolWindow(AppState& state) {
       if (ImGui::Button("Rotate 90°###mate_rotate90")) {
         // Wrapped into [0, 360), so four clicks come back to where they
         // started rather than winding the number up.
-        const float turned = glm::degrees(live->rotation) + 90.0f;
+        const double turned = glm::degrees(live->rotation) + 90.0;
         live->rotation =
-            glm::radians(turned - 360.0f * std::floor(turned / 360.0f));
+            glm::radians(turned - 360.0 * std::floor(turned / 360.0));
         edited();
       }
       if (editM == nullptr) {
-        float deg = glm::degrees(live->rotation);
-        if (ExprDragFloat(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
-                          -FLT_MAX, FLT_MAX, "%.3f")) {
+        double deg = glm::degrees(live->rotation);
+        if (ExprDragDouble(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
+                           -DBL_MAX, DBL_MAX, "%.3f")) {
           live->rotation = glm::radians(deg);
           edited();
         }
@@ -1766,7 +1766,7 @@ void DrawAssemblyEditWindow(AppState& state) {
       sel->name = name;
       asmDoc.BumpVersion();
     }
-    glm::vec3 pos = sel->position;
+    glm::dvec3 pos = sel->position;
     const bool posChanged =
         ExprDragFloat3(state, "Position###occ_pos", &pos.x, 0.1f);
     if (ImGui::IsItemActivated())
@@ -1775,13 +1775,13 @@ void DrawAssemblyEditWindow(AppState& state) {
       sel->position = pos;
       asmDoc.BumpVersion();
     }
-    glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
+    glm::dvec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
     const bool rotChanged =
         ExprDragFloat3(state, "Rotation (deg)###occ_rot", &euler.x, 1.0f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (rotChanged) {
-      sel->orientation = glm::quat(glm::radians(euler));
+      sel->orientation = glm::dquat(glm::radians(euler));
       asmDoc.BumpVersion();
     }
     bool fixed = sel->fixed;

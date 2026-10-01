@@ -16,15 +16,15 @@ namespace assembly {
 
 namespace {
 
-glm::mat4 OccMatrix(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 OccMatrix(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 
-void Decompose(const glm::mat4& m, glm::vec3& position,
-               glm::quat& orientation) {
-  position = glm::vec3(m[3]);
-  orientation = glm::normalize(glm::quat_cast(glm::mat3(m)));
+void Decompose(const glm::dmat4& m, glm::dvec3& position,
+               glm::dquat& orientation) {
+  position = glm::dvec3(m[3]);
+  orientation = glm::normalize(glm::quat_cast(glm::dmat3(m)));
 }
 
 // Synthetic ids: far above anything a document's counter reaches, so an
@@ -56,10 +56,10 @@ std::string Quoted(const std::string& name, uint64_t id) {
 
 } // namespace
 
-glm::mat4 InnerPlacement(const Occurrence& owner, const Occurrence& inner) {
+glm::dmat4 InnerPlacement(const Occurrence& owner, const Occurrence& inner) {
   if (owner.flexible)
     if (const InnerPose* p = owner.FindInnerPose(inner.id))
-      return glm::translate(glm::mat4(1.0f), p->position) *
+      return glm::translate(glm::dmat4(1.0), p->position) *
              glm::mat4_cast(p->orientation);
   return OccMatrix(inner);
 }
@@ -179,7 +179,7 @@ FlexibleExpansion ExpandFlexible(const AssemblyDocument& parent,
           moving.count(o.attachedTo))
         moving.insert(o.id);
 
-    const glm::mat4 rootWorld = OccMatrix(F);
+    const glm::dmat4 rootWorld = OccMatrix(F);
     for (const Occurrence& k : sub.GetOccurrences()) {
       if (!moving.count(k.id))
         continue;
@@ -384,7 +384,7 @@ void CollapseFlexible(const FlexibleExpansion& ex, AssemblyDocument& parent,
       }
       continue;
     }
-    const glm::mat4 inv = glm::inverse(OccMatrix(*F));
+    const glm::dmat4 inv = glm::inverse(OccMatrix(*F));
     F->innerPoses.clear();
     for (uint64_t k : u.moving) {
       const Occurrence* e = occ.at(ex.occIdOf.at({u.root, k}));
@@ -506,9 +506,9 @@ bool SetMateDofAt(AssemblyDocument& doc, const std::vector<uint64_t>& path,
     d = &F->innerMateDofs.back();
   }
   if (dof == MateDof::Rotation)
-    d->rotation = static_cast<float>(value);
+    d->rotation = value;
   else
-    d->offset = static_cast<float>(value);
+    d->offset = value;
   return true;
 }
 

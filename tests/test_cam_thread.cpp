@@ -502,7 +502,7 @@ TEST_CASE("an external thread is milled round a boss", "[cam][thread]") {
   const Body& body = doc.GetBodies().at(0);
   ElementRef side;
   for (const auto& [index, name] : body.elementMap.names) {
-    glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+    glm::dvec3 o(0.0), axis(0.0), x(0.0);
     if (body.shape.FaceAxis(index, o, axis, x))
       side = ElementRef{body.createdBy, name};
   }
@@ -563,7 +563,7 @@ TEST_CASE("a thread mill refuses what it cannot cut", "[cam][thread]") {
   // A face with no thread on it: the plate's top.
   ElementRef top;
   for (const auto& [index, name] : plate.doc->GetBodies()[0].elementMap.names) {
-    glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+    glm::dvec3 c(0.0), n(0.0), u(0.0);
     if (plate.doc->GetBodies()[0].shape.FacePlane(index, c, n, u) &&
         n.z > 0.99f && c.z > 9.99f)
       top = ElementRef{plate.doc->GetBodies()[0].createdBy, name};
