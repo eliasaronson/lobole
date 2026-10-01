@@ -587,19 +587,88 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
   const double lean = std::tan(sz.leadAngle) / sz.wheelPitchRadius *
                       (spec.rightHanded ? -1.0 : 1.0);
   // The tip: the usual r2 + 1.5 m (already held to the 45-degree throat),
-  // lowered until the thinnest tooth — at a face end, where the throat does
-  // not reach — keeps a printable crest a quarter of a module wide.
+  // lowered until the thinnest tooth keeps a printable crest a quarter of a
+  // module wide.
+  //
+  // The crest is the tooth's width at the top of the wheel's material in
+  // each section: the tip, the blank where that is lower, or the throat
+  // nearer the mid-plane. At one radius a tooth narrows from the face ends
+  // inward, so the thinnest crest is where the throat comes up to meet the
+  // tip -- about 3.9 mm off the mid-plane on the m = 2, z = 40, q = 10 pair,
+  // and a third narrower than at the face ends, where it used to be read.
+  // So the face is scanned, with the throat's meeting points sampled
+  // exactly (the minimum sits on that kink) and the best sample refined.
   const double crest = 0.25 * m;
+  const double ri = sz.throatRadius;
+  const auto topAt = [&](double R, double z) {
+    double top = std::min(R, blankRadius);
+    if (std::abs(z) < ri)
+      top = std::min(top, a - std::sqrt(ri * ri - z * z));
+    return top;
+  };
+  struct Crest {
+    double width = 0.0, z = 0.0, radius = 0.0;
+  };
   const auto crestAt = [&](double R) {
-    return std::min(ToothWidth(env, R, halfFace, -lean * halfFace),
-                    ToothWidth(env, R, -halfFace, lean * halfFace));
+    const auto widthAt = [&](double z) {
+      return ToothWidth(env, topAt(R, z), z, -lean * z);
+    };
+    std::vector<double> zs;
+    constexpr int kSamples = 32;
+    for (int i = 0; i <= kSamples; i++)
+      zs.push_back(-halfFace + 2.0 * halfFace * i / kSamples);
+    // Where the throat reaches the tip (or the blank): the kink.
+    const double top = std::min(R, blankRadius);
+    if (a - top < ri) {
+      const double zt = std::sqrt(ri * ri - (a - top) * (a - top));
+      if (zt < halfFace) {
+        zs.push_back(zt);
+        zs.push_back(-zt);
+      }
+    }
+    std::sort(zs.begin(), zs.end());
+    Crest best;
+    best.width = std::numeric_limits<double>::max();
+    size_t at = 0;
+    for (size_t i = 0; i < zs.size(); i++) {
+      const double w = widthAt(zs[i]);
+      if (w < best.width) {
+        best = {w, zs[i], topAt(R, zs[i])};
+        at = i;
+      }
+    }
+    // Golden section between the best sample's neighbours.
+    double lo = zs[at > 0 ? at - 1 : 0];
+    double hi = zs[std::min(at + 1, zs.size() - 1)];
+    const double g = 0.5 * (std::sqrt(5.0) - 1.0);
+    double x1 = hi - g * (hi - lo), x2 = lo + g * (hi - lo);
+    double f1 = widthAt(x1), f2 = widthAt(x2);
+    for (int k = 0; k < 24 && hi - lo > 1e-4 * m; k++) {
+      if (f1 < f2) {
+        hi = x2;
+        x2 = x1;
+        f2 = f1;
+        x1 = hi - g * (hi - lo);
+        f1 = widthAt(x1);
+      } else {
+        lo = x1;
+        x1 = x2;
+        f1 = f2;
+        x2 = lo + g * (hi - lo);
+        f2 = widthAt(x2);
+      }
+    }
+    for (const auto& [w, z] : {std::pair{f1, x1}, std::pair{f2, x2}})
+      if (w < best.width)
+        best = {w, z, topAt(R, z)};
+    return best;
   };
   double tipR = sz.wheelTipRadius;
-  if (crestAt(tipR) < crest) {
+  if (crestAt(tipR).width < crest) {
     double lo = sz.wheelThroatRadius, hi = tipR;
     for (int k = 0; k < 40; k++) {
       const double mid = 0.5 * (lo + hi);
-      (crestAt(mid) >= crest ? lo : hi) = mid;
+      (crestAt(mid).width >= crest ? lo : hi) = mid;
     }
     tipR = lo;
   }
@@ -794,7 +863,10 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
         }
         stats->midArea = area;
       }
-      stats->tipCrest = crestAt(tipR);
+      const Crest c = crestAt(tipR);
+      stats->tipCrest = c.width;
+      stats->tipCrestZ = c.z;
+      stats->tipCrestRadius = c.radius;
       stats->seconds =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
               .count();

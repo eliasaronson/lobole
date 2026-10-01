@@ -67,9 +67,14 @@ and `hand` are given again, because the worm is in another part.
   a = r1 + r2, and the throat radius ri = r1 − m about the worm's axis. The
   throat diameter is dt = 2(a − ri) = d2 + 2m. The root is r2 − 1.25m.
 - **Tip:** r2 + 1.5m, held to where the throat's arc stays within 45° of the
-  mid-plane. It is then lowered, if needed, until the thinnest tooth (at a
-  face end, where the throat does not reach) keeps a crest a quarter of a
-  module wide. The head's pair keeps the full r2 + 1.5m, with a 2.2 mm crest.
+  mid-plane. It is then lowered, if needed, until the thinnest crest keeps a
+  quarter of a module. The crest is the tooth's width at the top of the
+  wheel's material in each section (the tip, the blank where that is lower,
+  or the throat nearer the mid-plane), scanned across the face. At one radius
+  a tooth narrows from the face ends inward, so it is thinnest where the
+  throat comes up to meet the tip, √(ri² − (a − tip)²) off the mid-plane,
+  not at the face ends. The head's pair keeps the full r2 + 1.5m. Its crest
+  is 1.0 mm, 3.87 mm off the mid-plane, against 2.1 mm at the face ends.
 - **Face width:** a face wider than the worm can reach is refused, and the
   message says how wide it can be. Past the effective limit of 0.67·d1, the
   report notes that the ends carry no load.
@@ -257,7 +262,9 @@ Whether it stays locked under vibration is not claimed. Static self-locking
 is all the rule gives.
 
 The wheel's report also carries the centre distance to mount the worm at,
-the ratio, the throat and tip diameters, the tip crest, the throat arc, the
+the ratio, the throat and tip diameters, the tip crest and where it was
+found (`tip_crest_z` off the mid-plane, `tip_crest_diameter` the diameter it
+was measured at), the throat arc, the
 number of sections, how long the hob took, how the teeth were cut
 (`teeth_cut`) and whether the wheel was `reused`
 ([how the teeth are cut](#how-the-teeth-are-cut)).
@@ -271,6 +278,8 @@ number of sections, how long the hob took, how the teeth were cut
 - the worm's removed volume to Pappus;
 - the envelope converging as the hob's steps shrink;
 - the relation's sign for each hand, side and mate orientation;
+- `[slow]`: the tip crest read where the throat meets the tip, checked
+  against a circle under the tip cut by the wheel's body;
 - `[slow]`: a wheel hobbed from its blank, and the pair meshing through
   1¼ worm turns (more than a wheel pitch) in a motion study checked exactly
   at every sample, both hands, with the opposite sign as the control that

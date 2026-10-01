@@ -109,7 +109,13 @@ struct HobStats {
   // convergence is read on.
   double midArea = 0.0;
   double tipRadius = 0.0; // where the tip ended up (Sizes' at most)
-  double tipCrest = 0.0;  // the thinnest tooth's crest there, mm
+  // The thinnest crest (mm, as an arc): the tooth's width at the top of the
+  // wheel's material, scanned across the face. `tipCrestZ` is where it is,
+  // off the mid-plane along the axis; `tipCrestRadius` the radius it was
+  // measured at (the tip, or the throat or blank where those are lower).
+  double tipCrest = 0.0;
+  double tipCrestZ = 0.0;
+  double tipCrestRadius = 0.0;
 };
 
 // What a hobbed wheel loses, in two tools to subtract in turn from the

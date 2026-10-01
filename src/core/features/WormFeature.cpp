@@ -541,6 +541,10 @@ nlohmann::json WormWheelFeature::ReportJson() const {
       {"throat_diameter", 2.0 * s.wheelThroatRadius},
       {"tip_diameter", 2.0 * report.hob.tipRadius},
       {"tip_crest", report.hob.tipCrest},
+      // Where the crest is thinnest: off the mid-plane along the axis, and
+      // the diameter it was measured at (the tip's, or the throat's there).
+      {"tip_crest_z", report.hob.tipCrestZ},
+      {"tip_crest_diameter", 2.0 * report.hob.tipCrestRadius},
       {"root_diameter", 2.0 * s.wheelRootRadius},
       {"throat_arc_deg",
        worm::ThroatArcDeg(s, report.faceWidth, report.hob.tipRadius)},

@@ -22,7 +22,9 @@
 #include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
@@ -34,6 +36,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <gp_Circ.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -251,6 +254,50 @@ TEST_CASE("A wheel is hobbed from its blank: throat, tip and teeth",
   const double root = kPi * 35.0 * 35.0 * 13.0;
   CHECK(b.shape.Volume() < blank - 0.05 * blank);
   CHECK(b.shape.Volume() > root);
+}
+
+// The wheel's crest is read where it is thinnest: at one radius a tooth
+// narrows from the face ends inward, to where the throat comes up to meet the
+// tip -- sqrt(ri^2 - (a - tip)^2) = sqrt(8^2 - 7^2) off the mid-plane on the
+// head's pair. It used to be read at the face ends, and said 2.1 mm of a
+// crest that is 1.0 where the throat meets it. Proved on the body: a circle
+// just under the tip, cut by the solid, is z2 crests long.
+TEST_CASE("A wheel's tip crest is read where the tooth is thinnest",
+          "[worm][slow]") {
+  auto doc = WheelPart(true);
+  const auto* w = dynamic_cast<const WormWheelFeature*>(doc->GetFeature(1));
+  REQUIRE(w != nullptr);
+  INFO(w->GetError());
+  REQUIRE(w->GetError().empty());
+  const nlohmann::json rep = w->ReportJson();
+  const double kink = std::sqrt(8.0 * 8.0 - 7.0 * 7.0);
+  const double crest = rep.at("tip_crest").get<double>();
+  CHECK(crest >= 0.5); // the m/4 floor
+  CHECK_THAT(std::abs(rep.at("tip_crest_z").get<double>()),
+             WithinAbs(kink, 0.02));
+  CHECK_THAT(rep.at("tip_crest_diameter").get<double>(), WithinAbs(86.0, 1e-6));
+
+  // The crest on the body, at a radius just under the tip: the length of a
+  // circle there inside the solid, over the teeth. The blank runs z 0..13,
+  // its mid-plane at 6.5.
+  const TopoDS_Shape& body = doc->GetBodies().at(0).shape.GetShape();
+  const auto crestOnBody = [&](double R, double zOff) {
+    const TopoDS_Edge ring = BRepBuilderAPI_MakeEdge(
+        gp_Circ(gp_Ax2(gp_Pnt(0, 0, 6.5 + zOff), gp_Dir(0, 0, 1)), R));
+    BRepAlgoAPI_Common common;
+    REQUIRE(cad::BuildNonDestructive(common, ring, body));
+    GProp_GProps props;
+    BRepGProp::LinearProperties(common.Shape(), props);
+    return props.Mass() / 40.0;
+  };
+  const double R = 42.98; // the throat reaches it 3.84 off the mid-plane
+  const double atKink = crestOnBody(R, -3.9);
+  const double atEnd = crestOnBody(R, -6.4);
+  INFO("at the kink " << atKink << ", at the face end " << atEnd);
+  CHECK_THAT(atKink, WithinAbs(crest, 0.1));
+  CHECK(atEnd > crest + 0.8);
+  // Both sides of the mid-plane: the thinnest is within a tenth of either.
+  CHECK(std::abs(crestOnBody(R, 3.9) - atKink) < 0.1);
 }
 
 namespace {
