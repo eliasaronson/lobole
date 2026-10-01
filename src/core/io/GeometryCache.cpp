@@ -339,7 +339,15 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
         return false;
       }
     }
-    fs::rename(indexTmp, geom / "index.json");
+    // An index that says the same thing keeps its file too: a part this build
+    // regenerated is written even under a matching hash, and when nothing
+    // came out different, nothing on disk should look touched.
+    if (SameBytes(indexTmp, geom / "index.json")) {
+      std::error_code rmEc;
+      fs::remove(indexTmp, rmEc);
+    } else {
+      fs::rename(indexTmp, geom / "index.json");
+    }
     // Bodies that no longer exist leave no stale .brep behind.
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(geom, ec)) {
