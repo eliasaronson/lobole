@@ -806,6 +806,7 @@ set(app_sources
     src/ui/ExprInput.cpp
     src/ui/ExprComplete.cpp
     src/ui/PreviewFeature.cpp
+    src/ui/PrimitiveTool.cpp
     src/ui/PreviewHandles.cpp
     src/ui/ViewportHandleDraw.cpp
     src/ui/Overlays.cpp

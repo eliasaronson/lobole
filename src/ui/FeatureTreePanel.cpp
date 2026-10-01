@@ -22,6 +22,7 @@
 #include "ui/FeatureEditor.h"     // ArmSlot (blend edge re-pick)
 #include "ui/Icons.h"
 #include "ui/ListSelection.h"     // ListRowClicked / DeleteSelection
+#include "ui/PrimitiveTool.h"     // a plane row answers the primitive pick
 #include "ui/SelectionPipeline.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // DrawSketchModelSections (U8a)
@@ -208,7 +209,13 @@ void DrawFeatureTreePanel(AppState& state) {
               SketchPlane::StandardPlaneName(static_cast<PlaneType>(i)), false,
               ImGuiSelectableFlags_AllowDoubleClick)) {
         const int n = static_cast<int>(doc->FeatureCount()) + 1;
-        if (armedForPlane) {
+        if (armedForPlane &&
+            state.sketchEdit.purpose == SketchPurpose::Primitive) {
+          primitive::On on;
+          on.world = static_cast<PlaneType>(i);
+          if (std::string why = BeginPrimitiveOn(state, on); !why.empty())
+            state.sketchEdit.actionMsg = why; // still armed
+        } else if (armedForPlane) {
           const SketchPurpose purpose = state.sketchEdit.purpose;
           state.sketchEdit.pickingPlane = false;
           BeginSketchOnPlane(state, DefaultPlane(i),
@@ -359,6 +366,13 @@ void DrawFeatureTreePanel(AppState& state) {
           // travels the same slot path a body pick does.
           SlotPickClicked(state, {SelectionItem::Kind::Body, feature->GetId()},
                           /*meshId=*/0, /*index=*/0);
+        } else if (datum && state.sketchEdit.pickingPlane &&
+                   state.sketchEdit.purpose == SketchPurpose::Primitive) {
+          primitive::On on;
+          on.kind = primitive::OnKind::PlaneFeature;
+          on.featureId = datum->GetId();
+          if (std::string why = BeginPrimitiveOn(state, on); !why.empty())
+            state.sketchEdit.actionMsg = why;
         } else if (datum && state.sketchEdit.pickingPlane) {
           // A datum row IS the pick while one is armed, exactly as the base
           // planes are (U10) — a named plane in the tree beats hunting its

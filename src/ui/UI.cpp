@@ -36,6 +36,7 @@
 #include "ui/PerfHud.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
+#include "ui/PrimitiveTool.h"
 #include "ui/RendererSync.h"
 #include "ui/SceneOverlays.h"
 #include "ui/SelectionPipeline.h"
@@ -113,6 +114,14 @@ void DrawModelToolPrompt(AppState& state) {
   if (prompt == nullptr && state.sketchEdit.pickingPlane) {
     prompt = state.sketchEdit.purpose == SketchPurpose::Hole
                  ? "Hole (Step 1/3): click the flat face to drill into"
+             : state.sketchEdit.purpose == SketchPurpose::Primitive
+                 ? (state.primitive.kind == primitive::Kind::Box
+                        ? "Box: click a flat face or a plane to stand it on"
+                    : state.primitive.kind == primitive::Kind::Cylinder
+                        ? "Cylinder: click a flat face or a plane to stand "
+                          "it on"
+                        : "Sphere: click a flat face or a plane to centre "
+                          "it on")
                  : "New Sketch: click a plane or a model face to sketch on";
   }
   if (prompt == nullptr)
@@ -1048,6 +1057,7 @@ void DrawUI(AppState& state) {
       // Auto-constraint snap indicator + ghost glyphs, and dimension
       // annotations (2D overlays).
       DrawSnapGlyphs(state);
+      DrawPrimitiveSnapCue(state); // a primitive ghost being dragged
       DrawSelectionBox(state);
       DrawDatumLabels(state);
       DrawElementNameOverlay(state); // toponaming debug: hovered face's name

@@ -317,11 +317,27 @@ void DrawSketchToolWindow(AppState& state) {
 
   if (edit.pickingPlane) {
     const bool hole = edit.purpose == SketchPurpose::Hole;
-    BeginToolWindowFrame(state, hole ? "Hole" : "New Sketch");
+    const bool prim = edit.purpose == SketchPurpose::Primitive;
+    const std::string primPrompt =
+        std::string("Pick a flat face or a plane for the ") +
+        primitive::KindName(state.primitive.kind) +
+        " to stand on. (Esc to cancel)";
+    BeginToolWindowFrame(state, hole ? "Hole"
+                                : prim
+                                    ? primitive::KindName(state.primitive.kind)
+                                    : "New Sketch");
     ImGui::TextWrapped(
-        hole ? "Step 1 of 3 - pick the FLAT face to drill into. (Esc to "
-               "cancel)"
-             : "Pick a plane or a model face to sketch on. (Esc to cancel)");
+        "%s",
+        hole   ? "Step 1 of 3 - pick the FLAT face to drill into. (Esc to "
+                 "cancel)"
+        : prim ? primPrompt.c_str()
+               : "Pick a plane or a model face to sketch on. (Esc to cancel)");
+    if (prim && !edit.actionMsg.empty()) {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f), "%s",
+                         edit.actionMsg.c_str());
+      ImGui::PopTextWrapPos();
+    }
     if (ImGui::Button("Cancel"))
       edit = SketchEditState{};
     ImGui::End();

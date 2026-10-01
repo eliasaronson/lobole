@@ -13,6 +13,7 @@
 #include "ui/FeatureEditor.h" // kMateSessionSlot (U7c)
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
+#include "ui/PrimitiveTool.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/TerminalPanel.h"
@@ -232,6 +233,9 @@ void HandleViewportInput(AppState& state) {
     // Escape aborts a handle drag only — the preview itself survives.
     AbortPreviewHandleDrag(state);
     escUsed = true;
+  } else if (state.primitive.dragging && esc) {
+    AbortPrimitiveDrag(state); // the same for the primitive's ghost
+    escUsed = true;
   } else if (state.slotPick.Active()) {
     // The session's own answer, from the ONE table that also routes its picks
     // (ToolSession in FeatureEditor.h). This used to be a second chain of
@@ -390,6 +394,11 @@ void HandleViewportInput(AppState& state) {
   }
 
   if (RouteHandleInput(state, overViewport))
+    return;
+
+  // A primitive's ghost drags in its reference's frame
+  // (ui/PrimitiveTool.h). After the handles, so its height arrow wins.
+  if (HandlePrimitiveDragInput(state, overViewport))
     return;
 
   // The unified pick pipeline (U1b/U1c): default selection — edges/faces/

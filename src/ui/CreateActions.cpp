@@ -77,6 +77,7 @@
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
+#include "ui/PrimitiveTool.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (Hole select-first)
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
@@ -111,16 +112,6 @@
 namespace ui {
 
 namespace {
-// Placement offset so successive primitives don't overlap.
-// Where a new primitive goes. Fixed-size primitives (every one is 2 units),
-// so this ladder is equivalent to the shared clear-spot rule; anything whose
-// size varies should use ui/Placement.h's ClearOffset instead of inventing a
-// fourth answer (U10).
-glm::vec3 NextSpot(const AppState& state) {
-  const int n =
-      state.document ? static_cast<int>(state.document->FeatureCount()) : 0;
-  return glm::vec3(-4.0f + n * 2.5f, 0.0f, 0.0f);
-}
 std::string NextName(const AppState& state, const char* base) {
   const int n =
       state.document ? static_cast<int>(state.document->FeatureCount()) + 1 : 1;
@@ -128,25 +119,19 @@ std::string NextName(const AppState& state, const char* base) {
 }
 } // namespace
 
+// The primitives stand on something: each arms a face/plane pick, and the
+// pick opens the preview (ui/PrimitiveTool.h). They no longer make the stored
+// Box/Sphere/Cylinder features, which kept a world position nothing followed.
 void CreateBox(AppState& state) {
-  BeginPreviewFeature(
-      state, std::make_unique<BoxFeature>(NextName(state, "Box"),
-                                          NextSpot(state), 2.0, 2.0, 2.0));
+  StartPrimitiveTool(state, primitive::Kind::Box);
 }
 
 void CreateSphere(AppState& state) {
-  BeginPreviewFeature(state,
-                      std::make_unique<SphereFeature>(NextName(state, "Sphere"),
-                                                      NextSpot(state), 1.0));
+  StartPrimitiveTool(state, primitive::Kind::Sphere);
 }
 
 void CreateCylinder(AppState& state) {
-  // A fresh cylinder stands upright: base one unit below the spot, axis
-  // along world up.
-  BeginPreviewFeature(state, std::make_unique<CylinderFeature>(
-                                 NextName(state, "Cylinder"),
-                                 NextSpot(state) - conv::kWorldUpF,
-                                 conv::kWorldUpF, 0.8, 2.0));
+  StartPrimitiveTool(state, primitive::Kind::Cylinder);
 }
 
 void CreateDatumPlane(AppState& state) {

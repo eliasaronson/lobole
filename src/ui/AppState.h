@@ -6,6 +6,7 @@
 #include "core/Measure.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
+#include "core/Primitives.h" // the primitive tool's spec (PrimitiveSession)
 #include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
 #include "core/cam/CamJob.h"
 #include "core/cam/CamPicks.h"   // FaceRegion -- the only thing this header
@@ -117,7 +118,10 @@ enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 // for the Hole tool, so ✓/Enter hand off to BeginSketchHole instead of just
 // exiting, and Escape discards the sketch the tool created if the user drew
 // nothing in it. Freeform = an ordinary sketch (never auto-discarded).
-enum class SketchPurpose { Freeform, Hole };
+// Primitive = not a sketch session at all: the Box / Cylinder / Sphere tool
+// borrows the plane pick, and a pick starts its preview
+// (AppState::primitive, ui/PrimitiveTool.h) instead of a sketch.
+enum class SketchPurpose { Freeform, Hole, Primitive };
 
 enum class SketchTool {
   Select,
@@ -1321,6 +1325,33 @@ struct AppState {
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;
+  // A feature previewed WITH the pending one and resolved with it: removed
+  // together on cancel, committed together as one undo step on accept. A
+  // primitive's sketch, the Extrude or Revolve of which is the pending
+  // feature. 0 = none.
+  uint64_t pendingCompanionId = 0;
+
+  // The Box / Cylinder / Sphere tool (docs/ui/tool-sessions.md#primitives,
+  // ui/PrimitiveTool.h). Armed through the plane pick
+  // (SketchPurpose::Primitive, `kind` says which); once a face or plane is
+  // picked, the expanded sketch + solid are the pending preview and `spec`
+  // is what the tool window edits. Live while solidId == pendingFeatureId.
+  struct PrimitiveSession {
+    primitive::Kind kind = primitive::Kind::Box;
+    uint64_t sketchId = 0;
+    uint64_t solidId = 0;
+    primitive::Spec spec;
+    primitive::Placement placement;
+    std::string error; // a dimension that does not evaluate, in the window
+    // Dragging the ghost in the reference's frame: the plane point under
+    // the cursor at grab, and the offset it had then (Esc restores it).
+    bool dragging = false;
+    glm::dvec2 grabUV{0.0};
+    glm::dvec2 startOffset{0.0};
+    // What the drag snapped to on each axis ("" = free), for the cue.
+    std::string snapU, snapV;
+  };
+  PrimitiveSession primitive;
   // Committed feature open in the Tool-window editor session (U7e: editing
   // is explicit — double-click / context-menu Edit — now that the always-on
   // Properties panel is gone). 0 = none. Transient; edits commit as usual.

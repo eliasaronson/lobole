@@ -16,7 +16,8 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 #include "ui/DocumentSlots.h"
-#include "ui/ExprComplete.h" // variable completion in the dim editors
+#include "ui/ExprComplete.h"  // variable completion in the dim editors
+#include "ui/PrimitiveTool.h" // the Box/Cylinder/Sphere tool borrows the pick
 #include "ui/SceneOverlays.h"
 #include "ui/SketchOverlay.h" // SelectFeature
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
@@ -158,6 +159,27 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           }
           edit.pickingPlane = false;
           edit.reattachSketchId = 0;
+        } else if (edit.purpose == SketchPurpose::Primitive) {
+          // The Box / Cylinder / Sphere tool borrows this pick: what was
+          // clicked is what the primitive stands on. A refusal (a curved
+          // face) stays armed and says why; success ends the pick.
+          std::string why;
+          if (hit.hit) {
+            why = BeginPrimitiveOnFace(state, hit.meshId, hit.faceIndex);
+          } else if (datumId != 0 || plane >= 0) {
+            primitive::On on;
+            if (datumId != 0) {
+              on.kind = primitive::OnKind::PlaneFeature;
+              on.featureId = datumId;
+            } else {
+              on.kind = primitive::OnKind::WorldPlane;
+              on.world = static_cast<PlaneType>(plane);
+            }
+            why = BeginPrimitiveOn(state, on);
+          }
+          if (!why.empty())
+            edit.actionMsg = why;
+          return true; // `edit` was reset on success; touch nothing more
         } else if (hit.hit && edit.purpose == SketchPurpose::Hole) {
           // Hole sessions demand a genuinely planar face; a refusal stays
           // armed with an explanation rather than making a bad sketch.

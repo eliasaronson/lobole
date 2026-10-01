@@ -174,7 +174,7 @@ feature appeared.
 
 | Feature | Toolbar | GUI test |
 |---|---|---|
-| Box / Cylinder / Sphere | `###tb_box` … | `document/create_sphere_and_cylinder`, and most tests build a box |
+| Box / Cylinder / Sphere | `###tb_box` … | `primitive/*` (face pick, drag snap, Accept, one undo), `document/create_sphere_and_cylinder`. Most tests that just need a body add a stored box as a fixture (`AddFixtureBox`), not through the tool |
 | Sketch | `###tb_new_sketch` | `sketch/*`; plane picks from the tree and the datum row |
 | Extrude | `###tb_extrude`, `###tb_sk_extrude` | `sketch/model_toolbar_extrudes_finished`, `handles/extrude_arrow_drag_sets_distance` |
 | Revolve | `###tb_revolve`, `###tb_sk_revolve` | `revolve/profile_beside_the_axis_rings` (volume against Pappus) |

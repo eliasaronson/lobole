@@ -149,6 +149,10 @@ exactly one of these must hold:
   is missing;
 - `Expect::ArmsAPick` — not a preview at all; the tool asks for a face or a
   plane first (Hole, New Sketch);
+- `Expect::PickThenChanges` — asks for a face or a plane first, and given
+  the Top plane of an empty part (the row in the tree), opens a preview that
+  `Changes` (Box, Cylinder, Sphere: their sizes come from the scene's reach
+  when the reference has nothing of its own to measure);
 - `Expect::HarmlessNoOp` — accepts cleanly and legitimately changes nothing.
 
 "Enabled button, accepts, changes nothing" is the failure it exists to catch.
@@ -190,6 +194,62 @@ Hole matters as a feature rather than an extruded cut: its tool solid is
 built from primitives, so counterbore and countersink are expressible, and it
 stamps its id into every element it creates, which drawing hole callouts
 read.
+
+## Primitives
+
+Box, Cylinder and Sphere stand on something
+([../modeling/README.md#primitives](../modeling/README.md#primitives)): what
+they make is a dimensioned sketch on a face or a plane and an Extrude (Box,
+Cylinder) or a Revolve (Sphere) of it, never a stored solid at a world
+position. So the toolbar tool starts the way that model does, with the
+reference (`src/ui/PrimitiveTool.{h,cpp}`):
+
+```
+[idle] --tb_box-----------------------------------> A: face/plane pick
+       --tb_box + planar face / datum selected-----> B      (A skipped)
+A --click flat face / base plane / datum (or its tree row)--> B
+A --click curved face--> A    (stays armed: "that face is curved - pick a flat one")
+B --edit a field--> B         (primitive::Refill + regenerate, no undo entry)
+B --drag the ghost--> B       (offset u, v in the reference's frame; snaps)
+B --Accept / Enter--> committed  (sketch + solid, ONE undo step)
+B --Esc / Cancel / Ctrl+Z--> [idle] (both removed; the document as it was)
+```
+
+- **The pick is the plane pick**, with `SketchPurpose::Primitive`: the
+  viewport, the base-plane rows and the datum rows answer it exactly as they
+  answer New Sketch, and the same prompt pill and tool window name the step.
+  A face must be planar by the B-Rep (`ExactFacePlane`) and named (a stable
+  ref is what the sketch's `face_ref` holds); a refusal stays armed and says
+  why.
+- **Defaults** are `primitive::ApplyDefaults`: half the picked face's
+  smaller span, a quarter of the part on a plane, and, on an empty part's
+  plane, half the base planes' reach (`ScenePlaneHalfExtent`) — never a
+  literal.
+- **The preview is two features.** The sketch and the solid are both in the
+  document; the solid is the pending feature and the sketch its
+  **companion** (`AppState::pendingCompanionId`). `AcceptPendingFeature`
+  re-adds both through `AddFeatureCommand`s and coalesces them
+  (`CommandStack::CoalesceSince`) into one step; `CancelPendingFeature` and
+  every tab switch remove both.
+- **The window edits the spec** (`AppState::primitive.spec`): width, depth,
+  height or diameter, offset u/v, centered (Box: the offset is the centre or
+  the low corner, and toggling it keeps the box where it is), mode
+  (new body / add / cut) and reversed. Each field takes an expression and
+  keeps its text. The Extrude's own height arrow
+  ([viewport-handles.md](viewport-handles.md#preview-handles)) still works;
+  the window reads the height back from it.
+- **Dragging the ghost** moves the offset in the reference's frame: a press
+  on its footprint (on the plane it stands on, or on its far cap) grabs, and
+  the offset follows the cursor's point on the plane. Each axis snaps on its
+  own within 10 px: to the reference's centre (u, v = 0), and on a face to
+  its outline — a side flush with the face's edge, or the centre on the edge
+  line. A ring and a label ("centre", "flush", "on edge") mark it; Ctrl frees
+  it (the app's one polarity, [viewport-handles.md](viewport-handles.md#snapping-one-polarity));
+  Escape mid-drag puts the offset back.
+
+The stored `BoxFeature` / `CylinderFeature` / `SphereFeature` remain only so
+old documents load and as test fixtures (`AddFixtureBox` in the GUI suite);
+the feature editor still edits one that a file brought in.
 
 ## Sketch sessions
 
@@ -234,6 +294,11 @@ The sketch's own entity selection stays in `SketchEditState`
 ## Tests
 
 - `defaults/*` (one per creation tool), `defaults/no_op_warns_without_blocking`.
+- `primitive/face_pick_drag_snap_accept` (the ghost on the face, a free
+  drag, flush and centre snaps, Accept: a DOF-0 face-attached sketch and a
+  27 mm³ extrude, one Ctrl+Z takes both), `primitive/escape_leaves_document_unchanged`,
+  `primitive/curved_face_refused`, `primitive/preselected_face_skips_pick`,
+  `primitive/fields_rewrite_the_preview`.
 - `hole/face_pick_to_accept`, `hole/preselected_face_skips_pick`, and the
   other `hole/*` cases (Enter opens the params without accepting, the tiered
   Escape and its undo, curved-face refusal, drilling existing points).

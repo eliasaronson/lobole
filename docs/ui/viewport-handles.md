@@ -87,7 +87,9 @@ occurrence rotate (which snaps the **increment**, because a free occurrence's
 starting orientation is arbitrary), and a drag within a mate's rotational DOF
 (which snaps the **absolute** value, because the mate's own frame is the zero
 — a revolute joint lands on 90° from its seat). A ball joint snaps the turn.
-Drags that do not snap (assembly translation, the section offset) still do
+A primitive's ghost, dragged in its reference's frame, snaps to geometry
+instead of round numbers — the face's centre and outline
+([tool-sessions.md](tool-sessions.md#primitives)). Drags that do not snap (assembly translation, the section offset) still do
 not: the rule is about polarity, not coverage.
 
 ## Mates: flip and rotate

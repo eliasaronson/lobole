@@ -23,6 +23,7 @@
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h"
 #include "ui/MeasureActions.h"
+#include "ui/PrimitiveTool.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 #include "ui/Theme.h"         // ElevatedWindowBorder, DrawWindowShadow
 #include "ui/ToleranceActions.h"
@@ -134,12 +135,27 @@ void AcceptPendingFeature(AppState& state) {
   const uint64_t id = f->GetId();
   std::unique_ptr<Feature> owned = state.document->RemoveFeature(idx);
   state.pendingFeatureId = 0;
+  // A companion (a primitive's sketch) goes back in first, through its own
+  // command, and the two coalesce into the one step the user accepted.
+  std::unique_ptr<Feature> companion;
+  size_t cidx = 0;
+  if (state.pendingCompanionId != 0 &&
+      state.document->FindFeatureById(state.pendingCompanionId, &cidx))
+    companion = state.document->RemoveFeature(cidx);
+  state.pendingCompanionId = 0;
+  state.primitive = AppState::PrimitiveSession{};
   const bool blank = owned->TypeName() == "FlatPattern";
   if (blank) // authored off; ShowTheBlank switches it on in a configuration
     owned->SetSuppressed(true);
   const size_t mark = state.commands->UndoDepth();
+  const std::string name = owned->GetName();
+  if (companion)
+    state.commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(companion)),
+        *state.document);
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(owned)),
                           *state.document);
+  state.commands->CoalesceSince(mark, "Add " + name); // <2 commands: no-op
   if (blank)
     ShowTheBlank(state, id, mark);
   SelectFeature(state, id);
@@ -151,6 +167,12 @@ void CancelPendingFeature(AppState& state) {
   if (ResolvePendingFeature(state, &idx)) {
     state.document->RemoveFeature(idx);
   }
+  // The companion after the feature that depends on it.
+  if (state.pendingCompanionId != 0 && state.document != nullptr &&
+      state.document->FindFeatureById(state.pendingCompanionId, &idx))
+    state.document->RemoveFeature(idx);
+  state.pendingCompanionId = 0;
+  state.primitive = AppState::PrimitiveSession{};
   state.pendingFeatureId = 0;
   state.selection.Clear();
   state.slotPick = {};
@@ -548,6 +570,12 @@ void DrawToolWindow(AppState& state) {
   size_t idx = 0;
   Feature* feature = ResolvePendingFeature(state, &idx);
   if (!feature) {
+    // A preview whose feature went away leaves no companion behind.
+    size_t cidx = 0;
+    if (state.pendingCompanionId != 0 && state.document != nullptr &&
+        state.document->FindFeatureById(state.pendingCompanionId, &cidx))
+      state.document->RemoveFeature(cidx);
+    state.pendingCompanionId = 0;
     state.pendingFeatureId = 0;
     // Committed-feature editor session (U7e): same window, live commits.
     if (state.editFeatureId != 0 && state.document &&
@@ -592,9 +620,23 @@ void DrawToolWindow(AppState& state) {
     return;
   }
 
-  BeginToolWindowFrame(state, feature->TypeName());
+  // A primitive's preview is an Extrude or a Revolve underneath, but what
+  // the user is making -- and editing -- is the Box (ui/PrimitiveTool.h).
+  const bool primitiveSession = PrimitiveSessionActive(state);
+  BeginToolWindowFrame(state, primitiveSession
+                                  ? primitive::KindName(state.primitive.kind)
+                                  : feature->TypeName());
 
-  DrawFeatureParamWidgets(state, *feature, idx, /*commit=*/false);
+  if (primitiveSession) {
+    DrawPrimitiveParamWidgets(state);
+    feature = ResolvePendingFeature(state, &idx); // after its regeneration
+    if (feature == nullptr) {
+      ImGui::End();
+      return;
+    }
+  } else {
+    DrawFeatureParamWidgets(state, *feature, idx, /*commit=*/false);
+  }
 
   ImGui::Separator();
   bool accept = false, cancel = false;
@@ -713,7 +755,7 @@ void DrawToolWindow(AppState& state) {
   // ignore key REPEAT (a held Enter from the field would re-fire otherwise).
   static int idleFrames = 0;
   idleFrames = ImGui::IsAnyItemActive() ? 0 : idleFrames + 1;
-  if (idleFrames > 1 && !state.handleDrag.active) {
+  if (idleFrames > 1 && !state.handleDrag.active && !state.primitive.dragging) {
     if (!blocking && (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter,
                                           /*repeat=*/false)))

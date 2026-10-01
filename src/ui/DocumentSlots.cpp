@@ -159,6 +159,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document->Regenerate();
   state.selection.Clear();
   state.pendingFeatureId = 0;
+  state.pendingCompanionId = 0;
+  state.primitive = AppState::PrimitiveSession{};
   state.sketchEdit = SketchEditState{};
   // Simulation is a MODE, and the studies it edits belonged to the document
   // that just went away. File > New in simulation mode used to leave the
@@ -278,6 +280,8 @@ void ResetActiveTabUiState(AppState& state) {
   state.slotPick = {};
   state.hiddenBodies.clear();
   state.pendingFeatureId = 0;
+  state.pendingCompanionId = 0;
+  state.primitive = AppState::PrimitiveSession{};
   state.editFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it
