@@ -1082,6 +1082,12 @@ struct VerifyRun {
   std::vector<cam::Toolpath::Groove> grooves; // engraving: not gouge
   std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
   std::vector<cam::Toolpath::Thread> threads; // judged on their own terms
+  std::vector<cam::Toolpath::Fit> fits;       // judged against their bands
+  // The whole job, and the thread mills of it that generated a thread: what
+  // the job does not cut is a question about every setup
+  // (docs/cam/simulation.md#what-the-job-does-not-cut).
+  std::vector<cam::Setup> allSetups;
+  std::vector<uint64_t> milled;
   std::string gcode;
   double res = 0.25;
   // The job's other setups and their files, so what one of them removes is
@@ -1116,7 +1122,11 @@ PrepareVerify(ui::AppState& state, cam::JobDocument& job, const RpcParams& p) {
     w->tabs.insert(w->tabs.end(), tp.tabs.begin(), tp.tabs.end());
     w->grooves.insert(w->grooves.end(), tp.grooves.begin(), tp.grooves.end());
     w->threads.insert(w->threads.end(), tp.threads.begin(), tp.threads.end());
+    w->fits.insert(w->fits.end(), tp.fits.begin(), tp.fits.end());
+    for (const cam::Toolpath::Thread& t : tp.threads)
+      w->milled.push_back(t.op);
   }
+  w->allSetups = job.GetSetups();
   std::string error;
   if (!cam::PostProcess(setup.machine.post, setup, w->paths, PostOptsOf(setup),
                         w->gcode, &error))
@@ -1129,8 +1139,12 @@ PrepareVerify(ui::AppState& state, cam::JobDocument& job, const RpcParams& p) {
     if (other.id == setup.id || other.operations.empty())
       continue;
     std::string file, why;
-    if (!cam::PostProcess(other.machine.post, other,
-                          ui::GenerateCamToolpathsNow(state, other),
+    const std::vector<cam::Toolpath> otherPaths =
+        ui::GenerateCamToolpathsNow(state, other);
+    for (const cam::Toolpath& tp : otherPaths)
+      for (const cam::Toolpath::Thread& t : tp.threads)
+        w->milled.push_back(t.op);
+    if (!cam::PostProcess(other.machine.post, other, otherPaths,
                           PostOptsOf(other), file, &why)) {
       w->unposted.push_back("setup '" + other.name +
                             "', because it does not post: " + why);
@@ -1156,7 +1170,8 @@ void ComputeVerify(VerifyRun& w) {
                            w.unposted.end());
   w.verdict =
       cam::VerifyGcode(w.gcode, w.setup, w.bodies, w.res, w.reliefs, w.tabs,
-                       w.fixtures, &others, w.grooves, w.threads);
+                       w.fixtures, &others, w.grooves, w.threads, w.fits);
+  cam::AddUncutThreads(w.allSetups, w.bodies, w.milled, w.verdict);
 }
 
 // Step three: the answer, in the same sentences the panel shows.
@@ -1367,6 +1382,57 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       threads.push_back(std::move(tj));
     }
     out["threads"] = std::move(threads);
+  }
+  // Every toleranced wall against its band
+  // (docs/cam/simulation.md#tolerance-bands).
+  {
+    json fits = json::array();
+    for (const cam::FitVerdict& f : v.fits) {
+      json fj = {{"ops", f.ops},
+                 {"internal", f.internal},
+                 {"class", f.label},
+                 {"centre", {f.centre.x, f.centre.y}},
+                 {"nominal_mm", f.nominal},
+                 {"band_mm", {f.min, f.max}},
+                 {"aim_mm", f.aim},
+                 {"judged", f.judged}};
+      if (f.judged) {
+        fj["cut_mm"] = f.cut;
+        fj["in_band"] = f.InBand();
+        fj["scrap"] = f.Scrap();
+      } else {
+        fj["why"] = f.why;
+      }
+      fits.push_back(std::move(fj));
+    }
+    out["fits"] = std::move(fits);
+  }
+  // Pieces cut free and offcut not counted as leftover
+  // (docs/cam/simulation.md#tabs-and-offcuts).
+  {
+    json free = json::array();
+    for (const cam::Verdict::CutFree& c : v.cutFree)
+      free.push_back(
+          {{"at", {c.at.x, c.at.y}}, {"area_mm2", c.area}, {"part", c.part}});
+    out["cut_free"] = std::move(free);
+    out["offcut_area_mm2"] = v.offcutArea;
+  }
+  // The holes and threads nothing in the job cuts
+  // (docs/cam/simulation.md#what-the-job-does-not-cut).
+  {
+    json uncut = json::array();
+    for (const cam::UncutFeature& u : v.uncut)
+      uncut.push_back(
+          {{"kind",
+            u.kind == cam::UncutFeature::Kind::Hole ? "hole" : "thread"},
+           {"job_part", u.jobPartId},
+           {"feature_id", u.featureId},
+           {"feature", u.feature},
+           {"face",
+            {{"feature_id", u.face.featureId}, {"element", u.face.name}}},
+           {"what", u.what},
+           {"at", {u.at.x, u.at.y, u.at.z}}});
+    out["uncut"] = std::move(uncut);
   }
   // The typical scallop, where the worst cell is an end face no rotary
   // pass can reach. Rotary only: the height map does not compute it, and

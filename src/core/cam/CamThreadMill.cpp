@@ -15,6 +15,7 @@
 #include <gp_Pnt.hxx>
 
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -382,7 +383,16 @@ ThreadPlan PlanThread(const Setup& setup, const Operation& op, const Tool& tool,
   // A bore has to open toward the spindle: one tapped up from the underside
   // has metal over its top, and a vertical axis alone let the head go in
   // through it.
-  if (internal && SolidAround(*body, centre, r * 0.5, faceHi + 0.05)) {
+  // Over a drill's point, when the model's floor is one (HoleMark): its
+  // cone is air up to the apex, and a bore whose floor is up read as open.
+  double point = 0.0;
+  for (const HoleMark& h : body->holes)
+    if (!h.through && h.pointAngleDeg < 180.0 - 1e-6 &&
+        body->elementMap.Resolve(h.bore.name) == std::optional<int>(idx))
+      point = r / std::tan(glm::radians(h.pointAngleDeg * 0.5));
+  if (internal && (SolidAround(*body, centre, r * 0.5, faceHi + 0.05) ||
+                   (point > 0.0 && SolidAround(*body, centre, r * 0.5,
+                                               faceHi + point + 0.05)))) {
     out.why = "that thread's bore opens downward: its top, at Z " +
               Mm(faceHi, 2) +
               ", is closed by the part. Mill it from the side it opens on "

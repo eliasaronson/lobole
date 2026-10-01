@@ -542,6 +542,25 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   if (opts.comments) {
     e.Comment("Designer CAM - " + setup.name);
     e.Comment("post: " + std::string(dialect->id));
+    // Every toleranced wall the program aims at, and where in its band
+    // (docs/cam/post.md#what-the-file-says): the machinist gauges against
+    // the band, and re-posts with the cutter's measured size if it is off.
+    std::vector<const Toolpath::Fit*> said;
+    for (const Toolpath& tp : paths)
+      for (const Toolpath::Fit& f : tp.fits) {
+        bool again = false;
+        for (const Toolpath::Fit* s : said)
+          again = again ||
+                  (s->op == f.op && glm::distance(s->centre, f.centre) < 1e-3 &&
+                   std::abs(s->nominal - f.nominal) < 1e-6);
+        if (again)
+          continue;
+        said.push_back(&f);
+        e.Comment("fit op " + std::to_string(f.op) + ": " +
+                  (f.internal ? "bore D" : "boss D") + Num(f.nominal, 3) + " " +
+                  f.label + " " + Num(f.Min(), 4) + "-" + Num(f.Max(), 4) +
+                  ", aimed at " + Num(f.aim, 4));
+      }
   }
   // Absolute, mm, XY plane, cancel any leftover cutter comp or canned cycle:
   // a preamble that assumes the machine is in a known state is how a job

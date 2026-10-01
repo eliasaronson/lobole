@@ -517,6 +517,9 @@ DerivedOp DeriveOperation(const Setup& setup,
     glm::dvec2 holeCentre(0.0);
     double holeRadius = 0.0;
     double holeTop = 0.0;
+    // The drill point the model gives the hole's floor, when a Hole made it
+    // (HoleMark): 180 is flat, and so is a bore no Hole drilled.
+    double holePointDeg = 180.0;
     for (const Body& body : bodies) {
       if (body.createdBy != target.ref.featureId || !body.shape.IsValid())
         continue;
@@ -556,6 +559,9 @@ DerivedOp DeriveOperation(const Setup& setup,
           const BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
           if (surf.GetType() == GeomAbs_Cylinder)
             holeRadius = surf.Cylinder().Radius();
+          for (const HoleMark& h : body.holes)
+            if (body.elementMap.Resolve(h.bore.name) == idx && !h.through)
+              holePointDeg = h.pointAngleDeg;
         }
         break;
       }
@@ -597,13 +603,27 @@ DerivedOp DeriveOperation(const Setup& setup,
     const auto solidBelow = [&]() {
       if (holeRadius <= 0.0)
         return true; // no centre to probe: the old rule decides
-      return solidAt(op.bottomZ - 0.05);
+      // Under the drill's point, when the model's floor is one: its cone is
+      // air down to the apex, and probed above that a blind hole read as
+      // through.
+      const double point =
+          holePointDeg < 180.0 - 1e-6
+              ? holeRadius / std::tan(glm::radians(holePointDeg * 0.5))
+              : 0.0;
+      return solidAt(op.bottomZ - point - 0.05);
     };
     // A hole has to OPEN toward the spindle. Its axis being vertical is not
     // enough: a blind hole tapped up from the underside (a tripod thread)
     // has metal over its top, and derived as a through hole from the stock
     // top it drilled down through the plate's web into the pocket above.
-    if (holeRadius > 0.0 && solidAt(holeTop + 0.05)) {
+    // Over a drill's point too, when the floor is one and faces up here.
+    const double overPoint =
+        holePointDeg < 180.0 - 1e-6
+            ? holeRadius / std::tan(glm::radians(holePointDeg * 0.5))
+            : 0.0;
+    if (holeRadius > 0.0 &&
+        (solidAt(holeTop + 0.05) ||
+         (overPoint > 0.0 && solidAt(holeTop + overPoint + 0.05)))) {
       out.why = "that hole opens downward: its top, at Z " + Round2(holeTop) +
                 ", is closed by the part, so a tool would go in through "
                 "the metal over it. Drill it from the side it opens on -- "
@@ -623,6 +643,39 @@ DerivedOp DeriveOperation(const Setup& setup,
       if (reachesBottom)
         op.bottomZ = std::min(op.bottomZ, lo.z);
       op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
+    } else if (drill != nullptr && holePointDeg < 180.0 - 1e-6) {
+      // A BLIND hole whose floor is a drill's point in the model
+      // (docs/cam/operations.md#drill): a drill of the hole's size goes on
+      // down by its own point's height, so its full diameter reaches the
+      // bore's bottom and its point cuts the cone. Another angle, or a flat
+      // tool, cannot cut that cone, and is said.
+      const bool pointed =
+          drill->type == ToolType::Drill || drill->type == ToolType::VBit;
+      const bool plunge = std::abs(drill->diameter - 2.0 * holeRadius) < 1e-3;
+      if (pointed && plunge)
+        op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
+      const std::string floor = "the hole's floor is a " +
+                                Round2(holePointDeg) +
+                                " degree drill point in the model, and tool " +
+                                std::to_string(drill->number);
+      if (!pointed)
+        out.notes.push_back(floor +
+                            " is flat: it stops at the bore's bottom and "
+                            "leaves the cone. Drill it with a " +
+                            Round2(holePointDeg) + " degree drill");
+      else if (!plunge)
+        out.notes.push_back(floor + " (" + Round2(drill->diameter) +
+                            " mm) bores it rather than drilling it to size, "
+                            "so its point cuts no cone. Drill it with a " +
+                            Round2(2.0 * holeRadius) + " mm drill");
+      else if (std::abs(drill->tipAngleDeg - holePointDeg) > 0.5)
+        out.notes.push_back(
+            floor + "'s point is " + Round2(drill->tipAngleDeg) + " degrees: " +
+            (drill->tipAngleDeg < holePointDeg
+                 ? "it goes deeper than the cone, and gouges it"
+                 : "it leaves a ring of the cone standing") +
+            ". Use a " + Round2(holePointDeg) +
+            " degree drill, or model the point it has (drill_point_deg)");
     } else if (drill != nullptr) {
       // A BLIND hole: the point is the floor. Said when the model's floor is
       // FLAT, because then the cone is material the model does not have --
