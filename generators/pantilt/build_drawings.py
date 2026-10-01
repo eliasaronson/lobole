@@ -6,13 +6,17 @@ to scratch/pantilt/drawings/ as PDF and SVG.
 
 Three sheets:
 
-- **base_plate**: what a machinist makes the aluminium plate from -- its
-  top, the section A-A through the bearing seat and the tripod thread, and
-  its underside; the Ø32 K7 seat with its limits, the 3/8-16 UNC-2B thread
-  and the four M4 tapped holes as callouts the model writes, the chamfers,
-  datums A and B, the general tolerance and the material.
-- **assembly**: the head (the camera it carries left off), two views, a
-  balloon on every part and the parts list the balloons number.
+- **base_plate**: what a machinist makes the 6082-T6 plate from -- its
+  top, the section A-A through the bearing seat and the tripod thread,
+  DETAIL C of the seat's shoulder at 5:1, and its underside; the Ø32 K7
+  seat with its limits, the 3/8-16 UNC-2B thread and the four M4 tapped
+  holes as callouts the model writes, the chamfers, datum features A and B
+  and the feature control frames that name them (the seat perpendicular to
+  A, its shoulder's runout to B, the M4s' position to A and B), the
+  general tolerance, and the grade in the title block.
+- **assembly**: the head (the camera it carries left off), three views,
+  the parts list, and a balloon on every row laid out by the app
+  (`layout_balloons`), none of whose leaders cross.
 - **print**: the PETG parts, how each goes on the bed, and the printed-fit
   allowances the model was built with (asked of the app, never typed).
 
@@ -21,10 +25,15 @@ model's own text, so a change upstream re-draws rather than going stale.
 Geometry is picked by what it IS (a circle of the seat's diameter, the
 plate's bottom face in the section), from the project variables, not by
 toponame strings that a remodel would rename.
+
+Before the sheets, `as_ordered` gives the model the two things the sheets
+order by: the plate's grade (6082-T6) and the 1/4-20 camera screw as the
+ASME B18.3 part it is bought as. Both belong upstream (build_base.py,
+build_tilt.py and build_assembly.py); they are made here so the drawing
+stage can be re-run on its own from cam.dsgn.
 """
 import datetime
 import json
-import math
 
 import common
 from common import OUT
@@ -100,15 +109,15 @@ def base_plate_sheet(app, V):
     s = 2.0
     t, R = V["base_t"], V["base_r"]
     seat_d, seat_b = V["main_brg_D"], V["main_brg_B"]
+    # MATERIAL is left blank: the sheet writes the part's grade.
     app.call("create_drawing", name="base_plate drawing", sheet={
         "size": "a3", "landscape": True,
         "title_block": {
             "project": "Pan/tilt head", "document": "Base plate",
             "author": AUTHOR, "date": DATE,
-            "material": "6082-T6 or 6061-T6 plate, 30 thick (EN 485)",
             "notes": "General tolerances ISO 2768-mK"}})
     tx, ty = 150.0, 200.0     # the top view's centre (the pan axis)
-    px, py = tx, 66.0         # the section's: the axis at the underside
+    px, py = tx, 50.0         # the section's: the axis at the underside
     bx, by = 335.0, 200.0     # the underside's, at 1:1: it shows one hole
     top = app.call("add_drawing_view", source="base_plate",
                    orientation="top", scale=s, position=[tx, ty],
@@ -134,7 +143,8 @@ def base_plate_sheet(app, V):
     m4 = sorted(m4, key=lambda e: (-e["center"][1], e["center"][0]))
     if len(m4) != 4:
         raise SystemExit(f"drawings: expected 4 M4 holes, found {len(m4)}")
-    dim(app, top, "pattern_callout", [ref(e) for e in m4], (-40, 30))
+    m4_callout = dim(app, top, "pattern_callout", [ref(e) for e in m4],
+                     (-40, 30))["id"]
     tl, tr = m4[0], m4[1]  # the top pair, left to right
     br = max(m4[2:], key=lambda e: e["center"][0])
     dim(app, top, "distance_x", [ref(tl), ref(tr)],
@@ -176,9 +186,10 @@ def base_plate_sheet(app, V):
     drill_top = ref(drill, end=end_toward(drill, lambda p: p[1]))
     dim(app, sec, "distance_y", [ref(bottom), drill_top],
         (px - s * V["tripod_drill"] / 2 - 7 - px, 0))
-    # The seat: Ø across its walls; its class and limits are the model's.
-    mid = py + s * (t - seat_b / 2)
-    dim(app, sec, "diameter", [ref(wall)], (0, py + s * t + 6 - mid))
+    # The seat: Ø across its walls; its class and limits are the model's,
+    # and where it goes is the app's (beyond the section along the walls).
+    seat_dim = app.call("add_drawing_dim", view=sec, kind="diameter",
+                        refs=[ref(wall)])["id"]
 
     # Underside: the tripod thread, and the chamfers the 6090 cuts.
     tri = one(circles(gb, V["tripod_drill"], 1.0), "tripod drill rim")
@@ -190,9 +201,9 @@ def base_plate_sheet(app, V):
              text="{{edge_break}} × 45° CHAMFER: TRIPOD MOUTH,\n"
                   "SEAT MOUTH, BOTH OUTER RIMS")
 
-    # Datums: A the face it stands on, B the bearing seat.
-    # The face's leftmost point, over both halves the tripod hole splits
-    # it into (`extreme` reads every piece; an `end` only the reported one).
+    # Datum features: A the face it stands on, B the bearing seat. The
+    # face's leftmost point, over both halves the tripod hole splits it
+    # into (`extreme` reads every piece; an `end` only the reported one).
     app.call("add_drawing_note", view=sec, style="datum", text="A",
              ref=ref(bottom, extreme="left"),
              position=[left - 4, py - 12])
@@ -203,11 +214,24 @@ def base_plate_sheet(app, V):
              ref=ref(wall, end=b_end),
              position=[b_at[0] + side * 12, b_at[1] + 7])
 
-    # What the dimensions cannot say, ruled, on the title block.
+    # The frames that name them. The seat's axis square to A, in a
+    # cylindrical zone, written with the seat's size.
+    fcf(app, dim=seat_dim, symbol="perpendicularity", tolerance_mm=0.02,
+        diameter=True, datums=["A"])
+    # The four M4s located from A and B, with their callout.
+    fcf(app, dim=m4_callout, symbol="position", tolerance_mm=0.2,
+        diameter=True, datums=["A", "B"])
+
+    # DETAIL C: the seat's shoulder and the relief under it, at 5:1 -- the
+    # 1.2 step between the seat's floor and the relief's that the section's
+    # 9 and 10.2 only say by subtraction.
+    detail_sheet(app, V, sec)
+
+    # What the frames and dimensions cannot say, ruled, on the title block.
     notes = "\n".join([
         "NOTES",
-        "1\tSEAT B PERPENDICULAR TO A WITHIN 0.02, RUNOUT OF B TO A 0.03",
-        "2\tM4 HOLES: POSITION Ø0.2 TO A AND B; TAP BY HAND",
+        "1\tSTOCK: 30 THICK PLATE, EN 485-2",
+        "2\tM4 HOLES: TAP BY HAND",
         "3\tØ32 K7 SEAT: GAUGE BEFORE THE SETUP IS BROKEN",
         "4\tBREAK ALL OTHER EDGES 0.2 MAX; NO BURRS IN THE SEAT",
     ])
@@ -217,115 +241,64 @@ def base_plate_sheet(app, V):
     return export(app, "base_plate")
 
 
+def fcf(app, view=None, ref_=None, position=None, dim=None, **frame):
+    """A feature control frame: with a leader to `ref_` on `view`, or
+    stacked with dimension `dim`'s value."""
+    args = {"style": "fcf", "fcf": frame}
+    if dim is not None:
+        args["dim"] = dim
+    else:
+        args.update(view=view, ref=ref_, position=list(position))
+    return app.call("add_drawing_note", **args)
+
+
+def detail_sheet(app, V, sec):
+    """DETAIL C of the section: the seat's shoulder at 5:1, its width and
+    the step down to the relief, and the shoulder's runout to B (what the
+    bearing's outer ring is squared by)."""
+    t, seat_b = V["base_t"], V["main_brg_B"]
+    seat_r, relief_r = V["main_brg_D"] / 2, V["relief_d"] / 2
+    floor_z, relief_z = t - seat_b, t - V["relief_depth"]
+    s, R = 5.0, 4.5
+    cx, cz = 0.5 * (seat_r + relief_r), 0.5 * (floor_z + relief_z)
+    dx, dy = 285.0, 122.0     # where the circle's centre lands
+    det = app.call("add_drawing_view", detail={
+        "view": sec, "center": [cx, 0.0, cz], "radius_mm": R, "label": "C"},
+        scale=s, position=[dx, dy], name="detail C")["id"]
+    app.call("update_drawing")
+    g = geometry(app, det)
+
+    def at_x(x):  # a wall: vertical, at model x from the circle's centre
+        return lines(g, lambda a, b: abs(a[0] - b[0]) < 1e-6
+                     and abs(a[0] - (dx + s * (x - cx))) < 0.02)
+
+    def at_z(z):  # a floor
+        return lines(g, lambda a, b: abs(a[1] - b[1]) < 1e-6
+                     and abs(a[1] - (dy + s * (z - cz))) < 0.02)
+
+    wall = one(at_x(seat_r), "seat wall in detail C")
+    relief_wall = one(at_x(relief_r), "relief wall in detail C")
+    floor = one(at_z(floor_z), "seat floor in detail C")
+    relief_floor = one(at_z(relief_z), "relief floor in detail C")
+    dim(app, det, "distance_x", [ref(relief_wall), ref(wall)],
+        (0, dy + s * R + 6 - dy))
+    dim(app, det, "distance_y", [ref(relief_floor), ref(floor)],
+        (dx - s * R - 6 - min(relief_floor["p1"][0], floor["p1"][0]), 0))
+    # The shoulder the outer ring bears on, square to its seat's axis.
+    end = 1 if floor["p1"][0] >= floor["p2"][0] else 2
+    fcf(app, view=det, ref_=ref(floor, end=end),
+        position=(dx + s * R + 26, dy + 12),
+        symbol="circular_runout", tolerance_mm=0.03, datums=["B"])
+    return det
+
+
 # ---- the assembly ----------------------------------------------------------
-
-def extent(e):
-    """A geometry entry's sheet bounds (a circle reports its centre and
-    radius instead of a box)."""
-    if e["type"] == "circle":
-        (x, y), r = e["center"], e["radius"]
-        return (x - r, y - r), (x + r, y + r)
-    return e["bbox"][0], e["bbox"][1]
-
-
-def shown_length(g, occ):
-    """How much of an occurrence a view draws in solid line."""
-    total = 0.0
-    for e in g:
-        if e["source_id"] == occ and e["visible"]:
-            lo, hi = extent(e)
-            total += math.hypot(hi[0] - lo[0], hi[1] - lo[1])
-    return total
-
-
-def balloon_column(app, view, g, bbox, side, occs, floor_y=16.0):
-    """A balloon on each occurrence in `occs`, stacked in a column on `side`
-    of the view: each leader from the point of the part nearest the column
-    (a ref's `extreme`), the balloons in the order of those points, so
-    leaders do not cross."""
-    sign = -1.0 if side == "left" else 1.0
-    anchors = []
-    for occ in occs:
-        cands = []
-        for e in g:
-            if e["source_id"] != occ or not e["visible"]:
-                continue
-            # By the curve's REPORTED piece (p1..p2, which `end` names): a
-            # ref split into several pieces has a box spanning all of them.
-            if e["type"] == "circle":
-                (cx, _), r = e["center"], e["radius"]
-                size, reach = 2 * r, sign * cx + r
-            else:
-                size = math.dist(e["p1"], e["p2"])
-                reach = max(sign * e["p1"][0], sign * e["p2"][0])
-            cands.append((size > 1.5, reach, e))
-        if not cands:
-            print(f"  balloon: occurrence {occ} draws nothing in view {view}")
-            continue
-        _, _, best = max(cands, key=lambda c: (c[0], c[1]))
-        # The point the leader lands on, known here so the column can be
-        # ordered by it: a line's or curve's END nearer the column (as
-        # reported), a circle's extreme on that side.
-        if best["type"] == "circle":
-            (cx, cy), r = best["center"], best["radius"]
-            at, how = (cx + sign * r, cy), {"extreme": side}
-        else:
-            end = 1 if sign * best["p1"][0] >= sign * best["p2"][0] else 2
-            at, how = best["p1"] if end == 1 else best["p2"], {"end": end}
-        anchors.append((at[1], occ, best, how))
-    if not anchors:
-        return
-    anchors.sort(key=lambda a: -a[0])
-    x = bbox[0][0] - 12 if side == "left" else bbox[1][0] + 12
-    lo_y, hi_y = bbox[0][1], bbox[1][1]
-    step = 10.0 if len(anchors) < 2 else \
-        min(14.0, max(10.0, (hi_y - lo_y) / (len(anchors) - 1)))
-    top = 0.5 * (lo_y + hi_y) + 0.5 * step * (len(anchors) - 1)
-    # Clear of the title block and the parts list on it, both of which
-    # stand in the sheet's bottom right.
-    top = max(top, floor_y + step * (len(anchors) - 1))
-    for i, (_, occ, e, how) in enumerate(anchors):
-        app.call("add_drawing_note", view=view, style="balloon", text="",
-                 ref=ref(e, occurrence=True, **how),
-                 position=[x, top - i * step])
-
-
-def place_balloons(app, views, rows, by_part, sides):
-    """Each parts-list row ballooned once, on the view that draws the most
-    of it, in the column on whichever of that view's free sides it is
-    nearer."""
-    g = {v: geometry(app, v) for v in sides}
-    columns = {(v, s): [] for v in sides for s in sides[v]}
-    for row in rows:
-        part = row[2]
-        best = max(((shown_length(g[v], o), v, o) for v in g
-                    for o in by_part.get(part, [])), default=(0, None, None))
-        if best[0] <= 0:
-            print(f"  {part}: nothing drawn in solid line to balloon")
-            continue
-        _, v, occ = best
-        (vlo, vhi) = views[v]["bbox"]
-        xs = [0.5 * (extent(e)[0][0] + extent(e)[1][0]) for e in g[v]
-              if e["source_id"] == occ and e["visible"]]
-        mid = sum(xs) / len(xs)
-        side = "left" if mid < 0.5 * (vlo[0] + vhi[0]) else "right"
-        if side not in sides[v]:
-            side = sides[v][0]
-        columns[(v, side)].append(occ)
-    for (v, side), occs in columns.items():
-        x = views[v]["bbox"][0 if side == "left" else 1][0]
-        balloon_column(app, v, g[v], views[v]["bbox"], side, occs,
-                       floor_y=64.0 if x > 235.0 else 16.0)
-
 
 def assembly_sheet(app, clock):
     """A3 at 1:2.5: the head from the front, its plan with the yoke and the
     tilt axis left off (what the pan drive is, under them), and a section
     on both axes from the side; a balloon on every part, the parts list."""
     occs = occurrences(app)  # before the drawing tab is made
-    by_part = {}
-    for o in occs:
-        by_part.setdefault(o["part"], []).append(o["id"])
     camera = [o["id"] for o in occs if o["part"] == "camera"]
     # The plan is a section on the pan worm's axis, the lower of the two:
     # through the worm, its 609s in their blocks, the wheel's teeth and the
@@ -359,7 +332,6 @@ def assembly_sheet(app, clock):
     clock("  assembly views projected (two of them sections)")
     print("assembly views:", [(v["id"], v["curves"], v.get("error"))
                               for v in r["views"]])
-    views = {v["id"]: v for v in app.call("list_drawing_views")["views"]}
     # The parts list first: the balloons number themselves from it.
     app.call("add_drawing_note", view=front, table="bom", text="",
              position=[410, 58])
@@ -367,10 +339,13 @@ def assembly_sheet(app, clock):
     rows = [r.split("\t") for r in bom.split("\n")[1:]]
     print(f"parts list: {len(rows)} rows")
     clock("  parts list")
-    # The section has the front view on its left: its balloons go right.
-    place_balloons(app, views, rows, by_part,
-                   {front: ("left", "right"), plan: ("left", "right"),
-                    side: ("right",)})
+    # A balloon on every row, laid out by the app: each on the view that
+    # draws the most of it, round that view, no two leaders crossing.
+    laid = app.call("layout_balloons", views=[front, plan, side])
+    print(f"balloons: {len(laid['placed'])} placed, crossings "
+          f"{laid['crossings']}, unplaced {laid['unplaced']}")
+    if laid["crossings"] or laid["unplaced"]:
+        raise SystemExit("drawings: the balloons did not lay out cleanly")
     clock("  balloons")
     return export(app, "assembly")
 
@@ -466,6 +441,55 @@ def print_sheet(app, V):
     return export(app, "print")
 
 
+def camera_screw_length(V):
+    """The longest ASME B18.3 length (1/8 in. steps to 1 in.) that does not
+    reach past the camera's socket: the plain part's shank was the cradle's
+    plate plus the engagement."""
+    shank_in = (V["plate_t"] + V["cam_screw_eng"]) / 25.4
+    eighths = int(shank_in * 8 + 1e-9)
+    return eighths / 8 * 25.4
+
+
+def as_ordered(app, V):
+    """The plate's grade, and the camera screw as the bought part it is."""
+    plate = app.part("base_plate", create=False)
+    plate.material("aluminum_6082_t6")
+    parts = app.call("list_parts")["parts"]
+    head = next(p["id"] for p in parts if p["name"] == "pantilt")
+    app.call("set_active_part", part=head)
+    occs = app.call("list_occurrences")["occurrences"]
+    names = {p["id"]: p["name"] for p in parts}
+    old = next((o for o in occs if names.get(o["part_id"]) == "camera_screw"),
+               None)
+    if old is None:
+        return  # already the standard part
+    cradle = next(o for o in occs if names.get(o["part_id"]) == "cradle")
+    # The plain part was modelled to the fastener convention: the head's
+    # bearing face on z = 0, the shank up +z. So the standard part stands
+    # exactly where it stood.
+    tf = old["transform"]
+    screw = app.call("add_fastener", standard="asme_b18_3", size="1/4-20",
+                     length=camera_screw_length(V), position=tf["position"],
+                     orientation=tf["orientation"])
+    for m in app.call("list_mates")["mates"]:
+        if m["name"] == "camera screw":
+            app.call("remove_mate", id=m["id"])
+    app.call("remove_occurrence", occurrence=old["id"])
+    app.call("rename_occurrence", occurrence=screw["occurrence"],
+             name="camera screw")
+    # Fastened to the cradle where it stands, so it tilts with it. `pose`
+    # reads the joint off where the two already are: nothing moves.
+    mate = app.call("add_mate", type="fastened", name="camera screw",
+                    a={"occurrence": cradle["id"], "frame": "screw"},
+                    b={"occurrence": screw["occurrence"], "origin": True},
+                    derive="pose")
+    status = next(m for m in app.call("list_mates")["mates"]
+                  if m["id"] == mate["id"])
+    if status["status"] != "satisfied":
+        raise SystemExit(f"drawings: the camera screw's mate: {status}")
+    print(f"camera screw: {screw['part']}")
+
+
 def main():
     a = common.args()
     app = common.connect(a.port)
@@ -474,6 +498,8 @@ def main():
     plate = app.part("base_plate", create=False)
     plate.activate()
     V = variables(app)
+    as_ordered(app, V)
+    plate.activate()
     # What the drawing measures to, derived the way build_base.py made it.
     V["relief_depth"] = V["main_brg_B"] + V["run_gap"]
     V["tripod_drill"] = 0.3125 * 25.4  # 5/16 tap drill, the Hole's diameter
