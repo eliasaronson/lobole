@@ -143,7 +143,9 @@ body its bounding box overlaps, and every other body the new solid actually
 touches joins that one — a neck strung between two turned pieces makes one
 body of them, where it used to overlap the second as a separate solid and the
 part weighed the overlap twice. A body that only shares a bounding box with it
-stays separate. `add` never fuses into a reference (ghost) body, and `cut`
+stays separate, and so does one that already touched the target before the add:
+two overlapping bodies were made separate on purpose (a cavity drawn inside a
+shell, to be subtracted from it), and growing one does not merge them. `add` never fuses into a reference (ghost) body, and `cut`
 passes through one. A cut warns when it
 removes no material, and when it consumes EVERY body: a part left with
 nothing is a tool the wrong way round or a boolean the kernel could not do,

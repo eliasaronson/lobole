@@ -456,8 +456,17 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     if (warning && fused.fuzzy > 0.0) {
       *warning = std::move(fused.warning);
     }
+    const CADShape targetBefore = bodies[target].shape;
     bodies[target].shape = std::move(fused.shape);
     bodies[target].elementMap = std::move(fused.map); // propagated (T5)
+
+    // Whether two solids touch: they fuse to fewer solids than they were.
+    const auto touches = [](const CADShape& a, const CADShape& b) {
+      const CADShape u = a.Union(b);
+      return u.IsValid() && u.SolidCount() < a.SolidCount() + b.SolidCount();
+    };
+    glm::dvec3 tmin, tmax;
+    targetBefore.GetBoundingBox(tmin, tmax);
 
     // The tool may bridge several bodies -- the necks strung between turned
     // pieces, a rib across two blocks. Every other body it actually TOUCHES
@@ -465,6 +474,13 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // separate solids, and the part weighed the overlap twice. A body that
     // merely shares a bounding box with the tool stays its own (the tool and
     // it fuse to as many solids as they were apart).
+    //
+    // So does a body that ALREADY touched the target before this add: two
+    // bodies that overlap and are separate were made so on purpose (a
+    // new_body drawn into another, the cavity to be subtracted from a shell),
+    // and growing one of them is not a request to merge them. The cam
+    // cover's cavity, extended by a loft that runs inside the outer shell,
+    // swallowed the shell it was meant to hollow.
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
       if (i == target || bodies[i].reference)
         continue;
@@ -472,10 +488,10 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (!BoxesOverlap(pmin, pmax, bmin, bmax))
         continue;
-      const CADShape touch = shape.Union(bodies[i].shape);
-      if (!touch.IsValid() ||
-          touch.SolidCount() >=
-              shape.SolidCount() + bodies[i].shape.SolidCount())
+      if (!touches(shape, bodies[i].shape))
+        continue;
+      if (BoxesOverlap(tmin, tmax, bmin, bmax) &&
+          touches(targetBefore, bodies[i].shape))
         continue;
       CheckedBoolean joined =
           CheckedBooleanNamed(name, BooleanOp::Union, bodies[target].name,
