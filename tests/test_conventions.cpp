@@ -934,6 +934,181 @@ TEST_CASE("CADShape replaces its shape only through SetShape", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("the model is double: no float type in a model header",
+          "[convention]") {
+  // docs/conventions.md#the-model-is-double. A primitive placed at z = 24.7
+  // through a glm::vec3 sat at 24.70000076, and a pocket cut from a plane
+  // typed at that height kept a 0.8 um skin over itself; an occurrence
+  // placed through float moved by its own rounding on every save. Bulk
+  // DERIVED data -- meshes, height maps, GPU buffers -- is float on purpose,
+  // and so is what only the renderer reads; everything else in src/core and
+  // src/cad is the model, so a float there is refused unless this table names
+  // it and says why.
+  struct Allowed {
+    const char* file; // relative to the repo
+    const char* code; // a substring of the offending line, comment stripped
+    const char* why;
+  };
+  static const Allowed kAllowed[] = {
+      // Appearance: what the shaders light, never what the kernel builds.
+      {"src/core/Feature.h", "std::optional<glm::vec3> color;",
+       "appearance override colour, not geometry"},
+      {"src/core/Feature.h", "std::optional<float> roughness;",
+       "appearance override, not geometry"},
+      {"src/core/Feature.h", "std::optional<float> metallic;",
+       "appearance override, not geometry"},
+      {"src/core/Feature.h", "glm::vec3 displayColor{0.0f};",
+       "an imported body's viewport colour"},
+      {"src/core/Feature.h", "glm::vec3 color{0.0f};",
+       "an import's display colour"},
+      {"src/core/features/DerivedFeature.h", "glm::vec3 displayColor{0.0f};",
+       "a derived body's viewport colour"},
+      {"src/core/io/ImportAssembly.h", "glm::vec3 color{0.0f};",
+       "a product's display colour"},
+      {"src/cad/CADKernel.h", "glm::vec3 color{0.0f};",
+       "an XCAF product's display colour"},
+      {"src/cad/CADKernel.h", "std::optional<glm::vec3> color;",
+       "a STEP product's colour"},
+      {"src/cad/CADMaterials.h", "glm::vec3 baseColor;",
+       "render material, not a physical property"},
+      {"src/cad/CADMaterials.h", "float metallic;", "render material"},
+      {"src/cad/CADMaterials.h", "float roughness;", "render material"},
+      {"src/cad/CADMaterials.h", "float specular;", "render material"},
+      {"src/cad/CADMaterials.h", "float reflectance;", "render material"},
+      {"src/cad/CADMaterials.h", "float patternScale", "procedural texture"},
+      {"src/cad/CADMaterials.h", "float patternContrast", "procedural texture"},
+      {"src/cad/CADMaterials.h", "float transmission", "glass shading"},
+      {"src/cad/CADMaterials.h", "float ior", "glass shading"},
+      {"src/cad/CADMaterials.h", "float ViewportAlpha(",
+       "how see-through the viewport draws it"},
+      {"src/cad/CADMaterials.h", "int PatternAxis(",
+       "texture axis from a mesh extent"},
+      // The renderers' float mirrors of model constants, and the light rig.
+      {"src/core/Conventions.h", "kWorldUpF", "float mirror for the renderers"},
+      {"src/core/Conventions.h", "kWorldFrontF",
+       "float mirror for the renderers"},
+      {"src/core/Conventions.h", "kWorldRightF",
+       "float mirror for the renderers"},
+      {"src/core/Conventions.h", "LightDir =", "studio lights"},
+      {"src/core/Conventions.h", "Light{", "studio lights"},
+      // Meshes: tessellations the GPU draws and the picker hits.
+      {"src/cad/CADKernel.h", "glm::vec3 position;", "a mesh vertex"},
+      {"src/cad/CADKernel.h", "glm::vec3 normal;", "a mesh vertex normal"},
+      {"src/cad/CADKernel.h", "std::vector<std::vector<glm::vec3>>",
+       "edge polylines drawn as outlines"},
+      {"src/core/ElementHistory.h", "PolylineArcMidpoint(",
+       "a probe on a drawn edge polyline, matched with a tolerance"},
+      {"src/core/ElementHistory.h", "const glm::vec3& probe",
+       "a probe on a drawn edge polyline, matched with a tolerance"},
+      {"src/core/fem/FemTopo.h", "std::vector<glm::vec3>&",
+       "the optimised density's iso-surface mesh"},
+      // What the viewport draws over a feature.
+      {"src/core/features/ThreadFeature.h", "glm::vec3 origin{0.0f};",
+       "the cosmetic thread the viewport draws"},
+      {"src/core/features/ThreadFeature.h", "glm::vec3 dir{",
+       "the cosmetic thread the viewport draws"},
+      {"src/core/features/ThreadFeature.h", "float radius",
+       "the cosmetic thread the viewport draws"},
+      {"src/core/features/ThreadFeature.h", "float faceRadius",
+       "the cosmetic thread the viewport draws"},
+      {"src/core/features/ThreadFeature.h", "float v0",
+       "the cosmetic thread the viewport draws"},
+      {"src/cad/SketchPlane.h", "glm::mat4 GetPlaneMatrix()",
+       "the plane, narrowed for the renderers"},
+      {"src/cad/SketchPlane.h", "glm::mat4 GetInversePlaneMatrix()",
+       "the plane, narrowed for the renderers"},
+      // CAM's bulk: grids and meshes of the stock, sampled not modelled.
+      {"src/core/cam/CamVerify.h", "std::vector<float> z;",
+       "the verifier's height map"},
+      {"src/core/cam/CamVerify.h", "float At(", "the verifier's height map"},
+      {"src/core/cam/CamVerify.h", "float v)", "the verifier's height map"},
+      {"src/core/cam/CamRotary.h", "std::vector<float> r;",
+       "the rotary stock's radius map"},
+      {"src/core/cam/CamRotary.h", "float At(", "the rotary stock's map"},
+      {"src/core/cam/CamRotary.h", "float v)", "the rotary stock's map"},
+      {"src/core/cam/CamSim.h", "std::vector<std::vector<float>> m_keys;",
+       "the simulation's keyframed height maps"},
+      {"src/core/cam/CamThreadMill.h", "std::vector<float>",
+       "a per-cell excuse grid over the height map"},
+      {"src/core/cam/CamStockMesh.h", "glm::vec3 position;",
+       "the simulated stock's mesh"},
+      {"src/core/cam/CamStockMesh.h", "glm::vec3 normal;",
+       "the simulated stock's mesh"},
+      {"src/core/cam/CamStockMesh.h", "glm::vec3 bbox",
+       "the simulated stock's mesh bounds"},
+  };
+  // Whole headers that are not the model at all.
+  static const Allowed kNotModel[] = {
+      {"src/cad/FaceSelector.h", "", "picking against the render meshes"},
+      {"src/cad/CADMeshConverter.h", "", "mesh to GPU vertices"},
+      {"src/cad/MeshExport.h", "", "tessellated export (GLB, OBJ)"},
+      {"src/core/io/GlbAnimation.h", "", "glTF is float by specification"},
+      {"src/core/io/Settings.h", "", "preferences"},
+      {"src/core/io/WindowGeometry.h", "", "the window's size and place"},
+  };
+
+  const auto notModel = [&](const std::string& rel) {
+    for (const Allowed& a : kNotModel)
+      if (rel == a.file)
+        return true;
+    return false;
+  };
+  static const std::regex floatType(
+      R"((^|[^A-Za-z0-9_])(float|glm::(vec[234]|mat[234]|mat[234]x[234]|quat))([^A-Za-z0-9_]|$))");
+  std::vector<std::string> offenders;
+  std::set<size_t> used;
+  for (const char* dir : {"src/core", "src/cad"})
+    for (const SourceFile& src : SourcesUnder(dir, ".h")) {
+      const std::string rel = Relative(src.path);
+      if (notModel(rel))
+        continue;
+      std::istringstream lines(src.text);
+      int n = 0;
+      for (std::string row; std::getline(lines, row);) {
+        n++;
+        if (const size_t c = row.find("//"); c != std::string::npos)
+          row.erase(c);
+        if (!std::regex_search(row, floatType))
+          continue;
+        bool ok = false;
+        for (size_t i = 0; i < std::size(kAllowed); i++)
+          if (rel == kAllowed[i].file &&
+              row.find(kAllowed[i].code) != std::string::npos) {
+            used.insert(i);
+            ok = true;
+          }
+        if (!ok)
+          offenders.push_back(rel + ":" + std::to_string(n) + ": " + row);
+      }
+    }
+  INFO("A model header holds a float type. The model is double "
+       "(glm::dvec3, glm::dquat, glm::dmat4, double); narrow where a "
+       "renderer is filled, or allow-list a derived/display value with its "
+       "reason:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+  // An entry that matches nothing is a hole waiting for the next float.
+  std::vector<std::string> stale;
+  for (size_t i = 0; i < std::size(kAllowed); i++)
+    if (!used.contains(i))
+      stale.push_back(std::string(kAllowed[i].file) + ": " + kAllowed[i].code);
+  INFO("allow-list entries that match no line; remove them:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : stale)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(stale.empty());
+  for (const Allowed& a : kNotModel)
+    CHECK(fs::exists(fs::path(TestSourceDir()) / a.file));
+}
+
 TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
   // A verdict RPC is one that answers "is this all right?" — and there are
   // twelve of them. Each used to report a clean result and a result it could
