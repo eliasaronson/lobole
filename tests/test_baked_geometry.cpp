@@ -18,6 +18,7 @@
 #include "core/sheet/Unfold.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BinTools.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
@@ -110,6 +111,58 @@ TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
   REQUIRE(loaded != nullptr);
   CHECK(loaded->LastRegenStats().executed == 0);
   fs::remove_all(proj);
+}
+
+// The chain hash names the recipe, not the code that ran it. A build that
+// changes what a recipe produces (a kernel fix) regenerates a part to new
+// bodies under the same hash, and a save that trusted the hash alone left the
+// previous build's bodies on disk -- to come back on every open.
+TEST_CASE("A regenerated part is baked even when the blob's hash matches",
+          "[baked]") {
+  const fs::path proj = TempProject("baked-rebuilt.dsgn");
+  auto doc = MakePart();
+  const double volume = doc->GetBodies()[0].shape.Volume();
+  REQUIRE(testio::Save(*doc, proj.string()));
+  // What an older build left: the same hash over different bodies.
+  {
+    auto other = std::make_unique<Document>();
+    other->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0), 1, 1, 1));
+    const fs::path brep = proj / "geometry" / "0.brep";
+    REQUIRE(BinTools::Write(other->GetBodies()[0].shape.GetShape(),
+                            brep.string().c_str()));
+  }
+  // This build regenerated the part (no blob installed) and saves it.
+  auto rebuilt = MakePart();
+  REQUIRE(testio::Save(*rebuilt, proj.string()));
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->LastRegenStats().executed == 0);
+  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(volume, 1e-9));
+
+  // A part opened from its blob and saved unchanged still writes nothing.
+  const fs::path brep = proj / "geometry" / "0.brep";
+  const auto before = fs::last_write_time(brep);
+  REQUIRE(testio::Save(*loaded, proj.string()));
+  CHECK(fs::last_write_time(brep) == before);
+
+  // Opened from one project and saved as another whose blob an older build
+  // left under the same hash: the second project gets these bodies.
+  const fs::path other = TempProject("baked-rebuilt-copy.dsgn");
+  REQUIRE(testio::Save(*rebuilt, other.string()));
+  {
+    auto tiny = std::make_unique<Document>();
+    tiny->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0), 1, 1, 1));
+    REQUIRE(BinTools::Write(tiny->GetBodies()[0].shape.GetShape(),
+                            (other / "geometry" / "0.brep").string().c_str()));
+  }
+  REQUIRE(testio::Save(*loaded, other.string()));
+  auto copy = testio::Load(other.string());
+  REQUIRE(copy != nullptr);
+  CHECK_THAT(copy->GetBodies()[0].shape.Volume(), WithinRel(volume, 1e-9));
+  fs::remove_all(proj);
+  fs::remove_all(other);
 }
 
 // Warnings are a product of EXECUTION, and a baked open executes nothing —

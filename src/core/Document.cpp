@@ -350,11 +350,15 @@ bool Document::Regenerate() {
     std::vector<Body> baked = std::move(m_bakedBodies);
     const size_t bakedHash = m_bakedHash;
     std::map<uint64_t, std::string> bakedWarnings = std::move(m_bakedWarnings);
+    std::string bakedSource = std::move(m_bakedSource);
+    m_bakedSource.clear();
     m_bakedBodies.clear();
     m_bakedHash = 0;
     m_bakedWarnings.clear();
     if (bakedHash != 0 && bakedHash == m_tipHash && m_cache.empty()) {
       m_bodies = std::move(baked);
+      m_bodiesFromBlob = bakedHash;
+      m_bodiesBlobSource = std::move(bakedSource);
       m_lastStats.cached = upTo;
       // Seed the prefix cache so a LATER regeneration (the UI syncs, the RPC
       // layer, an unrelated document-version bump) is free too — without it,
@@ -434,6 +438,8 @@ bool Document::Regenerate() {
   }
 
   if (divergence < upTo) {
+    m_bodiesFromBlob = 0; // executed: the bodies are this build's now
+    m_bodiesBlobSource.clear();
     m_cache.resize(divergence); // stale suffix; rebuilt below
     for (size_t i = divergence; i < upTo; i++) {
       m_features[i]->ClearError();

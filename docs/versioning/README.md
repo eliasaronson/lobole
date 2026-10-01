@@ -92,12 +92,19 @@ with the blob's:
   from another recipe, a feature file edited by hand or by a merge): the
   blob is ignored and the document rebuilds.
 
-A stale blob can make an open slower, never wrong. Consequences:
+A blob that no longer matches the recipe makes an open slower, never wrong.
+Consequences:
 
 - **A model with a failed feature is not baked**, and neither is one with no
   bodies. A blob is a claim that this is what the recipe produces.
 - **An unchanged save rewrites nothing**: when the blob already carries the
-  current hash it is left alone, so repeated saves add nothing to git.
+  current hash AND the bodies in memory were installed from that very blob
+  with nothing executed since (`Document::BodiesAreBlob`), it is left alone,
+  so repeated saves add nothing to git. The hash names the recipe, not the
+  code that ran it: a part this build regenerated, or one opened from another
+  project and saved here, is written even under a matching hash (a body whose
+  bytes did not change keeps its file), or a kernel fix would never reach a
+  project saved before it.
 - **Datums still execute on a baked open.** A datum plane, axis, frame or
   curve (`Feature::IsDatum`) produces state rather than a body, and the blob
   carries only bodies; skipping them would leave a mate anchored to a Frame

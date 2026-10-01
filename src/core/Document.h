@@ -541,11 +541,15 @@ public:
   // geometry was built. Warnings are a product of EXECUTION, and a baked open
   // executes nothing — without carrying them the model would silently lose
   // its advice ("this draft changes the body by 46%") on every open.
+  // `source` names where the blob was read (see BodiesAreBlob); empty for
+  // bodies handed over from another document.
   void AdoptBakedGeometry(std::vector<Body> bodies, size_t tipHash,
-                          std::map<uint64_t, std::string> warnings = {}) {
+                          std::map<uint64_t, std::string> warnings = {},
+                          std::string source = {}) {
     m_bakedBodies = std::move(bodies);
     m_bakedHash = tipHash;
     m_bakedWarnings = std::move(warnings);
+    m_bakedSource = std::move(source);
   }
 
   // ---- Reference-image assets (v49) -------------------------------------
@@ -611,6 +615,19 @@ public:
   // saved geometry can be tagged with it (and a load can ask "is this blob
   // still the answer?"). 0 before the first regeneration or with no features.
   size_t TipChainHash() const { return m_tipHash; }
+  // Whether the bodies in memory were INSTALLED from the geometry blob at
+  // `source` (the directory a baked open read) carrying `hash`, with nothing
+  // executed since. A save may skip rewriting a blob that carries the
+  // recipe's hash only when this holds: the hash names the recipe, not the
+  // code that ran it, and a build that changed what a recipe produces
+  // regenerated a part, saved it, and left the previous build's bodies on
+  // disk under the same hash. The source matters as much as the hash: a
+  // project opened from one file and saved as another must write the second
+  // file's blob, whatever hash an older save left there.
+  bool BodiesAreBlob(size_t hash, const std::string& source) const {
+    return m_bodiesFromBlob != 0 && m_bodiesFromBlob == hash &&
+           !source.empty() && m_bodiesBlobSource == source;
+  }
   void ClearRegenCache() { m_cache.clear(); }
 
   // The body list as it stood after feature `index` executed, from the regen
@@ -721,6 +738,9 @@ private:
   std::vector<Body> m_bakedBodies;
   size_t m_bakedHash = 0;
   std::map<uint64_t, std::string> m_bakedWarnings;
+  std::string m_bakedSource;
+  size_t m_bodiesFromBlob = 0;    // see BodiesAreBlob()
+  std::string m_bodiesBlobSource; // see BodiesAreBlob()
   bool m_commitGeometry = true;
 
   // Prefix cache (R3): per feature, the chain hash of everything up to and
