@@ -107,17 +107,30 @@ The numbers that matter:
 
 ### 7. The base plate on the 6090
 
-- **The operations:** face, the pockets, the bearing bore (helical bore to a
-  fit) and the tripod thread.
-- **The thread mill, its cutter and its verification:** built, see
-  [docs/cam/operations.md#thread-mill](../cam/operations.md#thread-mill)
-  (the cutter: [#the-thread-mill-cutter](../cam/operations.md#the-thread-mill-cutter);
-  the check: [simulation.md#threads](../cam/simulation.md#threads)).
-  Multi-tooth cutters are not modelled.
-- Workholding with the fixtures from v126.
-- Tapping (G84) is not built: the 6090's spindle has no encoder, so it cannot
-  rigid-tap. An operation that needs a synchronised spindle is refused on a
-  machine without one.
+Built: see [generators/pantilt/README.md](../../generators/pantilt/README.md#the-base-plate-on-the-6090).
+The numbers that matter:
+
+- **Two vise setups** from a 90 x 90 blank saw-cut from 30 mm plate. Top:
+  face, clear round the disc to 2 mm over the jaws, the 6002 seat (rough,
+  finish, spring pass), relief, four M4 tap holes, chamfers. Underside
+  (flipped, gripped on the finished disc): face, clear the rest, the 5/16
+  tap bore and the 3/8-16 UNC-2B thread (pitch diameter 8.569 in 2B's
+  8.494-8.645), chamfers. Both verify ok AND complete at 0.1 mm.
+- **37.8 min** of program (Top 20.1, Underside 17.7) plus six manual tool
+  changes and the flip.
+- **K7 is not a router's tolerance.** Ø32 K7 is 25 µm wide (+7/-18); the
+  program cuts 32.000, inside it. Runout, deflection and quadrant reversal
+  all push a router's bore over size, so the seat is cut, gauged in the
+  setup, and re-cut with the finisher's diameter corrected; retaining
+  compound on a slip fit is the fallback.
+- **Not measured:** the 6090's traverse rate and travel, its spindle's
+  power, speed range and runout, the vise and parallels, the ER20 nuts and
+  stickouts, and the real size error of a bore.
+- **App fixes it took:** clear-round (adaptive or pocket on a part's outside
+  wall), a hole or thread that opens downward refused, a face's exact extent
+  for derived depths, a bore's rough no longer cut under its floor, a small
+  chamfer on a round rim read at its own angle, and thread marks that follow
+  a face a later feature renames.
 
 ### 8. Drawings, renders, retrospective
 

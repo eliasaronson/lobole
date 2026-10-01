@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The pan/tilt head, from nothing: every part, then the assembly with its
-# checks, studies and renders. What it makes (projects, renders, reports,
+# checks, studies and renders, then the base plate's CAM job on the 6090. What it makes (projects, renders, reports,
 # these logs) goes to scratch/pantilt/.
 #
 #   generators/pantilt/run_all.sh PORT                  # everything
 #   generators/pantilt/run_all.sh PORT --from assembly  # the saved parts,
 #                                                       # assembly only
 #
-# Stages, in order: base worms tilt yoke assembly. Each opens the project the
+# Stages, in order: base worms tilt yoke assembly cam. Each opens the project the
 # one before saved; `--from` starts at one and reuses what the earlier ones
 # left in scratch/pantilt/. Run it against a scratch instance
 # (tools/headless-preview.sh --start PORT), never somebody's open document.
@@ -24,10 +24,10 @@ FROM=base
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="$2"; shift 2 ;;
-    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly)" >&2; exit 2 ;;
+    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly cam)" >&2; exit 2 ;;
   esac
 done
-STAGES=(base worms tilt yoke assembly)
+STAGES=(base worms tilt yoke assembly cam)
 start=-1
 for i in "${!STAGES[@]}"; do [ "${STAGES[$i]}" = "$FROM" ] && start=$i; done
 if [ "$start" -lt 0 ]; then
@@ -40,7 +40,9 @@ for i in "${!STAGES[@]}"; do
   [ "$i" -lt "$start" ] && continue
   stage=${STAGES[$i]}
   echo "== $stage" >> "$LOG"
-  if ! python3 -u "$HERE/build_$stage.py" --port "$P" > "$OUT/build_$stage.log" 2>&1; then
+  script="build_$stage.py"
+  [ "$stage" = cam ] && script=cam.py   # not a part: the job that cuts one
+  if ! python3 -u "$HERE/$script" --port "$P" > "$OUT/build_$stage.log" 2>&1; then
     tail -n 30 "$OUT/build_$stage.log" >> "$LOG"
     echo failed >> "$LOG"
     exit 1

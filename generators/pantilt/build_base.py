@@ -32,6 +32,8 @@ def base_plate(app, S):
          "mm, under the inner ring so it turns free of the shoulder"),
         ("screw_pcd", "base_r + main_brg_D / 2",
          "mm, the wheel's screws, midway between pocket and rim"),
+        ("edge_break", "0.5", "mm, the chamfer on every machined rim: "
+         "modelled, so the CAM's chamfers are the part's"),
     ]:
         P[name] = part.param(name, expr, comment=comment, scope="project")
     S.update(spec.values(part))
@@ -61,6 +63,20 @@ def base_plate(app, S):
         sk.point((x, y))
     part.hole(sk.add(), d=1.0, depth=8.0,
               fit={"thread": SCREW, "kind": "tapped"}, name="Wheel screws")
+    # The edges the 6090 breaks (generators/pantilt/cam.py), in the model:
+    # a chamfer the model does not have is a gouge to the CAM check
+    # (docs/cam/simulation.md#verdict). The rim top and bottom, the bearing
+    # seat's mouth (a lead-in for the outer ring) and the tripod thread's.
+    plate = part.bodies()[0]
+
+    def rims(r, z):
+        return plate.edges(circular=True, radius=r,
+                           where=lambda e: abs(e.midpoint[2] - z) < 1e-3)
+    tripod_r = bore.radius
+    edges = (rims(S["base_r"], t) + rims(S["base_r"], 0.0) +
+             rims(S["main_brg_D"] / 2, t) + rims(tripod_r, 0.0))
+    assert len(edges) >= 4, edges
+    part.chamfer(edges, P["edge_break"], name="Edge breaks")
     part.material("aluminum")
     common.frame(part, "seat", (0, 0, t), (0, 0, 1), (1, 0, 0))
     part.check()
