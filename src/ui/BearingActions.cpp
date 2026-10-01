@@ -305,7 +305,12 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
       glm::vec3(inst.world * glm::vec4(glm::vec3(end->along), 0.0f)));
   fit.position = origin;
   fit.orientation = AlignZTo(along);
-  fit.overhang = std::max(0.0, row->B - end->length);
+  // Under a micron is the seat's own rounding (a sketch plane is single
+  // precision), not an overhang: a 9 mm counterbore for a 9 mm 6002 read
+  // "overhangs the seat by 4.578e-06 mm".
+  fit.overhang = row->B - end->length;
+  if (fit.overhang < 1e-3)
+    fit.overhang = 0.0;
 
   std::ostringstream s;
   s << Dims(*row) << (seat.shaft ? " on " : " in ") << inst.path << "'s Ø"
