@@ -65,9 +65,16 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Exact HLR is priced by surface complexity, so one swept part can "
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
-     "still draw exactly. ",
+     "still draw exactly. "
+     "`section: {point: [x, y, z] world mm, label?}` makes it a SECTION "
+     "view: cut by the plane through `point` square to the view's direction, "
+     "what is nearer the reader taken away, the cut faces hatched, captioned "
+     "SECTION A-A, and drawn as a lettered cutting-plane line on every other "
+     "view of the source that sees the plane edge-on; `section: null` makes "
+     "it a plain view again. An edge the plane made is named by the face it "
+     "was cut from (list_drawing_geometry's sil_face ref). ",
      "base_view, configuration, hidden, id, name, position, quality, "
-     "rotation_deg, scale, show_hidden"},
+     "rotation_deg, scale, section, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
@@ -104,9 +111,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Exact HLR is priced by surface complexity, so one swept part can "
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
-     "still draw exactly. ",
+     "still draw exactly. `section: {point: [x, y, z] world mm, label?}` "
+     "makes it a section view (see set_drawing_view).",
      "base_view, configuration, drawing, hidden, name, orientation, position, "
-     "quality, rotation_deg, scale, source"},
+     "quality, rotation_deg, scale, section, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views",
      "List views with placement and scale, each with what its projection "
@@ -161,18 +169,28 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"add_drawing_note",
      "Add a text note ({{expression}} resolves project variables, or "
      "source-part variables with view) {text, position: [x,y] sheet mm, view?, "
-     "ref?: "
-     "{feature_id, element}} — ref draws a leader from that geometry (needs "
-     "view). The annotation class no dimension kind covers. "
+     "ref?, style?, table?} — ref draws a leader from that geometry (needs "
+     "view); it is an add_drawing_dim ref ({edge | sil_face: {feature_id, "
+     "element}, occurrence?, end? | extreme?}) or the short {feature_id, "
+     "element} for an edge. The annotation class no dimension kind covers. "
+     "`style`: \"text\" (default), \"balloon\" (the text in a circle, a dot "
+     "on the part; with no text on an assembly view, the item number of the "
+     "ref's occurrence in that view's parts list) or \"datum\" (a datum "
+     "feature symbol: the letter in a box, a filled triangle on the ref). "
      "`table: \"bends\"` makes it a bend table of `view`'s part instead: one "
      "row per bend (direction, angle, radius, K, allowance), regenerated "
-     "from the part every time, with `text` as its optional caption.",
-     "position, ref, table, text, view"},
+     "from the part every time, with `text` as its optional caption. "
+     "`table: \"bom\"` makes it the parts list of `view`'s assembly: item, "
+     "quantity, part, kind (made, printed, bought), material and unit mass "
+     "of every part the view draws (its `hidden` occurrences left out), "
+     "numbered as its balloons are, ruled, its bottom-right corner at "
+     "`position`.",
+     "position, ref, style, table, text, view"},
     {"remove_drawing_note", "Remove a note by id.", "id"},
     {"list_drawing_notes", "List notes with leader state and table kind.", "",
      remote::NoFlags,
-     "notes[]{id,text,resolved_text,resolved,error,pos,view,table,leader_"
-     "resolved}"},
+     "notes[]{id,text,resolved_text,resolved,error,pos,view,table,style,"
+     "leader_resolved}"},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 
@@ -196,12 +214,25 @@ void RequireSheetObject(const json& sj) {
   if (!sj.is_object())
     throw std::runtime_error(
         "sheet is an object: {size: a4|a3|a2|a1|a0|letter, landscape?: "
-        "bool, title_block?: {project, document, author, date, notes}} — "
-        "for just a size, pass {\"size\": \"a4\"}");
-  if (sj.contains("title_block") && !sj.at("title_block").is_object())
-    throw std::runtime_error(
-        "title_block is an object of strings: {project?, document?, "
-        "author?, date?, notes?}");
+        "bool, title_block?: {project, document, author, date, notes, "
+        "material, scale}} — for just a size, pass {\"size\": \"a4\"}");
+  static const char* kTitleKeys =
+      "{project?, document?, author?, date?, notes?, material?, scale?}";
+  if (sj.contains("title_block")) {
+    const json& tb = sj.at("title_block");
+    if (!tb.is_object())
+      throw std::runtime_error(
+          std::string("title_block is an object of strings: ") + kTitleKeys);
+    // A misspelt row is refused, not dropped: `materal` would leave the
+    // block saying ALUMINUM where the shop needed the grade.
+    for (const auto& [key, value] : tb.items()) {
+      const std::string_view k = key;
+      if (k != "project" && k != "document" && k != "author" && k != "date" &&
+          k != "notes" && k != "material" && k != "scale")
+        throw std::runtime_error("title_block has no row '" + key +
+                                 "'; it takes " + kTitleKeys);
+    }
+  }
 }
 
 // Apply a create_drawing/set_drawing_sheet `sheet` JSON block. The shape
@@ -218,7 +249,62 @@ void ApplySheetJson(Sheet& sheet, const json& sj) {
     sheet.titleBlock.author = tb.value("author", sheet.titleBlock.author);
     sheet.titleBlock.date = tb.value("date", sheet.titleBlock.date);
     sheet.titleBlock.notes = tb.value("notes", sheet.titleBlock.notes);
+    sheet.titleBlock.material = tb.value("material", sheet.titleBlock.material);
+    sheet.titleBlock.scale = tb.value("scale", sheet.titleBlock.scale);
   }
+}
+
+// One projected-geometry ref, the add_drawing_dim shape: {edge | sil_face:
+// {feature_id, element}, occurrence?, end? | extreme?}.
+ProjRef ParseProjRef(const json& rj, uint64_t viewId) {
+  if (!rj.is_object())
+    throw std::runtime_error("a ref is {edge | sil_face: {feature_id, "
+                             "element}, occurrence?, end? | extreme?}");
+  ProjRef r;
+  r.viewId = viewId;
+  r.end = rj.value("end", 0);
+  r.extreme = rj.value("extreme", std::string{});
+  if (!IsProjRefExtreme(r.extreme))
+    throw std::runtime_error("extreme is left, right, top or bottom (the "
+                             "sheet's sides) -- got '" +
+                             r.extreme + "'");
+  if (!r.extreme.empty() && r.end != 0)
+    throw std::runtime_error(
+        "a ref takes `end` or `extreme`, not both: one names a point");
+  if (r.end < 0 || r.end > 2)
+    throw std::runtime_error(
+        "end is 1 (the curve's first point, p1) or 2 (its last, p2); "
+        "leave it out for the whole curve -- got " +
+        std::to_string(r.end));
+  r.occurrenceId = rj.value("occurrence", uint64_t{0});
+  if (rj.contains("edge"))
+    r.edge = ElementRef{rj.at("edge").value("feature_id", uint64_t{0}),
+                        rj.at("edge").value("element", std::string{})};
+  if (rj.contains("sil_face"))
+    r.silFace = ElementRef{rj.at("sil_face").value("feature_id", uint64_t{0}),
+                           rj.at("sil_face").value("element", std::string{})};
+  return r;
+}
+
+// A view's `section`: {point: [x, y, z] world mm, label?}; null = none.
+SectionSpec ParseSection(const json& sj) {
+  SectionSpec s;
+  if (sj.is_null())
+    return s;
+  const json* point =
+      sj.is_object() && sj.contains("point") ? &sj.at("point") : nullptr;
+  if (point == nullptr || !point->is_array() || point->size() != 3 ||
+      !point->at(0).is_number() || !point->at(1).is_number() ||
+      !point->at(2).is_number())
+    throw std::runtime_error(
+        "section is {point: [x, y, z] (world mm, a point the cutting plane "
+        "passes through; the plane is square to the view's direction), "
+        "label?: \"A\"}, or null for no section");
+  s.on = true;
+  s.point = {point->at(0).get<double>(), point->at(1).get<double>(),
+             point->at(2).get<double>()};
+  s.label = sj.value("label", std::string{});
+  return s;
 }
 
 // The layout report shared by check_drawing and export_drawing: resolve
@@ -555,6 +641,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         p.value("name", std::string(ViewOrientationToString(v.orientation)));
     v.baseViewId = p.value("base_view", uint64_t{0});
     v.rotationDeg = p.value("rotation_deg", 0.0);
+    if (p.contains("section"))
+      v.section = ParseSection(p.at("section"));
     // Say nothing about size or place and you get what the "Add view" button
     // gives: a standard scale that fits this sheet, and a spot clear of the
     // views already on it. This RPC dropped every view at the sheet centre at
@@ -657,7 +745,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         p.contains("configuration")
             ? ParseViewConfiguration(state, *view, p.at("configuration"))
             : view->configuration;
+    const SectionSpec section =
+        p.contains("section") ? ParseSection(p.at("section")) : view->section;
     ui::SnapshotDrawing(state);
+    view->section = section;
     view->configuration = configuration;
     if (p.contains("position")) {
       const json& pos = p.at("position");
@@ -803,6 +894,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                  {"quality", view.quality},
                  {"hidden", view.hidden},
                  {"configuration", view.configuration}};
+      if (view.section.on)
+        vj["section"] = {{"point",
+                          {view.section.point.x, view.section.point.y,
+                           view.section.point.z}},
+                         {"label", view.section.label}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
@@ -861,14 +957,29 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       if (!NoteTableFromString(name, table))
         throw std::runtime_error(UnknownNoteTable(name));
     }
+    NoteStyle style = NoteStyle::Text;
+    if (p.contains("style")) {
+      const std::string name = p.at("style").get<std::string>();
+      if (!NoteStyleFromString(name, style))
+        throw std::runtime_error(UnknownNoteStyle(name));
+    }
     const std::string text = p.value("text", std::string{});
-    if (text.empty() && table == NoteTable::None)
+    if (text.empty() && table == NoteTable::None && style != NoteStyle::Balloon)
       throw std::runtime_error("text must be non-empty");
-    if (table != NoteTable::None && !p.contains("view"))
+    if (table == NoteTable::Bends && !p.contains("view"))
       throw std::runtime_error(
           "a bend table needs `view` — its rows are that view's part's bends");
+    if (table == NoteTable::Bom && !p.contains("view"))
+      throw std::runtime_error("a parts list needs `view` — its rows are the "
+                               "parts that view of an assembly draws");
     if (table != NoteTable::None && p.contains("ref"))
       throw std::runtime_error("a table has no leader; drop `ref`");
+    if (table != NoteTable::None && style != NoteStyle::Text)
+      throw std::runtime_error("a table is drawn as a table; drop `style`");
+    if (style != NoteStyle::Text && !p.contains("ref"))
+      throw std::runtime_error(std::string("a ") + NoteStyleToString(style) +
+                               " points at geometry: give it `view` and "
+                               "`ref`");
     const json& pos = p.at("position");
     if (!pos.is_array() || pos.size() != 2 || !pos.at(0).is_number() ||
         !pos.at(1).is_number())
@@ -876,6 +987,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     DrawingNote n;
     n.text = text;
     n.table = table;
+    n.style = style;
     n.pos = {pos.at(0).get<double>(), pos.at(1).get<double>()};
     if (p.contains("view")) {
       n.viewId = p.at("view").get<uint64_t>();
@@ -888,9 +1000,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
             "a leader ref needs `view` — the ref resolves against that "
             "view's projection");
       const json& rj = p.at("ref");
-      n.leader.viewId = n.viewId;
-      n.leader.edge = ElementRef{rj.value("feature_id", uint64_t{0}),
-                                 rj.value("element", std::string{})};
+      if (rj.is_object() && (rj.contains("edge") || rj.contains("sil_face"))) {
+        n.leader = ParseProjRef(rj, n.viewId);
+      } else { // the short form: an edge's {feature_id, element}
+        n.leader.viewId = n.viewId;
+        n.leader.edge = ElementRef{rj.value("feature_id", uint64_t{0}),
+                                   rj.value("element", std::string{})};
+      }
     }
     const auto resolved = ui::ResolveDrawingNote(state, n);
     if (!resolved.resolved)
@@ -921,6 +1037,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                      {"pos", {n.pos.x, n.pos.y}},
                      {"view", n.viewId},
                      {"table", NoteTableToString(n.table)},
+                     {"style", NoteStyleToString(n.style)},
                      {"leader_resolved", rn.hasLeader}});
     }
     return json{{"notes", arr}};
@@ -1040,33 +1157,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("unknown dimension kind '" +
                                p.value("kind", std::string()) + "'");
     // refs: [{edge|sil_face: {feature_id, element}, end?, occurrence?}, ...]
-    for (const json& rj : p.at("refs")) {
-      ProjRef r;
-      r.viewId = viewId;
-      r.end = rj.value("end", 0);
-      r.extreme = rj.value("extreme", std::string{});
-      if (!IsProjRefExtreme(r.extreme))
-        throw std::runtime_error("extreme is left, right, top or bottom (the "
-                                 "sheet's sides) -- got '" +
-                                 r.extreme + "'");
-      if (!r.extreme.empty() && r.end != 0)
-        throw std::runtime_error(
-            "a ref takes `end` or `extreme`, not both: one names a point");
-      if (r.end < 0 || r.end > 2)
-        throw std::runtime_error(
-            "end is 1 (the curve's first point, p1) or 2 (its last, p2); "
-            "leave it out for the whole curve -- got " +
-            std::to_string(r.end));
-      r.occurrenceId = rj.value("occurrence", uint64_t{0});
-      if (rj.contains("edge"))
-        r.edge = ElementRef{rj.at("edge").value("feature_id", uint64_t{0}),
-                            rj.at("edge").value("element", std::string{})};
-      if (rj.contains("sil_face"))
-        r.silFace =
-            ElementRef{rj.at("sil_face").value("feature_id", uint64_t{0}),
-                       rj.at("sil_face").value("element", std::string{})};
-      dim.refs.push_back(r);
-    }
+    for (const json& rj : p.at("refs"))
+      dim.refs.push_back(ParseProjRef(rj, viewId));
     if (p.contains("offset")) {
       const json& o = p.at("offset");
       // A bare number here died as a raw nlohmann type_error ("cannot use

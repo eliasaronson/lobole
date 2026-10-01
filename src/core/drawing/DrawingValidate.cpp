@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingValidate.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace drawing {
@@ -17,6 +18,74 @@ bool RectsOverlap(const glm::dvec2& aMin, const glm::dvec2& aMax,
   // Strict: touching edges are not an overlap.
   return aMin.x < bMax.x && bMin.x < aMax.x && aMin.y < bMax.y &&
          bMin.y < aMax.y;
+}
+
+// Whether segment ab passes through the rectangle [mn, mx] (Liang-Barsky).
+bool SegmentHitsRect(glm::dvec2 a, glm::dvec2 b, const glm::dvec2& mn,
+                     const glm::dvec2& mx) {
+  double t0 = 0.0, t1 = 1.0;
+  const glm::dvec2 d = b - a;
+  const double p[4] = {-d.x, d.x, -d.y, d.y};
+  const double q[4] = {a.x - mn.x, mx.x - a.x, a.y - mn.y, mx.y - a.y};
+  for (int i = 0; i < 4; ++i) {
+    if (std::abs(p[i]) < 1e-12) {
+      if (q[i] < 0.0)
+        return false; // parallel and outside
+      continue;
+    }
+    const double t = q[i] / p[i];
+    if (p[i] < 0.0)
+      t0 = std::max(t0, t);
+    else
+      t1 = std::min(t1, t);
+    if (t0 > t1)
+      return false;
+  }
+  return true;
+}
+
+// Whether the ray from `p` along an axis (`axis` 0 = x, 1 = y; `sign` +-1)
+// crosses any of the view's curves.
+bool RayHitsCurve(const SheetView& sv, const glm::dvec2& p, int axis,
+                  double sign) {
+  const int other = 1 - axis;
+  for (const SheetCurve& c : sv.curves)
+    for (size_t i = 1; i < c.points.size(); ++i) {
+      const glm::dvec2 a = c.points[i - 1], b = c.points[i];
+      if ((a[other] - p[other]) * (b[other] - p[other]) > 0.0)
+        continue; // the segment is wholly to one side of the ray's line
+      const double d = b[other] - a[other];
+      const double at =
+          std::abs(d) < 1e-12
+              ? std::min(a[axis], b[axis])
+              : a[axis] + (p[other] - a[other]) / d * (b[axis] - a[axis]);
+      if (sign * (at - p[axis]) >= 0.0)
+        return true;
+    }
+  return false;
+}
+
+// Whether a label box sits ON a view: over a line the view draws, or inside
+// its outline (a line found every way from the label's centre) -- not merely
+// inside its bounding box. A label in the corner of a disc's box covers
+// nothing, and the box test flagged every callout placed beside a round
+// part's rim as sitting on it.
+bool LabelOnView(const SheetView& sv, const glm::dvec2& mn,
+                 const glm::dvec2& mx) {
+  if (!sv.hasGeometry || !RectsOverlap(mn, mx, sv.bboxMin, sv.bboxMax))
+    return false;
+  // The part's lines only: a section's hatching is interrupted by the text
+  // knocked out of it, which is how drafting puts a value in a section.
+  for (const SheetCurve& c : sv.curves)
+    for (size_t i = 1; i < c.points.size(); ++i)
+      if (SegmentHitsRect(c.points[i - 1], c.points[i], mn, mx))
+        return true;
+  if (sv.sectioned)
+    return false; // inside a section is on its hatching, knocked out
+  const glm::dvec2 centre = 0.5 * (mn + mx);
+  return RayHitsCurve(sv, centre, 0, -1.0) &&
+         RayHitsCurve(sv, centre, 0, 1.0) &&
+         RayHitsCurve(sv, centre, 1, -1.0) && RayHitsCurve(sv, centre, 1, 1.0);
 }
 
 // How far `p` pokes outside [min, max]; empty string when inside.
@@ -152,7 +221,7 @@ ValidateDrawing(const DrawingDocument& doc,
                         "dim " + std::to_string(d.id) + " ('" + d.text +
                             "') sits on the title block"});
     for (const auto& [vid, sv] : renders) {
-      if (!sv.hasGeometry || !RectsOverlap(mn, mx, sv.bboxMin, sv.bboxMax))
+      if (!LabelOnView(sv, mn, mx))
         continue;
       issues.push_back({"dim_label_over_view", vid, 0, d.id,
                         "dim " + std::to_string(d.id) + " ('" + d.text +
@@ -188,14 +257,14 @@ ValidateDrawing(const DrawingDocument& doc,
     if (!note.resolved)
       report("unresolved_note", note.error);
     glm::dvec2 mn, mx;
-    LabelBox(note.pos, note.text, mn, mx);
+    NoteBox(note, mn, mx);
     if (!OutsideBy(mn, chrome.borderMin, chrome.borderMax).empty() ||
         !OutsideBy(mx, chrome.borderMin, chrome.borderMax).empty())
       report("note_outside_border", "text extends outside the sheet border");
     if (RectsOverlap(mn, mx, chrome.titleBlockMin, chrome.titleBlockMax))
       report("note_over_title_block", "text overlaps the title block");
     for (const auto& [id, view] : renders)
-      if (view.hasGeometry && RectsOverlap(mn, mx, view.bboxMin, view.bboxMax))
+      if (LabelOnView(view, mn, mx))
         report("note_over_view", "text overlaps " + viewName(id), id);
     for (const auto& label : labels)
       if (RectsOverlap(mn, mx, label.mn, label.mx))

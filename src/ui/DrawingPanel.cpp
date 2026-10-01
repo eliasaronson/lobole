@@ -1,5 +1,6 @@
 #include "ui/DrawingPanel.h"
 
+#include "core/drawing/DrawingExport.h" // TitleBlockRows
 #include "core/io/Format.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/DocumentSlots.h"
@@ -248,6 +249,44 @@ void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
                         SheetToScreen(state, base - n * w), col);
 }
 
+// Sheet furniture (drawing::SheetGraphics) on screen: the primitives the
+// exporters draw, so a balloon or a hatch looks here as it prints.
+void DrawSheetGraphics(ImDrawList* dl, AppState& state,
+                       const drawing::SheetGraphics& g, ImU32 col) {
+  const float pxPerMM = static_cast<float>(state.sheetView.scale);
+  for (const auto& l : g.lines) {
+    const float px = std::max(1.0f, static_cast<float>(l.widthMM) * pxPerMM);
+    if (l.chain)
+      StrokeDashed(dl, state, {l.a, l.b}, col, px, drawing::kBendDashMM);
+    else if (l.dashed)
+      StrokeDashed(dl, state, {l.a, l.b}, col, px, drawing::kHiddenDashMM);
+    else
+      dl->AddLine(SheetToScreen(state, l.a), SheetToScreen(state, l.b), col,
+                  px);
+  }
+  for (const auto& f : g.fills) {
+    std::vector<ImVec2> pts;
+    for (const glm::dvec2& p : f)
+      pts.push_back(SheetToScreen(state, p));
+    if (pts.size() >= 3)
+      dl->AddConvexPolyFilled(pts.data(), static_cast<int>(pts.size()), col);
+  }
+  ImFont* font = ImGui::GetFont();
+  for (const auto& t : g.texts) {
+    const float fontPx = static_cast<float>(t.heightMM * 0.85) * pxPerMM;
+    if (fontPx < 4.0f)
+      continue; // illegible at this zoom
+    const ImVec2 size =
+        font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, t.text.c_str());
+    // pos is the baseline; ImGui places text by its top edge.
+    ImVec2 at = SheetToScreen(state, t.pos);
+    at.y -= size.y * 0.8f;
+    if (t.center)
+      at.x -= size.x * 0.5f;
+    dl->AddText(font, fontPx, at, col, t.text.c_str());
+  }
+}
+
 // Draws the active drawing's dimensions: extension/dimension lines + arrows +
 // value text (linear), or a centre->rim leader (radial). A dangling dimension
 // (a ref no longer resolves) draws its label in the error colour, never
@@ -282,10 +321,16 @@ void DrawDims(ImDrawList* dl, AppState& state) {
       dl->AddLine(SheetToScreen(state, d.center), SheetToScreen(state, d.rim),
                   ink, 1.2f);
       SheetArrow(dl, state, d.rim, glm::normalize(d.rim - d.center), ink);
+      const glm::dvec2 end = drawing::LeaderEnd(d.rim, d.labelPos, d.text);
+      if (glm::length(end - d.rim) > 1.0) // on to a value off the circle
+        dl->AddLine(SheetToScreen(state, d.rim), SheetToScreen(state, end), ink,
+                    1.2f);
     } else if (d.leader) {
       // Callout: a leader from the circle rim to the label, arrow at the rim.
-      dl->AddLine(SheetToScreen(state, d.rim), SheetToScreen(state, d.labelPos),
-                  ink, 1.2f);
+      dl->AddLine(
+          SheetToScreen(state, d.rim),
+          SheetToScreen(state, drawing::LeaderEnd(d.rim, d.labelPos, d.text)),
+          ink, 1.2f);
       const glm::dvec2 back = d.rim - d.labelPos;
       if (glm::length(back) > 1e-9)
         SheetArrow(dl, state, d.rim, glm::normalize(back), ink);
@@ -345,9 +390,16 @@ void DrawDims(ImDrawList* dl, AppState& state) {
   // Notes (v66): text + optional leader, same resolution as the exporters.
   for (const DrawingNote& note : state.drawing->GetNotes()) {
     const drawing::ResolvedNote rn = ResolveDrawingNote(state, note);
+    const drawing::SheetGraphics g = drawing::NoteGraphics(rn);
+    if (!g.empty()) { // a balloon, a datum, a table
+      DrawSheetGraphics(dl, state, g, ink);
+      continue;
+    }
     if (rn.hasLeader) {
-      dl->AddLine(SheetToScreen(state, rn.anchor), SheetToScreen(state, rn.pos),
-                  ink, 1.2f);
+      dl->AddLine(
+          SheetToScreen(state, rn.anchor),
+          SheetToScreen(state, drawing::LeaderEnd(rn.anchor, rn.pos, rn.text)),
+          ink, 1.2f);
       const glm::dvec2 back = rn.anchor - rn.pos;
       if (glm::length(back) > 1e-9)
         SheetArrow(dl, state, rn.anchor, glm::normalize(back), ink);
@@ -396,7 +448,7 @@ void DrawViews(ImDrawList* dl, AppState& state) {
     }
     // Centre marks on visible circles (v66) — same rule as the exporters.
     for (const drawing::SheetCurve& c : sv.curves) {
-      if (!c.visible || c.conicRadius <= 0.0)
+      if (!drawing::HasCentreMark(c))
         continue;
       const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
       dl->AddLine(
@@ -408,6 +460,7 @@ void DrawViews(ImDrawList* dl, AppState& state) {
           SheetToScreen(state, {c.conicCenter.x, c.conicCenter.y + leg}),
           visible, 1.0f);
     }
+    DrawSheetGraphics(dl, state, sv.extras, visible); // hatching, sections
 
     if (sv.hasGeometry) {
       // A light frame + the view name/scale label above the geometry.
@@ -522,17 +575,13 @@ void DrawSheet(AppState& state) {
   const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
   const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
   const double x0 = chrome.titleBlockMin.x, y0 = chrome.titleBlockMin.y;
-  // The same five rows the exporters write (DrawingExport.cpp's UnitsRow) —
-  // the sheet on screen and the sheet sent to a shop have to agree about what
-  // its bare numbers are in, and a UNITS row in the PDF alone would be the
-  // more dangerous half of that disagreement.
-  const std::array<std::pair<const char*, std::string>, 5> fields = {{
-      {"PROJECT", sheet.titleBlock.project},
-      {"DOCUMENT", sheet.titleBlock.document},
-      {"AUTHOR", sheet.titleBlock.author},
-      {"DATE", sheet.titleBlock.date},
-      {"UNITS", core::UnitsLabel(ActiveDrawingUnits(state))},
-  }};
+  // The same rows the exporters write (DrawingExport::TitleBlockRows), with
+  // the blanks filled the way an export fills them — the sheet on screen and
+  // the sheet sent to a shop have to agree about what its bare numbers are
+  // in, and what it is made of.
+  const std::vector<DrawingExport::TitleRow> fields =
+      DrawingExport::TitleBlockRows(DrawingSheetForOutput(state),
+                                    ActiveDrawingUnits(state));
   dl->AddRect(SheetToScreen(state, {x0, y0}),
               SheetToScreen(state, {x0 + tbW, y0 + tbH}), ink, 0.0f, 0, 1.5f);
   const double rowH = tbH / fields.size();
@@ -546,9 +595,9 @@ void DrawSheet(AppState& state) {
       ImFont* font = ImGui::GetFont();
       const ImVec2 labelPos = SheetToScreen(state, {x0 + 3.0, ry + rowH - 3.0});
       dl->AddText(font, fontPx, labelPos, IM_COL32(120, 120, 120, 255),
-                  fields[i].first);
+                  fields[i].label);
       const ImVec2 valPos = SheetToScreen(state, {x0 + 42.0, ry + rowH - 3.0});
-      dl->AddText(font, fontPx, valPos, ink, fields[i].second.c_str());
+      dl->AddText(font, fontPx, valPos, ink, fields[i].value.c_str());
     }
   }
 

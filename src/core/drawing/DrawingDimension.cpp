@@ -9,7 +9,9 @@
 #include "core/sheet/Unfold.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace drawing {
@@ -46,7 +48,9 @@ bool RefPoint(const SheetView& v, const ProjRef& r, glm::dvec2& out) {
   // An END asked for is that end, whatever the curve is. A circle answered
   // with its centre first, and a circle seen EDGE-ON is drawn as a line: the
   // two ends of a turned chess piece's underside measured its radius.
-  if (r.end == 0)
+  // An extreme asked for is that extreme, circle or not: a balloon on a
+  // bearing seen end-on landed on the bore's empty centre.
+  if (r.end == 0 && r.extreme.empty())
     for (const SheetCurve* c : cs)
       if (c->conicRadius > 0.0) {
         out = c->conicCenter;
@@ -185,6 +189,52 @@ bool RefLine(const SheetView& v, const ProjRef& r, glm::dvec2& p,
   return true;
 }
 
+// Two parallel straight curves of one ref, apart -- a cylinder seen from the
+// side: {a0, a1, b0, b1}, each pair a line's ends. Nothing when the ref
+// matches a conic (a circle is measured round, not across).
+std::optional<std::array<glm::dvec2, 4>> RefLinePair(const SheetView& v,
+                                                     const ProjRef& r) {
+  std::vector<const SheetCurve*> lines;
+  for (const SheetCurve* c : Match(v, r)) {
+    if (c->conicRadius > 0.0)
+      return std::nullopt;
+    if (c->points.size() < 2)
+      continue;
+    const glm::dvec2 a = c->points.front(), b = c->points.back();
+    const double len = glm::length(b - a);
+    if (len < 1e-9)
+      continue;
+    const glm::dvec2 n(-(b - a).y / len, (b - a).x / len);
+    bool straight = true;
+    for (const glm::dvec2& q : c->points)
+      straight = straight && std::abs(glm::dot(q - a, n)) < 1e-6 + len * 1e-6;
+    if (straight)
+      lines.push_back(c);
+  }
+  const auto length = [](const SheetCurve* c) {
+    return glm::length(c->points.back() - c->points.front());
+  };
+  std::sort(lines.begin(), lines.end(),
+            [&](const SheetCurve* x, const SheetCurve* y) {
+              return length(x) > length(y);
+            });
+  for (size_t i = 0; i < lines.size(); ++i)
+    for (size_t j = i + 1; j < lines.size(); ++j) {
+      const glm::dvec2 a0 = lines[i]->points.front(),
+                       a1 = lines[i]->points.back();
+      const glm::dvec2 b0 = lines[j]->points.front(),
+                       b1 = lines[j]->points.back();
+      const glm::dvec2 u = glm::normalize(a1 - a0);
+      if (std::abs(glm::dot(u, glm::normalize(b1 - b0))) < 0.9999)
+        continue;
+      const glm::dvec2 n(-u.y, u.x);
+      if (std::abs(glm::dot(b0 - a0, n)) < 1e-6)
+        continue; // collinear: two pieces of one wall
+      return std::array<glm::dvec2, 4>{a0, a1, b0, b1};
+    }
+  return std::nullopt;
+}
+
 } // namespace
 
 ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
@@ -257,6 +307,48 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
   case DrawingDimKind::Diameter: {
     if (dim.refs.empty())
       return rd;
+    // The name a tolerance is looked up by: the edge's, or for a wall seen
+    // from the side (a silhouette, a bore in section) the face's.
+    const std::string& refName = dim.refs[0].edge.IsSet()
+                                     ? dim.refs[0].edge.name
+                                     : dim.refs[0].silFace.name;
+    // A diameter seen from the side -- a shaft's two silhouettes, a bore's
+    // two walls in section -- is a LINEAR dimension across them with a Ø:
+    // the drafting convention, and the only one a section can carry. A
+    // radial leader from a midline that is not drawn anywhere read as a
+    // radius of nothing.
+    if (dim.kind == DrawingDimKind::Diameter) {
+      if (const auto pair = RefLinePair(view, dim.refs[0])) {
+        const auto& [a0, a1, b0, b1] = *pair;
+        const glm::dvec2 u = glm::normalize(a1 - a0);
+        const glm::dvec2 n(-u.y, u.x);
+        const double width = std::abs(glm::dot(b0 - a0, n));
+        // The dimension line crosses the walls at the offset's position
+        // along them, measured from the walls' common midpoint; the
+        // extension lines start at the wall ends on that side.
+        const glm::dvec2 mid = 0.25 * (a0 + a1 + b0 + b1);
+        const double level = glm::dot(mid, u) + glm::dot(off, u);
+        const auto endToward = [&](glm::dvec2 p, glm::dvec2 q) {
+          return std::abs(glm::dot(p, u) - level) <
+                         std::abs(glm::dot(q, u) - level)
+                     ? p
+                     : q;
+        };
+        rd.ext1 = endToward(a0, a1);
+        rd.ext2 = endToward(b0, b1);
+        rd.dim1 = rd.ext1 + u * (level - glm::dot(rd.ext1, u));
+        rd.dim2 = rd.ext2 + u * (level - glm::dot(rd.ext2, u));
+        rd.value = width / vs;
+        rd.text = "\xC3\x98" + core::FormatLength(rd.value, ctx.units);
+        if (ctx.sourceDoc)
+          if (const Tolerance* tol = FindToleranceForRef(
+                  *ctx.sourceDoc, refName, 0.5 * width / vs))
+            rd.text += FormatToleranceSuffix(*tol, ctx.units, rd.value);
+        rd.labelPos = 0.5 * (rd.dim1 + rd.dim2) + n * glm::dot(off, n);
+        rd.resolved = true;
+        break;
+      }
+    }
     glm::dvec2 c;
     double rad = 0.0;
     if (!RefCircle(view, dim.refs[0], c, rad))
@@ -272,9 +364,9 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     // size of the one written — the sort of plausible-looking wrong number
     // this project spends its refusals on.
     if (dim.kind == DrawingDimKind::Diameter && ctx.sourceDoc) {
-      if (const Tolerance* tol = FindToleranceForRef(
-              *ctx.sourceDoc, dim.refs[0].edge.name, rad / vs)) {
-        rd.text += FormatToleranceSuffix(*tol, ctx.units);
+      if (const Tolerance* tol =
+              FindToleranceForRef(*ctx.sourceDoc, refName, rad / vs)) {
+        rd.text += FormatToleranceSuffix(*tol, ctx.units, rd.value);
       }
     }
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
@@ -319,7 +411,8 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     rd.center = c;
     rd.radius = rad;
     rd.value = hole->diameter; // model mm
-    rd.text = FormatHoleCallout(*hole, ctx.units);
+    rd.text = FormatHoleCallout(*hole, ctx.units,
+                                FindThreadForHole(*ctx.sourceDoc, *hole));
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
                                                    : glm::dvec2(0.7071, 0.7071);
     rd.rim = c + dir * rad;
@@ -382,7 +475,8 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     if (ctx.sourceDoc)
       if (const HoleFeature* hole =
               FindHoleForRef(*ctx.sourceDoc, dim.refs[0].edge.name, rad / vs))
-        base = FormatHoleCallout(*hole, ctx.units);
+        base = FormatHoleCallout(*hole, ctx.units,
+                                 FindThreadForHole(*ctx.sourceDoc, *hole));
     rd.text = std::to_string(dim.refs.size()) + "\xC3\x97 " + base; // "N× "
     const auto pitch = UniformCollinearPitch(centers);
     if (pitch) {
@@ -512,6 +606,7 @@ ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
   if (!rn.resolved)
     rn.text = "[UNRESOLVED: " + rn.error + "]";
   rn.pos = note.pos;
+  rn.style = note.style;
   if (view != nullptr &&
       (note.leader.edge.IsSet() || note.leader.silFace.IsSet())) {
     glm::dvec2 a(0.0);
@@ -552,6 +647,207 @@ void LabelBox(const glm::dvec2& labelPos, const std::string& text,
   const double h = kLabelLineMM;
   mn = {labelPos.x - w * 0.5, labelPos.y - h * (lines - 0.5)};
   mx = {labelPos.x + w * 0.5, labelPos.y + h * 0.5};
+}
+
+void TextKnockout(const glm::dvec2& labelPos, const std::string& text,
+                  glm::dvec2& mn, glm::dvec2& mx) {
+  double w = 0.0;
+  size_t lines = 1;
+  size_t start = 0;
+  for (;;) {
+    const size_t nl = text.find('\n', start);
+    w = std::max(w, TextWidthMM(text.substr(
+                        start, nl == std::string::npos ? nl : nl - start)));
+    if (nl == std::string::npos)
+      break;
+    start = nl + 1;
+    ++lines;
+  }
+  constexpr double pad = 0.6, half = 0.5 * kLabelLineMM;
+  mn = {labelPos.x - 0.5 * w - pad,
+        labelPos.y - half - kLabelLineMM * static_cast<double>(lines - 1)};
+  mx = {labelPos.x + 0.5 * w + pad, labelPos.y + half};
+}
+
+glm::dvec2 LeaderEnd(const glm::dvec2& from, const glm::dvec2& labelPos,
+                     const std::string& text) {
+  glm::dvec2 mn, mx;
+  TextKnockout(labelPos, text, mn, mx);
+  if (from.x < mn.x)
+    return {mn.x, labelPos.y};
+  if (from.x > mx.x)
+    return {mx.x, labelPos.y};
+  return {labelPos.x, from.y < mn.y ? mn.y : mx.y};
+}
+
+namespace {
+
+std::vector<std::string> Split(const std::string& s, char sep) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  for (;;) {
+    const size_t at = s.find(sep, start);
+    out.push_back(s.substr(start, at == std::string::npos ? at : at - start));
+    if (at == std::string::npos)
+      return out;
+    start = at + 1;
+  }
+}
+
+// A ruled table's layout, in sheet mm from its bottom-right corner.
+constexpr double kTableRowMM = 6.0;
+constexpr double kTablePadMM = 2.0;
+
+struct TableLayout {
+  std::vector<std::vector<std::string>> rows;
+  std::vector<double> colW;
+  double width = 0.0, height = 0.0;
+};
+
+TableLayout LayoutTable(const std::string& text) {
+  TableLayout t;
+  for (const std::string& line : Split(text, '\n'))
+    t.rows.push_back(Split(line, '\t'));
+  size_t cols = 1;
+  for (const auto& r : t.rows)
+    cols = std::max(cols, r.size());
+  t.colW.assign(cols, 2.0 * kTablePadMM);
+  for (const auto& r : t.rows)
+    if (r.size() > 1)
+      for (size_t c = 0; c < r.size(); ++c)
+        t.colW[c] = std::max(t.colW[c], TextWidthMM(r[c]) + 2.0 * kTablePadMM);
+  for (double w : t.colW)
+    t.width += w;
+  // A spanning row (a caption) wider than the columns widens the last one.
+  for (const auto& r : t.rows)
+    if (r.size() == 1) {
+      const double need = TextWidthMM(r[0]) + 2.0 * kTablePadMM;
+      if (need > t.width) {
+        t.colW.back() += need - t.width;
+        t.width = need;
+      }
+    }
+  t.height = kTableRowMM * static_cast<double>(t.rows.size());
+  return t;
+}
+
+// A closed polygon approximating a circle.
+std::vector<glm::dvec2> Circle(glm::dvec2 c, double r, int n) {
+  std::vector<glm::dvec2> out;
+  for (int i = 0; i < n; ++i) {
+    const double a = 2.0 * 3.14159265358979323846 * i / n;
+    out.push_back(c + r * glm::dvec2(std::cos(a), std::sin(a)));
+  }
+  return out;
+}
+
+constexpr double kDatumBoxHalfMM = 3.25;
+
+double BalloonRadius(const std::string& text) {
+  return std::max(4.0, 0.5 * TextWidthMM(text) + 1.8);
+}
+
+} // namespace
+
+bool IsTableText(const std::string& text) {
+  return text.find('\t') != std::string::npos;
+}
+
+SheetGraphics NoteGraphics(const ResolvedNote& n) {
+  SheetGraphics g;
+  // Text on the line: a 3.5 mm font's cap height is about 2.5 mm, so a
+  // baseline 1.25 below the centre centres it.
+  constexpr double kCentreToBaseline = 1.25;
+  if (IsTableText(n.text)) {
+    const TableLayout t = LayoutTable(n.text);
+    const double x0 = n.pos.x - t.width, y0 = n.pos.y;
+    const double x1 = n.pos.x, y1 = n.pos.y + t.height;
+    g.lines.push_back({{x0, y0}, {x1, y0}, 0.35});
+    g.lines.push_back({{x1, y0}, {x1, y1}, 0.35});
+    g.lines.push_back({{x1, y1}, {x0, y1}, 0.35});
+    g.lines.push_back({{x0, y1}, {x0, y0}, 0.35});
+    for (size_t r = 0; r < t.rows.size(); ++r) {
+      const double top = y1 - kTableRowMM * static_cast<double>(r);
+      const double bottom = top - kTableRowMM;
+      if (r > 0)
+        g.lines.push_back({{x0, top}, {x1, top}, r == 1 ? 0.35 : 0.18});
+      const auto& cells = t.rows[r];
+      if (cells.size() == 1) {
+        g.texts.push_back(
+            {{0.5 * (x0 + x1), bottom + 1.8}, cells[0], true, 3.5});
+        continue;
+      }
+      double x = x0;
+      for (size_t c = 0; c < t.colW.size(); ++c) {
+        if (c > 0)
+          g.lines.push_back({{x, top}, {x, bottom}, 0.18});
+        if (c < cells.size() && !cells[c].empty())
+          g.texts.push_back(
+              {{x + kTablePadMM, bottom + 1.8}, cells[c], false, 3.5});
+        x += t.colW[c];
+      }
+    }
+    return g;
+  }
+  if (n.style == NoteStyle::Balloon) {
+    const double r = BalloonRadius(n.text);
+    const auto ring = Circle(n.pos, r, 48);
+    for (size_t i = 0; i < ring.size(); ++i)
+      g.lines.push_back({ring[i], ring[(i + 1) % ring.size()], 0.35});
+    g.texts.push_back(
+        {{n.pos.x, n.pos.y - kCentreToBaseline}, n.text, true, 3.5});
+    if (n.hasLeader && glm::length(n.anchor - n.pos) > r) {
+      const glm::dvec2 d = glm::normalize(n.anchor - n.pos);
+      g.lines.push_back({n.pos + d * r, n.anchor, 0.25});
+      g.fills.push_back(Circle(n.anchor, 0.7, 16)); // a dot on the part
+    }
+    return g;
+  }
+  if (n.style == NoteStyle::Datum) {
+    const double h = kDatumBoxHalfMM;
+    const glm::dvec2 lo = n.pos - glm::dvec2(h), hi = n.pos + glm::dvec2(h);
+    g.lines.push_back({{lo.x, lo.y}, {hi.x, lo.y}, 0.35});
+    g.lines.push_back({{hi.x, lo.y}, {hi.x, hi.y}, 0.35});
+    g.lines.push_back({{hi.x, hi.y}, {lo.x, hi.y}, 0.35});
+    g.lines.push_back({{lo.x, hi.y}, {lo.x, lo.y}, 0.35});
+    g.texts.push_back(
+        {{n.pos.x, n.pos.y - kCentreToBaseline}, n.text, true, 3.5});
+    if (n.hasLeader && glm::length(n.anchor - n.pos) > 2.0 * h) {
+      // The triangle stands on the feature, its base square to the leader;
+      // the leader runs from its apex to the box.
+      const glm::dvec2 u = glm::normalize(n.pos - n.anchor);
+      const glm::dvec2 across(-u.y, u.x);
+      constexpr double side = 3.4;
+      const glm::dvec2 apex = n.anchor + u * (side * 0.866);
+      g.fills.push_back({n.anchor + across * (side * 0.5), apex,
+                         n.anchor - across * (side * 0.5)});
+      const double toEdge = h / std::max(std::abs(u.x), std::abs(u.y));
+      g.lines.push_back({apex, n.pos - u * toEdge, 0.25});
+    }
+    return g;
+  }
+  return g;
+}
+
+void NoteBox(const ResolvedNote& n, glm::dvec2& mn, glm::dvec2& mx) {
+  if (IsTableText(n.text)) {
+    const TableLayout t = LayoutTable(n.text);
+    mn = {n.pos.x - t.width, n.pos.y};
+    mx = {n.pos.x, n.pos.y + t.height};
+    return;
+  }
+  if (n.style == NoteStyle::Balloon) {
+    const double r = BalloonRadius(n.text);
+    mn = n.pos - glm::dvec2(r);
+    mx = n.pos + glm::dvec2(r);
+    return;
+  }
+  if (n.style == NoteStyle::Datum) {
+    mn = n.pos - glm::dvec2(kDatumBoxHalfMM);
+    mx = n.pos + glm::dvec2(kDatumBoxHalfMM);
+    return;
+  }
+  LabelBox(n.pos, n.text, mn, mx);
 }
 
 namespace {

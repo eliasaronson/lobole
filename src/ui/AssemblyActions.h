@@ -73,6 +73,9 @@ struct BomRow {
   // the CSV, where a purchaser reads it, and in the row's tooltip.
   std::string standard;
   std::string designation;
+  // The top-level occurrences this row counts, one per leaf: what a balloon
+  // on a drawing finds its item number by.
+  std::vector<uint64_t> rootOccurrences;
   [[nodiscard]] bool bought() const { return !standard.empty(); }
 };
 
@@ -223,6 +226,11 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                       bool released);
 
 BomTable ComputeBom(AppState& state); // empty without an active assembly
+// The same table over any assembly's flattened leaves -- a drawing's parts
+// list draws an assembly that is not the active one, and leaves out what
+// its view hides (docs/drawings/README.md#parts-lists-and-balloons).
+BomTable ComputeBomOf(AppState& state,
+                      const std::vector<assembly::FlatInstance>& leaves);
 
 // What is wrong with a fastener already placed, or an empty list.
 //

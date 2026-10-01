@@ -23,10 +23,16 @@
 
 namespace core {
 
-// A length in millimetres as compact display text in `sys`'s length unit: up
-// to 3 significant figures, trailing zeros trimmed (40.0 -> "40", 8.5 ->
-// "8.5", 12.345 -> "12.3"), no unit suffix.
+// A length in millimetres as display text in `sys`'s length unit: a fixed
+// number of DECIMALS for the unit (mm 2, cm 3, m 5, in 3), trailing zeros
+// trimmed (40.0 -> "40", 8.5 -> "8.5", 37.335 -> "37.34"), no unit suffix.
+// Decimals, not significant figures: three of those printed a 37.34 hole
+// spacing as 37.3 and would have printed a 1051 mm frame as "1.05e+03".
 std::string FormatLength(double mm, const units::System& sys);
+
+// A tolerance's deviation: one decimal finer than a length (mm 3, in 4), so
+// a K7's +0.007 is not rounded to 0.01. Unsigned; the caller signs it.
+std::string FormatDeviation(double mm, const units::System& sys);
 
 // An angle in RADIANS as display text with the unit's symbol: degrees to one
 // decimal ("90°", "45.5°"), or radians to three ("1.571 rad") when the

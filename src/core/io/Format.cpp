@@ -7,13 +7,47 @@
 
 namespace core {
 
-std::string FormatLength(double mm, const units::System& sys) {
+namespace {
+
+int LengthDecimals(units::Length l) {
+  switch (l) {
+  case units::Length::Millimetre:
+    return 2;
+  case units::Length::Centimetre:
+    return 3;
+  case units::Length::Metre:
+    return 5;
+  case units::Length::Inch:
+    return 3;
+  }
+  return 2;
+}
+
+std::string Fixed(double mm, const units::System& sys, int decimals) {
   double v = mm / units::MmPerLength(sys.length);
-  if (std::abs(v) < 5e-7)
+  const double quantum = 0.5 * std::pow(10.0, -decimals);
+  if (std::abs(v) < quantum)
     v = 0.0; // clamp -0 / tiny noise to a clean 0
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "%.3g", v);
-  return buf;
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.*f", decimals, v);
+  std::string s = buf;
+  if (s.find('.') != std::string::npos) {
+    while (s.back() == '0')
+      s.pop_back();
+    if (s.back() == '.')
+      s.pop_back();
+  }
+  return s == "-0" ? "0" : s;
+}
+
+} // namespace
+
+std::string FormatLength(double mm, const units::System& sys) {
+  return Fixed(mm, sys, LengthDecimals(sys.length));
+}
+
+std::string FormatDeviation(double mm, const units::System& sys) {
+  return Fixed(mm, sys, LengthDecimals(sys.length) + 1);
 }
 
 std::string FormatAngle(double radians, const units::System& sys) {

@@ -93,7 +93,56 @@ std::string PdfText(const std::string& s) {
   return out;
 }
 
+// A label is centred on its position: the baseline sits this far under the
+// first line's middle (a 3.5 mm font's capitals are about 2.5 mm tall).
+constexpr double kTextDrop = 1.25;
+
+// Sheet furniture (drawing::SheetGraphics) as SVG; `H` flips sheet Y.
+void SvgGraphics(std::ostringstream& out, const drawing::SheetGraphics& g,
+                 double H) {
+  const auto fy = [H](double y) { return H - y; };
+  for (const auto& l : g.lines) {
+    out << "    <line x1=\"" << Num(l.a.x) << "\" y1=\"" << Num(fy(l.a.y))
+        << "\" x2=\"" << Num(l.b.x) << "\" y2=\"" << Num(fy(l.b.y))
+        << "\" stroke=\"#141418\" stroke-width=\"" << Num(l.widthMM) << '"';
+    if (l.chain || l.dashed) {
+      const std::span<const double> dash =
+          l.chain ? std::span<const double>(drawing::kBendDashMM)
+                  : std::span<const double>(drawing::kHiddenDashMM);
+      out << " stroke-dasharray=\"";
+      for (size_t i = 0; i < dash.size(); ++i)
+        out << (i ? " " : "") << Num(dash[i]);
+      out << '"';
+    }
+    out << "/>\n";
+  }
+  for (const auto& f : g.fills) {
+    out << "    <polygon points=\"";
+    for (size_t i = 0; i < f.size(); ++i)
+      out << (i ? " " : "") << Num(f[i].x) << ',' << Num(fy(f[i].y));
+    out << "\" fill=\"#141418\"/>\n";
+  }
+  for (const auto& t : g.texts)
+    out << "    <text x=\"" << Num(t.pos.x) << "\" y=\"" << Num(fy(t.pos.y))
+        << "\" font-family=\"Helvetica, sans-serif\" font-size=\""
+        << Num(t.heightMM) << "\" fill=\"#141418\" text-anchor=\""
+        << (t.center ? "middle" : "start") << "\">" << Esc(t.text)
+        << "</text>\n";
+}
+
 } // namespace
+
+std::vector<TitleRow> TitleBlockRows(const Sheet& sheet,
+                                     const units::System& units) {
+  return {{"PROJECT", sheet.titleBlock.project},
+          {"DOCUMENT", sheet.titleBlock.document},
+          {"MATERIAL", sheet.titleBlock.material},
+          {"SCALE", sheet.titleBlock.scale},
+          {"AUTHOR", sheet.titleBlock.author},
+          {"DATE", sheet.titleBlock.date},
+          {"UNITS", core::UnitsLabel(units)},
+          {"NOTES", sheet.titleBlock.notes}};
+}
 
 bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
@@ -151,7 +200,7 @@ bool SaveSVG(const DrawingDocument& doc,
       // Centre marks: a small cross on every visible circle — the machinist
       // aims at the centre, and the projected circle alone does not mark it.
       for (const drawing::SheetCurve& c : v.curves) {
-        if (!c.visible || c.conicRadius <= 0.0)
+        if (!drawing::HasCentreMark(c))
           continue;
         const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
         out << "    <line x1=\"" << Num(c.conicCenter.x - leg) << "\" y1=\""
@@ -165,6 +214,7 @@ bool SaveSVG(const DrawingDocument& doc,
             << Num(fy(c.conicCenter.y + leg))
             << "\" stroke=\"#141418\" stroke-width=\"0.15\"/>\n";
       }
+      SvgGraphics(out, v.extras, H); // hatching, cutting planes, captions
       out << "  </g>\n";
     }
 
@@ -190,7 +240,14 @@ bool SaveSVG(const DrawingDocument& doc,
     // one <text> per line, stepping down from the position, or a hole table
     // renders as a single line off the edge of the sheet.
     const auto label = [&](glm::dvec2 at, const std::string& text) {
-      double y = at.y;
+      // Knocked out of what it sits on, and centred on its position: the
+      // first line's middle at `at`, as the viewport draws it.
+      glm::dvec2 mn, mx;
+      drawing::TextKnockout(at, text, mn, mx);
+      out << "    <rect x=\"" << Num(mn.x) << "\" y=\"" << Num(fy(mx.y))
+          << "\" width=\"" << Num(mx.x - mn.x) << "\" height=\""
+          << Num(mx.y - mn.y) << "\" fill=\"white\"/>\n";
+      double y = at.y - kTextDrop;
       for (size_t start = 0; start <= text.size();) {
         const size_t nl = text.find('\n', start);
         const std::string line =
@@ -212,8 +269,12 @@ bool SaveSVG(const DrawingDocument& doc,
         if (d.radial) {
           line(d.center, d.rim, 0.25);
           arrow(d.rim, glm::normalize(d.rim - d.center));
+          // On to the value, when it stands off the circle.
+          const glm::dvec2 end = drawing::LeaderEnd(d.rim, d.labelPos, d.text);
+          if (glm::length(end - d.rim) > 1.0)
+            line(d.rim, end, 0.25);
         } else if (d.leader) { // callout: rim -> label leader
-          line(d.rim, d.labelPos, 0.25);
+          line(d.rim, drawing::LeaderEnd(d.rim, d.labelPos, d.text), 0.25);
           if (glm::length(d.rim - d.labelPos) > 1e-9)
             arrow(d.rim, glm::normalize(d.rim - d.labelPos));
         } else if (d.kind == DrawingDimKind::Angle) {
@@ -233,8 +294,13 @@ bool SaveSVG(const DrawingDocument& doc,
         label(d.labelPos, d.text);
       }
       for (const drawing::ResolvedNote& n : notes) {
+        const drawing::SheetGraphics g = drawing::NoteGraphics(n);
+        if (!g.empty()) { // a balloon, a datum, a table
+          SvgGraphics(out, g, H);
+          continue;
+        }
         if (n.hasLeader) {
-          line(n.anchor, n.pos, 0.25);
+          line(n.anchor, drawing::LeaderEnd(n.anchor, n.pos, n.text), 0.25);
           if (glm::length(n.pos - n.anchor) > 1e-9)
             arrow(n.anchor, glm::normalize(n.anchor - n.pos));
         }
@@ -248,16 +314,8 @@ bool SaveSVG(const DrawingDocument& doc,
     const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
     const double x0 = chrome.titleBlockMin.x,
                  y0 = chrome.titleBlockMin.y; // bottom-left (sheet mm)
-    struct Row {
-      const char* label;
-      std::string value;
-    };
-    const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
-                        {"DOCUMENT", sheet.titleBlock.document},
-                        {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date},
-                        {"UNITS", core::UnitsLabel(units)}};
-    const int nRows = 5;
+    const std::vector<TitleRow> rows = TitleBlockRows(sheet, units);
+    const int nRows = static_cast<int>(rows.size());
     const double rowH = tbH / nRows;
     out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
     out << "    <rect x=\"" << Num(x0) << "\" y=\"" << Num(fy(y0 + tbH))
@@ -359,9 +417,9 @@ bool SavePDF(const DrawingDocument& doc,
         const std::string line =
             s.substr(start, nl == std::string::npos ? nl : nl - start);
         double x = at.x;
-        // Rough centring: Helvetica averages ~0.5em/char.
+        // Centred by Helvetica's widths (drawing::TextWidthMM).
         if (center)
-          x -= 0.25 * sizeMm * static_cast<double>(PdfText(line).size());
+          x -= 0.5 * drawing::TextWidthMM(line, sizeMm);
         cs << gray << ' ' << gray << ' ' << gray << " rg BT /F1 " << P(sizeMm)
            << " Tf " << P(x) << ' ' << P(y) << " Td (" << PdfText(line)
            << ") Tj ET\n";
@@ -373,11 +431,35 @@ bool SavePDF(const DrawingDocument& doc,
       cs << "0 0 0 rg\n";
     };
 
+    // Sheet furniture (drawing::SheetGraphics): the same primitives the SVG
+    // and the viewport draw.
+    const auto graphics = [&](const drawing::SheetGraphics& g) {
+      for (const auto& l : g.lines) {
+        if (l.chain)
+          poly({l.a, l.b}, drawing::LineStyle{drawing::kBendDashMM, l.widthMM});
+        else if (l.dashed)
+          poly({l.a, l.b},
+               drawing::LineStyle{drawing::kHiddenDashMM, l.widthMM});
+        else
+          seg(l.a, l.b, l.widthMM);
+      }
+      for (const auto& f : g.fills) {
+        if (f.size() < 3)
+          continue;
+        cs << P(f[0].x) << ' ' << P(f[0].y) << " m ";
+        for (size_t i = 1; i < f.size(); ++i)
+          cs << P(f[i].x) << ' ' << P(f[i].y) << " l ";
+        cs << "f\n";
+      }
+      for (const auto& t : g.texts)
+        text(t.pos, t.heightMM, t.text, 0.08, t.center);
+    };
+
     for (const drawing::SheetView& v : views) {
       for (const drawing::SheetCurve& c : v.curves)
         poly(c.points, drawing::StyleOf(c));
       for (const drawing::SheetCurve& c : v.curves) {
-        if (!c.visible || c.conicRadius <= 0.0)
+        if (!drawing::HasCentreMark(c))
           continue; // centre marks: the machinist aims at the centre
         const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
         seg({c.conicCenter.x - leg, c.conicCenter.y},
@@ -385,16 +467,29 @@ bool SavePDF(const DrawingDocument& doc,
         seg({c.conicCenter.x, c.conicCenter.y - leg},
             {c.conicCenter.x, c.conicCenter.y + leg}, 0.15);
       }
+      graphics(v.extras); // hatching, cutting planes, captions
     }
 
+    // A label knocked out of what it sits on and centred on its position,
+    // as the viewport and the SVG draw it.
+    const auto label = [&](glm::dvec2 at, const std::string& s) {
+      glm::dvec2 mn, mx;
+      drawing::TextKnockout(at, s, mn, mx);
+      cs << "1 1 1 rg " << P(mn.x) << ' ' << P(mn.y) << ' ' << P(mx.x - mn.x)
+         << ' ' << P(mx.y - mn.y) << " re f 0 0 0 rg\n";
+      text({at.x, at.y - kTextDrop}, 3.5, s, 0.08, true);
+    };
     for (const drawing::ResolvedDim& d : dims) {
       if (!d.resolved)
         continue;
       if (d.radial) {
         seg(d.center, d.rim, 0.25);
         arrow(d.rim, glm::normalize(d.rim - d.center));
+        const glm::dvec2 end = drawing::LeaderEnd(d.rim, d.labelPos, d.text);
+        if (glm::length(end - d.rim) > 1.0)
+          seg(d.rim, end, 0.25);
       } else if (d.leader) { // callout: rim -> label leader
-        seg(d.rim, d.labelPos, 0.25);
+        seg(d.rim, drawing::LeaderEnd(d.rim, d.labelPos, d.text), 0.25);
         if (glm::length(d.rim - d.labelPos) > 1e-9)
           arrow(d.rim, glm::normalize(d.rim - d.labelPos));
       } else if (d.kind != DrawingDimKind::Angle) {
@@ -408,31 +503,28 @@ bool SavePDF(const DrawingDocument& doc,
           arrow(d.dim2, -u);
         }
       }
-      text(d.labelPos, 3.5, d.text, 0.08, true);
+      label(d.labelPos, d.text);
     }
     for (const drawing::ResolvedNote& n : notes) {
+      const drawing::SheetGraphics g = drawing::NoteGraphics(n);
+      if (!g.empty()) { // a balloon, a datum, a table
+        graphics(g);
+        continue;
+      }
       if (n.hasLeader) {
-        seg(n.anchor, n.pos, 0.25);
+        seg(n.anchor, drawing::LeaderEnd(n.anchor, n.pos, n.text), 0.25);
         if (glm::length(n.pos - n.anchor) > 1e-9)
           arrow(n.anchor, glm::normalize(n.anchor - n.pos));
       }
-      text(n.pos, 3.5, n.text, 0.08, true);
+      label(n.pos, n.text);
     }
 
     // Title block.
     const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
     const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
     const double x0 = chrome.titleBlockMin.x, y0 = chrome.titleBlockMin.y;
-    struct Row {
-      const char* label;
-      std::string value;
-    };
-    const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
-                        {"DOCUMENT", sheet.titleBlock.document},
-                        {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date},
-                        {"UNITS", core::UnitsLabel(units)}};
-    const int nRows = 5;
+    const std::vector<TitleRow> rows = TitleBlockRows(sheet, units);
+    const int nRows = static_cast<int>(rows.size());
     const double rowH = tbH / nRows;
     cs << P(0.35) << " w " << P(x0) << ' ' << P(y0) << ' ' << P(tbW) << ' '
        << P(tbH) << " re S\n";

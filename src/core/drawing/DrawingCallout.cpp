@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
+#include "core/FitStandards.h"
 #include "core/Measure.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
@@ -74,22 +75,46 @@ const Tolerance* FindToleranceForRef(const Document& doc,
 }
 
 std::string FormatToleranceSuffix(const Tolerance& tol,
-                                  const units::System& units) {
+                                  const units::System& units, double nominal) {
   if (tol.IsDistance())
     return {};
-  if (!tol.isoClass.empty())
-    return " " + tol.isoClass;
   const auto signed_ = [&](double v) {
     // A leading + is not decoration: "0.05/-0.02" reads as a range, while
     // "+0.05/-0.02" reads as the two deviations it is.
-    const std::string n = core::FormatLength(v, units);
+    const std::string n = core::FormatDeviation(v, units);
     return v >= 0.0 ? "+" + n : n;
   };
+  if (!tol.isoClass.empty()) {
+    std::string out = " " + tol.isoClass;
+    if (nominal > 0.0)
+      if (const auto band = fits::Limits(nominal, tol.isoClass, nullptr)) {
+        // A zero deviation is written 0, as ISO 286 prints it: "+0.021/0".
+        const auto dev = [&](double v) {
+          return std::abs(v) < 1e-9 ? std::string("0") : signed_(v);
+        };
+        out += " (" + dev(band->upper) + "/" + dev(band->lower) + ")";
+      }
+    return out;
+  }
   return " " + signed_(tol.upper) + "/" + signed_(tol.lower);
 }
 
+const ThreadMark* FindThreadForHole(const Document& doc,
+                                    const HoleFeature& hole) {
+  const ThreadMark* found = nullptr;
+  for (const Body& body : doc.GetBodies())
+    for (const ThreadMark& m : body.threads) {
+      const std::vector<uint64_t> ids = MappedNameFeatureIds(m.face.name);
+      if (m.featureId == hole.GetId() ||
+          std::find(ids.begin(), ids.end(), hole.GetId()) != ids.end())
+        found = &m;
+    }
+  return found;
+}
+
 std::string FormatHoleCallout(const HoleFeature& hole,
-                              const units::System& units) {
+                              const units::System& units,
+                              const ThreadMark* thread) {
   // A hole that recorded what it is FOR says so, instead of leaving a reader
   // to recognise 6.6 as an M6 clearance.
   // docs/modeling/holes-and-threads.md#hole promised exactly this when the fit
@@ -105,6 +130,20 @@ std::string FormatHoleCallout(const HoleFeature& hole,
   const bool named = !hole.fitThread.empty() && !hole.fitKind.empty();
   const bool tapped = named && hole.fitKind == "tapped";
   std::string out;
+  if (tapped && thread != nullptr && !thread->designation.empty()) {
+    out = thread->designation;
+    if (!thread->threadClass.empty())
+      out += "-" + thread->threadClass; // "M6-6H", "3/8-16 UNC-2B"
+    // How deep it is THREADED, then what is drilled under it: a blind
+    // tapped hole is two depths, and the drill is what the shop starts with.
+    if (thread->length > 1e-9)
+      out += " DEEP " + len(thread->length);
+    else
+      out += hole.through ? " THRU" : " DEEP " + len(hole.depth);
+    out += ", DRILL \xC3\x98" + len(hole.diameter) +
+           (hole.through ? " THRU" : " DEEP " + len(hole.depth));
+    return out;
+  }
   if (tapped) {
     out = hole.fitThread;
     // Printed only when the document stated one: "M6" alone means the coarse

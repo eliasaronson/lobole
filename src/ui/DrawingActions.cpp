@@ -29,6 +29,7 @@
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/drawing/DrawingSection.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
@@ -49,6 +50,12 @@
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SketchRenderer.h"
+#include <BRepAdaptor_Surface.hxx>
+#include <Standard_Failure.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <gp_Cylinder.hxx>
 
 #include "core/features/DraftFeature.h"
 #include "core/features/HoleFeature.h"
@@ -87,6 +94,8 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -116,7 +125,82 @@ struct SourceBody {
   uint64_t refId = 0;     // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
   const std::vector<BendRegion>* bends = nullptr; // flat creases to draw
+  const std::vector<ThreadMark>* threads = nullptr; // cosmetic threads
+  TopoDS_Shape whole; // the body before any section cut (its element map's)
+  // A section view's cut of this body: `input.shape` is then the cut, and
+  // this says which source edge or face each of its elements is.
+  std::shared_ptr<const drawing::SectionCut> cut;
 };
+
+// Section cuts, kept while their body and plane are the same: the boolean
+// is the dear part, and a new cut every update would also be a new shape to
+// the projection cache, which keys on shape identity. Session-local, small,
+// main thread only (like the projection cache).
+struct CutEntry {
+  TopoDS_Shape source; // held, so its identity cannot be reused
+  glm::dvec3 point{0.0}, normal{0.0};
+  std::shared_ptr<const drawing::SectionCut> cut;
+  uint64_t used = 0;
+};
+
+std::shared_ptr<const drawing::SectionCut> CachedCut(const TopoDS_Shape& shape,
+                                                     const glm::dvec3& point,
+                                                     const glm::dvec3& normal,
+                                                     std::string* error) {
+  static std::vector<CutEntry> cache;
+  static uint64_t clock = 0;
+  ++clock;
+  for (CutEntry& e : cache)
+    if (e.source.IsEqual(shape) && e.point == point && e.normal == normal) {
+      e.used = clock;
+      return e.cut;
+    }
+  auto cut = drawing::CutBody(shape, point, normal, error);
+  if (!cut)
+    return nullptr;
+  // Every body of every section on the sheets in hand: a head's two
+  // assembly sections are 120 cuts, and a cache of 64 re-cut all of them
+  // (and re-projected the new shapes) on every update and export.
+  constexpr size_t kMaxCuts = 1024;
+  if (cache.size() >= kMaxCuts)
+    cache.erase(std::min_element(
+        cache.begin(), cache.end(),
+        [](const CutEntry& a, const CutEntry& b) { return a.used < b.used; }));
+  CutEntry e;
+  e.source = shape;
+  e.point = point;
+  e.normal = normal;
+  e.cut = std::make_shared<const drawing::SectionCut>(std::move(*cut));
+  e.used = clock;
+  cache.push_back(e);
+  return cache.back().cut;
+}
+
+// Replaces each body with what a section view's plane leaves of it, in the
+// body's own frame; a body wholly in front of the plane is dropped.
+bool CutForSection(const DrawingView& view, std::vector<SourceBody>& bodies,
+                   std::string* error) {
+  glm::dvec3 viewDir, up;
+  ViewAxes(view, viewDir, up);
+  std::vector<SourceBody> kept;
+  for (SourceBody& sb : bodies) {
+    const glm::dmat4 inv = glm::inverse(sb.input.transform);
+    const glm::dvec3 p(inv * glm::dvec4(view.section.point, 1.0));
+    const glm::dvec3 n =
+        glm::normalize(glm::dvec3(inv * glm::dvec4(viewDir, 0.0)));
+    auto cut = CachedCut(sb.input.shape, p, n, error);
+    if (!cut)
+      return false;
+    if (cut->shape.IsNull() || cut->edgeOrigin.empty())
+      continue; // all of it was in front of the plane
+    sb.input.shape = cut->shape;
+    sb.cut = std::move(cut);
+    sb.input.sourceId = kept.size(); // the slot index the join looks up
+    kept.push_back(std::move(sb));
+  }
+  bodies = std::move(kept);
+  return true;
+}
 
 // Appends one part document's bodies at the given world placement.
 void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
@@ -140,6 +224,8 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
         sb.refId; // what a cost is charged to, and `hidden` names
     sb.map = &body.elementMap;
     sb.bends = &body.bends;
+    sb.threads = &body.threads;
+    sb.whole = sb.input.shape;
     out.push_back(std::move(sb));
   }
 }
@@ -236,6 +322,12 @@ uint64_t SourceVersionOf(AppState& state, const DrawingView& view) {
 drawing::SheetView AssembleSheetView(AppState& state, const DrawingView& view,
                                      const std::vector<SourceBody>& bodies,
                                      const drawing::ProjectionResult& proj);
+void SectionDecorations(AppState& state, const DrawingView& view,
+                        const std::vector<SourceBody>& bodies,
+                        drawing::SheetView& sheet);
+void ThreadDecorations(AppState& state, const DrawingView& view,
+                       const std::vector<SourceBody>& bodies,
+                       drawing::SheetView& sheet);
 
 drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
                                       std::function<bool()> cancelled) {
@@ -252,6 +344,17 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
   if (bodies.empty()) {
     result.error = "source has no geometry to project";
     return result;
+  }
+  if (view.section.on) {
+    if (!CutForSection(view, bodies, &error)) {
+      result.error = error;
+      return result;
+    }
+    if (bodies.empty()) {
+      result.error = "the section plane leaves nothing of the source behind "
+                     "it -- move its point, or look the other way";
+      return result;
+    }
   }
 
   std::vector<drawing::InputBody> inputs;
@@ -273,7 +376,11 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
     return result;
   }
 
-  return AssembleSheetView(state, view, bodies, *projected);
+  drawing::SheetView sheet = AssembleSheetView(state, view, bodies, *projected);
+  sheet.sectioned = view.section.on;
+  SectionDecorations(state, view, bodies, sheet);
+  ThreadDecorations(state, view, bodies, sheet);
+  return sheet;
 }
 
 // The cheap half of a view: place the projected curves on the sheet at the
@@ -333,12 +440,29 @@ AssembleSheetView(AppState& state, const DrawingView& view,
     }
     if (const SourceBody* sb = bodyOf(pc.source.sourceId)) {
       sc.sourceId = sb->refId; // occurrence id (assembly) or body owner (part)
-      if (pc.source.edgeIndex >= 0 && sb->map) {
-        if (const std::string* n = sb->map->EdgeNameOf(pc.source.edgeIndex))
+      int edgeIndex = pc.source.edgeIndex, faceIndex = pc.source.faceIndex;
+      if (sb->cut) {
+        // A section's elements are the cut's: name them by the source
+        // element each one is, and an edge the plane made by the face it
+        // was cut out of -- the wall of a bore in section, named like its
+        // silhouette would be.
+        const drawing::SectionCut& cut = *sb->cut;
+        const int e = edgeIndex, f = faceIndex;
+        edgeIndex = faceIndex = -1;
+        if (e >= 0 && e < static_cast<int>(cut.edgeOrigin.size())) {
+          edgeIndex = cut.edgeOrigin[e];
+          if (edgeIndex < 0)
+            faceIndex = cut.edgeFromFace[e];
+        }
+        if (f >= 0 && f < static_cast<int>(cut.faceOrigin.size()))
+          faceIndex = cut.faceOrigin[f];
+      }
+      if (edgeIndex >= 0 && sb->map) {
+        if (const std::string* n = sb->map->EdgeNameOf(edgeIndex))
           sc.edge = ElementRef{sb->featureId, *n};
       }
-      if (pc.source.faceIndex >= 0 && sb->map) {
-        if (const std::string* n = sb->map->NameOf(pc.source.faceIndex))
+      if (faceIndex >= 0 && sb->map) {
+        if (const std::string* n = sb->map->NameOf(faceIndex))
           sc.silFace = ElementRef{sb->featureId, *n};
       }
     }
@@ -384,6 +508,224 @@ AssembleSheetView(AppState& state, const DrawingView& view,
     result.bboxMax = hi;
   }
   return result;
+}
+
+// What a section adds to the sheet (docs/drawings/README.md#section-views):
+// on the section view itself, hatching over the faces the cut exposed and
+// its caption; on any other view of the same source that sees the plane
+// edge-on, the cutting-plane line, thick at its ends, with arrows in the
+// direction the section looks and its letter at both.
+void SectionDecorations(AppState& state, const DrawingView& view,
+                        const std::vector<SourceBody>& bodies,
+                        drawing::SheetView& sheet) {
+  if (!sheet.hasGeometry || !state.drawing)
+    return;
+  glm::dvec3 viewDir, up;
+  ViewAxes(view, viewDir, up);
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 pos = DrawingFoldedPosition(state, view).pos;
+  const auto toSheet = [&](const glm::dvec3& world) {
+    return pos + s * drawing::ProjectPoint(world, viewDir, up);
+  };
+  drawing::SheetGraphics& g = sheet.extras;
+
+  if (view.section.on) {
+    // One hatch per part, alternating direction, so two parts that touch
+    // in the section read as two.
+    std::vector<uint64_t> parts;
+    for (const SourceBody& sb : bodies) {
+      if (!sb.cut || sb.cut->cutLoops.empty())
+        continue;
+      size_t which =
+          std::find(parts.begin(), parts.end(), sb.refId) - parts.begin();
+      if (which == parts.size())
+        parts.push_back(sb.refId);
+      std::vector<std::vector<glm::dvec2>> loops;
+      for (const auto& loop : sb.cut->cutLoops) {
+        std::vector<glm::dvec2> pts;
+        for (const glm::dvec3& p : loop)
+          pts.push_back(
+              toSheet(glm::dvec3(sb.input.transform * glm::dvec4(p, 1.0))));
+        loops.push_back(std::move(pts));
+      }
+      constexpr double kHatchMM = 2.5, kPi = 3.14159265358979323846;
+      const double angle = (which % 2 == 0) ? kPi / 4.0 : 3.0 * kPi / 4.0;
+      for (const auto& [a, b] : drawing::HatchRegion(loops, kHatchMM, angle))
+        g.lines.push_back({a, b, 0.18});
+    }
+    const std::string label =
+        view.section.label.empty()
+            ? std::string("SECTION")
+            : "SECTION " + view.section.label + "-" + view.section.label;
+    g.texts.push_back(
+        {{0.5 * (sheet.bboxMin.x + sheet.bboxMax.x), sheet.bboxMin.y - 9.0},
+         label,
+         true,
+         5.0});
+  }
+
+  for (const DrawingView& other : state.drawing->GetViews()) {
+    if (other.id == view.id || !other.section.on ||
+        other.sourceDocId != view.sourceDocId)
+      continue;
+    glm::dvec3 sDir, sUp;
+    ViewAxes(other, sDir, sUp);
+    sDir = glm::normalize(sDir);
+    if (std::abs(glm::dot(sDir, glm::normalize(viewDir))) > 1e-6)
+      continue; // this view does not see that plane edge-on
+    // Once, on the view the section is projected from, when it folds from
+    // one that sees the plane: the line on every view that could show it
+    // drew it twice on a plate's top and underside.
+    if (other.baseViewId != 0 && other.baseViewId != view.id)
+      if (const DrawingView* base = state.drawing->FindView(other.baseViewId)) {
+        glm::dvec3 bDir, bUp;
+        ViewAxes(*base, bDir, bUp);
+        if (std::abs(glm::dot(sDir, glm::normalize(bDir))) < 1e-6)
+          continue;
+      }
+    const glm::dvec3 P = other.section.point;
+    const glm::dvec2 p0 = toSheet(P);
+    const glm::dvec3 along = glm::normalize(glm::cross(sDir, viewDir));
+    const glm::dvec2 d = glm::normalize(toSheet(P + along) - p0);
+    const glm::dvec2 sight = glm::normalize(toSheet(P + sDir) - p0);
+    double t0 = 1e300, t1 = -1e300;
+    for (const glm::dvec2& c : {sheet.bboxMin, sheet.bboxMax,
+                                glm::dvec2(sheet.bboxMin.x, sheet.bboxMax.y),
+                                glm::dvec2(sheet.bboxMax.x, sheet.bboxMin.y)}) {
+      t0 = std::min(t0, glm::dot(c - p0, d));
+      t1 = std::max(t1, glm::dot(c - p0, d));
+    }
+    constexpr double kOverrun = 6.0, kThick = 6.0, kShaft = 9.0;
+    const glm::dvec2 e0 = p0 + d * (t0 - kOverrun);
+    const glm::dvec2 e1 = p0 + d * (t1 + kOverrun);
+    g.lines.push_back({e0, e1, 0.25, true});
+    g.lines.push_back({e0, e0 + d * kThick, 0.7});
+    g.lines.push_back({e1 - d * kThick, e1, 0.7});
+    for (const glm::dvec2& e : {e0 + d * 2.0, e1 - d * 2.0}) {
+      // The arrow stands on the viewer's side and points the way the section
+      // looks, its tip on the line.
+      const glm::dvec2 tail = e - sight * kShaft;
+      g.lines.push_back({tail, e - sight * 2.6, 0.35});
+      const glm::dvec2 across(-sight.y, sight.x);
+      const glm::dvec2 base = e - sight * 3.0;
+      g.fills.push_back({e, base + across * 1.0, base - across * 1.0});
+      if (!other.section.label.empty())
+        g.texts.push_back({tail - sight * 4.0 - glm::dvec2(0.0, 1.75),
+                           other.section.label, true, 5.0});
+    }
+  }
+}
+
+// The ISO 6410 convention for a thread nothing modelled (a Thread feature's
+// cosmetic thread, a Hole's tapped fit), drawn in thin line
+// (docs/drawings/README.md#threads): seen down its axis, three quarters of a
+// circle at the major diameter of a tapped hole (the minor of a screw) where
+// the drilled rim shows; seen from the side, two lines along the threaded
+// length -- solid where a section cuts the thread open, dashed where the
+// hole is hidden, solid on a screw.
+void ThreadDecorations(AppState& state, const DrawingView& view,
+                       const std::vector<SourceBody>& bodies,
+                       drawing::SheetView& sheet) {
+  if (!sheet.hasGeometry)
+    return;
+  glm::dvec3 viewDir, up;
+  ViewAxes(view, viewDir, up);
+  const glm::dvec3 d = glm::normalize(viewDir);
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 pos = DrawingFoldedPosition(state, view).pos;
+  const auto toSheet = [&](const glm::dvec3& world) {
+    return pos + s * drawing::ProjectPoint(world, viewDir, up);
+  };
+  constexpr double kThin = 0.18, kPi = 3.14159265358979323846;
+  drawing::SheetGraphics& g = sheet.extras;
+  for (const SourceBody& sb : bodies) {
+    if (!sb.threads || sb.threads->empty() || !sb.map || sb.whole.IsNull())
+      continue;
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(sb.whole, TopAbs_FACE, faces);
+    // One per face: the last mark written says the most (a Thread on a
+    // tapped Hole's bore comes after the Hole).
+    std::map<int, const ThreadMark*> byFace;
+    for (const ThreadMark& m : *sb.threads)
+      if (m.face.featureId == sb.featureId && !m.modeled)
+        if (const auto i = sb.map->Resolve(m.face.name))
+          byFace[*i] = &m;
+    for (const auto& [index, mark] : byFace) {
+      if (index + 1 > faces.Extent())
+        continue;
+      try {
+        const BRepAdaptor_Surface surf(TopoDS::Face(faces(index + 1)));
+        if (surf.GetType() != GeomAbs_Cylinder)
+          continue;
+        const gp_Cylinder cyl = surf.Cylinder();
+        const gp_Pnt l = cyl.Location();
+        const gp_Dir a = cyl.Axis().Direction();
+        const double faceR = cyl.Radius();
+        double v0 = surf.FirstVParameter(), v1 = surf.LastVParameter();
+        if (v1 < v0)
+          std::swap(v0, v1);
+        if (mark->length > 1e-9)
+          v1 = std::min(v1, v0 + mark->length);
+        const glm::dmat4& xf = sb.input.transform;
+        const auto world = [&](double v) {
+          return glm::dvec3(xf * glm::dvec4(l.X() + v * a.X(),
+                                            l.Y() + v * a.Y(),
+                                            l.Z() + v * a.Z(), 1.0));
+        };
+        const glm::dvec3 p0 = world(v0), p1 = world(v1);
+        const glm::dvec3 axis = glm::normalize(p1 - p0);
+        // The thin line's radius: a tapped hole's major, a screw's root.
+        const double P = mark->pitch;
+        const double major = mark->majorDia > 0.0 ? 0.5 * mark->majorDia
+                             : mark->external     ? faceR
+                                                  : faceR + 0.54 * P;
+        const double thinR = mark->external ? major - 0.6134 * P : major;
+        if (std::abs(glm::dot(axis, d)) > 0.999) {
+          // Down the axis: only where the drilled rim (or the screw's end)
+          // shows -- a thread behind the part is left off, as drafting does.
+          const glm::dvec2 c = toSheet(p0);
+          bool shows = false;
+          for (const drawing::SheetCurve& sc : sheet.curves)
+            shows = shows || (sc.visible && sc.conicRadius > 0.0 &&
+                              glm::length(sc.conicCenter - c) < 1e-3 &&
+                              std::abs(sc.conicRadius - s * faceR) <
+                                  1e-3 * std::max(1.0, s * faceR));
+          if (!shows)
+            continue;
+          // Three quarters, the gap in the upper right quadrant.
+          constexpr int kSteps = 36;
+          glm::dvec2 prev = c + s * thinR * glm::dvec2(-1.0, 0.0);
+          for (int i = 1; i <= kSteps; ++i) {
+            const double t = kPi + 1.5 * kPi * i / kSteps; // 180 -> 450 deg
+            const glm::dvec2 q =
+                c + s * thinR * glm::dvec2(std::cos(t), std::sin(t));
+            g.lines.push_back({prev, q, kThin});
+            prev = q;
+          }
+          continue;
+        }
+        if (std::abs(glm::dot(axis, d)) > 1e-3)
+          continue; // oblique: no convention to draw
+        // From the side: two lines `thinR` either side of the axis.
+        const glm::dvec3 across = glm::normalize(glm::cross(axis, d));
+        bool cutOpen = false;
+        if (view.section.on)
+          cutOpen = std::abs(glm::dot(p0 - view.section.point, d)) < faceR;
+        const bool dashed = !mark->external && !cutOpen;
+        if (dashed && !view.showHidden)
+          continue;
+        for (double side : {-1.0, 1.0}) {
+          drawing::SheetGraphics::Line line{
+              toSheet(p0 + across * (side * thinR)),
+              toSheet(p1 + across * (side * thinR)), kThin};
+          line.dashed = dashed;
+          g.lines.push_back(line);
+        }
+      } catch (const Standard_Failure&) {
+        continue; // an unreadable face draws no convention, not a wrong one
+      }
+    }
+  }
 }
 
 } // namespace
@@ -484,7 +826,7 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
   for (const auto& note : state.drawing->GetNotes()) {
     const auto resolved = ResolveDrawingNote(state, note);
     glm::dvec2 mn, mx;
-    drawing::LabelBox(resolved.pos, resolved.text, mn, mx);
+    drawing::NoteBox(resolved, mn, mx);
     ctx.avoid.push_back({mn, mx});
   }
   // Resolved HERE, where the source document is reachable: a hole callout
@@ -496,6 +838,92 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
   return drawing::PlaceDimOffset(dim, it->second, ctx,
                                  rd.resolved ? &rd : nullptr);
 }
+
+namespace {
+
+// The parts list of an assembly view: its source's leaves less the
+// occurrences the view hides
+// (docs/drawings/README.md#parts-lists-and-balloons).
+std::optional<BomTable> ViewBom(AppState& state, const DrawingView& view,
+                                std::string* why) {
+  const AssemblyDocument* asmDoc = AssemblyDocById(state, view.sourceDocId);
+  if (asmDoc == nullptr) {
+    *why = "a parts list is of an assembly; this view draws a part";
+    return std::nullopt;
+  }
+  auto flat = assembly::Flatten(*asmDoc, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat) {
+    *why = flat.error();
+    return std::nullopt;
+  }
+  std::vector<assembly::FlatInstance> shown;
+  // What the table depends on: every shown leaf's part, the version of the
+  // document it is, its configuration, material and root occurrence. A
+  // balloon resolves through this on every placement probe, every check
+  // and every export, and the masses under it are a mass-properties pass
+  // per part: seventeen balloons on a 60-part head took an export past a
+  // minute until the table was kept while this key held.
+  std::string key = std::to_string(view.id);
+  for (assembly::FlatInstance& inst : *flat)
+    if (std::find(view.hidden.begin(), view.hidden.end(),
+                  inst.rootOccurrenceId) == view.hidden.end()) {
+      key += "|" + std::to_string(inst.partId) + ":" +
+             std::to_string(inst.part ? inst.part->Version() : 0) + ":" +
+             std::to_string(inst.configurationId) + ":" + inst.material + ":" +
+             std::to_string(inst.rootOccurrenceId) + ":" +
+             (inst.visible ? "v" : "h");
+      shown.push_back(std::move(inst));
+    }
+  static std::map<std::string, BomTable> cache;
+  if (const auto it = cache.find(key); it != cache.end())
+    return it->second;
+  if (cache.size() > 32)
+    cache.clear();
+  return cache[key] = ComputeBomOf(state, shown);
+}
+
+std::string Upper(std::string s) {
+  for (char& c : s)
+    c = c == '_' ? ' ' : static_cast<char>(std::toupper(c));
+  return s;
+}
+
+// The parts list as a table note's text (drawing::IsTableText): a caption
+// row if there is one, the header, then one row per BOM line, numbered as
+// the balloons number them.
+std::string BomTableText(AppState& state, const BomTable& bom,
+                         const std::string& caption) {
+  std::string out;
+  if (!caption.empty())
+    out += caption + "\n";
+  out += "ITEM\tQTY\tPART\tKIND\tMATERIAL\tMASS g";
+  for (size_t i = 0; i < bom.rows.size(); ++i) {
+    const BomRow& r = bom.rows[i];
+    std::string kind;
+    if (r.bought()) {
+      kind = "BOUGHT";
+    } else {
+      // A part declared printed (set_print_process) says so: its sizes are
+      // modelled with the print allowance, and a shop must not machine it.
+      // The process is the part's, whatever configuration it is placed in,
+      // so the live part answers it.
+      const Document* part = PartDocById(state, r.partId);
+      kind = part && part->PrintProcess() ? "PRINTED" : "MADE";
+      if (!r.configuration.empty())
+        kind += " (" + r.configuration + ")";
+    }
+    char mass[32] = "";
+    if (r.massKnown)
+      std::snprintf(mass, sizeof mass, "%.1f", r.unitMassG);
+    out += "\n" + std::to_string(i + 1) + "\t" + std::to_string(r.quantity) +
+           "\t" + r.partName + "\t" + kind + "\t" + Upper(r.material) + "\t" +
+           mass;
+  }
+  return out;
+}
+
+} // namespace
 
 drawing::ResolvedNote ResolveDrawingNote(AppState& state,
                                          const DrawingNote& note) {
@@ -531,6 +959,64 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
   const auto it = state.drawingRenders.find(note.viewId);
   const drawing::SheetView* sheetView =
       it == state.drawingRenders.end() ? nullptr : &it->second;
+  const auto unresolved = [&](const std::string& shown,
+                              const std::string& why) {
+    drawing::ResolvedNote rn;
+    rn.id = note.id;
+    rn.pos = note.pos;
+    rn.style = note.style;
+    rn.text = shown;
+    rn.resolved = false;
+    rn.error = why;
+    return rn;
+  };
+  if (note.table == NoteTable::Bom) {
+    // The rows are what the view draws NOW: an occurrence the view hides
+    // is not on its parts list.
+    std::string why;
+    const auto bom = view ? ViewBom(state, *view, &why) : std::nullopt;
+    if (!bom)
+      return unresolved(note.text.empty() ? "PARTS LIST" : note.text,
+                        view ? why : "a parts list needs `view`");
+    DrawingNote table = note;
+    table.text = BomTableText(state, *bom, note.text);
+    return drawing::ResolveNote(table, sheetView, symbols);
+  }
+  if (note.style == NoteStyle::Balloon && note.text.empty()) {
+    // The item number of the part the leader points at, in the same list
+    // the view's parts list draws -- numbered the same way, by the same
+    // code, so a balloon and its row cannot disagree.
+    std::string why = "a balloon with no text needs an assembly view";
+    // Numbered by the sheet's parts list when it has one of this assembly,
+    // whatever view the balloon is on: a plan with the yoke left off lists
+    // fewer parts, and its own numbering would disagree with the table.
+    const DrawingView* listed = view;
+    if (view)
+      for (const DrawingNote& other : state.drawing->GetNotes())
+        if (other.table == NoteTable::Bom)
+          if (const DrawingView* v = state.drawing->FindView(other.viewId);
+              v && v->sourceDocId == view->sourceDocId) {
+            listed = v;
+            break;
+          }
+    const auto bom = listed ? ViewBom(state, *listed, &why) : std::nullopt;
+    if (!bom)
+      return unresolved("?", why);
+    if (note.leader.occurrenceId == 0)
+      return unresolved("?", "a balloon numbers the occurrence its leader "
+                             "points at; give the ref an `occurrence`");
+    DrawingNote balloon = note;
+    for (size_t r = 0; r < bom->rows.size() && balloon.text.empty(); ++r)
+      for (uint64_t occ : bom->rows[r].rootOccurrences)
+        if (occ == note.leader.occurrenceId) {
+          balloon.text = std::to_string(r + 1);
+          break;
+        }
+    if (balloon.text.empty())
+      return unresolved("?", "the occurrence this balloon points at is not "
+                             "on the view's parts list (hidden in the view?)");
+    return drawing::ResolveNote(balloon, sheetView, symbols);
+  }
   if (note.table == NoteTable::Bends) {
     // The rows are the part's bends NOW, in the configuration the view draws,
     // so the table cannot disagree with the bend lines beside it.
@@ -573,6 +1059,65 @@ units::System ActiveDrawingUnits(AppState& state) {
   return {};
 }
 
+namespace {
+
+// "1:2", "2:1", "1:1": reductions read 1:n and enlargements n:1.
+std::string ScaleRatio(double s) {
+  if (s <= 0.0)
+    return {};
+  char buf[32];
+  if (s >= 1.0)
+    std::snprintf(buf, sizeof buf, "%.3g:1", s);
+  else
+    std::snprintf(buf, sizeof buf, "1:%.3g", 1.0 / s);
+  return buf;
+}
+
+// A material slug as a title block writes it: "plastic_black" ->
+// "PLASTIC BLACK".
+std::string MaterialWords(std::string slug) {
+  for (char& c : slug)
+    c = c == '_' ? ' ' : static_cast<char>(std::toupper(c));
+  return slug;
+}
+
+} // namespace
+
+Sheet DrawingSheetForOutput(AppState& state) {
+  if (!state.drawing)
+    return {};
+  Sheet sheet = state.drawing->GetSheet();
+  const std::vector<DrawingView>& views = state.drawing->GetViews();
+  if (views.empty())
+    return sheet;
+  const DrawingView& first = views.front();
+  if (sheet.titleBlock.scale.empty()) {
+    // The sheet's scale is its first view's; a view drawn at another says
+    // so beside it, and the block says that it may.
+    sheet.titleBlock.scale = ScaleRatio(first.scale);
+    for (const DrawingView& v : views)
+      if (std::abs(v.scale - first.scale) > 1e-9) {
+        sheet.titleBlock.scale += " UNLESS SHOWN";
+        break;
+      }
+  }
+  if (sheet.titleBlock.material.empty())
+    if (const Document* doc = DrawingViewDocument(state, first)) {
+      std::string slug;
+      for (const Body& body : doc->GetBodies()) {
+        if (body.reference || body.material.empty())
+          continue;
+        if (!slug.empty() && slug != body.material) {
+          slug = "mixed";
+          break;
+        }
+        slug = body.material;
+      }
+      sheet.titleBlock.material = MaterialWords(slug);
+    }
+  return sheet;
+}
+
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error) {
   if (!state.drawing) {
@@ -581,6 +1126,9 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     return false;
   }
   UpdateDrawingRenders(state); // export reflects current geometry
+  // The sheet as it goes out, its title block's blanks filled.
+  DrawingDocument out = *state.drawing;
+  out.GetSheet() = DrawingSheetForOutput(state);
   std::vector<drawing::SheetView> views;
   for (const DrawingView& v : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(v.id);
@@ -604,11 +1152,11 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext == ".svg")
-    return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error,
-                                  notes, sheetUnits);
+    return DrawingExport::SaveSVG(out, views, dims, path, error, notes,
+                                  sheetUnits);
   if (ext == ".pdf")
-    return DrawingExport::SavePDF(*state.drawing, views, dims, path, error,
-                                  notes, sheetUnits);
+    return DrawingExport::SavePDF(out, views, dims, path, error, notes,
+                                  sheetUnits);
   if (error)
     *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
   return false;

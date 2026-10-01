@@ -12,6 +12,7 @@
 
 class Document;
 struct Tolerance;
+struct ThreadMark;
 class HoleFeature;
 
 // Callout dimension support (drawings round 2): resolving a projected hole
@@ -60,8 +61,13 @@ const Tolerance* FindToleranceForRef(const Document& doc,
 // Here rather than at the call site because this file is where the sheet's
 // text vocabulary lives, Latin-1 and all. Deviations follow the sheet's own
 // rule: the document's unit, no suffix, the title block says which once.
+//
+// Given the `nominal` size it is on, a class states its limits too -- " K7
+// (+0.007/-0.018)" -- because the shop holds the numbers, and a reader with
+// no ISO 286 table to hand cannot make a K7 bore from the letters alone.
 std::string FormatToleranceSuffix(const Tolerance& tol,
-                                  const units::System& units = {});
+                                  const units::System& units = {},
+                                  double nominal = 0.0);
 
 // "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°"), with
 // every length in the document's unit and no suffix — the title block says
@@ -72,8 +78,21 @@ std::string FormatToleranceSuffix(const Tolerance& tol,
 // and a TAPPED one leads with the thread instead of the tap drill ("M3 THRU",
 // "M3×0.35 DEEP 8"), because the drill is not what gets made. A hole with no
 // fit is formatted exactly as it always was.
+//
+// Given the thread the hole's bores carry (FindThreadForHole), a tapped hole
+// says all a machinist needs and nothing he must guess: the designation with
+// its class, how deep it is threaded, and the drill under it --
+// "3/8-16 UNC-2B DEEP 12.7, DRILL Ø7.94 DEEP 12.7". Without one it reads as
+// it always has.
 std::string FormatHoleCallout(const HoleFeature& hole,
-                              const units::System& units = {});
+                              const units::System& units = {},
+                              const ThreadMark* thread = nullptr);
+
+// The thread on a bore this hole drilled, the LAST one written (a Thread
+// feature on a tapped Hole's bore comes after the Hole and says more: the
+// class), or null.
+const ThreadMark* FindThreadForHole(const Document& doc,
+                                    const HoleFeature& hole);
 
 // The uniform centre-to-centre pitch of a collinear row, or nullopt when the
 // centres aren't collinear (within tol) or the gaps aren't uniform. Two

@@ -113,14 +113,19 @@ double LastExit(const std::vector<parts::StackSegment>& stack) {
 } // namespace
 
 BomTable ComputeBom(AppState& state) {
-  BomTable table;
   if (!state.assembly)
-    return table;
+    return {};
+  return ComputeBomOf(state, FlattenActiveAssembly(state));
+}
+
+BomTable ComputeBomOf(AppState& state,
+                      const std::vector<assembly::FlatInstance>& leaves) {
+  BomTable table;
   // A5: aggregate over the LEAF parts of the whole tree, so a sub-assembly
   // placed twice doubles its parts' quantities. The per-unit BOM needs no
   // code of its own — it is this same function on that assembly's tab.
   std::vector<std::string> rowWears; // each row's material override
-  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+  for (const assembly::FlatInstance& inst : leaves) {
     if (!inst.visible)
       continue; // hidden or suppressed, here or above: out of the BOM
     // One line per part, configuration and material: what is made, and
@@ -135,12 +140,14 @@ BomTable ComputeBom(AppState& state) {
       }
     if (row) {
       row->quantity++;
+      row->rootOccurrences.push_back(inst.rootOccurrenceId);
       continue;
     }
     BomRow fresh;
     fresh.partId = inst.partId;
     fresh.configurationId = inst.configurationId;
     fresh.quantity = 1;
+    fresh.rootOccurrences.push_back(inst.rootOccurrenceId);
     for (const PartSlot& slot : state.parts)
       if (slot.kind == DocKind::Part && slot.id == inst.partId)
         fresh.partName = slot.name;

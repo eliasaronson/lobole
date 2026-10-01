@@ -93,7 +93,23 @@ struct ResolvedNote {
   glm::dvec2 pos{0.0};
   bool hasLeader = false;
   glm::dvec2 anchor{0.0};
+  NoteStyle style = NoteStyle::Text; // v147
 };
+
+// A table note's text: rows split by '\n', cells by '\t'; a row with no tab
+// spans the table (a caption). Drawn ruled, its bottom-right corner at the
+// note's position (v147, the parts list).
+[[nodiscard]] bool IsTableText(const std::string& text);
+
+// How a note is drawn when it is more than a line of text with an optional
+// arrow: a balloon, a datum symbol, a ruled table. Empty for a plain note,
+// which every surface draws as its centred text and arrowed leader.
+[[nodiscard]] SheetGraphics NoteGraphics(const ResolvedNote& note);
+
+// The box a note occupies on the sheet: LabelBox for a plain note, the
+// symbol or the table for the rest -- what placement avoids and
+// check_drawing flags overlaps against.
+void NoteBox(const ResolvedNote& note, glm::dvec2& mn, glm::dvec2& mx);
 
 // Resolve a note against its view's projection (`view` may be null for a
 // free note; a leader that no longer matches degrades to text-only rather
@@ -132,6 +148,21 @@ inline constexpr double kLabelLineMM = 5.0;
 
 void LabelBox(const glm::dvec2& labelPos, const std::string& text,
               glm::dvec2& mn, glm::dvec2& mx);
+
+// Where a leader from `from` stops at a label centred on `labelPos`: at the
+// side of its text facing `from`, on the first line's middle. A leader drawn
+// to the label's CENTRE ran through the words it introduces.
+[[nodiscard]] glm::dvec2 LeaderEnd(const glm::dvec2& from,
+                                   const glm::dvec2& labelPos,
+                                   const std::string& text);
+
+// The white box a label's text knocks out of whatever it sits on (the
+// dimension line it interrupts, a hatch), drawn under the text: what the
+// viewport always did and the exporters did not, so a "12.7" sat with its
+// dimension line through it on paper. Text is centred on `labelPos`, its
+// first line's middle there, later lines below.
+void TextKnockout(const glm::dvec2& labelPos, const std::string& text,
+                  glm::dvec2& mn, glm::dvec2& mx);
 
 // DefaultDimOffset with lanes: the base placement, stepped outward until
 // the resulting LABEL clears everything in `ctx` (five sheets in one

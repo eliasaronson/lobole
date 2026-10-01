@@ -201,7 +201,13 @@ TEST_CASE("FormatLength/FormatAngle produce compact display text",
   const units::System mm; // the default: millimetres, degrees
   CHECK(core::FormatLength(40.0, mm) == "40");
   CHECK(core::FormatLength(8.5, mm) == "8.5");
-  CHECK(core::FormatLength(12.345, mm) == "12.3");
+  CHECK(core::FormatLength(12.344, mm) == "12.34");
+  // Decimals, not significant figures: a 37.34 hole spacing read 37.3, and
+  // a 1051 mm frame would have read "1.05e+03".
+  CHECK(core::FormatLength(2.0 * 18.66762, mm) == "37.34");
+  CHECK(core::FormatLength(1051.09, mm) == "1051.09");
+  // A deviation is a decimal finer: a K7's +0.007 must not read 0.01.
+  CHECK(core::FormatDeviation(0.007, mm) == "0.007");
   CHECK(core::FormatLength(-0.0, mm) == "0");
   CHECK(core::FormatLength(0.0, mm) == "0");
   CHECK(core::FormatAngle(0.0, mm) == "0.0\xC2\xB0");
@@ -651,11 +657,12 @@ TEST_CASE("SheetChrome: one source for extent, border, and title block",
   sheet.landscape = true;
   const SheetChrome landscape = ChromeOf(sheet);
   CHECK(landscape.extent == glm::dvec2{420.0, 297.0});
-  // Title block pinned to the border's bottom-right corner, 160x32.
+  // Title block pinned to the border's bottom-right corner, 160x48 (eight
+  // rows since v147).
   CHECK(landscape.titleBlockMax.x == Catch::Approx(410.0));
   CHECK(landscape.titleBlockMin.x == Catch::Approx(410.0 - 160.0));
   CHECK(landscape.titleBlockMin.y == Catch::Approx(10.0));
-  CHECK(landscape.titleBlockMax.y == Catch::Approx(42.0));
+  CHECK(landscape.titleBlockMax.y == Catch::Approx(58.0));
 
   // A sheet narrower than the block clamps the width to the border span.
   Sheet letter;

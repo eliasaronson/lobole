@@ -6,8 +6,10 @@
 
 #ifdef HAVE_OPENCASCADE
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
+#include <Geom2d_Curve.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
 #include <HLRAlgo_EdgeIterator.hxx>
@@ -36,7 +38,9 @@
 #include <gp_Circ2d.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Elips2d.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 #include <chrono>
 #include <mutex>
@@ -222,6 +226,45 @@ struct BodyMaps {
   TopTools_IndexedMapOfShape edges;
   TopTools_IndexedMapOfShape faces;
 };
+
+// Whether a model edge is a SEAM of one of its body's faces, and what it is
+// then in a view looking along `viewDir`: the face's index when the face is
+// seen edge-on there (its silhouette), -1 when the face is seen across it
+// (no line at all). Nothing when the edge is no seam.
+std::optional<int> SeamFace(const std::vector<BodyMaps>& maps,
+                            const SourceRef& source,
+                            const glm::dvec3& viewDir) {
+  for (const BodyMaps& bm : maps) {
+    if (bm.sourceId != source.sourceId)
+      continue;
+    if (source.edgeIndex < 0 || source.edgeIndex >= bm.edges.Extent())
+      return std::nullopt;
+    const TopoDS_Edge edge = TopoDS::Edge(bm.edges(source.edgeIndex + 1));
+    for (int f = 1; f <= bm.faces.Extent(); ++f) {
+      const TopoDS_Face face = TopoDS::Face(bm.faces(f));
+      if (!BRep_Tool::IsClosed(edge, face))
+        continue;
+      double a = 0.0, b = 0.0;
+      const Handle(Geom2d_Curve) uv =
+          BRep_Tool::CurveOnSurface(edge, face, a, b);
+      if (uv.IsNull())
+        return std::nullopt;
+      const gp_Pnt2d at = uv->Value(0.5 * (a + b));
+      gp_Pnt p;
+      gp_Vec du, dv;
+      BRepAdaptor_Surface(face).D1(at.X(), at.Y(), p, du, dv);
+      gp_Vec n = du.Crossed(dv);
+      if (n.Magnitude() < 1e-12)
+        return std::nullopt;
+      n.Normalize();
+      const glm::dvec3 d = glm::normalize(viewDir);
+      return std::abs(n.X() * d.x + n.Y() * d.y + n.Z() * d.z) > 1e-3 ? -1
+                                                                      : f - 1;
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
 
 // Fallback identity for sub-shapes the HLR outliner rebuilt or split (they
 // fail IsSame against the input): split pieces share the source's stored
@@ -666,6 +709,20 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
       if (source.edgeIndex >= 0) {
         if (ed.Rg1Line())
           kind = ed.RgNLine() ? CurveKind::Sewn : CurveKind::Smooth;
+        // A SEAM is not an edge of the part: it is where a closed surface's
+        // parameters wrap. Seen across the face it lies in, it is no line
+        // at all (a chamfer cone's seam drew a radial tick in a top view);
+        // seen on the face's horizon it is that face's silhouette, and is
+        // named by the face like one -- so a cylinder's two side lines are
+        // one face's two silhouettes, and a Ø across them resolves whichever
+        // side happened to carry the seam.
+        if (const auto seam = SeamFace(maps, source, viewDir)) {
+          if (*seam < 0)
+            continue;
+          source.faceIndex = *seam;
+          source.edgeIndex = -1;
+          kind = CurveKind::Outline;
+        }
       } else if (const int genFace = genFaceOf[e]; genFace > 0) {
         // No source model edge: a projection-generated silhouette, named by
         // the face whose horizon it is.

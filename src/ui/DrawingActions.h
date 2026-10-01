@@ -95,6 +95,11 @@ const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
 // agree about it; they did not, and the numbers were mm regardless.
 units::System ActiveDrawingUnits(AppState& state);
 
+// The active drawing's sheet as it goes out: the title block's blank
+// MATERIAL and SCALE filled from the first view (its part's material, its
+// scale). What the viewport shows and what an export writes, so they agree.
+Sheet DrawingSheetForOutput(AppState& state);
+
 // Where a view actually lands on the sheet: a folded child's shared axis is
 // locked to its base (design §2), so the stored position's x and/or y may be
 // overridden at projection time. The one fold computation — projection and

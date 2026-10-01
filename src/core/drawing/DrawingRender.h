@@ -62,10 +62,87 @@ inline constexpr double kBendDashMM[] = {6.0, 1.2, 0.6, 1.2};
   return {{}, 0.35};
 }
 
+// Whether a projected curve gets a centre mark: a WHOLE circle seen whole.
+// An arc of a circle mostly hidden marked a centre in the empty air beside a
+// section, where nothing on the sheet was round.
+[[nodiscard]] inline bool HasCentreMark(const SheetCurve& c) {
+  return c.visible && c.conicRadius > 0.0 && c.closed;
+}
+
+// How wide `text` sets in Helvetica at `heightMM`, from its AFM advance
+// widths by class (capitals and W/M wide, digits, lower case, i/l/t/f
+// narrow, spaces and punctuation): a table sized for an average glyph had
+// ALUMINUM run through its column rule. UTF-8 aware: Ø and × are one glyph.
+[[nodiscard]] inline double TextWidthMM(const std::string& text,
+                                        double heightMM = 3.5) {
+  double em = 0.0;
+  for (size_t i = 0; i < text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    if ((c & 0xC0) == 0x80)
+      continue; // a UTF-8 continuation byte
+    if (c >= 0x80)
+      em += 0.70; // Ø, ×, °: as wide as a capital
+    else if (c == 'M' || c == 'W' || c == 'm' || c == 'w')
+      em += 0.85;
+    else if (c >= 'A' && c <= 'Z')
+      em += 0.70;
+    else if (c >= '0' && c <= '9')
+      em += 0.56;
+    else if (c == 'i' || c == 'l' || c == 'j' || c == 't' || c == 'f' ||
+             c == 'r' || c == 'I')
+      em += 0.30;
+    else if (c >= 'a' && c <= 'z')
+      em += 0.56;
+    else if (c == ' ' || c == '.' || c == ',' || c == ':' || c == ';' ||
+             c == '\'' || c == '!' || c == '|')
+      em += 0.28;
+    else
+      em += 0.58;
+  }
+  return em * heightMM;
+}
+
+// Sheet furniture that is not projected geometry -- a section's hatching and
+// its cutting-plane line, a balloon, a datum symbol, a ruled table -- as the
+// three primitives every surface can draw: lines, filled polygons and text.
+// ONE description, built in core, so the viewport, the SVG and the PDF draw
+// the same symbol rather than three hand-copies of it.
+struct SheetText {
+  glm::dvec2 pos{0.0}; // baseline, sheet mm
+  std::string text;
+  bool center = true;    // centred on pos.x; false = starts at pos.x
+  double heightMM = 3.5; // cap-height-ish: the font size
+};
+struct SheetGraphics {
+  struct Line {
+    glm::dvec2 a{0.0}, b{0.0};
+    double widthMM = 0.25;
+    bool chain = false;  // a chain line (kBendDashMM): a cutting plane
+    bool dashed = false; // a hidden line (kHiddenDashMM): a hidden thread
+  };
+  std::vector<Line> lines;
+  std::vector<std::vector<glm::dvec2>> fills; // filled convex polygons
+  std::vector<SheetText> texts;
+  [[nodiscard]] bool empty() const {
+    return lines.empty() && fills.empty() && texts.empty();
+  }
+  void Append(const SheetGraphics& o) {
+    lines.insert(lines.end(), o.lines.begin(), o.lines.end());
+    fills.insert(fills.end(), o.fills.begin(), o.fills.end());
+    texts.insert(texts.end(), o.texts.begin(), o.texts.end());
+  }
+};
+
 // All geometry for one view, ready to render or export.
 struct SheetView {
   uint64_t viewId = 0;
   std::vector<SheetCurve> curves;
+  // What the view draws besides its projected curves: a section's hatching
+  // and caption, the cutting-plane lines of other views' sections (v147).
+  SheetGraphics extras;
+  // A section view: a value inside its outline stands on hatching knocked
+  // out for it, which is how drafting dimensions a section.
+  bool sectioned = false;
   glm::dvec2 bboxMin{0.0}; // sheet-mm bounds of the projected geometry
   glm::dvec2 bboxMax{0.0};
   bool hasGeometry = false;

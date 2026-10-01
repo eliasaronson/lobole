@@ -50,7 +50,20 @@ its setup (sheet, views, dimensions, notes).
   regenerated from the part at every update. A bottom view calls the same
   crease DOWN that a top view calls UP; the flat-pattern DXF answers from the
   side the first flange was picked on and may differ.
-- **Centre mark**: drawn automatically on every visible circle.
+- **Section view**: a view with a `section` point is cut by the plane through
+  it square to the view's direction; the cut faces are hatched, the view is
+  captioned SECTION A-A, and the view it folds from draws the lettered
+  cutting-plane line. Dimension a bore in section with a `diameter` across
+  its two walls (one `sil_face` ref: the walls are the bore's face).
+- **Parts list and balloons**: a `table: "bom"` note on an assembly view lists
+  the parts that view draws (leave the load out with `hidden`); a `balloon`
+  note with no text, its leader on an occurrence, shows that part's item
+  number from the list.
+- **Datum**: a `datum` note — the letter in a box, a triangle on the feature.
+- **Thread**: a cosmetic or tapped thread draws in thin line by ISO 6410
+  (three quarters of a circle end-on, two lines from the side), and a tapped
+  hole's callout names the thread, its class, depth and drill.
+- **Centre mark**: drawn automatically on every circle seen whole.
 - **Dangling**: a dimension whose edge was consumed upstream (a fillet ate
   it, a feature was deleted) is flagged and left out of the export; it is
   never rebound to a different edge.
@@ -90,21 +103,23 @@ free notes are set over RPC.
 ## Over RPC / MCP
 
 ```
-create_drawing {name?, sheet?: {size, landscape, title_block: {project, document, author, date}}}
+create_drawing {name?, sheet?: {size, landscape, title_block: {project, document,
+                author, date, notes, material, scale}}}
 set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
                   configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names],
-                  rotation_deg?}
+                  rotation_deg?, section?: {point: [x, y, z], label?}}
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
-                  base_view?, configuration?, hidden?, rotation_deg?}
+                  base_view?, configuration?, hidden?, rotation_deg?, section?}
 update_drawing {budget_s?}     # re-project; per-view curve counts and errors
 list_drawing_views             # placement, stale, and what each projection cost
 list_drawing_geometry {view}   # a view's curves, with the ref to dimension each
 add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},
                                      occurrence?, end? | extreme?}], offset?}
 list_drawing_dims / remove_drawing_dim {id}
-add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element},
-                  table?: "bends"}
+add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element}
+                  | {edge | sil_face: {...}, occurrence?, end? | extreme?},
+                  style?: "text"|"balloon"|"datum", table?: "bends"|"bom"}
 list_drawing_notes / remove_drawing_note {id}
 check_drawing {drawing?}       # stale views, dangling refs, overlapping labels
 export_drawing {path}          # .svg or .pdf

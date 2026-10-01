@@ -1712,6 +1712,10 @@ json SheetJson(const Sheet& s) {
     tb["date"] = t.date;
   if (!t.notes.empty())
     tb["notes"] = t.notes;
+  if (!t.material.empty()) // v147
+    tb["material"] = t.material;
+  if (!t.scale.empty()) // v147
+    tb["scale"] = t.scale;
   json j = {{"size", SheetSizeToString(s.size)}, {"landscape", s.landscape}};
   if (!tb.empty())
     j["title_block"] = std::move(tb);
@@ -1736,6 +1740,8 @@ Sheet SheetFromJson(const json& j) {
   s.titleBlock.author = tb.value("author", std::string{});
   s.titleBlock.date = tb.value("date", std::string{});
   s.titleBlock.notes = tb.value("notes", std::string{});
+  s.titleBlock.material = tb.value("material", std::string{});
+  s.titleBlock.scale = tb.value("scale", std::string{});
   return s;
 }
 
@@ -1796,6 +1802,10 @@ json DrawingViewToJson(const DrawingView& v) {
     j["configuration"] = v.configuration;
   if (v.rotationDeg != 0.0) // v134
     j["rotation_deg"] = v.rotationDeg;
+  if (v.section.on) { // v147
+    const glm::dvec3& p = v.section.point;
+    j["section"] = {{"point", {p.x, p.y, p.z}}, {"label", v.section.label}};
+  }
   return j;
 }
 
@@ -1820,6 +1830,16 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
   v.configuration = j.value("configuration", uint64_t{0});
   v.rotationDeg = j.value("rotation_deg", 0.0);
+  if (j.contains("section")) {
+    const json& sj = j.at("section");
+    const json p = sj.value("point", json::array());
+    if (!p.is_array() || p.size() != 3)
+      throw std::runtime_error("a section view's point is [x, y, z]");
+    v.section.on = true;
+    v.section.point = {p[0].get<double>(), p[1].get<double>(),
+                       p[2].get<double>()};
+    v.section.label = sj.value("label", std::string{});
+  }
   return v;
 }
 
@@ -1833,6 +1853,8 @@ json DrawingNoteToJson(const DrawingNote& n) {
     j["leader"] = ProjRefJson(n.leader);
   if (n.table != NoteTable::None) // v115
     j["table"] = NoteTableToString(n.table);
+  if (n.style != NoteStyle::Text) // v147
+    j["style"] = NoteStyleToString(n.style);
   return j;
 }
 
@@ -1848,6 +1870,9 @@ DrawingNote DrawingNoteFromJson(const json& j) {
   const std::string table = j.value("table", std::string("none"));
   if (!NoteTableFromString(table, n.table))
     throw std::runtime_error(UnknownNoteTable(table));
+  const std::string style = j.value("style", std::string("text"));
+  if (!NoteStyleFromString(style, n.style))
+    throw std::runtime_error(UnknownNoteStyle(style));
   return n;
 }
 

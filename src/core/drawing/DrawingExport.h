@@ -14,6 +14,15 @@
 
 namespace DrawingExport {
 
+// The title block's rows, top to bottom, label and value: ONE list the
+// exporters and the viewport draw, so the sheet on screen is the sheet sent.
+struct TitleRow {
+  const char* label;
+  std::string value;
+};
+std::vector<TitleRow> TitleBlockRows(const Sheet& sheet,
+                                     const units::System& units);
+
 // Writes the sheet — border, title block, every view's visible (solid) and
 // hidden (dashed) edges, and each resolved dimension (extension/dimension lines
 // or a radial leader, arrows, value text) — as an SVG in millimetre user units.

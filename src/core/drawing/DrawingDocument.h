@@ -48,13 +48,21 @@ enum class DrawingDimKind {
 };
 
 // Title-block fields (a simple labelled table under the border). All cosmetic
-// free text; `scale`/`date` are filled by the sheet/exporter when blank.
+// free text; `material` and `scale` are filled at export when blank, from the
+// sheet's first view (its part's material, its scale), so a sheet says what
+// it is made of and how big it is drawn without anybody typing either --
+// and a grade the material library does not carry ("6082-T6") is typed
+// here (v147).
 struct TitleBlock {
   std::string project;
   std::string document;
   std::string author;
   std::string date; // ISO yyyy-mm-dd; blank = stamped at export
+  // General notes: the tolerance standard unwritten sizes are held to, the
+  // edge breaks. Printed in the block's NOTES row.
   std::string notes;
+  std::string material; // v147; blank = the first view's part's material
+  std::string scale;    // v147; blank = the first view's scale ("1:2")
 };
 
 struct Sheet {
@@ -84,6 +92,17 @@ struct ProjRef {
 
 // Whether `s` is a ProjRef extreme a file or a caller may name ("" too).
 [[nodiscard]] bool IsProjRefExtreme(const std::string& s);
+
+// A section view's cut (v147, docs/drawings/README.md#section-views): the
+// plane through `point` square to the view's own direction. What lies
+// between the reader and the plane is taken away, the faces the cut exposes
+// are hatched, and every other view of the same source that sees the plane
+// edge-on draws it as a cutting-plane line lettered `label` at both ends.
+struct SectionSpec {
+  bool on = false;
+  glm::dvec3 point{0.0}; // world mm (the source document's frame)
+  std::string label;     // "A" -> "SECTION A-A"
+};
 
 // A view on the sheet: a base view of a source document in a named
 // orientation, or an orthographically-folded child kept aligned to its base.
@@ -124,6 +143,8 @@ struct DrawingView {
   // chess piece -- draws upright as its front view turned 90, with no
   // rotated copy of the model.
   double rotationDeg = 0.0;
+  // A section view: cut by a plane square to its view direction (v147).
+  SectionSpec section;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured
@@ -143,7 +164,21 @@ struct DrawingDim {
 // What a note's text is generated from, if anything. A table note carries
 // only a caption in `text`; its rows come from the source of `viewId` each
 // time it is resolved, so it cannot go stale against the part.
-enum class NoteTable { None, Bends };
+//
+// Bom (v147) is the parts list of an ASSEMBLY view: one row per part the
+// view draws (its `hidden` occurrences are left out, so the load a head
+// carries is not listed as part of the head), drawn as a ruled table whose
+// bottom-right corner is the note's position -- where it stands on the title
+// block.
+enum class NoteTable { None, Bends, Bom };
+
+// How a note is drawn (v147). A balloon is the item number of the part its
+// leader points at, in a circle, with a dot on the part: on an assembly view
+// with an empty text, the number is the part's row in the sheet's parts list
+// of that assembly (else the view's own), so the two cannot disagree. A datum
+// is a datum feature symbol: the letter in a box, the leader ending in a filled
+// triangle on the feature.
+enum class NoteStyle { Text, Balloon, Datum };
 
 struct DrawingNote {
   uint64_t id = 0;
@@ -152,6 +187,7 @@ struct DrawingNote {
   uint64_t viewId = 0; // 0 = free note; else the leader's view
   ProjRef leader;      // unset = no leader line
   NoteTable table = NoteTable::None;
+  NoteStyle style = NoteStyle::Text;
 };
 
 // The document. Views and dims share one never-reused id counter (the
@@ -219,7 +255,9 @@ glm::dvec2 SheetExtentMM(SheetSize size);
 // change a constant here and every consumer (and check_drawing) agrees.
 inline constexpr double kSheetMarginMM = 10.0;
 inline constexpr double kTitleBlockWidthMM = 160.0;
-inline constexpr double kTitleBlockHeightMM = 32.0;
+// Eight 6 mm rows: project, document, material, scale, author, date, units,
+// notes.
+inline constexpr double kTitleBlockHeightMM = 48.0;
 
 struct SheetChrome {
   glm::dvec2 extent;
@@ -249,6 +287,9 @@ const char* NoteTableToString(NoteTable t);
 // The refusal both the loader and the RPC say, written once: two copies of a
 // list is how one of them ends up naming a value the other does not accept.
 [[nodiscard]] std::string UnknownNoteTable(const std::string& given);
+const char* NoteStyleToString(NoteStyle s);
+[[nodiscard]] bool NoteStyleFromString(const std::string& s, NoteStyle& out);
+[[nodiscard]] std::string UnknownNoteStyle(const std::string& given);
 const char* DrawingDimKindToString(DrawingDimKind k);
 [[nodiscard]] bool DrawingDimKindFromString(const std::string& s,
                                             DrawingDimKind& out);

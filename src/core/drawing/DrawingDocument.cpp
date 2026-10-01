@@ -243,6 +243,8 @@ const char* NoteTableToString(NoteTable t) {
     return "none";
   case NoteTable::Bends:
     return "bends";
+  case NoteTable::Bom:
+    return "bom";
   }
   return "none";
 }
@@ -252,13 +254,45 @@ bool NoteTableFromString(const std::string& s, NoteTable& out) {
     out = NoteTable::None;
   else if (s == "bends")
     out = NoteTable::Bends;
+  else if (s == "bom")
+    out = NoteTable::Bom;
   else
     return false;
   return true;
 }
 
 std::string UnknownNoteTable(const std::string& given) {
-  return "unknown note table '" + given + "' (expected one of: none, bends)";
+  return "unknown note table '" + given +
+         "' (expected one of: none, bends, bom)";
+}
+
+const char* NoteStyleToString(NoteStyle s) {
+  switch (s) {
+  case NoteStyle::Text:
+    return "text";
+  case NoteStyle::Balloon:
+    return "balloon";
+  case NoteStyle::Datum:
+    return "datum";
+  }
+  return "text";
+}
+
+bool NoteStyleFromString(const std::string& s, NoteStyle& out) {
+  if (s == "text")
+    out = NoteStyle::Text;
+  else if (s == "balloon")
+    out = NoteStyle::Balloon;
+  else if (s == "datum")
+    out = NoteStyle::Datum;
+  else
+    return false;
+  return true;
+}
+
+std::string UnknownNoteStyle(const std::string& given) {
+  return "unknown note style '" + given +
+         "' (expected one of: text, balloon, datum)";
 }
 
 const char* DrawingDimKindToString(DrawingDimKind k) {

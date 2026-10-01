@@ -1,0 +1,123 @@
+{
+  "format": "designer-document",
+  "version": 147,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Pan/tilt head",
+      "document": "Base plate",
+      "author": "generators/pantilt",
+      "date": "2026-10-01",
+      "notes": "General tolerances ISO 2768-mK",
+      "material": "6082-T6 or 6061-T6"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "top",
+      "source": 3,
+      "orientation": "top",
+      "scale": 2.0,
+      "position": [
+        150.0,
+        200.0
+      ],
+      "show_hidden": true,
+      "quality": "exact",
+      "hidden": []
+    },
+    {
+      "id": 2,
+      "name": "A-A",
+      "source": 3,
+      "orientation": "front",
+      "scale": 2.0,
+      "position": [
+        150.0,
+        66.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "base_view": 1,
+      "section": {
+        "point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "label": "A"
+      }
+    },
+    {
+      "id": 3,
+      "name": "head",
+      "source": 13,
+      "orientation": "front",
+      "scale": 0.4,
+      "position": [
+        300.0,
+        150.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [
+        14
+      ]
+    }
+  ],
+  "dims": [],
+  "notes": [
+    {
+      "id": 4,
+      "text": "A",
+      "pos": [
+        70.0,
+        54.0
+      ],
+      "view": 2,
+      "leader": {
+        "view": 2,
+        "end": 0,
+        "sil_face": {
+          "feature_id": 1,
+          "element": "1/face2;M7;M11"
+        },
+        "extreme": "left"
+      },
+      "style": "datum"
+    },
+    {
+      "id": 5,
+      "text": "",
+      "pos": [
+        410.0,
+        58.0
+      ],
+      "view": 3,
+      "table": "bom"
+    },
+    {
+      "id": 6,
+      "text": "",
+      "pos": [
+        250.0,
+        120.0
+      ],
+      "view": 3,
+      "leader": {
+        "view": 3,
+        "occurrence": 1,
+        "end": 1,
+        "edge": {
+          "feature_id": 1,
+          "element": "1/face0;U1"
+        }
+      },
+      "style": "balloon"
+    }
+  ]
+}

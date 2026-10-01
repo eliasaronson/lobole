@@ -13,19 +13,27 @@ neither runs features nor places occurrences; it projects other documents
 onto one sheet. A project holds any number of drawings.
 
 - **Sheet**: size (`a4`, `a3`, `a2`, `a1`, `a0`, `letter`, case-insensitive),
-  `landscape`, and a title block (`project`, `document`, `author`, `date`,
-  `notes`). The border margin (10 mm) and title-block rectangle (160 × 32 mm,
-  bottom-right) come from `ChromeOf`, the one source the viewport, both
-  exporters and the validator share.
+  `landscape`, and a title block (`project`, `document`, `material`,
+  `scale`, `author`, `date`, `notes`). The border margin (10 mm) and
+  title-block rectangle (160 × 48 mm, eight 6 mm rows, bottom-right) come
+  from `ChromeOf`, the one source the viewport, both exporters and the
+  validator share; the rows themselves from `DrawingExport::TitleBlockRows`.
+  A blank MATERIAL is the first view's part's material, a blank SCALE its
+  scale (`2:1`, with `UNLESS SHOWN` when another view differs), filled by
+  `ui::DrawingSheetForOutput` for the screen and the file alike; a grade the
+  material library does not carry ("6082-T6") is typed. NOTES carries the
+  general tolerance. A misspelt title-block key is refused.
 - **Views** (`DrawingView`): a source document by stable project-document id
   (part or assembly — a rename cannot break a view), a named orientation, a
   scale (with an optional expression), a sheet position in mm, `showHidden`,
   `quality` (`exact` or `fast`), `hidden` occurrences, a part
-  `configuration`, a `rotation_deg`, and `baseViewId` for a projected child.
+  `configuration`, a `rotation_deg`, `baseViewId` for a projected child, and
+  a `section` (below).
 - **Dimensions** (`DrawingDim`): a kind, a view, one or more `ProjRef`s and a
   label offset in sheet mm.
 - **Notes** (`DrawingNote`): text at a sheet position, optionally with a
-  leader to projected geometry, or a generated table.
+  leader to projected geometry, or a generated table; drawn as text, a
+  balloon or a datum symbol (`style`).
 
 Views, dimensions and notes share one never-reused id counter. Undo is a
 full-document snapshot stack (`DrawingHistory`, `ui::SnapshotDrawing`).
@@ -60,6 +68,48 @@ at 90 still looks along +Y, and a child folds from it only along an axis the
 two still share. The panel's view row offers 0/90/180/270
 (`Rotate`); `add_drawing_view` and `set_drawing_view` take any angle.
 
+### Section views
+
+A view with a `section` {`point`, `label`} is cut by the plane through
+`point` (world mm, the source's frame) square to the view's own direction:
+what lies between the reader and the plane is taken away
+(`drawing::CutBody`, `src/core/drawing/DrawingSection.{h,cpp}`, a
+non-destructive boolean against a box on the reader's side), and the rest is
+projected as any view is. The cut is per body, in its own frame, and kept
+while body and plane are the same (`CachedCut` in `ui/DrawingActions.cpp`,
+1024 entries): a new cut every update would also be a new shape to the
+projection cache, and a head's two assembly sections re-cut 120 bodies per
+update until the cache held them all.
+
+The cut's elements are not the source's, but a dimension still names the
+source's: `SectionCut` maps each of its edges and faces back to the source
+edge or face it is (a shortened edge is still that edge), and an edge the
+plane made to the face it was cut out of — the wall of a bore in section is
+named by the bore's face, as its silhouette would be, so a `diameter` across
+the two walls resolves. A body wholly in front of the plane is left out.
+
+On the section itself, the faces the cut exposed are hatched (thin lines at
+45°, 2.5 mm on the sheet, alternating direction from part to part so two
+parts that touch read as two; `drawing::HatchRegion`, even-odd) and the view
+is captioned `SECTION A-A`. Every other view of the same source that sees the
+plane edge-on draws it as a cutting-plane line — a chain line, thick at its
+ends, arrows pointing the way the section looks, the letter at both ends —
+once: on the view the section folds from when that view sees it, else on
+each that does. All of it is `SheetView::extras`, the `SheetGraphics` the
+viewport and both exporters draw the same way.
+
+### Threads
+
+A thread nothing modelled — a Thread feature's cosmetic thread, a Hole's
+tapped fit, both written on the body as `ThreadMark`s — is drawn by ISO
+6410's convention in thin line (`ThreadDecorations`, `ui/DrawingActions.cpp`):
+seen down its axis, three quarters of a circle at a tapped hole's major
+diameter (a screw's root) wherever the drilled rim shows; seen from the side,
+two lines along the threaded length — solid where a section cuts the thread
+open (the hatching stops at the drill, the thick line), dashed where the hole
+is hidden, and left off when the view hides hidden lines. A modelled thread
+draws its own geometry instead.
+
 ### Projected children
 
 A view with a `baseViewId` folds from its base: when the two views map the
@@ -91,6 +141,13 @@ then by shared stored curve and location, because the outliner splits input
 edges. HLR's `OutLine` flag is not the signal: it is also set on a face's
 real edges when the face is seen edge-on. A silhouette's generating face is
 the HLR face whose wire blocks contain it, and it is referenced as that face.
+
+A **seam** — where a closed surface's parameters wrap, a model edge that is
+no edge of the part — is drawn only where it lies on its face's horizon,
+and is then that face's silhouette, named by the face (`SeamFace` in
+`DrawingProjection.cpp`). So a cylinder's two side lines are one face's two
+silhouettes whichever side carries the seam, and a seam seen across its face
+(a chamfer cone's, from above) draws nothing rather than a tick.
 
 Exact HLR is priced by **surface complexity, not part count**: `Hide()`
 intersects every projected edge against every face, and a swept B-spline
@@ -209,20 +266,37 @@ model:
   only.
 
 A `diameter` dimension carries the tolerance the model records for that bore
-(`Ø20 H7`, or an explicit `+0.05/-0.02`), read from the part, so it follows
-edits; a `radius` does not, because an ISO class states how a diameter may
-vary. See [../tolerances/README.md](../tolerances/README.md).
+(`Ø20 H7 (+0.021/0)` — a class with its ISO 286 limits, which are what a
+shop holds — or an explicit `+0.05/-0.02`), read from the part, so it
+follows edits; a `radius` does not, because an ISO class states how a
+diameter may vary. See [../tolerances/README.md](../tolerances/README.md).
+On a circle it is radial; on two parallel lines of one ref — a shaft's
+silhouettes, a bore's walls in section — it is a LINEAR dimension across
+them with a Ø, its line moved along the walls by the offset's component
+along them.
+
+A tapped `hole_callout` reads the thread the hole's bores carry
+(`FindThreadForHole`): its designation and class, how deep it is threaded,
+and the drill under it — `3/8-16 UNC-2B DEEP 12.7, DRILL Ø7.94 DEEP 12.7`.
 
 Text goes through `core::FormatLength` / `FormatAngle` in the **source
 document's units**: a drawing of an inch part is an inch drawing. Lengths
-carry no suffix, so the title block's UNITS row (`core::UnitsLabel`) states
-what the bare numbers are; angles keep `°` (or `rad` on a radians document).
-The sheet takes its units from the first view's source
-(`ui::ActiveDrawingUnits`); a sheet mixing unit systems gets that one.
+are written to a fixed number of decimals for the unit (mm 2, in 3) and a
+deviation to one more (`core::FormatDeviation`) — three significant figures
+wrote a 37.34 hole spacing as 37.3. Lengths carry no suffix, so the title
+block's UNITS row (`core::UnitsLabel`) states what the bare numbers are;
+angles keep `°` (or `rad` on a radians document). The sheet takes its units
+from the first view's source (`ui::ActiveDrawingUnits`); a sheet mixing unit
+systems gets that one.
 
 A dimension without an `offset` is placed clear of the views, the title
-block and the labels already on the sheet. Every visible circle gets a
-centre mark, drawn by the same rule in the viewport and both exporters.
+block and the labels already on the sheet. Every circle seen whole
+(`HasCentreMark`: visible and closed — an arc of a circle mostly hidden
+marked a centre in empty air) gets a centre mark, drawn by the same rule in
+the viewport and both exporters. A label is centred on its position, its
+text knocked out of what it sits on (`TextKnockout`), and a leader stops at
+the side of the text facing it (`LeaderEnd`) rather than running through
+the words to their centre.
 
 **Notes** are text with `{{expression}}` resolved against project variables
 (or the source part's, with a view), and an optional leader to a projected
@@ -235,9 +309,37 @@ first flange was picked on, so the two can label a crease differently
 (`src/core/io/ExportDxf.h`). A view of a flat blank also draws its bend
 lines as chain lines. See [../sheetmetal/README.md](../sheetmetal/README.md).
 
+### Parts lists and balloons
+
+A note with `table: "bom"` on an ASSEMBLY view is its parts list: one row
+per part the view draws — `ITEM`, `QTY`, `PART`, `KIND` (`MADE`, `PRINTED`
+for a part with a print process, `BOUGHT` for a standard part), `MATERIAL`,
+unit `MASS g` — from `ui::ComputeBomOf` over the source's leaves less the
+view's `hidden` occurrences (so the camera a head carries is not listed as
+part of the head). Any note whose text holds tabs is a ruled table (rows by
+`\n`, cells by `\t`, a row with no tab spans it), standing on its
+bottom-right corner at the note's position — on the title block.
+
+A note with `style: "balloon"` and no text, its leader on an occurrence of
+an assembly view, shows that occurrence's item number in the sheet's parts
+list of the same assembly (else in the view's own), so a balloon and its row
+cannot disagree; one pointing at an occurrence the list leaves out is
+refused. It is drawn as the number in a circle with a dot on the part. A
+`style: "datum"` note is a datum feature symbol: its letter in a box, the
+leader ending in a filled triangle on the feature. A leader ref may name an
+`extreme` or an `end`, and an extreme is honoured on a circle too (a balloon
+on a bearing seen end-on landed in its bore). Both, and tables, are
+`NoteGraphics` — the one description every surface draws. The table is
+computed once per set of leaves (part, version, configuration, material,
+occurrence): seventeen balloons on a 60-part head each re-ran the masses.
+
 `check_drawing` (`src/core/drawing/DrawingValidate.cpp`) reports stale
 views, dangling dimensions, views off the border or over the title block,
-overlapping views and labels, and notes out of bounds, with a receipt.
+overlapping views and labels, and notes out of bounds, with a receipt. A
+label sits ON a view when it crosses a line the view draws or lies inside
+its outline (a line found every way from its centre) — not merely inside its
+box, which flagged every callout beside a round part; inside a section it
+stands on knocked-out hatching, which is how a section is dimensioned.
 
 ## Export
 
@@ -245,9 +347,11 @@ overlapping views and labels, and notes out of bounds, with a receipt.
 are hand-written, GUI-free, and consume the same projected structures as the
 viewport, so export is testable headless without rendering. SVG uses mm user
 units, polylines and `<text>`; PDF is one vector page with base-14
-Helvetica, mapping Ø, ° and × to WinAnsi. Both write the border, the title
-block with its UNITS row, visible and hidden line work, dimensions, notes and
-centre marks. `export_drawing {path}` and the toolbar's Export share
+Helvetica, mapping Ø, ° and × to WinAnsi, centring text by Helvetica's
+widths (`drawing::TextWidthMM`, which also sizes a table's columns). Both
+write the border, the title block, visible and hidden line work, every
+view's `extras` (hatching, cutting planes, captions, threads), dimensions,
+notes with their balloons, datums and tables, and centre marks. `export_drawing {path}` and the toolbar's Export share
 `ui::ExportActiveDrawing`; the format is chosen by extension and anything but
 `.svg` or `.pdf` is refused.
 
@@ -257,6 +361,7 @@ centre marks. `export_drawing {path}` and the toolbar's Export share
 |---|---|
 | model, enums, sheet chrome | `src/core/drawing/DrawingDocument.{h,cpp}` |
 | HLR, cache, cost | `src/core/drawing/DrawingProjection.{h,cpp}` |
+| section cut, hatching | `src/core/drawing/DrawingSection.{h,cpp}` |
 | dimension and note resolution, bend tables | `src/core/drawing/DrawingDimension.{h,cpp}`, `DrawingCallout.{h,cpp}` |
 | sheet-space render structures | `src/core/drawing/DrawingRender.h` |
 | validation | `src/core/drawing/DrawingValidate.{h,cpp}` |
@@ -281,6 +386,15 @@ centre marks. `export_drawing {path}` and the toolbar's Export share
   (parsed, never byte-compared, since HLR discretization is not stable across
   OCC versions), layout validation, auto-placement, note expressions,
   refusals of unknown enums.
+- `tests/test_drawing_sheet.cpp` (`[drawing]`): a section cut names its
+  edges by the source's (the bore's walls by its face), even-odd hatching,
+  seams as silhouettes, balloons/datums/tables as `NoteGraphics`, leader
+  ends, the tapped callout with its thread, class limits, a Ø across two
+  walls, an extreme on a circle, centre marks, the label-on-view rule, the
+  title block's rows, the v147 golden and its refusals.
+- `tests/drawing_sheet_smoke.py`: a section view, its Ø across the walls
+  with class and limits, a datum, the title block, a parts list numbered
+  for its balloons with a hidden occurrence left out, export, and a reopen.
 - `tests/test_flat_drawing.cpp`: a view draws its configuration, a dimension
   across a blank reads the developed length, bend tables.
 - `tests/test_actions.cpp`: layout reuse and nested-part invalidation through
@@ -293,11 +407,16 @@ centre marks. `export_drawing {path}` and the toolbar's Export share
 
 ## Not done
 
-- Section, detail, broken and crop views; exploded views.
-- Balloons and a BOM table on the sheet.
+- Detail, broken, crop, offset-section and half-section views; exploded
+  views. A section plane is square to one of the seven orientations.
+- Rotated text: a vertical dimension's value is written horizontally,
+  breaking its line (ISO 129's unidirectional method).
 - Multi-sheet drawings.
-- GD&T, weld and surface-finish symbols; templates and styles (one ISO-style
-  look, 3.5 mm text).
+- Feature control frames (a datum has its symbol, nothing refers to it but
+  text), weld and surface-finish symbols; templates and styles (one
+  ISO-style look, 3.5 mm text).
+- A material grade: the library's materials are render and density slugs
+  ("aluminum"), so a grade is typed in the title block.
 - DXF of a sheet (DXF exists for flat patterns only).
 - Dragging a view on the sheet in the GUI, and folding a child from the GUI
   (`base_view` is RPC-only); adding free notes in the GUI (Add bend table is

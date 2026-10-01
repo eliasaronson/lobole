@@ -17,9 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    146; // v146: feature types `Worm` and `WormWheel` (a ZA worm and its
-         //      hobbed wheel cut from cylindrical blanks), and relation kind
-         //      `worm` (docs/modeling/worm-gears.md).
+    147; // v147: drawings -- a view's `section` (a section view), a note's
+         //      `style` (balloon, datum) and table `bom` (a parts list), and
+         //      the title block's `material` and `scale`
+         //      (docs/drawings/README.md#section-views).
          // v145: CAM tool type `thread_mill` {tip_flat, neck_diameter,
          //      neck_length} and operation type `thread_mill` {passes}: a
          //      helix milled from the Thread on its face.

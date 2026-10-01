@@ -365,6 +365,7 @@ set(core_sources
     src/core/drawing/DrawingDimension.cpp
     src/core/drawing/DrawingValidate.cpp
     src/core/drawing/DrawingCallout.cpp
+    src/core/drawing/DrawingSection.cpp
     src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp

@@ -104,9 +104,13 @@ def main():
         vlines = sorted([g for g in geo if g.get("type") == "line" and
                         abs(g["p1"][1] - g["p2"][1]) > 5], key=lambda g: g["p1"][0])
         expect(len(vlines) >= 2, f"front view has vertical box edges: {geo}")
+        # The shaft's side lines are its face's silhouettes, the one on its
+        # seam included (v147), so each is picked by what it is.
+        def pick(g):
+            key = "sil_face" if g["kind"] == "silhouette" else "edge"
+            return {key: g["ref"], "occurrence": g["source_id"]}
         wd = d.call("add_drawing_dim", view=front_id, kind="distance_x",
-                    refs=[{"edge": vlines[0]["ref"], "occurrence": vlines[0]["source_id"]},
-                          {"edge": vlines[-1]["ref"], "occurrence": vlines[-1]["source_id"]}],
+                    refs=[pick(vlines[0]), pick(vlines[-1])],
                     offset=[0, -14])
         # The box is 40 mm wide; the shaft sits to its right, so the overall
         # width between outermost vertical edges is the model span.
@@ -447,8 +451,7 @@ def main():
         # Auto-placement: a dim with NO offset lands clear of the view, not
         # at the old useless {0,0}.
         auto = d.call("add_drawing_dim", view=front_id, kind="distance_x",
-                      refs=[{"edge": vlines[0]["ref"]},
-                            {"edge": vlines[-1]["ref"]}])
+                      refs=[pick(vlines[0]), pick(vlines[-1])])
         expect(auto["resolved"] and auto["offset"] != [0, 0],
                f"omitted offset is auto-placed: {auto}")
         chk = d.call("check_drawing", update=False)
@@ -535,7 +538,8 @@ def main():
         d.call("update_drawing")
         dia = d.call("add_drawing_dim", view=cv["id"], kind="diameter",
                      refs=[{"edge": bore[0]["ref"]}])
-        expect(dia["text"] == "\u00d83.2 H8",
+        # ...and its limits, which are what the shop holds (v147).
+        expect(dia["text"] == "\u00d83.2 H8 (+0.018/0)",
                f"the dim reads the band the model records: {dia}")
 
         # A RADIUS dim must NOT: an ISO class states how a DIAMETER varies,

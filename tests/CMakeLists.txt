@@ -141,6 +141,7 @@ add_executable(designer_tests
     test_topopt.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
+    test_drawing_sheet.cpp
     test_configuration.cpp
 )
 # designer_app brings the ui/ actions layer in so it can be exercised
@@ -388,6 +389,13 @@ add_test(NAME drawing_assembly_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_assembly_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(drawing_assembly_smoke PROPERTIES TIMEOUT 120)
+
+# Drawings v147: section views, datums, the title block's derived rows, a
+# parts list and its balloons, through RPC, export and a reopen. Headless.
+add_test(NAME drawing_sheet_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_sheet_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_sheet_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A2 project container: parts + assembly + occurrences, round-trip.
 add_test(NAME assembly_smoke
