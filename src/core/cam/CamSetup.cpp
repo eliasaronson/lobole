@@ -819,9 +819,26 @@ ElementRef FaceOnStockTop(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
 void StampBands(const Document& doc, Body& body) {
   body.bands.clear();
   for (const Tolerance& t : doc.GetTolerances()) {
-    if (t.IsDistance() || t.ref.featureId != body.createdBy ||
+    if (t.ref.featureId != body.createdBy ||
         !body.elementMap.Resolve(t.ref.name))
       continue;
+    // A distance between two faces of this body: whether they are level in
+    // a setup, and which one a cut ends on, is the generator's to say.
+    if (t.IsDistance()) {
+      if (t.ref2.featureId != body.createdBy ||
+          !body.elementMap.Resolve(t.ref2.name))
+        continue;
+      FaceBand band;
+      band.face = t.ref;
+      band.reference = t.ref2;
+      band.lower = t.lower;
+      band.upper = t.upper;
+      char buf[64];
+      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper, t.lower);
+      band.label = buf;
+      body.bands.push_back(std::move(band));
+      continue;
+    }
     const std::optional<Measure::Element> el =
         Measure::Describe(doc.GetBodies(), t.ref);
     if (!el || !el->hasRadius)

@@ -247,6 +247,18 @@ operations reaches. The band's ring, a cell either side, is excused from
 gouge (down to the wall's bottom) and from leftover (up to its top), so a
 band wider than the grid's quantisation reads as neither.
 
+A toleranced floor ([operations.md](operations.md#tolerance-bands)) is
+judged the same way, on its distance from its reference face: the lowest
+the tool's tip went over the floor's extent, among the cutting moves of the
+operations that declared it, is the floor the file cut, and its distance
+from the reference is `cut`. A height map holds Z exactly, so a floor is
+judged to the micron. Past the band on the side nothing puts back -- a
+floor below its reference too deep, a shoulder above it too low -- is
+scrap; short of it is metal left on the floor. Where the model is that
+floor, the cut is excused from gouge down to the band's deepest and from
+leftover up to its shallowest. `cam_verify` answers it in `fits` with
+`kind: "distance"` and `reference_z`.
+
 ### Tabs and offcuts
 
 A height map cannot watch a slug drop out of a through cut, so the machined
@@ -603,7 +615,8 @@ simulation did something without owning a renderer.
 ## Tests
 
 `tests/test_cam_honest.cpp` (headless): a toleranced bore aimed, posted,
-judged in its band and failed past it; a K7 class read at its size and a
+judged in its band and failed past it; a pocket floor and a shoulder whose
+distance from a reference face is toleranced, the same; a K7 class read at its size and a
 profile aiming; a part on tabs complete, one cut free said; an opening's
 slug excused and flagged; a blind tapped coupon drilled to its point and
 threaded to its depth, clean; the holes and threads a job leaves uncut.

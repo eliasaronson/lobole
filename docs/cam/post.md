@@ -39,7 +39,9 @@ dialect needs canned cycles translated. The post id is the machine's
   attributes moves), `(SKIPPED op N: why)` for an operation that produced
   nothing and `(SKIPPED on op N: …)` for a target it could not follow, and
   in the header `(fit op N: bore D32 K7 31.982-32.007, aimed at
-  31.9945)` for each toleranced wall the program aims at, so the machinist
+  31.9945)` for each toleranced wall the program aims at, and `(fit op N:
+  floor 8 from Z20 +0.300/+0.100 8.1-8.3, aimed at 8.2 [Z11.8])` for each
+  toleranced floor (a `shoulder` above its reference), so the machinist
   gauges against the band ([tolerance bands](operations.md#tolerance-bands)).
   Text a
   person typed is sanitised: G-code comments do not nest, so a parenthesis in a

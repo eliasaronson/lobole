@@ -641,6 +641,23 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         bool inBand = false;
         if (fits != nullptr)
           for (const Toolpath::Fit& f : *fits) {
+            // A toleranced floor: where the model is that floor, the cut may
+            // stand anywhere the band allows (judged against it instead).
+            if (f.depth) {
+              const double x = machined.CellX(i), y = machined.CellY(j);
+              if (x < f.lo.x || y < f.lo.y || x > f.hi.x || y > f.hi.y ||
+                  std::abs(designed.At(i, j) - f.faceZ) > 1e-3)
+                continue;
+              const double zMin =
+                  std::min({f.ZAt(f.Min()), f.ZAt(f.Max()), f.faceZ});
+              const double zMax =
+                  std::max({f.ZAt(f.Min()), f.ZAt(f.Max()), f.faceZ});
+              if (got > zMax + leftTol)
+                continue;
+              inBand = true;
+              want = std::min(want, zMin);
+              continue;
+            }
             const double d = glm::distance(
                 f.centre, glm::dvec2(machined.CellX(i), machined.CellY(j)));
             const double rLo =
@@ -1932,6 +1949,38 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
   // Toleranced walls, against their bands
   // (docs/cam/simulation.md#tolerance-bands).
   for (const FitVerdict& f : v.fits) {
+    if (f.depth) {
+      // A floor's distance from its reference face.
+      const char* what = f.internal ? "Floor" : "Shoulder";
+      if (!f.judged) {
+        std::snprintf(buf, sizeof(buf),
+                      "%s %.3f from Z %.3f %s was not judged: %s.", what,
+                      f.nominal, f.refZ, f.label.c_str(), f.why.c_str());
+        out.push_back({VerdictLine::Level::Warn, buf});
+      } else if (f.Scrap()) {
+        std::snprintf(buf, sizeof(buf),
+                      "%s %.3f from Z %.3f %s is cut %.4f, past its band's "
+                      "%.4f (%.4f - %.4f): that is scrap.",
+                      what, f.nominal, f.refZ, f.label.c_str(), f.cut,
+                      f.internal ? f.max : f.min, f.min, f.max);
+        out.push_back({VerdictLine::Level::Bad, buf});
+      } else if (f.Short()) {
+        std::snprintf(buf, sizeof(buf),
+                      "%s %.3f from Z %.3f %s is cut %.4f, short of its band "
+                      "(%.4f - %.4f): metal is left on the floor.",
+                      what, f.nominal, f.refZ, f.label.c_str(), f.cut, f.min,
+                      f.max);
+        out.push_back({VerdictLine::Level::Warn, buf});
+      } else {
+        std::snprintf(buf, sizeof(buf),
+                      "%s %.3f from Z %.3f %s: cut %.4f, in its band %.4f - "
+                      "%.4f (aimed at %.4f, the middle).",
+                      what, f.nominal, f.refZ, f.label.c_str(), f.cut, f.min,
+                      f.max, f.aim);
+        out.push_back({VerdictLine::Level::Good, buf});
+      }
+      continue;
+    }
     const char* wall = f.internal ? "Bore" : "Boss";
     if (!f.judged) {
       std::snprintf(buf, sizeof(buf), "%s \xC3\x98%.3f %s was not judged: %s.",

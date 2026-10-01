@@ -99,6 +99,8 @@ std::vector<FitCircle> ResolveFits(const std::vector<Body>& framed) {
   std::vector<FitCircle> out;
   for (const Body& body : framed)
     for (const FaceBand& band : body.bands) {
+      if (band.reference.IsSet())
+        continue; // a distance: ResolvePlanes
       const std::optional<int> idx = body.elementMap.Resolve(band.face.name);
       if (!idx || !body.shape.IsValid())
         continue;
@@ -159,17 +161,134 @@ std::vector<FitCircle> ResolveFits(const std::vector<Body>& framed) {
   return out;
 }
 
-// Holds the walls for one generate on this thread (GenerateFramed), and
-// hands the ones the path aimed at back as declarations.
+// A distance band between two faces that stand level in this setup: a
+// floor or a shoulder (a face looking up) whose height from the other face
+// is toleranced. Which of the two a cut ends on is the operation's: the one
+// at its floor.
+struct FitPlane {
+  struct Side {
+    double z = 0.0;
+    bool up = false;             // its outward normal points up: a floor
+    glm::dvec2 lo{0.0}, hi{0.0}; // its extent, setup XY
+  };
+  Side a, b;
+  double lower = 0.0, upper = 0.0;
+  std::string label;
+};
+
+std::optional<FitPlane::Side> LevelFace(const Body& body,
+                                        const ElementRef& ref) {
+  const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+  if (!idx || !body.shape.IsValid())
+    return std::nullopt;
+  int i = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), i++) {
+    if (i != *idx)
+      continue;
+    try {
+      const TopoDS_Face face = TopoDS::Face(ex.Current());
+      const BRepAdaptor_Surface s(face);
+      if (s.GetType() != GeomAbs_Plane)
+        return std::nullopt;
+      gp_Dir n = s.Plane().Axis().Direction();
+      if (face.Orientation() == TopAbs_REVERSED)
+        n.Reverse();
+      if (std::abs(n.Z()) < 0.999)
+        return std::nullopt; // not level in this setup
+      Bnd_Box box;
+      BRepBndLib::Add(face, box);
+      double x0, y0, z0, x1, y1, z1;
+      box.Get(x0, y0, z0, x1, y1, z1);
+      FitPlane::Side side;
+      side.z = s.Plane().Location().Z();
+      side.up = n.Z() > 0.0;
+      side.lo = {x0, y0};
+      side.hi = {x1, y1};
+      return side;
+    } catch (const Standard_Failure&) {
+      return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<FitPlane> ResolvePlanes(const std::vector<Body>& framed) {
+  std::vector<FitPlane> out;
+  for (const Body& body : framed)
+    for (const FaceBand& band : body.bands) {
+      if (!band.reference.IsSet())
+        continue;
+      const auto a = LevelFace(body, band.face);
+      const auto b = LevelFace(body, band.reference);
+      if (!a || !b || std::abs(a->z - b->z) < 1e-6)
+        continue;
+      FitPlane p;
+      p.a = *a;
+      p.b = *b;
+      p.lower = band.lower;
+      p.upper = band.upper;
+      p.label = band.label;
+      out.push_back(std::move(p));
+    }
+  return out;
+}
+
+// Holds the walls and the floors for one generate on this thread
+// (GenerateFramed), and hands the ones the path aimed at back as
+// declarations.
 class FitScope {
 public:
   explicit FitScope(const std::vector<Body>& framed)
-      : m_fits(ResolveFits(framed)), m_outer(tFits) {
+      : m_fits(ResolveFits(framed)), m_planes(ResolvePlanes(framed)),
+        m_outer(tFits) {
     tFits = &m_fits;
   }
   ~FitScope() { tFits = m_outer; }
   FitScope(const FitScope&) = delete;
   FitScope& operator=(const FitScope&) = delete;
+  // A floor or a shoulder this operation ends on whose distance from its
+  // reference is toleranced: the operation, its bottom moved to the band's
+  // middle, and the floor declared. Only the cuts that end on a level face
+  // -- a profile, a pocket, an adaptive clear, a facing pass -- and only
+  // the first floor that matches.
+  Operation AimAtFloor(const Operation& op) {
+    if (op.type != OpType::Profile && op.type != OpType::Pocket &&
+        op.type != OpType::Adaptive && op.type != OpType::Face)
+      return op;
+    for (const FitPlane& p : m_planes)
+      for (const bool aCut : {true, false}) {
+        const FitPlane::Side& cut = aCut ? p.a : p.b;
+        const FitPlane::Side& ref = aCut ? p.b : p.a;
+        // Where its depth passes end (DepthPasses): the floor it leaves. A
+        // rough before a finish ends there too -- lowered by the finish
+        // stock it then leaves -- and an operation told to leave stock is
+        // not the one that cuts the floor to size.
+        if (!cut.up || std::abs(op.bottomZ + op.stockToLeave - cut.z) > 1e-3)
+          continue;
+        Toolpath::Fit f;
+        f.depth = true;
+        f.faceZ = cut.z;
+        f.refZ = ref.z;
+        f.lo = cut.lo;
+        f.hi = cut.hi;
+        f.centre = 0.5 * (cut.lo + cut.hi);
+        f.nominal = std::abs(cut.z - ref.z);
+        f.lower = p.lower;
+        f.upper = p.upper;
+        f.aim = f.nominal + 0.5 * (p.lower + p.upper);
+        // Removing metal from a floor below its reference lengthens the
+        // distance, as boring a hole grows it.
+        f.internal = cut.z < ref.z;
+        f.zLo = f.zHi = cut.z;
+        f.label = p.label;
+        Operation aimed = op;
+        aimed.bottomZ += f.ZAt(f.aim) - cut.z;
+        m_floors.push_back(f);
+        return aimed;
+      }
+    return op;
+  }
   void Declare(uint64_t op, Toolpath& tp) const {
     for (const FitCircle& c : m_fits)
       if (c.used) {
@@ -177,10 +296,16 @@ public:
         f.op = op;
         tp.fits.push_back(f);
       }
+    for (Toolpath::Fit f : m_floors) {
+      f.op = op;
+      tp.fits.push_back(f);
+    }
   }
 
 private:
   std::vector<FitCircle> m_fits;
+  std::vector<FitPlane> m_planes;
+  std::vector<Toolpath::Fit> m_floors;
   std::vector<FitCircle>* m_outer;
 };
 
@@ -1723,8 +1848,11 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   }
 
   // The toleranced walls these bodies carry, for every strategy below to
-  // aim at; the ones the path followed are declared on it.
-  const FitScope fits(bodies);
+  // aim at, and the floor this operation ends on when its distance from a
+  // reference face is toleranced; the ones the path followed are declared
+  // on it.
+  FitScope fits(bodies);
+  const Operation aimed = fits.AimAtFloor(op);
 
   // ONE RUN PER TARGET, for the generators that resolve a single contour.
   // Before this they read targets.front() and dropped the rest in silence:
@@ -1734,7 +1862,7 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   // in the order the targets were picked; a target that cannot be followed
   // goes in `skipped` rather than failing the four that can.
   if (op.targets.size() > 1 && FollowsOneTargetAtATime(op.type)) {
-    Operation one = op;
+    Operation one = aimed;
     for (size_t i = 0; i < op.targets.size(); i++) {
       one.targets = {op.targets[i]};
       Toolpath sub;
@@ -1771,7 +1899,7 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
       tp.error = "no target of this operation could be followed. " +
                  tp.skipped.front();
   } else {
-    GenerateOne(setup, op, *tool, bodies, tp, ctx);
+    GenerateOne(setup, aimed, *tool, bodies, tp, ctx);
   }
   if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "

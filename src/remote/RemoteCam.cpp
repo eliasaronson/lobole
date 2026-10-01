@@ -538,10 +538,13 @@ constexpr MethodDoc kCamMethods[] = {
      "Simulate the POSTED G-code for a setup {setup, resolution?: the height "
      "map's cell size in mm, echoed as resolution_mm} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
-     "fits (each toleranced round wall the program aimed at: class, "
-     "nominal_mm, band_mm, aim_mm, cut_mm -- the diameter the file cuts -- "
-     "in_band, scrap; past the band on the scrap side counts against ok, "
-     "short of it against complete), cut_free (pieces through cuts part "
+     "fits (each toleranced round wall the program aimed at -- kind "
+     "'size': class, nominal_mm, band_mm, aim_mm, cut_mm, the diameter the "
+     "file cuts -- and each floor or shoulder whose distance from a "
+     "reference face is toleranced -- kind 'distance', reference_z, the "
+     "same keys for that distance; in_band, scrap; past the band on the "
+     "scrap side counts against ok, short of it against complete), cut_free "
+     "(pieces through cuts part "
      "from everything holding them -- no tab, not the stock's edge -- with "
      "at, area_mm2, part: they would fly; a finding, not a failure), "
      "offcut_area_mm2 (material cut free of the part, never leftover), "
@@ -1398,6 +1401,7 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
     json fits = json::array();
     for (const cam::FitVerdict& f : v.fits) {
       json fj = {{"ops", f.ops},
+                 {"kind", f.depth ? "distance" : "size"},
                  {"internal", f.internal},
                  {"class", f.label},
                  {"centre", {f.centre.x, f.centre.y}},
@@ -1412,6 +1416,8 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       } else {
         fj["why"] = f.why;
       }
+      if (f.depth)
+        fj["reference_z"] = f.refZ;
       fits.push_back(std::move(fj));
     }
     out["fits"] = std::move(fits);

@@ -51,7 +51,8 @@ uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId) {
   // a seat left the toolpath at the band it had before.
   for (const Tolerance& t : doc->GetTolerances()) {
     key = (key ^ t.id) * 1099511628211ull;
-    key = (key ^ std::hash<std::string>{}(t.ref.name + "|" + t.isoClass)) *
+    key = (key ^ std::hash<std::string>{}(t.ref.name + "|" + t.isoClass + "|" +
+                                          t.ref2.name)) *
           1099511628211ull;
     key = (key ^ static_cast<uint64_t>(std::llround(t.lower * 1e6))) *
           1099511628211ull;

@@ -556,6 +556,16 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         if (again)
           continue;
         said.push_back(&f);
+        if (f.depth) {
+          // A floor's distance from its reference face, and the Z the file
+          // cuts it at: what the machinist measures with a height gauge.
+          e.Comment("fit op " + std::to_string(f.op) + ": " +
+                    (f.internal ? "floor " : "shoulder ") + Num(f.nominal, 3) +
+                    " from Z" + Num(f.refZ, 3) + " " + f.label + " " +
+                    Num(f.Min(), 4) + "-" + Num(f.Max(), 4) + ", aimed at " +
+                    Num(f.aim, 4) + " (Z" + Num(f.ZAt(f.aim), 4) + ")");
+          continue;
+        }
         e.Comment("fit op " + std::to_string(f.op) + ": " +
                   (f.internal ? "bore D" : "boss D") + Num(f.nominal, 3) + " " +
                   f.label + " " + Num(f.Min(), 4) + "-" + Num(f.Max(), 4) +

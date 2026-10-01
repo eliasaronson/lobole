@@ -81,11 +81,14 @@ std::vector<FitVerdict> JudgeFits(const GProgram& program, const Setup& setup,
     FitVerdict* same = nullptr;
     for (FitVerdict& v : out)
       if (glm::distance(v.centre, f.centre) < 1e-3 &&
-          std::abs(v.nominal - f.nominal) < 1e-4 && v.internal == f.internal)
+          std::abs(v.nominal - f.nominal) < 1e-4 && v.internal == f.internal &&
+          v.depth == f.depth)
         same = &v;
     if (same == nullptr) {
       FitVerdict v;
       v.centre = f.centre;
+      v.depth = f.depth;
+      v.refZ = f.refZ;
       v.internal = f.internal;
       v.nominal = f.nominal;
       v.min = f.Min();
@@ -100,6 +103,35 @@ std::vector<FitVerdict> JudgeFits(const GProgram& program, const Setup& setup,
   }
   // The span each wall is judged over, from its declarations.
   for (FitVerdict& v : out) {
+    if (v.depth) {
+      // A floor: the lowest the tool's tip went over it, which with a flat
+      // or a ball end is the floor it left.
+      glm::dvec2 lo(std::numeric_limits<double>::max()), hi(-lo);
+      for (const Toolpath::Fit& f : fits)
+        if (f.depth &&
+            std::find(v.ops.begin(), v.ops.end(), f.op) != v.ops.end() &&
+            glm::distance(v.centre, f.centre) < 1e-3) {
+          lo = glm::min(lo, f.lo);
+          hi = glm::max(hi, f.hi);
+        }
+      double floor = std::numeric_limits<double>::max();
+      for (const GMove& m : program.moves) {
+        if (m.rapid ||
+            std::find(v.ops.begin(), v.ops.end(), m.op) == v.ops.end())
+          continue;
+        if (m.to.x < lo.x - 1e-6 || m.to.y < lo.y - 1e-6 ||
+            m.to.x > hi.x + 1e-6 || m.to.y > hi.y + 1e-6)
+          continue;
+        floor = std::min(floor, m.to.z);
+      }
+      if (floor == std::numeric_limits<double>::max()) {
+        v.why = "no cutting move of its operations reaches the floor";
+        continue;
+      }
+      v.judged = true;
+      v.cut = std::abs(v.refZ - floor);
+      continue;
+    }
     double zLo = std::numeric_limits<double>::max(), zHi = -zLo;
     for (const Toolpath::Fit& f : fits)
       if (std::find(v.ops.begin(), v.ops.end(), f.op) != v.ops.end() &&

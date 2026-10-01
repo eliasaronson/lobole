@@ -976,8 +976,21 @@ struct Toolpath {
     double aim = 0.0;            // mm, the diameter the path cuts
     double zLo = 0.0, zHi = 0.0; // the wall's span, setup Z
     std::string label;           // "K7", "+0.05/-0.02"
+    // A DISTANCE band instead (docs/cam/operations.md#tolerance-bands): a
+    // level floor or shoulder at `faceZ` whose distance from the level
+    // reference face at `refZ` carries the band. `nominal`, the band and
+    // `aim` are that distance; `internal` says removing metal lengthens it
+    // (the floor is below its reference). `lo`/`hi` are the floor's extent,
+    // setup XY, and `centre` its middle.
+    bool depth = false;
+    double faceZ = 0.0, refZ = 0.0;
+    glm::dvec2 lo{0.0}, hi{0.0};
     [[nodiscard]] double Min() const { return nominal + lower; }
     [[nodiscard]] double Max() const { return nominal + upper; }
+    // The floor's Z at a distance `d` from the reference.
+    [[nodiscard]] double ZAt(double d) const {
+      return faceZ < refZ ? refZ - d : refZ + d;
+    }
   };
   std::vector<Fit> fits;
   // The finishing half of a rough-then-finish operation (R6): the same

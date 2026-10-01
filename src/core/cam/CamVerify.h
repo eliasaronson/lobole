@@ -163,6 +163,11 @@ struct ThreadVerdict {
 struct FitVerdict {
   std::vector<uint64_t> ops; // the operations that aimed at it
   glm::dvec2 centre{0.0};
+  // A floor's distance from its reference, not a diameter: `nominal`, the
+  // band and `cut` are that distance, and `internal` is a floor below its
+  // reference (cutting deeper lengthens it, as a bore grows).
+  bool depth = false;
+  double refZ = 0.0;
   bool internal = true;
   double nominal = 0.0, min = 0.0, max = 0.0, aim = 0.0; // mm, diameters
   std::string label;

@@ -81,14 +81,17 @@ struct HoleMark {
   std::string thread; // a tapped fit's thread ("M4"); empty otherwise
 };
 
-// A size tolerance on one of this body's round faces, as a CAM job reads it
-// (docs/cam/operations.md#tolerance-bands): the band's deviations on the
-// DIAMETER, mm, measured at the face's own size, and how a person names it
-// ("K7", "+0.05/-0.02"). Stamped by the job when it assembles its bodies
-// (ui::JobBodies) from the part's tolerances, which live outside the
-// regeneration chain; empty everywhere else. Transient.
+// A tolerance on this body's faces, as a CAM job reads it
+// (docs/cam/operations.md#tolerance-bands): a SIZE band on a round face --
+// its deviations on the DIAMETER, mm, at the face's own size -- or, with
+// `reference` set, a DISTANCE band between two level faces, its deviations
+// on that distance; and how a person names it ("K7", "+0.05/-0.02").
+// Stamped by the job when it assembles its bodies (ui::JobBodies) from the
+// part's tolerances, which live outside the regeneration chain; empty
+// everywhere else. Transient.
 struct FaceBand {
   ElementRef face;
+  ElementRef reference; // set: a distance from `face` to it
   double lower = 0.0, upper = 0.0;
   std::string label;
 };

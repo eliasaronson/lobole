@@ -287,6 +287,171 @@ TEST_CASE("an opening's slug is offcut, and flagged when nothing holds it",
   CHECK(Says(v, "An offcut"));
 }
 
+// --- a distance tolerance ----------------------------------------------------
+
+namespace {
+// The down-facing planar face whose centroid sits at height `z`.
+ElementRef DownFaceAt(const Document& doc, double z) {
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
+      if (b.shape.FacePlane(index, c, n, u) && n.z < -0.99 &&
+          std::abs(c.z - z) < 1e-6)
+        return ElementRef{b.createdBy, name};
+    }
+  return {};
+}
+
+// A 40 x 30 x 20 block with a step milled off its -X end: a shoulder at
+// z = 12 from x = 0 to 15, its wall at x = 15.
+std::unique_ptr<Document> StepDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Step", glm::vec3(-1, -1, 12), 16, 32, 10));
+  const uint64_t step = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Stepped", block, step,
+                                                   BooleanOp::Subtract));
+  doc->Regenerate();
+  return doc;
+}
+} // namespace
+
+TEST_CASE("a floor whose depth from the top is toleranced is cut to the "
+          "band's middle, posted and judged",
+          "[cam]") {
+  // A pocket 8 deep, its floor's distance from the top 8 +0.3/+0.1: the
+  // floor is cut 8.2 down, at Z 11.8, and the file says so.
+  auto doc = PocketDoc();
+  doc->Regenerate();
+  const ElementRef floor = PocketFloorRef(*doc);
+  const ElementRef top = UpFaceAt(*doc, 20.0);
+  REQUIRE(floor.IsSet());
+  REQUIRE(top.IsSet());
+  Tolerance tol;
+  tol.ref = floor;
+  tol.ref2 = top;
+  tol.lower = 0.1;
+  tol.upper = 0.3;
+  doc->SetTolerance(tol);
+  const std::vector<Body> bodies = Stamped(*doc);
+  REQUIRE(bodies[0].bands.size() == 1);
+  CHECK(bodies[0].bands[0].reference.IsSet());
+
+  cam::Setup s = Ready(Flush(), bodies);
+  cam::DerivedOp d = cam::DeriveOperation(s, bodies, cam::OpType::Pocket,
+                                          cam::Target{0, floor}, 1);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.bottomZ, WithinAbs(12.0, 1e-9)); // the model's floor
+  d.op.id = 1;
+  s.operations.push_back(d.op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(s, bodies);
+  REQUIRE(paths.at(0).error.empty());
+  REQUIRE(paths[0].fits.size() == 1);
+  const cam::Toolpath::Fit& fit = paths[0].fits[0];
+  CHECK(fit.depth);
+  CHECK(fit.internal); // a floor below its reference
+  CHECK_THAT(fit.nominal, WithinAbs(8.0, 1e-9));
+  CHECK_THAT(fit.aim, WithinAbs(8.2, 1e-9));
+  double lowest = 1e9;
+  for (const cam::Move& m : paths[0].moves)
+    lowest = std::min(lowest, m.to.z);
+  CHECK_THAT(lowest, WithinAbs(11.8, 1e-6));
+
+  const std::string gcode = Post(s, paths);
+  INFO(gcode.substr(0, 600));
+  CHECK(gcode.find("(fit op 1: floor 8 from Z20 +0.300/+0.100 8.1-8.3, "
+                   "aimed at 8.2 [Z11.8])") != std::string::npos);
+
+  const std::vector<cam::Toolpath::Fit> fits =
+      Gather<cam::Toolpath::Fit>(paths, &cam::Toolpath::fits);
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, bodies, 0.25, {}, {}, {},
+                                          nullptr, {}, {}, fits);
+  REQUIRE(v.fits.size() == 1);
+  INFO(v.fits[0].why);
+  REQUIRE(v.fits[0].judged);
+  CHECK(v.fits[0].depth);
+  CHECK_THAT(v.fits[0].cut, WithinAbs(8.2, 1e-6));
+  CHECK(v.fits[0].InBand());
+  INFO("leftover " << v.maxLeftover << " gouge " << v.maxGouge << " at "
+                   << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.Safe(0.05)); // the 0.2 below the model is the band, not a gouge
+  CHECK(v.Complete(0.375));
+  CHECK(Says(v, "Floor 8.000 from Z 20.000"));
+  CHECK(Says(v, "in its band"));
+
+  // Cut at the model's floor -- what every floor was before -- it is short
+  // of the band; cut past it, scrap.
+  const std::vector<Body> bare = doc->GetBodies();
+  const std::vector<cam::Toolpath> nominal = cam::GenerateAll(s, bare);
+  CHECK(nominal.at(0).fits.empty()); // an untoleranced floor is cut as before
+  const cam::Verdict atNominal = cam::VerifyGcode(
+      Post(s, nominal), s, bodies, 0.25, {}, {}, {}, nullptr, {}, {}, fits);
+  REQUIRE(atNominal.fits.size() == 1);
+  CHECK_THAT(atNominal.fits[0].cut, WithinAbs(8.0, 1e-6));
+  CHECK(atNominal.fits[0].Short());
+  CHECK_FALSE(atNominal.Complete(0.375));
+  CHECK(Says(atNominal, "short of its band"));
+  std::vector<cam::Toolpath::Fit> shallow = fits;
+  shallow[0].lower = -0.2;
+  shallow[0].upper = 0.0;
+  const cam::Verdict over = cam::VerifyGcode(gcode, s, bodies, 0.25, {}, {}, {},
+                                             nullptr, {}, {}, shallow);
+  REQUIRE(over.fits.size() == 1);
+  CHECK(over.fits[0].Scrap());
+  CHECK_FALSE(over.Safe(0.375));
+  CHECK(Says(over, "scrap"));
+}
+
+TEST_CASE("a shoulder whose height from the base is toleranced is cut to "
+          "the band's middle and judged",
+          "[cam]") {
+  // A shoulder 12 above the part's underside, -0.1/-0.3: removing metal
+  // shortens the distance, so it is cut 11.8 up, and a cut lower than 11.7
+  // is scrap.
+  auto doc = StepDoc();
+  const ElementRef shoulder = UpFaceAt(*doc, 12.0);
+  const ElementRef base = DownFaceAt(*doc, 0.0);
+  REQUIRE(shoulder.IsSet());
+  REQUIRE(base.IsSet());
+  Tolerance tol;
+  tol.ref = base; // either order
+  tol.ref2 = shoulder;
+  tol.lower = -0.3;
+  tol.upper = -0.1;
+  doc->SetTolerance(tol);
+  const std::vector<Body> bodies = Stamped(*doc);
+  cam::Setup s = Ready(Flush(), bodies);
+  cam::DerivedOp d =
+      cam::DeriveOperation(s, bodies, cam::OpType::Profile,
+                           cam::Target{0, WallNear(*doc, 15.0, 15.0)}, 1);
+  INFO(d.why);
+  REQUIRE(d.ok);
+  REQUIRE_THAT(d.op.bottomZ, WithinAbs(12.0, 1e-9)); // the wall stops on it
+  d.op.id = 1;
+  s.operations.push_back(d.op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(s, bodies);
+  REQUIRE(paths.at(0).error.empty());
+  REQUIRE(paths[0].fits.size() == 1);
+  CHECK(paths[0].fits[0].depth);
+  CHECK_FALSE(paths[0].fits[0].internal);
+  CHECK_THAT(paths[0].fits[0].ZAt(paths[0].fits[0].aim), WithinAbs(11.8, 1e-9));
+  const std::string gcode = Post(s, paths);
+  CHECK(gcode.find("(fit op 1: shoulder 12 from Z0 -0.100/-0.300 "
+                   "11.7-11.9, aimed at 11.8 [Z11.8])") != std::string::npos);
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, s, bodies, 0.25, {}, {}, {}, nullptr, {}, {},
+                       Gather<cam::Toolpath::Fit>(paths, &cam::Toolpath::fits));
+  REQUIRE(v.fits.size() == 1);
+  INFO(v.fits[0].why);
+  CHECK_THAT(v.fits[0].cut, WithinAbs(11.8, 1e-6));
+  CHECK(v.fits[0].InBand());
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.Safe(0.05));
+}
+
 // --- the drill point and the thread depth ------------------------------------
 
 namespace {

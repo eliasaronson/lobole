@@ -583,7 +583,8 @@ operation settings offer "finish with T<n>".
 ## Tolerance bands
 
 A toleranced round wall is cut to the MIDDLE of its band, not to nominal:
-the Ø32 K7 seat (31.982 to 32.007) is cut at 31.9945.
+the Ø32 K7 seat (31.982 to 32.007) is cut at 31.9945. So is a toleranced
+floor or shoulder: a seat 8 +0.3/+0.1 below the top is cut 8.2 down.
 
 - **What is read.** A part's size tolerances on round faces
   ([tolerances](../tolerances/README.md#the-stored-tolerance)), an ISO class
@@ -591,8 +592,9 @@ the Ø32 K7 seat (31.982 to 32.007) is cut at 31.9945.
   job's bodies as it assembles them (`Body::bands`, `cam::StampBands`,
   called by `ui::JobBodies`). They live outside the part's regeneration, so
   the job's body key mixes them in (`JobSourceVersion`): a tolerance edit
-  regenerates the toolpaths. A distance tolerance is not read, and a face
-  without a band is cut as modelled.
+  regenerates the toolpaths. A distance tolerance between two faces of one
+  body is stamped too (`FaceBand::reference`), and a face without a band
+  is cut as modelled.
 - **How a path aims.** Per generate, each band whose cylinder stands
   vertical in the setup is resolved to a circle in setup space
   (`FitScope`, `CamStrategies.cpp`). The circle the material ends on moves
@@ -603,9 +605,22 @@ the Ø32 K7 seat (31.982 to 32.007) is cut at 31.9945.
   (a contour all of whose vertices lie on the circle), a pocket's and an
   adaptive's region (a round outline or a round island), and each half of a
   rough-then-finish operation. A plunge (the tool is the hole), a face, an
-  edge break, a thread, an engraving and a surface pass do not aim.
+  edge break, a thread, an engraving and a surface pass do not aim at a
+  wall.
+- **How a floor aims.** A distance band whose two faces stand level in the
+  setup -- planes square to its Z -- is a floor and its reference
+  (`FitPlane`, `FitScope::AimAtFloor`): the face looking up whose Z is
+  where an operation's depth passes end (its bottom plus its stock to
+  leave, so the rough of a rough-then-finish matches too, and an operation
+  told to leave stock does not) is the floor, the other its reference,
+  either order. The operation's bottom moves to the Z at the band's middle
+  distance from the reference, for a profile (the shoulder a wall stops
+  on), a pocket's or an adaptive's floor, and a facing pass. A floor below
+  its reference goes deeper for a longer distance; a shoulder above it,
+  lower for a shorter one.
 - **Said.** Each toolpath that aimed declares it (`Toolpath::Fit`: centre,
-  side, nominal, band, aim, the wall's Z span); the post writes it in the
+  side, nominal, band, aim, the wall's Z span; a floor's `depth`, its Z,
+  its reference's and its extent); the post writes it in the
   header ([post.md](post.md#what-the-file-says)) and the verifier judges
   the cut against the band ([simulation.md](simulation.md#tolerance-bands)).
 - **What a router holds.** The program aims; the machine's runout, the
