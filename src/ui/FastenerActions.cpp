@@ -372,6 +372,14 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     return fail(screwProfile->designation + " is a " + screwProfile->what +
                 ", which does not pass through a hole — ask for a screw and "
                 "put this on it with `nut` or `washer`");
+  // The joint's washers, nuts and clearance sizes are the metric tables';
+  // an inch screw has none of them here, so it is placed where told.
+  if (screwProfile->inch)
+    return fail(screwProfile->designation +
+                " is an inch screw, and the hole tables a fit is derived "
+                "from are metric — place it with add_fastener {standard: \"" +
+                screwProfile->name +
+                "\", size, length, position, orientation}");
 
   // Every placed leaf, once: the rim is on one of them and the stack is made
   // of the rest.

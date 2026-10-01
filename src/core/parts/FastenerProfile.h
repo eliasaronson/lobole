@@ -59,6 +59,10 @@ struct Profile {
   // OVERALL, so reading it as 20 mm under the head makes every one of them
   // one head-height too long.
   bool lengthOverHead = false;
+  // An inch standard (ASME B18.3): its sizes are unified threads ("1/4-20")
+  // and its designation writes the length in inches ("1/4-20 x 3/4"). The
+  // model is in millimetres all the same; the table is scaled on load.
+  bool inch = false;
 };
 
 // The profile for a standard, by its name ("iso4762") or by the vendored file

@@ -14,6 +14,7 @@
 #include <TopoDS.hxx>
 
 #include <cmath>
+#include <cstdio>
 #include <numbers>
 #include <sstream>
 
@@ -117,6 +118,25 @@ CADShape TorxPrism(double A, double B, double Re, double base, double height) {
 
 } // namespace
 
+std::string InchLength(double inches) {
+  const long sixteenths = std::lround(inches * 16.0);
+  char buf[32];
+  if (std::abs(inches * 16.0 - static_cast<double>(sixteenths)) > 1e-6) {
+    std::snprintf(buf, sizeof buf, "%.3f", inches);
+    return buf;
+  }
+  const long whole = sixteenths / 16;
+  long num = sixteenths % 16, den = 16;
+  while (num != 0 && num % 2 == 0) {
+    num /= 2;
+    den /= 2;
+  }
+  if (num == 0)
+    return std::to_string(whole);
+  const std::string frac = std::to_string(num) + "/" + std::to_string(den);
+  return whole == 0 ? frac : std::to_string(whole) + "-" + frac;
+}
+
 const FastenerFeature* SoleFastenerOf(const Document* doc) {
   if (doc == nullptr || doc->FeatureCount() != 1)
     return nullptr;
@@ -137,6 +157,12 @@ std::string FastenerFeature::Designation() const {
   const parts::Profile* profile = parts::ProfileFor(standard);
   std::ostringstream out;
   out << (profile ? profile->designation : standard) << " " << size;
+  if (profile && profile->inch && length > 0.0) {
+    // An inch screw is ordered by its length in inches, as a fraction where
+    // it is one: "1/4-20 x 3/4", "3/8-16 x 1-1/4".
+    out << " x " << InchLength(length / 25.4);
+    return out.str();
+  }
   // A nut and a washer have no length, so their designation has no "x20".
   const bool hasLength =
       profile == nullptr || profile->kind == parts::Kind::Screw;
@@ -183,8 +209,9 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   const std::optional<double> nominal = parts::NominalDiameter(size);
   if (!nominal) {
     SetError("\"" + size +
-             "\" is not a metric size — a fastener size is a "
-             "letter and a number, like M6");
+             "\" is not a size a fastener is made in — a metric size is a "
+             "letter and a number (M6), a unified one a size and its "
+             "threads per inch (1/4-20)");
     return false;
   }
 
@@ -460,7 +487,10 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   // The span is the whole shank: relief is the INTERSECTION with a matching
   // internal thread, so naming more of the screw than is cut threads
   // nothing else loose.
-  if (profile->kind == parts::Kind::Screw && threads::Lookup(size)) {
+  // An inch size is keyed as a supplier writes it ("1/4-20"); its thread
+  // is the coarse series B18.3's table is (UNC).
+  const std::string thread = profile->inch ? size + " UNC" : size;
+  if (profile->kind == parts::Kind::Screw && threads::Lookup(thread)) {
     const double shankRadius = *nominal / 2.0;
     for (const auto& [index, name] : map.names) {
       const TopoDS_Shape face = FaceAtIndex(solid.GetShape(), index);
@@ -492,6 +522,6 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   ctx.bodies.back().elementMap = std::move(map);
   if (threadOn.IsSet())
     ctx.bodies.back().threadRegions.push_back(
-        {threadOn, size, 0.0, 0.0, /*external=*/true});
+        {threadOn, thread, 0.0, 0.0, /*external=*/true});
   return true;
 }

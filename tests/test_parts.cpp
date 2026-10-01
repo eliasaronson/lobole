@@ -300,7 +300,8 @@ TEST_CASE("parts: the shipped tables all load", "[parts]") {
   for (const char* standard :
        {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
         "iso10664def", "iso14579def", "iso4017head", "iso10642def",
-        "iso7380def", "clearance_hole_sizes", "tap_hole_sizes"}) {
+        "iso7380def", "asmeb18_3def", "clearance_hole_sizes",
+        "tap_hole_sizes"}) {
     INFO(standard << ": " << error);
     CHECK(parts::Load(standard, &error) != nullptr);
   }
@@ -319,7 +320,8 @@ TEST_CASE("parts: the build stages the tables where the app looks", "[parts]") {
   for (const char* standard :
        {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
         "iso10664def", "iso14579def", "iso4017head", "iso10642def",
-        "iso7380def", "clearance_hole_sizes", "tap_hole_sizes"}) {
+        "iso7380def", "asmeb18_3def", "clearance_hole_sizes",
+        "tap_hole_sizes"}) {
     INFO(standard);
     CHECK(fs::exists(staged / (std::string(standard) + ".csv")));
   }
@@ -913,4 +915,75 @@ TEST_CASE("Axis traversal ignores the bodies its ray cannot reach",
   CHECK(crowded[1].part == "beyond");
   CHECK_THAT(crowded[1].enter, WithinAbs(45.0, 1e-6));
   CHECK_THAT(crowded[1].exit, WithinAbs(55.0, 1e-6));
+}
+
+// --- ASME B18.3: the inch socket head cap screw ------------------------------
+
+TEST_CASE("parts: an ASME B18.3 screw is the standard's inches, in mm",
+          "[parts]") {
+  const SourceTables tables;
+  std::string error;
+  // Table 1's 1/4-20 row: A 0.375, H 0.250, J 3/16, T 0.120 -- scaled once
+  // on load, so nothing past the loader sees an inch.
+  const auto dims = parts::Dimensions("asme_b18_3", "1/4-20", &error);
+  INFO(error);
+  REQUIRE(dims.has_value());
+  CHECK_THAT(dims->at("dk_max"), WithinAbs(0.375 * 25.4, 1e-9));
+  CHECK_THAT(dims->at("k"), WithinAbs(0.250 * 25.4, 1e-9));
+  CHECK_THAT(dims->at("s_mean"), WithinAbs(0.1875 * 25.4, 1e-9));
+  CHECK_THAT(dims->at("t"), WithinAbs(0.120 * 25.4, 1e-9));
+  // 3/8-16, the tripod thread's size, is carried too.
+  const auto tripod = parts::Dimensions("asme_b18_3", "3/8-16", &error);
+  REQUIRE(tripod.has_value());
+  CHECK_THAT(tripod->at("dk_max"), WithinAbs(0.562 * 25.4, 1e-9));
+  CHECK_THAT(*parts::NominalDiameter("1/4-20"), WithinAbs(6.35, 1e-9));
+  CHECK_THAT(*parts::NominalDiameter("#10-24"), WithinAbs(0.19 * 25.4, 1e-9));
+
+  // A size the table does not carry is refused naming what it does.
+  CHECK_FALSE(parts::Dimensions("asme_b18_3", "1/4-28", &error).has_value());
+  CHECK_THAT(error, ContainsSubstring("does not stock 1/4-28"));
+  CHECK_THAT(error, ContainsSubstring("#4-40"));
+  CHECK_THAT(error, ContainsSubstring("3/4-10"));
+
+  // Lengths snap to the inch series, inside the size's range.
+  const auto snapped = parts::SnapLength("asme_b18_3", "1/4-20", 15.0, &error);
+  REQUIRE(snapped.has_value());
+  CHECK_THAT(*snapped, WithinAbs(0.625 * 25.4, 1e-9)); // 5/8
+  CHECK_FALSE(
+      parts::SnapLength("asme_b18_3", "#4-40", 60.0, &error).has_value());
+}
+
+TEST_CASE("parts: a 1/4-20 cap screw measures Table 1 and says its inches",
+          "[parts]") {
+  const SourceTables tables;
+  std::string error;
+  const auto dims = parts::Dimensions("asme_b18_3", "1/4-20", &error);
+  REQUIRE(dims.has_value());
+  const double dk = dims->at("dk_max"), k = dims->at("k");
+  const double s = dims->at("s_mean"), t = dims->at("t");
+  const double length = 0.75 * 25.4, nominal = 6.35;
+  Document doc;
+  doc.AddFeature(std::make_unique<FastenerFeature>("Screw", "asme_b18_3",
+                                                   "1/4-20", length));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& screw = doc.GetBodies()[0];
+  glm::dvec3 lo(0.0), hi(0.0);
+  screw.shape.GetBoundingBox(lo, hi);
+  CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
+  CHECK_THAT(hi.z - lo.z, WithinAbs(length + k, 1e-3));
+  const double head = kPi * (dk / 2) * (dk / 2) * k;
+  const double shank = kPi * (nominal / 2) * (nominal / 2) * length;
+  CHECK_THAT(screw.shape.Volume(),
+             WithinAbs(head + shank - HexArea(s) * t, 0.5));
+  // Steel, and threaded where a 1/4-20 tapped hole can engage it.
+  CHECK(screw.material == "steel");
+  REQUIRE(screw.threadRegions.size() == 1);
+  CHECK(screw.threadRegions[0].designation == "1/4-20 UNC");
+  const auto* f = dynamic_cast<const FastenerFeature*>(doc.GetFeature(0));
+  REQUIRE(f != nullptr);
+  CHECK(f->Designation() == "ASME B18.3 1/4-20 x 3/4");
+  CHECK(InchLength(1.25) == "1-1/4");
+  CHECK(InchLength(0.5) == "1/2");
+  CHECK(InchLength(2.0) == "2");
+  CHECK(InchLength(0.3) == "0.300");
 }

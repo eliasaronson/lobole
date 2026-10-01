@@ -68,6 +68,11 @@ struct Table {
 // Every table in one file, in file order. Table 0 is the dimensions.
 struct TableFile {
   std::vector<Table> tables;
+  // Millimetres per number in the file. An inch standard is typed in the
+  // inches it is printed in (a `# units: inch` line says so) and every value
+  // -- and a length series' keys -- is scaled once, here, so nothing past
+  // the loader ever sees an inch.
+  double mmPerUnit = 1.0;
   [[nodiscard]] const Table* ById(const std::string& idSuffix) const;
 };
 
@@ -116,9 +121,10 @@ LengthRange(const std::string& stem, const std::string& size,
                                                double required,
                                                std::string* error);
 
-// The nominal diameter a metric size names: 6 from "M6", 1.6 from "M1.6".
-// nullopt for anything that is not a letter prefix and a number, which is what
-// a drive size ("T20") and a typo both look like.
+// The nominal diameter a metric size names: 6 from "M6", 1.6 from "M1.6";
+// and a unified one its thread's major diameter in mm: 6.35 from "1/4-20".
+// nullopt for anything that is neither, which is what a drive size ("T20")
+// and a typo both look like.
 //
 // This is the one dimension NOT in the tables: they give head and socket sizes
 // and take the thread diameter as read, because it is the size's own name.

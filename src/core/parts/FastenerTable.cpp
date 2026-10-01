@@ -208,8 +208,13 @@ std::optional<TableFile> ParseFile(const std::string& text,
       finish();
       continue;
     }
-    if (line[0] == '#')
-      continue; // our provenance header
+    if (line[0] == '#') {
+      // Our provenance header -- and the one line of it that is data: the
+      // unit the numbers are in.
+      if (line.find("units: inch") != std::string::npos)
+        out.mmPerUnit = 25.4;
+      continue;
+    }
 
     const std::vector<std::string> fields = SplitCsv(line);
     if (!haveHeader) {
@@ -255,7 +260,7 @@ std::optional<TableFile> ParseFile(const std::string& text,
         const double value = std::stod(fields[i], &consumed);
         if (consumed != fields[i].size())
           continue; // a name, not a dimension — see Table::text
-        row[current.columns[i]] = value;
+        row[current.columns[i]] = value * out.mmPerUnit;
       } catch (const std::exception&) {
         // Likewise. A dimension column that turns out to hold a name is not a
         // malformed file: `iso14579def.csv` puts the driver size ("T30")
@@ -350,7 +355,7 @@ std::vector<double> NominalLengths(const std::string& stem,
   out.reserve(lengths->order.size());
   for (const std::string& key : lengths->order) {
     try {
-      out.push_back(std::stod(key));
+      out.push_back(std::stod(key) * file->mmPerUnit);
     } catch (const std::exception&) {
       if (error)
         *error = lengths->id + " lists a non-numeric length \"" + key + "\"";
@@ -530,7 +535,16 @@ std::optional<double> WidestClearance(const std::string& size,
 }
 
 std::optional<double> NominalDiameter(const std::string& size) {
-  return KeyNumber(size);
+  if (const auto metric = KeyNumber(size))
+    return metric;
+  // A unified size ("1/4-20", "#10-24") is its thread's major diameter.
+  // The inch tables key a size as a supplier writes it, "1/4-20"; the
+  // thread table names its series as well.
+  for (const std::string& name : {size, size + " UNC"})
+    if (const auto thread = threads::Lookup(name);
+        thread && thread->series != threads::Series::Metric)
+      return thread->majorDia;
+  return std::nullopt;
 }
 
 std::optional<std::string> TextField(const std::string& stem,

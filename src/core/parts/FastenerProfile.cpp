@@ -22,6 +22,12 @@ const std::vector<Profile>& Table() {
        Kind::Screw, Head::Countersunk, Drive::Hex, "", true},
       {"iso7380", "iso7380def", "ISO 7380", "button head socket screw",
        Kind::Screw, Head::Button, Drive::Hex, "", false},
+      // Typed from the standard rather than vendored: no permissively
+      // licensed inch table carried B18.3's heads (assets/parts/
+      // asmeb18_3def.csv says which table and which columns).
+      {"asme_b18_3", "asmeb18_3def", "ASME B18.3",
+       "socket head cap screw, inch (UNC)", Kind::Screw, Head::SocketCap,
+       Drive::Hex, "", false, true},
       {"iso4032", "iso4032def", "ISO 4032", "hex nut", Kind::Nut, Head::None,
        Drive::None, "", false},
       {"iso7089", "iso7089def", "ISO 7089", "plain washer", Kind::Washer,

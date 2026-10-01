@@ -30,7 +30,9 @@ namespace {
 std::vector<const parts::Profile*> OfferedStandards() {
   std::vector<const parts::Profile*> out;
   for (const parts::Profile& p : parts::AllProfiles())
-    if (p.kind == parts::Kind::Screw && !p.lengthOverHead)
+    // An inch screw is not derived from a hole (the clearance, washer and
+    // nut tables are metric); add_fastener places one.
+    if (p.kind == parts::Kind::Screw && !p.lengthOverHead && !p.inch)
       out.push_back(&p);
   return out;
 }

@@ -76,6 +76,10 @@ public:
 
 class Document;
 
+// Inches as a fastener's length is written: a fraction to sixteenths where
+// it is one ("3/4", "1-1/4", "2"), else three decimals.
+[[nodiscard]] std::string InchLength(double inches);
+
 // The one Fastener feature a generated standard part is made of, or null.
 //
 // "The whole document" rather than "contains one": a part with a screw AND

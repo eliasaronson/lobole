@@ -316,9 +316,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "mass. Optional {position, orientation} place it; `fit_fastener` derives "
      "all of that from a picked hole and is what you usually want. Standards: "
      "iso4762, iso14579, iso4017, iso7380 (screws — `length` required), "
+     "asme_b18_3 (inch socket head cap screw, ASME B18.3: `size` a UNC "
+     "designation, \"#4-40\" to \"3/4-10\"), "
      "iso4032 (nut), iso7089 (washer — no `length`). `length` is the shank "
-     "length in MILLIMETRES (the 20 of \"M6x20\"), `size` is the thread "
-     "designation (\"M6\") rather than a measure, and `position` is model mm.",
+     "length in MILLIMETRES (the 20 of \"M6x20\"; an inch screw's 3/4 in. "
+     "is 19.05), `size` is the thread "
+     "designation (\"M6\", \"1/4-20\") rather than a measure, and "
+     "`position` is model mm.",
      "drive, length, orientation, position, size, standard"},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "

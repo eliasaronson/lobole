@@ -20,6 +20,7 @@ is the one place the directory name is written, under `DataDir()`
 |---|---|---|
 | `iso4762def.csv`, `iso14579def.csv`, `iso4017head.csv`, `iso10642def.csv`, `iso7380def.csv`, `iso4032def.csv`, `iso7089def.csv`, `iso888length.csv`, `iso10664def.csv` (torx lobes), `iso4757def.csv` (Phillips, unused) | FreeCAD Fasteners Workbench | GPL-2.0-or-later |
 | `clearance_hole_sizes.csv`, `tap_hole_sizes.csv` (metric rows only) | bd_warehouse | Apache-2.0 |
+| `asmeb18_3def.csv` | typed from ASME B18.3-2012 Table 1 ([inch screws](#inch-screws-asme-b183)) | the standard's numbers |
 
 Each file keeps its upstream name and content below a provenance header, so a
 re-vendor can diff; attribution is in `THIRD_PARTY.md`.
@@ -63,6 +64,7 @@ standard.
 | `iso10642` | countersunk socket head screw | overall |
 | `iso4032` | hex nut | — |
 | `iso7089` | plain washer | — |
+| `asme_b18_3` | socket head cap screw, inch (UNC) | under the head |
 
 - **The standard fixes the drive.** An empty `drive` is the standard's own; a
   different one is refused naming the standard that has it (a torx socket cap
@@ -88,6 +90,35 @@ so that twenty of them do not bury the person's own parts in the tab bar.
 about fasteners. A fastener is **refused on a part tab**: CAM would machine a
 screw body in a part, mass and BOM would count it as the part, and
 `check_geometry` would flag it as a disconnected component.
+
+## Inch screws (ASME B18.3)
+
+`asme_b18_3` is the inch hexagon socket head cap screw, #4-40 to 3/4-10
+UNC, 1/4-20 and 3/8-16 among them (the camera and tripod threads). No
+permissively licensed inch table carries B18.3's heads, so
+`assets/parts/asmeb18_3def.csv` is typed from ASME B18.3-2012 Table 1 and
+says so in its header, column by column: body diameter D, head diameter A
+(`dk_max`), head height H (`k`), socket size J (`s_mean`) and key
+engagement T (`t`), max or min as the table gives them. The nominal lengths
+are the standard's recommended series (1/8 in. steps to 1 in., 1/4 in. to
+3-1/2, 1/2 in. to 7, 1 in. to 10); the per-size length range is not the
+standard's but a conservative envelope of what suppliers stock, so a length
+outside it is refused rather than drawn.
+
+The file is in the inches the standard prints, and a `# units: inch` line
+in its header scales every value -- and the length series' keys -- to mm
+once, on load (`TableFile::mmPerUnit`): nothing past the loader sees an
+inch. A size is keyed as a supplier writes it (`1/4-20`), its thread is the
+UNC one the thread table names (`1/4-20 UNC`, so a tapped 1/4-20 hole
+engages it), and the designation writes the length in inches, as a
+fraction where it is one: `ASME B18.3 1/4-20 x 3/4`. An unknown size is
+refused naming the eleven there are.
+
+`add_fastener {standard: "asme_b18_3", size: "1/4-20", length}` places one
+(`length` in mm: 19.05 for 3/4 in.). `fit_fastener` and the Fastener tool
+do not offer it: a fit derives the joint from the clearance, washer and nut
+tables, which are metric, and is refused for an inch screw naming
+`add_fastener`.
 
 ## Deriving a fastener from a hole
 
@@ -404,12 +435,15 @@ washer_under_head?, washer_under_nut?, washer?, far_end?, dry_run?}`,
 
 `tests/test_parts.cpp` (the tables, their shapes and refusals, the generated
 geometry against the rows — an M6x20 ISO 4762 volume computed from head +
-shank − socket), `tests/test_actions.cpp` (`[parts]`: one part per spec and
+shank − socket; ASME B18.3's 1/4-20 row in mm, its refusal, its inch length
+series and a 1/4-20 x 3/4 measured against Table 1), `tests/test_actions.cpp` (`[parts]`: one part per spec and
 the part-tab refusal, the four derivation cases, whole joints with washers and
 nut, a second pick, a thread ends a joint, countersunk screws, a bolt mates
 the parts, riders, a rim on two placements), `tests/fastener_stack_smoke.py`
 (`fit_fastener` and `check_fasteners` agree on where a joint ends),
 `tests/test_drawing.cpp` (`fastener_callout`),
+`tests/drawing_frames_smoke.py` (an ASME B18.3 screw placed, refused at an
+unknown size, and BOUGHT in a parts list),
 `tests/test_faceselector.cpp` (a head-on rim pick takes the near rim), GUI
 `parts/a_fastener_is_placed_by_picking_a_rim` (arm, refuse, pick, far end,
 ghost count tracks the options, place, joined, check). Goldens
@@ -417,15 +451,15 @@ ghost count tracks the options, place, joined, check). Goldens
 
 ## Not built
 
-- Phillips/Pozidriv drives (the Phillips table is vendored but unused), and
-  any imperial sizes.
+- Phillips/Pozidriv drives (the Phillips table is vendored but unused);
+  inch sizes beyond ASME B18.3's socket head cap screws (no inch nuts,
+  washers, hex heads or UNF), and deriving an inch screw from its hole.
 - Modelled helical threads on generated fasteners (their thread is
   cosmetic; a `Thread` feature on a part can model one).
 - Extrusions, motors, o-rings as generated parts; a searchable parts
   browser.
 - Bearings beyond deep-groove ball bearings at bores 3 to 30 mm; shield and
   seal variants as their own designations; a bearing whose rings turn.
-- Balloons and a parts-list block on a drawing sheet.
 - Folding hardware in the Occurrences tree.
 - A ghost on hover before the rim is picked.
 - Attachment chains (an attached occurrence's parent is never itself chased)
