@@ -9,9 +9,12 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
+
+class BRepTools_History;
 
 // Propagation of stable element names through history-reporting OCC operations
 // (topological naming, T5). Each function keeps the OCC maker alive, folds its
@@ -24,6 +27,18 @@
 // ElementMap use), so references keep resolving across regenerations.
 namespace topo {
 
+// A clean-up of a boolean's result that is part of the same operation: given
+// the boolean's result, returns the cleaned shape and records its history
+// from that result in `history` (OCC's Modified/Generated/Removed), or
+// returns a null shape for "leave it as it is". The boolean's own history is
+// composed with it (BRepTools_History::Merge) before anything is named, so a
+// face the clean-up leaves alone is named exactly as the bare boolean names
+// it, and two pieces it merges take the one name their original had. A
+// modelled thread uses it to merge away the footprint its square end draws
+// on a shoulder (ThreadFeature.cpp).
+using RefineResult = std::function<TopoDS_Shape(const TopoDS_Shape& result,
+                                                BRepTools_History& history)>;
+
 // Boolean of two named shapes. `out` receives the propagated map for the
 // result (boolean section edges not reached by history seed "<tag>/seam<i>").
 // Returns an invalid CADShape on failure, with `out` cleared and, when OCC
@@ -31,12 +46,24 @@ namespace topo {
 // map may be empty — the op still runs, the result just carries fewer names.
 // `fuzzy` > 0 runs it with OCC's fuzzy option at that tolerance and
 // NON-destructively (cad::BuildNonDestructive): the one retry a refused body
-// boolean gets (CheckedBooleanNamed, core/BodyMode.h).
+// boolean gets (CheckedBooleanNamed, core/BodyMode.h). `refine` (optional)
+// cleans the result up before it is named (RefineResult).
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
                       ElementMap& out, std::string* error = nullptr,
-                      double fuzzy = 0.0);
+                      double fuzzy = 0.0, const RefineResult& refine = {});
+
+// Names for `result` from a history the caller built itself, for a chain of
+// operations that stands for one boolean of `target` and `tool` (the worm
+// wheel's teeth cut by replication, WormGear.h's CutSpacesBySectors): every
+// face and edge of either input is placed as BooleanNamed places it —
+// kept, ";M", ";G" — then the U/L passes. There are no section edges.
+ElementMap NamesThroughHistory(const CADShape& target,
+                               const ElementMap& targetMap,
+                               const CADShape& tool, const ElementMap& toolMap,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named

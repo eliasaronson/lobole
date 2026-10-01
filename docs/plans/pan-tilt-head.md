@@ -52,7 +52,7 @@ Built: see docs/modeling/worm-gears.md and docs/assemblies/relations.md#worm.
 Measured: hobbing by booleans does not scale (8 hob placements in one
 multi-tool common took 105 s, about ×7 per doubling), so the wheel is the
 same hob's envelope computed point by point and lofted — throated, converging
-as 1/n² in the hob's steps, 15–23 s a wheel; neither fallback was needed. The
+as 1/n² in the hob's steps, about 2 s a wheel; neither fallback was needed. The
 `gear` relation's fixed sign is wrong for half the ways a pair goes together,
 so the pair is coupled by a `worm` relation.
 

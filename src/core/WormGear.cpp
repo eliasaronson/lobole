@@ -7,6 +7,8 @@
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
 
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -20,16 +22,29 @@
 #include <BRep_Builder.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GProp_GProps.hxx>
-#include <GeomAPI_PointsToBSpline.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
-#include <TColgp_HArray1OfPnt.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Trsf.hxx>
+#include <math_Gauss.hxx>
+#include <math_Matrix.hxx>
+#include <math_Vector.hxx>
 
 #include <algorithm>
 #include <chrono>
@@ -385,25 +400,126 @@ Section SpaceAt(const Envelope& env, double z, double rootR, double topR,
   return s;
 }
 
-TopoDS_Wire SectionWire(const Section& s, double z, double tol) {
+// A clamped cubic on `spans` uniform spans of [0, 1], fitted by least
+// squares to the points `p` at the parameters `t`, through both end points.
+// Every flank of every section is fitted on the same knots, so the loft
+// joins them as they are. With knots of their own (an adaptive fit's), the
+// loft merges all of them into every section: twenty sections of three
+// knots each made flank faces of 19 x 19 patches, and the teeth's cut spent
+// most of its time evaluating them. `maxErr` is the worst miss at a point.
+Handle(Geom_BSplineCurve)
+    FitOnKnots(const std::vector<gp_Pnt>& p, const std::vector<double>& t,
+               int spans, double* maxErr) {
+  constexpr int deg = 3;
+  const int n = static_cast<int>(p.size());
+  const int poles = spans + deg;
+  std::vector<double> flat(poles + deg + 1);
+  for (int k = 0; k < static_cast<int>(flat.size()); k++)
+    flat[k] = std::clamp(static_cast<double>(k - deg) / spans, 0.0, 1.0);
+  // Cox-de Boor: every basis function of the flat knots at u.
+  const auto basis = [&](double u) {
+    std::vector<double> nb(flat.size() - 1, 0.0);
+    int span = deg;
+    while (span < poles - 1 && u >= flat[span + 1])
+      span++;
+    nb[span] = 1.0;
+    for (int d = 1; d <= deg; d++)
+      for (int j = 0; j + d < static_cast<int>(nb.size()); j++) {
+        double v = 0.0;
+        if (flat[j + d] > flat[j])
+          v += (u - flat[j]) / (flat[j + d] - flat[j]) * nb[j];
+        if (flat[j + d + 1] > flat[j + 1])
+          v += (flat[j + d + 1] - u) / (flat[j + d + 1] - flat[j + 1]) *
+               nb[j + 1];
+        nb[j] = v;
+      }
+    nb.resize(poles);
+    return nb;
+  };
+  // The end poles are the end points; the rest by normal equations.
+  const int m = poles - 2;
+  math_Matrix ata(1, m, 1, m, 0.0);
+  math_Matrix atb(1, m, 1, 3, 0.0);
+  std::vector<std::vector<double>> rows(n);
+  for (int i = 0; i < n; i++) {
+    rows[i] = basis(t[i]);
+    const std::vector<double>& b = rows[i];
+    const gp_XYZ rest =
+        p[i].XYZ() - b[0] * p.front().XYZ() - b[poles - 1] * p.back().XYZ();
+    for (int a = 1; a <= m; a++) {
+      for (int c = 1; c <= m; c++)
+        ata(a, c) += b[a] * b[c];
+      atb(a, 1) += b[a] * rest.X();
+      atb(a, 2) += b[a] * rest.Y();
+      atb(a, 3) += b[a] * rest.Z();
+    }
+  }
+  math_Gauss solve(ata);
+  if (!solve.IsDone())
+    return nullptr;
+  TColgp_Array1OfPnt cp(1, poles);
+  cp(1) = p.front();
+  cp(poles) = p.back();
+  for (int c = 1; c <= 3; c++) {
+    math_Vector rhs(1, m), x(1, m);
+    for (int a = 1; a <= m; a++)
+      rhs(a) = atb(a, c);
+    solve.Solve(rhs, x);
+    for (int a = 1; a <= m; a++)
+      cp(a + 1).SetCoord(c, x(a));
+  }
+  TColStd_Array1OfReal knots(1, spans + 1);
+  TColStd_Array1OfInteger mults(1, spans + 1);
+  for (int k = 0; k <= spans; k++) {
+    knots(k + 1) = static_cast<double>(k) / spans;
+    mults(k + 1) = k == 0 || k == spans ? deg + 1 : 1;
+  }
+  Handle(Geom_BSplineCurve) c = new Geom_BSplineCurve(cp, knots, mults, deg);
+  double worst = 0.0;
+  for (int i = 0; i < n; i++) {
+    gp_XYZ at(0, 0, 0);
+    for (int j = 0; j < poles; j++)
+      at += rows[i][j] * cp(j + 1).XYZ();
+    worst = std::max(worst, (at - p[i].XYZ()).Modulus());
+  }
+  *maxErr = worst;
+  return c;
+}
+
+// A section's two flank curves, left from root to top and right from top to
+// root, fitted on `spans` spans.
+struct Flanks {
+  Handle(Geom_BSplineCurve) left, right;
+  double err = 0.0;
+};
+Flanks FitFlanks(const Section& s, double z, int spans) {
   const auto at = [&](double R, double b) {
     return gp_Pnt(R * std::cos(b), R * std::sin(b), z);
   };
   const int n = static_cast<int>(s.radii.size());
-  Handle(TColgp_HArray1OfPnt) l = new TColgp_HArray1OfPnt(1, n);
-  Handle(TColgp_HArray1OfPnt) r = new TColgp_HArray1OfPnt(1, n);
+  std::vector<gp_Pnt> l(n), r(n);
+  std::vector<double> t(n);
   for (int i = 0; i < n; i++) {
-    l->SetValue(i + 1, at(s.radii[i], s.left[i]));
-    r->SetValue(i + 1, at(s.radii[n - 1 - i], s.right[n - 1 - i]));
+    // The radii were sampled at u^1.6 of the way up: u is the parameter.
+    t[i] = static_cast<double>(i) / (n - 1);
+    l[i] = at(s.radii[i], s.left[i]);
+    r[i] = at(s.radii[n - 1 - i], s.right[n - 1 - i]);
   }
-  // Approximated, not interpolated: a flank is smooth, and a curve with a
-  // pole per sample makes every face the loft builds from it that much
-  // heavier for the booleans that follow.
-  GeomAPI_PointsToBSpline li(l->Array1(), 3, 5, GeomAbs_C2, tol);
-  GeomAPI_PointsToBSpline ri(r->Array1(), 3, 5, GeomAbs_C2, tol);
-  if (!li.IsDone() || !ri.IsDone())
+  Flanks f;
+  double el = 0.0, er = 0.0;
+  f.left = FitOnKnots(l, t, spans, &el);
+  f.right = FitOnKnots(r, t, spans, &er);
+  f.err = std::max(el, er);
+  return f;
+}
+
+TopoDS_Wire SectionWire(const Section& s, const Flanks& f, double z) {
+  const auto at = [&](double R, double b) {
+    return gp_Pnt(R * std::cos(b), R * std::sin(b), z);
+  };
+  if (f.left.IsNull() || f.right.IsNull())
     return TopoDS_Wire();
-  const Handle(Geom_BSplineCurve) lc = li.Curve(), rc = ri.Curve();
+  const Handle(Geom_BSplineCurve) lc = f.left, rc = f.right;
   const double top = s.radii.back(), bot = s.radii.front();
   const Handle(Geom_TrimmedCurve) topArc =
       GC_MakeArcOfCircle(at(top, s.left.back()),
@@ -471,19 +587,88 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
   const double lean = std::tan(sz.leadAngle) / sz.wheelPitchRadius *
                       (spec.rightHanded ? -1.0 : 1.0);
   // The tip: the usual r2 + 1.5 m (already held to the 45-degree throat),
-  // lowered until the thinnest tooth — at a face end, where the throat does
-  // not reach — keeps a printable crest a quarter of a module wide.
+  // lowered until the thinnest tooth keeps a printable crest a quarter of a
+  // module wide.
+  //
+  // The crest is the tooth's width at the top of the wheel's material in
+  // each section: the tip, the blank where that is lower, or the throat
+  // nearer the mid-plane. At one radius a tooth narrows from the face ends
+  // inward, so the thinnest crest is where the throat comes up to meet the
+  // tip -- about 3.9 mm off the mid-plane on the m = 2, z = 40, q = 10 pair,
+  // and a third narrower than at the face ends, where it used to be read.
+  // So the face is scanned, with the throat's meeting points sampled
+  // exactly (the minimum sits on that kink) and the best sample refined.
   const double crest = 0.25 * m;
+  const double ri = sz.throatRadius;
+  const auto topAt = [&](double R, double z) {
+    double top = std::min(R, blankRadius);
+    if (std::abs(z) < ri)
+      top = std::min(top, a - std::sqrt(ri * ri - z * z));
+    return top;
+  };
+  struct Crest {
+    double width = 0.0, z = 0.0, radius = 0.0;
+  };
   const auto crestAt = [&](double R) {
-    return std::min(ToothWidth(env, R, halfFace, -lean * halfFace),
-                    ToothWidth(env, R, -halfFace, lean * halfFace));
+    const auto widthAt = [&](double z) {
+      return ToothWidth(env, topAt(R, z), z, -lean * z);
+    };
+    std::vector<double> zs;
+    constexpr int kSamples = 32;
+    for (int i = 0; i <= kSamples; i++)
+      zs.push_back(-halfFace + 2.0 * halfFace * i / kSamples);
+    // Where the throat reaches the tip (or the blank): the kink.
+    const double top = std::min(R, blankRadius);
+    if (a - top < ri) {
+      const double zt = std::sqrt(ri * ri - (a - top) * (a - top));
+      if (zt < halfFace) {
+        zs.push_back(zt);
+        zs.push_back(-zt);
+      }
+    }
+    std::sort(zs.begin(), zs.end());
+    Crest best;
+    best.width = std::numeric_limits<double>::max();
+    size_t at = 0;
+    for (size_t i = 0; i < zs.size(); i++) {
+      const double w = widthAt(zs[i]);
+      if (w < best.width) {
+        best = {w, zs[i], topAt(R, zs[i])};
+        at = i;
+      }
+    }
+    // Golden section between the best sample's neighbours.
+    double lo = zs[at > 0 ? at - 1 : 0];
+    double hi = zs[std::min(at + 1, zs.size() - 1)];
+    const double g = 0.5 * (std::sqrt(5.0) - 1.0);
+    double x1 = hi - g * (hi - lo), x2 = lo + g * (hi - lo);
+    double f1 = widthAt(x1), f2 = widthAt(x2);
+    for (int k = 0; k < 24 && hi - lo > 1e-4 * m; k++) {
+      if (f1 < f2) {
+        hi = x2;
+        x2 = x1;
+        f2 = f1;
+        x1 = hi - g * (hi - lo);
+        f1 = widthAt(x1);
+      } else {
+        lo = x1;
+        x1 = x2;
+        f1 = f2;
+        x2 = lo + g * (hi - lo);
+        f2 = widthAt(x2);
+      }
+    }
+    for (const auto& [w, z] : {std::pair{f1, x1}, std::pair{f2, x2}})
+      if (w < best.width)
+        best = {w, z, topAt(R, z)};
+    return best;
   };
   double tipR = sz.wheelTipRadius;
-  if (crestAt(tipR) < crest) {
+  if (crestAt(tipR).width < crest) {
     double lo = sz.wheelThroatRadius, hi = tipR;
     for (int k = 0; k < 40; k++) {
       const double mid = 0.5 * (lo + hi);
-      (crestAt(mid) >= crest ? lo : hi) = mid;
+      (crestAt(mid).width >= crest ? lo : hi) = mid;
     }
     tipR = lo;
   }
@@ -542,8 +727,24 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
     BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False, 1e-6);
     loft.CheckCompatibility(Standard_False);
     loft.SetMaxDegree(5);
+    // The fewest spans that put every flank within the tolerance: the same
+    // for every section, so the loft has no knots to merge.
+    const double fitTol = 2e-3 * m;
+    std::vector<Flanks> flanks(slices);
+    int spans = 1;
+    double fitErr = 0.0;
+    for (; spans <= points - 3; spans++) {
+      fitErr = 0.0;
+      for (int j = 0; j < slices; j++) {
+        flanks[j] = FitFlanks(sections[j], zs[j], spans);
+        fitErr = std::max(fitErr, flanks[j].err);
+      }
+      if (fitErr <= fitTol)
+        break;
+    }
+    spans = std::min(spans, points - 3);
     for (int j = 0; j < slices; j++) {
-      const TopoDS_Wire w = SectionWire(sections[j], zs[j], 2e-3 * m);
+      const TopoDS_Wire w = SectionWire(sections[j], flanks[j], zs[j]);
       if (w.IsNull()) {
         Fail(why, "a section of the tooth space could not be drawn");
         return false;
@@ -610,6 +811,39 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
     }
     out->rim = CADShape(BRepBuilderAPI_Transform(rim, place, true).Shape());
     out->spaces = CADShape(spaces);
+    // The ring the spaces reach, and where a sector of it can be bounded
+    // inside space 0: in each half of the face, the angles every section's
+    // space spans from its root to the top of the wheel's material there
+    // (the tip, or the throat nearer the mid-plane). Where no one angle
+    // fits a half, its sections' mean middle: the sector then cuts a flank,
+    // which is still the right wheel, only with that flank in two faces.
+    out->innerRadius = std::max(0.0, a - env.hob.tipR - 0.5 * m);
+    out->outerRadius = std::max(blankRadius, topR) + m;
+    out->halfHeight = hb + m;
+    const auto split = [&](bool upper) {
+      double lo = -1e300, hi = 1e300, mean = 0.0;
+      int count = 0;
+      for (int j = 0; j < slices; j++) {
+        if ((zs[j] > 0.0) != upper)
+          continue;
+        const Section& s = sections[j];
+        const double z = zs[j];
+        double top = std::min(blankRadius, tipR);
+        if (std::abs(z) < sz.throatRadius)
+          top = std::min(
+              top, a - std::sqrt(sz.throatRadius * sz.throatRadius - z * z));
+        for (size_t i = 0; i < s.radii.size(); i++)
+          if (i == 0 || s.radii[i] <= top + 1e-3 * m) {
+            lo = std::max(lo, s.left[i]);
+            hi = std::min(hi, s.right[i]);
+          }
+        mean += 0.5 * (s.left.front() + s.right.front());
+        count++;
+      }
+      return hi > lo ? 0.5 * (lo + hi) : mean / std::max(1, count);
+    };
+    out->lowerSplit = split(false);
+    out->upperSplit = split(true);
     if (stats) {
       stats->slices = slices;
       stats->flankPoints = points;
@@ -629,15 +863,18 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
         }
         stats->midArea = area;
       }
-      stats->tipCrest = crestAt(tipR);
+      const Crest c = crestAt(tipR);
+      stats->tipCrest = c.width;
+      stats->tipCrestZ = c.z;
+      stats->tipCrestRadius = c.radius;
       stats->seconds =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
               .count();
     }
     LOG_INFO(
-        "worm wheel: {} teeth, {} sections x {} flank points, {} hob "
-        "steps/pitch, {:.2f} s",
-        spec.teeth, slices, points, options.stepsPerPitch,
+        "worm wheel: {} teeth, {} sections x {} flank points on {} spans "
+        "(within {:.4f} mm), {} hob steps/pitch, {:.2f} s",
+        spec.teeth, slices, points, spans, fitErr, options.stepsPerPitch,
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count());
     return true;
@@ -646,6 +883,386 @@ bool WheelCutTools(const gp_Ax3& frame, double halfFace, double blankRadius,
     return false;
   }
 }
+namespace {
+
+// Whether `face` lies on a surface of revolution about `axis`: a plane
+// square to it, or a cylinder, cone, sphere, torus or revolved surface on it.
+bool RevolvesAbout(const TopoDS_Face& face, const gp_Ax1& axis) {
+  const BRepAdaptor_Surface s(face);
+  constexpr double angTol = 1e-9, linTol = 1e-7;
+  const gp_Lin line(axis);
+  const auto onAxis = [&](const gp_Ax1& ax) {
+    return ax.Direction().IsParallel(axis.Direction(), angTol) &&
+           line.Distance(ax.Location()) < linTol;
+  };
+  switch (s.GetType()) {
+  case GeomAbs_Plane:
+    return s.Plane().Axis().Direction().IsParallel(axis.Direction(), angTol);
+  case GeomAbs_Cylinder:
+    return onAxis(s.Cylinder().Axis());
+  case GeomAbs_Cone:
+    return onAxis(s.Cone().Axis());
+  case GeomAbs_Sphere:
+    return line.Distance(s.Sphere().Location()) < linTol;
+  case GeomAbs_Torus:
+    return onAxis(s.Torus().Axis());
+  case GeomAbs_SurfaceOfRevolution:
+    return onAxis(s.AxeOfRevolution());
+  default:
+    return false;
+  }
+}
+
+bool Revolved(const TopoDS_Shape& shape, const gp_Ax1& axis) {
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    if (!RevolvesAbout(TopoDS::Face(ex.Current()), axis))
+      return false;
+  return true;
+}
+
+// A boolean's history over every face and edge of `inputs` (the form
+// BRepTools_History's constructor needs: handed a solid, it reports
+// nothing).
+Handle(BRepTools_History)
+    HistoryOf(BRepAlgoAPI_BooleanOperation& op,
+              std::initializer_list<TopoDS_Shape> inputs) {
+  TopTools_ListOfShape args;
+  for (const TopoDS_Shape& in : inputs)
+    for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+      TopTools_IndexedMapOfShape subs;
+      TopExp::MapShapes(in, type, subs);
+      for (int i = 1; i <= subs.Extent(); i++)
+        args.Append(subs(i));
+    }
+  return new BRepTools_History(args, op);
+}
+
+// Every face and edge of `shape`.
+TopTools_IndexedMapOfShape Parts(const TopoDS_Shape& shape) {
+  TopTools_IndexedMapOfShape parts;
+  TopExp::MapShapes(shape, TopAbs_FACE, parts);
+  TopExp::MapShapes(shape, TopAbs_EDGE, parts);
+  return parts;
+}
+
+// What `s` became through `h`, as parts of that step's result (`within`):
+// its images, else itself if it is one. A boolean's history does not report
+// as removed everything its result left out.
+void Through(const Handle(BRepTools_History) & h, const TopoDS_Shape& s,
+             const TopTools_IndexedMapOfShape& within,
+             TopTools_ListOfShape& out) {
+  const TopTools_ListOfShape* mods = h.IsNull() ? nullptr : &h->Modified(s);
+  if (mods != nullptr && !mods->IsEmpty()) {
+    for (const TopoDS_Shape& m : *mods)
+      if (within.Contains(m))
+        out.Append(m);
+    return;
+  }
+  if (within.Contains(s))
+    out.Append(s);
+}
+
+double Volume(const TopoDS_Shape& s) {
+  GProp_GProps props;
+  BRepGProp::VolumeProperties(s, props);
+  return props.Mass();
+}
+
+} // namespace
+
+bool CutSpacesBySectors(const TopoDS_Shape& body, const gp_Ax3& frame,
+                        int teeth, const WheelTools& tools, SectorCut* out,
+                        std::string* why) {
+  if (teeth < 3 || !(tools.innerRadius > 0.0) ||
+      !(tools.outerRadius > tools.innerRadius) || !(tools.halfHeight > 0.0) ||
+      tools.spaces.GetShape().IsNull()) {
+    Fail(why, "no ring to replicate");
+    return false;
+  }
+  try {
+    using Clock = std::chrono::steady_clock;
+    const auto Secs = [](Clock::time_point a, Clock::time_point b) {
+      return std::chrono::duration<double>(b - a).count();
+    };
+    const auto t0 = Clock::now();
+    const gp_Ax1 axis = frame.Axis();
+    const gp_Dir dir = frame.Direction();
+    const double pitch = 2.0 * M_PI / teeth;
+    const double h = tools.halfHeight;
+    const auto at = [&](double z) {
+      return frame.Location().Translated(gp_Vec(dir) * z);
+    };
+
+    // The ring the spaces reach. A body that is all revolved is its own
+    // ring; any other has it cut out, and must find it revolved.
+    TopoDS_Shape ring = body, outside;
+    Handle(BRepTools_History) hOut, hIn;
+    if (!Revolved(body, axis)) {
+      const TopoDS_Shape band =
+          BRepPrimAPI_MakeCylinder(gp_Ax2(at(-h), dir, frame.XDirection()),
+                                   tools.outerRadius, 2.0 * h)
+              .Shape();
+      const TopoDS_Shape bore =
+          BRepPrimAPI_MakeCylinder(
+              gp_Ax2(at(-h - 1.0), dir, frame.XDirection()), tools.innerRadius,
+              2.0 * h + 2.0)
+              .Shape();
+      BRepAlgoAPI_Cut annulus;
+      if (!cad::BuildNonDestructive(annulus, band, bore)) {
+        Fail(why, "the ring could not be drawn");
+        return false;
+      }
+      BRepAlgoAPI_Cut outsideOp;
+      BRepAlgoAPI_Common insideOp;
+      if (!cad::BuildNonDestructive(outsideOp, body, annulus.Shape()) ||
+          !cad::BuildNonDestructive(insideOp, body, annulus.Shape())) {
+        Fail(why, "the ring could not be split from the body");
+        return false;
+      }
+      outside = outsideOp.Shape();
+      ring = insideOp.Shape();
+      hOut = HistoryOf(outsideOp, {body});
+      hIn = HistoryOf(insideOp, {body});
+      if (!Revolved(ring, axis)) {
+        Fail(why, "the rim is not a solid of revolution about the wheel's "
+                  "axis");
+        return false;
+      }
+    }
+
+    // One pitch of it, from space 0's middle to space 1's, the boundary
+    // stepping at the mid-plane to follow the spaces' lean.
+    const auto prism = [&](double angle, double z0, double z1) {
+      gp_Ax2 ax(at(z0), dir, frame.XDirection());
+      ax.Rotate(axis, angle);
+      return BRepPrimAPI_MakeCylinder(ax, tools.outerRadius + 1.0, z1 - z0,
+                                      pitch)
+          .Shape();
+    };
+    TopoDS_Shape wedge;
+    if (std::abs(tools.lowerSplit - tools.upperSplit) < 1e-12) {
+      wedge = prism(tools.lowerSplit, -h - 1.0, h + 1.0);
+    } else {
+      BRepAlgoAPI_Fuse both;
+      if (!cad::BuildNonDestructive(both, prism(tools.lowerSplit, -h - 1.0, 0),
+                                    prism(tools.upperSplit, 0, h + 1.0))) {
+        Fail(why, "the sector could not be drawn");
+        return false;
+      }
+      wedge = both.Shape();
+    }
+    BRepAlgoAPI_Common sectorOp;
+    if (!cad::BuildNonDestructive(sectorOp, ring, wedge)) {
+      Fail(why, "the sector could not be cut from the ring");
+      return false;
+    }
+    const TopoDS_Shape sector = sectorOp.Shape();
+    const Handle(BRepTools_History) hSector = HistoryOf(sectorOp, {ring});
+
+    // Spaces 0 and 1 out of it. Space 1 is space 0 MOVED, not copied: the
+    // halves of one root that two neighbouring copies carry then lie on one
+    // surface, and merge back into one face.
+    gp_Trsf turn;
+    turn.SetRotation(axis, pitch);
+    const TopLoc_Location step(turn);
+    TopoDS_Iterator first(tools.spaces.GetShape());
+    const TopoDS_Shape space0 = first.Value();
+    const TopoDS_Shape space1 = space0.Moved(step);
+    TopoDS_Compound pair;
+    BRep_Builder builder;
+    builder.MakeCompound(pair);
+    builder.Add(pair, space0);
+    builder.Add(pair, space1);
+    BRepAlgoAPI_Cut cutOp;
+    if (!cad::BuildNonDestructive(cutOp, sector, pair)) {
+      Fail(why, "the spaces could not be cut from the sector");
+      return false;
+    }
+    const TopoDS_Shape cut = cutOp.Shape();
+    const Handle(BRepTools_History) hCut = HistoryOf(cutOp, {sector, pair});
+    const double lost = Volume(sector) - Volume(cut);
+    const auto t2 = Clock::now();
+
+    // Turned round and glued: the copies meet only on whole, identical
+    // faces.
+    std::vector<TopLoc_Location> turns(teeth);
+    TopTools_ListOfShape copies, rest;
+    for (int k = 0; k < teeth; k++) {
+      turns[k] = step.Powered(k);
+      (k == 0 ? copies : rest).Append(cut.Moved(turns[k]));
+    }
+    BRepAlgoAPI_Fuse glue;
+    glue.SetArguments(copies);
+    glue.SetTools(rest);
+    glue.SetNonDestructive(Standard_True);
+    glue.SetGlue(BOPAlgo_GlueFull);
+    glue.Build();
+    if (!glue.IsDone()) {
+      Fail(why, "the sectors could not be glued");
+      return false;
+    }
+    TopTools_ListOfShape glueArgs;
+    for (const TopoDS_Shape& c : copies)
+      glueArgs.Append(c);
+    for (const TopoDS_Shape& c : rest)
+      glueArgs.Append(c);
+    Handle(BRepTools_History) hGlue;
+    {
+      TopTools_ListOfShape subs;
+      for (const TopoDS_Shape& c : glueArgs)
+        for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+          TopTools_IndexedMapOfShape m;
+          TopExp::MapShapes(c, type, m);
+          for (int i = 1; i <= m.Extent(); i++)
+            subs.Append(m(i));
+        }
+      hGlue = new BRepTools_History(subs, glue);
+    }
+    TopoDS_Shape joined = glue.Shape();
+    const auto t3 = Clock::now();
+    Handle(BRepTools_History) hJoin;
+    if (!outside.IsNull()) {
+      BRepAlgoAPI_Fuse join;
+      TopTools_ListOfShape a, b;
+      a.Append(outside);
+      b.Append(joined);
+      join.SetArguments(a);
+      join.SetTools(b);
+      join.SetNonDestructive(Standard_True);
+      join.SetGlue(BOPAlgo_GlueShift); // they meet on the ring's faces only
+      join.Build();
+      if (!join.IsDone()) {
+        Fail(why, "the toothed ring could not be joined to the body");
+        return false;
+      }
+      hJoin = HistoryOf(join, {outside, joined});
+      joined = join.Shape();
+    }
+
+    // The faces the sectors split, merged back. What the body had and the
+    // replication never touched is kept as it was.
+    ShapeUpgrade_UnifySameDomain unify(joined, Standard_True, Standard_True,
+                                       Standard_True);
+    if (!outside.IsNull()) {
+      TopTools_IndexedMapOfShape original;
+      TopExp::MapShapes(body, TopAbs_EDGE, original);
+      TopExp::MapShapes(body, TopAbs_VERTEX, original);
+      TopTools_MapOfShape keep;
+      for (const TopAbs_ShapeEnum type : {TopAbs_EDGE, TopAbs_VERTEX})
+        for (TopExp_Explorer ex(joined, type); ex.More(); ex.Next())
+          if (original.Contains(ex.Current()))
+            keep.Add(ex.Current());
+      unify.KeepShapes(keep);
+    }
+    unify.Build();
+    const TopoDS_Shape result = unify.Shape();
+    const Handle(BRepTools_History) hUnify = unify.History();
+    const auto t4 = Clock::now();
+
+    // One history from the body and the spaces to the result.
+    const TopTools_IndexedMapOfShape inOutside = Parts(outside),
+                                     inRing = Parts(ring),
+                                     inSector = Parts(sector),
+                                     inCut = Parts(cut),
+                                     inGlued = Parts(glue.Shape()),
+                                     inJoined = Parts(joined),
+                                     inResult = Parts(result);
+    const auto finish = [&](const TopTools_ListOfShape& in,
+                            TopTools_ListOfShape& done) {
+      for (const TopoDS_Shape& a : in) {
+        TopTools_ListOfShape glued, kept;
+        if (inOutside.Contains(a))
+          glued.Append(a); // the gluing never saw what lies outside the ring
+        else
+          Through(hGlue, a, inGlued, glued);
+        for (const TopoDS_Shape& g : glued)
+          Through(hJoin, g, inJoined, kept);
+        for (const TopoDS_Shape& k : kept)
+          Through(hUnify, k, inResult, done);
+      }
+    };
+    Handle(BRepTools_History) hist = new BRepTools_History();
+    const auto record = [&](const TopoDS_Shape& x,
+                            const TopTools_ListOfShape& images) {
+      // Itself among them: it survived (and keeps its name) as it is.
+      TopTools_MapOfShape seen;
+      for (const TopoDS_Shape& y : images)
+        if (seen.Add(y) && !y.IsSame(x) && y.ShapeType() == x.ShapeType())
+          hist->AddModified(x, y);
+      if (seen.IsEmpty())
+        hist->Remove(x);
+    };
+    for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+      TopTools_IndexedMapOfShape subs;
+      TopExp::MapShapes(body, type, subs);
+      for (int i = 1; i <= subs.Extent(); i++) {
+        const TopoDS_Shape& x = subs(i);
+        TopTools_ListOfShape before, ringParts, images;
+        if (!outside.IsNull()) {
+          Through(hOut, x, inOutside, before);
+          Through(hIn, x, inRing, ringParts);
+        } else {
+          ringParts.Append(x);
+        }
+        for (const TopoDS_Shape& r : ringParts) {
+          TopTools_ListOfShape sectorParts;
+          Through(hSector, r, inSector, sectorParts);
+          for (const TopoDS_Shape& s : sectorParts) {
+            TopTools_ListOfShape left;
+            Through(hCut, s, inCut, left);
+            for (const TopoDS_Shape& l : left)
+              for (int k = 0; k < teeth; k++)
+                before.Append(l.Moved(turns[k]));
+          }
+        }
+        finish(before, images);
+        record(x, images);
+      }
+    }
+    // Space k's faces are space 0's turned k pitches: its images are what
+    // copy k made of space 0 and what copy k-1 made of space 1.
+    for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+      TopTools_IndexedMapOfShape subs0;
+      TopExp::MapShapes(space0, type, subs0);
+      int k = 0;
+      for (TopoDS_Iterator it(tools.spaces.GetShape()); it.More();
+           it.Next(), k++) {
+        TopTools_IndexedMapOfShape subs;
+        TopExp::MapShapes(it.Value(), type, subs);
+        if (subs.Extent() != subs0.Extent()) {
+          Fail(why, "the spaces are not turned copies of one another");
+          return false;
+        }
+        for (int i = 1; i <= subs.Extent(); i++) {
+          TopTools_ListOfShape from0, from1, before, images;
+          Through(hCut, subs0(i), inCut, from0);
+          Through(hCut, subs0(i).Moved(step), inCut, from1);
+          for (const TopoDS_Shape& s : from0)
+            before.Append(s.Moved(turns[k]));
+          for (const TopoDS_Shape& s : from1)
+            before.Append(s.Moved(turns[(k + teeth - 1) % teeth]));
+          finish(before, images);
+          record(subs(i), images);
+        }
+      }
+    }
+
+    const auto t5 = Clock::now();
+    LOG_INFO("worm wheel: teeth replicated in {:.2f} s (sector {:.2f}, glue "
+             "{:.2f}, join and merge {:.2f}, names {:.2f})",
+             Secs(t0, t5), Secs(t0, t2), Secs(t2, t3), Secs(t3, t4),
+             Secs(t4, t5));
+    out->result = result;
+    out->history = hist;
+    out->removed = teeth * lost;
+    return true;
+  } catch (const Standard_Failure& e) {
+    Fail(why,
+         std::string("replicating the teeth failed: ") + e.GetMessageString());
+    return false;
+  }
+}
+
 double RelationRatio(const AssemblyDocument& asmDoc, const Mate& wormMate,
                      const Mate& wheelMate, bool samePath, bool topLevel,
                      const glm::mat4& wormFrame, const glm::mat4& wheelFrame,

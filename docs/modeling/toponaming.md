@@ -104,7 +104,11 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   appends `;M<tag>` (`.i` on a split); `Generated` appends `;G<tag>`; section
   edges history misses get `<tag>/seam<i>`. In OCC 7.9 faces created along an
   intersection are reported as `Modified`, and a pierced face *generates* its
-  section edges.
+  section edges. A clean-up that belongs to the same operation
+  (`topo::RefineResult`, e.g. a modelled thread merging the footprint its
+  square end draws on a shoulder) has its history composed onto the
+  boolean's before naming, so pieces it merges take their original's one
+  name and every face it leaves alone is named as the bare boolean names it.
 - **Fillet / chamfer** (`topo::EdgeBlendNamed`): blend faces
   `<spine edge name>;G<tag>`; support faces keep their names through
   `Modified`; corner patches fall to the fallback passes. The spine edge itself

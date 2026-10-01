@@ -56,7 +56,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
-| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
+| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out -- and a hole that comes out of the part's bottom starts that from the STOCK's bottom, as a cut-out does, so the bottom margin is drilled through too; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
 | Break an edge | the wall whose top edge to break | the break the model has there (top = its top edge, `edge_size` = a chamfer's width or a round's height), else on a sharp edge the biggest the tool can make within the wall; a flat mill is refused |
 | Face the top | none | the stock above the part, top = stock top, bottom = part top |
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
@@ -285,6 +285,16 @@ centre walks, a flat turn at the bottom, and for a hole wider than two tools
 rings from the centre outward by the stepover, the wall last so a through
 hole's slug goes progressively. A hole narrower than the tool is refused. A
 hole must point at the spindle.
+
+A through hole that comes out of the part's bottom is drilled through the
+stock's bottom margin as well, plus the point's height (`TipHeight`): the
+same floor a cut-out takes (Profile's bottom is the stock's), into the
+spoilboard, which the verifier reports as `below_stock_mm` and never as
+gouge. Stopped at the part, the drill left that margin standing under the
+hole as a slab, and a through [thread mill](#thread-mill)'s overtravel --
+a pitch past the plate -- ran its head into it. A hole that breaks out
+higher up (a cross hole through a turned part's flats) may have more part
+below it, so it stops a point's height past its own exit.
 
 A bore's rings each begin with a helix, and each climbs straight out of the
 hole before it travels (`EmitHelix`): a rapid that climbed and travelled at

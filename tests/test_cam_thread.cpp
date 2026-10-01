@@ -86,12 +86,13 @@ cam::Tool ThreadMill6(int number = 2, double diameter = 6.0) {
 // The plate's job: a 6 mm flat that bores the tap drill (T1) and the thread
 // mill (T2). `drill` false leaves the bore to nobody.
 cam::Setup ThreadJob(const Document& doc, const ElementRef& bore,
-                     bool drill = true, const cam::Tool& mill = ThreadMill6()) {
+                     bool drill = true, const cam::Tool& mill = ThreadMill6(),
+                     double bottomMargin = 0.0) {
   cam::Setup s = BasicSetup();
   s.tools.push_back(mill);
-  // The plate IS the stock, sitting on the spoilboard: a through thread's
-  // overtravel runs out into it, not into a slab the tap drill left.
-  s.stock.bottomMargin = 0.0;
+  // By default the plate IS the stock, sitting on the spoilboard; a margin
+  // puts a slab of stock under it, which the tap drill has to go through.
+  s.stock.bottomMargin = bottomMargin;
   s.safeZ = cam::DeriveSafeZ(s, doc.GetBodies());
   REQUIRE(cam::RecomputeOrigin(s, doc.GetBodies()));
   uint64_t id = 1;
@@ -606,6 +607,37 @@ TEST_CASE("the verifier judges a thread on its own terms", "[cam][thread]") {
   REQUIRE(none.threads.size() == 1);
   CHECK_FALSE(none.threads[0].judged);
   CHECK_FALSE(none.Complete(0.05));
+}
+
+// A through hole is drilled through the stock's bottom margin as well as the
+// plate. Stopped at the plate, it left a slab under the hole, and the thread
+// mill's overtravel -- a pitch past the plate -- ran its head into it.
+TEST_CASE("a through thread's tap drill goes through the stock below the part",
+          "[cam][thread]") {
+  const Plate plate = TappedPlate();
+  const cam::Setup s =
+      ThreadJob(*plate.doc, plate.bore, true, ThreadMill6(), 2.0);
+  // The drill reaches the stock's bottom, not just the part's: two
+  // millimetres deeper than on the job with no margin.
+  const cam::Setup flush = ThreadJob(*plate.doc, plate.bore);
+  CHECK_THAT(s.operations[0].bottomZ,
+             WithinAbs(flush.operations[0].bottomZ - 2.0, 1e-3));
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, plate.doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  REQUIRE(paths[1].error.empty());
+  const cam::Verdict v =
+      cam::VerifyGcode(Post(s, paths), s, plate.doc->GetBodies(), 0.25, {}, {},
+                       {}, nullptr, {}, DeclaredThreads(paths));
+  REQUIRE(v.threads.size() == 1);
+  INFO(v.threads[0].why);
+  CHECK(v.threads[0].judged);
+  CHECK(v.threads[0].InBand());
+  CHECK(v.maxGouge < 0.05);
+  CHECK(v.Safe(0.05));
+  // The tap drill goes below the stock, into the spoilboard -- reported as
+  // that, not as gouge.
+  CHECK(v.belowStock > 0.0);
 }
 
 TEST_CASE("a thread mill job saves and loads", "[cam][thread]") {

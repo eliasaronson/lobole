@@ -229,7 +229,8 @@ void AppendSubshapeArgs(const TopoDS_Shape& shape, TopTools_ListOfShape& args) {
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
-                      ElementMap& out, std::string* error, double fuzzy) {
+                      ElementMap& out, std::string* error, double fuzzy,
+                      const RefineResult& refine) {
   out = {};
   if (!target.IsValid() || !tool.IsValid()) {
     if (error)
@@ -274,13 +275,22 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
         *error = "boolean operation did not complete";
       return CADShape();
     }
-    const TopoDS_Shape result = mk->Shape();
+    TopoDS_Shape result = mk->Shape();
 
     // Normalize the maker's reports onto BRepTools_History (T1 prereq 5).
     TopTools_ListOfShape args;
     AppendSubshapeArgs(target.GetShape(), args);
     AppendSubshapeArgs(tool.GetShape(), args);
-    const BRepTools_History hist(args, *mk);
+    BRepTools_History hist(args, *mk);
+    // The clean-up, composed onto the boolean's history: inputs -> result.
+    if (refine) {
+      BRepTools_History after;
+      const TopoDS_Shape refined = refine(result, after);
+      if (!refined.IsNull()) {
+        hist.Merge(after);
+        result = refined;
+      }
+    }
 
     out = PropagateNames(
         {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, hist,
@@ -294,6 +304,18 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     out = {};
     return CADShape();
   }
+}
+
+ElementMap NamesThroughHistory(const CADShape& target,
+                               const ElementMap& targetMap,
+                               const CADShape& tool, const ElementMap& toolMap,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag) {
+  ElementMap out = PropagateNames(
+      {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, history,
+      TopTools_ListOfShape(), result.GetShape(), featureTag);
+  FallbackPasses(result.GetShape(), out);
+  return out;
 }
 
 namespace {

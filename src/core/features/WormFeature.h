@@ -104,6 +104,11 @@ public:
     worm::Sizes sizes;
     worm::HobStats hob;
     double faceWidth = 0.0;
+    // How the teeth were cut: by replicating one sector, or all at once
+    // (docs/modeling/worm-gears.md#how-the-teeth-are-cut); and whether this
+    // regeneration reused a wheel already built from the same inputs.
+    bool replicated = false;
+    bool reused = false;
   };
   Report report;
   [[nodiscard]] nlohmann::json ReportJson() const;
