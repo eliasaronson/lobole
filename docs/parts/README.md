@@ -310,8 +310,8 @@ refused asking for the rim.
 - **The mate.** A fastened mate `Bearing seat` between the ring (bore to a
   journal, outside to a housing bore) and the seat, its degrees of freedom
   measured from the poses so the solve moves nothing — a fastener's `Bolted`
-  mate, done the same way. The other ring is mated by hand, revolute where
-  the housing turns about the shaft.
+  mate, done the same way. The other ring is read, and mated only when
+  asked: see [both rings](#both-rings).
 - `dry_run` derives without placing; `candidates` lists what fits either way.
 
 ### Fits and seats
@@ -334,8 +334,39 @@ refused asking for the rim.
   the ring's chamfer. How far a shoulder may reach is an abutment dimension
   the standard does not give, so it is unverified unless an installed catalog
   is passed (`catalog`, `revision`, `hash`, `designation?`), whose limits are
-  then checked against the same measurements. An unmated ring is unverified,
-  never a pass.
+  then checked against the same measurements. Both rings are checked, the
+  one no mate reaches through the seat it sits on ([both rings](#both-rings));
+  a ring with no seat found is unverified, never a pass.
+
+### Both rings
+
+The body is one solid, so in a mechanism it is mated to ONE seat: fastened
+to the housing and to the shaft at once, it would lock the shaft to the
+housing. The other ring still sits on a seat, and that seat is what is
+checked:
+
+- **`check_seat`** reads a ring no mate reaches through the cylinder under
+  it: a face of another placement on the bearing's axis (within 1 µm, the
+  directions within 1e-5), of the ring's sense (a shaft for the bore, a
+  bore for the outside), running under the ring's width, and within 5 % or
+  0.5 mm of its size, so an unrelated coaxial face (a clearance bore, a hub)
+  is not taken for a seat. The nearest diameter wins, and the usual checks
+  then judge it: a bore of another size FAILS the diameter rather than being
+  passed over. Its entry in `seats` says `found: coaxial` with `mate: null`,
+  and names the placement and face (`occurrence`, `inner_path`,
+  `feature_id`, `face`).
+- **`fit_bearing`** places and fastens the picked ring as before, then reads
+  the other ring the same way and returns it as `other_ring` {ring, seat?,
+  diameter_check?}. It does NOT mate it unless asked: in a mechanism the
+  shaft already turns in the housing by a joint of its own, and a second
+  joint through the bearing closes a redundant loop for the solver to
+  reconcile. `mate_other: true` adds a **revolute** mate (`Bearing inner
+  ring` / `Bearing outer ring`) from that seat to the ring, as placed, for an
+  assembly where the bearing IS the joint. Asked for with no seat under the
+  ring, it says so in its own answer (`other_mate` 0, the summary) and
+  leaves the placement it was asked for first.
+- **`check_fits`** reads fits off mates, so the other ring's fit is listed
+  once `mate_other` (or a hand-made mate) names its seat.
 
 ### GUI
 
@@ -352,7 +383,9 @@ would put it, and Place re-arms for the next seat.
 bands, the body's named faces and its volume by Pappus, round trip, placing
 on a journal by face and by rim, a housing bore, a part-tab refusal, the BOM,
 `check_fits` on a k5 journal, `check_seat` with a square shoulder, a fillet
-too large and a catalog), GUI `parts/a_bearing_is_placed_on_a_picked_shaft`.
+too large and a catalog, both rings — the housing found under an unmated
+outer ring, a wrong-size bore failing, `mate_other`'s revolute moving
+nothing, and the answer when nothing is there), GUI `parts/a_bearing_is_placed_on_a_picked_shaft`.
 Golden `v141-bearing`.
 
 ## RPCs

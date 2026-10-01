@@ -56,32 +56,14 @@ wrong part:
 
 ## C. Fits, modelling, tooling
 
-**Fits.**
-
-- ISO 286 J and js classes.
-- Both rings of a bearing checked by `check_seat` and `fit_bearing`. The
-  inner ring is checked through its seat even though the solid is mated to
-  one seat only.
-- A Hole's clearance fit applies the part's print allowance.
-- `set_tolerance` on any part, not only the active one.
-
-**Modelling.**
-
-- A frame built from a cylindrical face takes the cylinder's seam as X,
-  stated in the docs, so a frame on a worm is reproducible.
-- The expression language gains a table lookup, for example
-  `lookup(table, key, column)` over a project table, so that bearing and
-  screw sizes can live in the model.
-
-**Tooling.**
-
-- `headless-preview.sh --stop` finds an instance whatever its
-  `XDG_STATE_HOME` was.
-- `worktree-build.sh` initialises submodules from main's checkout, without
-  the network.
-
-**Verified by:** each item's test, and the pan/tilt `check_fits`/`check_seat`
-report with both rings verified.
+Built: see [ISO 286 J and j](../tolerances/README.md#iso-286-limits-and-fits),
+[both rings](../parts/README.md#both-rings), the printed
+[Hole fit](../modeling/holes-and-threads.md#hole) and
+[printed parts](../tolerances/README.md#printed-parts),
+`set_tolerance {part}` in [tolerance RPCs](../tolerances/README.md#rpcs), a
+round face's [seam as X](../assemblies/solver.md#connector-frames),
+[project tables](../variables/README.md#tables), and the tooling in
+[scripting](../scripting/README.md).
 
 ## D. Topology you can build from
 

@@ -29,6 +29,13 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
   configuration override and an expression on the thread. A thread or fit the
   tables do not carry is refused; nothing is interpolated or rounded to a
   neighbour. A hole without a fit behaves and serializes as a plain diameter.
+- **A printed part's clearance fit** is the size the hole must come out at,
+  so on a part with a print process
+  ([printed parts](../tolerances/README.md#printed-parts)) it is modelled at
+  that size plus the process's hole allowance: M6 normal is Ø6.6 in steel
+  and a Ø6.8 model in PETG. A tapped hole keeps its tap drill. The regen hash
+  folds the process into these holes alone, so setting or clearing it
+  rebuilds them and nothing else.
 - **A unified thread taps too.** `fit: {thread: "3/8-16 UNC", kind:
   "tapped"}` drills the unified table's own tap drill (5/16" here, see
   [Thread standards](#thread-standards)), because the vendored tap table is

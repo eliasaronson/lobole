@@ -35,14 +35,27 @@ I/O, mirroring `ThreadStandards`:
   (negative = interference) and the `FitKind` — clearance, transition or
   interference — decided by the bounds, not by the letter.
 - Carried: sizes 0 < D ≤ 500 mm (the ISO 286-1 steps), grades IT4–IT13, shaft
-  letters `d e f g h js k m n p` and the matching hole letters. Hole K/M/N are
+  letters `d e f g h j js k m n p` and the matching hole letters. Hole K/M/N are
   defined only to IT8 and P to IT7, where the standard's Δ correction exists;
   shaft `k` outside IT4–IT7 is `h`. Everything outside is **refused naming what
   is carried** — dropping Δ would be wrong by exactly one grade step, which
   looks plausible.
+- **J and j** are neither a deviation applied at every grade nor symmetric:
+  each grade has its own tabulated deviation, carried per grade from ISO
+  286-1:2010 Tables 2 and 3 and checked cell for cell against ISO 286-2:2010
+  Tables 8 and 24. Hole J (ES tabulated, EI = ES − IT) is defined for **J6,
+  J7 and J8 at every size to 500 mm** (J7 at 3..6 mm is printed ±6,
+  "identical with JS7" — the same band); from IT9 the standard makes J
+  symmetric, so J9 and up are refused naming JS9. Shaft j (ei tabulated,
+  es = ei + IT) is defined for **j5, j6 and j7 at every size, and j8 only up
+  to 3 mm**; anything else is refused naming those and the js class of that
+  grade. EI = ES − IT is 286-2's own rule (its Figure 1); one cell of the
+  copy of Table 8 checked here reads otherwise — J6 at 250..315 as +25/−5,
+  a band of 30 where IT6 is 32 — and the rule's −7 is what is carried.
 - `tests/test_fits.cpp` pins the published tables and textbook fits (Ø20 H7/g6
   = 7..41 µm clearance, Ø50 H7/p6 = 1..42 µm interference, Ø20 N7 = −7/−28,
-  Ø20 K7 = +6/−15).
+  Ø20 K7 = +6/−15, Ø20 J7 = +12/−9, Ø20 j6 = +9/−4, a 6002's Ø32 J7/h6 a
+  transition fit).
 
 ## The stored tolerance
 
@@ -158,8 +171,16 @@ Where the numbers come from, beyond the table's column:
 - **Refused, never substituted.** An unknown process names the processes; a
   material the process has no data for names the ones it has. The same
   refusal on load, and in `check_fit`'s `print`.
-- **Drives no geometry.** The generator applies it where it models the part;
-  the checks say what to model.
+- **Drives one geometry: a Hole's clearance fit.** A Hole with a fit
+  (`M6 normal`, [../modeling/holes-and-threads.md](../modeling/holes-and-threads.md#hole))
+  names the size the hole must come out at, so on a printed part it is
+  modelled at that size plus the hole allowance: M6 normal is Ø6.6 in steel
+  and a Ø6.8 model in PETG. A tapped hole stays at its tap drill (what a
+  printed thread wants is the thread report's to say). The regen hash folds
+  the process into fitted clearance holes only, so setting it rebuilds those
+  and what follows them, and nothing on a part without one. Everywhere else
+  the generator applies it where it models the part, and the checks say what
+  to model.
 
 ### What the checks say
 
@@ -246,23 +267,31 @@ in a Ø8 reamed hole, and correct the table.
 
 ## RPCs
 
-`set_tolerance {feature_id, element, class | lower+upper, b?, comment?}`,
-`list_tolerances {part?}`, `clear_tolerance {id}`, `check_fit`, `check_fits`,
-`stack_up`, `set_print_process {process, material | clear}`,
-`get_print_process {part?}`, `print_allowance` — all in
+`set_tolerance {feature_id, element, class | lower+upper, b?, comment?,
+part?}`, `list_tolerances {part?}`, `clear_tolerance {id, part?}`,
+`check_fit`, `check_fits`, `stack_up`, `set_print_process {process, material
+| clear, part?}`, `get_print_process {part?}`, `print_allowance` — all in
 `src/remote/RemoteInspection.cpp`. Tolerance edits are
-undoable commands (`src/core/Command.h`).
+undoable commands (`src/core/Command.h`). The edits take `part` (a name,
+stable id or slot index) to act on **any** part, not only the active one —
+a generator or an assembly tab records intent on the parts it placed without
+switching tabs — and the edit lands in THAT part's undo history (the stashed
+slot's own stack), so it undoes on its own tab like an edit made there.
 
 ## Tests
 
-`tests/test_fits.cpp` (the tables), `tests/test_tolerances.cpp` (storage,
+`tests/test_fits.cpp` (the tables, J and j cell for cell and their
+refusals), `tests/test_tolerances.cpp` (storage,
 replace-per-subject, zero rebuilds, undo, round-trip, sizes and distances
 coexisting, stack signs and refusals), `tests/tolerances_smoke.py` (RPC:
 set/list/clear/undo, `check_fits` off mates including the sub-assembly walk),
 `tests/drawing_smoke.py` (callouts), `tests/test_print_allowance.cpp` (the
 table, its inverse, refusals, storage, the fit and thread sentences),
 `tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
-printed part, and the advised custom thread printing the right major), GUI
+printed part, and the advised custom thread printing the right major),
+`tests/test_print_allowance.cpp` "A printed clearance hole is modelled at its
+fit plus the allowance", `tests/tolerances_smoke.py` (set_tolerance on a part
+that is not the active one), GUI
 `tolerance/print_process_from_the_panel`, `tolerance/a_measured_bore_gets_a_class`,
 `tolerance/a_plane_is_told_what_to_do`, `tolerance/the_panel_lists_and_clears`,
 `tolerance/check_fits_from_the_panel`.
