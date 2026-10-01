@@ -930,13 +930,22 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // which is a part it never touches, so the nut followed the wrong casting
   // and the joint made no mate at all (there is no face on the rib at the
   // flange's back).
+  //
+  // And the joint is where JointEnd says it ends, not merely the second pick:
+  // a joint ended by a gap no screw spans (the pan/tilt head's block screws,
+  // whose line runs on 200 mm up into the camera) put its nut on the camera
+  // and bolted the cradle to the yoke, and the head could not tilt. A part
+  // is in the joint when the joint reaches INTO it, which keeps the part a
+  // blind screw ends inside.
   const uint64_t headOn = chosen->inst->rootOccurrenceId;
-  const double joinEnds =
-      truncate > 0.0 ? truncate : std::numeric_limits<double>::max();
+  const double joinEnds = extent.end;
+  const auto inJoint = [&](const parts::StackSegment& seg) {
+    return seg.enter < joinEnds - 1e-3;
+  };
   uint64_t farOn = headOn;
   double farthest = 0.0;
   for (const parts::StackSegment& seg : stack)
-    if (seg.exit > farthest && seg.exit <= joinEnds + 1e-3) {
+    if (seg.exit > farthest && inJoint(seg)) {
       farthest = seg.exit;
       farOn = seg.occurrence;
     }
@@ -1014,7 +1023,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // that is precisely what the second pick said.
     std::vector<const parts::StackSegment*> spanned;
     for (const parts::StackSegment& seg : stack) {
-      if (seg.exit > joinEnds + 1e-3)
+      if (!inJoint(seg))
         continue;
       // the live part: being a fastener is not a configuration's
       if (SoleFastenerOf(PartDocById(state, seg.partId)) != nullptr)

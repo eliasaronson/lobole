@@ -1489,6 +1489,26 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
       CHECK_THAT((glm::inverse(sWorld(s1)) * sWorld(s3))[c][r],
                  WithinAbs(lowWas[c][r], 1e-3));
     }
+
+  // A part further down the line than any screw of the size reaches is NOT
+  // in the joint, however it lines up: the pan/tilt head's block screws point
+  // at the camera 200 mm on, and the bolt put its nut on the camera and
+  // bolted the cradle to the yoke, so the head could not tilt.
+  MakeMultiBorePlate(state, "Far", 10.0, 6.6, {});
+  ui::SetActivePart(state, ui::AddAssembly(state, "Far rig"));
+  const uint64_t f1 = place("Top", glm::vec3(0.0f));
+  const uint64_t f2 = place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+  const uint64_t f3 = place("Far", glm::vec3(0.0f, 0.0f, -246.0f));
+  const ui::FastenerFit far =
+      ui::FitFastenerToHole(state, ui::RimPick{f1, topRims[0]}, request);
+  INFO(far.why);
+  REQUIRE(far.ok);
+  CHECK_FALSE(far.blind);
+  CHECK(far.grip < 60.0); // Top, Bottom and the nut, nowhere near Far
+  CHECK(far.mates.size() == 1);
+  for (const Mate& m : state.assembly->GetMates())
+    CHECK((m.a.occurrenceId != f3 && m.b.occurrenceId != f3));
+  CHECK(state.assembly->FindById(far.placed.back())->attachedTo == f2);
 }
 
 TEST_CASE("A placed fastener rides on the part it bears on",
