@@ -412,6 +412,90 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli",
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
 }
 
+// probe_study's arithmetic: a face carried by a known rigid motion is fitted
+// back to exactly that motion, and the fit carries it to a point off the
+// face as a rigid body would.
+TEST_CASE("FitFaceMotion recovers a rigid motion of a face", "[fem][probe]") {
+  fem::FemMesh mesh;
+  // A 10 x 10 square in z = 0 as two tri6, plus a node off the face that
+  // must not count.
+  const glm::dvec3 c[4] = {{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}};
+  const auto node = [&](const glm::dvec3& p) {
+    mesh.nodes.push_back(p);
+    return static_cast<int>(mesh.nodes.size()) - 1;
+  };
+  const int n0 = node(c[0]), n1 = node(c[1]), n2 = node(c[2]), n3 = node(c[3]);
+  const auto mid = [&](int a, int b) {
+    return node(0.5 * (mesh.nodes[a] + mesh.nodes[b]));
+  };
+  mesh.boundary.push_back(
+      {{n0, n1, n2, mid(n0, n1), mid(n1, n2), mid(n0, n2)}, 3});
+  mesh.boundary.push_back(
+      {{n0, n2, n3, mid(n0, n2), mid(n2, n3), mid(n0, n3)}, 3});
+  mesh.boundary.push_back({{n0, n1, node({5, 5, 9}), n0, n1, n0}, 4});
+
+  const glm::dvec3 t(0.01, -0.02, 0.03), theta(1e-4, -2e-4, 3e-4);
+  const glm::dvec3 centre(5, 5, 0);
+  std::vector<glm::dvec3> u;
+  for (const glm::dvec3& p : mesh.nodes)
+    u.push_back(t + glm::cross(theta, p - centre));
+  u.back() = glm::dvec3(1, 1, 1); // the off-face node moved arbitrarily
+
+  const auto fm = fem::FitFaceMotion(mesh, u, 3);
+  REQUIRE(fm.has_value());
+  CHECK(fm->rotationDetermined);
+  CHECK_THAT(fm->area, WithinRel(100.0, 1e-12));
+  CHECK(glm::length(fm->centroid - centre) < 1e-12);
+  CHECK(glm::length(fm->translation - t) < 1e-12);
+  CHECK(glm::length(fm->rotation - theta) < 1e-12);
+  CHECK(fm->rmsResidual < 1e-12);
+  const glm::dvec3 far(40, -20, 100);
+  CHECK(glm::length(fm->At(far) - (t + glm::cross(theta, far - centre))) <
+        1e-12);
+  CHECK_FALSE(fem::FitFaceMotion(mesh, u, 7).has_value()); // no such face
+}
+
+// The same fit on a solved cantilever: the loaded end face drops by the
+// beam's tip deflection and turns by its tip slope, P L^2 / 2EI.
+TEST_CASE("FitFaceMotion of a cantilever's end face is the tip's slope",
+          "[fem][probe]") {
+  const double L = 100, b = 10, h = 10;
+  CADShape beam = CADKernel::Instance().CreateBox(L, b, h);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(beam.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+  fem::Material steel{200000.0, 0.3};
+  const double P = 1000.0; // N in -z
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(*mesh, 0, L, 1e-6);
+  load.magnitude = P;
+  load.direction = glm::dvec3(0, 0, -1);
+  REQUIRE_FALSE(load.tris.empty());
+  auto res =
+      fem::Solve(*mesh, steel, NodesAtPlane(*mesh, 0, 0.0, 1e-6), {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  const int endFace = mesh->boundary[load.tris.front()].faceIndex;
+  const auto fm = fem::FitFaceMotion(*mesh, res->displacement, endFace);
+  REQUIRE(fm.has_value());
+  const double I = b * h * h * h / 12.0;
+  const double delta = P * L * L * L / (3 * steel.youngMPa * I);
+  const double slope = P * L * L / (2 * steel.youngMPa * I);
+  INFO("end face: drop " << fm->translation.z << " (EB " << -delta << "), turn "
+                         << fm->rotation.y << " (EB " << slope << ")");
+  // Same tolerance as the tip-deflection test: tet10 with shear and the
+  // clamp against slender-beam theory.
+  CHECK_THAT(-fm->translation.z, WithinRel(delta, 0.12));
+  CHECK_THAT(fm->rotation.y, WithinRel(slope, 0.12));
+  CHECK(std::abs(fm->rotation.x) < 0.01 * slope);
+  CHECK(std::abs(fm->rotation.z) < 0.01 * slope);
+}
+
 TEST_CASE("Solver: pressure on a face compresses along the inward normal",
           "[fem][solver]") {
   // Fix x=0, apply pressure on x=L: it must push inward (-x) => compression,

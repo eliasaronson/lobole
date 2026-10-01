@@ -584,4 +584,72 @@ SolveModal(const FemMesh& mesh, const Material& material,
 
 #endif // HAVE_FEM_SOLVER
 
+std::optional<FaceMotion>
+FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
+              int faceIndex) {
+  if (displacement.size() != mesh.nodes.size())
+    return std::nullopt;
+  // Each node stands for a sixth of every triangle it is a node of, so a
+  // finely meshed corner of the face does not outvote the rest of it.
+  std::vector<double> weight(mesh.nodes.size(), 0.0);
+  double area = 0.0;
+  for (const FemMesh::BoundaryTri& t : mesh.boundary) {
+    if (t.faceIndex != faceIndex)
+      continue;
+    const glm::dvec3& a = mesh.nodes[t.nodes[0]];
+    const double triArea =
+        0.5 * glm::length(glm::cross(mesh.nodes[t.nodes[1]] - a,
+                                     mesh.nodes[t.nodes[2]] - a));
+    area += triArea;
+    for (int n : t.nodes)
+      weight[n] += triArea / 6.0;
+  }
+  if (area <= 0.0)
+    return std::nullopt;
+
+  FaceMotion out;
+  out.area = area;
+  double total = 0.0;
+  for (std::size_t i = 0; i < weight.size(); ++i) {
+    if (weight[i] <= 0.0)
+      continue;
+    ++out.nodes;
+    total += weight[i];
+    out.centroid += weight[i] * mesh.nodes[i];
+    out.translation += weight[i] * displacement[i];
+  }
+  out.centroid /= total;
+  out.translation /= total;
+
+  // Least squares on u - t = theta x r over the nodes: with the centroid as
+  // the origin the translation decouples, and theta solves the face's own
+  // "inertia" system  sum w (|r|^2 I - r r^T) theta = sum w r x (u - t).
+  glm::dmat3 a(0.0);
+  glm::dvec3 b(0.0);
+  for (std::size_t i = 0; i < weight.size(); ++i) {
+    if (weight[i] <= 0.0)
+      continue;
+    const glm::dvec3 r = mesh.nodes[i] - out.centroid;
+    a += weight[i] *
+         (glm::dot(r, r) * glm::dmat3(1.0) - glm::outerProduct(r, r));
+    b += weight[i] * glm::cross(r, displacement[i] - out.translation);
+  }
+  // Singular for nodes on one line (a rotation about it moves nothing).
+  const double trace = a[0][0] + a[1][1] + a[2][2];
+  if (trace > 0.0 &&
+      std::abs(glm::determinant(a)) > 1e-12 * trace * trace * trace) {
+    out.rotation = glm::inverse(a) * b;
+    out.rotationDetermined = true;
+  }
+  double sq = 0.0;
+  for (std::size_t i = 0; i < weight.size(); ++i) {
+    if (weight[i] <= 0.0)
+      continue;
+    const glm::dvec3 e = displacement[i] - out.At(mesh.nodes[i]);
+    sq += weight[i] * glm::dot(e, e);
+  }
+  out.rmsResidual = std::sqrt(sq / total);
+  return out;
+}
+
 } // namespace fem

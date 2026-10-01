@@ -64,6 +64,32 @@ struct FemResults {
   std::vector<ModeShape> modes;
 };
 
+// How a face moved, as a rigid body: the small-displacement fit of its
+// boundary nodes' displacements, u(p) ~ translation + rotation x (p -
+// centroid), each node weighted by the area it stands for. A bearing seat
+// moves its bearing as a body, so this -- not the largest displacement
+// anywhere -- is what carries a deflection on to whatever the seat holds
+// (the lens of a camera on a shaft in two bores).
+// docs/simulation/README.md#probing-a-face
+struct FaceMotion {
+  int nodes = 0;
+  double area = 0.0;               // mm^2, of the boundary triangles
+  glm::dvec3 centroid{0.0};        // mm, undeformed, area-weighted
+  glm::dvec3 translation{0.0};     // mm, the centroid's displacement
+  glm::dvec3 rotation{0.0};        // radians, small-angle rotation vector
+  bool rotationDetermined = false; // false when the nodes lie on a line
+  double rmsResidual = 0.0;        // mm, what the rigid fit leaves
+  // The fitted motion carried to point `p`.
+  glm::dvec3 At(const glm::dvec3& p) const {
+    return translation + glm::cross(rotation, p - centroid);
+  }
+};
+// nullopt when no boundary triangle lies on face `faceIndex` or
+// `displacement` is not one entry per mesh node.
+std::optional<FaceMotion>
+FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
+              int faceIndex);
+
 // Solves K u = f with the given fixed nodes (all three DOF zeroed, eliminated
 // from the system), face tractions, and an optional body force (gravity
 // acceleration in mm/s^2; needs material.densityTPerMM3). Returns std::nullopt

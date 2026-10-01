@@ -312,6 +312,23 @@ static constexpr MethodDoc SimulationMethods[] = {
      "undeformed part in its own material and looks like the call silently "
      "did nothing.",
      "deform_scale, field, mode, study, threshold"},
+    {"probe_study",
+     "How one FACE moved under a solved static PART study, as a rigid body "
+     "{id (or study), face, at?}: the least-squares small-displacement fit "
+     "of the face's mesh nodes, u(p) = translation + rotation x (p - "
+     "centroid), each node weighted by the area it stands for. Returns "
+     "{nodes, area_mm2, centroid_mm, translation_mm (the centroid's "
+     "displacement, MILLIMETRES), rotation_rad (a small-angle rotation "
+     "vector, RADIANS), rotation_magnitude_deg, rms_residual_mm (what the "
+     "rigid fit leaves: the face's own distortion)}. `at` is a point "
+     "[x, y, z] in MILLIMETRES (part coordinates): the fitted motion carried "
+     "there comes back as displacement_at_mm -- where whatever the face "
+     "holds rigidly goes, a bearing seat's shaft, the lens on that shaft. "
+     "The maxima study_results reports are somewhere on the part; this is "
+     "what one seat did. Refused on a stale study (re-run it: the face "
+     "named now may not be the face that was meshed), an assembly study, "
+     "or a modal or topology one (docs/simulation/README.md#probing-a-face).",
+     "at, face, id, study"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
@@ -990,6 +1007,88 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       AttachReceipt(result, r);
     }
     return result;
+  }
+  if (m == "probe_study") {
+    // How one face moved, as a rigid body (fem::FitFaceMotion): what a
+    // bearing in a seat, or anything else carried by a face, does under the
+    // load. The maxima study_results reports are somewhere on the part; the
+    // question a mechanism asks is what its own seats did.
+    ui::ReapBackgroundJobs(state);
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
+    const fem::Study& s = host.Require(id);
+    if (host.IsAssembly())
+      throw std::runtime_error(
+          "probe_study reads a PART study: an assembly study meshes the "
+          "imprinted fuse of its participants, whose faces are not the "
+          "parts' faces -- study the part, loaded as the assembly loads it");
+    if (s.type != fem::AnalysisType::Static)
+      throw std::runtime_error(
+          std::string("probe_study reads a static study's displacements; "
+                      "this study is ") +
+          fem::AnalysisTypeToString(s.type));
+    const fem::StudyRuntime* rt = host.Results(id);
+    if (!rt)
+      throw std::runtime_error("study has not been run");
+    if (host.Stale(id))
+      throw std::runtime_error(
+          "the study is stale: the part changed after it was solved, so a "
+          "face named now may not be the face that was meshed -- run_study "
+          "again first");
+    if (!p.contains("face"))
+      throw std::runtime_error("probe_study needs `face` (the element, as "
+                               "add_load takes it)");
+    const ElementRef face = studyFaceOf(p.at("face"));
+    fem::ResolvedFace rf;
+    std::string why;
+    if (!fem::ResolveFace(*doc, face, "probe", rf, &why))
+      throw std::runtime_error(why);
+    const fem::StudyBodyResult* body = nullptr;
+    for (const fem::StudyBodyResult& b : rt->bodies)
+      if (b.bodyIndex == rf.bodyIndex)
+        body = &b;
+    if (!body)
+      throw std::runtime_error(
+          "face '" + face.name +
+          "' is on a body this study did not solve: a part study meshes only "
+          "the bodies its loads are on");
+    const auto fm = fem::FitFaceMotion(body->mesh, body->results.displacement,
+                                       rf.faceIndex);
+    if (!fm)
+      throw std::runtime_error("face '" + face.name +
+                               "' has no triangles in the study's mesh");
+    const auto vec = [](const glm::dvec3& v) {
+      return json::array({v.x, v.y, v.z});
+    };
+    json out{{"face", face.name},
+             {"body", body->bodyName},
+             {"nodes", fm->nodes},
+             {"area_mm2", fm->area},
+             {"centroid_mm", vec(fm->centroid)},
+             {"translation_mm", vec(fm->translation)},
+             {"translation_magnitude_mm", glm::length(fm->translation)},
+             {"rotation_determined", fm->rotationDetermined},
+             {"rms_residual_mm", fm->rmsResidual}};
+    if (fm->rotationDetermined) {
+      out["rotation_rad"] = vec(fm->rotation);
+      out["rotation_magnitude_deg"] = glm::degrees(glm::length(fm->rotation));
+    }
+    if (p.contains("at")) {
+      const json& a = p.at("at");
+      if (!a.is_array() || a.size() != 3)
+        throw std::runtime_error("`at` is a point [x, y, z] in millimetres");
+      const glm::dvec3 at(a.at(0).get<double>(), a.at(1).get<double>(),
+                          a.at(2).get<double>());
+      if (!fm->rotationDetermined)
+        throw std::runtime_error(
+            "face '" + face.name +
+            "': its nodes lie on a line, so a rotation about that line moves "
+            "none of them and the motion cannot be carried to `at`");
+      out["at_mm"] = vec(at);
+      out["displacement_at_mm"] = vec(fm->At(at));
+    }
+    return out;
   }
   if (m == "set_topo_ghost") {
     // Toggle the modeling-mode shape-guide ghost for a topology study: a

@@ -87,8 +87,11 @@ deep-copy each shape on the main thread and the worker meshes the copies;
 the document's shape is never written under the renderer.
 
 A mesh failure is reported as the study error, naming the face when Netgen
-says which. There is no defeaturing step: suppress cosmetic features before
-meshing.
+says which, and its shortest edge when that is under a micrometre: the usual
+cause, and one no picture and no BRepCheck shows: two faces meant to
+coincide that miss by a few micrometres leave a zero-area face bounded by
+edges that short (the pan/tilt yoke's arm and base did, while sketch planes
+were single precision). There is no defeaturing step: suppress cosmetic features before meshing.
 
 ## The solver
 
@@ -136,6 +139,32 @@ mesh and solve off the frame as a background job; `mesh_study {async: true}`
 meshes only. A static or modal solve cannot be cancelled (the linear solver
 has no interruption points). One study run at a time. A finished job stores
 its result into the document it ran on even if another tab is active.
+
+### Probing a face
+
+The maxima say how far the worst node moved, somewhere on the part. A
+mechanism asks a different question: what did the face that carries
+something do? A bearing seat moves its bearing, and the bearing its shaft,
+as one body, so `probe_study {id, face, at?}` fits the face's nodes with a
+small-displacement rigid motion (`fem::FitFaceMotion`):
+`u(p) = translation + rotation × (p − centroid)`, least squares, each node
+weighted by the area of the boundary triangles it stands for. It reports the
+translation (mm), the rotation vector (radians), and the RMS of what the
+fit leaves, which is the face's own distortion. Given `at` (a point in
+part coordinates), it carries the motion there: where a rigid thing held by
+the face goes.
+
+The pan/tilt head's yoke is the use it was built for
+(`generators/pantilt/yoke_loads.py`): the camera is not in the study, so
+the lens's deflection is the two bearing bores' translations (the shaft's
+line), the ledge's motion carried to the worm's axis (the wheel's turn), and
+the lens's lever from the tilt axis.
+
+It reads a part study's static result; it refuses a stale one (a face named
+now may not be the face that was meshed), an assembly study (its mesh is
+the imprinted fuse, whose faces are not the parts'), and modal or topology
+ones. Tests: `[probe]` in `tests/test_fem.cpp` (a rigid motion recovered
+exactly; a cantilever's end face turning by the tip slope, P L² / 2EI).
 
 ## Assembly studies
 
@@ -267,6 +296,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `run_study {id, async?}` | mesh + solve; returns the `study_results` summary when synchronous |
 | `study_status`, `cancel_study` | progress of an async job; cancel applies to topology only |
 | `study_results` | static: maxima, per-body, factor of safety; modal: `bodies[i].frequencies_hz` |
+| `probe_study {id, face, at?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none |
 

@@ -3,13 +3,17 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
+#include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 
 #include <cmath>
+#include <cstdio>
 
 #ifdef HAVE_NETGEN
 // Netgen's C++ meshing interface. Every netgen symbol is confined to this
@@ -103,9 +107,33 @@ std::string DescribeFace(const TopTools_IndexedMapOfShape& faceMap,
     const size_t dot = s.find('.');
     return dot == std::string::npos ? s : s.substr(0, dot + 3);
   };
-  return std::string(kind) + ", area " + mm(props.Mass()) +
-         " mm2, centred at (" + mm(c.X()) + ", " + mm(c.Y()) + ", " +
-         mm(c.Z()) + ")";
+  std::string out = std::string(kind) + ", area " + mm(props.Mass()) +
+                    " mm2, centred at (" + mm(c.X()) + ", " + mm(c.Y()) + ", " +
+                    mm(c.Z()) + ")";
+  // A sliver edge is the usual reason, and it is invisible: BRepCheck passes
+  // it and no picture shows a 5e-6 mm edge. Say so, and where.
+  double shortest = 1e30;
+  gp_Pnt at;
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e))
+      continue;
+    GProp_GProps lp;
+    BRepGProp::LinearProperties(e, lp);
+    if (lp.Mass() < shortest) {
+      shortest = lp.Mass();
+      at = lp.CentreOfMass();
+    }
+  }
+  if (shortest < 1e-3) {
+    char buf[200];
+    std::snprintf(buf, sizeof buf,
+                  "; it has an edge %.2g mm long at (%.2f, %.2f, %.2f) -- "
+                  "two faces meant to coincide that miss by that much",
+                  shortest, at.X(), at.Y(), at.Z());
+    out += buf;
+  }
+  return out;
 }
 
 } // namespace
