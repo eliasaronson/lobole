@@ -1837,8 +1837,8 @@ double PointToPolyline(const glm::dvec2& p,
 
 // Where a balloon's leader may end on one occurrence of a view: points its
 // refs resolve to (a line's middle, a curve's ends, its extremes) that lie
-// on a VISIBLE piece of that edge and clear of every other part's lines --
-// a dot where two parts meet says neither.
+// on a VISIBLE piece of that edge and `clearance` mm clear of every other
+// part's lines -- a dot where two parts meet says neither.
 struct AnchorRef {
   ProjRef ref;
   glm::dvec2 at{0.0};
@@ -1846,7 +1846,8 @@ struct AnchorRef {
 };
 
 std::vector<AnchorRef> BalloonAnchors(const drawing::SheetView& sv,
-                                      uint64_t viewId, uint64_t occurrence) {
+                                      uint64_t viewId, uint64_t occurrence,
+                                      double clearance) {
   std::vector<AnchorRef> out;
   std::vector<const drawing::SheetCurve*> others;
   for (const drawing::SheetCurve& c : sv.curves)
@@ -1904,7 +1905,7 @@ std::vector<AnchorRef> BalloonAnchors(const drawing::SheetView& sv,
         continue;
       bool clear = true;
       for (const auto* o : others)
-        if (PointToPolyline(at, o->points) < 0.8) {
+        if (PointToPolyline(at, o->points) < clearance) {
           clear = false;
           break;
         }
@@ -2011,7 +2012,15 @@ bool LayoutDrawingBalloons(AppState& state,
         const double L = ShownLength(sv, occ);
         if (L <= best)
           continue;
-        auto anchors = BalloonAnchors(sv, v, occ);
+        // Clear of its neighbours by 0.8 mm where it can be; a screw in
+        // its washer on a plate has no edge that far from another part's,
+        // and then the best it has (0.3 mm, then any visible point).
+        std::vector<AnchorRef> anchors;
+        for (double clearance : {0.8, 0.3, 0.0}) {
+          anchors = BalloonAnchors(sv, v, occ, clearance);
+          if (!anchors.empty())
+            break;
+        }
         if (anchors.empty())
           continue;
         best = L;
@@ -2023,8 +2032,7 @@ bool LayoutDrawingBalloons(AppState& state,
     if (bestView == 0) {
       report.unplaced.push_back(
           "item " + std::to_string(r + 1) + " (" + bom->rows[r].partName +
-          "): none of these views shows an edge of it clear of its "
-          "neighbours");
+          "): none of these views shows a visible edge of it");
       continue;
     }
     byView[bestView].push_back(

@@ -386,8 +386,9 @@ every row of the sheet's parts list, round the views it is given:
 - **Where the leader ends.** On a visible edge of the part: points its
   refs resolve to — a line's middle, a curve's ends, its four extremes —
   that lie on a VISIBLE piece of that edge and at least 0.8 mm from any
-  other part's lines, since a dot where two parts meet says neither. An
-  end costs more than a middle (a vertex is shared).
+  other part's lines, since a dot where two parts meet says neither (a
+  screw in its washer has no such point: then 0.3 mm, then any visible
+  point). An end costs more than a middle (a vertex is shared).
 - **Where the balloon goes** (`drawing::LayoutBalloons`,
   `src/core/drawing/DrawingBalloons.{h,cpp}`). Slots on three rings round
   the view's box, a balloon's width apart, kept where a balloon touches
