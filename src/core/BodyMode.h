@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cad/CADKernel.h"
+#include "core/ElementHistory.h"          // RefineResult
 #include "core/Feature.h"                 // Body
 #include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/features/ExtrudeFeature.h" // ExtrudeMode
@@ -85,12 +86,14 @@ struct CheckedBoolean {
 };
 // `extra` (optional) is a check of the caller's own that a result must also
 // pass, returning why not (the Boolean feature's BRepCheck); it runs before
-// BooleanRefusal on either attempt.
+// BooleanRefusal on either attempt. `refine` (optional) cleans each attempt's
+// result up before it is named and checked (topo::RefineResult).
 CheckedBoolean CheckedBooleanNamed(
     const std::string& feature, BooleanOp op, const std::string& body,
     const CADShape& target, const ElementMap& targetMap, const CADShape& tool,
     const ElementMap& toolMap, uint64_t featureTag,
-    const std::function<std::string(const CADShape&)>& extra = {});
+    const std::function<std::string(const CADShape&)>& extra = {},
+    const topo::RefineResult& refine = {});
 
 // The fuzzy retry's tolerance: 1e-5 of the SMALLER operand's bounding-box
 // diagonal, so it scales with the feature and never swallows a dimension of

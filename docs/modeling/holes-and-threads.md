@@ -189,10 +189,16 @@ only need the callout.
   the groove runs out through it. An end against material — a boss's
   shoulder, a blind hole's floor — or a `length` that stops mid-face is cut
   square: the tool is clipped there by a cylinder. There is no runout. A
-  square end on a shoulder leaves the groove's footprint drawn as edges on
-  the shoulder's face (the tool's end lies on that face; the edges bound no
-  volume). A `Refine` merges them, at the price of renaming the body's
-  faces.
+  square end on a shoulder (or a blind hole's floor) has the tool's end
+  lying on that face, so the cut draws the groove's footprint there: arcs
+  that split the plane into coplanar pieces and bound no volume. The cut
+  merges them away (`MergeFootprint`): a `ShapeUpgrade_UnifySameDomain`
+  restricted to the planar faces the cut made, across edges with such a
+  face on both sides, every other edge kept. Its history is composed onto
+  the boolean's (`topo::RefineResult`) before anything is named, so the
+  shoulder is one face named as the shoulder (`<shoulder>;M<thread>`) and
+  every other face is named exactly as the bare cut names it. A whole-body
+  `Refine` is not needed, and would name every face afresh.
 - **The cut** is one checked subtract on the face's own body
   (`CheckedBooleanNamed`), with the tool's faces named as a primitive's
   (per-flank naming is not done). Any failure — a groove whose root would be
@@ -249,7 +255,8 @@ empty-space warning), `tests/test_thread.cpp` (metric and unified table
 lookups and their refusals, cosmetic volume unchanged, bad faces, engagement
 relief, a tapped hole is threaded and takes a unified thread, modelled
 threads: an M8 in either hand by the Pappus volume and by following the
-groove, a shoulder left whole, a 3/8-16 UNC-2B in a tapped wall, a failure
+groove, a shoulder left whole and left one face with no stray edges and
+its other faces' names kept, a 3/8-16 UNC-2B in a tapped wall, a failure
 that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 `tests/test_parts.cpp` (the hole tables, fits and their refusals),
 `tests/test_cam_thread.cpp` (the pitch-diameter bands against the tables,

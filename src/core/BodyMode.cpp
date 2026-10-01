@@ -327,7 +327,8 @@ CheckedBooleanNamed(const std::string& feature, BooleanOp op,
                     const std::string& body, const CADShape& target,
                     const ElementMap& targetMap, const CADShape& tool,
                     const ElementMap& toolMap, uint64_t featureTag,
-                    const std::function<std::string(const CADShape&)>& extra) {
+                    const std::function<std::string(const CADShape&)>& extra,
+                    const topo::RefineResult& refine) {
   CheckedBoolean out;
   const auto check = [&](const CADShape& result) {
     if (extra)
@@ -336,7 +337,7 @@ CheckedBooleanNamed(const std::string& feature, BooleanOp op,
     return BooleanRefusal(feature, op, body, target, tool, result);
   };
   out.shape = topo::BooleanNamed(op, target, targetMap, tool, toolMap,
-                                 featureTag, out.map, &out.error);
+                                 featureTag, out.map, &out.error, 0.0, refine);
   if (!out.shape.IsValid())
     return out; // the kernel failed outright; the caller reports that
   const std::string exact = check(out.shape);
@@ -348,7 +349,7 @@ CheckedBooleanNamed(const std::string& feature, BooleanOp op,
   ElementMap map;
   std::string err;
   CADShape retry = topo::BooleanNamed(op, target, targetMap, tool, toolMap,
-                                      featureTag, map, &err, fuzzy);
+                                      featureTag, map, &err, fuzzy, refine);
   const std::string again =
       retry.IsValid() ? check(retry)
                       : "the kernel could not build it" +

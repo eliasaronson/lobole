@@ -19,7 +19,12 @@
 #include "core/parts/FastenerTable.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 
@@ -577,6 +582,136 @@ TEST_CASE("a modelled thread stops square at a shoulder", "[thread]") {
   // radial band, is still material all the way round.
   for (int k = 0; k < 12; k++)
     CHECK(cut.shape.ContainsPoint(Polar(3.6, k * M_PI / 6.0, 4.95)));
+}
+
+namespace {
+
+// The planar faces of `body` lying in z = `z` (normal along Z).
+std::vector<int> FacesInPlane(const Body& body, double z) {
+  std::vector<int> out;
+  int i = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), i++) {
+    BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+    if (s.GetType() != GeomAbs_Plane)
+      continue;
+    const gp_Pln pl = s.Plane();
+    if (std::abs(std::abs(pl.Axis().Direction().Z()) - 1.0) < 1e-9 &&
+        std::abs(pl.Location().Z() - z) < 1e-6)
+      out.push_back(i);
+  }
+  return out;
+}
+
+TopoDS_Face FaceAt(const Body& body, int index) {
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_FACE, faces);
+  return TopoDS::Face(faces(index + 1));
+}
+
+double FaceArea(const TopoDS_Face& f) {
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(f, props);
+  return props.Mass();
+}
+
+} // namespace
+
+TEST_CASE("a thread squared on a shoulder leaves no stray edges on it",
+          "[thread]") {
+  // An M8 shank on a plate, as a bolt's shank stands on its head. The
+  // thread's tool ends ON the shoulder, so the cut drew its footprint there:
+  // arcs on the shoulder's face that bound no volume. They are merged away
+  // -- only on the faces the thread touched, so every other face keeps its
+  // name, and the shoulder keeps its own.
+  Document doc;
+  auto plate =
+      std::make_unique<SketchFeature>("Plate", SketchPlane(PlaneType::XY));
+  plate->AddRectangle({-10, -10}, {10, 10});
+  doc.AddFeature(std::move(plate));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "PlatePad", doc.GetFeature(0)->GetId(), 5.0, ExtrudeMode::NewBody));
+  auto boss = std::make_unique<SketchFeature>(
+      "BossSketch",
+      SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  boss->AddEntity(sketch::Circle{{0, 0}, 4.0});
+  doc.AddFeature(std::move(boss));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "BossPad", doc.GetFeature(2)->GetId(), 12.0, ExtrudeMode::Add));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body before = doc.GetBodies()[0];
+  const std::vector<int> shoulderBefore = FacesInPlane(before, 5.0);
+  REQUIRE(shoulderBefore.size() == 1);
+  const std::string shoulderName =
+      before.elementMap.names.at(shoulderBefore[0]);
+  const double shoulderArea = FaceArea(FaceAt(before, shoulderBefore[0]));
+  const std::string shankName = CylFaceName(before);
+
+  auto th = std::make_unique<ThreadFeature>(
+      "Thread", ElementRef{before.createdBy, shankName}, "M8-6g", 1.0);
+  th->modeled = true;
+  doc.AddFeature(std::move(th));
+  const uint64_t threadId = doc.GetFeature(4)->GetId();
+  INFO(doc.GetFeature(4)->GetError());
+  REQUIRE(doc.GetFeature(4)->GetError().empty());
+  const Body& cut = doc.GetBodies()[0];
+
+  // The shoulder is ONE face, named for the shoulder it was.
+  const std::vector<int> shoulder = FacesInPlane(cut, 5.0);
+  for (int f : shoulder)
+    UNSCOPED_INFO("face " << f << " in the shoulder's plane: "
+                          << cut.elementMap.names.at(f) << ", area "
+                          << FaceArea(FaceAt(cut, f)));
+  REQUIRE(shoulder.size() == 1);
+  CHECK(cut.elementMap.names.at(shoulder[0]) ==
+        shoulderName + ";M" + std::to_string(threadId));
+  // ...and has no stray edge: every edge of it borders exactly one other
+  // face, and that face turns away from the shoulder's plane (a plate side,
+  // the shank, a groove flank).
+  const TopoDS_Face face = FaceAt(cut, shoulder[0]);
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndUniqueAncestors(cut.shape.GetShape(), TopAbs_EDGE,
+                                      TopAbs_FACE, edgeFaces);
+  int edges = 0;
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next(), edges++) {
+    const TopTools_ListOfShape& adj = edgeFaces.FindFromKey(ex.Current());
+    CHECK(adj.Extent() == 2);
+    for (const TopoDS_Shape& other : adj) {
+      if (other.IsSame(face))
+        continue;
+      const BRepAdaptor_Surface s(TopoDS::Face(other));
+      CHECK((s.GetType() != GeomAbs_Plane ||
+             std::abs(s.Plane().Axis().Direction().Z()) < 0.5));
+    }
+  }
+  CHECK(edges > 4);
+  // The groove's end opens onto it: the shoulder grew by the groove's
+  // footprint inside the shank, and lost nothing.
+  CHECK(FaceArea(face) > shoulderArea);
+
+  // The faces of the body the thread did not touch -- the plate's sides and
+  // bottom -- keep their names and their faces.
+  int kept = 0;
+  for (const auto& [index, name] : before.elementMap.names) {
+    if (index == shoulderBefore[0] || name == shankName)
+      continue;
+    const std::optional<int> now = cut.elementMap.Resolve(name);
+    if (!now)
+      continue; // the shank's top: notched by the thread, so ";M"
+    CHECK_THAT(FaceArea(FaceAt(cut, *now)),
+               WithinRel(FaceArea(FaceAt(before, index)), 1e-9));
+    kept++;
+  }
+  CHECK(kept == 5);
+  // Nothing was named afresh (a Refine renames every face): each face is a
+  // face of the body before, or of the thread's tool, carried through.
+  for (const auto& [index, name] : cut.elementMap.names) {
+    INFO(name);
+    bool carried = name.rfind(std::to_string(threadId) + "/face", 0) == 0;
+    for (const auto& [i, was] : before.elementMap.names)
+      carried = carried || name.rfind(was, 0) == 0;
+    CHECK(carried);
+  }
 }
 
 TEST_CASE("a modelled 3/8-16 UNC-2B cuts the groove in a tapped hole wall",

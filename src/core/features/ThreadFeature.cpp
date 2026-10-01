@@ -8,8 +8,14 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepTools_History.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Ax3.hxx>
@@ -23,6 +29,61 @@
 #include <cmath>
 
 namespace {
+
+// A square end's footprint, merged away. The tool's end face lies ON the
+// shoulder (or a blind hole's floor), so the cut draws its outline there:
+// arcs that split one plane into coplanar pieces and bound no volume. The
+// pieces are merged -- only planar faces the cut made (not faces of `body`
+// as it was), across edges with such a face on both sides; every other edge
+// is kept, so no other face is rebuilt and none is renamed. A whole-body
+// Refine would merge them too, and name every face afresh.
+TopoDS_Shape MergeFootprint(const TopoDS_Shape& body,
+                            const TopoDS_Shape& result,
+                            BRepTools_History& history) {
+  TopTools_IndexedMapOfShape original;
+  TopExp::MapShapes(body, TopAbs_FACE, original);
+  const auto mergeable = [&](const TopoDS_Shape& f) {
+    return !original.Contains(f) &&
+           BRepAdaptor_Surface(TopoDS::Face(f), Standard_False).GetType() ==
+               GeomAbs_Plane;
+  };
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndUniqueAncestors(result, TopAbs_EDGE, TopAbs_FACE,
+                                      edgeFaces);
+  TopTools_MapOfShape keep;
+  bool any = false;
+  for (int i = 1; i <= edgeFaces.Extent(); i++) {
+    const TopTools_ListOfShape& faces = edgeFaces(i);
+    bool both = faces.Extent() == 2;
+    for (const TopoDS_Shape& f : faces)
+      both = both && mergeable(f);
+    if (both)
+      any = true;
+    else
+      keep.Add(edgeFaces.FindKey(i));
+  }
+  if (!any)
+    return TopoDS_Shape(); // nothing drawn on a plane: as it is
+  // The edges stay as they are, so a face is only rebuilt by being merged.
+  // A merge the kernel cannot do leaves the cut as it was: the arcs are
+  // untidy, not wrong.
+  try {
+    ShapeUpgrade_UnifySameDomain unify(result, /*UnifyEdges=*/Standard_False,
+                                       /*UnifyFaces=*/Standard_True,
+                                       /*ConcatBSplines=*/Standard_False);
+    unify.KeepShapes(keep);
+    unify.Build();
+    if (unify.Shape().IsNull())
+      return TopoDS_Shape();
+    history.Merge(unify.History());
+    return unify.Shape();
+  } catch (const Standard_Failure& e) {
+    LOG_WARN("modelled thread: the footprint on the shoulder was not merged "
+             "({})",
+             e.GetMessageString());
+    return TopoDS_Shape();
+  }
+}
 
 // The groove a modelled thread cuts, as an axial profile for HelicalSweep:
 // the space between two teeth of the ISO 68-1 / ASME B1.1 basic profile
@@ -314,9 +375,13 @@ bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
   }
   ElementMap toolMap;
   topo::NamePrimitiveElements(tool, std::to_string(GetId()), toolMap);
-  CheckedBoolean cut =
-      CheckedBooleanNamed(m_name, BooleanOp::Subtract, body.name, body.shape,
-                          body.elementMap, tool, toolMap, GetId());
+  const TopoDS_Shape blank = body.shape.GetShape();
+  CheckedBoolean cut = CheckedBooleanNamed(
+      m_name, BooleanOp::Subtract, body.name, body.shape, body.elementMap, tool,
+      toolMap, GetId(), {},
+      [&](const TopoDS_Shape& result, BRepTools_History& history) {
+        return MergeFootprint(blank, result, history);
+      });
   if (!cut.refusal.empty() || !cut.shape.IsValid()) {
     SetError("the modelled thread's cut failed (" +
              (cut.refusal.empty() ? cut.error : cut.refusal) +
