@@ -91,7 +91,7 @@ def faces_of(part, S, model):
     }
     relief = model("hole", S["relief_d"]) / 2
     out["reliefs"] = [f for f in fs if cyl(f, relief)]
-    out["screws"] = [f for f in fs if cyl(f, 2.25)]
+    out["screws"] = [f for f in fs if cyl(f, model("hole", S["m4_clear"]) / 2)]
     return out
 
 

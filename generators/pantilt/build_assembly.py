@@ -143,23 +143,34 @@ def fasteners(app, asm, o, S):
     """The wheel's four screws into the plate's tapped holes, and two
     through each block with a nut on the far side."""
     out = []
+
+    def clear_r(part):
+        # The M4 clearance hole as MODELLED in that part: a Hole's clearance
+        # fit on a printed part is the size it prints at plus the process's
+        # allowance, so the radius is asked of the part's own process.
+        return app.print_allowance(part=part.id, kind="hole",
+                                   size_mm=S["m4_clear"])["model_mm"] / 2
+
     wheel = app.part("pan_wheel", create=False)
     face = S["wheel_face"]
+    r = clear_r(wheel)
     rims = [e for e in wheel.body().edges(circular=True)
-            if e.radius and abs(e.radius - 2.25) < 0.01
+            if e.radius and abs(e.radius - r) < 0.01
             and abs(e.midpoint[2] - (face - 4.5)) < 0.01]
     block = app.part("worm_block", create=False)
     # The head sits on the web at the bottom of its counterbore.
     z = S["block_h"] / 2 - S["block_web"]
+    r = clear_r(block)
     heads = [e for e in block.body().edges(circular=True)
-             if e.radius and abs(e.radius - 2.25) < 0.01
+             if e.radius and abs(e.radius - r) < 0.01
              and abs(e.midpoint[2] - z) < 0.01]
     # The yoke prints as a base and two arms: each arm's foot flange is
     # bolted down through the base, the head on the flange.
     yoke = app.part("yoke", create=False)
     zf = S["yoke_zt"] + S["yoke_base_t"]
+    r_yoke = clear_r(yoke)
     joints = [e for e in yoke.body().edges(circular=True)
-              if e.radius and abs(e.radius - 2.25) < 0.01
+              if e.radius and abs(e.radius - r_yoke) < 0.01
               and abs(e.midpoint[2] - zf) < 0.01
               and abs(e.midpoint[1]) > S["arm_out"]]
     if len(heads) != 2 or len(rims) != 4 or len(joints) != 4:
@@ -178,7 +189,7 @@ def fasteners(app, asm, o, S):
     # one off it).
     zl = S["ledge_z"] - S["yoke_base_t"]
     unders = [e for e in yoke.body().edges(circular=True)
-              if e.radius and abs(e.radius - 2.25) < 0.01
+              if e.radius and abs(e.radius - r_yoke) < 0.01
               and abs(e.midpoint[2] - zl) < 0.01]
     tilt_blocks = {o[k].id for k in ("tilt_block_a", "tilt_block_b")}
     for occ, rim, kw in jobs:
