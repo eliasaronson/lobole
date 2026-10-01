@@ -52,11 +52,11 @@ from designer_sdk import Plane
 
 MDF = "mdf"
 
-# Positions come back as float32, so an absolute tolerance has to suit the
-# MAGNITUDE, not the feature. A panel face at -164.8 reads -164.800003, and
-# picking edges with a 1e-6 window matched NOTHING — silently, because the
-# pick list was then empty and the fillet simply never happened. A micron is
-# still four orders finer than any edge this generator cares about.
+# The window edges are picked in. Positions used to come back as float32 (a
+# panel face at -164.8 read -164.800003, and a 1e-6 window matched NOTHING —
+# silently, the fillet simply never happened); the model is double now, but a
+# position is still the kernel's, not the literal it was drawn from. A micron
+# is four orders finer than any edge this generator cares about.
 NEAR = 1e-3
 
 # The frame rail, the spokes and the ring's wall are all ONE WALL THICKNESS,
