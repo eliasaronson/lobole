@@ -61,9 +61,13 @@ costs minutes, and it is tied to a mesh that Netgen does not reproduce across
 versions or machines, so re-running would not give it back. It is written as
 `studies/<id>-<slug>.result.json` beside the study (flat arrays: mesh nodes
 and tets, per-tet density, compliance history, iterations, achieved volume
-fraction) and loaded into the same `StudyRuntime` slot FEM results use. On
-load it is stamped with the settled document version, so it reads current
-until the part changes; a stale result is still displayed, badged. The solver
+fraction, and `input_hash`, the hash of what produced it) and loaded into
+the same `StudyRuntime` slot FEM results use. On load it is stamped with
+the settled document version, so it reads current until the part changes --
+unless its saved hash no longer matches the reopened part, when it reads
+stale; a stale result is still displayed, badged. A run of the same inputs
+after a reopen is answered from it, `reused: true`, nothing computed
+([studies as jobs](../simulation/README.md#studies-as-jobs)). The solver
 name and wall time are not saved. Goldens use a hand-made mesh, never Netgen
 output.
 
@@ -99,7 +103,11 @@ iteration, compliance, largest change and volume fraction through atomics,
 and checking a cancel flag each iteration. The result is stored at the one
 join point on the main thread (`ui::StartTopologyRun`,
 `src/ui/SimulationActions.cpp`). Cancelling keeps the best densities so far
-as a valid result marked cancelled. One study run at a time.
+as a valid result marked cancelled; a cancelled result is never reused for
+a later run. The run is a job with an id, cancelled with the RPC connection
+that started it unless `outlive_client`
+([studies as jobs](../simulation/README.md#studies-as-jobs)). One study run
+at a time.
 
 ## The GPU solver
 
@@ -278,10 +286,13 @@ set_study {id, mesh_size?, volume_fraction?, filter_radius?, max_iterations?}
 add_load  {study, type: "fixed", face}
 add_load  {study, type: "force", face, magnitude, direction?}   # N, total on the face
 add_keep_face {study, face}      / remove_keep_face
-run_study {id}                                     -> {started: true}   (always async)
-study_status {id}   -> {running, iteration, max_iterations, compliance,
+run_study {id, recompute?, outlive_client?}
+                    -> {started: true, job, kind}      (always async)
+                    or {reused: true, started: false, input_hash, ...}
+study_status {id}   -> {running, job, iteration, max_iterations, compliance,
                         max_change, volume_fraction, solver, elapsed_seconds}
-cancel_study {id}                                  -> {cancelled}
+study_status {job}  -> {running, fraction, ...} or {outcome, ...}
+cancel_study {id | job}                            -> {cancelled, job}
 study_results {id}  -> {iterations, converged, cancelled, volume_fraction,
                         compliance, solver, solve_seconds, stale}
 set_result_display {study, field: "shape"|"density"|"none", threshold?}
@@ -313,8 +324,9 @@ to STL is RPC-only; the panel has no button for it.
   solve, condition numbers, penalty ramp, fp32 Ke as an operator),
   `[refinebench]` (SIMP GPU vs CPU vs exact on slender parts),
   `[mg0gate]`, `[mgscale]`, benches.
-- `tests/topo_smoke.py`: start → poll → done, STL export, cancel keeping a
-  best-so-far result, one run at a time. Skips without Netgen. Reloading a
+- `tests/topo_smoke.py`: start → poll → done, STL export, an unchanged
+  study reused in under a second, cancel keeping a best-so-far result, one
+  run at a time. Skips without Netgen. Reloading a
   saved result is covered by `test_topopt.cpp`.
 - GUI: `sim/topology_holds_its_volume_target`.
 

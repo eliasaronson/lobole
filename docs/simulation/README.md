@@ -63,64 +63,92 @@ a transient `fem::StudyRuntime` cache stamped with the document's `Version()`
 at solve time. Any later change makes them **stale**: the panel badges them
 and `study_results` / `list_studies` report `stale: true`. Nothing is ever
 re-solved automatically — meshing and solving take seconds to minutes and
-stay an explicit act. A study reopened from disk carries its setup and no
-answers; `study_results` refuses it with "study has not been run".
+stay an explicit act; an explicit run whose inputs are unchanged is answered
+from the stored result ([studies as jobs](#studies-as-jobs)). A study
+reopened from disk carries its setup and no answers; `study_results`
+refuses it with "study has not been run".
 
 ## Studies as jobs
 
-Design note (the pan/tilt friction round, workstream A). An exact motion
-study is minutes and a topology study was two hours on the CPU, yet a study
-has no handle, keeps running after its client dies, is run again whole by
-`leave_at`, and is repeated identically by a rebuild because nothing ties a
-result to its inputs.
+Every long study -- a motion study, a static, modal or topology solve, a
+mesh-only run -- runs as a job with an id, and a result is keyed by a hash
+of exactly what produced it. This page holds it for all four kinds; the
+motion side is also in
+[assemblies](../assemblies/README.md#motion-studies).
 
-**The shape of the fix.**
+**A job id.** `BackgroundJob::id` (`src/ui/BackgroundJob.h`) is handed out
+by `StartBackgroundJob` from a session counter and never reused. An async
+`run_study`, `run_motion_study` or `mesh_study` answers `job: <id>` (and
+`kind`). `study_status {job}` reports a running job (kind, study, label,
+fraction, elapsed, cancellable, whether it outlives its client) and, once
+it has ended, how: `outcome` done, cancelled or failed, with `error` or
+`cancel_reason`; the registry keeps the last 64 ended jobs for that
+(`AppState::finishedJobs`). `cancel_study {job}` cancels any study job,
+motion included. Both work from any tab. An id that names no study job,
+running or ended, is refused naming the ones there are; an ended job is
+refused a cancel; a CAM or import job is refused, pointing at
+`cancel_background_job`. `background_jobs` lists every job with its id.
 
-- **A job id.** Every `BackgroundJob` gets a monotonic `id`. A long study
-  (motion, static, modal, topology, and the mesh-only run) started over RPC
-  answers `job: <id>`; `study_status {job}` reports it (kind, study,
-  running, fraction, elapsed, and once it ends its outcome: done, cancelled,
-  failed) and `cancel_study {job}` cancels it. An id that names no job,
-  running or recently finished, is refused naming the ones that exist.
-- **Owned by its client.** The RPC session numbers each connection; a study
-  job started by a connection is cancelled when that connection closes,
-  unless the call passed `outlive_client: true`. A synchronous motion run
-  polls the same thing. Jobs the GUI starts have no owner.
-- **Results keyed by inputs.** A run computes a 64-bit input hash of exactly
-  what produces its answer: the bodies' exact B-Rep (`BinTools` bytes, as
-  CAM keys its surfaces), names and materials (with the library's numbers),
-  the study's definition with its expressions evaluated, and for an
-  assembly every occurrence, mate (with its current value: the run starts
-  from the pose), relation and configuration, through every sub-assembly.
-  The result carries `input_hash`. A run whose hash matches a stored result
-  (the study's own, or one of the session's recent results) is answered from
-  it with `reused: true` and nothing computed; `recompute: true` runs anyway.
-  Topology results are saved with the project, so the hash is saved with
-  them and a reopened project reuses its result, and reads stale when the
-  part moved under it.
-- **`leave_at` from the samples.** The recorded sample's placements and
-  mate values are written into the live assembly and solved once; a value
-  between samples starts from the nearest one and is the same single solve.
-- **Cheaper exact checks.** The run solves every sample once (the separate
-  kinematics pass goes), then checks every sample's candidate pairs in one
-  parallel batch rather than sample by sample, so a pair that costs seconds
-  at every pose stops serialising the run. A pair whose relative pose
-  repeats one already checked in the run (a dwell, a full turn) is checked
-  once, and the session's exact-contact cache also matches a clear answer by
-  relative pose, so a re-run that lands a hair away is still a hit.
+**Owned by its client.** The RPC session numbers each connection
+(`RemoteServer`, a number never reused, unlike the fd), and the pump sets
+`AppState::rpcConnection` around each dispatch. A study job started over
+RPC is owned by that connection, and when the connection closes the pump
+cancels it (`CancelJobsOwnedBy`, reason "its client disconnected") --
+unless the call passed `outlive_client: true`. A synchronous motion run
+polls the same thing (`AppState::rpcCallerGone`) between samples and pair
+checks, so a client that hangs up mid-run stops it. Jobs the GUI starts,
+and CAM passes (cached and paid for), have no owner. A script that starts
+an async study and exits without `outlive_client` has stopped its study.
 
-**Files.** `src/ui/BackgroundJob{,s}.{h,cpp}`, `src/remote/RemoteSession.cpp`
-and `RemoteServer.h`, `src/core/InputHash.{h,cpp}`, `src/core/MotionStudy.*`,
-`src/core/CollisionCache.h`, `src/ui/MotionActions.cpp`,
-`src/ui/SimulationActions.cpp`, `src/core/fem/` (the hash, the saved
-result), `src/remote/Remote{Motion,Simulation,Dispatch}.cpp`, and the Study
-panel.
+**What cancelling does.** A topology run stops after the iteration it is
+on and keeps the best shape so far, marked cancelled. A motion run stops
+between samples, or between pair checks, and keeps the leading samples
+whose every check landed. A static, modal or mesh job stops at its next
+boundary -- after the meshing; the factorization has no interruption
+points, so a cancel during it lands when it ends -- and drops its answer.
 
-**Verified by:** a second identical run reused in well under a second; a
-change to each class of input (geometry, mates, relations, settings, loads,
-materials, configuration) missing; a reopened topology result reused; a
-cancel by id and a client disconnect stopping a job; `leave_at` costing one
-solve; and the pan/tilt head's pan study timed before and after.
+**Results keyed by inputs.** A run computes a 64-bit input hash
+(`src/core/InputHash.h`; FNV-1a) over the exact B-Rep of the bodies it reads
+(BinTools bytes without triangulation, memoized per shape identity), their
+names, materials and the library's numbers for them, thread regions and face
+names, and:
+
+- an FEM study (`fem::StudyInputKey`, `fem::AssemblyStudyInputKey`,
+  `src/core/fem/FemInputKey.cpp`): the study as saved with its expressions
+  EVALUATED (so a variable feeding a load is an input by its value), its
+  name and id aside; on an assembly, each taking-part occurrence as saved
+  and its placed bodies;
+- a motion study (`motion::InputKey`): the definition (name and id aside,
+  the panel's Preview or Validate override included), every occurrence with
+  its placement, every mate with its current value -- a run starts from the
+  pose the document is in, so a scrub or a `leave_at` moves the next run's
+  inputs --, relations, configurations and the active one, through every
+  sub-assembly, and every placed (part, configuration).
+
+A version string leads each hash (`motion/1`, `fem/1`); a change to what a
+run computes bumps it. The solver a topology run picks (GPU or CPU) is not
+an input. A finished whole run is kept by its hash in the session
+(`AppState::motionResultsByInput`, 32; `studyResultsByInput`, 8; a cancelled
+or failed run is not kept), and `Start…Run`/`RunMotionNow` ask first: a match
+-- the study's own result, or one of the session's -- is installed as the
+study's fresh result and nothing starts. The reply says `reused: true`,
+every result carries `input_hash`, and `recompute: true` computes anyway
+(Shift+Run in the panel, which also says "Reused" when it did). A reuse
+answers before the one-run-at-a-time check: it starts nothing.
+
+Topology results are saved with the project, so the hash is saved with them
+(`input_hash`, v148): a reopened project's run of the same inputs is reused
+(the B-Rep read back from disk hashes as it did when saved), and a result
+whose saved hash no longer matches the reopened part reads stale rather
+than current-because-loaded. Static, modal and motion results are not saved;
+across a reopen they are computed once more.
+
+The `[studyjobs]` tests prove the hash moves on each input class -- geometry,
+material, mates, a placement, relations, settings, loads, an expression's
+value, configurations -- and on nothing else (`tests/test_motion.cpp`,
+`tests/test_study_inputs.cpp`), and that a saved result reopens with its
+hash; `tests/study_jobs_smoke.py`, `fem_async_smoke.py` and `topo_smoke.py`
+drive the ids, cancels, disconnects and reuse over the RPC.
 
 ## Meshing
 
@@ -192,9 +220,12 @@ unverifiable when the result is stale or no body has a yield strength.
 validation, shape copies) + `MeshPlannedStudy` + `SolvePreparedStudy`
 (plain data, safe on a worker). `run_study {async: true}` and the Run button
 mesh and solve off the frame as a background job; `mesh_study {async: true}`
-meshes only. A static or modal solve cannot be cancelled (the linear solver
-has no interruption points). One study run at a time. A finished job stores
-its result into the document it ran on even if another tab is active.
+meshes only. Each is a job with an id
+([studies as jobs](#studies-as-jobs)); a cancel stops a static or modal job
+at its next boundary (after the meshing; the factorization has no
+interruption points) and drops its answer. One study run at a time. A
+finished job stores its result into the document it ran on even if another
+tab is active.
 
 ### Probing a face
 
@@ -351,8 +382,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
-| `run_study {id, async?}` | mesh + solve; returns the `study_results` summary when synchronous |
-| `study_status`, `cancel_study` | progress of an async job; cancel applies to topology only |
+| `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
+| `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
 | `study_results` | static: maxima, per-body, factor of safety; modal: `bodies[i].frequencies_hz` |
 | `probe_study {id, face, at?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
@@ -360,6 +391,13 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 ## Tests
 
+- `tests/test_study_inputs.cpp` (`[studyjobs]`): the input hash moves on
+  each input class and on nothing else; a saved topology result reopens
+  with its hash, fresh, and stale when saved against other inputs.
+- `tests/study_jobs_smoke.py`: job ids, a job cancelled with its
+  connection and one that outlives it, a cancel by id, an unknown id
+  refused, a hung-up synchronous run stopping, reuse, and `leave_at` in one
+  solve.
 - `tests/test_fem.cpp` (`[fem]`): element-level checks (tet10 stiffness and
   stress without a mesher), mesher cases, and analytic benchmarks — uniaxial
   bar σ = F/A, cantilever deflection against Euler–Bernoulli, a Lamé
@@ -370,7 +408,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
   staleness across documents, the shared cache, a bonded pair with two
   materials and an answer softer than the rigid one).
 - `tests/fem_smoke.py`, `tests/fem_async_smoke.py`: the RPC surface
-  headless, including an assembly tab. Both skip (exit 77) on a build without
+  headless, including an assembly tab; the async one also a reused run, a
+  job's status by id and a cancel by id. Both skip (exit 77) on a build without
   Netgen, which is how the stock-Ubuntu CI jobs build; run them locally.
 - GUI (`src/app/guitests/GuiTestsSimulation.cpp`, category `sim`): force
   direction and arrow placement, pressure as a field, face tints, gravity at

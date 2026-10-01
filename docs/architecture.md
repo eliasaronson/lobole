@@ -288,7 +288,11 @@ pipelining client still gets its answers in order while other connections
 (the MCP server, a second script) are served. While anything is parked the
 pump reports activity, which keeps the idle pacer at full rate. A parked
 request whose client disconnects is dropped; its passes land in the cache
-anyway.
+anyway. A STUDY job is different: each connection is numbered (never reused,
+unlike its fd), the pump sets `AppState::rpcConnection` around a dispatch,
+and a study job a connection started is cancelled when it closes, unless it
+was started with `outlive_client`
+([studies as jobs](simulation/README.md#studies-as-jobs)).
 
 ## One table per kind of thing
 

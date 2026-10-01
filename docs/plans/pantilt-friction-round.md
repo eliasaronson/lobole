@@ -8,41 +8,13 @@ design note: problem, the shape of the fix, files and verification, in
 
 ## A. Studies as jobs
 
-**Problem.** An exact motion study takes minutes, and a topology study took 2
-hours on the CPU. Yet:
-
-- a study has no handle; it keeps running after its client dies, and the
-  only stop is killing the app;
-- `run_motion_study {leave_at}` runs the whole study again to pose the end;
-- nothing ties a result to its inputs, so a rebuild repeats an identical run.
-
-**Fix.**
-
-- **Handle.** Every long study (motion, static, modal, topology) runs as a job
-  with an id: status, progress, `cancel_study {id}`, and a cancel when the
-  client that started it goes away, unless it asked to outlive its client.
-- **Results keyed by inputs.** A result is stored with a hash of exactly what
-  produced it: the geometry of the bodies, the mates and relations, the
-  study's settings, the loads and the materials. A run whose hash matches is
-  answered from the stored result, reported as reused, with no
-  re-computation. The hash moves on any input change, which the tests prove.
-- **`leave_at` from the samples.** It poses from the recorded samples, solving
-  only the pose asked for.
-- **Cheaper exact checks.** The exact motion check reuses its work between
-  samples; for example, pairs whose relative pose did not change are not
-  re-checked.
-
-**Files.** `src/core/MotionStudy.*`, `src/core/fem/`, `src/core/StudyHost.*`,
-the study RPCs in `src/remote/`, the A3 long-operations infrastructure, and
-the Simulation panel.
-
-**Verified by:**
-
-- a second identical run that is reused and returns in well under a second;
-- an input change that misses;
-- a cancel by id, and a client disconnect that stops the job;
-- `leave_at` costing one solve;
-- the pan study timed before and after on the pan/tilt head.
+Built: see [studies as jobs](../simulation/README.md#studies-as-jobs), the
+motion side in [assemblies](../assemblies/README.md#motion-studies) and
+[what a check costs](../assemblies/README.md#clash-sweeps-what-a-check-costs).
+The pan/tilt head's exact pan study (`scratch/pantilt`, study `pan 360`,
+measured in a headless instance on this machine): 48 samples, 1294 pair
+checks, 144 s before and 54 s after (7 samples: 21.7 s and 6.3 s); the same
+inputs run again answer `reused` in under 0.05 s.
 
 ## B. CAM honest about tolerance and threads
 

@@ -44,22 +44,6 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
-## Simulation
-
-### `fem_async_smoke` fails when a solve finishes between the poll and the cancel
-
-- **Symptom:** the smoke fails intermittently with `AssertionError: a static
-  solve must refuse to cancel`; every archived failure is this assertion.
-- **Cause:** the test polls `study_status`, sees `running: true`, then calls
-  `cancel_study`. If the solve finishes in between, `cancel_study` finds
-  nothing running and answers `{"cancelled": false}` instead of refusing. It
-  also checks only the solve's status, not the mesh job's.
-- **Where:** `tests/fem_async_smoke.py`; `cancel_study` in
-  `src/remote/RemoteSimulation.cpp`.
-- **Likely fix:** have `cancel_study` say plainly when nothing is running
-  (and consider the mesh phase), and let the test accept that answer when the
-  study has since finished.
-
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

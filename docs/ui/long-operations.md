@@ -12,11 +12,14 @@ registry, and the frame keeps drawing. The rule every job follows:
 
 | field | meaning |
 |---|---|
+| `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
 | `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
 | `cancellable` | whether cancel does anything; the UI and `background_jobs` read it |
+| `owner` | the RPC connection a STUDY job dies with (0: none -- the GUI started it, or `outlive_client`); CAM passes have none |
+| `studyId`, `cancelReason` | which study a study job runs; why `cancel` was set, for the record kept once it is reaped |
 | `done` | set by the worker last |
 | `error`, `thread`, `started`, `reaped` | |
 | `finish` | runs on the **main** thread after the join; returns `false` to be called again next frame, which is how a sliced main-thread step (the import's materialize, the motion video's pose-and-capture) fits without a second mechanism |
@@ -24,7 +27,10 @@ registry, and the frame keeps drawing. The rule every job follows:
 The destructor sets `cancel` and joins. The verbs are in
 `src/ui/BackgroundJobs.h`: `StartBackgroundJob`, `BackgroundJobRunning`,
 `FindBackgroundJob`, `CancelBackgroundJobs`, `JoinBackgroundJobs`,
-`ListBackgroundJobs`, `ReapBackgroundJobs`.
+`ListBackgroundJobs`, `ReapBackgroundJobs`, and by id
+`FindBackgroundJobById`, `CancelBackgroundJobById`, `CancelJobsOwnedBy`
+and `FinishedJobById` (the reap records how each job ended -- done,
+cancelled or failed -- and keeps the last 64 in `AppState::finishedJobs`).
 
 **One poll site.** `ui::PollBackgroundJobs` (`PumpRenderJob`, then
 `ReapBackgroundJobs`) is called once per iteration by each of the app's three
@@ -54,8 +60,11 @@ the Study panel and the motion window. A modal is used only where nothing else i
 the job runs (an import or an open is building the document); elsewhere the
 bar sits where the work was asked for and the rest of the UI stays live.
 
-**RPC.** `background_jobs` lists what is running (kind, label, fraction,
-cancellable) and `cancel_background_job {kind}` requests a cancel; for `cam`
+**RPC.** `background_jobs` lists what is running (id, kind, label, fraction,
+cancellable) and `cancel_background_job {kind}` requests a cancel; a study
+job is also asked about and cancelled by its id, `study_status {job}` and
+`cancel_study {job}`
+([studies as jobs](../simulation/README.md#studies-as-jobs)); for `cam`
 it first empties the CAM queues (`CancelCamPasses`). Both work without a part
 tab. They are not called `jobs`, because on this API a job is the CAM job
 document.
@@ -230,11 +239,12 @@ own shape would be a write under the renderer's reads. `tests/test_fem.cpp`
 holds both pairs to their inline originals (same nodes, tets, supports and
 tractions, and a shape that is not the document's).
 
-- `study` (static/modal) is not cancellable: the linear solver has no
-  interruption points. `cancel_study` refuses while one runs.
+- `study` (static/modal) is cancellable at its boundaries: the linear
+  solver has no interruption points, so a cancel lands after the meshing
+  or when the factorization ends, and the answer is dropped.
 - `topo` is cancellable and keeps its best iterate; `cancel_study` cancels
   it.
-- `mesh_study {async: true}` is a `mesh` job; `study_status` answers
+- `mesh_study {async: true}` is a `mesh` job (a cancel drops its report); `study_status` answers
   `{running, meshing: true}` until it lands and then carries
   `mesh: {bodies, seconds, error?}`. The synchronous form remains.
 
@@ -312,8 +322,9 @@ first visit to a turning job down from 0.6-0.9 s to under a millisecond.
 ## Motion studies
 
 A motion study's sampled solve and exact clash sweep is a cancellable `motion`
-job with a fraction per sample; cancelling keeps the samples already checked,
-and the result says so. Its bar is in the Motion tool window rather than a
+job: the solves come first and report the first tenth of the fraction, the
+checks of every sample in one batch the rest; cancelling keeps the leading
+samples whose every check landed, and the result says so. Its bar is in the Motion tool window rather than a
 modal, because you keep looking at the model while it runs.
 
 A job makes the work asynchronous; the setup that hands the worker pure data

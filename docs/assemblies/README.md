@@ -299,9 +299,11 @@ omitted = whichever is active).
   drawn in the last good pose.
 - Pairs rigid to each other over the whole study — fastened, or carried by
   the same moving part — cannot be made to collide by the motion, so they are
-  checked once, at the first sample, and skipped at every later one. A
-  kinematics-only pass over the samples decides which pairs move (the
-  relative transform of two top-level occurrences changes at some sample).
+  checked once, at the first sample, and skipped at every later one. The
+  run solves every sample once, recording the placements, and that record
+  decides which pairs move (the relative transform of two top-level
+  occurrences changes at some sample); then every sample's checks run in
+  one batch ([what a check costs](#clash-sweeps-what-a-check-costs)).
   The rigid check is always EXACT, whatever `clash_mode` says: touching is
   what a bolted joint does, and a mesh check calls touching a clash. A clash
   found there is a standing clash: reported at sample 0 with `rigid: true`,
@@ -316,16 +318,30 @@ omitted = whichever is active).
   overlap and gives `within_min_mm`/`within_max_mm`, the region their boxes
   share.
 - `run_motion_study` runs on a copy of the assembly, so the document is left
-  where it was; `leave_at` (`"start"`, `"last"` or a sample index) scrubs the
-  live assembly to a sample afterwards so the far end of the travel can be
-  measured. `leave_at_deg` (a rotation study) or `leave_at_mm` (an offset
-  study) leaves it at a driver VALUE between samples instead: it walks to the
-  nearest sample as the scrub does and takes one step from there, so a
-  slider-crank lands on the branch the run found. A value outside the
-  study's range, the other unit, or `leave_at` beside it is refused.
+  where it was; `leave_at` (`"start"`, `"last"` or a sample index) poses
+  the live assembly at a sample afterwards so the far end of the travel can
+  be measured: the placements and moving mate values the run recorded there
+  are written in and solved ONCE (`ui::ApplyMotionSample`; the reply's
+  `left_solves` counts them), not walked to. `leave_at_deg` (a rotation
+  study) or `leave_at_mm` (an offset study) leaves it at a driver VALUE
+  between samples instead: the nearest sample's pose, then the one solve
+  steps to the value from it, so a slider-crank lands on the branch the run
+  found. A value outside the study's range, the other unit, `leave_at`
+  beside it, or `leave_at` with `async` (there are no samples yet) is
+  refused; a sample that did not solve has no pose to leave it in.
   `set_motion_pose {t}` scrubs (no undo step). `include_poses`
   returns every occurrence's placement and every moving mate's value per
-  sample. `async: true` runs it as a background job.
+  sample.
+- A run is answered from a stored one when its inputs hash the same
+  (`motion::InputKey`: the definition, every occurrence and placement,
+  every mate with its current value, relations, configurations and the
+  placed parts' geometry and materials): `reused: true`, nothing computed,
+  `recompute: true` to run anyway. So `run_motion_study {leave_at}` after
+  a run costs one solve. `async: true` runs it as a job with an id
+  (`job`), reported by `study_status {job}` and `motion_status`
+  (`job`, `fraction`) and stopped by `cancel_study {job}`; it is cancelled
+  when the connection that started it closes, unless `outlive_client: true`
+  ([studies as jobs](../simulation/README.md#studies-as-jobs)).
 - `export_motion` writes an animated GLB (metres, Y-up, 24 fps) and refuses
   when any sample is unsolved.
 
@@ -497,6 +513,20 @@ stale).
   another has its boundaries far apart.
 - Parallelism is across pairs: `motion::Run` uses `parallel::For`; `RunSweep`
   (`RemoteInspection.cpp`) runs its own pool sized by `parallel::Workers()`.
+  A motion run solves every sample first (in order: each solve starts from
+  the last) and then checks EVERY sample's candidate pairs in one batch, so
+  a pair that costs seconds at every pose -- a worm against its wheel --
+  runs on all the cores at once instead of one sample's check waiting for
+  the last one's. The pan/tilt head's exact pan study (48 samples, 1294
+  pair checks) went from 144 s to 54 s by that alone. A cancel during the
+  batch keeps the leading samples whose every check landed; one during the
+  solves keeps none (a sample is finished when it is checked), except on a
+  kinematics-only run, whose sample is its solve.
+- A pair at a relative pose an earlier sample of the same run already found
+  CLEAR (the same two bodies, B in A's frame equal to within 1e-9 per matrix
+  entry: a dwell, a full turn come round) takes that answer instead of a
+  second boolean (`pairs_repeated`); a clash is asked again, since where it
+  is is in world space.
   Shapes are warmed single-threaded first, and every query boolean is
   non-destructive ([inspect](../inspect/README.md#query-booleans-are-non-destructive)).
 - Pairs are box-pruned before the exact check, and pairs rigid to each other
@@ -517,8 +547,12 @@ stale).
 50,000 exact pair results, FIFO eviction, keyed on both geometry identities,
 both placement ids and the exact bits of both world matrices — no pose
 rounding. Only successful answers are cached, clashes included; an unknown or
-failed boolean is not clearance. Motion replies separate `pairs_cached` from
-`pairs_executed`. The cache is not serialized.
+failed boolean is not clearance. A CLEAR answer is also found by the pair's
+relative pose, to within 1e-9 per matrix entry (OpenCASCADE's confusion
+distance is 1e-7 mm), so two bodies carried together, or a `recompute` whose
+solve landed a hair away from the last run's, is a hit; a clash is matched
+only at its exact world poses. Motion replies separate `pairs_cached` and
+`pairs_repeated` from `pairs_executed`. The cache is not serialized.
 
 ## Background motion copies without regenerating
 
@@ -535,8 +569,8 @@ describe the feature list. It returns `std::unique_ptr<Document>` on purpose —
 copy on top. Identities survive the copy, so background runs can hit
 `ExactContactCache`. `tests/test_document_copy.cpp` asserts identical saved
 bytes and `LastRegenStats().executed == 0`. The GUI panel shows the run's
-fraction and a Cancel (`OccurrencePanel.cpp`); `motion_status` reports no
-fraction.
+fraction and a Cancel (`OccurrencePanel.cpp`); `motion_status` reports the
+running job's id and fraction.
 
 ## Snap points while hovering
 
@@ -670,6 +704,8 @@ one.
   `assembly_loops_smoke.py`, `assembly_relations_smoke.py`,
   `assembly_propagation_smoke.py`, `nested_assembly_smoke.py`,
   `bom_smoke.py`, `exploded_smoke.py`, `motion_smoke.py`,
+  `study_jobs_smoke.py` (job ids, a run cancelled with its client, reuse,
+  `leave_at` in one solve),
   `fastener_stack_smoke.py`, `drawing_assembly_smoke.py`,
   `flexible_subassembly_smoke.py`, `part_configuration_smoke.py` (one part
   placed in two configurations and two materials: BOM lines, mass, STEP
