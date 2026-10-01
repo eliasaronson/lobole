@@ -7,12 +7,14 @@ the yoke, the base plate on the 6090, drawings):
 [docs/plans/pan-tilt-head.md](../../docs/plans/pan-tilt-head.md).
 
     tools/headless-preview.sh --start PORT        # a scratch instance
-    generators/pantilt/run_all.sh PORT            # everything, ~2.5 h
-                                                  # (the yoke's topology
-                                                  # study, 2 h on the CPU;
+    generators/pantilt/run_all.sh PORT            # everything, ~45 min
+                                                  # (the yoke's statics, 25;
                                                   # the motion studies, 9;
                                                   # the CAM job, 1.5)
     generators/pantilt/run_all.sh PORT --from yoke_topo  # its studies only
+    python3 generators/pantilt/build_yoke_topo.py --port PORT --fresh-topology
+                                                  # the topology study run
+                                                  # again: 2 h on the CPU
     generators/pantilt/run_all.sh PORT --from cam # the plate's CAM job only
     generators/pantilt/run_all.sh PORT --from assembly
     PANTILT_SAMPLES=6 generators/pantilt/run_all.sh PORT --from assembly  # ~4 min
@@ -28,7 +30,7 @@ log per stage, and `run_all.log`, which ends in `done` or `failed`):
 | `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot), the camera (the load: a box and a lens of 1.5 kg) and the 1/4-20 camera screw (a plain part with a cosmetic thread) | `tilt.dsgn` |
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
 | `build_assembly.py` | the assembly: mates, bearings by `fit_bearing` and `check_seat`, screws by `fit_fastener`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
-| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): static studies of the solid yoke and the head's, the lens carried from the seats (`probe_study`); the envelope's topology study and its pictures; the yoke as the three pieces it prints in, each checked against a 256 mm bed, with their STLs; stills; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_print_*.stl` |
+| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): static studies of the solid yoke and the head's, the lens carried from the seats (`probe_study`); the yoke as the three pieces it prints in, each checked against a 256 mm bed, with their STLs; stills; the envelope's topology study and its pictures -- run once and kept in `yoke_envelope.dsgn`, reused while the envelope is the same (its volume), `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
 | `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with the thread judged in its band, posted; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
 
 `spec.py` holds the derivation; `common.py` the connection, the print

@@ -37,6 +37,10 @@ import build_yoke
 import yoke_loads
 
 REPORT = {}
+# The last run's report: what a reused topology result was run with.
+_previous = common.OUT / "yoke_topo_report.json"
+REPORT_PREVIOUS = json.loads(_previous.read_text()) if _previous.exists() \
+    else {}
 # SIMP's design settles in tens of iterations; the CPU pays for each.
 TOPO_ITERATIONS = 30
 # The printer: a 256 mm cube (Bambu X1/P1 class). The pieces also fit a
@@ -191,12 +195,57 @@ def volume(app, part):
     return app.mass_properties(part=part.id)["total"]["volume"]
 
 
-def topology(app, S, c, target_volume, clock):
-    """The envelope, optimised for the gear's worst case; returns the study
-    and its summary."""
+def topo_step(app, S, c, target_volume, fresh_run, clock):
+    """The topology study, or the one `yoke_envelope.dsgn` already holds.
+
+    A run is two hours, so its project is kept: when the envelope built
+    now has the volume the saved one has (it is the same envelope), the
+    saved result is reused -- pictured and reported again, not re-run.
+    Called last, on the session saved as yoke_topo.dsgn: a fresh run adds
+    the envelope to it and saves that as yoke_envelope.dsgn."""
+    saved = common.OUT / "yoke_envelope.dsgn"
     fresh(app, "yoke_envelope")
     env = build_yoke.yoke(app, dict(S), name="yoke_envelope",
                           design="envelope")
+    v_now = volume(app, env)
+    if saved.exists() and not fresh_run:
+        app.call("open_project", path=str(saved))
+        old = app.part("yoke_envelope", create=False)
+        v_old = volume(app, old)
+        sid = next((s["id"] for s in app.call("list_studies")["studies"]
+                    if s["name"] == "yoke envelope" and s["has_results"]),
+                   None)
+        if sid is not None and abs(v_old - v_now) <= 1e-6 * v_now:
+            r = app.study_results(id=sid)
+            r.pop("receipt", None)
+            prev = REPORT_PREVIOUS.get("topology", {})
+            REPORT["topology"] = {
+                **{k: prev.get(k) for k in (
+                    "envelope_volume_mm3", "envelope_mass_g",
+                    "volume_fraction", "mesh_size_mm", "filter_radius_mm",
+                    "keep_faces", "case", "seconds")},
+                "study": sid, "reused_from": str(saved), **r}
+            print(f"  topology: reused {saved.name} (the same envelope, "
+                  f"{v_now:.0f} mm3): {r['iterations']} iterations, "
+                  f"compliance {r['compliance']:.1f}", flush=True)
+            REPORT["topology_pictures"] = pictures(app, old, sid)
+            clock("topology (reused)")
+            return
+        print(f"  topology: {saved.name} is for another envelope "
+              f"({v_old:.0f} against {v_now:.0f} mm3): running it",
+              flush=True)
+        app.call("open_project", path=str(common.OUT / "yoke_topo.dsgn"))
+        env = build_yoke.yoke(app, dict(S), name="yoke_envelope",
+                              design="envelope")
+    env, REPORT["topology"] = topology(app, S, env, c, target_volume, clock)
+    REPORT["topology_pictures"] = pictures(app, env,
+                                           REPORT["topology"]["study"])
+    common.save(app, "yoke_envelope.dsgn")
+
+
+def topology(app, S, env, c, target_volume, clock):
+    """The envelope, optimised for the gear's worst case; returns the study
+    and its summary."""
     model = common.printed(env)
     F = faces_of(env, S, model)
     v_env = volume(app, env)
@@ -354,6 +403,10 @@ def main():
     ap.add_argument("--port", type=int)
     ap.add_argument("--steps", default="solid,topo,yoke",
                     help="which of solid,topo,yoke to run (default: all)")
+    ap.add_argument("--fresh-topology", action="store_true",
+                    help="run the topology study even when "
+                         "yoke_envelope.dsgn holds a result for this "
+                         "envelope (two hours on the CPU)")
     a = ap.parse_args()
     app = common.connect(a.port)
     clock = common.Clock()
@@ -373,11 +426,6 @@ def main():
         REPORT["solid"] = {"mass_g": mass_g(app, solid),
                            "static": [static(app, solid, S, F, G, c, clock)
                                       for c in CASES]}
-    if "topo" in steps:
-        env, REPORT["topology"] = topology(app, S, CASES[1],
-                                           volume(app, solid), clock)
-        REPORT["topology_pictures"] = pictures(
-            app, env, REPORT["topology"]["study"])
     if "yoke" in steps:
         yoke = app.part("yoke", create=False)
         FY = faces_of(yoke, S, model)
@@ -389,6 +437,9 @@ def main():
         REPORT["stills"] = stills(app, [solid, yoke])
         clock("stills")
     common.save(app, "yoke_topo.dsgn")
+    if "topo" in steps:
+        topo_step(app, S, CASES[1], volume(app, solid), a.fresh_topology,
+                  clock)
     REPORT["time"] = clock.rows
     (common.OUT / "yoke_topo_report.json").write_text(
         json.dumps(REPORT, indent=1, default=str))
