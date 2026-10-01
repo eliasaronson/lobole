@@ -998,6 +998,23 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
   return drawing::ResolveDim(dim, it->second, ctx);
 }
 
+namespace {
+// The words a view draws besides its lines -- a section's or a detail's
+// caption, a cutting plane's letters, a detail circle's -- as boxes a
+// label or a balloon must stay off. A view's box is its lines', so
+// without these a dimension landed on SECTION A-A.
+void AvoidViewTexts(const AppState& state,
+                    std::vector<std::pair<glm::dvec2, glm::dvec2>>& avoid) {
+  for (const auto& [vid, sv] : state.drawingRenders)
+    for (const drawing::SheetText& t : sv.extras.texts) {
+      const double w = drawing::TextWidthMM(t.text, t.heightMM);
+      const double x0 = t.center ? t.pos.x - 0.5 * w : t.pos.x;
+      avoid.push_back({{x0, t.pos.y - 0.3 * t.heightMM},
+                       {x0 + w, t.pos.y + 0.8 * t.heightMM}});
+    }
+}
+} // namespace
+
 glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
   const auto it = state.drawingRenders.find(dim.viewId);
   if (it == state.drawingRenders.end() || !state.drawing)
@@ -1010,6 +1027,7 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
   for (const auto& [vid, sv] : state.drawingRenders)
     if (sv.hasGeometry)
       ctx.avoid.push_back({sv.bboxMin, sv.bboxMax});
+  AvoidViewTexts(state, ctx.avoid);
   for (const DrawingDim& dm : state.drawing->GetDims()) {
     const drawing::ResolvedDim rd = ResolveDrawingDim(state, dm);
     if (!rd.resolved)
@@ -1250,8 +1268,10 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
         return rn;
       }
     if (note.attachDim != 0) {
-      // Stacked under the dimension's value, no leader: the frame then
-      // applies to the feature that dimension sizes.
+      // Stacked with the dimension's value, no leader: the frame then
+      // applies to the feature that dimension sizes. Under a leader's
+      // value; over a value written along its line, whose other side is
+      // the line itself.
       const DrawingDim* dim = state.drawing->FindDim(note.attachDim);
       const drawing::ResolvedDim rd =
           dim ? ResolveDrawingDim(state, *dim) : drawing::ResolvedDim{};
@@ -1265,7 +1285,8 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
       glm::dvec2 mn, mx;
       drawing::DimLabelBox(rd, mn, mx);
       const glm::dvec2 size = drawing::FcfSize(rn.fcf, rn.fcfTolerance);
-      rn.pos = {0.5 * (mn.x + mx.x), mn.y - 0.8 - 0.5 * size.y};
+      rn.pos = {0.5 * (mn.x + mx.x), rd.aligned ? mx.y + 0.8 + 0.5 * size.y
+                                                : mn.y - 0.8 - 0.5 * size.y};
       rn.hasLeader = false;
     }
     return rn;
@@ -2015,6 +2036,7 @@ bool LayoutDrawingBalloons(AppState& state,
   const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
   std::vector<std::pair<glm::dvec2, glm::dvec2>> taken;
   taken.push_back({chrome.titleBlockMin, chrome.titleBlockMax});
+  AvoidViewTexts(state, taken);
   for (const DrawingDim& dm : state.drawing->GetDims()) {
     const drawing::ResolvedDim rd = ResolveDrawingDim(state, dm);
     if (!rd.resolved)

@@ -70,7 +70,7 @@ its setup (sheet, views, dimensions, notes).
 - **Feature control frame**: a `style: "fcf"` note — the ISO 1101 symbol,
   the tolerance zone (Ø for a cylindrical one, Ⓜ/Ⓛ for a material
   condition) and the datums it is measured from, with a leader to the
-  feature or stacked under a dimension's value. What the symbol cannot
+  feature or stacked with a dimension's value. What the symbol cannot
   carry (a datum on a flatness, no datum on a perpendicularity) is refused.
 - **Aligned values**: a length is written along its dimension line, above
   it, readable from the bottom or the right of the sheet; a vertical one is

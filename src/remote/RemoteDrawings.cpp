@@ -204,8 +204,9 @@ static constexpr MethodDoc DrawingMethods[] = {
      "takes no datum; orientation, coaxiality, symmetry and runout need one; "
      "a Ø or modifier the symbol cannot carry is refused. Each datum it names "
      "must be a `datum` note on this sheet. It stands at `position` with a "
-     "leader to `ref`, or with `dim` (a dimension id) under that "
-     "dimension's value with no leader and `position` ignored.",
+     "leader to `ref`, or with `dim` (a dimension id) stacked with that "
+     "dimension's value (under a callout's, over a linear one's) with no "
+     "leader and `position` ignored.",
      "dim, fcf, position, ref, style, table, text, view"},
     {"layout_balloons",
      "Balloon every row of the sheet's parts list round the given views "

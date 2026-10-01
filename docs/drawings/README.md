@@ -432,9 +432,11 @@ line work (the PDF's Helvetica has no glyph for any of them), the
 tolerance with its Ø and its circled modifier, then one compartment per
 datum, primary first, knocked out of what it stands on (`NoteGraphics`).
 With a `ref` it stands at its position with a leader from the end nearer
-the feature, an arrow on it; with `dim` (a dimension id) it stands under
-that dimension's value with no leader, which is how a size's position
-tolerance is written. A frame's tolerance is written in the source's
+the feature, an arrow on it; with `dim` (a dimension id) it is stacked
+with that dimension's value and has no leader -- under a leader's value,
+over a value written along its line -- which is how a tolerance on a
+feature of size (a hole pattern's position, a seat's perpendicularity) is
+written. A frame's tolerance is written in the source's
 units to a deviation's decimals (`0.02`).
 
 `check_drawing` (`src/core/drawing/DrawingValidate.cpp`) reports stale

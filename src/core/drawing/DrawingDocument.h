@@ -199,7 +199,7 @@ enum class NoteTable { None, Bends, Bom };
 //
 // Fcf (v151) is a feature control frame (ISO 1101): the tolerance symbol,
 // the zone and the datums it is measured from, drawn as the ruled frame with
-// a leader to the feature -- or stacked under a dimension's value when
+// a leader to the feature -- or stacked with a dimension's value when
 // `attachDim` names one, which is how a size's position tolerance is given.
 enum class NoteStyle { Text, Balloon, Datum, Fcf };
 
@@ -244,7 +244,7 @@ struct DrawingNote {
   NoteTable table = NoteTable::None;
   NoteStyle style = NoteStyle::Text;
   FeatureControlFrame fcf; // style Fcf only (v151)
-  // A frame stacked under this dimension's value instead of standing at
+  // A frame stacked with this dimension's value instead of standing at
   // `pos` with a leader (v151). 0 = not attached.
   uint64_t attachDim = 0;
 };
