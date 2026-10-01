@@ -60,9 +60,9 @@ struct Sizes {
 [[nodiscard]] double ThroatArcDeg(const Sizes& sizes, double face,
                                   double tipRadius);
 
-// Static self-locking (survey section 3): the pair locks when the lead angle
-// is under the friction angle atan(mu). Efficiency is the worm driving,
-// tan(gamma) / tan(gamma + rho).
+// Static self-locking (docs/modeling/worm-gears.md#sizing-a-pair): the pair
+// locks when the lead angle is under the friction angle atan(mu).
+// Efficiency is the worm driving, tan(gamma) / tan(gamma + rho).
 struct Locking {
   double mu = 0.0;
   double frictionAngleDeg = 0.0;

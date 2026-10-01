@@ -78,7 +78,7 @@ ElementRef BlankFace(const Document& doc) {
                     CylFaceName(doc.GetBodies().at(0))};
 }
 
-// The head's pair (docs/plans/pan-tilt-survey.md, section 3): m 2, one
+// The head's pair (docs/modeling/worm-gears.md#sizing-a-pair): m 2, one
 // start, 40 teeth, q 10 — a worm blank of 24 mm and a wheel blank of 86.
 std::unique_ptr<Document> WormPart(bool right, double backlash) {
   auto doc = Blank(12.0, 40.0);
@@ -202,7 +202,7 @@ TEST_CASE("A worm is its blank less the ZA tooth space, to Pappus", "[worm]") {
 }
 
 TEST_CASE("The hobbed envelope converges as the hob's steps shrink", "[worm]") {
-  // The survey's measure: one space at n, 2n, 4n and continuous, read on its
+  // The measure: one space at n, 2n, 4n and continuous, read on its
   // mid-plane section's area (the loft between sections adds a noise of its
   // own that the finer steps would drown in).
   // The scallops a discrete hob leaves shrink as 1/n^2, so the gap to the

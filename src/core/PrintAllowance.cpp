@@ -7,13 +7,14 @@ namespace {
 
 constexpr double kAbove = 1e9; // "and above": the last row's open end
 
-// The sources, once. docs/plans/pan-tilt-survey.md section 5 read them; the
-// numbers are that section's proposed table.
+// The sources, once (docs/tolerances/README.md#printed-parts says where each
+// number comes from).
 constexpr const char* kHoleSource =
     "FDM holes print 0.1-0.4 mm undersize on the diameter and the fix is to "
     "model them about 0.2 mm oversize (3dprintbounty.com, 3D printing "
     "tolerances guide); PETG holes read 0.2-0.3 mm under on Ø10, and PETG "
-    "shrinks 0.5-0.8 % against PLA's 0.3-0.5 % (pan-tilt survey, section 5)";
+    "shrinks 0.5-0.8 % against PLA's 0.3-0.5 % "
+    "(docs/tolerances/README.md#printed-parts)";
 constexpr const char* kShaftSource =
     "a PETG sliding fit wants 0.2-0.3 mm per side in all (sovol3d.com, FDM "
     "tolerances and clearances; 0.1-0.2 mm per side in the community "

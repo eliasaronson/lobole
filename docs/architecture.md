@@ -147,6 +147,20 @@ The numbers were measured on this 22-core, 30 GB machine.
   and never ends, and `pkill -f` kills the shell that ran it.
 - **The fast loop skips `slow`.** `tools/test-fast.sh` runs in about 65 s.
   The suite's floor was `watch_smoke` (73 s) until it was tagged.
+- **A dear result is kept and keyed by its inputs.** A generator stage that
+  runs a long study saves the project that holds its result and reuses it
+  while the inputs are the same (the pan/tilt yoke's topology study, kept
+  while the envelope's volume is unchanged, `--fresh-topology` to rerun):
+  a verification that rebuilt the head from nothing ran a two-hour study a
+  second time. `run_all.sh PORT --from STAGE` runs what changed.
+- **A generator times its stages** (`Clock` in
+  `generators/pantilt/common.py`), so a slow run says where: the pan/tilt
+  drawings stage was 146 s, of which most was
+  re-cutting section views through a cache too small to hold them (27 s
+  once it did).
+- **A study outlives its client.** A killed script leaves its study running
+  in the app; stop the instance by its pid (`headless-preview.sh --stop`,
+  with the same `XDG_STATE_HOME` as its `--start`).
 - **clangd** skips `.claude/worktrees/` (`.clangd`). Each worktree is
   another copy of the project, and the index held 5.4 GB.
 

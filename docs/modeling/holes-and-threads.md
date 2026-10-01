@@ -234,6 +234,32 @@ only need the callout.
   screw motion), with A and r̄ the groove section's area and centroid radius
   inside the blank. The tests assert that to 0.5%.
 
+### What a helical sweep gets wrong in OCC
+
+Every OCC thread we read (FreeCAD's hole and helix, the Fasteners workbench,
+freecad.gears, bd_warehouse) sweeps one profile along a helix, and each
+works round the same failures. The choices above are those workarounds:
+
+- **Many turns on one edge.** `BRepLib::BuildCurve3d` approximates the
+  whole helix as one B-spline, which degrades turn by turn: one edge a turn.
+- **Frenet on the approximated helix.** Its 3D curve is only C1, so the
+  frame drifts and the last section tilts: the binormal frame.
+- **Neighbouring turns touching.** A profile P tall or more meets the next
+  turn and the solid is invalid: the 0.95 P cap.
+- **Faces coincident with the body.** A cutter that ends on the surface it
+  cuts leaves the boolean a coincident face: the P/10 overshoot.
+- **Open ends.** Run the helix past an open face and let the boolean trim
+  it; a blind end needs a trim of its own (square here; a cone, a fade or
+  a DIN 76 runout elsewhere).
+- **An inside-out solid.** Classify a point at infinity and reverse the
+  solid when it reports IN.
+- **The seam.** A cutter end face in the target cylinder's seam plane makes
+  the boolean intersect along the seam edge: the quarter-turn offset.
+
+Those libraries, and the others the threads, worm gears and printed fits
+draw on (cq_gears, BOSL2, FreeCAD CAM), are GPL, LGPL, BSD and Apache, and
+this repository is AGPL: take their numbers and formulas, not their code.
+
 ## Thread engagement
 
 Exact interference between two bodies normally counts every overlap. A pair of

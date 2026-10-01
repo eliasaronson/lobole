@@ -513,7 +513,11 @@ output for a 3/8-16 UNC.
   a profile shallower than the thread, where the neck would rub the crests
   before the last pass reached the root; an axis that does not point at the
   spindle, or a bore that opens downward (metal over its top); and a machine that posts no arcs or a post without helical arcs
-  (`HelicalArcRefusal`, [post.md](post.md#helical-arcs)).
+  (`HelicalArcRefusal`, [post.md](post.md#helical-arcs)). FreeCAD logs an
+  oversized cutter and carries on.
+- **Classes are named as ISO names them.** FreeCAD's external metric tables
+  are labelled `6G` and `4G6G`; the ISO external classes are lowercase
+  (`6g`, `4g6g`), and that is what a Thread here states.
 - **Posted** as helical G2/G3: each arc is declared on the toolpath
   (`Toolpath::Arc`) and written whole, [post.md](post.md#helical-arcs).
 - **Told to the verifier.** Each thread is a `Toolpath::Thread` -- what was

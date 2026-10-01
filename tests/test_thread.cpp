@@ -333,7 +333,7 @@ TEST_CASE("unified thread table lookups", "[thread]") {
   CHECK_THAT(tripod->majorDia, WithinAbs(9.525, 1e-9));
   CHECK_THAT(tripod->pitch, WithinAbs(1.5875, 1e-9));
   CHECK_THAT(threads::TapDrill(*tripod), WithinAbs(7.9375, 1e-9)); // 5/16
-  // Basic minor (the 2B minimum minor): 7.807 mm, the table the survey read
+  // Basic minor (the 2B minimum minor): 7.807 mm, the FreeCAD CAM table
   // gives 7.798 for the 2B/3B minimum.
   CHECK_THAT(threads::MinorDiameter(*tripod), WithinAbs(7.807, 0.01));
   // The metric tap drill is still D - P.

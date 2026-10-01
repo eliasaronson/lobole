@@ -296,7 +296,7 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::PLASTIC_BLACK, 2.5f, 0.35f, 50.0f);
   // Filament datasheets (tensile bars printed flat): E 2.0-2.2 GPa, yield
   // 45-53 MPa. A printed part is weaker ACROSS its layers (the pan/tilt
-  // survey reads 30-50 MPa there), which an isotropic study cannot see.
+  // sources read 30-50 MPa there), which an isotropic study cannot see.
   elastic(MaterialType::PETG, 2.1f, 0.38f, 50.0f);
   // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
   // and the numbers are the plate's, not a unidirectional ply's.

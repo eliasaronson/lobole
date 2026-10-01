@@ -13,13 +13,12 @@
 // Thread milling (docs/cam/operations.md#thread-mill).
 //
 // FreeCAD's shape (Mod/CAM Path/Op/ThreadMilling.py and
-// Path/Base/Generator/threadmilling.py, surveyed in
-// docs/plans/pan-tilt-survey.md): the helix radius from the thread's sharp-V
-// tip less the tool's flat, radial passes of equal chip area, half-turn G2/G3
-// arcs each advancing Z by half a pitch, a partial last arc, semicircle
-// lead-in and lead-out from an "elevator" inside the bore. The functions
-// below reproduce its numbers, which the tests pin. What differs is what
-// drives them: the Thread on the face (size, pitch, hand, side, and the
+// Path/Base/Generator/threadmilling.py): the helix radius from the thread's
+// sharp-V tip less the tool's flat, radial passes of equal chip area,
+// half-turn G2/G3 arcs each advancing Z by half a pitch, a partial last arc,
+// semicircle lead-in and lead-out from an "elevator" inside the bore. The
+// functions below reproduce its numbers, which the tests pin. What differs is
+// what drives them: the Thread on the face (size, pitch, hand, side, and the
 // class, whose pitch-diameter band's MIDDLE the last pass aims at), a
 // through thread overtravelling a pitch past its last full turn, a blind one
 // stopped by the head on its floor, and the refusals FreeCAD only logs.

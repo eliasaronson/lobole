@@ -115,7 +115,7 @@ static data like `FitStandards`: per process and material, a signed allowance
 
 | fdm, petg | size (the printed diameter) | allowance | source |
 |---|---|---|---|
-| hole | under Ø10 | +0.2 | 3dprintbounty.com tolerances guide (FDM holes 0.1-0.4 under, model 0.2 over); the pan-tilt survey's PETG reading (0.2-0.3 under on Ø10) |
+| hole | under Ø10 | +0.2 | 3dprintbounty.com tolerances guide (FDM holes 0.1-0.4 under, model 0.2 over); PETG holes 0.2-0.3 under on Ø10, part of it faceting |
 | hole | from Ø10 | +0.3 | as above |
 | shaft | any | −0.1 | sovol3d.com clearance guide (PETG sliding fit 0.2-0.3 per side, most of it the hole's) |
 | internal thread | any | +0.4 | FreeCAD Fasteners 3D-print nut 1.03·D + 0.10 (M8 → +0.34); BOSL2 4·`$slop` at 0.1 |
@@ -128,6 +128,24 @@ tool defaults, **to confirm with a test coupon** — `generators/print_coupon.py
 prints the table's sizes and ± steps around them, and every report says so.
 PLA is not carried: the sources give PETG numbers, and PLA's differ by less
 than they disagree with each other, which is a coupon's job to settle.
+
+Where the numbers come from, beyond the table's column:
+
+- **Slicers** compensate but carry no per-material data. Bambu Studio's
+  `xy_hole_compensation` and `xy_contour_compensation` default to 0 (a few
+  vendor profiles set 0.02-0.025); PrusaSlicer's `xy_size_compensation` is
+  0 and its `filament_shrinkage_compensation_xy` 0 %.
+- **The Fasteners workbench**'s 3D-printer mode models a screw at
+  0.99·d − 0.05 and a nut at 1.03·D + 0.10: 0.47 mm diametral between them
+  on an M8.
+- **BOSL2** enlarges an internal thread by 4·`$slop` on the diameter; its
+  default is 0, its examples 0.05-0.15, typically 0.1.
+- **Community practice** for PETG is 0.1-0.2 mm radial clearance a side;
+  PETG shrinks 0.5-0.8 %, a little more than PLA.
+- **Faceting.** A hole exported as n chords loses the sagitta,
+  r·(1 − cos(π/n)), on the radius (nophead's polyhole models it at
+  r / cos(π/n) instead), so the STL export's tolerance is part of the
+  allowance; `print_allowance` reports it, below.
 
 - **Where it lives: on the part.** `Document::PrintProcess()`, serialized as
   the envelope's `print {process, material}` (v143), outside the regen chain

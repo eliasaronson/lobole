@@ -14,8 +14,9 @@ asked of the app with `list_bearings`) and the module (rounded up to a half
 module). Each is declared as a number with the minimum it was chosen over
 beside it, so the document still shows why.
 
-The sources are docs/plans/pan-tilt-survey.md (sizing, section 3; PETG
-friction and strength) unless a comment says otherwise.
+The sources are docs/modeling/worm-gears.md#sizing-a-pair (the worm pair's
+sizing, PETG friction and strength) and docs/tolerances/README.md#printed-parts
+(printed clearances) unless a comment says otherwise.
 """
 
 # name, expression, comment -- in dependency order.
@@ -23,7 +24,7 @@ LOAD = [
     ("load_kg", "1.5", "camera and lens"),
     ("com_up", "80", "mm, the load's CoM above the tilt axis"),
     ("com_fwd", "40", "mm, the load's CoM in front of the tilt axis"),
-    ("g_handling", "3", "handling load factor (survey: 3 g)"),
+    ("g_handling", "3", "handling load factor"),
     ("lever", "sqrt(com_up^2 + com_fwd^2)", "mm, the CoM's lever at full tilt"),
     ("tilt_torque_nm", "load_kg * 9.81 * lever / 1000",
      "N.m at 1 g, the worst tilt"),
@@ -33,20 +34,20 @@ LOAD = [
 
 MATERIAL = [
     ("nozzle", "0.4", "mm; the print allowance table assumes it"),
-    ("print_wall", "8 * nozzle", "mm, eight perimeters (survey: a 3.1 mm "
+    ("print_wall", "8 * nozzle", "mm, eight perimeters (a 3.1 mm "
      "tooth is seven or more)"),
     ("run_gap", "3 * nozzle", "mm, between printed parts that move past "
      "each other"),
-    ("petg_layer_mpa", "40", "MPa across the layers (survey: 30-50)"),
+    ("petg_layer_mpa", "40", "MPa across the layers (sources read 30-50)"),
     ("petg_allow_mpa", "petg_layer_mpa / 3", "MPa, a third of it"),
-    ("mu_run", "0.25", "PETG on PETG, kinetic (survey: 0.25-0.35)"),
+    ("mu_run", "0.25", "PETG on PETG, kinetic (sources read 0.25-0.35)"),
 ]
 
 WORM = [
     ("wheel_teeth", "40", "40:1 at one start"),
     ("worm_starts", "1", "one start: self-locking"),
-    ("worm_q", "10", "diameter quotient (survey: 10, gamma 5.71 deg)"),
-    ("lewis_y", "0.3", "Lewis form factor, survey's table"),
+    ("worm_q", "10", "diameter quotient (gamma 5.71 deg)"),
+    ("lewis_y", "0.3", "Lewis form factor"),
     ("face_k", "min(2 * (0.5 + sqrt(worm_q + 1)), 0.67 * worm_q)",
      "face width in modules: KHK, held to AGMA's 0.67 d1"),
     ("worm_module_min",
@@ -67,7 +68,7 @@ WORM_DERIVED = [
     ("wheel_face", "face_k * worm_module", "mm, the wheel's rim length"),
     ("worm_len", "pi * worm_module * (4.5 + 0.02 * wheel_teeth)",
      "mm, KHK's worm length"),
-    ("worm_backlash", "0.25", "mm axial, a printed pair (survey: 0.2-0.3)"),
+    ("worm_backlash", "0.25", "mm axial, a printed pair (sources: 0.2-0.3)"),
     ("wheel_ft_3g", "2 * torque_3g_nmm / wheel_d2",
      "N, tooth force at 3 g: the worm's axial load"),
     ("eta_run", "(1 / worm_q) * (1 - mu_run / worm_q) / (1 / worm_q + mu_run)",

@@ -15,10 +15,10 @@ features). Tests: `tests/test_worm.cpp`.
 
 ## Why two features, not a generator
 
-The pan/tilt head plan started this as a generator next to `gear.py`, to
-become a feature only if it had to. It had to: a generator can only reach
-what features already build, and none builds a helical sweep of a custom
-profile or cuts a wheel by a moving tool. A spur gear is a sketch extruded,
+This started as a generator next to `gear.py`, to become a feature only if
+it had to. It had to: a generator can only reach what features already
+build, and none builds a helical sweep of a custom profile or cuts a wheel
+by a moving tool. A spur gear is a sketch extruded,
 so it can stay a script. A worm cannot.
 
 It is two features rather than one with a kind, for three reasons:
@@ -90,12 +90,20 @@ the worm clears its own wheel.
 
 The mesh motion is this: the wheel turns θ, and the worm turns the angle
 that screws its thread r2·θ along its axis. The hob is screw-invariant, so
-that turn is the same as a slide. The survey planned to cut the wheel with
-the hob placed at 6–8 steps per wheel pitch: one gap envelope built by one
-multi-tool boolean, patterned z2 times. **Measured, the booleans do not
-scale.** One multi-tool common of a sector with 1, 2, 4 and 8 hob placements
-took 0.16, 2.4, 14 and 105 s, about ×7 per doubling. Sequential cuts grow
-about 0.65 s per placement already cut. A space needs about 60 placements at
+that turn is the same as a slide: the hob at wheel angle θ is the one hob
+solid turned θ about the wheel's axis and moved r2·θ along the worm's (a
+rack rolling on the pitch circle), a rigid transform with no sweep rebuilt.
+It touches one space over ±(L/2)/r2 of wheel turn, L the hob's length.
+
+Stepped, the cusp left between placements is about s²/(8ρ), with s = π·m/n
+for n steps per wheel pitch and ρ ≈ r2·sin α the flank's radius of
+curvature: 0.004 mm at m 2, r2 40, n 8, and 0.015 mm at n 4, an order of
+magnitude under print resolution at n = 6 to 8. Built that way, one
+space's envelope is one multi-tool boolean of those placements, patterned z2
+times. **Measured, the booleans do not scale.** One multi-tool common of a
+sector with 1, 2, 4 and 8 hob placements took 0.16, 2.4, 14 and 105 s,
+about ×7 per doubling. Sequential cuts grow about 0.65 s per placement
+already cut. A space needs about 60 placements at
 n = 8, which is hours either way. The placements are nearly coincident
 helical B-spline surfaces, and intersecting those is what the kernel pays
 for.
@@ -118,16 +126,16 @@ to:
   torus about its axis, radius ri at the centre distance) and those z2 spaces
   ([how the teeth are cut](#how-the-teeth-are-cut)).
 
-The stepped loop is still there as `HobOptions::stepsPerPitch`. The survey's
-convergence measure, one space's mid-plane area, reads:
+The stepped loop is still there as `HobOptions::stepsPerPitch`. Its
+convergence, one space's mid-plane area, reads:
 
 | hob steps per pitch | 8 | 16 | 32 | continuous |
 |---|---|---|---|---|
 | space area, mm² | 20.6486 | 20.6571 | 20.6595 | 20.6607 |
 
 The gap to the continuous envelope falls by about 3.4 then 3.0 per doubling.
-The scallops go as 1/n², as the survey predicted, and are 0.006 % of the area
-by n = 32.
+The scallops go as 1/n², as the cusp estimate says, and are 0.006 % of the
+area by n = 32.
 
 Measured facts about the loft:
 
@@ -226,9 +234,11 @@ The wheel still regenerates on the main thread. Regeneration is synchronous
 by design ([../ui/long-operations.md](../ui/long-operations.md#what-is-not-on-the-registry)), and at 2 s
 the wheel no longer reaches the frame watchdog's 3 s.
 
-The fallbacks the survey lists are the BOSL2-style bent tooth and a helical
-involute at the lead angle. Neither was needed. The computed envelope is
-throated and has line contact, which both fallbacks give up.
+No other library here hobs a wheel. freecad.gears and cq_gears have no
+wheel and pair the worm with a helical involute at the lead angle (point
+contact); BOSL2's `worm_gear()` bends an involute tooth round an arc of the
+worm and shears it by the lead, as a mesh rather than a B-rep. The computed
+envelope is throated and has line contact, which both give up.
 
 ## Phase
 
@@ -268,6 +278,39 @@ was measured at), the throat arc, the
 number of sections, how long the hob took, how the teeth were cut
 (`teeth_cut`) and whether the wheel was `reused`
 ([how the teeth are cut](#how-the-teeth-are-cut)).
+
+## Sizing a pair
+
+The axial-module arithmetic (KHK's worm table, DIN 3975), checked on KHK's
+example m 3, z1 2, z2 30, d1 44: a = 67, dt = 96, ri = 19.
+
+- d1 = q·m, q the diameter quotient (about 10); tan γ = z1/q; d2 = z2·m;
+  **a = (d1 + d2)/2**.
+- Throat diameter dt = d2 + 2m, **throat radius ri = a − dt/2 = d1/2 − m**;
+  wheel tip diameter about dt + m.
+- Worm length b1 ≈ π·m·(4.5 + 0.02·z2).
+- **Wheel face width b2 ≈ 2m·(0.5 + √(q + 1))**, no more than 0.67·d1
+  (AGMA's limit for the effective face).
+- Efficiency η = tan γ / tan(γ + ρ'), ρ' = atan μ; **statically self-locking
+  when γ < ρ'**.
+
+**Friction.** PETG on PETG, dry, reads static μ 0.3–0.4 and kinetic
+0.25–0.35 in the printed-polymer tribology papers (tribology.rs 2024-1,
+paper 9-1546). μ = 0.2 is the dry design floor (ρ' = 11.3°); a greased pair
+can fall to about 0.1 (ρ' = 5.7°). Those are the two rows of
+[self-locking](#self-locking).
+
+**Strength.** Tooth bending by Lewis (σ = Ft / (b2·m·Y), Y about 0.3)
+against PETG's strength across the layers, roughly 30–50 MPa.
+
+**Backlash.** The references thin the worm (cq_gears: tooth thickness
+m·(π/2 − j·tan α)/2) or widen the centre distance (BOSL2 `worm_dist`: by
+j·cos γ / tan α). Here the wheel is hobbed by the oversized hob and the
+worm is thinned by j/2 a flank (`backlash`), at the nominal centre distance.
+
+**Printing the worm.** Upright at 20° pressure angle its flanks are 20° off
+horizontal: print it lying on a flat, or keep m ≥ 2, where the overhang is
+only 2.25·m deep.
 
 ## Tests
 
