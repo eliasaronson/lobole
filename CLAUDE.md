@@ -345,6 +345,11 @@ docs/architecture.md#the-ui-actions-layer describes how the code is organised.
   `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
   fails otherwise, because a wrong unit is invisible in the answer
   (docs/conventions.md#units-and-angles).
+- **The model is double; derived bulk data is float.** Positions, planes,
+  placements, mate values, parameters: `double`/`glm::dvec3`/`dmat4`. Meshes,
+  height maps, GPU buffers: float, narrowed once where a renderer is filled,
+  never fed back. `test_conventions.cpp` scans the model headers
+  (docs/conventions.md#the-model-is-double).
 - **A CAM job edit calls `ui::MarkJobEdited`.** The job's undo guard records
   on that counter, not on the job's content (serializing it every frame was
   8% of an idle frame), so an edit that skips it does not undo; the GUI suite
