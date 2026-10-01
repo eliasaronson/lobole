@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -314,6 +315,51 @@ ElementMap NamesThroughHistory(const CADShape& target,
   ElementMap out = PropagateNames(
       {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, history,
       TopTools_ListOfShape(), result.GetShape(), featureTag);
+  FallbackPasses(result.GetShape(), out);
+  return out;
+}
+
+ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag) {
+  ElementMap out =
+      PropagateNames({{input.GetShape(), map}}, history, TopTools_ListOfShape(),
+                     result.GetShape(), featureTag);
+  // A clean-up rebuilds every face whose boundary edges it merged, and
+  // reports each as Modified -- so the end face of two boxes unioned and
+  // refined came back "1/face0;M4", though it is the same face on the same
+  // surface. A result face that ONE input face became, whole, is that face:
+  // it keeps the name verbatim. Faces it merged keep the ";M" naming.
+  TopTools_IndexedMapOfShape inFaces, inEdges, resFaces, resEdges;
+  MapSubshapes(input.GetShape(), inFaces, inEdges);
+  MapSubshapes(result.GetShape(), resFaces, resEdges);
+  std::map<int, std::vector<const std::string*>> onto;
+  for (const auto& [idx, name] : map.names) {
+    if (idx < 0 || idx + 1 > inFaces.Extent())
+      continue;
+    const TopoDS_Shape& f = inFaces(idx + 1);
+    const TopTools_ListOfShape& mods = history.Modified(f);
+    if (mods.IsEmpty()) {
+      if (!history.IsRemoved(f))
+        if (const int r = resFaces.FindIndex(f) - 1; r >= 0)
+          onto[r].push_back(&name);
+      continue;
+    }
+    int faces = 0, r = -1;
+    for (const TopoDS_Shape& s : mods)
+      if (s.ShapeType() == TopAbs_FACE) {
+        ++faces;
+        r = resFaces.FindIndex(s) - 1;
+      }
+    if (faces == 1 && r >= 0)
+      onto[r].push_back(&name);
+    else if (faces > 1)
+      onto[-1].push_back(&name); // split: not one face's name any more
+  }
+  onto.erase(-1);
+  for (const auto& [r, names] : onto)
+    if (names.size() == 1)
+      out.names[r] = *names.front();
   FallbackPasses(result.GetShape(), out);
   return out;
 }

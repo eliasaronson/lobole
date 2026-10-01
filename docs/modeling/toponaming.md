@@ -109,6 +109,14 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   square end draws on a shoulder) has its history composed onto the
   boolean's before naming, so pieces it merges take their original's one
   name and every face it leaves alone is named as the bare boolean names it.
+- **Refine** (`RefineFeature`, ShapeUpgrade_UnifySameDomain): named through
+  the unifier's history (`topo::NamesThroughHistory`, the one-input
+  overload). The unifier rebuilds every face whose edges it merged and
+  reports it `Modified`, so a result face that exactly ONE input face
+  became keeps that face's name verbatim; faces it merged take one of
+  theirs with `;M<tag>`. It used to rename every face `<id>/face<i>`, which
+  broke every reference to the body -- a study's loads, a bearing's seat, a
+  mate -- for the sake of the seams it cleaned.
 - **Fillet / chamfer** (`topo::EdgeBlendNamed`): blend faces
   `<spine edge name>;G<tag>`; support faces keep their names through
   `Modified`; corner patches fall to the fallback passes. The spine edge itself
@@ -121,7 +129,7 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   `<prefix>/face<i>` in index order, then the fallback passes. Used by
   Box/Sphere/Cylinder/Import (a multi-body import adds a body ordinal,
   `<tag>/b1`) and by features that rebuild topology wholesale — shell, draft,
-  refine, split, sweep, loft, pipe and rib tools, fasteners.
+  split, sweep, loft, pipe and rib tools, fasteners.
 - **Holes** (`HoleFeature::NameByRole`) name each drilled face by what it is,
   keyed by the sketch point it was drilled at: `<hole>/p<entity>/bore`, and
   so on. Deleting one point renames none of the other holes. These names

@@ -8,7 +8,11 @@
 #include "core/features/RefineFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Shape.hxx>
 
 #include <filesystem>
@@ -50,7 +54,49 @@ TEST_CASE("Refine merges the coplanar seams from a union", "[refine]") {
   CHECK(FaceCount(body.shape) == 6); // back to a clean box (4x2x2)
   CHECK_THAT(body.shape.Volume(), WithinRel(16.0, 1e-6)); // volume preserved
   CHECK(body.createdBy == u); // modified in place; downstream refs survive
-  CHECK(body.elementMap.names.size() == 6); // fresh names for the 6 faces
+  CHECK(body.elementMap.names.size() == 6); // every face named
+}
+
+namespace {
+// The centroid of face `index` (the ElementMap's 0-based explorer order).
+glm::dvec3 FaceCentroid(const CADShape& s, int index) {
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(s.GetShape(), TopAbs_FACE, faces);
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(faces(index + 1), props);
+  const gp_Pnt c = props.CentreOfMass();
+  return {c.X(), c.Y(), c.Z()};
+}
+} // namespace
+
+// A face Refine leaves alone keeps the name it had: a study's load, a
+// bearing's seat or a mate made to it before the Refine still finds it.
+// Refine used to rename every face "<id>/faceN", so the advice to refine a
+// body that would not mesh broke every reference to it.
+TEST_CASE("Refine keeps the names of the faces it leaves alone", "[refine]") {
+  Document doc;
+  uint64_t u;
+  AddUnion(doc, u);
+  REQUIRE(doc.GetBodies().size() == 1);
+  // The end face at x = 0 is A's own, untouched by the seam at x = 2.
+  std::string endName;
+  {
+    const Body& b = doc.GetBodies()[0];
+    for (const auto& [idx, name] : b.elementMap.names)
+      if (std::abs(FaceCentroid(b.shape, idx).x) < 1e-9)
+        endName = name;
+  }
+  REQUIRE_FALSE(endName.empty());
+
+  doc.AddFeature(std::make_unique<RefineFeature>("R", u));
+  const Body& body = doc.GetBodies()[0];
+  REQUIRE(FaceCount(body.shape) == 6);
+  const auto idx = body.elementMap.Resolve(endName);
+  INFO("before the Refine: " << endName);
+  REQUIRE(idx.has_value());
+  CHECK(std::abs(FaceCentroid(body.shape, *idx).x) < 1e-9);
+  // Every face of the refined box is named, the merged long ones included.
+  CHECK(body.elementMap.names.size() == 6);
 }
 
 TEST_CASE("Refine of a missing body fails", "[refine]") {

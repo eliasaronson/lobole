@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
+#include <BRepTools_History.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 
@@ -35,10 +36,19 @@ bool RefineFeature::Execute(RegenContext& ctx) {
       SetError("refine produced an empty or invalid solid");
       return false;
     }
-    // Topology is reorganized; give the result fresh primitive-style names so
-    // it stays referenceable (like shell/draft).
+    // Names through the unifier's history: a face it leaves alone keeps its
+    // name, merged pieces take one of theirs with ";M<id>". Fresh names
+    // ("<id>/faceN") broke every reference to the body -- a study's loads,
+    // a bearing's seat, a mate -- for the sake of the seams it cleaned, so
+    // the advice to Refine a body that will not mesh cost the study its
+    // faces (docs/modeling/toponaming.md).
     ElementMap map;
-    topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+    if (const Handle(BRepTools_History) & history = unify.History();
+        !history.IsNull())
+      map = topo::NamesThroughHistory(body->shape, body->elementMap, *history,
+                                      result, GetId());
+    else
+      topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
     body->shape = std::move(result);
     body->elementMap = std::move(map);
     return true;

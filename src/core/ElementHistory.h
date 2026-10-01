@@ -64,6 +64,12 @@ ElementMap NamesThroughHistory(const CADShape& target,
                                const CADShape& tool, const ElementMap& toolMap,
                                const BRepTools_History& history,
                                const CADShape& result, uint64_t featureTag);
+// The same for an operation on ONE shape (Refine's UnifySameDomain): a face
+// it leaves alone keeps its name verbatim, so a refined body's bearing seat
+// is still the reference a study load, a fit or a mate made to it.
+ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named
