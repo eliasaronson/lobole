@@ -275,7 +275,8 @@ worktree; it goes in main after the code has merged. Setup:
 git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/worktree-build.sh)
 ```
 `worktree-build.sh` handles the gotcha: a fresh worktree has EMPTY submodules
-(cmake fails without `git submodule update --init`), builds main's build type
+(cmake fails without `git submodule update --init`; it fills them from main's
+checkout, not the network), builds main's build type
 at a `-j` sized by free memory, and hits main's ccache: ~2 min for `designer`
 plus `designer_tests` in a fresh tree (docs/architecture.md#precompiled-headers).
 If it compiles everything, main's `build/` is on an old toolchain:
