@@ -420,6 +420,38 @@ TEST_CASE("a blind thread stops the head on the floor", "[cam][thread]") {
   CHECK(said);
 }
 
+TEST_CASE("a bore tapped from the other side is refused, and milled flipped",
+          "[cam][thread]") {
+  // The pan/tilt head's base plate: its tripod thread is tapped up from the
+  // underside. Its axis is vertical in the top-up setup too, and a vertical
+  // axis was all the check asked -- the head went in through the metal over
+  // the blind end. Here a blind hole from the top, the setup flipped.
+  const Plate plate = TappedPlate(20.0, 12.0);
+  cam::Setup s = ThreadJob(*plate.doc, plate.bore);
+  const cam::Operation op = s.operations.back();
+  s.frame = cam::FlipFrame(s.frame);
+  const cam::DerivedOp flipped =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::ThreadMill,
+                           cam::Target{0, plate.bore});
+  REQUIRE_FALSE(flipped.ok);
+  CHECK(flipped.why.find("opens downward") != std::string::npos);
+  CHECK(flipped.why.find("Flip") != std::string::npos);
+  // The drill is refused the same way.
+  const cam::DerivedOp drill =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, plate.bore}, 1);
+  REQUIRE_FALSE(drill.ok);
+  CHECK(drill.why.find("opens downward") != std::string::npos);
+  // Flipped back, the side it opens on is up again.
+  s.frame = cam::FlipFrame(s.frame);
+  const cam::DerivedOp up =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::ThreadMill,
+                           cam::Target{0, plate.bore});
+  INFO(up.why);
+  CHECK(up.ok);
+  CHECK(op.type == cam::OpType::ThreadMill);
+}
+
 TEST_CASE("a thread follows its bore through a chamfer on its mouth",
           "[cam][thread]") {
   // A face a later feature modifies is renamed (";M<tag>" appended), and

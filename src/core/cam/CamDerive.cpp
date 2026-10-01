@@ -123,9 +123,14 @@ ModelledBreak FindModelledBreak(const std::vector<Body>& bodies,
                                 const WallContour& wall, double reach,
                                 double ceiling) {
   ModelledBreak out;
+  // Sectioned finer than the toolpaths' 0.02 mm chords: the width is
+  // measured across a section, and a chord's sagitta is all error in it -- a
+  // 0.5 mm chamfer on a Ø73.6 rim read 0.52 wide, 92.2 degrees, and was
+  // refused for a 90 degree cutter.
+  constexpr double kFine = 0.002;
   const auto within = [&](double z) -> std::optional<double> {
     double best = std::numeric_limits<double>::max();
-    for (const Loop& l : SectionLoops(bodies, z))
+    for (const Loop& l : SectionLoops(bodies, z, kFine))
       best = std::min(best, DistanceToLoop(l.pts, wall.at));
     if (best <= reach)
       return best;
@@ -483,6 +488,7 @@ DerivedOp DeriveOperation(const Setup& setup,
     bool found = false;
     glm::dvec2 holeCentre(0.0);
     double holeRadius = 0.0;
+    double holeTop = 0.0;
     for (const Body& body : bodies) {
       if (body.createdBy != target.ref.featureId || !body.shape.IsValid())
         continue;
@@ -505,14 +511,18 @@ DerivedOp DeriveOperation(const Setup& setup,
            ex.Next(), i++) {
         if (i != *idx)
           continue;
+        // The face's exact extent: BRepBndLib::Add widens a box by the
+        // shape's tolerance, and a Ø32 bearing seat's bore stopped 20 µm
+        // under its own shoulder.
         Bnd_Box box;
-        BRepBndLib::Add(ex.Current(), box);
+        BRepBndLib::AddOptimal(ex.Current(), box, false, false);
         if (!box.IsVoid()) {
           double x0, y0, z0, x1, y1, z1;
           box.Get(x0, y0, z0, x1, y1, z1);
           // A through hole drills to the part's bottom face, a blind one
           // to its own floor — the face's extent says which.
           op.bottomZ = z0;
+          holeTop = z1;
           found = true;
           holeCentre = {origin.x, origin.y};
           const BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
@@ -542,11 +552,9 @@ DerivedOp DeriveOperation(const Setup& setup,
     // and read as blind -- it stopped short and said its flat floor kept the
     // drill point. Through when nothing is solid just below its bottom at its
     // centre; a section there, the centre inside an odd number of loops.
-    const auto solidBelow = [&]() {
-      if (holeRadius <= 0.0)
-        return true; // no centre to probe: the old rule decides
+    const auto solidAt = [&](double z) {
       int inside = 0;
-      for (const Loop& l : SectionLoops(bodies, op.bottomZ - 0.05)) {
+      for (const Loop& l : SectionLoops(bodies, z)) {
         if (l.pts.size() < 3)
           continue;
         const Clipper2Lib::Point64 c(
@@ -558,6 +566,22 @@ DerivedOp DeriveOperation(const Setup& setup,
       }
       return inside % 2 == 1;
     };
+    const auto solidBelow = [&]() {
+      if (holeRadius <= 0.0)
+        return true; // no centre to probe: the old rule decides
+      return solidAt(op.bottomZ - 0.05);
+    };
+    // A hole has to OPEN toward the spindle. Its axis being vertical is not
+    // enough: a blind hole tapped up from the underside (a tripod thread)
+    // has metal over its top, and derived as a through hole from the stock
+    // top it drilled down through the plate's web into the pocket above.
+    if (holeRadius > 0.0 && solidAt(holeTop + 0.05)) {
+      out.why = "that hole opens downward: its top, at Z " + Round2(holeTop) +
+                ", is closed by the part, so a tool would go in through "
+                "the metal over it. Drill it from the side it opens on -- "
+                "a setup with that face up (Flip)";
+      return out;
+    }
     // A hole that comes out of the part's BOTTOM goes on through the stock
     // below it, as a cut-out does (Profile's bottom is the stock's): a hole
     // stopped at the part leaves the bottom margin standing under it as a

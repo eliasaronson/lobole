@@ -379,6 +379,16 @@ ThreadPlan PlanThread(const Setup& setup, const Operation& op, const Tool& tool,
   }
 
   const bool internal = !m.external;
+  // A bore has to open toward the spindle: one tapped up from the underside
+  // has metal over its top, and a vertical axis alone let the head go in
+  // through it.
+  if (internal && SolidAround(*body, centre, r * 0.5, faceHi + 0.05)) {
+    out.why = "that thread's bore opens downward: its top, at Z " +
+              Mm(faceHi, 2) +
+              ", is closed by the part. Mill it from the side it opens on "
+              "-- a setup with that face up (Flip)";
+    return out;
+  }
   const double major = m.majorDia > 0.0 ? m.majorDia
                        : m.external
                            ? 2.0 * r

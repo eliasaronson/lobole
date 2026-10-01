@@ -342,8 +342,10 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
               "machine)";
     return out;
   }
+  // Exact, not BRepBndLib::Add's box widened by the face's tolerance: that
+  // put a cylinder's top 0.05 mm over the part and a chamfer's edge with it.
   Bnd_Box box;
-  BRepBndLib::Add(face, box);
+  BRepBndLib::AddOptimal(face, box, false, false);
   if (box.IsVoid()) {
     out.why = "that face has no extent";
     return out;

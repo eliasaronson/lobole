@@ -1541,6 +1541,112 @@ TEST_CASE("cam: a drill's point in a flat-bottomed blind hole is said",
   CHECK(t.notes.empty());
 }
 
+TEST_CASE("cam: a blind hole's floor is its own, not its bounding box's",
+          "[cam]") {
+  // BRepBndLib::Add widens a face's box by its tolerance: the pan/tilt base
+  // plate's Ø32 bearing seat was bored 20 µm under its own shoulder, and a
+  // chamfer's edge read 0.05 mm over the part's top.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(20, 15, 8), glm::vec3(0, 0, 1), 4.0, 13.0));
+  const uint64_t hole = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Bored", block, hole,
+                                                   BooleanOp::Subtract));
+  const cam::Setup s = BasicSetup();
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.bottomZ, WithinAbs(8.0, 1e-6));
+  // The wall's own top, for an edge break, is the part's top.
+  cam::Setup v = s;
+  v.tools[0] = ShapedTool(cam::ToolType::VBit, 6.0, 90.0);
+  const cam::DerivedOp e =
+      cam::DeriveOperation(v, doc->GetBodies(), cam::OpType::EdgeRound,
+                           cam::Target{0, HoleWall(*doc)});
+  INFO(e.why);
+  REQUIRE(e.ok);
+  CHECK_THAT(e.op.topZ, WithinAbs(20.0, 1e-6));
+}
+
+TEST_CASE("cam: a bore roughed then finished stops on its floor", "[cam]") {
+  // The rough leaves finish stock on the WALL. Lowering its bottom by that
+  // stock is right where the depth passes lift the floor by it (a profile,
+  // a pocket); a bore helixes to its own bottom, and the pan/tilt base
+  // plate's bearing seat was roughed 0.2 mm under its shoulder.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Seat", glm::vec3(20, 15, 8), glm::vec3(0, 0, 1), 10.0, 13.0));
+  const uint64_t seat = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Bored", block, seat,
+                                                   BooleanOp::Subtract));
+  cam::Setup s = BasicSetup();
+  cam::Tool finisher = s.tools[0];
+  finisher.number = 2;
+  finisher.diameter = 4.0;
+  s.tools.push_back(finisher);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.finishTool = 2;
+  op.finishStock = 0.2;
+  s.operations.push_back(op);
+  s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 2);
+  for (const cam::Toolpath& tp : paths) {
+    INFO(tp.error);
+    REQUIRE(tp.error.empty());
+    CHECK(tp.MinZ() >= 8.0 - 1e-6);
+  }
+  std::string gcode, why;
+  REQUIRE(cam::PostProcess("mach3", s, paths, {}, gcode, &why));
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.1);
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.maxGouge < 0.05);
+}
+
+TEST_CASE("cam: a hole that opens downward is refused, not drilled through "
+          "the part",
+          "[cam]") {
+  // Blind from the UNDERSIDE: the bore runs z 0..12 and the block is solid
+  // above it. Its axis is vertical, which was all the check asked, so it was
+  // derived as a through hole from the stock top -- 21 mm of drilling down
+  // through the part to reach it.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(20, 15, -1), glm::vec3(0, 0, 1), 4.0, 13.0));
+  const uint64_t hole = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Bored", block, hole,
+                                                   BooleanOp::Subtract));
+  cam::Setup s = BasicSetup();
+  const cam::DerivedOp up = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  REQUIRE_FALSE(up.ok);
+  CHECK(up.why.find("opens downward") != std::string::npos);
+  // Flipped, it opens toward the spindle and is drilled to its floor: 12 mm
+  // up from the underside, which is now the top.
+  s.frame = cam::FlipFrame(s.frame);
+  const cam::DerivedOp flipped = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, HoleWall(*doc)});
+  INFO(flipped.why);
+  REQUIRE(flipped.ok);
+  CHECK_THAT(flipped.op.bottomZ, WithinAbs(-12.0, 1e-6));
+}
+
 TEST_CASE("cam verify: a sloped move cuts as low as it goes over each cell",
           "[cam]") {
   // Carved at the tool's height at the closest approach, a cell a descending
