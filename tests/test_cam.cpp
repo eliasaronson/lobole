@@ -345,9 +345,10 @@ TEST_CASE("cam: a drill derives its depths from the hole it makes", "[cam]") {
   INFO(derived.why);
   REQUIRE(derived.ok);
   // Top from the STOCK (a typed part-top once sent entry rapids through the
-  // millimetre of stock above the part); bottom from the hole's own extent.
+  // millimetre of stock above the part); bottom from the hole's own extent,
+  // which for a through hole goes on through the 1 mm of stock below.
   CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9));
-  CHECK_THAT(derived.op.bottomZ, WithinAbs(0.0, 1e-4)); // OCC bbox gap
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(-1.0, 1e-4)); // OCC bbox gap
   REQUIRE(derived.op.targets.size() == 1);
   CHECK(derived.op.targets[0].ref.name == wall.name);
 

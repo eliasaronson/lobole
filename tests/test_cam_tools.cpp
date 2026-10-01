@@ -1060,9 +1060,10 @@ TEST_CASE("cam drill: a through hole breaks out by the point, whatever shape "
         setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
     REQUIRE(d.ok);
     // Top from the STOCK, not the part: entry rapids belong above the
-    // material. Bottom from the part's far face, plus the point.
+    // material. Bottom from the stock's far face (the 1 mm margin under the
+    // part is drilled through, as a cut-out goes through it), plus the point.
     CHECK_THAT(d.op.topZ, WithinAbs(21.0, 1e-6));
-    CHECK_THAT(d.op.bottomZ, WithinAbs(-shape.breakout, 1e-6));
+    CHECK_THAT(d.op.bottomZ, WithinAbs(-1.0 - shape.breakout, 1e-6));
   }
 
   // A BLIND hole keeps its floor: there the point's cone is the bottom of the

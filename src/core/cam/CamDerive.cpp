@@ -558,11 +558,20 @@ DerivedOp DeriveOperation(const Setup& setup,
       }
       return inside % 2 == 1;
     };
+    // A hole that comes out of the part's BOTTOM goes on through the stock
+    // below it, as a cut-out does (Profile's bottom is the stock's): a hole
+    // stopped at the part leaves the bottom margin standing under it as a
+    // slab, and a through thread mill's overtravel -- a pitch past the plate
+    // -- then runs its head into that slab. Only from the part's bottom: a
+    // hole that breaks out higher up (a cross hole through a turned part's
+    // flats) may have more part below it, so it keeps its own exit.
+    const bool reachesBottom = op.bottomZ <= modelBottom + kThrough;
     if (const Tool* drill = setup.FindTool(op.toolNumber);
-        drill != nullptr &&
-        (op.bottomZ <= modelBottom + kThrough || !solidBelow()))
+        drill != nullptr && (reachesBottom || !solidBelow())) {
+      if (reachesBottom)
+        op.bottomZ = std::min(op.bottomZ, lo.z);
       op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
-    else if (drill != nullptr) {
+    } else if (drill != nullptr) {
       // A BLIND hole: the point is the floor. Said when the model's floor is
       // FLAT, because then the cone is material the model does not have --
       // correct drilling, and the verifier's leftover, with nothing having

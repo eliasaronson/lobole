@@ -525,8 +525,9 @@ ThreadPlan PlanThread(const Setup& setup, const Operation& op, const Tool& tool,
         stockLo.z < zLo - 1e-6)
       out.notes.push_back(
           "the stock runs " + Mm(zLo - stockLo.z, 2) +
-          " mm below the thread: the tap drill has to go through it too, or "
-          "the head's overtravel meets it -- the check says so if it does");
+          " mm below the thread: the tap drill has to go through it too (a "
+          "derived drill does), or the head's overtravel meets it -- the "
+          "check says so if it does");
   }
   (void)faceHi;
   out.ok = true;
