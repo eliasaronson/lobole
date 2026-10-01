@@ -445,7 +445,10 @@ def main():
         # Preview -> accept/cancel feature flow (driven from the model toolbar;
         # the "###tb_*" ids are stable button handles under the dock host).
         d.call("new_project")
+        # A Box stands on something: the toolbar arms a face/plane pick, and
+        # the Top plane's row in the tree answers it.
         d.call("item_click", ref="//##DockHost/**/###tb_box")
+        d.call("item_click", ref="//##DockHost/**/Top Plane")
         st = d.call("get_state")
         expect(st["pending_feature_id"] != 0, "box is a pending preview")
         expect(not st["can_undo"], "preview not yet on undo stack")
@@ -454,8 +457,11 @@ def main():
         expect(st["pending_feature_id"] == 0 and st["can_undo"],
                "accept commits one undoable action")
         d.call("item_click", ref="//##DockHost/**/###tb_sphere")
+        d.call("item_click", ref="//##DockHost/**/Top Plane")
         d.call("cancel_pending")
-        expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
+        # The box is a sketch and its extrude; the cancelled sphere's sketch
+        # went with it.
+        expect(len(d.call("get_state")["features"]) == 2, "cancel discards")
 
         phase("Panel focus persists across independent RPCs")
         d.call("focus_panel", name="Variables")
@@ -496,10 +502,11 @@ def main():
         # from ui_items is the only handle, and item_combo opens+picks in one
         # action because the popup does not survive between RPCs.
         d.call("item_click", ref="//##DockHost/**/###tb_box")
+        d.call("item_click", ref="//##DockHost/**/Top Plane")
         hidden = sorted([i for i in d.call("ui_items", ref="//###ToolWindow")
                          ["items"] if not i["label"]], key=lambda i: i["y"])
         expect(hidden, "the tool window has hidden-label combos")
-        d.call("item_combo", id=hidden[0]["id"], value="Default")
+        d.call("item_combo", id=hidden[0]["id"], value="Add")  # the Mode
         d.call("cancel_pending")
 
         phase("Popups")

@@ -14,7 +14,7 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     // A plate lying flat: 80 wide (X), 60 deep (Y), 8 thick along world up.

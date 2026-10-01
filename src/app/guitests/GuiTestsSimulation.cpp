@@ -20,7 +20,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "gravity_pulls_down");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
     ctx->Yield();
     IM_CHECK(s_App->simulation.active);
@@ -38,7 +38,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "force_pushes_into_the_picked_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     // A study needs stiffness data, and a new body has none: the panel says
     // so and offers the fix in place, rather than sending the user out of
     // simulation mode to find the feature's Material combo.
@@ -104,7 +104,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "force_arrow_points_along_the_force");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
     fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
@@ -201,7 +201,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "force_arrow_never_buried_in_the_part");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
     fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
@@ -274,7 +274,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
                        "entering_simulation_brings_the_studies_tab_forward");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     // Put another tab in front, the way a user browsing History does. A dock
     // tab is selected by clicking it: ImGui::FocusWindow deliberately does
     // not select dock tabs, so WindowFocus cannot stand in for the click.
@@ -453,7 +453,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "pressure_is_a_field_over_the_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     // The default box is 2 mm on a side, and the glyph length has a floor
     // of 1.2 mm, so a 4 mm^2 face can never hold a second arrow: make it a
     // part-sized box through the command layer, as the cantilever helper
@@ -551,7 +551,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "fixed_and_loaded_faces_are_tinted");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
     fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
@@ -616,7 +616,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "gravity_is_drawn_at_the_centre_of_mass");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
     fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
@@ -667,7 +667,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
                        "an_assembly_study_clamps_where_the_support_touches");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     {
       const size_t index = Doc()->FeatureCount() - 1;
@@ -806,7 +806,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ToolbarClick(ctx, "###tb_simulation");
     ctx->Yield();
     IM_CHECK(s_App->simulation.active);

@@ -30,7 +30,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "bom_counts_through_a_sub_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     Doc()->GetFeature(0)->SetMaterial("steel");
     Doc()->Regenerate();
@@ -98,7 +98,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "part_placement_takes_a_configuration_and_material");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     Doc()->GetFeature(0)->SetMaterial("wood_maple");
     const uint64_t alt = Doc()->AddConfiguration("alt").id;
@@ -160,7 +160,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "outlines_are_instanced_per_part");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Repeats");
@@ -222,7 +222,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "switching_back_to_an_assembly_reuses_its_meshes");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Reuse");
@@ -266,7 +266,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // the same tessellation.)
     ui::SetActivePart(*s_App, 0);
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     ui::SetActivePart(*s_App, asmIdx);
     ctx->Yield(3);
@@ -382,7 +382,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "an_exploded_view_moves_what_is_drawn");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Exploding");
@@ -483,7 +483,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // part's configurations use — and the solve follows each click, and the
     // base comes back untouched.
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Held");
@@ -597,7 +597,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "a_motion_study_scrubs_and_runs");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Turning");
@@ -779,7 +779,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "motion_video_frames_are_the_view");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Filmed");
@@ -974,7 +974,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "a_long_row_elides_and_names_itself");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     const size_t asmIdx = ui::AddAssembly(*s_App, "Wide");
@@ -1011,7 +1011,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "insert_places_a_sub_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     // A unit holding that part, then a top assembly to place it in.
     const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
@@ -1061,7 +1061,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "right_click_a_row_opens_its_doc");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
 
@@ -1113,7 +1113,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "dragging_a_unit_keeps_its_shape");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     // A unit with two parts 500 mm apart, so a collapse is unmistakable.
     const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
@@ -1171,7 +1171,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_picks_a_face_inside_a_unit");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
     ui::SetActivePart(*s_App, unitIdx);
@@ -1217,7 +1217,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "hovering_an_occurrence_lights_all_of_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t asmIdx = ui::AddAssembly(*s_App, "Hover");
     ui::SetActivePart(*s_App, asmIdx);
@@ -1264,7 +1264,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "the_list_scrolls_to_a_part_picked_elsewhere");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t asmIdx = ui::AddAssembly(*s_App, "Long");
     ui::SetActivePart(*s_App, asmIdx);
@@ -1299,7 +1299,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "a_relation_row_is_selectable");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t asmIdx = ui::AddAssembly(*s_App, "Related");
     ui::SetActivePart(*s_App, asmIdx);
@@ -1345,7 +1345,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "a_mate_row_closes_and_deletes");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t asmIdx = ui::AddAssembly(*s_App, "Mated");
     ui::SetActivePart(*s_App, asmIdx);
@@ -1446,7 +1446,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // gear train as "if I keep turning it jumps back". One drag through 300
     // degrees must land at 300 degrees, not -60.
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t partSlotId = s_App->parts[0].id;
     ui::AddAssembly(*s_App, "Asm");
     ctx->Yield();
@@ -1522,7 +1522,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
@@ -1626,7 +1626,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_edit_repick_connector");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
@@ -1719,7 +1719,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_tool_rotates_the_part");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
@@ -1801,7 +1801,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "a_mate_rotate_snaps_to_the_common_angles");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t partSlotId = s_App->parts[0].id;
     ui::AddAssembly(*s_App, "Asm");
     ctx->Yield();
@@ -1895,7 +1895,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
 
@@ -1934,7 +1934,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
     ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
@@ -1983,7 +1983,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
 
@@ -2051,7 +2051,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
 
@@ -2134,7 +2134,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
 
@@ -2192,7 +2192,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     const uint64_t partId = s_App->parts[0].id;
 
@@ -2754,7 +2754,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "tolerance", "check_fits_from_the_panel");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     ctx->Yield();
     const uint64_t partId = s_App->parts[0].id;
     Document* part = ui::PartDocById(*s_App, partId);

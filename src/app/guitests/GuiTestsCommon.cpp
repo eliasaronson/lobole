@@ -8,6 +8,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/ProjectActions.h"
+#include "ui/SelectionPipeline.h" // SelectFeature (the fixtures)
 #include "ui/ViewActions.h"
 
 // Tests run inside the live application and reach it through the AppState.
@@ -249,6 +250,53 @@ void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
   ctx->Yield();
 }
 
+namespace {
+// The old toolbar's placement ladder and names, kept for the fixture.
+glm::vec3 FixtureSpot() {
+  const int n = static_cast<int>(Doc()->FeatureCount());
+  return glm::vec3(-4.0f + n * 2.5f, 0.0f, 0.0f);
+}
+std::string FixtureName(const char* base) {
+  return std::string(base) + " " + std::to_string(Doc()->FeatureCount() + 1);
+}
+void AddFixture(ImGuiTestContext* ctx, std::unique_ptr<Feature> f) {
+  s_App->commands->Execute(std::make_unique<AddFeatureCommand>(std::move(f)),
+                           *Doc());
+  ui::SelectFeature(*s_App,
+                    Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId());
+  ctx->Yield(2); // the frames the toolbar's click + accept used to take
+}
+} // namespace
+
+void AddFixtureBox(ImGuiTestContext* ctx) {
+  AddFixture(ctx, std::make_unique<BoxFeature>(FixtureName("Box"),
+                                               FixtureSpot(), 2.0, 2.0, 2.0));
+}
+
+void AddFixtureSphere(ImGuiTestContext* ctx) {
+  AddFixture(ctx, std::make_unique<SphereFeature>(FixtureName("Sphere"),
+                                                  FixtureSpot(), 1.0));
+}
+
+void AddFixtureCylinder(ImGuiTestContext* ctx) {
+  AddFixture(ctx, std::make_unique<CylinderFeature>(
+                      FixtureName("Cylinder"), FixtureSpot() - conv::kWorldUpF,
+                      conv::kWorldUpF, 0.8, 2.0));
+}
+
+void PrimitiveOnBasePlane(ImGuiTestContext* ctx, const char* tbId,
+                          int planeIdx) {
+  ToolbarClick(ctx, tbId);
+  ctx->Yield();
+  IM_CHECK_SILENT(s_App->sketchEdit.pickingPlane);
+  ctx->ItemClick(
+      (std::string("//##DockHost/**/") +
+       SketchPlane::StandardPlaneName(static_cast<PlaneType>(planeIdx)))
+          .c_str());
+  ctx->Yield(2);
+  ctx->SetRef("//##MainMenuBar");
+}
+
 // A steel cantilever with a fixed end and a distributed load on its top
 // face, placed by clicking, left ready to run. 200 x 10 x 20 mm: three
 // different dimensions, so an axis mix-up cannot hide (the drawings round
@@ -262,7 +310,7 @@ void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
 // part the frozen support/load skin IS the whole part.
 void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->SetRef("//##MainMenuBar");
-  ToolbarCreateAccept(ctx, "###tb_box");
+  AddFixtureBox(ctx);
   // The box tool's own dimension fields are not addressable yet, so the
   // shape is set through the command layer; everything from here down is
   // clicked, which is the half this test exists for.
@@ -362,12 +410,14 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
 }
 
 const ToolCase kToolCases[37] = {
-    {"box", "###tb_box", Needs::Nothing, Expect::Changes},
+    // The primitives stand on something: each arms a face/plane pick, and
+    // the Top plane of an empty part is enough for its defaults.
+    {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
     {"derive", "###tb_derive", Needs::Nothing, Expect::RefusesUntilPicked},
-    {"sphere", "###tb_sphere", Needs::Nothing, Expect::Changes},
-    {"cylinder", "###tb_cylinder", Needs::Nothing, Expect::Changes},
+    {"sphere", "###tb_sphere", Needs::Nothing, Expect::PickThenChanges},
+    {"cylinder", "###tb_cylinder", Needs::Nothing, Expect::PickThenChanges},
     {"curve3d", "###tb_curve3d", Needs::Nothing, Expect::Changes},
     {"datum_plane", "###tb_datum_plane", Needs::Nothing, Expect::Changes},
     {"datum_axis", "###tb_datum_axis", Needs::Nothing, Expect::Changes},
@@ -506,11 +556,11 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
   case Needs::Nothing:
     break;
   case Needs::Body:
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     break;
   case Needs::TwoBodies:
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
+    AddFixtureBox(ctx);
     break;
   case Needs::ClosedSketch:
     // Off the origin on purpose: a revolve whose profile STRADDLES its axis
@@ -613,7 +663,7 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
   case Needs::BodyAndOpenSketch: {
     // A rib grows a thin web from an open profile down onto a body, so the
     // gate needs both: the default box, and a line hanging above it.
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     glm::dvec3 lo(0.0), hi(0.0);
     Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
     // The web grows along the sketch plane's NORMAL, so the profile has to

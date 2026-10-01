@@ -19,8 +19,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "slots", "body_row_fills_an_armed_slot");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t firstBody = Doc()->GetFeature(0)->GetId();
 
@@ -67,9 +67,9 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "slots", "boolean_via_viewport_picks");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
+    AddFixtureBox(ctx);
+    AddFixtureBox(ctx);
     auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
     auto* box3 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(2));
     IM_CHECK(box2 != nullptr && box3 != nullptr);
@@ -168,7 +168,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "slots", "fillet_seeded_from_selected_edges");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const Body& body = Doc()->GetBodies()[0];
     const double before = body.shape.Volume();
@@ -282,7 +282,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "test");
@@ -334,7 +334,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "tabs", "duplicate_from_context_menu");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // something to copy
+    AddFixtureBox(ctx); // something to copy
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->document->FeatureCount(), (size_t)1);
 
@@ -642,12 +642,12 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const size_t second = ui::AddPart(*s_App, "Second");
     ctx->Yield(2);
     ui::SetActivePart(*s_App, second);
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
@@ -709,7 +709,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -744,7 +744,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
@@ -803,7 +803,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -870,7 +870,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -934,7 +934,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
       ctx->SetRef("//##MainMenuBar");
       ctx->MenuClick("File/New");
       ctx->Yield();
-      ToolbarCreateAccept(ctx, "###tb_box");
+      AddFixtureBox(ctx);
       ctx->ItemDoubleClick("//###Model/Box 1##0");
       ctx->Yield();
       ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 80.0f);
@@ -1023,7 +1023,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2 x 2 x 2 by default
+    AddFixtureBox(ctx); // 2 x 2 x 2 by default
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -1101,12 +1101,12 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const size_t second = ui::AddPart(*s_App, "Second");
     ctx->Yield(2);
     ui::SetActivePart(*s_App, second);
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
@@ -1177,7 +1177,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
@@ -1302,7 +1302,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
@@ -1343,7 +1343,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     // Before: Model owns the shared node. Without this the check below is a
     // false positive — the default layout docks History last, and the last
@@ -1448,7 +1448,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     std::string err;
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -1511,7 +1511,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ui::AddPart(*s_App, "Servo");
     ui::SetActivePart(*s_App, 1);
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const double servoVolume = Doc()->GetBodies()[0].shape.Volume();
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
@@ -1554,7 +1554,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // asked; the row says it is behind, and the verb retakes it.
     ui::SetActivePart(*s_App, 1);
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_sphere");
+    AddFixtureSphere(ctx);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
@@ -1588,14 +1588,14 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ui::AddPart(*s_App, "Servo");
     ui::SetActivePart(*s_App, 1);
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const uint64_t servoId = s_App->parts[1].id;
     // Part 0 draws on a ghost of the servo AND has a body of its own.
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
     ToolbarCreateAccept(ctx, "###tb_derive");
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_sphere");
+    AddFixtureSphere(ctx);
     ctx->Yield(2);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
     IM_CHECK(Doc()->GetBodies()[0].reference);
@@ -1634,11 +1634,11 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ui::AddPart(*s_App, "Camera");
     ui::SetActivePart(*s_App, 1);
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     ui::AddPart(*s_App, "Servo");
     ui::SetActivePart(*s_App, 2);
     ctx->Yield(2);
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::SetActivePart(*s_App, 0);
     ctx->Yield(2);
 
@@ -1685,7 +1685,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::AddPart(*s_App, "Second");
     ctx->Yield();
     IM_CHECK(ui::SaveProject(*s_App, two.string(), &err));
@@ -1696,7 +1696,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK(ui::SaveProject(*s_App, one.string(), &err));
     ui::MarkProjectSaved(*s_App, one.string(), "test");
     ctx->Yield();

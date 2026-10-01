@@ -235,7 +235,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "terminal", "hover_decides_who_gets_the_keys");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // one undoable feature
+    AddFixtureBox(ctx); // one undoable feature
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
     s_App->settings.terminalPanel = true;

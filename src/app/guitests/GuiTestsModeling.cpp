@@ -2,6 +2,7 @@
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
 #include "core/Measure.h"
+#include "core/Primitives.h"
 #include "core/SheetMetal.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
@@ -10,6 +11,7 @@
 #include "ui/FeatureTreePanel.h"
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
+#include "ui/PrimitiveTool.h"
 #include "ui/ProjectActions.h" // ProjectDirty
 #include "ui/VariableActions.h"
 
@@ -19,6 +21,40 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+namespace {
+
+// The primitive/* base: a 10 x 6 x 2 plate on the Top plane, through the core
+// tool (so its faces are named), as one undo step.
+void PrimitiveTestPlate() {
+  primitive::Add(*Doc(), *s_App->commands,
+                 primitive::SpecFromJson({{"type", "Box"},
+                                          {"on", "Top"},
+                                          {"width", 10.0},
+                                          {"depth", 6.0},
+                                          {"height", 2.0}}));
+}
+
+// The middle of the plate's top face.
+glm::vec3 PlateTop() {
+  glm::dvec3 lo(0.0), hi(0.0);
+  Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+  const glm::dvec3 mid = (lo + hi) * 0.5;
+  const glm::dvec3 up = conv::kWorldUp;
+  return glm::vec3(mid + up * glm::dot(hi - mid, up));
+}
+
+// The camera straight down the world's up axis at `p`, so a point on a
+// horizontal face lands where WorldToWindow says.
+void LookDownAt(ImGuiTestContext* ctx, const glm::vec3& p, float distance) {
+  s_App->camera->StopAnimation();
+  s_App->camera->SetTarget(p);
+  s_App->camera->SetUp(-glm::vec3(conv::kWorldFront));
+  s_App->camera->SetPosition(p + distance * LensScale() * conv::kWorldUpF);
+  ctx->Yield(2);
+}
+
+} // namespace
+
 void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -32,8 +68,13 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const size_t before = Doc()->FeatureCount();
     const size_t bodiesBefore = Doc()->GetBodies().size();
 
-    ToolbarCreateAccept(ctx, "###tb_box");
-    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    // The toolbar's Box: a sketch on the plane picked, and its extrude --
+    // two features, one body, ONE undo step.
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
     IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 1);
 
     ctx->MenuClick("Edit/Undo");
@@ -42,7 +83,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     ctx->MenuClick("Edit/Redo");
     ctx->Yield();
-    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "create_sphere_and_cylinder");
@@ -50,10 +91,17 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const size_t before = Doc()->FeatureCount();
     const size_t bodiesBefore = Doc()->GetBodies().size(); // see above
 
-    ToolbarCreateAccept(ctx, "###tb_sphere");
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
-    IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
+    PrimitiveOnBasePlane(ctx, "###tb_sphere", 0);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    PrimitiveOnBasePlane(ctx, "###tb_cylinder", 0);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 4); // a sketch + a solid each
     IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 2);
+    // A sphere is a revolved half disc; a cylinder an extruded circle.
+    IM_CHECK(Doc()->GetFeature(before + 1)->TypeName() == "Revolve");
+    IM_CHECK(Doc()->GetFeature(before + 3)->TypeName() == "Extrude");
 
     ctx->MenuClick("Edit/Undo");
     ctx->MenuClick("Edit/Undo");
@@ -92,7 +140,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "document", "new_project_clears_features");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK(Doc()->FeatureCount() > 0);
 
     ctx->SetRef("//##MainMenuBar");
@@ -105,8 +153,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "document", "feature_tree_drag_reorder");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");    // Box 1    -> index 0
-    ToolbarCreateAccept(ctx, "###tb_sphere"); // Sphere 1 -> index 1
+    AddFixtureBox(ctx);    // Box 1    -> index 0
+    AddFixtureSphere(ctx); // Sphere 1 -> index 1
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     const std::string a = Doc()->GetFeature(0)->GetName();
     const std::string b = Doc()->GetFeature(1)->GetName();
@@ -130,7 +178,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "properties", "edit_box_width_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
@@ -176,7 +224,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "dimension_field_takes_an_expression");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     // Each case starts from a LITERAL: an expression now switches the row to
@@ -228,7 +276,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "dimension_expression_is_not_truncated");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -249,7 +297,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "properties", "dimension_field_opens_selected");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -272,7 +320,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "dimension_field_opens_on_double_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -293,7 +341,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "properties", "vector_row_takes_an_expression");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -323,7 +371,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
     Doc()->Regenerate();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -369,7 +417,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
     Doc()->Regenerate();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -408,7 +456,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
     Doc()->Regenerate();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
 
@@ -437,7 +485,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
     Doc()->Regenerate();
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemClick("//Box###ToolWindow/Width/fx");
@@ -461,45 +509,43 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
 
-    ToolbarClick(ctx, "###tb_box");
-    ctx->Yield();
-    // Pending: in the doc + rendered, but NOT on the undo stack yet
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
+    // Pending: the sketch and its extrude are in the doc + rendered, but NOT
+    // on the undo stack yet
     IM_CHECK(ui::HasPendingFeature(*s_App));
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(!s_App->commands->CanUndo());
 
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK(!ui::HasPendingFeature(*s_App));
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(s_App->commands->CanUndo()); // now one undoable action
 
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // both, in one step
   };
 
   t = IM_REGISTER_TEST(engine, "preview", "box_cancel_discards");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
 
-    ToolbarClick(ctx, "###tb_box");
-    ctx->Yield();
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
     ui::CancelPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK(!ui::HasPendingFeature(*s_App));
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
-    IM_CHECK(!s_App->commands->CanUndo()); // stack untouched
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // the sketch went too
+    IM_CHECK(!s_App->commands->CanUndo());         // stack untouched
   };
 
   t = IM_REGISTER_TEST(engine, "preview", "ctrl_z_cancels_pending");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
 
-    ToolbarClick(ctx, "###tb_box");
-    ctx->Yield();
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
     // While pending, Ctrl+Z cancels the preview rather than touching history
@@ -516,10 +562,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
 
-    ToolbarClick(ctx, "###tb_box");
-    ctx->Yield();
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
     IM_CHECK(ui::HasPendingFeature(*s_App));
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the preview
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2); // the preview, both halves
 
     ui::AddPart(*s_App, "Part 2"); // stashes the first tab
     ctx->Yield();
@@ -531,13 +576,230 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->commands->CanUndo());         // and never committed
   };
 
+  // The primitive tools (docs/ui/tool-sessions.md#primitives): a Box is a
+  // sketch on what it stands on plus its extrude, and the toolbar's way to
+  // one is pick-the-face-first. The base is made through the core tool, so
+  // its faces are named and its top face has a known outline: 10 x 6, 2
+  // thick, centred on the origin on the Top plane.
+  t = IM_REGISTER_TEST(engine, "primitive", "face_pick_drag_snap_accept");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    PrimitiveTestPlate();
+    const size_t base = Doc()->FeatureCount();
+    const glm::vec3 top = PlateTop();
+    // Looking down at a point to the right of and above the plate, so the
+    // plate sits low on the left: the drags below must stay clear of the tool
+    // window, which opens top-right.
+    LookDownAt(ctx, top, 20.0f);
+    const glm::vec3 x(1.0f, 0.0f, 0.0f), y(0.0f, 1.0f, 0.0f);
+    const glm::vec3 right =
+        WorldToWindow(top + x).x > WorldToWindow(top).x ? x : -x;
+    const glm::vec3 up =
+        WorldToWindow(top + y).y < WorldToWindow(top).y ? y : -y;
+    LookDownAt(ctx, top + 4.0f * right + 2.0f * up, 20.0f);
+
+    ToolbarClick(ctx, "###tb_box");
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Primitive);
+    // Off-centre on the face: where on it is clicked is not where it goes.
+    ctx->MouseMoveToPos(WorldToWindow(top + glm::vec3(2.5f, 1.5f, 0.0f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
+    // The ghost is on the face: a pending extrude of a face-attached sketch,
+    // sized from the face (half its smaller span, 6 -> 3), at its centre.
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK(ui::PrimitiveSessionActive(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), base + 2);
+    const auto& session = s_App->primitive;
+    IM_CHECK(session.spec.on.kind == primitive::OnKind::Face);
+    IM_CHECK(session.placement.hasExtent);
+    IM_CHECK(std::abs(session.spec.width.value - 3.0) < 1e-9);
+    IM_CHECK(std::abs(session.spec.height.value - 3.0) < 1e-9);
+    IM_CHECK_EQ(session.spec.offsetU.value, 0.0);
+    IM_CHECK_EQ(session.spec.offsetV.value, 0.0);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(base));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK(sk->faceRef.IsSet());
+
+    // Drag it in the face's frame. The cursor positions are points on the
+    // face's plane, so the offset they ask for is exact up to the pick.
+    const SketchPlane plane = session.placement.plane;
+    const glm::dvec2 hi = session.placement.hi;
+    const auto at = [&](double u, double v) {
+      return WorldToWindow(glm::vec3(plane.PlaneToWorld(glm::dvec2(u, v))));
+    };
+    // Grabbed off its middle: looking straight down, the middle is where
+    // its height arrow stands, and the arrow wins a tie.
+    const glm::dvec2 grab(1.0, -1.0);
+    // The offset follows the cursor from where it was grabbed.
+    const auto to = [&](double u, double v) {
+      return at(grab.x + u, grab.y + v);
+    };
+    ctx->MouseMoveToPos(at(grab.x, grab.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(session.dragging);
+    // Somewhere free: neither axis near the centre or an edge line.
+    ctx->MouseMoveToPos(to(0.8, 0.7));
+    ctx->Yield(2);
+    IM_CHECK(session.snapU.empty() && session.snapV.empty());
+    IM_CHECK(std::abs(session.spec.offsetU.value - 0.8) < 0.15);
+    IM_CHECK(std::abs(session.spec.offsetV.value - 0.7) < 0.15);
+    // Its side near the face's +u edge: flush, exactly.
+    ctx->MouseMoveToPos(to(hi.x - 1.5 - 0.05, 0.7));
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(session.snapU.c_str(), "flush");
+    IM_CHECK(std::abs(session.spec.offsetU.value - (hi.x - 1.5)) < 1e-9);
+    // Near the middle: the face's centre, exactly, on both axes.
+    ctx->MouseMoveToPos(to(0.06, -0.05));
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(session.snapU.c_str(), "centre");
+    IM_CHECK_STR_EQ(session.snapV.c_str(), "centre");
+    IM_CHECK_EQ(session.spec.offsetU.value, 0.0);
+    IM_CHECK_EQ(session.spec.offsetV.value, 0.0);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(!session.dragging);
+
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), base + 2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(base));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK(sk->faceRef.IsSet());
+    IM_CHECK(sk->GetError().empty());
+    sketch::Solver solver;
+    solver.Load(*sk);
+    const sketch::SolveResult r = solver.Solve();
+    IM_CHECK(r.ok);
+    IM_CHECK_EQ(r.dof, 0);
+    Feature* solid = Doc()->GetFeature(base + 1);
+    IM_CHECK(solid->TypeName() == "Extrude");
+    IM_CHECK(solid->GetError().empty());
+    double made = 0.0;
+    for (const Body& b : Doc()->GetBodies())
+      if (b.createdBy == solid->GetId())
+        made = b.shape.Volume();
+    IM_CHECK(std::abs(made - 27.0) < 1e-6); // 3 x 3 x 3
+
+    ctx->MenuClick("Edit/Undo"); // one step takes both
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), base);
+  };
+
+  // Escape during the preview: nothing was made, nothing is on the stack.
+  t = IM_REGISTER_TEST(engine, "primitive", "escape_leaves_document_unchanged");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    PrimitiveTestPlate();
+    const ui::DocumentFingerprint before = ui::FingerprintOf(*Doc());
+    const size_t undoDepth = s_App->commands->UndoDepth();
+    const glm::vec3 top = PlateTop();
+    LookDownAt(ctx, top, 16.0f);
+
+    ToolbarClick(ctx, "###tb_cylinder");
+    ctx->MouseMoveToPos(WorldToWindow(top + glm::vec3(1.0f, 1.0f, 0.0f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK(!(ui::FingerprintOf(*Doc()) == before)); // the ghost is there
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK(ui::FingerprintOf(*Doc()) == before);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
+  };
+
+  // A curved face cannot carry a sketch: refused where the user is looking,
+  // and the tool stays armed for a flat one.
+  t = IM_REGISTER_TEST(engine, "primitive", "curved_face_refused");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx); // upright at x = -4, r 0.8, spanning -1..1
+    ctx->Yield();
+    const size_t base = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_box");
+    const glm::vec3 axis(-4.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(axis);
+    s_App->camera->SetUp(conv::kWorldUpF);
+    s_App->camera->SetPosition(axis + 10.0f * glm::vec3(conv::kWorldFront));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(
+        WorldToWindow(axis + 0.8f * glm::vec3(conv::kWorldFront)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.pickingPlane); // still armed
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Primitive);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), base);       // nothing created
+    IM_CHECK(!s_App->sketchEdit.actionMsg.empty()); // and it says why
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sketchEdit.pickingPlane);
+  };
+
+  // Select-first: with a flat face already picked, the tool skips the pick.
+  t = IM_REGISTER_TEST(engine, "primitive", "preselected_face_skips_pick");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    PrimitiveTestPlate();
+    const glm::vec3 top = PlateTop();
+    LookDownAt(ctx, top, 16.0f);
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->selection.First(ui::SelectionItem::Kind::Face) != nullptr);
+
+    ToolbarClick(ctx, "###tb_sphere");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.pickingPlane); // no second pick asked for
+    IM_CHECK(ui::PrimitiveSessionActive(*s_App));
+    IM_CHECK(s_App->primitive.spec.on.kind == primitive::OnKind::Face);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
+  // The window's fields rewrite the preview: a typed width is the sketch's
+  // dimension and the solid's size, before anything is accepted.
+  t = IM_REGISTER_TEST(engine, "primitive", "fields_rewrite_the_preview");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    PrimitiveOnBasePlane(ctx, "###tb_box", 0);
+    IM_CHECK(ui::PrimitiveSessionActive(*s_App));
+    const double d = s_App->primitive.spec.depth.value;
+    const double h = s_App->primitive.spec.height.value;
+    ctx->ItemInputValue("//###ToolWindow/Width/##Width", 7.0f);
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->primitive.spec.width.value - 7.0) < 1e-9);
+    IM_CHECK(Doc()->GetBodies().size() == 1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 7.0 * d * h) <
+             1e-6 * 7.0 * d * h);
+    // An expression keeps its text and drives the value.
+    ctx->ItemInputValue("//###ToolWindow/Height/##Height", "2*3");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->primitive.spec.height.expr.c_str(), "2*3");
+    IM_CHECK(std::abs(s_App->primitive.spec.height.value - 6.0) < 1e-9);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    auto* ext = dynamic_cast<ExtrudeFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_STR_EQ(ext->distanceExpr.c_str(), "2*3");
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 7.0 * d * 6.0) <
+             1e-6 * 7.0 * d * 6.0);
+  };
+
   // U9: the Hole tool. A hole is NOT sugar for an extruded cut (its tool is
   // built from primitives, so counterbore/countersink are impossible as a
   // cut), and before this it could only be created over the script API.
   t = IM_REGISTER_TEST(engine, "hole", "sk_hole_button_on_existing_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // something to drill into
+    AddFixtureBox(ctx); // something to drill into
     ctx->Yield();
     const double before = Doc()->GetBodies()[0].shape.Volume();
 
@@ -577,7 +839,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "hole", "enter_opens_params_without_accepting");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
 
     EnterHoleSketchOnPlane(ctx, 2);
@@ -606,7 +868,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "hole", "escape_discards_empty_keeps_drawn");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const size_t base = Doc()->FeatureCount();
 
@@ -643,7 +905,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "hole", "curved_face_refused_flat_accepted");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     ctx->Yield();
     const size_t base = Doc()->FeatureCount();
 
@@ -691,7 +953,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "hole", "face_pick_to_accept");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
 
@@ -747,7 +1009,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "hole", "preselected_face_skips_pick");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
 
     glm::dvec3 lo(0.0), hi(0.0);
@@ -794,6 +1056,19 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
         ctx->Yield(2);
         return;
       }
+      if (tc->expect == Expect::PickThenChanges) {
+        // It asks for a face/plane first -- and given one (the Top plane of
+        // an EMPTY part, which has nothing of its own to measure), its
+        // defaults make something: the size comes from the scene's reach,
+        // not a literal.
+        IM_CHECK(s_App->sketchEdit.pickingPlane);
+        IM_CHECK(!ui::HasPendingFeature(*s_App));
+        ctx->ItemClick((std::string("//##DockHost/**/") +
+                        SketchPlane::StandardPlaneName(PlaneType::XY))
+                           .c_str());
+        ctx->Yield(2);
+        IM_CHECK(!s_App->sketchEdit.pickingPlane);
+      }
 
       // Whatever else it is, the click must have DONE something. A toolbar
       // button that is enabled and silently does nothing is the same bug in
@@ -822,7 +1097,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
       Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
       IM_CHECK(made != nullptr);
       IM_CHECK(made->GetError().empty());
-      if (tc->expect == Expect::Changes)
+      if (tc->expect == Expect::Changes ||
+          tc->expect == Expect::PickThenChanges)
         IM_CHECK(!(ui::FingerprintOf(*Doc()) == before));
     };
   }
@@ -832,7 +1108,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "defaults", "no_op_warns_without_blocking");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // a clean box: nothing to merge
+    AddFixtureBox(ctx); // a clean box: nothing to merge
     ctx->Yield();
 
     ToolbarClick(ctx, "###tb_refine");
@@ -969,7 +1245,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "chamfer", "edge_via_click_makes_a_chamfer");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
 
@@ -1037,7 +1313,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "shell", "open_face_pick_hollows_the_box");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
@@ -1089,7 +1365,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "draft", "face_pick_names_the_body");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
     const double before = Doc()->GetBodies()[0].shape.Volume();
@@ -1132,7 +1408,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "split", "default_plane_cuts_the_body_in_two");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
 
@@ -1163,7 +1439,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "switching_the_plane_re_centers_the_knife");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     // A datum plane on the box's top face — the worst case, and the one hit
     // in practice: tangent, so any offset in the wrong direction misses.
@@ -1213,8 +1489,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
+    AddFixtureBox(ctx);
     auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
     IM_CHECK(box2 != nullptr);
     box2->position = glm::vec3(-2.0f, 0.0f, 0.0f); // shares box 1's +X face
@@ -1450,7 +1726,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "circular_preview_param_edits_survive");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
 
     ctx->SetRef("//##MainMenuBar");
@@ -1725,7 +2001,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "fillet", "fillet_body_edge_via_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const double before = Doc()->GetBodies()[0].shape.Volume();
 
@@ -2108,8 +2384,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "tree", "context_rename_and_rollback_drag");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_sphere");
+    AddFixtureBox(ctx);
+    AddFixtureSphere(ctx);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
 
     // Rename "Box 1" via right-click > Rename: the row becomes a focused
@@ -2153,7 +2429,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
                        "a_picked_face_names_the_feature_that_made_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     IM_CHECK(ui::FeaturesThatMadeThePick(*s_App).empty()); // nothing picked
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
@@ -2179,7 +2455,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
   t = IM_REGISTER_TEST(engine, "tolerance", "a_measured_bore_gets_a_class");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
 
     // The cylindrical face, taken off the body's own element map so the test
@@ -2248,7 +2524,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // it, because a second pick turns the same gesture into a length.
   t = IM_REGISTER_TEST(engine, "tolerance", "a_plane_is_told_what_to_do");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const Body& body = Doc()->GetBodies()[0];
     std::vector<std::string> planes;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -2289,7 +2565,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // The Variables panel lists what the part carries, and clears a row.
   t = IM_REGISTER_TEST(engine, "tolerance", "the_panel_lists_and_clears");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     const Body& body = Doc()->GetBodies()[0];
     std::string round;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -2333,7 +2609,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // printed" takes it off again.
   t = IM_REGISTER_TEST(engine, "tolerance", "print_process_from_the_panel");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    AddFixtureCylinder(ctx);
     ctx->Yield(2);
     IM_CHECK(!Doc()->PrintProcess().has_value());
     const uint64_t version = Doc()->Version();

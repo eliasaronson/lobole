@@ -33,6 +33,7 @@
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/PrimitiveTool.h" // SnapPrimitiveAxis
 #include "ui/ProjectActions.h"
 #include "ui/StudyPanel.h" // SimulationLoadLabel
 #include "ui/ViewActions.h"
@@ -2803,3 +2804,24 @@ TEST_CASE("the CAM panel's rows are removed as one undo step each",
   CHECK(undoDepth() == depth);
 }
 #endif // HAVE_CAM
+
+// The primitive ghost's drag snap (docs/ui/tool-sessions.md#primitives): one
+// axis at a time, to the reference's centre and, on a face, its outline.
+TEST_CASE("a primitive drag snaps to the face's centre and edges",
+          "[primitive]") {
+  // A 3-wide primitive on a face spanning -5..5 along this axis.
+  const auto snap = [](double centre, double capture) {
+    return ui::SnapPrimitiveAxis(centre, 1.5, true, -5.0, 5.0, capture);
+  };
+  CHECK(snap(0.1, 0.2).value == 0.0);
+  CHECK(std::string(snap(0.1, 0.2).what) == "centre");
+  CHECK(snap(3.4, 0.2).value == 3.5); // its side flush with the +edge
+  CHECK(std::string(snap(3.4, 0.2).what) == "flush");
+  CHECK(snap(-4.9, 0.2).value == -5.0); // its centre on the -edge line
+  CHECK(std::string(snap(-4.9, 0.2).what) == "on edge");
+  CHECK(snap(1.0, 0.2).value == 1.0); // free between them
+  CHECK(std::string(snap(1.0, 0.2).what).empty());
+  CHECK(snap(0.1, 0.0).value == 0.1); // Ctrl: no capture, no snap
+  // A plane has no outline: only its origin.
+  CHECK(ui::SnapPrimitiveAxis(3.4, 1.5, false, 0.0, 0.0, 0.2).value == 3.4);
+}

@@ -35,7 +35,7 @@ struct Rig {
 Rig BuildRig(ImGuiTestContext* ctx) {
   Rig r;
   ctx->SetRef("//##MainMenuBar");
-  ToolbarCreateAccept(ctx, "###tb_box");
+  AddFixtureBox(ctx);
   ctx->Yield();
   const uint64_t partId = s_App->parts[0].id;
   glm::dvec3 lo, hi;

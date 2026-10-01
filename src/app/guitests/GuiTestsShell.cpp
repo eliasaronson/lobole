@@ -111,7 +111,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "shortcuts", "undo_redo_keyboard");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
@@ -480,7 +480,7 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     using Seen = std::unordered_map<uint32_t, std::string>;
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield(2);
     {
       Seen part;
@@ -541,10 +541,13 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->KeyPress(ImGuiKey_Enter);
     ctx->Yield();
     IM_CHECK(!s_App->paletteOpen);
-    IM_CHECK(s_App->pendingFeatureId != 0); // Box preview began
-    ui::AcceptPendingFeature(*s_App);
-    ctx->Yield();
-    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    // The Box tool began: it asks what to stand on first.
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Primitive);
+    IM_CHECK(s_App->primitive.kind == primitive::Kind::Box);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
   };
 
   // Dimension visuals: a new distance dim is born with a non-zero label

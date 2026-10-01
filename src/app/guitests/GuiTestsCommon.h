@@ -126,6 +126,24 @@ void ToolbarClick(ImGuiTestContext* ctx, const char* tbId);
 // Create from the toolbar, then accept the preview (the real accept path).
 void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId);
 
+// A stored Box / Sphere / Cylinder as a FIXTURE: what the toolbar made before
+// the primitive tools stood on a face (2 x 2 x 2 box, r 1 sphere, r 0.8 x 2
+// upright cylinder, along a ladder at x = -4 + 2.5 n). Most tests want "a
+// body" and the picks they make are placed against exactly this geometry, so
+// it stays -- added as one undoable command and selected, as an accept left
+// it. Nothing the GUI reaches makes these any more
+// (docs/ui/tool-sessions.md#primitives); the primitive tools are tested by
+// the primitive/* cases.
+void AddFixtureBox(ImGuiTestContext* ctx);
+void AddFixtureSphere(ImGuiTestContext* ctx);
+void AddFixtureCylinder(ImGuiTestContext* ctx);
+
+// The primitive tool, the real way in: the toolbar arms the pick, and the
+// base plane's row in the feature tree (PlaneType index, as DefaultPlane
+// takes it) answers it. Leaves the preview pending.
+void PrimitiveOnBasePlane(ImGuiTestContext* ctx, const char* tbId,
+                          int planeIdx);
+
 void BuildCantileverStudy(ImGuiTestContext* ctx, double height);
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId);
 
@@ -154,6 +172,7 @@ enum class Expect {
   Changes,            // accept with defaults => the model is different
   RefusesUntilPicked, // Accept is disabled and the window says what is missing
   ArmsAPick,          // not a preview: the tool asks for a face/plane first
+  PickThenChanges,    // asks for a face/plane; given the Top plane, Changes
   HarmlessNoOp,       // accepting cleanly changes nothing, and that is correct
 };
 struct ToolCase {

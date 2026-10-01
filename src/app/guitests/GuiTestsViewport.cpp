@@ -28,7 +28,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "viewport", "middle_drag_rotates_camera");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     const glm::vec3 posBefore = s_App->camera->GetPosition();
     const float distBefore = s_App->camera->GetDistance();
@@ -182,7 +182,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "cleared_on_mode_entry");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     s_App->measure.active = true;
     ui::EnterSimulation(*s_App);
@@ -210,7 +210,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "touching_leads_with_the_angle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
 
     // Two ADJACENT faces of the box: they share an edge, so the minimum
@@ -274,7 +274,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "a_corner_is_a_measurable_point");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
     const Body& body = Doc()->GetBodies()[0];
 
@@ -365,7 +365,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "copy_and_make_a_variable");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
     const Body& body = Doc()->GetBodies()[0];
     std::string px, nx;
@@ -438,7 +438,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "whole_bodies_and_parts");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
 
     // A whole BODY on a part tab, seeded from the tree selection — which is
@@ -517,7 +517,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "seeds_from_selection_and_names");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
     const Body& body = Doc()->GetBodies()[0];
     std::string top, side, anEdge;
@@ -585,7 +585,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "pin_qualifiers_and_totals");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     const uint64_t id = Doc()->GetFeature(0)->GetId();
     const Body& body = Doc()->GetBodies()[0];
     std::string px, nx;
@@ -695,7 +695,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "hover_previews_before_the_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     glm::dvec3 mn, mx;
     Doc()->GetBodies()[0].shape.GetBoundingBox(mn, mx);
     const glm::vec3 c = (mn + mx) * 0.5;
@@ -768,7 +768,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "cleared_on_tab_switch");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
 
     s_App->measure.active = true;
@@ -825,7 +825,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
 
     glm::dvec3 min, max;
@@ -1102,7 +1102,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     ToolbarClick(ctx, "###tb_section");
     ctx->Yield(3);
@@ -1145,7 +1145,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_on_an_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::AddAssembly(*s_App, "Rig");
     ctx->Yield();
     Occurrence occ;
@@ -1513,7 +1513,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "handles", "fillet_marker_drag_sets_radius");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
 
     // Preview a fillet on a known edge (the picking flow is covered by the
@@ -1578,7 +1578,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(ui::EffectivePlaneVisibility(*s_App)); // empty part → planes shown
 
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK(!ui::EffectivePlaneVisibility(*s_App)); // has a body → hidden
   };
 
@@ -1588,7 +1588,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "view", "shadow_toggle_survives_section");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showShadows = false;
     ctx->Yield(3);
@@ -1607,7 +1607,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "view", "ssao_toggle_survives_section");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showAmbientOcclusion = false;
     ctx->Yield(3);
@@ -1627,7 +1627,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "view", "render_quality_switches_survive");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->ssaoFullRes = true; // half -> full AO targets
     ctx->Yield(3);
@@ -1823,8 +1823,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "selection", "survives_sibling_delete");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
-    ToolbarCreateAccept(ctx, "###tb_sphere");
+    AddFixtureBox(ctx);
+    AddFixtureSphere(ctx);
     const uint64_t sphereId = Doc()->GetFeature(1)->GetId();
 
     ctx->ItemClick("//###Model/Sphere 2##1");
@@ -1856,7 +1856,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     for (int i = 0; i < 4; i++)
-      ToolbarCreateAccept(ctx, "###tb_box");
+      AddFixtureBox(ctx);
     ctx->Yield(2);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)4);
     const auto row = [&](size_t i) {
@@ -1912,7 +1912,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     for (int i = 0; i < 3; i++)
-      ToolbarCreateAccept(ctx, "###tb_box");
+      AddFixtureBox(ctx);
     ctx->Yield(2);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
     const uint64_t kept = Doc()->GetFeature(0)->GetId();
@@ -1944,7 +1944,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "selection", "pick_cycle_multiselect");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
 
     glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
@@ -2151,7 +2151,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "render", "modal_enabled_on_an_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // a part with a body
+    AddFixtureBox(ctx); // a part with a body
     const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
     ui::SetActivePart(*s_App, asmIdx);
     ctx->Yield(2);
@@ -2218,7 +2218,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "measure", "assembly_distance");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    AddFixtureBox(ctx); // 2x2x2 at the origin
     glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
@@ -2302,7 +2302,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     // A pending FILLET has the direct-manipulation handle (its radius); a
     // pending box does not — ComputeHandleSpec only serves features with a
     // headline scalar (extrude distance, blend radius, revolve angle).
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ctx->Yield();
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(!body.elementMap.edgeNames.empty());
@@ -2340,7 +2340,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "handles", "gizmo_hover_names_the_axis");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ToolbarCreateAccept(ctx, "###tb_box");
+    AddFixtureBox(ctx);
     ui::AddAssembly(*s_App, "Rig");
     ctx->Yield();
     Occurrence occ;
