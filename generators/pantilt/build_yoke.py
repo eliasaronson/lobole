@@ -82,17 +82,17 @@ def declare(part, S):
 
 def arm_side(S, design, sign):
     """An arm's +X edge, bottom to top, ending where the boss's arc starts
-    (the outline is symmetric about the tilt axis). The +Y arm keeps inside
-    the tilt worm's blocks (and their screws' nuts under the ledge) above
-    `zk`; nothing stands in the -Y arm's slab."""
+    (the outline is symmetric about the tilt axis). The lightened +Y arm
+    keeps inside the tilt worm's blocks (and their screws' nuts under the
+    ledge) above `zk`. The envelope's arms are both whole plates: the
+    blocks are the topology study's keep-outs (build_yoke_topo.keep_outs),
+    not a step drawn into the envelope by hand."""
     zb, zt, tz = S["yoke_zb"], S["yoke_zt"], S["tilt_z"]
     aw, xb, xu = S["arm_w"], S["yoke_xb"], S["arm_up_x"]
     zk = S["ledge_z"] - 2 * S["yoke_base_t"]
     if design == "solid":
         return [(aw / 2, zb), (aw / 2, tz)]
     if design == "envelope":
-        if sign > 0:
-            return [(xb, zb), (xb, zk), (xu, zk), (xu, tz), (aw / 2, tz)]
         return [(xb, zb), (xb, tz), (aw / 2, tz)]
     # lightened: an A-frame, its legs straight from the foot to the boss
     if sign > 0:
@@ -240,9 +240,9 @@ def yoke(app, S, name="yoke", design="solid"):
     """The yoke, or (design="envelope") the room it may fill: the base out
     to the pan blocks' far edge on both sides and each arm a plate across
     that whole width up to the tilt axis -- what the topology study of
-    build_yoke_topo.py removes material from. Nothing else stands in the
-    arms' slab of space (the camera is inside them, the tilt wheel and the
-    worm outside), so it is all available."""
+    build_yoke_topo.py removes material from. The tilt worm's blocks stand
+    in the +Y arm's slab above the ledge, and their nuts under it: the
+    study keeps out of them (keep-outs), so the plate need not."""
     part = app.part(name)
     model = common.printed(part)
     if name == "yoke":
