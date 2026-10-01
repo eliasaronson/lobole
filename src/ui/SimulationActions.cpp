@@ -795,7 +795,7 @@ void EnterSimulation(AppState& state) {
   // Drop the modeling-mode shape-guide ghost while in simulation mode.
   state.syncedDocumentVersion = UINT64_MAX;
 }
-void ExitSimulation(AppState& state) {
+void ResetSimulationDisplay(AppState& state) {
   // Restore any body instances the field overlay hid, and drop the topology
   // iso-surface instance.
   if (state.meshRenderer) {
@@ -807,6 +807,9 @@ void ExitSimulation(AppState& state) {
   if (state.fieldRenderer)
     state.fieldRenderer->SetMesh({}, {});
   state.simulation = SimulationState{};
+}
+void ExitSimulation(AppState& state) {
+  ResetSimulationDisplay(state);
   state.simulationToolOpen = false;
   state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }

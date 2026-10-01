@@ -290,8 +290,11 @@ void ResetActiveTabUiState(AppState& state) {
   state.dimTool = AppState::DimTool{}; // transient dimension-pick state
   state.dimDrag = 0;
   // Any tab change exits simulation mode (results themselves live on the
-  // Document and survive; only the mode/display state resets).
-  state.simulation = SimulationState{};
+  // Document and survive; only the mode/display state resets). Through
+  // ResetSimulationDisplay, not by resetting the state: the topology Shape
+  // view is a mesh instance of its own, and a bare reset forgot its id and
+  // left it drawn over every tab -- and project -- that came after.
+  ResetSimulationDisplay(state);
   // ...and drops the measure session. Its picks are ElementRefs into the
   // document that was on screen; carried onto another tab they resolve
   // against nothing while the readout keeps displaying the old distance over

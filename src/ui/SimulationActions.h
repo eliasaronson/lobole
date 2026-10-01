@@ -76,6 +76,10 @@ uint64_t ActiveSlotId(const AppState& state);
 void EnterSimulation(AppState& state);
 
 void ExitSimulation(AppState& state);
+// The display half of ExitSimulation, for a tab change: puts back the bodies
+// a field hid, removes the topology Shape instance, clears the field mesh
+// and resets the mode -- leaving the Simulation window as it was.
+void ResetSimulationDisplay(AppState& state);
 
 // Meshes + solves study `id` on the active document and caches the results
 // (stamped with the current Version). Returns false and fills *error on any

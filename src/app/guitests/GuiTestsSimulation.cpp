@@ -372,6 +372,19 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // A structure carrying a load has compliance > 0.
     IM_CHECK(!rt->complianceHistory.empty());
     IM_CHECK(rt->complianceHistory.back() > 0.0);
+
+    // The Shape view is a mesh instance of its own; leaving the tab must
+    // take it away. A tab change reset the simulation state and left the
+    // instance drawn -- the pan/tilt yoke's optimised shape stood over every
+    // part opened after it, in other projects too.
+    s_App->simulation.field = ui::SimulationState::Field::Shape;
+    ctx->Yield(3);
+    const uint32_t iso = s_App->simulation.topoIsoInstance;
+    IM_CHECK(iso != 0);
+    IM_CHECK(s_App->meshRenderer->GetInstanceTransform(iso).has_value());
+    ui::AddPart(*s_App, "Elsewhere");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->meshRenderer->GetInstanceTransform(iso).has_value());
   };
 
 #else  // !HAVE_NETGEN
