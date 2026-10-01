@@ -41,15 +41,38 @@ TARGETS="designer"
 # A fresh `git worktree` does NOT populate submodules (deps/imgui,
 # deps/nativefiledialog, deps/imgui_test_engine) — cmake then fails at
 # configure. Init them into this worktree first. Cheap when already present.
+#
+# They are cloned from MAIN's checkout, not the network: every submodule's
+# URL is rewritten (url.<local>.insteadOf, for this one command only — no
+# config is written, and a worktree's config is main's) to the same
+# submodule in the main checkout, which already holds its objects. A clone
+# from GitHub stalled a fresh worktree for minutes once. Only when main's
+# copy lacks the pinned commit (main has not run `submodule update` since
+# the pin moved) does it fall back to the network, and says so. Not
+# --recursive: the one nested submodule (imgui_test_engine's own test
+# suite's implot) is built by nothing here, main's checkout does not hold
+# it, and recursing fetched it from GitHub every time.
+MAIN="$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"
 if [ ! -f "$ROOT/deps/imgui/imgui.cpp" ]; then
-  echo "worktree-build: initializing submodules (fresh worktree)"
-  git -C "$ROOT" submodule update --init --recursive
+  echo "worktree-build: initializing submodules from $MAIN (fresh worktree)"
+  LOCAL=(-c protocol.file.allow=always)
+  while read -r key path; do
+    name="${key#submodule.}"; name="${name%.path}"
+    url="$(git -C "$ROOT" config -f .gitmodules --get "submodule.$name.url")"
+    if [ -e "$MAIN/$path/.git" ]; then
+      LOCAL+=(-c "url.$MAIN/$path.insteadOf=$url")
+    fi
+  done < <(git -C "$ROOT" config -f .gitmodules --get-regexp '\.path$')
+  if ! git "${LOCAL[@]}" -C "$ROOT" submodule update --init; then
+    echo "worktree-build: main's checkout lacks a pinned submodule commit;" \
+         "fetching from the network"
+    git -C "$ROOT" submodule update --init
+  fi
 fi
 
 # The SAME configuration as main's build/, or no object is shared: a Debug
 # worktree beside a Release main missed ccache on every file, and ran the
 # suite slower and differently (watchdog_smoke failed in every Debug tree).
-MAIN="$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"
 BUILD_TYPE="$(sed -n 's/^CMAKE_BUILD_TYPE:[A-Z]*=//p' "$MAIN/build/CMakeCache.txt" 2>/dev/null)"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 # Memory, not cores, is what runs out: about 1.5 GB a compiler. Four

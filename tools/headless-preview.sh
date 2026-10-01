@@ -112,19 +112,57 @@ export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
 # There was no supported way to stop one, so the reflex is `pkill -f designer`
 # or `pgrep -f "remote 8842"` — and BOTH match the shell that runs them, so an
 # agent tearing down its own scratch instance kills its own session instead.
-# The instance registry has the pid; use it.
+#
+# The pid is found WHATEVER XDG_STATE_HOME the instance was started with: an
+# instance started under a scratch state dir announces itself in THAT
+# registry, and a --stop from a shell without the variable found nothing.
+# So, in order, the first candidate that is a live designer serving this
+# port wins:
+#   1. the pid file --start writes in a state-independent run dir;
+#   2. the instance itself: `ping` reports its pid, no registry needed;
+#   3. the registry under this shell's XDG_STATE_HOME, then the default one.
+# A candidate counts only when /proc says it IS a designer with `--remote
+# PORT` on its command line, so a stale file naming a recycled pid never
+# kills a stranger. The registry it announced in is read from the process's
+# own environment, and cleared with the pid file.
+RUN_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/designer-preview"
+is_instance() { # pid port
+  local pid="$1" port="$2" cmd
+  [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] || return 1
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
+  case "$cmd" in
+    *designer*" --remote $port "*) return 0 ;;
+  esac
+  return 1
+}
+reg_pid() {
+  sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$1" 2>/dev/null
+}
+ping_pid() {
+  python3 "$ROOT/tools/designer_remote.py" "$1" ping 2>/dev/null |
+    python3 -c 'import json, sys; print(json.load(sys.stdin).get("pid", ""))' \
+      2>/dev/null
+}
 if [ "${1:-}" = "--stop" ]; then
   PORT="${2:-8798}"
-  REG="${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json"
-  [ -f "$REG" ] || { echo "headless-preview: nothing announced on $PORT" >&2; exit 1; }
-  PID="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$REG")"
-  [ -n "$PID" ] || { echo "headless-preview: no pid in $REG" >&2; exit 1; }
-  if kill "$PID" 2>/dev/null; then
-    echo "headless-preview: stopped $PID on port $PORT"
-  else
-    echo "headless-preview: $PID is already gone; clearing $PORT" >&2
+  PID=""
+  for cand in "$(cat "$RUN_DIR/$PORT.pid" 2>/dev/null)" "$(ping_pid "$PORT")" \
+      "$(reg_pid "${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json")" \
+      "$(reg_pid "$HOME/.local/state/designer/instances/$PORT.json")"; do
+    if is_instance "$cand" "$PORT"; then PID="$cand"; break; fi
+  done
+  rm -f "$RUN_DIR/$PORT.pid"
+  if [ -z "$PID" ]; then
+    echo "headless-preview: no designer instance serving port $PORT" >&2
+    exit 1
   fi
-  rm -f "$REG"
+  # Where it announced itself: its own XDG_STATE_HOME, read before it dies.
+  ITS_STATE="$(tr '\0' '\n' <"/proc/$PID/environ" 2>/dev/null |
+    sed -n 's/^XDG_STATE_HOME=//p')"
+  ITS_REG="${ITS_STATE:-$HOME/.local/state}/designer/instances/$PORT.json"
+  kill "$PID"
+  echo "headless-preview: stopped $PID on port $PORT"
+  [ "$(reg_pid "$ITS_REG")" = "$PID" ] && rm -f "$ITS_REG"
   exit 0
 fi
 
@@ -149,9 +187,10 @@ if [ "${1:-}" = "--start" ]; then
   # process-group leader), so $! is the app itself.
   APP=$!
   wait_ready "$PORT" "$APP" || { echo "headless-preview: see $LOG" >&2; exit 1; }
-  REG="${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json"
-  PID="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$REG" 2>/dev/null)"
-  echo "headless-preview: ready on $PORT (pid ${PID:-unknown}, log $LOG)"
+  # The pid file --stop reads first: outside any XDG_STATE_HOME, so a
+  # --stop from a shell that does not share this one's finds it.
+  mkdir -p "$RUN_DIR" && echo "$APP" >"$RUN_DIR/$PORT.pid"
+  echo "headless-preview: ready on $PORT (pid $APP, log $LOG)"
   echo "headless-preview: stop it with $0 --stop $PORT"
   exit 0
 fi

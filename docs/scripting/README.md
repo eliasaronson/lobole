@@ -53,7 +53,14 @@ An offscreen instance has no panels, so the viewport is the whole
 framebuffer, and it projects the document into the renderers only when
 something looks (see CLAUDE.md, "Driving / screenshotting the running app").
 `tools/headless-preview.sh --start <port>` starts one in the background with
-a scratch config directory and prints its pid; `--stop <port>` stops it.
+a scratch config directory and prints its pid; `--stop <port>` stops it
+whatever `XDG_STATE_HOME` it was started under: it takes the pid from a
+file `--start` writes in a state-independent run directory
+(`$XDG_RUNTIME_DIR/designer-preview/<port>.pid`), else from the instance's
+own `ping`, else from the registry under this shell's state dir and the
+default one, and kills a candidate only when `/proc` shows a designer
+serving that port. It clears the registry entry in the state dir the
+instance itself was started with.
 
 ### The instance registry
 
@@ -122,7 +129,8 @@ reading either.
 
 ```sh
 git worktree add ../designer-wt1 -b wt1 && (cd ../designer-wt1 && tools/worktree-build.sh)
-# worktree-build.sh prints a scratch port for that worktree
+# worktree-build.sh clones the submodules from the main checkout (no
+# network unless main lacks a pinned commit) and prints a scratch port
 ../designer-wt1/build/designer --headless --remote <port1> &
 DESIGNER_PORT=<port1> claude -p "build the bracket in parts/bracket" ...
 ```
