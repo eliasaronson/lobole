@@ -1663,18 +1663,27 @@ TEST_CASE("cam: clearing round a part takes the stock down its outside wall",
   const ElementRef wall = HoleWall(*doc);
   REQUIRE(wall.IsSet());
   const cam::DerivedOp d = cam::DeriveOperation(
-      s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, wall});
+      s, doc->GetBodies(), cam::OpType::Adaptive, cam::Target{0, wall});
   INFO(d.why);
   REQUIRE(d.ok);
   CHECK(d.op.side == cam::Side::Outside);
   CHECK(d.op.name == "Clear round");
   CHECK_THAT(d.op.topZ, WithinAbs(16.0, 1e-6));
   CHECK_THAT(d.op.bottomZ, WithinAbs(-1.0, 1e-6));
-  // An opening's wall is still a pocket's to refuse: its floor says how deep.
+  // Asked as an adaptive only: the pocket verb on a wall is a missed floor,
+  // refused with the way to ask for this.
+  {
+    const cam::DerivedOp pocket = cam::DeriveOperation(
+        s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, wall});
+    REQUIRE_FALSE(pocket.ok);
+    CHECK(pocket.why.find("FLOOR") != std::string::npos);
+    CHECK(pocket.why.find("adaptive on its outside wall") != std::string::npos);
+  }
+  // An opening's wall is refused either way: its floor says how deep.
   {
     auto slotted = SlottedDoc();
     const cam::DerivedOp opening = cam::DeriveOperation(
-        BasicSetup(), slotted->GetBodies(), cam::OpType::Pocket,
+        BasicSetup(), slotted->GetBodies(), cam::OpType::Adaptive,
         cam::Target{0, WallNear(*slotted, 14.0, 15.0)});
     REQUIRE_FALSE(opening.ok);
     CHECK(opening.why.find("FLOOR") != std::string::npos);

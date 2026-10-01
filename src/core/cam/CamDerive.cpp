@@ -282,10 +282,19 @@ DerivedOp DeriveOperation(const Setup& setup,
       // does. The part's OUTSIDE wall is the other case -- clear the stock
       // round the part, down the wall (docs/cam/operations.md#clear-round),
       // and through the stock with it when the wall reaches the part's
-      // bottom, as a cut-out goes.
-      if (wall.opening) {
-        out.why = "click the pocket's FLOOR — an opening's wall says where to "
-                  "go round, not how deep to go. Cut it out follows a wall.";
+      // bottom, as a cut-out goes. Asked for as an ADAPTIVE only: the
+      // pocket verb clicked on a wall is a missed floor far more often than
+      // a request to clear the whole stock, and turned into one it ran for
+      // minutes over a sheet with a post at its far end.
+      if (wall.opening || type != OpType::Adaptive) {
+        out.why = wall.opening
+                      ? "click the pocket's FLOOR — an opening's wall says "
+                        "where to go round, not how deep to go. Cut it out "
+                        "follows a wall."
+                      : "click the pocket's FLOOR — a wall says where to go "
+                        "round, not how deep to go. Cut it out follows a "
+                        "wall; to clear the stock ROUND the part, add an "
+                        "adaptive on its outside wall.";
         return out;
       }
       op.name = "Clear round";
@@ -293,8 +302,6 @@ DerivedOp DeriveOperation(const Setup& setup,
       op.side = Side::Outside;
       op.topZ = hi.z;
       op.bottomZ = wall.bottomZ > modelBottom + kThrough ? wall.bottomZ : lo.z;
-      if (AdaptiveAvailable() && op.topZ - op.bottomZ > tool.diameter)
-        op.type = OpType::Adaptive;
       break;
     }
     const FaceRegion region =

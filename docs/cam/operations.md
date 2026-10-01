@@ -53,7 +53,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | verb | pick | derives |
 |---|---|---|
 | Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top as the earlier setups left it (below). A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
-| Clear round the part | the part's OUTSIDE wall, as a pocket or adaptive | the stock between its edge and the part, from the stock top down the wall; through the stock's bottom when the wall reaches the part's bottom, as a cut-out does ([Clear round](#clear-round)). An opening's wall is refused: its floor says how deep |
+| Clear round the part | the part's OUTSIDE wall, as an `adaptive` (`add_cam_op`; a pocket on a wall is refused, naming this) | the stock between its edge and the part, from the stock top down the wall; through the stock's bottom when the wall reaches the part's bottom, as a cut-out does ([Clear round](#clear-round)). An opening's wall is refused: its floor says how deep |
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
@@ -281,8 +281,12 @@ is scrap.
 A part cut from a blank in a vise has its waste ROUND it, and no floor to
 pick: before this, only a profile could take it, which leaves a frame for the
 operator to saw off (or, cut through, to fall into the cutter as it frees).
-A pocket or adaptive whose target is the part's OUTSIDE wall clears round
-the part (`ClearsRound`, `ClearRoundRegions` in `CamStrategies.cpp`):
+An adaptive whose target is the part's OUTSIDE wall clears round
+the part (`ClearsRound`, `ClearRoundRegions` in `CamStrategies.cpp`). A
+pocket on a wall stays refused, naming the adaptive: the pocket verb clicked
+on a wall is a missed floor more often than a request to clear the whole
+stock, and taken as one it ran for minutes on a sheet with a post at its far
+end (`cam/verbs_two_clicks_to_a_pocket`).
 
 - **The region**, per depth pass: the stock, grown by 0.55 of the cutter
   (its edges are open, so the cutter's centre may stand on them), less the
