@@ -21,22 +21,22 @@ TEST_CASE("A clamped B-spline interpolates its first and last poles",
           "[spline]") {
   BSpline s;
   s.poles = {{0, 0}, {1, 2}, {3, 2}, {4, 0}};
-  const glm::vec2 first = sketch::BSplineEvalUV(s, 0.0);
-  const glm::vec2 last = sketch::BSplineEvalUV(s, 1e9); // clamps to the end
-  CHECK_THAT(first.x, WithinAbs(0.0f, 1e-5));
-  CHECK_THAT(first.y, WithinAbs(0.0f, 1e-5));
-  CHECK_THAT(last.x, WithinAbs(4.0f, 1e-5));
-  CHECK_THAT(last.y, WithinAbs(0.0f, 1e-5));
+  const glm::dvec2 first = sketch::BSplineEvalUV(s, 0.0);
+  const glm::dvec2 last = sketch::BSplineEvalUV(s, 1e9); // clamps to the end
+  CHECK_THAT(first.x, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(first.y, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(last.x, WithinAbs(4.0, 1e-5));
+  CHECK_THAT(last.y, WithinAbs(0.0, 1e-5));
 }
 
 TEST_CASE("A B-spline stays within the convex hull of its poles", "[spline]") {
   BSpline s;
   s.poles = {{0, 0}, {1, 3}, {3, 3}, {4, 0}};
   for (auto& p : sketch::BSplineSampleUV(s, 6)) {
-    CHECK(p.x >= -1e-4f);
-    CHECK(p.x <= 4.0f + 1e-4f);
-    CHECK(p.y >= -1e-4f);
-    CHECK(p.y <= 3.0f + 1e-4f);
+    CHECK(p.x >= -1e-4);
+    CHECK(p.x <= 4.0 + 1e-4);
+    CHECK(p.y >= -1e-4);
+    CHECK(p.y <= 3.0 + 1e-4);
   }
 }
 
@@ -45,28 +45,28 @@ TEST_CASE("A two-pole B-spline degrades to the segment between them",
   BSpline s;
   s.poles = {{0, 0}, {2, 4}};
   CHECK(sketch::BSplineDegree(s) == 1);
-  const glm::vec2 mid =
+  const glm::dvec2 mid =
       sketch::BSplineEvalUV(s, 0.5 * (2 - 1)); // umax = n-p = 1
-  CHECK_THAT(mid.x, WithinAbs(1.0f, 1e-5));
-  CHECK_THAT(mid.y, WithinAbs(2.0f, 1e-5));
+  CHECK_THAT(mid.x, WithinAbs(1.0, 1e-5));
+  CHECK_THAT(mid.y, WithinAbs(2.0, 1e-5));
 }
 
 TEST_CASE("EntityPointUV addresses pole k of a spline", "[spline]") {
   sketch::Entity e = BSpline{{{0, 0}, {1, 2}, {3, 2}, {4, 0}}};
-  CHECK(sketch::EntityPointUV(e, 0) == glm::vec2(0, 0));
-  CHECK(sketch::EntityPointUV(e, 2) == glm::vec2(3, 2));
+  CHECK(sketch::EntityPointUV(e, 0) == glm::dvec2(0, 0));
+  CHECK(sketch::EntityPointUV(e, 2) == glm::dvec2(3, 2));
 }
 
 TEST_CASE("Translate/rotate/reflect move every pole", "[spline]") {
   sketch::Entity e = BSpline{{{0, 0}, {1, 2}, {4, 0}}};
   sketch::Entity t = sketch::TranslateEntity(e, {10, 5});
   auto& tp = std::get<BSpline>(t).poles;
-  CHECK(tp[0] == glm::vec2(10, 5));
-  CHECK(tp[2] == glm::vec2(14, 5));
+  CHECK(tp[0] == glm::dvec2(10, 5));
+  CHECK(tp[2] == glm::dvec2(14, 5));
   // Reflect across the X axis (y -> -y).
   sketch::Entity r = sketch::ReflectEntity(e, {0, 0}, {1, 0});
   auto& rp = std::get<BSpline>(r).poles;
-  CHECK_THAT(rp[1].y, WithinAbs(-2.0f, 1e-5));
+  CHECK_THAT(rp[1].y, WithinAbs(-2.0, 1e-5));
 }
 
 // --- Serialization ----------------------------------------------------------
@@ -89,7 +89,7 @@ TEST_CASE("A sketch B-spline round-trips through JSON", "[spline]") {
   REQUIRE(bs != nullptr);
   REQUIRE(bs->poles.size() == 4);
   CHECK(bs->degree == 3);
-  CHECK(bs->poles[3] == glm::vec2(4, 0));
+  CHECK(bs->poles[3] == glm::dvec2(4, 0));
   CHECK(sketch::EntityId(sk->entities[0]) != 0); // id assigned on load
   fs::remove(path);
 }
@@ -155,10 +155,10 @@ TEST_CASE("A B-spline pole is a solver point (Coincident moves it)",
   solver.WriteBack(out);
 
   auto& bs = std::get<BSpline>(out[0]);
-  CHECK_THAT(bs.poles[2].x, WithinAbs(0.0f, 1e-4));
-  CHECK_THAT(bs.poles[2].y, WithinAbs(0.0f, 1e-4));
-  CHECK(bs.poles[0] == glm::vec2(0, 0)); // untouched
-  CHECK(bs.poles[3] == glm::vec2(4, 0)); // untouched
+  CHECK_THAT(bs.poles[2].x, WithinAbs(0.0, 1e-4));
+  CHECK_THAT(bs.poles[2].y, WithinAbs(0.0, 1e-4));
+  CHECK(bs.poles[0] == glm::dvec2(0, 0)); // untouched
+  CHECK(bs.poles[3] == glm::dvec2(4, 0)); // untouched
 }
 
 TEST_CASE("An unconstrained B-spline solves without moving",
@@ -171,7 +171,7 @@ TEST_CASE("An unconstrained B-spline solves without moving",
   std::vector<sketch::Entity> out;
   solver.WriteBack(out);
   auto& bs = std::get<BSpline>(out[0]);
-  CHECK(bs.poles[1] == glm::vec2(1, 2));
+  CHECK(bs.poles[1] == glm::dvec2(1, 2));
 }
 
 #endif // HAVE_PLANEGCS

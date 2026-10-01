@@ -44,7 +44,7 @@ public:
   // Drag one or more points toward per-point UV targets (a line body pins both
   // endpoints; an endpoint pins one).
   bool BeginDrag(const std::vector<PointRef>& points);
-  void SetDragTargets(const std::vector<glm::vec2>& targets);
+  void SetDragTargets(const std::vector<glm::dvec2>& targets);
 
   // Drag a circle's radius toward a target length (centre held by its own
   // constraints). Pair with SetRadiusTarget.

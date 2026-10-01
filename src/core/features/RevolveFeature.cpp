@@ -47,8 +47,8 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  glm::vec3 axisOrigin{0.0f};
-  glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
+  glm::dvec3 axisOrigin{0.0};
+  glm::dvec3 axisDir{1.0, 0.0, 0.0};
   if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
     SetError("revolve axis not found (deleted datum axis or sketch line?)");
     return false;
@@ -57,10 +57,10 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   // The axis must lie in the sketch plane: its direction perpendicular to the
   // plane normal, and a point of it on the plane. Otherwise the revolve is a
   // skew sweep rather than a solid of revolution.
-  const glm::vec3 n = sketch->plane.GetNormal();
-  const glm::vec3 planeO = sketch->plane.GetOrigin();
-  if (std::abs(glm::dot(axisDir, n)) > 1e-4f ||
-      std::abs(glm::dot(axisOrigin - planeO, n)) > 1e-4f) {
+  const glm::dvec3 n = sketch->plane.GetNormal();
+  const glm::dvec3 planeO = sketch->plane.GetOrigin();
+  if (std::abs(glm::dot(axisDir, n)) > 1e-4 ||
+      std::abs(glm::dot(axisOrigin - planeO, n)) > 1e-4) {
     SetError("revolve axis is not in the sketch plane");
     return false;
   }

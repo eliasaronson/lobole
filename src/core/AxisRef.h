@@ -30,4 +30,4 @@ struct AxisRef {
 // features visible in ctx (strictly earlier in the history). Returns false
 // if a SketchLine reference doesn't resolve or is degenerate.
 bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
-                 glm::vec3& outOrigin, glm::vec3& outDir);
+                 glm::dvec3& outOrigin, glm::dvec3& outDir);

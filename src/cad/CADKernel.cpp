@@ -588,7 +588,7 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
   return CADShape(m_shape);
 }
 
-void CADShape::Translate(const glm::vec3& offset) {
+void CADShape::Translate(const glm::dvec3& offset) {
   if (!IsValid())
     return;
 
@@ -601,7 +601,7 @@ void CADShape::Translate(const glm::vec3& offset) {
   }
 }
 
-void CADShape::Rotate(const glm::vec3& axis, double angle) {
+void CADShape::Rotate(const glm::dvec3& axis, double angle) {
   if (!IsValid())
     return;
 
@@ -628,7 +628,7 @@ void CADShape::Scale(double factor) {
   }
 }
 
-void CADShape::RotateAbout(const glm::vec3& point, const glm::vec3& dir,
+void CADShape::RotateAbout(const glm::dvec3& point, const glm::dvec3& dir,
                            double angle) {
   if (!IsValid())
     return;
@@ -643,7 +643,7 @@ void CADShape::RotateAbout(const glm::vec3& point, const glm::vec3& dir,
   }
 }
 
-void CADShape::Mirror(const glm::vec3& point, const glm::vec3& normal) {
+void CADShape::Mirror(const glm::dvec3& point, const glm::dvec3& normal) {
   if (!IsValid())
     return;
 
@@ -692,6 +692,17 @@ std::vector<CADShape> CADShape::SplitSolids() const {
 
 bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
                          glm::vec3& uAxis) const {
+  glm::dvec3 c, n, u;
+  if (!FacePlane(faceIndex, c, n, u))
+    return false;
+  center = glm::vec3(c);
+  normal = glm::vec3(n);
+  uAxis = glm::vec3(u);
+  return true;
+}
+
+bool CADShape::FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
+                         glm::dvec3& uAxis) const {
   if (!IsValid() || faceIndex < 0)
     return false;
 
@@ -716,7 +727,7 @@ bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
   GProp_GProps props;
   BRepGProp::SurfaceProperties(face, props);
   const gp_Pnt c = props.CentreOfMass();
-  center = glm::vec3(c.X(), c.Y(), c.Z());
+  center = glm::dvec3(c.X(), c.Y(), c.Z());
 
   // The plane's surface normal, then the face orientation for the outward
   // sense. The AXIS is the surface normal only when the plane's frame is
@@ -726,15 +737,15 @@ bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
   gp_Dir nd = surf.Plane().Axis().Direction();
   if (!surf.Plane().Position().Direct())
     nd.Reverse();
-  glm::vec3 n(nd.X(), nd.Y(), nd.Z());
+  glm::dvec3 n(nd.X(), nd.Y(), nd.Z());
   if (face.Orientation() == TopAbs_REVERSED)
     n = -n;
   normal = glm::normalize(n);
 
   // Deterministic in-plane u-axis (matches the sketch-on-face baking
   // heuristic), so the sketch frame is stable across upstream edits.
-  glm::vec3 u =
-      std::abs(normal.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  glm::dvec3 u =
+      std::abs(normal.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
   uAxis = glm::normalize(u - glm::dot(u, normal) * normal);
   return true;
 }
@@ -1248,7 +1259,7 @@ CADShape CADKernel::CreateBox(double width, double height, double depth) {
   return CADShape();
 }
 
-CADShape CADKernel::CreateSphere(const glm::vec3& center, double radius) {
+CADShape CADKernel::CreateSphere(const glm::dvec3& center, double radius) {
   if (radius <= Precision::Confusion()) {
     return CADShape();
   }
@@ -1272,8 +1283,8 @@ CADShape CADKernel::CreateSphere(const glm::vec3& center, double radius) {
   return CADShape();
 }
 
-CADShape CADKernel::CreateCylinder(const glm::vec3& center,
-                                   const glm::vec3& direction, double radius,
+CADShape CADKernel::CreateCylinder(const glm::dvec3& center,
+                                   const glm::dvec3& direction, double radius,
                                    double height) {
   if (radius <= Precision::Confusion() || height <= Precision::Confusion()) {
     return CADShape();
@@ -1301,8 +1312,8 @@ CADShape CADKernel::CreateCylinder(const glm::vec3& center,
   return CADShape();
 }
 
-CADShape CADKernel::CreateCone(const glm::vec3& center,
-                               const glm::vec3& direction, double radius1,
+CADShape CADKernel::CreateCone(const glm::dvec3& center,
+                               const glm::dvec3& direction, double radius1,
                                double radius2, double height) {
   if (radius1 <= Precision::Confusion() || radius2 <= Precision::Confusion() ||
       height <= Precision::Confusion()) {
@@ -1813,15 +1824,15 @@ bool CADKernel::SaveSTEPModel(const std::string& filename,
 }
 
 // Helper functions
-gp_Pnt CADKernel::ToOCCPoint(const glm::vec3& point) const {
+gp_Pnt CADKernel::ToOCCPoint(const glm::dvec3& point) const {
   return gp_Pnt(point.x, point.y, point.z);
 }
 
-gp_Vec CADKernel::ToOCCVector(const glm::vec3& vector) const {
+gp_Vec CADKernel::ToOCCVector(const glm::dvec3& vector) const {
   return gp_Vec(vector.x, vector.y, vector.z);
 }
 
-gp_Dir CADKernel::ToOCCDirection(const glm::vec3& direction) const {
+gp_Dir CADKernel::ToOCCDirection(const glm::dvec3& direction) const {
   return gp_Dir(direction.x, direction.y, direction.z);
 }
 

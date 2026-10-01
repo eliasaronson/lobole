@@ -290,20 +290,21 @@ TEST_CASE("ExtrudeFeature Cut removes material", "[extrude][feature]") {
              WithinRel(32.0 - 2 * 2 * 2, 1e-4));
 }
 
-TEST_CASE("A cut from a face's height opens it whatever the plane rounds to",
+TEST_CASE("A cut opens a face a float-placed primitive left above its plane",
           "[extrude][feature]") {
-  // A sketch plane is single precision. At z = 13.4 it is 13.39999962, and a
-  // pocket cut down from it into a part whose top is at 13.4 kept a 0.4 um
-  // skin over the pocket: a sealed void that passed BRepCheck, and a bearing
-  // seat with a shoulder at both ends (the pan/tilt head's wheel).
+  // A sketch plane is exact, but a primitive's position is single
+  // precision: a box placed at z = 24.7 sits at 24.70000076, so its top is
+  // 0.76 um above a plane typed at 29.7. A pocket cut down from that plane
+  // kept a skin over itself -- a sealed void that passes BRepCheck (the
+  // pan/tilt head's bearing seat had a "shoulder" at both ends). The tool
+  // starts a hair behind the plane instead (CoplanarStartSlack).
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 20, 20, 13.4));
-  const SketchPlane top(glm::vec3(0, 0, 13.4), glm::vec3(0, 0, 1),
-                        glm::vec3(1, 0, 0));
-  REQUIRE(double(top.GetOrigin().z) < 13.4); // the rounding this is about
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 24.7), 20, 20, 5.0));
+  const SketchPlane top(glm::dvec3(0, 0, 29.7), glm::dvec3(0, 0, 1),
+                        glm::dvec3(1, 0, 0));
   uint64_t sid = AddRectSketch(doc, {5, 5}, {15, 15}, top);
-  auto cut = std::make_unique<ExtrudeFeature>("Pocket", sid, 9.0,
+  auto cut = std::make_unique<ExtrudeFeature>("Pocket", sid, 3.0,
                                               ExtrudeMode::Cut, true);
   doc.AddFeature(std::move(cut));
   REQUIRE(doc.GetBodies().size() == 1);
@@ -318,32 +319,32 @@ TEST_CASE("A cut from a face's height opens it whatever the plane rounds to",
     gp_Dir n = surf.Plane().Axis().Direction();
     if (f.Orientation() == TopAbs_REVERSED)
       n.Reverse();
-    if (n.Z() < -0.5 && surf.Plane().Location().Z() > 13.0)
+    if (n.Z() < -0.5 && surf.Plane().Location().Z() > 29.0)
       lids++;
   }
   CHECK(lids == 0);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
-             WithinRel(20.0 * 20.0 * 13.4 - 10.0 * 10.0 * 9.0, 1e-5));
+             WithinRel(20.0 * 20.0 * 5.0 - 10.0 * 10.0 * 3.0, 1e-5));
 }
 
-TEST_CASE("An add from a face's height fuses whatever the plane rounds to",
-          "[extrude][feature]") {
-  // The other way round: 24.7 is stored as 24.70000076, so a boss grown up
-  // from a part whose top is at 24.7 started 0.8 um above it, and the part
-  // was two solids.
+TEST_CASE(
+    "An add fuses to a face a float-placed primitive left below its plane",
+    "[extrude][feature]") {
+  // The other way round: a box placed at z = 13.4 sits at 13.39999962, so a
+  // boss grown up from a plane typed at its top, 18.4, started 0.38 um above
+  // the face, and the part was two solids.
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 20, 20, 24.7));
-  const SketchPlane top(glm::vec3(0, 0, 24.7), glm::vec3(0, 0, 1),
-                        glm::vec3(1, 0, 0));
-  REQUIRE(double(top.GetOrigin().z) > 24.7);
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 13.4), 20, 20, 5.0));
+  const SketchPlane top(glm::dvec3(0, 0, 18.4), glm::dvec3(0, 0, 1),
+                        glm::dvec3(1, 0, 0));
   uint64_t sid = AddRectSketch(doc, {5, 5}, {15, 15}, top);
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Boss", sid, 5.0, ExtrudeMode::Add));
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
-             WithinRel(20.0 * 20.0 * 24.7 + 10.0 * 10.0 * 5.0, 1e-5));
+             WithinRel(20.0 * 20.0 * 5.0 + 10.0 * 10.0 * 5.0, 1e-5));
 }
 
 TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",

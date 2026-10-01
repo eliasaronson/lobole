@@ -12,20 +12,20 @@ DatumAxisFeature::DatumAxisFeature(const std::string& name, DatumAxisKind kind)
 bool DatumAxisFeature::Execute(RegenContext& ctx) {
   switch (kind) {
   case DatumAxisKind::GlobalX:
-    m_origin = glm::vec3(0.0f);
-    m_dir = glm::vec3(1.0f, 0.0f, 0.0f);
+    m_origin = glm::dvec3(0.0);
+    m_dir = glm::dvec3(1.0, 0.0, 0.0);
     return true;
   case DatumAxisKind::GlobalY:
-    m_origin = glm::vec3(0.0f);
-    m_dir = glm::vec3(0.0f, 1.0f, 0.0f);
+    m_origin = glm::dvec3(0.0);
+    m_dir = glm::dvec3(0.0, 1.0, 0.0);
     return true;
   case DatumAxisKind::GlobalZ:
-    m_origin = glm::vec3(0.0f);
-    m_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+    m_origin = glm::dvec3(0.0);
+    m_dir = glm::dvec3(0.0, 0.0, 1.0);
     return true;
   case DatumAxisKind::TwoPoints: {
-    const glm::vec3 d = p1 - p0;
-    if (glm::dot(d, d) < 1e-12f) {
+    const glm::dvec3 d = p1 - p0;
+    if (glm::dot(d, d) < 1e-12) {
       SetError("the two points are coincident");
       return false;
     }

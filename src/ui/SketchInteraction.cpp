@@ -69,7 +69,7 @@ void HandleCollectPhase(AppState& state, SketchFeature& sketch,
         finish(); // tap in empty space: confirm/continue
     } else {
       const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
-      auto project = [&](glm::vec2 p) {
+      auto project = [&](glm::dvec2 p) {
         return SketchUVToScreen(state, sketch.plane, p);
       };
       for (uint32_t id : sketch::BoxSelect(sketch.entities, edit.boxStart,
@@ -117,7 +117,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           if (auto uv = RayToPlaneUV(ray, p)) {
             if (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent)
               continue; // ray misses the visible quad
-            float dist = glm::length(p.PlaneToWorld(*uv) - ray.origin);
+            const float dist = static_cast<float>(
+                glm::length(p.PlaneToWorld(*uv) - glm::dvec3(ray.origin)));
             if (dist < bestDist) {
               bestDist = dist;
               plane = i;
@@ -133,8 +134,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           if (auto uv = RayToPlaneUV(ray, dp->OutputPlane())) {
             if (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent)
               continue;
-            float dist =
-                glm::length(dp->OutputPlane().PlaneToWorld(*uv) - ray.origin);
+            const float dist = static_cast<float>(glm::length(
+                dp->OutputPlane().PlaneToWorld(*uv) - glm::dvec3(ray.origin)));
             if (dist < bestDist) {
               bestDist = dist;
               plane = -1; // a datum beat the base planes
@@ -163,13 +164,17 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           if (!BeginHoleSketchOnFace(state, hit.meshId, hit.faceIndex))
             edit.actionMsg = "Hole: that face is curved - pick a flat one.";
         } else if (hit.hit) {
-          glm::vec3 c =
-              state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
-          glm::vec3 nrm =
-              state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex);
-          glm::vec3 u =
-              std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-          u = glm::normalize(u - glm::dot(u, nrm) * nrm);
+          // The B-rep face's own frame when it is planar (a plane baked from
+          // the render mesh is a float approximation of it); the mesh's
+          // otherwise.
+          glm::dvec3 c, nrm, u;
+          if (!ExactFacePlane(state, hit.meshId, hit.faceIndex, c, nrm, u)) {
+            c = state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
+            nrm = state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex);
+            u = std::abs(nrm.y) < 0.9 ? glm::dvec3(0, 1, 0)
+                                      : glm::dvec3(1, 0, 0);
+            u = glm::normalize(u - glm::dot(u, nrm) * nrm);
+          }
           const SketchPlane facePlane(c, nrm, u);
           // Attach to the face by its stable name when it has one; else bake.
           if (auto ref = FaceElementRef(state, hit.meshId, hit.faceIndex)) {
@@ -288,7 +293,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   auto uvOpt = RayToPlaneUV(ray, sketch->plane);
   if (!uvOpt)
     return true;
-  glm::vec2 uv = *uvOpt;
+  glm::dvec2 uv = *uvOpt;
 
   // Auto-constraint inference for the drawing tools: snap the cursor to nearby
   // geometry so the preview and the click both use the snapped point, and stash
@@ -308,7 +313,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
     // The fixed "other end" for segment-level H/V/parallel/perp snapping: the
     // pending Line start, or the last placed Spline pole.
-    std::optional<glm::vec2> other;
+    std::optional<glm::dvec2> other;
     if (edit.tool == SketchTool::Line && edit.hasPendingPoint)
       other = edit.pendingPoint;
     else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty())
@@ -323,7 +328,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
       std::vector<sketch::Entity> withPoles = sketch->entities;
       uint32_t synthId = 0xFFF00000u;
-      for (const glm::vec2& pole : edit.splinePoles) {
+      for (const glm::dvec2& pole : edit.splinePoles) {
         sketch::Point pt;
         pt.p = pole;
         pt.id = synthId++;
@@ -478,7 +483,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         }
       } else {
         const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
-        auto project = [&](glm::vec2 p) {
+        auto project = [&](glm::dvec2 p) {
           return SketchUVToScreen(state, sketch->plane, p);
         };
         auto ids = sketch::BoxSelect(sketch->entities, edit.boxStart,
@@ -669,14 +674,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       return true;
     }
     // Point-in-image: invert  origin + R(rotation) * (px,py)*unitsPerPixel.
-    const auto overImage = [&](glm::vec2 p) {
-      const glm::vec2 d = p - img->origin;
-      const float cs = std::cos(static_cast<float>(-img->rotation));
-      const float sn = std::sin(static_cast<float>(-img->rotation));
-      const glm::vec2 px = glm::vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) /
-                           static_cast<float>(img->unitsPerPixel);
-      return px.x >= 0.0f && px.x <= static_cast<float>(img->widthPx) &&
-             px.y >= 0.0f && px.y <= static_cast<float>(img->heightPx);
+    const auto overImage = [&](glm::dvec2 p) {
+      const glm::dvec2 d = p - img->origin;
+      const double cs = std::cos(-img->rotation);
+      const double sn = std::sin(-img->rotation);
+      const glm::dvec2 px =
+          glm::dvec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) /
+          img->unitsPerPixel;
+      return px.x >= 0.0 && px.x <= img->widthPx && px.y >= 0.0 &&
+             px.y <= img->heightPx;
     };
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && overImage(uv)) {
       edit.imageDragActive = true;
@@ -719,7 +725,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && vtx.hit) {
       const size_t vi = sketch->IndexOfEntity(vtx.ref.entity);
       if (vi != SIZE_MAX) {
-        const glm::vec2 cornerUV =
+        const glm::dvec2 cornerUV =
             sketch::EntityPointUV(sketch->entities[vi], vtx.ref.which);
         std::vector<uint32_t> lines; // lines with an endpoint at the corner
         for (const auto& e : sketch->entities)
@@ -906,7 +912,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.pendingPoint = uv;
       edit.hasPendingPoint = true;
     } else {
-      const glm::vec2 a = edit.pendingPoint;
+      const glm::dvec2 a = edit.pendingPoint;
       switch (edit.tool) {
       case SketchTool::Line:
         CommitLine(state, *sketch, index, a, uv, infer);

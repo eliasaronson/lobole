@@ -18,10 +18,10 @@
 namespace {
 // Angles (radians) where segment [la,lb] crosses the circle (center, r), for
 // intersection params strictly inside the segment. 0, 1, or 2 values.
-std::vector<double> LineCircleAngles(glm::vec2 center, double r, glm::vec2 la,
-                                     glm::vec2 lb) {
+std::vector<double> LineCircleAngles(glm::dvec2 center, double r, glm::dvec2 la,
+                                     glm::dvec2 lb) {
   std::vector<double> out;
-  const glm::vec2 d = lb - la, f = la - center;
+  const glm::dvec2 d = lb - la, f = la - center;
   const double A = glm::dot(d, d);
   if (A < 1e-12)
     return out;
@@ -33,7 +33,7 @@ std::vector<double> LineCircleAngles(glm::vec2 center, double r, glm::vec2 la,
   disc = std::sqrt(disc);
   for (double t : {(-B - disc) / (2.0 * A), (-B + disc) / (2.0 * A)}) {
     if (t > 1e-4 && t < 1.0 - 1e-4) {
-      glm::vec2 p = la + static_cast<float>(t) * d;
+      glm::dvec2 p = la + t * d;
       out.push_back(std::atan2(p.y - center.y, p.x - center.x));
     }
   }
@@ -41,13 +41,13 @@ std::vector<double> LineCircleAngles(glm::vec2 center, double r, glm::vec2 la,
 }
 
 // Params t in (0,1) along segment [a, a+d] where it crosses circle (center, r).
-std::vector<float> LineCircleParams(glm::vec2 a, glm::vec2 d, glm::vec2 center,
-                                    double r) {
-  std::vector<float> out;
+std::vector<double> LineCircleParams(glm::dvec2 a, glm::dvec2 d,
+                                     glm::dvec2 center, double r) {
+  std::vector<double> out;
   const double A = glm::dot(d, d);
   if (A < 1e-12)
     return out;
-  const glm::vec2 f = a - center;
+  const glm::dvec2 f = a - center;
   const double B = 2.0 * glm::dot(f, d);
   const double C = glm::dot(f, f) - r * r;
   double disc = B * B - 4.0 * A * C;
@@ -56,13 +56,13 @@ std::vector<float> LineCircleParams(glm::vec2 a, glm::vec2 d, glm::vec2 center,
   disc = std::sqrt(disc);
   for (double t : {(-B - disc) / (2.0 * A), (-B + disc) / (2.0 * A)})
     if (t > 1e-4 && t < 1.0 - 1e-4)
-      out.push_back(static_cast<float>(t));
+      out.push_back(t);
   return out;
 }
 
 // Angles (radians) on circle (c1, r1) where circle (c2, r2) crosses it.
 // Tangent/concentric/separate pairs yield none.
-std::vector<double> CircleCircleAngles(glm::vec2 c1, double r1, glm::vec2 c2,
+std::vector<double> CircleCircleAngles(glm::dvec2 c1, double r1, glm::dvec2 c2,
                                        double r2) {
   std::vector<double> out;
   const glm::dvec2 d(double(c2.x) - c1.x, double(c2.y) - c1.y);
@@ -192,7 +192,7 @@ std::optional<double> GetEntityField(const Entity& e,
 }
 
 bool SetEntityField(Entity& e, const std::string& field, double value) {
-  const float f = static_cast<float>(value);
+  const double f = value;
   return std::visit(
       [&](auto& g) -> bool {
         using T = std::decay_t<decltype(g)>;
@@ -379,7 +379,7 @@ bool SketchFeature::DeleteImage(uint32_t id) {
   return true;
 }
 
-bool SketchFeature::CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2,
+bool SketchFeature::CalibrateImage(uint32_t id, glm::dvec2 p1, glm::dvec2 p2,
                                    double distance, int alignAxis) {
   const size_t idx = IndexOfImage(id);
   if (idx == std::numeric_limits<size_t>::max())
@@ -414,17 +414,17 @@ bool SketchFeature::CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2,
   const double c2 = std::cos(rot), s2 = std::sin(rot);
   const glm::dvec2 offset(scale * (c2 * pix1.x - s2 * pix1.y),
                           scale * (s2 * pix1.x + c2 * pix1.y));
-  img.origin =
-      glm::vec2(float(double(p1.x) - offset.x), float(double(p1.y) - offset.y));
+  img.origin = glm::dvec2(double(double(p1.x) - offset.x),
+                          double(double(p1.y) - offset.y));
   img.rotation = rot;
   img.unitsPerPixel = scale;
   return true;
 }
 
-std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1,
-                                                    glm::vec2 c2) {
+std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::dvec2 c1,
+                                                    glm::dvec2 c2) {
   using K = sketch::ConstraintKind;
-  const glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+  const glm::dvec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
   const uint32_t l0 = AddEntity(sketch::Line{a, b}); // bottom (horizontal)
   const uint32_t l1 = AddEntity(sketch::Line{b, c}); // right (vertical)
   const uint32_t l2 = AddEntity(sketch::Line{c, d}); // top (horizontal)
@@ -442,10 +442,10 @@ std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1,
   return {l0, l1, l2, l3};
 }
 
-std::array<uint32_t, 5> SketchFeature::AddRectangleCentered(glm::vec2 center,
-                                                            glm::vec2 corner) {
+std::array<uint32_t, 5> SketchFeature::AddRectangleCentered(glm::dvec2 center,
+                                                            glm::dvec2 corner) {
   using K = sketch::ConstraintKind;
-  const auto ids = AddRectangle(2.0f * center - corner, corner);
+  const auto ids = AddRectangle(2.0 * center - corner, corner);
   // Anchor: a centre point held midway between the diagonal corners —
   // Symmetric about a POINT (the solver's P2PSymmetric point overload), so
   // the rectangle stays centred on it when dimensioned or dragged.
@@ -524,15 +524,15 @@ size_t SketchFeature::DeleteEntity(uint32_t id) {
   return droppedNonTrivial;
 }
 
-uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
+uint32_t SketchFeature::SplitEntity(uint32_t id, glm::dvec2 P) {
   const size_t idx = IndexOfEntity(id);
   if (idx == std::numeric_limits<size_t>::max())
     return 0;
   auto* line = std::get_if<sketch::Line>(&entities[idx]);
   if (!line)
     return 0;
-  const glm::vec2 a = line->a, b = line->b;
-  const float eps = 1e-4f;
+  const glm::dvec2 a = line->a, b = line->b;
+  const double eps = 1e-4;
   if (glm::length(P - a) < eps || glm::length(P - b) < eps)
     return 0; // degenerate: split at an endpoint
 
@@ -576,8 +576,9 @@ uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
   return newId;
 }
 
-bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
-                                glm::vec2& ab, float& tLo, float& tHi) const {
+bool SketchFeature::TrimBracket(uint32_t id, glm::dvec2 clickUV, glm::dvec2& a,
+                                glm::dvec2& ab, double& tLo,
+                                double& tHi) const {
   const size_t idx = IndexOfEntity(id);
   if (idx == std::numeric_limits<size_t>::max())
     return false;
@@ -586,26 +587,26 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
     return false;
   a = line->a;
   ab = line->b - line->a;
-  const float len2 = glm::dot(ab, ab);
-  if (len2 < 1e-12f)
+  const double len2 = glm::dot(ab, ab);
+  if (len2 < 1e-12)
     return false;
 
   // Cut parameters along [a,b]: interior intersections with other lines, and
   // where circles/arcs cross the line (so a curve laid over a line splits it).
-  std::vector<float> cuts = {0.0f, 1.0f};
+  std::vector<double> cuts = {0.0, 1.0};
   for (const auto& e : entities) {
     if (sketch::EntityId(e) == id)
       continue;
     if (auto* o = std::get_if<sketch::Line>(&e)) {
       if (auto t = sketch::SegmentIntersect(a, line->b, o->a, o->b))
-        if (*t > 1e-4f && *t < 1.0f - 1e-4f)
+        if (*t > 1e-4 && *t < 1.0 - 1e-4)
           cuts.push_back(*t);
     } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
-      for (float t : LineCircleParams(a, ab, c->center, c->radius))
+      for (double t : LineCircleParams(a, ab, c->center, c->radius))
         cuts.push_back(t);
     } else if (auto* ar = std::get_if<sketch::Arc>(&e)) {
-      for (float t : LineCircleParams(a, ab, ar->center, ar->radius)) {
-        const glm::vec2 p = a + t * ab;
+      for (double t : LineCircleParams(a, ab, ar->center, ar->radius)) {
+        const glm::dvec2 p = a + t * ab;
         if (AngleInArc(std::atan2(p.y - ar->center.y, p.x - ar->center.x), *ar))
           cuts.push_back(t);
       }
@@ -614,14 +615,14 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
   std::sort(cuts.begin(), cuts.end());
   cuts.erase(
       std::unique(cuts.begin(), cuts.end(),
-                  [](float x, float y) { return std::abs(x - y) < 1e-4f; }),
+                  [](double x, double y) { return std::abs(x - y) < 1e-4; }),
       cuts.end());
 
-  const float tClick = glm::clamp(glm::dot(clickUV - a, ab) / len2, 0.0f, 1.0f);
-  tLo = 0.0f;
-  tHi = 1.0f;
+  const double tClick = glm::clamp(glm::dot(clickUV - a, ab) / len2, 0.0, 1.0);
+  tLo = 0.0;
+  tHi = 1.0;
   for (size_t i = 0; i + 1 < cuts.size(); i++) {
-    if (tClick >= cuts[i] - 1e-6f && tClick <= cuts[i + 1] + 1e-6f) {
+    if (tClick >= cuts[i] - 1e-6 && tClick <= cuts[i + 1] + 1e-6) {
       tLo = cuts[i];
       tHi = cuts[i + 1];
       break;
@@ -630,36 +631,36 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
   return true;
 }
 
-std::optional<std::pair<glm::vec2, glm::vec2>>
-SketchFeature::TrimSpanAt(uint32_t id, glm::vec2 clickUV) const {
-  glm::vec2 a, ab;
-  float tLo, tHi;
+std::optional<std::pair<glm::dvec2, glm::dvec2>>
+SketchFeature::TrimSpanAt(uint32_t id, glm::dvec2 clickUV) const {
+  glm::dvec2 a, ab;
+  double tLo, tHi;
   if (!TrimBracket(id, clickUV, a, ab, tLo, tHi))
     return std::nullopt;
   return std::make_pair(a + tLo * ab, a + tHi * ab);
 }
 
-bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
-  glm::vec2 a, ab;
-  float tLo, tHi;
+bool SketchFeature::TrimLineAt(uint32_t id, glm::dvec2 clickUV) {
+  glm::dvec2 a, ab;
+  double tLo, tHi;
   if (!TrimBracket(id, clickUV, a, ab, tLo, tHi))
     return false;
-  auto at = [&](float t) { return a + t * ab; };
-  if (tLo <= 1e-4f && tHi >= 1.0f - 1e-4f) {
+  auto at = [&](double t) { return a + t * ab; };
+  if (tLo <= 1e-4 && tHi >= 1.0 - 1e-4) {
     DeleteEntity(id); // no bracketing cut — remove the whole line
     return true;
   }
   // Split off the clicked interval [tLo, tHi] and delete just that piece.
   uint32_t clicked = id;
-  if (tHi < 1.0f - 1e-4f)
+  if (tHi < 1.0 - 1e-4)
     SplitEntity(id, at(tHi)); // id becomes [0, tHi]
-  if (tLo > 1e-4f)
+  if (tLo > 1e-4)
     clicked = SplitEntity(id, at(tLo)); // new piece is [tLo, tHi]
   DeleteEntity(clicked);
   return true;
 }
 
-bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
+bool SketchFeature::TrimCurveAt(uint32_t id, glm::dvec2 clickUV) {
   const size_t idx = IndexOfEntity(id);
   if (idx == std::numeric_limits<size_t>::max())
     return false;
@@ -667,7 +668,7 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
   // Extract center/radius and the angular window (a full circle, or the arc's
   // own sweep). Angles below are all measured relative to `base` so the window
   // is the half-open interval [base, base + span).
-  glm::vec2 center;
+  glm::dvec2 center;
   double radius, base, span;
   const bool isCircle = std::holds_alternative<sketch::Circle>(entities[idx]);
   if (auto* c = std::get_if<sketch::Circle>(&entities[idx])) {
@@ -713,9 +714,8 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
     } else if (auto* oa = std::get_if<sketch::Arc>(&e)) {
       for (double ang :
            CircleCircleAngles(center, radius, oa->center, oa->radius)) {
-        const glm::vec2 p(center.x + static_cast<float>(radius * std::cos(ang)),
-                          center.y +
-                              static_cast<float>(radius * std::sin(ang)));
+        const glm::dvec2 p(center.x + (radius * std::cos(ang)),
+                           center.y + (radius * std::sin(ang)));
         if (AngleInArc(std::atan2(p.y - oa->center.y, p.x - oa->center.x), *oa))
           angles.push_back(ang);
       }
@@ -797,7 +797,7 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
   std::vector<uint32_t> generated;
   // Axis geometry comes from the datum helpers for the X/Y axes, else from the
   // axis line entity. A linked Mirror op references axisLineId either way.
-  glm::vec2 a, b;
+  glm::dvec2 a, b;
   if (sketch::IsDatum(axisLineId)) {
     const auto ep = sketch::DatumAxisEndpoints(axisLineId);
     a = ep.first;
@@ -867,8 +867,8 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
 
   // The shared corner: the endpoint pair (one per line) that coincides. c1/c2
   // are the which-index (0=a, 1=b) of the corner endpoint on each line.
-  const float tol = 1e-4f;
-  const glm::vec2 e1[2] = {l1->a, l1->b}, e2[2] = {l2->a, l2->b};
+  const double tol = 1e-4;
+  const glm::dvec2 e1[2] = {l1->a, l1->b}, e2[2] = {l2->a, l2->b};
   int c1 = -1, c2 = -1;
   for (int i = 0; i < 2 && c1 < 0; i++)
     for (int j = 0; j < 2; j++)
@@ -881,25 +881,24 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
     return fail("the lines share no endpoint (within 1e-4) - no corner to "
                 "round");
 
-  const glm::vec2 C = e1[c1];
-  glm::vec2 d1 = e1[1 - c1] - C, d2 = e2[1 - c2] - C;
-  const float len1 = glm::length(d1), len2 = glm::length(d2);
+  const glm::dvec2 C = e1[c1];
+  glm::dvec2 d1 = e1[1 - c1] - C, d2 = e2[1 - c2] - C;
+  const double len1 = glm::length(d1), len2 = glm::length(d2);
   if (len1 < tol || len2 < tol)
     return fail("a line is zero-length");
   d1 /= len1;
   d2 /= len2;
-  const double theta = std::acos(glm::clamp(glm::dot(d1, d2), -1.0f, 1.0f));
+  const double theta = std::acos(glm::clamp(glm::dot(d1, d2), -1.0, 1.0));
   if (theta < 1e-3 || theta > M_PI - 1e-3)
     return fail("the lines are parallel/collinear - no corner to round");
   const double dTan = radius / std::tan(theta / 2.0);
   if (dTan > len1 - tol || dTan > len2 - tol)
     return fail("radius " + std::to_string(radius) +
                 " is too large - the fillet would consume a whole segment");
-  const glm::vec2 bis = glm::normalize(d1 + d2);
-  const glm::vec2 center =
-      C + bis * static_cast<float>(radius / std::sin(theta / 2.0));
-  const glm::vec2 T1 = C + d1 * static_cast<float>(dTan);
-  const glm::vec2 T2 = C + d2 * static_cast<float>(dTan);
+  const glm::dvec2 bis = glm::normalize(d1 + d2);
+  const glm::dvec2 center = C + bis * (radius / std::sin(theta / 2.0));
+  const glm::dvec2 T1 = C + d1 * dTan;
+  const glm::dvec2 T2 = C + d2 * dTan;
 
   // Trim each line's corner endpoint to its tangent point.
   (c1 == 0 ? l1->a : l1->b) = T1;
@@ -985,11 +984,9 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   constraints.push_back({K::PointOnLine, {pId, 0}, {lineId2, 0}, 0.0});
 
   // Add-then-prune: in a richly-constrained corner the fillet's own web (arc
-  // tangency + endpoint coincidents + the point-on-line direction locks)
-  // over-determines the corner, so ONE fillet-added constraint becomes
-  // REDUNDANT (dependent on the rest — here typically a tangent, implied once
-  // both lines are collinear-locked to the fixed corner point and their
-  // endpoints sit on the arc). PlaneGCS reports redundants as "conflicting",
+  // tangency + endpoint coincidents + the point-on-line direction locks) can
+  // over-determine the corner, so a fillet-added constraint can be REDUNDANT
+  // (dependent on the rest). PlaneGCS reports redundants as "conflicting",
   // a spurious red flag on a sketch that is geometrically fine.
   //
   // Solve and drop exactly one flagged constraint that WE added this call —
@@ -1139,7 +1136,7 @@ std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
     if (!idx) {
       continue;
     }
-    glm::vec3 center, normal, uAxis;
+    glm::dvec3 center, normal, uAxis;
     if (body.shape.FacePlane(*idx, center, normal, uAxis)) {
       return SketchPlane(center, normal, uAxis);
     }
@@ -1282,7 +1279,7 @@ void SketchFeature::RegenerateDerived() {
     // Mirror (v51): resolve the axis endpoints fresh each regen so the
     // copies track it. An unresolvable axis prunes the instances (same as
     // a vanished source).
-    glm::vec2 axisA{0.0f}, axisB{0.0f};
+    glm::dvec2 axisA{0.0}, axisB{0.0};
     if (op.kind == sketch::DerivedKind::Mirror) {
       bool axisOk = false;
       if (sketch::IsDatum(op.axisEntity)) {
@@ -1310,7 +1307,7 @@ void SketchFeature::RegenerateDerived() {
 
     // Circular (v51): an optional centre REFERENCE tracks an entity point;
     // fall back to the baked coordinate when unset or unresolvable.
-    glm::vec2 circCenter = op.vec;
+    glm::dvec2 circCenter = op.vec;
     if (op.kind == sketch::DerivedKind::CircularPattern &&
         op.centerEntity != 0) {
       const size_t ci = IndexOfEntity(op.centerEntity);
@@ -1329,8 +1326,8 @@ void SketchFeature::RegenerateDerived() {
         const int col = k % op.count;
         const int row = k / op.count;
         return sketch::TranslateEntity(src,
-                                       static_cast<float>(col) * op.vec +
-                                           static_cast<float>(row) * op.vec2);
+                                       static_cast<double>(col) * op.vec +
+                                           static_cast<double>(row) * op.vec2);
       }
       return sketch::RotateEntity(src, circCenter,
                                   static_cast<double>(k) * op.scalar);
@@ -1424,8 +1421,8 @@ void SketchFeature::BreakLink(size_t opIndex) {
 
 std::vector<uint32_t>
 SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
-                                glm::vec2 step, int count, bool link,
-                                glm::vec2 step2, int count2) {
+                                glm::dvec2 step, int count, bool link,
+                                glm::dvec2 step2, int count2) {
   std::vector<uint32_t> gen;
   count2 = std::max(1, count2);
   if (count < 2 || sourceIds.empty())
@@ -1442,8 +1439,8 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
           if (row == 0 && col == 0)
             continue;
           gen.push_back(AddEntity(sketch::TranslateEntity(
-              srcCopy, static_cast<float>(col) * step +
-                           static_cast<float>(row) * step2)));
+              srcCopy, static_cast<double>(col) * step +
+                           static_cast<double>(row) * step2)));
         }
     }
     return gen;
@@ -1463,7 +1460,7 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
 }
 
 std::vector<uint32_t> SketchFeature::AddCircularPattern(
-    const std::vector<uint32_t>& sourceIds, glm::vec2 center, double stepAngle,
+    const std::vector<uint32_t>& sourceIds, glm::dvec2 center, double stepAngle,
     int count, bool link, uint32_t centerEntity, uint8_t centerWhich) {
   std::vector<uint32_t> gen;
   if (count < 2 || sourceIds.empty())

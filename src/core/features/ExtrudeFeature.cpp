@@ -70,7 +70,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     }
     // Signed sweep along the sketch normal to the target's plane — the sign
     // picks the side, so `reversed` does not apply.
-    const glm::vec3 n = sketch->plane.GetNormal();
+    const glm::dvec3 n = sketch->plane.GetNormal();
     total = glm::dot(target->GetOrigin() - sketch->plane.GetOrigin(), n);
     sweepReversed = false;
   } else if (endMode == ExtrudeEnd::ThroughAll) {
@@ -84,31 +84,31 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     }
     // Sweep from the sketch plane to just past the farthest body extent
     // along the cut direction (`reversed` picks the side, like a blind cut).
-    const glm::vec3 n = sketch->plane.GetNormal();
-    const glm::vec3 dir = reversed ? -n : n;
-    const glm::vec3 origin = sketch->plane.GetOrigin();
-    float reach = 0.0f;
+    const glm::dvec3 n = sketch->plane.GetNormal();
+    const glm::dvec3 dir = reversed ? -n : n;
+    const glm::dvec3 origin = sketch->plane.GetOrigin();
+    double reach = 0.0;
     for (const auto& b : ctx.bodies) {
       glm::vec3 lo, hi;
       b.shape.GetBoundingBox(lo, hi);
       for (int c = 0; c < 8; ++c) {
-        const glm::vec3 corner{c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y,
-                               c & 4 ? hi.z : lo.z};
+        const glm::dvec3 corner{c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y,
+                                c & 4 ? hi.z : lo.z};
         reach = std::max(reach, glm::dot(corner - origin, dir));
       }
     }
     total = reach + 1.0;
   }
   // A tool that starts ON its sketch plane starts a hair behind it when a
-  // face of the body it meets lies there within the plane's single-precision
-  // rounding: otherwise a pocket cut from a face can keep a sub-micron skin
-  // over it (CoplanarStartSlack).
+  // face of the body it meets lies there within single-precision rounding (a
+  // face placed through float): otherwise a pocket cut from that face can
+  // keep a sub-micron skin over it (CoplanarStartSlack).
   if ((mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) &&
       (endMode == ExtrudeEnd::Blind || endMode == ExtrudeEnd::ThroughAll) &&
       total > 0.0) {
-    const glm::dvec3 n(sketch->plane.GetNormal());
+    const glm::dvec3 n = sketch->plane.GetNormal();
     const double slack =
-        CoplanarStartSlack(ctx.bodies, glm::dvec3(sketch->plane.GetOrigin()),
+        CoplanarStartSlack(ctx.bodies, sketch->plane.GetOrigin(),
                            reversed ? -n : n, mode == ExtrudeMode::Cut);
     total += slack;
     backOffset += slack;
@@ -137,9 +137,8 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     return false;
   }
   if (backOffset != 0.0) {
-    const glm::vec3 n = sketch->plane.GetNormal();
-    const float sign = reversed ? 1.0f : -1.0f;
-    prism.Translate(n * (sign * static_cast<float>(backOffset)));
+    const double sign = reversed ? 1.0 : -1.0;
+    prism.Translate(sketch->plane.GetNormal() * (sign * backOffset));
   }
 
   if (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) {

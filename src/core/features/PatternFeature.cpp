@@ -72,8 +72,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
       SetError("mirror plane not found");
       return false;
     }
-    const glm::vec3 o = plane->GetOrigin();
-    const glm::vec3 n = plane->GetNormal();
+    const glm::dvec3 o = plane->GetOrigin();
+    const glm::dvec3 n = plane->GetNormal();
     for (size_t i = 0; i < seedCount; i++) {
       CADShape reflected = instances[i].first;
       reflected.Mirror(o, n);
@@ -81,8 +81,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
                              Suffixed(instances[i].second, "m"));
     }
   } else {
-    glm::vec3 axisOrigin{0.0f};
-    glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
+    glm::dvec3 axisOrigin{0.0};
+    glm::dvec3 axisDir{1.0, 0.0, 0.0};
     if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
       SetError("pattern axis not found");
       return false;
@@ -102,7 +102,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
       for (int k = 1; k < n; k++) {
         CADShape copy = instances[i].first;
         if (kind == PatternKind::Linear) {
-          copy.Translate(axisDir * static_cast<float>(k * spacing));
+          copy.Translate(axisDir * (k * spacing));
         } else { // Circular
           copy.RotateAbout(axisOrigin, axisDir,
                            glm::radians(static_cast<double>(k) * angleDeg));
@@ -138,8 +138,8 @@ bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
     reflected.Mirror(plane->GetOrigin(), plane->GetNormal());
     cutters.emplace_back(std::move(reflected), suffixed("m"));
   } else {
-    glm::vec3 axisOrigin{0.0f};
-    glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
+    glm::dvec3 axisOrigin{0.0};
+    glm::dvec3 axisDir{1.0, 0.0, 0.0};
     if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
       SetError("pattern axis not found");
       return false;
@@ -155,7 +155,7 @@ bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
     for (int k = 1; k < n; k++) { // k = 0 is the source cut itself
       CADShape copy = tool;
       if (kind == PatternKind::Linear)
-        copy.Translate(axisDir * static_cast<float>(k * spacing));
+        copy.Translate(axisDir * (k * spacing));
       else
         copy.RotateAbout(axisOrigin, axisDir,
                          glm::radians(static_cast<double>(k) * angleDeg));

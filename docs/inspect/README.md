@@ -363,10 +363,12 @@ partner, and an all-pairs sweep is quadratic.
 
 ## Positions are float32
 
-Document positions are float32 (`SketchPlane` is `glm::vec3`, about 1e-5 mm
-of resolution at 100 mm), so a filter on a position needs a tolerance sized to
-its magnitude: a 1e-6 window silently matches nothing. `Measure` reports
-doubles.
+Outside the sketch, document positions are float32 — a primitive's position
+and an occurrence's placement among them — about 1e-5 mm of resolution at
+100 mm, so a filter on such a position needs a tolerance sized to its
+magnitude: a 1e-6 window silently matches nothing. `Measure` reports
+doubles, and so do sketch planes and sketch geometry
+([../sketching/README.md](../sketching/README.md#plane)).
 
 ## How it is tested
 

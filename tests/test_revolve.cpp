@@ -25,8 +25,8 @@ static const SketchPlane kXY(PlaneType::XY);
 // A rectangle sketch on XY; returns its feature id. On XY the plane UV maps
 // directly to world XY, so (1,0)->(3,3) sits at x in [1,3], y in [0,3], z=0 —
 // entirely on the +x side of the global Y axis.
-static uint64_t AddRectSketch(Document& doc, const glm::vec2& c1,
-                              const glm::vec2& c2) {
+static uint64_t AddRectSketch(Document& doc, const glm::dvec2& c1,
+                              const glm::dvec2& c2) {
   auto sk = std::make_unique<SketchFeature>("Profile", kXY);
   sk->AddRectangle(c1, c2);
   doc.AddFeature(std::move(sk));
@@ -87,8 +87,8 @@ TEST_CASE("Symmetric revolve matches one-directional volume but centers it",
   glm::vec3 omin, omax, smin, smax;
   one.GetBodies()[0].shape.GetBoundingBox(omin, omax);
   sym.GetBodies()[0].shape.GetBoundingBox(smin, smax);
-  CHECK_THAT(smin.z + smax.z, WithinAbs(0.0f, 1e-3f)); // centered
-  CHECK(std::abs(omin.z + omax.z) > 1.0f);             // offset to one side
+  CHECK_THAT(smin.z + smax.z, WithinAbs(0.0, 1e-3)); // centered
+  CHECK(std::abs(omin.z + omax.z) > 1.0);            // offset to one side
 }
 
 // --- Failure modes -----------------------------------------------------------
@@ -233,10 +233,9 @@ static std::vector<sketch::Entity> ArcCapProfile(double apexZ) {
   const double r = (10.0 * 10.0 + sag * sag) / (2.0 * sag);
   const double zc = apexZ - r;
   const double a0 = std::atan2(-13.0 - zc, 10.0);
-  const glm::vec2 A{0.0f, -62.1f}, B{38.0f, -62.1f}, C{38.0f, -25.7f},
-      D{49.5f, -8.0f}, E{52.5f, -7.4f}, F{52.5f, -5.4f}, G{61.0f, -3.4f},
-      H{61.0f, -2.4f}, I{46.0f, 0.0f}, J{10.0f, -13.0f},
-      K{0.0f, static_cast<float>(apexZ)};
+  const glm::dvec2 A{0.0, -62.1}, B{38.0, -62.1}, C{38.0, -25.7}, D{49.5, -8.0},
+      E{52.5, -7.4}, F{52.5, -5.4}, G{61.0, -3.4}, H{61.0, -2.4}, I{46.0, 0.0},
+      J{10.0, -13.0}, K{0.0, static_cast<double>(apexZ)};
   std::vector<sketch::Entity> e;
   for (auto [p, q] : {std::pair{A, B},
                       {B, C},
@@ -249,7 +248,7 @@ static std::vector<sketch::Entity> ArcCapProfile(double apexZ) {
                       {I, J},
                       {K, A}})
     e.push_back(sketch::Line{p, q});
-  e.push_back(sketch::Arc{{0.0f, static_cast<float>(zc)}, r, a0, M_PI / 2.0});
+  e.push_back(sketch::Arc{{0.0, static_cast<double>(zc)}, r, a0, M_PI / 2.0});
   return e;
 }
 
@@ -261,7 +260,7 @@ TEST_CASE("Exact-coordinate arc profile revolves (float32 joint tolerance)",
           "[revolve][arc]") {
   // Regression: with apex -9.5 the dome arc's joint vertices sat ~1e-6 off
   // the exact-double trimming circle (all UV math is float32) while their
-  // tolerance was measured only against the float endpoint — MakeEdge's
+  // tolerance was measured only against the double endpoint — MakeEdge's
   // projection failed and the whole revolve threw "BRep_API: command not
   // done". Solver-noised GUI arcs accidentally cleared the bar; exactly-
   // authored RPC arcs are the ones that collapsed it.
@@ -294,7 +293,7 @@ TEST_CASE("Arc profile builds across a dome-radius sweep", "[revolve][arc]") {
 TEST_CASE("BuildLoops arc endpoints match the wire builder's rounding",
           "[revolve][arc]") {
   // BuildLoops and MakeLoopWire must derive arc endpoints with the same
-  // float32 rounding (center + float(r*cos a)), or the joint midpoints drift
+  // float32 rounding (center + double(r*cos a)), or the joint midpoints drift
   // from the trimming circle by an extra ulp.
   auto loops = sketch::BuildLoops(ArcCapProfile(-9.5));
   REQUIRE(loops.size() == 1);
@@ -304,11 +303,11 @@ TEST_CASE("BuildLoops arc endpoints match the wire builder's rounding",
       arc = &e;
   REQUIRE(arc != nullptr);
   const auto onCircle = [&](double ang) {
-    return glm::vec2{
-        arc->center.x + static_cast<float>(arc->radius * std::cos(ang)),
-        arc->center.y + static_cast<float>(arc->radius * std::sin(ang))};
+    return glm::dvec2{
+        arc->center.x + static_cast<double>(arc->radius * std::cos(ang)),
+        arc->center.y + static_cast<double>(arc->radius * std::sin(ang))};
   };
-  const glm::vec2 s = onCircle(arc->angStart), en = onCircle(arc->angEnd);
+  const glm::dvec2 s = onCircle(arc->angStart), en = onCircle(arc->angEnd);
   // BuildLoops may swap a/b to fit the walk; accept either pairing, bitwise.
   const bool fwd = arc->a == s && arc->b == en;
   const bool rev = arc->a == en && arc->b == s;
@@ -409,7 +408,7 @@ TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   CHECK_THAT(g->GetBodies()[0].shape.Volume(), WithinRel(24.0 * M_PI, 1e-3));
   auto* coil = dynamic_cast<CurveFeature*>(g->GetFeature(2));
   REQUIRE(coil);
-  CHECK(glm::length(coil->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3f);
+  CHECK(glm::length(coil->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3);
 }
 
 TEST_CASE("A profile whose arc ends on the axis revolves at every size",
@@ -437,12 +436,13 @@ TEST_CASE("A profile whose arc ends on the axis revolves at every size",
     const double end = std::atan2(p0.y - c.y, p0.x - c.x);
     const double start = std::atan2(p2.y - c.y, p2.x - c.x);
     std::vector<sketch::Entity> ents = {
-        sketch::Line{{0.0f, 0.0f}, {0.0f, float(5.0 * k)}, 1},
-        sketch::Line{{0.0f, float(5.0 * k)}, {float(p0.x), float(5.0 * k)}, 2},
+        sketch::Line{{0.0, 0.0}, {0.0, double(5.0 * k)}, 1},
         sketch::Line{
-            {float(p0.x), float(5.0 * k)}, {float(p0.x), float(p0.y)}, 3},
-        sketch::Arc{glm::vec2(c), r, start, end, 4},
-        sketch::Line{{float(p2.x), 0.0f}, {0.0f, 0.0f}, 5}};
+            {0.0, double(5.0 * k)}, {double(p0.x), double(5.0 * k)}, 2},
+        sketch::Line{
+            {double(p0.x), double(5.0 * k)}, {double(p0.x), double(p0.y)}, 3},
+        sketch::Arc{glm::dvec2(c), r, start, end, 4},
+        sketch::Line{{double(p2.x), 0.0}, {0.0, 0.0}, 5}};
     const auto loops = sketch::BuildLoops(ents);
     REQUIRE(loops.size() == 1);
     ElementMap names;

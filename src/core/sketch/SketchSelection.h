@@ -15,8 +15,8 @@ namespace sketch {
 // injected so this is camera-free and unit-testable. Construction geometry is
 // eligible.
 std::vector<uint32_t>
-BoxSelect(const std::vector<Entity>& entities, glm::vec2 rectMin,
-          glm::vec2 rectMax, bool crossing,
-          const std::function<glm::vec2(glm::vec2)>& project);
+BoxSelect(const std::vector<Entity>& entities, glm::dvec2 rectMin,
+          glm::dvec2 rectMax, bool crossing,
+          const std::function<glm::dvec2(glm::dvec2)>& project);
 
 } // namespace sketch

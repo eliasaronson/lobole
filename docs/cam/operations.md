@@ -53,10 +53,11 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | verb | pick | derives |
 |---|---|---|
 | Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top as the earlier setups left it (below). A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
+| Clear round the part | the part's OUTSIDE wall, as an `adaptive` (`add_cam_op`; a pocket on a wall is refused, naming this) | the stock between its edge and the part, from the stock top down the wall; through the stock's bottom when the wall reaches the part's bottom, as a cut-out does ([Clear round](#clear-round)). An opening's wall is refused: its floor says how deep |
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
-| Drill a hole | inside the hole (a cylindrical face) | top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out -- and a hole that comes out of the part's bottom starts that from the STOCK's bottom, as a cut-out does, so the bottom margin is drilled through too; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
+| Drill a hole | inside the hole (a cylindrical face) | refused when the hole opens away from the spindle (metal over its top: tapped up from the underside); top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out -- and a hole that comes out of the part's bottom starts that from the STOCK's bottom, as a cut-out does, so the bottom margin is drilled through too; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
 | Break an edge | the wall whose top edge to break | the break the model has there (top = its top edge, `edge_size` = a chamfer's width or a round's height), else on a sharp edge the biggest the tool can make within the wall; a flat mill is refused |
 | Face the top | none | the stock above the part, top = stock top, bottom = part top |
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
@@ -103,7 +104,13 @@ where a floor is wanted and the reverse; a hole that does not point at the
 spindle ("lay a face up"); a cutter wider than the hole; a V-bit or drill on
 anything with a floor (pocket, face, adaptive — the `NeedsFlatFloor` column:
 a cone ploughs a groove as deep as the pass, and no stepover fixes that); a
-V-bit or drill on a surface finish; an inside profile with nothing to follow.
+V-bit or drill on a surface finish; an inside profile with nothing to follow;
+a hole or a thread whose bore opens downward ("drill it from the side it
+opens on"): its axis is vertical, which was once all the check asked, and the
+pan/tilt head's tripod hole, tapped up from the underside, was derived as a
+through hole from the top. Depths read from a face's extent take its exact
+bounds (`BRepBndLib::AddOptimal`), not a box widened by the face's tolerance,
+which bored a Ø32 bearing seat 20 µm under its own shoulder.
 "Cut it out" on a level face that has material standing round it refuses
 rather than routing a full-depth contour round a pocket floor.
 
@@ -269,6 +276,35 @@ is scrap.
   there anyway made moves that kept the fall-back from running.
 - Both refuse cones (`NeedsFlatFloor`).
 
+### Clear round
+
+A part cut from a blank in a vise has its waste ROUND it, and no floor to
+pick: before this, only a profile could take it, which leaves a frame for the
+operator to saw off (or, cut through, to fall into the cutter as it frees).
+An adaptive whose target is the part's OUTSIDE wall clears round
+the part (`ClearsRound`, `ClearRoundRegions` in `CamStrategies.cpp`). A
+pocket on a wall stays refused, naming the adaptive: the pocket verb clicked
+on a wall is a missed floor more often than a request to clear the whole
+stock, and taken as one it ran for minutes on a sheet with a post at its far
+end (`cam/verbs_two_clicks_to_a_pocket`).
+
+- **The region**, per depth pass: the stock, grown by 0.55 of the cutter
+  (its edges are open, so the cutter's centre may stand on them), less the
+  part's projection from the operation's top down to the pass with its
+  openings filled -- an overhang above a pass is not undercut, and the
+  cutter never goes into the part's own pockets.
+- **Adaptive** clears that region from inside, and is told the ring beyond
+  the stock is already clear (a loop marked `hole` in an adaptive region,
+  `CamAdaptive.cpp`), so it does not cut the air there. It still enters on
+  its own helix, in the stock's corner. The ring starts a quarter cutter out
+  from the stock: told the stock's own edge was clear, it left a 0.6 mm
+  sliver along it. Told nothing, it cleared the air too: the base plate's
+  two setups cut 77 m and took 13 minutes to plan, against 62 m and 2.
+- **Depths** derive from the wall: from the stock top down to the wall's
+  bottom, or through the stock's bottom when the wall reaches the part's.
+  A vise-held part stops above the jaws with `bottom_z` and takes the rest
+  from the other side (the pan/tilt base plate, `generators/pantilt/cam.py`).
+
 ### Face
 
 Clears the stock above the part, starting with the cutter centred on the
@@ -284,7 +320,8 @@ the tool is **bored**: a helix down at the ramp angle on the circle the tool
 centre walks, a flat turn at the bottom, and for a hole wider than two tools
 rings from the centre outward by the stepover, the wall last so a through
 hole's slug goes progressively. A hole narrower than the tool is refused. A
-hole must point at the spindle.
+hole must point at the spindle and open toward it: one with metal over its
+top is drilled from the other side.
 
 A through hole that comes out of the part's bottom is drilled through the
 stock's bottom margin as well, plus the point's height (`TipHeight`): the
@@ -316,6 +353,9 @@ square step nobody asked for.
   there is nothing within a tool radius of the wall there. On a chamfered
   or rounded one the material steps back from it up to the top face.
   Bisection finds that face, which is the real edge and the op's `top_z`.
+  The sections are flattened to 2 µm chords, not the toolpaths' 20: the
+  width is measured across them, and a 0.5 mm chamfer on a Ø73.6 rim read
+  0.52 wide (92 degrees) and was refused for a 90 degree cutter.
 - **The size:** the break's width there for a chamfer (exact at its top),
   or its height for a round (a round meets the face tangentially, so its
   width just below falls short).
@@ -472,7 +512,7 @@ output for a 3/8-16 UNC.
   plus twice the thread's depth must fit the bore, or the helix has no room;
   a profile shallower than the thread, where the neck would rub the crests
   before the last pass reached the root; an axis that does not point at the
-  spindle; and a machine that posts no arcs or a post without helical arcs
+  spindle, or a bore that opens downward (metal over its top); and a machine that posts no arcs or a post without helical arcs
   (`HelicalArcRefusal`, [post.md](post.md#helical-arcs)).
 - **Posted** as helical G2/G3: each arc is declared on the toolpath
   (`Toolpath::Arc`) and written whole, [post.md](post.md#helical-arcs).
@@ -508,9 +548,13 @@ cuts threads and nothing else: any other operation refuses it.
 
 `finishTool` / `finishStock` on profile, pocket, face, drill, adaptive and
 edge round: the operation roughs with its own tool leaving `finishStock`
-(default a tenth of the roughing cutter) on the wall and in Z, then a second
-toolpath with the finishing tool takes the final boundary in one full-depth
-pass. One operation with two tools rather than two operations that must agree
+(default a tenth of the roughing cutter) on the WALL, then a second toolpath
+with the finishing tool takes the final boundary in one full-depth pass. The
+floor is the rough's, cut to depth: where the depth passes lift the floor by
+the stock to leave (`DepthPasses`: profile, pocket, adaptive, face) the
+rough's bottom is lowered by the finish stock to cancel it; a bore helixes to
+its own bottom and an edge break sizes itself from its depth, so theirs is
+left alone (lowered, a bore was roughed 0.2 mm under its floor). One operation with two tools rather than two operations that must agree
 about a boundary; tool ordering groups the two toolpaths. The panel's
 operation settings offer "finish with T<n>".
 

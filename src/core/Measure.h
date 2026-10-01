@@ -64,15 +64,12 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 // the way out should not add loss the caller cannot see. A box at 164.8 now
 // reports 164.8 and not 164.800003.
 //
-// This is NOT the whole of that problem, and it would be misleading to read
-// it as the fix. Geometry built on a SKETCH is still positioned in float32,
-// because SketchPlane (src/cad/SketchPlane.h) holds its origin and axes as
-// glm::vec3 — so a panel drawn on a plane at -172.8 sits at -172.800003 and
-// faithfully reports it. That is a document-model precision choice (~1e-5 mm
-// at 100 mm, under any manufacturing tolerance) and changing it touches the
-// format. What it means for a CALLER is worth knowing either way: a position
-// filter needs a tolerance suited to the magnitude, because a 1e-6 window
-// matches NOTHING at cabinet scale — silently, since an empty pick list
+// Geometry built on a sketch is double end to end too (SketchPlane holds
+// glm::dvec3), so a panel drawn on a plane at -172.8 sits at -172.8. Other
+// document positions are still float32 -- a primitive's position, an
+// occurrence's placement -- so a CALLER filtering on a position needs a
+// tolerance suited to the magnitude: a 1e-6 window matches NOTHING at
+// cabinet scale where a float went in, silently, since an empty pick list
 // looks exactly like nothing to do
 // (docs/inspect/README.md#positions-are-float32).
 struct FaceInfo {

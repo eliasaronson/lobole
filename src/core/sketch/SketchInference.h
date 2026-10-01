@@ -22,7 +22,7 @@ enum class GlyphKind {
 // The referenced constraints describe "the new point": the caller fills in the
 // new entity's id once it exists (see the commit path).
 struct Snap {
-  glm::vec2 uv{0.0f};                  // the point, snapped (or unchanged)
+  glm::dvec2 uv{0.0};                  // the point, snapped (or unchanged)
   std::optional<PointRef> coincident;  // snap the point coincident to this
   std::optional<uint32_t> pointOnLine; // else bind the point onto this line id
   // Axis alignment with another vertex: the new point shares that vertex's X
@@ -44,8 +44,8 @@ struct Snap {
 // nullopt disables segment-level inference. `skipId` (the entity being drawn,
 // 0 if none yet) is excluded from candidates. `pixelsPerUV` converts the pixel
 // tolerances to UV space (from the current zoom).
-Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
-                std::optional<glm::vec2> other, uint32_t skipId,
-                float pixelsPerUV);
+Snap InferPoint(const std::vector<Entity>& entities, glm::dvec2 uv,
+                std::optional<glm::dvec2> other, uint32_t skipId,
+                double pixelsPerUV);
 
 } // namespace sketch

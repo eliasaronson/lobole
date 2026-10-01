@@ -136,7 +136,7 @@ void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
 glm::vec2 WorldToScreen(AppState& state, const glm::vec3& world);
 
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
-                           glm::vec2 uv);
+                           glm::dvec2 uv);
 
 // Screen-space pick of a sketch element within tolerance. `body` is true when
 // the hit is on an entity's interior (line segment / circle rim) rather than an
@@ -171,7 +171,7 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
 // default (the placement-stage path).
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr = {},
-                           const glm::vec2* labelOffset = nullptr);
+                           const glm::dvec2* labelOffset = nullptr);
 
 // Dimension-on-create: while a draw tool is live, typing a digit opens a
 // small value field near the cursor; Enter applies it as a driving dimension
@@ -206,8 +206,8 @@ bool SetPatternCount(AppState& state, size_t opIndex, int count);
 // `vec`, circular step angle in `scalar` radians, `count`; linear may also
 // carry the v50 second grid direction `vec2`/`count2`) and regenerates it
 // id-stably. No-op if unchanged or count < 2. One undo record.
-bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
-                       double scalar, int count, glm::vec2 vec2 = {0.0f, 0.0f},
+bool EditPatternParams(AppState& state, size_t opIndex, glm::dvec2 vec,
+                       double scalar, int count, glm::dvec2 vec2 = {0.0, 0.0},
                        int count2 = 1);
 
 // Removes a linked pattern (its op + generated entities) and regenerates. One
@@ -241,7 +241,7 @@ void TextToolActivated(AppState& state);
 // Places a label at `uv` from the Tool window's fields and makes it the one
 // the window edits. False (with SketchEditState::textError set) when the
 // label cannot be laid out — refused visibly, nothing committed.
-bool PlaceSketchText(AppState& state, glm::vec2 uv);
+bool PlaceSketchText(AppState& state, glm::dvec2 uv);
 // Re-applies the Tool window's fields to the label being edited, as one undo
 // record. False (textError set) when the edit is refused.
 bool ApplyTextEdit(AppState& state);

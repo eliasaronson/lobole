@@ -26,7 +26,7 @@
 
 namespace {
 
-gp_Pnt P(const glm::vec3& v) { return gp_Pnt(v.x, v.y, v.z); }
+gp_Pnt P(const glm::dvec3& v) { return gp_Pnt(v.x, v.y, v.z); }
 glm::dvec3 G(const gp_XYZ& v) { return {v.X(), v.Y(), v.Z()}; }
 
 TopoDS_Face Rect(const gp_Pnt& o, const gp_Vec& a, const gp_Vec& b) {
@@ -136,8 +136,9 @@ bool JogFeature::Execute(RegenContext& ctx) {
         if (surf.GetType() != GeomAbs_Plane)
           continue;
         const gp_Pln pln = surf.Plane();
-        // Sketch coordinates are single precision, so a line drawn on the
-        // face sits on it to a few microns, not to machine precision.
+        // A line drawn on the face sits on it to whatever placed the face
+        // (a face placed through float is microns off), not to machine
+        // precision.
         if (pln.Distance(a) > 1e-4 || pln.Distance(b) > 1e-4)
           continue;
         gp_Dir n = pln.Axis().Direction();
@@ -149,8 +150,8 @@ bool JogFeature::Execute(RegenContext& ctx) {
           continue;
         body = &candidate;
         up = n;
-        // Onto the face exactly: the sketch's single precision is not a
-        // coordinate the bends should inherit.
+        // Onto the face exactly: the gap between the plane and the face is
+        // not a coordinate the bends should inherit.
         const gp_Vec off(pln.Location(), a);
         a.Translate(gp_Vec(n) * -off.Dot(gp_Vec(n)));
         const gp_Vec offB(pln.Location(), b);

@@ -65,7 +65,7 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
             add(g.a);
             add(g.b);
           } else if constexpr (std::is_same_v<T, sketch::Circle>) {
-            const glm::vec2 r(static_cast<float>(g.radius));
+            const glm::dvec2 r(g.radius);
             add(g.center - r);
             add(g.center + r);
           } else if constexpr (std::is_same_v<T, sketch::Arc> ||
@@ -189,18 +189,18 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
     // Resolve the axis exactly as regeneration does, against the features
     // before the pending one. RegenContext only reads here; the bodies ref
     // is non-const purely for regeneration's sake.
-    glm::vec3 origin, dir;
+    glm::dvec3 origin, dir;
     RegenContext ctx{const_cast<std::vector<Body>&>(doc.GetBodies()),
                      doc.GetFeatures(), index};
     if (!ResolveAxis(ctx, rev->axis, origin, dir))
       return false;
-    const glm::vec3 c = sk->plane.PlaneToWorld(ProfileCenterUV(*sk, {}));
+    const glm::dvec3 c = sk->plane.PlaneToWorld(ProfileCenterUV(*sk, {}));
     // Arc centered on the axis at the profile's height, through the profile.
-    const float along = glm::dot(c - origin, dir);
+    const double along = glm::dot(c - origin, dir);
     spec.anchor = origin + dir * along;
     spec.dir = dir;
-    spec.arcRadius =
-        std::max(glm::length(c - spec.anchor), 0.35f * GizmoScale(state));
+    spec.arcRadius = std::max(glm::length(glm::vec3(c) - spec.anchor),
+                              0.35f * GizmoScale(state));
     spec.rotate = true;
     spec.value = rev->angleDeg;
     spec.degrees = true;

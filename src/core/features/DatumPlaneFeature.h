@@ -65,7 +65,7 @@ public:
   std::string angleExpr;
 
   // ThroughPoints: three non-collinear world-space points.
-  glm::vec3 p0{0.0f}, p1{1.0f, 0.0f, 0.0f}, p2{0.0f, 1.0f, 0.0f};
+  glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0}, p2{0.0, 1.0, 0.0};
 
 private:
   SketchPlane m_outPlane{PlaneType::XY};

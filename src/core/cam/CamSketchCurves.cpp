@@ -57,14 +57,6 @@ std::vector<glm::dvec2> ArcUV(glm::dvec2 c, double r, double a0, double a1) {
   return out;
 }
 
-std::vector<glm::dvec2> ToDouble(const std::vector<glm::vec2>& pts) {
-  std::vector<glm::dvec2> out;
-  out.reserve(pts.size());
-  for (const glm::vec2& p : pts)
-    out.emplace_back(p);
-  return out;
-}
-
 template <class> constexpr bool kNoStrokesYet = false;
 
 // What one entity contributes, in its plane's UV. The ONE place an entity
@@ -112,12 +104,11 @@ EntityStrokes StrokesOf(const sketch::Entity& entity) {
           double end = e.endParam;
           while (end <= e.startParam)
             end += glm::two_pi<double>();
-          out.strokes.push_back(ToDouble(sketch::EllipseArcSampleUV(
-              e, SegmentsFor(e.rMajor, end - e.startParam))));
+          out.strokes.push_back(sketch::EllipseArcSampleUV(
+              e, SegmentsFor(e.rMajor, end - e.startParam)));
           out.closed.push_back(false);
         } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
-          std::vector<glm::dvec2> pts =
-              ToDouble(sketch::BSplineSampleUV(e, 32));
+          std::vector<glm::dvec2> pts = sketch::BSplineSampleUV(e, 32);
           const bool closed =
               pts.size() > 2 && glm::length(pts.front() - pts.back()) < 1e-6;
           out.strokes.push_back(std::move(pts));

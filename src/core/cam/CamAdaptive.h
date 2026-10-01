@@ -41,9 +41,12 @@ struct AdaptiveResult {
   bool available = false; // false = this build has no adaptive clearing
 };
 
-// Clears `region` (outer loops plus island holes, in setup space) from
-// `fromZ` down to `z` — the helix entry is planned by the library, the
-// descent to it is ours. Reads exactly the inputs `AdaptiveKey` hashes and
+// Clears `region` (outer loops plus island holes, in setup space, each with
+// `hole` false and wound as Clipper winds them) from `fromZ` down to `z` —
+// the helix entry is planned by the library, the descent to it is ours. A
+// loop with `hole` TRUE is area already clear: air beyond the stock round a
+// part cleared round (docs/cam/operations.md#clear-round), which is not
+// cut. Reads exactly the inputs `AdaptiveKey` hashes and
 // nothing else; `test_conventions` holds the two to the same list.
 [[nodiscard]] AdaptiveResult
 AdaptiveClear(const Setup& setup, const Operation& op, const Tool& tool,

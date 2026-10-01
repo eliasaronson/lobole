@@ -20,7 +20,7 @@ using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
 
 static std::unique_ptr<BoxFeature> MakeBox(const std::string& name) {
-  return std::make_unique<BoxFeature>(name, glm::vec3(0), 2.0, 2.0, 2.0);
+  return std::make_unique<BoxFeature>(name, glm::dvec3(0), 2.0, 2.0, 2.0);
 }
 
 TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
@@ -33,10 +33,10 @@ TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
     REQUIRE(gen.size() == 1);
     const auto& copy =
         std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
-    CHECK_THAT(copy.a.x, WithinAbs(-2.0f, 1e-5f));
-    CHECK_THAT(copy.a.y, WithinAbs(1.0f, 1e-5f));
-    CHECK_THAT(copy.b.x, WithinAbs(-3.0f, 1e-5f));
-    CHECK_THAT(copy.b.y, WithinAbs(4.0f, 1e-5f));
+    CHECK_THAT(copy.a.x, WithinAbs(-2.0, 1e-5));
+    CHECK_THAT(copy.a.y, WithinAbs(1.0, 1e-5));
+    CHECK_THAT(copy.b.x, WithinAbs(-3.0, 1e-5));
+    CHECK_THAT(copy.b.y, WithinAbs(4.0, 1e-5));
     CHECK(sk.constraints.empty()); // bake adds none
   }
   SECTION("linked: a Mirror op that tracks source AND axis (v51)") {
@@ -52,8 +52,8 @@ TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
     sk.RegenerateDerived();
     const auto& c1 =
         std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
-    CHECK_THAT(c1.a.x, WithinAbs(-2.0f, 1e-5f));
-    CHECK_THAT(c1.a.y, WithinAbs(2.0f, 1e-5f));
+    CHECK_THAT(c1.a.x, WithinAbs(-2.0, 1e-5));
+    CHECK_THAT(c1.a.y, WithinAbs(2.0, 1e-5));
 
     // Move the AXIS (shift to x = 1): the copy re-reflects.
     auto& ax = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(axis)]);
@@ -62,7 +62,7 @@ TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
     sk.RegenerateDerived();
     const auto& c2 =
         std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
-    CHECK_THAT(c2.a.x, WithinAbs(0.0f, 1e-5f)); // 2 reflected about x=1
+    CHECK_THAT(c2.a.x, WithinAbs(0.0, 1e-5)); // 2 reflected about x=1
   }
 }
 
@@ -77,9 +77,9 @@ TEST_CASE("Mirror across a datum axis reflects and links to it",
 
   const auto& copy =
       std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
-  CHECK_THAT(copy.a.x, WithinAbs(-1.0f, 1e-4f)); // reflected across x = 0
-  CHECK_THAT(copy.b.x, WithinAbs(-2.0f, 1e-4f));
-  CHECK_THAT(copy.b.y, WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(copy.a.x, WithinAbs(-1.0, 1e-4)); // reflected across x = 0
+  CHECK_THAT(copy.b.x, WithinAbs(-2.0, 1e-4));
+  CHECK_THAT(copy.b.y, WithinAbs(1.0, 1e-4));
 
   REQUIRE(sk.derived.size() == 1);
   CHECK(sk.derived[0].kind == sketch::DerivedKind::Mirror);
@@ -100,12 +100,12 @@ TEST_CASE("MirrorEntities reflects an arc keeping it CCW", "[sketch][arc]") {
   REQUIRE(gen.size() == 1);
   const auto& arc =
       std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(gen[0])]);
-  CHECK_THAT(arc.center.x, WithinAbs(-2.0f, 1e-5f));
+  CHECK_THAT(arc.center.x, WithinAbs(-2.0, 1e-5));
   CHECK(arc.endAngle > arc.startAngle); // still CCW-always
   // Endpoints are the reflections of the source's (winding swapped).
-  glm::vec2 s = sketch::ArcPointUV(arc, 1), e = sketch::ArcPointUV(arc, 2);
-  CHECK_THAT(glm::length(s - glm::vec2(-2, 1)), WithinAbs(0.0f, 1e-4f));
-  CHECK_THAT(glm::length(e - glm::vec2(-3, 0)), WithinAbs(0.0f, 1e-4f));
+  glm::dvec2 s = sketch::ArcPointUV(arc, 1), e = sketch::ArcPointUV(arc, 2);
+  CHECK_THAT(glm::length(s - glm::dvec2(-2, 1)), WithinAbs(0.0, 1e-4));
+  CHECK_THAT(glm::length(e - glm::dvec2(-3, 0)), WithinAbs(0.0, 1e-4));
 }
 
 TEST_CASE("FilletCorner rounds a right-angle corner with a tangent arc",
@@ -123,13 +123,13 @@ TEST_CASE("FilletCorner rounds a right-angle corner with a tangent arc",
   const auto& arc = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(arcId)]);
   CHECK_THAT(arc.radius, WithinAbs(r, 1e-5));
   // For a right angle at the origin, the fillet centre is at (r, r).
-  CHECK_THAT(arc.center.x, WithinAbs(1.0f, 1e-4f));
-  CHECK_THAT(arc.center.y, WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(arc.center.x, WithinAbs(1.0, 1e-4));
+  CHECK_THAT(arc.center.y, WithinAbs(1.0, 1e-4));
   // Lines trimmed to the tangent points (r along each from the corner).
   const auto& s1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l1)]);
   const auto& s2 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l2)]);
-  CHECK_THAT(glm::length(s1.b - glm::vec2(1, 0)), WithinAbs(0.0f, 1e-4f));
-  CHECK_THAT(glm::length(s2.a - glm::vec2(0, 1)), WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(glm::length(s1.b - glm::dvec2(1, 0)), WithinAbs(0.0, 1e-4));
+  CHECK_THAT(glm::length(s2.a - glm::dvec2(0, 1)), WithinAbs(0.0, 1e-4));
   // Old corner coincident removed; two tangents added.
   int tang = 0, coincAtOrigin = 0;
   for (const auto& c : sk.constraints) {
@@ -154,8 +154,8 @@ TEST_CASE("Linear pattern bakes stepped copies", "[sketch][pattern]") {
       std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
   const auto& c2 =
       std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[1])]);
-  CHECK_THAT(c1.a.x, WithinAbs(5.0f, 1e-5f));
-  CHECK_THAT(c2.a.x, WithinAbs(10.0f, 1e-5f));
+  CHECK_THAT(c1.a.x, WithinAbs(5.0, 1e-5));
+  CHECK_THAT(c2.a.x, WithinAbs(10.0, 1e-5));
 }
 
 TEST_CASE("2D linear pattern fills a grid (v50)", "[sketch][pattern]") {
@@ -178,12 +178,12 @@ TEST_CASE("2D linear pattern fills a grid (v50)", "[sketch][pattern]") {
   const auto at = [&](uint32_t id) {
     return std::get<sketch::Point>(sk2.entities[sk2.IndexOfEntity(id)]).p;
   };
-  CHECK_THAT(at(gen2[0]).x, WithinAbs(2.0f, 1e-5f));
-  CHECK_THAT(at(gen2[0]).y, WithinAbs(0.0f, 1e-5f));
-  CHECK_THAT(at(gen2[1]).x, WithinAbs(0.0f, 1e-5f));
-  CHECK_THAT(at(gen2[1]).y, WithinAbs(3.0f, 1e-5f));
-  CHECK_THAT(at(gen2[4]).x, WithinAbs(2.0f, 1e-5f));
-  CHECK_THAT(at(gen2[4]).y, WithinAbs(6.0f, 1e-5f));
+  CHECK_THAT(at(gen2[0]).x, WithinAbs(2.0, 1e-5));
+  CHECK_THAT(at(gen2[0]).y, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(at(gen2[1]).x, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(at(gen2[1]).y, WithinAbs(3.0, 1e-5));
+  CHECK_THAT(at(gen2[4]).x, WithinAbs(2.0, 1e-5));
+  CHECK_THAT(at(gen2[4]).y, WithinAbs(6.0, 1e-5));
 
   // Shrinking the second direction prunes id-stably.
   sk2.derived[0].count2 = 1;
@@ -203,15 +203,15 @@ TEST_CASE("Circular pattern centre reference tracks its point (v51)",
   // Centre resolved from the point (0,0): the copy lands at (-2, 0).
   const auto& g0 =
       std::get<sketch::Circle>(sk.entities[sk.IndexOfEntity(gen[0])]);
-  CHECK_THAT(g0.center.x, WithinAbs(-2.0f, 1e-4f));
+  CHECK_THAT(g0.center.x, WithinAbs(-2.0, 1e-4));
 
   // Move the centre point: the pattern follows on regeneration.
   std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(ctr)]).p = {2, 2};
   sk.RegenerateDerived();
   const auto& g1 =
       std::get<sketch::Circle>(sk.entities[sk.IndexOfEntity(gen[0])]);
-  CHECK_THAT(g1.center.x, WithinAbs(2.0f, 1e-4f)); // (2,0) rotated pi about
-  CHECK_THAT(g1.center.y, WithinAbs(4.0f, 1e-4f)); // (2,2) → (2,4)
+  CHECK_THAT(g1.center.x, WithinAbs(2.0, 1e-4)); // (2,0) rotated pi about
+  CHECK_THAT(g1.center.y, WithinAbs(4.0, 1e-4)); // (2,2) → (2,4)
 }
 
 TEST_CASE("Circular pattern bakes rotated copies", "[sketch][pattern]") {
@@ -221,11 +221,11 @@ TEST_CASE("Circular pattern bakes rotated copies", "[sketch][pattern]") {
   REQUIRE(gen.size() == 3); // 90, 180, 270 degrees
   const auto& q1 =
       std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[0])]);
-  CHECK_THAT(q1.p.x, WithinAbs(0.0f, 1e-5f));
-  CHECK_THAT(q1.p.y, WithinAbs(1.0f, 1e-5f)); // (1,0) rotated 90 → (0,1)
+  CHECK_THAT(q1.p.x, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(q1.p.y, WithinAbs(1.0, 1e-5)); // (1,0) rotated 90 → (0,1)
   const auto& q2 =
       std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[1])]);
-  CHECK_THAT(q2.p.x, WithinAbs(-1.0f, 1e-5f)); // 180 → (-1,0)
+  CHECK_THAT(q2.p.x, WithinAbs(-1.0, 1e-5)); // 180 → (-1,0)
 }
 
 TEST_CASE("A linked pattern regenerates when its source moves",
@@ -244,9 +244,9 @@ TEST_CASE("A linked pattern regenerates when its source moves",
       std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[0])]);
   const auto& g1 =
       std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[1])]);
-  CHECK_THAT(g0.p.y, WithinAbs(5.0f, 1e-5f)); // followed the source in y
-  CHECK_THAT(g0.p.x, WithinAbs(2.0f, 1e-5f));
-  CHECK_THAT(g1.p.x, WithinAbs(4.0f, 1e-5f));
+  CHECK_THAT(g0.p.y, WithinAbs(5.0, 1e-5)); // followed the source in y
+  CHECK_THAT(g0.p.x, WithinAbs(2.0, 1e-5));
+  CHECK_THAT(g1.p.x, WithinAbs(4.0, 1e-5));
 }
 
 TEST_CASE("Changing a linked pattern's count is id-stable",
@@ -297,15 +297,15 @@ TEST_CASE("Editing a linked pattern's step regenerates it id-stably",
   REQUIRE(gen.size() == 2);
   const uint32_t inst1 = gen[0]; // k=1 at (2,0)
 
-  sk.derived[0].vec = glm::vec2{0, 5}; // re-aim the step to +Y, spacing 5
+  sk.derived[0].vec = glm::dvec2{0, 5}; // re-aim the step to +Y, spacing 5
   sk.RegenerateDerived();
 
   CHECK(sk.entities.size() == 3);             // count unchanged
   const size_t idx = sk.IndexOfEntity(inst1); // same id...
   REQUIRE(idx != SIZE_MAX);
   const auto& moved = std::get<sketch::Point>(sk.entities[idx]);
-  CHECK_THAT(moved.p.x, WithinAbs(0.0f, 1e-5f)); // ...moved to (0,5)
-  CHECK_THAT(moved.p.y, WithinAbs(5.0f, 1e-5f));
+  CHECK_THAT(moved.p.x, WithinAbs(0.0, 1e-5)); // ...moved to (0,5)
+  CHECK_THAT(moved.p.y, WithinAbs(5.0, 1e-5));
 }
 
 TEST_CASE("A linked pattern round-trips through JSON", "[sketch][pattern]") {
@@ -406,10 +406,10 @@ TEST_CASE("v1 documents without ids load and get ids assigned", "[ids][io]") {
 TEST_CASE("Entity coordinate expressions round-trip through JSON (v38)",
           "[sketch][exprs]") {
   auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
-  const uint32_t p = sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
-  const uint32_t l = sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
-  const uint32_t c = sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
-  const uint32_t a = sk->AddEntity(sketch::Arc{{1.0f, 1.0f}, 2.0, 0.25, 1.75});
+  const uint32_t p = sk->AddEntity(sketch::Point{{1.0, 2.0}});
+  const uint32_t l = sk->AddEntity(sketch::Line{{0.0, 0.0}, {4.0, 0.0}});
+  const uint32_t c = sk->AddEntity(sketch::Circle{{2.0, 1.0}, 0.5});
+  const uint32_t a = sk->AddEntity(sketch::Arc{{1.0, 1.0}, 2.0, 0.25, 1.75});
   sk->entityExprs[p] = {{"x", "w / 2"}, {"y", "h"}};
   sk->entityExprs[l] = {{"bx", "w"}};
   sk->entityExprs[c] = {{"r", "bore / 2"}};
@@ -427,19 +427,20 @@ TEST_CASE("Entity coordinate expressions round-trip through JSON (v38)",
   CHECK(j.at("entities")[2].at("r_expr") == "bore / 2");
   // An entity without exprs carries no *_expr keys (compact JSON).
   auto sk2 = std::make_unique<SketchFeature>("S2", SketchPlane(PlaneType::XY));
-  sk2->AddEntity(sketch::Circle{{0.0f, 0.0f}, 1.0});
+  sk2->AddEntity(sketch::Circle{{0.0, 0.0}, 1.0});
   const auto j2 = DocumentIO::FeatureToJson(*sk2);
   CHECK_FALSE(j2.at("entities")[0].contains("r_expr"));
 }
 
 TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
-  SketchPlane plane(glm::vec3(1, 2, 3), glm::vec3(0, 1, 1), glm::vec3(1, 0, 0));
+  SketchPlane plane(glm::dvec3(1, 2, 3), glm::dvec3(0, 1, 1),
+                    glm::dvec3(1, 0, 0));
   auto sk = std::make_unique<SketchFeature>("Sketch 1", plane);
-  sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
-  sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
-  sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
-  sk->AddEntity(sketch::Arc{{1.0f, 1.0f}, 2.0, 0.25, 1.75});
-  sk->AddEntity(sketch::Ellipse{{3.0f, 2.0f}, 1.5, 0.75, 0.6});
+  sk->AddEntity(sketch::Point{{1.0, 2.0}});
+  sk->AddEntity(sketch::Line{{0.0, 0.0}, {4.0, 0.0}});
+  sk->AddEntity(sketch::Circle{{2.0, 1.0}, 0.5});
+  sk->AddEntity(sketch::Arc{{1.0, 1.0}, 2.0, 0.25, 1.75});
+  sk->AddEntity(sketch::Ellipse{{3.0, 2.0}, 1.5, 0.75, 0.6});
   sk->SetId(7);
 
   auto j = DocumentIO::FeatureToJson(*sk);
@@ -461,23 +462,23 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   // The ellipse survives with its radii and rotation intact.
   REQUIRE(std::holds_alternative<sketch::Ellipse>(rsk->entities[4]));
   const auto& ell = std::get<sketch::Ellipse>(rsk->entities[4]);
-  CHECK_THAT(ell.center.x, WithinAbs(3.0f, 1e-6f));
+  CHECK_THAT(ell.center.x, WithinAbs(3.0, 1e-6));
   CHECK_THAT(ell.rMajor, WithinAbs(1.5, 1e-6));
   CHECK_THAT(ell.rMinor, WithinAbs(0.75, 1e-6));
   CHECK_THAT(ell.rotation, WithinAbs(0.6, 1e-6));
 
   // Plane axes reconstructed orthonormally
-  CHECK_THAT(glm::length(rsk->plane.GetNormal()), WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(glm::length(rsk->plane.GetNormal()), WithinAbs(1.0, 1e-4));
   CHECK_THAT(glm::dot(rsk->plane.GetNormal(), rsk->plane.GetUAxis()),
-             WithinAbs(0.0f, 1e-4f));
-  glm::vec3 world = rsk->plane.PlaneToWorld({1.0f, 1.0f});
-  glm::vec3 expected = sk->plane.PlaneToWorld({1.0f, 1.0f});
-  CHECK_THAT(glm::length(world - expected), WithinAbs(0.0f, 1e-4f));
+             WithinAbs(0.0, 1e-4));
+  glm::dvec3 world = rsk->plane.PlaneToWorld({1.0, 1.0});
+  glm::dvec3 expected = sk->plane.PlaneToWorld({1.0, 1.0});
+  CHECK_THAT(glm::length(world - expected), WithinAbs(0.0, 1e-4));
 
   // A sketch contributes no bodies
   Document doc;
   doc.AddFeature(std::move(restored));
-  doc.AddFeature(std::make_unique<BoxFeature>("Box", glm::vec3(0), 1, 1, 1));
+  doc.AddFeature(std::make_unique<BoxFeature>("Box", glm::dvec3(0), 1, 1, 1));
   REQUIRE(doc.Regenerate());
   CHECK(doc.GetBodies().size() == 1);
 }
@@ -487,8 +488,8 @@ TEST_CASE("ArcFromThreePoints builds a CCW arc through the middle point",
   // Unit circle: start (1,0), through top (0,1), end (-1,0) → upper semicircle.
   auto arc = sketch::ArcFromThreePoints({1, 0}, {0, 1}, {-1, 0});
   REQUIRE(arc.has_value());
-  CHECK_THAT(arc->center.x, WithinAbs(0.0f, 1e-4f));
-  CHECK_THAT(arc->center.y, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(arc->center.x, WithinAbs(0.0, 1e-4));
+  CHECK_THAT(arc->center.y, WithinAbs(0.0, 1e-4));
   CHECK_THAT(arc->radius, WithinAbs(1.0, 1e-4));
   // The span must include the through-point's angle (π/2).
   CHECK(arc->startAngle <= M_PI / 2 + 1e-6);
@@ -508,14 +509,14 @@ TEST_CASE("ArcFromThreePoints builds a CCW arc through the middle point",
 TEST_CASE("EllipseFromClicks derives radii and rotation", "[sketch][ellipse]") {
   // Centre at origin, major-axis end at (2,0) → rMajor 2, rotation 0. A third
   // point at (0.5, 0.75) is 0.75 off the major (x) axis → rMinor 0.75.
-  sketch::Ellipse e = sketch::EllipseFromClicks({0, 0}, {2, 0}, {0.5f, 0.75f});
+  sketch::Ellipse e = sketch::EllipseFromClicks({0, 0}, {2, 0}, {0.5, 0.75});
   CHECK_THAT(e.rMajor, WithinAbs(2.0, 1e-5));
   CHECK_THAT(e.rMinor, WithinAbs(0.75, 1e-5));
   CHECK_THAT(e.rotation, WithinAbs(0.0, 1e-5));
 
   // Rotated major axis: end at (0,3) → rMajor 3, rotation π/2. The minor point
   // (−1.2, 0) is 1.2 off the (now vertical) major axis.
-  sketch::Ellipse r = sketch::EllipseFromClicks({0, 0}, {0, 3}, {-1.2f, 0});
+  sketch::Ellipse r = sketch::EllipseFromClicks({0, 0}, {0, 3}, {-1.2, 0});
   CHECK_THAT(r.rMajor, WithinAbs(3.0, 1e-5));
   CHECK_THAT(r.rMinor, WithinAbs(1.2, 1e-5));
   CHECK_THAT(r.rotation, WithinAbs(M_PI / 2, 1e-5));
@@ -609,14 +610,14 @@ TEST_CASE("Dimension label offset round-trips", "[sketch][serialization]") {
   uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 0}});
   sketch::Constraint dim{
       sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 4.0};
-  dim.labelOffset = {0.5f, 1.2f};
+  dim.labelOffset = {0.5, 1.2};
   sk->constraints.push_back(dim);
 
   auto restored = DocumentIO::FeatureFromJson(DocumentIO::FeatureToJson(*sk));
   auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
   REQUIRE(rsk != nullptr);
-  CHECK(rsk->constraints[0].labelOffset.x == 0.5f);
-  CHECK(rsk->constraints[0].labelOffset.y == 1.2f);
+  CHECK(rsk->constraints[0].labelOffset.x == 0.5);
+  CHECK(rsk->constraints[0].labelOffset.y == 1.2);
 }
 
 TEST_CASE("Construction flag round-trips through JSON",
@@ -699,10 +700,10 @@ TEST_CASE("SplitEntity splits a line and transfers its constraints",
 
   auto& p1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l0)]);
   auto& p2 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l2)]);
-  CHECK(p1.a == glm::vec2(0, 0));
-  CHECK(p1.b == glm::vec2(2, 0)); // piece 1: a -> P
-  CHECK(p2.a == glm::vec2(2, 0));
-  CHECK(p2.b == glm::vec2(4, 0)); // piece 2: P -> original end
+  CHECK(p1.a == glm::dvec2(0, 0));
+  CHECK(p1.b == glm::dvec2(2, 0)); // piece 1: a -> P
+  CHECK(p2.a == glm::dvec2(2, 0));
+  CHECK(p2.b == glm::dvec2(4, 0)); // piece 2: P -> original end
 
   int coincident = 0, horizontal = 0, distance = 0;
   bool spanDistance = false, farJoinMoved = false, cutAdded = false;
@@ -750,8 +751,8 @@ TEST_CASE("TrimLineAt removes the segment between two crossings", "[sketch]") {
   bool left = false, right = false;
   for (const auto& e : sk.entities) {
     if (auto* l = std::get_if<sketch::Line>(&e)) {
-      auto near = [](glm::vec2 p, glm::vec2 q) {
-        return glm::length(p - q) < 1e-4f;
+      auto near = [](glm::dvec2 p, glm::dvec2 q) {
+        return glm::length(p - q) < 1e-4;
       };
       if ((near(l->a, {0, 0}) && near(l->b, {2, 0})) ||
           (near(l->a, {2, 0}) && near(l->b, {0, 0})))
@@ -773,8 +774,8 @@ TEST_CASE("TrimSpanAt reports the span a trim would remove", "[sketch]") {
 
   auto span = sk.TrimSpanAt(l0, {3, 0}); // cursor in the middle span
   REQUIRE(span.has_value());
-  auto near = [](glm::vec2 p, glm::vec2 q) {
-    return glm::length(p - q) < 1e-4f;
+  auto near = [](glm::dvec2 p, glm::dvec2 q) {
+    return glm::length(p - q) < 1e-4;
   };
   CHECK(((near(span->first, {2, 0}) && near(span->second, {4, 0})) ||
          (near(span->first, {4, 0}) && near(span->second, {2, 0}))));
@@ -836,7 +837,7 @@ TEST_CASE("TrimCurveAt splits a crossed arc, dropping the clicked sub-span",
   sk.AddEntity(sketch::Line{{0, -2}, {0, 2}}); // crosses the arc at angle π/2
 
   // Click the right sub-span (angle ~π/4) → removed; left sub-span survives.
-  glm::vec2 clickRight(std::cos(M_PI / 4), std::sin(M_PI / 4));
+  glm::dvec2 clickRight(std::cos(M_PI / 4), std::sin(M_PI / 4));
   REQUIRE(sk.TrimCurveAt(a0, clickRight));
 
   size_t idx = sk.IndexOfEntity(a0);
@@ -853,8 +854,8 @@ TEST_CASE("A circle crossing a line splits it for trimming", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {6, 0}});
   sk.AddEntity(sketch::Circle{{3, 0}, 1.0}); // crosses the line at x=2 and x=4
-  auto near = [](glm::vec2 p, glm::vec2 q) {
-    return glm::length(p - q) < 1e-3f;
+  auto near = [](glm::dvec2 p, glm::dvec2 q) {
+    return glm::length(p - q) < 1e-3;
   };
 
   // Clicking the middle brackets the [2,4] span between the circle crossings.
@@ -941,7 +942,7 @@ TEST_CASE("Cross-sketch linked copies sync until the link breaks",
   sketch::DerivedOp op;
   op.kind = sketch::DerivedKind::LinkedCopy;
   op.sourceIds = {c1};
-  op.vec = {3.0f, 0.0f};
+  op.vec = {3.0, 0.0};
   op.count = 2;
   op.sourceSketchId = aId;
   skB->derived.push_back(op);
@@ -983,7 +984,7 @@ TEST_CASE("ProjectFaceBoundary maps face outlines to construction geometry",
           "[sketch][project]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Box", glm::vec3(0.0f), 2.0, 2.0, 2.0));
+      std::make_unique<BoxFeature>("Box", glm::dvec3(0.0), 2.0, 2.0, 2.0));
   doc.Regenerate();
   REQUIRE(doc.GetBodies().size() == 1);
   const SketchPlane xy(PlaneType::XY);
@@ -1005,7 +1006,7 @@ TEST_CASE("ProjectFaceBoundary maps face outlines to construction geometry",
 
   Document doc2;
   doc2.AddFeature(std::make_unique<CylinderFeature>(
-      "Cyl", glm::vec3(0.0f), glm::vec3(0, 0, 1), 1.0, 2.0));
+      "Cyl", glm::dvec3(0.0), glm::dvec3(0, 0, 1), 1.0, 2.0));
   doc2.Regenerate();
   REQUIRE(doc2.GetBodies().size() == 1);
   // Some face (a cap) projects to a single full construction circle.
@@ -1033,7 +1034,7 @@ TEST_CASE("HasUserGeometry ignores generated external geometry", "[sketch]") {
   sk.external.push_back(ex);
   CHECK_FALSE(HasUserGeometry(sk)); // only projected outline
 
-  sk.AddEntity(sketch::Point{{2.0f, 1.0f}}); // the user places a hole centre
+  sk.AddEntity(sketch::Point{{2.0, 1.0}}); // the user places a hole centre
   CHECK(HasUserGeometry(sk));
 }
 

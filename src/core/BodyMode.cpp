@@ -599,11 +599,15 @@ double CoplanarStartSlack(const std::vector<Body>& bodies,
   if (len < 1e-12)
     return 0.0;
   const glm::dvec3 dir = sweep / len;
-  // The plane's own rounding: half an ULP of its largest coordinate, and a
-  // little more for the arithmetic that placed it.
+  // Single-precision rounding at the plane's largest coordinate, and a
+  // little more for the arithmetic that placed the face.
   const double scale = std::max(
       {1.0, std::abs(origin.x), std::abs(origin.y), std::abs(origin.z)});
   const double tol = 4.0 * FLT_EPSILON * scale;
+  // A face ON the plane to double precision needs nothing: OpenCASCADE cuts
+  // and fuses an exactly coplanar face cleanly, and a tool moved off it
+  // would leave the feature's own face a hair off the plane it was drawn on.
+  const double exact = 16.0 * DBL_EPSILON * scale;
   for (const Body& b : bodies) {
     if (b.reference || !b.shape.IsValid())
       continue;
@@ -625,7 +629,7 @@ double CoplanarStartSlack(const std::vector<Body>& bodies,
         continue;
       const gp_Pnt p = pln.Location();
       const double d = glm::dot(glm::dvec3(p.X(), p.Y(), p.Z()) - origin, dir);
-      if (std::abs(d) <= tol)
+      if (std::abs(d) > exact && std::abs(d) <= tol)
         return 2.0 * tol;
     }
   }

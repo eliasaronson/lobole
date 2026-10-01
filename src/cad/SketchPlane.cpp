@@ -1,24 +1,25 @@
 #include "cad/SketchPlane.h"
 #include "core/Conventions.h"
 #include <array>
+#include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 
-SketchPlane::SketchPlane(PlaneType type, const glm::vec3& origin)
+SketchPlane::SketchPlane(PlaneType type, const glm::dvec3& origin)
     : m_type(type), m_origin(origin) {
 
   // Set up standard plane orientations
   switch (type) {
   case PlaneType::XY: // Front plane
-    m_normal = glm::vec3(0, 0, 1);
-    m_uAxis = glm::vec3(1, 0, 0);
+    m_normal = glm::dvec3(0, 0, 1);
+    m_uAxis = glm::dvec3(1, 0, 0);
     break;
   case PlaneType::XZ: // Top plane
-    m_normal = glm::vec3(0, 1, 0);
-    m_uAxis = glm::vec3(1, 0, 0);
+    m_normal = glm::dvec3(0, 1, 0);
+    m_uAxis = glm::dvec3(1, 0, 0);
     break;
   case PlaneType::YZ: // Right plane
-    m_normal = glm::vec3(1, 0, 0);
-    m_uAxis = glm::vec3(0, 1, 0);
+    m_normal = glm::dvec3(1, 0, 0);
+    m_uAxis = glm::dvec3(0, 1, 0);
     break;
   }
 
@@ -26,21 +27,28 @@ SketchPlane::SketchPlane(PlaneType type, const glm::vec3& origin)
   SetNameFromType();
 }
 
-SketchPlane::SketchPlane(const glm::vec3& origin, const glm::vec3& normal,
-                         const glm::vec3& uAxis)
-    : m_type(PlaneType::XY), m_origin(origin), m_normal(glm::normalize(normal)),
-      m_uAxis(glm::normalize(uAxis)) {
+SketchPlane::SketchPlane(const glm::dvec3& origin, const glm::dvec3& normal,
+                         const glm::dvec3& uAxis)
+    : m_type(PlaneType::XY), m_origin(origin), m_normal(normal),
+      m_uAxis(uAxis) {
 
   UpdateAxes();
   m_name = "Custom Plane";
 }
 
 void SketchPlane::UpdateAxes() {
-  // Ensure normal is normalized
-  m_normal = glm::normalize(m_normal);
-
-  // Make sure U axis is perpendicular to normal
-  m_uAxis = glm::normalize(m_uAxis - glm::dot(m_uAxis, m_normal) * m_normal);
+  // Unit normal, U perpendicular to it and unit. A frame that already is one
+  // (to a few ULPs: a saved plane being loaded) is kept bit for bit --
+  // normalizing a unit vector again moves its last bit, and a plane that
+  // shifted on every save and load would not be the plane that was saved.
+  constexpr double kExact = 1e-14;
+  if (std::abs(glm::length(m_normal) - 1.0) > kExact)
+    m_normal = glm::normalize(m_normal);
+  if (const double along = glm::dot(m_uAxis, m_normal);
+      std::abs(along) > kExact)
+    m_uAxis -= along * m_normal;
+  if (std::abs(glm::length(m_uAxis) - 1.0) > kExact)
+    m_uAxis = glm::normalize(m_uAxis);
 
   // V axis is cross product of normal and U axis
   m_vAxis = glm::cross(m_normal, m_uAxis);
@@ -85,10 +93,13 @@ glm::mat4 SketchPlane::GetPlaneMatrix() const {
   glm::mat4 transform(1.0f);
 
   // Set the columns of the matrix
-  transform[0] = glm::vec4(m_uAxis, 0.0f);  // X axis in plane coordinates
-  transform[1] = glm::vec4(m_vAxis, 0.0f);  // Y axis in plane coordinates
-  transform[2] = glm::vec4(m_normal, 0.0f); // Z axis in plane coordinates
-  transform[3] = glm::vec4(m_origin, 1.0f); // Translation
+  transform[0] =
+      glm::vec4(glm::vec3(m_uAxis), 0.0f); // X axis in plane coordinates
+  transform[1] =
+      glm::vec4(glm::vec3(m_vAxis), 0.0f); // Y axis in plane coordinates
+  transform[2] =
+      glm::vec4(glm::vec3(m_normal), 0.0f); // Z axis in plane coordinates
+  transform[3] = glm::vec4(glm::vec3(m_origin), 1.0f); // Translation
 
   return transform;
 }
@@ -97,15 +108,15 @@ glm::mat4 SketchPlane::GetInversePlaneMatrix() const {
   return glm::inverse(GetPlaneMatrix());
 }
 
-glm::vec2 SketchPlane::WorldToPlane(const glm::vec3& worldPos) const {
-  glm::vec3 localPos = worldPos - m_origin;
+glm::dvec2 SketchPlane::WorldToPlane(const glm::dvec3& worldPos) const {
+  glm::dvec3 localPos = worldPos - m_origin;
 
-  float u = glm::dot(localPos, m_uAxis);
-  float v = glm::dot(localPos, m_vAxis);
+  const double u = glm::dot(localPos, m_uAxis);
+  const double v = glm::dot(localPos, m_vAxis);
 
-  return glm::vec2(u, v);
+  return glm::dvec2(u, v);
 }
 
-glm::vec3 SketchPlane::PlaneToWorld(const glm::vec2& planePos) const {
+glm::dvec3 SketchPlane::PlaneToWorld(const glm::dvec2& planePos) const {
   return m_origin + planePos.x * m_uAxis + planePos.y * m_vAxis;
 }

@@ -40,6 +40,12 @@ bool ExprDragFloat2(AppState& state, const char* label, float v[2],
                     float speed);
 bool ExprDragFloat3(AppState& state, const char* label, float v[3],
                     float speed);
+// The same rows over doubles: a sketch coordinate or a datum point is a
+// double, and a row that went through float would round it on every edit.
+bool ExprDragFloat2(AppState& state, const char* label, double v[2],
+                    float speed);
+bool ExprDragFloat3(AppState& state, const char* label, double v[3],
+                    float speed);
 // InputFloat / InputInt / InputFloat3 drop-ins. These keep ImGui's own widget
 // (they are text fields already, with a buffer big enough to type into) and
 // only add the evaluation on commit.

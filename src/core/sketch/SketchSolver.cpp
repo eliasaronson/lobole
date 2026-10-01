@@ -72,6 +72,21 @@ struct Solver::Impl {
     return &gcsPoints[it->second];
   }
 
+  // The arc endpoint (which 1 or 2) a Coincident constraint joins to an end
+  // of `line`, or null when the two meet nowhere by construction.
+  GCS::Point* SharedArcEnd(const std::vector<Constraint>& constraints,
+                           uint32_t line, uint32_t arc) {
+    for (const Constraint& c : constraints) {
+      if (c.kind != ConstraintKind::Coincident)
+        continue;
+      for (const auto& [p, q] : {std::pair{c.a, c.b}, std::pair{c.b, c.a}})
+        if (p.entity == line && p.which <= 1 && q.entity == arc &&
+            (q.which == 1 || q.which == 2))
+          return Resolve(q);
+    }
+    return nullptr;
+  }
+
   // Declares every point coord + radius as an unknown and initialises the
   // solution structure. Call after all constraints (incl. drag) are added.
   void DeclareUnknowns() {
@@ -177,7 +192,7 @@ void Solver::Load(const SketchFeature& sketch) {
     im.fixedParams.insert(gp.x);
     im.fixedParams.insert(gp.y);
   };
-  auto addDatumAxis = [&](uint32_t id, glm::vec2 a, glm::vec2 b) {
+  auto addDatumAxis = [&](uint32_t id, glm::dvec2 a, glm::dvec2 b) {
     GCS::Line gl;
     gl.p1 = addPoint(id, 0, a);
     gl.p2 = addPoint(id, 1, b);
@@ -186,7 +201,7 @@ void Solver::Load(const SketchFeature& sketch) {
     im.lines.push_back(gl);
     im.lineOf[id] = static_cast<int>(im.lines.size() - 1);
   };
-  fixPoint(addPoint(kOrigin, 0, {0.0f, 0.0f}));
+  fixPoint(addPoint(kOrigin, 0, {0.0, 0.0}));
   {
     auto [xa, xb] = DatumAxisEndpoints(kAxisX);
     addDatumAxis(kAxisX, xa, xb);
@@ -221,7 +236,7 @@ void Solver::Load(const SketchFeature& sketch) {
       GCS::Arc ga;
       ga.center = addPoint(id, 0, ar->center);
       // The endpoints in double, from the same centre, radius and angles the
-      // arc rules read: through float32 (ArcPointUV) they start ~1e-6 off
+      // arc rules read: rounded through any other path they start off
       // the rules, the solve "corrects" the ANGLES to match, and the write-
       // back keeps it -- an expression-driven sketch drifted a little on
       // every regen until its arcs no longer met their neighbours.
@@ -270,7 +285,7 @@ void Solver::Load(const SketchFeature& sketch) {
       // moves one relative to the others (docs/sketching/README.md#text).
       const GCS::Point anchor = addPoint(id, 0, tx->anchor);
       for (uint8_t k = 1; k <= 4; k++) {
-        const glm::vec2 corner = TextPointUV(*tx, k);
+        const glm::dvec2 corner = TextPointUV(*tx, k);
         const GCS::Point gp = addPoint(id, k, corner);
         im.params.push_back(static_cast<double>(corner.x) - tx->anchor.x);
         im.sys.addConstraintDifference(anchor.x, gp.x, &im.params.back(), 0);
@@ -380,9 +395,9 @@ void Solver::Load(const SketchFeature& sketch) {
             std::get<Line>(im.entityShapes[im.shapeIndexOf[con.a.entity]]);
         const auto& circ =
             std::get<Circle>(im.entityShapes[im.shapeIndexOf[con.b.entity]]);
-        glm::vec2 d = ln.b - ln.a;
-        glm::vec2 r = circ.center - ln.a;
-        bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
+        glm::dvec2 d = ln.b - ln.a;
+        glm::dvec2 r = circ.center - ln.a;
+        bool ccw = (d.x * r.y - d.y * r.x) > 0.0;
         im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
                                     im.circles[im.circleOf[con.b.entity]], ccw,
                                     tag++);
@@ -392,12 +407,29 @@ void Solver::Load(const SketchFeature& sketch) {
             std::get<Line>(im.entityShapes[im.shapeIndexOf[con.a.entity]]);
         const auto& arc =
             std::get<Arc>(im.entityShapes[im.shapeIndexOf[con.b.entity]]);
-        glm::vec2 d = ln.b - ln.a;
-        glm::vec2 r = arc.center - ln.a;
-        bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
-        im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
-                                    im.arcs[im.arcOf[con.b.entity]], ccw,
-                                    tag++);
+        GCS::Line& gl = im.lines[im.lineOf[con.a.entity]];
+        GCS::Arc& ga = im.arcs[im.arcOf[con.b.entity]];
+        if (GCS::Point* joint = im.SharedArcEnd(sketch.constraints,
+                                                con.a.entity, con.b.entity)) {
+          // The line ends ON the arc (a fillet, a slot): tangency at that
+          // point, as the angle between the two curves there -- 0 or pi,
+          // whichever they already make. The distance form (centre to line =
+          // radius) says the same thing as "the shared end is on the arc"
+          // to first order AT exact tangency, so the pair reads as one
+          // redundant constraint and a free DOF -- every fillet flagged,
+          // once the sketch held its geometry exactly.
+          const double now = im.sys.calculateAngleViaPoint(gl, ga, *joint);
+          im.params.push_back(
+              std::abs(std::remainder(now, 2.0 * M_PI)) < M_PI / 2.0 ? 0.0
+                                                                     : M_PI);
+          im.sys.addConstraintAngleViaPoint(gl, ga, *joint, &im.params.back(),
+                                            tag++);
+        } else {
+          glm::dvec2 d = ln.b - ln.a;
+          glm::dvec2 r = arc.center - ln.a;
+          bool ccw = (d.x * r.y - d.y * r.x) > 0.0;
+          im.sys.addConstraintTangent(gl, ga, ccw, tag++);
+        }
       }
       break;
     case ConstraintKind::PointOnLine:
@@ -651,7 +683,7 @@ bool Solver::BeginDrag(const std::vector<PointRef>& points) {
   return im.RunSolve().conflicting.empty();
 }
 
-void Solver::SetDragTargets(const std::vector<glm::vec2>& targets) {
+void Solver::SetDragTargets(const std::vector<glm::dvec2>& targets) {
   Impl& im = *m_impl;
   for (size_t i = 0; i < targets.size() && i < im.dragTargetBase.size(); i++) {
     const int base = im.dragTargetBase[i];
@@ -690,10 +722,10 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
   for (uint32_t i = 0; i < entities.size(); i++) {
     Entity& e = entities[i];
     const uint32_t id = EntityId(e);
-    auto pointAt = [&](uint8_t which) -> glm::vec2 {
+    auto pointAt = [&](uint8_t which) -> glm::dvec2 {
       auto it = im.pointIndex.find(Impl::Key(id, which));
       const GCS::Point& gp = im.gcsPoints[it->second];
-      return glm::vec2(*gp.x, *gp.y);
+      return glm::dvec2(*gp.x, *gp.y);
     };
     if (std::holds_alternative<Point>(e)) {
       std::get<Point>(e).p = pointAt(0);
@@ -746,7 +778,7 @@ SolveResult Solver::Solve() {
   return {true, -1, {}, {}};
 }
 bool Solver::BeginDrag(const std::vector<PointRef>&) { return false; }
-void Solver::SetDragTargets(const std::vector<glm::vec2>&) {}
+void Solver::SetDragTargets(const std::vector<glm::dvec2>&) {}
 bool Solver::BeginRadiusDrag(uint32_t) { return false; }
 void Solver::SetRadiusTarget(double) {}
 SolveResult Solver::SolveDrag() { return {true, -1, {}, {}}; }

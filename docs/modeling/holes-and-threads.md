@@ -109,7 +109,12 @@ parts area).
   bodies reads -- the CAM thread mill -- rather than guessing a thread back
   from a diameter. A Thread on a tapped Hole's bore comes after the Hole's
   own mark and is the one read. Unlike a `ThreadRegion` it claims nothing
-  about engagement.
+  about engagement. A later feature that MODIFIES the face (a chamfer on the
+  hole's mouth) renames it, `;M<tag>` appended, and after every feature a
+  mark (and a `ThreadRegion`) whose face no longer resolves follows it to
+  the one face whose name extends its own (`FollowModifiedFaces`,
+  `Document.cpp`); a face split in two is not followed, and the thread mill
+  then says the face carries no thread.
 - GUI: `###tb_thread`, then pick a cylindrical face. The editor has the
   designation combo (both tables, then Custom), the class combo (the
   series' classes for the face's side), **Modeled** and **Hand**.

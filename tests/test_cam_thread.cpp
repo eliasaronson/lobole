@@ -9,6 +9,7 @@
 #include "core/ThreadStandards.h"
 #include "core/cam/CamGcode.h"
 #include "core/cam/CamThreadMill.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/ThreadFeature.h"
 
@@ -417,6 +418,80 @@ TEST_CASE("a blind thread stops the head on the floor", "[cam][thread]") {
   for (const std::string& n : plan.notes)
     said = said || n.find("floor stops the head") != std::string::npos;
   CHECK(said);
+}
+
+TEST_CASE("a bore tapped from the other side is refused, and milled flipped",
+          "[cam][thread]") {
+  // The pan/tilt head's base plate: its tripod thread is tapped up from the
+  // underside. Its axis is vertical in the top-up setup too, and a vertical
+  // axis was all the check asked -- the head went in through the metal over
+  // the blind end. Here a blind hole from the top, the setup flipped.
+  const Plate plate = TappedPlate(20.0, 12.0);
+  cam::Setup s = ThreadJob(*plate.doc, plate.bore);
+  const cam::Operation op = s.operations.back();
+  s.frame = cam::FlipFrame(s.frame);
+  const cam::DerivedOp flipped =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::ThreadMill,
+                           cam::Target{0, plate.bore});
+  REQUIRE_FALSE(flipped.ok);
+  CHECK(flipped.why.find("opens downward") != std::string::npos);
+  CHECK(flipped.why.find("Flip") != std::string::npos);
+  // The drill is refused the same way.
+  const cam::DerivedOp drill =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, plate.bore}, 1);
+  REQUIRE_FALSE(drill.ok);
+  CHECK(drill.why.find("opens downward") != std::string::npos);
+  // Flipped back, the side it opens on is up again.
+  s.frame = cam::FlipFrame(s.frame);
+  const cam::DerivedOp up =
+      cam::DeriveOperation(s, plate.doc->GetBodies(), cam::OpType::ThreadMill,
+                           cam::Target{0, plate.bore});
+  INFO(up.why);
+  CHECK(up.ok);
+  CHECK(op.type == cam::OpType::ThreadMill);
+}
+
+TEST_CASE("a thread follows its bore through a chamfer on its mouth",
+          "[cam][thread]") {
+  // A face a later feature modifies is renamed (";M<tag>" appended), and
+  // the thread recorded on it before kept the old name: the pan/tilt base
+  // plate's tripod hole, chamfered after it was tapped, had "no thread" on
+  // its bore for the thread mill.
+  Plate plate = TappedPlate(20.0, 12.0);
+  Document& doc = *plate.doc;
+  const Body& body = doc.GetBodies().at(0);
+  std::vector<ElementRef> mouth;
+  const auto polylines = body.shape.GenerateEdgePolylines();
+  for (size_t e = 0; e < polylines.size(); e++) {
+    bool onRim = polylines[e].size() >= 2;
+    for (const glm::vec3& p : polylines[e])
+      onRim = onRim && std::abs(p.z - 20.0f) < 1e-3f &&
+              std::abs(glm::length(glm::vec2(p)) - 7.9375f / 2.0f) < 1e-2f;
+    if (!onRim)
+      continue;
+    const std::string* name = body.elementMap.EdgeNameOf(static_cast<int>(e));
+    REQUIRE(name != nullptr);
+    mouth.push_back(ElementRef{body.createdBy, *name});
+  }
+  REQUIRE_FALSE(mouth.empty());
+  doc.AddFeature(std::make_unique<FilletFeature>("Break", mouth, 0.5,
+                                                 EdgeBlendOp::Chamfer));
+  REQUIRE(doc.Regenerate());
+  const Body& after = doc.GetBodies().at(0);
+  REQUIRE_FALSE(after.threads.empty());
+  for (const ThreadMark& m : after.threads) {
+    INFO(m.face.name);
+    CHECK(after.elementMap.Resolve(m.face.name).has_value());
+  }
+  ElementRef bore;
+  for (const auto& [index, name] : after.elementMap.names)
+    if (name.find("/bore") != std::string::npos)
+      bore = ElementRef{after.createdBy, name};
+  REQUIRE(bore.IsSet());
+  CHECK(bore.name != plate.bore.name); // the chamfer renamed it
+  const cam::Setup s = ThreadJob(doc, bore);
+  CHECK(s.operations.back().type == cam::OpType::ThreadMill);
 }
 
 TEST_CASE("an external thread is milled round a boss", "[cam][thread]") {

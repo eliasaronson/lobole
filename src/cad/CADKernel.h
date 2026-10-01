@@ -164,13 +164,14 @@ public:
   // translation carries the tight box, permuted; any other starts cold
   // (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape).
   CADShape Transformed(const glm::mat4& m) const;
-  void Translate(const glm::vec3& offset);
-  void Rotate(const glm::vec3& axis, double angle);
+  void Translate(const glm::dvec3& offset);
+  void Rotate(const glm::dvec3& axis, double angle);
   // Rotates `angle` radians about the axis through `point` along `dir`
   // (unlike Rotate, whose axis passes through the origin).
-  void RotateAbout(const glm::vec3& point, const glm::vec3& dir, double angle);
+  void RotateAbout(const glm::dvec3& point, const glm::dvec3& dir,
+                   double angle);
   // Reflects across the plane through `point` with the given `normal`.
-  void Mirror(const glm::vec3& point, const glm::vec3& normal);
+  void Mirror(const glm::dvec3& point, const glm::dvec3& normal);
   void Scale(double factor);
 
   // Gathers disjoint solids into one shape WITHOUT fusing them (a compound).
@@ -194,6 +195,10 @@ public:
   // `center` = the face centroid, `normal` = the outward face normal, `uAxis`
   // = a deterministic in-plane axis. Returns false if the index is out of
   // range or the face is not planar (topological naming, sketch-on-face).
+  // The double form is what a sketch plane is built from; the float one
+  // narrows it.
+  bool FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
+                 glm::dvec3& uAxis) const;
   bool FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
                  glm::vec3& uAxis) const;
 
@@ -368,12 +373,12 @@ public:
   CADShape CreateBox(const glm::vec3& corner1, const glm::vec3& corner2);
   CADShape CreateBox(double width, double height, double depth);
 
-  CADShape CreateSphere(const glm::vec3& center, double radius);
+  CADShape CreateSphere(const glm::dvec3& center, double radius);
 
-  CADShape CreateCylinder(const glm::vec3& center, const glm::vec3& direction,
+  CADShape CreateCylinder(const glm::dvec3& center, const glm::dvec3& direction,
                           double radius, double height);
 
-  CADShape CreateCone(const glm::vec3& center, const glm::vec3& direction,
+  CADShape CreateCone(const glm::dvec3& center, const glm::dvec3& direction,
                       double radius1, double radius2, double height);
 
   // File I/O
@@ -486,9 +491,9 @@ private:
   CADKernel() = default;
 
   // Helper functions
-  gp_Pnt ToOCCPoint(const glm::vec3& point) const;
-  gp_Vec ToOCCVector(const glm::vec3& vector) const;
-  gp_Dir ToOCCDirection(const glm::vec3& direction) const;
+  gp_Pnt ToOCCPoint(const glm::dvec3& point) const;
+  gp_Vec ToOCCVector(const glm::dvec3& vector) const;
+  gp_Dir ToOCCDirection(const glm::dvec3& direction) const;
   glm::vec3 FromOCCPoint(const gp_Pnt& point) const;
   glm::vec3 FromOCCVector(const gp_Vec& vector) const;
 };
@@ -545,6 +550,9 @@ public:
   bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const {
     return false;
   }
+  bool FacePlane(int, glm::dvec3&, glm::dvec3&, glm::dvec3&) const {
+    return false;
+  }
   bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
   struct FaceSnap {
     int edgeIndex = -1;
@@ -580,14 +588,14 @@ public:
   CADShape CreateBox(double width, double height, double depth) {
     return CADShape();
   }
-  CADShape CreateSphere(const glm::vec3& center, double radius) {
+  CADShape CreateSphere(const glm::dvec3& center, double radius) {
     return CADShape();
   }
-  CADShape CreateCylinder(const glm::vec3& center, const glm::vec3& direction,
+  CADShape CreateCylinder(const glm::dvec3& center, const glm::dvec3& direction,
                           double radius, double height) {
     return CADShape();
   }
-  CADShape CreateCone(const glm::vec3& center, const glm::vec3& direction,
+  CADShape CreateCone(const glm::dvec3& center, const glm::dvec3& direction,
                       double radius1, double radius2, double height) {
     return CADShape();
   }

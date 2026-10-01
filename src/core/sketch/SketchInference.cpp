@@ -5,14 +5,14 @@
 namespace sketch {
 
 namespace {
-constexpr float kPointTolPx = 10.0f; // coincident: cursor near a vertex
-constexpr float kEdgeTolPx = 8.0f;   // point-on-line: cursor near a segment
-constexpr float kAlignTolPx =
-    8.0f; // axis alignment: cursor shares a vertex X/Y
-constexpr float kAngleTanTol = 0.0349f; // tan(2 deg): H/V slope ratio
-constexpr float kAngleSinTol = 0.0349f; // sin(2 deg): parallel/perpendicular
+constexpr double kPointTolPx = 10.0; // coincident: cursor near a vertex
+constexpr double kEdgeTolPx = 8.0;   // point-on-line: cursor near a segment
+constexpr double kAlignTolPx =
+    8.0; // axis alignment: cursor shares a vertex X/Y
+constexpr double kAngleTanTol = 0.0349; // tan(2 deg): H/V slope ratio
+constexpr double kAngleSinTol = 0.0349; // sin(2 deg): parallel/perpendicular
 
-float Cross(glm::vec2 a, glm::vec2 b) { return a.x * b.y - a.y * b.x; }
+double Cross(glm::dvec2 a, glm::dvec2 b) { return a.x * b.y - a.y * b.x; }
 
 // Visits every named vertex of an entity: Point(0), Line(0,1), Circle/Ellipse
 // centre(0), Arc centre(0)/start(1)/end(2) — the coincident and alignment
@@ -47,33 +47,34 @@ template <class F> void ForEachVertex(const Entity& e, F fn) {
 }
 
 // Distance from p to segment [a,b], plus the closest point on it.
-float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b, glm::vec2& closest) {
-  glm::vec2 ab = b - a;
-  float len2 = glm::dot(ab, ab);
-  float t =
-      len2 > 1e-12f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+double DistToSegment(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b,
+                     glm::dvec2& closest) {
+  glm::dvec2 ab = b - a;
+  double len2 = glm::dot(ab, ab);
+  double t =
+      len2 > 1e-12 ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0) : 0.0;
   closest = a + t * ab;
   return glm::length(p - closest);
 }
 } // namespace
 
-Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
-                std::optional<glm::vec2> other, uint32_t skipId,
-                float pixelsPerUV) {
+Snap InferPoint(const std::vector<Entity>& entities, glm::dvec2 uv,
+                std::optional<glm::dvec2> other, uint32_t skipId,
+                double pixelsPerUV) {
   Snap s;
   s.uv = uv;
-  const float scale = pixelsPerUV > 1e-6f ? pixelsPerUV : 1.0f;
-  const float pointTol = kPointTolPx / scale;
-  const float edgeTol = kEdgeTolPx / scale;
+  const double scale = pixelsPerUV > 1e-6 ? pixelsPerUV : 1.0;
+  const double pointTol = kPointTolPx / scale;
+  const double edgeTol = kEdgeTolPx / scale;
 
   // 1. Coincident — nearest existing vertex within tolerance.
-  float bestPt = pointTol;
+  double bestPt = pointTol;
   for (const auto& e : entities) {
     const uint32_t id = EntityId(e);
     if (id == skipId)
       continue;
-    ForEachVertex(e, [&](uint8_t which, glm::vec2 p) {
-      float d = glm::length(uv - p);
+    ForEachVertex(e, [&](uint8_t which, glm::dvec2 p) {
+      double d = glm::length(uv - p);
       if (d < bestPt) {
         bestPt = d;
         s.coincident = PointRef{id, which};
@@ -85,7 +86,7 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
   if (glm::length(uv) < bestPt) {
     bestPt = glm::length(uv);
     s.coincident = PointRef{kOrigin, 0};
-    s.uv = glm::vec2(0.0f);
+    s.uv = glm::dvec2(0.0);
   }
   if (s.coincident) {
     s.glyphs.push_back(GlyphKind::Coincident);
@@ -94,36 +95,36 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
 
   // 2. Point-on-curve — nearest line body, circle or arc circumference
   // within tolerance (the constraint kind dispatches per target).
-  float bestEdge = edgeTol;
+  double bestEdge = edgeTol;
   for (const auto& e : entities) {
     const uint32_t id = EntityId(e);
     if (id == skipId)
       continue;
     if (auto* l = std::get_if<Line>(&e)) {
-      glm::vec2 closest;
-      float d = DistToSegment(uv, l->a, l->b, closest);
+      glm::dvec2 closest;
+      double d = DistToSegment(uv, l->a, l->b, closest);
       if (d < bestEdge) {
         bestEdge = d;
         s.pointOnLine = id;
         s.uv = closest;
       }
     } else if (auto* c = std::get_if<Circle>(&e)) {
-      const glm::vec2 off = uv - c->center;
-      const float len = glm::length(off);
-      if (len < 1e-6f)
+      const glm::dvec2 off = uv - c->center;
+      const double len = glm::length(off);
+      if (len < 1e-6)
         continue; // at the center: direction undefined
-      const float d = std::abs(len - static_cast<float>(c->radius));
+      const double d = std::abs(len - c->radius);
       if (d < bestEdge) {
         bestEdge = d;
         s.pointOnLine = id;
-        s.uv = c->center + off * (static_cast<float>(c->radius) / len);
+        s.uv = c->center + off * (c->radius / len);
       }
     } else if (auto* ar = std::get_if<Arc>(&e)) {
-      const glm::vec2 off = uv - ar->center;
-      const float len = glm::length(off);
-      if (len < 1e-6f)
+      const glm::dvec2 off = uv - ar->center;
+      const double len = glm::length(off);
+      if (len < 1e-6)
         continue;
-      const float d = std::abs(len - static_cast<float>(ar->radius));
+      const double d = std::abs(len - ar->radius);
       if (d >= bestEdge)
         continue;
       // Only within the arc's CCW angular span.
@@ -136,7 +137,7 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
       if (ang <= s1) {
         bestEdge = d;
         s.pointOnLine = id;
-        s.uv = ar->center + off * (static_cast<float>(ar->radius) / len);
+        s.uv = ar->center + off * (ar->radius / len);
       }
     }
   }
@@ -153,25 +154,25 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     }();
     if (ti < entities.size()) {
       const Entity& target = entities[ti];
-      const float alignTol = kAlignTolPx / scale;
+      const double alignTol = kAlignTolPx / scale;
       // Points on the curve where it crosses the axis x=c (vertical=true) or
       // y=c, nearest to the current snap point; nullopt if none in range.
       auto curveAxisPoint = [&](bool vertical,
-                                float c) -> std::optional<glm::vec2> {
-        std::vector<glm::vec2> hits;
+                                double c) -> std::optional<glm::dvec2> {
+        std::vector<glm::dvec2> hits;
         if (auto* l = std::get_if<Line>(&target)) {
-          const glm::vec2 d = l->b - l->a;
-          const float den = vertical ? d.x : d.y;
-          if (std::abs(den) > 1e-9f) {
-            const float t = (c - (vertical ? l->a.x : l->a.y)) / den;
-            if (t >= 0.0f && t <= 1.0f)
+          const glm::dvec2 d = l->b - l->a;
+          const double den = vertical ? d.x : d.y;
+          if (std::abs(den) > 1e-9) {
+            const double t = (c - (vertical ? l->a.x : l->a.y)) / den;
+            if (t >= 0.0 && t <= 1.0)
               hits.push_back(l->a + t * d);
           }
         } else if (auto* ci = std::get_if<Circle>(&target)) {
-          const float off = c - (vertical ? ci->center.x : ci->center.y);
-          const float r = static_cast<float>(ci->radius);
+          const double off = c - (vertical ? ci->center.x : ci->center.y);
+          const double r = ci->radius;
           if (std::abs(off) <= r) {
-            const float h = std::sqrt(std::max(0.0f, r * r - off * off));
+            const double h = std::sqrt(std::max(0.0, r * r - off * off));
             if (vertical) {
               hits.push_back({c, ci->center.y + h});
               hits.push_back({c, ci->center.y - h});
@@ -181,15 +182,15 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
             }
           }
         } else if (auto* ar = std::get_if<Arc>(&target)) {
-          const float off = c - (vertical ? ar->center.x : ar->center.y);
-          const float r = static_cast<float>(ar->radius);
+          const double off = c - (vertical ? ar->center.x : ar->center.y);
+          const double r = ar->radius;
           if (std::abs(off) <= r) {
-            const float h = std::sqrt(std::max(0.0f, r * r - off * off));
-            const glm::vec2 c1 = vertical ? glm::vec2(c, ar->center.y + h)
-                                          : glm::vec2(ar->center.x + h, c);
-            const glm::vec2 c2 = vertical ? glm::vec2(c, ar->center.y - h)
-                                          : glm::vec2(ar->center.x - h, c);
-            for (const glm::vec2& p : {c1, c2}) {
+            const double h = std::sqrt(std::max(0.0, r * r - off * off));
+            const glm::dvec2 c1 = vertical ? glm::dvec2(c, ar->center.y + h)
+                                           : glm::dvec2(ar->center.x + h, c);
+            const glm::dvec2 c2 = vertical ? glm::dvec2(c, ar->center.y - h)
+                                           : glm::dvec2(ar->center.x - h, c);
+            for (const glm::dvec2& p : {c1, c2}) {
               double ang = std::atan2(p.y - ar->center.y, p.x - ar->center.x);
               double s0 = ar->startAngle, s1 = ar->endAngle;
               while (s1 <= s0)
@@ -201,8 +202,8 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
             }
           }
         }
-        std::optional<glm::vec2> best;
-        for (const glm::vec2& p : hits)
+        std::optional<glm::dvec2> best;
+        for (const glm::dvec2& p : hits)
           if (!best || glm::length(p - s.uv) < glm::length(*best - s.uv))
             best = p;
         if (best && glm::length(*best - s.uv) <= alignTol)
@@ -212,21 +213,21 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
       // Nearest share-X and share-Y vertex candidates (skip the curve's own
       // id for its endpoints, keep its centre — that's the top-of-circle
       // case; the origin joins at lower priority like the plain alignment).
-      float bestX = alignTol, bestY = alignTol;
+      double bestX = alignTol, bestY = alignTol;
       std::optional<PointRef> refX, refY;
-      float cX = 0.0f, cY = 0.0f;
+      double cX = 0.0, cY = 0.0;
       for (const auto& e : entities) {
         const uint32_t id = EntityId(e);
         if (id == skipId)
           continue;
-        ForEachVertex(e, [&](uint8_t which, glm::vec2 p) {
-          const float dx = std::abs(s.uv.x - p.x);
+        ForEachVertex(e, [&](uint8_t which, glm::dvec2 p) {
+          const double dx = std::abs(s.uv.x - p.x);
           if (dx < bestX) {
             bestX = dx;
             cX = p.x;
             refX = PointRef{id, which};
           }
-          const float dy = std::abs(s.uv.y - p.y);
+          const double dy = std::abs(s.uv.y - p.y);
           if (dy < bestY) {
             bestY = dy;
             cY = p.y;
@@ -236,20 +237,20 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
       }
       if (std::abs(s.uv.x) < bestX) {
         bestX = std::abs(s.uv.x);
-        cX = 0.0f;
+        cX = 0.0;
         refX = PointRef{kOrigin, 0};
       }
       if (std::abs(s.uv.y) < bestY) {
         bestY = std::abs(s.uv.y);
-        cY = 0.0f;
+        cY = 0.0;
         refY = PointRef{kOrigin, 0};
       }
       // Prefer the closer axis; take the first that the curve can satisfy.
       struct Cand {
         bool vertical;
-        float c;
+        double c;
         std::optional<PointRef> ref;
-        float d;
+        double d;
       };
       Cand cands[2] = {{true, cX, refX, bestX}, {false, cY, refY, bestY}};
       if (cands[1].d < cands[0].d)
@@ -280,21 +281,21 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
   //    snaps so aligning to existing geometry claims that axis first.
   bool alignedX = false, alignedY = false;
   {
-    const float alignTol = kAlignTolPx / scale;
-    float bestX = alignTol, bestY = alignTol;
-    float snapX = uv.x, snapY = uv.y;
+    const double alignTol = kAlignTolPx / scale;
+    double bestX = alignTol, bestY = alignTol;
+    double snapX = uv.x, snapY = uv.y;
     for (const auto& e : entities) {
       const uint32_t id = EntityId(e);
       if (id == skipId)
         continue;
-      ForEachVertex(e, [&](uint8_t which, glm::vec2 p) {
-        const float dx = std::abs(uv.x - p.x);
+      ForEachVertex(e, [&](uint8_t which, glm::dvec2 p) {
+        const double dx = std::abs(uv.x - p.x);
         if (dx < bestX) {
           bestX = dx;
           snapX = p.x;
           s.alignShareX = PointRef{id, which};
         }
-        const float dy = std::abs(uv.y - p.y);
+        const double dy = std::abs(uv.y - p.y);
         if (dy < bestY) {
           bestY = dy;
           snapY = p.y;
@@ -307,12 +308,12 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     // wins), yielding a two-point Vertical/Horizontal to the origin on commit.
     if (std::abs(uv.x) < bestX) {
       bestX = std::abs(uv.x);
-      snapX = 0.0f;
+      snapX = 0.0;
       s.alignShareX = PointRef{kOrigin, 0};
     }
     if (std::abs(uv.y) < bestY) {
       bestY = std::abs(uv.y);
-      snapY = 0.0f;
+      snapY = 0.0;
       s.alignShareY = PointRef{kOrigin, 0};
     }
     if (s.alignShareX) {
@@ -332,11 +333,11 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
   //    by an alignment above; skip parallel/perp entirely once aligned.
   if (!other)
     return s;
-  glm::vec2 seg = s.uv - *other;
-  float segLen = glm::length(seg);
-  if (segLen < 1e-6f)
+  glm::dvec2 seg = s.uv - *other;
+  double segLen = glm::length(seg);
+  if (segLen < 1e-6)
     return s;
-  glm::vec2 dir = seg / segLen;
+  glm::dvec2 dir = seg / segLen;
 
   // Horizontal / vertical by slope ratio.
   if (!alignedY && std::abs(dir.y) <= std::abs(dir.x) * kAngleTanTol) {
@@ -356,7 +357,7 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
               // segment
 
   // Parallel / perpendicular to the nearest matching line direction.
-  float bestPar = kAngleSinTol, bestPerp = kAngleSinTol;
+  double bestPar = kAngleSinTol, bestPerp = kAngleSinTol;
   for (const auto& e : entities) {
     const uint32_t id = EntityId(e);
     if (id == skipId)
@@ -364,13 +365,13 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     auto* l = std::get_if<Line>(&e);
     if (!l)
       continue;
-    glm::vec2 ld = l->b - l->a;
-    float ll = glm::length(ld);
-    if (ll < 1e-6f)
+    glm::dvec2 ld = l->b - l->a;
+    double ll = glm::length(ld);
+    if (ll < 1e-6)
       continue;
     ld /= ll;
-    float par = std::abs(Cross(dir, ld));     // |sin| — 0 when parallel
-    float perp = std::abs(glm::dot(dir, ld)); // |cos| — 0 when perpendicular
+    double par = std::abs(Cross(dir, ld));     // |sin| — 0 when parallel
+    double perp = std::abs(glm::dot(dir, ld)); // |cos| — 0 when perpendicular
     if (par < bestPar) {
       bestPar = par;
       s.parallelTo = id;

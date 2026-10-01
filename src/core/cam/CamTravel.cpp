@@ -719,8 +719,13 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
   // rough that stopped short of the floor left a 0.6 mm step in the stock
   // beyond the finishing tool's reach -- reported as leftover on a correct
   // job. The finish takes the wall band at full depth; the floor is the
-  // rough's, cut to depth.
-  rough.bottomZ -= op.finishStock;
+  // rough's, cut to depth. Only where the depth passes are DepthPasses',
+  // which lift the floor by the stock to leave: a bore helixes to its own
+  // bottom and an edge break sizes itself from its depth, so lowered they
+  // cut the finish stock UNDER the floor -- the pan/tilt base plate's
+  // bearing seat was roughed 0.2 mm under its shoulder.
+  if (op.type != OpType::Drill && op.type != OpType::EdgeRound)
+    rough.bottomZ -= op.finishStock;
   rough.cornerRelief = CornerRelief::None; // the finish clears the corners
   rough.leadArcs = false;
   out.push_back(GenerateFramed(setup, rough, framed, ctx));

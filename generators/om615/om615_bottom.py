@@ -7,7 +7,6 @@ the assembly module can place them and nothing has to be built in an order
 this file knows about. The numbers all come from om615_spec.
 """
 import math
-import struct
 import os
 import sys
 
@@ -30,13 +29,12 @@ from om615_spec import *  # noqa: E402,F401,F403
 # literal. These two helpers are the whole vocabulary.
 
 def plane_span(z0, z1):
-    """Span between the API's float sketch planes, not unsnapped doubles.
+    """The extrusion that takes a slab drawn at z0 up to the plane at z1.
 
-    Otherwise a slab ending at 242.9 passes about 0.000006 mm
-    through a gasket whose starting plane is stored at 242.899993896.
+    Sketch planes are exact, so a slab ending at 242.9 meets a gasket whose
+    starting plane is at 242.9.
     """
-    snap = lambda z: struct.unpack("f", struct.pack("f", z))[0]
-    return snap(z1) - snap(z0)
+    return z1 - z0
 
 
 def casting_finish(p, material="aluminum", color=None):
@@ -310,10 +308,7 @@ def _block_rest(p, length):
 
     # Head bolts: blind in the deck, ten of them, on the list the HEAD drills
     # through — one list, not two that agree until one is edited.
-    # Start outside the casting. Sketch planes store float coordinates while
-    # the slab's extrusion distance is double: at deck=242.9 an exactly
-    # coplanar cut started 0.000006 mm below the face, leaving a membrane
-    # that the fastener's axial probe correctly detected as a blocked hole.
+    # Start outside the casting, so the holes open the deck whatever made it.
     deck = p.sketch(Plane.xy(DECK + 1.0, flip=True), name="Head bolt holes")
     for x, y in HEAD_BOLT:
         deck.circle((x, y), d=HEAD_BOLT_D + TAP_FIT)

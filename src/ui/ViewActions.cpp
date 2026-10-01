@@ -535,7 +535,7 @@ std::optional<glm::vec4> SketchSlicePlane(const AppState& state) {
   const glm::vec3 n0 = glm::normalize(sk->plane.GetNormal());
   const float facing = glm::dot(n0, state.camera->GetForward());
   const glm::vec3 n = facing > 0.0f ? -n0 : n0;
-  return glm::vec4(n, glm::dot(sk->plane.GetOrigin(), n));
+  return glm::vec4(n, glm::dot(glm::vec3(sk->plane.GetOrigin()), n));
 }
 
 ClipPlaneArray SectionPlanes(const AppState& state) {

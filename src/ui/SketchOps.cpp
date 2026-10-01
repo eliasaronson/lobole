@@ -47,68 +47,67 @@ namespace {} // namespace
 // A newly created dimension is born with a legible label offset — pushed off
 // the measured geometry the way other CAD seeds placements — instead of at
 // offset 0 (on top of it). UV units (≈mm at scale 1).
-glm::vec2 SeedLabelOffset(const SketchFeature& sk,
-                          const sketch::Constraint& c) {
+glm::dvec2 SeedLabelOffset(const SketchFeature& sk,
+                           const sketch::Constraint& c) {
   using K = sketch::ConstraintKind;
   switch (c.kind) {
   case K::Distance: {
     const auto a = RefUV(sk, c.a), b = RefUV(sk, c.b);
     if (!a || !b || glm::length(*b - *a) < 1e-6f)
-      return {0.0f, 0.8f};
-    const glm::vec2 d = glm::normalize(*b - *a);
-    return glm::vec2(-d.y, d.x) * 0.8f; // perpendicular to the span
+      return {0.0, 0.8};
+    const glm::dvec2 d = glm::normalize(*b - *a);
+    return glm::dvec2(-d.y, d.x) * 0.8; // perpendicular to the span
   }
   case K::DistanceX:
-    return {0.0f, -0.8f}; // dimension line below the pair
+    return {0.0, -0.8}; // dimension line below the pair
   case K::DistanceY:
-    return {-0.8f, 0.0f}; // dimension line left of the pair
+    return {-0.8, 0.0}; // dimension line left of the pair
   case K::DistancePL: {
     // Along the measured line's direction so the dim line (point → foot,
     // perpendicular to it) slides clear of both.
     const auto a = RefUV(sk, {c.b.entity, 0}), b = RefUV(sk, {c.b.entity, 1});
     if (!a || !b || glm::length(*b - *a) < 1e-6f)
-      return {0.0f, 0.8f};
-    return glm::normalize(*b - *a) * 0.8f;
+      return {0.0, 0.8};
+    return glm::normalize(*b - *a) * 0.8;
   }
   case K::Radius:
   case K::Diameter: {
     // Along the renderer's leader direction, clear of the rim.
     const size_t ci = sk.IndexOfEntity(c.a.entity);
-    glm::vec2 dir(0.7071f, 0.7071f);
-    float radius = 0.0f;
+    glm::dvec2 dir(0.7071, 0.7071);
+    double radius = 0.0;
     if (ci != SIZE_MAX) {
       if (const auto* arc = std::get_if<sketch::Arc>(&sk.entities[ci])) {
         const double mid = 0.5 * (arc->startAngle + arc->endAngle);
-        dir = {static_cast<float>(std::cos(mid)),
-               static_cast<float>(std::sin(mid))};
-        radius = static_cast<float>(arc->radius);
+        dir = {(std::cos(mid)), (std::sin(mid))};
+        radius = arc->radius;
       } else if (const auto* circ =
                      std::get_if<sketch::Circle>(&sk.entities[ci])) {
-        radius = static_cast<float>(circ->radius);
+        radius = circ->radius;
       }
     }
-    return dir * (0.25f * radius + 0.7f);
+    return dir * (0.25 * radius + 0.7);
   }
   case K::Angle: {
     // Along the lines' bisector so the arc lands between them.
     const auto a0 = RefUV(sk, {c.a.entity, 0}), a1 = RefUV(sk, {c.a.entity, 1});
     const auto b0 = RefUV(sk, {c.b.entity, 0}), b1 = RefUV(sk, {c.b.entity, 1});
     if (!a0 || !a1 || !b0 || !b1)
-      return {0.9f, 0.9f};
-    const glm::vec2 da = glm::normalize(*a1 - *a0);
-    const glm::vec2 db = glm::normalize(*b1 - *b0);
-    const glm::vec2 bis = da + db;
-    return glm::length(bis) > 1e-4f ? glm::normalize(bis) * 1.2f
-                                    : glm::vec2(0.9f, 0.9f);
+      return {0.9, 0.9};
+    const glm::dvec2 da = glm::normalize(*a1 - *a0);
+    const glm::dvec2 db = glm::normalize(*b1 - *b0);
+    const glm::dvec2 bis = da + db;
+    return glm::length(bis) > 1e-4f ? glm::normalize(bis) * 1.2
+                                    : glm::dvec2(0.9, 0.9);
   }
   default:
-    return {0.0f, 0.0f};
+    return {0.0, 0.0};
   }
 }
 
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr,
-                           const glm::vec2* labelOffset) {
+                           const glm::dvec2* labelOffset) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
@@ -464,8 +463,8 @@ bool ApplyOffset(AppState& state) {
   return true;
 }
 
-bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
-                       double scalar, int count, glm::vec2 vec2, int count2) {
+bool EditPatternParams(AppState& state, size_t opIndex, glm::dvec2 vec,
+                       double scalar, int count, glm::dvec2 vec2, int count2) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   count2 = std::max(1, count2);
@@ -658,7 +657,7 @@ bool ToggleConstruction(AppState& state) {
 namespace {
 
 // The label the Tool window's fields describe, at `anchor`.
-sketch::Text TextFromToolState(const SketchEditState& edit, glm::vec2 anchor,
+sketch::Text TextFromToolState(const SketchEditState& edit, glm::dvec2 anchor,
                                double angle, double spacing) {
   const std::vector<std::string>& fonts = sketch::TextFontNames();
   sketch::Text t;
@@ -712,7 +711,7 @@ void TextToolActivated(AppState& state) {
     edit.textHeight = 5.0f * SketchGridFor(state, *sketch).step;
 }
 
-bool PlaceSketchText(AppState& state, glm::vec2 uv) {
+bool PlaceSketchText(AppState& state, glm::dvec2 uv) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (sketch == nullptr)

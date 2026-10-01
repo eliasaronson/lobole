@@ -69,7 +69,7 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
             continue;
           const sketch::Entity refl =
               sketch::ReflectEntity(sketch->entities[si], axl->a, axl->b);
-          std::vector<glm::vec2> poly = sketch::TessellateEntity(refl);
+          std::vector<glm::dvec2> poly = sketch::TessellateEntity(refl);
           for (size_t i = 0; i + 1 < poly.size(); i++) {
             out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
             out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
@@ -92,7 +92,7 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     }
     return ids;
   };
-  auto emitPoly = [&](const std::vector<glm::vec2>& poly) {
+  auto emitPoly = [&](const std::vector<glm::dvec2>& poly) {
     for (size_t i = 0; i + 1 < poly.size(); i++) {
       out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
       out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
@@ -119,8 +119,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
           const int row = k / edit.patternCount;
           inst = sketch::TranslateEntity(
               sketch->entities[si],
-              static_cast<float>(col) * edit.patternStep +
-                  static_cast<float>(row) * edit.patternStep2);
+              static_cast<double>(col) * edit.patternStep +
+                  static_cast<double>(row) * edit.patternStep2);
         }
         emitPoly(sketch::TessellateEntity(inst));
       }
@@ -155,7 +155,7 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
   }
 
   // Text: the label a click would place, ghosted at the cursor.
-  if (edit.tool == SketchTool::Text && edit.textHeight > 0.0f) {
+  if (edit.tool == SketchTool::Text && edit.textHeight > 0.0) {
     sketch::Text t;
     t.anchor = edit.hoverPoint;
     t.text = edit.textString;
@@ -178,9 +178,9 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
   if (!edit.hasPendingPoint)
     return;
 
-  const glm::vec2 a = edit.pendingPoint;
-  const glm::vec2 b = edit.hoverPoint;
-  std::vector<glm::vec2> poly;
+  const glm::dvec2 a = edit.pendingPoint;
+  const glm::dvec2 b = edit.hoverPoint;
+  std::vector<glm::dvec2> poly;
   switch (edit.tool) {
   case SketchTool::Line:
     poly = sketch::TessellateEntity(sketch::Line{a, b});
@@ -194,7 +194,7 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     break;
   case SketchTool::RectangleCenter: {
     // Centre placed: ghost the rectangle mirrored about it, cursor = corner.
-    const glm::vec2 c1 = 2.0f * a - b;
+    const glm::dvec2 c1 = 2.0 * a - b;
     poly = {c1, {b.x, c1.y}, b, {c1.x, b.y}, c1};
     break;
   }
@@ -304,7 +304,7 @@ void DrawSnapGlyphs(AppState& state) {
   auto guide = [&](const std::optional<sketch::PointRef>& ref) {
     if (!ref)
       return;
-    glm::vec2 targetUV;
+    glm::dvec2 targetUV;
     if (sketch::IsDatum(ref->entity)) {
       targetUV = sketch::DatumPointUV(ref->entity, ref->which);
     } else {

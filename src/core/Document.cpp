@@ -11,6 +11,41 @@
 #include <string>
 #include <unordered_map>
 
+namespace {
+
+// A face a later feature MODIFIES keeps its name with ";M<tag>" appended
+// (core/ElementHistory.h), and a thread recorded on it before -- a Thread, a
+// tapped Hole -- still named it the old way: a chamfer on the pan/tilt base
+// plate's tripod hole left the thread mill finding "no thread" on its bore.
+// So after each feature, a mark whose face no longer resolves follows it to
+// the one face whose name extends it. Two (a face split in two) is not one:
+// the mark is left as it is, and its reader says the thread is gone.
+void FollowModifiedFaces(std::vector<Body>& bodies) {
+  const auto follow = [](const ElementMap& map, ElementRef& face) {
+    if (map.Resolve(face.name))
+      return;
+    const std::string stem = face.name + ";M";
+    const std::string* only = nullptr;
+    for (const auto& [index, name] : map.names) {
+      if (name.compare(0, stem.size(), stem) != 0)
+        continue;
+      if (only != nullptr)
+        return;
+      only = &name;
+    }
+    if (only != nullptr)
+      face.name = *only;
+  };
+  for (Body& b : bodies) {
+    for (ThreadMark& t : b.threads)
+      follow(b.elementMap, t.face);
+    for (ThreadRegion& t : b.threadRegions)
+      follow(b.elementMap, t.face);
+  }
+}
+
+} // namespace
+
 // Monotonic for the life of the process: identity must never be reused, or
 // the consumers of InstanceId() are back to guessing.
 uint64_t Document::NextInstanceId() {
@@ -360,6 +395,9 @@ bool Document::Regenerate() {
       m_bodiesFromBlob = bakedHash;
       m_bodiesBlobSource = std::move(bakedSource);
       m_lastStats.cached = upTo;
+      // A bake from before the marks followed their faces holds the old
+      // names.
+      FollowModifiedFaces(m_bodies);
       // Seed the prefix cache so a LATER regeneration (the UI syncs, the RPC
       // layer, an unrelated document-version bump) is free too — without it,
       // the next Regenerate found an empty cache and rebuilt everything the
@@ -465,6 +503,7 @@ bool Document::Regenerate() {
                     m_features[i]->GetName(), m_features[i]->GetError());
           allOk = false;
         }
+        FollowModifiedFaces(m_bodies);
       }
       m_cache.push_back({hashes[i], m_bodies});
     }

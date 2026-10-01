@@ -296,7 +296,7 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
                                       : base;
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
     // One polyline for most entities; one per glyph contour for a label.
-    for (const std::vector<glm::vec2>& poly :
+    for (const std::vector<glm::dvec2>& poly :
          sketch::TessellateEntityPolylines(e)) {
       for (size_t i = 0; i + 1 < poly.size(); i++) {
         glm::vec3 wa = sk->plane.PlaneToWorld(poly[i]);

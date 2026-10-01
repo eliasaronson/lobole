@@ -50,7 +50,7 @@ glm::vec2 WorldToScreen(AppState& state, const glm::vec3& world) {
 }
 
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
-                           glm::vec2 uv) {
+                           glm::dvec2 uv) {
   return WorldToScreen(state, plane.PlaneToWorld(uv));
 }
 
@@ -59,9 +59,9 @@ glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
 // does this entity expose" would drift. Declared in
 // SketchInteractionInternal.h.
 // Endpoints exposed by an entity for picking/constraints.
-std::vector<std::pair<uint8_t, glm::vec2>>
+std::vector<std::pair<uint8_t, glm::dvec2>>
 EntityPoints(const sketch::Entity& e) {
-  std::vector<std::pair<uint8_t, glm::vec2>> pts;
+  std::vector<std::pair<uint8_t, glm::dvec2>> pts;
   if (auto* p = std::get_if<sketch::Point>(&e)) {
     pts = {{0, p->p}};
   } else if (auto* l = std::get_if<sketch::Line>(&e)) {
@@ -148,15 +148,14 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
                         SketchUVToScreen(state, sketch.plane, l->b));
     } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
       glm::vec2 center = SketchUVToScreen(state, sketch.plane, c->center);
-      glm::vec2 rim = SketchUVToScreen(
-          state, sketch.plane,
-          c->center + glm::vec2(static_cast<float>(c->radius), 0.0f));
+      glm::vec2 rim = SketchUVToScreen(state, sketch.plane,
+                                       c->center + glm::dvec2(c->radius, 0.0));
       float rPx = glm::length(rim - center);
       d = std::abs(glm::length(mousePos - center) - rPx);
     } else if (std::holds_alternative<sketch::Arc>(e)) {
       // Distance to the tessellated arc polyline — respects the sweep (only
       // the drawn span is hit) and works under any projection.
-      std::vector<glm::vec2> uv = sketch::TessellateEntity(e);
+      std::vector<glm::dvec2> uv = sketch::TessellateEntity(e);
       for (size_t k = 0; k + 1 < uv.size(); k++)
         d = std::min(
             d, DistToSegment(mousePos,
@@ -180,8 +179,8 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
   // (or cycling walked past everything else).
   for (uint32_t axisId : {sketch::kAxisX, sketch::kAxisY}) {
     const auto ep = sketch::DatumAxisEndpoints(axisId);
-    const glm::vec2 dir = ep.second - ep.first;
-    const glm::vec2 a = ep.first - dir * 100.0f, b = ep.first + dir * 100.0f;
+    const glm::dvec2 dir = ep.second - ep.first;
+    const glm::dvec2 a = ep.first - dir * 100.0, b = ep.first + dir * 100.0;
     const float d =
         DistToSegment(mousePos, SketchUVToScreen(state, sketch.plane, a),
                       SketchUVToScreen(state, sketch.plane, b));

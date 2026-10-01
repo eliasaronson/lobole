@@ -185,6 +185,50 @@ std::unique_ptr<Document> BrokenBlockDoc(double size, EdgeBlendOp how) {
 }
 } // namespace
 
+TEST_CASE("cam: a small chamfer on a round rim reads at its own angle",
+          "[cam]") {
+  // The pan/tilt base plate's 0.5 mm chamfer on its Ø73.6 rim read "92.23
+  // degrees included (0.52 mm wide)": the probe measured the break across
+  // sections flattened to 0.02 mm chords, which is 4% of half a millimetre.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Disc", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 36.8, 24.7));
+  const Body& body = doc->GetBodies().at(0);
+  std::vector<ElementRef> rim;
+  const auto polylines = body.shape.GenerateEdgePolylines();
+  for (size_t e = 0; e < polylines.size(); e++) {
+    bool atTop = polylines[e].size() >= 2;
+    for (const glm::vec3& p : polylines[e])
+      atTop = atTop && std::abs(p.z - 24.7f) < 1e-3f;
+    if (!atTop)
+      continue;
+    const std::string* name = body.elementMap.EdgeNameOf(static_cast<int>(e));
+    REQUIRE(name != nullptr);
+    rim.push_back(ElementRef{body.createdBy, *name});
+  }
+  REQUIRE(rim.size() == 1);
+  doc->AddFeature(
+      std::make_unique<FilletFeature>("Break", rim, 0.5, EdgeBlendOp::Chamfer));
+  REQUIRE(doc->Regenerate());
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::VBit, 6.0, 90.0)};
+  // The disc's side: the cylinder's own face0 (the chamfer's cone is the
+  // Break's).
+  ElementRef wall;
+  const std::string side =
+      std::to_string(doc->GetFeature(0)->GetId()) + "/face0;M";
+  for (const auto& [index, name] : doc->GetBodies().at(0).elementMap.names)
+    if (name.rfind(side, 0) == 0)
+      wall = ElementRef{doc->GetBodies().at(0).createdBy, name};
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.topZ, WithinAbs(24.7, 0.005));
+  CHECK_THAT(d.op.edgeSize, WithinAbs(0.5, 0.005));
+}
+
 TEST_CASE("cam: an edge break follows the break the model already has",
           "[cam]") {
   // Derived from the wall's own top, a break went below the one modelled

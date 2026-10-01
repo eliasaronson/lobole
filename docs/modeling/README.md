@@ -183,16 +183,20 @@ body as it was.
   it was, with a warning: the boolean would still imprint the tool's outline
   where the two touch, splitting a face and renaming it.
 - **A tool starts a hair behind its plane when a face lies on it.** A sketch
-  plane is single precision, so a plane at z = 13.4 is 13.39999962: a pocket
-  cut down from it into a part whose top is at 13.4 kept a 0.4 µm skin over
-  the pocket, a sealed void that passed BRepCheck (and a bearing seat with a
-  "shoulder" at both ends), and an add from a plane that rounds up started
-  above the face and left two solids. A blind or through-all cut or add whose
-  plane lies within that rounding of a planar face it meets — a face looking
-  against the sweep for a cut, with it for an add — starts behind the plane
-  by twice the rounding (`CoplanarStartSlack`, `src/core/BodyMode.cpp`); a
-  Hole's bores and counterbores do the same. The real fix is a double-precision
-  sketch plane, which is wider work.
+  plane is exact, and a face made from one lies on it; but a face can come
+  from a value that went through float — a primitive's position is a
+  `glm::vec3`, so a box placed at z = 24.7 sits at 24.70000076 — and a pocket
+  cut from a plane typed at that face's height kept a sub-micron skin over
+  itself, a sealed void that passed BRepCheck, while an add from a plane just
+  above a face left two solids. A blind or through-all cut or add whose plane
+  lies within single-precision rounding of a planar face it meets — a face
+  looking against the sweep for a cut, with it for an add — starts behind the
+  plane by twice that rounding (`CoplanarStartSlack`,
+  `src/core/BodyMode.cpp`); a Hole's bores and counterbores do the same. A
+  face on the plane to double precision gets none of it: OpenCASCADE fuses
+  and cuts an exactly coplanar face cleanly, and a tool moved behind it
+  leaves the feature's own face a hair off the plane it was drawn on — a
+  cap's underside that no longer met the tube end it was built on.
 
 ### Patterns
 

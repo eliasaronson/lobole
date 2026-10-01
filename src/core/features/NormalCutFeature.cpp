@@ -51,8 +51,8 @@ bool NormalCutFeature::Execute(RegenContext& ctx) {
     SetError("the sketch's profile could not be made into a face");
     return false;
   }
-  const glm::vec3 o = sketch->plane.GetOrigin();
-  const glm::vec3 n = sketch->plane.GetNormal();
+  const glm::dvec3 o = sketch->plane.GetOrigin();
+  const glm::dvec3 n = sketch->plane.GetNormal();
   const gp_Pnt origin(o.x, o.y, o.z);
   const gp_Dir normal(n.x, n.y, n.z);
   // EVERY region the sketch holds, not just the first: three circles drawn

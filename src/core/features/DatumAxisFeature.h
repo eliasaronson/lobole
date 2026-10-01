@@ -33,15 +33,15 @@ public:
 
   [[nodiscard]] bool IsDatum() const override { return true; }
 
-  [[nodiscard]] const glm::vec3& Origin() const { return m_origin; }
-  [[nodiscard]] const glm::vec3& Direction() const { return m_dir; } // unit
+  [[nodiscard]] const glm::dvec3& Origin() const { return m_origin; }
+  [[nodiscard]] const glm::dvec3& Direction() const { return m_dir; } // unit
 
   DatumAxisKind kind = DatumAxisKind::TwoPoints;
-  glm::vec3 p0{0.0f}, p1{1.0f, 0.0f, 0.0f}; // TwoPoints (world space)
+  glm::dvec3 p0{0.0}, p1{1.0, 0.0, 0.0};    // TwoPoints (world space)
   uint64_t sketchId = 0;                    // SketchLine: sketch feature id
   uint32_t entityId = 0;                    // SketchLine: stable entity id
 
 private:
-  glm::vec3 m_origin{0.0f};
-  glm::vec3 m_dir{1.0f, 0.0f, 0.0f};
+  glm::dvec3 m_origin{0.0};
+  glm::dvec3 m_dir{1.0, 0.0, 0.0};
 };
