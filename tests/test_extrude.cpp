@@ -10,6 +10,10 @@
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
 
+#include <BRepAdaptor_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -284,6 +288,62 @@ TEST_CASE("ExtrudeFeature Cut removes material", "[extrude][feature]") {
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
              WithinRel(32.0 - 2 * 2 * 2, 1e-4));
+}
+
+TEST_CASE("A cut from a face's height opens it whatever the plane rounds to",
+          "[extrude][feature]") {
+  // A sketch plane is single precision. At z = 13.4 it is 13.39999962, and a
+  // pocket cut down from it into a part whose top is at 13.4 kept a 0.4 um
+  // skin over the pocket: a sealed void that passed BRepCheck, and a bearing
+  // seat with a shoulder at both ends (the pan/tilt head's wheel).
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 20, 20, 13.4));
+  const SketchPlane top(glm::vec3(0, 0, 13.4), glm::vec3(0, 0, 1),
+                        glm::vec3(1, 0, 0));
+  REQUIRE(double(top.GetOrigin().z) < 13.4); // the rounding this is about
+  uint64_t sid = AddRectSketch(doc, {5, 5}, {15, 15}, top);
+  auto cut = std::make_unique<ExtrudeFeature>("Pocket", sid, 9.0,
+                                              ExtrudeMode::Cut, true);
+  doc.AddFeature(std::move(cut));
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Open: no face looks down from the top of the part.
+  int lids = 0;
+  for (TopExp_Explorer ex(doc.GetBodies()[0].shape.GetShape(), TopAbs_FACE);
+       ex.More(); ex.Next()) {
+    const TopoDS_Face f = TopoDS::Face(ex.Current());
+    BRepAdaptor_Surface surf(f);
+    if (surf.GetType() != GeomAbs_Plane)
+      continue;
+    gp_Dir n = surf.Plane().Axis().Direction();
+    if (f.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    if (n.Z() < -0.5 && surf.Plane().Location().Z() > 13.0)
+      lids++;
+  }
+  CHECK(lids == 0);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(20.0 * 20.0 * 13.4 - 10.0 * 10.0 * 9.0, 1e-5));
+}
+
+TEST_CASE("An add from a face's height fuses whatever the plane rounds to",
+          "[extrude][feature]") {
+  // The other way round: 24.7 is stored as 24.70000076, so a boss grown up
+  // from a part whose top is at 24.7 started 0.8 um above it, and the part
+  // was two solids.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 20, 20, 24.7));
+  const SketchPlane top(glm::vec3(0, 0, 24.7), glm::vec3(0, 0, 1),
+                        glm::vec3(1, 0, 0));
+  REQUIRE(double(top.GetOrigin().z) > 24.7);
+  uint64_t sid = AddRectSketch(doc, {5, 5}, {15, 15}, top);
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Boss", sid, 5.0, ExtrudeMode::Add));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(20.0 * 20.0 * 24.7 + 10.0 * 10.0 * 5.0, 1e-5));
 }
 
 TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",

@@ -10,6 +10,10 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepAdaptor_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+
 #include <filesystem>
 #include <map>
 #include <set>
@@ -259,6 +263,42 @@ TEST_CASE("a through hole in a thin ledge far above the rest is not air",
   REQUIRE(doc.Regenerate());
   CHECK_THAT(doc.GetFeature(3)->GetWarning(),
              Catch::Matchers::ContainsSubstring("1 of 2 hole centres"));
+}
+
+TEST_CASE("a counterbore drilled from a face keeps no skin over it", "[hole]") {
+  // A sketch plane is single precision: at z = 13.4 it is 13.39999962, and a
+  // counterbore drilled from it into a part whose top is at 13.4 kept a
+  // 0.4 um skin over the counterbore, sealing it.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0), 20.0, 20.0, 13.4));
+  const uint64_t sk = PointSketch(doc, 13.4, {{10, 10}});
+  auto ho =
+      std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 4.5, 0.0);
+  ho->through = true;
+  ho->cbDiameter = 8.0;
+  ho->cbDepth = 4.5;
+  doc.AddFeature(std::move(ho));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Nothing faces down at the top: no lid over the counterbore.
+  int lids = 0;
+  for (TopExp_Explorer ex(doc.GetBodies()[0].shape.GetShape(), TopAbs_FACE);
+       ex.More(); ex.Next()) {
+    const TopoDS_Face f = TopoDS::Face(ex.Current());
+    BRepAdaptor_Surface s(f);
+    if (s.GetType() != GeomAbs_Plane)
+      continue;
+    gp_Dir n = s.Plane().Axis().Direction();
+    if (f.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    if (n.Z() < -0.5 && s.Plane().Location().Z() > 13.0)
+      lids++;
+  }
+  CHECK(lids == 0);
+  const double removed = M_PI * 2.25 * 2.25 * (13.4 - 4.5) + M_PI * 16.0 * 4.5;
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(20.0 * 20.0 * 13.4 - removed, 1e-4));
 }
 
 TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {

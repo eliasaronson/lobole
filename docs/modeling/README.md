@@ -178,6 +178,17 @@ body as it was.
 - A cut that removes nothing, or an add that adds nothing, leaves the body as
   it was, with a warning: the boolean would still imprint the tool's outline
   where the two touch, splitting a face and renaming it.
+- **A tool starts a hair behind its plane when a face lies on it.** A sketch
+  plane is single precision, so a plane at z = 13.4 is 13.39999962: a pocket
+  cut down from it into a part whose top is at 13.4 kept a 0.4 µm skin over
+  the pocket, a sealed void that passed BRepCheck (and a bearing seat with a
+  "shoulder" at both ends), and an add from a plane that rounds up started
+  above the face and left two solids. A blind or through-all cut or add whose
+  plane lies within that rounding of a planar face it meets — a face looking
+  against the sweep for a cut, with it for an add — starts behind the plane
+  by twice the rounding (`CoplanarStartSlack`, `src/core/BodyMode.cpp`); a
+  Hole's bores and counterbores do the same. The real fix is a double-precision
+  sketch plane, which is wider work.
 
 ### Patterns
 
