@@ -301,22 +301,36 @@ own text, so a change upstream re-draws rather than going stale.
   37.34 spacing), SECTION A-A folded under it through the seat and the
   tripod hole (24.7 thick, the seat `Ø32 K7 (+0.007/-0.018)` 9 deep, the
   relief 10.2, the drill 12.7, the 3/8-16 thread drawn to ISO 6410 in the
-  section), the underside at 1:1 (`3/8-16 UNC-2B DEEP 12.7, DRILL Ø7.94
-  DEEP 12.7`, the chamfers), datums A (the face it stands on) and B (the
-  seat), the notes the dimensions cannot carry (perpendicularity and runout
-  of B to A, the M4 holes' position, gauging the seat), and the title block's
-  material (6082-T6 or 6061-T6 plate, 30 thick) and general tolerance
-  (ISO 2768-mK). Geometry is picked by what it is (a circle of the seat's
+  section, the seat's Ø placed by the app above the section), DETAIL C of
+  the seat's shoulder at 5:1 (its width 4.25 and the 1.2 step down to the
+  relief), the underside at 1:1 (`3/8-16 UNC-2B DEEP 12.7, DRILL Ø7.94
+  DEEP 12.7`, the chamfers), datum features A (the face it stands on) and
+  B (the seat) and the feature control frames that name them: the seat
+  perpendicular to A within Ø0.02 over its Ø, its shoulder's circular
+  runout 0.03 to B in the detail, the M4s' position Ø0.2 to A and B under
+  their callout; the notes the frames cannot carry (the stock, tapping the
+  M4s by hand, gauging the seat), and the title block's grade (6082-T6,
+  the plate's material) and general tolerance (ISO 2768-mK). The shoulder's
+  runout reads the old note's "runout of B to A" as the face the bearing's
+  outer ring is squared by. Geometry is picked by what it is (a circle of the seat's
   diameter, the face at z = 0 in the section), from the project's
   variables, never by toponame strings.
 - **`assembly`** (A3, 1:2.5): the head from the front without its camera,
   SECTION C-C through the pan worm's axis (the worm in its 609s, the wheel's
   teeth, the screws that hold the wheel down) and SECTION B-B on both axes
   (the pan journal in its 6002s, the tilt shaft in its pair, the yoke in
-  section), a balloon on every one of the 17 parts-list rows, each placed on
-  the view that draws the most of that part, in a column beside it in the
-  order of its anchor so leaders do not cross; the parts list on the title
-  block (item, quantity, part, made/printed/bought, material, unit mass).
+  section), a balloon on every one of the 17 parts-list rows laid out by
+  the app (`layout_balloons`: each on the view that draws the most of it,
+  round that view, no two leaders crossing); the parts list on the title
+  block (item, quantity, part, made/printed/bought, material grade, unit
+  mass), the camera screw in it as `ASME B18.3 1/4-20 x 3/8`, BOUGHT.
+
+Before the sheets the stage gives the model what they order by: the plate's
+grade (`aluminum_6082_t6`) and the 1/4-20 camera screw as the ASME B18.3
+part it is bought as (the longest stocked length short of the plain part's
+shank, fastened to the cradle where it stood). Both belong in build_base.py
+and build_tilt.py/build_assembly.py; they are made here so the stage runs
+on its own from cam.dsgn.
 - **`print`**: the PETG parts, how each goes on the bed and why, an iso of
   each, and the printed-fit allowances the model was built with, asked of
   `print_allowance` (hole +0.3 at Ø32 and Ø24, shaft -0.1, counterbore +0.2).
@@ -404,7 +418,12 @@ saved and never printed; "the active document is not a part, not a part".
    views, no auto-layout of balloons or auto-placement of a linear Ø (the
    generator places them), no material grade in the material library
    ("ALUMINUM" in the parts list), a 1/4-20 camera screw that cannot be a
-   standard part.
+   standard part. (Fixed since, in the friction round: see
+   [feature control frames](../../docs/drawings/README.md#feature-control-frames),
+   [detail views](../../docs/drawings/README.md#detail-views),
+   [balloon layout](../../docs/drawings/README.md#balloon-layout),
+   [inch screws](../../docs/parts/README.md#inch-screws-asme-b183) and
+   [grades](../../docs/rendering/materials.md#grades).)
 6. **Modelling.** A frame built from a cylindrical face has an arbitrary X
    (every worm frame is written out); the expression language has no table
    lookup (bearing and screw sizes are chosen in Python).
@@ -426,4 +445,5 @@ saved and never printed; "the active document is not a part, not a part".
 4. Fits: J/js classes, both rings of a bearing checked, the print allowance
    in a Hole's clearance fit, `set_tolerance` on any part.
 5. Drawings: feature control frames on datums, rotated text, balloon
-   auto-layout, imperial screws as standard parts, a material grade.
+   auto-layout, imperial screws as standard parts, a material grade --
+   built: see [the drawings](#drawings-and-renders).

@@ -69,15 +69,14 @@ needs it, and the Simulation panel.
 
 ## E. Drawings
 
-- feature control frames on datums;
-- rotated dimension text;
-- automatic balloon layout and placement of a linear Ø;
-- detail views;
-- imperial (UNC) screws as standard parts;
-- a material grade in the material library (6061-T6, not "ALUMINUM").
-
-**Verified by:** the pan/tilt sheets regenerated, inspected rendered, and
-the generator's hand-placed balloons removed.
+Built: see [feature control frames](../drawings/README.md#feature-control-frames)
+on datum features, aligned values and a placed Ø in
+[dimensions and annotation](../drawings/README.md#dimensions-and-annotation),
+[detail views](../drawings/README.md#detail-views),
+[balloon layout](../drawings/README.md#balloon-layout),
+[inch screws](../parts/README.md#inch-screws-asme-b183) and material
+[grades](../rendering/materials.md#grades); the pan/tilt sheets in
+[drawings and renders](../../generators/pantilt/README.md#drawings-and-renders).
 
 ## F. The big generators as tests
 
