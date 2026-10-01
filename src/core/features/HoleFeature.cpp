@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "core/PrintAllowance.h"
 #include "core/ThreadStandards.h"
 #include "core/parts/FastenerTable.h"
 
@@ -139,6 +140,20 @@ bool HoleFeature::Execute(RegenContext& ctx) {
       return false;
     }
     diameter = *bore;
+    // A clearance fit names the size the hole must COME OUT at, so on a
+    // printed part it is modelled at that size plus the process's hole
+    // allowance (docs/tolerances/README.md#printed-parts): an M6 normal hole
+    // in PETG prints Ø6.6 from a Ø6.8 model. A tapped hole stays at its tap
+    // drill; what a printed thread wants is the thread report's to say.
+    if (*fit != parts::Fit::Tapped && ctx.print != nullptr) {
+      const auto a =
+          printfit::ForBasic(*ctx.print, printfit::Printed::Hole, *bore, &why);
+      if (!a) {
+        SetError(why);
+        return false;
+      }
+      diameter = a->modelMm;
+    }
   }
   if (diameter <= 1e-9 || (!through && depth <= 1e-9)) {
     SetError("hole diameter and depth must be positive");

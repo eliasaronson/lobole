@@ -194,6 +194,9 @@ class Feature;
 // (a feature can only reference what already exists — e.g. an extrude can
 // only consume an earlier sketch).
 struct Configuration;
+namespace printfit {
+struct Process;
+}
 
 struct RegenContext {
   std::vector<Body>& bodies;
@@ -219,6 +222,12 @@ struct RegenContext {
   // feature's authored flag made a sketch a configuration turns ON invisible
   // to the revolve built on it, and one it turns OFF still referable.
   const Configuration* configuration = nullptr;
+
+  // How the part is made, when it is printed (Document::PrintProcess), else
+  // null. A Hole's clearance fit is modelled at its size plus the process's
+  // hole allowance (docs/tolerances/README.md#printed-parts); the regen hash
+  // folds the process into exactly those holes, so nothing else rebuilds.
+  const printfit::Process* print = nullptr;
 
   // Searches features[0, currentIndex) by stable id; nullptr if absent or
   // suppressed.

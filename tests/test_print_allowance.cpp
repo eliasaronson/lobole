@@ -5,6 +5,9 @@
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/PrintAllowance.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 #include "ui/ToleranceActions.h"
@@ -241,4 +244,72 @@ TEST_CASE("A Thread on a printed part reports its printed allowance",
   for (const std::string& n : r->notes)
     cosmetic = cosmetic || Contains(n, "cosmetic");
   CHECK(cosmetic);
+}
+
+// A Hole's clearance fit names the size the hole must COME OUT at, so on a
+// printed part it is modelled at that size plus the hole allowance
+// (docs/tolerances/README.md#printed-parts): M6 normal is Ø6.6 in steel and
+// a Ø6.8 model in PETG. A tapped hole stays at its tap drill. Setting the
+// process rebuilds that hole; a part without one rebuilds nothing.
+TEST_CASE("A printed clearance hole is modelled at its fit plus the allowance",
+          "[tolerances][print][hole]") {
+  const auto block = [](const std::string& kind) {
+    auto doc = std::make_unique<Document>();
+    auto pad =
+        std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+    pad->AddRectangle({-20, -20}, {20, 20});
+    doc->AddFeature(std::move(pad));
+    doc->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Pad", doc->GetFeature(0)->GetId(), 20.0, ExtrudeMode::NewBody));
+    auto centre = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(glm::vec3(0, 0, 20), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+    centre->AddEntity(sketch::Point{{0, 0}, 1});
+    doc->AddFeature(std::move(centre));
+    const uint64_t at = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    auto hole =
+        std::make_unique<HoleFeature>("Hole", at, HoleKind::Simple, 1.0, 12.0);
+    hole->fitThread = "M6";
+    hole->fitKind = kind;
+    doc->AddFeature(std::move(hole));
+    REQUIRE(doc->Regenerate());
+    return doc;
+  };
+  const auto holeOf = [](const Document& doc) {
+    return dynamic_cast<const HoleFeature*>(
+        doc.GetFeature(doc.FeatureCount() - 1));
+  };
+
+  auto doc = block("normal");
+  CHECK(holeOf(*doc)->diameter == Approx(6.6));
+  const auto a =
+      printfit::ForBasic(kPetg, printfit::Printed::Hole, 6.6, nullptr);
+  REQUIRE(a);
+  CommandStack stack;
+  stack.Execute(std::make_unique<SetPrintProcessCommand>(kPetg), *doc);
+  INFO(holeOf(*doc)->GetError());
+  CHECK(holeOf(*doc)->diameter == Approx(a->modelMm));
+  CHECK(holeOf(*doc)->diameter == Approx(6.8));
+  CHECK(doc->LastRegenStats().executed >= 1); // the hole rebuilt
+  // The bore really is that size.
+  bool found = false;
+  for (const auto& [index, name] : doc->GetBodies().at(0).elementMap.names) {
+    const auto face = Measure::DescribeFaceAt(doc->GetBodies().at(0), index);
+    if (face && face->kind == "cylinder") {
+      CHECK(face->radius * 2.0 == Approx(6.8));
+      found = true;
+    }
+  }
+  CHECK(found);
+  // Undone, it is the steel size again.
+  stack.Undo(*doc);
+  CHECK(holeOf(*doc)->diameter == Approx(6.6));
+
+  // A tapped hole stays at its tap drill.
+  auto tapped = block("tapped");
+  const double drill = holeOf(*tapped)->diameter;
+  const uint64_t version = tapped->Version();
+  tapped->SetPrintProcess(kPetg);
+  CHECK(holeOf(*tapped)->diameter == Approx(drill));
+  CHECK(tapped->Version() == version); // nothing on it moved: no regen
 }

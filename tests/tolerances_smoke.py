@@ -162,6 +162,23 @@ def main():
 
         shaft_class("g6")
 
+        # From the assembly tab, by `part`: no tab switch (the friction
+        # round's generators switched tabs for every class). It lands in the
+        # SHAFT's undo history, so it undoes on the shaft's tab.
+        r = d.call("set_tolerance", part="Shaft", feature_id=sf,
+                   element=sname, **{"class": "j6"})
+        expect(r["class"] == "j6", f"set on another part: {r}")
+        fit = only_fit(d)[1]
+        expect(fit["kind"] == "transition", f"H7/j6 is a transition: {fit}")
+        d.call("set_active_part", name="Shaft")
+        d.call("undo")
+        d.call("set_active_part", name="Rig")
+        expect(only_fit(d)[1]["kind"] == "clearance", "undone on its tab")
+        refused(d, "set_tolerance", "no part with id", part="Nope",
+                feature_id=sf, element=sname, **{"class": "g6"})
+        refused(d, "set_tolerance", "JS9", part="Shaft", feature_id=sf,
+                element=sname, **{"class": "J9"})
+
         # A fastened joint says nothing about which fit it wants, so its fit
         # is reported and NOT judged — the verdict would be invented.
         d.call("set_active_part", name="Rig")

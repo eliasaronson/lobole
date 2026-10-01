@@ -1,5 +1,6 @@
 #include "core/Document.h"
 #include "core/features/DerivedFeature.h"
+#include "core/features/HoleFeature.h"
 
 #include "common/Logger.h"
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
@@ -10,6 +11,8 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+
+static bool PrintDrivesGeometry(const Feature& f);
 
 namespace {
 
@@ -369,6 +372,12 @@ bool Document::Regenerate() {
         fj.erase("path");
         fj["content_hash"] = content;
       }
+    // A clearance-fitted Hole on a printed part is modelled at the fit plus
+    // the process's allowance (HoleFeature::Execute), so the process is one
+    // of ITS inputs — and only its: a part with no such hole keeps its
+    // hashes whatever the process.
+    if (m_print && PrintDrivesGeometry(*m_features[i]))
+      fj["print"] = m_print->process + "/" + m_print->material;
     chain = std::hash<std::string>{}(
         std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
@@ -432,6 +441,7 @@ bool Document::Regenerate() {
                          i,         &m_symbols,
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         ctx.configuration = ActiveConfig();
+        ctx.print = m_print ? &*m_print : nullptr;
         datums++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty())
@@ -487,6 +497,7 @@ bool Document::Regenerate() {
                          i,         &m_symbols,
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         ctx.configuration = ActiveConfig();
+        ctx.print = m_print ? &*m_print : nullptr;
         m_lastStats.executed++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty()) {
@@ -835,6 +846,22 @@ Document::FindParameterReferences(const std::string& name) {
     }
   }
   return refs;
+}
+
+// A Hole whose fit is a clearance (close/normal/loose) is modelled at the
+// print allowance when the part is printed (HoleFeature::Execute).
+static bool PrintDrivesGeometry(const Feature& f) {
+  const auto* hole = dynamic_cast<const HoleFeature*>(&f);
+  return hole != nullptr && !hole->fitThread.empty() &&
+         hole->fitKind != "tapped";
+}
+
+void Document::SetPrintProcess(std::optional<printfit::Process> p) {
+  m_print = std::move(p);
+  MarkEdited();
+  if (std::any_of(m_features.begin(), m_features.end(),
+                  [](const auto& f) { return PrintDrivesGeometry(*f); }))
+    Regenerate();
 }
 
 void Document::EvaluateParameters() {

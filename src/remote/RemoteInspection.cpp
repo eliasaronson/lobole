@@ -332,6 +332,40 @@ void OriginJson(const topo::ElementOrigin& o, json& row) {
   }
 }
 
+// The part a design-intent edit (a tolerance, the print process) acts on:
+// `part` when given — ANY part, not only the active one, so a generator or
+// an assembly tab can record intent on the parts it placed — else the active
+// part. Paired with CommandsFor, so the edit lands in THAT part's undo
+// history.
+Document& PartToEdit(ui::AppState& state, Document* active, const RpcParams& p,
+                     const char* what) {
+  if (p.contains("part"))
+    return *ResolvePartParam(state, p.at("part"));
+  if (active == nullptr)
+    throw std::runtime_error(
+        std::string(what) +
+        ": no active part document — pass `part` (a name, stable id or "
+        "slot index, see list_parts) to edit any part from this tab");
+  return *active;
+}
+
+// The undo history `part` keeps: the active tab's, or the one its slot
+// holds while stashed. An edit to a stashed part undoes when that part's
+// tab is undone, like any edit made on it.
+CommandStack& CommandsFor(ui::AppState& state, const Document& part) {
+  if (state.document.get() == &part && state.commands)
+    return *state.commands;
+  for (ui::PartSlot& slot : state.parts)
+    if (slot.doc.get() == &part) {
+      if (!slot.commands)
+        slot.commands = std::make_unique<CommandStack>();
+      return *slot.commands;
+    }
+  throw std::runtime_error("that part has no undo history of its own (a "
+                           "configuration's evaluated copy?) — switch to its "
+                           "tab and edit it there");
+}
+
 // The active part document, required by the part-tab-only inspection RPCs.
 Document& RequirePartDoc(Document* doc, const char* what) {
   if (doc == nullptr)
@@ -704,15 +738,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Declare how this PART is printed: {process, material} — `fdm` with "
      "`petg` is what the table carries — or {clear: true} for a part that is "
      "not printed. It lives on the part because a part is made one way, "
-     "whichever machine or tab opens it. It drives NO geometry and rebuilds "
-     "nothing: it changes what check_fit, check_fits and the Thread "
+     "whichever machine or tab opens it. The one geometry it drives is a "
+     "Hole's clearance fit, modelled at the fit's size plus the hole "
+     "allowance (M6 normal in PETG: Ø6.8 to print Ø6.6), so those holes "
+     "rebuild; otherwise it changes what check_fit, check_fits and the Thread "
      "reports say to MODEL, since a printer makes a hole smaller than its "
      "model and a shaft larger (a PETG Ø8 H7 bore: model Ø8.2). An unknown "
      "process, or a material the table has no data for, is REFUSED naming "
      "what is carried — never borrowed from a neighbour. Undoable. The "
      "answer lists every Thread on the part with what it should be modelled "
-     "at.",
-     "clear, material, process", remote::NeedsPart,
+     "at. `part` (name, stable id or slot index) sets it on any part, not "
+     "only the active one, in that part's undo history.",
+     "clear, material, part, process", remote::NoFlags,
      "print{process,material}, threads[]{feature_id,name,designation,"
      "side,modeled,known,pitch,allowance_mm,modelled_major,prints_major,"
      "want_major?,model_major?,model_face?,notes,sentence,confirm}"},
@@ -758,20 +795,24 @@ static constexpr MethodDoc InspectionMethods[] = {
      "per subject — a face's own size, and each ordered pair of faces — so "
      "setting a second REPLACES the first. The class is validated against "
      "the face's measured size when you set it, not when something later "
-     "looks. Acts on the ACTIVE part, like every other mutation; "
-     "list_tolerances reads any part.",
-     "b, class, comment, element, feature_id, lower, upper", remote::NeedsPart},
+     "looks. `part` (name, stable id or slot index) records it on ANY "
+     "part — a generator need not switch tabs — in that part's own undo "
+     "history; without it, the active part.",
+     "b, class, comment, element, feature_id, lower, part, upper",
+     remote::NoFlags},
     {"list_tolerances",
      "Every tolerance on this part, each tagged `kind: size|distance`, with "
      "the limits it implies at the measured nominal — the face's diameter, "
      "or the distance between the two faces. A ref whose element no longer "
      "resolves is listed `resolved: false` rather than dropped: the intent "
      "outlives the topology that carried it.",
-     "part", remote::NeedsPart,
+     "part", remote::NoFlags,
      "tolerances[]{id,feature_id,element,kind,resolved,comment?,b?,lower?,"
      "upper?,class?,nominal?,min?,max?,error?}"},
-    {"clear_tolerance", "Remove one tolerance by {id}.", "id",
-     remote::NeedsPart},
+    {"clear_tolerance",
+     "Remove one tolerance by {id}, from the active part or `part` (name, "
+     "stable id or slot index).",
+     "id, part", remote::NoFlags},
     {"stack_up",
      "Worst case along a STATED chain: {terms: [{tolerance: id, subtract?}]} "
      "gives the summed nominal and the min/max the bands allow. The chain is "
@@ -2753,7 +2794,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // How the part is printed (docs/tolerances/README.md#printed-parts).
     // Drives no geometry, so it rebuilds nothing; it is what the fit checks
     // read for the allowance to model.
-    Document& part = RequirePartDoc(doc, "set_print_process");
+    Document& part = PartToEdit(state, doc, p, "set_print_process");
     std::optional<printfit::Process> next;
     if (p.value("clear", false)) {
       if (p.contains("process") || p.contains("material"))
@@ -2771,8 +2812,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (const std::string why = printfit::Validate(*next); !why.empty())
         throw std::runtime_error("set_print_process: " + why);
     }
-    state.commands->Execute(std::make_unique<SetPrintProcessCommand>(next),
-                            part);
+    CommandsFor(state, part)
+        .Execute(std::make_unique<SetPrintProcessCommand>(next), part);
     return json{{"print", ProcessJson(part.PrintProcess())},
                 {"threads", PrintedThreadsJson(part)}};
   }
@@ -3143,7 +3184,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // (docs/tolerances/README.md#the-stored-tolerance). params: {feature_id,
     // element, b?: {feature_id, element},
     //          class? | lower?+upper?, comment?}
-    Document& part = RequirePartDoc(doc, "set_tolerance");
+    Document& part = PartToEdit(state, doc, p, "set_tolerance");
     const ElementRef ref{p.at("feature_id").get<uint64_t>(),
                          p.at("element").get<std::string>()};
     const auto el = Measure::Describe(part.GetBodies(), ref);
@@ -3234,7 +3275,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
 
     auto cmd = std::make_unique<SetToleranceCommand>(std::move(t));
     SetToleranceCommand* raw = cmd.get();
-    state.commands->Execute(std::move(cmd), part);
+    CommandsFor(state, part).Execute(std::move(cmd), part);
     const Tolerance* stored = part.FindTolerance(raw->ToleranceId());
     json out{{"id", stored->id},
              {"element", stored->ref.name},
@@ -3315,13 +3356,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return json{{"tolerances", std::move(list)}};
   }
   if (m == "clear_tolerance") {
-    Document& part = RequirePartDoc(doc, "clear_tolerance");
+    Document& part = PartToEdit(state, doc, p, "clear_tolerance");
     const uint64_t id = p.at("id").get<uint64_t>();
     if (!part.FindTolerance(id))
       throw std::runtime_error("clear_tolerance: no tolerance with id " +
                                std::to_string(id) +
                                " (list_tolerances shows them)");
-    state.commands->Execute(std::make_unique<ClearToleranceCommand>(id), part);
+    CommandsFor(state, part)
+        .Execute(std::make_unique<ClearToleranceCommand>(id), part);
     return json{{"ok", true}, {"id", id}};
   }
   if (m == "stack_up") {

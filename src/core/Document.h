@@ -416,16 +416,18 @@ public:
   // a part is made one way, by one process, whichever machine or tab opens it,
   // and the same PETG is printed or moulded with different allowances.
   //
-  // Like a tolerance it drives NO geometry: it changes what check_fit,
-  // check_fits, print_allowance and the Thread editor say should be modelled,
-  // so it sits outside the regen chain and setting it rebuilds nothing.
+  // It drives ONE kind of geometry: a Hole with a clearance fit is modelled
+  // at the fit's size plus the hole allowance, because the fit names the
+  // size it must come out at. Everything else it changes is what check_fit,
+  // check_fits, print_allowance and the Thread editor say should be
+  // modelled. The regen hash folds the process into fitted clearance holes
+  // only, so setting it rebuilds those (and what follows them), and on a
+  // part without one it does not regenerate at all — the version stays, so
+  // nothing reads a solved study as stale over it.
   const std::optional<printfit::Process>& PrintProcess() const {
     return m_print;
   }
-  void SetPrintProcess(std::optional<printfit::Process> p) {
-    m_print = std::move(p);
-    MarkEdited();
-  }
+  void SetPrintProcess(std::optional<printfit::Process> p);
 
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
