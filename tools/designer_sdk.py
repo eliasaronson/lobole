@@ -3007,7 +3007,7 @@ def _id(x):
         return 0
     if isinstance(x, Ref):
         return x
-    if isinstance(x, (Sketch, Frame, Occurrence, InnerOccurrence)):
+    if isinstance(x, (Sketch, Frame, Occurrence, InnerOccurrence, Feature)):
         return x.id
     if isinstance(x, Body):
         return x.created_by
