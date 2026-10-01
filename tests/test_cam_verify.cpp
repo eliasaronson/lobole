@@ -515,34 +515,6 @@ TEST_CASE("cam verify: leftover comes back as points to paint", "[cam]") {
   CHECK(cam::LeftoverPoints(none, 0.2).empty());
 }
 
-TEST_CASE("cam verify: a job with tabs is SAFE without being COMPLETE",
-          "[cam]") {
-  // The two questions have different answers, and one flag could not carry
-  // both: tabs are material deliberately left standing, so a job that cuts
-  // the part correctly reports leftover forever. Gating on one boolean meant
-  // gating on a boolean no real job could ever set
-  // (docs/cam/simulation.md#verdict).
-  auto doc = BlockDoc();
-  cam::Setup setup = BasicSetup();
-  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
-  cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{});
-  REQUIRE(derived.ok);
-  REQUIRE(derived.op.tabCount > 0); // the point of the test
-  derived.op.id = 1;
-  setup.operations.push_back(derived.op);
-  const std::vector<cam::Toolpath> paths =
-      cam::GenerateAll(setup, doc->GetBodies());
-  std::string gcode, error;
-  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
-  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.4);
-  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " over "
-                << v.leftoverArea << " mm2 in " << v.leftoverRegions);
-  CHECK(v.Safe(0.6));            // nothing scrapped, nothing crashed…
-  CHECK_FALSE(v.Complete(0.6));  // …and the tabs are still standing
-  CHECK(v.leftoverRegions >= 3); // in several small places, as tabs are
-}
-
 TEST_CASE("cam verify: an unmodelled edge break says why it gouges", "[cam]") {
   // The verifier compares the cut stock with the DESIGNED part, so a round
   // the toolpath makes and the model does not have is, correctly, material
@@ -1087,7 +1059,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 const std::vector<Toolpath::Tab>& tabs,
                 const OtherSetups* others,
                 const std::vector<float>* grooveFloor,
-                const std::vector<float>* threadFloor);
+                const std::vector<float>* threadFloor,
+                const std::vector<Toolpath::Fit>* fits);
 } // namespace cam
 
 namespace {
@@ -1208,7 +1181,7 @@ TEST_CASE("cam verify: the board's planar check, timed", "[cam][.bench]") {
   cam::Verdict v;
   const double compare = BestMs(repeat, [&] {
     v = cam::Compare(insp.machined, designed, lo.z, &insp.touched, 0.0, {}, {},
-                     &others, nullptr, nullptr);
+                     &others, nullptr, nullptr, nullptr);
   });
   std::printf("\n== %s / %s at %.2f mm, %zu other setups, map %d x %d, %zu "
               "workers\n"

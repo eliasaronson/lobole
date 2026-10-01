@@ -49,7 +49,7 @@ regeneration and survives a boolean that splits or trims the face, which
 keeps the surface even where it moves the seam edge. So a frame on a worm,
 a cam or a keyed shaft is reproducible from the face alone, and a mate's
 `rotation` counts from a direction the part fixes, not from the world (until
-v149 it was a world-axis heuristic, the same for every Z-axis cylinder).
+v150 it was a world-axis heuristic, the same for every Z-axis cylinder).
 Frame features built on a round face take the same X, and their own rotation
 turns the frame from there.
 

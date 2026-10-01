@@ -62,6 +62,37 @@ struct ThreadMark {
   bool modeled = false;
 };
 
+// A hole a Hole feature drilled into this body, written by the feature that
+// knows it (docs/modeling/holes-and-threads.md#hole), as a thread is: what a
+// consumer that has only the bodies -- the CAM drill derivation, the job's
+// list of what it does not cut
+// (docs/cam/simulation.md#what-the-job-does-not-cut)
+// -- reads rather than guessing a hole back from a cylinder. Transient.
+struct HoleMark {
+  ElementRef bore;        // the cylindrical bore face
+  uint64_t featureId = 0; // the Hole
+  std::string feature;    // its name, for a finding to say
+  double diameter = 0.0;  // mm
+  double depth = 0.0;     // mm, the full-diameter depth; 0 when through
+  bool through = false;
+  // The included angle of the drill point at a blind floor, degrees; 180 is
+  // a flat floor. Read as modelled: the cone below the bore is the part's.
+  double pointAngleDeg = 180.0;
+  std::string thread; // a tapped fit's thread ("M4"); empty otherwise
+};
+
+// A size tolerance on one of this body's round faces, as a CAM job reads it
+// (docs/cam/operations.md#tolerance-bands): the band's deviations on the
+// DIAMETER, mm, measured at the face's own size, and how a person names it
+// ("K7", "+0.05/-0.02"). Stamped by the job when it assembles its bodies
+// (ui::JobBodies) from the part's tolerances, which live outside the
+// regeneration chain; empty everywhere else. Transient.
+struct FaceBand {
+  ElementRef face;
+  double lower = 0.0, upper = 0.0;
+  std::string label;
+};
+
 // A bend a sheet feature MADE, written down rather than measured back off the
 // cylindrical faces afterwards
 // (docs/sheetmetal/README.md#bends-are-recorded-never-recognised). Unfolding is
@@ -185,6 +216,10 @@ struct Body {
   std::vector<BendRegion> bends;
   // Every thread on this body's faces (ThreadMark, above).
   std::vector<ThreadMark> threads;
+  // Every hole a Hole feature drilled into it (HoleMark, above).
+  std::vector<HoleMark> holes;
+  // The size tolerances a CAM job read off its part (FaceBand, above).
+  std::vector<FaceBand> bands;
 };
 
 class Feature;

@@ -76,12 +76,172 @@ constexpr double kIslandProbe = 0.05;
 // the operation was made by clicking a face: the face's own wires, the same
 // at every depth. Empty when the operation has no target, which is the
 // caller's signal to fall back to sectioning the model.
+// --- tolerance bands (docs/cam/operations.md#tolerance-bands) --------------
+//
+// A toleranced round wall is cut at the middle of its band: the circle the
+// material ends on is moved radially by a quarter of the band's deviations
+// summed (half their mean, on the radius) before the tool is offset from it,
+// so every strategy that follows that circle -- a bore's rings, a profile's
+// contour, a pocket's outline or island -- aims there with no code of its
+// own. The walls come from the bands the job stamped on the bodies
+// (Body::bands), resolved once per generate in the setup's frame.
+struct FitCircle {
+  Toolpath::Fit decl;
+  double radius = 0.0; // the modelled wall's radius
+  double shift = 0.0;  // how far it moves outward to the band's middle
+  uint64_t jobPartId = 0;
+  ElementRef face;
+  bool used = false;
+};
+thread_local std::vector<FitCircle>* tFits = nullptr;
+
+std::vector<FitCircle> ResolveFits(const std::vector<Body>& framed) {
+  std::vector<FitCircle> out;
+  for (const Body& body : framed)
+    for (const FaceBand& band : body.bands) {
+      const std::optional<int> idx = body.elementMap.Resolve(band.face.name);
+      if (!idx || !body.shape.IsValid())
+        continue;
+      int i = 0;
+      for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next(), i++) {
+        if (i != *idx)
+          continue;
+        try {
+          const TopoDS_Face face = TopoDS::Face(ex.Current());
+          const BRepAdaptor_Surface s(face);
+          if (s.GetType() != GeomAbs_Cylinder)
+            break;
+          const gp_Cylinder cyl = s.Cylinder();
+          const gp_Dir dir = cyl.Axis().Direction();
+          if (std::abs(dir.Z()) < 0.999)
+            break; // a wall this setup does not see standing up
+          double v0 = s.FirstVParameter(), v1 = s.LastVParameter();
+          const double u = 0.5 * (s.FirstUParameter() + s.LastUParameter());
+          const gp_Pnt loc = cyl.Location();
+          // Which side the metal is on: the face's outward normal points at
+          // the axis in a bore, away from it round a boss.
+          BRepLProp_SLProps props(s, u, 0.5 * (v0 + v1), 1, 1e-9);
+          if (!props.IsNormalDefined())
+            break;
+          gp_Dir n = props.Normal();
+          if (face.Orientation() == TopAbs_REVERSED)
+            n.Reverse();
+          const gp_Pnt p = props.Value();
+          const gp_Vec radial(
+              gp_Pnt(loc.X() + (p.Z() - loc.Z()) / dir.Z() * dir.X(),
+                     loc.Y() + (p.Z() - loc.Z()) / dir.Z() * dir.Y(), p.Z()),
+              p);
+          FitCircle c;
+          c.radius = cyl.Radius();
+          c.shift = (band.lower + band.upper) * 0.25;
+          c.jobPartId = body.jobPartId;
+          c.face = band.face;
+          Toolpath::Fit& f = c.decl;
+          f.internal = radial.Dot(gp_Vec(n)) < 0.0;
+          const double zA = loc.Z() + v0 * dir.Z(), zB = loc.Z() + v1 * dir.Z();
+          f.zLo = std::min(zA, zB);
+          f.zHi = std::max(zA, zB);
+          const double zMid = 0.5 * (f.zLo + f.zHi);
+          f.centre = {loc.X() + (zMid - loc.Z()) / dir.Z() * dir.X(),
+                      loc.Y() + (zMid - loc.Z()) / dir.Z() * dir.Y()};
+          f.nominal = 2.0 * c.radius;
+          f.lower = band.lower;
+          f.upper = band.upper;
+          f.aim = f.nominal + 2.0 * c.shift;
+          f.label = band.label;
+          out.push_back(c);
+        } catch (const Standard_Failure&) {
+        }
+        break;
+      }
+    }
+  return out;
+}
+
+// Holds the walls for one generate on this thread (GenerateFramed), and
+// hands the ones the path aimed at back as declarations.
+class FitScope {
+public:
+  explicit FitScope(const std::vector<Body>& framed)
+      : m_fits(ResolveFits(framed)), m_outer(tFits) {
+    tFits = &m_fits;
+  }
+  ~FitScope() { tFits = m_outer; }
+  FitScope(const FitScope&) = delete;
+  FitScope& operator=(const FitScope&) = delete;
+  void Declare(uint64_t op, Toolpath& tp) const {
+    for (const FitCircle& c : m_fits)
+      if (c.used) {
+        Toolpath::Fit f = c.decl;
+        f.op = op;
+        tp.fits.push_back(f);
+      }
+  }
+
+private:
+  std::vector<FitCircle> m_fits;
+  std::vector<FitCircle>* m_outer;
+};
+
+// A contour that IS a toleranced wall's circle at height `z` -- every vertex
+// on it, round its centre -- moved to the band's middle.
+void AimAtBands(Clipper2Lib::Paths64& paths, double z) {
+  if (tFits == nullptr || tFits->empty())
+    return;
+  for (Clipper2Lib::Path64& path : paths) {
+    if (path.size() < 6)
+      continue;
+    for (FitCircle& c : *tFits) {
+      const Toolpath::Fit& f = c.decl;
+      if (z < f.zLo - 0.05 || z > f.zHi + 0.05 || std::abs(c.shift) < 1e-9)
+        continue;
+      bool on = true;
+      for (const Clipper2Lib::Point64& p : path) {
+        const glm::dvec2 q(static_cast<double>(p.x) / kScale,
+                           static_cast<double>(p.y) / kScale);
+        if (std::abs(glm::distance(q, f.centre) - c.radius) > 0.01) {
+          on = false;
+          break;
+        }
+      }
+      if (!on)
+        continue;
+      const double k = (c.radius + c.shift) / c.radius;
+      for (Clipper2Lib::Point64& p : path) {
+        const glm::dvec2 q(static_cast<double>(p.x) / kScale,
+                           static_cast<double>(p.y) / kScale);
+        const glm::dvec2 moved = f.centre + (q - f.centre) * k;
+        p.x = static_cast<int64_t>(std::llround(moved.x * kScale));
+        p.y = static_cast<int64_t>(std::llround(moved.y * kScale));
+      }
+      c.used = true;
+      break;
+    }
+  }
+}
+// The circle aimed at for a bore the drill resolved by its face, or the
+// shift 0 when it carries no band.
+double AimAtBore(const Body& body, int idx) {
+  if (tFits == nullptr)
+    return 0.0;
+  for (FitCircle& c : *tFits) {
+    if (c.jobPartId != body.jobPartId || c.face.featureId != body.createdBy ||
+        body.elementMap.Resolve(c.face.name) != std::optional<int>(idx))
+      continue;
+    c.used = true;
+    return c.shift;
+  }
+  return 0.0;
+}
+
 // The inner wires of a level face that are genuine OPENINGS: an inner wire
 // with nothing standing in it. It is the same question `useOutline` asks
 // about a pocket floor (below), asked for the opposite purpose -- there to
 // know what may be driven over, here to know what may be cut out -- so it is
 // one test and not two. A BOSS has an inner wire too, and cutting round the
 // inside of one removes the boss.
+
 std::vector<Loop> FaceOpenings(const std::vector<Body>& bodies,
                                const FaceRegion& region) {
   std::vector<Loop> holes;
@@ -605,6 +765,9 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       lastFound = contour;
     if (contour.empty())
       continue; // above the model, where there has never been anything
+    // A toleranced round wall is followed at its band's middle -- on this
+    // pass's copy, so the next pass starts from the wall as modelled.
+    AimAtBands(contour, z);
     const double lead = op.leadArcs && op.side != Side::On ? radius : 0.0;
     Clipper2Lib::Paths64 paths;
     if (op.side != Side::Inside) {
@@ -800,6 +963,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
     // inset brackets the region's inscribed radius (a region shrinks to
     // nothing exactly when the offset passes it), and that is what sizes the
     // helix. First ring sits one radius in from the wall (plus stock).
+    AimAtBands(region, z); // a toleranced round wall: its band's middle
     std::vector<Clipper2Lib::Paths64> rings;
     double inset = radius + op.stockToLeave;
     double lastInset = 0.0;
@@ -1067,6 +1231,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     }
     if (region.empty())
       continue;
+    AimAtBands(region, z); // a toleranced round wall: its band's middle
     std::vector<Loop> asLoops;
     for (const Clipper2Lib::Path64& path : region) {
       Loop l;
@@ -1324,6 +1489,9 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
       // only as 42 mm2 of "leftover" among the tabs and the slug.
       double radius = 0.0;
       if (BoreRadius(body, *idx, radius)) {
+        // A toleranced bore is cut to its band's middle: the rings, the
+        // wall's last, are offset from that circle and not the modelled one.
+        radius += AimAtBore(body, *idx);
         const double dia = radius * 2.0;
         if (tool.diameter > dia + 1e-6) {
           tp.error = "tool " + std::to_string(op.toolNumber) + " is " +
@@ -1554,6 +1722,10 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     return tp;
   }
 
+  // The toleranced walls these bodies carry, for every strategy below to
+  // aim at; the ones the path followed are declared on it.
+  const FitScope fits(bodies);
+
   // ONE RUN PER TARGET, for the generators that resolve a single contour.
   // Before this they read targets.front() and dropped the rest in silence:
   // five bolt holes picked into one operation bored the first and left four
@@ -1604,6 +1776,8 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "
                "against the model";
+  if (tp.error.empty())
+    fits.Declare(op.id, tp);
   // Cut what fits: clipped HERE, at the one place every toolpath is made,
   // and not in GenerateAll -- the panel regenerates a verb's operation on
   // its own through this function, and a clip that lived only in the full

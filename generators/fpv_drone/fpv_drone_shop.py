@@ -438,7 +438,7 @@ def cam(app, out):
               f"{posted.get('lines', 0):>5} lines  gouge "
               f"{verdict.get('max_gouge_mm', 0):.3f} mm  "
               f"{verdict.get('leftover_regions', 0):>2} left standing "
-              f"(tabs, slugs and offcut — see the notes)")
+              f"(see the notes)")
         if not verdict.get("ok"):
             raise SdkError(f"{sheet}: {verdict.get('says')}")
         made.append((sheet, posted, verdict, run))

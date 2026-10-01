@@ -167,7 +167,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "hole_kind": "simple"|"counterbore"|"countersink", "diameter": num,
   "diameter_expr"?: str, "depth": num, "depth_expr"?: str, "through"?: bool,
   counterbore: "cb_diameter"/"cb_depth", countersink: "cs_diameter"/
-  "cs_depth"}} — far cleaner than a construction circle + cut-extrude per
+  "cs_depth", "drill_point_deg"?: a blind floor's point (absent: 118 with a
+  fit, else flat), "thread_depth"?: a tapped fit's thread from the mouth
+  (absent: the depth less 3 pitches)}} — far cleaner than a construction circle + cut-extrude per
   bolt hole; put the point sketch on the face you drill from.
 - Sweep (sweep a closed profile sketch along an open path):
   {{"type": "Sweep", "name": str, "profile_id": <sketch feature id>,
@@ -959,7 +961,7 @@ def measure(a: dict, b: dict | None = None,
           "and `role` -- start_cap | end_cap (a cut's floor) | side (swept "
           "from sketch `entity`) | generated (a fillet's or chamfer's face) "
           "| bore | bottom | counterbore | counterbore_floor | countersink "
-          "(a Hole's) | outside | inner_side | outer_side | shield (a "
+          "| point (a Hole's) | outside | inner_side | outer_side | shield (a "
           "bearing's) | positional (a feature that names by index) | "
           "boundary | pole | seam; `instance` for a pattern copy, `derived` "
           "for one that came in through a Derived feature. ASK for faces "

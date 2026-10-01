@@ -1,6 +1,6 @@
 {
   "format": "designer-document",
-  "version": 149,
+  "version": 150,
   "tables": [
     {"name": "bearings", "comment": "ISO 15, 60 and 62 series",
      "columns": ["d", "D", "B"],

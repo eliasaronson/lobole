@@ -55,6 +55,10 @@ def base_plate(app, S):
     tri = part.hole(sk.add(), d=1.0, depth=P["tripod_len"] +
                     P["tripod_pitch"] * 2,
                     fit={"thread": "3/8-16 UNC", "kind": "tapped"},
+                    # Bored flat with the 6 mm end mill on the 6090, not
+                    # drilled (cam.py): a drill's point here would break
+                    # through the web into the relief.
+                    drill_point_deg=180.0,
                     name="Tripod hole")
     bore = [f for f in tri.bores()][0]
     part.thread(bore, "3/8-16 UNC-2B")

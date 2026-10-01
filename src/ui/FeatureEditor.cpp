@@ -1867,6 +1867,32 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                index, commit);
     if (!ho->through)
       ExprDim(state, feature, index, commit, "Depth", ho->depthExpr, ho->depth);
+    // The floor's drill point and a tapped hole's thread depth, each 0 to
+    // derive it (docs/modeling/holes-and-threads.md#hole).
+    if (!ho->through) {
+      HandleEdit(state, feature,
+                 ExprInputDouble(state, "Drill point (deg)", &ho->pointAngleDeg,
+                                 "%.1f"),
+                 index, commit);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The point's included angle at the floor; 0 "
+                          "derives it (now %.0f: %s), 180 is flat",
+                          ho->PointAngleUsed(),
+                          ho->fitThread.empty()
+                              ? "a plain diameter keeps a flat floor"
+                              : "a jobber drill's, as a fit's drill is");
+    }
+    if (ho->fitKind == "tapped" && !ho->fitThread.empty()) {
+      ExprDim(state, feature, index, commit, "Thread depth",
+              ho->threadDepthExpr, ho->threadDepth);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("How deep it is threaded from the mouth; 0 derives "
+                          "it (now %.2f: %s)",
+                          ho->ThreadDepthUsed(),
+                          ho->through ? "the whole bore"
+                                      : "the depth less a tap's lead, 3 "
+                                        "pitches");
+    }
     if (ho->kind == HoleKind::Counterbore) {
       HandleEdit(state, feature, DragDim(state, "C'bore dia", &ho->cbDiameter),
                  index, commit);

@@ -56,7 +56,8 @@ seed  := tag '/g' entityId       side face swept from sketch entity <entityId>
        | prefix '/face' i        a primitive, import or rebuilt shape (below)
        | tag '/p' entityId '/' role
                                  a hole's face by role (bore, bottom, counterbore,
-                                 counterbore_floor, countersink; '.n' when one
+                                 counterbore_floor, countersink, point -- a
+                                 blind floor's drill point; '.n' when one
                                  role is in pieces), per sketch point; a face
                                  with no role is '/p' entityId '/face' k
        | tag '/' role            a generated bearing's face by role (bore,

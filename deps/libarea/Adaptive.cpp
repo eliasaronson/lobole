@@ -2979,29 +2979,111 @@ bool Adaptive2d::MakeLeadPath(
     output.push_back(startPoint);
     double stepSize = min(MIN_STEP_CLIPPER * 8, 0.2 * stepOverScaled + 1);
 
+    // Designer patch 0002, 2026-10-01: the lead path works on the cleared
+    // area WITHIN REACH of it, not the whole of it. Upstream copied the
+    // whole cleared area, offset all of it inward by the tool's radius, and
+    // for a lead-out did both again at every step: on a part cleared at a
+    // tenth of the cutter that was a third of the whole adaptive's time
+    // (docs/cam/operations.md#pocket-and-adaptive). Whether a point lies in
+    // the area eroded by `erode` depends only on the cleared area within
+    // `erode` of it, and the path never goes further than `maxLength` from
+    // its start, so the area clipped to a box that reaches `erode` past
+    // that answers every question the path asks, the same way. A beacon
+    // outside the eroded area is moved to its nearest point found the same
+    // way, in a box round the beacon grown until the point lies inside it.
+    const double erode = toolRadiusScaled + stepSize;
+    const auto clippedTo = [&](const IntPoint& at, double half) {
+        const cInt h = (cInt)ceil(half);
+        Path box{IntPoint(at.X - h, at.Y - h), IntPoint(at.X + h, at.Y - h),
+                 IntPoint(at.X + h, at.Y + h), IntPoint(at.X - h, at.Y + h)};
+        Clipper c;
+        c.AddPath(box, PolyType::ptSubject, true);
+        c.AddPaths(clearedAreaOriginal.GetCleared(), PolyType::ptClip, true);
+        Paths out;
+        c.Execute(ClipType::ctIntersection, out);
+        return out;
+    };
+    const auto reachOf = [&](const IntPoint& beacon) {
+        const double d = sqrt(DistanceSqrd(startPoint, beacon));
+        // maxLength below, a step past it, then the erosion and a margin.
+        return max(d * 2, stepSize * 10) + stepSize + 2 * erode + 16;
+    };
+    double half = reachOf(beaconPoint);
+    Paths nearby = clippedTo(startPoint, half);
+
     // make a copy of clearedArea to update as the path progresses (for lead out only)
     ClearedArea clearedArea(toolRadiusScaled);
-    clearedArea.SetClearedPaths(clearedAreaOriginal.GetCleared());
+    clearedArea.SetClearedPaths(nearby);
 
     // compute acceptable tool end locations
     ClipperOffset clipof;
     clipof.Clear();
     Paths cleared;
     clipof.AddPaths(clearedArea.GetCleared(), JoinType::jtRound, EndType::etClosedPolygon);
-    clipof.Execute(cleared, -(toolRadiusScaled + stepSize));
+    clipof.Execute(cleared, -erode);
 
     // move the beacon to an acceptable location if necessary
-    if (cleared.size() == 0) {
-        return false;
-    }
-
-    if (getPathNestingLevel({beaconPoint}, cleared) % 2 == 0) {
-        IntPoint clp;  // to store closest point
-        size_t clpPathIndex;
-        size_t clpSegmentIndex;
-        double clpParameter;
-        DistancePointToPathsSqrd(cleared, beaconPoint, clp, clpPathIndex, clpSegmentIndex, clpParameter);
-        beaconPoint = clp;
+    const bool beaconInBox
+        = abs(beaconPoint.X - startPoint.X) + erode + 8 < half
+        && abs(beaconPoint.Y - startPoint.Y) + erode + 8 < half;
+    if (!beaconInBox || getPathNestingLevel({beaconPoint}, cleared) % 2 == 0) {
+        // Where the beacon may go: the eroded area near it, from a box round
+        // the beacon that grows until what it finds lies `erode` inside it
+        // -- the same answer the whole area gives -- and the whole area when
+        // the box has grown past it.
+        BoundBox all;
+        bool first = true;
+        for (const Path& path : clearedAreaOriginal.GetCleared()) {
+            for (const IntPoint& pt : path) {
+                if (first) {
+                    all.SetFirstPoint(pt);
+                    first = false;
+                }
+                else {
+                    all.AddPoint(pt);
+                }
+            }
+        }
+        if (first) {
+            return false;
+        }
+        bool placed = false;
+        for (double h = 4 * erode + 32; !placed; h *= 2) {
+            const bool covers = beaconPoint.X - h <= all.minX && beaconPoint.X + h >= all.maxX
+                && beaconPoint.Y - h <= all.minY && beaconPoint.Y + h >= all.maxY;
+            Paths eroded;
+            clipof.Clear();
+            clipof.AddPaths(covers ? clearedAreaOriginal.GetCleared() : clippedTo(beaconPoint, h),
+                            JoinType::jtRound, EndType::etClosedPolygon);
+            clipof.Execute(eroded, -erode);
+            if (eroded.empty()) {
+                if (covers) {
+                    return false;
+                }
+                continue;
+            }
+            if (getPathNestingLevel({beaconPoint}, eroded) % 2 == 1) {
+                placed = true;  // the beacon is in it already
+                break;
+            }
+            IntPoint clp;  // to store closest point
+            size_t clpPathIndex;
+            size_t clpSegmentIndex;
+            double clpParameter;
+            const double d = sqrt(DistancePointToPathsSqrd(
+                eroded, beaconPoint, clp, clpPathIndex, clpSegmentIndex, clpParameter));
+            if (covers || d + erode + 16 <= h) {
+                beaconPoint = clp;
+                placed = true;
+            }
+        }
+        // The box again, for where the beacon is now.
+        half = reachOf(beaconPoint);
+        nearby = clippedTo(startPoint, half);
+        clearedArea.SetClearedPaths(nearby);
+        clipof.Clear();
+        clipof.AddPaths(clearedArea.GetCleared(), JoinType::jtRound, EndType::etClosedPolygon);
+        clipof.Execute(cleared, -erode);
     }
 
     IntPoint currentPoint = startPoint;

@@ -141,6 +141,8 @@ about 40 ms is meshing the part for `SampleModel`. The chess set's CAM
 - **Below the stock** (`below_stock_mm`) is cutting into the spoilboard,
   which is what a through cut is for; it is reported and never counted as
   gouge.
+- **Offcuts are not leftover**, and pieces nothing holds are said
+  ([below](#tabs-and-offcuts)).
 - **Told, not guessed:** each toolpath's corner reliefs are skipped for gouge,
   and its tabs are excused for leftover up to their own height (a relief
   excuses a cut too deep, a tab one that did not happen, so a tab needs its
@@ -225,6 +227,69 @@ gouge under it, the holder and the shank are probed on every move.
 against `ok`; a thread not judged (no helix of it in the file, or a file
 that turns A), out of its band, of the wrong pitch or hand, or short count
 against `complete`.
+
+### Tolerance bands
+
+A toleranced round wall the program aimed at its band's middle
+([operations.md](operations.md#tolerance-bands)) is judged against the
+band, not nominal: a grid of tenths of a millimetre cannot see a K7's 25
+microns. From the posted file (`JudgeFits`, `CamFindings.cpp`), every
+cutting move of the operations that declared the wall, within the wall's Z
+span, gives its rim's distance from the wall's centre -- the move's own tool
+from the setup's table, a cut's endpoints lying on its arc -- and the widest
+round a bore (the narrowest round a boss) is the diameter the file cuts.
+Walls declared by several operations (a bore and its spring pass) are one
+wall. `cam_verify` answers `fits` (`FitVerdict`); `Explain` says a line
+each. Past the band on the side nothing puts back -- a bore too big, a boss
+too small -- is scrap and counts against `ok`; short of it is metal left on
+the wall and counts against `complete`, and so does a wall no move of its
+operations reaches. The band's ring, a cell either side, is excused from
+gouge (down to the wall's bottom) and from leftover (up to its top), so a
+band wider than the grid's quantisation reads as neither.
+
+### Tabs and offcuts
+
+A height map cannot watch a slug drop out of a through cut, so the machined
+map is split, after the cut, into the pieces of material that through cuts
+separate (`OffcutCells`): a cell cut to the stock's floor separates, and so
+does a tab's own material in the kerf, which holds a piece rather than
+joining it to its neighbour; pieces are 8-connected, so a kerf separates
+only where it is cut through cell to cell.
+
+- A piece with none of the part in it is an **offcut** -- the slug of an
+  opening, the frame round a part cut from a sheet -- and is never
+  leftover, wherever the tool touched it (a lead arc into the slug, a ramp
+  in the frame). `offcut_area_mm2` says how much. A profile on tabs
+  verifies complete.
+- A piece held neither by the stock's edge (the sheet, clamped) nor by a
+  tab is **cut free**: an offcut or the part itself, and it would fly.
+  `cut_free` lists them (where, how big, whether it is the part), the part
+  first, and `Explain` says each as a warning. A finding, not a failure: a
+  vacuum table, screws or tape the job does not model may hold it.
+- A setup that cuts nothing through is one piece, and nothing here changes.
+
+### What the job does not cut
+
+`cam_verify` lists every hole and thread of the job's parts that the job
+does not cut (`uncut`, `UncutFeature`), and `Explain` says one line per
+feature. Without it a forgotten hole was silent: leftover is measured only
+where the tool went.
+
+- **A hole** (each bore a Hole drilled, its `HoleMark`) is cut when some
+  setup leaves its bore in air at three points down its axis: this setup's
+  machined map where the bore stands up in it (`FindUncutHoles`), or any
+  other setup's final map (`SetupStock::Removes`). A hole cut by another
+  setup is not listed; one no setup reaches is.
+- **A thread** (each `ThreadMark`, the last on a face) is cut when an
+  enabled thread mill of the job targets its face and generated a thread
+  (`AddUncutThreads`, from every setup's toolpaths). The height map cannot
+  see a thread, so it is the operation's word.
+- **A finding, not a failure**: neither `ok` nor `complete` reads it. A job
+  routinely leaves a feature to another process -- the pan/tilt base
+  plate's M4 threads are tapped by hand -- and `complete` stays the
+  program's statement about what it set out to cut. A caller that requires
+  a feature gates on the list itself, as `generators/pantilt/cam.py` does:
+  anything uncut but the M4 threads stops it.
 
 ### Leftover another setup removes
 
@@ -313,9 +378,13 @@ gouge beyond tolerance, no rapid through material, nothing past the travel,
 no holder, shank or fixture collision, no bite deeper than the operation's
 passes, no move into the chuck or tailstock, and a file that read straight —
 the flag to gate on. `complete` means nothing is left standing. They are separate
-because a height map cannot watch a slug drop out of a through cut, so a
-correct job can be `ok` and not `complete`; tabs do not count against
-`complete`. A program that never touches the stock is `cuts_nothing` and not
+because a correct job can be `ok` and not `complete` -- a forgotten
+operation scraps nothing; tabs and offcuts do not count
+against `complete` ([tabs and offcuts](#tabs-and-offcuts)), a toleranced
+wall cut past its band counts against `ok` and short of it against
+`complete` ([tolerance bands](#tolerance-bands)), and the holes and threads
+the job does not cut are listed and count against neither
+([what the job does not cut](#what-the-job-does-not-cut)). A program that never touches the stock is `cuts_nothing` and not
 `complete`: leftover is measured only where the tool went, so it used to read
 as complete, and a setup whose operation was refused posted a file that
 "verified clean". `cam_verify` also reports how much is left over and where
@@ -532,6 +601,11 @@ simulation did something without owning a renderer.
 
 ## Tests
 
+`tests/test_cam_honest.cpp` (headless): a toleranced bore aimed, posted,
+judged in its band and failed past it; a K7 class read at its size and a
+profile aiming; a part on tabs complete, one cut free said; an opening's
+slug excused and flagged; a blind tapped coupon drilled to its point and
+threaded to its depth, clean; the holes and threads a job leaves uncut.
 `tests/test_cam_verify.cpp` and `test_cam_sim.cpp` (headless):
 `SeekTo(End())` equals `Inspect`'s map; scrubbing past and back lands on the
 same map; the mesh is the map (bounds, volume, below-stock cuts, the triangle

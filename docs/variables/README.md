@@ -124,7 +124,7 @@ set_variable {name: "od", expression: "lookup(\"bearings\", size, \"D\")"}
 - **Where it lives: the project.** `AppState::projectTables`, beside the
   project variables, saved in `project.json` under `"tables"` (an additive
   key; the envelope stays version 2). A lone part's flat file is the whole
-  project, so its envelope carries them (`"tables"`, format v149) and the
+  project, so its envelope carries them (`"tables"`, format v150) and the
   open takes them back into the project scope (`Document::TakeTables`), the
   way the project variables travel. A malformed table refuses the open: an
   expression reads it, and a project that lost one would load with every
@@ -283,7 +283,7 @@ Every numeric feature parameter also accepts an expression, as a
 - `tests/tables_smoke.py` covers the RPCs, both row forms, and the tables
   surviving a flat save and a project.json save.
 - `tests/golden/v11-expressions.json`, `v38-entity-exprs.json` and
-  `v149-lookup-table.json` pin the file format.
+  `v150-lookup-table.json` pin the file format.
 
 ## Not built
 

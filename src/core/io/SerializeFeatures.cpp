@@ -1356,6 +1356,14 @@ json FeatureToJson(const Feature& feature) {
       j["depth_expr"] = ho->depthExpr;
     if (ho->through)
       j["through"] = true;
+    // v148: each written only when stated; absent is derived
+    // (docs/modeling/holes-and-threads.md#hole).
+    if (ho->pointAngleDeg > 0.0)
+      j["drill_point_deg"] = ho->pointAngleDeg;
+    if (ho->threadDepth > 0.0)
+      j["thread_depth"] = ho->threadDepth;
+    if (!ho->threadDepthExpr.empty())
+      j["thread_depth_expr"] = ho->threadDepthExpr;
     if (ho->kind == HoleKind::Counterbore) {
       j["cb_diameter"] = ho->cbDiameter;
       j["cb_depth"] = ho->cbDepth;
@@ -1647,7 +1655,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "clearance, 5.0 tapped) and is what a drawing callout and a fastener "
      "check read. A TAPPED fit also threads the bore it cuts, so a screw in "
      "it engages instead of reading as interference "
-     "(docs/modeling/holes-and-threads.md#hole)"},
+     "(docs/modeling/holes-and-threads.md#hole); drill_point_deg? (a blind "
+     "floor's point, included angle 30-180; absent = 118 with a fit, a "
+     "jobber drill's, else flat); thread_depth? (mm, +_expr; a tapped fit's "
+     "thread from the mouth; absent = the depth less 3 pitches, a tap's "
+     "lead, or the whole bore when through)"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
@@ -2538,6 +2550,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ho->fitKind = fit.value("kind", std::string("normal"));
       ho->fitPitch = fit.value("pitch", 0.0);
     }
+    // v148: the drill's point and a tapped fit's thread depth. Absent is
+    // derived; a value Execute cannot use is its error, not a substitute.
+    ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
+    ho->threadDepth = j.value("thread_depth", 0.0);
+    ho->threadDepthExpr = j.value("thread_depth_expr", std::string{});
     out = std::move(ho);
   } else if (type == "Draft") { // v22
     std::vector<ElementRef> refs;

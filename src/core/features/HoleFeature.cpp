@@ -17,9 +17,11 @@
 #include "core/features/SketchFeature.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepTools.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <Precision.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -108,10 +110,47 @@ bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::dvec3& c,
   return false;
 }
 
+// The point a twist drill leaves, ISO 235's jobber drills: the drill tables
+// a fit is read from (clearance and tap drill sizes) are those drills.
+constexpr double kJobberPointDeg = 118.0;
+// How many pitches at a blind floor a tap leaves without full thread: the
+// lead of the blind-hole tap, ISO 8830 (DIN 2197) chamfer form C, 2-3
+// threads.
+constexpr double kTapLeadPitches = 3.0;
+
+// The pitch a tapped fit cuts: the stated one, else the table's coarse.
+double FitPitch(const std::string& thread, double stated) {
+  if (stated > 0.0)
+    return stated;
+  const std::optional<threads::Standard> table = threads::Lookup(thread);
+  return table ? table->pitch : 0.0;
+}
+
 } // namespace
+
+double HoleFeature::PointAngleUsed() const {
+  if (pointAngleDeg > 0.0)
+    return pointAngleDeg;
+  return fitThread.empty() ? 180.0 : kJobberPointDeg;
+}
+
+double HoleFeature::ThreadDepthUsed() const {
+  if (fitKind != "tapped" || fitThread.empty())
+    return 0.0;
+  if (threadDepth > 0.0)
+    return threadDepth;
+  if (through)
+    return 0.0; // the whole bore
+  const double pitch = FitPitch(fitThread, fitPitch);
+  // Too shallow for a tap's lead: threaded to the floor, and Execute says so.
+  return depth - kTapLeadPitches * pitch >= pitch
+             ? depth - kTapLeadPitches * pitch
+             : 0.0;
+}
 
 bool HoleFeature::Execute(RegenContext& ctx) {
   m_tool = CADShape(); // a failed regen leaves no stale tool to pattern
+  m_unpointed.clear();
   m_toolMap = {};
   const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sk) {
@@ -157,6 +196,26 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   }
   if (diameter <= 1e-9 || (!through && depth <= 1e-9)) {
     SetError("hole diameter and depth must be positive");
+    return false;
+  }
+  // The drill point and the thread depth, refused rather than read as
+  // something else (docs/modeling/holes-and-threads.md#hole).
+  if (pointAngleDeg != 0.0 && (pointAngleDeg < 30.0 || pointAngleDeg > 180.0)) {
+    SetError("drill_point_deg is the point's included angle, 30 to 180 "
+             "degrees (118 a jobber drill, 180 a flat floor); it was " +
+             std::to_string(pointAngleDeg));
+    return false;
+  }
+  const bool tapped = fitKind == "tapped" && !fitThread.empty();
+  if (threadDepth != 0.0 && !tapped) {
+    SetError("thread_depth is how deep a TAPPED hole is threaded, and this "
+             "hole has no tapped fit -- give it fit {thread, kind: tapped}, "
+             "or drop thread_depth");
+    return false;
+  }
+  if (threadDepth < 0.0 || (!through && threadDepth > depth + 1e-9)) {
+    SetError("thread_depth must be positive and no deeper than the hole (" +
+             std::to_string(depth) + " mm)");
     return false;
   }
 
@@ -219,8 +278,39 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // rather than n times. Measured by driving a 480-hole plate over the RPC.
   std::vector<CADShape> tools;
   tools.reserve(centers.size());
-  for (const glm::dvec3& c : centers) {
+  // A blind hole's floor is the drill's point when it has one: a cone below
+  // the full-diameter depth, its apex the point's height further down.
+  const double pointDeg = PointAngleUsed();
+  const bool pointed = !through && pointDeg < 180.0 - 1e-6;
+  const double pointHeight =
+      pointed ? r / std::tan(glm::radians(pointDeg * 0.5)) : 0.0;
+  for (size_t site = 0; site < centers.size(); site++) {
+    const glm::dvec3& c = centers[site];
     CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth);
+    // Only where the floor is in material: a hole drilled on into a pocket
+    // or out of the far side has no floor for a point to be on, and a cone
+    // in the air would only rename the faces it touches.
+    const glm::dvec3 floor = c + axis * boreDepth;
+    bool floorInMaterial = false;
+    if (pointed)
+      for (const Body& b : ctx.bodies)
+        floorInMaterial =
+            floorInMaterial ||
+            (!b.reference && b.shape.IsValid() &&
+             b.shape.ContainsPoint(floor + axis * (pointHeight * 0.5)));
+    if (pointed && !floorInMaterial)
+      m_unpointed.push_back(entities[site]);
+    if (pointed && floorInMaterial && hole.IsValid()) {
+      try {
+        BRepPrimAPI_MakeCone cone(gp_Ax2(gp_Pnt(floor.x, floor.y, floor.z),
+                                         gp_Dir(axis.x, axis.y, axis.z)),
+                                  r, 0.0, pointHeight);
+        cone.Build();
+        hole = cone.IsDone() ? hole.Union(CADShape(cone.Shape())) : CADShape();
+      } catch (const Standard_Failure&) {
+        hole = CADShape();
+      }
+    }
     if (kind == HoleKind::Counterbore && cbDiameter > diameter &&
         cbDepth > 1e-9) {
       hole =
@@ -320,9 +410,47 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     SetError("hole cut failed");
     return false;
   }
-  if (fitKind == "tapped" && !fitThread.empty())
+  if (tapped) {
     RecordTapping(ctx.bodies);
+    if (!through && threadDepth == 0.0 && ThreadDepthUsed() == 0.0)
+      SetWarning("this tapped hole is too shallow for a tap's lead (" +
+                 std::to_string(static_cast<int>(kTapLeadPitches)) +
+                 " pitches) to leave a full thread above its floor, so it "
+                 "is threaded to the floor: drill it deeper, or state "
+                 "thread_depth");
+  }
+  RecordHoles(ctx.bodies);
   return true;
+}
+
+// What CAM reads of every bore this feature cut (HoleMark): by its own name
+// prefix and role, the way RecordTapping finds them.
+void HoleFeature::RecordHoles(std::vector<Body>& bodies) const {
+  const bool tapped = fitKind == "tapped" && !fitThread.empty();
+  for (Body& body : bodies) {
+    if (body.reference || !body.shape.IsValid())
+      continue;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const topo::ElementOrigin o = topo::DecodeElementName(name);
+      if (o.ok && o.derived.empty() && o.madeBy == GetId() &&
+          o.role == topo::ElementRole::Bore) {
+        HoleMark h;
+        h.bore = ElementRef{body.createdBy, name};
+        h.featureId = GetId();
+        h.feature = GetName();
+        h.diameter = diameter;
+        h.depth = through ? 0.0 : depth;
+        h.through = through;
+        h.pointAngleDeg =
+            through || std::find(m_unpointed.begin(), m_unpointed.end(),
+                                 o.entity) != m_unpointed.end()
+                ? 180.0
+                : PointAngleUsed();
+        h.thread = tapped ? fitThread : std::string{};
+        body.holes.push_back(std::move(h));
+      }
+    }
+  }
 }
 
 // A hole drilled FOR a thread IS threaded.
@@ -338,8 +466,9 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 //
 // Every bore this feature cut, by its own name prefix and its radius — a
 // counterbore or a countersink on the same hole is a different radius and is
-// not a thread. The region carries no length, so it is the whole bore, and
-// no minimum engagement, so the standard's pitch stands.
+// not a thread. The region runs the thread's depth from the mouth
+// (ThreadDepthUsed; 0, the whole bore, when through), and carries no
+// minimum engagement, so the standard's pitch stands.
 void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
   // What the tap cuts, for whatever reads the bodies (the CAM thread mill):
   // the table's thread at the fit's pitch, right-handed, no class stated.
@@ -351,6 +480,9 @@ void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
     std::snprintf(buf, sizeof buf, "%sx%g", fitThread.c_str(), fitPitch);
     designation = buf;
   }
+  // As deep as it is threaded, from the mouth: a blind hole's tap leaves its
+  // lead short of the floor (ThreadDepthUsed); 0 is the whole bore.
+  const double length = ThreadDepthUsed();
   for (Body& body : bodies) {
     if (body.reference || !body.shape.IsValid())
       continue;
@@ -359,11 +491,11 @@ void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
       if (o.ok && o.derived.empty() && o.madeBy == GetId() &&
           o.role == topo::ElementRole::Bore) {
         body.threadRegions.push_back(
-            {ElementRef{body.createdBy, name}, fitThread, 0.0, 0.0, false});
+            {ElementRef{body.createdBy, name}, fitThread, length, 0.0, false});
         if (pitch > 0.0)
           body.threads.push_back({ElementRef{body.createdBy, name}, GetId(),
                                   designation, table ? table->majorDia : 0.0,
-                                  pitch, "", true, false, 0.0, false});
+                                  pitch, "", true, false, length, false});
       }
     }
   }
@@ -404,7 +536,7 @@ void HoleFeature::NameByRole(const CADShape& tool,
         role = "counterbore";
     } else if (s.GetType() == GeomAbs_Cone) {
       p = s.Cone().Location();
-      role = "countersink";
+      role = "countersink"; // or the drill's point, decided below by depth
     } else {
       double u0, u1, v0, v1;
       BRepTools::UVBounds(face, u0, u1, v0, v1);
@@ -420,6 +552,13 @@ void HoleFeature::NameByRole(const CADShape& tool,
         best = d;
         site = k;
       }
+    }
+    if (s.GetType() == GeomAbs_Cone) {
+      // A countersink sits at the mouth; the drill's point under the floor.
+      const glm::dvec3& c = centers[site];
+      const double t = gp_Vec(gp_Pnt(c.x, c.y, c.z), p).Dot(gp_Vec(dir));
+      if (same(t, boreDepth))
+        role = "point";
     }
     if (s.GetType() == GeomAbs_Plane) {
       const glm::dvec3& c = centers[site];

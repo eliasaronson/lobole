@@ -273,11 +273,14 @@ TEST_CASE("a hole drilled FOR a thread is threaded", "[thread][hole]") {
   };
   // An M6 screw standing in the bore: the shank is the major diameter, so it
   // is 0.8 mm of steel wider than the hole all the way round — that overlap
-  // IS the thread, and is exactly what must not read as interference.
+  // IS the thread, and is exactly what must not read as interference. It
+  // stops in the thread, 9 mm of the 12 drilled: a tap's lead leaves the
+  // last three pitches unthreaded (docs/modeling/holes-and-threads.md#hole).
   Body screw;
-  screw.shape = CADShape(
-      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 9), gp_Dir(0, 0, 1)), 3, 10)
-          .Shape());
+  screw.shape =
+      CADShape(BRepPrimAPI_MakeCylinder(
+                   gp_Ax2(gp_Pnt(0, 0, 11.5), gp_Dir(0, 0, 1)), 3, 8.5)
+                   .Shape());
   {
     int i = 0;
     for (TopExp_Explorer ex(screw.shape.GetShape(), TopAbs_FACE); ex.More();

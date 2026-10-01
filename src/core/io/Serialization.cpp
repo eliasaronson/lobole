@@ -242,7 +242,7 @@ json DocumentEnvelope(const Document& doc) {
     j["generator"] = doc.Generator();
   if (!doc.GetCatalogs().empty())
     j["catalogs"] = catalog::Serialize(doc.GetCatalogs());
-  // v149: project tables a single-part file carries (the project's, folded
+  // v150: project tables a single-part file carries (the project's, folded
   // in for the write like its variables).
   if (!doc.GetTables().empty())
     j["tables"] = lookuptable::ToJson(doc.GetTables());

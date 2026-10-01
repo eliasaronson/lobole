@@ -961,6 +961,25 @@ struct Toolpath {
     Tool tool;
   };
   std::vector<Thread> threads;
+  // A toleranced round wall this path aimed at the middle of its band
+  // (docs/cam/operations.md#tolerance-bands): the wall's centre and side,
+  // its nominal diameter, the band, what the path aimed at and the wall's
+  // span. The verifier measures the diameter the posted file cut there and
+  // judges it against the band, and the post states the band in its header.
+  struct Fit {
+    uint64_t op = 0;        // the operation, as the file's `(op N)` names it
+    glm::dvec2 centre{0.0}; // setup XY
+    bool internal = true;   // a bore; false: a boss
+    double nominal = 0.0;   // mm, the modelled diameter
+    double lower = 0.0;     // mm, the band's deviations on the diameter
+    double upper = 0.0;
+    double aim = 0.0;            // mm, the diameter the path cuts
+    double zLo = 0.0, zHi = 0.0; // the wall's span, setup Z
+    std::string label;           // "K7", "+0.05/-0.02"
+    [[nodiscard]] double Min() const { return nominal + lower; }
+    [[nodiscard]] double Max() const { return nominal + upper; }
+  };
+  std::vector<Fit> fits;
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;

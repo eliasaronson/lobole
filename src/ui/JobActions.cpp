@@ -40,11 +40,25 @@ Document* JobSourceDocument(AppState& state, uint64_t sourceDocId) {
 
 uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId) {
   const Document* doc = JobSourceDocument(state, sourceDocId);
+  if (doc == nullptr)
+    return 0;
   // Editing a configuration the job cuts regenerates it and moves no
   // Version.
-  return doc ? doc->Version() ^
-                   (doc->ConfigurationsRevision() * 0x9E3779B97F4A7C15ull)
-             : 0;
+  uint64_t key =
+      doc->Version() ^ (doc->ConfigurationsRevision() * 0x9E3779B97F4A7C15ull);
+  // Nor does a tolerance, which a job stamps on its bodies and cuts to
+  // (docs/cam/operations.md#tolerance-bands): without it here, a K7 set on
+  // a seat left the toolpath at the band it had before.
+  for (const Tolerance& t : doc->GetTolerances()) {
+    key = (key ^ t.id) * 1099511628211ull;
+    key = (key ^ std::hash<std::string>{}(t.ref.name + "|" + t.isoClass)) *
+          1099511628211ull;
+    key = (key ^ static_cast<uint64_t>(std::llround(t.lower * 1e6))) *
+          1099511628211ull;
+    key = (key ^ static_cast<uint64_t>(std::llround(t.upper * 1e6))) *
+          1099511628211ull;
+  }
+  return key;
 }
 
 // What the assembled bodies depend on: which parts the job lists, and what
@@ -373,6 +387,9 @@ const std::vector<Body>& JobBodies(AppState& state) {
       }
       state.jobBodies.push_back(b);
       state.jobBodies.back().jobPartId = part.id;
+      // The part's size tolerances, which live outside its regeneration:
+      // what the job cuts to (docs/cam/operations.md#tolerance-bands).
+      cam::StampBands(*doc, state.jobBodies.back());
     }
   }
   state.jobBodiesKey = key;

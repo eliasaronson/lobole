@@ -42,7 +42,7 @@ Each stage opens the project the one before saved; all of it lands in
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
 | `build_assembly.py` | the assembly: mates, bearings by `fit_bearing` and `check_seat`, screws by `fit_fastener`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
 | `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): static studies of the solid yoke and the head's, the lens carried from the seats (`probe_study`); the yoke as the three pieces it prints in, each checked against a 256 mm bed, with their STLs; stills; the envelope's topology study and its pictures -- run once and kept in `yoke_envelope.dsgn`, reused while the envelope is the same (its volume), `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
-| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with the thread judged in its band, posted; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
+| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
 | `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
@@ -142,7 +142,8 @@ reason (a frame built from a cylindrical face does not carry the blank's X).
   over the jaws (adaptive, 1 mm engagement, 10 mm deep), the 6002's seat
   (bored with the 10 mm leaving 0.2, finished with a fresh 6 mm in one
   full-depth pass, then a spring pass: the same lap again), the relief, the
-  four M4 tap holes (3.3 flat-bottom drill, pecked; tap them M4 by hand), the
+  four M4 tap holes (3.3 mm 118 degree drill, pecked, to the point the
+  model has; tap them M4 by hand, 5.9 deep), the
   seat-mouth and rim chamfers. 20.1 min.
 - **Underside** (flipped; the vise on the finished disc's top 10 mm): face
   to 24.7, clear the rest of the waste 0.5 mm into what Top cleared, the
@@ -156,15 +157,17 @@ reason (a frame built from a cylindrical face does not carry the blank's X).
   loads about half of Harvey Tool's and Helical Solutions' 6061 charts for a
   VMC, every feed under the 1500 mm/min the machine states. 10 mm 3-flute at
   15000 rpm and 0.03 mm/tooth (1350 mm/min); 6 mm 3-flute finisher at 20000
-  and 0.02 (1200); 3.3 mm flat-bottom carbide drill at 12000 and 0.05/rev;
+  and 0.02 (1200); 3.3 mm 118 degree carbide drill at 12000 and 0.05/rev;
   6 mm 60 degree single-form thread mill (head 6, neck 3.6 x 18) at 15000
   and 0.02 (900 at the rim); 6 mm 90 degree chamfer mill at 18000 (1000).
   ER20 holders, 35 mm nuts, each tool's stickout stated so the holder check
   runs.
 
 **The K7 seat.** Ø32 K7 is +7/-18 µm: 31.982 to 32.007, 25 µm wide. The
-program puts the finisher's rim on 32.000, inside the band and 7 µm under
-its top; the CAM reads no tolerance, so that is where any bore goes. A
+program aims the finisher's rim, and the spring pass's, at the band's
+middle, 31.9945, and says so in its header (`(fit op 7: bore D32 K7
+31.982-32.007, aimed at 31.9945)`); the check reads the posted bore at
+31.9946, in its band. A
 router does not hold 25 µm unaided: spindle runout (an ER20 collet, 10-20
 µm), the finisher's deflection and the steppers' reversal at the quadrants
 each take a part of it, and all push the bore over size, which is the loose
@@ -191,19 +194,18 @@ real bore size error, which is the K7 question above.
 - Nothing retains the yoke against lifting off (gravity holds it) or the
   tilt shaft axially at the -Y arm; a nut or circlip is not modelled.
 - The M4 threads are tapped by hand: an M4 thread mill would be a 2.4 mm
-  head on a router, and nothing in the check says a thread on the part is
-  left uncut.
+  head on a router. The check lists them as not cut by the job, and
+  `cam.py` stops on anything else it lists.
 - The flipped setup's playback shows the waste Top already removed from
   below it as a solid slab: a height map seen from above cannot hold an
   undercut. The check reads it from Top's program and is right.
 - The yoke prints as three pieces bolted together (below); the studies
   model it as one solid, so the joint is taken as bonded.
-- The plate's tapped holes are threaded as deep as they are drilled (the
-  drawing says so: `M4 DEEP 8, DRILL Ø3.3 DEEP 8`): a Hole has no drill
-  point and a Thread no length short of its bore, and a hand tap does not
-  cut to the bottom of a blind hole. At the machine, drill 2 mm deeper or
-  tap to depth with a bottoming tap; the tripod screw needs 9.5 of the
-  12.7.
+- The M4 holes are drilled 8 deep with a 118 degree point and threaded
+  5.9, three pitches short of it (a Hole's derived drill point and thread
+  depth). The tripod hole is bored flat with the 6 mm end mill and states
+  so (`drill_point_deg` 180): a drill's point there would break through
+  the web into the relief.
 
 ## The yoke under load
 
@@ -291,7 +293,7 @@ dimensions are measured off the projection and its callouts are the model's
 own text, so a change upstream re-draws rather than going stale.
 
 - **`base_plate`** (A3, 2:1): the top (the disc Ø73.6, the relief Ø23.5
-  seen through the seat, `4× M4 DEEP 8, DRILL Ø3.3 DEEP 8` and their
+  seen through the seat, `4× M4 DEEP 5.9, DRILL Ø3.3 DEEP 8` and their
   37.34 spacing), SECTION A-A folded under it through the seat and the
   tripod hole (24.7 thick, the seat `Ø32 K7 (+0.007/-0.018)` 9 deep, the
   relief 10.2, the drill 12.7, the 3/8-16 thread drawn to ISO 6410 in the
@@ -385,7 +387,10 @@ saved and never printed; "the active document is not a part, not a part".
    complete; a Hole has no drill point and a Thread no length short of its
    bore, so blind tapped holes are threaded to the bottom of a flat drill;
    a thread the job does not cut (the M4s) is ignored silently; adaptive
-   clearing is slow. Risks a wrong part.
+   clearing is slow. Risks a wrong part. (Fixed since, in the friction
+   round: the seat is aimed into K7 and judged against it, tabs and
+   offcuts verify, a Hole has a drill point and a thread depth, the M4s are
+   listed as uncut, and adaptive's lead paths are cheaper.)
 4. **Fits stop at one ring.** `check_seat`/`fit_bearing` verify the outer
    ring only (a one-solid bearing mates to one seat in a mechanism); ISO
    286's J classes are missing (J7); a Hole's clearance fit ignores the
@@ -411,9 +416,9 @@ saved and never printed; "the active document is not a part, not a part".
 2. Topology you can build from: several load cases, keep-out bodies, a
    connectivity filter, a static study on the optimised mesh, a split for
    the printer.
-3. CAM honest about tolerance and threads: a finish aimed into a size
-   band (or the band stated with the program), a Hole drill point and a
-   thread length, an uncut thread or hole reported, tabs that verify.
+3. CAM honest about tolerance and threads -- built: see
+   [tolerance bands](../../docs/cam/operations.md#tolerance-bands) and
+   [what the job does not cut](../../docs/cam/simulation.md#what-the-job-does-not-cut).
 4. Fits: J/js classes, both rings of a bearing checked, the print allowance
    in a Hole's clearance fit, `set_tolerance` on any part.
 5. Drawings: feature control frames on datums, rotated text, balloon

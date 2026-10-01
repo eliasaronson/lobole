@@ -90,6 +90,7 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
   fresh.grooves = previous.grooves;
   fresh.arcs = previous.arcs;
   fresh.threads = previous.threads;
+  fresh.fits = previous.fits;
   fresh.strategy = previous.strategy;
 }
 

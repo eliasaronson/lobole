@@ -470,6 +470,14 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // (docs/cam/simulation.md#leftover-another-setup-removes).
 [[nodiscard]] glm::dmat4 BodyToSetup(const Setup& setup, uint64_t jobPartId);
 
+// The size tolerances `doc` puts on `body`'s round faces, written on it as
+// `Body::bands` (docs/cam/operations.md#tolerance-bands): what a job stamps
+// on each body it assembles from its part (ui::JobBodies), so the strategies
+// aim at a band's middle and the verifier judges against it. A class is read
+// at the face's measured size; a tolerance whose face no longer resolves,
+// whose class this size does not carry, or on a distance, is not stamped.
+void StampBands(const Document& doc, Body& body);
+
 // The bodies as this setup sees them: `SetupToModel` undone, so the setup's
 // "up" is +Z again and the whole 2.5D pipeline — sectioning, face regions,
 // stock bounds, the verifier — works unchanged on a part that is not modelled

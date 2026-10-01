@@ -156,6 +156,45 @@ struct ThreadVerdict {
   }
 };
 
+// A toleranced round wall, judged against its band
+// (docs/cam/simulation.md#tolerance-bands): the diameter the posted file cut
+// -- the widest the tool's rim reached round a bore over the wall's span,
+// the narrowest round a boss -- from every operation that declared it.
+struct FitVerdict {
+  std::vector<uint64_t> ops; // the operations that aimed at it
+  glm::dvec2 centre{0.0};
+  bool internal = true;
+  double nominal = 0.0, min = 0.0, max = 0.0, aim = 0.0; // mm, diameters
+  std::string label;
+  bool judged = false; // false: no cutting move of those ops on the wall
+  std::string why;
+  double cut = 0.0; // mm, the diameter the file cuts
+  // Past the band on the side nothing can put back: a bore too big, a boss
+  // too small. Counts against Safe.
+  [[nodiscard]] bool Scrap() const {
+    return judged && (internal ? cut > max + 1e-4 : cut < min - 1e-4);
+  }
+  // Short of the band: metal left on the wall. Counts against Complete.
+  [[nodiscard]] bool Short() const {
+    return !judged || (internal ? cut < min - 1e-4 : cut > max + 1e-4);
+  }
+  [[nodiscard]] bool InBand() const { return judged && !Scrap() && !Short(); }
+};
+
+// A hole or a thread of the job's parts that the job does not cut
+// (docs/cam/simulation.md#what-the-job-does-not-cut). A finding, not a
+// failure: a job may leave a feature to the tap, the reamer or another job.
+struct UncutFeature {
+  enum class Kind { Hole, Thread };
+  Kind kind = Kind::Hole;
+  uint64_t jobPartId = 0;
+  uint64_t featureId = 0;
+  std::string feature; // the Hole's name, or the thread's designation
+  ElementRef face;     // the bore, or the threaded face
+  std::string what;    // "M4 thread", "hole D3.3 deep 8"
+  glm::dvec3 at{0.0};  // the face's middle, model space
+};
+
 struct Verdict {
   double maxGouge = 0.0; // mm cut BELOW the designed surface (scrap)
   // How far the deepest cut went below the WORKPIECE — the spoilboard, which
@@ -366,6 +405,24 @@ struct Verdict {
   // down to its head's lowest tip, is not gouge; this is what says whether
   // the thread is right.
   std::vector<ThreadVerdict> threads;
+  // Every toleranced wall the program declared, judged against its band
+  // (docs/cam/simulation.md#tolerance-bands).
+  std::vector<FitVerdict> fits;
+  // Pieces of material that through cuts separate from everything that
+  // holds them (docs/cam/simulation.md#tabs-and-offcuts). An offcut -- a
+  // piece with none of the part in it, the slug of an opening -- is never
+  // leftover; one held neither by the stock's edge nor by a tab is cut
+  // free, and so is a piece of the part that nothing holds. Said, not
+  // failed: a vacuum table or screws the job does not know of may hold it.
+  struct CutFree {
+    glm::dvec2 at{0.0}; // its middle
+    double area = 0.0;  // mm^2
+    bool part = false;  // the part, not an offcut
+  };
+  std::vector<CutFree> cutFree;
+  double offcutArea = 0.0; // mm^2 of offcut excused from leftover
+  // Holes and threads of the job's parts the job does not cut.
+  std::vector<UncutFeature> uncut;
   int firstBadLine = 0; // the G-code line of the first such rapid
   size_t cells = 0;
   // How much of the stock the program never passed over. A pocket-only job
@@ -385,8 +442,8 @@ struct Verdict {
   double leftoverArea = 0.0; // mm^2 above the designed surface
   int leftoverRegions = 0;   // separate places it sits in
   // The biggest of those places, largest first. "341 mm2 in 12 places" is a
-  // number to worry about; "the slot's slug, two bores and four tabs" is a
-  // job to sign off. Capped, so a fine grid cannot flood a report.
+  // number to worry about; "four inside corners a round cutter cannot reach"
+  // is a job to sign off. Capped, so a fine grid cannot flood a report.
   struct Region {
     glm::dvec2 at{0.0}; // centroid
     double area = 0.0;  // mm^2
@@ -415,24 +472,27 @@ struct Verdict {
            holdingCollisions == 0 && fileErrors == 0 &&
            std::all_of(
                threads.begin(), threads.end(),
-               [&](const ThreadVerdict& t) { return t.Safe(tolerance); });
+               [&](const ThreadVerdict& t) { return t.Safe(tolerance); }) &&
+           std::none_of(fits.begin(), fits.end(),
+                        [](const FitVerdict& f) { return f.Scrap(); });
   }
   // Complete: nothing is left standing that the model says should be gone.
-  // This one is SOFTER, because a height map cannot watch a slug fall out of
-  // a through cut — so a correct job can still report material left over, and
-  // the two used to be one flag that no real job could ever set
-  // (docs/cam/simulation.md#verdict). Tabs no longer count against it: they are
-  // asked for, and the toolpath now says where it left them, so every job
-  // that used one reported `complete: false` for a reason the flag could not
-  // express. Read it with leftoverArea and `biggest`: several small places
-  // are the corners a round cutter cannot reach, one large one is an
-  // operation nobody added.
+  // This one is SOFTER: a corner a round cutter cannot reach is material
+  // left too, and the two used to be one flag that no real job could ever
+  // set (docs/cam/simulation.md#verdict). Tabs and offcuts do not count
+  // against it: a tab is asked for and the toolpath says where it left it,
+  // and a piece through cuts part from the part is not the part
+  // (docs/cam/simulation.md#tabs-and-offcuts). Read it with leftoverArea and
+  // `biggest`: several small places are the corners a round cutter cannot
+  // reach, one large one is an operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
     return maxLeftover <= tolerance && grooveShallow <= tolerance &&
            !CutsNothing() &&
            std::all_of(
                threads.begin(), threads.end(),
-               [&](const ThreadVerdict& t) { return t.Good(tolerance); });
+               [&](const ThreadVerdict& t) { return t.Good(tolerance); }) &&
+           std::none_of(fits.begin(), fits.end(),
+                        [](const FitVerdict& f) { return f.Short(); });
   }
   // The program never touches the stock. Leftover is measured only where the
   // tool went, so such a program has none and read as complete -- the chess
@@ -473,7 +533,8 @@ Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<FixtureSolid>& fixtures = {},
         const OtherSetups* others = nullptr,
         const std::vector<Toolpath::Groove>& grooves = {},
-        const std::vector<Toolpath::Thread>& threads = {});
+        const std::vector<Toolpath::Thread>& threads = {},
+        const std::vector<Toolpath::Fit>& fits = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -493,7 +554,34 @@ VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<FixtureSolid>& fixtures = {},
             const OtherSetups* others = nullptr,
             const std::vector<Toolpath::Groove>& grooves = {},
-            const std::vector<Toolpath::Thread>& threads = {});
+            const std::vector<Toolpath::Thread>& threads = {},
+            const std::vector<Toolpath::Fit>& fits = {});
+
+// The threads of the job's parts that the job does not cut
+// (docs/cam/simulation.md#what-the-job-does-not-cut), added to `v.uncut`:
+// a thread is cut when an enabled thread mill of the job (`setups`, every
+// setup) targets its face and generated a thread (`milled`: the ops whose
+// toolpath declared one, by id). The holes are `Inspect`'s, which has the
+// machined map they are judged on.
+void AddUncutThreads(const std::vector<Setup>& setups,
+                     const std::vector<Body>& rawBodies,
+                     const std::vector<uint64_t>& milled, Verdict& v);
+
+// Every toleranced wall `fits` declares, judged from `program` (in setup
+// space): the walls declared by several operations (a bore and its spring
+// pass) are one wall, cut by all of them
+// (docs/cam/simulation.md#tolerance-bands).
+[[nodiscard]] std::vector<FitVerdict>
+JudgeFits(const GProgram& program, const Setup& setup,
+          const std::vector<Toolpath::Fit>& fits);
+
+// The holes of the job's parts whose bores no setup leaves in air, into
+// `v.uncut`: this setup's `machined` map where the bore stands up in it,
+// and `others` (may be null) for the rest
+// (docs/cam/simulation.md#what-the-job-does-not-cut).
+void FindUncutHoles(const Setup& setup, const std::vector<Body>& rawBodies,
+                    const HeightMap& machined, const OtherSetups* others,
+                    Verdict& v);
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/simulation.md#verdict). Empty only when there is nothing to say.

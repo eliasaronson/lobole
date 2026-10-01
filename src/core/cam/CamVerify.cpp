@@ -402,6 +402,113 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
 // program actually swept — see Verdict::untouchedFraction. Null compares
 // every cell.
 // Leftover deeper than this counts toward `leftoverArea`/`leftoverRegions`.
+// Pieces of material, after the cut, that through cuts separate
+// (docs/cam/simulation.md#tabs-and-offcuts). A cell holds material when the
+// machined stock stands above the stock's floor; a cell cut to the floor
+// separates, and so does a tab's own material in the kerf, which holds a
+// piece rather than making it part of its neighbour. Each piece with none
+// of the part in it is an OFFCUT: its cells are returned set, never to be
+// counted as leftover -- a height map cannot watch a slug drop out, and the
+// frame round a part cut from a sheet is not the part. A piece held neither
+// by the stock's edge (the sheet itself, clamped) nor by a tab is cut free,
+// and said in `v.cutFree`, a piece of the part as much as an offcut. Empty
+// when nothing is cut through: then the stock is one piece.
+static std::vector<uint8_t> OffcutCells(const HeightMap& machined,
+                                        const HeightMap& designed,
+                                        double floorZ,
+                                        const std::vector<uint8_t>* touched,
+                                        const std::vector<Toolpath::Tab>& tabs,
+                                        double leftTol, Verdict& v) {
+  const int nx = machined.nx, ny = machined.ny;
+  const size_t total = static_cast<size_t>(nx) * static_cast<size_t>(ny);
+  constexpr double kThrough = 1e-3;
+  std::vector<uint8_t> state(total, 0); // 0 cut through, 1 material, 2 tab
+  bool anyThrough = false;
+  for (int j = 0; j < ny; j++)
+    for (int i = 0; i < nx; i++) {
+      const size_t k = static_cast<size_t>(j) * static_cast<size_t>(nx) +
+                       static_cast<size_t>(i);
+      const double got = machined.At(i, j);
+      if (got <= floorZ + kThrough) {
+        anyThrough = true;
+        continue;
+      }
+      state[k] = 1;
+      if (touched == nullptr || touched->size() != total || (*touched)[k] == 0)
+        continue;
+      for (const Toolpath::Tab& t : tabs)
+        if (got <= t.topZ + leftTol &&
+            glm::distance(t.at, glm::dvec2(machined.CellX(i),
+                                           machined.CellY(j))) <= t.radius) {
+          state[k] = 2;
+          break;
+        }
+    }
+  if (!anyThrough)
+    return {};
+  std::vector<uint8_t> offcut(total, 0);
+  std::vector<uint8_t> seen(total, 0);
+  std::vector<size_t> stack, cells;
+  for (size_t start = 0; start < total; start++) {
+    if (state[start] != 1 || seen[start] != 0)
+      continue;
+    // One piece, 8-connected: a kerf parts two pieces only where it is cut
+    // through cell to cell, so two cells touching at a corner across a
+    // kerf's edge are not taken for a cut the cutter never made.
+    cells.clear();
+    stack.push_back(start);
+    seen[start] = 1;
+    bool part = false, edge = false, tab = false;
+    double sx = 0.0, sy = 0.0;
+    while (!stack.empty()) {
+      const size_t k = stack.back();
+      stack.pop_back();
+      cells.push_back(k);
+      const int i = static_cast<int>(k % static_cast<size_t>(nx));
+      const int j = static_cast<int>(k / static_cast<size_t>(nx));
+      sx += machined.CellX(i);
+      sy += machined.CellY(j);
+      part = part || designed.At(i, j) > floorZ + leftTol;
+      edge = edge || i == 0 || j == 0 || i == nx - 1 || j == ny - 1;
+      for (int dj = -1; dj <= 1; dj++)
+        for (int di = -1; di <= 1; di++) {
+          const int ni = i + di, nj = j + dj;
+          if ((di == 0 && dj == 0) || ni < 0 || nj < 0 || ni >= nx || nj >= ny)
+            continue;
+          const size_t nk = static_cast<size_t>(nj) * static_cast<size_t>(nx) +
+                            static_cast<size_t>(ni);
+          if (state[nk] == 2)
+            tab = true;
+          if (state[nk] != 1 || seen[nk] != 0)
+            continue;
+          seen[nk] = 1;
+          stack.push_back(nk);
+        }
+    }
+    const double area =
+        static_cast<double>(cells.size()) * machined.res * machined.res;
+    if (!part) {
+      for (const size_t k : cells)
+        offcut[k] = 1;
+      v.offcutArea += area;
+    }
+    if (!edge && !tab) {
+      Verdict::CutFree c;
+      c.at = {sx / static_cast<double>(cells.size()),
+              sy / static_cast<double>(cells.size())};
+      c.area = area;
+      c.part = part;
+      v.cutFree.push_back(c);
+    }
+  }
+  // The part first, then the largest offcut: what flies hardest.
+  std::sort(v.cutFree.begin(), v.cutFree.end(),
+            [](const Verdict::CutFree& a, const Verdict::CutFree& b) {
+              return a.part != b.part ? a.part : a.area > b.area;
+            });
+  return offcut;
+}
+
 // Zero takes the grid's own quantisation (one and a half cells).
 // `floorZ` is the bottom of the STOCK. Material removed below it is the
 // spoilboard, not the part, so it lands in `belowStock` instead of `maxGouge`
@@ -414,7 +521,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 const std::vector<Toolpath::Tab>& tabs = {},
                 const OtherSetups* others = nullptr,
                 const std::vector<float>* grooveFloor = nullptr,
-                const std::vector<float>* threadFloor = nullptr) {
+                const std::vector<float>* threadFloor = nullptr,
+                const std::vector<Toolpath::Fit>* fits = nullptr) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -423,6 +531,10 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
   const double leftTol =
       leftoverTolerance > 0.0 ? leftoverTolerance : machined.res * 1.5;
   std::vector<uint8_t> over(total, 0);
+  // Offcuts: material that through cuts separate from the part, never
+  // leftover (docs/cam/simulation.md#tabs-and-offcuts).
+  const std::vector<uint8_t> offcut =
+      OffcutCells(machined, designed, floorZ, touched, tabs, leftTol, v);
   // Cell by cell, in bands of rows on every core. Each band keeps its own
   // worsts, and they are merged in band order with the serial scan's strict
   // `>`, so a tie goes to the lowest row as it did on one thread; the area
@@ -523,6 +635,23 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         if (threadFloor != nullptr && threadFloor->size() == total &&
             (*threadFloor)[k] != kNoGroove)
           want = std::min(want, static_cast<double>((*threadFloor)[k]));
+        // Inside a toleranced wall's band the cut may stand anywhere the
+        // band allows, down to the wall's own bottom: it is judged against
+        // the band instead (docs/cam/simulation.md#tolerance-bands).
+        bool inBand = false;
+        if (fits != nullptr)
+          for (const Toolpath::Fit& f : *fits) {
+            const double d = glm::distance(
+                f.centre, glm::dvec2(machined.CellX(i), machined.CellY(j)));
+            const double rLo =
+                std::min({f.nominal, f.Min(), f.aim}) * 0.5 - machined.res;
+            const double rHi =
+                std::max({f.nominal, f.Max(), f.aim}) * 0.5 + machined.res;
+            if (d < rLo || d > rHi || got > f.zHi + leftTol)
+              continue;
+            inBand = true;
+            want = std::min(want, f.zLo);
+          }
         if (!relieved && want - got > v.maxGouge) {
           v.maxGouge = want - got;
           v.gougeAt = {machined.CellX(i), machined.CellY(j)};
@@ -531,7 +660,7 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         // -- but only up to its own top. Excusing it by position alone, the
         // way a relief is excused, would excuse a genuinely uncut slab
         // sitting above it: the whole point of a tab is that it is SHORT.
-        bool tabbed = false;
+        bool tabbed = inBand || (!offcut.empty() && offcut[k] != 0);
         for (const Toolpath::Tab& t : tabs)
           if (got <= t.topZ + leftTol &&
               glm::distance(t.at, glm::dvec2(machined.CellX(i),
@@ -993,7 +1122,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<FixtureSolid>& fixtures,
                    const OtherSetups* others,
                    const std::vector<Toolpath::Groove>& grooves,
-                   const std::vector<Toolpath::Thread>& threads) {
+                   const std::vector<Toolpath::Thread>& threads,
+                   const std::vector<Toolpath::Fit>& fits) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -1420,8 +1550,14 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict = Compare(machined, out.designed, lo.z, &touched,
                         /*leftoverTolerance=*/0.0, reliefs, tabs, others,
                         grooves.empty() ? nullptr : &grooveFloor,
-                        threads.empty() ? nullptr : &threadFloor);
+                        threads.empty() ? nullptr : &threadFloor,
+                        fits.empty() ? nullptr : &fits);
   out.verdict.threads = std::move(threadVerdicts);
+  // Each toleranced wall, against its band; and each hole of the part no
+  // setup cuts (docs/cam/simulation.md#tolerance-bands,
+  // docs/cam/simulation.md#what-the-job-does-not-cut).
+  out.verdict.fits = JudgeFits(program, setup, fits);
+  FindUncutHoles(setup, rawBodies, machined, others, out.verdict);
   out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.tabs = static_cast<int>(tabs.size());
   out.verdict.grooves = static_cast<int>(grooves.size());
@@ -1619,7 +1755,8 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<FixtureSolid>& fixtures,
                     const OtherSetups* others,
                     const std::vector<Toolpath::Groove>& grooves,
-                    const std::vector<Toolpath::Thread>& threads) {
+                    const std::vector<Toolpath::Thread>& threads,
+                    const std::vector<Toolpath::Fit>& fits) {
   // The STOCK MODEL follows the file, not the setup. A program whose A moves
   // is cut from a cylinder that turns and one whose A does not is cut from a
   // block that does not, and asking the setup would get the answer wrong in
@@ -1643,6 +1780,12 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
       tv.threadClass = t.threadClass;
       tv.why = "the file turns A: a thread is judged on a 3-axis program";
       v.threads.push_back(std::move(tv));
+    }
+    // So is a toleranced wall.
+    for (FitVerdict& f : JudgeFits(program, setup, fits)) {
+      f.judged = false;
+      f.why = "the file turns A: a band is judged on a 3-axis program";
+      v.fits.push_back(std::move(f));
     }
     v.fixturesSkippedRotary = !fixtures.empty();
     // The machine's travel, which a turning program was never checked
@@ -1676,7 +1819,7 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     return v;
   }
   Verdict v = Inspect(gcode, setup, bodies, res, reliefs, tabs, fixtures,
-                      others, grooves, threads)
+                      others, grooves, threads, fits)
                   .verdict;
   if (others != nullptr)
     v.otherSetupsNotChecked = others->notChecked;
@@ -1784,6 +1927,97 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                     t.floorLimited ? " (the floor stops the head)" : "",
                     t.neckClearance, t.internal ? "wall" : "boss");
       out.push_back({VerdictLine::Level::Good, buf});
+    }
+  }
+  // Toleranced walls, against their bands
+  // (docs/cam/simulation.md#tolerance-bands).
+  for (const FitVerdict& f : v.fits) {
+    const char* wall = f.internal ? "Bore" : "Boss";
+    if (!f.judged) {
+      std::snprintf(buf, sizeof(buf), "%s \xC3\x98%.3f %s was not judged: %s.",
+                    wall, f.nominal, f.label.c_str(), f.why.c_str());
+      out.push_back({VerdictLine::Level::Warn, buf});
+    } else if (f.Scrap()) {
+      std::snprintf(buf, sizeof(buf),
+                    "%s \xC3\x98%.3f %s is cut %.4f, past its band's %.4f "
+                    "(%.4f - %.4f): that is scrap.",
+                    wall, f.nominal, f.label.c_str(), f.cut,
+                    f.internal ? f.max : f.min, f.min, f.max);
+      out.push_back({VerdictLine::Level::Bad, buf});
+    } else if (f.Short()) {
+      std::snprintf(buf, sizeof(buf),
+                    "%s \xC3\x98%.3f %s is cut %.4f, short of its band "
+                    "(%.4f - %.4f): metal is left on the wall.",
+                    wall, f.nominal, f.label.c_str(), f.cut, f.min, f.max);
+      out.push_back({VerdictLine::Level::Warn, buf});
+    } else {
+      std::snprintf(buf, sizeof(buf),
+                    "%s \xC3\x98%.3f %s: cut %.4f, in its band %.4f - %.4f "
+                    "(aimed at %.4f, the middle).",
+                    wall, f.nominal, f.label.c_str(), f.cut, f.min, f.max,
+                    f.aim);
+      out.push_back({VerdictLine::Level::Good, buf});
+    }
+  }
+  // Pieces cut free (docs/cam/simulation.md#tabs-and-offcuts).
+  for (const Verdict::CutFree& c : v.cutFree) {
+    if (c.part)
+      std::snprintf(buf, sizeof(buf),
+                    "The part (%.0f mm2 at X%.1f %s%.1f) is cut free with "
+                    "nothing holding it -- no tab, and not the stock's edge: "
+                    "it would fly. Add tabs, or hold it down.",
+                    c.area, c.at.x, second, c.at.y);
+    else
+      std::snprintf(buf, sizeof(buf),
+                    "An offcut of %.0f mm2 at X%.1f %s%.1f is cut free with "
+                    "no tab holding it: it would fly. Tab it, or hold it "
+                    "down.",
+                    c.area, c.at.x, second, c.at.y);
+    out.push_back({VerdictLine::Level::Warn, buf});
+  }
+  if (v.offcutArea > 0.0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%.0f mm2 of offcut, cut through from the part, is not "
+                  "counted as leftover.",
+                  v.offcutArea);
+    out.push_back({VerdictLine::Level::Good, buf});
+  }
+  // The holes and threads nothing in the job cuts, one line for each
+  // feature and kind (docs/cam/simulation.md#what-the-job-does-not-cut).
+  {
+    struct Group {
+      UncutFeature::Kind kind;
+      uint64_t featureId;
+      std::string what, feature;
+      int count = 0;
+    };
+    std::vector<Group> groups;
+    for (const UncutFeature& u : v.uncut) {
+      Group* g = nullptr;
+      for (Group& have : groups)
+        if (have.kind == u.kind && have.featureId == u.featureId &&
+            have.what == u.what)
+          g = &have;
+      if (g == nullptr) {
+        groups.push_back({u.kind, u.featureId, u.what, u.feature, 0});
+        g = &groups.back();
+      }
+      g->count++;
+    }
+    for (const Group& g : groups) {
+      if (g.kind == UncutFeature::Kind::Thread)
+        std::snprintf(buf, sizeof(buf),
+                      "Not cut by this job: %d x %s -- no thread mill of the "
+                      "job cuts %s. Tap %s by hand, or add a thread_mill.",
+                      g.count, g.what.c_str(), g.count == 1 ? "it" : "them",
+                      g.count == 1 ? "it" : "them");
+      else
+        std::snprintf(buf, sizeof(buf),
+                      "Not cut by this job: %d x %s of '%s' -- no setup "
+                      "leaves %s bore open.",
+                      g.count, g.what.c_str(), g.feature.c_str(),
+                      g.count == 1 ? "its" : "their");
+      out.push_back({VerdictLine::Level::Warn, buf});
     }
   }
   if (v.grooveShallow > tolerance) {

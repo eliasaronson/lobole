@@ -2,6 +2,8 @@
 
 #include "core/cam/CamToolpathInternal.h"
 
+#include "core/Document.h"
+#include "core/FitStandards.h"
 #include "core/Measure.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -812,6 +814,37 @@ ElementRef FaceOnStockTop(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
     }
   }
   return best;
+}
+
+void StampBands(const Document& doc, Body& body) {
+  body.bands.clear();
+  for (const Tolerance& t : doc.GetTolerances()) {
+    if (t.IsDistance() || t.ref.featureId != body.createdBy ||
+        !body.elementMap.Resolve(t.ref.name))
+      continue;
+    const std::optional<Measure::Element> el =
+        Measure::Describe(doc.GetBodies(), t.ref);
+    if (!el || !el->hasRadius)
+      continue;
+    FaceBand band;
+    band.face = t.ref;
+    if (t.isoClass.empty()) {
+      band.lower = t.lower;
+      band.upper = t.upper;
+      char buf[64];
+      std::snprintf(buf, sizeof buf, "%+.3f/%+.3f", t.upper, t.lower);
+      band.label = buf;
+    } else {
+      const std::optional<fits::Band> b =
+          fits::Limits(el->radius * 2.0, t.isoClass, nullptr);
+      if (!b)
+        continue; // list_tolerances says why; nothing to aim at
+      band.lower = b->lower;
+      band.upper = b->upper;
+      band.label = t.isoClass;
+    }
+    body.bands.push_back(std::move(band));
+  }
 }
 
 } // namespace cam

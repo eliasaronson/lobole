@@ -755,7 +755,7 @@ TEST_CASE("A part mated to a turned frame faces the way the frame says",
 // (docs/assemblies/solver.md#connector-frames): for an extruded sketch
 // circle, the sketch plane's U axis. It is the part's, not the world's, so it
 // follows the part and stays put through a regeneration and a boolean that
-// trims the face. Until v149 every Z-axis cylinder got X = world +Y.
+// trims the face. Until v150 every Z-axis cylinder got X = world +Y.
 TEST_CASE("A cylinder's frame takes its seam as X", "[assembly][solve]") {
   const auto seamX = [](const Document& doc) {
     for (const Body& b : doc.GetBodies())

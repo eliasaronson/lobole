@@ -26,6 +26,7 @@ enum class ElementRole {
   Counterbore,      // a hole's
   CounterboreFloor, // a hole's
   Countersink,      // a hole's
+  DrillPoint,       // a hole's: the cone a drill leaves at a blind floor
   // A generated bearing's (docs/parts/README.md#bearings); its bore is Bore.
   Outside,   // the outer ring's outside diameter
   InnerSide, // an inner-ring side face (a shaft shoulder bears on it)

@@ -2,7 +2,7 @@
 
 `Adaptive.cpp` / `Adaptive.hpp` are Kresimir Tusek's adaptive-clearing
 algorithm, and `clipper.cpp` / `clipper.hpp` are the Clipper 1 it uses
-internally. Copied from FreeCAD, with the one patch listed below:
+internally. Copied from FreeCAD, with the patches listed below:
 
     https://github.com/FreeCAD/FreeCAD
     commit b2da06bfe0521773f302c8be977b31dc27f60203
@@ -42,6 +42,7 @@ the patches to the pinned commit and the result must equal these files.
 | patch | why |
 |---|---|
 | `0001-deterministic-link-path.patch` | `ResolveLinkPath` gave up after a `clock()` budget. `clock()` is the whole PROCESS's CPU time, and adaptive passes run on parallel workers, so the other passes drained each one's budget: the same part produced a different toolpath depending on thread scheduling. Two CAM tests failed only under a parallel `ctest`. The search's own step limit (10000) still bounds it. |
+| `0002-lead-path-local-cleared-area.patch` | `MakeLeadPath` copied the WHOLE cleared area, offset all of it inward by the tool's radius, and for a lead-out did both again at every step; on the pan/tilt base plate's clearing at a tenth of the cutter that was a third of the adaptive's time. A lead path never leaves a box of its own reach, and whether a point lies in the eroded area depends only on the area within the erosion of it, so the area clipped to that box answers the same; a beacon outside the eroded area moves to its nearest point found in a box round the beacon that grows until the answer lies inside it. The toolpath is the same move for move; the base plate's Top setup generates in about 27 s instead of 37. |
 
 The library narrates itself to `std::cout`;
 that is swallowed by the bridge at the call site rather than patched out

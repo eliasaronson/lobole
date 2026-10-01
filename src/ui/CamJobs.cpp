@@ -456,6 +456,7 @@ void CancelCamPasses(AppState& state) {
       tp.grooves.clear();
       tp.arcs.clear();
       tp.threads.clear();
+      tp.fits.clear();
       tp.strategy.clear();
       tp.error = "this pass was cancelled before it was cut "
                  "-- press Generate to queue it again";

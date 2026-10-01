@@ -2209,6 +2209,11 @@ struct VerifyWork {
   std::vector<cam::Toolpath::Tab> tabs;
   std::vector<cam::Toolpath::Groove> grooves; // engraving: not gouge
   std::vector<cam::Toolpath::Thread> threads; // judged on their own terms
+  std::vector<cam::Toolpath::Fit> fits;       // judged against their bands
+  // The whole job and its thread mills that cut a thread: what the job does
+  // not cut (docs/cam/simulation.md#what-the-job-does-not-cut).
+  std::vector<cam::Setup> allSetups;
+  std::vector<uint64_t> milled;
   std::vector<cam::FixtureSolid> fixtures; // bed space
   std::vector<std::string> missingFixtures;
   // The job's other setups and their posted files, and the ones that could
@@ -2265,9 +2270,10 @@ void InspectWork(VerifyWork& w) {
   }
   const cam::Inspection insp =
       cam::Inspect(w.gcode, w.setup, w.bodies, kVerifyRes, w.reliefs, w.tabs,
-                   w.fixtures, &others, w.grooves, w.threads);
+                   w.fixtures, &others, w.grooves, w.threads, w.fits);
   w.ok = insp.ok;
   w.verdict = insp.verdict;
+  cam::AddUncutThreads(w.allSetups, w.bodies, w.milled, w.verdict);
   w.verdict.otherSetupsNotChecked = others.notChecked;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
   // reporting it would teach the user to ignore the verdict.
@@ -2379,7 +2385,11 @@ void RunCamVerification(AppState& state) {
                          tp.grooves.end());
     work->threads.insert(work->threads.end(), tp.threads.begin(),
                          tp.threads.end());
+    work->fits.insert(work->fits.end(), tp.fits.begin(), tp.fits.end());
+    for (const cam::Toolpath::Thread& t : tp.threads)
+      work->milled.push_back(t.op);
   }
+  work->allSetups = state.job->GetSetups();
   work->setup = *setup;
   work->bodies = ui::JobBodies(state);
   work->fixtures =
@@ -2408,6 +2418,9 @@ void RunCamVerification(AppState& state) {
     bool pending = false;
     const std::vector<cam::Toolpath> paths =
         CamToolpathsQueued(state, other, pending);
+    for (const cam::Toolpath& tp : paths)
+      for (const cam::Toolpath::Thread& t : tp.threads)
+        work->milled.push_back(t.op);
     if (pending) {
       othersPending = true;
       work->othersNotChecked.push_back(
