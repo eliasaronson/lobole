@@ -149,10 +149,11 @@ list kept elsewhere drifts.
   post, the rotary check and playback. Two fixes each made one side agree
   before a test through the pipeline showed which was right, and an indexed
   cut would have landed on the far side of the part.
-- Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". Anything else
-  "flaky under load" is worth one look for a mechanism before it earns that
-  label: the ones that looked like it here were real bugs (a version number
-  used as a document identity, a port race, a heap corruption).
+- No test is a known flake. Anything "flaky under load" is worth one look for
+  a mechanism before it earns that label: the ones that looked like it here
+  were real bugs (a version number used as a document identity, a port race,
+  a heap corruption, and femgpu "TopologyOptimize…": an unconverged fp32
+  solve).
   `tests/smoke_app.py` is the one launcher for smokes, and keeps the app's log.
 - **An OpenCASCADE boolean MODIFIES its arguments** (it writes the p-curves it
   computes onto their edges). Two threads running booleans on pairs that share

@@ -431,3 +431,30 @@ TEST_CASE("An add that bridges two bodies joins both, and only those",
   CHECK(apart.name == "Apart");
   CHECK_THAT(apart.shape.Volume(), WithinRel(1000.0, 1e-9));
 }
+
+// Two bodies that ALREADY overlap were made separate on purpose -- a cavity
+// drawn as its own body inside a shell, to be subtracted from it later -- and
+// an add that grows one of them must not merge them. The bridging rule above
+// swallowed the cam cover's shell into the cavity a loft extended, and the
+// cavity's end face, now inside the shell, was gone.
+TEST_CASE("An add that grows one of two overlapping bodies leaves the other",
+          "[boolean][body-mode]") {
+  const auto box = [](double x0, double y0, double z0, double dx, double dy,
+                      double dz) {
+    return CADShape(
+        BRepPrimAPI_MakeBox(gp_Pnt(x0, y0, z0), dx, dy, dz).Shape());
+  };
+  std::vector<Body> bodies;
+  bodies.push_back({"Shell", box(0, 0, 0, 40, 10, 10), "", 1});
+  bodies.push_back({"Cavity", box(2, 2, 2, 10, 6, 6), "", 2});
+  std::string warning, error;
+  // Extends the cavity along x, still inside the shell.
+  REQUIRE(ApplyBodyMode(bodies, box(12, 2, 2, 20, 6, 6), ElementMap{},
+                        ExtrudeMode::Add, "Grow", "", 9, &warning, &error));
+  CHECK(error.empty());
+  REQUIRE(bodies.size() == 2);
+  CHECK(bodies[0].name == "Shell");
+  CHECK_THAT(bodies[0].shape.Volume(), WithinRel(4000.0, 1e-9));
+  CHECK(bodies[1].name == "Cavity");
+  CHECK_THAT(bodies[1].shape.Volume(), WithinRel(30.0 * 36.0, 1e-6));
+}

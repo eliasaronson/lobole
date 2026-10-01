@@ -85,10 +85,6 @@ title block and SVG/PDF export. Missing, in the order a shop asks for them:
 
 - **FEM:** thermal, buckling and nonlinear studies; modal analysis without
   supports (free-free); VTU export of results.
-- **Topology optimization:** a slender bending part falls back from the fp32
-  GPU solver to the CPU and runs at CPU speed; fp64 iterative refinement
-  around the GPU solve is designed and unbuilt (see
-  [topopt/README.md](topopt/README.md)).
 - **Tolerances:** an inferred stack-up chain (`stack_up` sums a chain the
   caller states), and general-tolerance tables (ISO 2768).
 - **Beam elements** for tube frames: `check_frame` checks the member graph,

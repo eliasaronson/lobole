@@ -87,8 +87,19 @@ public:
   // available, mirroring Eigen's accept-on-NoConvergence behavior that the
   // CPU topology path relies on). Returns false only on a hard failure
   // (device error, NaN breakdown).
+  //
+  // `lastIterate` is the inner solve of a refinement loop
+  // (docs/topopt/README.md#mixed-precision-refinement): no best-iterate
+  // bookkeeping and no stall restarts — run to tol or maxIter and return
+  // where CG got to. The best-by-residual-norm iterate is the wrong answer
+  // there: CG lowers the ENERGY error every step while the residual norm
+  // first rises (by orders of magnitude on a slender bending part), so the
+  // best iterate by norm is the starting guess, and from zero the solve
+  // returns zero. The caller's outer loop measures what came back in fp64
+  // and takes it with an energy-optimal step, so no inner answer can hurt.
   bool Solve(const std::vector<float>& f, std::vector<float>& x, float tol,
-             int maxIter, CgStats* stats, std::string* error);
+             int maxIter, CgStats* stats, std::string* error,
+             bool lastIterate = false);
 
   // Per-element strain energies at FULL modulus: se[e] = ue^T Ke0 ue for the
   // reduced displacement `u` (GPU4 — the SIMP sensitivity kernel). One
@@ -106,7 +117,8 @@ private:
   // Multigrid path (GPU3): the coarse solve is a CPU call between submits,
   // so the cycle cannot be chunk-recorded — its own per-iteration driver.
   bool SolveMg(const std::vector<float>& f, std::vector<float>& x, float tol,
-               int maxIter, CgStats* stats, std::string* error);
+               int maxIter, CgStats* stats, std::string* error,
+               bool lastIterate);
   void RecordChebInto(const BoundSet& initSet, const BoundSet& iterSet);
   bool ApplyMgPrecond(uint32_t rzSlot, std::string* error);
 

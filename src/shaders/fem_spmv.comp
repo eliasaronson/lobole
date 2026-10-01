@@ -5,6 +5,19 @@
 // 30x30 element product and scatter with float atomicAdd (shared nodes are
 // touched by many elements). Fixed DOFs carry index -1: they contribute 0 on
 // gather and are skipped on scatter — identical to the CPU reduced assembly.
+//
+// The product is taken RELATIVE to the element's first node. Ke annihilates a
+// rigid translation, so in exact arithmetic Ke·p = Ke·(p - t) for t = node 0's
+// displacement on every node, and node 0's row is minus the sum of the
+// others (the element's forces balance). In fp32 it is not the same thing:
+// rounding Ke to fp32 breaks its null space by ~1e-7, and a slender part's
+// elements mostly TRANSLATE (a cantilever's tip moves thousands of times
+// further than any element strains), so the plain product was dominated by
+// rounding — the operator came out 20-60 % too stiff on a beam
+// (docs/topopt/README.md#mixed-precision-refinement). Relative to node 0 the
+// translation never meets Ke, and the error falls to ~1e-3 (rotation, which
+// remains, is far smaller per element). The result is still exactly
+// symmetric: it is S^T Ke' S with S = I - T applied on both sides.
 #extension GL_EXT_shader_atomic_float : require
 
 layout(local_size_x = 32) in;
@@ -21,6 +34,7 @@ layout(push_constant) uniform Push {
 } pc;
 
 shared float pe[30];
+shared float ye[30];
 
 void main() {
   const uint e = gl_WorkGroupID.y * pc.groupsX + gl_WorkGroupID.x;
@@ -31,11 +45,24 @@ void main() {
     pe[t] = g >= 0 ? p[g] : 0.0;
   }
   barrier();
+  // Rows of nodes 1..9 against displacements relative to node 0 (whose own
+  // relative displacement is zero, so its columns drop out).
+  if (t >= 3u && t < 30u) {
+    float acc = 0.0;
+    const uint base = e * 900u + t * 30u;
+    for (uint c = 3u; c < 30u; ++c)
+      acc += ke[base + c] * (pe[c] - pe[c % 3u]);
+    ye[t] = acc;
+  }
+  barrier();
+  // Node 0's rows: the element's forces sum to zero.
+  if (t < 3u) {
+    float s = 0.0;
+    for (uint i = 1u; i < 10u; ++i) s += ye[3u * i + t];
+    ye[t] = -s;
+  }
   if (t >= 30u) return;
   const int row = dof[e * 30u + t];
   if (row < 0) return;
-  float acc = 0.0;
-  const uint base = e * 900u + t * 30u;
-  for (uint c = 0u; c < 30u; ++c) acc += ke[base + c] * pe[c];
-  atomicAdd(Ap[row], scaleE[e] * acc);
+  atomicAdd(Ap[row], scaleE[e] * ye[t]);
 }
