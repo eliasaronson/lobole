@@ -23,6 +23,12 @@ enum class MaterialType {
   // Non-metals
   PLASTIC_WHITE,
   PLASTIC_BLACK,
+  // PETG as an FDM printer lays it down: the printed parts of a pan/tilt
+  // head. Its own row because 1270 kg/m3 against generic plastic's 1040 reads
+  // a printed part a fifth light, and a study wants its own modulus. The
+  // process allowance a printed part is MODELLED with is not a material
+  // property (docs/tolerances/README.md#printed-parts).
+  PETG,
   // 3K twill carbon plate: the material a frame, an arm or a drone's whole
   // structure is cut from, and 1550 kg/m3 against black plastic's 1040 —
   // modelling one as the other reads a third light, which is a third of an

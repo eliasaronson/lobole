@@ -107,6 +107,16 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                          // Plastic reflectance
       "Black Plastic"};
 
+  materials[MaterialType::PETG] = {
+      // A printed orange, pre-darkened for the bright rig as the woods are:
+      // at 0.8/0.32 it rendered yellow.
+      glm::vec3(0.42f, 0.07f, 0.01f),
+      0.0f,
+      0.35f, // a printed surface: glossy filament, layer lines
+      0.5f,
+      0.05f, // ((n-1)/(n+1))^2 at n = 1.57
+      "PETG"};
+
   // Pre-darkened for the scene's bright rig, exactly as the woods below are:
   // at the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
   // which is the one comparison the material exists to win. The weave's relief
@@ -241,6 +251,7 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::TITANIUM].density = 4506.0f;
   materials[MaterialType::PLASTIC_WHITE].density = 1040.0f;
   materials[MaterialType::PLASTIC_BLACK].density = 1040.0f;
+  materials[MaterialType::PETG].density = 1270.0f;
   materials[MaterialType::CARBON_FIBRE].density = 1550.0f;
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
@@ -283,6 +294,10 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::TITANIUM, 116.0f, 0.32f, 880.0f);
   elastic(MaterialType::PLASTIC_WHITE, 2.5f, 0.35f, 50.0f);
   elastic(MaterialType::PLASTIC_BLACK, 2.5f, 0.35f, 50.0f);
+  // Filament datasheets (tensile bars printed flat): E 2.0-2.2 GPa, yield
+  // 45-53 MPa. A printed part is weaker ACROSS its layers (the pan/tilt
+  // survey reads 30-50 MPa there), which an isotropic study cannot see.
+  elastic(MaterialType::PETG, 2.1f, 0.38f, 50.0f);
   // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
   // and the numbers are the plate's, not a unidirectional ply's.
   elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);
@@ -370,6 +385,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::TITANIUM, "titanium"},
       {MaterialType::PLASTIC_WHITE, "plastic_white"},
       {MaterialType::PLASTIC_BLACK, "plastic_black"},
+      {MaterialType::PETG, "petg"},
       {MaterialType::CARBON_FIBRE, "carbon_fibre"},
       {MaterialType::RUBBER, "rubber"},
       {MaterialType::GLASS, "glass"},

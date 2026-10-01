@@ -391,7 +391,7 @@ also the parallel-lines distance (use an endpoint of the first line)."""
 
 MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
                   "chrome, gold, silver, titanium, plastic_white, "
-                  "plastic_black, carbon_fibre, rubber, glass, ruby, concrete, "
+                  "plastic_black, petg, carbon_fibre, rubber, glass, ruby, concrete, "
                   "epoxy, wood_oak, wood_pine, wood_walnut, wood_maple, "
                   "wood_beech, plywood_birch, plywood_pine, mdf")
 

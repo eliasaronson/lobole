@@ -11,10 +11,13 @@ stamped onto its bodies each regeneration (`Body::material`), and resolved
 into `CADMaterials::MaterialProperties` (`src/cad/CADMaterials.{h,cpp}`):
 base colour, metallic, roughness, specular, reflectance, plus the physics —
 density, Young's modulus, Poisson's ratio, yield — that mass properties, the
-BOM and FEM read. The library has 23 assignable materials; `DEFAULT` is the
-empty slug and carries no physics (density 0, so mass reports none rather
-than a guess). The accepted slugs are `MaterialLibrary::AllSlugs()`
-(reported as `material_slugs`).
+BOM and FEM read. `DEFAULT` is the empty slug and carries no physics
+(density 0, so mass reports none rather than a guess). The accepted slugs
+are `MaterialLibrary::AllSlugs()` (`describe` reports them as
+`material_slugs`). `petg` is the printed parts' material: 1270 kg/m³ and a
+filament datasheet's modulus, where generic plastic would read a printed part
+a fifth light; how a printed part is modelled to fit is its print process,
+not its material ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 
 The viewport shades metallic-roughness PBR in `mesh.frag`; the path tracer
 reads the same values through `RTMaterial` (`RayTracingRenderer.h`), so the

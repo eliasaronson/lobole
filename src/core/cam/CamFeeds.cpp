@@ -61,6 +61,7 @@ CutClass CutClassOf(const std::string& slug) {
       {"epoxy", CutClass::Plastic},
       {"plastic_white", CutClass::Plastic},
       {"plastic_black", CutClass::Plastic},
+      {"petg", CutClass::Plastic},
       {"aluminum", CutClass::Aluminium},
       {"aluminium", CutClass::Aluminium},
       {"brass", CutClass::Brass},

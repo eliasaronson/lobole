@@ -148,6 +148,22 @@ TEST_CASE("Carbon fibre is told from black plastic by more than gloss",
   CHECK(cf.density > pb.density * 1.4f);
 }
 
+TEST_CASE("PETG is a material of its own, heavier than generic plastic",
+          "[materials]") {
+  // A printed part in PETG weighed as generic plastic reads a fifth light,
+  // and FEM wants the filament's own modulus.
+  CHECK(MaterialLibrary::MaterialTypeFromString("petg") == MaterialType::PETG);
+  CHECK(MaterialLibrary::Slug(MaterialType::PETG) == "petg");
+  const MaterialProperties& petg =
+      MaterialLibrary::GetMaterial(MaterialType::PETG);
+  CHECK(petg.density == 1270.0f);
+  CHECK(petg.density >
+        MaterialLibrary::GetMaterial(MaterialType::PLASTIC_WHITE).density);
+  CHECK(petg.youngGPa > 2.0f);
+  CHECK(petg.yieldMPa > 0.0f);
+  CHECK(petg.metallic == 0.0f);
+}
+
 TEST_CASE("A pattern's axis comes from the part's local extent",
           "[materials]") {
   // The rule the raster and ray-traced paths BOTH call now. They used to keep
