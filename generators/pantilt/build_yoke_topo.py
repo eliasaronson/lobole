@@ -430,8 +430,18 @@ def check(app, S, env, G, cases, sid):
     F = faces_of(env, S, model)
     t0 = time.monotonic()
     # Two static solves (one factorisation each, every case on it): a
-    # minute or two on the yoke, so a long timeout.
-    chk = app.call("check_topology", study=sid, _timeout=900)
+    # minute or two on the yoke, as a job the app stays responsive through;
+    # once it is done the same call answers from the two results.
+    chk = app.call("check_topology", study=sid)
+    if chk.get("started"):
+        while True:
+            st = app.call("study_status", job=chk["job"])
+            if not st.get("running"):
+                break
+            time.sleep(2.0)
+        if st.get("outcome") != "done":
+            raise SystemExit(f"check_topology: {st}")
+        chk = app.call("check_topology", study=sid)
     seconds = time.monotonic() - t0
     out = {"seconds": round(seconds, 1), "threshold": chk["threshold"],
            "threshold_lowered_from": chk["threshold_lowered_from"],

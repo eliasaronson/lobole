@@ -2,6 +2,8 @@
 #include "core/io/SerializationInternal.h"
 
 #include "cad/CADMaterials.h"
+#include "core/InputHash.h"
+#include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 
 #include <nlohmann/json.hpp>
@@ -612,6 +614,231 @@ Relation RelationFromJson(const json& j) {
     r.drives = FreewheelDrivesFromString(j.at("drives").get<std::string>());
     r.lead = j.value("lead", 0.0);
   }
+  return r;
+}
+
+// ---- Motion result (v153) --------------------------------------------------
+// Saved beside its study (motion/<id>-<slug>.result.json) with the input
+// hash that produced it: a reopened project's run of the same inputs is
+// answered from it (docs/simulation/README.md#studies-as-jobs). Everything
+// the table, the scrub, the export and the RPCs read; a matrix as its 16
+// numbers, column by column.
+
+namespace {
+
+json Mat4ToJson(const glm::dmat4& m) {
+  json out = json::array();
+  for (int c = 0; c < 4; ++c)
+    for (int r = 0; r < 4; ++r)
+      out.push_back(m[c][r]);
+  return out;
+}
+
+glm::dmat4 Mat4FromJson(const json& j) {
+  if (!j.is_array() || j.size() != 16)
+    throw std::runtime_error("motion result: a placement is not 16 numbers");
+  glm::dmat4 m(1.0);
+  for (int c = 0; c < 4; ++c)
+    for (int r = 0; r < 4; ++r)
+      m[c][r] = j.at(c * 4 + r).get<double>();
+  return m;
+}
+
+json ClashToJson(const motion::Clash& c) {
+  json j = {{"a", c.a},
+            {"b", c.b},
+            {"a_name", c.aName},
+            {"b_name", c.bName},
+            {"within_min", Vec3ToJson(c.withinMin)},
+            {"within_max", Vec3ToJson(c.withinMax)}};
+  if (c.aInner != 0)
+    j["a_inner"] = c.aInner;
+  if (c.bInner != 0)
+    j["b_inner"] = c.bInner;
+  if (c.rigid)
+    j["rigid"] = true;
+  if (c.known)
+    j["overlap"] = {{"volume", c.volume},
+                    {"centroid", Vec3ToJson(c.centroid)},
+                    {"bbox_min", Vec3ToJson(c.bboxMin)},
+                    {"bbox_max", Vec3ToJson(c.bboxMax)}};
+  return j;
+}
+
+motion::Clash ClashFromJson(const json& j) {
+  motion::Clash c;
+  c.a = j.at("a").get<uint64_t>();
+  c.b = j.at("b").get<uint64_t>();
+  c.aInner = j.value("a_inner", uint64_t{0});
+  c.bInner = j.value("b_inner", uint64_t{0});
+  c.aName = j.value("a_name", std::string{});
+  c.bName = j.value("b_name", std::string{});
+  c.rigid = j.value("rigid", false);
+  if (j.contains("within_min"))
+    c.withinMin = Vec3FromJson(j.at("within_min"));
+  if (j.contains("within_max"))
+    c.withinMax = Vec3FromJson(j.at("within_max"));
+  if (j.contains("overlap")) {
+    const json& o = j.at("overlap");
+    c.known = true;
+    c.volume = o.value("volume", 0.0);
+    c.centroid = Vec3FromJson(o.at("centroid"));
+    c.bboxMin = Vec3FromJson(o.at("bbox_min"));
+    c.bboxMax = Vec3FromJson(o.at("bbox_max"));
+  }
+  return c;
+}
+
+} // namespace
+
+json MotionResultToJson(const motion::Result& r) {
+  json samples = json::array();
+  for (const motion::Sample& s : r.samples) {
+    json worlds = json::array();
+    for (const auto& [id, m] : s.worlds)
+      worlds.push_back({{"occurrence", id}, {"world", Mat4ToJson(m)}});
+    json sj = {{"t", s.t},
+               {"value", s.value},
+               {"solved", s.solved},
+               {"worlds", std::move(worlds)}};
+    if (s.erroredMates != 0)
+      sj["errored_mates"] = s.erroredMates;
+    if (s.residualMm != 0.0)
+      sj["residual_mm"] = s.residualMm;
+    if (!s.leaves.empty()) {
+      json leaves = json::array();
+      for (const motion::Sample::LeafWorld& l : s.leaves)
+        leaves.push_back({{"root", l.root},
+                          {"occurrence", l.occurrence},
+                          {"world", Mat4ToJson(l.world)}});
+      sj["leaves"] = std::move(leaves);
+    }
+    if (!s.clashes.empty()) {
+      json clashes = json::array();
+      for (const motion::Clash& c : s.clashes)
+        clashes.push_back(ClashToJson(c));
+      sj["clashes"] = std::move(clashes);
+    }
+    if (!s.unknownContacts.empty()) {
+      json unknown = json::array();
+      for (const motion::UnknownContact& u : s.unknownContacts) {
+        json uj = {{"a", u.a},
+                   {"b", u.b},
+                   {"a_name", u.aName},
+                   {"b_name", u.bName},
+                   {"reason", u.reason}};
+        if (u.aInner != 0)
+          uj["a_inner"] = u.aInner;
+        if (u.bInner != 0)
+          uj["b_inner"] = u.bInner;
+        unknown.push_back(std::move(uj));
+      }
+      sj["unknown_contacts"] = std::move(unknown);
+    }
+    if (!s.mates.empty()) {
+      json mates = json::array();
+      for (const motion::Sample::MateValue& m : s.mates) {
+        json mj = {{"mate", m.mate},
+                   {"rotation", m.rotation},
+                   {"offset", m.offset},
+                   {"turns", m.turns},
+                   {"slides", m.slides}};
+        if (!m.path.empty())
+          mj["path"] = m.path;
+        if (!m.name.empty())
+          mj["name"] = m.name;
+        mates.push_back(std::move(mj));
+      }
+      sj["mates"] = std::move(mates);
+    }
+    samples.push_back(std::move(sj));
+  }
+  json out = {{"samples", std::move(samples)},
+              {"pairs_rigid", r.pairsRigid},
+              {"pairs_rigid_checked", r.pairsRigidChecked},
+              {"rigid_checked_at", r.rigidCheckedAt},
+              {"clean", r.clean},
+              {"worst_sample", r.worstSample},
+              {"deflection_mm", r.deflectionMm},
+              {"pairs_cached", r.pairsCached},
+              {"pairs_repeated", r.pairsRepeated},
+              {"pairs_unknown", r.pairsUnknown},
+              {"checked_clashes", r.checkedClashes},
+              {"pairs_checked", r.pairsChecked},
+              {"seconds", r.seconds},
+              {"cancelled", r.cancelled}};
+  if (!r.error.empty())
+    out["error"] = r.error;
+  if (r.inputHash != 0)
+    out["input_hash"] = inputhash::Hex(r.inputHash);
+  return out;
+}
+
+motion::Result MotionResultFromJson(const json& j) {
+  motion::Result r;
+  for (const json& sj : j.at("samples")) {
+    motion::Sample s;
+    s.t = sj.at("t").get<double>();
+    s.value = sj.at("value").get<double>();
+    s.solved = sj.value("solved", true);
+    s.erroredMates = sj.value("errored_mates", 0);
+    s.residualMm = sj.value("residual_mm", 0.0);
+    for (const json& wj : sj.value("worlds", json::array()))
+      s.worlds.emplace_back(wj.at("occurrence").get<uint64_t>(),
+                            Mat4FromJson(wj.at("world")));
+    for (const json& lj : sj.value("leaves", json::array()))
+      s.leaves.push_back({lj.at("root").get<uint64_t>(),
+                          lj.at("occurrence").get<uint64_t>(),
+                          Mat4FromJson(lj.at("world"))});
+    for (const json& cj : sj.value("clashes", json::array()))
+      s.clashes.push_back(ClashFromJson(cj));
+    for (const json& uj : sj.value("unknown_contacts", json::array())) {
+      motion::UnknownContact u;
+      u.a = uj.at("a").get<uint64_t>();
+      u.b = uj.at("b").get<uint64_t>();
+      u.aName = uj.value("a_name", std::string{});
+      u.bName = uj.value("b_name", std::string{});
+      u.reason = uj.value("reason", u.reason);
+      u.aInner = uj.value("a_inner", uint64_t{0});
+      u.bInner = uj.value("b_inner", uint64_t{0});
+      s.unknownContacts.push_back(std::move(u));
+    }
+    for (const json& mj : sj.value("mates", json::array())) {
+      motion::Sample::MateValue m;
+      m.mate = mj.at("mate").get<uint64_t>();
+      m.rotation = mj.value("rotation", 0.0);
+      m.offset = mj.value("offset", 0.0);
+      m.turns = mj.value("turns", false);
+      m.slides = mj.value("slides", false);
+      m.path = mj.value("path", std::vector<uint64_t>{});
+      m.name = mj.value("name", std::string{});
+      s.mates.push_back(std::move(m));
+    }
+    r.samples.push_back(std::move(s));
+  }
+  r.pairsRigid = j.value("pairs_rigid", size_t{0});
+  r.pairsRigidChecked = j.value("pairs_rigid_checked", size_t{0});
+  r.rigidCheckedAt = j.value("rigid_checked_at", -1);
+  r.clean = j.value("clean", true);
+  r.worstSample = j.value("worst_sample", size_t{0});
+  r.deflectionMm = j.value("deflection_mm", 0.0);
+  r.pairsCached = j.value("pairs_cached", size_t{0});
+  r.pairsRepeated = j.value("pairs_repeated", size_t{0});
+  r.pairsUnknown = j.value("pairs_unknown", size_t{0});
+  r.checkedClashes = j.value("checked_clashes", false);
+  r.pairsChecked = j.value("pairs_checked", size_t{0});
+  r.seconds = j.value("seconds", 0.0);
+  r.cancelled = j.value("cancelled", false);
+  r.error = j.value("error", std::string{});
+  if (j.contains("input_hash") &&
+      !inputhash::FromHex(j.at("input_hash").get<std::string>(), r.inputHash))
+    throw std::runtime_error("motion result: input_hash " +
+                             j.at("input_hash").dump() +
+                             " is not 0x and 16 hex digits");
+  if (r.worstSample >= std::max<size_t>(r.samples.size(), 1))
+    throw std::runtime_error("motion result: worst_sample " +
+                             std::to_string(r.worstSample) + " of " +
+                             std::to_string(r.samples.size()) + " samples");
   return r;
 }
 

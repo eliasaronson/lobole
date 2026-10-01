@@ -706,9 +706,9 @@ TEST_CASE("Topology result round-trips through JSON", "[topopt][serialize]") {
   CHECK_THAT(r.bodies[0].density[0], WithinAbs(0.8, 1e-12));
 }
 
-TEST_CASE("StudyResultToJson declines a non-topology runtime",
+TEST_CASE("StudyResultToJson declines a runtime with nothing solved",
           "[topopt][serialize]") {
-  fem::StudyRuntime rt; // topology defaults false (a static/modal result)
+  fem::StudyRuntime rt; // no bodies: never solved
   nlohmann::json j;
   CHECK_FALSE(DocumentIO::StudyResultToJson(rt, j));
 }

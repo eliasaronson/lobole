@@ -232,6 +232,7 @@ here; the golden corpus and git history cover them.
 | 150 | Project tables: `tables` [{`name`, `comment`?, `columns`, `rows` [{`key` (a number or a string), `values`}]}] in a lone part's envelope, and in `project.json` (additive there), read by `lookup("table", key, "column")`; a malformed table refuses the load ([tables](../variables/README.md#tables)). A cylinder's or cone's connector frame takes the surface's seam (u = 0) as X instead of a world-axis heuristic, so a stored mate `rotation` on a round face counts from the part's own direction ([connector frames](../assemblies/solver.md#connector-frames)) |
 | 151 | Drawings: a view's `detail` {`view`, `center` [x, y, z] world mm, `radius_mm`, `label`}, a detail of another view ([detail views](../drawings/README.md#detail-views)); a note's `style: "fcf"` with `fcf` {`symbol`, `tolerance_mm`, `diameter`?, `modifier`? (`mmc`, `lmc`), `datums`} and `dim`, the dimension a frame stands under ([feature control frames](../drawings/README.md#feature-control-frames)); an unknown symbol or modifier, or a frame ISO 1101 cannot write, is refused on load. Material slugs `aluminum_6061_t6` and `aluminum_6082_t6`. Golden `drawing/v151-frames-details` |
 | 152 | Studies: `load_cases` [{`name`, `weight` (+`weight_expr`)}] on a static or topology study, and a force's or pressure's `case` naming one ([load cases](../topopt/README.md#load-cases)); a topology study's `keep_outs` [{`body`} or {`box_min`, `box_max`} mm] ([keep-outs](../topopt/README.md#keep-outs)); a static study's `shape_from` {`study`, `threshold`? or `whole`?}, refused on any other type ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)). A topology result file carries `cases` [{`name`, `weight`, `compliance`}], `keep_outs` [{`what`, `tets`, `volume`}] and `islands` {`threshold`, `components`, `tets`, `volume`, `keep_faces`, `load_path_broken`} ([connectivity](../topopt/README.md#connectivity)). A keep-out that is neither a body nor a box is refused on load. Golden `v152-topology-load-cases` |
+| 153 | Every study result is saved beside its study with its `input_hash`, in the directory form only: a static or modal result in a part's or an assembly's `studies/<id>-<slug>.result.json` (`kind` `static`/`modal`/`topology`, `maxima`, each body's mesh with `results` {`displacement`, `von_mises`, maxima, `modes` [{`frequency_hz`, `shape`}]} or one per load case in `cases`, and a shape study's `shape` {`source`, `threshold`, `island_tets`, `volume`, `threshold_lowered_from`}), and a motion result in an assembly's `motion/<id>-<slug>.result.json` (every sample's `worlds`, `leaves`, `clashes`, `unknown_contacts` and `mates`, the pair counts). A reopened project's run of the same inputs is answered from it; one whose inputs moved reads stale ([studies as jobs](../simulation/README.md#studies-as-jobs)). A `kind` that is none of the three, or a malformed hash, is refused on load. Golden `v153-saved-study-results` (the single-file form carries no results; `tests/test_study_inputs.cpp` and `tests/test_motion.cpp` reopen each kind) |
 
 ## The directory form
 
@@ -278,7 +279,9 @@ studies and FEM studies share the assembly's one never-reused id counter.
 
 Directory form: `index.json` (kind + id lists) plus `occurrences/`, `mates/`,
 `exploded/`, `relations/`, `assertions/`, `motion/` and `studies/`, one file
-per item, each directory absent when it would be empty.
+per item, each directory absent when it would be empty. A motion or FEM
+study's result sits beside it as `<id>-<slug>.result.json` (v153), with the
+input hash that produced it.
 
 ## The project envelope
 

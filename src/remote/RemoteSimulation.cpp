@@ -65,7 +65,7 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
 
 bool IsStudyJobKind(const std::string& kind) {
   return kind == "motion" || kind == "topo" || kind == "study" ||
-         kind == "mesh";
+         kind == "mesh" || kind == "check";
 }
 
 // The study jobs there are to ask about: running, then recently ended.
@@ -423,19 +423,27 @@ static constexpr MethodDoc SimulationMethods[] = {
      "result -- '<name>: shape', its tets at or above `threshold` (0..1, "
      "default the volume-matched level) connected to the supports, and "
      "'<name>: solid', every tet of the design domain -- with the topology "
-     "study's supports, loads and load cases, runs both (synchronously; "
-     "one factorisation each serves every case), and answers per case the "
-     "shape's and the solid's max_displacement_mm, max_von_mises_mpa and "
+     "study's supports, loads and load cases, and solves both as a JOB "
+     "(kind 'check'; one factorisation each serves every case): it answers "
+     "{started, job, kind, shape_study, solid_study}, study_status {job} "
+     "follows it, cancel_study {job} stops it, and it is cancelled with "
+     "its connection unless `outlive_client: true`. When both studies "
+     "hold results for their inputs (a check already run, or a reopened "
+     "project's) nothing starts and it answers per case the shape's and "
+     "the solid's max_displacement_mm, max_von_mises_mpa and "
      "factor_of_safety, their displacement ratio, and each one's "
-     "volume_mm3 and mass_g. The two studies stay, for probe_study {case} "
-     "and set_result_display {case}. Solid elements at a threshold, not "
-     "SIMP-penalised stiffness "
+     "volume_mm3 and mass_g, `reused: true`: call it again when the job "
+     "is done. `recompute: true` solves anyway. The two studies stay, for "
+     "probe_study {case} and set_result_display {case}. Solid elements at "
+     "a threshold, not SIMP-penalised stiffness "
      "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
-     "study, threshold", remote::NoFlags,
-     "{topology, threshold, shape_study, solid_study, dropped_tets, islands, "
-     "cases[]{name, shape{study, max_displacement_mm, max_displacement_at, "
-     "max_von_mises_mpa, max_von_mises_at, factor_of_safety?, volume_mm3, "
-     "mass_g?}, solid{...}, displacement_ratio}}"},
+     "outlive_client, recompute, study, threshold", remote::NoFlags,
+     "{started, job, kind, shape_study, solid_study, outlives_client} | "
+     "{reused, topology, threshold, shape_study, solid_study, dropped_tets, "
+     "islands, cases[]{name, shape{study, max_displacement_mm, "
+     "max_displacement_at, max_von_mises_mpa, max_von_mises_at, "
+     "factor_of_safety?, volume_mm3, mass_g?}, solid{...}, "
+     "displacement_ratio}}"},
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
@@ -460,8 +468,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "stored result (the study with its expressions evaluated, the bodies' "
      "exact geometry, names and materials; on an assembly the taking-part "
      "occurrences and their placed bodies) is answered from it with "
-     "`reused: true` and nothing computed -- a reopened project's topology "
-     "result included; `input_hash` names the inputs, `recompute: true` "
+     "`reused: true` and nothing computed -- a reopened project's result "
+     "of any kind included; `input_hash` names the inputs, `recompute: true` "
      "runs anyway. Takes "
      "`id` (or `study`, the same thing here) — see remove_study.",
      "async, id, outlive_client, recompute, study"},
@@ -499,9 +507,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "as though they were top-level, which is a KeyError rather than a wrong "
      "answer, but only after the solve has been paid for. Refused with "
      "\"study has not been run\" when there is "
-     "nothing to report -- a solved result is DERIVED and no project keeps "
-     "one, so a study reopened from disk carries its load cases and no "
-     "answers (`has_results`, `stale` in list_studies). Takes `id` (or "
+     "nothing to report: a study never run. A result is saved with the "
+     "project beside its study and reads current after a reopen while its "
+     "inputs hash as they did, stale otherwise (`has_results`, `stale` in "
+     "list_studies). Takes `id` (or "
      "`study`, the same thing here) — see remove_study.",
      "id, study"},
     {"set_result_display",
@@ -584,23 +593,24 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
         "threshold must be in [0, 1) (0 = the volume-matched level)");
 
   // The two studies, found by what they are (a static study of this result,
-  // whole or not) so a second check refreshes them rather than adding more.
+  // whole or not) so a second check refreshes them rather than adding more,
+  // solved as a job unless both hold results for their inputs.
   uint64_t shapeId = 0, solidId = 0;
   std::string err;
-  if (!ui::EnsureTopologyCheckStudies(state, *doc, id, threshold, &shapeId,
-                                      &solidId, &err))
+  ui::JobStart start;
+  start.recompute = p.value("recompute", false);
+  start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
+  if (!ui::StartTopologyCheck(state, *doc, id, threshold, &shapeId, &solidId,
+                              &err, &start))
     throw std::runtime_error("check_topology: " + err);
-  for (const uint64_t sid : {shapeId, solidId}) {
-    ui::JobStart start;
-    if (ui::ReuseStudyResult(state, doc, nullptr, sid, &start))
-      continue;
-    if (!ui::RunStudyAndCache(*doc, sid, &err))
-      throw std::runtime_error(
-          "check_topology: " +
-          std::string(sid == shapeId ? "the shape" : "the solid") + ": " + err);
-    if (const fem::StudyRuntime* done = host.Results(sid))
-      ui::RememberStudyResult(state, *done);
-  }
+  if (!start.reused)
+    return json{{"started", true},
+                {"running", true},
+                {"job", start.jobId},
+                {"kind", "check"},
+                {"shape_study", shapeId},
+                {"solid_study", solidId},
+                {"outlives_client", start.owner == 0}};
   const fem::StudyRuntime* shape = host.Results(shapeId);
   const fem::StudyRuntime* solid = host.Results(solidId);
   const fem::Study* shapeStudy = host.Find(shapeId);
@@ -642,7 +652,8 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
            {"displacement_ratio", db > 0 ? da / db : 0.0}};
     cases.push_back(std::move(c));
   }
-  return json{{"topology", id},
+  return json{{"reused", true},
+              {"topology", id},
               {"threshold", shape->shapeThreshold},
               {"threshold_lowered_from", shape->shapeThresholdLoweredFrom},
               {"shape_study", shapeId},

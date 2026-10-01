@@ -1,4 +1,6 @@
 #include "core/io/Serialization.h"
+
+#include "core/MotionStudy.h"
 #include "core/io/GeometryCache.h"
 #include "core/io/SerializationInternal.h"
 
@@ -617,7 +619,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     // FEM studies (v29): file-per-study under studies/, id list in the index.
     // Both the key and the directory stay absent when there are no studies, so
     // a pre-v29 document re-saves byte-identically (the exploded-views v27
-    // discipline). Mesh/results are derived and never written.
+    // discipline). Each result is written beside its study (topology v33,
+    // static and modal v153), with the input hash that produced it.
     if (!doc.GetStudies().empty()) {
       const fs::path studyDir = dir / "studies";
       fs::create_directories(studyDir);
@@ -633,8 +636,7 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           return false;
         index["studies"].push_back(s.id);
         wantedStudies.insert(file);
-        // A topology study's optimized result is persisted (v33) — unlike FEM
-        // results, which are derived and never written.
+        // Its result (topology v33, every kind v153).
         const fem::StudyRuntime* rt = doc.StudyResults(s.id);
         json resultJson;
         if (rt && StudyResultToJson(*rt, resultJson)) {
@@ -767,6 +769,12 @@ void InsertIdFile(std::map<uint64_t, std::filesystem::path>& byId,
   }
 }
 
+// A study's result beside it: "<id>-<slug>.result.json".
+bool IsResultFile(const std::filesystem::path& path) {
+  const std::string stem = path.stem().string(); // strips ".json"
+  return stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0;
+}
+
 // The index lists the ids, in order. A duplicate there means the same file
 // loads twice — two features, one id — which is the other half of the merge
 // hazard above and just as ambiguous downstream.
@@ -883,7 +891,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                       std::vector<unsigned char>(data.begin(), data.end()));
       }
     }
-    // Topology results (v33) loaded below but stored after the final regen.
+    // Study results (v33, v153) loaded below but stored after the final
+    // regen.
     std::vector<std::pair<uint64_t, fem::StudyRuntime>> pendingResults;
     // FEM studies (v29): id-prefix files under studies/, index order. A pre-v29
     // document has no `studies` key ⇒ the loop is empty.
@@ -893,10 +902,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
            fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
         if (entry.path().extension() != ".json")
           continue;
-        const std::string stem = entry.path().stem().string(); // strips ".json"
-        // A topology result file is "<id>-<slug>.result.json": its stem ends
-        // ".result" — route it to the result map, not the study-def map.
-        if (stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0)
+        // A result file is "<id>-<slug>.result.json": route it to the
+        // result map, not the study-def map.
+        if (IsResultFile(entry.path()))
           InsertIdFile(resultById, entry.path(), "study result");
         else
           InsertIdFile(studyById, entry.path(), "study");
@@ -912,7 +920,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         }
         std::ifstream sin(it->second);
         doc->RestoreStudy(StudyFromJson(ParseProjectFile(it->second)));
-        // A persisted topology result loads into the transient runtime cache.
+        // A persisted result loads into the transient runtime cache.
         // Defer storing it until after the final regeneration below so it can
         // be stamped with the settled document version (else the rollback /
         // active-config regen would leave it spuriously stale).
@@ -958,18 +966,26 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // regeneration which decides whether they still describe the recipe.
     LoadGeometry(*doc, dirPath);
     bulk.reset(); // the one regeneration for everything loaded above
-    // Now that regeneration has settled, stamp the persisted topology results
-    // with the final version so they read as current (v33).
+    // Now that regeneration has settled, stamp the persisted results with
+    // the final version so they read as current (v33).
     // A result whose saved input hash no longer matches what the reopened
-    // part would hand the optimizer was saved stale, or the part moved under
-    // it: it reads stale, and is not reused (v148).
+    // part would hand a run was saved stale, or the part moved under it: it
+    // reads stale, and is not reused (v148). All are stored before any is
+    // checked: a shape study's inputs include its topology result's.
+    std::vector<std::pair<uint64_t, uint64_t>> hashed;
     for (auto& [id, rt] : pendingResults) {
       rt.solvedAtVersion = doc->Version();
       if (rt.inputHash != 0)
-        if (const fem::Study* st = doc->FindStudy(id))
-          if (fem::StudyInputKey(*doc, *st) != rt.inputHash)
-            rt.solvedAtVersion = UINT64_MAX; // no version reaches it
+        hashed.emplace_back(id, rt.inputHash);
       doc->StoreStudyResults(id, std::move(rt));
+    }
+    for (const auto& [id, hash] : hashed) {
+      const fem::Study* st = doc->FindStudy(id);
+      if (st == nullptr || fem::StudyInputKey(*doc, *st) != hash) {
+        fem::StudyRuntime rt = *doc->StudyResults(id);
+        rt.solvedAtVersion = UINT64_MAX; // no version reaches it
+        doc->StoreStudyResults(id, std::move(rt));
+      }
     }
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              dirPath);
@@ -1122,6 +1138,15 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         return false;
       index["motion"].push_back(s.id);
       wantedMotion.insert(file);
+      // Its result (v153), with the input hash that produced it.
+      if (const auto result = asmDoc.MotionResult(s.id)) {
+        const std::string resultFile =
+            file.substr(0, file.size() - 5) + ".result.json";
+        if (!WriteTextAtomic(motionDir / resultFile,
+                             MotionResultToJson(*result).dump() + "\n", error))
+          return false;
+        wantedMotion.insert(resultFile);
+      }
     }
     for (const auto& entry : fs::directory_iterator(motionDir, ec)) {
       if (entry.path().extension() == ".json" &&
@@ -1130,7 +1155,7 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     }
 
     // FEM studies (v106) mirror the part's: file-per-study under studies/,
-    // absent when none. Mesh and results are derived and never written.
+    // absent when none, each result beside its study (v153).
     const fs::path asmStudyDir = dir / "studies";
     if (!asmDoc.GetStudies().empty()) {
       index["studies"] = json::array();
@@ -1146,6 +1171,16 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         return false;
       index["studies"].push_back(s.id);
       wantedStudies.insert(file);
+      json resultJson;
+      if (const fem::StudyRuntime* rt = asmDoc.StudyResults(s.id);
+          rt != nullptr && StudyResultToJson(*rt, resultJson)) {
+        const std::string resultFile =
+            file.substr(0, file.size() - 5) + ".result.json";
+        if (!WriteTextAtomic(asmStudyDir / resultFile, resultJson.dump() + "\n",
+                             error))
+          return false;
+        wantedStudies.insert(resultFile);
+      }
     }
     for (const auto& entry : fs::directory_iterator(asmStudyDir, ec)) {
       if (entry.path().extension() == ".json" &&
@@ -1338,14 +1373,18 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       LoadAssertions(*asmDoc, jsons);
     }
 
-    // Motion studies (v87): id-prefix files under motion/, index order.
+    // Motion studies (v87): id-prefix files under motion/, index order; a
+    // result (v153) beside its study.
     {
-      std::map<uint64_t, fs::path> byId;
+      std::map<uint64_t, fs::path> byId, resultById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "motion", ec)) {
         if (entry.path().extension() != ".json")
           continue;
-        InsertIdFile(byId, entry.path(), "motion");
+        if (IsResultFile(entry.path()))
+          InsertIdFile(resultById, entry.path(), "motion result");
+        else
+          InsertIdFile(byId, entry.path(), "motion");
       }
       std::vector<json> jsons;
       for (const auto& idJson : index.value("motion", json::array())) {
@@ -1359,16 +1398,27 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         jsons.push_back(ParseProjectFile(it->second));
       }
       LoadMotionStudies(*asmDoc, jsons);
+      // Read current or stale by the app, which can resolve the parts its
+      // input hash reads (ui::AdoptSavedMotionResults).
+      for (const auto& [id, path] : resultById)
+        if (asmDoc->FindMotionStudyById(id) != nullptr)
+          asmDoc->StoreMotionResult(
+              id, std::make_shared<const motion::Result>(
+                      MotionResultFromJson(ParseProjectFile(path))));
     }
 
-    // FEM studies (v106): id-prefix files under studies/, index order.
+    // FEM studies (v106): id-prefix files under studies/, index order; a
+    // result (v153) beside its study.
     {
-      std::map<uint64_t, fs::path> byId;
+      std::map<uint64_t, fs::path> byId, resultById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
         if (entry.path().extension() != ".json")
           continue;
-        InsertIdFile(byId, entry.path(), "study");
+        if (IsResultFile(entry.path()))
+          InsertIdFile(resultById, entry.path(), "study result");
+        else
+          InsertIdFile(byId, entry.path(), "study");
       }
       CheckIndexIdsUnique(index.value("studies", json::array()), "study");
       std::vector<json> jsons;
@@ -1383,6 +1433,15 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         jsons.push_back(ParseProjectFile(it->second));
       }
       LoadAssemblyStudies(*asmDoc, jsons);
+      // Stale until the app, which can resolve the parts the input hash
+      // reads, finds it current (ui::AdoptStoredResults).
+      for (const auto& [id, path] : resultById) {
+        if (asmDoc->FindStudy(id) == nullptr)
+          continue;
+        fem::StudyRuntime rt = StudyResultFromJson(ParseProjectFile(path));
+        rt.solvedAtVersion = UINT64_MAX;
+        asmDoc->StoreStudyResults(id, std::move(rt));
+      }
     }
 
     // Configurations (v31): id-prefix files under configurations/, index order.

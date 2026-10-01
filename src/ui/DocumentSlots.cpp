@@ -61,6 +61,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/fem/FemSolver.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
@@ -157,6 +158,9 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
                            &cells, {});
   }
   state.document->Regenerate();
+  // The regeneration moved the version its saved results were stamped at:
+  // those whose inputs still hash the same read current again.
+  fem::RestampByInputs(*state.document);
   state.selection.Clear();
   state.pendingFeatureId = 0;
   state.pendingCompanionId = 0;
@@ -749,6 +753,9 @@ void SetActivePart(AppState& state, size_t index) {
   // edits without an explicit solve_assembly.
   if (state.assembly && AssemblyPartsStale(state))
     SolveActiveAssembly(state);
+  // An assembly's saved results, read current or stale by their inputs.
+  if (state.assembly)
+    AdoptStoredResults(state);
   // A drawing projects on the FIRST view of the tab (design §2): if the
   // restored cache is empty (never projected this session) fill it; otherwise
   // keep the stashed geometry so staleness is only cleared by explicit update.

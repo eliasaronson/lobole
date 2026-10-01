@@ -288,9 +288,9 @@ public:
   // Document-level analysis definitions, a sibling to the parameter table.
   // A study consumes the finished bodies and produces no geometry, so it is
   // not a Feature and does not participate in regeneration. Mesh and results
-  // are derived data held elsewhere (never serialized); only this
-  // configuration persists. Edits do NOT auto-regenerate (a study is inert
-  // until explicitly meshed/solved).
+  // are derived data held elsewhere (StudyResults, saved beside the study
+  // with the input hash that produced them). Edits do NOT auto-regenerate (a
+  // study is inert until explicitly meshed/solved).
 
   // CAM setups (v58, docs/cam/README.md#invariants). Document-level objects
   // like studies: they describe how to cut the model, and change nothing about
@@ -323,9 +323,11 @@ public:
   // Backs the study modify Command.
   bool ReplaceStudy(fem::Study study);
 
-  // The transient mesh+results cache for a study, or nullptr if it has never
-  // been run. Derived data, never serialized; stale when its solvedAtVersion
-  // differs from Version(). Mutable so const RPC reads can populate/query it.
+  // The mesh+results cache for a study, or nullptr if it has never been run.
+  // Derived data, saved with the project and read back on load (v153;
+  // docs/simulation/README.md#studies-as-jobs); stale when its
+  // solvedAtVersion differs from Version(). Mutable so const RPC reads can
+  // populate/query it.
   const fem::StudyRuntime* StudyResults(uint64_t studyId) const {
     auto it = m_studyRuntime.find(studyId);
     return it == m_studyRuntime.end() ? nullptr : &it->second;
@@ -341,6 +343,9 @@ public:
   // result (fem::ShapeSource) also when that result is stale, gone, or no
   // longer the one it was cut from.
   bool StudyResultsStale(uint64_t studyId) const;
+  // Stamps a stored result as solved at this version: one whose inputs hash
+  // as they did when it was made (fem::RestampByInputs). False when absent.
+  bool MarkStudyResultsCurrent(uint64_t studyId);
 
   // ---- Tolerances (docs/tolerances/README.md) ------------------------------
   // Permitted variation of measured features, keyed by element. Like studies
@@ -711,7 +716,7 @@ private:
   std::vector<Parameter> m_parameters;
   std::vector<Tolerance> m_tolerances;
   std::vector<fem::Study> m_studies;
-  // Transient per-study mesh+results (never serialized); keyed by study id.
+  // Per-study mesh+results (StudyResults); keyed by study id.
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   uint64_t m_studyResultsEpoch = 0;
   static uint64_t NextInstanceId();

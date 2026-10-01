@@ -550,7 +550,7 @@ void DrawMotionBody(AppState& state) {
         sel->driverMate = c.mate;
         sel->driverPath = c.path;
         sel->driverDof = c.rotation ? MateDof::Rotation : MateDof::Offset;
-        state.motionResults.erase(sel->id);
+        DropMotionResult(state, sel->id);
         asmDoc.BumpVersion();
       }
     }
@@ -616,7 +616,7 @@ void DrawMotionBody(AppState& state) {
     if (ImGui::SmallButton("Delete###motion_delete")) {
       SnapshotAssembly(state);
       asmDoc.RemoveMotionStudy(sel->id);
-      state.motionResults.erase(sel->id);
+      DropMotionResult(state, sel->id);
       state.activeMotionStudy = 0;
       asmDoc.BumpVersion();
       return;

@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    152; // v152: studies -- `load_cases` [{name, weight, weight_expr?}] and a
+    153; // v153: every study result is saved beside its study with its
+         //      `input_hash`: a static or modal one in a part's or an
+         //      assembly's studies/<id>-<slug>.result.json (`kind`,
+         //      `maxima`, each body's mesh and `results` or `cases`, a shape
+         //      study's `shape`), a motion one in motion/<id>-<slug>
+         //      .result.json (docs/simulation/README.md#studies-as-jobs).
+         // v152: studies -- `load_cases` [{name, weight, weight_expr?}] and a
          //      force's or pressure's `case`; a topology study's `keep_outs`
          //      [{body} | {box_min, box_max}]; a static study's `shape_from`
          //      {study, threshold? | whole?}. A topology result carries

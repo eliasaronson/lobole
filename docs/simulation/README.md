@@ -63,29 +63,29 @@ by accident.
 
 ### Results and staleness
 
-Mesh and results are **derived** and are never written to a project
-(topology results are the one exception; see the topopt page). They live in
-a transient `fem::StudyRuntime` cache stamped with the document's `Version()`
-at solve time. Any later change makes them **stale**: the panel badges them
-and `study_results` / `list_studies` report `stale: true`. Nothing is ever
-re-solved automatically — meshing and solving take seconds to minutes and
-stay an explicit act; an explicit run whose inputs are unchanged is answered
-from the stored result ([studies as jobs](#studies-as-jobs)). A study
-reopened from disk carries its setup and no answers; `study_results`
+Mesh and results are **derived**. They live in a `fem::StudyRuntime` cache
+stamped with the document's `Version()` at solve time, and are saved with
+the project beside their study, with the input hash that produced them
+([studies as jobs](#studies-as-jobs)). Any later change makes them
+**stale**: the panel badges them and `study_results` / `list_studies`
+report `stale: true`. Nothing is ever re-solved automatically — meshing and
+solving take seconds to minutes and stay an explicit act; an explicit run
+whose inputs are unchanged is answered from the stored result. A study
+that has never been run carries its setup and no answers; `study_results`
 refuses it with "study has not been run".
 
 ## Studies as jobs
 
 Every long study -- a motion study, a static, modal or topology solve, a
-mesh-only run -- runs as a job with an id, and a result is keyed by a hash
+topology check, a mesh-only run -- runs as a job with an id, and a result is keyed by a hash
 of exactly what produced it. This page holds it for all four kinds; the
 motion side is also in
 [assemblies](../assemblies/README.md#motion-studies).
 
 **A job id.** `BackgroundJob::id` (`src/ui/BackgroundJob.h`) is handed out
 by `StartBackgroundJob` from a session counter and never reused. An async
-`run_study`, `run_motion_study` or `mesh_study` answers `job: <id>` (and
-`kind`). `study_status {job}` reports a running job (kind, study, label,
+`run_study`, `run_motion_study` or `mesh_study`, and a `check_topology`
+that has something to solve, answers `job: <id>` (and `kind`). `study_status {job}` reports a running job (kind, study, label,
 fraction, elapsed, cancellable, whether it outlives its client) and, once
 it has ended, how: `outcome` done, cancelled or failed, with `error` or
 `cancel_reason`; the registry keeps the last 64 ended jobs for that
@@ -142,19 +142,50 @@ every result carries `input_hash`, and `recompute: true` computes anyway
 (Shift+Run in the panel, which also says "Reused" when it did). A reuse
 answers before the one-run-at-a-time check: it starts nothing.
 
-Topology results are saved with the project, so the hash is saved with them
-(`input_hash`, v148): a reopened project's run of the same inputs is reused
-(the B-Rep read back from disk hashes as it did when saved), and a result
-whose saved hash no longer matches the reopened part reads stale rather
-than current-because-loaded. Static, modal and motion results are not saved;
-across a reopen they are computed once more.
+**Saved with the project.** Every result is written beside its study with
+its hash: a part's or an assembly's static, modal or topology result as
+`studies/<id>-<slug>.result.json` (topology since v33 and its hash since
+v148, the others v153), a motion result as `motion/<id>-<slug>.result.json`
+(v153). What is kept is what the panel and the RPCs read -- the mesh, each
+node's displacement and stress, the modes, the maxima, a shape study's cut
+and the result it was cut from, the topology density, every motion sample's
+poses, mate values and clashes -- never a solver's scratch. A reopened
+project's run of the same inputs is answered from it (`reused: true`), and
+a result whose saved hash no longer matches the reopened inputs reads stale
+rather than current-because-loaded. The checks:
+
+- a part's results are checked as it loads (`LoadDir`), and again after
+  the app regenerates it once more against the project's variables
+  (`fem::RestampByInputs`, from `SyncProjectScope` and every open): that
+  regeneration moves the version a result was stamped at, which made a
+  reopened topology result read stale and `check_topology` refuse it;
+- an assembly's FEM and motion results need the parts their hash reads, so
+  the app checks them when the assembly is opened or its tab comes up
+  (`ui::AdoptStoredResults`, `ui::AdoptSavedMotionResults`); until then an
+  assembly study's saved result reads stale.
+
+**The B-Rep is hashed as geometry**, not as OCC's bookkeeping on it
+(`inputhash::ShapeDigest`): a copy of the shape, its TShapes' `Modified`,
+`Checked` and `Free` flags set one way, written as text without UV points,
+every `-0` read as `0`. Meshing a face -- Netgen for a study, BRepMesh for
+the viewport -- clears its `Checked` flag and its cached UV points, and a
+shape read back from the project's baked geometry carries a `+0` where the
+regenerated one had a `-0` (a circle's axis); the pan/tilt yoke's envelope,
+meshed in place by its topology run and saved meshed, reopened hashing
+otherwise, and its 80 s run was paid again on every reopen. A topology run
+now meshes a copy, as a static plan does.
 
 The `[studyjobs]` tests prove the hash moves on each input class -- geometry,
 material, mates, a placement, relations, settings, loads, an expression's
 value, configurations -- and on nothing else (`tests/test_motion.cpp`,
-`tests/test_study_inputs.cpp`), and that a saved result reopens with its
-hash; `tests/study_jobs_smoke.py`, `fem_async_smoke.py` and `topo_smoke.py`
-drive the ids, cancels, disconnects and reuse over the RPC.
+`tests/test_study_inputs.cpp`); that a result of each kind -- static, modal,
+topology, motion -- reopens with its hash, current, its part hashing as it
+did, and reads stale once an input moves; and that a part meshed in place,
+or with a bore, hashes the same after a reopen.
+`tests/study_jobs_smoke.py`, `fem_async_smoke.py`, `topo_smoke.py` and
+`topo_build_smoke.py` drive the ids, cancels, disconnects and reuse over the
+RPC; `tests/study_reopen_smoke.py` saves a project with a study of each kind
+and a topology check, opens it again, and has each one reused.
 
 ## Meshing
 
@@ -398,7 +429,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `probe_study {id, face, at?, case?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
-| `check_topology {study, threshold?}` | a topology result's shape and solid design domain, statically, per case ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
+| `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
 ## Tests
 

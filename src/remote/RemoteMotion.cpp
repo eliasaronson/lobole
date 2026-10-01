@@ -80,7 +80,8 @@ constexpr MethodDoc MotionMethods[] = {
     {"run_motion_study",
      "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
      "leave_at_mm?, recompute?, outlive_client?}. A run whose INPUTS hash "
-     "the same as a result this session holds (the study's definition, "
+     "the same as a stored result -- this session's, or the one a saved "
+     "project carries -- (the study's definition, "
      "every occurrence and its placement, every mate and its current "
      "value, relations, configurations, and the placed parts' exact "
      "geometry and materials) is answered from it, `reused: true`, nothing "
@@ -639,7 +640,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       }
     }
     asmDoc.BumpVersion();
-    state.motionResults.erase(s.id); // it described the old definition
+    ui::DropMotionResult(state, s.id); // it described the old definition
     return StudyJson(state, asmDoc, s);
   }
   if (m == "remove_motion_study") {
@@ -648,7 +649,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const uint64_t id = s.id;
     ui::SnapshotAssembly(state);
     asmDoc.RemoveMotionStudy(id);
-    state.motionResults.erase(id);
+    ui::DropMotionResult(state, id);
     return json{{"removed", id}};
   }
   if (m == "list_motion_studies") {

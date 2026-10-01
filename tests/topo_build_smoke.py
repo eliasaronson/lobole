@@ -121,7 +121,22 @@ def main():
         expect("islands" in res and not res["islands"]["load_path_broken"],
                f"islands reported: {res['islands']}")
 
+        # A job (kind "check"): the app answers while it solves, and the
+        # same call answers from the two results once it is done.
+        started = d.call("check_topology", study=s)
+        expect(started.get("started") and started.get("kind") == "check",
+               f"check_topology starts a job: {started}")
+        expect(d.call("ping") is not None, "the app answers during a check")
+        while True:
+            st = d.call("study_status", job=started["job"])
+            if not st.get("running"):
+                break
+            time.sleep(0.2)
+        expect(st.get("outcome") == "done", f"the check finished: {st}")
         chk = d.call("check_topology", study=s)
+        expect(chk.get("reused") and
+               chk["shape_study"] == started["shape_study"],
+               f"answered from the job's results: {chk}")
         expect([c["name"] for c in chk["cases"]] == ["down", "side"],
                f"check per case: {chk}")
         for c in chk["cases"]:
@@ -151,6 +166,15 @@ def main():
         expect(shown["case"] == 1, f"display case: {shown}")
         again = d.call("check_topology", study=s)
         expect(again["shape_study"] == shape, "a second check refreshes")
+        expect(again.get("reused"), f"an unchanged check solves nothing: {again}")
+        # Recomputed, and cancelled: a cancel is answered by the job.
+        redo = d.call("check_topology", study=s, recompute=True)
+        expect(redo.get("started"), f"recompute starts a job: {redo}")
+        d.call("cancel_study", job=redo["job"])
+        while d.call("study_status", job=redo["job"]).get("running"):
+            time.sleep(0.2)
+        expect(d.call("study_status", job=redo["job"])["outcome"] in
+               ("cancelled", "done"), "the check job ends when cancelled")
         expect(len(d.call("list_studies")["studies"]) == 3,
                "no third study from a second check")
 

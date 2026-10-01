@@ -641,6 +641,12 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // mates re-solve on load — the format's stated contract.
     if (state.assembly && AssemblyPartsStale(state))
       SolveActiveAssembly(state);
+    // The saved study and motion results whose inputs still hash as they
+    // did read current (docs/simulation/README.md#studies-as-jobs). The
+    // motion results the session held were the previous project's.
+    state.motionResults.clear();
+    state.motionResultRevisions.clear();
+    AdoptStoredResults(state);
     if (state.drawing && state.drawing->ViewCount() > 0)
       UpdateDrawingRenders(
           state); // re-project on first view of an opened drawing

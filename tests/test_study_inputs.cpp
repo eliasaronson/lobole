@@ -11,6 +11,10 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/InputHash.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
@@ -195,4 +199,176 @@ TEST_CASE("A topology result's input hash round-trips, and a malformed one is "
   CHECK_THROWS_WITH(DocumentIO::StudyResultFromJson(j),
                     "topology result: input_hash \"123\" is not 0x and 16 "
                     "hex digits");
+}
+
+namespace {
+
+// A real run of the bar's study, stored as the app stores one: stamped, and
+// with the input hash taken before it ran.
+void RunAndStore(Bar& bar) {
+  fem::Study& s = StudyOf(bar);
+  const uint64_t hash = Key(bar);
+  REQUIRE(hash != 0);
+  fem::StudyRuntime rt;
+  std::string err;
+  const bool ok = s.type == fem::AnalysisType::Topology
+                      ? fem::RunTopology(bar.doc, s, rt, &err)
+                      : fem::RunStudy(bar.doc, s, rt, &err);
+  INFO(err);
+  REQUIRE(ok);
+  rt.solvedAtVersion = bar.doc.Version();
+  rt.inputHash = hash;
+  bar.doc.StoreStudyResults(bar.studyId, std::move(rt));
+}
+
+std::unique_ptr<Bar> BarOf(fem::AnalysisType type) {
+  auto bar = MakeBar(type);
+  fem::Study& s = StudyOf(*bar);
+  if (type == fem::AnalysisType::Modal) {
+    s.loads.pop_back(); // the support alone
+    s.numModes = 3;
+  }
+  if (type == fem::AnalysisType::Topology) {
+    s.volumeFraction = 0.5;
+    s.maxIterations = 3;
+  }
+  return bar;
+}
+
+} // namespace
+
+// Every kind of study result is saved with the project (v153; topology
+// since v33), and a reopened project's part hashes as it did when the run
+// was made -- after the run meshed it, which once cleared flags BinTools
+// writes, so a topology result read stale on every reopen and ran again.
+TEST_CASE("A study result of each kind reopens current, its part hashing as "
+          "it did, and reads stale once an input moves",
+          "[fem][topopt][mesh][serialize][studyjobs]") {
+  namespace fs = std::filesystem;
+  for (const fem::AnalysisType type :
+       {fem::AnalysisType::Static, fem::AnalysisType::Modal,
+        fem::AnalysisType::Topology}) {
+    INFO("kind " << static_cast<int>(type));
+    auto bar = BarOf(type);
+    RunAndStore(*bar);
+    const fem::StudyRuntime& ran = *bar->doc.StudyResults(bar->studyId);
+    const uint64_t hash = ran.inputHash;
+
+    const fs::path proj = fs::temp_directory_path() / "study_kinds_reopen.dsgn";
+    fs::remove_all(proj);
+    REQUIRE(testio::Save(bar->doc, proj.string()));
+    auto reloaded = testio::Load(proj.string());
+    REQUIRE(reloaded != nullptr);
+    const fem::StudyRuntime* got = reloaded->StudyResults(bar->studyId);
+    REQUIRE(got != nullptr);
+    CHECK(got->inputHash == hash);
+    CHECK(fem::StudyInputKey(*reloaded, *reloaded->FindStudy(bar->studyId)) ==
+          hash);
+    CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
+
+    // What the panel and the RPCs read came back.
+    REQUIRE(got->bodies.size() == ran.bodies.size());
+    const fem::StudyBodyResult& a = ran.bodies[0];
+    const fem::StudyBodyResult& b = got->bodies[0];
+    CHECK(b.mesh.nodes == a.mesh.nodes);
+    CHECK(b.mesh.tets == a.mesh.tets);
+    CHECK(b.mesh.boundary.size() == a.mesh.boundary.size());
+    CHECK(b.density == a.density);
+    CHECK(b.results.displacement == a.results.displacement);
+    CHECK(b.results.vonMises == a.results.vonMises);
+    REQUIRE(b.results.modes.size() == a.results.modes.size());
+    for (size_t m = 0; m < a.results.modes.size(); ++m) {
+      CHECK(b.results.modes[m].frequencyHz == a.results.modes[m].frequencyHz);
+      CHECK(b.results.modes[m].displacement == a.results.modes[m].displacement);
+    }
+    CHECK(got->maxVonMises == ran.maxVonMises);
+    CHECK(got->maxDisplacement == ran.maxDisplacement);
+    CHECK(got->complianceHistory == ran.complianceHistory);
+    if (type == fem::AnalysisType::Modal)
+      CHECK(a.results.modes.size() == 3);
+
+    // The app regenerates an opened part once more (the project scope):
+    // that moves the version, and the result is current again by its
+    // inputs, not by its stamp.
+    reloaded->Regenerate();
+    CHECK(reloaded->StudyResultsStale(bar->studyId));
+    fem::RestampByInputs(*reloaded);
+    CHECK_FALSE(reloaded->StudyResultsStale(bar->studyId));
+
+    // An input moved after the save: stale on reopen, and not restamped.
+    reloaded->GetFeature(0)->SetMaterial("aluminum");
+    reloaded->Regenerate();
+    fem::RestampByInputs(*reloaded);
+    CHECK(reloaded->StudyResultsStale(bar->studyId));
+    REQUIRE(testio::Save(*reloaded, proj.string()));
+    auto moved = testio::Load(proj.string());
+    REQUIRE(moved != nullptr);
+    REQUIRE(moved->StudyResults(bar->studyId) != nullptr);
+    CHECK(moved->StudyResultsStale(bar->studyId));
+    fs::remove_all(proj);
+  }
+}
+
+TEST_CASE("Meshing a body in place does not move its input hash",
+          "[fem][mesh][studyjobs]") {
+  // Netgen (and the viewport's BRepMesh) clear the meshed faces' Checked
+  // flag and their cached UV points, both of which BinTools writes. The
+  // hash reads the geometry only: a copy's bytes, in the format without UV
+  // points.
+  namespace fs = std::filesystem;
+  auto bar = MakeBar(fem::AnalysisType::Static);
+  const uint64_t before = Key(*bar);
+  std::string err;
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  REQUIRE(fem::Mesh(bar->doc.GetBodies()[0].shape.GetShape(), ms, &err));
+  const fs::path proj = fs::temp_directory_path() / "meshed_part_hash.dsgn";
+  fs::remove_all(proj);
+  REQUIRE(testio::Save(bar->doc, proj.string()));
+  auto reloaded = testio::Load(proj.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(fem::StudyInputKey(*reloaded, *reloaded->FindStudy(bar->studyId)) ==
+        before);
+  fs::remove_all(proj);
+}
+
+#include "core/InputHash.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/SketchFeature.h"
+// A shape read back from the project's baked geometry is the regenerated
+// one but for the sign of a zero in a circle's axis; the hash reads the
+// geometry, so a part with a bore hashes the same after a reopen.
+TEST_CASE("A part with a bore hashes the same after a save and reopen",
+          "[studyjobs][serialize]") {
+  namespace fs = std::filesystem;
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, -25, -25),
+                                              60, 50, 50));
+  auto sk = std::make_unique<SketchFeature>(
+      "Bore",
+      SketchPlane(glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0)));
+  sk->AddEntity(sketch::Circle{{0, 0}, 15.0});
+  doc.AddFeature(std::move(sk));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Cut", doc.GetFeature(1)->GetId(), 70.0, ExtrudeMode::Cut, false));
+  doc.Regenerate();
+  REQUIRE(doc.GetFeature(2)->GetError().empty());
+  inputhash::Hasher h1;
+  h1.Bodies(doc.GetBodies());
+  const fs::path proj = fs::temp_directory_path() / "bored_part_hash.dsgn";
+  fs::remove_all(proj);
+  REQUIRE(testio::Save(doc, proj.string()));
+  auto re = testio::Load(proj.string());
+  inputhash::Hasher h2;
+  h2.Bodies(re->GetBodies());
+  CHECK(h1.Digest() == h2.Digest());
+  for (size_t i = 0; i < doc.GetBodies().size(); ++i) {
+    inputhash::Hasher a, b;
+    a.Shape(doc.GetBodies()[i].shape);
+    b.Shape(re->GetBodies()[i].shape);
+    CHECK(a.Digest() == b.Digest());
+    CHECK(doc.GetBodies()[i].elementMap.names ==
+          re->GetBodies()[i].elementMap.names);
+  }
+  fs::remove_all(proj);
 }

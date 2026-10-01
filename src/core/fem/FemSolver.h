@@ -197,15 +197,17 @@ struct KeepOutReport {
 // solvedAtVersion != Document::Version(). Maxima are aggregated across all
 // solved bodies for the summary an engineer reads.
 //
-// FEM (static/modal) runtimes are never serialized (recompute = seconds).
-// A TOPOLOGY runtime IS serialized (topology != 0): its result is minutes of
-// compute over a mesh that is not reproducible across Netgen versions, so it is
-// persisted into the document and reloaded into this same cache slot.
+// Every runtime is saved with the project beside its study, with the input
+// hash that produced it, and reloaded into this same cache slot
+// (DocumentIO::StudyResultToJson; topology since v33, static and modal v153):
+// a topology result is minutes of compute over a mesh that is not
+// reproducible across Netgen versions, and a static one of a big part is
+// minutes too.
 struct StudyRuntime {
   uint64_t solvedAtVersion = 0;
   // The input hash of what produced it (fem::StudyInputKey,
   // docs/simulation/README.md#studies-as-jobs); 0 = unknown, never matched.
-  // Saved with a topology result, so a reopened project can reuse it.
+  // Saved with the result, so a reopened project can reuse it.
   uint64_t inputHash = 0;
   // Assembly studies: the version of every PART the solve read, beside the
   // assembly's own above. Stale when any of them moved — a panel regenerated
@@ -400,6 +402,12 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
 // topology run picks (GPU or CPU) is not an input: both answer the same
 // problem.
 uint64_t StudyInputKey(const Document& doc, const Study& study);
+// Every stored result of `doc` whose input hash is what a run would hash now
+// is stamped current (Document::MarkStudyResultsCurrent): a reopened project
+// whose parts were regenerated again after loading (the project scope, a
+// variable edit) still holds the answers its inputs have. One that does not
+// match keeps its stamp. Shape studies after the results they are cut from.
+void RestampByInputs(Document& doc);
 uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
                                const Study& study,
                                const AssemblyStudyContext& ctx);

@@ -176,6 +176,16 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
   return true;
 }
 
+// `result` as the study's own: what MotionResultFor answers, and what the
+// assembly carries into the project when it is saved.
+void Install(AppState& state, AssemblyDocument& asmDoc, uint64_t studyId,
+             motion::Result result, std::string revision) {
+  asmDoc.StoreMotionResult(studyId,
+                           std::make_shared<const motion::Result>(result));
+  state.motionResults[studyId] = std::move(result);
+  state.motionResultRevisions[studyId] = std::move(revision);
+}
+
 // A result the session holds for exactly these inputs, installed as the
 // study's own: the stored run answers, and nothing is computed.
 bool ReuseStored(AppState& state, const MotionRun& run, JobStart* job) {
@@ -187,8 +197,7 @@ bool ReuseStored(AppState& state, const MotionRun& run, JobStart* job) {
     return false;
   if (state.motionPlaybackStudy == run.studyId)
     StopMotionPlayback(state);
-  state.motionResults[run.studyId] = *stored;
-  state.motionResultRevisions[run.studyId] = run.revision;
+  Install(state, *state.assembly, run.studyId, *stored, run.revision);
   if (job != nullptr)
     job->reused = true;
   return true;
@@ -248,8 +257,8 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
       // The poses being played are about to be replaced.
       if (s.motionPlaybackStudy == run->studyId)
         StopMotionPlayback(s);
-      s.motionResults[run->studyId] = std::move(run->result);
-      s.motionResultRevisions[run->studyId] = run->revision;
+      Install(s, *s.assembly, run->studyId, std::move(run->result),
+              run->revision);
     }
     return true;
   };
@@ -278,14 +287,50 @@ motion::Result RunMotionNow(AppState& state, uint64_t studyId,
   Remember(state, r, run.inputHash);
   if (state.motionPlaybackStudy == studyId)
     StopMotionPlayback(state);
-  state.motionResults[studyId] = r;
-  state.motionResultRevisions[studyId] = run.revision;
+  Install(state, *state.assembly, studyId, r, run.revision);
   return r;
 }
 
 const motion::Result* MotionResultFor(const AppState& state, uint64_t studyId) {
   const auto it = state.motionResults.find(studyId);
   return it == state.motionResults.end() ? nullptr : &it->second;
+}
+
+void DropMotionResult(AppState& state, uint64_t studyId) {
+  state.motionResults.erase(studyId);
+  state.motionResultRevisions.erase(studyId);
+  if (state.assembly)
+    state.assembly->StoreMotionResult(studyId, nullptr);
+}
+
+void AdoptSavedMotionResults(AppState& state) {
+  if (!state.assembly)
+    return;
+  for (const uint64_t id : state.assembly->MotionResultIds()) {
+    const std::shared_ptr<const motion::Result> saved =
+        state.assembly->MotionResult(id);
+    const MotionStudy* study = state.assembly->FindMotionStudyById(id);
+    if (!saved || study == nullptr)
+      continue;
+    // The session's own (a tab switched back to): it keeps the revision it
+    // was run at, which says whether anything moved since.
+    const auto have = state.motionResults.find(id);
+    if (have != state.motionResults.end() &&
+        have->second.inputHash == saved->inputHash)
+      continue;
+    // Current when the inputs hash as they did when it ran; stale (a
+    // revision nothing produces) when they do not.
+    const bool current =
+        saved->inputHash != 0 &&
+        motion::InputKey(*state.assembly, PartResolverFor(state),
+                         AssemblyResolverFor(state),
+                         *study) == saved->inputHash;
+    state.motionResults[id] = *saved;
+    state.motionResultRevisions[id] =
+        current ? Revision(state, id) : std::string("saved, inputs moved");
+    if (current && !saved->cancelled && saved->error.empty())
+      state.motionResultsByInput.Put(saved->inputHash, saved);
+  }
 }
 
 bool MotionResultStale(AppState& state, uint64_t studyId) {

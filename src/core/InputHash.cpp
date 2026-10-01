@@ -4,7 +4,11 @@
 #include "cad/CADMaterials.h"
 #include "core/Feature.h"
 
-#include <BinTools.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepTools.hxx>
+#include <TopTools_MapOfShape.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_TShape.hxx>
 
 #include <bit>
 #include <cstdio>
@@ -36,6 +40,39 @@ ShapeMemo& Memo() {
   return memo;
 }
 
+// Every sub-shape's Modified, Checked and Free flags, which say what has
+// been done to a shape and where it sits, not what it is.
+void NeutralFlags(const TopoDS_Shape& shape) {
+  TopTools_MapOfShape seen;
+  std::vector<TopoDS_Shape> todo{shape};
+  while (!todo.empty()) {
+    const TopoDS_Shape s = todo.back();
+    todo.pop_back();
+    if (s.IsNull() || !seen.Add(s))
+      continue;
+    const Handle(TopoDS_TShape) & t = s.TShape();
+    t->Modified(false);
+    t->Checked(false);
+    t->Free(false);
+    for (TopoDS_Iterator it(s, false, false); it.More(); it.Next())
+      todo.push_back(it.Value());
+  }
+}
+
+// "-0" (a whole token) as "0": the sign of a zero is not geometry.
+std::string FoldNegativeZeros(const std::string& in) {
+  std::string out;
+  out.reserve(in.size());
+  const auto sep = [](char c) { return c == ' ' || c == '\n' || c == '\t'; };
+  for (size_t i = 0; i < in.size(); ++i) {
+    if (in[i] == '-' && i + 1 < in.size() && in[i + 1] == '0' &&
+        (i == 0 || sep(in[i - 1])) && (i + 2 == in.size() || sep(in[i + 2])))
+      continue;
+    out += in[i];
+  }
+  return out;
+}
+
 uint64_t ShapeDigest(const CADShape& shape) {
   if (!shape.IsValid())
     return 0;
@@ -48,11 +85,27 @@ uint64_t ShapeDigest(const CADShape& shape) {
     if (it != memo.entries.end() && it->second.shape.SameGeometryAs(shape))
       return it->second.digest;
   }
-  std::ostringstream brep(std::ios::binary);
-  BinTools::Write(shape.GetShape(), brep, /*theWithTriangles=*/false,
-                  /*theWithNormals=*/false, BinTools_FormatVersion_CURRENT);
+  // The geometry, not the bookkeeping OCC keeps on it, and the same however
+  // the shape came to be. Meshing a face (Netgen for a study, BRepMesh for
+  // the viewport) clears its TShape's `Checked` flag and its cached UV
+  // points, and BinTools wrote both: a topology run hashed its envelope,
+  // meshed it in place, and the project saved the meshed shape, so the
+  // reopened part hashed otherwise and its result read stale and ran again.
+  // And a shape read back from the project's baked geometry carries a +0
+  // where the regenerated one had a -0 (a circle's axis): a reopened part
+  // with a bore hashed otherwise too. So: a copy (the copy carries the
+  // flags over) with those flags set one way, written as text in format 1
+  // (no UV points), every "-0" read as "0".
+  const TopoDS_Shape copy =
+      BRepBuilderAPI_Copy(shape.GetShape(), /*copyGeom=*/true,
+                          /*copyMesh=*/false)
+          .Shape();
+  NeutralFlags(copy);
+  std::ostringstream text;
+  BRepTools::Write(copy, text, /*theWithTriangles=*/false,
+                   /*theWithNormals=*/false, TopTools_FormatVersion_VERSION_1);
   Hasher h;
-  h.Str(brep.str());
+  h.Str(FoldNegativeZeros(text.str()));
   const uint64_t digest = h.Digest();
   std::lock_guard lock(memo.mutex);
   if (!memo.entries.contains(key)) {

@@ -15,6 +15,7 @@
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/MotionActions.h"
 #ifdef HAVE_FEM_GPU
 #include "femgpu/TopoGpuSolver.h"
 #endif
@@ -226,7 +227,8 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   if (ReuseStudyResult(state, &doc, nullptr, studyId, jobStart))
     return true;
   if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study")) {
+      BackgroundJobRunning(state, "study") ||
+      BackgroundJobRunning(state, "check")) {
     if (error)
       *error = "a study run is already in progress";
     return false;
@@ -409,7 +411,8 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   if (ReuseStudyResult(state, &doc, nullptr, studyId, jobStart))
     return true;
   if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study"))
+      BackgroundJobRunning(state, "study") ||
+      BackgroundJobRunning(state, "check"))
     return fail("a study run is already in progress");
   const uint64_t inputHash = fem::StudyInputKey(doc, *s);
 
@@ -470,6 +473,145 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   if (jobStart)
     jobStart->jobId = started.id;
   return true;
+}
+
+bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
+                        double threshold, uint64_t* shapeId, uint64_t* solidId,
+                        std::string* error, JobStart* jobStart) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  uint64_t ids[2] = {0, 0};
+  if (!EnsureTopologyCheckStudies(state, doc, topoId, threshold, &ids[0],
+                                  &ids[1], error))
+    return false;
+  if (shapeId)
+    *shapeId = ids[0];
+  if (solidId)
+    *solidId = ids[1];
+  // Each one a stored result answers is not solved again.
+  struct Part {
+    uint64_t studyId = 0;
+    uint64_t inputHash = 0;
+    fem::StudyPlan plan;
+    fem::StudyJobInput input;
+    fem::StudyRuntime runtime;
+  };
+  struct CheckJob {
+    uint64_t partSlotId = 0;
+    std::vector<Part> parts;
+    std::string error;
+    uint64_t errorStudy = 0;
+    std::chrono::steady_clock::time_point started;
+  };
+  auto job = std::make_shared<CheckJob>();
+  bool running = BackgroundJobRunning(state, "topo") ||
+                 BackgroundJobRunning(state, "study") ||
+                 BackgroundJobRunning(state, "check");
+  for (const uint64_t sid : ids) {
+    JobStart one;
+    one.recompute = jobStart != nullptr && jobStart->recompute;
+    if (ReuseStudyResult(state, &doc, nullptr, sid, &one))
+      continue;
+    if (running)
+      return fail("a study run is already in progress");
+    fem::Study* s = doc.StudyForRun(sid);
+    if (s == nullptr)
+      return fail("no such study");
+    Part part;
+    part.studyId = sid;
+    part.inputHash = fem::StudyInputKey(doc, *s);
+    if (!fem::PlanStudy(doc, *s, part.plan, error))
+      return false;
+    job->parts.push_back(std::move(part));
+  }
+  if (job->parts.empty()) {
+    if (jobStart)
+      jobStart->reused = true;
+    return true;
+  }
+  job->partSlotId = SlotIdOfDoc(state, doc);
+  job->started = std::chrono::steady_clock::now();
+
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "check";
+  bg->label = StudyLabel(doc, topoId, "Checking");
+  // Between the two solves, and after a factorization (it has no
+  // interruption points): what was not finished is dropped.
+  bg->cancellable = true;
+  bg->studyId = topoId;
+  bg->owner = jobStart ? jobStart->owner : 0;
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([job, raw]() {
+    OSD::SetSignal(Standard_False); // OCC's handlers are per thread
+    const double n = static_cast<double>(job->parts.size());
+    for (size_t i = 0; i < job->parts.size() && !raw->cancel.load(); ++i) {
+      Part& p = job->parts[i];
+      std::string err;
+      if (!fem::MeshPlannedStudy(p.plan, p.input, &err))
+        job->error = err.empty() ? "meshing failed" : err;
+      else if (!raw->cancel.load() &&
+               !fem::SolvePreparedStudy(p.input, p.runtime, &err))
+        job->error = err.empty() ? "solve failed" : err;
+      if (!job->error.empty()) {
+        job->errorStudy = p.studyId;
+        break;
+      }
+      raw->fraction.store((static_cast<double>(i) + 1.0) / n);
+    }
+    raw->error = job->error;
+    raw->done.store(true); // last
+  });
+  bg->finish = [job, raw](AppState& s) {
+    CheckJob& j = *job;
+    Document* target = JobDocument(s, j.partSlotId, "topology check");
+    if (target == nullptr)
+      return true;
+    for (Part& p : j.parts) {
+      // Solved whole: a cancel after it does not take it back. The one the
+      // cancel or the failure landed in, and what came after, are dropped.
+      if (p.runtime.bodies.empty())
+        continue;
+      p.runtime.solvedAtVersion = target->Version();
+      p.runtime.solver = fem::CpuSolverName(p.input.type);
+      p.runtime.solveSeconds = Elapsed(j.started);
+      p.runtime.inputHash = p.inputHash;
+      RememberStudyResult(s, p.runtime);
+      target->StoreStudyResults(p.studyId, std::move(p.runtime));
+    }
+    if (!j.error.empty() && !raw->cancel.load())
+      if (fem::Study* st = target->StudyForRun(j.errorStudy))
+        st->error = j.error;
+    return true;
+  };
+  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
+  if (jobStart)
+    jobStart->jobId = started.id;
+  return true;
+}
+
+void AdoptStoredResults(AppState& state) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (Document* d = SlotDoc(state, i))
+      fem::RestampByInputs(*d);
+  if (state.document)
+    fem::RestampByInputs(*state.document);
+  if (!state.assembly)
+    return;
+  AssemblyDocument& asmDoc = *state.assembly;
+  for (const fem::Study& s : asmDoc.GetStudies()) {
+    const fem::StudyRuntime* rt = asmDoc.StudyResults(s.id);
+    if (rt == nullptr || rt->inputHash == 0 ||
+        !AssemblyStudyStale(state, asmDoc, s.id))
+      continue;
+    if (fem::AssemblyStudyInputKey(asmDoc, s, AssemblyStudyContextFor(state)) ==
+        rt->inputHash)
+      asmDoc.MarkStudyResultsCurrent(
+          s.id, AssemblyStudyPartVersions(state, asmDoc, s));
+  }
+  AdoptSavedMotionResults(state);
 }
 
 bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
@@ -847,7 +989,8 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
       ReuseStudyResult(state, nullptr, &asmDoc, studyId, jobStart))
     return true;
   if (BackgroundJobRunning(state, "topo") ||
-      BackgroundJobRunning(state, "study"))
+      BackgroundJobRunning(state, "study") ||
+      BackgroundJobRunning(state, "check"))
     return fail("a study run is already in progress");
   auto job = std::make_shared<StudyJob>();
   fem::Study* s = nullptr;

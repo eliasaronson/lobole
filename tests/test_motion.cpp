@@ -894,3 +894,68 @@ TEST_CASE("The exact contact cache matches a clear pair by relative pose",
   const auto overlapMoved = cache.Check(sa, carried, sb, carried * nearer);
   CHECK_FALSE(overlapMoved.cached);
 }
+
+// A motion result is saved with the project beside its study (v153), with
+// the input hash that produced it: the reopened assembly hashes the same, so
+// a run of it is answered from the saved table, and every sample comes back
+// as it was run.
+TEST_CASE("A saved motion result reopens with its hash and its samples",
+          "[motion][studyjobs][serialize]") {
+  namespace fs = std::filesystem;
+  Rig r = MakeRig(90.0);
+  MotionStudy study = FullTurn(r.axle, 13);
+  study.id = r.asmDoc.AddMotionStudy(study);
+  const MotionStudy& stored = *r.asmDoc.FindMotionStudyById(study.id);
+  motion::Result result = motion::Run(r.asmDoc, r.Parts(), nullptr, stored);
+  REQUIRE(result.error.empty());
+  REQUIRE_FALSE(result.clean); // the stop at 90 degrees
+  result.inputHash = motion::InputKey(r.asmDoc, r.Parts(), nullptr, stored);
+  REQUIRE(result.inputHash != 0);
+  r.asmDoc.StoreMotionResult(study.id,
+                             std::make_shared<const motion::Result>(result));
+
+  const fs::path proj = fs::temp_directory_path() / "motion_result_reopen.dsgn";
+  fs::remove_all(proj);
+  REQUIRE(testio::SaveAssembly(r.asmDoc, proj.string()));
+  auto reloaded = testio::LoadAssembly(proj.string());
+  REQUIRE(reloaded != nullptr);
+  const std::shared_ptr<const motion::Result> back =
+      reloaded->MotionResult(study.id);
+  REQUIRE(back != nullptr);
+  CHECK(back->inputHash == result.inputHash);
+  const MotionStudy& reread = *reloaded->FindMotionStudyById(study.id);
+  CHECK(motion::InputKey(*reloaded, r.Parts(), nullptr, reread) ==
+        result.inputHash);
+  // The table and the poses, as run.
+  CHECK(motion::Table(*back, reread) == motion::Table(result, stored));
+  REQUIRE(back->samples.size() == result.samples.size());
+  CHECK(back->clean == result.clean);
+  CHECK(back->worstSample == result.worstSample);
+  CHECK(back->pairsChecked == result.pairsChecked);
+  for (size_t i = 0; i < result.samples.size(); ++i) {
+    const motion::Sample& a = result.samples[i];
+    const motion::Sample& b = back->samples[i];
+    CHECK(a.value == b.value);
+    REQUIRE(a.worlds.size() == b.worlds.size());
+    for (size_t k = 0; k < a.worlds.size(); ++k) {
+      CHECK(a.worlds[k].first == b.worlds[k].first);
+      CHECK(a.worlds[k].second == b.worlds[k].second);
+    }
+    CHECK(a.clashes.size() == b.clashes.size());
+    CHECK(a.mates.size() == b.mates.size());
+  }
+
+  // An input moved after the save: the reopened one hashes otherwise, and
+  // is not the answer to it.
+  reloaded->FindById(r.stopOcc)->position.z = 1.0;
+  CHECK(motion::InputKey(*reloaded, r.Parts(), nullptr, reread) !=
+        back->inputHash);
+
+  // A result gone from the study is gone from the next save.
+  r.asmDoc.StoreMotionResult(study.id, nullptr);
+  REQUIRE(testio::SaveAssembly(r.asmDoc, proj.string()));
+  auto without = testio::LoadAssembly(proj.string());
+  REQUIRE(without != nullptr);
+  CHECK(without->MotionResult(study.id) == nullptr);
+  fs::remove_all(proj);
+}

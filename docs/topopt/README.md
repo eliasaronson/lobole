@@ -59,8 +59,9 @@ data, a single loaded body, the load cases' rules and the keep-outs'.
 
 ## Results
 
-A topology result **is saved with the project**, unlike FEM results: it
-costs minutes, and it is tied to a mesh that Netgen does not reproduce across
+A topology result **is saved with the project**, as every study result is
+([studies as jobs](../simulation/README.md#studies-as-jobs)): it costs
+minutes, and it is tied to a mesh that Netgen does not reproduce across
 versions or machines, so re-running would not give it back. It is written as
 `studies/<id>-<slug>.result.json` beside the study (flat arrays: mesh nodes
 and tets, per-tet density, compliance history, iterations, achieved volume
@@ -218,15 +219,24 @@ result that is missing or stale, loads on another body, and refinements
 (nothing is meshed). `study_results` adds `shape`: the threshold, the
 volume solved and the tets dropped as not connected to a support.
 
-`check_topology {study, threshold?}` makes (or refreshes) two of them,
-'<name>: shape' and '<name>: solid', with the topology study's supports,
-loads and cases, runs both (one factorisation each serves every case), and
-answers per case each one's maximum deflection and stress, factor of
-safety, volume and mass, and the deflection ratio. The two studies stay,
-for `probe_study {case}` and `set_result_display {case}`. It is
-synchronous: on the pan/tilt yoke (44k tets, two factorisations) about two
-minutes in which the app answers nothing else. In the panel it is **Check
-shape**, which makes both and runs the shape's off the frame.
+`check_topology {study, threshold?, recompute?, outlive_client?}` makes (or
+refreshes) two of them, '<name>: shape' and '<name>: solid', with the
+topology study's supports, loads and cases, and solves both as a job
+(`ui::StartTopologyCheck`, kind `check`; one factorisation each serves
+every case): it answers `{started, job, shape_study, solid_study}`,
+`study_status {job}` follows it, `cancel_study {job}` stops it between the
+two solves or after a factorization, and it is cancelled with its
+connection unless `outlive_client`. A study already answered by a stored
+result for its inputs is not solved again; when both are, nothing starts
+and it answers, `reused: true`, per case each one's maximum deflection and
+stress, factor of safety, volume and mass, and the deflection ratio. So a
+caller starts it, follows the job, and calls it again for the answer; a
+reopened project's check answers at once. The two studies stay, for
+`probe_study {case}` and `set_result_display {case}`. On the pan/tilt yoke
+(44k tets, two factorisations) the solves are about two minutes, through
+which the app answers as usual; synchronous, it answered nothing else. In
+the panel it is **Check shape**, which makes both and runs the shape's off
+the frame.
 
 On the pan/tilt yoke (`generators/pantilt/README.md`, "The yoke under
 load") the check is what showed that the result at the solid yoke's mass
@@ -281,7 +291,9 @@ sketch can project or a boolean can take.
 
 A run takes minutes, so it happens on a worker thread over an immutable
 snapshot. `fem::PrepareTopology` (main thread) evaluates expressions,
-resolves faces, meshes the body and builds a `fem::TopoInput` of plain data;
+resolves faces, meshes a copy of the body (Netgen writes into what it
+meshes, and the document's shape is what the project saves and its hash
+reads) and builds a `fem::TopoInput` of plain data;
 the worker runs `TopologyOptimize` with no document access, publishing
 iteration, compliance, largest change and volume fraction through atomics,
 and checking a cancel flag each iteration. The result is stored at the one
@@ -495,10 +507,12 @@ study_results {id}  -> {iterations, converged, cancelled, volume_fraction,
                         keep_outs[{what, tets, volume_mm3}],
                         islands{threshold, components, tets, volume_mm3,
                                 keep_faces, load_path_broken}}
-check_topology {study, threshold?}
-                    -> {shape_study, solid_study, threshold, dropped_tets,
-                        islands, cases[{name, shape{...}, solid{...},
-                                        displacement_ratio}]}
+check_topology {study, threshold?, recompute?, outlive_client?}
+                    -> {started: true, job, kind: "check", shape_study,
+                        solid_study}                      (a job), then
+                    -> {reused: true, shape_study, solid_study, threshold,
+                        dropped_tets, islands, cases[{name, shape{...},
+                                        solid{...}, displacement_ratio}]}
 set_study {id, shape_from: {study, threshold? | whole: true} | null}  # static
 split_for_printing {bed_mm, cuts?[{axis, at_mm}], body?, part?, prefix?,
                     dry_run?}   -> {cuts, fits_whole, pieces[...]}
@@ -550,7 +564,8 @@ to STL is RPC-only; the panel has no button for it.
   run at a time. Skips without Netgen. Reloading a
   saved result is covered by `test_topopt.cpp`.
 - `tests/topo_build_smoke.py`: load cases, a keep-out, the islands report,
-  `check_topology`, a case through `probe_study` and the display, the
+  `check_topology` as a job (followed, answered from its results, recomputed
+  and cancelled), a case through `probe_study` and the display, the
   refusals, and `split_for_printing` over RPC.
 - GUI: `sim/topology_holds_its_volume_target`,
   `sim/load_cases_take_the_force_placed_in_them`.

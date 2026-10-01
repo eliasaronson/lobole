@@ -149,6 +149,21 @@ bool EnsureTopologyCheckStudies(AppState& state, Document& doc, uint64_t topoId,
                                 double threshold, uint64_t* shapeId,
                                 uint64_t* solidId, std::string* error);
 
+// check_topology as a job (kind "check"): makes the two studies above, and
+// solves on a worker whichever of them is not answered by a stored result
+// for its inputs -- the shape's, then the solid's, a cancel landing between
+// them or after a factorization. When both are answered, nothing starts and
+// `job->reused` is set. One study run at a time.
+bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
+                        double threshold, uint64_t* shapeId, uint64_t* solidId,
+                        std::string* error, JobStart* job = nullptr);
+
+// After an open (and a tab switch to an assembly): every stored study and
+// motion result whose inputs hash as they did when it was made reads
+// current, and the active assembly's saved motion results are the ones
+// MotionResultFor answers (docs/simulation/README.md#studies-as-jobs).
+void AdoptStoredResults(AppState& state);
+
 // mesh_study off the frame: plan on this thread, mesh on a worker, and keep
 // what it found as a MeshReport for study_status (`meshing: true` while it
 // runs, then `mesh: {...}`). One mesh run at a time, per study.

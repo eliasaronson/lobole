@@ -337,7 +337,11 @@ omitted = whichever is active).
   every mate with its current value, relations, configurations and the
   placed parts' geometry and materials): `reused: true`, nothing computed,
   `recompute: true` to run anyway. So `run_motion_study {leave_at}` after
-  a run costs one solve. `async: true` runs it as a job with an id
+  a run costs one solve. The result is saved with the project
+  (`motion/<id>-<slug>.result.json`, v153) and read back when the assembly
+  is opened or its tab comes up: current when its inputs hash as they did,
+  stale otherwise, so a reopened project's exact run is not paid for again
+  ([studies as jobs](../simulation/README.md#studies-as-jobs)). `async: true` runs it as a job with an id
   (`job`), reported by `study_status {job}` and `motion_status`
   (`job`, `fraction`) and stopped by `cancel_study {job}`; it is cancelled
   when the connection that started it closes, unless `outlive_client: true`

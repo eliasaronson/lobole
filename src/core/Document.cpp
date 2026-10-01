@@ -142,6 +142,14 @@ bool Document::StudyResultsStale(uint64_t studyId) const {
          src->second.densityDigest != it->second.sourceDigest;
 }
 
+bool Document::MarkStudyResultsCurrent(uint64_t studyId) {
+  const auto it = m_studyRuntime.find(studyId);
+  if (it == m_studyRuntime.end())
+    return false;
+  it->second.solvedAtVersion = m_version;
+  return true;
+}
+
 Feature* Document::GetFeature(size_t index) {
   return index < m_features.size() ? m_features[index].get() : nullptr;
 }

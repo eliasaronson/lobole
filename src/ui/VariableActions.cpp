@@ -61,6 +61,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/fem/FemSolver.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
@@ -118,6 +119,9 @@ void SyncProjectScope(AppState& state) {
       d->SetProjectSymbols(&state.projectSymbols);
       d->SetProjectParameters(&state.projectParameters);
       d->Regenerate();
+      // A result whose inputs the new values did not touch is still the
+      // answer (an open regenerates every part once more, here).
+      fem::RestampByInputs(*d);
     }
   }
   state.syncedDocumentVersion = UINT64_MAX; // a cross-tab edit; force resync

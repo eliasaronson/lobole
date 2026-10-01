@@ -256,55 +256,151 @@ fem::Study StudyFromJson(const json& j) {
   return s;
 }
 
-// ---- Topology result (v33) ------------------------------------------------
-// Persisted (unlike FEM results): the optimized density + its mesh + summary.
-// Flat numeric arrays keep it compact; solvedAtVersion is stamped on load.
+// ---- Study results (topology v33, every kind v153) -------------------------
+// Saved with the project, each beside its study, so a reopened project's run
+// of the same inputs is answered from it (docs/simulation/README.md
+// #studies-as-jobs). What the panel and the RPCs read -- the mesh, each
+// node's displacement and stress, the modes, the maxima, the topology
+// density -- and never the solver's scratch. Flat numeric arrays keep it
+// compact; solvedAtVersion is stamped on load.
+
+namespace {
+
+json FlatVec3(const std::vector<glm::dvec3>& v) {
+  json out = json::array();
+  for (const glm::dvec3& p : v) {
+    out.push_back(p.x);
+    out.push_back(p.y);
+    out.push_back(p.z);
+  }
+  return out;
+}
+
+std::vector<glm::dvec3> Vec3sFromFlat(const json& j, const char* what) {
+  const auto flat = j.get<std::vector<double>>();
+  if (flat.size() % 3 != 0)
+    throw std::runtime_error(std::string("study result: ") + what +
+                             " is not a whole number of xyz triples");
+  std::vector<glm::dvec3> out;
+  out.reserve(flat.size() / 3);
+  for (size_t i = 0; i + 3 <= flat.size(); i += 3)
+    out.emplace_back(flat[i], flat[i + 1], flat[i + 2]);
+  return out;
+}
+
+json FieldsToJson(const fem::FemResults& r) {
+  json out = {{"displacement", FlatVec3(r.displacement)},
+              {"von_mises", r.vonMises},
+              {"max_von_mises", r.maxVonMises},
+              {"max_vm_node", r.maxVmNode},
+              {"max_vm_at", Vec3ToJson(r.maxVmAt)},
+              {"max_displacement", r.maxDisplacement},
+              {"max_disp_node", r.maxDispNode},
+              {"max_disp_at", Vec3ToJson(r.maxDispAt)}};
+  if (!r.modes.empty()) {
+    json modes = json::array();
+    for (const fem::FemResults::ModeShape& m : r.modes)
+      modes.push_back({{"frequency_hz", m.frequencyHz},
+                       {"shape", FlatVec3(m.displacement)}});
+    out["modes"] = std::move(modes);
+  }
+  return out;
+}
+
+fem::FemResults FieldsFromJson(const json& j) {
+  fem::FemResults r;
+  r.displacement =
+      Vec3sFromFlat(j.value("displacement", json::array()), "displacement");
+  r.vonMises = j.value("von_mises", std::vector<double>{});
+  r.maxVonMises = j.value("max_von_mises", 0.0);
+  r.maxVmNode = j.value("max_vm_node", -1);
+  if (j.contains("max_vm_at"))
+    r.maxVmAt = Vec3FromJson(j.at("max_vm_at"));
+  r.maxDisplacement = j.value("max_displacement", 0.0);
+  r.maxDispNode = j.value("max_disp_node", -1);
+  if (j.contains("max_disp_at"))
+    r.maxDispAt = Vec3FromJson(j.at("max_disp_at"));
+  for (const json& mj : j.value("modes", json::array()))
+    r.modes.push_back({mj.at("frequency_hz").get<double>(),
+                       Vec3sFromFlat(mj.at("shape"), "a mode shape")});
+  return r;
+}
+
+const char* KindOf(const fem::StudyRuntime& rt) {
+  if (rt.topology)
+    return "topology";
+  for (const fem::StudyBodyResult& b : rt.bodies)
+    if (!b.results.modes.empty())
+      return "modal";
+  return "static";
+}
+
+} // namespace
 
 bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
-  if (!rt.topology)
-    return false;
+  if (rt.bodies.empty())
+    return false; // nothing was solved
   out = json::object();
-  out["topology"] = {{"iterations", rt.iterations},
-                     {"converged", rt.converged},
-                     {"cancelled", rt.cancelled},
-                     {"volume_fraction", rt.volumeFractionAchieved},
-                     {"compliance", rt.complianceHistory}};
+  out["kind"] = KindOf(rt);
+  if (rt.topology)
+    out["topology"] = {{"iterations", rt.iterations},
+                       {"converged", rt.converged},
+                       {"cancelled", rt.cancelled},
+                       {"volume_fraction", rt.volumeFractionAchieved},
+                       {"compliance", rt.complianceHistory}};
   // What produced it (v148): a reopened project reuses the result for a run
   // whose inputs hash the same, and reads it stale when they do not.
   if (rt.inputHash != 0)
     out["input_hash"] = inputhash::Hex(rt.inputHash);
-  // The load cases and what each one came to (v152).
+  if (!rt.topology)
+    out["maxima"] = {{"von_mises", rt.maxVonMises},
+                     {"von_mises_at", Vec3ToJson(rt.maxVmAt)},
+                     {"von_mises_body", rt.maxVmBody},
+                     {"displacement", rt.maxDisplacement},
+                     {"displacement_at", Vec3ToJson(rt.maxDispAt)},
+                     {"displacement_body", rt.maxDispBody}};
+  // The load cases (v152): a topology run's weight and compliance each, a
+  // static run's names (its fields are per body, below).
   if (!rt.caseNames.empty()) {
     json cases = json::array();
-    for (size_t k = 0; k < rt.caseNames.size(); ++k)
-      cases.push_back(
-          {{"name", rt.caseNames[k]},
-           {"weight", k < rt.caseWeights.size() ? rt.caseWeights[k] : 1.0},
-           {"compliance",
-            k < rt.caseCompliance.size() ? rt.caseCompliance[k] : 0.0}});
+    for (size_t k = 0; k < rt.caseNames.size(); ++k) {
+      json c = {{"name", rt.caseNames[k]}};
+      if (rt.topology) {
+        c["weight"] = k < rt.caseWeights.size() ? rt.caseWeights[k] : 1.0;
+        c["compliance"] =
+            k < rt.caseCompliance.size() ? rt.caseCompliance[k] : 0.0;
+      }
+      cases.push_back(std::move(c));
+    }
     out["cases"] = std::move(cases);
   }
-  // What the keep-outs took and the connectivity filter removed (v152).
-  if (!rt.keepOuts.empty()) {
-    json ko = json::array();
-    for (const fem::KeepOutReport& k : rt.keepOuts)
-      ko.push_back({{"what", k.what}, {"tets", k.tets}, {"volume", k.volume}});
-    out["keep_outs"] = std::move(ko);
+  if (rt.topology) {
+    // What the keep-outs took and the connectivity filter removed (v152).
+    if (!rt.keepOuts.empty()) {
+      json ko = json::array();
+      for (const fem::KeepOutReport& k : rt.keepOuts)
+        ko.push_back(
+            {{"what", k.what}, {"tets", k.tets}, {"volume", k.volume}});
+      out["keep_outs"] = std::move(ko);
+    }
+    out["islands"] = {{"threshold", rt.islands.threshold},
+                      {"components", rt.islands.components},
+                      {"tets", rt.islands.tets},
+                      {"volume", rt.islands.volume},
+                      {"keep_faces", rt.islands.keepFaces},
+                      {"load_path_broken", rt.islands.loadPathBroken}};
   }
-  out["islands"] = {{"threshold", rt.islands.threshold},
-                    {"components", rt.islands.components},
-                    {"tets", rt.islands.tets},
-                    {"volume", rt.islands.volume},
-                    {"keep_faces", rt.islands.keepFaces},
-                    {"load_path_broken", rt.islands.loadPathBroken}};
+  // A static study of a topology result: the cut it solved, and which
+  // result it was cut from (its density digest), so it stays current after
+  // a reopen only while that result does.
+  if (rt.sourceDigest != 0)
+    out["shape"] = {{"source", inputhash::Hex(rt.sourceDigest)},
+                    {"threshold", rt.shapeThreshold},
+                    {"island_tets", rt.shapeIslandTets},
+                    {"volume", rt.shapeVolume},
+                    {"threshold_lowered_from", rt.shapeThresholdLoweredFrom}};
   json bodies = json::array();
   for (const fem::StudyBodyResult& b : rt.bodies) {
-    json nodes = json::array();
-    for (const glm::dvec3& n : b.mesh.nodes) {
-      nodes.push_back(n.x);
-      nodes.push_back(n.y);
-      nodes.push_back(n.z);
-    }
     json tets = json::array();
     for (const std::array<int, 10>& t : b.mesh.tets)
       for (int v : t)
@@ -315,12 +411,27 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
         boundary.push_back(v);
       boundary.push_back(tr.faceIndex);
     }
-    bodies.push_back({{"body_index", b.bodyIndex},
-                      {"body", b.bodyName},
-                      {"nodes", std::move(nodes)},
-                      {"tets", std::move(tets)},
-                      {"boundary", std::move(boundary)},
-                      {"density", b.density}});
+    json bj = {{"body_index", b.bodyIndex},
+               {"body", b.bodyName},
+               {"nodes", FlatVec3(b.mesh.nodes)},
+               {"tets", std::move(tets)},
+               {"boundary", std::move(boundary)}};
+    if (!b.mesh.tetDomain.empty())
+      bj["tet_domain"] = b.mesh.tetDomain;
+    if (b.mesh.stats.worstQuality != 0.0)
+      bj["worst_quality"] = b.mesh.stats.worstQuality;
+    if (rt.topology) {
+      bj["density"] = b.density;
+    } else if (!b.cases.empty()) {
+      // `results` is the first case's copy: written once.
+      json cases = json::array();
+      for (const fem::FemResults& c : b.cases)
+        cases.push_back(FieldsToJson(c));
+      bj["cases"] = std::move(cases);
+    } else if (!b.results.displacement.empty() || !b.results.modes.empty()) {
+      bj["results"] = FieldsToJson(b.results);
+    }
+    bodies.push_back(std::move(bj));
   }
   out["bodies"] = std::move(bodies);
   return true;
@@ -328,25 +439,51 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
 
 fem::StudyRuntime StudyResultFromJson(const json& j) {
   fem::StudyRuntime rt;
-  rt.topology = true;
-  const json& s = j.at("topology");
-  rt.iterations = s.value("iterations", 0);
-  rt.converged = s.value("converged", false);
-  rt.cancelled = s.value("cancelled", false);
-  rt.volumeFractionAchieved = s.value("volume_fraction", 0.0);
-  rt.complianceHistory = s.value("compliance", std::vector<double>{});
+  const std::string kind =
+      j.value("kind", std::string(j.contains("topology") ? "topology" : ""));
+  if (kind != "topology" && kind != "static" && kind != "modal")
+    throw std::runtime_error("study result: kind '" + kind +
+                             "' (expected one of: static, modal, topology)");
+  rt.topology = kind == "topology";
+  if (rt.topology) {
+    const json& s = j.at("topology");
+    rt.iterations = s.value("iterations", 0);
+    rt.converged = s.value("converged", false);
+    rt.cancelled = s.value("cancelled", false);
+    rt.volumeFractionAchieved = s.value("volume_fraction", 0.0);
+    rt.complianceHistory = s.value("compliance", std::vector<double>{});
+  }
   if (j.contains("input_hash") &&
       !inputhash::FromHex(j.at("input_hash").get<std::string>(), rt.inputHash))
-    throw std::runtime_error("topology result: input_hash " +
+    throw std::runtime_error(kind + " result: input_hash " +
                              j.at("input_hash").dump() +
                              " is not 0x and 16 hex digits");
+  if (j.contains("maxima")) {
+    const json& m = j.at("maxima");
+    rt.maxVonMises = m.value("von_mises", 0.0);
+    if (m.contains("von_mises_at"))
+      rt.maxVmAt = Vec3FromJson(m.at("von_mises_at"));
+    rt.maxVmBody = m.value("von_mises_body", std::string{});
+    rt.maxDisplacement = m.value("displacement", 0.0);
+    if (m.contains("displacement_at"))
+      rt.maxDispAt = Vec3FromJson(m.at("displacement_at"));
+    rt.maxDispBody = m.value("displacement_body", std::string{});
+  }
+  if (j.contains("shape")) {
+    const json& s = j.at("shape");
+    if (!inputhash::FromHex(s.at("source").get<std::string>(), rt.sourceDigest))
+      throw std::runtime_error("shape result: source " + s.at("source").dump() +
+                               " is not 0x and 16 hex digits");
+    rt.shapeThreshold = s.value("threshold", 0.0);
+    rt.shapeIslandTets = s.value("island_tets", 0);
+    rt.shapeVolume = s.value("volume", 0.0);
+    rt.shapeThresholdLoweredFrom = s.value("threshold_lowered_from", 0.0);
+  }
   for (const json& bj : j.value("bodies", json::array())) {
     fem::StudyBodyResult b;
     b.bodyIndex = bj.value("body_index", -1);
     b.bodyName = bj.value("body", std::string{});
-    const auto nodes = bj.value("nodes", std::vector<double>{});
-    for (size_t i = 0; i + 3 <= nodes.size(); i += 3)
-      b.mesh.nodes.push_back(glm::dvec3(nodes[i], nodes[i + 1], nodes[i + 2]));
+    b.mesh.nodes = Vec3sFromFlat(bj.at("nodes"), "nodes");
     const auto tets = bj.value("tets", std::vector<int>{});
     for (size_t i = 0; i + 10 <= tets.size(); i += 10) {
       std::array<int, 10> t;
@@ -362,15 +499,25 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
       tr.faceIndex = boundary[i + 6];
       b.mesh.boundary.push_back(tr);
     }
-    b.density = bj.value("density", std::vector<double>{});
+    b.mesh.tetDomain = bj.value("tet_domain", std::vector<int>{});
     b.mesh.stats.nodeCount = b.mesh.nodes.size();
     b.mesh.stats.tetCount = b.mesh.tets.size();
+    b.mesh.stats.worstQuality = bj.value("worst_quality", 0.0);
+    b.density = bj.value("density", std::vector<double>{});
+    for (const json& cj : bj.value("cases", json::array()))
+      b.cases.push_back(FieldsFromJson(cj));
+    if (!b.cases.empty())
+      b.results = b.cases.front();
+    else if (bj.contains("results"))
+      b.results = FieldsFromJson(bj.at("results"));
     rt.bodies.push_back(std::move(b));
   }
   for (const json& cj : j.value("cases", json::array())) {
     rt.caseNames.push_back(cj.at("name").get<std::string>());
-    rt.caseWeights.push_back(cj.value("weight", 1.0));
-    rt.caseCompliance.push_back(cj.value("compliance", 0.0));
+    if (rt.topology) {
+      rt.caseWeights.push_back(cj.value("weight", 1.0));
+      rt.caseCompliance.push_back(cj.value("compliance", 0.0));
+    }
   }
   for (const json& kj : j.value("keep_outs", json::array()))
     rt.keepOuts.push_back({kj.value("what", std::string{}), kj.value("tets", 0),
@@ -384,7 +531,7 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     rt.islands.keepFaces = ij.value("keep_faces", std::vector<int>{});
     rt.islands.loadPathBroken = ij.value("load_path_broken", false);
   }
-  if (!rt.bodies.empty())
+  if (rt.topology && !rt.bodies.empty())
     rt.densityDigest =
         fem::DensityDigest(rt.bodies.front().mesh, rt.bodies.front().density);
   return rt;

@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -244,6 +244,10 @@ tractions, and a shape that is not the document's).
   or when the factorization ends, and the answer is dropped.
 - `topo` is cancellable and keeps its best iterate; `cancel_study` cancels
   it.
+- `check` (`check_topology`) solves the shape's and the solid's static
+  studies one after the other, each planned on the main thread; a cancel
+  lands between them or when a factorization ends, and keeps what was
+  solved whole ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)).
 - `mesh_study {async: true}` is a `mesh` job (a cancel drops its report); `study_status` answers
   `{running, meshing: true}` until it lands and then carries
   `mesh: {bodies, seconds, error?}`. The synchronous form remains.

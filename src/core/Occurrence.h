@@ -448,6 +448,12 @@ namespace fem {
 struct StudyRuntime;
 struct StudyRuntimeCache;
 } // namespace fem
+namespace motion {
+struct Result;
+} // namespace motion
+// The motion results an assembly carries, by study id (AssemblyDocument::
+// MotionResult).
+struct MotionResultCache;
 
 class AssemblyDocument {
 public:
@@ -557,10 +563,10 @@ public:
   bool RemoveStudy(uint64_t id);                      // bumps the version
   void RestoreStudy(fem::Study study);         // load/undo: keeps its ids
   uint64_t AllocateId() { return m_nextId++; } // a load's id
-  // Derived mesh + results, never serialized, SHARED with every full-state
-  // copy of this document (the undo snapshots): results are not document
-  // state, and a snapshot that duplicated a 2.5M-DOF mesh would be the
-  // reason nobody could undo.
+  // Derived mesh + results, saved beside each study (v153), SHARED with
+  // every full-state copy of this document (the undo snapshots): results are
+  // not document state, and a snapshot that duplicated a 2.5M-DOF mesh would
+  // be the reason nobody could undo.
   const fem::StudyRuntime* StudyResults(uint64_t studyId) const;
   void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt);
   uint64_t StudyResultsEpoch() const;
@@ -569,6 +575,23 @@ public:
   bool StudyResultsStale(
       uint64_t studyId,
       const std::function<uint64_t(uint64_t partId)>& partVersion) const;
+  // Stamps a stored result as solved at this version and these part
+  // versions: a reopened project's whose inputs hash as they did when it
+  // was made. False when absent.
+  bool MarkStudyResultsCurrent(
+      uint64_t studyId,
+      std::vector<std::pair<uint64_t, uint64_t>> partVersions);
+
+  // The motion studies' results (docs/assemblies/README.md#motion-studies),
+  // saved with the project beside each study and read back on open. Derived
+  // like StudyResults and shared with the undo snapshots the same way; what
+  // reads them in a session is the app's (ui::MotionResultFor), which
+  // installs these and keeps them in step.
+  std::shared_ptr<const motion::Result> MotionResult(uint64_t studyId) const;
+  // Null erases.
+  void StoreMotionResult(uint64_t studyId,
+                         std::shared_ptr<const motion::Result> result);
+  std::vector<uint64_t> MotionResultIds() const;
 
   // Configurations: named assembly variants. Reuses the Configuration type —
   // for an assembly, `suppressedFeatures` holds suppressed OCCURRENCE ids (a
@@ -652,6 +675,7 @@ private:
   std::vector<Configuration> m_configurations;
   std::vector<fem::Study> m_studies;
   std::shared_ptr<fem::StudyRuntimeCache> m_studyRuntime; // see StudyResults
+  std::shared_ptr<MotionResultCache> m_motionResults;     // see MotionResult
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id
                          // space shared by occurrences, mates, and views

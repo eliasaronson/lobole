@@ -1009,7 +1009,11 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
     keepOuts.push_back(ks);
   }
 
-  auto meshed = Mesh(body.shape.GetShape(), settings, &err);
+  // A deep copy, as a static plan meshes: Netgen writes triangulation into
+  // the faces it meshes and clears their flags, and the document's shape is
+  // what the renderer draws and the project saves.
+  auto meshed =
+      Mesh(BRepBuilderAPI_Copy(body.shape.GetShape()).Shape(), settings, &err);
   if (!meshed)
     return fail("body '" + body.name + "': " + err);
 

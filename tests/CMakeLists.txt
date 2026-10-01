@@ -481,6 +481,15 @@ add_test(NAME study_jobs_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(study_jobs_smoke PROPERTIES TIMEOUT 300)
 
+# Every study kind's result saved with the project and reused after a
+# reopen; a moved input reads stale (docs/simulation/README.md
+# #studies-as-jobs).
+add_test(NAME study_reopen_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/study_reopen_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(study_reopen_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
 # fit_fastener and check_fasteners agree about where a joint ENDS (W1).
 add_test(NAME fastener_stack_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fastener_stack_smoke.py

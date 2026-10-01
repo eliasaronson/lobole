@@ -1,5 +1,6 @@
 #include "core/Occurrence.h"
 #include "core/Angles.h"
+#include "core/MotionStudy.h"
 #include "core/fem/FemSolver.h" // StudyRuntime, StudyRuntimeCache
 
 #include <algorithm>
@@ -334,6 +335,10 @@ void AssemblyDocument::RestoreStudy(fem::Study study) {
   m_studies.push_back(std::move(study));
 }
 
+struct MotionResultCache {
+  std::map<uint64_t, std::shared_ptr<const motion::Result>> byStudy;
+};
+
 const fem::StudyRuntime*
 AssemblyDocument::StudyResults(uint64_t studyId) const {
   if (!m_studyRuntime)
@@ -364,6 +369,47 @@ bool AssemblyDocument::StudyResultsStale(
     if (!partVersion || partVersion(partId) != version)
       return true;
   return false;
+}
+
+bool AssemblyDocument::MarkStudyResultsCurrent(
+    uint64_t studyId, std::vector<std::pair<uint64_t, uint64_t>> partVersions) {
+  if (!m_studyRuntime)
+    return false;
+  const auto it = m_studyRuntime->byStudy.find(studyId);
+  if (it == m_studyRuntime->byStudy.end())
+    return false;
+  it->second.solvedAtVersion = m_version;
+  it->second.solvedPartVersions = std::move(partVersions);
+  ++m_studyRuntime->epoch;
+  return true;
+}
+
+std::shared_ptr<const motion::Result>
+AssemblyDocument::MotionResult(uint64_t studyId) const {
+  if (!m_motionResults)
+    return nullptr;
+  const auto it = m_motionResults->byStudy.find(studyId);
+  return it == m_motionResults->byStudy.end() ? nullptr : it->second;
+}
+
+void AssemblyDocument::StoreMotionResult(
+    uint64_t studyId, std::shared_ptr<const motion::Result> result) {
+  if (!result) {
+    if (m_motionResults)
+      m_motionResults->byStudy.erase(studyId);
+    return;
+  }
+  if (!m_motionResults)
+    m_motionResults = std::make_shared<MotionResultCache>();
+  m_motionResults->byStudy[studyId] = std::move(result);
+}
+
+std::vector<uint64_t> AssemblyDocument::MotionResultIds() const {
+  std::vector<uint64_t> ids;
+  if (m_motionResults)
+    for (const auto& [id, result] : m_motionResults->byStudy)
+      ids.push_back(id);
+  return ids;
 }
 
 // ---- Configurations (C4) --------------------------------------------------

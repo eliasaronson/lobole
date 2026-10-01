@@ -44,6 +44,21 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   return h.Digest();
 }
 
+void RestampByInputs(Document& doc) {
+  // A shape study's inputs and staleness read its topology result's: the
+  // results it is cut from first.
+  for (const bool shapes : {false, true})
+    for (const Study& s : doc.GetStudies()) {
+      if ((s.shapeFrom.study != 0) != shapes)
+        continue;
+      const StudyRuntime* rt = doc.StudyResults(s.id);
+      if (rt == nullptr || rt->inputHash == 0 || !doc.StudyResultsStale(s.id))
+        continue;
+      if (StudyInputKey(doc, s) == rt->inputHash)
+        doc.MarkStudyResultsCurrent(s.id);
+    }
+}
+
 uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
                                const Study& studyIn,
                                const AssemblyStudyContext& ctx) {

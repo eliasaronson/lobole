@@ -172,16 +172,20 @@ bool DeleteMachine(const std::string& dir, const std::string& name,
                    std::string* error = nullptr);
 fem::Study StudyFromJson(const nlohmann::json& j);
 
-// Topology-study RESULT (de)serialization (v33). Unlike FEM results (derived,
-// never stored), a topology result is minutes of compute over a non-
-// reproducible mesh, so it IS persisted: the optimized density field + its
-// mesh + the convergence summary. `solvedAtVersion` is NOT written — on load
-// the caller stamps the result with the reloaded document's version (a just-
-// loaded result reads as current; a subsequent edit marks it stale). Returns
-// true only for a topology runtime (topology == true). Throws on malformed
-// input.
+// A study's RESULT (de)serialization: topology (v33), static and modal
+// (v153). Saved with the project beside its study, with the input hash that
+// produced it, so a reopened project's run of the same inputs is answered
+// from it (docs/simulation/README.md#studies-as-jobs): the mesh and what the
+// panel and the RPCs read of it, never the solver's scratch.
+// `solvedAtVersion` is NOT written -- on load the caller stamps it (current
+// when the inputs still hash the same, stale otherwise). Returns false for a
+// runtime that holds nothing solved. Throws on malformed input.
 bool StudyResultToJson(const fem::StudyRuntime& rt, nlohmann::json& out);
 fem::StudyRuntime StudyResultFromJson(const nlohmann::json& j);
+// A motion study's result (v153), the same way: every sample's poses, mate
+// values, clashes and unknown contacts, the pair counts, and its input hash.
+nlohmann::json MotionResultToJson(const motion::Result& result);
+motion::Result MotionResultFromJson(const nlohmann::json& j);
 
 // Single-configuration (de)serialization (v31); the studies pattern. The
 // active-configuration id lives in the document envelope, not here. Throws on

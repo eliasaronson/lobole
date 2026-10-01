@@ -67,6 +67,13 @@ bool ApplyMotionSample(AppState& state, uint64_t studyId,
 
 // The stored result for a study of the ACTIVE assembly, or null.
 const motion::Result* MotionResultFor(const AppState& state, uint64_t studyId);
+// Forget a study's result: its definition changed, or it is gone. The
+// assembly's saved copy goes with it.
+void DropMotionResult(AppState& state, uint64_t studyId);
+// The active assembly's saved motion results, installed as the ones
+// MotionResultFor answers: current when their inputs hash as they did when
+// they ran, stale otherwise, and kept by their hash for a later run.
+void AdoptSavedMotionResults(AppState& state);
 // Conservative revision check; retained results remain available as evidence.
 bool MotionResultStale(AppState& state, uint64_t studyId);
 
