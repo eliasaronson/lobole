@@ -304,7 +304,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 
 ## Tests
 
-- Headless, `tests/test_cam*.cpp` (`ctest -L cam`), fixtures in
+- Headless, `tests/test_cam*.cpp` (`tools/ctest -L cam`), fixtures in
   `tests/cam_fixtures.h`: toolpath geometry against known shapes
   (`test_cam.cpp`), setups/frames/stock/origin (`test_cam_setup.cpp`),
   machine profiles, dialects and the frozen G-code goldens

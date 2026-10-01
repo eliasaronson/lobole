@@ -37,11 +37,13 @@ tools/build.sh            # = ninja -j$(tools/build-jobs) designer designer_test
 That pair is the inner loop. **`-j` comes from free memory, not cores**
 (`tools/build-jobs`, ~1.5 GB a compiler): at one job per core, parallel
 builds got the OOM killer to take the agent host itself. `tools/build.sh`
-also holds `build/`'s lock, which `tools/merge-branch.sh` takes before it
-changes the tree: a merge that lands mid-build links objects that saw two
-versions of a header. A *fresh* build dir needs plain `ninja` — the
-pair skips `femgpu_tests`, and ctest then fails on a missing executable
-instead of running the suite.
+also holds `build/`'s lock exclusively, as `tools/merge-branch.sh` does before
+it changes the tree: a merge that lands mid-build links objects that saw two
+versions of a header. A suite holds it SHARED — **run ctest only through
+`tools/ctest`** (every argument is ctest's), or a merge can relink
+`designer_tests` mid-run and a test fails once and passes on the rerun. A
+*fresh* build dir needs plain `ninja` — the pair skips `femgpu_tests`, and
+ctest then fails on a missing executable instead of running the suite.
 
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
@@ -100,11 +102,11 @@ are upper bounds on a loaded machine; the suites print their own counts.
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~110 s |
+| headless | `tools/ctest -LE gui -j$(nproc)` | ~110 s |
 | **inner loop** | `tools/test-fast.sh` | **~65 s** |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
-| the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
-| the big generators | `ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~6 min |
+| the python `gui` ones | `tools/ctest -L pygui -j1` | ~110 s |
+| the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~6 min |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
 unsharded — ~365 s against ~130 s. It keeps the `gui` label so the headless
@@ -114,7 +116,7 @@ verification is ~5 min. `remote_smoke` is most of the `pygui` time because it
 drives the WINDOWED path (`--hidden`); passing `--headless` would override
 that and stop testing what it exists for.
 
-**Tags are ctest labels** (`ADD_TAGS_AS_LABELS`): `ctest -L cam`, `-L sketch`,
+**Tags are ctest labels** (`ADD_TAGS_AS_LABELS`): `tools/ctest -L cam`, `-L sketch`,
 `-L solver` all work — and that is the ONLY way to run a tag. The same filter
 handed to the binary (`./tests/designer_tests '[cam]'`) runs those tests
 SERIALLY in one process, about three times slower. The binary is for ONE case,
@@ -126,9 +128,9 @@ list kept elsewhere drifts.
 
 - Entering `nix-shell` costs ~5 s; `tools/nix-run 'cmd'` runs a command in
   the same environment from a cache (`nix print-dev-env`, keyed on shell.nix
-  and nixpkgs) in ~0.1 s, and `tools/build.sh` and `tools/test-fast.sh` use
-  it. Where `nix-shell` is still used, batch commands into one invocation
-  rather than one each. Run the full headless suite before committing.
+  and nixpkgs) in ~0.1 s, and `tools/build.sh`, `tools/ctest` and
+  `tools/test-fast.sh` use it. Where `nix-shell` is still used, batch
+  commands into one invocation rather than one each. Run the full headless suite before committing.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 4 parallel shards.
   `--fast` drops the slowest few, `-j 8` more shards, `-f <pattern>` one case,
   `--serial` for debugging, `--in-order` to switch the shuffle off.

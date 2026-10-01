@@ -69,7 +69,7 @@ Two suites, and both matter:
 
 ```
 # Headless: unit tests + python integration smokes. No GPU, no display.
-nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"
+tools/ctest -LE gui -j$(nproc)    # ctest under build/'s lock, in nix
 
 # GUI: the real app on a virtual display, driving its own widgets.
 ./tools/gui-tests-xvfb.sh            # 150 tests, 4 shards, ~80 s

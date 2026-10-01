@@ -221,7 +221,7 @@ every runtime closure; see `nix/netgen-lean.nix`.
 ## Testing
 
 ```
-ctest --test-dir build -LE gui -j$(nproc)   # headless: no GPU, no display
+tools/ctest -LE gui -j$(nproc)              # headless: no GPU, no display
 ./tools/gui-tests-xvfb.sh                   # the GUI suite on a virtual display
 ./tools/gui-tests-xvfb.sh --fast            # ...minus the slowest cases
 ./tools/gui-tests-xvfb.sh -f <pattern>      # ...one case
@@ -234,8 +234,10 @@ every push. The GUI suite drives the real application through
 mouse and keyboard on the actual UI) and needs a GPU — `gui-tests-xvfb.sh`
 supplies the display, splits the suite across four parallel shards (a few
 times faster than one serial run) and serializes concurrent runs with a
-lock. Plain `ctest`
-with no `-LE gui` will try to run the display-gated tests too.
+lock. `tools/ctest` is ctest holding the build directory's lock shared, so a
+build or a merge (which take it exclusively) cannot relink the binaries under
+a running suite; with no `-LE gui` it will try to run the display-gated tests
+too.
 
 ## Sanitizers & static analysis
 

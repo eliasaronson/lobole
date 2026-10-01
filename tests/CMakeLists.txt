@@ -649,6 +649,12 @@ add_test(NAME config_isolation_lint
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/config_isolation_lint.py)
 set_tests_properties(config_isolation_lint PROPERTIES TIMEOUT 60)
 
+# A merge (exclusive on build/'s lock) waits for a suite run through
+# tools/ctest (shared); two suites run together. A scratch tree, no app.
+add_test(NAME build_lock_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/build_lock_smoke.py)
+set_tests_properties(build_lock_smoke PROPERTIES TIMEOUT 120)
+
 # V2 strict inputs + digests: unknown feature fields error, mutating
 # responses carry body digests with deltas, bom warnings. Headless.
 add_test(NAME strict_inputs_smoke

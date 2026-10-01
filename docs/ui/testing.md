@@ -41,7 +41,9 @@ there is no compositor, occlusion or screen lock to throttle presentation.
   never share the recent-projects list or `settings.json`, and no run writes
   the developer's real preferences.
 - The run takes a machine-wide `flock`, so concurrent runs (parallel agents)
-  serialise rather than collide.
+  serialise rather than collide, and then `build/`'s lock shared, so a build
+  or a merge does not relink `designer` under the shards
+  ([the development loop](../architecture.md#the-development-loop)).
 - It compares the number of tests that ran with `--gui-test-list`, so a bad
   partition fails loudly instead of skipping tests.
 - It reaps Xvfb servers orphaned by an earlier run.

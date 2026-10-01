@@ -83,7 +83,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 `XDG_STATE_HOME` and config) and writing to a private directory, never
 `scratch/`:
 
-    ctest -C generators -L generators -j2      # in build/, ~6 min
+    tools/ctest -C generators -L generators -j2      # ~6 min
 
 | test | runs | measured alone | budget |
 |---|---|---|---|

@@ -191,7 +191,7 @@ A section cap of a transmissive body is drawn as glass too.
 
 ## Tests
 
-- `ctest -L materials` (`tests/test_materials.cpp`) — the pattern partition,
+- `tools/ctest -L materials` (`tests/test_materials.cpp`) — the pattern partition,
   `PatternAxis` (a long board picks its length, a sheet its thickness, a
   cube is deterministic), slug refusal, and that glass and only glass
   transmits with an IOR over 1.

@@ -47,7 +47,7 @@ if [ "${1:-}" != "--report-only" ]; then
   ninja -C "$BUILD" designer designer_tests
 
   echo "coverage: running the headless suite (slow: -O0 + instrumentation)"
-  ( cd "$BUILD" && ctest -LE gui -j"$(nproc)" ) || true
+  "$ROOT/tools/ctest" --test-dir "$BUILD" -LE gui -j"$(nproc)" || true
 fi
 
 echo "coverage: analysing"

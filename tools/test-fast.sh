@@ -29,12 +29,11 @@
 # tools/ci-local.sh and in CI, and not in the loop you run after every edit.
 #
 # ALWAYS run the full suite before committing (tools/ci-local.sh --nix, or
-# plain ctest): "fast" here means fewer tests, not weaker ones.
+# tools/ctest -LE gui): "fast" here means fewer tests, not weaker ones.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Parallel by memory, not cores: each app-driving test is its own process
 # (tools/build-jobs).
 jobs="$("$root/tools/build-jobs" 700)"
-exec "$root/tools/nix-run" \
-  "cd '$root/build' && ctest -LE 'gui|slow' -j$jobs --output-on-failure $*"
+exec "$root/tools/ctest" -LE 'gui|slow' -j"$jobs" --output-on-failure "$@"

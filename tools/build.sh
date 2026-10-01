@@ -5,8 +5,9 @@
 #   tools/build.sh build designer        # one target
 #   tools/build.sh .ci-local/build-nocam # a whole other tree
 #
-# -j comes from free memory (tools/build-jobs). The lock is what
-# tools/merge-branch.sh takes before it changes the tree: a merge that lands
+# -j comes from free memory (tools/build-jobs). The lock (tools/build-lock.sh)
+# is taken exclusively, as tools/merge-branch.sh takes it before it changes the
+# tree, and waits for a suite holding it shared (tools/ctest): a merge that lands
 # while a build is compiling gives a binary whose objects saw two versions of
 # a header -- it died on its first autosave with a bad_alloc that looked like
 # heap corruption (docs/architecture.md#the-development-loop). Prints FAILED lines and exits
@@ -24,11 +25,9 @@ fi
 jobs="$("$root/tools/build-jobs")"
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
-exec 9>"$dir/.build.lock"
-if ! flock -n 9; then
-  echo "build: waiting for the lock on $dir (a build or a merge holds it)" >&2
-  flock 9
-fi
+# shellcheck source=build-lock.sh
+. "$root/tools/build-lock.sh"
+build_lock_exclusive "$dir" 9
 status=0
 "$root/tools/nix-run" "ninja -C '$dir' -j$jobs ${targets[*]:-}" > "$log" 2>&1 || status=$?
 grep -E 'FAILED|error:|Terminated signal' "$log" | head -40 || true

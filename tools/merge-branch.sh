@@ -5,9 +5,10 @@
 #   tools/merge-branch.sh BRANCH --full     # the headless suite, the big
 #                                           # generators and the GUI suite
 #
-# The cherry-pick happens under build/'s lock (tools/build.sh), so it never
-# lands while a build of this tree is compiling. A conflict stops here with
-# the cherry-pick in progress, for a person to resolve; `git cherry-pick
+# The cherry-pick happens under build/'s lock, held exclusively
+# (tools/build-lock.sh), so it never lands while a build of this tree is
+# compiling or a suite (tools/ctest, the GUI runner) runs from it. A conflict
+# stops here with the cherry-pick in progress, for a person to resolve; `git cherry-pick
 # --continue` and then this script again with --no-pick finishes the rest.
 # The worktree is removed only when every commit is on main and it holds
 # nothing uncommitted -- `git worktree remove` refuses trees with submodules,
@@ -38,8 +39,11 @@ if [ "$pick" = 1 ]; then
   if [ -z "$commits" ]; then
     echo "merge-branch: nothing on $branch that main lacks"
   else
-    exec 9>"$root/build/.build.lock"
-    flock -n 9 || { echo "merge-branch: waiting for build/'s lock"; flock 9; }
+    # Exclusive: it waits for a build, and for every suite running from
+    # build/ (tools/ctest, the GUI runner hold it shared).
+    # shellcheck source=build-lock.sh
+    . "$root/tools/build-lock.sh"
+    build_lock_exclusive "$root/build" 9
     echo "merge-branch: cherry-picking $(echo "$commits" | wc -l) commit(s)"
     # What was picked, so a commit whose conflict was resolved by hand (its
     # patch no longer matches the branch's) still counts as landed below.
@@ -56,14 +60,14 @@ fi
 
 "$root/tools/build.sh"
 if [ "$full" = 1 ]; then
-  nix-shell shell.nix --run "cd build && ctest -LE gui -j$("$root/tools/build-jobs" 700)" | grep -E 'tests passed|\(Failed\)'
+  "$root/tools/ctest" -LE gui -j"$("$root/tools/build-jobs" 700)" | grep -E 'tests passed|\(Failed\)'
   # The big generators, each from nothing on its own instance
   # (generators/README.md#the-big-generators-as-tests): after the headless
   # suite, not beside it -- two at a time is what memory and one GPU take.
   # The verdict, and on a failure the test's own message: why (exit code,
   # budget, no success marker), where its output was kept, and the last
   # lines the generator printed -- not the app's whole log, which follows.
-  "$root/tools/nix-run" "cd '$root/build' && ctest -C generators -L generators -j2 --output-on-failure" |
+  "$root/tools/ctest" -C generators -L generators -j2 --output-on-failure |
     awk '/tests passed|\(Failed\)|\(Timeout\)/ { print; next }
          /^[a-z0-9_]+: (exit|over its budget)/ { n = 40 }
          n > 0 { print; n-- }'

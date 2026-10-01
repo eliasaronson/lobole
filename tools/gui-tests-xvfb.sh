@@ -56,6 +56,15 @@ if [ "${DESIGNER_GUI_LOCKED:-}" != "1" ]; then
   exec flock "$LOCK" "$ROOT/tools/gui-tests-xvfb.sh" "$@"
 fi
 
+# build/'s lock, shared: the shards run build/designer, and a merge or a build
+# (which take it exclusively) must not relink it under them
+# (tools/build-lock.sh). Taken after the GPU lock, so a run queued behind
+# another suite does not hold up a merge while it waits. This shell holds it;
+# what it launches does not (8>&-), so an orphaned app cannot keep it.
+# shellcheck source=build-lock.sh
+. "$ROOT/tools/build-lock.sh"
+build_lock_shared "$ROOT/build" 8
+
 if command -v xvfb-run >/dev/null; then
   XVFB_RUN=xvfb-run
 else
@@ -93,7 +102,7 @@ run_shard() {
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
     "$ROOT/tools/nix-run" \
     "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
-     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-}"
+     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-}" 8>&-
 }
 
 SHARDS=4
@@ -133,7 +142,7 @@ while [ "$#" -gt 0 ]; do
       "$XVFB_RUN" -a -s "$SCREEN" \
         "$ROOT/tools/nix-run" \
         "cd '$ROOT/build' && ./designer --gui-tests --hidden \
-         --gui-test-filter '$2'" > "$FLOG" 2>&1 || true
+         --gui-test-filter '$2'" > "$FLOG" 2>&1 8>&- || true
       cat "$FLOG"
       fline="$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' "$FLOG" | tail -1 ||
                true)"
@@ -173,7 +182,7 @@ trap 'rm -rf "$WORK"' EXIT
 if [ "$RECORD" = "1" ]; then
   echo "Recording per-test times (serial, ~6 min)..."
   "$XVFB_RUN" -a -s "$SCREEN" "$ROOT/tools/nix-run" \
-    "cd '$ROOT/build' && ./designer --gui-tests --hidden" 2>&1 |
+    "cd '$ROOT/build' && ./designer --gui-tests --hidden" 2>&1 8>&- |
     python3 -u "$ROOT/tools/gui_shard_record.py" "$TIMES"
   exit $?
 fi

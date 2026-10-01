@@ -129,12 +129,18 @@ The numbers were measured on this 22-core, 30 GB machine.
   killer to take 58 compilers and then the agent host. `tools/build-jobs`
   sizes `-j` from free memory (about 1.5 GB a compile, 700 MB a test that
   starts the app), and worktree agents start two at a time.
-- **One way to build, under a lock.** `tools/build.sh` builds with an
-  `flock` on the build directory. `tools/merge-branch.sh` takes the same lock
-  before it cherry-picks, then builds, tests and removes the worktree. A
-  merge that landed mid-build once linked objects that saw two versions of
-  `AppState.h`, and the binary died with a `bad_alloc` that looked like heap
-  corruption.
+- **One way to build, and one to test, under a lock**
+  (`tools/build-lock.sh`). `tools/build.sh` builds with an exclusive `flock`
+  on the build directory. `tools/merge-branch.sh` takes the same lock before
+  it cherry-picks, then builds, tests and removes the worktree. A merge that
+  landed mid-build once linked objects that saw two versions of `AppState.h`,
+  and the binary died with a `bad_alloc` that looked like heap corruption.
+  `tools/ctest` (ctest, every argument passed through) and the GUI runner
+  hold it shared: suites run side by side, and a build or a merge waits for
+  them, where one used to relink `designer_tests` mid-suite so a test failed
+  once and passed on the rerun. What a suite launches does not inherit the
+  lock, so an app a test left running cannot keep it. `build_lock_smoke`
+  proves a merge waits for a running suite.
 - **Trees share one ccache** ([precompiled headers](#precompiled-headers)): a
   fresh worktree builds in about 2 minutes, where it took 11.5.
 - **`tools/nix-run`** runs a command with what `nix-shell` adds to the
@@ -409,12 +415,12 @@ by the same name drift apart without any test noticing:
   adding to it); `tests/test_conventions.cpp` holds the source-scanning rules
   listed in [conventions.md](conventions.md#rules-the-source-is-scanned-for).
 - Heavy tests carry the `[slow]` tag; `tools/test-fast.sh` is
-  `ctest -LE 'gui|slow'`. A tag is the ctest label, so a test's cost class
+  `tools/ctest -LE 'gui|slow'`. A tag is the ctest label, so a test's cost class
   lives on the test rather than in a list in `tools/`.
 - Every test that needs a display carries the `gui` label, which is what the
   headless run excludes. `gui_smoke` runs the same cases as
   `tools/gui-tests-xvfb.sh`, serially; the python ones also carry `pygui`, so
-  they run as `ctest -L pygui` rather than by excluding `gui_smoke` by name.
+  they run as `tools/ctest -L pygui` rather than by excluding `gui_smoke` by name.
 - `src/render/` and `app/main.cpp` have no unit tests; they are verified by
   the GUI suite, the pixel gate and screenshots. Low line coverage there is
   expected.

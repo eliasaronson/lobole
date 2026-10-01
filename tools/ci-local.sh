@@ -177,7 +177,7 @@ if [ "$run_nix" = 1 ]; then
   run_build release -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -- .ci-local/build -j$(nproc)
   run_tests headless "headless suite" \
-    nix-shell shell.nix --run "ctest --test-dir .ci-local/build -LE gui -j$(nproc) --output-on-failure"
+    "$root/tools/ctest" --test-dir .ci-local/build -LE gui -j"$(nproc)" --output-on-failure
 
   # The GUI suite. Shuffled, and its seed is in the log: a failure that
   # cannot be replayed is a failure nobody fixes. Sharded as usual — this is
@@ -205,7 +205,7 @@ if [ "$run_nix" = 1 ]; then
   run_build no-cam -S . -B .ci-local/build-nocam -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_CAM=OFF \
     -- .ci-local/build-nocam -j$(nproc)
   run_tests nocam "CAM-free suite" \
-    nix-shell shell.nix --run "ctest --test-dir .ci-local/build-nocam -LE gui -j$(nproc) --output-on-failure"
+    "$root/tools/ctest" --test-dir .ci-local/build-nocam -LE gui -j"$(nproc)" --output-on-failure
 fi
 
 # ---- the sanitizer job (opt-in here, weekly/manual on GitHub) --------------
@@ -217,7 +217,7 @@ if [ "$run_asan" = 1 ]; then
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
     -- build-asan -j$(nproc) --target designer designer_tests
   run_tests asan "sanitized suite" \
-    nix-shell shell.nix --run "ctest --test-dir build-asan -LE gui -j$(nproc) --output-on-failure -E '$SANITIZER_TEST_EXCLUDE'"
+    "$root/tools/ctest" --test-dir build-asan -LE gui -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
 fi
 
 # ---- the race job (opt-in; separate tree, ASan and TSan cannot combine) -----
@@ -233,7 +233,7 @@ if [ "$run_tsan" = 1 ]; then
   # -j4, not -j$(nproc): TSan multiplies each process's memory footprint, and
   # a saturated machine turns a race hunt into a timeout hunt.
   run_tests tsan "race suite" \
-    nix-shell shell.nix --run "ctest --test-dir build-tsan -LE gui -j4 --output-on-failure"
+    "$root/tools/ctest" --test-dir build-tsan -LE gui -j4 --output-on-failure
 fi
 
 # ---- job 2: the stock-Ubuntu containers ------------------------------------

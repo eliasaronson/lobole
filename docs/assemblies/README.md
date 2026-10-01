@@ -687,7 +687,7 @@ one.
 
 ## Tests
 
-- Unit (`ctest -L assembly`, `-L motion`): `test_assembly.cpp` (model,
+- Unit (`tools/ctest -L assembly`, `-L motion`): `test_assembly.cpp` (model,
   serialization), `test_assembly_solve.cpp` (mate types, offset sign, the
   part-edit-moves-the-mate payoff, dangling refs), `test_assembly_loops.cpp`
   (four-bar DOF, branch keeping, redundant bolts, conflicting loops,
