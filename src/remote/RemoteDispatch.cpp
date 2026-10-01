@@ -607,9 +607,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // does not exist. Whether a method needs a part is only a sensible thing
   // to say about a method that exists.
   if (!doc && (MethodFlags(m) & remote::NeedsPart)) {
+    // Named, every kind: the fall-through used to read "the active document
+    // is not a part, not a part" on a CAM job's tab.
     const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
-                                       : "not a part";
+                       : state.job     ? "a CAM job"
+                                       : "empty";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              ", not a part; switch to a part tab");
   }
