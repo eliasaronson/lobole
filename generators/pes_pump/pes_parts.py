@@ -3,7 +3,6 @@
 and returns the finished Part; every number comes from pes_spec."""
 import math
 import os
-import struct
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -18,15 +17,11 @@ from pes_spec import *  # noqa: E402,F401,F403
 
 # --- vocabulary ---------------------------------------------------------------
 
-def _snap(z):
-    return struct.unpack("f", struct.pack("f", z))[0]
-
-
 def slab(p, x0, y0, z0, x1, y1, z1, name, mode="add"):
     """A block drawn on its BOTTOM face and extruded up."""
     sk = p.sketch(Plane.xy(z0), name=name)
     sk.rect((x0, y0), (x1, y1))
-    return p.extrude(sk.add(), _snap(z1) - _snap(z0), mode=mode, name=name)
+    return p.extrude(sk.add(), z1 - z0, mode=mode, name=name)
 
 
 def rounded_rect(sk, x0, y0, x1, y1, r):
@@ -64,7 +59,7 @@ def round_slab(p, x0, y0, z0, x1, y1, z1, r, name, mode="add"):
     """`slab` with its vertical edges rounded: how a casting is shaped."""
     sk = p.sketch(Plane.xy(z0), name=name)
     rounded_rect(sk, x0, y0, x1, y1, r)
-    return p.extrude(sk.add(), _snap(z1) - _snap(z0), mode=mode, name=name)
+    return p.extrude(sk.add(), z1 - z0, mode=mode, name=name)
 
 
 def axis_plane(start, direction):
