@@ -326,4 +326,4 @@ that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 and a tapped hole's thread on its body),
 `tests/test_derived.cpp` (a hole on a projected derived hole edge),
 `tests/test_drawing.cpp` (hole callouts), goldens `v36-thread-rib` and
-`v71-hole-fit`, `v140-modeled-thread` and `v148-hole-point`.
+`v71-hole-fit`, `v140-modeled-thread` and `v149-hole-point`.
