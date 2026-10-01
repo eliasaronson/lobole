@@ -2,6 +2,7 @@
 
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
+#include "core/PrintAllowance.h"
 #include "core/catalog/Catalog.h"
 #include "core/features/BearingFeature.h"
 #include "core/parts/BearingSeat.h"
@@ -32,6 +33,28 @@ std::string Mm(double v) {
 std::string Dims(const parts::BearingRow& r) {
   return std::string(r.designation) + " (" + Mm(r.d) + "x" + Mm(r.D) + "x" +
          Mm(r.B) + ")";
+}
+
+// The diameter a seat comes out at. A seat on a PRINTED part is modelled at
+// its size plus the process allowance (a PETG housing for a Ø32 outside is
+// modelled Ø32.3, docs/tolerances/README.md#printed-parts), so the bearing it
+// takes and the size it is checked against are what it PRINTS at; anything
+// else is read as modelled. `note` (optional) says so when it applies.
+double SeatDiameter(const Document* part, const parts::Seat& seat,
+                    std::string* note = nullptr) {
+  if (part == nullptr || !part->PrintProcess())
+    return seat.diameter;
+  const printfit::Process& proc = *part->PrintProcess();
+  std::string why;
+  const auto a = printfit::ForModelled(
+      proc, seat.shaft ? printfit::Printed::Shaft : printfit::Printed::Hole,
+      seat.diameter, &why);
+  if (!a)
+    return seat.diameter;
+  if (note != nullptr)
+    *note = "modelled Ø" + Mm(seat.diameter) + ", prints Ø" + Mm(a->basicMm) +
+            " (" + proc.process + " " + proc.material + ")";
+  return a->basicMm;
 }
 
 // +Z (a bearing's own axis, side A to side B) rotated onto `to`.
@@ -192,8 +215,10 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
   }
   const assembly::FlatInstance& inst = *found.front().inst;
   const parts::Seat& seat = found.front().seat;
+  std::string printedNote;
+  const double seatDia = SeatDiameter(inst.part, seat, &printedNote);
   fit.shaft = seat.shaft;
-  fit.seatDiameter = seat.diameter;
+  fit.seatDiameter = seatDia;
 
   // Which end the bearing sits at. A rim names it; a face has two, and the
   // one with a shoulder is the one a bearing is pushed up against.
@@ -220,13 +245,14 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
   // Which bearing. The diameter narrows it to a handful; the caller says
   // which of those, or the handful is the answer.
   const std::vector<const parts::BearingRow*> rows =
-      seat.shaft ? parts::BearingsForBore(seat.diameter)
-                 : parts::BearingsForOutside(seat.diameter);
+      seat.shaft ? parts::BearingsForBore(seatDia)
+                 : parts::BearingsForOutside(seatDia);
   for (const parts::BearingRow* r : rows)
     fit.candidates.push_back(Dims(*r));
-  const std::string what = seat.shaft
-                               ? "a Ø" + Mm(seat.diameter) + " shaft"
-                               : "a Ø" + Mm(seat.diameter) + " housing bore";
+  const std::string what =
+      (seat.shaft ? "a Ø" + Mm(seatDia) + " shaft"
+                  : "a Ø" + Mm(seatDia) + " housing bore") +
+      (printedNote.empty() ? "" : " (" + printedNote + ")");
   if (rows.empty())
     return fail(what + " takes no bearing this build carries — ISO 15 " +
                 std::string(seat.shaft ? "bores" : "outside diameters") +
@@ -283,7 +309,9 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
 
   std::ostringstream s;
   s << Dims(*row) << (seat.shaft ? " on " : " in ") << inst.path << "'s Ø"
-    << Mm(seat.diameter) << (seat.shaft ? " journal" : " bore");
+    << Mm(seatDia) << (seat.shaft ? " journal" : " bore");
+  if (!printedNote.empty())
+    s << " (" << printedNote << ")";
   if (end->shoulder) {
     s << ", against its Ø" << Mm(end->shoulderDiameter) << " shoulder";
     if (end->filletRadius > 0.0)
@@ -455,16 +483,22 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
         gap = g;
       }
     }
-    s["diameter"] = seat->diameter;
+    std::string printedNote;
+    const double seatDia = SeatDiameter(inst->part, *seat, &printedNote);
+    s["diameter"] = seatDia;
+    if (!printedNote.empty())
+      s["modelled_diameter"] = seat->diameter;
     const double nominal = bore ? row->d : row->D;
     const std::string key = bore ? "shaft_diameter" : "housing_diameter";
-    measurements[key] = seat->diameter;
+    measurements[key] = seatDia;
     (bore ? haveBore : haveOutside) = true;
-    const bool same = std::abs(seat->diameter - nominal) < 1e-3;
+    const bool same = std::abs(seatDia - nominal) < 1e-3;
     json dia = {{"characteristic", key},
-                {"observed", seat->diameter},
+                {"observed", seatDia},
                 {"required", nominal},
                 {"status", same ? "pass" : "fail"}};
+    if (!printedNote.empty())
+      dia["printed"] = printedNote;
     if (!same)
       dia["reason"] =
           "the seat is not the ring's basic size — a fit is a tolerance "

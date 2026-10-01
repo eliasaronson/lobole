@@ -9,6 +9,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/PrintAllowance.h"
 #include "core/catalog/Catalog.h"
 #include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
@@ -637,4 +638,84 @@ TEST_CASE("A bearing goes in a housing bore by its outside",
     if (c.at("characteristic") == "outer_ring_seated")
       CHECK(c.at("status") == "pass");
   }
+}
+
+// A seat on a printed part is modelled at its size plus the process
+// allowance (docs/tolerances/README.md#printed-parts): the pan/tilt head's
+// PETG yoke bores for a 6002 are Ø32.3. fit_bearing refused them as "a
+// Ø32.3 housing bore takes no bearing", and check_seat would have failed the
+// diameter, though the part was modelled exactly as the docs say.
+TEST_CASE("A printed housing is fitted and checked at what it prints",
+          "[actions][parts][bearing]") {
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  const size_t tab = ui::AddPart(state, "Printed housing");
+  ui::SetActivePart(state, tab);
+  Document& doc = *state.document;
+  const double model =
+      *printfit::ForBasic({"fdm", "petg"}, printfit::Printed::Hole, 30.0,
+                          nullptr)
+           .transform([](const printfit::Allowance& a) { return a.modelMm; });
+  REQUIRE(model > 30.0);
+  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::vec3(-30, -30, 0),
+                                              60.0, 60.0, 20.0));
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Through", glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), 10.0, 22.0));
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  const uint64_t drilled = doc.GetFeatures().back()->GetId();
+  doc.AddFeature(
+      std::make_unique<CylinderFeature>("Counterbore", glm::vec3(0, 0, 11),
+                                        glm::vec3(0, 0, 1), model / 2.0, 10.0));
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Bore", drilled, doc.GetFeatures().back()->GetId(), BooleanOp::Subtract));
+  REQUIRE(doc.Regenerate());
+  const Body& body = doc.GetBodies().front();
+  ElementRef seat;
+  for (const auto& [index, mapped] : body.elementMap.names) {
+    const auto face = Measure::DescribeFaceAt(body, index);
+    if (face && face->kind == "cylinder" &&
+        std::abs(face->radius - model / 2.0) < 1e-6)
+      seat = ElementRef{body.createdBy, mapped};
+  }
+  REQUIRE(seat.IsSet());
+  ui::SetActivePart(state, ui::AddAssembly(state, "Rig"));
+  Occurrence occ;
+  occ.partId = state.parts[tab].id;
+  occ.name = "Housing";
+  const uint64_t housing = state.assembly->AddOccurrence(occ);
+  ui::BearingRequest request;
+  request.designation = "6200";
+
+  // Not printed, the same bore is a size no bearing has.
+  request.dryRun = true;
+  CHECK_FALSE(ui::FitBearing(state, ui::RimPick{housing, seat}, request).ok);
+
+  // The housing's tab is stashed while the assembly is active.
+  REQUIRE(state.parts[tab].doc != nullptr);
+  state.parts[tab].doc->SetPrintProcess(printfit::Process{"fdm", "petg"});
+  request.dryRun = false;
+  const ui::BearingFit fit =
+      ui::FitBearing(state, ui::RimPick{housing, seat}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK(fit.designation == "6200");
+  CHECK_THAT(fit.seatDiameter, WithinAbs(30.0, 1e-9));
+  CHECK_THAT(fit.summary, ContainsSubstring("prints"));
+  const nlohmann::json r = ui::CheckSeat(state, fit.occurrence, nullptr, "");
+  INFO(r.dump(2));
+  bool checked = false;
+  for (const auto& c : r.at("checks")) {
+    if (c.at("characteristic") == "housing_diameter") {
+      CHECK(c.at("status") == "pass");
+      CHECK(c.at("observed") == 30.0);
+      checked = true;
+    }
+  }
+  CHECK(checked);
+  CHECK_THAT(r.at("seats")[0].at("modelled_diameter").get<double>(),
+             WithinAbs(model, 1e-9));
 }

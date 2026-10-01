@@ -299,6 +299,10 @@ refused asking for the rim.
   with neither is refused naming them; a designation of another size is
   refused naming the ones that fit. A seat that is not a stocked size is
   refused: a fit is a tolerance class on the seat, not a different diameter.
+  A seat on a PRINTED part (`set_print_process`) is read at the diameter it
+  prints, so a PETG housing modelled Ø32.3 for a 6002 takes the 6002 and the
+  summary says "modelled Ø32.3, prints Ø32"; `check_seat` judges that printed
+  diameter and reports the modelled one beside it.
 - **The mate.** A fastened mate `Bearing seat` between the ring (bore to a
   journal, outside to a housing bore) and the seat, its degrees of freedom
   measured from the poses so the solve moves nothing — a fastener's `Bolted`
