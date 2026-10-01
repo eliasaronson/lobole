@@ -30,10 +30,12 @@ const CurveFeature* BentPathOf(const RegenContext& ctx, const Feature* f) {
 //
 // A joint does not belong on a bend: the tube there is a torus, it has been
 // thinned by the bending, and there is no straight to fit a cope against —
-// so a cut that finds nothing at a bend is a DESIGN answer, not a kernel
-// quirk, and blaming tangency sends the reader to open a gap that will not
-// help. A bend occupies the path from one tangent point to the other, which
-// is `radius * tan(angle/2)` either side of the corner it was drawn from.
+// so a cope there is refused as a DESIGN answer, whatever the kernel would
+// make of it, and never blamed on tangency, which sends the reader to open a
+// gap that will not help. A bend occupies the path from one tangent point to
+// the other, which is `radius * tan(angle/2)` either side of the corner it was
+// drawn from.
+//
 // The solid to remove for a MITRE: everything on the far side of the plane
 // through `at` whose normal is `keep`. A box big enough to swallow the
 // member, placed so its near face IS that plane.
@@ -265,6 +267,14 @@ bool CopeFeature::Execute(RegenContext& ctx) {
         return false;
       }
     } else if (pipe != nullptr) {
+      // Refused BEFORE cutting: on a bend the kernel can sometimes find a
+      // cut, and it is still not a joint. It used to be found only after
+      // the cut removed nothing, which it did while the bent path's arcs met
+      // their straights only to float precision.
+      if (const std::string bend = OnABend(ctx, *this, f); !bend.empty()) {
+        SetError("cope to '" + f->GetName() + "': " + bend);
+        return false;
+      }
       // A tube neighbour is rebuilt from its PATH as a solid, so the cut is
       // the outside of the tube and not its wall.
       std::string why;
@@ -325,9 +335,6 @@ bool CopeFeature::Execute(RegenContext& ctx) {
         // that removes nothing has not reached its neighbour's surface, and
         // that is a gap in the frame.
         continue;
-      } else if (const std::string bend = OnABend(ctx, *this, f);
-                 !cut.asMitre && !bend.empty()) {
-        SetError("cope to '" + f->GetName() + "' removed nothing: " + bend);
       } else {
         SetError(
             std::string(what) + " to '" + f->GetName() +
