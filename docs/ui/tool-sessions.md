@@ -297,7 +297,7 @@ The sketch's own entity selection stays in `SketchEditState`
 - `primitive/face_pick_drag_snap_accept` (the ghost on the face, a free
   drag, flush and centre snaps, Accept: a DOF-0 face-attached sketch and a
   27 mm³ extrude, one Ctrl+Z takes both), `primitive/escape_leaves_document_unchanged`,
-  `primitive/curved_face_refused`, `primitive/preselected_face_skips_pick`,
+  `primitive/curved_face_refused`, `primitive/selected_face_is_the_reference`,
   `primitive/fields_rewrite_the_preview`.
 - `hole/face_pick_to_accept`, `hole/preselected_face_skips_pick`, and the
   other `hole/*` cases (Enter opens the params without accepting, the tiered

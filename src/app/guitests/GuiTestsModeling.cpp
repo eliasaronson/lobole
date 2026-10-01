@@ -744,7 +744,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   };
 
   // Select-first: with a flat face already picked, the tool skips the pick.
-  t = IM_REGISTER_TEST(engine, "primitive", "preselected_face_skips_pick");
+  t = IM_REGISTER_TEST(engine, "primitive", "selected_face_is_the_reference");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     PrimitiveTestPlate();
