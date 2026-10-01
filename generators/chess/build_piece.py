@@ -10,13 +10,17 @@ authored model is the king.
 """
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 # What the run makes -- projects, programs, renders, reports -- is
 # regenerable, so it goes to the untracked scratch/, not beside the code.
-OUT = HERE.parent.parent / "scratch" / "chess"
+# DESIGNER_SCRATCH moves it (tests/generator_runs.py runs it in a private
+# directory); unset, the repo's scratch/.
+OUT = Path(os.environ.get("DESIGNER_SCRATCH")
+           or HERE.parent.parent / "scratch") / "chess"
 OUT.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))

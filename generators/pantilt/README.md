@@ -27,6 +27,10 @@ section views, parts lists and balloons
     generators/pantilt/run_all.sh PORT --from cam # the CAM job onward
     generators/pantilt/run_all.sh PORT --from drawings  # the sheets, renders
     generators/pantilt/run_all.sh PORT --from assembly
+    generators/pantilt/run_all.sh PORT --skip yoke_topo renders  # no later
+                                                  # stage reads either; what
+                                                  # the generator_pantilt
+                                                  # test runs
     PANTILT_SAMPLES=6 generators/pantilt/run_all.sh PORT --from assembly  # ~4 min
 
 Each stage opens the project the one before saved; all of it lands in

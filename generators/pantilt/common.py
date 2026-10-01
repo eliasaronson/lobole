@@ -3,6 +3,7 @@ connection, and the few helpers that are several RPCs."""
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -10,7 +11,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 # What the run makes -- projects, renders, reports -- is regenerable, so it
 # goes to the untracked scratch/, not beside the code.
-OUT = HERE.parent.parent / "scratch" / "pantilt"
+# DESIGNER_SCRATCH moves it (tests/generator_runs.py runs it in a private
+# directory); unset, the repo's scratch/.
+OUT = Path(os.environ.get("DESIGNER_SCRATCH")
+           or HERE.parent.parent / "scratch") / "pantilt"
 OUT.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))

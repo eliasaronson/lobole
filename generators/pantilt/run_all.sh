@@ -8,10 +8,13 @@
 #   generators/pantilt/run_all.sh PORT --from assembly  # the saved parts,
 #                                                       # assembly only
 #   generators/pantilt/run_all.sh PORT --from drawings  # the sheets, renders
+#   generators/pantilt/run_all.sh PORT --skip yoke_topo renders
 #
 # Stages, in order: base worms tilt yoke assembly yoke_topo cam drawings
 # renders. Each opens the project the one before saved; `--from` starts at
-# one and reuses what the earlier ones left in scratch/pantilt/. Run it
+# one and reuses what the earlier ones left in scratch/pantilt/; `--skip`
+# leaves stages out (no later stage opens yoke_topo's or renders' output).
+# DESIGNER_SCRATCH moves scratch/ (tests/generator_runs.py). Run it
 # against a scratch instance (tools/headless-preview.sh --start PORT), never
 # somebody's open document.
 #
@@ -19,14 +22,16 @@
 # (tools/wait-for.sh --file scratch/pantilt/run_all.log --line '^(done|failed)$').
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="$HERE/../../scratch/pantilt"
+OUT="${DESIGNER_SCRATCH:-$HERE/../../scratch}/pantilt"
 mkdir -p "$OUT"
-P=${1:?usage: run_all.sh PORT [--from STAGE]}
+P=${1:?usage: run_all.sh PORT [--from STAGE] [--skip STAGE...]}
 shift
 FROM=base
+SKIP=" "
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="$2"; shift 2 ;;
+    --skip) shift; while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do SKIP="$SKIP$1 "; shift; done ;;
     *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly yoke_topo cam drawings renders)" >&2; exit 2 ;;
   esac
 done
@@ -37,11 +42,18 @@ if [ "$start" -lt 0 ]; then
   echo "run_all: no stage '$FROM'; the stages are ${STAGES[*]}" >&2
   exit 2
 fi
+for s in $SKIP; do
+  case " ${STAGES[*]} " in
+    *" $s "*) ;;
+    *) echo "run_all: cannot skip '$s'; the stages are ${STAGES[*]}" >&2; exit 2 ;;
+  esac
+done
 LOG="$OUT/run_all.log"
 : > "$LOG"
 for i in "${!STAGES[@]}"; do
   [ "$i" -lt "$start" ] && continue
   stage=${STAGES[$i]}
+  case "$SKIP" in *" $stage "*) echo "== $stage (skipped)" >> "$LOG"; continue ;; esac
   echo "== $stage" >> "$LOG"
   script="build_$stage.py"
   [ "$stage" = cam ] && script=cam.py   # not a part: the job that cuts one
