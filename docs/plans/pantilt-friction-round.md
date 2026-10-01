@@ -43,29 +43,20 @@ round face's [seam as X](../assemblies/solver.md#connector-frames),
 
 ## D. Topology you can build from
 
-**Problem.** A topology result is a picture and an STL. Re-modelling the
-yoke from it took about 4 hours.
-
-**Fix.**
-
-- several load cases in one study, optimised together, weighted by
-  compliance;
-- keep-out bodies;
-- a connectivity filter, so that no floating islands remain;
-- a static study run on the optimised mesh before re-modelling;
-- a split-for-printing verb that cuts a body into pieces that fit a stated
-  bed, by planes, keeping materials and names.
-
-This builds on A's job handle, so it starts after A lands.
-
-**Files.** `src/core/fem/`, the topopt code, `src/femgpu` where the solver
-needs it, and the Simulation panel.
-
-**Verified by:**
-
-- the yoke envelope, re-optimised with all three load cases at once and the
-  worm blocks as keep-outs;
-- the result's static deflection compared with the hand re-model's.
+Built: see [topology you can build from](../topopt/README.md#topology-you-can-build-from)
+([load cases](../topopt/README.md#load-cases),
+[keep-outs](../topopt/README.md#keep-outs),
+[connectivity](../topopt/README.md#connectivity),
+[a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape),
+[split for printing](../topopt/README.md#split-for-printing),
+[a body from the result](../topopt/README.md#a-body-from-the-result)) and
+the yoke in `generators/pantilt/README.md`. The yoke envelope with all
+three cases at once and the worms' blocks as keep-outs, on the GPU: 80 s
+for 30 iterations on 44k tets. At the hand re-model's mass (1051 g) the
+checked shape's lens moves 1.50 / 2.64 / 4.53 mm (level / tilted /
+sideways at 3 g) against the re-model's 1.79 / 3.17 / 4.22. At the solid
+yoke's mass (591 g) the check refuses it as built: the -Y seat hangs on a
+strut a tet or two wide, lens 18.7 / 13.7 / 6.9 mm.
 
 ## E. Drawings
 

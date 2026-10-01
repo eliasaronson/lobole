@@ -45,7 +45,7 @@ Each stage opens the project the one before saved; all of it lands in
 | `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot), the camera (the load: a box and a lens of 1.5 kg) and the 1/4-20 camera screw (a plain part with a cosmetic thread) | `tilt.dsgn` |
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
 | `build_assembly.py` | the assembly: mates, bearings by `fit_bearing` and `check_seat`, screws by `fit_fastener`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
-| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): static studies of the solid yoke and the head's, the lens carried from the seats (`probe_study`); the yoke as the three pieces it prints in, each checked against a 256 mm bed, with their STLs; stills; the envelope's topology study and its pictures -- run once and kept in `yoke_envelope.dsgn`, reused while the envelope is the same (its volume), `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
+| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`); the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
 | `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
 | `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
@@ -237,35 +237,55 @@ and 80 above the axis.
 | factor of safety, PETG yield 50 / across layers 40 | 2.7 / 2.2 | 2.4 / 1.9 |
 
 The solid yoke is phase 5's with the pan journal fixed (below). Mesh
-arm_t / 3, about 54k and 112k tet10s.
+arm_t / 3, about 54k and 112k tet10s. Each yoke is one study with the three
+cases in it (one factorisation): 76 s and 407 s, where three studies were
+264 s and 1380 s, the same numbers to the third decimal.
 
 **The topology study** is of `yoke_envelope`: the base out to the pan
-blocks' far edge on both sides, a hub under it down to the wheel, each arm a
-plate across that width up to the tilt axis -- inside the tilt worm's
-blocks and their nuts above and under the ledge. The seats, shoulders,
-reliefs and screw holes are kept. Its volume fraction is the solid yoke's
-volume in the envelope (0.48): the stiffest layout of the same material,
-and the target asked of the re-model is the lens at most a third of the
-solid yoke's at 3 g level. The study's case is the tilted one (the gear's
-worst); 30 iterations at an 8 mm mesh, 33k tets: about 80 s on the GPU with
-fp64 refinement ([mixed-precision refinement](../../docs/topopt/README.md#mixed-precision-refinement));
-the saved result was run on the CPU in two hours, when the fp32 GPU solver
-could not converge on a part this slender. Its
-compliance settled from iteration 15 (139, from 171 at iteration 5); it did
-not reach the change tolerance.
+blocks' far edge on both sides, a hub under it down to the wheel, and each
+arm a whole plate across that width up to the tilt axis. The worms' blocks
+are keep-outs, boxes from their own sizes and frames with the running gap
+round them (`keep_outs`): the tilt blocks standing in the +Y arm's slab
+above the ledge took 667 and 684 tets, their nuts' room under it 1227 and
+1208, the pan blocks none (they hang under the base, which they touch). The
+first envelope stepped the +Y arm in by hand around them, and the run
+before that overlapped them, found only in the result. The seats,
+shoulders, reliefs and the pan blocks' screw holes are kept; the tilt
+blocks' screws, under a keep-out, are not. All three cases at once, each
+weighted by the inverse of its compliance on the uniform start (5.1, 1.1
+and 0.5: at equal weights the sideways case is nearly the whole objective
+and the level one, the working pose, is left what the others leave). 30
+iterations at arm_t / 2 (6.4 mm), 44k tets: 80 s on the GPU for the three.
 
-What it says (`yoke_topo_{density,shape}_{iso,arm_pos,arm_neg,base_top,
-base_under}.png`), read critically:
+At the solid yoke's volume (0.45 of the domain) the check
+(`check_topology`, a static of the shape before modelling from it) says the
+result cannot be built as it stands: the -Y arm is one strut a tet or two
+wide, the volume-matched level reaches the -Y seat only through tet edges,
+and at the highest level that carries it (0.475 against 0.485) the lens
+moves 18.7 / 13.7 / 6.9 mm, worse than the solid yoke's 5.5 / 10.3 / 13.1
+in two cases. At 8 mm it was worse (the strut broke); the old one-case
+study's single strut was the same finding unchecked.
 
-- The +Y arm (the gear's side) stays a solid plate; the -Y arm becomes a
-  single strut from the bearing to the -X end of its foot, along that
-  case's bearing load. One load case, so one strut: under the level or the
-  sideways load it would bend. The re-model makes both arms A-frames.
-- The base stays solid on -X and +Y and empties the +X/-Y quadrant --
-  where the pan worm's blocks bolt on, which no case loads. The re-model
-  keeps it.
-- The screw holes' kept rings float free under the base: a keep face
-  freezes the tets it touches, connected or not.
+So the study now runs at the head's yoke's volume (0.79 of the domain,
+1051 g), and the shape is checked against it case by case. Lens at 3 g,
+the same seats carried the same way (`yoke_loads.lens`):
+
+| 3 g, lens / max von Mises | topology shape, 1051 g | the hand re-model, 1051 g | the solid domain, 1326 g |
+|---|---|---|---|
+| level | 1.50 mm / 5.3 MPa | 1.79 mm / 5.2 MPa | 1.50 mm |
+| tilted 63 deg | 2.64 mm / 11.6 MPa | 3.17 mm / 11.5 MPa | 2.59 mm |
+| sideways | 4.53 mm / 20.7 MPa | 4.22 mm / 20.5 MPa | 4.48 mm |
+
+The hand re-model at the shape's mesh size (arm_t / 2) reads 1.77 / 3.13 /
+4.16, so the comparison is not the mesh's. The shape is 16 % stiffer
+than the re-model level and tilted and 7 % softer sideways, and within 2 %
+of the whole domain at 79 % of its mass. Read critically
+(`yoke_topo_{density,shape}_*.png`): the -Y arm is an A-frame with a cross
+strut, the re-model's arm; the +Y arm stays a whole plate with the blocks'
+and nuts' pockets cut through it, ragged at the tets' size; the base stays
+whole. The pockets' staircase edges and the plate are what a re-model
+would square off; the shape's figures are tets, not the smoothed STL. No
+loose pieces were left to remove at this fraction.
 
 **The re-model** (`build_yoke.lighten`): A-frame arms with windows, the +Y
 arm solid above the ledge; a web under the tilt worm, from the base to the
@@ -278,10 +298,11 @@ yoke's lens moves 0.46 mm at 3 g level: three quarters of the 1.8 mm is the
 strength, is what limits the stiffness, and topology cannot reach it.
 
 **Printing.** On a 256 mm cube (it also fits a 250 x 210 x 220 bed) as
-three pieces split at the base's top, `yoke_print_*.stl`: the base (564 g,
-159 x 206, 43 high, top face down), the +Y arm with the web and the ledge
-(339 g, upright, 187 high; the ledge outboard of the web on support) and
-the -Y arm (148 g, on its inner face, 24 high). Whole, the yoke fits the
+three pieces, `split_for_printing` with one cut at the base's top (the
+arms above it are two solids, so two pieces), `yoke_print_*.stl`: the base
+(564 g, 159 x 206 x 43), the +Y arm with the web and the ledge (339 g, 159
+x 60 x 187) and the -Y arm (148 g, 159 x 24 x 187), each a Derived copy of
+the yoke cut by a box, in PETG. Whole, the yoke fits the
 volume but has no orientation without supports under a 220 mm U.
 
 The assembly re-runs with it: the standing sweep and both motion studies
@@ -399,6 +420,11 @@ saved and never printed; "the active document is not a part, not a part".
    result), islands kept where a keep face freezes unconnected tets, no
    static study on the optimised shape, no snapping a re-model to it, no
    split-into-printable-parts verb. About 4 h of re-modelling by hand.
+   (Fixed since, in the friction round: load cases, keep-outs, the
+   connectivity filter, `check_topology`, `split_for_printing` and
+   `topo_to_body`; see
+   [topology you can build from](../../docs/topopt/README.md#topology-you-can-build-from).
+   Snapping to the shape guide is not built.)
 3. **CAM trusts the model where the model is silent.** It ignores part
    tolerances (the K7 seat is cut at nominal; a band the router cannot hold
    unaided is the machinist's problem); a profile with tabs never verifies

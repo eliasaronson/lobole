@@ -19,9 +19,10 @@ the static solver (`src/core/fem/FemSolverInternal.h`, shared verbatim):
 1. Each tet's density ρ is a design variable in [0, 1]; its modulus is
    `Emin + ρᵖ (E0 − Emin)` with p = 3 and `Emin = 1e-6 E0` (modified SIMP).
    The penalty pushes intermediate densities toward 0 or 1.
-2. Solve `K(ρ) u = F` for the study's force and pressure loads.
+2. Solve `K(ρ) u = F` for the study's force and pressure loads -- once per
+   load case, on the same K ([load cases](#load-cases)).
 3. Sensitivity of compliance per element, `−p ρᵖ⁻¹ uₑᵀ Kₑ⁰ uₑ` — the element
-   strain energy at full modulus.
+   strain energy at full modulus, summed over the cases with their weights.
 4. **Sensitivity filter** (Sigmund) over element centroids with radius R,
    found through a uniform grid hash. The physical density equals the design
    variable, so the field goes crisply to 0/1 and the volume stays linear in
@@ -31,6 +32,7 @@ the static solver (`src/core/fem/FemSolverInternal.h`, shared verbatim):
    limit 0.2, damping 0.5.
 6. Stop when the largest density change is below 0.01, or at
    `maxIterations` (default 60).
+7. Remove what holds no support and no load ([connectivity](#connectivity)).
 
 Invariants:
 
@@ -43,8 +45,9 @@ Invariants:
 - **Penalty is constant.** `TopoParams::penaltyRampIters` exists but is 0:
   sensitivity filtering already yields a discrete design at constant p, and
   ramping p from 1 converges to a softer, greyer design.
-- **One body.** The design domain is the single loaded body; modelled holes
-  are keep-out by construction. A study loading several bodies is refused.
+- **One body.** The design domain is the single loaded body less its
+  [keep-outs](#keep-outs); modelled holes are keep-out by construction. A
+  study loading several bodies is refused.
 - The CPU linear solver is Eigen CG with an incomplete-Cholesky
   preconditioner, warm-started from the previous iteration's displacement (K
   changes little between SIMP steps). This is the correctness oracle and the
@@ -52,7 +55,7 @@ Invariants:
 
 Validation happens before the run, on `study.error`: a fixed support and a
 force or pressure load, volume fraction in (0, 1), a material with stiffness
-data, a single loaded body.
+data, a single loaded body, the load cases' rules and the keep-outs'.
 
 ## Results
 
@@ -61,7 +64,9 @@ costs minutes, and it is tied to a mesh that Netgen does not reproduce across
 versions or machines, so re-running would not give it back. It is written as
 `studies/<id>-<slug>.result.json` beside the study (flat arrays: mesh nodes
 and tets, per-tet density, compliance history, iterations, achieved volume
-fraction, and `input_hash`, the hash of what produced it) and loaded into
+fraction, `input_hash`, the hash of what produced it, and, since v152, each
+case's weight and compliance, what the keep-outs took and the islands
+removed) and loaded into
 the same `StudyRuntime` slot FEM results use. On load it is stamped with
 the settled document version, so it reads current until the part changes --
 unless its saved hash no longer matches the reopened part, when it reads
@@ -90,8 +95,10 @@ on a build without the solver or mesher):
   boundary-edge counts and whether the surface is watertight.
 
 There is no automatic reconstruction of a B-Rep or feature tree from the
-result. The workflow is to re-model over the ghost, then check the new part
-with a static study.
+result. The workflow is to check the shape statically
+([check_topology](#a-static-study-of-the-optimised-shape)), re-model over
+the ghost, check the new part with a static study, and cut it for the
+printer ([split for printing](#split-for-printing)).
 
 ## Topology you can build from
 
@@ -171,9 +178,25 @@ load sits in a piece no support reaches, which the shape does not survive.
 ### A static study of the optimised shape
 
 A static study with `shape_from` {study, threshold?} meshes nothing: its
-mesh is the topology result's tets at or above the threshold (0 = the
-volume-matched level) that are connected to its supports, cut out with
-`ExtractSubMesh`, and its loads land on the faces the result still has.
+mesh is cut out of the topology result with `ExtractSubMesh`, and its loads
+land on the faces the result still has. Which tets:
+
+- **The field** is the density averaged onto the corner nodes and back onto
+  each tet: the field the iso-surface (the Shape view, the STL) is drawn
+  from. Thresholded per tet, a member one or two tets wide is a chain that
+  meets itself at edges. Frozen tets (supports, loads, keep faces) stay.
+- **The level** is the threshold given, or 0 for the volume-matched level
+  of that field.
+- **Face-connected to a support.** A tet that meets the rest only at an
+  edge or a corner is a hinge, and a solve reports its free swing as the
+  part's deflection, so only what is face-connected to a support is
+  solved; what is dropped is counted (`dropped_tets`).
+- **Every load carried.** When the volume-matched level leaves a loaded
+  face out (its member reaches a support only through edges), the level is
+  lowered by bisection to the highest that carries every load, and the
+  answer says so (`threshold_lowered_from`). A threshold that was given is
+  not lowered: the study refuses, naming the load.
+
 `whole: true` takes every tet of the design domain instead: the solid
 envelope less its keep-outs, the reference the shape is compared with.
 
@@ -197,8 +220,18 @@ volume solved and the tets dropped as not connected to a support.
 loads and cases, runs both (one factorisation each serves every case), and
 answers per case each one's maximum deflection and stress, factor of
 safety, volume and mass, and the deflection ratio. The two studies stay,
-for `probe_study {case}` and `set_result_display {case}`. In the panel it
-is **Check shape**.
+for `probe_study {case}` and `set_result_display {case}`. It is
+synchronous: on the pan/tilt yoke (44k tets, two factorisations) about two
+minutes in which the app answers nothing else. In the panel it is **Check
+shape**, which makes both and runs the shape's off the frame.
+
+On the pan/tilt yoke (`generators/pantilt/README.md`, "The yoke under
+load") the check is what showed that the result at the solid yoke's mass
+cannot be built as it stands: its -Y arm is one strut a tet or two wide,
+the volume-matched level reaches the -Y bearing seat only through edges,
+and at the highest level that carries it the lens moves 18.7 mm at 3 g
+level, three times the solid yoke's. At the hand re-model's mass the same
+study's shape is stiffer than the re-model in two cases of three.
 
 ### Split for printing
 
@@ -219,15 +252,27 @@ Each piece becomes a part '<prefix>_<n>' (default '<part>_piece_<n>'): a
 Derived copy of the body (not a reference), a box over the cell and an
 intersect carrying the body's material. The pieces follow the source when
 the Derived is updated, and the faces that came from the body keep their
-names through the boolean (toponaming T5). A cell can hold several solids
-(a U cut above its base is two posts); the piece is then one part with
-both. Pieces are never rotated off their axes, so a diagonal member that
-would fit turned is reported as not fitting.
+names through the boolean (toponaming T5). A cell's separate solids (a U cut
+above its base is two posts) are pieces of their own when a box can take
+each alone: their boxes, padded 0.5 mm and kept inside the cell, are the
+pieces' boxes; solids whose boxes interlock stay one piece. Pieces are
+never rotated off their axes, so a diagonal member that would fit turned
+is reported as not fitting.
 
 ### A body from the result
 
-Measured on the pan/tilt yoke (below): see the verification. The shape
-guide stays a translucent picture; there is no snapping to it.
+`topo_to_body {study, path, name?, threshold?, smooth?}` writes the
+smoothed iso-surface (`export_topo_stl`'s) to `path` and imports it into a
+new part in the result's own coordinates (`keep_origin`), with the design
+body's material: a sewn solid of the surface's triangles, which booleans,
+measures, sections and Derived copies take. It is a faceted body, not a
+re-model: no feature tree, no named faces beyond the triangles. Measured
+on the pan/tilt yoke's result (44k tets, 18,130 triangles): the export
+0.03 s, the import 0.7 s to a valid solid, and a boolean subtract of a
+cylinder through it 3 s. The import re-reads `path` when it regenerates,
+so the file goes with the project. Snapping to the shape guide is not
+built: the guide stays a translucent picture, and the body is what a
+sketch can project or a boolean can take.
 
 ## The run
 
@@ -400,14 +445,23 @@ every run went to the CPU. `ui::TopologyGpuBuiltIn` and a test in
 2. Enter simulation, add a study and set the analysis to **Topology**.
 3. Arm **Fixed** and click the support faces; arm **Force** or **Pressure**
    and click the loaded faces. Optionally arm **Keep face** for faces that
-   must stay solid, and set a mesh size.
+   must stay solid, pick a body under **Keep out of...** for a region the
+   result must leave empty, and set a mesh size. **Load cases**: **Add
+   case** makes one (the first takes every force there is), each with its
+   weight; a force or pressure placed while a case is chosen under **In
+   case** goes in it.
 4. Set the **Volume fraction** (0.3 keeps 30 % of the material), and
    optionally the filter radius and max iterations. **Run** shows a progress
    bar with the iteration; **Cancel** keeps the best shape so far.
-5. The result shows iterations, a compliance start→end, the achieved volume
-   fraction and a stale badge. **Display**: *Shape* (the grey optimized body,
-   with a **Threshold** slider; 0 = volume-matched), *Density* or *Off*.
-6. Tick **Shape guide (modeling overlay)** and leave simulation to model
+5. The result shows iterations, a compliance start→end and each case's,
+   the achieved volume fraction, what the keep-outs took, any loose pieces
+   removed (and a broken load path), and a stale badge. **Display**:
+   *Shape* (the grey optimized body, with a **Threshold** slider; 0 =
+   volume-matched), *Density* or *Off*.
+6. **Check shape** makes the shape's and the solid's static studies and runs
+   the shape's; run the solid's to compare. A static study with cases lists
+   each case's maxima, and the one clicked is the one the viewport shows.
+7. Tick **Shape guide (modeling overlay)** and leave simulation to model
    against the result.
 
 Volume fractions of 0.4–0.5 give chunkier, cleaner members than 0.3 on small
@@ -420,8 +474,11 @@ at a higher cost per iteration.
 add_study {type: "topology", name?}                -> {id}
 set_study {id, mesh_size?, volume_fraction?, filter_radius?, max_iterations?}
 add_load  {study, type: "fixed", face}
-add_load  {study, type: "force", face, magnitude, direction?}   # N, total on the face
+set_study {id, load_cases: [{name, weight?}]}      # the whole list
+add_load  {study, type: "force", face, magnitude, direction?, case?}   # N, total on the face
 add_keep_face {study, face}      / remove_keep_face
+add_keep_out {study, body} | {study, box_min, box_max}   -> {index}   # mm
+remove_keep_out {study, index}
 run_study {id, recompute?, outlive_client?}
                     -> {started: true, job, kind}      (always async)
                     or {reused: true, started: false, input_hash, ...}
@@ -430,10 +487,23 @@ study_status {id}   -> {running, job, iteration, max_iterations, compliance,
 study_status {job}  -> {running, fraction, ...} or {outcome, ...}
 cancel_study {id | job}                            -> {cancelled, job}
 study_results {id}  -> {iterations, converged, cancelled, volume_fraction,
-                        compliance, solver, solve_seconds, stale}
+                        compliance, solver, solve_seconds, stale,
+                        cases?[{name, weight, compliance}],
+                        keep_outs[{what, tets, volume_mm3}],
+                        islands{threshold, components, tets, volume_mm3,
+                                keep_faces, load_path_broken}}
+check_topology {study, threshold?}
+                    -> {shape_study, solid_study, threshold, dropped_tets,
+                        islands, cases[{name, shape{...}, solid{...},
+                                        displacement_ratio}]}
+set_study {id, shape_from: {study, threshold? | whole: true} | null}  # static
+split_for_printing {bed_mm, cuts?[{axis, at_mm}], body?, part?, prefix?,
+                    dry_run?}   -> {cuts, fits_whole, pieces[...]}
 set_result_display {study, field: "shape"|"density"|"none", threshold?}
 set_topo_ghost {study, on}
 export_topo_stl {study, path, threshold?, smooth?}  # smooth: Taubin passes, default 3
+topo_to_body {study, path, name?, threshold?, smooth?}
+                    -> {part, part_id, volume_mm3, valid, triangles, watertight}
 ```
 
 `volume_fraction` and `filter_radius` also take expression strings. Export
@@ -460,17 +530,37 @@ to STL is RPC-only; the panel has no button for it.
   solve, condition numbers, penalty ramp, fp32 Ke as an operator),
   `[refinebench]` (SIMP GPU vs CPU vs exact on slender parts),
   `[mg0gate]`, `[mgscale]`, benches.
+- `tests/test_topo_build.cpp` (`[topobuild]`): a sub-mesh closed and
+  wound as its mesh; the connectivity filter; `SolveCases` against one
+  solve per case; two cases making a design that carries both and beats
+  the one-case design on their sum; a keep face nothing connects handed
+  back connected or removed; the load-case refusals; the v152 fields
+  round-tripping; a box keep-out leaving its tets out, and one over a
+  support or naming a missing body refused; a static study of the shape
+  against the solid domain, per case, going stale when the result is
+  replaced; the print split's cells, automatic slabs, refusals and
+  separate solids.
+- `tests/test_femgpu.cpp` also runs two load cases on the GPU against the
+  CPU (the design and each case's compliance).
 - `tests/topo_smoke.py`: start → poll → done, STL export, an unchanged
   study reused in under a second, cancel keeping a best-so-far result, one
   run at a time. Skips without Netgen. Reloading a
   saved result is covered by `test_topopt.cpp`.
-- GUI: `sim/topology_holds_its_volume_target`.
+- `tests/topo_build_smoke.py`: load cases, a keep-out, the islands report,
+  `check_topology`, a case through `probe_study` and the display, the
+  refusals, and `split_for_printing` over RPC.
+- GUI: `sim/topology_holds_its_volume_target`,
+  `sim/load_cases_take_the_force_placed_in_them`.
 
 ## Not done
 
-- Stress-constrained optimization, multiple load cases, manufacturing
-  constraints (draw direction, symmetry, extrusion), frequency objectives.
-- Assembly-level optimization and keep-out bodies.
+- Stress-constrained optimization, manufacturing constraints (draw
+  direction, symmetry, extrusion), frequency objectives.
+- Assembly-level optimization: a neighbour is kept out of as a Derived
+  reference body of the part, not as an occurrence. A keep-out box is set
+  over RPC only.
+- A print split's cuts are axis-aligned planes, and a piece is checked
+  against the bed only in axis-aligned orientations.
 - Density filtering with Heaviside projection (sharper edges and true
   minimum-member-size control); the current sensitivity filter leaves a grey
   band at member boundaries that the threshold and STL smoothing clean up.

@@ -26,6 +26,12 @@ A study holds:
   inward normal, positive pushes into the part).
 - `gravity` (static only; m/s² in world axes, 0 = off; needs a material
   density) and `numModes` (modal only; default 6).
+- `loadCases` (static and topology): forces and pressures grouped into
+  cases, each solved on its own over the same supports
+  ([load cases](../topopt/README.md#load-cases)).
+- `shapeFrom` (static only): solve a topology study's result instead of
+  meshing the body
+  ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)).
 - `participants` (assembly studies only, below).
 
 Sizes and magnitudes follow the value + expression convention, so a load can
@@ -183,7 +189,8 @@ were single precision). There is no defeaturing step: suppress cosmetic features
 shared with topology optimization), namespace `fem`, GUI-free. Gated
 `HAVE_FEM_SOLVER` on Eigen and `HAVE_SPECTRA` on Spectra (modal only).
 
-- **Static** (`fem::Solve`): tet10 isotropic elasticity, 4-point Gauss rule,
+- **Static** (`fem::Solve`, or `fem::SolveCases` for several load cases on
+  one factorisation): tet10 isotropic elasticity, 4-point Gauss rule,
   triplet assembly into a sparse K, fixed nodes eliminated (all three DOF),
   consistent nodal loads from face tractions (equal splitting is visibly
   wrong on tet10), `SimplicialLDLT`. The factorization can report success on
@@ -210,7 +217,9 @@ checked before any factorization).
 
 `study_results` for a static study reports `max_von_mises_mpa` and
 `max_displacement_mm` (`{value, at, body}`), the per-body breakdown, and a
-factor of safety against the material's yield strength when one is known. The
+factor of safety against the material's yield strength when one is known.
+With load cases the top level is the worst over them and `cases` lists each
+one's maxima and factor of safety. The
 factor travels with a receipt whose basis is *predicted*, and which is
 unverifiable when the result is stale or no body has a yield strength.
 
@@ -247,7 +256,8 @@ the lens's deflection is the two bearing bores' translations (the shaft's
 line), the ledge's motion carried to the worm's axis (the wheel's turn), and
 the lens's lever from the tilt axis.
 
-It reads a part study's static result; it refuses a stale one (a face named
+A study with load cases is probed in one, `case` (its name or index; the
+first when omitted). It reads a part study's static result; it refuses a stale one (a face named
 now may not be the face that was meshed), an assembly study (its mesh is
 the imprinted fuse, whose faces are not the parts'), and modal or topology
 ones. Tests: `[probe]` in `tests/test_fem.cpp` (a rigid motion recovered
@@ -377,17 +387,18 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes`, `participants`, topology parameters |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?}` | returns the load id |
+| `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes`, `participants`, `load_cases`, `shape_from`, topology parameters |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?}` | returns the load id |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
 | `study_results` | static: maxima, per-body, factor of safety; modal: `bodies[i].frequencies_hz` |
-| `probe_study {id, face, at?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
+| `probe_study {id, face, at?, case?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
-| `set_result_display {study?, field, deform_scale?, mode?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none |
+| `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
+| `check_topology {study, threshold?}` | a topology result's shape and solid design domain, statically, per case ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
 
 ## Tests
 
