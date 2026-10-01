@@ -34,7 +34,12 @@ namespace {
 // lines vanished from a reopened project's DXF and check_sheet_metal checked
 // nothing while reporting ok. An older blob is ignored, which rebuilds and
 // re-stamps them.
-constexpr int kGeometryFormat = 2;
+// 3: threads. A body's ThreadRegions (what a screw may engage) and
+// ThreadMarks (what a thread mill reads) are stamped by the Thread and Hole
+// features the same way, so a reopened pan/tilt head lost both: every screw
+// in a tapped hole read as an exact clash of its thread's depth, and the
+// base plate's 3/8-16 had no thread for CAM to mill.
+constexpr int kGeometryFormat = 3;
 
 // A bend record, whole. It is not document data — the features stamp it on
 // every regeneration — but a baked open regenerates nothing, so the blob has
@@ -85,6 +90,52 @@ json BendToJson(const BendRegion& b) {
               {"unfolded_by", b.unfoldedBy},
               {"parent_place", std::move(place)},
               {"trims", std::move(trims)}};
+}
+
+json ThreadRegionToJson(const ThreadRegion& t) {
+  return json{{"face", RefJson(t.face)},
+              {"designation", t.designation},
+              {"length", t.length},
+              {"minimum_engagement", t.minimumEngagement},
+              {"external", t.external}};
+}
+
+ThreadRegion ThreadRegionFromJson(const json& j) {
+  ThreadRegion t;
+  t.face = RefFromJson(j.value("face", json()));
+  t.designation = j.value("designation", std::string{});
+  t.length = j.value("length", 0.0);
+  t.minimumEngagement = j.value("minimum_engagement", 0.0);
+  t.external = j.value("external", false);
+  return t;
+}
+
+json ThreadMarkToJson(const ThreadMark& t) {
+  return json{{"face", RefJson(t.face)},
+              {"feature", t.featureId},
+              {"designation", t.designation},
+              {"major_dia", t.majorDia},
+              {"pitch", t.pitch},
+              {"class", t.threadClass},
+              {"right_hand", t.rightHand},
+              {"external", t.external},
+              {"length", t.length},
+              {"modeled", t.modeled}};
+}
+
+ThreadMark ThreadMarkFromJson(const json& j) {
+  ThreadMark t;
+  t.face = RefFromJson(j.value("face", json()));
+  t.featureId = j.value("feature", uint64_t{0});
+  t.designation = j.value("designation", std::string{});
+  t.majorDia = j.value("major_dia", 0.0);
+  t.pitch = j.value("pitch", 0.0);
+  t.threadClass = j.value("class", std::string{});
+  t.rightHand = j.value("right_hand", true);
+  t.external = j.value("external", false);
+  t.length = j.value("length", 0.0);
+  t.modeled = j.value("modeled", false);
+  return t;
 }
 
 BendRegion BendFromJson(const json& j) {
@@ -260,6 +311,18 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
           bends.push_back(BendToJson(b));
         entry["bends"] = std::move(bends);
       }
+      if (!body.threadRegions.empty()) {
+        json regions = json::array();
+        for (const ThreadRegion& t : body.threadRegions)
+          regions.push_back(ThreadRegionToJson(t));
+        entry["thread_regions"] = std::move(regions);
+      }
+      if (!body.threads.empty()) {
+        json marks = json::array();
+        for (const ThreadMark& t : body.threads)
+          marks.push_back(ThreadMarkToJson(t));
+        entry["threads"] = std::move(marks);
+      }
       index["bodies"].push_back(std::move(entry));
       wanted.push_back(file);
     }
@@ -341,6 +404,10 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
       body.reference = bj.value("reference", false);
       for (const json& bendJson : bj.value("bends", json::array()))
         body.bends.push_back(BendFromJson(bendJson));
+      for (const json& t : bj.value("thread_regions", json::array()))
+        body.threadRegions.push_back(ThreadRegionFromJson(t));
+      for (const json& t : bj.value("threads", json::array()))
+        body.threads.push_back(ThreadMarkFromJson(t));
       bodies.push_back(std::move(body));
     }
     if (bodies.empty())

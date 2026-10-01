@@ -12,6 +12,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GeometryCache.h"
@@ -163,6 +164,48 @@ TEST_CASE("A regenerated part is baked even when the blob's hash matches",
   CHECK_THAT(copy->GetBodies()[0].shape.Volume(), WithinRel(volume, 1e-9));
   fs::remove_all(proj);
   fs::remove_all(other);
+}
+
+// A body's threads are stamped by the features that cut them, like its bends:
+// a baked open executes nothing, so the blob carries them. Without them every
+// screw in a reopened tapped hole read as an exact clash of its thread's depth,
+// and a thread mill found no thread to cut.
+TEST_CASE("Threads survive a baked open", "[baked][hole]") {
+  const fs::path proj = TempProject("baked-threads.dsgn");
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0), 30, 30, 12));
+  SketchPlane top(glm::vec3(0, 0, 12), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centre", top);
+  sk->AddEntity(sketch::Point{{15.0f, 15.0f}});
+  doc->AddFeature(std::move(sk));
+  auto hole = std::make_unique<HoleFeature>(
+      "Tapped", doc->GetFeature(1)->GetId(), HoleKind::Simple, 5.0, 10.0);
+  hole->fitThread = "M6";
+  hole->fitKind = "tapped";
+  doc->AddFeature(std::move(hole));
+  REQUIRE(doc->Regenerate());
+  const Body& built = doc->GetBodies().front();
+  REQUIRE(built.threadRegions.size() == 1);
+  REQUIRE(built.threads.size() == 1);
+  REQUIRE(testio::Save(*doc, proj.string()));
+
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->LastRegenStats().executed == 0);
+  const Body& body = loaded->GetBodies().front();
+  REQUIRE(body.threadRegions.size() == 1);
+  CHECK(body.threadRegions[0].face.name == built.threadRegions[0].face.name);
+  CHECK(body.threadRegions[0].designation ==
+        built.threadRegions[0].designation);
+  CHECK(body.threadRegions[0].length == built.threadRegions[0].length);
+  REQUIRE(body.threads.size() == 1);
+  CHECK(body.threads[0].face.name == built.threads[0].face.name);
+  CHECK(body.threads[0].featureId == built.threads[0].featureId);
+  CHECK(body.threads[0].designation == built.threads[0].designation);
+  CHECK(body.threads[0].pitch == built.threads[0].pitch);
+  CHECK(body.threads[0].majorDia == built.threads[0].majorDia);
+  fs::remove_all(proj);
 }
 
 // Warnings are a product of EXECUTION, and a baked open executes nothing —

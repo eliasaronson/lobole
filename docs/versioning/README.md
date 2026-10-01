@@ -110,6 +110,11 @@ Consequences:
   carries only bodies; skipping them would leave a mate anchored to a Frame
   at the identity. They run against the installed bodies, in list order.
   Feature warnings recorded at bake time are restored.
+- **What features stamp on a body travels with it**: its element map, its
+  bends, and its threads (`ThreadRegion`, what a screw may engage, and
+  `ThreadMark`, what a thread mill reads; geometry format 3). A baked open
+  re-derives none of them, and without the threads every screw in a reopened
+  tapped hole read as an exact clash.
 - **A different OCC version loads the blob anyway**, with a log line.
   Rebuilding could reorder faces and move the element names that dimensions
   and mates reference; the geometry the author saw is the geometry loaded.
