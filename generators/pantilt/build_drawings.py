@@ -284,10 +284,9 @@ def detail_sheet(app, V, sec):
         (0, dy + s * R + 6 - dy))
     dim(app, det, "distance_y", [ref(relief_floor), ref(floor)],
         (dx - s * R - 6 - min(relief_floor["p1"][0], floor["p1"][0]), 0))
-    # The shoulder the outer ring bears on, square to its seat's axis.
-    end = 1 if floor["p1"][0] >= floor["p2"][0] else 2
-    fcf(app, view=det, ref_=ref(floor, end=end),
-        position=(dx + s * R + 26, dy + 12),
+    # The shoulder the outer ring bears on, square to its seat's axis: the
+    # leader on the middle of the floor the detail shows.
+    fcf(app, view=det, ref_=ref(floor), position=(dx + s * R + 38, dy - 14),
         symbol="circular_runout", tolerance_mm=0.03, datums=["B"])
     return det
 
