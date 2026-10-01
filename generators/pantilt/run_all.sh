@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # The pan/tilt head, from nothing: every part, then the assembly with its
-# checks, studies and renders, then the base plate's CAM job on the 6090. What it makes (projects, renders, reports,
-# these logs) goes to scratch/pantilt/.
+# checks, studies and renders, the base plate's CAM job on the 6090, the
+# drawings and the final renders. What it makes (projects, renders,
+# drawings, reports, these logs) goes to scratch/pantilt/.
 #
 #   generators/pantilt/run_all.sh PORT                  # everything
 #   generators/pantilt/run_all.sh PORT --from assembly  # the saved parts,
 #                                                       # assembly only
+#   generators/pantilt/run_all.sh PORT --from drawings  # the sheets, renders
 #
-# Stages, in order: base worms tilt yoke assembly yoke_topo cam. Each opens
-# the project the
-# one before saved; `--from` starts at one and reuses what the earlier ones
-# left in scratch/pantilt/. Run it against a scratch instance
-# (tools/headless-preview.sh --start PORT), never somebody's open document.
+# Stages, in order: base worms tilt yoke assembly yoke_topo cam drawings
+# renders. Each opens the project the one before saved; `--from` starts at
+# one and reuses what the earlier ones left in scratch/pantilt/. Run it
+# against a scratch instance (tools/headless-preview.sh --start PORT), never
+# somebody's open document.
 #
 # run_all.log ends in `done` or `failed`, a marker to wait on
 # (tools/wait-for.sh --file scratch/pantilt/run_all.log --line '^(done|failed)$').
@@ -25,10 +27,10 @@ FROM=base
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="$2"; shift 2 ;;
-    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly yoke_topo cam)" >&2; exit 2 ;;
+    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly yoke_topo cam drawings renders)" >&2; exit 2 ;;
   esac
 done
-STAGES=(base worms tilt yoke assembly yoke_topo cam)
+STAGES=(base worms tilt yoke assembly yoke_topo cam drawings renders)
 start=-1
 for i in "${!STAGES[@]}"; do [ "${STAGES[$i]}" = "$FROM" ] && start=$i; done
 if [ "$start" -lt 0 ]; then
