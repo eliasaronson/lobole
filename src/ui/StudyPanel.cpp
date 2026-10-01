@@ -304,6 +304,27 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     });
 }
 
+// Which study's last Run was answered from a stored result
+// (docs/simulation/README.md#studies-as-jobs), so the panel can say why
+// nothing ran. Panel state only: the result itself is the study's.
+uint64_t g_reusedStudy = 0;
+
+void NoteReuse(uint64_t studyId, const JobStart& start) {
+  g_reusedStudy = start.reused ? studyId : 0;
+}
+
+void RunButtonTip() {
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Unchanged inputs reuse the stored result instead of "
+                      "computing it again. Shift+click to compute anyway.");
+}
+
+// Reused: shown under the result it is about.
+void DrawReuseNote(uint64_t studyId) {
+  if (g_reusedStudy == studyId)
+    ImGui::TextColored(kMuted, "Reused: these inputs were already solved.");
+}
+
 // Topology results: an async Run (worker thread) with a live progress bar +
 // Cancel, then the optimization summary and the Shape/Density display controls.
 void DrawTopoResults(AppState& state, const fem::Study& s) {
@@ -346,9 +367,13 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
 
   if (ImGui::Button(ICON_FA_PLAY " Run###topo_run")) {
     std::string err;
-    if (!StartTopologyRun(state, *doc, s.id, &err))
+    JobStart start;
+    start.recompute = ImGui::GetIO().KeyShift;
+    if (!StartTopologyRun(state, *doc, s.id, &err, &start))
       LOG_WARN("topology run failed: {}", err);
+    NoteReuse(s.id, start);
   }
+  RunButtonTip();
   if (!s.error.empty()) {
     ImGui::SameLine();
     ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
@@ -356,6 +381,7 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
       ImGui::SetTooltip("%s", s.error.c_str());
   }
 
+  DrawReuseNote(s.id);
   const fem::StudyRuntime* rt = doc->StudyResults(s.id);
   if (!rt) {
     ImGui::TextColored(kMuted, "Not run yet.");
@@ -453,20 +479,33 @@ void DrawResults(AppState& state, const fem::Study& s) {
   const StudyRunStatus run = GetStudyRunStatus(state, s.id);
   if (run.running) {
     // The shared bar (ui/Widgets.h), indeterminate: the linear solver has no
-    // progress to report and no point to stop at, so no Cancel either.
+    // progress to report. Its Cancel lands at the next boundary -- after the
+    // meshing, or when the factorization ends -- and drops the answer.
     JobProgress bar;
     bar.status = "Solving";
     bar.overlay = std::to_string(static_cast<int>(run.elapsedSeconds)) + " s";
-    bar.cancellable = false;
-    DrawJobProgress(bar);
-  } else if (ImGui::Button(ICON_FA_PLAY " Run###study_run")) {
-    std::string err;
-    const bool started =
-        host.IsAssembly()
-            ? StartAssemblyStudyRun(state, *host.asmDoc, s.id, &err)
-            : StartStudyRun(state, *host.part, s.id, &err);
-    if (!started)
-      LOG_WARN("run study failed: {}", err);
+    BackgroundJob* bg = FindBackgroundJob(state, "study");
+    bar.cancellable = bg != nullptr;
+    bar.cancelAsked = bg != nullptr && bg->cancel.load();
+    bar.cancelId = "###study_cancel";
+    bar.cancelTip = "Stop after the meshing, or when the solve ends; the "
+                    "answer is dropped.";
+    if (DrawJobProgress(bar) && bg != nullptr)
+      CancelBackgroundJobById(state, bg->id, "the Cancel button");
+  } else {
+    if (ImGui::Button(ICON_FA_PLAY " Run###study_run")) {
+      std::string err;
+      JobStart start;
+      start.recompute = ImGui::GetIO().KeyShift;
+      const bool started =
+          host.IsAssembly()
+              ? StartAssemblyStudyRun(state, *host.asmDoc, s.id, &err, &start)
+              : StartStudyRun(state, *host.part, s.id, &err, &start);
+      if (!started)
+        LOG_WARN("run study failed: {}", err);
+      NoteReuse(s.id, start);
+    }
+    RunButtonTip();
   }
   if (!s.error.empty()) {
     ImGui::SameLine();
@@ -475,6 +514,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
       ImGui::SetTooltip("%s", s.error.c_str());
   }
 
+  DrawReuseNote(s.id);
   const fem::StudyRuntime* rt = host.Results(s.id);
   if (!rt) {
     ImGui::TextColored(kMuted, "Not run yet.");

@@ -53,29 +53,33 @@ def main():
             sigma = sync["max_von_mises_mpa"]["value"]
             expect(sigma > 0, f"a positive von Mises came back: {sigma}")
 
-            # Re-running is what makes the results stale-then-fresh again; the
-            # load is unchanged, so the async answer must equal the sync one.
-            started = d.call("run_study", study=study, **{"async": True})
-            expect(started.get("started") and started.get("running"),
-                   f"async static run starts: {started}")
+            # The same inputs again: answered from the stored result, nothing
+            # started (docs/simulation/README.md#studies-as-jobs).
+            t0 = time.time()
+            again = d.call("run_study", study=study, **{"async": True})
+            expect(again.get("reused") is True and again.get("started") is False,
+                   f"an unchanged static study is reused: {again}")
+            expect(time.time() - t0 < 1.0,
+                   f"a reuse is well under a second: {time.time() - t0:.2f}s")
+            expect(again.get("input_hash") == sync.get("input_hash"),
+                   f"the same inputs, the same hash: {again} vs {sync}")
+
+            # recompute: a real run, as a job with an id.
+            started = d.call("run_study", study=study, recompute=True,
+                             **{"async": True})
+            expect(started.get("started") and started.get("running")
+                   and isinstance(started.get("job"), int),
+                   f"async static run starts as a job: {started}")
+            job = started["job"]
 
             deadline = time.time() + 120
-            refused_a_cancel = False
             while time.time() < deadline:
                 st = d.call("study_status", study=study)
                 if not st.get("running", False):
                     break
                 expect("elapsed_seconds" in st,
                        f"a running status reports elapsed: {st}")
-                # A static solve cannot be interrupted mid-factorisation, so
-                # cancel must refuse and SAY so rather than accept and lie.
-                try:
-                    d.call("cancel_study", study=study)
-                    raise AssertionError("a static solve must refuse to cancel")
-                except RuntimeError as e:
-                    expect("cannot be cancelled" in str(e),
-                           f"the cancel refusal explains itself: {e}")
-                    refused_a_cancel = True
+                expect(st.get("job") == job, f"the status names its job: {st}")
                 time.sleep(0.2)
             else:
                 raise AssertionError("async solve did not finish in 120s")
@@ -85,16 +89,37 @@ def main():
             got = res["max_von_mises_mpa"]["value"]
             expect(abs(got / sigma - 1.0) < 0.05,
                    f"the worker's answer matches the sync one: {got} vs {sigma}")
+            done = d.call("study_status", job=job)
+            expect(done["running"] is False and done["outcome"] == "done",
+                   f"the job says how it ended: {done}")
 
-            # Not an assertion about the solve: if the mesh is small enough
-            # that it finished before the first poll, the refusal above never
-            # ran and this test quietly stopped covering it. Say so rather
-            # than report a pass that checked less than it claims.
-            if not refused_a_cancel:
-                print("fem_async_smoke: NOTE the solve finished before the "
-                      "first poll, so the cancel refusal was not exercised",
-                      file=sys.stderr)
-
+            # A cancel by job id: the static job stops at its next boundary
+            # and drops its answer.
+            third = d.call("run_study", study=study, recompute=True,
+                           **{"async": True})
+            c = d.call("cancel_study", job=third["job"])
+            expect(c.get("cancelled") is True, f"cancel by id: {c}")
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                st = d.call("study_status", job=third["job"])
+                if not st["running"]:
+                    break
+                time.sleep(0.2)
+            expect(st["outcome"] == "cancelled"
+                   and st.get("cancel_reason") == "cancel_study",
+                   f"cancelled by cancel_study: {st}")
+            try:
+                d.call("cancel_study", job=third["job"])
+                raise AssertionError("an ended job cannot be cancelled again")
+            except RuntimeError as e:
+                expect("already ended" in str(e), f"says it ended: {e}")
+            try:
+                d.call("study_status", job=987654)
+                raise AssertionError("an unknown job id is refused")
+            except RuntimeError as e:
+                expect("no study job 987654" in str(e)
+                       and str(third["job"]) in str(e),
+                       f"refused, naming the jobs there are: {e}")
             print("fem_async_smoke: OK")
             return 0
     except Exception as e:

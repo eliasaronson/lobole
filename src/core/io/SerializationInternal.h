@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    147; // v147: drawings -- a view's `section` (a section view), a note's
+    148; // v148: a topology result's `input_hash` ("0x" + 16 hex digits):
+         //      what produced it, so a reopened project reuses it for the
+         //      same inputs and reads it stale otherwise
+         //      (docs/simulation/README.md#studies-as-jobs).
+         // v147: drawings -- a view's `section` (a section view), a note's
          //      `style` (balloon, datum) and table `bom` (a parts list), and
          //      the title block's `material` and `scale`
          //      (docs/drawings/README.md#section-views).

@@ -3,6 +3,7 @@
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/Occurrence.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -17,6 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -52,6 +54,89 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
     return study;
   throw std::runtime_error(
       "which study? pass `id` (or `study`, which means the same here)");
+}
+
+// --- A study job by its id (docs/simulation/README.md#studies-as-jobs) ----
+
+bool IsStudyJobKind(const std::string& kind) {
+  return kind == "motion" || kind == "topo" || kind == "study" ||
+         kind == "mesh";
+}
+
+// The study jobs there are to ask about: running, then recently ended.
+std::string KnownStudyJobs(const ui::AppState& state) {
+  std::vector<std::string> have;
+  for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
+    if (IsStudyJobKind(j.kind))
+      have.push_back(std::to_string(j.id) + " (" + j.kind + ", running)");
+  for (const ui::FinishedJob& f : state.finishedJobs)
+    if (IsStudyJobKind(f.kind))
+      have.push_back(std::to_string(f.id) + " (" + f.kind + ", " + f.outcome +
+                     ")");
+  return KnownList(have);
+}
+
+[[noreturn]] void RefuseNotStudyJob(uint64_t id, const std::string& kind) {
+  throw std::runtime_error("job " + std::to_string(id) + " is a '" + kind +
+                           "' job, not a study -- background_jobs lists it and "
+                           "cancel_background_job {kind} stops it");
+}
+
+// study_status {job} and cancel_study {job}: a running job reports how far
+// it is (or is asked to stop); one that has ended reports how it ended. An
+// id that names no study job is refused, naming the ones there are.
+json StudyJobJson(ui::AppState& state, uint64_t id, bool cancel) {
+  if (ui::BackgroundJob* j = ui::FindBackgroundJobById(state, id)) {
+    if (!IsStudyJobKind(j->kind))
+      RefuseNotStudyJob(id, j->kind);
+    if (cancel) {
+      if (!j->cancellable)
+        throw std::runtime_error("job " + std::to_string(id) +
+                                 " cannot be cancelled");
+      ui::CancelBackgroundJobById(state, id, "cancel_study");
+      return json{{"job", id},
+                  {"kind", j->kind},
+                  {"study", j->studyId},
+                  {"cancelled", true}};
+    }
+    const double elapsed = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now() - j->started)
+                               .count();
+    json out{{"job", id},
+             {"kind", j->kind},
+             {"study", j->studyId},
+             {"label", j->label},
+             {"running", true},
+             {"elapsed_seconds", elapsed},
+             {"cancellable", j->cancellable},
+             {"cancel_requested", j->cancel.load()},
+             {"outlives_client", j->owner == 0}};
+    const double fraction = j->fraction.load();
+    out["fraction"] = fraction >= 0.0 ? json(fraction) : json(nullptr);
+    return out;
+  }
+  if (const ui::FinishedJob* f = ui::FinishedJobById(state, id)) {
+    if (!IsStudyJobKind(f->kind))
+      RefuseNotStudyJob(id, f->kind);
+    if (cancel)
+      throw std::runtime_error("job " + std::to_string(id) +
+                               " has already ended (" + f->outcome +
+                               "); there is nothing to cancel");
+    json out{{"job", id},
+             {"kind", f->kind},
+             {"study", f->studyId},
+             {"label", f->label},
+             {"running", false},
+             {"outcome", f->outcome},
+             {"seconds", f->seconds}};
+    if (!f->error.empty())
+      out["error"] = f->error;
+    if (!f->cancelReason.empty())
+      out["cancel_reason"] = f->cancelReason;
+    return out;
+  }
+  throw std::runtime_error("no study job " + std::to_string(id) +
+                           "; study jobs: " + KnownStudyJobs(state));
 }
 
 // Where the studies live: the active PART, or the active ASSEMBLY
@@ -265,24 +350,47 @@ static constexpr MethodDoc SimulationMethods[] = {
      "up) or pass `async: true`: the mesh then runs on a background job and "
      "study_status answers {running, meshing: true} until it lands, after "
      "which its `mesh` carries the same bodies/nodes/elements/worst_quality. "
+     "Async answers `job` (its id) and, like run_study's, the job is "
+     "cancelled when the connection that started it closes unless "
+     "`outlive_client: true`. "
      "Takes `id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, study"},
+     "async, id, outlive_client, study"},
     {"run_study",
      "Solve the study (blocking, or `async` and poll study_status). Async "
      "meshes AND solves off the frame; the result is stored into the part "
-     "the study belongs to even if another tab is active when it lands. Takes "
+     "the study belongs to even if another tab is active when it lands. A "
+     "topology study always runs async. An async run is a JOB: the reply's "
+     "`job` is its id, which study_status {job} and cancel_study {job} take, "
+     "and it is cancelled when the connection that started it closes "
+     "unless `outlive_client: true`. A run whose INPUTS hash the same as a "
+     "stored result (the study with its expressions evaluated, the bodies' "
+     "exact geometry, names and materials; on an assembly the taking-part "
+     "occurrences and their placed bodies) is answered from it with "
+     "`reused: true` and nothing computed -- a reopened project's topology "
+     "result included; `input_hash` names the inputs, `recompute: true` "
+     "runs anyway. Takes "
      "`id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, study"},
+     "async, id, outlive_client, recompute, study"},
     {"cancel_study",
-     "Cancel a running study — takes `id` (or `study`, the same thing here) — "
-     "see remove_study.",
-     "id, study"},
+     "Cancel a running study: {job} (the id run_study, run_motion_study or "
+     "mesh_study answered -- any study job, motion included) or `id` (or "
+     "`study`, the same thing here; a part or assembly study's running "
+     "job). A topology run keeps the best shape so far; a static or modal "
+     "run stops at its next boundary (after meshing; the factorization has "
+     "no interruption points and ends first) and drops its answer. A job "
+     "id that names no study job, or one that has ended, is refused.",
+     "id, job, study"},
     {"study_status",
-     "Status/progress of a study: {running, meshing?, iteration…} while a "
-     "job runs, else the cached result's state plus `mesh` from the last "
-     "mesh_study {async}. Takes `id` (or `study`, the same thing here) — see "
-     "remove_study.",
-     "id, study"},
+     "Status/progress of a study: {running, job, meshing?, iteration…} "
+     "while a job runs, else the cached result's state (with `input_hash`) "
+     "plus `mesh` from the last mesh_study {async}. Takes `id` (or `study`, "
+     "the same thing here) — see remove_study — or `job`, a study job's id "
+     "from any tab: {job, kind, study, running, fraction, elapsed_seconds, "
+     "cancellable, outlives_client} while it runs, {running: false, outcome "
+     "(done|cancelled|failed), error?, cancel_reason?, seconds} once it has "
+     "ended; an id that names no study job is refused, naming those there "
+     "are.",
+     "id, job, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
      "array, one entry PER BODY, because a part study meshes and solves each "
@@ -346,6 +454,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       ours = ours || m == d.name;
     if (!ours)
       return std::nullopt;
+  }
+  // A study JOB is asked about by its id from any tab: it may be running on
+  // one that is not active (a motion study's assembly, a part behind it).
+  if ((m == "study_status" || m == "cancel_study") && p.contains("job")) {
+    if (p.contains("id") || p.contains("study"))
+      throw std::runtime_error(
+          "job and id/study both name what to ask about; pass one -- job is "
+          "the id run_study or run_motion_study answered, id the study's");
+    ui::ReapBackgroundJobs(state);
+    return StudyJobJson(state, p.at("job").get<uint64_t>(),
+                        m == "cancel_study");
   }
   if (!doc && !state.assembly) {
     const char* kind = state.drawing ? "a drawing"
@@ -729,9 +848,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "an assembly study meshes synchronously (run_study async: true "
             "meshes and solves off the frame)");
       std::string err;
-      if (!ui::StartMeshRun(state, *doc, id, &err))
+      ui::JobStart start;
+      start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
+      if (!ui::StartMeshRun(state, *doc, id, &err, &start))
         throw std::runtime_error(err);
-      return json{{"started", true}, {"running", true}, {"job", "mesh"}};
+      return json{{"started", true},
+                  {"running", true},
+                  {"job", start.jobId},
+                  {"kind", "mesh"},
+                  {"outlives_client", start.owner == 0}};
     }
     std::vector<fem::StudyBodyMesh> meshes;
     std::string err;
@@ -766,28 +891,43 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                      p.contains("study"), p.value("study", uint64_t{0}));
     fem::Study* s = &host.Require(id);
 
+    // The job running this study, of whichever FEM kind: one at a time each.
+    const auto studyJob = [&]() -> ui::BackgroundJob* {
+      for (const char* kind : {"topo", "study", "mesh"})
+        if (ui::BackgroundJob* j = ui::FindBackgroundJob(state, kind))
+          if (j->studyId == id)
+            return j;
+      return nullptr;
+    };
     if (m == "cancel_study") {
-      if (ui::GetStudyRunStatus(state, id).running)
-        throw std::runtime_error(
-            "a static/modal solve cannot be cancelled (the linear solver "
-            "has no interruption points) — wait for study_status running: "
-            "false");
-      return json{{"cancelled", ui::CancelTopologyRun(state, id)}};
+      // A static or modal job stops at its next boundary and drops its
+      // answer; a topology job keeps the best shape so far.
+      if (ui::BackgroundJob* j = studyJob()) {
+        const uint64_t jobId = j->id;
+        ui::CancelBackgroundJobById(state, jobId, "cancel_study");
+        return json{{"cancelled", true}, {"job", jobId}};
+      }
+      return json{{"cancelled", false}};
     }
     if (m == "study_status") {
+      const ui::BackgroundJob* job = studyJob();
+      const uint64_t jobId = job ? job->id : 0;
       const ui::MeshRunStatus mrs = ui::GetMeshRunStatus(state, id);
       if (mrs.running)
         return json{{"running", true},
+                    {"job", jobId},
                     {"meshing", true},
                     {"elapsed_seconds", mrs.elapsedSeconds}};
       const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
       if (srs.running)
         return json{{"running", true},
+                    {"job", jobId},
                     {"solver", srs.solver},
                     {"elapsed_seconds", srs.elapsedSeconds}};
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
       if (st.running)
         return json{{"running", true},
+                    {"job", jobId},
                     {"iteration", st.iteration},
                     {"max_iterations", st.maxIterations},
                     {"compliance", st.compliance},
@@ -806,6 +946,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                {"solver", rt ? rt->solver : ""},
                {"solve_seconds", rt ? rt->solveSeconds : 0.0},
                {"stale", host.Stale(id)}};
+      if (rt && rt->inputHash != 0)
+        out["input_hash"] = inputhash::Hex(rt->inputHash);
       if (!s->error.empty())
         out["error"] = s->error;
       if (const ui::MeshReport* mr =
@@ -824,38 +966,70 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       return out;
     }
 
+    // A run answered from a stored result for the same inputs
+    // (docs/simulation/README.md#studies-as-jobs) says so in its reply.
+    bool reused = false;
     if (m == "run_study") {
+      ui::JobStart start;
+      start.recompute = p.value("recompute", false);
+      start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
+      const auto started = [&](const char* kind) {
+        return json{{"started", true},
+                    {"running", true},
+                    {"job", start.jobId},
+                    {"kind", kind},
+                    {"outlives_client", start.owner == 0}};
+      };
       if (s->type == fem::AnalysisType::Topology) {
         std::string err;
         topoOnly();
-        if (!ui::StartTopologyRun(state, *doc, id, &err))
+        if (!ui::StartTopologyRun(state, *doc, id, &err, &start))
           throw std::runtime_error(err);
-        return json{{"started", true}, {"running", true}};
-      }
-      // Static/modal: async on request (a big mesh can outlive a remote
-      // client's socket timeout when solved synchronously).
-      if (p.value("async", false)) {
+        if (!start.reused)
+          return started("topo");
+      } else if (p.value("async", false)) {
+        // Static/modal: async on request (a big mesh can outlive a remote
+        // client's socket timeout when solved synchronously).
         std::string err;
-        const bool started =
-            host.IsAssembly()
-                ? ui::StartAssemblyStudyRun(state, *host.asmDoc, id, &err)
-                : ui::StartStudyRun(state, *doc, id, &err);
-        if (!started)
+        const bool ok = host.IsAssembly()
+                            ? ui::StartAssemblyStudyRun(state, *host.asmDoc, id,
+                                                        &err, &start)
+                            : ui::StartStudyRun(state, *doc, id, &err, &start);
+        if (!ok)
           throw std::runtime_error(err);
-        return json{{"started", true}, {"running", true}};
+        if (!start.reused)
+          return started("study");
+      } else if (!ui::ReuseStudyResult(
+                     state, doc, host.IsAssembly() ? host.asmDoc : nullptr, id,
+                     &start)) {
+        std::string err;
+        const bool ran =
+            host.IsAssembly()
+                ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err)
+                : ui::RunStudyAndCache(*doc, id, &err);
+        if (!ran)
+          throw std::runtime_error(err);
+        if (const fem::StudyRuntime* done = host.Results(id))
+          ui::RememberStudyResult(state, *done);
       }
-      std::string err;
-      const bool ran =
-          host.IsAssembly()
-              ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err)
-              : ui::RunStudyAndCache(*doc, id, &err);
-      if (!ran)
-        throw std::runtime_error(err);
+      reused = start.reused;
     }
 
     const fem::StudyRuntime* rt = host.Results(id);
     if (!rt)
       throw std::runtime_error("study has not been run");
+    // What every answer below carries: the inputs it is for, and on a run
+    // whether it was computed or reused.
+    const auto stamp = [&](json j) {
+      if (rt->inputHash != 0)
+        j["input_hash"] = inputhash::Hex(rt->inputHash);
+      if (m == "run_study") {
+        j["reused"] = reused;
+        if (reused)
+          j["started"] = false;
+      }
+      return j;
+    };
 
     // Topology studies report the optimization summary (the density field is
     // read via set_result_display / export, not echoed here).
@@ -865,19 +1039,19 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         nodes += b.mesh.stats.nodeCount;
         elements += b.mesh.stats.tetCount;
       }
-      return json{{"type", "topology"},
-                  {"nodes", nodes},
-                  {"elements", elements},
-                  {"iterations", rt->iterations},
-                  {"converged", rt->converged},
-                  {"cancelled", rt->cancelled},
-                  {"volume_fraction", rt->volumeFractionAchieved},
-                  {"compliance", rt->complianceHistory.empty()
-                                     ? 0.0
-                                     : rt->complianceHistory.back()},
-                  {"solver", rt->solver},
-                  {"solve_seconds", rt->solveSeconds},
-                  {"stale", host.Stale(id)}};
+      return stamp(json{{"type", "topology"},
+                        {"nodes", nodes},
+                        {"elements", elements},
+                        {"iterations", rt->iterations},
+                        {"converged", rt->converged},
+                        {"cancelled", rt->cancelled},
+                        {"volume_fraction", rt->volumeFractionAchieved},
+                        {"compliance", rt->complianceHistory.empty()
+                                           ? 0.0
+                                           : rt->complianceHistory.back()},
+                        {"solver", rt->solver},
+                        {"solve_seconds", rt->solveSeconds},
+                        {"stale", host.Stale(id)}});
     }
 
     // An assembly study's answer carries its role table (S1): the reader
@@ -908,7 +1082,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                {"stale", host.Stale(id)}};
       if (!roles.empty())
         out["participants"] = roles;
-      return out;
+      return stamp(out);
     }
 
     // Aggregate mesh size and a factor of safety (min over bodies with yield
@@ -1005,7 +1179,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
       AttachReceipt(result, r);
     }
-    return result;
+    return stamp(result);
   }
   if (m == "probe_study") {
     // How one face moved, as a rigid body (fem::FitFaceMotion): what a

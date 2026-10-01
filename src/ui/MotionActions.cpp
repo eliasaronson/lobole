@@ -63,6 +63,7 @@ struct MotionRun {
   motion::Result result;
   std::shared_ptr<collide::ExactContactCache> contacts;
   std::string revision;
+  uint64_t inputHash = 0; // motion::InputKey of what this run reads
   std::chrono::steady_clock::time_point started;
 };
 
@@ -117,6 +118,13 @@ void PrebuildMeshes(MotionRun& run) {
     }
 }
 
+// The copies the worker reads, and the collision meshes it would otherwise
+// build off the main thread.
+void CopyForWorker(AppState& state, MotionRun& run) {
+  CopySubtree(state, run);
+  PrebuildMeshes(run);
+}
+
 bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
              std::string* error, bool copyDocs,
              const RunOverride* override = nullptr) {
@@ -154,37 +162,73 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
   }
   run.asmCopy = *state.assembly;
   run.started = std::chrono::steady_clock::now();
+  // What the answer depends on, hashed from the live documents the copies
+  // are about to be taken from (docs/simulation/README.md#studies-as-jobs).
+  run.inputHash = motion::InputKey(*state.assembly, PartResolverFor(state),
+                                   AssemblyResolverFor(state), run.study);
   // The copies exist so the worker shares nothing with the tab, and are made
   // only for a run that leaves the main thread — a synchronous run reads the
   // live documents it is blocking anyway. They are cheap now
   // (docs/assemblies/README.md#background-motion-copies-without-regenerating);
   // they were not, and a plain Document copy still is not.
-  if (copyDocs) {
-    CopySubtree(state, run);
-    PrebuildMeshes(run);
-  }
+  if (copyDocs)
+    CopyForWorker(state, run);
   return true;
+}
+
+// A result the session holds for exactly these inputs, installed as the
+// study's own: the stored run answers, and nothing is computed.
+bool ReuseStored(AppState& state, const MotionRun& run, JobStart* job) {
+  if (job != nullptr && job->recompute)
+    return false;
+  const std::shared_ptr<const motion::Result> stored =
+      state.motionResultsByInput.Find(run.inputHash);
+  if (!stored)
+    return false;
+  if (state.motionPlaybackStudy == run.studyId)
+    StopMotionPlayback(state);
+  state.motionResults[run.studyId] = *stored;
+  state.motionResultRevisions[run.studyId] = run.revision;
+  if (job != nullptr)
+    job->reused = true;
+  return true;
+}
+
+// Keep a finished run by its input hash -- a whole one only: a cancelled or
+// refused run is not the answer to its inputs.
+void Remember(AppState& state, motion::Result& result, uint64_t inputHash) {
+  result.inputHash = inputHash;
+  if (!result.cancelled && result.error.empty())
+    state.motionResultsByInput.Put(
+        inputHash, std::make_shared<const motion::Result>(result));
 }
 
 } // namespace
 
 bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
-                    const RunOverride* override) {
+                    const RunOverride* override, JobStart* jobStart) {
+  auto run = std::make_shared<MotionRun>();
+  if (!Prepare(state, studyId, *run, error, /*copyDocs=*/false, override))
+    return false;
+  // Answered from a stored run before asking whether one is running: a
+  // reuse starts nothing, so it waits for nothing.
+  if (ReuseStored(state, *run, jobStart))
+    return true;
   if (BackgroundJobRunning(state, "motion")) {
     if (error)
       *error = "a motion study is already running (background_jobs lists "
-               "it; cancel_background_job {kind: \"motion\"} stops it)";
+               "it with its job id; cancel_study {job} stops it)";
     return false;
   }
-  auto run = std::make_shared<MotionRun>();
-  if (!Prepare(state, studyId, *run, error, /*copyDocs=*/true, override))
-    return false;
+  CopyForWorker(state, *run);
   // Keep the previous result visible, with its revision, while running.
 
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "motion";
   bg->label = "Motion study '" + run->study.name + "'";
   bg->cancellable = true;
+  bg->studyId = studyId;
+  bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
   bg->thread = std::thread([run, raw]() {
     OSD::SetSignal(Standard_False);
@@ -193,9 +237,11 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
         [raw] { return raw->cancel.load(); },
         [raw](double f) { raw->fraction.store(f); }, &run->meshes,
         run->contacts.get());
+    raw->error = run->result.error;
     raw->done.store(true); // last
   });
   bg->finish = [run](AppState& s) {
+    Remember(s, run->result, run->inputHash);
     // Only for the document it was run against: a tab switched underneath
     // a run does not receive somebody else's collision table.
     if (s.assembly.get() == run->ranAgainst) {
@@ -207,11 +253,14 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
     }
     return true;
   };
-  StartBackgroundJob(state, std::move(bg));
+  BackgroundJob& started = StartBackgroundJob(state, std::move(bg));
+  if (jobStart)
+    jobStart->jobId = started.id;
   return true;
 }
 
-motion::Result RunMotionNow(AppState& state, uint64_t studyId) {
+motion::Result RunMotionNow(AppState& state, uint64_t studyId,
+                            JobStart* jobStart) {
   MotionRun run;
   std::string error;
   if (!Prepare(state, studyId, run, &error, /*copyDocs=*/false)) {
@@ -219,9 +268,14 @@ motion::Result RunMotionNow(AppState& state, uint64_t studyId) {
     r.error = error;
     return r;
   }
+  if (ReuseStored(state, run, jobStart))
+    return state.motionResults[studyId];
+  // A caller that hangs up mid-run stops it: nobody is left to read it.
+  const std::function<bool()> gone = state.rpcCallerGone;
   motion::Result r = motion::Run(run.asmCopy, PartResolverFor(state),
-                                 AssemblyResolverFor(state), run.study, nullptr,
+                                 AssemblyResolverFor(state), run.study, gone,
                                  nullptr, &run.meshes, run.contacts.get());
+  Remember(state, r, run.inputHash);
   if (state.motionPlaybackStudy == studyId)
     StopMotionPlayback(state);
   state.motionResults[studyId] = r;
@@ -331,6 +385,53 @@ bool ApplyMotionValue(AppState& state, uint64_t studyId, int sample,
   const double t = static_cast<double>(std::clamp(sample, 0, steps)) / steps;
   WalkDriver(state, *s, motion::ValueAt(*s, t)); // onto the run's own path
   WalkDriver(state, *s, value); // under one spacing: a single step
+  return true;
+}
+
+bool ApplyMotionSample(AppState& state, uint64_t studyId,
+                       const motion::Result& result, size_t sample,
+                       const double* value, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (sample >= result.samples.size())
+    return fail("sample " + std::to_string(sample) + " of a run with " +
+                std::to_string(result.samples.size()) + " samples");
+  const motion::Sample& at = result.samples[sample];
+  if (!at.solved)
+    return fail("sample " + std::to_string(sample) +
+                " did not solve (residual " + std::to_string(at.residualMm) +
+                " mm), so the run has no pose there to leave the assembly in");
+  MotionStudy* s = StudyToPose(state, studyId, error);
+  if (!s)
+    return false;
+  AssemblyDocument& asmDoc = *state.assembly;
+  const assembly::AssemblyResolver subs = AssemblyResolverFor(state);
+  // Where the run had everything: each top-level placement, and each moving
+  // mate's value (a flexible placement's inner ones through its path).
+  for (const auto& [occId, world] : at.worlds)
+    if (Occurrence* o = asmDoc.FindById(occId)) {
+      o->position = glm::dvec3(world[3]);
+      o->orientation = glm::normalize(glm::quat_cast(glm::dmat3(world)));
+    }
+  for (const motion::Sample::MateValue& v : at.mates) {
+    if (v.turns)
+      assembly::SetMateDofAt(asmDoc, v.path, v.mate, MateDof::Rotation,
+                             v.rotation, subs);
+    if (v.slides)
+      assembly::SetMateDofAt(asmDoc, v.path, v.mate, MateDof::Offset, v.offset,
+                             subs);
+  }
+  if (value != nullptr)
+    assembly::SetMateDofAt(asmDoc, s->driverPath, s->driverMate, s->driverDof,
+                           *value, subs);
+  // The one solve: from the recorded pose it only settles, and to a value
+  // between samples it is the single step the walk would have ended on.
+  SolveActiveAssemblyDriven(state, s->driverMate, s->driverDof,
+                            /*diagnose=*/false, s->driverPath);
+  state.syncedDocumentVersion = UINT64_MAX; // the placements changed
   return true;
 }
 

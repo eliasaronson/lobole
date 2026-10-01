@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -125,6 +126,10 @@ private:
     std::string method;
     nlohmann::json params;
     int client = -1; // fd the response goes back to
+    // The connection it came in on: a number never reused, unlike the fd,
+    // so a job owned by a connection cannot outlive it under a new client
+    // that got the same fd (docs/simulation/README.md#studies-as-jobs).
+    uint64_t connection = 0;
     // Came back from parking (below): dispatch it, do not park it again.
     bool resumed = false;
   };
@@ -141,13 +146,14 @@ private:
   // back at the head of the queue to be dispatched.
   void PollParked(ui::AppState& state);
   bool ClientConnected(int client);
+  bool ConnectionOpen(uint64_t connection);
 
   // Accept loop (listen socket bound in Start) spawning one reader per
   // connection — several clients may be connected at once (e.g. the MCP
   // server plus a hand-driven python shell); requests interleave through the
   // single main-thread queue and responses route back by fd.
   void ReaderThread();
-  void ClientThread(int fd);
+  void ClientThread(int fd, uint64_t connection);
   void Send(int client, const nlohmann::json& message);
   void Respond(int client, const nlohmann::json& id,
                const nlohmann::json& result);
@@ -176,6 +182,11 @@ private:
 
   std::mutex m_clientsMutex;
   std::vector<int> m_clients;               // open connection fds (for Stop)
+  // Connection numbers: the next to hand out, the open ones, and the ones
+  // closed since the pump last looked -- whose study jobs it cancels.
+  uint64_t m_nextConnection = 1;
+  std::set<uint64_t> m_openConnections;
+  std::vector<uint64_t> m_closedConnections;
   std::vector<std::thread> m_clientThreads; // joined in Stop
 
   std::mutex m_queueMutex;

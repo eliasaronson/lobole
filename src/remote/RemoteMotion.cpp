@@ -4,6 +4,7 @@
 #include "remote/RemoteHelpers.h"
 
 #include "core/AssemblySolve.h"
+#include "core/InputHash.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 #include "core/io/Serialization.h"
@@ -78,7 +79,13 @@ constexpr MethodDoc MotionMethods[] = {
      "stale?,clean?,collision_checked?}"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
-     "leave_at_mm?}. Synchronous by default and "
+     "leave_at_mm?, recompute?, outlive_client?}. A run whose INPUTS hash "
+     "the same as a result this session holds (the study's definition, "
+     "every occurrence and its placement, every mate and its current "
+     "value, relations, configurations, and the placed parts' exact "
+     "geometry and materials) is answered from it, `reused: true`, nothing "
+     "computed; `input_hash` names the inputs; `recompute: true` runs "
+     "anyway. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
      "it solved, the loop residual, and the clashing pairs (each with "
      "`rigid`, and under an EXACT check its `volume`, `centroid_mm` and "
@@ -111,24 +118,33 @@ constexpr MethodDoc MotionMethods[] = {
      "barrel — with `a_path`/`b_path` naming which. A study that names a "
      "configuration runs "
      "under it. "
-     "{async: true} runs it as a background job ('motion' in "
-     "background_jobs) and motion_status reads the result when it lands. A "
+     "{async: true} runs it as a background JOB and answers `job` (its id: "
+     "study_status {job} reports it, cancel_study {job} stops it, and "
+     "motion_status {study} reads the result when it lands). The job is "
+     "cancelled when the connection that started it closes, unless "
+     "`outlive_client: true` -- a script that starts a run and exits "
+     "without it has stopped the run. A "
      "sample that does not solve is reported unsolved with its residual — "
      "never drawn in the last good pose's place. The run happens on a COPY, "
      "so the assembly is left where it was; `leave_at` (\"last\", "
-     "\"start\", or a sample INDEX) scrubs it to one of the samples "
+     "\"start\", or a sample INDEX) poses it at one of the samples "
      "afterwards, which is how anything about the far end of the travel — a "
-     "section, a mass property, a measurement — can be asked at all. To "
-     "leave it at a driver VALUE instead, `leave_at_deg` (a rotation "
-     "study, degrees) or `leave_at_mm` (an offset study, millimetres), "
-     "within the study's range: the pose is reached by walking to the "
-     "nearest sample and stepping from there, as the run steps, so a "
+     "section, a mass property, a measurement — can be asked at all: the "
+     "placements and mate values the run recorded there, and ONE solve "
+     "(with unchanged inputs the run itself is reused, so asking again with "
+     "leave_at costs that solve and nothing more). To leave it at a driver "
+     "VALUE instead, `leave_at_deg` (a rotation study, degrees) or "
+     "`leave_at_mm` (an offset study, millimetres), within the study's "
+     "range: the nearest sample's pose and one solve stepping from it, so a "
      "slider-crank stays on the branch the run found. The reply says "
-     "`left_at` (the sample walked to) and `left_at_value`.",
-     "async, include_poses, leave_at, leave_at_deg, leave_at_mm, study"},
+     "`left_at` (the sample), `left_at_value` and `left_solves`. leave_at "
+     "with async is refused: its samples do not exist yet.",
+     "async, include_poses, leave_at, leave_at_deg, leave_at_mm, "
+     "outlive_client, recompute, study"},
     {"motion_status",
-     "{study}: whether a run is in progress, and the stored result if one "
-     "has landed (the same shape run_motion_study returns).",
+     "{study}: whether a run of THIS study is in progress (with its `job` "
+     "id and `fraction` while it is), and the stored result if one has "
+     "landed (the same shape run_motion_study returns).",
      "include_poses, study"},
     {"set_motion_pose",
      "Scrub: drive the study's mate to {t} (0..1 along the range) and "
@@ -327,7 +343,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
       {"worst_sample", r.worstSample},
       {"pairs_checked", r.pairsChecked},
       {"pairs_cached", r.pairsCached},
-      {"pairs_executed", r.pairsChecked - r.pairsCached},
+      {"pairs_repeated", r.pairsRepeated},
+      {"pairs_executed", r.pairsChecked - r.pairsCached - r.pairsRepeated},
       {"pairs_unknown", r.pairsUnknown},
       {"collision_status", !r.error.empty()    ? "error"
                            : !r.checkedClashes ? "not_checked"
@@ -349,6 +366,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
     out["cancelled"] = true;
   if (!r.error.empty())
     out["error"] = r.error;
+  if (r.inputHash != 0)
+    out["input_hash"] = inputhash::Hex(r.inputHash);
 
   // The receipt (core/Receipt.h). This handler had the discipline first and
   // alone — `collision_status` has told error / not_checked / incomplete /
@@ -416,7 +435,7 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
 // driver, falls outside the range the run walked, or comes with `leave_at`
 // as well — two answers to one question, and neither would be the other.
 json LeaveAtValue(ui::AppState& state, const MotionStudy& s,
-                  const RpcParams& p) {
+                  const motion::Result& r, const RpcParams& p) {
   const bool rot = s.driverDof == MateDof::Rotation;
   const char* want = rot ? "leave_at_deg" : "leave_at_mm";
   const char* other = rot ? "leave_at_mm" : "leave_at_deg";
@@ -446,12 +465,16 @@ json LeaveAtValue(ui::AppState& state, const MotionStudy& s,
                              " — the run never walked there, so it has no "
                              "branch to keep; widen the study's from/to");
   }
-  const int n = s.samples;
+  const int n = static_cast<int>(r.samples.size());
+  if (n < 2)
+    throw std::runtime_error(std::string(want) +
+                             ": the run has fewer than two samples");
   const double t = (value - s.from) / (s.to - s.from);
   const int nearest =
       std::clamp(static_cast<int>(std::lround(t * (n - 1))), 0, n - 1);
   std::string err;
-  if (!ui::ApplyMotionValue(state, s.id, nearest, value, &err))
+  if (!ui::ApplyMotionSample(state, s.id, r, static_cast<size_t>(nearest),
+                             &value, &err))
     throw std::runtime_error(err);
   return json{{"left_at", nearest}, {"left_at_value", wire}};
 }
@@ -631,8 +654,9 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
   if (m == "list_motion_studies") {
     AssemblyDocument& asmDoc = NeedAssembly(state);
     json out = json::array();
-    const bool running = ui::BackgroundJobRunning(state, "motion");
+    const ui::BackgroundJob* job = ui::FindBackgroundJob(state, "motion");
     for (const MotionStudy& s : asmDoc.GetMotionStudies()) {
+      const bool running = job != nullptr && job->studyId == s.id;
       json j = StudyJson(state, asmDoc, s);
       const motion::Result* r = ui::MotionResultFor(state, s.id);
       j["has_result"] = r != nullptr;
@@ -650,28 +674,52 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
+    const bool atValue =
+        p.contains("leave_at_deg") || p.contains("leave_at_mm");
+    // Who the run belongs to, and whether a stored answer may stand for it
+    // (docs/simulation/README.md#studies-as-jobs).
+    ui::JobStart start;
+    start.recompute = p.value("recompute", false);
+    start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
     if (p.value("async", false)) {
+      if (p.contains("leave_at") || atValue)
+        throw std::runtime_error(
+            "leave_at needs the run's samples, and an async run has none yet "
+            "-- poll motion_status, then run_motion_study {study, leave_at} "
+            "(the same inputs are answered from the stored run, and the pose "
+            "is one solve)");
       std::string err;
-      if (!ui::StartMotionRun(state, s.id, &err))
+      if (!ui::StartMotionRun(state, s.id, &err, nullptr, &start))
         throw std::runtime_error(err);
-      return json{{"started", true}, {"running", true}, {"job", "motion"}};
+      if (start.reused) {
+        json out{{"started", false},
+                 {"running", false},
+                 {"reused", true},
+                 {"kind", "motion"}};
+        if (const motion::Result* r = ui::MotionResultFor(state, s.id))
+          out["input_hash"] = inputhash::Hex(r->inputHash);
+        return out;
+      }
+      return json{{"started", true},
+                  {"running", true},
+                  {"job", start.jobId},
+                  {"kind", "motion"},
+                  {"outlives_client", start.owner == 0}};
     }
-    const motion::Result r = ui::RunMotionNow(state, s.id);
+    const motion::Result r = ui::RunMotionNow(state, s.id, &start);
     if (!r.error.empty())
       throw std::runtime_error(r.error);
     json out = ResultJson(NeedAssembly(state), r, s, includePoses);
+    out["reused"] = start.reused;
     // A run happens on a COPY, so the assembly is left exactly where it was
-    // — which means nothing about the far end of the travel can be measured
-    // afterwards. `section` after a throttle study saw the shut throttle
-    // twice, and the only way out was reading orientations from the poses
-    // and doing quaternion arithmetic in the caller. `leave_at` scrubs the
-    // live assembly to one of the samples instead, through the same walk
-    // the scrub uses, so it arrives on the branch the run found rather than
-    // on whichever one a jump would have landed on.
-    const bool atValue =
-        p.contains("leave_at_deg") || p.contains("leave_at_mm");
+    // -- which means nothing about the far end of the travel can be measured
+    // afterwards. `leave_at` poses the live assembly at one of the run's
+    // samples instead: the placements and mate values recorded there,
+    // written in and solved ONCE, so it arrives on the branch the run found
+    // without walking the travel again.
+    const uint64_t solvesBefore = assembly::SolveCount();
     if (atValue)
-      out.update(LeaveAtValue(state, s, p));
+      out.update(LeaveAtValue(state, s, r, p));
     if (p.contains("leave_at") && !atValue) {
       const json& at = p.at("leave_at");
       const int n = static_cast<int>(r.samples.size());
@@ -695,18 +743,28 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                    std::to_string(n - 1));
       }
       std::string err;
-      const double t = n > 1 ? double(idx) / double(n - 1) : 0.0;
-      if (!ui::ApplyMotionPose(state, s.id, t, &err))
+      if (!ui::ApplyMotionSample(state, s.id, r, static_cast<size_t>(idx),
+                                 nullptr, &err))
         throw std::runtime_error(err);
       out["left_at"] = idx;
     }
+    if (p.contains("leave_at") || atValue)
+      out["left_solves"] = assembly::SolveCount() - solvesBefore;
     return out;
   }
   if (m == "motion_status") {
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
-    json out{{"running", ui::BackgroundJobRunning(state, "motion")}};
+    // The job running THIS study, if any: its id and how far it is.
+    ui::BackgroundJob* job = ui::FindBackgroundJob(state, "motion");
+    if (job != nullptr && job->studyId != s.id)
+      job = nullptr;
+    json out{{"running", job != nullptr}};
+    if (job != nullptr) {
+      out["job"] = job->id;
+      out["fraction"] = job->fraction.load();
+    }
     if (const motion::Result* r = ui::MotionResultFor(state, s.id)) {
       out["result"] = ResultJson(asmDoc, *r, s, includePoses);
       out["stale"] = ui::MotionResultStale(state, s.id);

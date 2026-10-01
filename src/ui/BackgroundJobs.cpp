@@ -46,6 +46,23 @@ void ReapBackgroundJobs(AppState& state) {
       continue; // asked to be called again next frame
     job.finish = nullptr;
     job.reaped = true;
+    // How it ended, kept for a status asked by id after the end.
+    FinishedJob f;
+    f.id = job.id;
+    f.kind = job.kind;
+    f.label = job.label;
+    f.studyId = job.studyId;
+    f.error = job.error;
+    f.cancelReason = job.cancelReason;
+    f.outcome = !job.error.empty()  ? "failed"
+                : job.cancel.load() ? "cancelled"
+                                    : "done";
+    f.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                              job.started)
+                    .count();
+    state.finishedJobs.push_back(std::move(f));
+    while (state.finishedJobs.size() > 64)
+      state.finishedJobs.pop_front();
   }
   std::erase_if(
       state.backgroundJobs,
@@ -55,6 +72,7 @@ void ReapBackgroundJobs(AppState& state) {
 BackgroundJob& StartBackgroundJob(AppState& state,
                                   std::unique_ptr<BackgroundJob> job) {
   job->started = std::chrono::steady_clock::now();
+  job->id = state.nextJobId++;
   state.backgroundJobs.push_back(std::move(job));
   return *state.backgroundJobs.back();
 }
@@ -107,6 +125,9 @@ std::vector<BackgroundJobInfo> ListBackgroundJobs(const AppState& state) {
     if (j->reaped)
       continue;
     BackgroundJobInfo info;
+    info.id = j->id;
+    info.owner = j->owner;
+    info.studyId = j->studyId;
     info.kind = j->kind;
     info.label = j->label;
     info.cancellable = j->cancellable;
@@ -116,6 +137,44 @@ std::vector<BackgroundJobInfo> ListBackgroundJobs(const AppState& state) {
     out.push_back(std::move(info));
   }
   return out;
+}
+
+BackgroundJob* FindBackgroundJobById(AppState& state, uint64_t id) {
+  for (std::unique_ptr<BackgroundJob>& j : state.backgroundJobs)
+    if (j->id == id && !j->reaped)
+      return j.get();
+  return nullptr;
+}
+
+const FinishedJob* FinishedJobById(const AppState& state, uint64_t id) {
+  for (const FinishedJob& f : state.finishedJobs)
+    if (f.id == id)
+      return &f;
+  return nullptr;
+}
+
+bool CancelBackgroundJobById(AppState& state, uint64_t id,
+                             const std::string& reason) {
+  BackgroundJob* job = FindBackgroundJobById(state, id);
+  if (job == nullptr)
+    return false;
+  if (!job->cancel.exchange(true))
+    job->cancelReason = reason;
+  return true;
+}
+
+size_t CancelJobsOwnedBy(AppState& state, uint64_t owner,
+                         const std::string& reason) {
+  if (owner == 0)
+    return 0;
+  size_t asked = 0;
+  for (std::unique_ptr<BackgroundJob>& j : state.backgroundJobs)
+    if (j->owner == owner && !j->reaped) {
+      if (!j->cancel.exchange(true))
+        j->cancelReason = reason;
+      asked++;
+    }
+  return asked;
 }
 
 } // namespace ui

@@ -14,6 +14,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -1477,9 +1478,16 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
   return report;
 }
 
+namespace {
+std::atomic<uint64_t> g_solveCount{0};
+} // namespace
+
+uint64_t SolveCount() { return g_solveCount.load(); }
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById, const Driven& driven,
                   bool diagnose) {
+  g_solveCount.fetch_add(1, std::memory_order_relaxed);
   // Flexible sub-assemblies (v129) are solved by WRAPPING: the solve runs on
   // a copy with every flexible placement's inside added, and the answer is
   // written back. Nothing flexible, nothing to wrap.

@@ -158,6 +158,9 @@ struct Driven {
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr,
                   const Driven& driven = {}, bool diagnose = true);
+// How many times Solve has run in this process: what a test counts to show
+// `leave_at` poses with one solve rather than a walk.
+uint64_t SolveCount();
 
 // ---- Flexible sub-assemblies (v129) ----------------------------------------
 // (docs/assemblies/README.md#flexible-sub-assemblies)

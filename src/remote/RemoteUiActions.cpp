@@ -724,6 +724,11 @@ struct RemoteServer::Parked {
   std::unique_ptr<remote::CamParking> wait;
 };
 
+bool RemoteServer::ConnectionOpen(uint64_t connection) {
+  std::lock_guard<std::mutex> lock(m_clientsMutex);
+  return m_openConnections.contains(connection);
+}
+
 bool RemoteServer::ClientConnected(int client) {
   std::lock_guard<std::mutex> lock(m_clientsMutex);
   return std::find(m_clients.begin(), m_clients.end(), client) !=
@@ -811,6 +816,21 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
   // even if the client never polls for it — this is the RPC pump's own
   // main-thread join point, and it applies before it answers.
   ui::ReapBackgroundJobs(state);
+  // A study job dies with the connection that started it, unless it was
+  // asked to outlive it (docs/simulation/README.md#studies-as-jobs).
+  {
+    std::vector<uint64_t> closed;
+    {
+      std::lock_guard<std::mutex> lock(m_clientsMutex);
+      closed.swap(m_closedConnections);
+    }
+    for (uint64_t connection : closed)
+      if (const size_t n = ui::CancelJobsOwnedBy(state, connection,
+                                                 "its client disconnected"))
+        LOG_INFO("Remote control: cancelled {} study job(s) of a client that "
+                 "disconnected",
+                 n);
+  }
   // Parked requests next: one whose passes just landed is answered on the
   // same tick, ahead of anything that arrived since.
   PollParked(state);
@@ -939,6 +959,19 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       bool handled = false;
       // Named on the watchdog's stall line if it takes that long.
       const watchdog::Label rpcLabel("RPC " + request.method);
+      // Who is asking, for a study job to belong to and a synchronous run to
+      // stop on; cleared however the handler leaves.
+      struct Caller {
+        ui::AppState& state;
+        ~Caller() {
+          state.rpcConnection = 0;
+          state.rpcCallerGone = nullptr;
+        }
+      } caller{state};
+      state.rpcConnection = request.connection;
+      state.rpcCallerGone = [this, connection = request.connection] {
+        return !ConnectionOpen(connection);
+      };
       json result = HandleSemantic(request, state, handled, params);
       if (handled) {
         // Strict params: a recognized method that ran without touching a key

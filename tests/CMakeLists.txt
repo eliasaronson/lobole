@@ -139,6 +139,7 @@ add_executable(designer_tests
     test_ibl.cpp
     test_fem.cpp
     test_topopt.cpp
+    test_study_inputs.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
     test_drawing_sheet.cpp
@@ -460,6 +461,12 @@ add_test(NAME scrub_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scrub_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(scrub_smoke PROPERTIES TIMEOUT 300)
+
+# A study is a job: an id, cancelled with its client, reused by its inputs.
+add_test(NAME study_jobs_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/study_jobs_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(study_jobs_smoke PROPERTIES TIMEOUT 300)
 
 # fit_fastener and check_fasteners agree about where a joint ENDS (W1).
 add_test(NAME fastener_stack_smoke

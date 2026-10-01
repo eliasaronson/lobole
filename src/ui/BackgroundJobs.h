@@ -81,12 +81,42 @@ size_t CancelBackgroundJobs(AppState& state, const std::string& kind);
 void JoinBackgroundJobs(AppState& state, const std::string& kind);
 
 struct BackgroundJobInfo {
+  uint64_t id = 0;
   std::string kind, label;
   bool cancellable = false;
   double fraction = -1.0;
   double elapsedSeconds = 0.0;
+  uint64_t owner = 0, studyId = 0;
 };
 [[nodiscard]] std::vector<BackgroundJobInfo>
 ListBackgroundJobs(const AppState& state);
+
+// --- Jobs by id (docs/simulation/README.md#studies-as-jobs) -----------------
+
+[[nodiscard]] BackgroundJob* FindBackgroundJobById(AppState& state,
+                                                   uint64_t id);
+
+[[nodiscard]] const FinishedJob* FinishedJobById(const AppState& state,
+                                                 uint64_t id);
+
+// Ask job `id` to stop, recording why. False when no running job has it.
+bool CancelBackgroundJobById(AppState& state, uint64_t id,
+                             const std::string& reason);
+
+// Cancel every job `owner` (an RPC connection) started — it has gone away.
+// Returns how many were asked.
+size_t CancelJobsOwnedBy(AppState& state, uint64_t owner,
+                         const std::string& reason);
+
+// What starting a study run wants and gets back. In: whether to compute
+// even when a stored result matches (`recompute`), and the connection the
+// job dies with (`owner`, 0 = none). Out: the job's id, or `reused` when a
+// stored result with the same input hash answered and nothing started.
+struct JobStart {
+  bool recompute = false;
+  uint64_t owner = 0;
+  uint64_t jobId = 0;
+  bool reused = false;
+};
 
 } // namespace ui

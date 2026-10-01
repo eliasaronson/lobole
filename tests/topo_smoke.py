@@ -166,8 +166,15 @@ def main():
         d.call("set_topo_ghost", study=study, on=False)
 
         # --- cancel: a second run stopped mid-flight keeps best-so-far -----
-        started2 = d.call("run_study", study=study)
+        # The same inputs again: the stored result answers, nothing starts.
+        t0 = time.time()
+        re = d.call("run_study", study=study)
+        expect(re.get("reused") is True and re.get("started") is False,
+               f"an unchanged topology study is reused: {re}")
+        expect(time.time() - t0 < 1.0, "a reuse is well under a second")
+        started2 = d.call("run_study", study=study, recompute=True)
         expect(started2.get("started") is True, "second run started")
+        expect(isinstance(started2.get("job"), int), f"a job id: {started2}")
         c = d.call("cancel_study", study=study)
         expect(c["cancelled"] is True, "cancel acknowledged")
         st2 = poll_until_done(d, study, timeout=60.0)
@@ -175,10 +182,10 @@ def main():
         expect(st2["cancelled"] is True, "the result is flagged cancelled")
 
         # A second run cannot start while one is in progress.
-        started3 = d.call("run_study", study=study)
+        started3 = d.call("run_study", study=study, recompute=True)
         expect(started3.get("started") is True, "third run started")
         try:
-            d.call("run_study", study=study)
+            d.call("run_study", study=study, recompute=True)
             raise AssertionError("expected 'already in progress' error")
         except Exception as e:
             expect("in progress" in str(e), f"one run at a time: {e}")

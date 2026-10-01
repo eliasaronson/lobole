@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "TestIO.h"
 #include "core/AssemblySolve.h"
@@ -20,7 +21,9 @@
 #include "core/io/Serialization.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -339,7 +342,7 @@ TEST_CASE(
   const auto warm = motion::Run(rig.asmDoc, rig.Parts(), nullptr, study,
                                 nullptr, nullptr, nullptr, &cache);
   REQUIRE(cold.pairsChecked > 0);
-  CHECK(warm.pairsCached == warm.pairsChecked);
+  CHECK(warm.pairsCached + warm.pairsRepeated == warm.pairsChecked);
   CHECK(warm.clean == cold.clean);
   CHECK(warm.pairsUnknown == 0);
   for (size_t i = 0; i < cold.samples.size(); ++i) {
@@ -412,29 +415,59 @@ TEST_CASE("motion table explains unknown contacts and interrupted runs",
 // before — the predicate that produces one was not.
 TEST_CASE("A cancelled motion run keeps the samples it finished", "[motion]") {
   Rig r = MakeRig(90.0);
-  const MotionStudy study = FullTurn(r.axle, 25);
-
-  int seen = 0;
-  const motion::Result res = motion::Run(
-      r.asmDoc, r.Parts(), nullptr, study, [&seen] { return ++seen > 7; },
-      nullptr);
-
-  REQUIRE(res.error.empty());
-  CHECK(res.cancelled);
-  // Seven asks returned false, the eighth stopped it — so seven samples.
-  CHECK(res.samples.size() == 7);
-  // `clean` is false on an interrupted run whatever the samples showed: it
-  // means "this mechanism is clear", and seven of twenty-five poses cannot
-  // say that.
-  CHECK_FALSE(res.clean);
-  CHECK(motion::Table(res, study).find("INCOMPLETE") != std::string::npos);
+  MotionStudy study = FullTurn(r.axle, 25);
+  study.clashMode = "exact";
 
   // The same study, uninterrupted, is the control: cancelling changes what
   // was checked, not what checking finds.
   const motion::Result full = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
   REQUIRE(full.samples.size() == 25);
-  for (size_t i = 0; i < res.samples.size(); i++)
+
+  // A run solves every sample, then checks them all in one batch; a cancel
+  // during the checks keeps the leading samples whose every check landed.
+  // Cancelled at the first check, as progress reports them.
+  // One worker, so the batch stops where the cancel lands rather than with
+  // every candidate already handed out.
+  setenv("DESIGNER_SWEEP_THREADS", "1", 1);
+  std::atomic<bool> stop{false};
+  const motion::Result res = motion::Run(
+      r.asmDoc, r.Parts(), nullptr, study, [&stop] { return stop.load(); },
+      [&stop](double f) {
+        if (f > 0.1) // the first check landed
+          stop.store(true);
+      });
+  unsetenv("DESIGNER_SWEEP_THREADS");
+  REQUIRE(res.error.empty());
+  CHECK(res.cancelled);
+  CHECK(res.samples.size() < 25);
+  // `clean` is false on an interrupted run whatever the samples showed: it
+  // means "this mechanism is clear", and part of the poses cannot say that.
+  CHECK_FALSE(res.clean);
+  CHECK(motion::Table(res, study).find("INCOMPLETE") != std::string::npos);
+  for (size_t i = 0; i < res.samples.size(); i++) {
     CHECK(res.samples[i].value == full.samples[i].value);
+    CHECK(res.samples[i].clashes.size() == full.samples[i].clashes.size());
+  }
+
+  // Cancelled during the solves, nothing was checked, so nothing is kept: a
+  // sample is finished when it is checked.
+  int seen = 0;
+  const motion::Result early = motion::Run(
+      r.asmDoc, r.Parts(), nullptr, study, [&seen] { return ++seen > 7; },
+      nullptr);
+  CHECK(early.cancelled);
+  CHECK(early.samples.empty());
+
+  // A kinematics-only run's sample IS its solve: seven asks returned false,
+  // the eighth stopped it, so seven samples.
+  MotionStudy kinematics = study;
+  kinematics.checkClash = false;
+  seen = 0;
+  const motion::Result moved = motion::Run(
+      r.asmDoc, r.Parts(), nullptr, kinematics, [&seen] { return ++seen > 7; },
+      nullptr);
+  CHECK(moved.cancelled);
+  CHECK(moved.samples.size() == 7);
 }
 
 TEST_CASE("A study runs under the configuration it names", "[motion]") {
@@ -720,4 +753,144 @@ TEST_CASE("The verdict calls a rigid pair's clash standing", "[motion]") {
   CHECK_THAT(motion::Summarize(r, s, false).text,
              ContainsSubstring("Plate A x Plate B at sample 0") &&
                  ContainsSubstring("standing"));
+}
+
+// A run is answered from a stored one only when its input hash matches
+// (docs/simulation/README.md#studies-as-jobs), so the hash must move on every
+// input that can change an answer -- each class checked here on its own --
+// and on nothing that cannot.
+TEST_CASE("A motion run's input hash moves with every input",
+          "[motion][studyjobs]") {
+  Rig r = MakeRig(90.0);
+  const MotionStudy study = FullTurn(r.axle, 13);
+  const auto key = [&](const MotionStudy& s) {
+    return motion::InputKey(r.asmDoc, r.Parts(), nullptr, s);
+  };
+  const uint64_t base = key(study);
+  REQUIRE(base != 0);
+  CHECK(key(study) == base); // deterministic
+
+  // The study's name is a label, not an input.
+  MotionStudy renamed = study;
+  renamed.name = "another name";
+  CHECK(key(renamed) == base);
+
+  // Settings.
+  MotionStudy more = study;
+  more.samples = 14;
+  CHECK(key(more) != base);
+  MotionStudy exact = study;
+  exact.clashMode = "exact";
+  CHECK(key(exact) != base);
+  MotionStudy shorter = study;
+  shorter.to = kPi;
+  CHECK(key(shorter) != base);
+
+  // A mate's value (the run starts from the pose the document is in).
+  r.asmDoc.FindMateById(r.axle)->rotation = 0.25;
+  CHECK(key(study) != base);
+  r.asmDoc.FindMateById(r.axle)->rotation = 0.0;
+  REQUIRE(key(study) == base);
+
+  // A placement.
+  r.asmDoc.FindById(r.stopOcc)->position.z = 1.0;
+  CHECK(key(study) != base);
+  r.asmDoc.FindById(r.stopOcc)->position.z = 0.0;
+  REQUIRE(key(study) == base);
+
+  // A relation.
+  Relation rel;
+  rel.kind = RelationKind::Gear;
+  rel.mateA = r.axle;
+  rel.mateB = r.axle;
+  rel.ratio = 1.0;
+  const uint64_t relId = r.asmDoc.AddRelation(rel);
+  CHECK(key(study) != base);
+  r.asmDoc.RemoveRelation(relId);
+
+  // A configuration, and which one is active.
+  const uint64_t beforeConfig = key(study);
+  Configuration& noStop = r.asmDoc.AddConfiguration("no stop");
+  noStop.suppressedFeatures.push_back(r.stopOcc);
+  const uint64_t withConfig = key(study);
+  CHECK(withConfig != beforeConfig);
+  r.asmDoc.SetActiveConfigurationRaw(noStop.id);
+  CHECK(key(study) != withConfig);
+  r.asmDoc.SetActiveConfigurationRaw(0);
+
+  // The geometry of a placed part, and its material.
+  const uint64_t beforeGeometry = key(study);
+  r.stop = BoxPart({-2, -2, -2}, {5, 4, 4});
+  CHECK(key(study) != beforeGeometry);
+  const uint64_t beforeMaterial = key(study);
+  r.stop->GetFeature(0)->SetMaterial("steel");
+  r.stop->Regenerate();
+  CHECK(key(study) != beforeMaterial);
+}
+
+// The exact check reuses work between samples: a pair at a relative pose it
+// was already found clear at -- here the full turn's last sample, which is
+// its first -- takes that answer instead of a second boolean, and the table
+// is the same as the answer each sample would have got on its own.
+TEST_CASE("An exact motion run checks a repeated relative pose once",
+          "[motion][studyjobs]") {
+  // A stop just off the arm's line at 0 degrees: the arm clashes with it
+  // at 0 (and 360), and at 30 degrees their boxes overlap with the two
+  // clear of each other -- a clear answer to repeat.
+  Rig r = MakeRig(0.0);
+  r.asmDoc.FindById(r.stopOcc)->position = glm::dvec3(20.0, 2.0, 0.0);
+  MotionStudy study = FullTurn(r.axle, 13);
+  study.clashMode = "exact";
+  // Two full turns: every pose of the second is one of the first.
+  study.to = 4.0 * kPi;
+  study.samples = 25;
+  const motion::Result res = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
+  REQUIRE(res.error.empty());
+  REQUIRE(res.samples.size() == 25);
+  CHECK(res.pairsRepeated > 0);
+  // Sample k and sample k + 12 are the same pose: the same clashes.
+  for (size_t k = 0; k + 12 < res.samples.size(); k++)
+    CHECK(res.samples[k].clashes.size() == res.samples[k + 12].clashes.size());
+  // And the same as one turn checked on its own.
+  MotionStudy once = study;
+  once.to = 2.0 * kPi;
+  once.samples = 13;
+  const motion::Result single = motion::Run(r.asmDoc, r.Parts(), nullptr, once);
+  for (size_t k = 0; k < single.samples.size(); k++)
+    CHECK(single.samples[k].clashes.size() == res.samples[k].clashes.size());
+  CHECK(res.clean == single.clean);
+}
+
+// The session's exact cache finds a clear pair by its RELATIVE pose: two
+// bodies moved together, or a re-run whose solve landed a hair away, is a
+// hit. A clash is not reused across world poses (its location is in world
+// space).
+TEST_CASE("The exact contact cache matches a clear pair by relative pose",
+          "[motion][cache][studyjobs]") {
+  auto a = BoxPart({0, 0, 0}, {4, 4, 4});
+  auto b = BoxPart({10, 0, 0}, {4, 4, 4});
+  const CADShape& sa = a->GetBodies()[0].shape;
+  const CADShape& sb = b->GetBodies()[0].shape;
+  collide::ExactContactCache cache;
+  const glm::dmat4 id(1.0);
+  const auto first = cache.Check(sa, id, sb, id);
+  REQUIRE(first.contact);
+  CHECK_FALSE(first.cached);
+  CHECK(first.contact->volume == 0.0);
+  // Both carried 50 mm and turned together: the same question.
+  const glm::dmat4 carried =
+      glm::rotate(glm::translate(glm::dmat4(1.0), glm::dvec3(50, 0, 0)), 0.7,
+                  glm::dvec3(0, 0, 1));
+  const auto moved = cache.Check(sa, carried, sb, carried);
+  CHECK(moved.cached);
+  // Apart by a different amount: a different question.
+  const glm::dmat4 nearer =
+      glm::translate(glm::dmat4(1.0), glm::dvec3(-7, 0, 0));
+  const auto closer = cache.Check(sa, id, sb, nearer);
+  CHECK_FALSE(closer.cached);
+  REQUIRE(closer.contact);
+  CHECK(closer.contact->volume > 0.0); // they overlap now
+  // An overlap is not found by relative pose from another world pose.
+  const auto overlapMoved = cache.Check(sa, carried, sb, carried * nearer);
+  CHECK_FALSE(overlapMoved.cached);
 }

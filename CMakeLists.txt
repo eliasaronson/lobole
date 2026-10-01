@@ -399,6 +399,7 @@ set(core_sources
     src/core/features/FrameFeature.cpp
     src/core/MeshCollide.cpp
     src/core/MotionStudy.cpp
+    src/core/InputHash.cpp
     src/core/io/GlbAnimation.cpp
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp
@@ -425,6 +426,7 @@ set(core_sources
     src/core/features/PatternFeature.cpp
     src/core/sketch/SketchSolver.cpp
     src/core/fem/FemStudy.cpp
+    src/core/fem/FemInputKey.cpp
     src/core/fem/AssemblyStudy.cpp
     src/core/fem/FemSolver.cpp
     src/core/fem/FemTopo.cpp

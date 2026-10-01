@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <thread>
@@ -26,8 +27,23 @@ namespace ui {
 struct AppState;
 
 struct BackgroundJob {
+  // Assigned by StartBackgroundJob from a session counter and never reused:
+  // the handle a study job is asked about and cancelled by
+  // (docs/simulation/README.md#studies-as-jobs). A kind names many jobs over
+  // a session; an id names one.
+  uint64_t id = 0;
   std::string kind;  // "cam" | … — what `cancel_background_job` names
   std::string label; // "Clearing 'Pocket 1', pass 2 of 4" — shown as-is
+  // The RPC connection that started it and that it dies with (0: nobody —
+  // the GUI started it, or the caller asked it to outlive its client). Only
+  // study jobs set it: a CAM pass is cached and paid for, and keeps going.
+  uint64_t owner = 0;
+  // The study a study job runs (0 for every other kind), so a status by job
+  // id can say which.
+  uint64_t studyId = 0;
+  // Why `cancel` was set, for the record kept once the job is reaped:
+  // "cancel_study", "its client disconnected", …
+  std::string cancelReason;
   bool cancellable = false;
   std::atomic<double> fraction{-1.0}; // <0 = indeterminate, no bar
   std::atomic<bool> cancel{false};    // main sets; a job may ignore it
@@ -52,6 +68,17 @@ struct BackgroundJob {
     if (thread.joinable())
       thread.join();
   }
+};
+
+// A job after it was reaped: how it ended. The registry keeps the last few
+// so a status asked just after the end answers rather than "no such job".
+struct FinishedJob {
+  uint64_t id = 0;
+  std::string kind, label;
+  uint64_t studyId = 0;
+  std::string outcome; // "done" | "cancelled" | "failed"
+  std::string error, cancelReason;
+  double seconds = 0.0;
 };
 
 } // namespace ui

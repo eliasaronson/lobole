@@ -93,8 +93,18 @@ def main():
               f"{r['pairs_checked']} pair checks")
         expect(len(r["samples"]) == 25, f"25 samples: {len(r['samples'])}")
         expect(all(s["solved"] for s in r["samples"]), "every sample solved")
-        warm = d.call("run_motion_study", study=sid)
-        expect(warm["pairs_cached"] == warm["pairs_checked"], "repeat reuses exact checks")
+        # Unchanged inputs: the stored run answers, nothing is computed.
+        t0 = time.time()
+        same = d.call("run_motion_study", study=sid)
+        expect(same["reused"] is True and time.time() - t0 < 1.0,
+               f"an unchanged study is reused: {same.get('reused')}")
+        expect(same["samples"] == r["samples"] and
+               same["input_hash"] == r["input_hash"], "the same run")
+        # recompute runs it again, and the exact checks come from the cache.
+        warm = d.call("run_motion_study", study=sid, recompute=True)
+        expect(warm["reused"] is False, "recompute runs")
+        expect(warm["pairs_cached"] + warm["pairs_repeated"] ==
+               warm["pairs_checked"], "repeat reuses exact checks")
         expect(warm["pairs_executed"] == 0, "repeat executes no booleans")
         expect(warm["samples"] == r["samples"], "cached results preserve collision locations")
         expect(not d.call("motion_status", study=sid)["stale"], "fresh result")
@@ -128,8 +138,14 @@ def main():
                f"the run drove a COPY; the mate is where it was: {mate}")
 
         # ---- The same run as a job --------------------------------------
-        r2 = d.call("run_motion_study", study=sid, **{"async": True})
-        expect(r2["started"] and r2["job"] == "motion", f"started: {r2}")
+        # Unchanged inputs answer from the stored run even asked async;
+        # recompute runs it as a job, with an id.
+        same = d.call("run_motion_study", study=sid, **{"async": True})
+        expect(same["reused"] and not same["started"], f"reused: {same}")
+        r2 = d.call("run_motion_study", study=sid, recompute=True,
+                    **{"async": True})
+        expect(r2["started"] and r2["kind"] == "motion"
+               and isinstance(r2["job"], int), f"started: {r2}")
         for _ in range(300):
             st = d.call("motion_status", study=sid)
             # The prior synchronous result remains available while rerunning.

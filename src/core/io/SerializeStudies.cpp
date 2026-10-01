@@ -2,6 +2,7 @@
 #include "core/io/SerializationInternal.h"
 
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 
@@ -195,6 +196,10 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
                      {"cancelled", rt.cancelled},
                      {"volume_fraction", rt.volumeFractionAchieved},
                      {"compliance", rt.complianceHistory}};
+  // What produced it (v148): a reopened project reuses the result for a run
+  // whose inputs hash the same, and reads it stale when they do not.
+  if (rt.inputHash != 0)
+    out["input_hash"] = inputhash::Hex(rt.inputHash);
   json bodies = json::array();
   for (const fem::StudyBodyResult& b : rt.bodies) {
     json nodes = json::array();
@@ -233,6 +238,11 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   rt.cancelled = s.value("cancelled", false);
   rt.volumeFractionAchieved = s.value("volume_fraction", 0.0);
   rt.complianceHistory = s.value("compliance", std::vector<double>{});
+  if (j.contains("input_hash") &&
+      !inputhash::FromHex(j.at("input_hash").get<std::string>(), rt.inputHash))
+    throw std::runtime_error("topology result: input_hash " +
+                             j.at("input_hash").dump() +
+                             " is not 0x and 16 hex digits");
   for (const json& bj : j.value("bodies", json::array())) {
     fem::StudyBodyResult b;
     b.bodyIndex = bj.value("body_index", -1);

@@ -19,6 +19,7 @@
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SweepFeature.h"
+#include "core/fem/FemSolver.h"
 
 #include <nlohmann/json.hpp>
 
@@ -954,8 +955,15 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     bulk.reset(); // the one regeneration for everything loaded above
     // Now that regeneration has settled, stamp the persisted topology results
     // with the final version so they read as current (v33).
+    // A result whose saved input hash no longer matches what the reopened
+    // part would hand the optimizer was saved stale, or the part moved under
+    // it: it reads stale, and is not reused (v148).
     for (auto& [id, rt] : pendingResults) {
       rt.solvedAtVersion = doc->Version();
+      if (rt.inputHash != 0)
+        if (const fem::Study* st = doc->FindStudy(id))
+          if (fem::StudyInputKey(*doc, *st) != rt.inputHash)
+            rt.solvedAtVersion = UINT64_MAX; // no version reaches it
       doc->StoreStudyResults(id, std::move(rt));
     }
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),

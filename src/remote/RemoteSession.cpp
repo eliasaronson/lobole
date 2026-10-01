@@ -283,12 +283,15 @@ void RemoteServer::ReaderThread() {
       continue;
     }
     m_clients.push_back(client);
-    m_clientThreads.emplace_back([this, client] { ClientThread(client); });
+    const uint64_t connection = m_nextConnection++;
+    m_openConnections.insert(connection);
+    m_clientThreads.emplace_back(
+        [this, client, connection] { ClientThread(client, connection); });
     LOG_INFO("Remote control: client connected ({} active)", m_clients.size());
   }
 }
 
-void RemoteServer::ClientThread(int client) {
+void RemoteServer::ClientThread(int client, uint64_t connection) {
   std::string buffer;
   char chunk[4096];
   while (m_running) {
@@ -306,6 +309,7 @@ void RemoteServer::ClientThread(int client) {
 
       Request request;
       request.client = client;
+      request.connection = connection;
       try {
         json msg = json::parse(line);
         request.id = msg.value("id", json());
@@ -332,7 +336,13 @@ void RemoteServer::ClientThread(int client) {
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     m_clients.erase(std::remove(m_clients.begin(), m_clients.end(), client),
                     m_clients.end());
+    // The pump cancels the study jobs this connection started, unless they
+    // were asked to outlive it.
+    m_openConnections.erase(connection);
+    m_closedConnections.push_back(connection);
   }
+  if (m_wake)
+    m_wake();
   LOG_INFO("Remote control: client disconnected");
 }
 

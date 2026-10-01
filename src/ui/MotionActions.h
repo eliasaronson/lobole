@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MotionStudy.h"
+#include "ui/BackgroundJobs.h"
 
 #include <glm/glm.hpp>
 
@@ -37,12 +38,32 @@ struct RunOverride {
 // Start an async run. False (with `error`) if one is already running or
 // the study cannot run (WhyNot). `override` (may be null) changes what this
 // run checks without editing the study.
+//
+// A run whose input hash (motion::InputKey) matches a result the session
+// holds is answered from it and starts nothing: `job->reused` says so,
+// unless `job->recompute` asked for a run anyway
+// (docs/simulation/README.md#studies-as-jobs). Otherwise `job->jobId` is
+// the started job's id, and `job->owner` the connection it dies with.
 bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
-                    const RunOverride* override = nullptr);
+                    const RunOverride* override = nullptr,
+                    JobStart* job = nullptr);
 
 // Run on the main thread, now. The same result as the job, for a caller
-// that would rather wait than poll.
-motion::Result RunMotionNow(AppState& state, uint64_t studyId);
+// that would rather wait than poll; reused as StartMotionRun says. It stops
+// (cancelled) when `state.rpcCallerGone` says its caller has gone.
+motion::Result RunMotionNow(AppState& state, uint64_t studyId,
+                            JobStart* job = nullptr);
+
+// Leave the live assembly where sample `sample` of `result` has it: every
+// placement and moving mate value the run recorded there, written in, and
+// ONE solve to settle it -- not a walk from wherever the assembly is. With
+// `value` (the driver, radians or mm), the driver is set to it after the
+// sample's pose and the one solve steps there: the nearest sample is less
+// than a spacing away, so a slider-crank stays on the run's branch. Refuses
+// a sample that did not solve: there is no pose to leave it in.
+bool ApplyMotionSample(AppState& state, uint64_t studyId,
+                       const motion::Result& result, size_t sample,
+                       const double* value, std::string* error);
 
 // The stored result for a study of the ACTIVE assembly, or null.
 const motion::Result* MotionResultFor(const AppState& state, uint64_t studyId);

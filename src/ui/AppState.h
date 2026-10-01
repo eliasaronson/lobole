@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/Measure.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
@@ -1215,6 +1216,10 @@ struct AppState {
   std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
+  // The session's recent motion results by INPUT HASH
+  // (docs/simulation/README.md#studies-as-jobs): a run whose inputs hash to
+  // one of these is answered from it, whichever study or tab asked.
+  inputhash::Store<motion::Result> motionResultsByInput{32};
   // Playback of a stored result
   // (docs/ui/panels.md#assembly-tab-the-model-panel): display-only, read by
   // DisplayMatrix and the renderer sync. 0 = not showing one.
@@ -1763,6 +1768,18 @@ struct AppState {
   // Every long-running operation the registry knows about
   // (ui/BackgroundJobs.h). Polled from PollBackgroundJobs and nowhere else.
   std::vector<std::unique_ptr<BackgroundJob>> backgroundJobs;
+  // Job ids (BackgroundJob::id): the next to hand out, and the last jobs to
+  // end, so a status asked by id just after the end still answers.
+  uint64_t nextJobId = 1;
+  std::deque<FinishedJob> finishedJobs;
+  // The RPC connection whose request is being handled (0: none — the GUI),
+  // set by the remote pump around each dispatch; what a study job started
+  // over RPC is owned by. `rpcCallerGone` answers whether that connection
+  // has closed, for a synchronous run to stop on.
+  uint64_t rpcConnection = 0;
+  std::function<bool()> rpcCallerGone;
+  // FEM results (static, modal, topology) by input hash, as above.
+  inputhash::Store<fem::StudyRuntime> studyResultsByInput{8};
   bool camShowToolpath = true;
   double camSafeZEdit = 5.0;
   std::string camLastPost;

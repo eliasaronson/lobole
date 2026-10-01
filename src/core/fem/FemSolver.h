@@ -164,6 +164,10 @@ struct StudyBodyResult {
 // persisted into the document and reloaded into this same cache slot.
 struct StudyRuntime {
   uint64_t solvedAtVersion = 0;
+  // The input hash of what produced it (fem::StudyInputKey,
+  // docs/simulation/README.md#studies-as-jobs); 0 = unknown, never matched.
+  // Saved with a topology result, so a reopened project can reuse it.
+  uint64_t inputHash = 0;
   // Assembly studies: the version of every PART the solve read, beside the
   // assembly's own above. Stale when any of them moved — a panel regenerated
   // behind a fresh-looking result is the stale drawing's lie. Empty on a
@@ -305,6 +309,19 @@ struct AssemblyStudyContext {
 bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                        const AssemblyStudyContext& ctx, StudyPlan& out,
                        std::string* error);
+
+// The input hash of a run of `study` (docs/simulation/README.md
+// #studies-as-jobs): the study with its expressions evaluated (its name and
+// id aside), and the bodies it reads -- their exact B-Rep, names and
+// materials with the library's numbers. On an assembly, each taking part
+// occurrence as saved and its placed bodies. 0 when an expression does not
+// evaluate (the run would refuse; nothing is reused for it). The solver a
+// topology run picks (GPU or CPU) is not an input: both answer the same
+// problem.
+uint64_t StudyInputKey(const Document& doc, const Study& study);
+uint64_t AssemblyStudyInputKey(const AssemblyDocument& asmDoc,
+                               const Study& study,
+                               const AssemblyStudyContext& ctx);
 
 // The derived results of an assembly's studies, shared between the document
 // and its undo snapshots (a full-state copy must not duplicate meshes).

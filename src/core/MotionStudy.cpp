@@ -3,20 +3,82 @@
 
 #include "core/CollisionCache.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
 #include "core/Parallel.h"
+#include "core/io/Serialization.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 
 namespace motion {
+
+namespace {
+
+// An assembly document's own content: what it places, how they are mated
+// and coupled, its configurations and which one is active. The saved form,
+// so a field added to the format is an input here without anyone listing it.
+void HashAssembly(inputhash::Hasher& h, const AssemblyDocument& d) {
+  h.U64(d.GetOccurrences().size());
+  for (const Occurrence& o : d.GetOccurrences())
+    h.Json(DocumentIO::OccurrenceToJson(o));
+  h.U64(d.GetMates().size());
+  for (const Mate& m : d.GetMates())
+    h.Json(DocumentIO::MateToJson(m));
+  h.U64(d.GetRelations().size());
+  for (const Relation& r : d.GetRelations())
+    h.Json(DocumentIO::RelationToJson(r));
+  h.U64(d.GetConfigurations().size());
+  for (const Configuration& c : d.GetConfigurations())
+    h.Json(DocumentIO::ConfigurationToJson(c));
+  h.U64(d.ActiveConfiguration());
+}
+
+} // namespace
+
+uint64_t InputKey(const AssemblyDocument& asmDoc,
+                  const assembly::PartResolver& parts,
+                  const assembly::AssemblyResolver& assemblies,
+                  const MotionStudy& study) {
+  inputhash::Hasher h;
+  // The algorithm's own version: a change to what a run computes (the clash
+  // rule, the walk to the start) bumps it, so no answer stored before is
+  // handed out as one from after.
+  h.Str("motion/1");
+  nlohmann::json definition = DocumentIO::MotionStudyToJson(study);
+  definition.erase("name"); // a label: two studies alike share an answer
+  definition.erase("id");
+  h.Json(definition);
+  HashAssembly(h, asmDoc);
+  for (const auto& [id, version] :
+       assembly::SubtreeVersions(asmDoc, parts, assemblies)) {
+    (void)version; // session-local: the content is what is hashed
+    if (const AssemblyDocument* sub = assemblies ? assemblies(id) : nullptr) {
+      h.U64(id);
+      HashAssembly(h, *sub);
+    }
+  }
+  for (const auto& [part, configuration] :
+       assembly::SubtreePartConfigurations(asmDoc, assemblies)) {
+    h.U64(part);
+    h.U64(configuration);
+    if (const Document* doc = parts ? parts(part, configuration) : nullptr)
+      h.Bodies(doc->GetBodies());
+    else
+      h.U64(0);
+  }
+  return h.Digest();
+}
 
 double ValueAt(const MotionStudy& study, double t) {
   return study.from + t * (study.to - study.from);
@@ -204,26 +266,9 @@ void WalkToStart(assembly::FlexibleExpansion& ex, Mate& driver,
   }
 }
 
-// The kinematics-only pass: every sample solved on its own copy, in order,
-// placements recorded.
-RelativeMotion TrackMotion(const assembly::FlexibleExpansion& ex,
-                           const assembly::PartResolver& parts,
-                           const assembly::AssemblyResolver& assemblies,
-                           const MotionStudy& study, uint64_t driverId) {
-  RelativeMotion motion;
-  assembly::FlexibleExpansion probe = ex;
-  Mate* driver = probe.doc.FindMateById(driverId);
-  for (int i = 0; i < study.samples; i++) {
-    const double t =
-        static_cast<double>(i) / static_cast<double>(study.samples - 1);
-    assembly::SetMateDof(*driver, study.driverDof, ValueAt(study, t));
-    assembly::PropagateRelations(probe.doc, driver->id, parts);
-    assembly::Solve(probe.doc, parts, assemblies, {driver->id, study.driverDof},
-                    /*diagnose=*/false);
-    motion.Record(probe);
-  }
-  return motion;
-}
+// Of a run's progress, the share the solves take when clashes are checked
+// too; the checks have the rest.
+constexpr double kSolveShare = 0.1;
 
 // One placed body at one sample, for the pair sweep.
 struct Placed {
@@ -337,72 +382,179 @@ std::vector<Placed> PlaceBodies(const AssemblyDocument& asmDoc,
   return placed;
 }
 
-// One sample's clash check, into `s` and the run's tallies in `out`.
-// `checkRigid` is true at the one sample the rigid pairs are checked at.
-void CheckClashes(const AssemblyDocument& asmDoc,
-                  const std::vector<assembly::FlatInstance>& flat,
-                  const std::set<uint64_t>& flexible, const MotionStudy& study,
-                  const RelativeMotion& motion, bool checkRigid,
-                  MeshCache& meshes, collide::ExactContactCache* contacts,
-                  Sample& s, Result& out) {
-  const std::vector<Placed> placed = PlaceBodies(asmDoc, flat, flexible);
+// Every sample's clash check, in ONE batch, into `out.samples` and the run's
+// tallies. `placed[i]` holds sample i's bodies (empty when it could not be
+// flattened); `rigidAt` is the sample the rigid pairs are checked at.
+//
+// One batch rather than one per sample: every sample's pose is known before
+// any check runs, and a pair that costs seconds at every pose (a worm
+// against its wheel) used to serialise the run, each sample's boolean
+// waiting for the last one's while the other cores sat idle. Returns the
+// number of leading samples whose every check completed: all of them unless
+// `cancelled` stopped the batch.
+size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
+                       int rigidAt, const MotionStudy& study,
+                       const RelativeMotion& motion, MeshCache& meshes,
+                       collide::ExactContactCache* contacts,
+                       const std::function<bool()>& cancelled,
+                       const std::function<void(double)>& progress,
+                       Result& out) {
   const bool exact = study.clashMode == "exact";
   // Candidates first, then the booleans on every core. Only pairs whose
   // boxes overlap can clash, and that clears most of any assembly for
   // nothing. A contact check is ~161 ms and one engine study is 20,403 of
   // them: run serially it was 3292 s, 85% of a whole generator run.
   struct Cand {
-    size_t a, b;
+    size_t s, a, b;
     bool rigid;
     std::pair<Key, Key> key;
+    // An earlier candidate of this run asking the same question: the same
+    // two bodies at the same relative pose (to within the exact cache's
+    // tolerance) -- a dwell, or a full turn come round. Its answer is this
+    // one's when it found them clear; a clash is asked again, since where it
+    // is is in world space.
+    long repeatOf = -1;
   };
   std::vector<Cand> cands;
-  for (size_t a = 0; a < placed.size(); a++)
-    for (size_t b = a + 1; b < placed.size(); b++) {
-      if (placed[a].key == placed[b].key)
-        continue; // a part does not clash with itself
-      const bool rigid = !motion.Moves(placed[a].key, placed[b].key);
-      if (rigid && !checkRigid) {
-        out.pairsRigid++;
-        continue; // checked at the first sample; nothing since has changed
+  for (size_t s = 0; s < placed.size(); s++) {
+    const std::vector<Placed>& ps = placed[s];
+    const bool checkRigid = static_cast<int>(s) == rigidAt;
+    for (size_t a = 0; a < ps.size(); a++)
+      for (size_t b = a + 1; b < ps.size(); b++) {
+        if (ps[a].key == ps[b].key)
+          continue; // a part does not clash with itself
+        const bool rigid = !motion.Moves(ps[a].key, ps[b].key);
+        if (rigid && !checkRigid) {
+          out.pairsRigid++;
+          continue; // checked at the first sample; nothing since has changed
+        }
+        if (!BoxesOverlap(ps[a], ps[b]))
+          continue;
+        if (rigid)
+          out.pairsRigidChecked++;
+        cands.push_back(
+            {s,
+             a,
+             b,
+             rigid,
+             {std::min(ps[a].key, ps[b].key), std::max(ps[a].key, ps[b].key)},
+             -1});
       }
-      if (!BoxesOverlap(placed[a], placed[b]))
+  }
+
+  // Repeats, for the exact checks (a mesh check is cheap): keyed by the two
+  // bodies, then matched by relative pose.
+  {
+    std::map<std::pair<const Body*, const Body*>,
+             std::vector<std::pair<glm::dmat4, size_t>>>
+        seen;
+    for (size_t k = 0; k < cands.size(); k++) {
+      Cand& cd = cands[k];
+      if (!(exact || cd.rigid))
         continue;
-      if (rigid)
-        out.pairsRigidChecked++;
-      cands.push_back({a,
-                       b,
-                       rigid,
-                       {std::min(placed[a].key, placed[b].key),
-                        std::max(placed[a].key, placed[b].key)}});
+      const Placed& pa = placed[cd.s][cd.a];
+      const Placed& pb = placed[cd.s][cd.b];
+      const glm::dmat4 rel = glm::inverse(pa.world) * pb.world;
+      auto& bucket = seen[{pa.body, pb.body}];
+      for (const auto& [r, idx] : bucket)
+        if (collide::ExactContactCache::SameRelative(r, rel)) {
+          cd.repeatOf = static_cast<long>(idx);
+          break;
+        }
+      if (cd.repeatOf < 0)
+        bucket.emplace_back(rel, k);
     }
+  }
 
   // Mesh mode caches per shape in a shared map, so every mesh it will want
   // is built HERE, single-threaded, before anything reads it.
   if (!exact)
     for (const Cand& c : cands)
       if (!c.rigid) {
-        MeshFor(meshes, placed[c.a].body->shape);
-        MeshFor(meshes, placed[c.b].body->shape);
+        MeshFor(meshes, placed[c.s][c.a].body->shape);
+        MeshFor(meshes, placed[c.s][c.b].body->shape);
       }
+
+  // The callbacks are the caller's and need not be thread-safe: the workers
+  // take turns at them.
+  std::mutex callbacks;
+  std::atomic<bool> stop{false};
+  std::atomic<size_t> finished{0};
+  size_t toRun = 0;
+  for (const Cand& c : cands)
+    toRun += c.repeatOf < 0 ? 1 : 0;
   std::vector<Hit> hits(cands.size());
-  parallel::For(cands.size(), [&](size_t k) {
+  std::vector<char> done(cands.size(), 0);
+  const auto check = [&](size_t k) {
+    if (stop.load())
+      return;
+    if (cancelled) {
+      std::lock_guard lock(callbacks);
+      if (cancelled()) {
+        stop.store(true);
+        return;
+      }
+    }
     const Cand& cd = cands[k];
+    const Placed& pa = placed[cd.s][cd.a];
+    const Placed& pb = placed[cd.s][cd.b];
     // A rigid pair is always asked exactly: touching is what fastened parts
     // do, and a mesh check would call every bolted joint a clash.
-    hits[k] = exact || cd.rigid ? ExactHit(placed[cd.a], placed[cd.b], contacts)
-                                : MeshHit(placed[cd.a], placed[cd.b], meshes);
-  });
+    hits[k] = exact || cd.rigid ? ExactHit(pa, pb, contacts)
+                                : MeshHit(pa, pb, meshes);
+    done[k] = 1;
+    const size_t n = finished.fetch_add(1) + 1;
+    if (progress && toRun > 0) {
+      std::lock_guard lock(callbacks);
+      progress(kSolveShare + (1.0 - kSolveShare) *
+                                 std::min(1.0, static_cast<double>(n) /
+                                                   static_cast<double>(toRun)));
+    }
+  };
+  std::vector<size_t> first;
+  for (size_t k = 0; k < cands.size(); k++)
+    if (cands[k].repeatOf < 0)
+      first.push_back(k);
+  parallel::For(first.size(), [&](size_t i) { check(first[i]); });
+  // A repeat takes its original's answer when that was clear, and is asked
+  // itself when it was a clash or unknown.
+  std::vector<size_t> again;
+  for (size_t k = 0; k < cands.size(); k++) {
+    const long r = cands[k].repeatOf;
+    if (r < 0 || !done[r])
+      continue;
+    const Hit& h = hits[r];
+    if (h.known && !h.hit) {
+      hits[k] = h;
+      hits[k].cached = false;
+      done[k] = 1;
+      out.pairsRepeated++;
+    } else {
+      again.push_back(k);
+    }
+  }
+  parallel::For(again.size(), [&](size_t i) { check(again[i]); });
 
-  // The merge keeps the FIRST hit per key pair, in candidate order — a rule
+  // How far the batch got: the leading samples whose every check is done.
+  size_t complete = placed.size();
+  for (size_t k = 0; k < cands.size(); k++)
+    if (!done[k]) {
+      complete = std::min(complete, cands[k].s);
+      break; // candidates are in sample order
+    }
+
+  // The merge keeps the FIRST hit per key pair, in candidate order -- a rule
   // that is inherently sequential, so it lives here and not in the workers.
-  // `pairsChecked` counts every boolean actually run.
-  std::map<std::pair<Key, Key>, Clash> found;
+  // `pairsChecked` counts every check answered, repeats included.
+  std::vector<std::map<std::pair<Key, Key>, Clash>> found(placed.size());
   for (size_t k = 0; k < cands.size(); k++) {
     const Cand& cd = cands[k];
+    if (cd.s >= complete)
+      break;
+    Sample& s = out.samples[cd.s];
     const Hit& h = hits[k];
-    const Placed& pa = placed[cd.a];
-    const Placed& pb = placed[cd.b];
+    const Placed& pa = placed[cd.s][cd.a];
+    const Placed& pb = placed[cd.s][cd.b];
     const bool aFirst = pa.key == cd.key.first;
     const Placed& p1 = aFirst ? pa : pb;
     const Placed& p2 = aFirst ? pb : pa;
@@ -421,7 +573,7 @@ void CheckClashes(const AssemblyDocument& asmDoc,
       out.clean = false;
     }
     out.deflectionMm = std::max(out.deflectionMm, h.deflection);
-    if (!h.hit || found.count(cd.key))
+    if (!h.hit || found[cd.s].count(cd.key))
       continue;
     Clash c;
     c.rigid = cd.rigid;
@@ -438,10 +590,12 @@ void CheckClashes(const AssemblyDocument& asmDoc,
     c.bInner = p2.key.second;
     c.aName = p1.name;
     c.bName = p2.name;
-    found[cd.key] = c;
+    found[cd.s][cd.key] = c;
   }
-  for (auto& [key, c] : found)
-    s.clashes.push_back(c);
+  for (size_t s = 0; s < complete; s++)
+    for (auto& [key, c] : found[s])
+      out.samples[s].clashes.push_back(c);
+  return complete;
 }
 
 void RecordMates(const AssemblyDocument& doc, const std::vector<uint64_t>& path,
@@ -510,15 +664,15 @@ Result Run(const AssemblyDocument& asmDocIn,
 
   MeshCache own;
   MeshCache& meshes = meshesIn ? *meshesIn : own;
-  size_t worstCount = 0;
-  bool worstSet = false;
+  const double solveShare = study.checkClash ? kSolveShare : 1.0;
 
-  // Pass A: which pairs move relative to each other, so the clash pass
-  // checks the rigid ones once instead of at every sample.
-  const RelativeMotion motion =
-      study.checkClash ? TrackMotion(ex, parts, assemblies, study, driverId)
-                       : RelativeMotion{};
-
+  // Pass A: every sample solved ONCE, in order -- each solve starts from the
+  // last, so a closed loop stays on its branch -- with its placements
+  // recorded. The same pass records which pairs move relative to each other,
+  // so the checks can ask the rigid ones once instead of at every sample.
+  RelativeMotion motion;
+  std::vector<std::vector<Placed>> placed;
+  std::vector<char> flattened;
   for (int i = 0; i < study.samples; i++) {
     if (cancelled && cancelled()) {
       out.cancelled = true;
@@ -534,6 +688,8 @@ Result Run(const AssemblyDocument& asmDocIn,
     assembly::SolveReport rep = assembly::Solve(ex.doc, parts, assemblies,
                                                 {driver->id, study.driverDof},
                                                 /*diagnose=*/false);
+    if (study.checkClash)
+      motion.Record(ex);
     // Collapsed whenever there were units at all, so one that could not
     // move still reports why, sample by sample.
     const bool collapse = !ex.units.empty();
@@ -566,7 +722,8 @@ Result Run(const AssemblyDocument& asmDocIn,
     if (!flat) {
       s.solved = false;
       out.samples.push_back(std::move(s));
-      out.clean = false;
+      placed.emplace_back();
+      flattened.push_back(0);
       continue;
     }
     // Placements: one per top-level occurrence, from the solved document,
@@ -579,17 +736,45 @@ Result Run(const AssemblyDocument& asmDocIn,
           s.leaves.push_back(
               {u.root, k,
                OccurrenceWorld(*ex.doc.FindById(ex.occIdOf.at({u.root, k})))});
+    // The bodies placed here, for the checks: single-threaded, since a world
+    // box fills a cache on the shape.
+    placed.push_back(study.checkClash ? PlaceBodies(solved, *flat, flexible)
+                                      : std::vector<Placed>{});
+    flattened.push_back(1);
+    out.samples.push_back(std::move(s));
+    if (progress)
+      progress(solveShare * static_cast<double>(i + 1) /
+               static_cast<double>(study.samples));
+  }
 
-    if (study.checkClash) {
+  // Pass B: the checks, all samples at once. A run cancelled during the
+  // solves checks nothing: a sample is finished when it is checked.
+  if (study.checkClash) {
+    if (out.cancelled) {
+      out.samples.clear();
+    } else {
       // The rigid pairs go at the first sample that is checked at all: the
       // first one, unless it could not be flattened.
-      const bool checkRigid = out.rigidCheckedAt < 0;
-      if (checkRigid)
-        out.rigidCheckedAt = i;
-      CheckClashes(solved, *flat, flexible, study, motion, checkRigid, meshes,
-                   contacts, s, out);
+      for (size_t i = 0; i < placed.size(); i++)
+        if (flattened[i]) {
+          out.rigidCheckedAt = static_cast<int>(i);
+          break;
+        }
+      const size_t complete =
+          CheckAllClashes(placed, out.rigidCheckedAt, study, motion, meshes,
+                          contacts, cancelled, progress, out);
+      if (complete < out.samples.size()) {
+        out.samples.resize(complete);
+        out.cancelled = true;
+      }
     }
+  }
 
+  // The verdict over what was finished.
+  size_t worstCount = 0;
+  bool worstSet = false;
+  for (size_t i = 0; i < out.samples.size(); i++) {
+    const Sample& s = out.samples[i];
     const bool bad =
         !s.solved || !s.clashes.empty() || !s.unknownContacts.empty();
     if (bad)
@@ -597,20 +782,19 @@ Result Run(const AssemblyDocument& asmDocIn,
     // The worst sample: the first unsolved one wins outright, else the one
     // with the most clashes.
     if (!s.solved && (!worstSet || out.samples[out.worstSample].solved)) {
-      out.worstSample = out.samples.size();
+      out.worstSample = i;
       worstSet = true;
       worstCount = SIZE_MAX;
     } else if (s.solved &&
                s.clashes.size() + s.unknownContacts.size() > worstCount &&
                (!worstSet || out.samples[out.worstSample].solved)) {
-      out.worstSample = out.samples.size();
+      out.worstSample = i;
       worstCount = s.clashes.size() + s.unknownContacts.size();
       worstSet = true;
     }
-    out.samples.push_back(std::move(s));
-    if (progress)
-      progress(static_cast<double>(i + 1) / static_cast<double>(study.samples));
   }
+  if (out.cancelled)
+    out.clean = false;
   out.seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();

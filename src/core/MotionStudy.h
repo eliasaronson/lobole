@@ -117,12 +117,18 @@ struct Result {
                              // first unsolved one)
   double deflectionMm = 0.0; // the mesh check's deflection, 0 for exact
   size_t pairsCached = 0;
+  // Pair checks answered by an earlier sample of THIS run whose relative
+  // pose was the same (a dwell, a full turn): counted in pairsChecked, not
+  // computed again.
+  size_t pairsRepeated = 0;
   size_t pairsUnknown = 0;
   bool checkedClashes = false;
   size_t pairsChecked = 0; // over all samples
   double seconds = 0.0;
   bool cancelled = false;
   std::string error; // a refusal (driver gone, DOF missing); empty = ran
+  // The input hash it was run for (InputKey); 0 = unknown.
+  uint64_t inputHash = 0;
 };
 
 // Runs `study` against a COPY of `asmDoc`: the document handed in is not
@@ -140,6 +146,17 @@ Result Run(const AssemblyDocument& asmDoc, const assembly::PartResolver& parts,
            const std::function<void(double)>& progress = nullptr,
            MeshCache* meshes = nullptr,
            collide::ExactContactCache* contacts = nullptr);
+
+// The input hash of a run of `study` on `asmDoc` (docs/simulation/README.md
+// #studies-as-jobs): the study's definition (its name aside), every
+// occurrence with its placement, every mate with its current value (the run
+// starts from the pose the document is in), relation and configuration and
+// the active one, through every sub-assembly, and every (part,
+// configuration) placed, by its bodies' exact B-Rep, names and materials.
+uint64_t InputKey(const AssemblyDocument& asmDoc,
+                  const assembly::PartResolver& parts,
+                  const assembly::AssemblyResolver& assemblies,
+                  const MotionStudy& study);
 
 // The driver value at parameter t (0..1): `from + t * (to - from)`.
 double ValueAt(const MotionStudy& study, double t);

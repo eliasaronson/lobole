@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/BackgroundJobs.h"
+
 #include "render/MeshRenderer.h"
 #include "render/SketchRenderer.h"
 #include "ui/AppState.h"
@@ -65,7 +67,8 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
 // and solve run on the thread, and the result lands on the assembly tab it
 // was started from when the job is reaped.
 bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
-                           uint64_t studyId, std::string* error);
+                           uint64_t studyId, std::string* error,
+                           JobStart* job = nullptr);
 // Plan + mesh only, for mesh_study on an assembly tab.
 bool MeshAssemblyStudy(AppState& state, AssemblyDocument& asmDoc,
                        uint64_t studyId, std::vector<fem::StudyBodyMesh>& out,
@@ -87,6 +90,22 @@ void ResetSimulationDisplay(AppState& state);
 // run_study RPC. Defined in AppActions.cpp.
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
 
+// --- Results keyed by inputs (docs/simulation/README.md#studies-as-jobs) ---
+//
+// The input hash of study `studyId` on the part `doc` or, with `doc` null,
+// the assembly `asmDoc` (fem::StudyInputKey / AssemblyStudyInputKey).
+uint64_t StudyInputHash(AppState& state, const Document* doc,
+                        const AssemblyDocument* asmDoc, uint64_t studyId);
+// A result for exactly the study's current inputs -- its own (a reopened
+// topology result carries the hash it was saved with) or one the session
+// holds -- installed as the study's fresh result, so nothing is computed;
+// `job->reused` says so. False (and nothing changed) when there is none, or
+// `job->recompute` asked for a run anyway. Every Start…Run asks this first.
+bool ReuseStudyResult(AppState& state, Document* doc, AssemblyDocument* asmDoc,
+                      uint64_t studyId, JobStart* job);
+// Keep a finished result by its input hash (a cancelled one is not kept).
+void RememberStudyResult(AppState& state, const fem::StudyRuntime& rt);
+
 // True when this build can hand a topology run to the GPU solver (fem_gpu
 // compiled into the file that starts the run). A test holds it to the build
 // option: for a month it was false in every build, and every run went to
@@ -96,7 +115,7 @@ bool TopologyGpuBuiltIn();
 // Prepares the snapshot (meshes on the calling thread) and spawns the worker.
 // Returns false + *error on a prep failure or if a run is already in progress.
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error);
+                      std::string* error, JobStart* job = nullptr);
 
 // If a run has finished (converged, capped, cancelled, or errored), joins it
 // and stores the result (or the study error). Cheap no-op otherwise — call it
@@ -113,16 +132,17 @@ bool CancelTopologyRun(AppState& state, uint64_t studyId);
 TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 
 // The async static/modal counterparts (StudyJob): prepare-on-main +
-// solve-on-worker, polled at the same sites as the topology run. A static
-// solve is NOT cancellable (no interruption points in the linear solver).
+// solve-on-worker, polled at the same sites as the topology run. A cancel
+// lands at a boundary (after the meshing; during the factorization, which
+// has no interruption points, when it ends) and drops the answer.
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
-                   std::string* error);
+                   std::string* error, JobStart* job = nullptr);
 
 // mesh_study off the frame: plan on this thread, mesh on a worker, and keep
 // what it found as a MeshReport for study_status (`meshing: true` while it
 // runs, then `mesh: {...}`). One mesh run at a time, per study.
 bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
-                  std::string* error);
+                  std::string* error, JobStart* job = nullptr);
 struct MeshRunStatus {
   bool running = false;
   double elapsedSeconds = 0.0;

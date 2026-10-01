@@ -292,7 +292,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "regression unless you ask.",
      ""},
     {"background_jobs",
-     "Every long operation running off the frame, as {jobs: [{kind, label, "
+     "Every long operation running off the frame, as {jobs: [{id, kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
      "job cannot say. Kinds: `cam` (an adaptive clearing pass; see "
      "cam_toolpath's `async`, and what a waiting cam_toolpath, cam_post, "
@@ -1110,7 +1110,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "background_jobs") {
     json jobs = json::array();
     for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
-      jobs.push_back({{"kind", j.kind},
+      jobs.push_back({{"id", j.id},
+                      {"kind", j.kind},
                       {"label", j.label},
                       {"fraction", j.fraction},
                       {"cancellable", j.cancellable},
