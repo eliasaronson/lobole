@@ -108,6 +108,7 @@ add_executable(designer_tests
     test_lookup_table.cpp
     test_variables.cpp
     test_datum.cpp
+    test_primitives.cpp
     test_frame.cpp
     test_meshcollide.cpp
     test_flexible_subassembly.cpp

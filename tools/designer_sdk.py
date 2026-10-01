@@ -1830,30 +1830,66 @@ class Part(_Tab):
         return self.revolve(sk.add(), axis=axis, angle_deg=angle_deg,
                             name=name, **kw)
 
-    def box(self, position=(0, 0, 0), w=1.0, h=1.0, d=1.0, name="Box"):
-        f = {"type": "Box", "name": name, "position": list(V(position))}
-        _dim(f, "width", w)
-        _dim(f, "height", h)
-        _dim(f, "depth", d)
+    # --- primitives ---------------------------------------------------------
+    # A primitive is for a fixture, a stand-in or a first rough block; the
+    # model is built on faces and planes from sketches. Each one is placed
+    # `on` something -- "Top"/"Front"/"Right", a planar Face, a datum_plane(),
+    # a frame() or a committed Sketch -- and stored as a dimensioned sketch on
+    # it plus an extrude (a sphere: a revolve), so it follows what it is on
+    # (docs/modeling/README.md#primitives). `at` is (u, v) in that thing's
+    # frame: on a face its origin is the face's centroid and its u is
+    # `face.frame().x`; on Top u is +X and v +Y. Every size, and `at`, takes
+    # a number, a Param or an expression string. A size left out is derived
+    # from what it is on.
+
+    @_renamed(position=("on", "what the box stands on (a face, a plane, a "
+                                "frame); `at=(u, v)` places it there"),
+              w=("width", "the extent along the frame's u"),
+              h=("height", "the extent along the NORMAL (it was the Y "
+                           "extent)"),
+              d=("depth", "the extent along the frame's v (it was the Z "
+                          "extent)"))
+    def box(self, on, width=None, depth=None, height=None, at=None,
+            centered=True, mode="new_body", reversed=False, name="Box"):
+        """A box on `on`: `width` along u, `depth` along v, `height` along
+        the normal (`reversed=True` the other way). `at` is its centre, or
+        with `centered=False` its low-u low-v corner."""
+        f = {"type": "Box", "name": name, "on": _on(on), "mode": mode}
+        _dim(f, "width", width)
+        _dim(f, "depth", depth)
+        _dim(f, "height", height)
+        if not centered:
+            f["centered"] = False
+        if reversed:
+            f["reversed"] = True
+        _at(f, at)
         return self._body_from(self._add(f), f)
 
-    def cylinder(self, center=(0, 0, 0), direction=(0, 0, 1), d=None, r=None,
-                 h=1.0, name="Cylinder"):
-        if (d is None) == (r is None):
-            raise SdkError("cylinder takes one of d= or r=")
-        f = {"type": "Cylinder", "name": name, "center": list(V(center)),
-             "direction": list(V(direction))}
-        _dim(f, "radius", (f"({d}) / 2" if isinstance(d, str) else
-                           (d / 2.0 if d is not None else r)))
-        _dim(f, "height", h)
+    @_renamed(center=("on", "what the cylinder stands on; `at=(u, v)` "
+                            "places its axis there"),
+              direction=("on", "a face, plane or frame: the axis is its "
+                               "normal"),
+              h=("height", "the same length, along the normal"))
+    def cylinder(self, on, d=None, r=None, height=None, at=None,
+                 mode="new_body", reversed=False, name="Cylinder"):
+        """A cylinder standing on `on`, its axis along the normal through
+        `at`."""
+        f = {"type": "Cylinder", "name": name, "on": _on(on), "mode": mode}
+        _diameter(f, d, r, "cylinder")
+        _dim(f, "height", height)
+        if reversed:
+            f["reversed"] = True
+        _at(f, at)
         return self._body_from(self._add(f), f)
 
-    def sphere(self, center=(0, 0, 0), d=None, r=None, name="Sphere"):
-        if (d is None) == (r is None):
-            raise SdkError("sphere takes one of d= or r=")
-        f = {"type": "Sphere", "name": name, "center": list(V(center))}
-        _dim(f, "radius", (f"({d}) / 2" if isinstance(d, str) else
-                           (d / 2.0 if d is not None else r)))
+    @_renamed(center=("on", "what the sphere sits on; `at=(u, v)` puts its "
+                            "centre there, ON that plane"))
+    def sphere(self, on, d=None, r=None, at=None, mode="new_body",
+               name="Sphere"):
+        """A sphere centred at `at` on `on` (half above it, half below)."""
+        f = {"type": "Sphere", "name": name, "on": _on(on), "mode": mode}
+        _diameter(f, d, r, "sphere")
+        _at(f, at)
         return self._body_from(self._add(f), f)
 
     def hole(self, sketch, d, depth=None, through=False, kind="simple", **kw):
@@ -3040,6 +3076,68 @@ def _dim(feature, key, value):
         feature[ekey] = value
     elif value is not None:
         feature[key] = float(value)
+
+
+def _on(on):
+    """What a primitive stands on, as the app's `on`."""
+    if isinstance(on, str):
+        return on  # "Top" / "Front" / "Right"; the app refuses anything else
+    if isinstance(on, Face):
+        if on.kind != "plane":
+            raise SdkError(
+                f"face {on.name!r} is a {on.kind}, not planar: put the "
+                f"primitive on part.frame(name, of=face) instead, whose Z is "
+                f"the axis")
+        return dict(on.ref)
+    if isinstance(on, DatumPlane):
+        return {"feature_id": on.id}
+    if isinstance(on, (Frame, Sketch)):
+        if on.id is None:
+            raise SdkError(
+                "that frame is a query result, not a Frame feature: create "
+                "one with part.frame(name, ...) to stand a primitive on")
+        return {"feature_id": on.id}
+    if isinstance(on, Plane):
+        raise SdkError(
+            "a Plane is numbers, not a reference: a primitive stands on "
+            "something it follows -- a Face, part.datum_plane(...), "
+            "part.frame(...), a Sketch, or \"Top\"/\"Front\"/\"Right\"")
+    raise SdkError(
+        f"`on` must be a Face, a DatumPlane, a Frame, a Sketch or "
+        f"\"Top\"/\"Front\"/\"Right\", not {on!r} (a primitive has no bare "
+        f"world position: put it on a datum_plane or a frame placed there)")
+
+
+def _at(feature, at):
+    """`at=(u, v)`: where on its frame a primitive sits."""
+    if at is None:
+        return
+    if len(at) != 2:
+        raise SdkError("at is (u, v) in the frame of what it is on -- two "
+                       "numbers, not a world point")
+    nums, exprs = [], []
+    for c in at:
+        if isinstance(c, Param):
+            nums.append(float(c))
+            exprs.append(c.expr)
+        elif isinstance(c, str):
+            nums.append(0.0)
+            exprs.append(c)
+        else:
+            nums.append(float(c))
+            exprs.append("")
+    feature["offset"] = nums
+    if any(exprs):
+        feature["offset_expr"] = exprs
+
+
+def _diameter(feature, d, r, what):
+    if d is not None and r is not None:
+        raise SdkError(f"{what} takes d= or r=, not both")
+    if d is not None:
+        _dim(feature, "diameter", d)
+    elif r is not None:
+        _dim(feature, "radius", r)
 
 
 def _dim3(feature, key, value):

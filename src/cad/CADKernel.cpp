@@ -79,6 +79,7 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_TShape.hxx>
 #include <algorithm>
+#include <limits>
 
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -738,6 +739,43 @@ bool CADShape::FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
       std::abs(normal.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
   uAxis = glm::normalize(u - glm::dot(u, normal) * normal);
   return true;
+}
+
+bool CADShape::FaceExtent(int faceIndex, const glm::dvec3& origin,
+                          const glm::dvec3& u, const glm::dvec3& v,
+                          glm::dvec2& lo, glm::dvec2& hi) const {
+  if (!IsValid() || faceIndex < 0)
+    return false;
+  int i = 0;
+  TopoDS_Face face;
+  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+    if (i == faceIndex) {
+      face = TopoDS::Face(exp.Current());
+      break;
+    }
+  }
+  if (face.IsNull())
+    return false;
+  lo = glm::dvec2(std::numeric_limits<double>::max());
+  hi = glm::dvec2(std::numeric_limits<double>::lowest());
+  // Sampled, not a bounding box of the edge curves: an arc's box is its
+  // circle's, and a face's extent is what its outline actually reaches.
+  constexpr int kSamples = 32;
+  for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next()) {
+    const TopoDS_Edge& edge = TopoDS::Edge(e.Current());
+    if (BRep_Tool::Degenerated(edge))
+      continue;
+    BRepAdaptor_Curve c(edge);
+    const double t0 = c.FirstParameter(), t1 = c.LastParameter();
+    for (int k = 0; k <= kSamples; k++) {
+      const gp_Pnt p = c.Value(t0 + (t1 - t0) * k / kSamples);
+      const glm::dvec3 d = glm::dvec3(p.X(), p.Y(), p.Z()) - origin;
+      const glm::dvec2 uv(glm::dot(d, u), glm::dot(d, v));
+      lo = glm::min(lo, uv);
+      hi = glm::max(hi, uv);
+    }
+  }
+  return lo.x <= hi.x && lo.y <= hi.y;
 }
 
 bool CADShape::FaceAxis(int faceIndex, glm::dvec3& origin, glm::dvec3& axis,

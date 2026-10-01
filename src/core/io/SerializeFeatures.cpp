@@ -1444,13 +1444,25 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "reversed?, regions?, end_target?, thin? {thickness (+_expr), side: "
      "out|in|both} (a wall of that thickness along the profile instead of a "
      "filled face); extrudes along +plane normal"},
+    // A primitive asked for through add_feature is EXPANDED into a Sketch
+    // and an Extrude/Revolve (core/Primitives.h); these rows are
+    // that dialect. A stored Box/Sphere/Cylinder (position/center, from an
+    // older document) still loads, and nothing new creates one.
     {"Box", 1,
-     "position [x,y,z] = MIN corner, width/height/depth = X/Y/Z extents mm "
-     "(each +_expr, so a variable can drive it)"},
-    {"Sphere", 1, "center [x,y,z], radius (+_expr)"},
+     "on: Top|Front|Right, {feature_id, element} (a planar face) or "
+     "{feature_id} (a DatumPlane, Sketch or Frame) — required; width (u), "
+     "depth (v), height (along the normal) mm, each +_expr, defaults sized "
+     "from what it is on; offset [u, v] mm (+offset_expr) of its centre, or "
+     "of its low corner with centered: false; mode: new_body|add|cut; "
+     "reversed?. Stored as a Sketch + Extrude, one undo step"},
+    {"Sphere", 1,
+     "on (as Box) — required; diameter OR radius mm (+_expr); offset [u, v] "
+     "mm (+offset_expr) of its centre, which lies ON the plane; mode. Stored "
+     "as a Sketch (a half disc) + a Revolve"},
     {"Cylinder", 1,
-     "center [x,y,z] (base), direction [x,y,z], radius (+_expr), "
-     "height (+_expr)"},
+     "on (as Box) — required; diameter OR radius mm, height mm (each "
+     "+_expr); offset [u, v] mm (+offset_expr) of its axis; mode; reversed?. "
+     "Stored as a Sketch (a circle) + an Extrude along the normal"},
     {"Fastener", 69,
      "standard: iso4762|iso14579|iso4017|iso10642|iso7380 (screws), iso4032 "
      "(nut), iso7089 (washer); size (a key in that table, e.g. M6); length "

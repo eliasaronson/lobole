@@ -8,6 +8,7 @@
 #include "core/Document.h"
 #include "core/Expression.h"
 #include "core/PrintSplit.h"
+#include "core/Primitives.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -156,6 +157,40 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   }
 }
 
+// A Box, Cylinder or Sphere is a one-call convenience that stores what a
+// person would have drawn: a dimensioned Sketch on what it names in `on`,
+// and an Extrude (or a Revolve) of it, as ONE undo step
+// (docs/modeling/README.md#primitives). The stored primitive types are not
+// reachable here: an old document may hold one, nothing new makes one.
+json AddPrimitive(ui::AppState& state, Document& doc, const json& fj) {
+  const primitive::Spec spec = primitive::SpecFromJson(fj);
+  const json preDigest = BodyDigestJson(doc);
+  const primitive::Added added = primitive::Add(doc, *state.commands, spec);
+  size_t index = 0;
+  doc.FindFeatureById(added.solidId, &index);
+  return json{{"index", index},
+              {"id", added.solidId},
+              {"ids", json::array({added.solidId, added.sketchId})},
+              {"regen", RegenSummaryJson(doc)},
+              {"digest", DigestJson(preDigest, doc)}};
+}
+
+// modify_feature cannot turn anything into a stored primitive either.
+void RefusePrimitiveSpec(const json& fj) {
+  if (!fj.is_object())
+    return;
+  const auto kind = primitive::KindFromName(fj.value("type", std::string{}));
+  if (!kind)
+    return;
+  throw std::runtime_error(
+      std::string(primitive::KindName(*kind)) +
+      " is not a stored feature: add_feature {type: \"" +
+      primitive::KindName(*kind) +
+      "\", on, ...} stores a Sketch and an Extrude (a Sphere, a Revolve). "
+      "Change one by its sketch's dimensions (set_constraint) or the solid's "
+      "height (modify_feature on the Extrude)");
+}
+
 // Error-audit round: "no such feature/sketch" names the candidates that DO
 // exist, id + name, so the correction is one edit away.
 std::string FeatureCandidates(Document& doc, bool sketchesOnly) {
@@ -236,7 +271,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "feature_types[], and the fields every type accepts — including "
      "`material`, whose slug is refused if unrecognised: describe's "
      "material_slugs) and regenerate; returns {index, id, "
-     "entity_ids?, regen}. A Thread on a PRINTED part (set_print_process) "
+     "entity_ids?, regen}. A Box, Cylinder or Sphere names what it is `on` "
+     "(a planar face, a DatumPlane, a Sketch, a Frame, or Top/Front/Right) "
+     "and is stored as a dimensioned Sketch plus an Extrude (a Sphere, a "
+     "Revolve), one undo step; it also returns `ids`, the solid's first "
+     "(docs/modeling/README.md#primitives). A Thread on a PRINTED part "
+     "(set_print_process) "
      "also returns `print`: what the print wants it modelled at, since the "
      "basic profile it cuts prints tight (docs/tolerances/README.md).",
      "feature", remote::NeedsPart | remote::Deferrable},
@@ -655,6 +695,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_feature") {
     json fj = p.at("feature");
+    if (fj.is_object() &&
+        primitive::KindFromName(fj.value("type", std::string{})))
+      return AddPrimitive(state, *doc, fj);
     // A Derived's configuration may be NAMED ("pawn"); the feature stores
     // the id, which survives a rename. An unknown name is refused with the
     // ones the source has, never read as "whichever is active".
@@ -871,6 +914,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           "changed. Read the feature out of get_state, change what you want "
           "and send it back; describe feature_types[] lists the fields each "
           "type takes.");
+    RefusePrimitiveSpec(p.at("feature"));
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     RejectUnknownFeatureFields(p.at("feature"),

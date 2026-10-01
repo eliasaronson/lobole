@@ -5,8 +5,8 @@ Library:
     from designer_remote import Designer
     d = Designer(8437)
     d.call("add_feature", feature={"type": "Box", "name": "Box 1",
-                                   "position": [0, 0, 0],
-                                   "width": 2, "height": 2, "depth": 2})
+                                   "on": "Top",
+                                   "width": 2, "depth": 2, "height": 2})
     print(d.call("get_state"))
 
 CLI:

@@ -21,6 +21,14 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
              ") not found earlier in history");
     return false;
   }
+  // A sketch that failed this regeneration (its face or plane is gone) still
+  // holds its last plane and profile; extruding those would build the solid
+  // where the reference USED to be, which is a fall-back nobody asked for.
+  if (!sketch->GetError().empty()) {
+    SetError("profile sketch '" + sketch->GetName() +
+             "' failed: " + sketch->GetError());
+    return false;
+  }
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
   // Single-stroke text makes no profile: refused by name when it is what was

@@ -170,10 +170,16 @@ class Designer:
         feature.update(kw)
         return self._call("add_feature", feature=feature)["id"]
 
-    def box(self, position=(0, 0, 0), width=1.0, height=1.0, depth=1.0,
+    def box(self, on, width, depth, height, at=(0, 0), centered=True,
             name="Box"):
-        return self.feature(type="Box", name=name, position=list(position),
-                            width=width, height=height, depth=depth)
+        """A box standing on `on` ("Top"/"Front"/"Right", a face
+        {feature_id, element}, or {feature_id} of a datum plane, sketch or
+        frame): width along u, depth along v, height along the normal, `at`
+        its centre (or low corner, centered=False) in that frame. Stored as
+        a sketch and an extrude (docs/modeling/README.md#primitives)."""
+        return self.feature(type="Box", name=name, on=on, width=width,
+                            depth=depth, height=height, offset=list(at),
+                            centered=centered)
 
     # --- inspection ---------------------------------------------------------
     def state(self):

@@ -39,11 +39,23 @@ written out: the one for a turned feature off the origin)."""
 
 FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 
-- Box: {{"type": "Box", "name": str, "position": [x,y,z],
-  "width": num, "height": num, "depth": num}}
-- Sphere: {{"type": "Sphere", "name": str, "center": [x,y,z], "radius": num}}
-- Cylinder: {{"type": "Cylinder", "name": str, "center": [x,y,z],
-  "direction": [x,y,z], "radius": num, "height": num}}
+- Box / Cylinder / Sphere — a primitive is for a fixture, a stand-in or a
+  first rough block, and is always placed ON something; it is stored as a
+  dimensioned Sketch on that thing plus an Extrude (Sphere: a Revolve), one
+  undo step, and follows it. "on" is "Top" | "Front" | "Right", a planar
+  face {{"feature_id": id, "element": name}}, or {{"feature_id": id}} of a
+  DatumPlane, a Sketch or a Frame. No world position: off those, put it on a
+  DatumPlane or a Frame placed there. "offset"?: [u, v] mm in that frame
+  (a face's frame: origin its centroid). Sizes default from what it is on.
+  Returns "ids", the solid's first.
+  {{"type": "Box", "name": str, "on": <on>, "width"?: num (u),
+    "depth"?: num (v), "height"?: num (along the normal), "offset"?: [u,v],
+    "centered"?: bool (default true; false = offset is the low corner),
+    "mode"?: "new_body"|"add"|"cut", "reversed"?: bool}}
+  {{"type": "Cylinder", "name": str, "on": <on>, "diameter"?: num (or
+    "radius"), "height"?: num, "offset"?: [u,v], "mode"?, "reversed"?}}
+  {{"type": "Sphere", "name": str, "on": <on>, "diameter"?: num (or
+    "radius"), "offset"?: [u,v] (its centre, ON the plane), "mode"?}}
 - Sketch: {{"type": "Sketch", "name": str,
   "plane": {{"origin": [x,y,z], "normal": [x,y,z], "uAxis": [x,y,z]}},
   "plane_ref"?: <DatumPlane feature id — tracks the datum instead of baking>,
@@ -412,6 +424,11 @@ The loop that works — follow it every time:
 2. Sketch on a plane (or a DatumPlane feature). Draw entities, then constrain
    until the geometry cannot wiggle: anchor to the sketch origin/axes datum
    refs, use distance/radius constraints driven by your variables.
+   Model on faces and planes from sketches: a boss is a sketch ON the face
+   it stands on (face_ref), so it follows the face when the part changes.
+   Box/Cylinder/Sphere are for a fixture, a stand-in or a first rough block,
+   and are always placed `on` something (a face, a plane, a Frame) — never at
+   a world position.
 3. Extrude/Revolve referencing the sketch by the id add_feature returned.
    Never guess ids — read them from tool results or get_state. Unsure of a
    feature's JSON dialect? describe lists feature_types[].params (field

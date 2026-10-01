@@ -22,6 +22,12 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
              ") not found earlier in history");
     return false;
   }
+  // As Extrude: a failed sketch's stale plane is not a place to build.
+  if (!sketch->GetError().empty()) {
+    SetError("profile sketch '" + sketch->GetName() +
+             "' failed: " + sketch->GetError());
+    return false;
+  }
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
   // Single-stroke text makes no profile: refused by name when it is what was

@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/Angles.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
 #include "core/sketch/SketchText.h"
@@ -1153,13 +1154,32 @@ bool SketchFeature::Execute(RegenContext& ctx) {
     }
     plane = *p;
   } else if (planeRef != 0) {
-    const auto* datum =
-        dynamic_cast<const DatumPlaneFeature*>(ctx.FindById(planeRef));
-    if (datum == nullptr) {
-      SetError("referenced datum plane not found");
+    // A datum plane, another sketch's plane, or a Frame's XY plane (X as u):
+    // the three things a primitive can stand on besides a face or a world
+    // plane (docs/modeling/README.md#primitives). Whichever it is, a missing
+    // or failed one is this sketch's error -- never the world plane.
+    const Feature* ref = ctx.FindById(planeRef);
+    if (ref == nullptr) {
+      SetError("the plane this sketch is on (feature " +
+               std::to_string(planeRef) + ") is gone or suppressed");
       return false;
     }
-    plane = datum->OutputPlane();
+    if (!ref->GetError().empty()) {
+      SetError("the plane this sketch is on, '" + ref->GetName() +
+               "', failed: " + ref->GetError());
+      return false;
+    }
+    if (const auto* datum = dynamic_cast<const DatumPlaneFeature*>(ref)) {
+      plane = datum->OutputPlane();
+    } else if (const auto* sk = dynamic_cast<const SketchFeature*>(ref)) {
+      plane = sk->plane;
+    } else if (const auto* fr = dynamic_cast<const FrameFeature*>(ref)) {
+      plane = SketchPlane(fr->Origin(), fr->ZAxis(), fr->XAxis());
+    } else {
+      SetError("the plane this sketch is on, '" + ref->GetName() + "', is a " +
+               ref->TypeName() + ", not a DatumPlane, Sketch or Frame");
+      return false;
+    }
   }
 
   // Cross-sketch linked copies re-sync from their (already executed) source.

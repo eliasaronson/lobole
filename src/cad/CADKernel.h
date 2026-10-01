@@ -199,6 +199,14 @@ public:
   bool FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
                  glm::dvec3& uAxis) const;
 
+  // The extent of the face at `faceIndex` in a plane frame: every boundary
+  // edge sampled and projected onto (u, v) about `origin`, giving the UV box
+  // it spans. False when the index is out of range. What a primitive placed
+  // on the face sizes its defaults from and snaps its edges to
+  // (docs/modeling/README.md#primitives).
+  bool FaceExtent(int faceIndex, const glm::dvec3& origin, const glm::dvec3& u,
+                  const glm::dvec3& v, glm::dvec2& lo, glm::dvec2& hi) const;
+
   // For the cylindrical face at `faceIndex` (same explorer order as
   // FacePlane), outputs an axis frame: cylinder -> origin = face centroid
   // projected onto the axis; cone -> origin = the APEX (where a mating
@@ -545,6 +553,10 @@ public:
   }
   std::vector<CADShape> SplitSolids() const { return {}; }
   bool FacePlane(int, glm::dvec3&, glm::dvec3&, glm::dvec3&) const {
+    return false;
+  }
+  bool FaceExtent(int, const glm::dvec3&, const glm::dvec3&, const glm::dvec3&,
+                  glm::dvec2&, glm::dvec2&) const {
     return false;
   }
   bool FaceAxis(int, glm::dvec3&, glm::dvec3&, glm::dvec3&) const {

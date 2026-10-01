@@ -400,6 +400,7 @@ set(core_sources
     src/core/features/DerivedFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
     src/core/features/FrameFeature.cpp
+    src/core/Primitives.cpp
     src/core/MeshCollide.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp
