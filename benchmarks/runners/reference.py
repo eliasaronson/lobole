@@ -170,31 +170,37 @@ def _mechanism(d):
     axis, which is what the first version of this did.
     """
     # --- the parts
+    # Primitives stand ON something (docs/modeling/README.md#primitives):
+    # the disc on Top, the pin on the frame it pivots about, the bar on Top
+    # with its low corner placed, the piston on a plane across its skirt.
     d.call("add_part", name="crank")
     d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Disc", "center": [0, 0, 0],
-        "direction": [0, 0, 1], "radius": 28.0, "height": 8.0})
+        "type": "Cylinder", "name": "Disc", "on": "Top",
+        "radius": 28.0, "height": 8.0})
+    pin = _frame(d, "pin", (20, 0, 8))
     d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Pin", "center": [20, 0, 8],
-        "direction": [0, 0, 1], "radius": 4.0, "height": 12.0})
-    _frame(d, "pin", (20, 0, 8))
+        "type": "Cylinder", "name": "Pin", "on": {"feature_id": pin},
+        "radius": 4.0, "height": 12.0})
     # The crank is the fixed part, so it also carries the ground frame the
     # piston slides along: Z of the frame is the slide direction.
     _frame(d, "ground_x", (0, 0, 8), z=(1, 0, 0), x=(0, 0, 1))
 
     d.call("add_part", name="rod")
     d.call("add_feature", feature={
-        "type": "Box", "name": "Bar", "position": [-7, -6, 0],
-        "width": 84.0, "height": 12.0, "depth": 6.0})
+        "type": "Box", "name": "Bar", "on": "Top", "centered": False,
+        "offset": [-7, -6], "width": 84.0, "depth": 12.0, "height": 6.0})
     holes = sketch(d, [circle(0, 0, 4.5), circle(70, 0, 4.5)])
     extrude(d, holes, 8.0, mode="cut", name="Holes")
     _frame(d, "big_end", (0, 0, 0))
     _frame(d, "small_end", (70, 0, 0))
 
     d.call("add_part", name="piston")
+    skirt = d.call("add_feature", feature={
+        "type": "DatumPlane", "name": "Skirt", "kind": "offset",
+        "base_plane": "yz", "offset": -15.0})["id"]
     d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Piston", "center": [-15, 0, 0],
-        "direction": [1, 0, 0], "radius": 15.0, "height": 30.0})
+        "type": "Cylinder", "name": "Piston", "on": {"feature_id": skirt},
+        "radius": 15.0, "height": 30.0})
     _frame(d, "wrist", (0, 0, 0))
     _frame(d, "slide", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
 
