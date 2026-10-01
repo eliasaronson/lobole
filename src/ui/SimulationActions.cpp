@@ -137,6 +137,14 @@ double Elapsed(std::chrono::steady_clock::time_point since) {
 
 } // namespace
 
+bool TopologyGpuBuiltIn() {
+#ifdef HAVE_FEM_GPU
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                       std::string* error) {
   if (BackgroundJobRunning(state, "topo") ||
@@ -207,6 +215,11 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
           j->compliance.store(p.compliance, std::memory_order_relaxed);
           j->maxChange.store(p.maxChange, std::memory_order_relaxed);
           j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
+          if (!p.solverFallback.empty() &&
+              !j->fellBack.load(std::memory_order_relaxed)) {
+            j->fallbackReason = p.solverFallback;
+            j->fellBack.store(true, std::memory_order_release);
+          }
           if (j->maxIterations > 0)
             raw->fraction.store(static_cast<double>(p.iteration) /
                                 j->maxIterations);
@@ -410,6 +423,11 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   st.maxChange = job->maxChange.load(std::memory_order_relaxed);
   st.volumeFraction = job->volumeFraction.load(std::memory_order_relaxed);
   st.solver = job->solverName; // written before the thread launched
+  // Named as the stored result will name it, from the iteration the worker
+  // dropped the external solver.
+  if (job->fellBack.load(std::memory_order_acquire))
+    st.solver =
+        "cpu (" + job->solverName + " failed: " + job->fallbackReason + ")";
   st.elapsedSeconds = Elapsed(job->started);
   return st;
 }

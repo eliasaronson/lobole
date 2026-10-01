@@ -39,6 +39,10 @@ struct TopoJob {
   std::string error;
   std::unique_ptr<fem::TopoLinearSolver> solver;
   std::string solverName; // "gpu: <device>" or "cpu (<why>)" — set pre-launch
+  // Set by the worker when the external solver is dropped mid-run: the
+  // reason is written once, before `fellBack` is released, and never again.
+  std::string fallbackReason;
+  std::atomic<bool> fellBack{false};
   std::chrono::steady_clock::time_point started;
 };
 

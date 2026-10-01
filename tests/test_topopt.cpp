@@ -364,6 +364,52 @@ struct DirectSeamSolver : fem::TopoLinearSolver {
 
 } // namespace
 
+// The progress a run publishes names the fallback from the iteration the
+// injected solver is dropped, not only at the end: the pan/tilt yoke's run
+// reported "gpu" for every poll while the CPU ground at four minutes an
+// iteration.
+TEST_CASE("Topology progress says when the injected solver was dropped",
+          "[topopt]") {
+  struct FailsThird : DirectSeamSolver {
+    bool Solve(const std::vector<double>& scale, const std::vector<double>& F,
+               std::vector<double>& u, std::string* error) override {
+      if (solveCalls == 2) {
+        ++solveCalls;
+        *error = "made no progress";
+        return false;
+      }
+      return DirectSeamSolver::Solve(scale, F, u, error);
+    }
+  } solver;
+  fem::FemMesh mesh = GenerateBoxMesh(6, 3, 3, 60, 30, 30);
+  fem::Material steel{210000.0, 0.3};
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 60.0, 1e-6);
+  load.magnitude = 1000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 15.0;
+  params.maxIterations = 5;
+  params.volumeFraction = 0.5;
+  std::vector<std::string> seen;
+  std::string err;
+  auto res = fem::TopologyOptimize(
+      mesh, steel, NodesAtPlane(mesh, 0, 0.0, 1e-6), {load}, params, &err,
+      [&](const fem::TopoProgress& p) {
+        seen.push_back(p.solverFallback);
+        return true;
+      },
+      {}, &solver);
+  INFO(err);
+  REQUIRE(res.has_value());
+  REQUIRE(seen.size() >= 3);
+  CHECK(seen[0].empty());
+  CHECK(seen[1].empty());
+  CHECK(seen[2] == "made no progress");
+  CHECK(res->solverFallback == "made no progress");
+}
+
 TEST_CASE("TopologyOptimize drives an injected linear solver (the GPU seam)",
           "[topopt]") {
   fem::FemMesh mesh = GenerateBoxMesh(6, 3, 3, 60, 30, 30);

@@ -51,6 +51,10 @@ struct TopoProgress {
   double compliance = 0.0;     // u^T K u at this iteration (lower = stiffer)
   double maxChange = 0.0;      // max |dx| this iteration
   double volumeFraction = 0.0; // achieved solid fraction this iteration
+  // Why the injected solver was dropped, once it has been (empty while it
+  // carries the run): a progress report naming the GPU while the CPU grinds
+  // at minutes an iteration is the status lying about the wait.
+  std::string solverFallback;
 };
 
 // The optimized density field + convergence history. `density` is the physical

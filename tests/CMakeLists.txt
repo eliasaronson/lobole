@@ -148,6 +148,11 @@ add_executable(designer_tests
 # failing to compile. Test the actions layer, not the widgets.
 target_link_libraries(designer_tests PRIVATE designer_app designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# What the build option promised, stated apart from the define the app's
+# library carries, so a test can hold the one to the other.
+if(HAVE_FEM_GPU)
+    target_compile_definitions(designer_tests PRIVATE DESIGNER_EXPECT_TOPO_GPU)
+endif()
 
 # Precompiled headers. designer_core has carried one since round 1 for the same
 # reason (CMakeLists.txt): the OpenCASCADE tree behind core/Document.h is

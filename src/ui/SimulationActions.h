@@ -83,6 +83,12 @@ void ExitSimulation(AppState& state);
 // run_study RPC. Defined in AppActions.cpp.
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
 
+// True when this build can hand a topology run to the GPU solver (fem_gpu
+// compiled into the file that starts the run). A test holds it to the build
+// option: for a month it was false in every build, and every run went to
+// the CPU at a few minutes an iteration without a word.
+bool TopologyGpuBuiltIn();
+
 // Prepares the snapshot (meshes on the calling thread) and spawns the worker.
 // Returns false + *error on a prep failure or if a run is already in progress.
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,

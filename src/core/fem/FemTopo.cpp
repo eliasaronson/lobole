@@ -838,6 +838,7 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
       prog.compliance = compliance;
       prog.maxChange = maxChange;
       prog.volumeFraction = Vphys / Vtot;
+      prog.solverFallback = result.solverFallback;
       if (!progress(prog)) { // caller cancelled: keep best-so-far
         result.cancelled = true;
         return result;

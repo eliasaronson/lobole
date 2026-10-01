@@ -126,6 +126,20 @@ uint64_t AddBox(Document& doc, const glm::vec3& at, double w, double h,
 // missing the body"). Nothing tested it until now.
 // ---------------------------------------------------------------------------
 
+// The GPU topology solver is wired in where the run starts. The define lived
+// on the `designer` executable while SimulationActions.cpp was compiled into
+// designer_app, so from the day the library split off every topology run
+// went to the CPU -- 4 minutes an iteration on the pan/tilt yoke -- and
+// study_status said "cpu (Eigen CG-IC)" with no reason.
+TEST_CASE("a build with the GPU topology solver starts runs with it",
+          "[actions][topopt]") {
+#ifdef DESIGNER_EXPECT_TOPO_GPU
+  CHECK(ui::TopologyGpuBuiltIn());
+#else
+  CHECK_FALSE(ui::TopologyGpuBuiltIn());
+#endif
+}
+
 TEST_CASE("a split's offset is derived from the body, not a literal",
           "[actions][defaults]") {
   ui::AppState state = MakeHeadlessState();

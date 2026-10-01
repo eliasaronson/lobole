@@ -1098,8 +1098,12 @@ if(GLSLC AND DESIGNER_ENABLE_FEM_GPU)
         # The app auto-selects the GPU solver for topology runs when a usable
         # hardware device exists (DESIGNER_TOPO_GPU=0 disables, =1 admits a
         # software device).
-        target_link_libraries(designer fem_gpu)
-        target_compile_definitions(designer PRIVATE HAVE_FEM_GPU)
+        # On designer_app, where the topology run is started
+        # (src/ui/SimulationActions.cpp): on the `designer` executable alone
+        # the define never reached that file, and every topology run since
+        # the app was split into a library went to the CPU.
+        target_link_libraries(designer_app PUBLIC fem_gpu)
+        target_compile_definitions(designer_app PUBLIC HAVE_FEM_GPU)
         set(HAVE_FEM_GPU ON)
     endif()
 endif()
