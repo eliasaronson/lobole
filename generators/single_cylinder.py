@@ -47,7 +47,8 @@ def block(app):
       .var("rod_l", ROD_L))
     # The barrel starts clear of the crank's swing: the webs reach WEB_R from
     # the axis, and the rod's big end swings wider still.
-    p.box(position=(-70, -60, BARREL_Z), w=140, h=120, d=DECK - BARREL_Z,
+    underside = p.datum_plane("xy", offset=BARREL_Z, name="Barrel underside")
+    p.box(underside, width=140, depth=120, height=DECK - BARREL_Z,
           name="Barrel")
     hole = p.sketch(Plane.xy(BARREL_Z - 5), name="Bore")
     hole.circle((0, 0), d="bore")
@@ -76,18 +77,21 @@ def crank(app):
     # middle. A journal running the full length passes exactly through where
     # the rod's big end has to be, and the motion study reported it as a
     # crank/rod clash at every angle.
-    p.cylinder(center=(0, -70, 0), direction=(0, 1, 0), d=50, h=24,
-               name="Journal L")
-    p.cylinder(center=(0, 46, 0), direction=(0, 1, 0), d=50, h=24,
-               name="Journal R")
+    # Each journal grows inward from the crank's end plane (y = -70 and
+    # +70; an XZ datum faces -Y, so the left one is reversed).
+    jl = p.cylinder(p.datum_plane("xz", offset=70, name="Left end"), d=50,
+                    height=24, reversed=True, name="Journal L")
+    jr = p.cylinder(p.datum_plane("xz", offset=-70, name="Right end"), d=50,
+                    height=24, name="Journal R")
     # 2 mm diametral clearance in the rod's 46 bore: a running fit, and well
     # outside the collision mesh's deflection on a part this size.
-    p.cylinder(center=(0, -30, CRANK_R), direction=(0, 1, 0), d=42, h=60,
-               name="Crank pin")
-    for y in (-46, 16):
+    p.cylinder(p.datum_plane("xz", offset=30, name="Crank pin end"), d=42,
+               height=60, at=(0, CRANK_R), reversed=True, name="Crank pin")
+    for y, journal in ((-46, jl), (16, jr)):
         # A web either side of the rod, radius WEB_R so it passes under the
-        # barrel and 1 mm off the rod's cheeks.
-        p.cylinder(center=(0, y, 0), direction=(0, 1, 0), d=2 * WEB_R, h=30,
+        # barrel and 1 mm off the rod's cheeks. Each stands on its
+        # journal's inner end.
+        p.cylinder(journal.feature.end_cap(), d=2 * WEB_R, height=30,
                    name="Web")
         # The counterweight: material OPPOSITE the pin, which is what makes a
         # crank a crank rather than two discs.
@@ -110,11 +114,12 @@ def rod(app):
     # piston's crown, which sits 30 above the wrist pin.
     # 32 across, not 36: at its worst tilt the shank's outer edge came within
     # a millimetre of the bore's mouth, and the study called it.
-    p.box(position=(-16, -14, -34), w=32, h=28, d=ROD_L + 50, name="Shank")
+    foot = p.datum_plane("xy", offset=-34, name="Rod foot")
+    p.box(foot, width=32, depth=28, height=ROD_L + 50, name="Shank")
     # The big end is wider than the shank: the bolts have to clear its bore
     # (45 dia) and still be inside material. At the shank's own 36 they were
     # in fresh air, and the app said so.
-    p.box(position=(-35, -14, -34), w=70, h=28, d=54, name="Big end")
+    p.box(foot, width=70, depth=28, height=54, name="Big end")
     bores = p.sketch(Plane.xz(14), name="Bores")
     bores.circle((0, 0), d=46)
     bores.circle((0, "rod_l"), d=26)
@@ -134,8 +139,8 @@ def piston(app):
     wrist pin, so the rod mates to it without an offset."""
     p = app.part("piston")
     p.var("bore", BORE).var("pin_h", PIN_HEIGHT)
-    p.cylinder(center=(0, 0, -SKIRT), direction=(0, 0, 1), d=BORE - 0.5,
-               h=SKIRT + PIN_HEIGHT, name="Piston")
+    p.cylinder(p.datum_plane("xy", offset=-SKIRT, name="Skirt"),
+               d=BORE - 0.5, height=SKIRT + PIN_HEIGHT, name="Piston")
     # Ring grooves: revolved cuts, the way a lathe makes them.
     for i in range(3):
         z = PIN_HEIGHT - 6.0 - 6.0 * i
@@ -185,7 +190,7 @@ def head(app):
     above them."""
     p = app.part("head")
     p.var("bore", BORE)
-    p.box(position=(-70, -60, 0), w=140, h=120, d=60, name="Head")
+    p.box("Top", width=140, depth=120, height=60, name="Head")
     # Two valve guides, bored through, either side of the bore's axis.
     guides = p.sketch(Plane.xy(-5), name="Guides")
     for x in (-22, 22):
@@ -269,11 +274,13 @@ def camshaft(app):
     cam relation's table, not this geometry. The lobes are here so the part
     looks like a camshaft and so the study has something to check."""
     p = app.part("camshaft")
-    p.cylinder(center=(0, -70, 0), direction=(0, 1, 0), d=26, h=140,
-               name="Shaft")
+    # Shaft and lobes each grow along +Y from an XZ datum (which faces -Y,
+    # hence reversed) at their left end.
+    p.cylinder(p.datum_plane("xz", offset=70, name="Shaft end"), d=26,
+               height=140, reversed=True, name="Shaft")
     for y in (-30, 14):
-        p.cylinder(center=(0, y, 0), direction=(0, 1, 0), d=34, h=16,
-                   name="Lobe")
+        p.cylinder(p.datum_plane("xz", offset=-y, name=f"Lobe at {y}"),
+                   d=34, height=16, reversed=True, name="Lobe")
     p.frame("axle", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
     return p

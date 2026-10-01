@@ -36,6 +36,17 @@ def plane_at_x(x):
     return {"origin": [x, 0, 0], "normal": [1, 0, 0], "uAxis": [0, 1, 0]}
 
 
+def uv_on(face, point):
+    """Where a world point lands in the frame a primitive standing on `face`
+    (an SDK Face) is drawn in: `at=uv_on(face, p)`. That frame's origin is
+    the face's centroid and its u the face frame's X, which a script cannot
+    guess for a round face, so it is asked rather than assumed."""
+    f = face.frame()
+    d = [p - o for p, o in zip(point, f.origin)]
+    return (sum(a * b for a, b in zip(d, f.x)),
+            sum(a * b for a, b in zip(d, f.y)))
+
+
 def plane_at_y(y):
     """XZ plane at y with normal -Y, so v = world Z (not -Z)."""
     return {"origin": [0, y, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]}

@@ -22,9 +22,9 @@ from om615_spec import *  # noqa: E402,F401,F403
 
 # --- the two shapes everything here is made of ------------------------------
 #
-# No Box, Sphere or Cylinder anywhere in this engine. A primitive is always a
-# NEW BODY (they take no mode), so a part built from them is a bag of
-# overlapping solids rather than one; and a drawn profile is what the part is
+# No Box, Sphere or Cylinder anywhere in this engine. A part built from
+# primitives as bodies of their own is a bag of overlapping solids rather
+# than one; and a drawn profile is what the part is
 # actually described by, so changing a number re-draws it instead of moving a
 # literal. These two helpers are the whole vocabulary.
 
@@ -621,12 +621,11 @@ def crankshaft(app):
     counterweight opposite each pin, a nose carrying two sprockets and the
     damper, and a flywheel flange.
 
-    ONE body, not eighteen. A primitive is always a new body — Box, Cylinder
-    and Sphere take no mode — so a crank built from cylinders is a bag of
-    overlapping solids that reports the overlaps twice in its own volume and
-    has no single outside for anything to bear on. Every round section here
-    is a circle extruded with mode="add", which is the same drawing and one
-    solid at the end of it.
+    ONE body, not eighteen. A crank built from cylinders as bodies of their
+    own is a bag of overlapping solids that reports the overlaps twice in
+    its own volume and has no single outside for anything to bear on. Every
+    round section here is a circle extruded with mode="add", which is the
+    same drawing and one solid at the end of it.
 
     The web thicknesses are DERIVED from the gap each one has to fill — half
     a bore pitch less half a main and half a rod journal — so moving a main

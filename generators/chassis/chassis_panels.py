@@ -22,6 +22,7 @@ two cases are not the same part:
   left at the near face is the weld's root gap.
 """
 import chassis_spec as S
+from chassis_jig import axis_frame
 
 PANEL_GAUGE = "1.5mm"   # floor and firewall
 TAB_GAUGE = "4mm"       # a suspension pickup carries a rod end
@@ -58,9 +59,10 @@ def _saddle(d, part, at, direction, od, i):
     """Cut this blank to sit ON a tube rather than through it."""
     r = od / 2.0 + SADDLE_GAP
     base = tuple(at[k] - direction[k] * 200.0 for k in range(3))
+    axis = axis_frame(d, f"Tube {i} axis", base, direction)
     cyl = d.call("add_feature", feature={
-        "type": "Cylinder", "name": f"Tube {i}", "center": list(base),
-        "direction": list(direction), "radius": r, "height": 400.0})
+        "type": "Cylinder", "name": f"Tube {i}", "on": {"feature_id": axis},
+        "radius": r, "height": 400.0})
     _check(cyl, f"{part} tube {i}")
     st = d.call("get_state")["bodies"]
     target = [b["created_by"] for b in st if b["created_by"] != cyl["id"]][0]

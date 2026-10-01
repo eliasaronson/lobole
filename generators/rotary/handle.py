@@ -88,11 +88,16 @@ def dimples(d, solid):
     surface at its own station, so the bite is constant while the handle's
     radius is not.
 
-    A primitive has no cut mode -- it is a body, and a Boolean is what
-    removes it -- so each one is subtracted in turn and the result becomes
-    the target of the next. The app said so by refusing `mode` on a Sphere
-    and naming the fields it does take, which is the refusal rule earning
-    its keep on a generator rather than on a user.
+    Each ball is a Sphere that CUTS, so the handle keeps its one body. It
+    stands on a frame at its own centre whose X is the handle's axis: a
+    sphere is a half disc revolved about the frame's X, and with X along the
+    handle its poles sit beside the dimple, not in it. A ball on a YZ plane
+    revolves about Y instead, which puts a pole inside the dimple on the
+    stations where the twist turns it towards Y -- and the kernel's cut
+    through a pole is off by tens of mm3 (31 low at the second dimple, where
+    a slice integral of ball and profile gives 263.4); placed this way all
+    five agree with that integral to 0.01 mm3. The old stored Sphere was
+    off there too, 17.6 high, for the same reason.
     """
     for i in range(DIMPLE_N):
         x = DIMPLE_X0 + i * DIMPLE_STEP
@@ -102,14 +107,16 @@ def dimples(d, solid):
         # which is the arc from x=14 to x=66.
         r = surface_radius(x)
         centre = r + DIMPLE_R - DIMPLE_BITE
-        ball = check(d.call("add_feature", feature={
-            "type": "Sphere", "name": f"Grip {i + 1}",
-            "center": [x, centre * math.sin(theta), centre * math.cos(theta)],
+        ball_at = check(d.call("add_feature", feature={
+            "type": "Frame", "name": f"Grip {i + 1} centre",
+            "kind": "explicit",
+            "origin": [x, centre * math.sin(theta), centre * math.cos(theta)],
+            "z_axis": [0.0, math.cos(theta), -math.sin(theta)],
+            "x_axis": [1.0, 0.0, 0.0]}), f"grip {i + 1} centre")
+        check(d.call("add_feature", feature={
+            "type": "Sphere", "name": f"Grip {i + 1}", "mode": "cut",
+            "on": {"feature_id": ball_at["id"]},
             "radius": DIMPLE_R}), f"grip {i + 1}")
-        solid = check(d.call("add_feature", feature={
-            "type": "Boolean", "name": f"Cut grip {i + 1}",
-            "target_id": solid["id"], "tool_id": ball["id"],
-            "op": "subtract"}), f"cut grip {i + 1}")
     return solid
 
 

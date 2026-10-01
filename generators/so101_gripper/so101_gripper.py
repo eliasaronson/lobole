@@ -34,10 +34,25 @@ XMAX = P.A + P.D + RIM               # chassis half-width in X
 
 
 class Build:
-    """Primitives and booleans, with a regen check on every feature."""
+    """Primitives and booleans, with a regen check on every feature.
+
+    A primitive stands ON a plane: every box here is a block resting on the
+    level plane at its underside, and every cylinder a round standing on
+    the plane square to its axis through its base centre. Those are the
+    world planes where they can be, and otherwise one datum (a frame, where
+    the plane is tilted) per plane per part, shared by everything that
+    stands on it."""
+
+    # A world plane's frame (docs/modeling/README.md#primitives): which
+    # world axis its u and v are, each with a sign. A datum offset from one
+    # has the same frame.
+    PLANES = {2: ("xy", "Top", ((0, 1), (1, 1))),       # u +X, v +Y, n +Z
+              0: ("yz", "Right", ((1, 1), (2, 1))),     # u +Y, v +Z, n +X
+              1: ("xz", "Front", ((0, 1), (2, -1)))}    # u +X, v -Z, n +Y
 
     def __init__(self, d):
         self.d = d
+        self._datums = {}
 
     def feat(self, **f):
         r = self.d.call("add_feature", feature=f)
@@ -46,18 +61,65 @@ class Build:
             raise SystemExit(f"REGEN FAILED after {f.get('name')}: {regen}")
         return r["id"]
 
+    def _on(self, axis, at):
+        """What a primitive whose normal runs along world `axis` (0, 1, 2)
+        from the point `at` stands on, and that point's (u, v) there."""
+        base, world, uv = self.PLANES[axis]
+        offset = float(at[axis])
+        where = [sgn * float(at[i]) for i, sgn in uv]
+        if abs(offset) < 1e-9:
+            return world, where
+        key = (self.d.call("list_parts")["active_id"], base, round(offset, 6))
+        if key not in self._datums:
+            self._datums[key] = self.feat(
+                type="DatumPlane", name=f"{world} {offset:+g}",
+                kind="offset", base_plane=base, offset=offset)
+        return {"feature_id": self._datums[key]}, where
+
     def box(self, name, lo, hi):
         a, c = list(lo), list(hi)
         lo = [min(a[i], c[i]) for i in range(3)]
         hi = [max(a[i], c[i]) for i in range(3)]
-        return self.feat(type="Box", name=name, position=lo,
-                         width=hi[0] - lo[0], height=hi[1] - lo[1],
-                         depth=hi[2] - lo[2])
+        on, at = self._on(2, lo)
+        return self.feat(type="Box", name=name, on=on, centered=False,
+                         offset=at, width=hi[0] - lo[0],
+                         depth=hi[1] - lo[1], height=hi[2] - lo[2])
+
+    def _on_tilted(self, name, direction, at):
+        """A plane square to a direction no world plane is (the camera
+        seat's): an explicit Frame, Z along `direction`, shared by every
+        cylinder that starts on the same plane."""
+        n = math.sqrt(sum(c * c for c in direction))
+        z = [c / n for c in direction]
+        level = sum(a * b for a, b in zip(at, z))
+        key = (self.d.call("list_parts")["active_id"],
+               tuple(round(c, 9) for c in z), round(level, 6))
+        if key not in self._datums:
+            ref = (1.0, 0.0, 0.0) if abs(z[0]) < 0.9 else (0.0, 1.0, 0.0)
+            dot = sum(r * c for r, c in zip(ref, z))
+            x = [r - c * dot for r, c in zip(ref, z)]
+            m = math.sqrt(sum(c * c for c in x))
+            x = [c / m for c in x]
+            self._datums[key] = (self.feat(
+                type="Frame", name=f"{name} plane", kind="explicit",
+                origin=list(at), z_axis=z, x_axis=x), list(at), x)
+        fid, origin, x = self._datums[key]
+        y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2],
+             z[0] * x[1] - z[1] * x[0]]
+        d = [a - o for a, o in zip(at, origin)]
+        return {"feature_id": fid}, [sum(a * b for a, b in zip(d, x)),
+                                     sum(a * b for a, b in zip(d, y))]
 
     def cyl(self, name, centre, direction, radius, height):
-        return self.feat(type="Cylinder", name=name, center=list(centre),
-                         direction=list(direction), radius=radius,
-                         height=height)
+        axis = [i for i in range(3) if abs(direction[i]) > 1e-9]
+        if len(axis) != 1:
+            on, at = self._on_tilted(name, direction, centre)
+            return self.feat(type="Cylinder", name=name, on=on, offset=at,
+                             radius=radius, height=height)
+        on, at = self._on(axis[0], centre)
+        return self.feat(type="Cylinder", name=name, on=on, offset=at,
+                         radius=radius, height=height,
+                         reversed=direction[axis[0]] < 0)
 
     def boolean(self, op, target, tool, name):
         return self.feat(type="Boolean", name=name, target_id=target,

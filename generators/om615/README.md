@@ -164,8 +164,8 @@ Construction rules the builders keep:
   or slides on carries an axis. A mate aligns axes, so a frame whose z "points
   down" turns the part over.
 - Everything is a drawn profile (`slab`, `disc`, `axis_solid`, `bore` in
-  `om615_bottom.py`), because primitives are always new bodies and a part
-  built from them counts its overlaps twice.
+  `om615_bottom.py`), because a part built from primitives as bodies of
+  their own counts its overlaps twice.
 - The head is built in one order: the water jacket is a void, so everything
   that must stay dry has its wall put back before it is drilled. The jacket is
   a ladder of channels and columns, not a slab crossing every port.

@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_sdk import Plane, SdkError, connect  # noqa: E402
+from _lib import uv_on  # noqa: E402
 
 
 def build(app, crank_r=20.0, rod_l=70.0, bore_d=30.0):
@@ -52,8 +53,10 @@ def build(app, crank_r=20.0, rod_l=70.0, bore_d=30.0):
     # whole travel.
     block = app.part("block")
     block.var("bore_d", bore_d).var("crank_r", crank_r).var("rod_l", rod_l)
-    block.box(position=(barrel_x0, -25, -25), w=tdc + 35 - barrel_x0, h=50,
-              d=50, name="Block")
+    # The block stands on the plane the barrel starts at and runs along +X.
+    barrel_end = block.datum_plane("yz", offset=barrel_x0, name="Barrel end")
+    block.box(barrel_end, width=50, depth=50, height=tdc + 35 - barrel_x0,
+              name="Block")
     bore_sk = block.sketch(Plane.yz(barrel_x0), name="Bore")
     bore_sk.circle((0, 0), d="bore_d")
     block.extrude(bore_sk.add(), tdc + 40 - barrel_x0, mode="cut", name="Bore")
@@ -65,9 +68,13 @@ def build(app, crank_r=20.0, rod_l=70.0, bore_d=30.0):
     # through it, so the rod's big end runs on the pin and clears the disc.
     crank = app.part("crank")
     crank.var("crank_r", crank_r)
-    crank.cylinder(center=(0, -30, 0), direction=(0, 1, 0), d=2 * crank_r + 16,
-                   h=8, name="Disc")
-    crank.cylinder(center=(crank_r, -22, 0), direction=(0, 1, 0), d=8, h=25,
+    # The disc's back is 30 behind the rod plane (an XZ datum faces -Y, so
+    # the disc grows reversed, towards +Y); the pin stands on its front.
+    disc_back = crank.datum_plane("xz", offset=30, name="Disc back")
+    disc = crank.cylinder(disc_back, d=2 * crank_r + 16, height=8,
+                          reversed=True, name="Disc")
+    front = disc.feature.end_cap()
+    crank.cylinder(front, d=8, height=25, at=uv_on(front, (crank_r, -22, 0)),
                    name="Pin")
     crank.frame("axle", origin=(0, 0, 0), z=(0, 1, 0))
     crank.frame("pin", origin=("crank_r", 0, 0), z=(0, 1, 0))
@@ -76,7 +83,10 @@ def build(app, crank_r=20.0, rod_l=70.0, bore_d=30.0):
     # ---- The rod: in the plane y -3..3, big end at its own origin.
     rod = app.part("rod")
     rod.var("rod_l", rod_l)
-    rod.box(position=(-8, -3, -6), w=rod_l + 16, h=6, d=12, name="Rod")
+    # The rod lies in the plane y -3..3, its underside 6 below the axis.
+    underside = rod.datum_plane("xy", offset=-6, name="Rod underside")
+    rod.box(underside, width=rod_l + 16, depth=6, height=12,
+            at=(rod_l / 2, 0), name="Rod")
     hole = rod.sketch(Plane.xz(3.0), name="Pin hole")
     hole.circle((0, 0), d=9)
     rod.extrude(hole.add(), 8.0, mode="cut", name="Pin hole")
@@ -88,13 +98,12 @@ def build(app, crank_r=20.0, rod_l=70.0, bore_d=30.0):
     # OPENS at the back face so the rod's small end swings inside it.
     piston = app.part("piston")
     piston.var("bore_d", bore_d)
-    piston.cylinder(center=(-6, 0, 0), direction=(1, 0, 0), d=bore_d - 0.5,
-                    h=32, name="Piston")
-    piston.box(position=(-8, -4, -11), w=20, h=8, d=22, name="Slot")
-    piston.app.add_feature(feature={
-        "type": "Boolean", "name": "Slot cut",
-        "target_id": piston.body(name="Piston").created_by,
-        "tool_id": piston.body(name="Slot").created_by, "op": "subtract"})
+    # Both start on YZ datums behind the wrist pin and run along +X: the
+    # piston from its back face, the slot from 2 mm behind it, so it opens.
+    piston.cylinder(piston.datum_plane("yz", offset=-6, name="Piston back"),
+                    d=bore_d - 0.5, height=32, name="Piston")
+    piston.box(piston.datum_plane("yz", offset=-8, name="Slot start"),
+               width=8, depth=22, height=20, mode="cut", name="Slot")
     piston.frame("wrist_pin", origin=(0, 0, 0), z=(0, 1, 0))
     piston.frame("slide", origin=(0, 0, 0), z=(1, 0, 0))
     piston.check()

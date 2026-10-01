@@ -219,12 +219,19 @@ def disc(part, center, axis, d, t, name="Disc"):
     Returns the feature id, like everything else here — `part.cylinder`
     returns the Body, which costs a body query per call and is the wrong
     currency when the next move is a union.
+
+    The disc stands on a frame of its own at its back face (`<name> face`,
+    Z along `axis`): the axis may be any direction, the head tube's
+    included, so neither a world plane nor an offset datum can carry it.
     """
     n = V(axis).unit()
     base = V(center) - n * (float(t) / 2.0)
-    return part._add({"type": "Cylinder", "name": name, "center": list(base),
-                      "direction": list(n), "radius": float(d) / 2.0,
-                      "height": float(t)})["id"]
+    ref = V(1, 0, 0) if abs(n.dot(V(1, 0, 0))) < 0.9 else V(0, 1, 0)
+    face = part.frame(f"{name} face", origin=tuple(base), z=tuple(n),
+                      x=tuple((ref - n * ref.dot(n)).unit()))
+    return part._add({"type": "Cylinder", "name": name,
+                      "on": {"feature_id": face.id},
+                      "diameter": float(d), "height": float(t)})["id"]
 
 
 AXES = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}

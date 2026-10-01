@@ -131,11 +131,15 @@ def pedal(app, S):
     high = float(S["PEDAL_H"]) / 2.0
     rail = width / 2.0 - 2.0
     steel = [tube(part, (0, 0, -14), (0, 0, length + 18), 12.0, 0.0, "Axle")]
+    # The rails rise from the cage's inboard end, 12 out along the axle; the
+    # rubber blocks from 14.
+    cage = part.datum_plane("xy", offset=12.0, name="Cage end")
+    rubber = part.datum_plane("xy", offset=14.0, name="Block end")
     for x in (-rail, rail):                    # the cage's side rails
         steel.append(part._add({
             "type": "Box", "name": f"Rail {x:+.0f}",
-            "position": [x - 2.5, -high, 12.0],
-            "width": 5.0, "height": 2 * high, "depth": length})["id"])
+            "on": {"feature_id": cage.id}, "offset": [x, 0.0],
+            "width": 5.0, "depth": 2 * high, "height": length})["id"])
     for z in (14.0, length + 8.0):             # webs tying them to the axle
         steel.append(tube(part, (-rail, 0, z), (rail, 0, z), 5.0, 0.0,
                           f"Web {z:.0f}"))
@@ -144,10 +148,10 @@ def pedal(app, S):
     # this pedal weighed when the blocks were steel too.
     for side in (+1, -1):
         part._add({"type": "Box", "name": f"Block {side:+d}",
-                   "position": [-(rail + 1.0), 4.0 if side > 0 else -high,
-                                14.0],
-                   "width": 2 * (rail + 1.0), "height": high - 4.0,
-                   "depth": length - 4.0})
+                   "on": {"feature_id": rubber.id},
+                   "offset": [0.0, side * (high + 4.0) / 2.0],
+                   "width": 2 * (rail + 1.0), "depth": high - 4.0,
+                   "height": length - 4.0})
     part.app.set_material(body=0, material="steel")
     shop.look(part, "chrome", body=0)
     for index in (1, 2):

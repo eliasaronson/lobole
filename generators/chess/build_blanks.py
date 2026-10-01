@@ -134,10 +134,13 @@ def build_blank(app, name, pieces, piece_part):
     # the clearance every cutter keeps from their face, at one end; the
     # tailstock's centre at the other. Modelled square, the check measures
     # what the machine can cut instead of calling the ends leftover.
+    # Each is a square standing on a YZ datum at its inboard end (Right's
+    # normal is +X, the blank's axis), growing along +X.
     for name_, x0, lx in (("Grip", -GRIP, GRIP + CHUCK_CLEAR),
                           ("Stub", prev_top + neck_l, stub_l)):
         body = [b for b in part.bodies() if b.name not in ("Grip", "Stub")][0]
-        box = part.box((x0, -side / 2, -side / 2), lx, side, side, name=name_)
+        end = part.datum_plane("yz", offset=x0, name=f"{name_} end")
+        box = part.box(end, width=side, depth=side, height=lx, name=name_)
         app.add_feature(feature={"type": "Boolean", "name": f"{name_} on",
                                  "target_id": body.created_by,
                                  "tool_id": box.created_by, "op": "union"})

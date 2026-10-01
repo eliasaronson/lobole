@@ -195,14 +195,17 @@ def front_brake(app, S):
                         f"Arm {side:+d} upper"))
         ids.append(tube(part, waist, (pad[0], y, pad[2] + 5.0), 9.0, 0.0,
                         f"Arm {side:+d} lower"))
-        # The pad KISSES the braking track; it does not sink into it.
+        # The pad KISSES the braking track; it does not sink into it: it
+        # stands on the track's plane and grows outboard. An XZ datum faces
+        # -Y, so the +Y pad is the reversed one.
+        track = part.datum_plane(
+            "xz", offset=-side * float(S["RIM_WIDTH"]) / 2.0,
+            name=f"Braking track {side:+d}")
         ids.append(part._add({
             "type": "Box", "name": f"Pad {side:+d}",
-            "position": [pad[0] - 24.0,
-                         (float(S["RIM_WIDTH"]) / 2.0) if side > 0
-                         else -(float(S["RIM_WIDTH"]) / 2.0 + 6.0),
-                         pad[2] - 4.0],
-            "width": 48.0, "height": 6.0, "depth": 10.0})["id"])
+            "on": {"feature_id": track.id}, "reversed": side > 0,
+            "offset": [pad[0], pad[2] + 1.0],
+            "width": 48.0, "depth": 10.0, "height": 6.0})["id"])
     union(part, ids, "Brake build")
     shop.finish(part, "steel", "chrome")
     seat_frame(part)

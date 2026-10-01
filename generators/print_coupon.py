@@ -133,9 +133,11 @@ def main():
 
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
+    # The plate stands on Top with its low corner at the origin.
     check(d.call("add_feature", feature={
-        "type": "Box", "name": "Plate", "position": [0, 0, 0],
-        "width": width, "height": depth, "depth": thick}), "plate")
+        "type": "Box", "name": "Plate", "on": "Top", "centered": False,
+        "offset": [0, 0], "width": width, "depth": depth, "height": thick}),
+        "plate")
 
     def x_at(i):
         return pitch * (i + 0.5)

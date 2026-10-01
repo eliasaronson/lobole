@@ -378,13 +378,14 @@ def antenna_mount(app):
     # The SMA bore runs up the stem, so it is an angled cylinder cut.
     axis = ant_sma_axis()
     o = ant_sma_origin()
-    tool = p.cylinder(center=(o[0] - axis[0] * 20, o[1], o[2] - axis[2] * 20),
-                      direction=axis, d=ANT_BORE_D, h=26.0,
-                      name="SMA bore tool")
-    p._add({"type": "Boolean", "name": "SMA bore", "op": "subtract",
-            "target_id": p.body(index=0).created_by, "tool_id": tool.created_by})
+    # The bore stands on a frame 20 down the SMA's own axis, so it starts
+    # inside the mount and opens through the stem's face.
     p.frame("Origin", origin=(0, 0, 0))
     p.frame("SMA", origin=o, z=axis, x=(axis[2], 0, -axis[0]))
+    start = p.frame("SMA bore start",
+                    origin=(o[0] - axis[0] * 20, o[1], o[2] - axis[2] * 20),
+                    z=axis, x=(axis[2], 0, -axis[0]))
+    p.cylinder(start, d=ANT_BORE_D, height=26.0, mode="cut", name="SMA bore")
     return p.material("rubber").check(solids=1)
 
 
@@ -485,8 +486,7 @@ def camera(app):
 
 def receiver(app):
     p = app.part("Receiver ELRS 2.4G")
-    p.box(position=(-RX_L / 2, -RX_W / 2, 0), w=RX_L, h=RX_W, d=RX_H,
-          name="Receiver")
+    p.box("Top", width=RX_L, depth=RX_W, height=RX_H, name="Receiver")
     p.frame("Origin", origin=(0, 0, 0))
     return p.material("plastic_black").check(solids=1)
 
@@ -507,15 +507,14 @@ def battery(app):
 
 def capacitor(app):
     p = app.part("Capacitor 35V 1000uF")
-    p.cylinder(center=(0, 0, 0), direction=(1, 0, 0), d=CAP_D,
-               h=CAP_H, name="Can")
+    p.cylinder("Right", d=CAP_D, height=CAP_H, name="Can")
     p.frame("Origin", origin=(0, 0, 0))
     return p.material("aluminum").check(solids=1)
 
 
 def buzzer(app):
     p = app.part("Buzzer 5V")
-    p.cylinder(center=(0, 0, 0), d=BUZZER_D, h=BUZZER_H, name="Buzzer")
+    p.cylinder("Top", d=BUZZER_D, height=BUZZER_H, name="Buzzer")
     p.frame("Origin", origin=(0, 0, 0))
     return p.material("plastic_black").check(solids=1)
 

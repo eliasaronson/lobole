@@ -57,8 +57,10 @@ def worm(app, S):
     model = common.printed(part)
     declare(part, S)
     L, s = S["worm_len"], S["worm_span"]
-    blank = part.cylinder(center=(0, 0, -L / 2), direction=(0, 0, 1),
-                          d="worm_tip_d", h="worm_len", name="Blank")
+    # Centred on the origin: it stands on a plane half its length down.
+    end = part.datum_plane("xy", offset="-worm_len / 2", name="Worm end")
+    blank = part.cylinder(end, d="worm_tip_d", height="worm_len",
+                          name="Blank")
     face = blank.faces(kind="cylinder")[0]
     r = part.worm(face, starts=int(S["worm_starts"]), hand="right",
                   backlash=S["worm_backlash"], name="Worm")
@@ -120,8 +122,7 @@ def block(app, S):
 def knob(app, S):
     part = app.part("knob")
     model = common.printed(part)
-    body = part.cylinder(center=(0, 0, 0), direction=(0, 0, 1),
-                         d="knob_d", h="knob_h", name="Knob")
+    body = part.cylinder("Top", d="knob_d", height="knob_h", name="Knob")
     sk = part.sketch(Plane.xy(0, flip=True), name="Bore")
     sk.circle((0, 0), d=model("hole", S["worm_brg_d"]))
     part.cut(sk.add(), Param(S["knob_bore"], "knob_bore"), reversed=True,

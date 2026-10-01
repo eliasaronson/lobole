@@ -68,8 +68,8 @@ def tilt_wheel(app, S):
     model = common.printed(part)
     declare(part, S)
     F = S["wheel_face"]
-    blank = part.cylinder(center=(0, 0, 0), direction=(0, 0, 1),
-                          d="wheel_rim_d", h="wheel_face", name="Blank")
+    blank = part.cylinder("Top", d="wheel_rim_d", height="wheel_face",
+                          name="Blank")
     rim = blank.faces(kind="cylinder")[0]
     c = S["tilt_collar"]
     sk = part.sketch(Plane.xy(0, flip=True), name="Collar")
@@ -134,10 +134,13 @@ def camera(app, S):
     part = app.part("camera")
     part.activate()
     w, h, d = S["cam_w"], S["cam_h"], S["cam_d"]
-    body = part.box(position=(-d / 2, -w / 2, 0), w="cam_d", h="cam_w",
-                    d="cam_h", name="Body")
-    lens = part.cylinder(center=(d / 2, 0, S["cam_cz"]), direction=(1, 0, 0),
-                         d="lens_d", h="lens_l", name="Lens")
+    body = part.box("Top", width="cam_d", depth="cam_w", height="cam_h",
+                    name="Body")
+    # The lens stands on the body's front face, at the lens centre height.
+    front = body.face(normal=(1, 0, 0))
+    lens = part.cylinder(front, d="lens_d", height="lens_l",
+                         at=common.uv_on(front, (d / 2, 0, S["cam_cz"])),
+                         name="Lens")
     part.app.add_feature(feature={"type": "Boolean", "name": "Camera",
                                   "target_id": body.created_by,
                                   "tool_id": lens.created_by, "op": "union"})
@@ -163,11 +166,12 @@ def camera_screw(app, S):
     part.activate()
     major = 6.35  # 1/4 in, the designation's own diameter
     head_d, head_h = 2.5 * major, major
-    part.cylinder(center=(0, 0, -head_h), direction=(0, 0, 1), d=head_d,
-                  h=head_h, name="Head")
+    # The head hangs under Top; the shank stands on its top face.
+    head = part.cylinder("Top", d=head_d, height=head_h, reversed=True,
+                         name="Head")
     shank_l = S["plate_t"] + S["cam_screw_eng"]
-    shank = part.cylinder(center=(0, 0, 0), direction=(0, 0, 1), d=major,
-                          h=shank_l, name="Shank")
+    shank = part.cylinder(head.face(normal=(0, 0, 1)), d=major,
+                          height=shank_l, name="Shank")
     face = shank.faces(kind="cylinder")[0]
     bodies = part.bodies()
     part.app.add_feature(feature={"type": "Boolean", "name": "Screw",

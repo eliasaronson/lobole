@@ -23,6 +23,17 @@ from designer_sdk import connect, Plane, Param  # noqa: E402,F401
 PRINT = {"process": "fdm", "material": "petg"}
 
 
+def uv_on(face, point):
+    """Where a world point lands in the frame a primitive standing on
+    `face` is drawn in (origin the face's centroid, u its frame's X):
+    `at=uv_on(face, p)`. The face's X is the kernel's to choose, so it is
+    asked, not assumed."""
+    f = face.frame()
+    d = [p - o for p, o in zip(point, f.origin)]
+    return (sum(a * b for a, b in zip(d, f.x)),
+            sum(a * b for a, b in zip(d, f.y)))
+
+
 def args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)

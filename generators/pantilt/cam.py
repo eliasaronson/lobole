@@ -237,8 +237,9 @@ def vise_jaw(app):
     z = 0 -- so a fixture's pos is the gripping face's top edge."""
     part = app.part("vise jaw")
     part.activate()
-    part.box(position=(0.0, -JAW["l"] / 2, -JAW["h"]), w=JAW["w"],
-             h=JAW["l"], d=JAW["h"], name="Jaw")
+    part.box("Top", width=JAW["w"], depth=JAW["l"], height=JAW["h"],
+             at=(0.0, -JAW["l"] / 2), centered=False, reversed=True,
+             name="Jaw")
     part.material("steel")
     return part
 
@@ -301,15 +302,38 @@ def main():
 
     job = Job(app, "base_plate", "Base plate")
     J = job.job
-    faces = {f.ref["element"]: f for f in plate.faces()}
+    feats = plate.state()["features"]
 
-    def ref(prefix):
-        # The face itself, not a chamfer's face generated from its edge
-        # (";G<chamfer>"), which carries the same prefix.
-        matches = sorted((e for e in faces if e.startswith(prefix)),
-                         key=lambda e: (";G" in e, len(e)))
-        f = faces[matches[0]]
-        return {"feature_id": f.ref["feature_id"], "element": f.ref["element"]}
+    def made(name, type_, role):
+        """The faces the plate's feature `name` (of `type_`) made in
+        `role`, asked by what made them rather than by a name's prefix. Not
+        a chamfer's face generated from one of their edges (";G<chamfer>"),
+        which the same feature is the origin of."""
+        fid = [f["id"] for f in feats
+               if f["name"] == name and f["type"] == type_]
+        if len(fid) != 1:
+            raise SystemExit(f"base_plate: {len(fid)} {type_} '{name}'")
+        out = [f for f in plate.faces(made_by=fid[0], role=role)
+               if ";G" not in f.name]
+        if not out:
+            raise SystemExit(f"base_plate: '{name}' made no {role} face")
+        return [{"feature_id": f.ref["feature_id"],
+                 "element": f.ref["element"]} for f in out]
+
+    def one(name, type_, role):
+        faces = made(name, type_, role)
+        if len(faces) != 1:
+            raise SystemExit(f"base_plate: '{name}' made {len(faces)} "
+                             f"{role} faces, not one")
+        return faces[0]
+
+    rim = one("Plate", "Extrude", "side")
+    seat = one("Bearing pocket", "Extrude", "side")
+    relief = one("Relief", "Extrude", "side")
+    tripod = one("Tripod hole", "Hole", "bore")
+    # In the hole's own point order (p1..p4), which is the order drilled.
+    screws = sorted(made("Wheel screws", "Hole", "bore"),
+                    key=lambda f: f["element"])
 
     # -- Top: the model's own frame, the blank's underside at -B["under"] --
     top = job.setup("Top", {"mode": "relative",
@@ -320,23 +344,23 @@ def main():
     job.op(top, "Face", type="face", tool=1, stepdown=FACE_STEP)
     # The waste round the disc, down to just above the jaws: cleared, not
     # profiled, so no frame is left to saw off or to fall into the cutter.
-    job.op(top, "Clear round", type="adaptive", tool=1, target=ref("1/face0"),
+    job.op(top, "Clear round", type="adaptive", tool=1, target=rim,
            bottom_z=jaw_top + JAW_CLEAR, stepover=ADAPTIVE_STEP,
            stepdown=CLEAR_STEP)
     # The 6002's seat (K7): bored with the 10 mm leaving 0.2 mm, finished
     # with the fresh 6 mm in one full-depth pass, then a spring pass -- the
     # same lap again, to take what the cutter's deflection left.
-    job.op(top, "Bearing seat", type="drill", tool=1, target=ref("3/g1"),
+    job.op(top, "Bearing seat", type="drill", tool=1, target=seat,
            finish_tool=6, finish_stock=0.2)
     job.op(top, "Bearing seat spring pass", type="profile", tool=6,
-           side="inside", target=ref("3/g1"), stepdown=0)
-    job.op(top, "Relief", type="drill", tool=1, target=ref("5/g1"))
+           side="inside", target=seat, stepdown=0)
+    job.op(top, "Relief", type="drill", tool=1, target=relief)
     job.op(top, "M4 tap holes", type="drill", tool=3,
-           targets=[ref(f"10/p{i}/bore") for i in range(1, 5)])
-    job.op(top, "Chamfer seat", type="edge_round", tool=5, target=ref("3/g1"),
+           targets=screws)
+    job.op(top, "Chamfer seat", type="edge_round", tool=5, target=seat,
            edge_size=CHAMFER)
     job.op(top, "Chamfer top edge", type="edge_round", tool=5,
-           target=ref("1/face0"), edge_size=CHAMFER)
+           target=rim, edge_size=CHAMFER)
     clock("Top setup")
 
     # -- Underside: flipped about X, so setup z = -(model z) --
@@ -346,16 +370,16 @@ def main():
     jaws(app, J, under, B["across"] / 2, -(hi[2] - GRIP_DISC), "disc")
     job.op(under, "Face", type="face", tool=1, stepdown=FACE_STEP)
     job.op(under, "Clear round", type="adaptive", tool=1,
-           target=ref("1/face0"), bottom_z=-(jaw_top + JAW_CLEAR + OVERLAP),
+           target=rim, bottom_z=-(jaw_top + JAW_CLEAR + OVERLAP),
            stepover=ADAPTIVE_STEP, stepdown=CLEAR_STEP)
     job.op(under, "Tripod tap bore", type="drill", tool=6,
-           target=ref("7/p1/bore"))
+           target=tripod)
     job.op(under, "Tripod thread", type="thread_mill", tool=4,
-           target=ref("7/p1/bore"))
+           target=tripod)
     job.op(under, "Chamfer tripod", type="edge_round", tool=5,
-           target=ref("7/p1/bore"), edge_size=CHAMFER)
+           target=tripod, edge_size=CHAMFER)
     job.op(under, "Chamfer bottom edge", type="edge_round", tool=5,
-           target=ref("1/face0"), edge_size=CHAMFER)
+           target=rim, edge_size=CHAMFER)
     clock("Underside setup")
 
     out = OUT / "nc"

@@ -64,6 +64,21 @@ def planar_face(d, part, normal, near=None):
     return {"feature_id": f["created_by"], "element": f["element"]}
 
 
+def box_on_face(d, face, centre, size_x, size_y):
+    """A box's width, depth and offset on `face` (a face facing +Z) for a
+    footprint `size_x` by `size_y` centred at the world point `centre`. The
+    face's frame -- origin its centroid, u its X -- is asked of the app: a
+    face's X is the kernel's to choose, so it is read, not assumed."""
+    f = d.call("frame", **face)
+    o, x, y = f["origin"], f["x"], f["y"]
+    dv = [p - q for p, q in zip(centre, o)]
+    along_x = abs(x[0]) > 0.5
+    return {"width": size_x if along_x else size_y,
+            "depth": size_y if along_x else size_x,
+            "offset": [sum(a * b for a, b in zip(dv, x)),
+                       sum(a * b for a, b in zip(dv, y))]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
@@ -86,9 +101,11 @@ def main():
     gears = (("pinion", ZA, 0.0), ("idler", 24, 36.0 + BACKLASH),
              ("wheel", ZB, 96.0 + 2 * BACKLASH))
     d.call("add_part", name="carrier")
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Plate", "position": [-20, -50, -PLATE],
-        "width": 136, "height": 100, "depth": PLATE})
+    # The plate hangs under Top (its top face is z = 0, where the gears
+    # seat), so it grows reversed.
+    plate = d.call("add_feature", feature={
+        "type": "Box", "name": "Plate", "on": "Top", "reversed": True,
+        "width": 136, "depth": 100, "height": PLATE, "offset": [48, 0]})["id"]
     d.call("add_feature", feature={
         "type": "Sketch", "name": "Axle holes",
         "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
@@ -99,11 +116,12 @@ def main():
         "type": "Hole", "name": "Axles", "sketch_id": holes_sk,
         "hole_kind": "simple", "diameter": BORE, "depth": PLATE,
         "through": True})
+    # The rail block stands on the plate's top face.
+    top = planar_face(d, "carrier", (0, 0, 1), (48, 0, 0))
     d.call("add_feature", feature={
-        "type": "Box", "name": "Rail block", "position": [112, -47, 0],
-        "width": 4, "height": 8, "depth": 8})
-    d.call("set_material", feature_id=d.call("get_state")["features"][0]["id"],
-           material="aluminum")
+        "type": "Box", "name": "Rail block", "on": top, "height": 8,
+        **box_on_face(d, top, (114, -43, 0), 4, 8)})
+    d.call("set_material", feature_id=plate, material="aluminum")
 
     gear = os.path.join(ROOT, "generators", "gear.py")
     for name, z, _ in gears:
@@ -121,8 +139,8 @@ def main():
     # face mates to the rail block.
     d.call("add_part", name="rack")
     d.call("add_feature", feature={
-        "type": "Box", "name": "Bar", "position": [0, -4, -3],
-        "width": 120, "height": 8, "depth": 6})
+        "type": "Box", "name": "Bar", "on": "Right",
+        "width": 8, "depth": 6, "height": 120})
 
     d.call("add_assembly", name="train")
     carrier = d.call("add_occurrence", part="carrier", fixed=True)["id"]

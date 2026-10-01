@@ -142,12 +142,11 @@ def round_ends(d):
 def build(d, name="Rolling pin"):
     # A plain cylinder, not the finished profile revolved: see round_ends.
     body = check(d.call("add_feature", feature={
-        "type": "Cylinder", "name": name, "center": [0.0, 0.0, 0.0],
-        # About X, because the rotary axis is setup-space X and a part
+        "type": "Cylinder", "name": name,
+        # On Right, so about X: the rotary axis is setup-space X and a part
         # modelled across it would need a fixture frame to lay it down --
         # one more transform between the model and the trunnion, for nothing.
-        "direction": [1.0, 0.0, 0.0], "radius": R,
-        "height": LENGTH}), "barrel")
+        "on": "Right", "radius": R, "height": LENGTH}), "barrel")
     twist(d, body)
     round_ends(d)
     return body

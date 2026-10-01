@@ -37,8 +37,8 @@ def base_plate(app, S):
     ]:
         P[name] = part.param(name, expr, comment=comment, scope="project")
     S.update(spec.values(part))
-    body = part.cylinder(center=(0, 0, 0), direction=(0, 0, 1),
-                         r=P["base_r"], h=P["base_t"], name="Plate")
+    body = part.cylinder("Top", r=P["base_r"], height=P["base_t"],
+                         name="Plate")
     t = S["base_t"]
     sk = part.sketch(Plane.xy(t), name="Bearing pocket")
     sk.circle((0, 0), d=Param(S["main_brg_D"], "main_brg_D"))
@@ -91,8 +91,8 @@ def pan_wheel(app, S):
     part = app.part("pan_wheel")
     model = common.printed(part)
     face = S["wheel_face"]
-    blank = part.cylinder(center=(0, 0, 0), direction=(0, 0, 1),
-                          d="wheel_rim_d", h="wheel_face", name="Blank")
+    blank = part.cylinder("Top", d="wheel_rim_d", height="wheel_face",
+                          name="Blank")
     rim = blank.faces(kind="cylinder")[0]
     sk = part.sketch(Plane.xy(face), name="Bearing counterbore")
     sk.circle((0, 0), d=model("hole", S["main_brg_D"]))
