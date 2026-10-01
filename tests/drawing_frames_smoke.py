@@ -132,7 +132,7 @@ def main():
                 style="datum", text="A", position=[70, 60],
                 ref=ref(bottom[0], extreme="right"))
         d.call("add_drawing_note", view=sec, style="datum", text="B",
-               position=[150, 112], ref={"sil_face": walls[0]["ref"],
+               position=[178, 106], ref={"sil_face": walls[0]["ref"],
                                          "end": 1})
         refused(d, "add_drawing_note", "datum C is not on this sheet",
                 view=sec, style="fcf", position=[220, 110],
