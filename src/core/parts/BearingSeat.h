@@ -52,4 +52,13 @@ struct Seat {
                                          const ElementRef& pick,
                                          std::string* why);
 
+// Every named cylindrical face of `bodies` on the axis through `axisPoint`
+// along `axisDir` (the part's own coordinates): the candidates for a ring's
+// seat that no mate names. check_seat reads a bearing's second ring through
+// these, because a one-solid bearing in a mechanism is mated to ONE seat
+// (fastening it to both would lock the shaft to the housing).
+[[nodiscard]] std::vector<ElementRef>
+CoaxialCylinders(const std::vector<Body>& bodies, const glm::dvec3& axisPoint,
+                 const glm::dvec3& axisDir);
+
 } // namespace parts

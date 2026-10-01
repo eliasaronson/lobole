@@ -745,3 +745,127 @@ TEST_CASE("A printed housing is fitted and checked at what it prints",
   CHECK_THAT(r.at("seats")[0].at("modelled_diameter").get<double>(),
              WithinAbs(model, 1e-9));
 }
+
+// Both rings (docs/parts/README.md#both-rings): a one-solid bearing in a
+// mechanism is mated to ONE seat, since fastening it to the housing and
+// the shaft would lock the shaft. Its other ring is still on a seat, and
+// check_seat reads it through that seat (the coaxial cylinder under it)
+// rather than calling it unverified. fit_bearing reports that ring, and
+// mates it (revolute) only when asked.
+TEST_CASE("check_seat reads the ring no mate reaches through its seat",
+          "[actions][parts][bearing]") {
+  Rig rig;
+  BuildRig(rig);
+  ui::AppState& state = rig.state;
+  const int asmTab = state.activePart;
+  // A plate with a Ø30 bore through it, around the journal: the 6200's
+  // outer ring sits in it at z 10..19 once the plate is placed at z 5.
+  const size_t tab = ui::AddPart(state, "Housing");
+  ui::SetActivePart(state, tab);
+  Document& doc = *state.document;
+  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::dvec3(-30, -30, 0),
+                                              60.0, 60.0, 20.0));
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Bore", glm::dvec3(0, 0, -1), glm::dvec3(0, 0, 1), 15.0, 22.0));
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  REQUIRE(doc.Regenerate());
+  ui::SetActivePart(state, static_cast<size_t>(asmTab));
+  REQUIRE(state.assembly != nullptr);
+  Occurrence occ;
+  occ.partId = state.parts[tab].id;
+  occ.name = "Housing";
+  occ.position = glm::dvec3(0, 0, 5);
+  const uint64_t housing = state.assembly->AddOccurrence(occ);
+
+  const auto status = [](const nlohmann::json& r, const std::string& what) {
+    for (const auto& c : r.at("checks"))
+      if (c.at("characteristic") == what)
+        return c.at("status").get<std::string>();
+    return std::string("absent");
+  };
+  ui::BearingRequest place;
+  place.designation = "6200";
+
+  SECTION("check_seat finds the housing under the outer ring") {
+    const ui::BearingFit fit =
+        ui::FitBearing(state, ui::RimPick{rig.shaftOcc, rig.journal}, place);
+    REQUIRE(fit.ok);
+    CHECK(fit.otherMate == 0); // not asked for
+    INFO(fit.otherRing.dump(2));
+    REQUIRE(fit.otherRing.contains("seat"));
+    CHECK(fit.otherRing.at("seat").at("found") == "coaxial");
+    CHECK(fit.otherRing.at("diameter_check").at("status") == "pass");
+
+    const nlohmann::json r = ui::CheckSeat(state, fit.occurrence, nullptr, "");
+    INFO(r.dump(2));
+    REQUIRE(r.at("seats").size() == 2);
+    const nlohmann::json* outer = nullptr;
+    for (const auto& s : r.at("seats"))
+      if (s.at("ring") == "outer")
+        outer = &s;
+    REQUIRE(outer != nullptr);
+    CHECK(outer->at("found") == "coaxial");
+    CHECK(outer->at("mate").is_null());
+    CHECK(outer->at("occurrence") == housing);
+    CHECK(status(r, "shaft_diameter") == "pass");
+    CHECK(status(r, "housing_diameter") == "pass");
+    // A plain through bore stops nothing: said, not passed.
+    CHECK(status(r, "outer_ring_located") == "unverified");
+
+    // A bore of another size under the ring FAILS the diameter, rather than
+    // being passed over as "no seat".
+    Document* housingDoc = state.parts[tab].doc.get();
+    REQUIRE(housingDoc != nullptr);
+    auto* bore = dynamic_cast<CylinderFeature*>(housingDoc->GetFeature(1));
+    REQUIRE(bore != nullptr);
+    bore->radius = 15.05;
+    REQUIRE(housingDoc->Regenerate());
+    const nlohmann::json wide =
+        ui::CheckSeat(state, fit.occurrence, nullptr, "");
+    INFO(wide.dump(2));
+    CHECK(status(wide, "housing_diameter") == "fail");
+  }
+  SECTION("fit_bearing mates the other ring when asked, and moves nothing") {
+    place.mateOther = true;
+    const ui::BearingFit fit =
+        ui::FitBearing(state, ui::RimPick{rig.shaftOcc, rig.journal}, place);
+    REQUIRE(fit.ok);
+    INFO(fit.summary);
+    REQUIRE(fit.otherMate != 0);
+    const Mate* mate = nullptr;
+    for (const Mate& m : state.assembly->GetMates())
+      if (m.id == fit.otherMate)
+        mate = &m;
+    REQUIRE(mate != nullptr);
+    CHECK(mate->type == MateType::Revolute);
+    CHECK(mate->a.occurrenceId == housing);
+    CHECK(BearingFeature::RoleOf(mate->b.anchor.face.name) == "outside");
+    const glm::dvec3 before =
+        state.assembly->FindById(fit.occurrence)->position;
+    const glm::dvec3 housingBefore =
+        state.assembly->FindById(housing)->position;
+    CHECK(ui::SolveActiveAssembly(state) == 0);
+    CHECK(glm::length(state.assembly->FindById(fit.occurrence)->position -
+                      before) < 1e-4);
+    CHECK(glm::length(state.assembly->FindById(housing)->position -
+                      housingBefore) < 1e-4);
+    const nlohmann::json r = ui::CheckSeat(state, fit.occurrence, nullptr, "");
+    INFO(r.dump(2));
+    for (const auto& s : r.at("seats"))
+      if (s.at("ring") == "outer")
+        CHECK(s.at("mate") == fit.otherMate); // read through the mate now
+    CHECK(status(r, "housing_diameter") == "pass");
+  }
+  SECTION("asked to mate a ring nothing sits under, it says so") {
+    REQUIRE(state.assembly->RemoveOccurrence(housing));
+    place.mateOther = true;
+    const ui::BearingFit fit =
+        ui::FitBearing(state, ui::RimPick{rig.shaftOcc, rig.journal}, place);
+    REQUIRE(fit.ok);
+    CHECK(fit.otherMate == 0);
+    CHECK_FALSE(fit.otherRing.contains("seat"));
+    CHECK_THAT(fit.summary, ContainsSubstring("outer ring is NOT mated"));
+  }
+}

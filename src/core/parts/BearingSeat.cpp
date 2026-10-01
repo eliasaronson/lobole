@@ -323,4 +323,38 @@ std::optional<Seat> SeatOf(const std::vector<Body>& bodies,
   }
 }
 
+std::vector<ElementRef> CoaxialCylinders(const std::vector<Body>& bodies,
+                                         const glm::dvec3& axisPoint,
+                                         const glm::dvec3& axisDir) {
+  std::vector<ElementRef> out;
+  const Axis axis{axisPoint, glm::normalize(axisDir)};
+  for (const Body& body : bodies) {
+    if (body.reference)
+      continue;
+    const TopoDS_Shape& whole = body.shape.GetShape();
+    if (whole.IsNull())
+      continue;
+    try {
+      int i = 0;
+      for (TopExp_Explorer ex(whole, TopAbs_FACE); ex.More(); ex.Next(), i++) {
+        const BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+        if (s.GetType() != GeomAbs_Cylinder)
+          continue;
+        // Looser than a seat's own rim test: these axes come through two
+        // placements, not one part's geometry.
+        const gp_Ax1 a = s.Cylinder().Axis();
+        if (std::abs(std::abs(glm::dot(V(a.Direction().XYZ()), axis.d)) - 1.0) >
+                1e-5 ||
+            axis.Radial(V(a.Location().XYZ())) > 1e-3)
+          continue;
+        if (const std::string* n = body.elementMap.NameOf(i))
+          out.push_back({body.createdBy, *n});
+      }
+    } catch (const Standard_Failure&) {
+      continue;
+    }
+  }
+  return out;
+}
+
 } // namespace parts

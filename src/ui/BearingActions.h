@@ -39,6 +39,14 @@ struct BearingRequest {
   std::string designation;
   std::string series;
   bool dryRun = false;
+  // Also mate the OTHER ring to the seat check_seat finds for it on the
+  // bearing's axis, REVOLUTE (docs/parts/README.md#both-rings). Off by
+  // default: the picked ring is fastened, so the other ring's seat turns
+  // relative to the bearing, and in a mechanism that joint usually exists
+  // already (the shaft's revolute in the housing) — a second one through
+  // the bearing closes a redundant loop. Ask for it where the bearing IS the
+  // joint (nothing else holds the shaft).
+  bool mateOther = false;
 };
 
 struct BearingFit {
@@ -58,6 +66,10 @@ struct BearingFit {
   glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
   uint64_t occurrence = 0; // placed (not on a dry run)
   uint64_t mate = 0;       // the seat mate, 0 if none could be made
+  // The other ring, read once placed: check_seat's seat entry for it (found
+  // on the axis, or null when nothing sits there) and its diameter check.
+  nlohmann::json otherRing;
+  uint64_t otherMate = 0; // the revolute asked for by mateOther, else 0
 };
 
 // Put a bearing on a picked SEAT: a cylindrical face (a shaft journal or a

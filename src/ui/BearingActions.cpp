@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <optional>
 #include <sstream>
 
 // Bearings as generated standard parts (docs/parts/README.md#bearings): the
@@ -357,6 +359,54 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
   }
   if (fit.mate == 0)
     fit.summary += "; NOT mated — the seat's frame could not be matched";
+
+  // The other ring, read the way check_seat reads it: through the seat it
+  // sits on, on the bearing's axis, though no mate names it.
+  const std::string otherRing = seat.shaft ? "outer" : "inner";
+  const std::string otherKey =
+      seat.shaft ? "housing_diameter" : "shaft_diameter";
+  try {
+    const nlohmann::json report = CheckSeat(state, fit.occurrence, nullptr, "");
+    nlohmann::json other = {{"ring", otherRing}};
+    for (const nlohmann::json& s : report.at("seats"))
+      if (s.at("ring") == otherRing && s.contains("face"))
+        other["seat"] = s;
+    for (const nlohmann::json& c : report.at("checks"))
+      if (c.at("characteristic") == otherKey)
+        other["diameter_check"] = c;
+    fit.otherRing = std::move(other);
+  } catch (const std::exception& e) {
+    fit.otherRing = {{"ring", otherRing}, {"error", e.what()}};
+  }
+  const bool otherFound = fit.otherRing.contains("seat");
+  // Asked to mate the other ring and nothing sits under it: said in THIS
+  // answer (other_mate 0, the summary), not left for a check_seat to find.
+  // The placed bearing and its seat mate stand; they are what was asked
+  // first, and undo takes them back.
+  if (request.mateOther && bearing != nullptr && !otherFound)
+    fit.summary += "; the " + otherRing +
+                   " ring is NOT mated - nothing on the bearing's axis is a "
+                   "seat for it";
+  if (request.mateOther && bearing != nullptr && otherFound) {
+    const nlohmann::json& os = fit.otherRing.at("seat");
+    Mate mate;
+    mate.type = MateType::Revolute;
+    mate.name = "Bearing " + otherRing + " ring";
+    mate.a.occurrenceId = os.at("occurrence").get<uint64_t>();
+    mate.a.innerPath = os.at("inner_path").get<std::vector<uint64_t>>();
+    mate.a.anchor.face = {os.at("feature_id").get<uint64_t>(),
+                          os.at("face").get<std::string>()};
+    mate.b.occurrenceId = fit.occurrence;
+    mate.b.anchor.face = {bearing->GetId(),
+                          bearing->FaceName(seat.shaft
+                                                ? BearingFeature::kOutside
+                                                : BearingFeature::kBore)};
+    fit.otherMate = AddMateAsPlaced(state, mate);
+    if (fit.otherMate == 0)
+      fit.summary += "; the " + otherRing +
+                     " ring is NOT mated — its seat's frame could not be "
+                     "matched";
+  }
   fit.ok = true;
   return fit;
 }
@@ -427,58 +477,17 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
   json measurements = json::object();
   bool haveBore = false, haveOutside = false;
 
-  for (const Mate& mate : state.assembly->GetMates()) {
-    const Connector* mine = nullptr;
-    const Connector* other = nullptr;
-    if (mate.a.occurrenceId == occurrence && mate.a.innerPath.empty()) {
-      mine = &mate.a;
-      other = &mate.b;
-    } else if (mate.b.occurrenceId == occurrence && mate.b.innerPath.empty()) {
-      mine = &mate.b;
-      other = &mate.a;
-    }
-    if (mine == nullptr || mine->anchor.face.featureId != bearing->GetId())
-      continue;
-    const std::string role = BearingFeature::RoleOf(mine->anchor.face.name);
-    const bool bore = role == BearingFeature::kBore;
-    if (!bore && role != BearingFeature::kOutside)
-      continue;
-    const assembly::FlatInstance* inst = nullptr;
-    for (const assembly::FlatInstance& f : flat)
-      if (f.rootOccurrenceId == other->occurrenceId &&
-          f.innerIds == other->innerPath && f.part != nullptr)
-        inst = &f;
-    json s = {{"ring", bore ? "inner" : "outer"}, {"mate", mate.id}};
-    if (inst == nullptr || !other->anchor.face.IsSet()) {
-      s["error"] = "the other side of this mate is not a face of a placed "
-                   "part";
-      seats.push_back(std::move(s));
-      continue;
-    }
-    s["part"] = inst->path;
-    s["face"] = other->anchor.face.name;
-    std::string why;
-    const auto seat =
-        parts::SeatOf(inst->part->GetBodies(), other->anchor.face, &why);
-    if (!seat) {
-      s["error"] = why;
-      seats.push_back(std::move(s));
-      continue;
-    }
-    if (seat->shaft != bore) {
-      s["error"] = std::string("the ") + (bore ? "bore" : "outside") +
-                   " is mated to a " + (seat->shaft ? "shaft" : "bore") +
-                   ", not a seat for it";
-      seats.push_back(std::move(s));
-      continue;
-    }
+  // One ring on one seat, however the seat was found (a mate, or the
+  // coaxial search below): the end it sits at, the diameter, the shoulder.
+  const auto judge = [&](bool bore, const assembly::FlatInstance& inst,
+                         const parts::Seat& seat, json s) {
     // The end the ring sits at: the one nearer either side face.
-    const glm::dmat4 toLocal = glm::inverse(inst->world);
+    const glm::dmat4 toLocal = glm::inverse(inst.world);
     const glm::dvec3 a(toLocal * glm::dvec4(sideA, 1));
     const glm::dvec3 b(toLocal * glm::dvec4(sideB, 1));
     const parts::SeatEnd* end = nullptr;
     double gap = 0.0;
-    for (const parts::SeatEnd& e : seat->ends) {
+    for (const parts::SeatEnd& e : seat.ends) {
       const double g = std::min(std::abs(glm::dot(a - e.origin, e.along)),
                                 std::abs(glm::dot(b - e.origin, e.along)));
       if (end == nullptr || g < gap ||
@@ -488,10 +497,10 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
       }
     }
     std::string printedNote;
-    const double seatDia = SeatDiameter(inst->part, *seat, &printedNote);
+    const double seatDia = SeatDiameter(inst.part, seat, &printedNote);
     s["diameter"] = seatDia;
     if (!printedNote.empty())
-      s["modelled_diameter"] = seat->diameter;
+      s["modelled_diameter"] = seat.diameter;
     const double nominal = bore ? row->d : row->D;
     const std::string key = bore ? "shaft_diameter" : "housing_diameter";
     measurements[key] = seatDia;
@@ -516,7 +525,7 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
              {"reason", "nothing on this seat stops the ring axially — no "
                         "shoulder at the end it sits at"}});
       seats.push_back(std::move(s));
-      continue;
+      return;
     }
     s["shoulder"] = true;
     s["shoulder_diameter"] = end->shoulderDiameter;
@@ -576,17 +585,137 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
     }
     check(std::move(sh));
     seats.push_back(std::move(s));
+  };
+
+  for (const Mate& mate : state.assembly->GetMates()) {
+    const Connector* mine = nullptr;
+    const Connector* other = nullptr;
+    if (mate.a.occurrenceId == occurrence && mate.a.innerPath.empty()) {
+      mine = &mate.a;
+      other = &mate.b;
+    } else if (mate.b.occurrenceId == occurrence && mate.b.innerPath.empty()) {
+      mine = &mate.b;
+      other = &mate.a;
+    }
+    if (mine == nullptr || mine->anchor.face.featureId != bearing->GetId())
+      continue;
+    const std::string role = BearingFeature::RoleOf(mine->anchor.face.name);
+    const bool bore = role == BearingFeature::kBore;
+    if (!bore && role != BearingFeature::kOutside)
+      continue;
+    const assembly::FlatInstance* inst = nullptr;
+    for (const assembly::FlatInstance& f : flat)
+      if (f.rootOccurrenceId == other->occurrenceId &&
+          f.innerIds == other->innerPath && f.part != nullptr)
+        inst = &f;
+    json s = {{"ring", bore ? "inner" : "outer"}, {"mate", mate.id}};
+    if (inst == nullptr || !other->anchor.face.IsSet()) {
+      s["error"] = "the other side of this mate is not a face of a placed "
+                   "part";
+      seats.push_back(std::move(s));
+      continue;
+    }
+    s["part"] = inst->path;
+    s["occurrence"] = inst->rootOccurrenceId;
+    s["inner_path"] = inst->innerIds;
+    s["feature_id"] = other->anchor.face.featureId;
+    s["face"] = other->anchor.face.name;
+    std::string why;
+    const auto seat =
+        parts::SeatOf(inst->part->GetBodies(), other->anchor.face, &why);
+    if (!seat) {
+      s["error"] = why;
+      seats.push_back(std::move(s));
+      continue;
+    }
+    if (seat->shaft != bore) {
+      s["error"] = std::string("the ") + (bore ? "bore" : "outside") +
+                   " is mated to a " + (seat->shaft ? "shaft" : "bore") +
+                   ", not a seat for it";
+      seats.push_back(std::move(s));
+      continue;
+    }
+    judge(bore, *inst, *seat, std::move(s));
   }
+
+  // A ring no mate reaches is read through the seat it SITS on. A one-solid
+  // bearing in a mechanism is mated to one seat only: fastened to the
+  // housing AND the shaft it would lock the shaft to the housing, so the
+  // inner ring's journal is named by no mate. It is still the seat that
+  // ring is on — a cylinder of the right sense (a shaft for the bore, a bore
+  // for the outside) on the bearing's axis, running under the ring's width,
+  // within 5 % (or 0.5 mm) of its size so an unrelated coaxial face (a
+  // clearance bore, a hub) is not judged as a seat. The nearest diameter
+  // wins; the diameter check then says whether it is the ring's size.
+  const auto searchCoaxial = [&](bool bore) {
+    const double nominal = bore ? row->d : row->D;
+    const double window = std::max(0.5, 0.05 * nominal);
+    const assembly::FlatInstance* best = nullptr;
+    std::optional<parts::Seat> bestSeat;
+    double bestOff = 0.0;
+    for (const assembly::FlatInstance& f : flat) {
+      if (f.part == nullptr || !f.visible ||
+          (f.rootOccurrenceId == occurrence && f.innerIds.empty()))
+        continue;
+      const glm::dmat4 toLocal = glm::inverse(f.world);
+      const glm::dvec3 a(toLocal * glm::dvec4(sideA, 1));
+      const glm::dvec3 b(toLocal * glm::dvec4(sideB, 1));
+      const glm::dvec3 dir = glm::normalize(b - a);
+      for (const ElementRef& face :
+           parts::CoaxialCylinders(f.part->GetBodies(), a, dir)) {
+        std::string why;
+        auto seat = parts::SeatOf(f.part->GetBodies(), face, &why);
+        if (!seat || seat->shaft != bore || seat->ends.empty())
+          continue;
+        // The seat's span along the bearing's axis, against the ring's.
+        double lo = std::numeric_limits<double>::max(), hi = -lo;
+        for (const parts::SeatEnd& e : seat->ends) {
+          const double t0 = glm::dot(e.origin - a, dir);
+          const double t1 = t0 + e.length * glm::dot(e.along, dir);
+          lo = std::min({lo, t0, t1});
+          hi = std::max({hi, t0, t1});
+        }
+        if (std::min(hi, row->B) - std::max(lo, 0.0) <= 1e-6)
+          continue;
+        const double off = std::abs(SeatDiameter(f.part, *seat) - nominal);
+        if (off > window || (best != nullptr && off >= bestOff))
+          continue;
+        best = &f;
+        bestSeat = std::move(seat);
+        bestOff = off;
+      }
+    }
+    if (best == nullptr)
+      return;
+    json s = {{"ring", bore ? "inner" : "outer"},
+              {"mate", nullptr},
+              {"found", "coaxial"},
+              {"part", best->path},
+              {"occurrence", best->rootOccurrenceId},
+              {"inner_path", best->innerIds},
+              {"feature_id", bestSeat->face.featureId},
+              {"face", bestSeat->face.name}};
+    judge(bore, *best, *bestSeat, std::move(s));
+  };
+  if (!haveBore)
+    searchCoaxial(true);
+  if (!haveOutside)
+    searchCoaxial(false);
+
   if (!haveBore)
     check({{"characteristic", "shaft_diameter"},
            {"status", "unverified"},
-           {"reason", "the bore is not mated to a seat (fit_bearing mates it; "
-                      "or add_mate the bore to the journal)"}});
+           {"reason", "no seat for the bore: it is mated to none, and no "
+                      "shaft of its size runs through it on its axis "
+                      "(fit_bearing places it; or add_mate the bore to the "
+                      "journal)"}});
   if (!haveOutside)
     check({{"characteristic", "housing_diameter"},
            {"status", "unverified"},
-           {"reason", "the outside is not mated to a housing bore (add_mate "
-                      "it, revolute if the housing turns about the shaft)"}});
+           {"reason", "no seat for the outside: it is mated to none, and no "
+                      "housing bore of its size surrounds it on its axis "
+                      "(add_mate it, revolute if the housing turns about the "
+                      "shaft)"}});
   out["seats"] = seats;
   out["checks"] = checks;
   out["measurements"] = measurements;

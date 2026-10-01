@@ -434,15 +434,27 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "with a shoulder at both ends or neither is refused asking for the rim. "
      "Placing adds a FASTENED mate `Bearing seat` between the ring and the "
      "seat as placed, so nothing moves and `check_fits` reads the fit off "
-     "it. {dry_run: true} derives without placing.",
-     "designation, dry_run, seat, series", remote::NoFlags,
+     "it. Once placed, the OTHER ring is read the way check_seat reads it "
+     "- through the seat it sits on, on the bearing's axis, though no mate "
+     "names it - and returned as `other_ring` {ring, seat?, "
+     "diameter_check?}. `mate_other: true` also mates that ring to that "
+     "seat, REVOLUTE (off by default: in a mechanism the shaft usually "
+     "turns in the housing by a joint of its own, and a second through the "
+     "bearing closes a redundant loop; ask for it where the bearing is the "
+     "joint); with no seat found, other_mate is 0 and the summary says so. "
+     "{dry_run: true} derives "
+     "without placing.",
+     "designation, dry_run, mate_other, seat, series", remote::NoFlags,
      "designation, candidates[], shaft, seat_diameter_mm, shoulder, "
-     "overhang_mm, summary, occurrence, mate"},
+     "overhang_mm, summary, occurrence, mate, other_ring, other_mate"},
     {"check_seat",
      "Check a PLACED bearing's seats against the bearing "
      "(docs/parts/README.md#bearings): its d, D, B and r_s min come from the "
      "part, and the observations are MEASURED off the seats its bore and "
-     "outside are mated to — the journal/bore diameter (must be the ring's "
+     "outside sit on: the seat a mate names, or, for a ring no mate "
+     "reaches, the coaxial cylinder of the right sense under the ring "
+     "(`found: coaxial`), since a one-solid bearing in a mechanism is mated "
+     "to one seat only — the journal/bore diameter (must be the ring's "
      "basic size), whether the ring sits on its shoulder, the fillet into "
      "the shoulder (must not exceed r_s min) and the shoulder's diameter "
      "(must reach past the chamfer). All in mm. How far a shoulder may reach "
@@ -450,9 +462,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "catalog {catalog, revision, hash, designation?} and its limits are "
      "checked against the same measurements (designation defaults to the "
      "bearing's). Each check is pass, fail or unverified with a reason; an "
-     "unmated ring is unverified, never a pass.",
+     "ring with no seat found is unverified, never a pass.",
      "catalog, designation, hash, occurrence, revision", remote::NoFlags,
-     "occurrence, designation, d, D, B, r_min, seats[]{ring,mate,part?,"
+     "occurrence, designation, d, D, B, r_min, seats[]{ring,mate,found?,"
+     "part?,occurrence?,inner_path?,feature_id?,"
      "face?,diameter?,shoulder?,shoulder_diameter?,fillet_radius?,gap_mm?,"
      "error?}, checks[]{characteristic,status,observed?,required?,minimum?,"
      "maximum?,reason?}, measurements, catalog?, status, evidence"},
@@ -1025,6 +1038,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     request.designation = p.value("designation", std::string{});
     request.series = p.value("series", std::string{});
     request.dryRun = p.value("dry_run", false);
+    request.mateOther = p.value("mate_other", false);
     const ui::BearingFit fit = ui::FitBearing(state, seat, request);
     if (!fit.ok)
       throw std::runtime_error(fit.why);
@@ -1036,7 +1050,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"overhang_mm", fit.overhang},
                 {"summary", fit.summary},
                 {"occurrence", fit.occurrence},
-                {"mate", fit.mate}};
+                {"mate", fit.mate},
+                {"other_ring", fit.otherRing},
+                {"other_mate", fit.otherMate}};
   }
   if (m == "check_seat") {
     // rpc-returns-from: src/ui/BearingActions.cpp
