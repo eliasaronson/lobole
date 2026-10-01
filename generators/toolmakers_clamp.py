@@ -377,7 +377,17 @@ def drawings(app, parts, out):
                 ],
             ),
             ("top", [100, 75]),
-            ("iso", [290, 95]),
+            # Clear of the title block, 48 mm tall since it gained its
+            # material, scale and notes rows (v147), and a rod's tall iso
+            # clear of the source notes above it.
+            (
+                "iso",
+                [
+                    290,
+                    {"fixed": 112, "moving": 112, "centre_rod": 88,
+                     "rear_rod": 88}.get(key, 95),
+                ],
+            ),
         ]:
             views[orient] = app.add_drawing_view(
                 source=p.name,
