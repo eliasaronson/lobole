@@ -1,7 +1,9 @@
 #include "core/parts/BearingTable.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 namespace parts {
 
@@ -181,6 +183,40 @@ std::vector<const BearingRow*> BearingsForBore(double diameter) {
 
 std::vector<const BearingRow*> BearingsForOutside(double diameter) {
   return Matching(diameter, false);
+}
+
+std::vector<const BearingRow*> BearingsFrom(const std::string& series,
+                                            double minBore, std::string* why) {
+  std::vector<const BearingRow*> out;
+  bool knownSeries = series.empty();
+  double largest = 0.0;
+  for (const BearingRow& r : kRows) {
+    if (!series.empty() && series != r.series)
+      continue;
+    knownSeries = true;
+    largest = std::max(largest, r.d);
+    if (r.d >= minBore - 1e-9)
+      out.push_back(&r);
+  }
+  if (!knownSeries) {
+    if (why != nullptr)
+      *why = "no bearing series \"" + series + "\" — this build carries " +
+             KnownBearingSeries() + " (ISO 15 deep-groove ball bearings)";
+    return {};
+  }
+  std::stable_sort(
+      out.begin(), out.end(),
+      [](const BearingRow* a, const BearingRow* b) { return a->d < b->d; });
+  if (out.empty() && why != nullptr) {
+    char buf[160];
+    std::snprintf(buf, sizeof buf,
+                  "no bearing%s%s takes a %.3g mm bore: the largest bore "
+                  "carried is %.3g mm",
+                  series.empty() ? "" : " of series ", series.c_str(), minBore,
+                  largest);
+    *why = buf;
+  }
+  return out;
 }
 
 namespace {

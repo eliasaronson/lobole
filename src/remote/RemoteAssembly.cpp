@@ -11,6 +11,7 @@
 #include "core/catalog/Catalog.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
+#include "core/parts/BearingTable.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
 #include "ui/DocumentSlots.h"
@@ -407,6 +408,19 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "z = 0. `fit_bearing` derives all of that from a picked seat and is "
      "what you usually want.",
      "designation, orientation, position", remote::NoFlags, "occurrence, part"},
+    {"list_bearings",
+     "The ISO 15 table this build carries, before anything is placed "
+     "(docs/parts/README.md#bearings): {series?, min_bore_mm?} answers the "
+     "rows of that series (every series when omitted) whose bore is at "
+     "least min_bore_mm, SMALLEST BORE FIRST, each {designation, series, "
+     "d_mm, D_mm, B_mm, r_min_mm}. So a generator sizing a shaft from its "
+     "load asks for the first row over the diameter it needs and models "
+     "the journal and the housing bore from that row's d, D and B, instead "
+     "of typing a table out of a catalogue. An unknown series is refused "
+     "naming the carried ones; a bore past the largest carried is refused "
+     "saying how far the table reaches.",
+     "min_bore_mm, series", remote::NoFlags,
+     "bearings[]{designation,series,d_mm,D_mm,B_mm,r_min_mm}"},
     {"fit_bearing",
      "Put a bearing on a picked SEAT and mate it there "
      "(docs/parts/README.md#bearings). `seat` is {feature_id, element, "
@@ -982,6 +996,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     const Occurrence* placed = state.assembly->FindById(id);
     return json{{"occurrence", id},
                 {"part", placed != nullptr ? placed->name : std::string{}}};
+  }
+  if (m == "list_bearings") {
+    std::string why;
+    const auto rows = parts::BearingsFrom(p.value("series", std::string{}),
+                                          p.value("min_bore_mm", 0.0), &why);
+    if (rows.empty())
+      throw std::runtime_error(why);
+    json out = json::array();
+    for (const parts::BearingRow* r : rows)
+      out.push_back({{"designation", r->designation},
+                     {"series", r->series},
+                     {"d_mm", r->d},
+                     {"D_mm", r->D},
+                     {"B_mm", r->B},
+                     {"r_min_mm", r->rMin}});
+    return json{{"bearings", std::move(out)}};
   }
   if (m == "fit_bearing") {
     ui::RimPick seat;

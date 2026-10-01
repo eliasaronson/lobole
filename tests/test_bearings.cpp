@@ -97,6 +97,37 @@ TEST_CASE("An unknown bearing is refused naming what is carried",
   CHECK_THAT(doc.GetFeature(0)->GetError(), ContainsSubstring("6206"));
 }
 
+TEST_CASE("The table answers the smallest bearing over a bore",
+          "[parts][bearing]") {
+  // A generator sizes a shaft from its load (13.9 mm for the pan/tilt
+  // head's 3 g moment in PETG) and asks for the first 60-series row over it.
+  std::string why;
+  const auto rows = parts::BearingsFrom("60", 13.9, &why);
+  REQUIRE_FALSE(rows.empty());
+  CHECK(std::string(rows.front()->designation) == "6002");
+  CHECK(rows.front()->d == 15.0);
+  CHECK(rows.front()->D == 32.0);
+  CHECK(rows.front()->B == 9.0);
+  for (size_t i = 1; i < rows.size(); ++i) {
+    CHECK(rows[i]->d >= rows[i - 1]->d);
+    CHECK(std::string(rows[i]->series) == "60");
+  }
+  // A bore the table has is its own row, not the next one up.
+  CHECK(
+      std::string(parts::BearingsFrom("60", 8.0, &why).front()->designation) ==
+      "608");
+  // Every series when none is named.
+  CHECK(parts::BearingsFrom("", 0.0, &why).size() ==
+        parts::AllBearings().size());
+  // Refused: a series the table lacks, and a bore past the largest.
+  why.clear();
+  CHECK(parts::BearingsFrom("64", 10.0, &why).empty());
+  CHECK_THAT(why, ContainsSubstring("618, 619, 60, 62, 63"));
+  why.clear();
+  CHECK(parts::BearingsFrom("62", 31.0, &why).empty());
+  CHECK_THAT(why, ContainsSubstring("largest bore carried is 30"));
+}
+
 TEST_CASE("ISO 492 normal-class ring tolerances", "[parts][bearing]") {
   CHECK_THAT(parts::BoreTolerance(10.0)->lower, WithinAbs(-0.008, 1e-12));
   CHECK_THAT(parts::BoreTolerance(20.0)->lower, WithinAbs(-0.010, 1e-12));

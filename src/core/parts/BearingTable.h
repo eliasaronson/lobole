@@ -50,6 +50,16 @@ struct BearingRow {
 [[nodiscard]] std::vector<const BearingRow*>
 BearingsForOutside(double diameter);
 
+// The rows of one series (all of them when `series` is empty) whose bore is
+// at least `minBore` mm, smallest bore first: what a generator sizing a
+// shaft from its load asks before any seat exists — "the smallest 60-series
+// bearing that takes a 13.9 mm shaft" is the first row. An unknown series is
+// refused naming the carried ones (`why` set, empty result); a bore over the
+// largest carried is an empty result with `why` saying how far the table
+// reaches.
+[[nodiscard]] std::vector<const BearingRow*>
+BearingsFrom(const std::string& series, double minBore, std::string* why);
+
 // ISO 492 normal tolerance class: the deviation of the mean bore diameter
 // (t_Δdmp) and of the mean outside diameter (t_ΔDmp) from nominal, in mm.
 // Upper is 0 and lower negative for both — a bearing's bore is made SMALL,

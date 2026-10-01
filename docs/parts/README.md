@@ -247,6 +247,9 @@ Deep-groove ball bearings, generated from their designation the way a
 fastener is from its standard and size: one part per designation, named
 `ISO 15 6200`, filed in "Standard parts", placed as an occurrence, counted by
 `bom` as a bought row (`standard` `iso15`, `designation` `6200`).
+`list_bearings` answers the table itself, smallest bore first, so a part can
+be sized to a bearing before one is placed: the pan/tilt head takes the first
+60-series row over the shaft its load needs (`parts::BearingsFrom`).
 
 **The table** (`src/core/parts/BearingTable.{h,cpp}`) is ISO 15's boundary
 dimensions — d, D, B and the smallest chamfer r_s min — for series 618, 619,
@@ -346,7 +349,9 @@ Golden `v141-bearing`.
 
 ## RPCs
 
-`add_bearing {designation, position?, orientation?}`, `fit_bearing {seat,
+`list_bearings {series?, min_bore_mm?}` (the table's rows, smallest bore
+first: what a generator sizes a journal and a housing from before anything is
+placed), `add_bearing {designation, position?, orientation?}`, `fit_bearing {seat,
 designation?, series?, dry_run?}`, `check_seat {occurrence, catalog?,
 revision?, hash?, designation?}`;
 `add_fastener {standard, size, length?, drive?, position?, orientation?}`
