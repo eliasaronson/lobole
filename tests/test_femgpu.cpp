@@ -1095,6 +1095,7 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   fem::TopoParams params;
   params.filterRadius = 25.0;
   params.maxIterations = 30;
+  params.connectivityFilter = false; // the solvers' runs, compared
 
   std::string err;
   auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
@@ -1133,6 +1134,7 @@ TEST_CASE("femgpu: load cases land on the CPU design via the GPU solver",
   fem::TopoParams params;
   params.filterRadius = 25.0;
   params.maxIterations = 20;
+  params.connectivityFilter = false; // the solvers' runs, compared
 
   std::string err;
   auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, cases, params, &err,
@@ -1176,6 +1178,7 @@ TEST_CASE("femgpu: a slender cantilever solves on the GPU (GATE)",
   load.direction = glm::dvec3(0, -1, 0);
   fem::TopoParams params;
   params.maxIterations = 10;
+  params.connectivityFilter = false; // the solvers' runs, compared
 
   std::string err;
   auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);

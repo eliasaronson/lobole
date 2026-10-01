@@ -984,6 +984,8 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   // design that is handed back — finished or cancelled: at the
   // volume-matched threshold, components holding no support and no load go.
   const auto finish = [&](TopoResult& r) {
+    if (!params.connectivityFilter)
+      return;
     const double thr =
         AutoIsoThreshold(mesh, r.density, r.volumeFractionAchieved);
     r.islands =

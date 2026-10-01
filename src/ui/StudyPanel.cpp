@@ -223,15 +223,17 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
       double w = c.weight;
-      if (ImGui::InputDouble("###case_weight", &w, 0.0, 0.0, "%.3g"))
-        sim.placeRefusal.clear();
-      if (ImGui::IsItemDeactivatedAfterEdit() && w > 0.0 && w != c.weight) {
+      std::string wExpr;
+      const bool wChanged =
+          ExprInputDouble(state, "###case_weight", &w, "%.3g", &wExpr);
+      if ((wChanged || ImGui::IsItemDeactivatedAfterEdit()) && w > 0.0 &&
+          (w != c.weight || wExpr != c.weightExpr)) {
         const std::string name = c.name;
         ModifyStudy(state, s.id, "Set load case weight", [&](fem::Study& cs) {
           for (fem::LoadCase& lc : cs.loadCases)
             if (lc.name == name) {
               lc.weight = w;
-              lc.weightExpr.clear();
+              lc.weightExpr = wExpr;
             }
         });
       }

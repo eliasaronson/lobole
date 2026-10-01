@@ -174,6 +174,9 @@ washers because of the difference. `study_results` reports `islands`: the
 threshold, the pieces and tets removed, their volume, the keep faces they
 held (indices into the study's keep faces), and `load_path_broken` when a
 load sits in a piece no support reaches, which the shape does not survive.
+It thresholds, so two runs that differ by round-off can remove different
+tets; the tests that hold the GPU's run to the CPU's switch it off
+(`TopoParams::connectivityFilter`).
 
 ### A static study of the optimised shape
 

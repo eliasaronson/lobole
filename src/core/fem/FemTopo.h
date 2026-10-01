@@ -42,6 +42,11 @@ struct TopoParams {
   double moveLimit = 0.2;  // max per-iteration change in a design variable
   double damping = 0.5;    // OC update exponent eta
   double changeTol = 0.01; // converge when max |dx| < this
+  // After the last iteration, remove what holds no support and no load
+  // (RemoveIslands; docs/topopt/README.md#connectivity). Off only where a
+  // test compares two linear solvers' runs: the filter thresholds, and a
+  // tie at the threshold is not a difference between the solvers.
+  bool connectivityFilter = true;
 };
 
 // Reported once per iteration to the progress callback (and accumulated into
