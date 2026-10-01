@@ -74,6 +74,13 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   dirty="$(git -C "$wt" status --porcelain --untracked-files=no)"
   if [ "$left" -eq 0 ] && [ -z "$dirty" ]; then
     git worktree unlock "$wt" 2>/dev/null || true
+    # A generator's output lives in the worktree's untracked scratch/, which
+    # the rm below would take with it. Carry it over, never over main's own.
+    if [ -d "$wt/scratch" ]; then
+      mkdir -p "$root/scratch"
+      cp -a -n "$wt/scratch/." "$root/scratch/"
+      echo "merge-branch: kept $wt/scratch in scratch/ (existing files untouched)"
+    fi
     rm -rf "$wt"
     git worktree prune
     git branch -D "$branch" >/dev/null
