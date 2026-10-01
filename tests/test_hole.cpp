@@ -267,40 +267,53 @@ TEST_CASE("a through hole in a thin ledge far above the rest is not air",
 }
 
 TEST_CASE("a counterbore drilled from a face keeps no skin over it", "[hole]") {
-  // A box placed at z = 24.7 sits at 24.70000076 (a primitive's position is
-  // single precision), so its top is 0.76 um above a plane typed at 29.7. A
-  // counterbore drilled from that plane kept a skin over itself, sealing it;
-  // the bores start a hair behind the plane instead (CoplanarStartSlack).
-  Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 24.7), 20.0,
-                                              20.0, 13.4));
-  const uint64_t sk = PointSketch(doc, 24.7 + 13.4, {{10, 10}});
-  auto ho =
-      std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 4.5, 0.0);
-  ho->through = true;
-  ho->cbDiameter = 8.0;
-  ho->cbDepth = 4.5;
-  doc.AddFeature(std::move(ho));
-  REQUIRE(doc.Regenerate());
-  REQUIRE(doc.GetBodies().size() == 1);
-  // Nothing faces down at the top: no lid over the counterbore.
-  int lids = 0;
-  for (TopExp_Explorer ex(doc.GetBodies()[0].shape.GetShape(), TopAbs_FACE);
-       ex.More(); ex.Next()) {
-    const TopoDS_Face f = TopoDS::Face(ex.Current());
-    BRepAdaptor_Surface s(f);
-    if (s.GetType() != GeomAbs_Plane)
-      continue;
-    gp_Dir n = s.Plane().Axis().Direction();
-    if (f.Orientation() == TopAbs_REVERSED)
-      n.Reverse();
-    if (n.Z() < -0.5 && s.Plane().Location().Z() > 37.0)
-      lids++;
+  // A counterbore drilled from the plane of the face it opens, at heights
+  // that are not binary fractions. While a primitive's position was float, a
+  // box at z = 24.7 sat at 24.70000076 and the counterbore kept a sealed
+  // skin over itself; placed in double, the face is where the plane is
+  // (docs/conventions.md#the-model-is-double). The box's BOTTOM face is the
+  // one at the typed height, and the hole is drilled up into it.
+  for (const double t : {0.3, 13.4, 24.7, 1e3 + 0.1, -0.7, -13.4}) {
+    CAPTURE(t);
+    Document doc;
+    doc.AddFeature(std::make_unique<BoxFeature>("B", glm::dvec3(0, 0, t), 20.0,
+                                                20.0, 13.4));
+    // Facing down, V is -Y.
+    auto pts = std::make_unique<SketchFeature>(
+        "Holes", SketchPlane(glm::dvec3(0, 0, t), glm::dvec3(0, 0, -1),
+                             glm::dvec3(1, 0, 0)));
+    pts->AddEntity(sketch::Point{{10, -10}});
+    doc.AddFeature(std::move(pts));
+    const uint64_t sk = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+    auto ho =
+        std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 4.5, 0.0);
+    ho->through = true;
+    ho->cbDiameter = 8.0;
+    ho->cbDepth = 4.5;
+    doc.AddFeature(std::move(ho));
+    REQUIRE(doc.Regenerate());
+    REQUIRE(doc.GetBodies().size() == 1);
+    // Nothing looks up into the part at the bottom: no skin over the
+    // counterbore.
+    int lids = 0;
+    for (TopExp_Explorer ex(doc.GetBodies()[0].shape.GetShape(), TopAbs_FACE);
+         ex.More(); ex.Next()) {
+      const TopoDS_Face f = TopoDS::Face(ex.Current());
+      BRepAdaptor_Surface s(f);
+      if (s.GetType() != GeomAbs_Plane)
+        continue;
+      gp_Dir n = s.Plane().Axis().Direction();
+      if (f.Orientation() == TopAbs_REVERSED)
+        n.Reverse();
+      if (n.Z() > 0.5 && std::abs(s.Plane().Location().Z() - t) < 1e-3)
+        lids++;
+    }
+    CHECK(lids == 0);
+    const double removed =
+        M_PI * 2.25 * 2.25 * (13.4 - 4.5) + M_PI * 16.0 * 4.5;
+    CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+               WithinRel(20.0 * 20.0 * 13.4 - removed, 1e-6));
   }
-  CHECK(lids == 0);
-  const double removed = M_PI * 2.25 * 2.25 * (13.4 - 4.5) + M_PI * 16.0 * 4.5;
-  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
-             WithinRel(20.0 * 20.0 * 13.4 - removed, 1e-4));
 }
 
 TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {

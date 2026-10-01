@@ -204,22 +204,12 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // rather than n times. Measured by driving a 480-hole plate over the RPC.
   std::vector<CADShape> tools;
   tools.reserve(centers.size());
-  // Drilled from a face it was sketched on, a bore starts a hair behind the
-  // plane when that face lies within single-precision rounding of it -- a
-  // face placed through float (CoplanarStartSlack): otherwise a counterbore
-  // keeps a sub-micron skin over it. Not for a countersink, whose cone is
-  // sized at the plane.
-  double slack = 0.0;
-  if (kind != HoleKind::Countersink)
-    for (const glm::dvec3& c : centers)
-      slack = std::max(slack, CoplanarStartSlack(ctx.bodies, c, axis, true));
-  for (const glm::dvec3& c0 : centers) {
-    const glm::dvec3 c = c0 - axis * slack;
-    CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth + slack);
+  for (const glm::dvec3& c : centers) {
+    CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth);
     if (kind == HoleKind::Counterbore && cbDiameter > diameter &&
         cbDepth > 1e-9) {
-      hole = hole.Union(
-          kernel.CreateCylinder(c, axis, cbDiameter / 2.0, cbDepth + slack));
+      hole =
+          hole.Union(kernel.CreateCylinder(c, axis, cbDiameter / 2.0, cbDepth));
     } else if (kind == HoleKind::Countersink && csDiameter > diameter &&
                csDepth > 1e-9) {
       // Cone from the surface (csDiameter/2) tapering down to the bore radius.

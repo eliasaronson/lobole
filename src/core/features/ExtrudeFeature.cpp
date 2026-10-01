@@ -99,20 +99,6 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     }
     total = reach + 1.0;
   }
-  // A tool that starts ON its sketch plane starts a hair behind it when a
-  // face of the body it meets lies there within single-precision rounding (a
-  // face placed through float): otherwise a pocket cut from that face can
-  // keep a sub-micron skin over it (CoplanarStartSlack).
-  if ((mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) &&
-      (endMode == ExtrudeEnd::Blind || endMode == ExtrudeEnd::ThroughAll) &&
-      total > 0.0) {
-    const glm::dvec3 n = sketch->plane.GetNormal();
-    const double slack =
-        CoplanarStartSlack(ctx.bodies, sketch->plane.GetOrigin(),
-                           reversed ? -n : n, mode == ExtrudeMode::Cut);
-    total += slack;
-    backOffset += slack;
-  }
   if (std::abs(total) < 1e-9) {
     SetError(endMode == ExtrudeEnd::UpToFace
                  ? "target face lies on the sketch plane"
