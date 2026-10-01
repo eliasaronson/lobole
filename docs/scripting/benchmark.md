@@ -7,15 +7,14 @@ run it and how to read a result are in
 [benchmarks/README.md](../../benchmarks/README.md); this page is the summary
 and the rules that bind changes elsewhere in the repo.
 
-## The rule
+## Status
 
-**No benchmark, no claim.** A new or removed tool, a reworded description, a
-different refusal message, a change to `help()`, `describe` or the
-`modeling-workflow` prompt changes what the benchmark measures. Claiming it
-helps means a sweep before and after. Results are committed under
-`benchmarks/results/<timestamp>-<model>/` and never overwritten. A sweep
-costs money: `python3 benchmarks/run.py --dry-run` prints the plan, the run
-count and the cost ceiling for free — read that, and ask before spending it.
+**Unfinished.** It does not yet measure what it is for, so it neither gates a
+change to a tool, a description, a refusal message, `help()`, `describe` or the
+`modeling-workflow` prompt, nor backs a claim about one. When a sweep is run,
+its results are committed under `benchmarks/results/<timestamp>-<model>/` and
+never overwritten. A sweep costs money: `python3 benchmarks/run.py --dry-run`
+prints the plan, the run count and the cost ceiling for free.
 
 ## What it grades
 

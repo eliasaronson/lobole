@@ -46,6 +46,3 @@ which element was meant.
   undo restores the literals, and changing one new variable moves exactly
   the fields it drives.
 - `rpc_params_gate` and `rpc_units_gate` pass on the new row.
-- Both changes alter the MCP surface, so a benchmark sweep before and after
-  is required before claiming either helps
-  ([docs/scripting/benchmark.md](../scripting/benchmark.md)).

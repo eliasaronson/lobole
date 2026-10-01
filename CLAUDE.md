@@ -197,14 +197,14 @@ list kept elsewhere drifts.
   back-compat/migration is required (no users yet); fix any test that assumed
   old behavior. (Check the header for the current version — it moves.)
 
-## Benchmark — is the API still usable by an agent?
+## Benchmark — unfinished
 
 `benchmarks/` grades an agent that has ONLY the MCP surface (`--tools ""`, no
-shell, no repo) on described parts — static ones, mechanisms, and a Fit task
-graded against a host part the agent never sees — with a C++/OCCT oracle that
-reads the exported STEP back and links no designer_core. Changing a tool, a
-description, a refusal message or `help()` changes what this measures — **no
-benchmark, no claim**, and results are committed, never overwritten.
+shell, no repo) on described parts, with a C++/OCCT oracle that reads the
+exported STEP back. **It is unfinished and does not yet measure what it is
+for**, so it neither gates a change to a tool, a description or `help()` nor
+backs a claim about one. Results that are run are committed, never
+overwritten.
 
 - Free self-test, run it first: `python3 benchmarks/runners/reference.py`
   builds every task by hand and must score every check. It PRINTS the totals;
