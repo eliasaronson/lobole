@@ -42,9 +42,12 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
   the body (a `ThreadMark`: the table's thread at the fit's pitch,
   right-handed, no class), which is what a CAM thread mill reads
   ([thread mill](../cam/operations.md#thread-mill)).
-- **Empty-space warning.** A hole checks, per centre, whether any point down
-  the bore (clipped to the bodies' bounding box) is inside a non-reference
-  body; centres that meet no material are listed in the feature's warning.
+- **Empty-space warning.** A hole checks, per centre, whether its axis passes
+  through a non-reference body anywhere down the bore (clipped to the bodies'
+  bounding box). The axis is split where it crosses each body's faces and the
+  middle of each piece classified, so a thin plate anywhere along a long
+  through bore is found; centres that meet no material are listed in the
+  feature's warning.
   Some centres missing is the case nothing else reports — the cut still
   removes material elsewhere. The warning reminds that sketch coordinates are
   measured from the sketch plane's origin.

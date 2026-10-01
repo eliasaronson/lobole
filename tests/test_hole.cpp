@@ -225,6 +225,42 @@ TEST_CASE("a through hole in a thin plate is not reported as air", "[hole]") {
              Catch::Matchers::ContainsSubstring("1 of 2 hole centres"));
 }
 
+TEST_CASE("a through hole in a thin ledge far above the rest is not air",
+          "[hole]") {
+  // The span is clipped to every body's box, and a ledge 12.8 thick 160 mm
+  // up a yoke sat between the first two of nine samples spread over that
+  // span: three holes that cut the ledge were reported as drilling air. The
+  // axis is now split where it crosses each body's faces, so a span inside
+  // material is found however thin it is or wherever it lies.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      "Base", glm::vec3(-50.0f, -50.0f, 0.0f), 100.0, 100.0, 10.0));
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      "Ledge", glm::vec3(60.0f, 0.0f, 150.0f), 20.0, 20.0, 1.5));
+  SketchPlane plane(glm::vec3(0, 0, 151.5f), glm::vec3(0, 0, 1),
+                    glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centres", plane);
+  sk->AddEntity(sketch::Point{{70.0f, 10.0f}}); // on the ledge only
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(2)->GetId();
+  auto ho =
+      std::make_unique<HoleFeature>("Drill", skId, HoleKind::Simple, 3.0, 0.0);
+  ho->through = true;
+  doc.AddFeature(std::move(ho));
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.GetFeature(3)->GetError().empty());
+  CHECK(doc.GetFeature(3)->GetWarning().empty());
+
+  // A centre over neither body is still reported.
+  auto* centres = dynamic_cast<SketchFeature*>(doc.GetFeature(2));
+  REQUIRE(centres != nullptr);
+  centres->AddEntity(sketch::Point{{90.0f, 40.0f}});
+  doc.ClearRegenCache();
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(doc.GetFeature(3)->GetWarning(),
+             Catch::Matchers::ContainsSubstring("1 of 2 hole centres"));
+}
+
 TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));

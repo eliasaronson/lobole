@@ -17,6 +17,8 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepTools.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
+#include <Precision.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -69,6 +71,40 @@ bool ClipToBox(const glm::vec3& origin, const glm::vec3& dir,
   *from = t0;
   *to = t1;
   return true;
+}
+
+// Does the drilling axis from `c` pass through material between `from` and
+// `to`? Exact along the axis line: the line's crossings with each body's
+// faces split it into spans that are wholly inside or wholly outside, and
+// the middle of each span is classified. Sampling the span at fixed fractions
+// cannot be right for every part: a thin ledge 160 mm up a yoke, drilled
+// through, sat between the first two of nine samples spread over the whole
+// height, and three correct holes were reported as drilling air.
+bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::vec3& c,
+                       const glm::vec3& axis, double from, double to) {
+  if (to <= from)
+    return false;
+  const gp_Lin line(gp_Pnt(c.x, c.y, c.z), gp_Dir(axis.x, axis.y, axis.z));
+  for (const Body& b : bodies) {
+    if (b.reference || !b.shape.IsValid())
+      continue;
+    std::vector<double> cuts{from, to};
+    IntCurvesFace_ShapeIntersector crossings;
+    crossings.Load(b.shape.GetShape(), Precision::Confusion());
+    crossings.Perform(line, from, to);
+    if (crossings.IsDone())
+      for (int i = 1; i <= crossings.NbPnt(); ++i)
+        cuts.push_back(crossings.WParameter(i));
+    std::sort(cuts.begin(), cuts.end());
+    for (size_t i = 0; i + 1 < cuts.size(); ++i) {
+      if (cuts[i + 1] - cuts[i] < 1e-6)
+        continue;
+      const double t = 0.5 * (cuts[i] + cuts[i + 1]);
+      if (b.shape.ContainsPoint(c + axis * float(t)))
+        return true;
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -235,28 +271,13 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   {
     std::vector<std::string> empty;
     for (const glm::vec3& c : centers) {
-      bool meets = false;
-      // Sampled over the span where material CAN be — the bore clipped to
-      // the bodies' box — not over the bore's own length. A through hole's
-      // bore is a bounding-box DIAGONAL long, so nine points spread over it
-      // all start past a thin plate and every one of them reports air: a
-      // carbon frame drilled twelve correct holes and warned about all
-      // twelve. The clip is what makes the spacing scale with the MATERIAL.
+      // Asked over the span where material CAN be — the bore clipped to the
+      // bodies' box — not over the bore's own length, which for a through
+      // hole is a bounding-box diagonal.
       double from = 0.0, to = boreDepth;
       if (!ctx.bodies.empty() && !ClipToBox(c, axis, lo, hi, &from, &to))
         from = to = 0.0; // the bore misses the box entirely: no material
-      for (int i = 1; i <= 9 && !meets && to > from; i++) {
-        const glm::vec3 p = c + axis * float(from + (to - from) * (0.1 * i));
-        for (const Body& b : ctx.bodies) {
-          if (b.reference || !b.shape.IsValid())
-            continue;
-          if (b.shape.ContainsPoint(p)) {
-            meets = true;
-            break;
-          }
-        }
-      }
-      if (meets)
+      if (AxisMeetsMaterial(ctx.bodies, c, axis, from, to))
         continue;
       char buf[64];
       std::snprintf(buf, sizeof(buf), "(%.2f, %.2f, %.2f)", c.x, c.y, c.z);
