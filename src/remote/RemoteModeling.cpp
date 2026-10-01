@@ -187,8 +187,10 @@ void RefusePrimitiveSpec(const json& fj) {
       " is not a stored feature: add_feature {type: \"" +
       primitive::KindName(*kind) +
       "\", on, ...} stores a Sketch and an Extrude (a Sphere, a Revolve). "
-      "Change one by its sketch's dimensions (set_constraint) or the solid's "
-      "height (modify_feature on the Extrude)");
+      "Change one through what it stored: a dimension's value in its Sketch "
+      "(modify_feature on the sketch; it re-solves), a variable when the "
+      "size was given as an expression (set_variable), or the height "
+      "(modify_feature on the Extrude's distance)");
 }
 
 // Error-audit round: "no such feature/sketch" names the candidates that DO
@@ -920,10 +922,43 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     RejectUnknownFeatureFields(p.at("feature"),
                                *DocumentIO::FeatureFromJson(p.at("feature")));
     json before = DocumentIO::FeatureToJson(*feature);
+    json after = p.at("feature");
+    // A sketch whose dimension VALUE changed is re-solved here, so the
+    // geometry follows the number. A sketch with literal dimensions is not
+    // re-solved at regeneration (only expression-driven ones are), so a
+    // changed `value` used to be stored beside geometry that ignored it --
+    // and a primitive's size is exactly such a dimension
+    // (docs/modeling/README.md#primitives).
+    if (const auto* oldSk = dynamic_cast<const SketchFeature*>(feature)) {
+      auto built = DocumentIO::FeatureFromJson(after);
+      auto* newSk = dynamic_cast<SketchFeature*>(built.get());
+      bool changed = false;
+      if (newSk != nullptr &&
+          newSk->constraints.size() == oldSk->constraints.size())
+        for (size_t c = 0; c < newSk->constraints.size(); c++)
+          changed =
+              changed ||
+              (sketch::IsDimension(newSk->constraints[c].kind) &&
+               newSk->constraints[c].value != oldSk->constraints[c].value);
+      if (changed) {
+        newSk->plane = oldSk->plane; // the resolved plane, for the solve
+        sketch::Solver solver;
+        solver.Load(*newSk);
+        const sketch::SolveResult r = solver.Solve();
+        if (!r.ok)
+          throw std::runtime_error(
+              "the sketch does not solve with those dimension values (the "
+              "dimensions conflict or cannot be met); the document is "
+              "unchanged");
+        solver.WriteBack(newSk->entities);
+        const json solved = DocumentIO::FeatureToJson(*newSk);
+        after["entities"] = solved.at("entities");
+      }
+    }
     const json preDigest = BodyDigestJson(*doc);
-    if (!state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
-                                     index, before, p.at("feature")),
-                                 *doc)) {
+    if (!state.commands->Execute(
+            std::make_unique<ModifyFeatureCommand>(index, before, after),
+            *doc)) {
       throw std::runtime_error(
           "modify failed — the replacement feature did not apply and the "
           "document is unchanged (its regeneration failed where the original "

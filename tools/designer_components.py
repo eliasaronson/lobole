@@ -23,15 +23,32 @@ class _StagingPart(Part):
         self._seen = defaultdict(int)
         self._next = max((f['id'] for f in features), default=0) + 1
 
-    def _add(self, feature):
-        stem = (feature['type'], feature.get('name', ''))
+    def _stable_id(self, type_, name):
+        stem = (type_, name)
         key = (*stem, self._seen[stem])
         self._seen[stem] += 1
         fid = self._keys.get(key)
         if fid is None:
             fid = self._next
             self._next += 1
-        return super()._add(dict(feature, id=fid))
+        return fid
+
+    def _add(self, feature):
+        name = feature.get('name', '')
+        if feature['type'] in _PRIMITIVES:
+            # A primitive is stored as the features it expands to, a Sketch
+            # named "<name> sketch" and the solid named <name>
+            # (docs/modeling/README.md#primitives): pin both, as they are
+            # what the manifest holds.
+            solid = self._stable_id(_PRIMITIVES[feature['type']], name)
+            sketch = self._stable_id('Sketch', name + ' sketch')
+            return super()._add(dict(feature, ids=[solid, sketch]))
+        return super()._add(dict(feature,
+                                 id=self._stable_id(feature['type'], name)))
+
+
+# What a primitive's solid is stored as.
+_PRIMITIVES = {'Box': 'Extrude', 'Cylinder': 'Extrude', 'Sphere': 'Revolve'}
 
 
 class _BuilderApp:

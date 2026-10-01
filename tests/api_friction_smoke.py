@@ -74,6 +74,33 @@ def part_checks(d):
     expect(abs(coil.get("start_deg", 0) - 90) < 1e-9,
            f"start_deg is kept: {coil}")
 
+    # A primitive's size is a dimension in its sketch: changing that value
+    # through modify_feature re-solves the sketch, so the solid follows
+    # (docs/modeling/README.md#primitives). A stored primitive type is not
+    # something modify_feature makes.
+    d.call("new_project")
+    box = d.call("add_feature", feature={
+        "type": "Box", "name": "Blk", "on": "Top", "width": 10, "depth": 4,
+        "height": 2})
+    solid, sketch = box["ids"]
+    sk = next(f for f in d.call("get_state")["features"] if f["id"] == sketch)
+    widened = False
+    for c in sk["constraints"]:
+        if c["kind"] == "distance_x" and abs(c["value"] - 10) < 1e-9:
+            c["value"] = 25.0
+            widened = True
+    expect(widened, f"the box sketch dimensions its width: {sk}")
+    for key in ("index", "error", "warning", "after_earlier_failure"):
+        sk.pop(key, None)
+    r = d.call("modify_feature", feature_id=sketch, feature=sk)
+    vol = [b for b in r["digest"]["bodies"] if b["created_by"] == solid]
+    expect(vol and abs(vol[0]["volume"] - 25 * 4 * 2) < 1e-6,
+           f"a changed width re-solves the sketch: {r['digest']}")
+    refused(d, "modify_feature", ["not a stored feature", "modify_feature on "
+                                  "the sketch"], feature_id=solid,
+            feature={"type": "Box", "on": "Top", "width": 1, "depth": 1,
+                     "height": 1})
+
 
 def assembly_checks(d):
     def box(name, lo, size):

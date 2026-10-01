@@ -402,3 +402,27 @@ TEST_CASE("a primitive without a reference is refused, naming what is "
       {{"type", "Box"}, {"on", {{"feature_id", shaft}, {"element", round}}}},
       "Frame");
 }
+
+TEST_CASE("a primitive's two ids can be pinned", "[primitives]") {
+  Document doc;
+  CommandStack commands;
+  const auto a = AddJson(doc, commands,
+                         {{"type", "Box"},
+                          {"on", "Top"},
+                          {"width", 1.0},
+                          {"depth", 1.0},
+                          {"height", 1.0},
+                          {"ids", {40, 41}}});
+  CHECK(a.solidId == 40);
+  CHECK(a.sketchId == 41);
+  CHECK(dynamic_cast<ExtrudeFeature*>(doc.FindFeatureById(40)) != nullptr);
+  CHECK(dynamic_cast<SketchFeature*>(doc.FindFeatureById(41)) != nullptr);
+  // An id already taken is refused, and nothing is added.
+  CHECK_THROWS_WITH(AddJson(doc, commands,
+                            {{"type", "Sphere"},
+                             {"on", "Top"},
+                             {"radius", 1.0},
+                             {"ids", {41, 42}}}),
+                    ContainsSubstring("already exists"));
+  CHECK(doc.FeatureCount() == 2);
+}

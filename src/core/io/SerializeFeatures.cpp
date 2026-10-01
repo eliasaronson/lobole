@@ -1454,7 +1454,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "depth (v), height (along the normal) mm, each +_expr, defaults sized "
      "from what it is on; offset [u, v] mm (+offset_expr) of its centre, or "
      "of its low corner with centered: false; mode: new_body|add|cut; "
-     "reversed?. Stored as a Sketch + Extrude, one undo step"},
+     "reversed?; ids? [solid, sketch] pins the two feature ids. Stored as a "
+     "Sketch + Extrude, one undo step"},
     {"Sphere", 1,
      "on (as Box) — required; diameter OR radius mm (+_expr); offset [u, v] "
      "mm (+offset_expr) of its centre, which lies ON the plane; mode. Stored "

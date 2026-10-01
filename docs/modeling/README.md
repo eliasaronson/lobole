@@ -193,7 +193,15 @@ from sketches.
 - **One undo step.** `add_feature` adds the sketch, then the solid, and
   collapses both into one command (`primitive::Add`,
   `src/core/Primitives.{h,cpp}`). It returns `id`/`index` of the solid
-  (the body's `created_by`) and `ids` [solid, sketch].
+  (the body's `created_by`) and `ids` [solid, sketch]. A request may pin
+  both with `ids` [solid, sketch], which is how a component builder keeps
+  their identity across rebuilds (`tools/designer_components.py`).
+- **Edited through what it stored.** `modify_feature` on the sketch with a
+  dimension's `value` changed re-solves the sketch before committing it, so
+  the geometry follows the number (a literal dimension is not re-solved at
+  regeneration, only an expression-driven one); a size given as an
+  expression follows `set_variable`; the height is the extrude's
+  `distance`.
 - **Refused, naming what is accepted**: a missing or unknown `on`, the old
   `position`/`center`/`direction`, an unknown field, a size given as both
   diameter and radius, a size that is not positive, a feature that is not a

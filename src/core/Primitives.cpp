@@ -54,13 +54,15 @@ const char* AcceptedKeys(Kind kind) {
   switch (kind) {
   case Kind::Box:
     return "type, name, on, width, depth, height (each +_expr), offset [u, v] "
-           "(+offset_expr), centered, mode, reversed, material";
+           "(+offset_expr), centered, mode, reversed, material, ids [solid, "
+           "sketch]";
   case Kind::Cylinder:
     return "type, name, on, diameter or radius, height (each +_expr), offset "
-           "[u, v] (+offset_expr), mode, reversed, material";
+           "[u, v] (+offset_expr), mode, reversed, material, ids [solid, "
+           "sketch]";
   case Kind::Sphere:
     return "type, name, on, diameter or radius (+_expr), offset [u, v] "
-           "(+offset_expr), mode, material";
+           "(+offset_expr), mode, material, ids [solid, sketch]";
   }
   return "";
 }
@@ -124,7 +126,8 @@ On OnFromJson(const json& on) {
     return out;
   }
   if (!on.is_object() || !on.contains("feature_id") ||
-      !on.at("feature_id").is_number_unsigned())
+      !on.at("feature_id").is_number_integer() ||
+      on.at("feature_id").get<int64_t>() <= 0)
     throw std::runtime_error("on: " + on.dump() + " names nothing. " +
                              AcceptedOn());
   for (auto it = on.begin(); it != on.end(); ++it)
@@ -284,8 +287,8 @@ Spec SpecFromJson(const json& j) {
           "`: a primitive is a sketch ON something, extruded or revolved, "
           "and placed by `offset` [u, v] in that thing's frame. " +
           AcceptedOn() + ".");
-  std::set<std::string> allowed = {"type",        "name", "on",      "offset",
-                                   "offset_expr", "mode", "material"};
+  std::set<std::string> allowed = {"type",        "name", "on",       "offset",
+                                   "offset_expr", "mode", "material", "ids"};
   if (s.kind == Kind::Box)
     allowed.insert({"width", "width_expr", "depth", "depth_expr", "height",
                     "height_expr", "centered", "reversed"});
@@ -367,6 +370,18 @@ Spec SpecFromJson(const json& j) {
       throw std::runtime_error("reversed is true or false");
     s.reversed = j.at("reversed").get<bool>();
   }
+  if (j.contains("ids")) {
+    const json& ids = j.at("ids");
+    const auto positive = [](const json& v) {
+      return v.is_number_integer() && v.get<int64_t>() > 0;
+    };
+    if (!ids.is_array() || ids.size() != 2 || !positive(ids.at(0)) ||
+        !positive(ids.at(1)) || ids.at(0) == ids.at(1))
+      throw std::runtime_error("ids is [solid id, sketch id]: two different "
+                               "positive feature ids, or leave it out");
+    s.solidId = ids.at(0).get<uint64_t>();
+    s.sketchId = ids.at(1).get<uint64_t>();
+  }
   if (j.contains("material")) {
     if (!j.at("material").is_string())
       throw std::runtime_error("material is a slug (describe material_slugs)");
@@ -400,6 +415,8 @@ json SpecToJson(const Spec& s) {
     j["reversed"] = true;
   if (!s.material.empty())
     j["material"] = s.material;
+  if (s.solidId != 0 && s.sketchId != 0)
+    j["ids"] = {s.solidId, s.sketchId};
   return j;
 }
 
@@ -557,6 +574,8 @@ Expansion Expand(const Spec& s, const Placement& p) {
   SetSolid(*out.solid, s, axis);
   if (!s.material.empty())
     out.solid->SetMaterial(s.material);
+  out.sketch->SetId(s.sketchId);
+  out.solid->SetId(s.solidId);
   return out;
 }
 
@@ -572,6 +591,10 @@ void BindSketch(Feature& solid, uint64_t sketchId) {
 Added Add(Document& doc, CommandStack& commands, Spec spec,
           double fallbackSize) {
   const std::string type = KindName(spec.kind);
+  for (uint64_t id : {spec.solidId, spec.sketchId})
+    if (id != 0 && doc.FindFeatureById(id) != nullptr)
+      throw std::runtime_error(type + ": ids: feature " + std::to_string(id) +
+                               " already exists");
   const auto placement = Resolve(doc, spec.on);
   if (!placement)
     throw std::runtime_error(type + ": " + placement.error());

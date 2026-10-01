@@ -74,6 +74,10 @@ struct Spec {
   ExtrudeMode mode = ExtrudeMode::NewBody;
   bool reversed = false; // Box, Cylinder: extrude against the normal
   std::string material;
+  // The ids the two features get, [solid, sketch] (0 = the document mints
+  // them): what a generator that keeps feature identity across rebuilds
+  // (tools/designer_components.py) pins.
+  uint64_t solidId = 0, sketchId = 0;
 };
 
 // The frame a primitive is drawn in, resolved against the document as it
