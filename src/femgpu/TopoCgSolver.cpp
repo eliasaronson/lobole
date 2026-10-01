@@ -325,10 +325,20 @@ bool TopoCgSolver::EstimateLambdaMax(std::string* error) {
   const NPush np{n};
   const float* scal = static_cast<const float*>(m_scalars.mapped);
 
-  { // v0 = ones
+  { // v0: a fixed pseudo-random field, NOT ones. Ones is the smoothest
+    // vector there is, nearly orthogonal to the top eigenvector this is
+    // after: on the pan/tilt yoke's third SIMP system it read 3.35 after 16
+    // iterations against a true 5.52, the 1.1 margin did not cover it, the
+    // Chebyshev smoother AMPLIFIED the top of the spectrum, and the
+    // multigrid PCG made no progress in 3000 iterations. From a random
+    // start the same 16 iterations read 5.47.
     float* v = static_cast<float*>(m_chebD.mapped);
-    for (int i = 0; i < m_nFree; ++i)
-      v[i] = 1.0f;
+    uint32_t state = 0x2545f491u;
+    for (int i = 0; i < m_nFree; ++i) {
+      state = state * 1664525u + 1013904223u;
+      v[i] =
+          static_cast<float>(state >> 8) / static_cast<float>(1u << 23) - 1.0f;
+    }
   }
   double lambda = 0.0, prev = 0.0;
   for (int it = 0; it < 16; ++it) {
@@ -417,14 +427,14 @@ void TopoCgSolver::RecordIteration(int parity) {
 
 bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
                          float tol, int maxIter, CgStats* stats,
-                         std::string* error) {
+                         std::string* error, bool lastIterate) {
   if (f.size() != static_cast<size_t>(m_nFree)) {
     if (error)
       *error = "f size != nFree";
     return false;
   }
   if (m_opts.precond == CgOptions::Precond::Multigrid)
-    return SolveMg(f, x, tol, maxIter, stats, error);
+    return SolveMg(f, x, tol, maxIter, stats, error, lastIterate);
   x.resize(m_nFree, 0.0f);
   std::memcpy(m_f.mapped, f.data(), m_f.size);
   std::memcpy(m_x.mapped, x.data(), m_x.size);
@@ -540,12 +550,19 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
     if (trace)
       std::fprintf(stderr, "cg it=%d rr=%g rzA=%g rzB=%g pAp=%g\n", iter,
                    scal[kRr], scal[kRzA], scal[kRzB], scal[kPAp]);
-    if (std::isfinite(rr) && rr < bestRr) {
+    // (In lastIterate mode "best" is the latest finite iterate, and nothing
+    // restarts: a NaN ends the solve on the iterate before it.)
+    if (std::isfinite(rr) && (lastIterate || rr < bestRr)) {
       bestRr = rr;
       std::memcpy(bestX.data(), m_x.mapped, m_x.size);
       chunksSinceBest = 0;
     } else {
       ++chunksSinceBest;
+    }
+    if (lastIterate) {
+      if (!std::isfinite(rr))
+        break;
+      continue;
     }
     if (!std::isfinite(rr) || chunksSinceBest >= kStallChunks) {
       // Restart from the best iterate (a NaN — alpha noise at the floor —
@@ -678,7 +695,7 @@ bool TopoCgSolver::ApplyMgPrecond(uint32_t rzSlot, std::string* error) {
 // Jacobi's ~10^3-10^4) the extra submit overhead is noise.
 bool TopoCgSolver::SolveMg(const std::vector<float>& f, std::vector<float>& x,
                            float tol, int maxIter, CgStats* stats,
-                           std::string* error) {
+                           std::string* error, bool lastIterate) {
   x.resize(m_nFree, 0.0f);
   std::memcpy(m_f.mapped, f.data(), m_f.size);
   std::memcpy(m_x.mapped, x.data(), m_x.size);
@@ -815,12 +832,18 @@ bool TopoCgSolver::SolveMg(const std::vector<float>& f, std::vector<float>& x,
       rr = scal[kRr];
       fresh = true;
     }
-    if (fresh && std::isfinite(rr) && rr < bestRr) {
+    // lastIterate: "best" is the latest fresh finite iterate; no restarts.
+    if (fresh && std::isfinite(rr) && (lastIterate || rr < bestRr)) {
       bestRr = rr;
       std::memcpy(bestX.data(), m_x.mapped, m_x.size);
       sinceBest = 0;
     } else if (fresh) {
       ++sinceBest;
+    }
+    if (lastIterate) {
+      if (!std::isfinite(rr))
+        break;
+      continue;
     }
     if (!std::isfinite(rr) || sinceBest >= kStallIters) {
       restartsNoGain = bestRr < 0.999f * bestAtRestart ? 0 : restartsNoGain + 1;

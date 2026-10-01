@@ -247,6 +247,40 @@ TEST_CASE("femgpu: matrix-free SpMV matches the CPU assembly (GATE)",
   CheckSpmvAgainstCpu(*ctx, mesh, fixed);
 }
 
+// A rigid translation strains nothing, so K·t = 0 — and on a slender part
+// it is most of what each element does. The plain fp32 product broke that by
+// the rounding of Ke times the translation, which made a beam's operator
+// 20-60 % too stiff ("fp32 Ke as an operator on slender parts" below); the
+// kernel works relative to each element's first node, where a translation
+// is exactly zero in any precision.
+TEST_CASE("femgpu: SpMV leaves a rigid translation unloaded (GATE)",
+          "[femgpu][gate]") {
+  REQUIRE_GPU();
+  fem::FemMesh mesh = GenerateBoxMesh(20, 2, 2, 200, 20, 20);
+  const gpu::SpmvSystem sys = PackSystem(mesh, {}, 200000.0, 0.3); // free
+  std::string err;
+  auto spmv = gpu::TopoSpmv::Create(*ctx, sys, &err);
+  INFO(err);
+  REQUIRE(spmv);
+  uint32_t state = 7;
+  std::vector<float> scales(sys.nElems);
+  for (float& s : scales)
+    s = 1e-3f + Rand01(state);
+  REQUIRE(spmv->SetScales(scales, &err));
+  for (int axis = 0; axis < 3; ++axis) {
+    std::vector<float> t(sys.nFree, 0.0f);
+    for (int i = axis; i < sys.nFree; i += 3)
+      t[i] = 3.7f; // node-major, all DOFs free
+    std::vector<float> Kt;
+    REQUIRE(spmv->Apply(t, Kt, &err));
+    float worst = 0.0f;
+    for (float v : Kt)
+      worst = std::max(worst, std::abs(v));
+    INFO("axis " << axis);
+    CHECK(worst == 0.0f);
+  }
+}
+
 #ifdef HAVE_NETGEN
 #include "cad/CADKernel.h"
 #include "core/fem/FemMesher.h"
@@ -280,6 +314,7 @@ TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",
 #include "femgpu/TopoMultigrid.h"
 
 #include <Eigen/IterativeLinearSolvers>
+#include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
 #include <chrono>
@@ -474,12 +509,11 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
 // ---- Where the fp32 solver stops working (diagnostics, not gates) ---------
 //
 // The 2026-08-23 round found the GPU path returning a ZERO displacement field
-// on a beam-shaped part
-// (docs/topopt/README.md#the-fp32-limit-on-slender-parts). `TopologyOptimize`
-// falls back to the CPU when that happens, so this is a performance limit
-// rather than a correctness one — but fixing the numerics needs to start from
-// measurements, and these two are them. Hidden ([.]) : run with `femgpu_tests
-// [fp32floor]`.
+// on a beam-shaped part. These probes measured why, for the fix that is now
+// TopoGpuSolver's fp64 refinement
+// (docs/topopt/README.md#mixed-precision-refinement); they drive the bare
+// fp32 CG, which still has every limit below. Hidden ([.]) : run with
+// `femgpu_tests [fp32floor]`.
 //
 // Measured on an RTX 4060 Laptop, tolerance 1e-5, uniform stiffness, all
 // meshes built from 10 mm CUBIC cells so element SHAPE is held constant:
@@ -650,6 +684,187 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
     }
 }
 
+// ---- Mixed-precision refinement: the fp32-floor systems, solved ----------
+//
+// docs/topopt/README.md#mixed-precision-refinement. The probes above are the
+// systems fp32 could not solve; these drive the SHIPPING adapter
+// (TopoGpuSolver: fp64 residual, fp32 GPU CG inside) on them and hold its
+// answer to an fp64 direct factorization of the same operator.
+
+namespace {
+
+struct FloorCase {
+  const char* name;
+  int nx, ny, nz;
+  double Lx, Ly, Lz;
+  bool frozenSkin; // SIMP's first solve: skin at 1, bulk at vf^3
+};
+
+// The bending load the probes use: 100 N over the free end, pushing -Y.
+std::vector<double> TipLoad(const fem::FemMesh& mesh,
+                            const std::vector<int>& dofMap, int nFree,
+                            double Lx) {
+  std::vector<double> F(nFree, 0.0);
+  int tip = 0;
+  for (const auto& n : mesh.nodes)
+    if (std::abs(n.x - Lx) < 1e-6)
+      ++tip;
+  for (size_t n = 0; n < mesh.nodes.size(); ++n)
+    if (std::abs(mesh.nodes[n].x - Lx) < 1e-6) {
+      const int g = dofMap[3 * n + 1];
+      if (g >= 0)
+        F[g] = -100.0 / tip;
+    }
+  return F;
+}
+
+std::vector<double> FloorScales(const fem::FemMesh& mesh, const FloorCase& c,
+                                double bulk) {
+  std::vector<double> s(mesh.tets.size(), c.frozenSkin ? bulk : 1.0);
+  if (c.frozenSkin)
+    for (size_t e = 0; e < mesh.tets.size(); ++e)
+      for (int i = 0; i < 10; ++i) {
+        const double x = mesh.nodes[mesh.tets[e][i]].x;
+        if (x < 1e-6 || x > c.Lx - 1e-6) {
+          s[e] = 1.0;
+          break;
+        }
+      }
+  return s;
+}
+
+// The element stiffness matrices in fp64, as the CPU path computes them.
+std::vector<Eigen::Matrix<double, 30, 30>> ElementKs(const fem::FemMesh& mesh,
+                                                     const fem::Material& m) {
+  using namespace fem::internal;
+  const auto D0 = Elasticity(m.youngMPa, m.poisson);
+  std::vector<Eigen::Matrix<double, 30, 30>> out(mesh.tets.size());
+  for (size_t e = 0; e < mesh.tets.size(); ++e) {
+    Eigen::Vector3d X[10];
+    for (int i = 0; i < 10; ++i) {
+      const auto& p = mesh.nodes[mesh.tets[e][i]];
+      X[i] = Eigen::Vector3d(p.x, p.y, p.z);
+    }
+    out[e].setZero();
+    for (const auto& g : kTetGauss) {
+      Eigen::Matrix<double, 6, 30> B;
+      const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+      out[e] += (kTetW * std::abs(detJ)) * (B.transpose() * D0 * B);
+    }
+  }
+  return out;
+}
+
+// K(scale) in fp64 over the reduced DOF map — the operator the CPU path
+// assembles, and the one the GPU adapter's fp64 residual applies.
+Eigen::SparseMatrix<double>
+AssembleK(const fem::FemMesh& mesh,
+          const std::vector<Eigen::Matrix<double, 30, 30>>& Ke,
+          const std::vector<int>& dofMap, int nFree,
+          const std::vector<double>& scale) {
+  std::vector<Eigen::Triplet<double>> trip;
+  trip.reserve(mesh.tets.size() * 900);
+  for (size_t e = 0; e < mesh.tets.size(); ++e) {
+    const auto& tet = mesh.tets[e];
+    for (int a = 0; a < 30; ++a) {
+      const int ga = dofMap[3 * tet[a / 3] + a % 3];
+      if (ga < 0)
+        continue;
+      for (int b = 0; b < 30; ++b) {
+        const int gb = dofMap[3 * tet[b / 3] + b % 3];
+        if (gb >= 0)
+          trip.emplace_back(ga, gb, scale[e] * Ke[e](a, b));
+      }
+    }
+  }
+  Eigen::SparseMatrix<double> K(nFree, nFree);
+  K.setFromTriplets(trip.begin(), trip.end());
+  return K;
+}
+
+} // namespace
+
+TEST_CASE("femgpu: refinement solves the fp32-floor systems to 1e-5",
+          "[femgpu][cg]") {
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
+  INFO("device: " << solver->DeviceName());
+
+  // The condition-number table's rows (docs/topopt/README.md), up to the
+  // 2.7e8 one whose first fp32 solve returned zeros.
+  const FloorCase cases[] = {
+      {"cube 4x4x4 1:1 uniform", 4, 4, 4, 40, 40, 40, false},
+      {"beam 20x2x2 10:1 frozen skin", 20, 2, 2, 200, 20, 20, true},
+      {"beam 20x1x2 20:1 uniform", 20, 1, 2, 200, 10, 20, false},
+      {"beam 20x1x2 20:1 frozen skin", 20, 1, 2, 200, 10, 20, true},
+  };
+  const FloorCase& c = cases[GENERATE(0, 1, 2, 3)];
+  INFO(c.name);
+  fem::FemMesh mesh = GenerateBoxMesh(c.nx, c.ny, c.nz, c.Lx, c.Ly, c.Lz);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const fem::Material steel{200000.0, 0.3};
+  const auto dofs =
+      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+  const auto Ke = ElementKs(mesh, steel);
+  const std::vector<double> F = TipLoad(mesh, dofs.map, dofs.nFree, c.Lx);
+  Eigen::Map<const Eigen::VectorXd> Fv(F.data(), dofs.nFree);
+
+  std::string err;
+  REQUIRE(solver->Setup(mesh, steel, dofs.map, dofs.nFree, &err));
+
+  // The first (cold) solve, then a warm one on the next design — the
+  // bulk a little denser, as one SIMP step would leave it.
+  std::vector<double> u;
+  for (const double bulk : {0.027, 0.04}) {
+    INFO("bulk scale " << bulk);
+    const std::vector<double> scale = FloorScales(mesh, c, bulk);
+    REQUIRE(solver->Solve(scale, F, u, &err));
+    REQUIRE(static_cast<int>(u.size()) == dofs.nFree);
+
+    const Eigen::SparseMatrix<double> K =
+        AssembleK(mesh, Ke, dofs.map, dofs.nFree, scale);
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt(K);
+    REQUIRE(ldlt.info() == Eigen::Success);
+    const Eigen::VectorXd uRef = ldlt.solve(Fv);
+    Eigen::Map<const Eigen::VectorXd> uv(u.data(), dofs.nFree);
+    const double res = (Fv - K * uv).norm() / Fv.norm();
+    const double uErr = (uv - uRef).norm() / uRef.norm();
+    const double cRef = Fv.dot(uRef);
+    const double cErr = std::abs(Fv.dot(uv) - cRef) / cRef;
+    INFO("fp64 residual " << res << "  |u - u*|/|u*| " << uErr
+                          << "  compliance error " << cErr);
+    CHECK(res <= 1e-5);
+    // The residual bound is the target; what SIMP consumes is u and the
+    // compliance, and those agree with the direct solve to far better than
+    // the design can sense (the energy error goes as the residual squared).
+    CHECK(uErr < 1e-3);
+    CHECK(cErr < 1e-6);
+
+    // ...and so are the sensitivities' element energies. A cantilever's
+    // elements mostly move rigidly, so ue^T Ke ue is a small difference of
+    // large terms; from fp32 Ke they came out wrong enough to send SIMP to
+    // another design while the solve itself was exact.
+    std::vector<double> se;
+    REQUIRE(solver->ElementEnergies(u, se, &err));
+    REQUIRE(se.size() == mesh.tets.size());
+    double maxRef = 0.0, maxErr = 0.0;
+    for (size_t e = 0; e < mesh.tets.size(); ++e) {
+      Eigen::Matrix<double, 30, 1> ue;
+      for (int a = 0; a < 30; ++a) {
+        const int g = dofs.map[3 * mesh.tets[e][a / 3] + a % 3];
+        ue(a) = g >= 0 ? uRef(g) : 0.0;
+      }
+      const double ref = ue.dot(Ke[e] * ue);
+      maxRef = std::max(maxRef, ref);
+      maxErr = std::max(maxErr, std::abs(se[e] - ref));
+    }
+    INFO("element energy error " << maxErr / maxRef << " of the largest");
+    CHECK(maxErr < 1e-4 * maxRef);
+  }
+}
+
 // Which mechanism actually kills the fp32 solve: the operator's conditioning,
 // or the diagonal spread the frozen skin introduces? Dense fp64 eigenvalues of
 // the reduced K, small meshes only. Measured 2026-08-24:
@@ -670,213 +885,8 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
 //
 // Symmetric diagonal scaling (what a Jacobi preconditioner does, but applied
 // to the matrix itself so the fp32 recurrence sees unit diagonals) is worth
-// only 2-5x. It is not the fix. Dropping the contrast is worth 8.5x, and
-// mixed precision is worth ~9 decimal digits — see
-// docs/plans/topopt-gpu-mixed-precision.md. The gate for
-// docs/plans/topopt-gpu-mixed-precision.md. No production code: this exists to
-// answer one question cheaply, and to KILL the plan if the answer is no.
-//
-// The plan proposes fp64 iterative refinement around the fp32 solve:
-//
-//     u = 0
-//     repeat:  r = F - K u        (fp64, on the host)
-//              solve K d = r      (fp32, on the GPU, loosely)
-//              u += d
-//
-// It only works if the inner fp32 solve is a CONTRACTION on the systems that
-// matter — if each outer step shrinks the residual by some rho < 1. That is
-// not obvious here: the whole reason this plan exists is that on the 20:1
-// beam with SIMP's frozen skin the inner solve makes NO progress at all and
-// returns its initial guess, and an inner solve that returns its input
-// unchanged gives d = 0 and rho = 1 exactly. Refinement would stall.
-//
-// So: run the loop on that exact system and print rho. Gate (from the plan):
-// the outer residual reaches 1e-3 within 4 steps from a warm start that is
-// not zero. Cold start is measured too, because the first SIMP solve has no
-// warm start and is where the round found the zeros.
-//
-// RESULT (2026-08-25, RTX 4060 Laptop, 5 runs). The plan SURVIVES, with two
-// amendments, and the run-to-run spread is itself the finding — the inner
-// solve is nondeterministic on this system, returning 128, 272 or 368
-// iterations from byte-identical inputs.
-//
-//   start                     reached 1e-3 at step   rho once productive
-//   warm (non-zero)           4, 4, 4, 5, 5          0.009 - 0.10
-//   cold (u = 0)              4, 5, never x3         0.016 - 0.19
-//   cold, inner guess seeded  4, 4, 5, 5, 5          0.008 - 0.16
-//
-// 1. FROM A WARM START, REFINEMENT WORKS — every run converged, and rho in
-//    the productive regime is 0.01-0.1, i.e. a decimal digit or two per outer
-//    step. That is the gate's own condition and it is met.
-//
-// 2. FROM ZERO IT CAN STALL FOREVER, AT EXACTLY rho = 1.000. Three runs in
-//    five printed this, all six steps identical:
-//
-//      step 1  ||r||/||F|| 1.000e+00   inner iters 128   max|d| 0.00e+00
-//      step 2  ||r||/||F|| 1.000e+00   rho 1.000  ...    max|d| 0.00e+00
-//
-//    The inner solver's stall policy returns its BEST iterate, which from a
-//    zero start it never improves on, so d = 0 -> u unchanged -> r unchanged
-//    -> the next step has identical input. Refinement cannot rescue this,
-//    because refinement's correction IS the inner solve: zero is a fixed
-//    point of the whole loop. More outer steps buy nothing, which is why the
-//    plan's gate specified a non-zero warm start rather than trusting the
-//    cold case.
-//
-// 3. PERTURBING THE INNER INITIAL GUESS BREAKS THE FIXED POINT — 5 runs of 5
-//    made progress, none stalled. One RNG pass over nFree floats, and it is
-//    the cheapest known mitigation for the first (cold) SIMP solve.
-//
-// The "within 4 steps" budget is too tight to design against: the observed
-// range is 4-6 even when it works, and it moves between runs for the reason
-// in the header. Cost per outer step here is 200-650 inner iterations.
-//
-// Rescaling matters and is not incidental. r shrinks by orders of magnitude
-// per step, and handing a tiny vector to an fp32 solver wastes its exponent
-// range; each step normalises r to unit norm before the solve and scales the
-// correction back on the way out.
-TEST_CASE("femgpu probe: GPU5.0 does fp64 refinement contract?",
-          "[.][fp32floor]") {
-  REQUIRE_GPU();
-  // The exact case that returns zeros (see "what zeroes the slender solve").
-  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200, 10, 20);
-  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
-  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 200000.0, 0.3);
-  const auto dofs =
-      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
-
-  // 100 N over the free-end face, pushing -Y: the load the round placed.
-  std::vector<float> f(sys.nFree, 0.0f);
-  int tipNodes = 0;
-  for (const auto& n : mesh.nodes)
-    if (std::abs(n.x - 200.0) < 1e-6)
-      ++tipNodes;
-  for (size_t n = 0; n < mesh.nodes.size(); ++n)
-    if (std::abs(mesh.nodes[n].x - 200.0) < 1e-6) {
-      const int g = dofs.map[3 * n + 1];
-      if (g >= 0)
-        f[g] = -100.0f / static_cast<float>(tipNodes);
-    }
-
-  // SIMP's first solve: support/load skin frozen at 1.0, bulk at vf cubed.
-  std::vector<float> mixed(sys.nElems, 0.027f);
-  for (int e = 0; e < sys.nElems; ++e)
-    for (int i = 0; i < 10; ++i) {
-      const double x = mesh.nodes[mesh.tets[e][i]].x;
-      if (x < 1e-6 || x > 200.0 - 1e-6) {
-        mixed[e] = 1.0f;
-        break;
-      }
-    }
-
-  std::string err;
-  gpu::CgOptions opts;
-  opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
-  REQUIRE(opts.mg);
-  opts.precond = gpu::CgOptions::Precond::Multigrid;
-  opts.chebDegree = 3;
-  opts.chebRatio = 15.0f;
-  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
-  REQUIRE(cg);
-
-  double fnorm = 0.0;
-  for (int i = 0; i < sys.nFree; ++i)
-    fnorm += static_cast<double>(f[i]) * static_cast<double>(f[i]);
-  fnorm = std::sqrt(fnorm);
-
-  // Returns the step at which the outer residual first went below 1e-3, or 0.
-  // `seed` != 0 gives each inner solve a small random initial guess instead
-  // of zero. The reason is specific: the inner solver's stall policy returns
-  // its BEST iterate, and when it cannot improve on a zero start the best
-  // iterate IS zero — so d = 0, the outer residual is unchanged, and that
-  // whole refinement step is spent for nothing. Breaking the degeneracy costs
-  // one RNG pass.
-  const auto refine = [&](std::vector<double> u, const char* label, int steps,
-                          uint32_t seed = 0) {
-    std::printf("\n--- %s ---\n", label);
-    double prev = -1.0;
-    int hit = 0;
-    for (int k = 1; k <= steps; ++k) {
-      const std::vector<double> Ku = CpuApply64(sys, mixed, u);
-      std::vector<double> r(sys.nFree);
-      double rn = 0.0;
-      for (int i = 0; i < sys.nFree; ++i) {
-        r[i] = static_cast<double>(f[i]) - Ku[i];
-        rn += r[i] * r[i];
-      }
-      rn = std::sqrt(rn);
-      const double rel = rn / fnorm;
-      const double rho = prev < 0.0 ? 0.0 : rel / prev;
-      std::printf("  step %d  ||r||/||F|| %.3e", k, rel);
-      if (prev >= 0.0)
-        std::printf("   rho %.3f", rho);
-      if (rel < 1e-3 && hit == 0)
-        hit = k;
-      // Normalise into fp32's comfortable range, solve, scale back.
-      const double s = rn > 0.0 ? 1.0 / rn : 1.0;
-      std::vector<float> rs(sys.nFree);
-      for (int i = 0; i < sys.nFree; ++i)
-        rs[i] = static_cast<float>(r[i] * s);
-      std::vector<float> d(sys.nFree, 0.0f);
-      if (seed != 0)
-        for (int i = 0; i < sys.nFree; ++i)
-          d[i] = 1e-3f * RandSym(seed);
-      gpu::CgStats st{};
-      REQUIRE(cg->Solve(rs, d, 1e-4f, 4000, &st, &err));
-      double dmax = 0.0;
-      for (float v : d)
-        dmax = std::max(dmax, static_cast<double>(std::abs(v)));
-      std::printf("   inner iters %5d  max|d| %.2e\n", st.iterations, dmax);
-      for (int i = 0; i < sys.nFree; ++i)
-        u[i] += static_cast<double>(d[i]) / s;
-      prev = rel;
-    }
-    return hit;
-  };
-
-  REQUIRE(cg->SetScales(mixed, &err));
-
-  // Cold: what the first SIMP solve does. This is the configuration that
-  // returned a zero displacement field.
-  const int cold = refine(std::vector<double>(sys.nFree, 0.0), "cold start", 6);
-
-  // Warm: what every LATER SIMP solve does — the previous iterate, carried
-  // over from a density field one step away. Modelled here by solving the
-  // uniform-0.027 system (which converges) and starting from its answer.
-  const std::vector<float> uniform(sys.nElems, 0.027f);
-  REQUIRE(cg->SetScales(uniform, &err));
-  std::vector<float> x0(sys.nFree, 0.0f);
-  gpu::CgStats st0{};
-  REQUIRE(cg->Solve(f, x0, 1e-5f, 20000, &st0, &err));
-  std::vector<double> warmStart(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i)
-    warmStart[i] = static_cast<double>(x0[i]);
-  double wmax = 0.0;
-  for (double v : warmStart)
-    wmax = std::max(wmax, std::abs(v));
-  std::printf("\n(warm start from the uniform-0.027 solve: max|u| %.3e)\n",
-              wmax);
-  REQUIRE(wmax > 0.0); // the gate says "a warm start that is not zero"
-  REQUIRE(cg->SetScales(mixed, &err));
-  const int warm = refine(warmStart, "warm start", 6);
-
-  // ...and the same cold start with the degeneracy broken.
-  REQUIRE(cg->SetScales(mixed, &err));
-  const int coldSeeded = refine(std::vector<double>(sys.nFree, 0.0),
-                                "cold start, inner guess "
-                                "perturbed",
-                                6, 12345u);
-
-  std::printf("\nGPU5.0 GATE: 1e-3 within 4 steps\n");
-  std::printf("  cold                     : %s (step %d)\n",
-              cold > 0 && cold <= 4 ? "PASS" : "fail", cold);
-  std::printf("  cold, inner guess seeded : %s (step %d)\n",
-              coldSeeded > 0 && coldSeeded <= 4 ? "PASS" : "fail", coldSeeded);
-  std::printf("  warm                     : %s (step %d)\n",
-              warm > 0 && warm <= 4 ? "PASS" : "fail", warm);
-  std::printf("(0 = never reached 1e-3 within the steps run)\n");
-}
-
+// only 2-5x. It is not the fix; fp64 refinement around the fp32 solve is
+// (docs/topopt/README.md#mixed-precision-refinement).
 TEST_CASE("femgpu probe: condition numbers", "[.][fp32floor]") {
   struct Case {
     const char* name;
@@ -1031,12 +1041,43 @@ TEST_CASE("femgpu probe: penalty ramp on a slender part", "[.][fp32floor]") {
   }
 }
 
+namespace {
+
+// The GPU run IS the CPU run: both solve to a residual far below anything
+// SIMP can sense (the GPU through fp64 refinement, energies in fp64), so the
+// two land on the same design to ~1e-8 in density and the same compliance
+// history to ~1e-9. The bars here are four orders looser than that and
+// still far tighter than any two different designs. They used to be loose
+// enough to pass a 55 % compliance error, because the fp32 solve was not
+// converged and the run was nondeterministic in outcome; the inner fp32 CG
+// still is in its iterations, which is why these are tolerances rather than
+// equality.
+void CheckSameRun(const fem::TopoResult& cpu, const fem::TopoResult& gpu) {
+  INFO("solver fallback: '" << gpu.solverFallback << "'");
+  CHECK(gpu.solverFallback.empty());
+  CHECK(gpu.iterations == cpu.iterations);
+  REQUIRE(gpu.complianceHistory.size() == cpu.complianceHistory.size());
+  for (size_t i = 0; i < cpu.complianceHistory.size(); ++i) {
+    INFO("iteration " << i);
+    CHECK_THAT(gpu.complianceHistory[i],
+               WithinRel(cpu.complianceHistory[i], 1e-4));
+  }
+  CHECK_THAT(gpu.volumeFractionAchieved,
+             WithinAbs(cpu.volumeFractionAchieved, 1e-4));
+  REQUIRE(gpu.density.size() == cpu.density.size());
+  double worst = 0.0;
+  for (size_t e = 0; e < cpu.density.size(); ++e)
+    worst = std::max(worst, std::abs(gpu.density[e] - cpu.density[e]));
+  INFO("largest density difference " << worst);
+  CHECK(worst < 1e-3);
+}
+
+} // namespace
+
 TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
           "[femgpu][cg][slow]") {
-  // The GPU1 verification: the same small cantilever optimized twice — the
-  // built-in Eigen CG-IC vs the injected GPU solver — must land on the same
-  // optimum (fp32 + Jacobi vs fp64 + IC changes the path negligibly since
-  // the OC update reacts to energies, not raw displacements).
+  // The same small cantilever optimized twice — the built-in Eigen CG-IC
+  // vs the injected GPU solver — must be the same run.
   std::string gerr;
   auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
   if (!solver)
@@ -1063,50 +1104,7 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   INFO(err);
   REQUIRE(gpuRes.has_value());
 
-  const auto best = [](const std::vector<double>& hist) {
-    return *std::min_element(hist.begin(), hist.end());
-  };
-  const double cpuBest = best(cpuRes->complianceHistory);
-  const double gpuBest = best(gpuRes->complianceHistory);
-  INFO("cpu compliance last "
-       << cpuRes->complianceHistory.back() << " best " << cpuBest << " ("
-       << cpuRes->iterations << " it), gpu last "
-       << gpuRes->complianceHistory.back() << " best " << gpuBest << " ("
-       << gpuRes->iterations << " it)");
-  // SIMP is non-convex and the GPU solve is run-to-run NONDETERMINISTIC
-  // (fp32 atomic reduction order), so what can this test assert? Measured
-  // over dozens of back-to-back runs against the deterministic CPU result:
-  // the DESIGN is the sharp invariant — solid/void flips were 0 and the
-  // volume matched in every run, including the bad ones. The compliance
-  // readout is NOT sharp: most runs land within ~10% of the CPU value, but
-  // ~1 run in 15 reports ~55% high across its WHOLE history while the flips
-  // check still passes — same topology, inflated objective readout (grayer
-  // boundary elements and/or an under-converged warm-capped CG). A tight
-  // compliance band therefore flakes wherever it's set (the old 5%
-  // back()-vs-back() check failed ~1 run in 3). Gate on the design; keep
-  // compliance as a divergence backstop only (catches NaN / a genuinely
-  // broken solve, not readout spread).
-  CHECK(gpuBest > 0.3 * cpuBest);
-  CHECK(gpuBest < 2.5 * cpuBest);
-  CHECK_THAT(gpuRes->volumeFractionAchieved,
-             WithinAbs(cpuRes->volumeFractionAchieved, 0.01));
-  REQUIRE(gpuRes->density.size() == cpuRes->density.size());
-  int flipped = 0;
-  double meanDiff = 0.0;
-  for (size_t e = 0; e < cpuRes->density.size(); ++e) {
-    const double d = std::abs(gpuRes->density[e] - cpuRes->density[e]);
-    meanDiff += d;
-    if (d > 0.5)
-      ++flipped; // solid on one side, void on the other
-  }
-  meanDiff /= cpuRes->density.size();
-  const double flippedFrac = double(flipped) / cpuRes->density.size();
-  INFO("mean |density diff|: " << meanDiff
-                               << "  solid/void flips: " << flippedFrac);
-  CHECK(flippedFrac < 0.10);
-  // Gray closeness: catches wholesale density-field divergence that never
-  // crosses the 0.5 flip threshold (measured <= 0.096 across all runs).
-  CHECK(meanDiff < 0.15);
+  CheckSameRun(*cpuRes, *gpuRes);
 }
 
 // A dogfooding round (2026-08-23) ran the FIRST thing anyone would try —
@@ -1150,9 +1148,11 @@ TEST_CASE("femgpu: a slender cantilever solves on the GPU (GATE)",
                          << gpuRes->complianceHistory.back() << " vf "
                          << gpuRes->volumeFractionAchieved << " ("
                          << gpuRes->iterations << " it)");
-  // Either the GPU solves it or it says it could not and the CPU finishes the
-  // run; both are pass. Returning zeros and calling them an answer is not.
+  // The GPU finishes the run itself: fp64 refinement around the fp32 solve
+  // (docs/topopt/README.md#mixed-precision-refinement). Before it, the first
+  // solve here made no progress and the run fell back to the CPU.
   INFO("solver fallback: '" << gpuRes->solverFallback << "'");
+  CHECK(gpuRes->solverFallback.empty());
   // A structure carrying a load has compliance > 0. Zero means the linear
   // solve never moved off its zero initial guess.
   CHECK(gpuRes->complianceHistory.back() > 0.0);
@@ -1161,6 +1161,202 @@ TEST_CASE("femgpu: a slender cantilever solves on the GPU (GATE)",
   // all zero, which is exactly what a zero displacement field produces.
   CHECK_THAT(gpuRes->volumeFractionAchieved,
              WithinAbs(params.volumeFraction, 0.01));
+  // ...and it is the CPU's run.
+  CheckSameRun(*cpuRes, *gpuRes);
+}
+
+namespace {
+
+// The exact answer: an fp64 sparse Cholesky of K(scale) every solve, as an
+// injected solver, so SIMP runs through the same loop with no iterative
+// solve error at all. Slow; the oracle the two iterative paths are judged by.
+struct DirectOracle : fem::TopoLinearSolver {
+  const fem::FemMesh* mesh = nullptr;
+  std::vector<Eigen::Matrix<double, 30, 30>> Ke;
+  std::vector<int> dofMap;
+  int nFree = 0;
+  bool Setup(const fem::FemMesh& m, const fem::Material& mat,
+             const std::vector<int>& dm, int nf, std::string*) override {
+    mesh = &m;
+    Ke = ElementKs(m, mat);
+    dofMap = dm;
+    nFree = nf;
+    return true;
+  }
+  bool Solve(const std::vector<double>& scale, const std::vector<double>& F,
+             std::vector<double>& u, std::string* error) override {
+    const Eigen::SparseMatrix<double> K =
+        AssembleK(*mesh, Ke, dofMap, nFree, scale);
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt(K);
+    if (ldlt.info() != Eigen::Success) {
+      *error = "LDLT failed";
+      return false;
+    }
+    const Eigen::VectorXd x =
+        ldlt.solve(Eigen::Map<const Eigen::VectorXd>(F.data(), F.size()));
+    u.assign(x.data(), x.data() + x.size());
+    return true;
+  }
+};
+
+struct DesignDiff {
+  int flips = 0;
+  double meanDiff = 0.0;
+};
+DesignDiff Compare(const fem::TopoResult& a, const fem::TopoResult& b) {
+  DesignDiff d;
+  for (size_t e = 0; e < a.density.size(); ++e) {
+    const double x = std::abs(a.density[e] - b.density[e]);
+    d.meanDiff += x;
+    if (x > 0.5)
+      ++d.flips;
+  }
+  d.meanDiff /= std::max<size_t>(1, a.density.size());
+  return d;
+}
+
+} // namespace
+
+// Where the time goes, and whose design is right, on the systems the
+// refinement exists for. Three runs of the same SIMP loop per mesh: the GPU
+// adapter, the built-in CPU CG-IC, and an exact fp64 factorization (the
+// oracle). Run with: femgpu_tests "[refinebench]"
+TEST_CASE("femgpu bench: SIMP on slender parts, GPU vs CPU vs exact",
+          "[.][refinebench]") {
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
+  std::printf("device: %s\n", solver->DeviceName().c_str());
+  struct M {
+    const char* name;
+    int nx, ny, nz;
+    double Lx, Ly, Lz;
+    int iters;
+    bool oracle;
+  };
+  const M meshes[] = {
+      {"beam 20x1x2   200x10x20 (gate)", 20, 1, 2, 200, 10, 20, 10, true},
+      {"beam 40x2x4   200x10x20", 40, 2, 4, 200, 10, 20, 10, true},
+      {"beam 80x4x8   200x10x20", 80, 4, 8, 200, 10, 20, 5, false},
+      {"beam 120x3x6  300x7.5x15 (40:1)", 120, 3, 6, 300, 7.5, 15, 5, false},
+      {"cube 12x12x12 80^3 (gpubench)", 12, 12, 12, 80, 80, 80, 6, false},
+  };
+  using clk = std::chrono::steady_clock;
+  for (const M& m : meshes) {
+    fem::FemMesh mesh = GenerateBoxMesh(m.nx, m.ny, m.nz, m.Lx, m.Ly, m.Lz);
+    fem::Material steel{200000.0, 0.3};
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+    fem::FaceLoad load;
+    load.type = fem::LoadType::Force;
+    load.tris = TrisAtPlane(mesh, 0, m.Lx, 1e-6);
+    load.magnitude = 100.0;
+    load.direction = glm::dvec3(0, -1, 0);
+    fem::TopoParams params;
+    params.maxIterations = m.iters;
+    params.filterRadius = 1.5 * std::max(m.Lx / m.nx, m.Ly / m.ny);
+    std::string err;
+    auto run = [&](fem::TopoLinearSolver* s, double* seconds) {
+      const auto t0 = clk::now();
+      auto r = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                     {}, {}, s);
+      *seconds = std::chrono::duration<double>(clk::now() - t0).count();
+      REQUIRE(r.has_value());
+      return *r;
+    };
+    double gs = 0, cs = 0, xs = 0;
+    const fem::TopoResult g = run(solver.get(), &gs);
+    const fem::TopoResult c = run(nullptr, &cs);
+    std::printf("\n%s: %zu tets\n", m.name, mesh.tets.size());
+    std::printf("  gpu   %.3f s/iter  C %.5g  fallback '%s'\n",
+                gs / g.iterations, g.complianceHistory.back(),
+                g.solverFallback.c_str());
+    std::printf("  cpu   %.3f s/iter  C %.5g\n", cs / c.iterations,
+                c.complianceHistory.back());
+    const DesignDiff gc = Compare(g, c);
+    std::printf("  gpu vs cpu: flips %d  mean diff %.4f\n", gc.flips,
+                gc.meanDiff);
+    if (m.oracle) {
+      DirectOracle exact;
+      const fem::TopoResult x = run(&exact, &xs);
+      std::printf("  exact %.3f s/iter  C %.5g\n", xs / x.iterations,
+                  x.complianceHistory.back());
+      const DesignDiff gx = Compare(g, x), cx = Compare(c, x);
+      std::printf("  gpu vs exact: flips %d  mean diff %.4f\n", gx.flips,
+                  gx.meanDiff);
+      std::printf("  cpu vs exact: flips %d  mean diff %.4f\n", cx.flips,
+                  cx.meanDiff);
+      std::printf("  compliance by iteration (gpu / cpu / exact):\n");
+      for (size_t i = 0; i < x.complianceHistory.size(); ++i)
+        std::printf(
+            "    %2zu  %.6g  %.6g  %.6g\n", i,
+            i < g.complianceHistory.size() ? g.complianceHistory[i] : 0.0,
+            i < c.complianceHistory.size() ? c.complianceHistory[i] : 0.0,
+            x.complianceHistory[i]);
+    }
+  }
+}
+
+// What rounding Ke to fp32 does to the OPERATOR, before any solver sees it.
+// Compliance F.u of an exact (LDLT) solve of three versions of K on the
+// frozen-skin + 0.027 field with the bending tip load. Measured 2026-10-01:
+//
+//   mesh                    fp64 Ke     fp32 Ke, plain   fp32 Ke, relative
+//   beam 20x1x2   (240)     2518.55     -21 %            -0.20 %
+//   beam 40x2x4   (1920)    2734.20     -40 %            -0.13 %
+//   beam 80x4x8   (15360)   2841.70     -63 %            -0.09 %
+//   cube 12^3     (10368)   0.125319    -0.05 %          -0.0003 %
+//
+// The plain fp32 operator is a different, much stiffer structure: an element
+// of a slender part mostly translates, Ke·(translation) should be zero, and
+// the rounded Ke's ~1e-7 error times a translation thousands of times the
+// element's strain is not. The fp32 CG was solving that operator — so even a
+// "converged" GPU solve on a beam was 20-60 % stiff — and fp64 refinement
+// cannot converge around an inner operator that far off. Taken RELATIVE to
+// the element's first node (fem_spmv.comp), the translation never meets Ke
+// and the error falls by two to three orders.
+TEST_CASE("femgpu probe: fp32 Ke as an operator on slender parts",
+          "[.][fp32floor]") {
+  struct M {
+    int nx, ny, nz;
+    double Lx, Ly, Lz;
+  };
+  for (const M m : {M{20, 1, 2, 200, 10, 20}, M{40, 2, 4, 200, 10, 20},
+                    M{80, 4, 8, 200, 10, 20}, M{12, 12, 12, 80, 80, 80}}) {
+    fem::FemMesh mesh = GenerateBoxMesh(m.nx, m.ny, m.nz, m.Lx, m.Ly, m.Lz);
+    fem::Material steel{200000.0, 0.3};
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+    const auto dofs =
+        fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+    const auto Ke = ElementKs(mesh, steel);
+    const std::vector<double> F = TipLoad(mesh, dofs.map, dofs.nFree, m.Lx);
+    Eigen::Map<const Eigen::VectorXd> Fv(F.data(), dofs.nFree);
+    // bulk 0.027 with frozen skin
+    FloorCase fc{"", m.nx, m.ny, m.nz, m.Lx, m.Ly, m.Lz, true};
+    const std::vector<double> scale = FloorScales(mesh, fc, 0.027);
+    std::vector<Eigen::Matrix<double, 30, 30>> K32(Ke.size()), Krel(Ke.size());
+    Eigen::Matrix<double, 30, 30> S = Eigen::Matrix<double, 30, 30>::Identity();
+    for (int a = 0; a < 30; ++a)
+      S(a, a % 3) -= 1.0; // w = u - u_node0 (row a, col node0 comp)
+    for (size_t e = 0; e < Ke.size(); ++e) {
+      Eigen::Matrix<double, 30, 30> r = Ke[e].cast<float>().cast<double>();
+      K32[e] = r;
+      Eigen::Matrix<double, 30, 30> sub = r;
+      sub.topRows(3).setZero();
+      sub.leftCols(3).setZero();
+      Krel[e] = S.transpose() * sub * S;
+    }
+    auto comp = [&](const std::vector<Eigen::Matrix<double, 30, 30>>& k) {
+      auto K = AssembleK(mesh, k, dofs.map, dofs.nFree, scale);
+      Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt(K);
+      return Fv.dot(ldlt.solve(Fv));
+    };
+    const double cx = comp(Ke), c32 = comp(K32), cr = comp(Krel);
+    std::printf("%zu tets: exact %.8g  fp32 Ke %.8g (%.2e)  relative %.8g "
+                "(%.2e)\n",
+                mesh.tets.size(), cx, c32, std::abs(c32 - cx) / cx, cr,
+                std::abs(cr - cx) / cx);
+  }
 }
 
 TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",

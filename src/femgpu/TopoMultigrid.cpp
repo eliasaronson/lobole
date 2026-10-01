@@ -12,6 +12,23 @@ namespace gpu {
 
 namespace {
 
+// The element matrix the GPU SpMV actually applies (fem_spmv.comp): the fp32
+// Ke taken relative to the element's first node, S^T Ke' S with Ke' = Ke
+// without node 0's rows and columns and S = I - (node 0's translation). In
+// exact arithmetic it IS Ke; from fp32 entries it keeps the translation null
+// space exact, which the plain rounded Ke does not — and the coarse space is
+// made of exactly those rigid motions.
+Eigen::Matrix<double, 30, 30> RelativeKe(const float* ke) {
+  Eigen::Matrix<double, 30, 30> K = Eigen::Matrix<double, 30, 30>::Zero();
+  for (int a = 3; a < 30; ++a)
+    for (int b = 3; b < 30; ++b)
+      K(a, b) = static_cast<double>(ke[a * 30 + b]);
+  Eigen::Matrix<double, 30, 30> S = Eigen::Matrix<double, 30, 30>::Identity();
+  for (int a = 0; a < 30; ++a)
+    S(a, a % 3) -= 1.0;
+  return S.transpose() * K * S;
+}
+
 // Assemble the fp64 sparse reduced stiffness from the packed fp32 element
 // data (the same numbers the GPU consumes — oracle discipline from GPU0/1).
 Eigen::SparseMatrix<double> AssembleA(const SpmvSystem& sys,
@@ -20,15 +37,15 @@ Eigen::SparseMatrix<double> AssembleA(const SpmvSystem& sys,
   trip.reserve(static_cast<size_t>(sys.nElems) * 400);
   for (int e = 0; e < sys.nElems; ++e) {
     const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
-    const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+    const Eigen::Matrix<double, 30, 30> Ke =
+        RelativeKe(&sys.ke[static_cast<size_t>(e) * 900]);
     const double s = scales[e];
     for (int a = 0; a < 30; ++a) {
       if (dof[a] < 0)
         continue;
       for (int b = 0; b < 30; ++b)
         if (dof[b] >= 0)
-          trip.emplace_back(dof[a], dof[b],
-                            s * static_cast<double>(ke[a * 30 + b]));
+          trip.emplace_back(dof[a], dof[b], s * Ke(a, b));
     }
   }
   Eigen::SparseMatrix<double> A(sys.nFree, sys.nFree);
@@ -39,7 +56,14 @@ Eigen::SparseMatrix<double> AssembleA(const SpmvSystem& sys,
 // lambda_max(D^-1 A) by power iteration (fp64) — aims the Chebyshev smoother.
 double PowerLambdaMax(const Eigen::SparseMatrix<double>& A,
                       const Eigen::VectorXd& diag) {
-  Eigen::VectorXd v = Eigen::VectorXd::Ones(A.rows());
+  // A pseudo-random start, as on the GPU (TopoCgSolver::EstimateLambdaMax):
+  // ones is nearly orthogonal to the top eigenvector.
+  Eigen::VectorXd v(A.rows());
+  uint32_t state = 0x2545f491u;
+  for (Eigen::Index i = 0; i < v.size(); ++i) {
+    state = state * 1664525u + 1013904223u;
+    v[i] = static_cast<double>(state >> 8) / double(1u << 23) - 1.0;
+  }
   double lambda = 1.0;
   for (int it = 0; it < 20; ++it) {
     Eigen::VectorXd w = diag.cwiseInverse().cwiseProduct(A * v);
@@ -246,7 +270,6 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
   out.elemBlockOffset.assign(sys.nElems + 1, 0);
   for (int e = 0; e < sys.nElems; ++e) {
     const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
-    const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
     // Local coarse DOF set: aggregates of this element's nodes.
     std::vector<int> coarse; // global coarse dof ids
     coarse.reserve(24);
@@ -269,10 +292,7 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
       for (int c = 0; c < nc; ++c)
         Pl(slot, c) = out.P.coeff(g, coarse[c]);
     }
-    Eigen::MatrixXd Ke(30, 30);
-    for (int a = 0; a < 30; ++a)
-      for (int b = 0; b < 30; ++b)
-        Ke(a, b) = static_cast<double>(ke[a * 30 + b]);
+    Eigen::MatrixXd Ke = RelativeKe(&sys.ke[static_cast<size_t>(e) * 900]);
     // Zero the fixed slots (they are absent from the reduced system).
     for (int slot = 0; slot < 30; ++slot)
       if (dof[slot] < 0) {

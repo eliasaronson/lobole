@@ -3,11 +3,13 @@
 // The fem::TopoLinearSolver implementation backed by the Vulkan matrix-free
 // CG (docs/topopt/README.md#the-gpu-solver): the bridge between designer_core's
 // GPU-free topology loop and fem_gpu's TopoCgSolver. Owns a private headless
-// ComputeContext; Setup packs the element matrices once per run, Solve
-// converts fp64<->fp32 and runs the on-device PCG warm-started from the
-// previous SIMP displacement. Built only when Eigen is available (it uses the
-// shared element math to pack Ke); absent a usable GPU, Create returns null
-// and callers stay on the CPU path.
+// ComputeContext; Setup packs the element matrices once per run (fp32 to the
+// device, fp64 kept on the host), Solve refines an fp64 displacement with the
+// on-device fp32 PCG as its inner solve, warm-started from the previous SIMP
+// displacement (docs/topopt/README.md#mixed-precision-refinement), and the
+// element energies are computed in fp64. Built only when Eigen is available (it
+// uses the shared element math to pack Ke); absent a usable GPU, Create returns
+// null and callers stay on the CPU path.
 
 #include "core/fem/FemTopo.h"
 
