@@ -229,9 +229,10 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"cancel_pending", "Discard the pending (preview) feature.", "",
      remote::NeedsPart},
     {"add_feature",
-     "Append a feature (see feature_types for the JSON dialect, and for the "
-     "fields every type accepts — including `material`, whose slug is "
-     "refused if unrecognised) and regenerate; returns {index, id, "
+     "Append a feature (`describe` lists its JSON dialect in "
+     "feature_types[], and the fields every type accepts — including "
+     "`material`, whose slug is refused if unrecognised: describe's "
+     "material_slugs) and regenerate; returns {index, id, "
      "entity_ids?, regen}. A Thread on a PRINTED part (set_print_process) "
      "also returns `print`: what the print wants it modelled at, since the "
      "basic profile it cuts prints tight (docs/tolerances/README.md).",
@@ -265,7 +266,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "different feature now', which deliberately dangles those references.",
      "feature, feature_id, index", remote::NeedsPart | remote::Deferrable},
     {"set_material",
-     "Assign a material slug (see material_slugs) to a body's creating "
+     "Assign a material slug (describe's material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
      "default. An unrecognised slug is refused, naming the accepted set. "
      "Drives mass, BOM and FEM as well as appearance.",
