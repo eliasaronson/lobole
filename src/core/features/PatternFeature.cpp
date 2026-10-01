@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "core/BodyMode.h"
+#include "core/ElementOrigin.h"
 #include "core/Expression.h"
 #include "core/features/DatumPlaneFeature.h" // ResolveParentPlane
 
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 PatternFeature::PatternFeature(const std::string& name, PatternKind kind,
                                uint64_t sourceId)
@@ -29,6 +31,109 @@ ElementMap Suffixed(const ElementMap& src, const std::string& tag) {
   for (const auto& [i, n] : src.edgeNames)
     m.edgeNames[i] = n + "#" + tag;
   return m;
+}
+
+// What the seed's features wrote on its faces -- a Hole's HoleMark, a tapped
+// Hole's or a Thread's ThreadMark and ThreadRegion -- for the copies to carry.
+// The marks hold no geometry, only the face's name: whoever reads one finds
+// the axis and the position from the face itself, so a copy's mark is the
+// seed's with the copy's face. Without them CAM drilled a patterned tapped
+// hole as a plain bore and listed only the seed as uncut, and a screw in a
+// copy clashed with its thread.
+struct SeedMarks {
+  std::vector<HoleMark> holes;
+  std::vector<ThreadMark> threads;
+  std::vector<ThreadRegion> regions;
+  bool Empty() const {
+    return holes.empty() && threads.empty() && regions.empty();
+  }
+};
+
+// A face's identity across copies: its name with the instance suffixes
+// taken out and the modification steps after it dropped ("4/p7/bore#2;M9"
+// -> "4/p7/bore"), and the last instance suffix ("2"), empty on the seed.
+std::string CopyKey(const std::string& name, std::string* tag) {
+  std::string out;
+  tag->clear();
+  for (size_t i = 0; i < name.size();) {
+    if (name[i] != '#') {
+      out += name[i++];
+      continue;
+    }
+    size_t j = i + 1;
+    while (j < name.size() && name[j] != ';' && name[j] != ',' &&
+           name[j] != '#')
+      j++;
+    *tag = name.substr(i + 1, j - i - 1);
+    i = j;
+  }
+  const size_t step = out.find(";M");
+  if (step != std::string::npos)
+    out.resize(step);
+  return out;
+}
+
+// The instance suffixes a set of copies' names carry.
+void CollectTags(const ElementMap& map, std::set<std::string>& tags) {
+  std::string tag;
+  for (const auto& [index, name] : map.names) {
+    CopyKey(name, &tag);
+    if (!tag.empty())
+      tags.insert(tag);
+  }
+}
+
+// Each body's faces that are a copy (by `tags`, and the seed itself when
+// `seed`) of a marked seed face get the seed's mark, on that face. A face
+// already marked keeps its own.
+void CarryMarks(std::vector<Body>& bodies, const SeedMarks& marks,
+                const std::set<std::string>& tags, bool seed,
+                uint64_t onlyCreatedBy) {
+  if (marks.Empty())
+    return;
+  const auto keyOf = [](const std::string& n) {
+    std::string t;
+    return CopyKey(n, &t);
+  };
+  std::string tag;
+  for (Body& body : bodies) {
+    if (body.reference || !body.shape.IsValid() ||
+        (onlyCreatedBy != 0 && body.createdBy != onlyCreatedBy))
+      continue;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const std::string key = CopyKey(name, &tag);
+      if (tag.empty() ? !seed : tags.count(tag) == 0)
+        continue;
+      const ElementRef here{body.createdBy, name};
+      const auto same = [&here](const ElementRef& r) {
+        return r.featureId == here.featureId && r.name == here.name;
+      };
+      for (const HoleMark& h : marks.holes) {
+        if (keyOf(h.bore.name) != key ||
+            std::any_of(body.holes.begin(), body.holes.end(),
+                        [&](const HoleMark& o) { return same(o.bore); }))
+          continue;
+        body.holes.push_back(h);
+        body.holes.back().bore = here;
+      }
+      for (const ThreadMark& t : marks.threads) {
+        if (keyOf(t.face.name) != key ||
+            std::any_of(body.threads.begin(), body.threads.end(),
+                        [&](const ThreadMark& o) { return same(o.face); }))
+          continue;
+        body.threads.push_back(t);
+        body.threads.back().face = here;
+      }
+      for (const ThreadRegion& r : marks.regions) {
+        if (keyOf(r.face.name) != key ||
+            std::any_of(body.threadRegions.begin(), body.threadRegions.end(),
+                        [&](const ThreadRegion& o) { return same(o.face); }))
+          continue;
+        body.threadRegions.push_back(r);
+        body.threadRegions.back().face = here;
+      }
+    }
+  }
 }
 
 } // namespace
@@ -113,12 +218,30 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
 
+  // The fuse makes new bodies and drops the seeds' marks: collect them
+  // first, and give them back to the seed and every copy after.
+  SeedMarks marks;
+  for (const Body& b : ctx.bodies) {
+    if (b.createdBy != sourceId)
+      continue;
+    marks.holes.insert(marks.holes.end(), b.holes.begin(), b.holes.end());
+    marks.threads.insert(marks.threads.end(), b.threads.begin(),
+                         b.threads.end());
+    marks.regions.insert(marks.regions.end(), b.threadRegions.begin(),
+                         b.threadRegions.end());
+  }
+  std::set<std::string> tags;
+  for (size_t i = seedCount; i < instances.size(); i++)
+    CollectTags(instances[i].second, tags);
+
   std::string fuseErr;
   const bool ok =
       FuseInstancesReplacingSource(ctx.bodies, sourceId, std::move(instances),
                                    m_name, m_material, GetId(), &fuseErr);
   if (!ok)
     SetError(fuseErr.empty() ? "pattern failed" : fuseErr);
+  else
+    CarryMarks(ctx.bodies, marks, tags, true, GetId());
   return ok;
 }
 
@@ -162,11 +285,28 @@ bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
       cutters.emplace_back(std::move(copy), suffixed(std::to_string(k)));
     }
   }
+  // The source's marks (a Hole's, a tapped Hole's thread), wherever it
+  // drilled them, for the copies' faces.
+  SeedMarks marks;
+  for (const Body& b : ctx.bodies) {
+    for (const HoleMark& h : b.holes)
+      if (h.featureId == sourceId)
+        marks.holes.push_back(h);
+    for (const ThreadMark& t : b.threads)
+      if (t.featureId == sourceId)
+        marks.threads.push_back(t);
+    for (const ThreadRegion& r : b.threadRegions)
+      if (topo::DecodeElementName(r.face.name).madeBy == sourceId)
+        marks.regions.push_back(r);
+  }
+  std::set<std::string> tags;
   for (auto& [shape, map] : cutters) {
+    CollectTags(map, tags);
     if (!ApplyBodyModeReporting(ctx.bodies, std::move(shape), std::move(map),
                                 adds ? ExtrudeMode::Add : ExtrudeMode::Cut,
                                 *this))
       return false;
   }
+  CarryMarks(ctx.bodies, marks, tags, false, 0);
   return true;
 }

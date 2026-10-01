@@ -141,7 +141,9 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   `#<instance>`; the fused result is split back into solids by looking each
   piece's faces up in the fused map (`topo::NamesOfSubShape`) — the pieces
   share their faces with the shape they came out of, so no second history pass
-  is needed.
+  is needed. The marks the seed's faces carry (a hole's, a thread's) are
+  given to each instance's face of the same name less its `#<instance>`
+  ([holes and threads](holes-and-threads.md#hole)).
 - **Derived** copies rename the source's elements
   `<derived id>/<source created_by>/<source name>` ([derived.md](derived.md)).
 

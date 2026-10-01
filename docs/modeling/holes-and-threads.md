@@ -77,6 +77,14 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
   ([drill](../cam/operations.md#drill)) and what the job's list of holes it
   does not cut is made from
   ([simulation](../cam/simulation.md#what-the-job-does-not-cut)).
+- **Patterned.** A pattern of a Hole gives each copy's bore the seed's
+  `HoleMark`, `ThreadMark` and `ThreadRegion` (`PatternFeature.cpp`,
+  `CarryMarks`), so a patterned tapped hole is drilled to its point,
+  threaded, listed as uncut and relieved for a screw like the seed; so does
+  a pattern of a body a hole is in, which fuses new bodies. A mark holds the
+  face's name and no geometry, so the copy's is the seed's on the copy's
+  face; a mirrored copy keeps the seed's hand, as a tap cuts right-handed on
+  either side (`[cam][pattern]` in `tests/test_cam_honest.cpp`).
 - **Empty-space warning.** A hole checks, per centre, whether its axis passes
   through a non-reference body anywhere down the bore (clipped to the bodies'
   bounding box). The axis is split where it crosses each body's faces and the

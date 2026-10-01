@@ -275,7 +275,8 @@ does not cut (`uncut`, `UncutFeature`), and `Explain` says one line per
 feature. Without it a forgotten hole was silent: leftover is measured only
 where the tool went.
 
-- **A hole** (each bore a Hole drilled, its `HoleMark`) is cut when some
+- **A hole** (each bore a Hole drilled, its `HoleMark`, a pattern's copies
+  included) is cut when some
   setup leaves its bore in air at three points down its axis: this setup's
   machined map where the bore stands up in it (`FindUncutHoles`), or any
   other setup's final map (`SetupStock::Removes`). A hole cut by another

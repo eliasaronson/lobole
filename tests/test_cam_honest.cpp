@@ -10,6 +10,7 @@
 #include "core/cam/CamGcode.h"
 #include "core/cam/CamThreadMill.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/PatternFeature.h"
 
 namespace {
 
@@ -436,6 +437,129 @@ TEST_CASE("a job lists the holes and threads it does not cut", "[cam]") {
   CHECK(faced.uncut[0].kind == cam::UncutFeature::Kind::Hole);
   CHECK(faced.uncut[0].feature == "Hole");
   CHECK(Says(faced, "tap-drill hole"));
+}
+
+// --- a pattern of holes ------------------------------------------------------
+
+namespace {
+// The coupon's bores by instance: the seed's, then each copy's ("#1", "#2").
+std::vector<ElementRef> Bores(const Body& body) {
+  std::vector<ElementRef> out;
+  for (const char* tag : {"", "#1", "#2"})
+    for (const auto& [index, name] : body.elementMap.names)
+      if (name.find("/bore") != std::string::npos &&
+          (*tag == 0 ? name.find('#') == std::string::npos
+                     : name.find(tag) != std::string::npos))
+        out.push_back(ElementRef{body.createdBy, name});
+  return out;
+}
+} // namespace
+
+TEST_CASE("a patterned tapped hole is drilled, threaded and listed like one",
+          "[cam][pattern]") {
+  // A Hole writes its HoleMark and ThreadMark on the bores it cut; a pattern
+  // of it cut copies whose bores carried neither, so CAM drilled a copy flat
+  // as a plain bore, refused to thread it, and listed only the seed as uncut.
+  Plate plate = Coupon();
+  Document& doc = *plate.doc;
+  const uint64_t holeId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto pat =
+      std::make_unique<PatternFeature>("Holes x3", PatternKind::Linear, holeId);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 3;
+  pat->spacing = 12.0;
+  doc.AddFeature(std::move(pat));
+  doc.Regenerate();
+  REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+  const std::vector<Body>& bodies = doc.GetBodies();
+  REQUIRE(bodies.size() == 1);
+  const std::vector<ElementRef> bores = Bores(bodies[0]);
+  REQUIRE(bores.size() == 3);
+  REQUIRE(bodies[0].holes.size() == 3);
+  REQUIRE(bodies[0].threads.size() == 3);
+  CHECK(bodies[0].threadRegions.size() == 3);
+  for (const HoleMark& h : bodies[0].holes) {
+    CHECK(h.pointAngleDeg == 118.0);
+    CHECK(h.thread == "3/8-16 UNC");
+    CHECK(h.featureId == holeId);
+  }
+
+  cam::Setup s = BasicSetup();
+  s.tools = {TapDrill(cam::ToolType::Drill), Mill6()};
+  s.stock.bottomMargin = 0.0;
+  s = Ready(s, bodies);
+  const double point = 7.9375 * 0.5 / std::tan(59.0 * std::numbers::pi / 180);
+  for (const ElementRef& bore : bores) {
+    INFO(bore.name);
+    // Drilled to the bore's bottom by the drill's point, as the seed is.
+    const cam::DerivedOp drill = cam::DeriveOperation(
+        s, bodies, cam::OpType::Drill, cam::Target{0, bore}, 1);
+    REQUIRE(drill.ok);
+    CHECK_THAT(drill.op.bottomZ, WithinAbs(5.0 - point, 1e-3));
+    // Threaded to the seed's thread depth.
+    const cam::DerivedOp thread = cam::DeriveOperation(
+        s, bodies, cam::OpType::ThreadMill, cam::Target{0, bore}, 2);
+    INFO(thread.why);
+    REQUIRE(thread.ok);
+    cam::Setup one = s;
+    one.operations = {thread.op};
+    const cam::ThreadPlan plan =
+        cam::PlanThread(one, one.operations[0], s.tools[1], bodies,
+                        one.operations[0].targets[0]);
+    REQUIRE(plan.ok);
+    CHECK_THAT(plan.thread.zLo, WithinAbs(20.0 - (15.0 - 3 * kP16), 1e-3));
+  }
+
+  // A job that only faces the plate lists every hole and every thread.
+  cam::Setup facing = BasicSetup();
+  facing.tools = {TapDrill(cam::ToolType::Flat)};
+  facing = Ready(facing, bodies);
+  cam::DerivedOp face =
+      cam::DeriveOperation(facing, bodies, cam::OpType::Face, cam::Target{});
+  REQUIRE(face.ok);
+  face.op.id = 1;
+  facing.operations = {face.op};
+  cam::Verdict faced = cam::VerifyGcode(
+      Post(facing, cam::GenerateAll(facing, bodies)), facing, bodies, 0.25);
+  cam::AddUncutThreads({facing}, bodies, {}, faced);
+  int holes = 0, threads = 0;
+  for (const cam::UncutFeature& u : faced.uncut)
+    (u.kind == cam::UncutFeature::Kind::Hole ? holes : threads)++;
+  CHECK(holes == 3);
+  CHECK(threads == 3);
+}
+
+TEST_CASE("a pattern of a drilled body carries its holes to every copy",
+          "[cam][pattern]") {
+  // The other path: a pattern of a BODY (the plate the hole is in) fuses
+  // copies into new bodies, which dropped every mark, the seed's too.
+  Plate plate = HolePlate(10.0, 1.0, 0.0, [](HoleFeature& h) {
+    h.through = true;
+    h.fitThread = "M6";
+    h.fitKind = "tapped";
+  });
+  Document& doc = *plate.doc;
+  const uint64_t padId = doc.GetFeature(1)->GetId();
+  auto pat =
+      std::make_unique<PatternFeature>("Plates x2", PatternKind::Linear, padId);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 2;
+  pat->spacing = 100.0;
+  doc.AddFeature(std::move(pat));
+  doc.Regenerate();
+  REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+  size_t holes = 0, threads = 0;
+  for (const Body& b : doc.GetBodies()) {
+    for (const HoleMark& h : b.holes) {
+      CHECK(h.bore.featureId == b.createdBy);
+      CHECK(b.elementMap.Resolve(h.bore.name).has_value());
+      CHECK(h.through);
+    }
+    holes += b.holes.size();
+    threads += b.threads.size();
+  }
+  CHECK(holes == 2);
+  CHECK(threads == 2);
 }
 
 #endif // HAVE_CAM
