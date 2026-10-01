@@ -83,4 +83,12 @@ bool ImportRunning(const AppState& state);
 // A line for the modal: what is happening right now.
 std::string ImportStatusLine(const AppState& state);
 
+// TEST ONLY: while held, a STEP import's worker waits before it reads the
+// file (a cancel still ends the wait). A small file imports in a frame or
+// two, and the modal's Cancel button exists only until the worker is done
+// (the materialize drops it), so a GUI test asserting the modal "was seen"
+// raced the worker and lost under load. Holding the worker makes "the modal
+// is up while the import runs" a state the test reaches, not a race.
+void HoldImportWorkerForTesting(bool hold);
+
 } // namespace ui

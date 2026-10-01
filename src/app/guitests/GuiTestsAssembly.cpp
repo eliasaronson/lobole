@@ -335,6 +335,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     const size_t tabsBefore = s_App->parts.size();
     std::string error;
+    // The worker is HELD before it reads, so the modal's Cancel button (drawn
+    // only until the worker finishes) is a state this test reaches rather
+    // than a race it can lose: this small file imports in a frame or two, and
+    // under load the worker beat the first frame that drew the modal.
+    ui::HoldImportWorkerForTesting(true);
+    struct Release {
+      ~Release() { ui::HoldImportWorkerForTesting(false); }
+    } release;
     IM_CHECK(ui::StartImport(*s_App, stepPath.string(), &error));
     // It is a JOB, not a call: nothing has been created yet and the modal is
     // up. (If this ever fails because the import already finished, the import
@@ -342,19 +350,22 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::ImportRunning(*s_App));
     IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
 
-    // The registry reaps it from the frame loop; yield until it lands.
-    // Bounded so a
-    // hang fails the test rather than wedging the suite. The modal must be up
-    // for the duration — it is drawn by DockLayout rather than a toolbar
-    // precisely so it survives the part->assembly tab switch that
-    // materialization performs halfway through.
     bool sawModal = false;
-    for (int i = 0; i < 2000 && ui::ImportRunning(*s_App); i++) {
+    for (int i = 0; i < 600 && !sawModal; i++) {
       ctx->Yield();
-      if (ctx->ItemExists("//Importing STEP/Cancel###import_cancel"))
-        sawModal = true;
+      sawModal = ctx->ItemExists("//Importing STEP/Cancel###import_cancel");
     }
     IM_CHECK(sawModal);
+    IM_CHECK(ui::ImportRunning(*s_App));
+    ui::HoldImportWorkerForTesting(false);
+
+    // The registry reaps it from the frame loop; yield until it lands.
+    // Bounded so a hang fails the test rather than wedging the suite. The
+    // modal is drawn by DockLayout rather than a toolbar precisely so it
+    // survives the part->assembly tab switch that materialization performs
+    // halfway through.
+    for (int i = 0; i < 2000 && ui::ImportRunning(*s_App); i++)
+      ctx->Yield();
     IM_CHECK(!ui::ImportRunning(*s_App));
     IM_CHECK(s_App->importError.empty());
 

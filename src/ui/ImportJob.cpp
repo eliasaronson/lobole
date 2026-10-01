@@ -12,6 +12,8 @@
 #include <Standard_Failure.hxx>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <utility>
@@ -25,6 +27,9 @@ namespace {
 // 299-part file, so 8 keeps a frame near 60 ms: slow enough to be one visible
 // progress step, fast enough that 299 parts land in ~2.5 s.
 constexpr size_t kPartsPerFrame = 8;
+
+// HoldImportWorkerForTesting's gate.
+std::atomic<bool> g_holdWorker{false};
 
 // The worker's view of the job: forwards OCC's progress into the atomics and
 // lets `cancel` abort the read. Lives on the worker thread; the main thread
@@ -56,6 +61,9 @@ void Run(ImportJob* job, BackgroundJob* bg) {
   // handler is installed PER THREAD. Without this a fault inside the reader on
   // this thread is a raw SIGSEGV rather than a catchable failure.
   OSD::SetSignal(Standard_False);
+
+  while (g_holdWorker.load() && !bg->cancel.load())
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
   try {
     JobProgress progress(job, bg);
@@ -243,6 +251,8 @@ bool StartImport(AppState& state, const std::string& path, std::string* error) {
   LOG_INFO("Assembly import started in the background: '{}'", stepPath);
   return true;
 }
+
+void HoldImportWorkerForTesting(bool hold) { g_holdWorker.store(hold); }
 
 std::string ImportStatusLine(const AppState& state) {
   const ImportJob* job = state.importJob.get();
