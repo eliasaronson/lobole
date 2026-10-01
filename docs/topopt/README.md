@@ -93,6 +93,83 @@ There is no automatic reconstruction of a B-Rep or feature tree from the
 result. The workflow is to re-model over the ghost, then check the new part
 with a static study.
 
+## Topology you can build from
+
+Design note (the pan/tilt friction round, workstream D). A topology result
+is a picture and an STL: one load case per study (the yoke's arm became a
+single strut along the one case's load), no keep-out bodies (the first
+envelope overlapped the tilt worm's blocks, found only in the result),
+islands where a keep face freezes tets nothing connects, no static study of
+the optimised shape, and no verb to cut a part for the printer. The yoke's
+re-model was read off screenshots in about four hours and only known to
+meet its target once built.
+
+**The shape of the fix.**
+
+- **Load cases.** A study holds `load_cases` [{name, weight}]; each force or
+  pressure load names one (`case`), and the supports are shared by all. A
+  topology run minimises the weighted sum of the cases' compliances: every
+  iteration solves each case on the same K (the GPU warm-starts each from
+  its own previous displacement) and sums the weighted sensitivities. A
+  static study with cases factors K once and solves one right-hand side per
+  case; `study_results` reports each case, and `probe_study` and
+  `set_result_display` take `case`. A study with no cases behaves as
+  before. The cases are in the study's saved form, so the input hash covers
+  them.
+- **Keep-outs.** A topology study's `keep_outs` are bodies of the part (a
+  neighbour arrives as a Derived reference body) or boxes in part
+  coordinates. The tets whose centroids lie inside one are removed from the
+  mesh before the run: void, and not design space (the volume fraction is of
+  what remains). Refused: a body the part does not have (naming those it
+  has), the design body itself, an empty box, and a keep-out that would
+  remove a tet of a support, a load or a keep face. Each reports the tets
+  and volume it took.
+- **Connectivity.** At the end of the run the density is thresholded at the
+  volume-matched level and split into face-connected components; a
+  component that holds no support and no load is removed (its density set
+  to 0). The result reports what went (components, tets, volume, the keep
+  faces it held) and `load_path_broken` when a load sits in a component no
+  support reaches.
+- **A static study of the optimised shape.** A static study with
+  `shape_from` {study, threshold?} meshes nothing: its mesh is the topology
+  result's tets at or above the threshold (volume-matched by default), the
+  part connected to its supports. Thresholded solid, not SIMP-penalised
+  stiffness: what gets printed or machined is binary, and an intermediate
+  density's ρ³ E describes a material nobody will make. `whole: true` takes
+  every tet of the design domain, the solid envelope less its keep-outs, as
+  the reference. `check_topology {study}` makes and runs both, with the
+  topology study's cases, and answers per case: deflection, stress and
+  factor of safety of the optimised shape and of the solid, their ratio,
+  and each one's mass. A shape study reads stale once its topology result
+  is replaced.
+- **Split for printing.** `split_for_printing {part?, body?, bed_mm,
+  cuts?}` cuts a body into pieces that fit a bed of the stated size: at the
+  given axis-aligned cuts, or, without them, into the fewest equal slabs
+  along the body's longest axis whose pieces fit. Each piece is a new part:
+  a Derived copy of the body, a box and an intersect, carrying the body's
+  material and, through the boolean, its face names. A piece fits when its
+  box fits the bed in one of the six axis-aligned orientations; if one does
+  not, nothing is created and the refusal names it and its size.
+- **A body from the result.** Measured before it is promised: the smoothed
+  iso-surface imported as a sewn solid is the cheap route, if sewing and a
+  boolean against it cost seconds on the yoke; otherwise the shape guide
+  stays a picture, and that is said.
+
+**Files.** `src/core/fem/` (`FemStudy`, `FemTopo`, `FemSolver`, the input
+key), `src/core/io/SerializeStudies.cpp` (v151), `src/femgpu` untouched
+unless a second right-hand side needs it, `src/ui/SimulationActions.cpp`
+and `StudyPanel.cpp`, `src/remote/RemoteSimulation.cpp`, a print-split
+module in `src/core/` with its verb in `src/remote/RemoteModeling.cpp`,
+and `generators/pantilt/build_yoke_topo.py`.
+
+**Verified by:** tests of each on structured meshes (two cases give a
+design neither alone gives; a box keep-out leaves its tets out; an island
+from a keep face is removed and reported; the static of a thresholded
+shape against the solid; a split's pieces fit or the split is refused);
+and the pan/tilt yoke's envelope, re-run on the GPU with all three cases
+and the tilt worm's blocks as keep-outs, its static deflection compared
+with the hand re-model's (lens 1.79 / 3.17 / 4.22 mm at 1051 g).
+
 ## The run
 
 A run takes minutes, so it happens on a worker thread over an immutable
