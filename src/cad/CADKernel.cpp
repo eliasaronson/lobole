@@ -199,7 +199,7 @@ struct LocatedBoxCache {
   };
   struct Entry {
     Handle(TopoDS_TShape) keepAlive;
-    glm::vec3 min{0.0f}, max{0.0f};
+    glm::dvec3 min{0.0}, max{0.0};
   };
   static constexpr size_t kCapacity = 1024;
   std::mutex mutex;
@@ -215,7 +215,7 @@ struct LocatedBoxCache {
         k.trsf[(r - 1) * 4 + (c - 1)] = t.Value(r, c);
     return k;
   }
-  bool Find(const TopoDS_Shape& shape, glm::vec3& min, glm::vec3& max) {
+  bool Find(const TopoDS_Shape& shape, glm::dvec3& min, glm::dvec3& max) {
     const Key k = KeyOf(shape);
     std::lock_guard<std::mutex> lock(mutex);
     const auto it = entries.find(k);
@@ -225,8 +225,8 @@ struct LocatedBoxCache {
     max = it->second.max;
     return true;
   }
-  void Store(const TopoDS_Shape& shape, const glm::vec3& min,
-             const glm::vec3& max) {
+  void Store(const TopoDS_Shape& shape, const glm::dvec3& min,
+             const glm::dvec3& max) {
     const Key k = KeyOf(shape);
     std::lock_guard<std::mutex> lock(mutex);
     if (entries.find(k) == entries.end()) {
@@ -256,8 +256,8 @@ LocatedBoxCache& TheLocatedBoxCache() {
 
 } // namespace
 
-void CADShape::RememberTightBox(const CADShape& shape, const glm::vec3& min,
-                                const glm::vec3& max) {
+void CADShape::RememberTightBox(const CADShape& shape, const glm::dvec3& min,
+                                const glm::dvec3& max) {
   if (!shape.IsValid())
     return;
   shape.m_boxMin[1] = min;
@@ -268,8 +268,8 @@ void CADShape::RememberTightBox(const CADShape& shape, const glm::vec3& min,
 
 bool CADShape::HasTightBox() const { return m_boxValid[1]; }
 
-void CADShape::ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const {
-  min = max = glm::vec3(0.0f);
+void CADShape::ExactBoxUnmemoized(glm::dvec3& min, glm::dvec3& max) const {
+  min = max = glm::dvec3(0.0);
   if (m_shape.IsNull())
     return;
   Bnd_Box box;
@@ -279,8 +279,8 @@ void CADShape::ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const {
     return;
   double xmin, ymin, zmin, xmax, ymax, zmax;
   box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-  min = glm::vec3(xmin, ymin, zmin);
-  max = glm::vec3(xmax, ymax, zmax);
+  min = glm::dvec3(xmin, ymin, zmin);
+  max = glm::dvec3(xmax, ymax, zmax);
 }
 
 size_t CADShape::SharedTightBoxCount() { return TheLocatedBoxCache().Size(); }
@@ -353,7 +353,7 @@ bool CADShape::ComputeMassProps(MassProps& out) const {
   BRepGProp::VolumeProperties(m_shape, volumeProps);
   out.volume = volumeProps.Mass();
   const gp_Pnt com = volumeProps.CentreOfMass();
-  out.centerOfMass = glm::vec3(com.X(), com.Y(), com.Z());
+  out.centerOfMass = glm::dvec3(com.X(), com.Y(), com.Z());
 
   // A GProps' inertia matrix is about its system location — anchor a second
   // pass at the center of mass so the matrix is the physical one.
@@ -381,10 +381,10 @@ bool CADShape::ComputeMassProps(MassProps& out) const {
 // that lives in the shape has no key to collide: it is reachable only from
 // the object whose TShape it describes, and that object is what keeps the
 // TShape alive.
-void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
+void CADShape::GetBoundingBox(glm::dvec3& min, glm::dvec3& max,
                               bool tight) const {
   if (!IsValid()) {
-    min = max = glm::vec3(0.0f);
+    min = max = glm::dvec3(0.0);
     return;
   }
 
@@ -434,10 +434,10 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
   if (!box.IsVoid()) {
     double xmin, ymin, zmin, xmax, ymax, zmax;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-    min = glm::vec3(xmin, ymin, zmin);
-    max = glm::vec3(xmax, ymax, zmax);
+    min = glm::dvec3(xmin, ymin, zmin);
+    max = glm::dvec3(xmax, ymax, zmax);
   } else {
-    min = max = glm::vec3(0.0f);
+    min = max = glm::dvec3(0.0);
   }
   // A void box is remembered too: it is an answer, and re-deriving it costs
   // the same full traversal as any other.
@@ -488,12 +488,12 @@ CADShape CADShape::Difference(const CADShape& other) const {
 // a placement turned 90 degrees) and each framed copy used to recompute its
 // tight box from the surfaces: seconds on a turned blank's tori, every time a
 // job tab was opened. Any other angle leaves the copy cold, as before.
-void CADShape::CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
+void CADShape::CarryBoxes(const glm::dmat3& basis, const glm::dvec3& shift,
                           CADShape& to) const {
   for (int c = 0; c < 3; c++)
     for (int r = 0; r < 3; r++) {
-      const float v = std::abs(basis[c][r]);
-      if (v > 1e-5f && std::abs(v - 1.0f) > 1e-5f)
+      const double v = std::abs(basis[c][r]);
+      if (v > 1e-5 && std::abs(v - 1.0) > 1e-5)
         return;
     }
   // The TIGHT box only: it is the surfaces' true extent, which a quarter
@@ -503,14 +503,14 @@ void CADShape::CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
   for (const int slot : {1}) {
     if (!m_boxValid[slot])
       continue;
-    glm::vec3 lo(0.0f), hi(0.0f);
+    glm::dvec3 lo(0.0), hi(0.0);
     for (int r = 0; r < 3; r++) {
       // Row r of the rotated box: the one source axis c that lands on r.
       for (int c = 0; c < 3; c++) {
-        const float e = std::round(basis[c][r]);
-        if (e == 0.0f)
+        const double e = std::round(basis[c][r]);
+        if (e == 0.0)
           continue;
-        const float a = e * m_boxMin[slot][c], b = e * m_boxMax[slot][c];
+        const double a = e * m_boxMin[slot][c], b = e * m_boxMax[slot][c];
         lo[r] = std::min(a, b) + shift[r];
         hi[r] = std::max(a, b) + shift[r];
       }
@@ -521,24 +521,25 @@ void CADShape::CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
   }
 }
 
-CADShape CADShape::Transformed(const glm::mat4& m) const {
+CADShape CADShape::Transformed(const glm::dmat4& m) const {
   if (m_shape.IsNull())
     return CADShape();
   gp_Trsf t;
-  const glm::mat3 basis(m);
+  const glm::dmat3 basis(m);
   // Is this a plain rotation+translation? Columns unit-length and a positive
   // determinant. Occurrence placements always are; mirrors and anything
   // exotic take the general path below.
-  const float det = glm::determinant(basis);
-  const bool rigid = det > 0.0f && std::abs(det - 1.0f) < 1e-3f &&
-                     std::abs(glm::length(basis[0]) - 1.0f) < 1e-3f &&
-                     std::abs(glm::length(basis[1]) - 1.0f) < 1e-3f &&
-                     std::abs(glm::length(basis[2]) - 1.0f) < 1e-3f;
+  const double det = glm::determinant(basis);
+  const bool rigid = det > 0.0 && std::abs(det - 1.0) < 1e-3 &&
+                     std::abs(glm::length(basis[0]) - 1.0) < 1e-3 &&
+                     std::abs(glm::length(basis[1]) - 1.0) < 1e-3 &&
+                     std::abs(glm::length(basis[2]) - 1.0) < 1e-3;
   try {
     if (rigid) {
       // Hand OCC an EXACTLY orthonormal rotation. Routed through SetValues,
-      // the rounding in a float rotation makes OCC infer a scale factor a
-      // hair off 1 — measured: 0.99999998859 for a 45-degree rotation — and
+      // the rounding in a rotation matrix makes OCC infer a scale factor a
+      // hair off 1 — measured: 0.99999998859 for a 45-degree rotation held
+      // in float — and
       // TopoDS_Shape::Moved() refuses to move a shape by a scaled location
       // ("Moving with scaling transformation is forbidden").
       //
@@ -548,7 +549,7 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
       // measured with the same matrix. So this is not the kernel being picky;
       // it is us having always produced a technically-scaled placement that
       // one version forgave.
-      const glm::quat q = glm::normalize(glm::quat_cast(basis));
+      const glm::dquat q = glm::normalize(glm::quat_cast(basis));
       t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
       t.SetTranslationPart(gp_Vec(m[3][0], m[3][1], m[3][2]));
     } else {
@@ -563,7 +564,7 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
     // A pure placement: attach it as a LOCATION, which copies no geometry.
     try {
       CADShape moved(m_shape.Moved(TopLoc_Location(t)));
-      CarryBoxes(basis, glm::vec3(m[3]), moved);
+      CarryBoxes(basis, glm::dvec3(m[3]), moved);
       return moved;
     } catch (const Standard_Failure&) {
       // Moved() enforces "no scaling" and throws Standard_Failure, which is
@@ -690,17 +691,6 @@ std::vector<CADShape> CADShape::SplitSolids() const {
   return solids;
 }
 
-bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
-                         glm::vec3& uAxis) const {
-  glm::dvec3 c, n, u;
-  if (!FacePlane(faceIndex, c, n, u))
-    return false;
-  center = glm::vec3(c);
-  normal = glm::vec3(n);
-  uAxis = glm::vec3(u);
-  return true;
-}
-
 bool CADShape::FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
                          glm::dvec3& uAxis) const {
   if (!IsValid() || faceIndex < 0)
@@ -750,8 +740,8 @@ bool CADShape::FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
   return true;
 }
 
-bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
-                        glm::vec3& xAxis) const {
+bool CADShape::FaceAxis(int faceIndex, glm::dvec3& origin, glm::dvec3& axis,
+                        glm::dvec3& xAxis) const {
   if (!IsValid() || faceIndex < 0)
     return false;
 
@@ -774,9 +764,9 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
     // deterministic vertical axis. Enough for a ball-mate connector (which
     // only consumes the origin) and predictable everywhere else.
     const gp_Pnt c = surf.Sphere().Location();
-    origin = glm::vec3(c.X(), c.Y(), c.Z());
-    axis = glm::vec3(0.0f, 0.0f, 1.0f);
-    xAxis = glm::vec3(1.0f, 0.0f, 0.0f);
+    origin = glm::dvec3(c.X(), c.Y(), c.Z());
+    axis = glm::dvec3(0.0, 0.0, 1.0);
+    xAxis = glm::dvec3(1.0, 0.0, 0.0);
     return true;
   }
   if (type != GeomAbs_Cylinder && type != GeomAbs_Cone)
@@ -786,14 +776,14 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
       type == GeomAbs_Cone ? surf.Cone().Axis() : surf.Cylinder().Axis();
   const gp_Pnt ap = ax.Location();
   const gp_Dir ad = ax.Direction();
-  const glm::vec3 axisPoint(ap.X(), ap.Y(), ap.Z());
-  axis = glm::normalize(glm::vec3(ad.X(), ad.Y(), ad.Z()));
+  const glm::dvec3 axisPoint(ap.X(), ap.Y(), ap.Z());
+  axis = glm::normalize(glm::dvec3(ad.X(), ad.Y(), ad.Z()));
 
   if (type == GeomAbs_Cone) {
     // A cone anchors at its APEX — for a seat face that is exactly where a
     // mating ball's contact ray converges, the point a ball mate wants.
     const gp_Pnt apex = surf.Cone().Apex();
-    origin = glm::vec3(apex.X(), apex.Y(), apex.Z());
+    origin = glm::dvec3(apex.X(), apex.Y(), apex.Z());
   } else {
     // Origin = the face centroid projected onto the axis, so the frame sits
     // at the middle of the actual (possibly partial) cylindrical patch
@@ -801,13 +791,13 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
     GProp_GProps props;
     BRepGProp::SurfaceProperties(face, props);
     const gp_Pnt c = props.CentreOfMass();
-    const glm::vec3 centroid(c.X(), c.Y(), c.Z());
+    const glm::dvec3 centroid(c.X(), c.Y(), c.Z());
     origin = axisPoint + glm::dot(centroid - axisPoint, axis) * axis;
   }
 
   // Deterministic perpendicular (matches FacePlane's u-axis heuristic).
-  glm::vec3 u =
-      std::abs(axis.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  glm::dvec3 u =
+      std::abs(axis.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
   xAxis = glm::normalize(u - glm::dot(u, axis) * axis);
   return true;
 }
@@ -844,12 +834,12 @@ void CADShape::FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const {
     BRepAdaptor_Curve curve(edge);
     if (curve.GetType() == GeomAbs_Circle) {
       const gp_Pnt c = curve.Circle().Location();
-      snap.point = glm::vec3(c.X(), c.Y(), c.Z());
+      snap.point = glm::dvec3(c.X(), c.Y(), c.Z());
       snap.circleCenter = true;
     } else {
       const gp_Pnt m =
           curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
-      snap.point = glm::vec3(m.X(), m.Y(), m.Z());
+      snap.point = glm::dvec3(m.X(), m.Y(), m.Z());
     }
     out.push_back(snap);
   }
@@ -899,7 +889,7 @@ void CADShape::FaceCorners(int faceIndex, std::vector<FaceCorner>& out) const {
     c.edgeA = std::min(incident[0], incident[1]);
     c.edgeB = std::max(incident[0], incident[1]);
     const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vertexToEdges.FindKey(v)));
-    c.point = glm::vec3(p.X(), p.Y(), p.Z());
+    c.point = glm::dvec3(p.X(), p.Y(), p.Z());
     candidates.push_back(c);
   }
 
@@ -915,7 +905,7 @@ void CADShape::FaceCorners(int faceIndex, std::vector<FaceCorner>& out) const {
   }
 }
 
-bool CADShape::CornerPoint(int edgeA, int edgeB, glm::vec3& point) const {
+bool CADShape::CornerPoint(int edgeA, int edgeB, glm::dvec3& point) const {
   if (!IsValid() || edgeA < 0 || edgeB < 0 || edgeA == edgeB)
     return false;
   TopTools_IndexedMapOfShape edges;
@@ -945,7 +935,7 @@ bool CADShape::CornerPoint(int edgeA, int edgeB, glm::vec3& point) const {
   if (count != 1 || !shared)
     return false; // no corner, or an ambiguous pair — refuse either way
   const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(*shared));
-  point = glm::vec3(p.X(), p.Y(), p.Z());
+  point = glm::dvec3(p.X(), p.Y(), p.Z());
   return true;
 }
 
@@ -954,8 +944,8 @@ uint64_t CADShape::PlacementId() const {
     return 0;
   uint64_t h = reinterpret_cast<uint64_t>(m_shape.TShape().get());
   const auto mix = [&h](double v) {
-    // Quantized before hashing: a placement that differs in the last bits of
-    // a float is the same placement, and two of them must not read as
+    // Quantized before hashing: a placement that differs in its last bits is
+    // the same placement, and two of them must not read as
     // different meshes.
     const int64_t q = static_cast<int64_t>(std::llround(v * 1.0e6));
     h ^= static_cast<uint64_t>(q) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
@@ -968,7 +958,7 @@ uint64_t CADShape::PlacementId() const {
   return h;
 }
 
-bool CADShape::ContainsPoint(const glm::vec3& p, double tol) const {
+bool CADShape::ContainsPoint(const glm::dvec3& p, double tol) const {
   if (m_shape.IsNull())
     return false;
   BRepClass3d_SolidClassifier classifier(m_shape);
@@ -977,18 +967,19 @@ bool CADShape::ContainsPoint(const glm::vec3& p, double tol) const {
   return state == TopAbs_IN || state == TopAbs_ON;
 }
 
-std::vector<bool> CADShape::ContainsPoints(const std::vector<glm::vec3>& points,
-                                           double tol) const {
+std::vector<bool>
+CADShape::ContainsPoints(const std::vector<glm::dvec3>& points,
+                         double tol) const {
   std::vector<bool> out(points.size(), false);
   if (m_shape.IsNull() || points.empty())
     return out;
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   GetBoundingBox(lo, hi, /*tight=*/false);
-  const float pad = static_cast<float>(tol) + 1e-4f;
+  const double pad = tol + 1e-4;
   BRepClass3d_SolidClassifier classifier;
   bool loaded = false;
   for (size_t i = 0; i < points.size(); i++) {
-    const glm::vec3& p = points[i];
+    const glm::dvec3& p = points[i];
     if (glm::any(glm::lessThan(p, lo - pad)) ||
         glm::any(glm::greaterThan(p, hi + pad)))
       continue; // outside the box: outside the solid
@@ -1003,7 +994,7 @@ std::vector<bool> CADShape::ContainsPoints(const std::vector<glm::vec3>& points,
   return out;
 }
 
-bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {
+bool CADShape::EdgeSnapPoint(int edgeIndex, glm::dvec3& point) const {
   if (!IsValid() || edgeIndex < 0)
     return false;
   TopTools_IndexedMapOfShape edges;
@@ -1016,12 +1007,12 @@ bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {
   BRepAdaptor_Curve curve(edge);
   if (curve.GetType() == GeomAbs_Circle) {
     const gp_Pnt c = curve.Circle().Location();
-    point = glm::vec3(c.X(), c.Y(), c.Z());
+    point = glm::dvec3(c.X(), c.Y(), c.Z());
   } else {
     // Midpoint of the parameter range for a non-circular edge.
     const gp_Pnt m =
         curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
-    point = glm::vec3(m.X(), m.Y(), m.Z());
+    point = glm::dvec3(m.X(), m.Y(), m.Z());
   }
   return true;
 }
@@ -1218,8 +1209,8 @@ CADKernel& CADKernel::Instance() {
   return instance;
 }
 
-CADShape CADKernel::CreateBox(const glm::vec3& corner1,
-                              const glm::vec3& corner2) {
+CADShape CADKernel::CreateBox(const glm::dvec3& corner1,
+                              const glm::dvec3& corner2) {
   gp_Pnt p1 = ToOCCPoint(corner1);
   gp_Pnt p2 = ToOCCPoint(corner2);
 
@@ -1411,11 +1402,11 @@ std::string XcafLabelName(const TDF_Label& label) {
 
 // A rigid gp_Trsf as a glm placement. glm is column-major: m[col][row];
 // gp_Trsf::Value is 1-based (row, col) with col 4 = translation.
-glm::mat4 TrsfToMat4(const gp_Trsf& t) {
-  glm::mat4 m(1.0f);
+glm::dmat4 TrsfToMat4(const gp_Trsf& t) {
+  glm::dmat4 m(1.0);
   for (int row = 0; row < 3; row++)
     for (int col = 0; col < 4; col++)
-      m[col][row] = static_cast<float>(t.Value(row + 1, col + 1));
+      m[col][row] = t.Value(row + 1, col + 1);
   return m;
 }
 
@@ -1658,14 +1649,14 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
 namespace {
 // A rigid glm placement as OCC's, or nullopt for one that is not rigid
 // (sheared, scaled, degenerate or mirrored).
-std::optional<gp_Trsf> RigidTrsf(const glm::mat4& m) {
-  // A placement is a float matrix, so its rotation is orthonormal only to
-  // float precision. Handing that to gp_Trsf::SetValues reads the determinant's
-  // rounding as a SCALE of 1 ± 1e-7, and OpenCASCADE 7.6 refuses to move a
-  // shape by a scaling location ("Moving with scaling transformation is
-  // forbidden") where 7.9 lets it pass. So check the axes are unit and
-  // orthogonal to float precision, refuse a mirror, and rebuild the rotation
-  // from a normalized quaternion: its scale is then exactly 1.
+std::optional<gp_Trsf> RigidTrsf(const glm::dmat4& m) {
+  // A placement's rotation matrix is orthonormal only to its rounding (it
+  // was 1e-7 when placements were float). Handing that to gp_Trsf::SetValues
+  // reads the determinant's rounding as a SCALE a hair off 1, and
+  // OpenCASCADE 7.6 refuses to move a shape by a scaling location ("Moving with
+  // scaling transformation is forbidden") where 7.9 lets it pass. So check the
+  // axes are unit and orthogonal to that rounding, refuse a mirror, and rebuild
+  // the rotation from a normalized quaternion: its scale is then exactly 1.
   const gp_XYZ x(m[0][0], m[0][1], m[0][2]);
   const gp_XYZ y(m[1][0], m[1][1], m[1][2]);
   const gp_XYZ z(m[2][0], m[2][1], m[2][2]);
@@ -1836,12 +1827,12 @@ gp_Dir CADKernel::ToOCCDirection(const glm::dvec3& direction) const {
   return gp_Dir(direction.x, direction.y, direction.z);
 }
 
-glm::vec3 CADKernel::FromOCCPoint(const gp_Pnt& point) const {
-  return glm::vec3(point.X(), point.Y(), point.Z());
+glm::dvec3 CADKernel::FromOCCPoint(const gp_Pnt& point) const {
+  return glm::dvec3(point.X(), point.Y(), point.Z());
 }
 
-glm::vec3 CADKernel::FromOCCVector(const gp_Vec& vector) const {
-  return glm::vec3(vector.X(), vector.Y(), vector.Z());
+glm::dvec3 CADKernel::FromOCCVector(const gp_Vec& vector) const {
+  return glm::dvec3(vector.X(), vector.Y(), vector.Z());
 }
 
 #endif

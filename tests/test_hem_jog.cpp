@@ -99,12 +99,12 @@ void Ok(Document& doc) {
 }
 
 glm::vec3 Lo(const Document& doc) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   return lo;
 }
 glm::vec3 Hi(const Document& doc) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   return hi;
 }

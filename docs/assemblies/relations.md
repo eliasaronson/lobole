@@ -89,11 +89,11 @@ skipped without an error.
 ### When relations disagree
 
 After placement and the loop pass, every equality relation is checked: one
-whose `b` does not equal what it asks for (to float precision) is a DOF driven
-twice by relations that disagree, and carries `not satisfied: mate N's
-rotation is X deg where this relation wants Y`. In a tree the second relation
-was never applied; in a loop the solver settled on a compromise. Either way it
-is said on the relation.
+whose `b` does not equal what it asks for (to 1e-4 of its magnitude, the room
+a closed loop needs) is a DOF driven twice by relations that disagree, and
+carries `not satisfied: mate N's rotation is X deg where this relation wants
+Y`. In a tree the second relation was never applied; in a loop the solver
+settled on a compromise. Either way it is said on the relation.
 
 ## Cam
 
@@ -141,9 +141,10 @@ undone with the pose.
   turns, one clutch drives and the other slips and absorbs the difference,
   order-independently (`test_assembly_relations.cpp`, "Two freewheels drive
   one output").
-- **Idempotent:** after a pass the equation holds exactly (with a float-ulp
-  slack so rounding does not grow `lead`), so the many solves per action —
-  `set_mate` then solve, every drag frame, load, tab switch — change nothing.
+- **Idempotent:** after a pass the equation holds exactly (with a slack of
+  1e-6 of its magnitude, so rounding and a loop's closing tolerance do not
+  grow `lead`), so the many solves per action — `set_mate` then solve, every
+  drag frame, load, tab switch — change nothing.
 - **Created where it stands:** `lead` starts as the current gap between the
   two parts unless given, so adding a clutch moves nothing. `set_relation
   {lead}` puts the history back and moves b onto the drive line at that lead.

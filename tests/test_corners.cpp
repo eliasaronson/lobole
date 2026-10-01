@@ -139,7 +139,7 @@ void LaysFlat(Document& doc, uint64_t base) {
   doc.AddFeature(std::make_unique<FlatPatternFeature>("Flat", base));
   Ok(doc);
   CHECK(Sound(doc));
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   CHECK_THAT(static_cast<double>(hi.z - lo.z), WithinAbs(kT, 1e-5));
 }

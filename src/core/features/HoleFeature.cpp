@@ -100,7 +100,7 @@ bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::dvec3& c,
       if (cuts[i + 1] - cuts[i] < 1e-6)
         continue;
       const double t = 0.5 * (cuts[i] + cuts[i + 1]);
-      if (b.shape.ContainsPoint(glm::vec3(c + axis * t)))
+      if (b.shape.ContainsPoint(glm::dvec3(c + axis * t)))
         return true;
     }
   }
@@ -181,7 +181,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // Through-all: drill well past any body (bbox diagonal of all bodies).
   glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : ctx.bodies) {
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     lo = glm::min(lo, glm::dvec3(bmin));
     hi = glm::max(hi, glm::dvec3(bmax));

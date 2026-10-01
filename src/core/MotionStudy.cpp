@@ -114,8 +114,8 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
 
 namespace {
 
-glm::mat4 OccurrenceWorld(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 OccurrenceWorld(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 
@@ -157,9 +157,9 @@ public:
     const size_t n = std::min(ia->second.size(), ib->second.size());
     if (n < 2)
       return true;
-    const glm::mat4 first = glm::inverse(ia->second[0]) * ib->second[0];
+    const glm::dmat4 first = glm::inverse(ia->second[0]) * ib->second[0];
     for (size_t k = 1; k < n; k++) {
-      const glm::mat4 rel = glm::inverse(ia->second[k]) * ib->second[k];
+      const glm::dmat4 rel = glm::inverse(ia->second[k]) * ib->second[k];
       for (int c = 0; c < 4; c++)
         for (int r = 0; r < 4; r++)
           if (std::abs(rel[c][r] - first[c][r]) > 1e-6)
@@ -169,12 +169,12 @@ public:
   }
 
 private:
-  std::map<Key, std::vector<glm::mat4>>::const_iterator
+  std::map<Key, std::vector<glm::dmat4>>::const_iterator
   Find(const Key& k) const {
     const auto it = track_.find(k);
     return it != track_.end() ? it : track_.find(Key{k.first, 0});
   }
-  std::map<Key, std::vector<glm::mat4>> track_;
+  std::map<Key, std::vector<glm::dmat4>> track_;
 };
 
 // Walk the driver from wherever the document has it to the study's first
@@ -230,8 +230,8 @@ struct Placed {
   Key key; // {top-level occurrence, inner occurrence or 0}
   std::string name;
   const Body* body = nullptr;
-  glm::mat4 world{1.0f};
-  glm::vec3 lo{0.0f}, hi{0.0f}; // world box
+  glm::dmat4 world{1.0};
+  glm::dvec3 lo{0.0}, hi{0.0}; // world box
 };
 
 // A mesh per LOCAL shape, built once for the whole run and placed by matrix
@@ -248,8 +248,8 @@ std::shared_ptr<const collide::Mesh> MeshFor(MeshCache& cache,
   return mesh;
 }
 
-bool WorldBox(const Body& b, const glm::mat4& world, glm::vec3& lo,
-              glm::vec3& hi) {
+bool WorldBox(const Body& b, const glm::dmat4& world, glm::dvec3& lo,
+              glm::dvec3& hi) {
   std::vector<Body> one(1);
   one[0].shape = b.shape;
   return Measure::WorldBounds(one, world, lo, hi);
@@ -299,7 +299,7 @@ Hit MeshHit(const Placed& a, const Placed& b, MeshCache& meshes) {
   const auto ma = MeshFor(meshes, a.body->shape);
   const auto mb = MeshFor(meshes, b.body->shape);
   h.deflection = std::max(ma->Deflection(), mb->Deflection());
-  h.hit = ma->Overlaps(glm::dmat4(a.world), *mb, glm::dmat4(b.world));
+  h.hit = ma->Overlaps(a.world, *mb, b.world);
   return h;
 }
 

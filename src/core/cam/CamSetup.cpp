@@ -77,11 +77,11 @@ bool SetupIsSquare(const Setup& setup) {
 bool ModelBoundsFramed(const std::vector<Body>& bodies, glm::dvec3& min,
                        glm::dvec3& max) {
   bool any = false;
-  glm::vec3 lo(0.0f), hi(0.0f);
+  glm::dvec3 lo(0.0), hi(0.0);
   for (const Body& b : bodies) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 bmin(0.0f), bmax(0.0f);
+    glm::dvec3 bmin(0.0), bmax(0.0);
     // TIGHT. The default bound is computed from a B-spline's CONTROL POINTS,
     // which lie outside the surface -- fine for a broad phase, wrong for
     // stock, because stock is the size of material a person buys and clamps.
@@ -272,8 +272,8 @@ glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId) {
 }
 
 bool FaceNormalOf(const std::vector<Body>& bodies, const ElementRef& ref,
-                  glm::vec3& normal, uint64_t jobPartId) {
-  glm::vec3 centre(0.0f), uAxis(0.0f);
+                  glm::dvec3& normal, uint64_t jobPartId) {
+  glm::dvec3 centre(0.0), uAxis(0.0);
   for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId)
       continue;
@@ -370,9 +370,8 @@ std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
   // The section machinery the Section TOOL already uses (I3): one plane, the
   // filled cut face per body. Reusing it means a toolpath cannot disagree
   // with what the section view shows.
-  const std::vector<CADShape> caps =
-      Measure::SectionCaps(bodies, glm::vec3(0.0f, 0.0f, static_cast<float>(z)),
-                           glm::vec3(0.0f, 0.0f, 1.0f));
+  const std::vector<CADShape> caps = Measure::SectionCaps(
+      bodies, glm::dvec3(0.0, 0.0, z), glm::dvec3(0.0, 0.0, 1.0));
   for (const CADShape& cap : caps) {
     if (!cap.IsValid())
       continue;
@@ -450,11 +449,7 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
     const Placement* place = PlacementForBody(setup, b);
     if (place != nullptr && !place->enabled)
       continue; // on the sheet, not cut this run
-    const glm::dmat4 d = BodyToSetup(setup, b.jobPartId);
-    glm::mat4 m(1.0f);
-    for (int col = 0; col < 4; col++)
-      for (int row = 0; row < 4; row++)
-        m[col][row] = static_cast<float>(d[col][row]);
+    const glm::dmat4 m = BodyToSetup(setup, b.jobPartId);
     Body copy = b; // keeps createdBy and the element map: names must survive
     if (b.shape.IsValid())
       copy.shape = b.shape.Transformed(m);
@@ -543,12 +538,12 @@ bool FindSeatFace(const std::vector<Body>& model, const ElementRef& ref,
     const std::optional<int> index = b.elementMap.Resolve(ref.name);
     if (!index)
       continue;
-    glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+    glm::dvec3 c(0.0), n(0.0), u(0.0);
     if (!b.shape.FacePlane(*index, c, n, u)) {
       why = "that face is not flat -- a fixture rests on a flat face";
       return false;
     }
-    if (n.z > -0.999f) {
+    if (n.z > -0.999) {
       why = "that face does not face down -- a fixture only turns about Z, "
             "so the face it rests on has to be one that faces down";
       return false;
@@ -611,7 +606,7 @@ glm::dvec2 NoseOf(const std::vector<Body>& model, const SeatFace& sf) {
   for (const Body& b : model) {
     if (!b.shape.IsValid())
       continue;
-    glm::vec3 blo(0.0f), bhi(0.0f);
+    glm::dvec3 blo(0.0), bhi(0.0);
     b.shape.GetBoundingBox(blo, bhi, /*tight=*/true);
     lo = glm::min(lo, glm::dvec3(blo));
     hi = glm::max(hi, glm::dvec3(bhi));
@@ -780,8 +775,8 @@ ElementRef FaceOnStockTop(const glm::dvec3& stockLo, const glm::dvec3& stockHi,
   Fixture placed;
   placed.pos = pos;
   placed.rotZdeg = rotZdeg;
-  const glm::mat4 m(FixtureTransform(placed));
-  constexpr double kOn = 1e-3; // a snapped face lands exactly; this is float
+  const glm::dmat4 m(FixtureTransform(placed));
+  constexpr double kOn = 1e-3; // a snapped face lands exactly; this is slack
   ElementRef best;
   double most = 0.0;
   for (const Body& b : fixtureModel) {

@@ -32,7 +32,7 @@ static uint64_t AddOffsetDatum(Document& doc, double offset,
 
 // A rectangle sketch bound to a datum plane by id; returns the sketch id.
 static uint64_t AddSketchOnDatum(Document& doc, uint64_t datumId,
-                                 const glm::vec2& c1, const glm::vec2& c2) {
+                                 const glm::dvec2& c1, const glm::dvec2& c2) {
   // The baked plane is a placeholder; Execute overwrites it from the datum.
   auto sk = std::make_unique<SketchFeature>("Sketch", kXY);
   sk->planeRef = datumId;
@@ -50,15 +50,15 @@ TEST_CASE("Offset datum shifts along the parent normal", "[datum]") {
   REQUIRE(dp != nullptr);
 
   const SketchPlane& out = dp->OutputPlane();
-  CHECK_THAT(out.GetOrigin().z, WithinRel(5.0f, 1e-5f));
-  CHECK_THAT(out.GetNormal().z, WithinRel(1.0f, 1e-5f));
+  CHECK_THAT(out.GetOrigin().z, WithinRel(5.0, 1e-5));
+  CHECK_THAT(out.GetNormal().z, WithinRel(1.0, 1e-5));
   // A datum contributes no body.
   CHECK(doc.GetBodies().empty());
 
   // flip negates the offset direction.
   dp->flip = true;
   doc.Regenerate();
-  CHECK_THAT(dp->OutputPlane().GetOrigin().z, WithinRel(-5.0f, 1e-5f));
+  CHECK_THAT(dp->OutputPlane().GetOrigin().z, WithinRel(-5.0, 1e-5));
 }
 
 TEST_CASE("Angled datum rotates the parent normal about an axis", "[datum]") {
@@ -73,10 +73,10 @@ TEST_CASE("Angled datum rotates the parent normal about an axis", "[datum]") {
   REQUIRE(d != nullptr);
 
   // +Z rotated 90 deg about +X -> -Y (right-hand rule).
-  const glm::vec3 n = d->OutputPlane().GetNormal();
-  CHECK_THAT(n.x, WithinAbs(0.0f, 1e-5f));
-  CHECK_THAT(n.y, WithinAbs(-1.0f, 1e-5f));
-  CHECK_THAT(n.z, WithinAbs(0.0f, 1e-5f));
+  const glm::dvec3 n = d->OutputPlane().GetNormal();
+  CHECK_THAT(n.x, WithinAbs(0.0, 1e-5));
+  CHECK_THAT(n.y, WithinAbs(-1.0, 1e-5));
+  CHECK_THAT(n.z, WithinAbs(0.0, 1e-5));
 }
 
 TEST_CASE("Angled datum with an axis parallel to the normal fails", "[datum]") {
@@ -101,8 +101,8 @@ TEST_CASE("ThroughPoints datum spans its three points", "[datum]") {
   REQUIRE(d != nullptr);
 
   // All three points lie at z=1, so the plane normal is +/-Z and origin at p0.
-  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(1.0f, 1e-5f));
-  CHECK_THAT(std::abs(d->OutputPlane().GetNormal().z), WithinRel(1.0f, 1e-5f));
+  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(1.0, 1e-5));
+  CHECK_THAT(std::abs(d->OutputPlane().GetNormal().z), WithinRel(1.0, 1e-5));
 }
 
 TEST_CASE("ThroughPoints with collinear points fails", "[datum]") {
@@ -127,10 +127,10 @@ TEST_CASE("Sketch on an offset datum extrudes at the offset height",
                                                   ExtrudeMode::NewBody));
 
   REQUIRE(doc.GetBodies().size() == 1);
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   doc.GetBodies()[0].shape.GetBoundingBox(min, max);
   // Base at z=5, extruded +2: bbox center z = 5 + 1.
-  CHECK_THAT(((min + max) * 0.5f).z, WithinRel(6.0f, 1e-3f));
+  CHECK_THAT(((min + max) * 0.5).z, WithinRel(6.0, 1e-3));
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(16.0, 1e-4));
 }
 
@@ -147,9 +147,9 @@ TEST_CASE("Editing a datum offset moves the sketch and its extrusion",
   dp->offset = 10.0;
   doc.Regenerate();
 
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   doc.GetBodies()[0].shape.GetBoundingBox(min, max);
-  CHECK_THAT(((min + max) * 0.5f).z, WithinRel(11.0f, 1e-3f));
+  CHECK_THAT(((min + max) * 0.5).z, WithinRel(11.0, 1e-3));
 }
 
 TEST_CASE("Datum-on-datum offsets compose", "[datum]") {
@@ -158,7 +158,7 @@ TEST_CASE("Datum-on-datum offsets compose", "[datum]") {
   uint64_t second = AddOffsetDatum(doc, 4.0, PlaneType::XY, first);
   auto* d2 = dynamic_cast<DatumPlaneFeature*>(doc.FindFeatureById(second));
   REQUIRE(d2 != nullptr);
-  CHECK_THAT(d2->OutputPlane().GetOrigin().z, WithinRel(7.0f, 1e-5f));
+  CHECK_THAT(d2->OutputPlane().GetOrigin().z, WithinRel(7.0, 1e-5));
 }
 
 TEST_CASE("A datum offset driven by a variable follows a parameter edit",
@@ -171,10 +171,10 @@ TEST_CASE("A datum offset driven by a variable follows a parameter edit",
   doc.AddFeature(std::move(dp));
   auto* d = dynamic_cast<DatumPlaneFeature*>(doc.GetFeature(0));
   REQUIRE(d != nullptr);
-  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(4.0f, 1e-5f));
+  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(4.0, 1e-5));
 
   doc.SetParameter("gap", "9");
-  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(9.0f, 1e-5f));
+  CHECK_THAT(d->OutputPlane().GetOrigin().z, WithinRel(9.0, 1e-5));
 }
 
 TEST_CASE("Angled datum can hinge on a sketch line", "[datum]") {
@@ -196,7 +196,7 @@ TEST_CASE("Angled datum can hinge on a sketch line", "[datum]") {
   REQUIRE(d != nullptr);
 
   // Hinge on X, +Z rotated 90 deg -> -Y, same as the world-X-axis case.
-  CHECK_THAT(d->OutputPlane().GetNormal().y, WithinAbs(-1.0f, 1e-4f));
+  CHECK_THAT(d->OutputPlane().GetNormal().y, WithinAbs(-1.0, 1e-4));
 }
 
 // --- Failure modes -----------------------------------------------------------
@@ -252,16 +252,16 @@ TEST_CASE("Datum + tracked sketch + extrude round-trip through JSON",
   auto* dp = dynamic_cast<DatumPlaneFeature*>(loaded->GetFeature(0));
   REQUIRE(dp != nullptr);
   CHECK(dp->offsetExpr == "gap");
-  CHECK_THAT(dp->OutputPlane().GetOrigin().z, WithinRel(5.0f, 1e-5f));
+  CHECK_THAT(dp->OutputPlane().GetOrigin().z, WithinRel(5.0, 1e-5));
 
   auto* sk = dynamic_cast<SketchFeature*>(loaded->GetFeature(1));
   REQUIRE(sk != nullptr);
   CHECK(sk->planeRef == dp->GetId());
 
   REQUIRE(loaded->GetBodies().size() == 1);
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   loaded->GetBodies()[0].shape.GetBoundingBox(min, max);
-  CHECK_THAT(((min + max) * 0.5f).z, WithinRel(6.0f, 1e-3f));
+  CHECK_THAT(((min + max) * 0.5).z, WithinRel(6.0, 1e-3));
 
   fs::remove(path);
 }
@@ -273,14 +273,14 @@ TEST_CASE("Datum regeneration is deterministic", "[datum]") {
   doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketch, 2.0,
                                                   ExtrudeMode::NewBody));
 
-  glm::vec3 min1, max1;
+  glm::dvec3 min1, max1;
   doc.GetBodies()[0].shape.GetBoundingBox(min1, max1);
   doc.Regenerate();
-  glm::vec3 min2, max2;
+  glm::dvec3 min2, max2;
   doc.GetBodies()[0].shape.GetBoundingBox(min2, max2);
 
-  CHECK_THAT(min1.z, WithinAbs(min2.z, 1e-6f));
-  CHECK_THAT(max1.z, WithinAbs(max2.z, 1e-6f));
+  CHECK_THAT(min1.z, WithinAbs(min2.z, 1e-6));
+  CHECK_THAT(max1.z, WithinAbs(max2.z, 1e-6));
 }
 
 // --- Datum axes --------------------------------------------------------------
@@ -291,7 +291,7 @@ TEST_CASE("DatumAxis global and two-point variants", "[datum]") {
   doc.AddFeature(std::move(gx));
   auto* x = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(0));
   REQUIRE(x != nullptr);
-  CHECK_THAT(x->Direction().x, WithinRel(1.0f, 1e-6f));
+  CHECK_THAT(x->Direction().x, WithinRel(1.0, 1e-6));
   CHECK(doc.GetBodies().empty()); // contributes no body
 
   auto tp =
@@ -301,8 +301,8 @@ TEST_CASE("DatumAxis global and two-point variants", "[datum]") {
   doc.AddFeature(std::move(tp));
   auto* diag = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(1));
   REQUIRE(diag != nullptr);
-  CHECK_THAT(diag->Origin().z, WithinRel(3.0f, 1e-6f));
-  CHECK_THAT(diag->Direction().z, WithinRel(1.0f, 1e-6f));
+  CHECK_THAT(diag->Origin().z, WithinRel(3.0, 1e-6));
+  CHECK_THAT(diag->Direction().z, WithinRel(1.0, 1e-6));
 }
 
 TEST_CASE("DatumAxis with coincident points fails", "[datum]") {
@@ -329,7 +329,7 @@ TEST_CASE("DatumAxis along a sketch line resolves to the line", "[datum]") {
   auto* a = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(1));
   REQUIRE(a != nullptr);
   // Line runs along +U (world X) on the XY plane.
-  CHECK_THAT(a->Direction().x, WithinRel(1.0f, 1e-5f));
+  CHECK_THAT(a->Direction().x, WithinRel(1.0, 1e-5));
 }
 
 TEST_CASE("DatumAxis round-trips through JSON", "[datum]") {
@@ -348,6 +348,6 @@ TEST_CASE("DatumAxis round-trips through JSON", "[datum]") {
   auto* ax = dynamic_cast<DatumAxisFeature*>(loaded->GetFeature(0));
   REQUIRE(ax != nullptr);
   CHECK(ax->kind == DatumAxisKind::TwoPoints);
-  CHECK_THAT(ax->Direction().z, WithinRel(1.0f, 1e-6f));
+  CHECK_THAT(ax->Direction().z, WithinRel(1.0, 1e-6));
   fs::remove(path);
 }

@@ -54,8 +54,8 @@ public:
   void SetActive(bool active) { m_active = active; }
 
   // Grid properties
-  float GetGridSize() const { return m_gridSize; }
-  void SetGridSize(float size) { m_gridSize = size; }
+  double GetGridSize() const { return m_gridSize; }
+  void SetGridSize(double size) { m_gridSize = size; }
 
   int GetGridSubdivisions() const { return m_gridSubdivisions; }
   void SetGridSubdivisions(int subdivisions) {
@@ -78,6 +78,6 @@ private:
   bool m_active = false;
 
   // Grid settings
-  float m_gridSize = 1.0f;
+  double m_gridSize = 1.0;
   int m_gridSubdivisions = 10;
 };

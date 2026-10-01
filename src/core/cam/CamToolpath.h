@@ -500,7 +500,7 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // second plate up at all (the name resolved on the wrong part). It is the
 // same qualifier an operation target carries, for the same reason.
 [[nodiscard]] bool FaceNormalOf(const std::vector<Body>& bodies,
-                                const ElementRef& ref, glm::vec3& normal,
+                                const ElementRef& ref, glm::dvec3& normal,
                                 uint64_t jobPartId = 0);
 
 // The FIXTURING frame that lays `normal` under the spindle — the quaternion

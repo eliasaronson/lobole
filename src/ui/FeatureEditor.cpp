@@ -1468,7 +1468,7 @@ void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
           std::to_string(c.occurrenceId);
       const bool current =
           c.slotId == d.sourcePart &&
-          (c.occurrenceId == 0 || d.position != glm::vec3(0.0f));
+          (c.occurrenceId == 0 || d.position != glm::dvec3(0.0));
       if (ImGui::Selectable(label.c_str(), current)) {
         nlohmann::json before = DocumentIO::FeatureToJson(d);
         const std::string why = PointDerivedAt(state, d, c);
@@ -1940,9 +1940,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
       if (ImGui::Button("Add point")) {
         nlohmann::json before = DocumentIO::FeatureToJson(*cv);
-        const glm::vec3 last =
-            cv->points.empty() ? glm::vec3(0.0f) : cv->points.back();
-        cv->points.push_back(last + glm::vec3(1.0f, 0.0f, 0.0f));
+        const glm::dvec3 last =
+            cv->points.empty() ? glm::dvec3(0.0) : cv->points.back();
+        cv->points.push_back(last + glm::dvec3(1.0, 0.0, 0.0));
         CommitDiscrete(state, feature, before, index, commit);
       }
     }

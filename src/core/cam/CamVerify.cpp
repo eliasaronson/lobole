@@ -689,7 +689,7 @@ FixtureField BuildFixtureField(const std::vector<FixtureSolid>& fixtures,
     for (const Body& b : f.bodies) {
       if (!b.shape.IsValid())
         continue;
-      glm::vec3 blo, bhi;
+      glm::dvec3 blo, bhi;
       b.shape.GetBoundingBox(blo, bhi);
       lo = glm::min(lo, glm::dvec3(blo));
       hi = glm::max(hi, glm::dvec3(bhi));

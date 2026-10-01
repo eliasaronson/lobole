@@ -483,17 +483,17 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   ImGui::BeginDisabled(threadDepths);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60.0f);
-  float top = static_cast<float>(op.topZ);
-  if (ExprDragFloat(state, "###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
+  double top = op.topZ;
+  if (ExprDragDouble(state, "###top", &top, 0.25f, -1000.0, 1000.0, "%.2f")) {
     op.topZ = top;
     touched(op.id);
   }
   ImGui::SetItemTooltip("Top of the cut (Z)");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60.0f);
-  float bottom = static_cast<float>(op.bottomZ);
-  if (ExprDragFloat(state, "###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
-                    "%.2f")) {
+  double bottom = op.bottomZ;
+  if (ExprDragDouble(state, "###bottom", &bottom, 0.25f, -1000.0, 1000.0,
+                     "%.2f")) {
     op.bottomZ = bottom;
     touched(op.id);
   }
@@ -506,9 +506,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::Stepdown)) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(55.0f);
-    float step = static_cast<float>(op.stepdown);
-    if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
-                      "%.2f")) {
+    double step = op.stepdown;
+    if (ExprDragDouble(state, "###stepdown", &step, 0.25f, 0.0, 100.0,
+                       "%.2f")) {
       op.stepdown = step;
       touched(op.id);
     }
@@ -577,9 +577,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     if (op.finishTool != 0) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(55.0f);
-      float leave = static_cast<float>(op.finishStock);
-      if (ExprDragFloat(state, "left###cam_finish_stock", &leave, 0.05f, 0.0f,
-                        10.0f, "%.2f")) {
+      double leave = op.finishStock;
+      if (ExprDragDouble(state, "left###cam_finish_stock", &leave, 0.05f, 0.0,
+                         10.0, "%.2f")) {
         op.finishStock = leave;
         touched(op.id);
       }
@@ -597,9 +597,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::Peck)) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(55.0f);
-    float peck = static_cast<float>(op.peck);
-    if (ExprDragFloat(state, "Peck###peck", &peck, 0.25f, 0.0f, 100.0f,
-                      "%.2f")) {
+    double peck = op.peck;
+    if (ExprDragDouble(state, "Peck###peck", &peck, 0.25f, 0.0, 100.0,
+                       "%.2f")) {
       op.peck = peck;
       touched(op.id);
     }
@@ -620,9 +620,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   }
   if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
     ImGui::SetNextItemWidth(70.0f);
-    float size = static_cast<float>(op.edgeSize);
-    if (ExprDragFloat(state, "Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
-                      "%.2f")) {
+    double size = op.edgeSize;
+    if (ExprDragDouble(state, "Break###edgesize", &size, 0.1f, 0.0, 100.0,
+                       "%.2f")) {
       op.edgeSize = size;
       touched(op.id);
     }
@@ -640,9 +640,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     bool edited = false;
     if (tool != nullptr && tool->type == cam::ToolType::VBit) {
       ImGui::SetNextItemWidth(70.0f);
-      float width = static_cast<float>(op.engraveWidth);
-      if (ExprDragFloat(state, "Width###engravewidth", &width, 0.05f, 0.0f,
-                        static_cast<float>(tool->diameter), "%.2f")) {
+      double width = op.engraveWidth;
+      if (ExprDragDouble(state, "Width###engravewidth", &width, 0.05f, 0.0,
+                         tool->diameter, "%.2f")) {
         op.engraveWidth = width;
         op.engraveDepth = 0.0;
         edited = true;
@@ -656,9 +656,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     cam::EngraveGroove shown = tool != nullptr
                                    ? cam::EngraveGrooveFor(op, *tool)
                                    : cam::EngraveGroove{};
-    float depth = static_cast<float>(shown.ok ? shown.depth : op.engraveDepth);
-    if (ExprDragFloat(state, "Depth###engravedepth", &depth, 0.05f, 0.0f,
-                      100.0f, "%.2f")) {
+    double depth = shown.ok ? shown.depth : op.engraveDepth;
+    if (ExprDragDouble(state, "Depth###engravedepth", &depth, 0.05f, 0.0, 100.0,
+                       "%.2f")) {
       op.engraveDepth = depth;
       op.engraveWidth = 0.0;
       edited = true;
@@ -701,9 +701,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   if (cam::OpTypeHas(op.type, cam::OpField::Lead) &&
       op.rotaryPattern == cam::RotaryPattern::Helical) {
     ImGui::SetNextItemWidth(80.0f);
-    float lead = static_cast<float>(op.leadMm);
-    if (ExprDragFloat(state, "lead mm###lead", &lead, 1.0f, -10000.0f, 10000.0f,
-                      "%.1f")) {
+    double lead = op.leadMm;
+    if (ExprDragDouble(state, "lead mm###lead", &lead, 1.0f, -10000.0, 10000.0,
+                       "%.1f")) {
       op.leadMm = lead;
       touched(op.id);
     }
@@ -796,9 +796,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   }
   if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
     ImGui::SetNextItemWidth(70.0f);
-    float angle = static_cast<float>(op.cutAngleDeg);
-    if (ExprDragFloat(state, "deg###cutangle", &angle, 1.0f, -180.0f, 180.0f,
-                      "%.0f")) {
+    double angle = op.cutAngleDeg;
+    if (ExprDragDouble(state, "deg###cutangle", &angle, 1.0f, -180.0, 180.0,
+                       "%.0f")) {
       op.cutAngleDeg = angle;
       touched(op.id);
     }
@@ -809,9 +809,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   }
   if (cam::OpTypeHas(op.type, cam::OpField::ZStep)) {
     ImGui::SetNextItemWidth(70.0f);
-    float zs = static_cast<float>(op.zStep);
-    if (ExprDragFloat(state, "Z step###zstep", &zs, 0.05f, 0.0f, 20.0f,
-                      "%.2f")) {
+    double zs = op.zStep;
+    if (ExprDragDouble(state, "Z step###zstep", &zs, 0.05f, 0.0, 20.0,
+                       "%.2f")) {
       op.zStep = zs;
       touched(op.id);
     }
@@ -822,9 +822,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   }
   if (cam::OpTypeHas(op.type, cam::OpField::SampleStep)) {
     ImGui::SetNextItemWidth(70.0f);
-    float ss = static_cast<float>(op.sampleStep);
-    if (ExprDragFloat(state, "sample###samplestep", &ss, 0.02f, 0.0f, 5.0f,
-                      "%.2f")) {
+    double ss = op.sampleStep;
+    if (ExprDragDouble(state, "sample###samplestep", &ss, 0.02f, 0.0, 5.0,
+                       "%.2f")) {
       op.sampleStep = ss;
       touched(op.id);
     }
@@ -835,9 +835,9 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   }
   if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
     ImGui::SetNextItemWidth(70.0f);
-    float over = static_cast<float>(op.stepover);
-    if (ExprDragFloat(state, "Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,
-                      "%.2f")) {
+    double over = op.stepover;
+    if (ExprDragDouble(state, "Stepover###stepover", &over, 0.01f, 0.05, 0.9,
+                       "%.2f")) {
       op.stepover = over;
       touched(op.id);
     }
@@ -852,10 +852,10 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
   // stepdown terraces. The engine has had it since C1; only a script
   // could reach it.
   if (cam::OpTypeHas(op.type, cam::OpField::StockToLeave)) {
-    float leave = static_cast<float>(op.stockToLeave);
+    double leave = op.stockToLeave;
     ImGui::SetNextItemWidth(58.0f);
-    if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
-                      "%.2f")) {
+    if (ExprDragDouble(state, "Leave###leave", &leave, 0.05f, 0.0, 10.0,
+                       "%.2f")) {
       op.stockToLeave = leave;
       touched(op.id);
     }
@@ -908,8 +908,8 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
     changed = true;
   }
   ImGui::SetNextItemWidth(70.0f);
-  float dia = static_cast<float>(t.diameter);
-  if (ExprDragFloat(state, "mm###dia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
+  double dia = t.diameter;
+  if (ExprDragDouble(state, "mm###dia", &dia, 0.1f, 0.1, 50.0, "%.3f")) {
     t.diameter = dia;
     changed = true;
   }
@@ -919,9 +919,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   // the simulation and settable nowhere, so every tool in every job
   // carried the 20 mm default whatever was in the spindle -- and the
   // reach finding compares against it.
-  float flute = static_cast<float>(t.fluteLength);
-  if (ExprDragFloat(state, "flute###flutelen", &flute, 0.5f, 0.5f, 300.0f,
-                    "%.1f")) {
+  double flute = t.fluteLength;
+  if (ExprDragDouble(state, "flute###flutelen", &flute, 0.5f, 0.5, 300.0,
+                     "%.1f")) {
     t.fluteLength = flute;
     changed = true;
   }
@@ -930,8 +930,8 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                         "and the holder goes into the work.");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
-  float feed = static_cast<float>(t.feedCut);
-  if (ExprDragFloat(state, "F###feed", &feed, 10.0f, 1.0f, 10000.0f, "%.0f")) {
+  double feed = t.feedCut;
+  if (ExprDragDouble(state, "F###feed", &feed, 10.0f, 1.0, 10000.0, "%.0f")) {
     t.feedCut = feed;
     changed = true;
   }
@@ -962,9 +962,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
     // length is the head's own width, derived from these.
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
-    float flat = static_cast<float>(t.tipFlat);
-    if (ExprDragFloat(state, "flat###tipflat", &flat, 0.005f, 0.0f, 2.0f,
-                      "%.3f")) {
+    double flat = t.tipFlat;
+    if (ExprDragDouble(state, "flat###tipflat", &flat, 0.005f, 0.0, 2.0,
+                       "%.3f")) {
       t.tipFlat = flat;
       cam::FillThreadMillShape(t, true);
       changed = true;
@@ -973,9 +973,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                           "diameter, mm. It must be no wider than a "
                           "thread's root, P/8.");
     ImGui::SetNextItemWidth(70.0f);
-    float neck = static_cast<float>(t.neckDiameter);
-    if (ExprDragFloat(state, "neck###neckdia", &neck, 0.05f, 0.1f,
-                      static_cast<float>(t.diameter), "%.2f")) {
+    double neck = t.neckDiameter;
+    if (ExprDragDouble(state, "neck###neckdia", &neck, 0.05f, 0.1, t.diameter,
+                       "%.2f")) {
       t.neckDiameter = neck;
       cam::FillThreadMillShape(t, true);
       changed = true;
@@ -986,9 +986,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                           "crests.");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
-    float neckLen = static_cast<float>(t.neckLength);
-    if (ExprDragFloat(state, "reach###necklen", &neckLen, 0.5f, 0.5f, 200.0f,
-                      "%.1f")) {
+    double neckLen = t.neckLength;
+    if (ExprDragDouble(state, "reach###necklen", &neckLen, 0.5f, 0.5, 200.0,
+                       "%.1f")) {
       t.neckLength = neckLen;
       changed = true;
     }
@@ -999,9 +999,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
       t.type == cam::ToolType::ThreadMill) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(70.0f);
-    float angle = static_cast<float>(t.tipAngleDeg);
-    if (ExprDragFloat(state, "deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
-                      "%.0f")) {
+    double angle = t.tipAngleDeg;
+    if (ExprDragDouble(state, "deg###tipangle", &angle, 1.0f, 5.0, 179.0,
+                       "%.0f")) {
       t.tipAngleDeg = angle;
       changed = true;
     }
@@ -1013,9 +1013,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
   // so this row is empty on every tool until somebody measures theirs,
   // which is exactly the right default for a limit nobody typed.
   ImGui::SetNextItemWidth(70.0f);
-  float stickout = static_cast<float>(t.overallLength);
-  if (ExprDragFloat(state, "out###overall", &stickout, 0.5f, 0.0f, 400.0f,
-                    "%.1f")) {
+  double stickout = t.overallLength;
+  if (ExprDragDouble(state, "out###overall", &stickout, 0.5f, 0.0, 400.0,
+                     "%.1f")) {
     t.overallLength = stickout;
     changed = true;
   }
@@ -1025,9 +1025,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                         "touches. 0 = not stated, nothing checked.");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
-  float collar = static_cast<float>(t.collarDiameter);
-  if (ExprDragFloat(state, "collar###collardia", &collar, 0.5f, 0.0f, 120.0f,
-                    "%.1f")) {
+  double collar = t.collarDiameter;
+  if (ExprDragDouble(state, "collar###collardia", &collar, 0.5f, 0.0, 120.0,
+                     "%.1f")) {
     t.collarDiameter = collar;
     changed = true;
   }
@@ -1035,9 +1035,9 @@ bool DrawCamToolFields(AppState& state, cam::Tool& t) {
                         "stickout beside it to mean anything.");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0f);
-  float shank = static_cast<float>(t.shankDiameter);
-  if (ExprDragFloat(state, "shank###shankdia", &shank, 0.1f, 0.0f, 50.0f,
-                    "%.2f")) {
+  double shank = t.shankDiameter;
+  if (ExprDragDouble(state, "shank###shankdia", &shank, 0.1f, 0.0, 50.0,
+                     "%.2f")) {
     t.shankDiameter = shank;
     changed = true;
   }
@@ -1183,7 +1183,7 @@ void AfterStructuralEdit(AppState& state) {
   MarkJobEdited(state);
   if (cam::Setup* active = ActiveCamSetup(state)) {
     (void)cam::RecomputeOrigin(*active, JobBodies(state));
-    state.camSafeZEdit = static_cast<float>(active->safeZ);
+    state.camSafeZEdit = active->safeZ;
   }
   RefreshCamToolpaths(state);
   state.camVerdict.clear();

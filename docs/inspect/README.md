@@ -361,14 +361,15 @@ can: `tools/ci-local.sh --tsan`.
 any exact boolean: almost every pair in a real assembly is nowhere near its
 partner, and an all-pairs sweep is quadratic.
 
-## Positions are float32
+## Positions are double
 
-Outside the sketch, document positions are float32 — a primitive's position
-and an occurrence's placement among them — about 1e-5 mm of resolution at
-100 mm, so a filter on such a position needs a tolerance sized to its
-magnitude: a 1e-6 window silently matches nothing. `Measure` reports
-doubles, and so do sketch planes and sketch geometry
-([../sketching/README.md](../sketching/README.md#plane)).
+The model is double ([../conventions.md](../conventions.md#the-model-is-double)):
+a box placed at 164.8 has a face at the double nearest 164.8, and `Measure`
+reports it as that, in doubles, like sketch planes and sketch geometry
+([../sketching/README.md](../sketching/README.md#plane)). A filter on a
+COMPUTED position still wants a tolerance sized to its magnitude, since
+arithmetic rounds: a centroid, an intersection or a solved placement is
+exact to rounding, not to the decimal a person would write.
 
 ## How it is tested
 

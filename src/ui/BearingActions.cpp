@@ -58,15 +58,15 @@ double SeatDiameter(const Document* part, const parts::Seat& seat,
 }
 
 // +Z (a bearing's own axis, side A to side B) rotated onto `to`.
-glm::quat AlignZTo(const glm::vec3& to) {
-  const glm::vec3 from(0.0f, 0.0f, 1.0f);
-  const float dot = glm::dot(from, to);
-  if (dot < -0.999999f)
-    return glm::quat(0.0f, 1.0f, 0.0f, 0.0f); // 180 degrees about X
-  if (dot > 0.999999f)
-    return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-  const glm::vec3 c = glm::cross(from, to);
-  return glm::normalize(glm::quat(1.0f + dot, c.x, c.y, c.z));
+glm::dquat AlignZTo(const glm::dvec3& to) {
+  const glm::dvec3 from(0.0, 0.0, 1.0);
+  const double dot = glm::dot(from, to);
+  if (dot < -0.999999)
+    return glm::dquat(0.0, 1.0, 0.0, 0.0); // 180 degrees about X
+  if (dot > 0.999999)
+    return glm::dquat(1.0, 0.0, 0.0, 0.0);
+  const glm::dvec3 c = glm::cross(from, to);
+  return glm::normalize(glm::dquat(1.0 + dot, c.x, c.y, c.z));
 }
 
 // A fastened mate between two faces in the pose they are ALREADY in: the
@@ -85,22 +85,22 @@ uint64_t AddMateAsPlaced(AppState& state, Mate mate) {
   const Occurrence* occB = state.assembly->FindById(mate.b.occurrenceId);
   if (!fa || !fb || occA == nullptr || occB == nullptr)
     return 0;
-  const glm::mat4 wa = OccurrenceMatrix(*occA) * *fa;
-  const glm::mat4 wb = OccurrenceMatrix(*occB) * *fb;
-  const glm::mat4 rel = glm::inverse(wa) * wb;
-  mate.flipped = rel[2][2] < 0.0f;
+  const glm::dmat4 wa = OccurrenceMatrix(*occA) * *fa;
+  const glm::dmat4 wb = OccurrenceMatrix(*occB) * *fb;
+  const glm::dmat4 rel = glm::inverse(wa) * wb;
+  mate.flipped = rel[2][2] < 0.0;
   mate.rotation = std::atan2(rel[0][1], rel[0][0]);
   mate.dx = rel[3][0];
   mate.dy = rel[3][1];
   mate.offset = rel[3][2];
-  glm::mat4 adjust(1.0f);
-  adjust = glm::translate(adjust, glm::vec3(mate.dx, mate.dy, mate.offset));
-  adjust = glm::rotate(adjust, mate.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
+  glm::dmat4 adjust(1.0);
+  adjust = glm::translate(adjust, glm::dvec3(mate.dx, mate.dy, mate.offset));
+  adjust = glm::rotate(adjust, mate.rotation, glm::dvec3(0.0, 0.0, 1.0));
   if (mate.flipped)
-    adjust = glm::rotate(adjust, glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+    adjust = glm::rotate(adjust, glm::pi<double>(), glm::dvec3(1.0, 0.0, 0.0));
   for (int c = 0; c < 4; c++)
     for (int r = 0; r < 4; r++)
-      if (std::abs(adjust[c][r] - rel[c][r]) > 1e-3f)
+      if (std::abs(adjust[c][r] - rel[c][r]) > 1e-3)
         return 0;
   return state.assembly->AddMate(mate);
 }
@@ -113,7 +113,7 @@ const BearingFeature* BearingOn(AppState& state, const Occurrence& occ) {
 } // namespace
 
 uint64_t AddBearing(AppState& state, const std::string& designation,
-                    const glm::vec3& position, const glm::quat& orientation,
+                    const glm::dvec3& position, const glm::dquat& orientation,
                     std::string* error) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
@@ -299,10 +299,10 @@ BearingFit FitBearing(AppState& state, const RimPick& pick,
   fit.designation = row->designation;
 
   // Where: side A on the shoulder plane, the axis along the seat.
-  const glm::vec3 origin =
-      glm::vec3(inst.world * glm::vec4(glm::vec3(end->origin), 1.0f));
-  const glm::vec3 along = glm::normalize(
-      glm::vec3(inst.world * glm::vec4(glm::vec3(end->along), 0.0f)));
+  const glm::dvec3 origin =
+      glm::dvec3(inst.world * glm::dvec4(glm::dvec3(end->origin), 1.0));
+  const glm::dvec3 along = glm::normalize(
+      glm::dvec3(inst.world * glm::dvec4(glm::dvec3(end->along), 0.0)));
   fit.position = origin;
   fit.orientation = AlignZTo(along);
   // Under a micron is the seat's own rounding (a sketch plane is single
@@ -410,10 +410,9 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
               {"r_min", row->rMin}};
 
   // The bearing's two side planes, in the world.
-  const glm::mat4 bw = OccurrenceMatrix(*occ);
-  const glm::vec3 sideA = glm::vec3(bw * glm::vec4(0, 0, 0, 1));
-  const glm::vec3 sideB =
-      glm::vec3(bw * glm::vec4(0, 0, static_cast<float>(row->B), 1));
+  const glm::dmat4 bw = OccurrenceMatrix(*occ);
+  const glm::dvec3 sideA = glm::dvec3(bw * glm::dvec4(0, 0, 0, 1));
+  const glm::dvec3 sideB = glm::dvec3(bw * glm::dvec4(0, 0, row->B, 1));
 
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
   json seats = json::array();
@@ -474,9 +473,9 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
       continue;
     }
     // The end the ring sits at: the one nearer either side face.
-    const glm::mat4 toLocal = glm::inverse(inst->world);
-    const glm::dvec3 a = glm::dvec3(glm::vec3(toLocal * glm::vec4(sideA, 1)));
-    const glm::dvec3 b = glm::dvec3(glm::vec3(toLocal * glm::vec4(sideB, 1)));
+    const glm::dmat4 toLocal = glm::inverse(inst->world);
+    const glm::dvec3 a(toLocal * glm::dvec4(sideA, 1));
+    const glm::dvec3 b(toLocal * glm::dvec4(sideB, 1));
     const parts::SeatEnd* end = nullptr;
     double gap = 0.0;
     for (const parts::SeatEnd& e : seat->ends) {

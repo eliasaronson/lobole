@@ -152,27 +152,27 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
     const auto b = Measure::ElementBounds(*input, ref);
     if (!b)
       return false;
-    const glm::vec3 P = (b->min + b->max) * 0.5f;
+    const glm::dvec3 P = (b->min + b->max) * 0.5;
     // Tangent from the edge box's dominant extent (exact for straight edges,
     // close enough for the handle on curved ones).
-    const glm::vec3 ext = b->max - b->min;
-    const glm::vec3 T =
-        glm::length(ext) > 1e-6f ? glm::normalize(ext) : glm::vec3(0, 0, 1);
+    const glm::dvec3 ext = b->max - b->min;
+    const glm::dvec3 T =
+        glm::length(ext) > 1e-6 ? glm::normalize(ext) : glm::dvec3(0, 0, 1);
     // "Pull away = bigger": from the body center through the edge, projected
     // ⟂ to the edge tangent; camera-right fallback when that degenerates.
-    glm::vec3 out(0.0f);
+    glm::dvec3 out(0.0);
     for (const Body& body : *input) {
       if (body.createdBy != ref.featureId)
         continue;
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       body.shape.GetBoundingBox(bmin, bmax);
-      out = P - (bmin + bmax) * 0.5f;
+      out = P - (bmin + bmax) * 0.5;
       out -= glm::dot(out, T) * T;
       break;
     }
-    if (glm::length(out) < 1e-4f && state.camera)
-      out = glm::cross(state.camera->GetForward(), T);
-    if (glm::length(out) < 1e-4f)
+    if (glm::length(out) < 1e-4 && state.camera)
+      out = glm::cross(glm::dvec3(state.camera->GetForward()), T);
+    if (glm::length(out) < 1e-4)
       return false;
     spec.anchor = P;
     spec.dir = glm::normalize(out);

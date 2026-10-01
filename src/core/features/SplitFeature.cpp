@@ -18,10 +18,10 @@
 #include <cstdio>
 #include <limits>
 
-double CenteredSplitOffset(const glm::vec3& planeOrigin,
-                           const glm::vec3& planeNormal, const glm::vec3& bmin,
-                           const glm::vec3& bmax) {
-  const glm::vec3 center = (bmin + bmax) * 0.5f;
+double CenteredSplitOffset(const glm::dvec3& planeOrigin,
+                           const glm::dvec3& planeNormal,
+                           const glm::dvec3& bmin, const glm::dvec3& bmax) {
+  const glm::dvec3 center = (bmin + bmax) * 0.5;
   return static_cast<double>(glm::dot(center - planeOrigin, planeNormal));
 }
 
@@ -70,7 +70,7 @@ bool SplitFeature::Execute(RegenContext& ctx) {
   // Build the cutting tool: a planar face large enough to span the body,
   // centered on the body's projection onto the plane so an off-origin body is
   // still fully crossed. Half-extent = the bounding-box diagonal (generous).
-  glm::vec3 bmin, bmax;
+  glm::dvec3 bmin, bmax;
   body->shape.GetBoundingBox(bmin, bmax);
   const glm::dvec3 center = (glm::dvec3(bmin) + glm::dvec3(bmax)) * 0.5;
   const glm::dvec3 proj = center - glm::dot(center - origin, normal) * normal;

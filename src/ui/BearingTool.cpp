@@ -112,8 +112,8 @@ void SyncBearingGhost(AppState& state) {
       CADMeshConverter::ConvertCADMeshToVertices(mesh), mesh.indices);
   if (asset == 0)
     return;
-  const glm::mat4 xf = glm::translate(glm::mat4(1.0f), tool.position) *
-                       glm::mat4_cast(tool.orientation);
+  const glm::mat4 xf(glm::translate(glm::dmat4(1.0), tool.position) *
+                     glm::mat4_cast(tool.orientation));
   const uint32_t id = state.meshRenderer->AddInstance(asset, xf);
   // The fastener ghost's blue: a preview must not read as geometry.
   state.meshRenderer->SetInstanceColor(id, glm::vec3(0.35f, 0.62f, 1.0f));

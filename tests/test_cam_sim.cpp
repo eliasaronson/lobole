@@ -191,9 +191,9 @@ TEST_CASE("cam sim: a laid-flat job plays where its toolpath cuts", "[cam]") {
   // property this asserts is unchanged; where it is asserted is not.
   const std::vector<Body> framed =
       cam::BodiesInSetupFrame(job.setup, job.doc->GetBodies());
-  glm::vec3 partLo(FLT_MAX), partHi(-FLT_MAX);
+  glm::dvec3 partLo(DBL_MAX), partHi(-DBL_MAX);
   for (const Body& b : framed) {
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     partLo = glm::min(partLo, bmin);
     partHi = glm::max(partHi, bmax);
@@ -512,7 +512,7 @@ TEST_CASE("cam sim: an ARC-fitted, tabbed job plays where it cuts", "[cam]") {
   // The wall of the bore is what "cut the opening" points at.
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 c(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // planar: not the bore
       op.targets.push_back(cam::Target{0, ElementRef{b.createdBy, name}});

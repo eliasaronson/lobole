@@ -84,7 +84,7 @@ TEST_CASE("Symmetric revolve matches one-directional volume but centers it",
 
   // Revolving about Y sweeps into z. Symmetric is z-centered; one-directional
   // is not.
-  glm::vec3 omin, omax, smin, smax;
+  glm::dvec3 omin, omax, smin, smax;
   one.GetBodies()[0].shape.GetBoundingBox(omin, omax);
   sym.GetBodies()[0].shape.GetBoundingBox(smin, smax);
   CHECK_THAT(smin.z + smax.z, WithinAbs(0.0, 1e-3)); // centered
@@ -332,7 +332,7 @@ TEST_CASE("Revolve about a custom axis off the origin", "[revolve]") {
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(BodyVolume(doc), WithinRel(24.0 * M_PI, 1e-3));
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi, /*tight=*/true);
   CHECK_THAT(lo.x, WithinAbs(7.0, 1e-3));
   CHECK_THAT(hi.x, WithinAbs(13.0, 1e-3));
@@ -408,7 +408,7 @@ TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   CHECK_THAT(g->GetBodies()[0].shape.Volume(), WithinRel(24.0 * M_PI, 1e-3));
   auto* coil = dynamic_cast<CurveFeature*>(g->GetFeature(2));
   REQUIRE(coil);
-  CHECK(glm::length(coil->Polyline().front() - glm::vec3(0, 2, 0)) < 1e-3);
+  CHECK(glm::length(coil->Polyline().front() - glm::dvec3(0, 2, 0)) < 1e-3);
 }
 
 TEST_CASE("A profile whose arc ends on the axis revolves at every size",

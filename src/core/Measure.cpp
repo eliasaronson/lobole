@@ -117,7 +117,7 @@ TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
 
 // A rigid glm placement (rotation + translation, as occurrence transforms
 // are) as an OCC gp_Trsf. glm is column-major: m[col][row].
-gp_Trsf ToTrsf(const glm::mat4& m) {
+gp_Trsf ToTrsf(const glm::dmat4& m) {
   // Built from a NORMALIZED quaternion rather than by handing OCC the float
   // matrix. SetValues infers a scale factor from the 3x3 block, and the
   // rounding in a float rotation is enough for it to infer one that is not
@@ -126,7 +126,7 @@ gp_Trsf ToTrsf(const glm::mat4& m) {
   // identical input. An occurrence placement is rigid by construction, so
   // say so, and no version has to forgive us. Pinned by
   // "A rigid placement reaches the kernel unscaled" in test_cadkernel.cpp.
-  const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
+  const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(m)));
   gp_Trsf t;
   t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
   t.SetTranslationPart(gp_Vec(m[3][0], m[3][1], m[3][2]));
@@ -143,7 +143,7 @@ struct ShapeClass {
   std::string kind;
   double radius = 0.0;
   bool hasRadius = false;
-  glm::vec3 axis{0.0f};
+  glm::dvec3 axis{0.0};
   bool hasAxis = false;
 };
 
@@ -152,7 +152,7 @@ ShapeClass ClassifyFace(const TopoDS_Face& face) {
   BRepAdaptor_Surface surf(face);
   const auto axisOf = [&out](const gp_Ax1& ax) {
     const gp_Dir a = ax.Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.axis = glm::dvec3(a.X(), a.Y(), a.Z());
     out.hasAxis = true;
   };
   switch (surf.GetType()) {
@@ -233,7 +233,7 @@ ShapeClass ClassifyEdge(const TopoDS_Edge& edge) {
     out.radius = curve.Circle().Radius();
     out.hasRadius = true;
     const gp_Dir a = curve.Circle().Axis().Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.axis = glm::dvec3(a.X(), a.Y(), a.Z());
     out.hasAxis = true;
     break;
   }
@@ -259,7 +259,7 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
   const gp_Pnt c = props.CentreOfMass();
   out.centroid = glm::dvec3(c.X(), c.Y(), c.Z());
   if (const auto n = FaceNormal(TopoDS::Face(f), c))
-    out.normal = glm::vec3(n->X(), n->Y(), n->Z());
+    out.normal = glm::dvec3(n->X(), n->Y(), n->Z());
   const ShapeClass sc = ClassifyFace(TopoDS::Face(f));
   out.kind = sc.kind;
   out.radius = sc.radius;
@@ -342,9 +342,9 @@ void BuildQuery(BRepAlgoAPI_BooleanOperation& op, const TopoDS_Shape& a,
 }
 
 std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
-                                         const glm::mat4& xfA,
+                                         const glm::dmat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB) {
+                                         const glm::dmat4& xfB) {
   const auto threaded = [](const auto& bodies) {
     return std::any_of(bodies.begin(), bodies.end(),
                        [](const Body& b) { return !b.threadRegions.empty(); });
@@ -412,8 +412,8 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
   }
 }
 
-bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
-                 glm::vec3& min, glm::vec3& max) {
+bool WorldBounds(const std::vector<Body>& bodies, const glm::dmat4& xf,
+                 glm::dvec3& min, glm::dvec3& max) {
   try {
     const TopLoc_Location loc(ToTrsf(xf));
     Bnd_Box box;
@@ -426,8 +426,8 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
       return false;
     Standard_Real x0, y0, z0, x1, y1, z1;
     box.Get(x0, y0, z0, x1, y1, z1);
-    min = glm::vec3(x0, y0, z0);
-    max = glm::vec3(x1, y1, z1);
+    min = glm::dvec3(x0, y0, z0);
+    max = glm::dvec3(x1, y1, z1);
     return true;
   } catch (const Standard_Failure&) {
     return false;
@@ -437,7 +437,7 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
 namespace {
 
 // The oriented box of a placed body set, or a void box when it has no shape.
-Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::mat4& xf) {
+Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::dmat4& xf) {
   const TopLoc_Location loc(ToTrsf(xf));
   Bnd_OBB obb;
   for (const Body& b : bodies) {
@@ -453,8 +453,8 @@ Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::mat4& xf) {
 
 } // namespace
 
-bool SeparatedByOBB(const std::vector<Body>& a, const glm::mat4& xfA,
-                    const std::vector<Body>& b, const glm::mat4& xfB,
+bool SeparatedByOBB(const std::vector<Body>& a, const glm::dmat4& xfA,
+                    const std::vector<Body>& b, const glm::dmat4& xfB,
                     double gap) {
   try {
     Bnd_OBB ba = PlacedOBB(a, xfA);
@@ -634,9 +634,9 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
 }
 
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
-                                         const glm::mat4& xfA,
+                                         const glm::dmat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB,
+                                         const glm::dmat4& xfB,
                                          bool wantDistance) {
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
@@ -767,8 +767,8 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
 }
 
 std::optional<SetCompare>
-CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
-                const std::vector<Body>& bodiesB, const glm::mat4& xfB,
+CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
+                const std::vector<Body>& bodiesB, const glm::dmat4& xfB,
                 CADShape* missingOut, CADShape* extraOut, bool overlap) {
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
@@ -810,13 +810,13 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
 
     SetCompare out;
     const auto measure = [](const CADShape& s, double& vol, double& surf,
-                            glm::dvec3& com, glm::vec3& mn, glm::vec3& mx,
+                            glm::dvec3& com, glm::dvec3& mn, glm::dvec3& mx,
                             int& faces, int& edges) {
       CADShape::MassProps mp;
       if (s.ComputeMassProps(mp)) {
         vol = mp.volume;
         surf = mp.surfaceArea;
-        com = glm::dvec3(mp.centerOfMass);
+        com = mp.centerOfMass;
       }
       s.GetBoundingBox(mn, mx);
       for (TopExp_Explorer ex(s.GetShape(), TopAbs_FACE); ex.More(); ex.Next())
@@ -1053,8 +1053,8 @@ std::optional<Bounds> ElementBounds(const std::vector<Body>& bodies,
   Standard_Real x0, y0, z0, x1, y1, z1;
   box.Get(x0, y0, z0, x1, y1, z1);
   Bounds out;
-  out.min = glm::vec3(x0, y0, z0);
-  out.max = glm::vec3(x1, y1, z1);
+  out.min = glm::dvec3(x0, y0, z0);
+  out.max = glm::dvec3(x1, y1, z1);
   return out;
 }
 
@@ -1062,18 +1062,19 @@ namespace {
 // A planar cutting face spanning every body's bounds, centered on the section
 // plane. Null if `bodies` is empty. Shared by CrossSectionArea + SectionCaps.
 TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
-                               const glm::vec3& origin, const glm::vec3& n) {
-  glm::vec3 u = std::abs(n.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+                               const glm::dvec3& origin, const glm::dvec3& n) {
+  glm::dvec3 u =
+      std::abs(n.x) < 0.9 ? glm::dvec3(1, 0, 0) : glm::dvec3(0, 1, 0);
   u = glm::normalize(u - n * glm::dot(u, n));
-  const glm::vec3 v = glm::cross(n, u);
-  glm::vec3 lo(1e30f), hi(-1e30f);
+  const glm::dvec3 v = glm::cross(n, u);
+  glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : bodies) {
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
   }
-  const float s = glm::length(hi - lo) + 1.0f;
+  const double s = glm::length(hi - lo) + 1.0;
   // Center the quad on the BODIES, projected onto the plane — not on the
   // plane's origin. Sizing it from the bodies' diagonal while centering it
   // at the origin only works for a model that sits near the origin: a part
@@ -1081,10 +1082,10 @@ TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
   // missed entirely by the cutter, so the cross-section area came back zero
   // and the section view had no cap faces. Same rule the split tool uses to
   // place its knife.
-  const glm::vec3 c = (lo + hi) * 0.5f;
-  const glm::vec3 center = c - n * glm::dot(c - origin, n);
-  auto pt = [&](float su, float sv) {
-    const glm::vec3 w = center + u * su + v * sv;
+  const glm::dvec3 c = (lo + hi) * 0.5;
+  const glm::dvec3 center = c - n * glm::dot(c - origin, n);
+  auto pt = [&](double su, double sv) {
+    const glm::dvec3 w = center + u * su + v * sv;
     return gp_Pnt(w.x, w.y, w.z);
   };
   BRepBuilderAPI_MakePolygon poly(pt(-s, -s), pt(s, -s), pt(s, s), pt(-s, s),
@@ -1130,9 +1131,7 @@ std::vector<SectionLoop> SectionLoopsOf(const TopoDS_Face& face) {
         seg.kind = "arc";
         const gp_Circ circle = curve.Circle();
         const gp_Pnt cc = circle.Location();
-        seg.center =
-            glm::vec3(static_cast<float>(cc.X()), static_cast<float>(cc.Y()),
-                      static_cast<float>(cc.Z()));
+        seg.center = glm::dvec3(cc.X(), cc.Y(), cc.Z());
         seg.radius = circle.Radius();
       } else {
         seg.kind = "other";
@@ -1148,8 +1147,8 @@ std::vector<SectionLoop> SectionLoopsOf(const TopoDS_Face& face) {
 } // namespace
 
 std::optional<std::vector<SectionRegion>>
-CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
-                    const glm::vec3& normal, bool withLoops) {
+CrossSectionRegions(const std::vector<Body>& bodies, const glm::dvec3& origin,
+                    const glm::dvec3& normal, bool withLoops) {
   std::vector<SectionRegion> out;
   if (bodies.empty())
     return out;
@@ -1175,9 +1174,7 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
         const gp_Pnt c = props.CentreOfMass();
         SectionRegion region;
         region.area = props.Mass();
-        region.centroid =
-            glm::vec3(static_cast<float>(c.X()), static_cast<float>(c.Y()),
-                      static_cast<float>(c.Z()));
+        region.centroid = glm::dvec3(c.X(), c.Y(), c.Z());
         if (withLoops)
           region.loops = SectionLoopsOf(TopoDS::Face(ex.Current()));
         out.push_back(std::move(region));
@@ -1199,8 +1196,8 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
 }
 
 std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
-                                       const glm::vec3& origin,
-                                       const glm::vec3& normal) {
+                                       const glm::dvec3& origin,
+                                       const glm::dvec3& normal) {
   if (bodies.empty())
     return 0.0;
   try {
@@ -1242,9 +1239,9 @@ void AppendQuantized(std::string& key, double v) {
   key += ',';
 }
 
-std::string CapKey(const Body& b, const glm::vec3& origin,
-                   const glm::vec3& normal,
-                   const std::vector<glm::vec4>& trimPlanes) {
+std::string CapKey(const Body& b, const glm::dvec3& origin,
+                   const glm::dvec3& normal,
+                   const std::vector<glm::dvec4>& trimPlanes) {
   std::string key = std::to_string(b.shape.PlacementId());
   key += '|';
   for (int i = 0; i < 3; i++)
@@ -1252,7 +1249,7 @@ std::string CapKey(const Body& b, const glm::vec3& origin,
   for (int i = 0; i < 3; i++)
     AppendQuantized(key, normal[i]);
   key += '|';
-  for (const glm::vec4& t : trimPlanes)
+  for (const glm::dvec4& t : trimPlanes)
     for (int i = 0; i < 4; i++)
       AppendQuantized(key, t[i]);
   return key;
@@ -1265,9 +1262,9 @@ constexpr size_t kMaxCapCache = 512;
 } // namespace
 
 std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
-                                  const glm::vec3& origin,
-                                  const glm::vec3& normal,
-                                  const std::vector<glm::vec4>& trimPlanes,
+                                  const glm::dvec3& origin,
+                                  const glm::dvec3& normal,
+                                  const std::vector<glm::dvec4>& trimPlanes,
                                   SectionCapCache* cache) {
   std::vector<CADShape> caps;
   if (bodies.empty())
@@ -1313,23 +1310,23 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
         // a half-space solid built from the same oversized quad the cutter
         // uses, with its reference point on the DISCARDED side.
         TopoDS_Shape capShape = common.Shape();
-        for (const glm::vec4& t : trimPlanes) {
-          const glm::vec3 tn = glm::vec3(t);
-          if (glm::length(tn) < 1e-6f)
+        for (const glm::dvec4& t : trimPlanes) {
+          const glm::dvec3 tn = glm::dvec3(t);
+          if (glm::length(tn) < 1e-6)
             continue;
-          const glm::vec3 tnu = glm::normalize(tn);
-          const glm::vec3 tOrigin = tnu * t.w;
+          const glm::dvec3 tnu = glm::normalize(tn);
+          const glm::dvec3 tOrigin = tnu * t.w;
           const TopoDS_Face trimFace = BuildSectionCutter(bodies, tOrigin, tnu);
           // A point well past the plane on the removed side. The distance is
           // the model's own size, so it scales with the part.
-          glm::vec3 lo(1e30f), hi(-1e30f);
+          glm::dvec3 lo(1e30), hi(-1e30);
           for (const auto& bb : bodies) {
-            glm::vec3 bmin, bmax;
+            glm::dvec3 bmin, bmax;
             bb.shape.GetBoundingBox(bmin, bmax);
             lo = glm::min(lo, bmin);
             hi = glm::max(hi, bmax);
           }
-          const glm::vec3 ref = tOrigin + tnu * (glm::length(hi - lo) + 1.0f);
+          const glm::dvec3 ref = tOrigin + tnu * (glm::length(hi - lo) + 1.0);
           BRepPrimAPI_MakeHalfSpace halfSpace(trimFace,
                                               gp_Pnt(ref.x, ref.y, ref.z));
           if (!halfSpace.IsDone())
@@ -1428,20 +1425,20 @@ std::optional<Direction> DirectionOf(const std::vector<Body>& bodies,
 
 std::optional<AngleResult> Angle(const std::vector<Body>& bodies,
                                  const ElementRef& a, const ElementRef& b) {
-  return Angle(bodies, a, glm::mat4(1.0f), bodies, b, glm::mat4(1.0f));
+  return Angle(bodies, a, glm::dmat4(1.0), bodies, b, glm::dmat4(1.0));
 }
 
 std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
-                                 const ElementRef& a, const glm::mat4& xfA,
+                                 const ElementRef& a, const glm::dmat4& xfA,
                                  const std::vector<Body>& bodiesB,
-                                 const ElementRef& b, const glm::mat4& xfB) {
+                                 const ElementRef& b, const glm::dmat4& xfB) {
   const auto da = DirectionOf(bodiesA, a);
   const auto db = DirectionOf(bodiesB, b);
   if (!da || !db)
     return std::nullopt;
   // Occurrence placements are rigid, so only the rotation touches a
   // direction — a translation cannot change an angle.
-  const auto placed = [](const glm::dvec3& d, const glm::mat4& xf) {
+  const auto placed = [](const glm::dvec3& d, const glm::dmat4& xf) {
     return glm::normalize(glm::dmat3(xf) * d);
   };
   const glm::dvec3 va = placed(da->dir, xfA);
@@ -1527,8 +1524,8 @@ std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
   return units::FormatLength(e->length, sys) + " edge";
 }
 
-std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
-                                  const ElementRef& ref) {
+std::optional<glm::dvec3> AnchorOf(const std::vector<Body>& bodies,
+                                   const ElementRef& ref) {
   std::string kind;
   const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
   if (shape.IsNull())
@@ -1538,12 +1535,12 @@ std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
       GProp_GProps props;
       BRepGProp::SurfaceProperties(shape, props);
       const gp_Pnt c = props.CentreOfMass();
-      return glm::vec3(c.X(), c.Y(), c.Z());
+      return glm::dvec3(c.X(), c.Y(), c.Z());
     }
     BRepAdaptor_Curve curve(TopoDS::Edge(shape));
     const gp_Pnt mid =
         curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
-    return glm::vec3(mid.X(), mid.Y(), mid.Z());
+    return glm::dvec3(mid.X(), mid.Y(), mid.Z());
   } catch (const Standard_Failure&) {
     return std::nullopt;
   }
@@ -1583,8 +1580,8 @@ std::vector<const char*> DistanceKindNames() {
 
 std::optional<DistanceResult>
 DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
-               const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-               const ElementRef& b, const glm::mat4& xfB, DistanceKind kind) {
+               const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+               const ElementRef& b, const glm::dmat4& xfB, DistanceKind kind) {
   if (kind == DistanceKind::Minimum)
     return DistanceDetailed(bodiesA, a, xfA, bodiesB, b, xfB);
 
@@ -1594,8 +1591,8 @@ DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
     if (!ca || !cb)
       return std::nullopt;
     DistanceResult out;
-    out.pointA = glm::vec3(xfA * glm::vec4(*ca, 1.0f));
-    out.pointB = glm::vec3(xfB * glm::vec4(*cb, 1.0f));
+    out.pointA = glm::dvec3(xfA * glm::dvec4(*ca, 1.0));
+    out.pointB = glm::dvec3(xfB * glm::dvec4(*cb, 1.0));
     out.distance = glm::distance(out.pointA, out.pointB);
     return out;
   }
@@ -1640,8 +1637,8 @@ DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
         const double d2 = p.SquareDistance(q);
         if (d2 > best) {
           best = d2;
-          out.pointA = glm::vec3(p.X(), p.Y(), p.Z());
-          out.pointB = glm::vec3(q.X(), q.Y(), q.Z());
+          out.pointA = glm::dvec3(p.X(), p.Y(), p.Z());
+          out.pointB = glm::dvec3(q.X(), q.Y(), q.Z());
         }
       }
     }
@@ -1674,9 +1671,9 @@ std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
   return out;
 }
 
-std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
-                                  const ElementRef& edgeA,
-                                  const ElementRef& edgeB) {
+std::optional<glm::dvec3> CornerOf(const std::vector<Body>& bodies,
+                                   const ElementRef& edgeA,
+                                   const ElementRef& edgeB) {
   for (const Body& body : bodies) {
     if (body.createdBy != edgeA.featureId || body.shape.GetShape().IsNull())
       continue;
@@ -1684,7 +1681,7 @@ std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
     const auto b = body.elementMap.ResolveEdge(edgeB.name);
     if (!a || !b)
       return std::nullopt;
-    glm::vec3 p;
+    glm::dvec3 p;
     if (!body.shape.CornerPoint(*a, *b, p))
       return std::nullopt;
     return p;
@@ -1692,14 +1689,14 @@ std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
   return std::nullopt;
 }
 
-std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
-                                  const ElementRef& ref) {
+std::optional<glm::dvec3> CentreOf(const std::vector<Body>& bodies,
+                                   const ElementRef& ref) {
   std::string kind;
   const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
   if (shape.IsNull())
     return std::nullopt;
   const auto pt = [](const gp_Pnt& p) {
-    return std::optional<glm::vec3>(glm::vec3(p.X(), p.Y(), p.Z()));
+    return std::optional<glm::dvec3>(glm::dvec3(p.X(), p.Y(), p.Z()));
   };
   try {
     if (kind == "edge") {
@@ -1834,8 +1831,8 @@ std::optional<RimCircle> RimCircleOf(const std::vector<Body>& bodies,
 
 std::optional<DistanceResult>
 DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
-                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-                 const ElementRef& b, const glm::mat4& xfB, bool parallel) {
+                 const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::dmat4& xfB, bool parallel) {
   const auto extrema = DistanceDetailed(bodiesA, a, xfA, bodiesB, b, xfB);
   if (!parallel || !extrema)
     return extrema;
@@ -1845,7 +1842,7 @@ DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
   const auto anchor = AnchorOf(bodiesA, a);
   if (!anchor)
     return extrema;
-  const glm::vec3 fromA = glm::vec3(xfA * glm::vec4(*anchor, 1.0f));
+  const glm::dvec3 fromA = glm::dvec3(xfA * glm::dvec4(*anchor, 1.0));
   std::string kb;
   TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);
   if (sb.IsNull())
@@ -1861,7 +1858,7 @@ DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
     DistanceResult out;
     out.distance = extrema->distance;
     out.pointA = fromA;
-    out.pointB = glm::vec3(onB.X(), onB.Y(), onB.Z());
+    out.pointB = glm::dvec3(onB.X(), onB.Y(), onB.Z());
     return out;
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Measure dimension anchors failed: {}",
@@ -1930,8 +1927,8 @@ std::optional<SetMeasure> DescribeTarget(const Target& t) {
   if (placed.empty())
     return std::nullopt;
   SetMeasure out;
-  glm::vec3 lo(std::numeric_limits<float>::max());
-  glm::vec3 hi(std::numeric_limits<float>::lowest());
+  glm::dvec3 lo(std::numeric_limits<double>::max());
+  glm::dvec3 hi(std::numeric_limits<double>::lowest());
   for (const Body& b : placed) {
     CADShape::MassProps mp;
     if (b.shape.ComputeMassProps(mp)) {
@@ -1939,7 +1936,7 @@ std::optional<SetMeasure> DescribeTarget(const Target& t) {
       out.surfaceArea += mp.surfaceArea;
     }
     out.solids += b.shape.SolidCount();
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
     lo = glm::min(lo, bmin);
     hi = glm::max(hi, bmax);
@@ -1971,7 +1968,7 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
           const auto p = CentreOf(*t.bodies, t.ref);
           if (!p)
             return std::nullopt;
-          const glm::vec3 w = glm::vec3(t.xf * glm::vec4(*p, 1.0f));
+          const glm::dvec3 w = glm::dvec3(t.xf * glm::dvec4(*p, 1.0));
           return gp_Pnt(w.x, w.y, w.z);
         }
         GProp_GProps props;
@@ -1985,8 +1982,8 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
       if (!ca || !cb)
         return std::nullopt;
       DistanceResult out;
-      out.pointA = glm::vec3(ca->X(), ca->Y(), ca->Z());
-      out.pointB = glm::vec3(cb->X(), cb->Y(), cb->Z());
+      out.pointA = glm::dvec3(ca->X(), ca->Y(), ca->Z());
+      out.pointB = glm::dvec3(cb->X(), cb->Y(), cb->Z());
       out.distance = glm::distance(out.pointA, out.pointB);
       return out;
     }
@@ -2009,8 +2006,8 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
         for (const gp_Pnt& q : pb)
           if (const double d2 = p.SquareDistance(q); d2 > best) {
             best = d2;
-            out.pointA = glm::vec3(p.X(), p.Y(), p.Z());
-            out.pointB = glm::vec3(q.X(), q.Y(), q.Z());
+            out.pointA = glm::dvec3(p.X(), p.Y(), p.Z());
+            out.pointB = glm::dvec3(q.X(), q.Y(), q.Z());
           }
       out.distance = std::sqrt(best);
       return out;
@@ -2033,8 +2030,8 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
                                        sy, glm::dmat4(1.0), &pa, &pb);
         if (d < best) {
           best = d;
-          out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
-          out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+          out.pointA = glm::dvec3(pa.X(), pa.Y(), pa.Z());
+          out.pointB = glm::dvec3(pb.X(), pb.Y(), pb.Z());
         }
       }
     if (std::isfinite(best)) {
@@ -2048,8 +2045,8 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
     out.distance = dist.Value();
     const gp_Pnt pa = dist.PointOnShape1(1);
     const gp_Pnt pb = dist.PointOnShape2(1);
-    out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
-    out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+    out.pointA = glm::dvec3(pa.X(), pa.Y(), pa.Z());
+    out.pointB = glm::dvec3(pb.X(), pb.Y(), pb.Z());
     return out;
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Measure target distance failed: {}",
@@ -2059,15 +2056,15 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
   }
 }
 
-std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
-                                        DistanceKind kind) {
+std::optional<glm::dvec3> NearestPointOn(const Target& t, const glm::dvec3& p,
+                                         DistanceKind kind) {
   if (kind == DistanceKind::Centres) {
     // "Centre to centre" from a point means the other side's centre.
     if (!t.Whole()) {
       const auto c = CentreOf(*t.bodies, t.ref);
       if (!c)
         return std::nullopt;
-      return glm::vec3(t.xf * glm::vec4(*c, 1.0f));
+      return glm::dvec3(t.xf * glm::dvec4(*c, 1.0));
     }
   }
   const TopoDS_Shape shape = ResolveTarget(t);
@@ -2075,11 +2072,11 @@ std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
     return std::nullopt;
   try {
     if (kind == DistanceKind::Maximum) {
-      std::optional<glm::vec3> best;
+      std::optional<glm::dvec3> best;
       double farthest = -1.0;
       for (TopExp_Explorer ex(shape, TopAbs_VERTEX); ex.More(); ex.Next()) {
         const gp_Pnt q = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
-        const glm::vec3 v(q.X(), q.Y(), q.Z());
+        const glm::dvec3 v(q.X(), q.Y(), q.Z());
         const double d = glm::distance(p, v);
         if (d > farthest) {
           farthest = d;
@@ -2093,7 +2090,7 @@ std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
     if (!dist.IsDone() || dist.NbSolution() < 1)
       return std::nullopt;
     const gp_Pnt q = dist.PointOnShape2(1);
-    return glm::vec3(q.X(), q.Y(), q.Z());
+    return glm::dvec3(q.X(), q.Y(), q.Z());
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Measure nearest point failed: {}", e.GetMessageString()
                                                       ? e.GetMessageString()
@@ -2112,7 +2109,7 @@ std::optional<SetContact> OverlapBetween(const Target& a, const Target& b) {
   // read `volume` alone. Asking for the distance as well doubled the cost of
   // every `measure` between two whole shapes — the handler had already
   // computed one through DistanceBetween.
-  return ContactBetween(pa, glm::mat4(1.0f), pb, glm::mat4(1.0f), false);
+  return ContactBetween(pa, glm::dmat4(1.0), pb, glm::dmat4(1.0), false);
 }
 
 collide::Gap MeshGap(const Target& a, const Target& b) {
@@ -2148,14 +2145,14 @@ std::optional<double> Distance(const std::vector<Body>& bodies,
 std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
                                                const ElementRef& a,
                                                const ElementRef& b) {
-  return DistanceDetailed(bodies, a, glm::mat4(1.0f), bodies, b,
-                          glm::mat4(1.0f));
+  return DistanceDetailed(bodies, a, glm::dmat4(1.0), bodies, b,
+                          glm::dmat4(1.0));
 }
 
 std::optional<DistanceResult>
 DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
-                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-                 const ElementRef& b, const glm::mat4& xfB) {
+                 const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::dmat4& xfB) {
   std::string ka, kb;
   TopoDS_Shape sa = ResolveShape(bodiesA, a, ka);
   TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);
@@ -2171,8 +2168,8 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
     out.distance = dist.Value();
     const gp_Pnt pa = dist.PointOnShape1(1);
     const gp_Pnt pb = dist.PointOnShape2(1);
-    out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
-    out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+    out.pointA = glm::dvec3(pa.X(), pa.Y(), pa.Z());
+    out.pointB = glm::dvec3(pb.X(), pb.Y(), pb.Z());
     return out;
   } catch (const std::exception& e) {
     LOG_ERROR("Measure distance failed: {}", e.what());
@@ -2190,7 +2187,7 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
 }
 
 std::vector<ThreadSpan> ThreadSpansOf(const Body& body,
-                                      const glm::mat4& world) {
+                                      const glm::dmat4& world) {
   return ThreadSpans(body, TopLoc_Location(ToTrsf(world)));
 }
 

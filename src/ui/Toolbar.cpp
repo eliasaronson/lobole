@@ -858,9 +858,9 @@ double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
   // not count as occupied, so the next insert could land inside it.
   const auto spanOf = [&](uint64_t id, OccurrenceRef k, Span& out) {
     out = {1e30, -1e30};
-    const auto addBox = [&](const glm::vec3& bmin, const glm::vec3& bmax) {
-      out.lo = std::min(out.lo, static_cast<double>(bmin.x));
-      out.hi = std::max(out.hi, static_cast<double>(bmax.x));
+    const auto addBox = [&](const glm::dvec3& bmin, const glm::dvec3& bmax) {
+      out.lo = std::min(out.lo, bmin.x);
+      out.hi = std::max(out.hi, bmax.x);
     };
     if (k == OccurrenceRef::Assembly) {
       const AssemblyDocument* sub = AssemblyDocById(state, id);
@@ -874,13 +874,13 @@ double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
         if (!inst.visible)
           continue;
         for (const Body& b : inst.part->GetBodies()) {
-          glm::vec3 bmin, bmax;
+          glm::dvec3 bmin, bmax;
           b.shape.GetBoundingBox(bmin, bmax);
           for (int c = 0; c < 8; c++) {
-            const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                                   (c & 2) ? bmax.y : bmin.y,
-                                   (c & 4) ? bmax.z : bmin.z);
-            const glm::vec3 w = glm::vec3(inst.world * glm::vec4(corner, 1.0f));
+            const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                    (c & 2) ? bmax.y : bmin.y,
+                                    (c & 4) ? bmax.z : bmin.z);
+            const glm::dvec3 w(inst.world * glm::dvec4(corner, 1.0));
             addBox(w, w);
           }
         }
@@ -891,7 +891,7 @@ double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
     if (doc == nullptr || doc->GetBodies().empty())
       return false;
     for (const Body& b : doc->GetBodies()) {
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       b.shape.GetBoundingBox(bmin, bmax);
       addBox(bmin, bmax);
     }

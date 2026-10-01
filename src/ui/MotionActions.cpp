@@ -375,12 +375,12 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
   for (const Occurrence& o : state.assembly->GetOccurrences()) {
     if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
       continue;
-    const glm::mat4 rootWorld = OccurrenceMatrix(o);
+    const glm::dmat4 rootWorld = OccurrenceMatrix(o);
     for (const assembly::FlatInstance& inst : *flat) {
       if (inst.rootOccurrenceId != o.id || !inst.visible || !inst.part)
         continue;
       Key key{o.id, 0};
-      glm::mat4 frame = rootWorld;
+      glm::dmat4 frame = rootWorld;
       if (!inst.innerIds.empty() && moving.count({o.id, inst.innerIds[0]})) {
         key.second = inst.innerIds[0];
         frame = rootWorld *
@@ -393,7 +393,7 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
                      : o.name + "/" +
                            (inst.levels.size() >= 2 ? inst.levels[1].name
                                                     : inst.name);
-      const glm::mat4 inv = glm::inverse(frame);
+      const glm::dmat4 inv = glm::inverse(frame);
       for (const Body& b : inst.part->GetBodies()) {
         if (b.reference || !b.shape.IsValid())
           continue;
@@ -412,7 +412,7 @@ bool ExportMotionGlb(AppState& state, uint64_t studyId, const std::string& path,
   std::vector<glb::Node> out;
   for (auto& [key, n] : nodes) {
     for (const motion::Sample& sample : r->samples) {
-      glm::mat4 world(1.0f);
+      glm::dmat4 world(1.0);
       if (key.second == 0) {
         for (const auto& [occId, m] : sample.worlds)
           if (occId == key.first)
@@ -443,7 +443,7 @@ namespace {
 // speed.
 constexpr double kMaxPlaybackStep = 0.25; // s: a stalled frame does not skip
 
-bool FindWorld(const motion::Sample& s, uint64_t occId, glm::mat4& out) {
+bool FindWorld(const motion::Sample& s, uint64_t occId, glm::dmat4& out) {
   for (const auto& [id, m] : s.worlds)
     if (id == occId) {
       out = m;
@@ -453,7 +453,7 @@ bool FindWorld(const motion::Sample& s, uint64_t occId, glm::mat4& out) {
 }
 
 bool FindLeaf(const motion::Sample& s, uint64_t root, uint64_t occ,
-              glm::mat4& out) {
+              glm::dmat4& out) {
   for (const motion::Sample::LeafWorld& l : s.leaves)
     if (l.root == root && l.occurrence == occ) {
       out = l.world;
@@ -464,17 +464,17 @@ bool FindLeaf(const motion::Sample& s, uint64_t root, uint64_t occ,
 
 // Rigid placements: position lerped, orientation slerped, between the two
 // samples either side.
-glm::mat4 Blend(const glm::mat4& a, const glm::mat4& b, float f) {
-  const glm::quat qa = glm::normalize(glm::quat_cast(glm::mat3(a)));
-  const glm::quat qb = glm::normalize(glm::quat_cast(glm::mat3(b)));
-  const glm::vec3 p = glm::mix(glm::vec3(a[3]), glm::vec3(b[3]), f);
-  return glm::translate(glm::mat4(1.0f), p) *
+glm::dmat4 Blend(const glm::dmat4& a, const glm::dmat4& b, double f) {
+  const glm::dquat qa = glm::normalize(glm::quat_cast(glm::dmat3(a)));
+  const glm::dquat qb = glm::normalize(glm::quat_cast(glm::dmat3(b)));
+  const glm::dvec3 p = glm::mix(glm::dvec3(a[3]), glm::dvec3(b[3]), f);
+  return glm::translate(glm::dmat4(1.0), p) *
          glm::mat4_cast(glm::slerp(qa, qb, f));
 }
 
 // The two samples playback stands between, and how far along.
 bool PlaybackSpan(const AppState& state, const motion::Result*& r, size_t& i,
-                  float& f) {
+                  double& f) {
   if (state.motionPlaybackStudy == 0)
     return false;
   r = state.motionPlaybackPinned
@@ -485,7 +485,7 @@ bool PlaybackSpan(const AppState& state, const motion::Result*& r, size_t& i,
   const size_t n = r->samples.size();
   const double pos = std::clamp(state.motionPlaybackPos, 0.0, double(n - 1));
   i = std::min(static_cast<size_t>(pos), n - 2);
-  f = static_cast<float>(pos - double(i));
+  f = pos - double(i);
   return true;
 }
 
@@ -636,13 +636,13 @@ void TickMotionPlayback(AppState& state, double now) {
 }
 
 bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
-                         glm::mat4& world) {
+                         glm::dmat4& world) {
   const motion::Result* r = nullptr;
   size_t i = 0;
-  float f = 0.0f;
+  double f = 0.0;
   if (!PlaybackSpan(state, r, i, f))
     return false;
-  glm::mat4 a, b;
+  glm::dmat4 a, b;
   if (!FindWorld(r->samples[i], occurrenceId, a) ||
       !FindWorld(r->samples[i + 1], occurrenceId, b))
     return false;
@@ -652,15 +652,15 @@ bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
 
 bool MotionPlaybackLocal(AppState& state, const Occurrence& root,
                          const std::vector<uint64_t>& innerPath,
-                         const glm::mat4& docLocal, glm::mat4& local) {
+                         const glm::dmat4& docLocal, glm::dmat4& local) {
   if (!root.flexible || innerPath.empty())
     return false;
   const motion::Result* r = nullptr;
   size_t i = 0;
-  float f = 0.0f;
+  double f = 0.0;
   if (!PlaybackSpan(state, r, i, f))
     return false;
-  glm::mat4 la, lb, ra, rb;
+  glm::dmat4 la, lb, ra, rb;
   if (!FindLeaf(r->samples[i], root.id, innerPath[0], la) ||
       !FindLeaf(r->samples[i + 1], root.id, innerPath[0], lb) ||
       !FindWorld(r->samples[i], root.id, ra) ||
@@ -672,7 +672,7 @@ bool MotionPlaybackLocal(AppState& state, const Occurrence& root,
     return false;
   // docLocal = P * rest, with P where the document has that occurrence now;
   // the played one stands at the leaf's recorded pose instead.
-  const glm::mat4 rest =
+  const glm::dmat4 rest =
       glm::inverse(assembly::InnerPlacement(root, *inner)) * docLocal;
   local = glm::inverse(Blend(ra, rb, f)) * Blend(la, lb, f) * rest;
   return true;

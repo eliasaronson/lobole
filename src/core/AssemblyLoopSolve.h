@@ -30,8 +30,8 @@ namespace assembly {
 // MateAdjust(const Mate&) forwards to it, so the solver and the placement pass
 // cannot drift apart (a transform with a second copy in this codebase has
 // drifted before).
-glm::mat4 MateAdjustFor(bool flipped, float rotation, float offset, float dx,
-                        float dy, const glm::quat& ballRotation);
+glm::dmat4 MateAdjustFor(bool flipped, double rotation, double offset,
+                         double dx, double dy, const glm::dquat& ballRotation);
 
 // Which of a fastened mate's numbers to READ OFF the placement the two
 // occurrences are already in, rather than take from the caller.
@@ -49,9 +49,9 @@ enum class MateDerive { Twist, Pose };
 // `rotation`, `dx`, `dy` and `offset` untouched. Refusing there is the point:
 // the nearest quarter turn between skew frames is an answer to a question
 // nobody asked, and it is indistinguishable from a joint that fits.
-[[nodiscard]] bool DeriveMateDofs(const glm::mat4& rel, MateDerive how,
-                                  bool& flipped, float& rotation, float& dx,
-                                  float& dy, float& offset);
+[[nodiscard]] bool DeriveMateDofs(const glm::dmat4& rel, MateDerive how,
+                                  bool& flipped, double& rotation, double& dx,
+                                  double& dy, double& offset);
 
 // How many DOF this mate type leaves free — the width of its slice of q.
 // Fastened 0, Revolute/Slider 1, Cylindrical 2, Planar/Ball 3.
@@ -66,14 +66,14 @@ struct LoopMate {
   MateType type = MateType::Fastened;
   uint64_t aOcc = 0;
   uint64_t bOcc = 0;
-  glm::mat4 fa{1.0f}; // a's connector frame, in a's occurrence space
-  glm::mat4 fb{1.0f}; // b's connector frame, in b's occurrence space
+  glm::dmat4 fa{1.0}; // a's connector frame, in a's occurrence space
+  glm::dmat4 fb{1.0}; // b's connector frame, in b's occurrence space
   bool flipped = true;
-  float rotation = 0.0f;
-  float offset = 0.0f;
-  float dx = 0.0f;
-  float dy = 0.0f;
-  glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f};
+  double rotation = 0.0;
+  double offset = 0.0;
+  double dx = 0.0;
+  double dy = 0.0;
+  glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
 };
 
 // One placement step: `to` is positioned from `from` across `mate`.
@@ -121,7 +121,7 @@ struct LoopProblem {
   std::vector<LoopMate> mates;
   std::vector<LoopTreeEdge> tree;                     // in placement order
   std::vector<size_t> cut;                            // indices into `mates`
-  std::vector<std::pair<uint64_t, glm::mat4>> anchor; // pinned occ -> world
+  std::vector<std::pair<uint64_t, glm::dmat4>> anchor; // pinned occ -> world
   std::vector<LoopRelation> relations;
   std::vector<LoopPin> pinned;
   // Run the tilted-axis diagnosis (DiagnoseLoop) on every component that
@@ -178,7 +178,7 @@ struct LoopSolution {
   // One per failing component, when the problem asked to `diagnose`.
   std::vector<LoopDiagnosis> diagnoses;
   std::vector<LoopMate> solved;      // `mates` with their DOF updated
-  std::unordered_map<uint64_t, glm::mat4> world; // solved placements
+  std::unordered_map<uint64_t, glm::dmat4> world; // solved placements
   // Non-empty when this build has no Eigen: the caller keeps A3 behaviour and
   // says so rather than silently placing something plausible.
   std::string unavailable;
@@ -199,7 +199,7 @@ LoopDiagnosis DiagnoseLoop(const LoopProblem& problem);
 // Forward kinematics: walk the tree from the anchors at the given DOF values.
 // Exposed because it is the residual evaluation AND the write-back pass, and
 // because a test wants to check placement without running the solver.
-std::unordered_map<uint64_t, glm::mat4>
+std::unordered_map<uint64_t, glm::dmat4>
 EvaluateTree(const LoopProblem& problem, const std::vector<LoopMate>& mates);
 
 } // namespace assembly

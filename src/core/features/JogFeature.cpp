@@ -179,7 +179,7 @@ bool JogFeature::Execute(RegenContext& ctx) {
     gp_Dir pd(gp_Vec(up).Crossed(gp_Vec(e)));
     if (flip)
       pd.Reverse();
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     body->shape.GetBoundingBox(lo, hi);
     const double size = glm::length(hi - lo) * 4.0 + 100.0;
 

@@ -21,7 +21,7 @@ namespace {
 std::vector<std::string> SideFaces(const Body& b) {
   std::vector<std::string> out;
   for (const auto& [idx, name] : b.elementMap.names) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (b.shape.FacePlane(idx, c, n, u) && std::abs(n.z) < 0.5)
       out.push_back(name);
   }
@@ -69,7 +69,7 @@ TEST_CASE("Draft turns each face by its angle as measured", "[draft]") {
   ElementRef top;
   std::vector<ElementRef> sides;
   for (const auto& [idx, name] : b.elementMap.names) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (!b.shape.FacePlane(idx, c, n, u))
       continue;
     if (n.z > 0.99f)
@@ -100,7 +100,7 @@ TEST_CASE("Draft rejects a cap face perpendicular to the pull", "[draft]") {
   // Find the +Z top cap.
   std::string cap;
   for (const auto& [idx, name] : doc.GetBodies()[0].elementMap.names) {
-    glm::vec3 c, n, u;
+    glm::dvec3 c, n, u;
     if (doc.GetBodies()[0].shape.FacePlane(idx, c, n, u) && n.z > 0.9)
       cap = name;
   }

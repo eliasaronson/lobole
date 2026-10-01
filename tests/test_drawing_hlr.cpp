@@ -879,8 +879,8 @@ TEST_CASE("HLR project benchmark compares incremental assembly visibility",
     if (inst.visible)
       for (const auto& body : inst.part->GetBodies())
         if (!body.reference && !body.shape.GetShape().IsNull())
-          bodies.push_back({body.shape.GetShape(), glm::dmat4(inst.world),
-                            bodies.size(), inst.part->Version()});
+          bodies.push_back({body.shape.GetShape(), inst.world, bodies.size(),
+                            inst.part->Version()});
   REQUIRE(bodies.size() > 2);
   drawing::ProjectionCache cache;
   ProjectionOptions options;

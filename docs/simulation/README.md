@@ -168,10 +168,12 @@ How it is built (`src/core/fem/AssemblyStudy.cpp`, `fem::PlanAssemblyStudy`):
   general fuse (`BOPAlgo_Builder`) runs over the copies with
   `SetNonDestructive` — an OpenCASCADE boolean writes to its arguments. A
   split written into a part would reach its drawings, CAM and exports.
-- **The fuse is fuzzy** (`SetFuzzyValue(1e-3)` mm). Parts are placed at
-  float32, so faces that should coincide sit microns apart; a strict boolean
-  finds nothing between them and the assembly meshes as loose pieces, which
-  looks exactly like a working study.
+- **The fuse is fuzzy** (`SetFuzzyValue(1e-3)` mm). Placed parts meet only as
+  exactly as their placements were solved — a loop closes to 1e-5 mm, a
+  rotation rounds, a placement typed by hand is off by what was typed — so
+  faces that should coincide can sit apart; a strict boolean finds nothing
+  between them and the assembly meshes as loose pieces, which looks exactly
+  like a working study.
 - **A bonded group is one conforming mesh.** The fuse imprints the shared
   faces and keeps each solid, and Netgen meshes a shared face once, so the
   tets on both sides share its nodes and load crosses the joint without

@@ -68,9 +68,9 @@ std::string MateLabelAt(AppState& state, const std::vector<uint64_t>& path,
 // A connector's world frame for a mate named by path: an inner mate's
 // connector is in its sub-assembly's space, placed by the flexible
 // placement's own pose of the occurrence it is on.
-std::optional<glm::mat4> MateConnectorWorldAt(AppState& state,
-                                              const std::vector<uint64_t>& path,
-                                              const Connector& c);
+std::optional<glm::dmat4>
+MateConnectorWorldAt(AppState& state, const std::vector<uint64_t>& path,
+                     const Connector& c);
 
 // The sub-assembly a FLEXIBLE placement runs, or null (rigid, a part, not
 // loaded).
@@ -106,7 +106,7 @@ std::pair<uint64_t, uint64_t> SelectedInnerOccurrence(const AppState& state);
 // Where a moving inner occurrence is DRAWN: the placement's display matrix
 // (explode, playback) times its pose in the placement, displaced by its own
 // explode step.
-glm::mat4 InnerDisplayMatrix(AppState& state, const Occurrence& placement,
-                             const Occurrence& inner);
+glm::dmat4 InnerDisplayMatrix(AppState& state, const Occurrence& placement,
+                              const Occurrence& inner);
 
 } // namespace ui

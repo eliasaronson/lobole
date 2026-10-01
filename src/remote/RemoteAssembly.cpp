@@ -615,7 +615,7 @@ uint64_t AssertionKey(ui::AppState& state, const ClearanceAssertion& a) {
     const std::vector<Body> bodies = ui::OccurrenceSubtreeBodies(state, occ);
     mix(static_cast<double>(bodies.size()));
     for (const Body& body : bodies) {
-      glm::vec3 lo{0.0f}, hi{0.0f};
+      glm::dvec3 lo{0.0}, hi{0.0};
       body.shape.GetBoundingBox(lo, hi);
       mix(lo.x);
       mix(lo.y);
@@ -712,7 +712,7 @@ void VerifyAssertion(ui::AppState& state, AssemblyDocument& asmDoc,
     gap = known ? best - tolerance : 0.0;
   } else {
     const std::optional<Measure::SetContact> c = Measure::ContactBetween(
-        bodiesA, glm::mat4(1.0f), bodiesB, glm::mat4(1.0f), true);
+        bodiesA, glm::dmat4(1.0), bodiesB, glm::dmat4(1.0), true);
     if (c && c->distanceKnown) {
       known = true;
       gap = c->volume > 1e-9 ? -1.0 : c->distance;
@@ -753,12 +753,12 @@ json NormalizeTransform(json t) {
         "pass either transform.orientation or transform.rotate, not both");
   const json& r = t.at("rotate");
   const json& ax = r.at("axis");
-  const glm::vec3 axis(ax.at(0).get<float>(), ax.at(1).get<float>(),
-                       ax.at(2).get<float>());
+  const glm::dvec3 axis(ax.at(0).get<double>(), ax.at(1).get<double>(),
+                        ax.at(2).get<double>());
   if (glm::length(axis) < 1e-9f)
     throw std::runtime_error("rotate.axis must be non-zero");
-  const float rad = glm::radians(r.at("angle_deg").get<float>());
-  const glm::quat q = glm::angleAxis(rad, glm::normalize(axis));
+  const double rad = glm::radians(r.at("angle_deg").get<double>());
+  const glm::dquat q = glm::angleAxis(rad, glm::normalize(axis));
   t["orientation"] = {q.x, q.y, q.z, q.w};
   t.erase("rotate");
   return t;
@@ -789,15 +789,15 @@ json NormalizeTransform(json t) {
 // `rpc_params_gate` reads the handler for the keys it touches, and a helper
 // that reached into `p` itself made add_mate look as though it had quietly
 // stopped accepting either.
-float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
-                          float current) {
+double MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
+                           double current) {
   if (hasRad && hasDeg)
     throw std::runtime_error(
         "pass rotation (radians) or rotation_deg, not both");
   if (hasDeg)
-    return static_cast<float>(angles::ToRadians(deg));
+    return angles::ToRadians(deg);
   if (hasRad)
-    return static_cast<float>(rad);
+    return rad;
   return current;
 }
 
@@ -949,17 +949,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"mates", fit.mates}};
   }
   if (m == "add_fastener") {
-    glm::vec3 position(0.0f);
+    glm::dvec3 position(0.0);
     if (p.contains("position")) {
       const auto& v = p.at("position");
-      position = glm::vec3(v.at(0).get<float>(), v.at(1).get<float>(),
-                           v.at(2).get<float>());
+      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                            v.at(2).get<double>());
     }
-    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
     if (p.contains("orientation")) {
       const auto q = p.at("orientation");
-      orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                              q.at(1).get<float>(), q.at(2).get<float>());
+      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
+                               q.at(1).get<double>(), q.at(2).get<double>());
     }
     std::string error;
     const uint64_t id = ui::AddFastener(
@@ -975,17 +975,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return json{{"occurrence", id}, {"part", placed}};
   }
   if (m == "add_bearing") {
-    glm::vec3 position(0.0f);
+    glm::dvec3 position(0.0);
     if (p.contains("position")) {
       const auto& v = p.at("position");
-      position = glm::vec3(v.at(0).get<float>(), v.at(1).get<float>(),
-                           v.at(2).get<float>());
+      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                            v.at(2).get<double>());
     }
-    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
     if (p.contains("orientation")) {
       const auto q = p.at("orientation");
-      orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                              q.at(1).get<float>(), q.at(2).get<float>());
+      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
+                               q.at(1).get<double>(), q.at(2).get<double>());
     }
     std::string error;
     const uint64_t id =
@@ -1211,11 +1211,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // to measure: asking for its extent by way of `partId` returns nothing,
     // which is worse than refusing — the caller reads a missing key as "no
     // geometry" rather than "not implemented for this kind".
-    std::map<uint64_t, std::pair<glm::vec3, glm::vec3>> boundsByRoot;
+    std::map<uint64_t, std::pair<glm::dvec3, glm::dvec3>> boundsByRoot;
     for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(state))
       if (inst.visible) {
         leavesByRoot[inst.rootOccurrenceId].push_back(inst.path);
-        glm::vec3 lmn(0.0f), lmx(0.0f);
+        glm::dvec3 lmn(0.0), lmx(0.0);
         if (inst.part != nullptr &&
             Measure::WorldBounds(inst.part->GetBodies(), inst.world, lmn,
                                  lmx)) {
@@ -1241,7 +1241,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     for (const Occurrence& o : state.assembly->GetOccurrences()) {
       json oj = DocumentIO::OccurrenceToJson(o);
       if (wantBounds) {
-        glm::vec3 bmn(0.0f), bmx(0.0f);
+        glm::dvec3 bmn(0.0), bmx(0.0);
         bool have = false;
         if (o.refKind == OccurrenceRef::Assembly) {
           const auto it = boundsByRoot.find(o.id);
@@ -1352,14 +1352,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       if (t.contains("position")) {
         const json& pos = t.at("position");
         occ->position =
-            glm::vec3(pos.at(0).get<float>(), pos.at(1).get<float>(),
-                      pos.at(2).get<float>());
+            glm::dvec3(pos.at(0).get<double>(), pos.at(1).get<double>(),
+                       pos.at(2).get<double>());
       }
       if (t.contains("orientation")) {
         const json& q = t.at("orientation"); // [x,y,z,w]
         occ->orientation =
-            glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                      q.at(1).get<float>(), q.at(2).get<float>());
+            glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
+                       q.at(1).get<double>(), q.at(2).get<double>());
       }
       if (!t.contains("position") && !t.contains("orientation"))
         throw std::runtime_error(
@@ -1543,8 +1543,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         {"rotation",
          MateRotationRadians(p.contains("rotation"), p.value("rotation", 0.0),
                              p.contains("rotation_deg"),
-                             p.value("rotation_deg", 0.0), 0.0f)},
-        {"offset", p.value("offset", 0.0f)}};
+                             p.value("rotation_deg", 0.0), 0.0)},
+        {"offset", p.value("offset", 0.0)}};
     if (p.contains("dx"))
       mateJson["dx"] = p.at("dx"); // planar
     if (p.contains("dy"))
@@ -1651,13 +1651,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         assembly::MateDofAt(*state.assembly, path, mate->id, dof,
                             ui::AssemblyResolverFor(state))
             .value_or(0.0);
-    const double value = turn
-                             ? MateRotationRadians(p.contains("rotation"),
-                                                   p.value("rotation", 0.0),
-                                                   p.contains("rotation_deg"),
-                                                   p.value("rotation_deg", 0.0),
-                                                   static_cast<float>(current))
-                             : p.at("offset").get<double>();
+    const double value =
+        turn ? MateRotationRadians(p.contains("rotation"),
+                                   p.value("rotation", 0.0),
+                                   p.contains("rotation_deg"),
+                                   p.value("rotation_deg", 0.0), current)
+             : p.at("offset").get<double>();
     ui::SnapshotAssembly(state);
     assembly::SetMateDofAt(*state.assembly, path, mate->id, dof, value,
                            ui::AssemblyResolverFor(state));
@@ -1710,20 +1709,20 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                               p.contains("rotation_deg"),
                               p.value("rotation_deg", 0.0), mate->rotation);
     if (p.contains("offset"))
-      mate->offset = p.at("offset").get<float>();
+      mate->offset = p.at("offset").get<double>();
     if (p.contains("flipped"))
       mate->flipped = p.at("flipped").get<bool>();
     if (p.contains("name"))
       mate->name = p.at("name").get<std::string>();
     if (p.contains("dx"))
-      mate->dx = p.at("dx").get<float>(); // planar
+      mate->dx = p.at("dx").get<double>(); // planar
     if (p.contains("dy"))
-      mate->dy = p.at("dy").get<float>(); // planar
+      mate->dy = p.at("dy").get<double>(); // planar
     if (p.contains("ball_rotation")) {    // ball [x,y,z,w]
       const json& q = p.at("ball_rotation");
       mate->ballRotation =
-          glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                    q.at(1).get<float>(), q.at(2).get<float>());
+          glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
+                     q.at(1).get<double>(), q.at(2).get<double>());
     }
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
@@ -2153,10 +2152,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             "a worm relation reads its sign from where the two mates' axes "
             "are, and these mates' frames cannot be resolved");
       if (fa && fb) {
-        const glm::vec3 za = glm::normalize(glm::vec3((*fa)[2]));
-        const glm::vec3 zb = glm::normalize(glm::vec3((*fb)[2]));
-        const float along = std::abs(glm::dot(za, zb)); // 1 parallel, 0 across
-        if (r.kind == RelationKind::Rack && along > 0.7071f)
+        const glm::dvec3 za = glm::normalize(glm::dvec3((*fa)[2]));
+        const glm::dvec3 zb = glm::normalize(glm::dvec3((*fb)[2]));
+        const double along = std::abs(glm::dot(za, zb)); // 1 parallel, 0 across
+        if (r.kind == RelationKind::Rack && along > 0.7071)
           throw std::runtime_error(
               "mate " + std::to_string(b->id) + " slides along mate " +
               std::to_string(a->id) +
@@ -2165,7 +2164,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               "(a slider slides along its connector frames' Z), not by "
               "origin frames, which are Z-up");
         if (r.kind == RelationKind::Worm) {
-          if (along > 0.0872f) // > 5 degrees off square
+          if (along > 0.0872) // > 5 degrees off square
             warnings.push_back(
                 "a worm and its wheel turn on axes at 90 degrees; these are " +
                 std::to_string(glm::degrees(std::acos(along))) +
@@ -2180,7 +2179,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             throw std::runtime_error(whyNot);
           r.ratio = ratio;
         }
-        if (r.kind == RelationKind::Gear && along < 0.9962f) // > 5 degrees
+        if (r.kind == RelationKind::Gear && along < 0.9962) // > 5 degrees
           warnings.push_back(
               "the two axles are not parallel (" +
               std::to_string(glm::degrees(std::acos(along))) +
@@ -2489,8 +2488,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     }
     const auto& o = p.at("offset");
-    const glm::vec3 offset(o.at(0).get<float>(), o.at(1).get<float>(),
-                           o.at(2).get<float>());
+    const glm::dvec3 offset(o.at(0).get<double>(), o.at(1).get<double>(),
+                            o.at(2).get<double>());
     ui::SnapshotAssembly(state);
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : v->steps)
@@ -2556,12 +2555,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       state.activeExplodedView = id;
     }
     if (p.contains("factor")) {
-      const float factor = std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
+      const double factor = std::clamp(p.at("factor").get<double>(), 0.0, 1.0);
       // A positive factor with no active view used to succeed and visibly do
       // NOTHING. Auto-activate the only view when that's unambiguous;
       // otherwise say what's missing. factor 0 stays a no-op success (the
       // reset idiom).
-      if (factor > 0.0f && state.activeExplodedView == 0) {
+      if (factor > 0.0 && state.activeExplodedView == 0) {
         const auto& views = state.assembly->GetExplodedViews();
         if (views.size() == 1)
           state.activeExplodedView = views[0].id;

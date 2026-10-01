@@ -25,8 +25,8 @@ static const SketchPlane kXY(PlaneType::XY);
 
 // Rectangles are four lines now; build them at exact corners so BuildLoops
 // chains them without needing a solve.
-static std::vector<sketch::Entity> RectLines(glm::vec2 c1, glm::vec2 c2) {
-  glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+static std::vector<sketch::Entity> RectLines(glm::dvec2 c1, glm::dvec2 c2) {
+  glm::dvec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
   return {sketch::Line{a, b}, sketch::Line{b, c}, sketch::Line{c, d},
           sketch::Line{d, a}};
 }
@@ -38,7 +38,7 @@ TEST_CASE("SegmentIntersect finds crossings and rejects misses", "[profile]") {
   // Crosses at the midpoint of segment 1.
   auto hit = sketch::SegmentIntersect({0, 0}, {2, 0}, {1, -1}, {1, 1});
   REQUIRE(hit.has_value());
-  CHECK_THAT(*hit, WithinAbs(0.5f, 1e-5f));
+  CHECK_THAT(*hit, WithinAbs(0.5, 1e-5));
   // Parallel: no intersection.
   CHECK_FALSE(sketch::SegmentIntersect({0, 0}, {2, 0}, {0, 1}, {2, 1}));
   // Lines would cross beyond segment 1's extent (x=3 > 2).
@@ -135,11 +135,11 @@ TEST_CASE("A filleted-corner profile (lines + arc) extrudes",
   // the arc runs CCW from (4,1.5) to (3.5,2), centred at (3.5,1.5).
   const double r = 0.5;
   std::vector<sketch::Entity> e;
-  e.push_back(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
-  e.push_back(sketch::Line{{4.0f, 0.0f}, {4.0f, 1.5f}});
-  e.push_back(sketch::Arc{{3.5f, 1.5f}, r, 0.0, M_PI / 2});
-  e.push_back(sketch::Line{{3.5f, 2.0f}, {0.0f, 2.0f}});
-  e.push_back(sketch::Line{{0.0f, 2.0f}, {0.0f, 0.0f}});
+  e.push_back(sketch::Line{{0.0, 0.0}, {4.0, 0.0}});
+  e.push_back(sketch::Line{{4.0, 0.0}, {4.0, 1.5}});
+  e.push_back(sketch::Arc{{3.5, 1.5}, r, 0.0, M_PI / 2});
+  e.push_back(sketch::Line{{3.5, 2.0}, {0.0, 2.0}});
+  e.push_back(sketch::Line{{0.0, 2.0}, {0.0, 0.0}});
 
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 1);
@@ -154,8 +154,8 @@ TEST_CASE("A half-disk (diameter line + semicircle arc) extrudes",
           "[extrude][arc]") {
   // Semicircle radius 1 centred at origin, closed by its diameter.
   std::vector<sketch::Entity> e;
-  e.push_back(sketch::Line{{-1.0f, 0.0f}, {1.0f, 0.0f}}); // diameter
-  e.push_back(sketch::Arc{{0.0f, 0.0f}, 1.0, 0.0, M_PI}); // upper semicircle
+  e.push_back(sketch::Line{{-1.0, 0.0}, {1.0, 0.0}});   // diameter
+  e.push_back(sketch::Arc{{0.0, 0.0}, 1.0, 0.0, M_PI}); // upper semicircle
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 1);
   CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
@@ -176,9 +176,9 @@ TEST_CASE("Rounded flanges extrude on translated oblique planes",
       sketch::Arc{{-24, -22}, 12, M_PI, 3 * M_PI / 2}};
   const auto loops = sketch::BuildLoops(edges);
   REQUIRE(loops.size() == 1);
-  for (const glm::vec3 origin :
-       {glm::vec3(202, 0, 212.4f), glm::vec3(10202, 500, 1212.4f)}) {
-    const SketchPlane plane(origin, {0.8f, 0, -0.6f}, {0, 1, 0});
+  for (const glm::dvec3 origin :
+       {glm::dvec3(202, 0, 212.4), glm::dvec3(10202, 500, 1212.4)}) {
+    const SketchPlane plane(origin, {0.8, 0, -0.6}, {0, 1, 0});
     const CADShape prism = sketch::BuildPrism(plane, loops, 10, false);
     REQUIRE(prism.IsValid());
     const double area = 72 * 68 - (4 - M_PI) * 12 * 12;
@@ -224,28 +224,28 @@ TEST_CASE("Reversed extrude sits on the opposite side of the plane",
   auto loops = sketch::BuildLoops(RectLines({0, 0}, {2, 2}));
   CADShape prism = sketch::BuildPrism(kXY, loops, 2.0, true);
   REQUIRE(prism.IsValid());
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   prism.GetBoundingBox(min, max);
   CHECK(max.z <= 1e-6); // extruded toward -Z
   CHECK(min.z <= -2.0 + 1e-6);
 }
 
 TEST_CASE("Offset plane places the prism where expected", "[extrude]") {
-  SketchPlane plane(PlaneType::XY, glm::vec3(10, 0, 5));
+  SketchPlane plane(PlaneType::XY, glm::dvec3(10, 0, 5));
   auto loops = sketch::BuildLoops(RectLines({-1, -1}, {1, 1}));
   CADShape prism = sketch::BuildPrism(plane, loops, 2.0, false);
   REQUIRE(prism.IsValid());
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   prism.GetBoundingBox(min, max);
-  glm::vec3 center = (min + max) * 0.5f;
-  CHECK_THAT(center.x, WithinRel(10.0f, 1e-3f));
-  CHECK_THAT(center.z, WithinRel(6.0f, 1e-3f)); // 5 + half of 2
+  glm::dvec3 center = (min + max) * 0.5;
+  CHECK_THAT(center.x, WithinRel(10.0, 1e-3));
+  CHECK_THAT(center.z, WithinRel(6.0, 1e-3)); // 5 + half of 2
 }
 
 // --- ExtrudeFeature modes (through a Document) ------------------------------
 
-static uint64_t AddRectSketch(Document& doc, const glm::vec2& c1,
-                              const glm::vec2& c2,
+static uint64_t AddRectSketch(Document& doc, const glm::dvec2& c1,
+                              const glm::dvec2& c2,
                               const SketchPlane& plane = kXY) {
   auto sk = std::make_unique<SketchFeature>("Sketch", plane);
   sk->AddRectangle(c1, c2);
@@ -265,7 +265,7 @@ TEST_CASE("ExtrudeFeature NewBody adds a body", "[extrude][feature]") {
 TEST_CASE("ExtrudeFeature Add fuses into an existing body",
           "[extrude][feature]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4,
                                               1));   // z 0..1
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // on XY, overlaps base top
   doc.AddFeature(
@@ -279,7 +279,7 @@ TEST_CASE("ExtrudeFeature Add fuses into an existing body",
 
 TEST_CASE("ExtrudeFeature Cut removes material", "[extrude][feature]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4,
                                               2));   // z 0..2, vol 32
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // 2x2 hole
   doc.AddFeature(
@@ -374,10 +374,10 @@ TEST_CASE("A cut that only touches the body leaves it exactly as it was",
   // removed nothing.
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
   const auto before = doc.GetBodies()[0].elementMap.names;
-  const SketchPlane top(glm::vec3(0, 0, 2), glm::vec3(0, 0, 1),
-                        glm::vec3(1, 0, 0));
+  const SketchPlane top(glm::dvec3(0, 0, 2), glm::dvec3(0, 0, 1),
+                        glm::dvec3(1, 0, 0));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Away", sid, 5.0, ExtrudeMode::Cut));
@@ -390,7 +390,7 @@ TEST_CASE("ExtrudeFeature Cut that removes material carries no warning",
           "[extrude][feature][warning]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // real pocket
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
@@ -401,7 +401,7 @@ TEST_CASE("Fixing a no-op cut clears its warning on the next regen",
           "[extrude][feature][warning]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12}); // misses
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
@@ -475,14 +475,12 @@ TEST_CASE("Solver float noise at a line/arc joint does not distort the prism",
   // between the trimmed top line and the fillet arc). The noisy joint made
   // the profile lose ~5% of its area while still extruding "successfully".
   std::vector<sketch::Entity> e;
-  e.push_back(sketch::Line{{0.0f, 0.0f}, {40.0f, 0.0f}});
-  e.push_back(sketch::Line{{40.0f, 0.0f}, {40.0f, 20.0f}});
-  e.push_back(sketch::Line{{40.0f, 20.0f}, {3.999999761581421f, 20.0f}});
-  e.push_back(sketch::Line{{0.0f, 16.0f}, {0.0f, 0.0f}});
-  e.push_back(sketch::Arc{{4.0f, 16.0f},
-                          3.9999999543595246,
-                          1.5707963501871345,
-                          3.1415926649999117});
+  e.push_back(sketch::Line{{0.0, 0.0}, {40.0, 0.0}});
+  e.push_back(sketch::Line{{40.0, 0.0}, {40.0, 20.0}});
+  e.push_back(sketch::Line{{40.0, 20.0}, {3.999999761581421, 20.0}});
+  e.push_back(sketch::Line{{0.0, 16.0}, {0.0, 0.0}});
+  e.push_back(sketch::Arc{
+      {4.0, 16.0}, 3.9999999543595246, 1.5707963501871345, 3.1415926649999117});
 
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 1);
@@ -563,7 +561,7 @@ TEST_CASE("Multi-profile revolve sums the groups", "[extrude][profile]") {
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 2);
   CADShape rings = sketch::BuildRevolve(
-      kXY, loops, glm::vec3(0), glm::vec3(0, 1, 0), 2.0 * M_PI, false, false);
+      kXY, loops, glm::dvec3(0), glm::dvec3(0, 1, 0), 2.0 * M_PI, false, false);
   REQUIRE(rings.IsValid());
   const double v = 2.0 * M_PI * 2.5 * 1.0 + 2.0 * M_PI * 5.5 * 1.0;
   CHECK_THAT(rings.Volume(), WithinRel(v, 1e-3));
@@ -611,7 +609,7 @@ TEST_CASE("Symmetric extrude straddles the sketch plane", "[extrude][end]") {
   doc.AddFeature(std::move(ext));
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(48.0, 1e-6));
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   doc.GetBodies()[0].shape.GetBoundingBox(min, max);
   CHECK_THAT(min.z, Catch::Matchers::WithinAbs(-3.0, 1e-4));
   CHECK_THAT(max.z, Catch::Matchers::WithinAbs(3.0, 1e-4));
@@ -631,7 +629,7 @@ TEST_CASE("Two-sided extrude sweeps both ways with separate distances",
   doc.AddFeature(std::move(ext));
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 7.0, 1e-6));
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   doc.GetBodies()[0].shape.GetBoundingBox(min, max);
   CHECK_THAT(min.z, Catch::Matchers::WithinAbs(-2.0, 1e-4));
   CHECK_THAT(max.z, Catch::Matchers::WithinAbs(5.0, 1e-4));
@@ -669,12 +667,12 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
 TEST_CASE("Through-all cut pierces the whole body without a distance",
           "[extrude][end]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4,
                                               2)); // z 0..2, vol 32
   // Sketch ON the top face, cutting back down through the box — the case
   // that used to need a plane parked behind the material plus an overshoot
   // distance. The 0.123 literal must be ignored.
-  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+  SketchPlane top(PlaneType::XY, glm::dvec3(0, 0, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
   auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 0.123,
                                               ExtrudeMode::Cut, true);
@@ -690,7 +688,7 @@ TEST_CASE("Through-all cut pierces the whole body without a distance",
 TEST_CASE("Through-all cut sweeps forward without reversed", "[extrude][end]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // on XY at z=0, +normal up
   auto ext =
       std::make_unique<ExtrudeFeature>("Slot", sid, 1.0, ExtrudeMode::Cut);
@@ -704,7 +702,7 @@ TEST_CASE("Through-all cut sweeps forward without reversed", "[extrude][end]") {
 TEST_CASE("Through-all requires cut mode", "[extrude][end]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3});
   auto ext =
       std::make_unique<ExtrudeFeature>("Pad", sid, 1.0, ExtrudeMode::NewBody);
@@ -720,8 +718,8 @@ TEST_CASE("Through-all cut that misses warns like a blind cut",
           "[extrude][end][warning]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
-  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
+  SketchPlane top(PlaneType::XY, glm::dvec3(0, 0, 2));
   uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12}, top); // off to the side
   auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 1.0,
                                               ExtrudeMode::Cut, true);
@@ -738,8 +736,8 @@ TEST_CASE("Through-all round-trips through serialization (v52)",
           "[extrude][end][serialization]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
-  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 4, 4, 2));
+  SketchPlane top(PlaneType::XY, glm::dvec3(0, 0, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
   auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 1.0,
                                               ExtrudeMode::Cut, true);
@@ -972,9 +970,9 @@ TEST_CASE("A cut into an empty document reports why", "[extrude][error]") {
 // A rectangle whose corners are visited in the given direction: the sketch
 // rectangle tool follows the drag, so a hole is as likely to come out
 // clockwise as counter-clockwise.
-static std::vector<sketch::Entity> RectLinesDir(glm::vec2 c1, glm::vec2 c2,
+static std::vector<sketch::Entity> RectLinesDir(glm::dvec2 c1, glm::dvec2 c2,
                                                 bool ccw) {
-  glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+  glm::dvec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
   if (ccw)
     return {sketch::Line{a, b}, sketch::Line{b, c}, sketch::Line{c, d},
             sketch::Line{d, a}};

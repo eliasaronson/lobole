@@ -407,10 +407,11 @@ void SyncDocumentRenderers(AppState& state) {
   {
     float reach = 0.0f;
     for (const auto& body : bodies) {
-      glm::vec3 mn, mx;
+      glm::dvec3 mn, mx;
       body.shape.GetBoundingBox(mn, mx);
       for (int i = 0; i < 3; i++)
-        reach = std::max({reach, std::abs(mn[i]), std::abs(mx[i])});
+        reach =
+            std::max({reach, float(std::abs(mn[i])), float(std::abs(mx[i]))});
     }
     state.sceneReachDoc = state.document.get();
     state.sceneReachVersion = activeVersion;
@@ -701,7 +702,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
           continue;
         // Every OTHER plane trims this cap, or two cuts leave each other's
         // fill hanging in space past the corner.
-        std::vector<glm::vec4> trim;
+        std::vector<glm::dvec4> trim;
         for (size_t j = 0; j < worldPlanes.size(); j++) {
           glm::vec3 to, tn;
           if (j != i && SectionPlaneInPartSpace(worldPlanes[j], src.xf, to, tn))
@@ -1348,24 +1349,26 @@ void SyncAssemblyRenderers(AppState& state) {
     // Motion playback swaps the unit's solved placement for the pose the
     // run recorded — display-only. Only when playing, so every other frame
     // is computed exactly as before (the pixel gate is byte-exact).
-    glm::mat4 xf =
-        glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
+    glm::dmat4 world =
+        glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) *
         inst.world;
-    glm::mat4 played;
+    glm::dmat4 played;
     if (MotionPlaybackWorld(state, occ.id, played)) {
-      glm::mat4 local = glm::inverse(OccurrenceMatrix(occ)) * inst.world;
-      glm::mat4 leaf; // a moving leaf of a flexible placement (v129)
+      glm::dmat4 local = glm::inverse(OccurrenceMatrix(occ)) * inst.world;
+      glm::dmat4 leaf; // a moving leaf of a flexible placement (v129)
       if (MotionPlaybackLocal(state, occ, inst.innerIds, local, leaf))
         local = leaf;
-      xf = glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
-           played * local;
+      world = glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) *
+              played * local;
     }
     // A moving part of a flexible unit may explode on its own (v130), on top
     // of the unit's step. Only when it has one: the pixel gate is byte-exact.
-    if (const glm::vec3 inner =
+    if (const glm::dvec3 inner =
             ExplodeInnerOffset(state, occ.id, inst.innerIds);
-        inner != glm::vec3(0.0f))
-      xf = glm::translate(glm::mat4(1.0f), inner) * xf;
+        inner != glm::dvec3(0.0))
+      world = glm::translate(glm::dmat4(1.0), inner) * world;
+    // The model composes in double; the renderers take float, here.
+    const glm::mat4 xf(world);
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
       const SharedBody& sb = it->second.bodies[bi];
       if (!sb.tess)
@@ -1429,7 +1432,7 @@ void SyncAssemblyRenderers(AppState& state) {
         }
       }
       // The other sections, also in this part's space, trim this cap.
-      std::vector<glm::vec4> trim;
+      std::vector<glm::dvec4> trim;
       for (size_t j = 0; j < planes.size(); j++) {
         glm::vec3 to, tn;
         if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
@@ -1551,7 +1554,7 @@ void SyncInContextGhosts(AppState& state) {
   const Occurrence* edited = asmDoc.FindById(state.inContext.occurrenceId);
   if (!edited)
     return;
-  const glm::mat4 inv = glm::inverse(OccurrenceMatrix(*edited));
+  const glm::dmat4 inv = glm::inverse(OccurrenceMatrix(*edited));
 
   // One shared asset per context part body (as in SyncAssemblyRenderers),
   // minus everything a ghost doesn't need: outlines, picking, materials.
@@ -1587,7 +1590,7 @@ void SyncInContextGhosts(AppState& state) {
         tess.push_back(TessellationFor(state, body.shape));
       it = byPart.emplace(key, std::move(tess)).first;
     }
-    const glm::mat4 xf = inv * inst.world;
+    const glm::mat4 xf(inv * inst.world); // to the renderer, in float
     for (size_t bi = 0; bi < it->second.size(); bi++) {
       if (it->second[bi] == nullptr)
         continue; // empty body

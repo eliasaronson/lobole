@@ -245,9 +245,8 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
 }
 } // namespace
 
-bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
-  min = glm::vec3(FLT_MAX);
-  max = glm::vec3(-FLT_MAX);
+bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax) {
+  glm::dvec3 min(DBL_MAX), max(-DBL_MAX);
   bool any = false;
   if (state.assembly) {
     // Every visible leaf part of the tree, placed (A5). Bounding only the
@@ -259,20 +258,20 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
       const Document* part = inst.part;
       // The top-level occurrence's explode offset moves the whole subtree,
       // so exploded extents are bounded too.
-      const glm::mat4 xf =
-          glm::translate(glm::mat4(1.0f),
+      const glm::dmat4 xf =
+          glm::translate(glm::dmat4(1.0),
                          ExplodeOffset(state, inst.rootOccurrenceId) +
                              ExplodeInnerOffset(state, inst.rootOccurrenceId,
                                                 inst.innerIds)) *
           inst.world;
       for (const auto& body : part->GetBodies()) {
-        glm::vec3 bmin, bmax;
+        glm::dvec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
         for (int c = 0; c < 8; c++) { // transform all 8 corners
-          const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                                 (c & 2) ? bmax.y : bmin.y,
-                                 (c & 4) ? bmax.z : bmin.z);
-          const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+          const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                  (c & 2) ? bmax.y : bmin.y,
+                                  (c & 4) ? bmax.z : bmin.z);
+          const glm::dvec3 w = glm::dvec3(xf * glm::dvec4(corner, 1.0));
           min = glm::min(min, w);
           max = glm::max(max, w);
           any = true;
@@ -281,7 +280,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
     }
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies()) {
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       body.shape.GetBoundingBox(bmin, bmax);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
@@ -296,7 +295,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
     // control points, and the chess jig's view was framed round a piece that
     // much bigger than it is, the jig pushed up against the top edge.
     for (const Body& body : JobPlacedBodies(state)) {
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
       min = glm::min(min, bmin);
       max = glm::max(max, bmax);
@@ -306,8 +305,8 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
     // what a person is setting up.
     glm::dvec3 stockLo(0.0), stockHi(0.0);
     if (CamStockBox(state, stockLo, stockHi)) {
-      min = glm::min(min, glm::vec3(stockLo));
-      max = glm::max(max, glm::vec3(stockHi));
+      min = glm::min(min, glm::dvec3(stockLo));
+      max = glm::max(max, glm::dvec3(stockHi));
       any = true;
     }
     // ...and what holds them, which is drawn too. The MODEL shape's box
@@ -316,7 +315,7 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
     // with a cold memo, bounded afresh on every call.
     if (const cam::Setup* setup = ActiveJobSetup(state))
       for (const cam::Fixture& f : setup->fixtures) {
-        const glm::mat4 xf(cam::FixtureTransform(f));
+        const glm::dmat4 xf(cam::FixtureTransform(f));
         // A part's bodies by reference (this runs every frame under the
         // section tool, and a Body copy carries its element map); a box is
         // one small cached shape.
@@ -327,13 +326,13 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
         for (const Body& body : doc != nullptr ? doc->GetBodies() : box) {
           if (body.reference || !body.shape.IsValid())
             continue;
-          glm::vec3 bmin, bmax;
+          glm::dvec3 bmin, bmax;
           body.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
           for (int c = 0; c < 8; c++) {
-            const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                                   (c & 2) ? bmax.y : bmin.y,
-                                   (c & 4) ? bmax.z : bmin.z);
-            const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+            const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                    (c & 2) ? bmax.y : bmin.y,
+                                    (c & 4) ? bmax.z : bmin.z);
+            const glm::dvec3 w = glm::dvec3(xf * glm::dvec4(corner, 1.0));
             min = glm::min(min, w);
             max = glm::max(max, w);
             any = true;
@@ -341,6 +340,9 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
         }
       }
   }
+  // The camera and the section tool take float; the box narrows here.
+  outMin = glm::vec3(min);
+  outMax = glm::vec3(max);
   return any;
 }
 
@@ -406,7 +408,7 @@ SectionFrame SectionSourceFrame(const AppState& state,
       if (body.createdBy != s.face.featureId)
         continue;
       const std::optional<int> idx = body.elementMap.Resolve(s.face.name);
-      glm::vec3 origin(0.0f), normal(0.0f), uAxis(0.0f);
+      glm::dvec3 origin(0.0), normal(0.0), uAxis(0.0);
       if (idx && body.shape.FacePlane(*idx, origin, normal, uAxis)) {
         f.origin = origin;
         f.normal = glm::normalize(normal);
@@ -484,7 +486,7 @@ void SectionFacePicked(AppState& state, const SelectionItem& item) {
       if (body.createdBy != item.element.featureId)
         continue;
       const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       planar = idx && body.shape.FacePlane(*idx, o, n, u);
       break;
     }
@@ -652,7 +654,7 @@ void FitCameraToSelection(AppState& state) {
     for (const auto& body : state.document->GetBodies()) {
       if (body.createdBy != createdBy)
         continue;
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       body.shape.GetBoundingBox(bmin, bmax);
       addBox(bmin, bmax, glm::mat4(1.0f));
     }
@@ -694,7 +696,7 @@ void FitCameraToSelection(AppState& state) {
         break;
       const glm::mat4 xf = DisplayMatrix(state, *occ);
       for (const auto& body : part->GetBodies()) {
-        glm::vec3 bmin, bmax;
+        glm::dvec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
         addBox(bmin, bmax, xf);
       }
@@ -824,7 +826,7 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     const glm::vec3 planeOrigin = n * planes[i].w; // dot(origin,n) = w
     // Every OTHER section trims this cap; without that, two cuts leave each
     // other's fill hanging in space past the corner.
-    std::vector<glm::vec4> trim;
+    std::vector<glm::dvec4> trim;
     for (size_t j = 0; j < planes.size(); j++)
       if (j != i && glm::length(glm::vec3(planes[j])) > 1e-6f)
         trim.push_back(planes[j]);

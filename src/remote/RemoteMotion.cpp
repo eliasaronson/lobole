@@ -252,7 +252,7 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
     if (includePoses) {
       json poses = json::array();
       for (const auto& [occId, m] : sm.worlds) {
-        const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
+        const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(m)));
         poses.push_back({{"occurrence", occId},
                          {"position", {m[3].x, m[3].y, m[3].z}},
                          {"orientation", {q.x, q.y, q.z, q.w}}});
@@ -261,8 +261,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
       // PATH, and no `occurrence` key — its id is the sub-assembly's and
       // would collide with this document's.
       for (const motion::Sample::LeafWorld& l : sm.leaves) {
-        const glm::mat4& m = l.world;
-        const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
+        const glm::dmat4& m = l.world;
+        const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(m)));
         poses.push_back({{"path", {l.root, l.occurrence}},
                          {"position", {m[3].x, m[3].y, m[3].z}},
                          {"orientation", {q.x, q.y, q.z, q.w}}});

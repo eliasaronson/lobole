@@ -48,19 +48,19 @@ SDK's `Plane.xy/xz/yz` helpers take `flip=True` for the opposite-facing plane;
 their axes are tabled in
 [the SDK guide](../scripting/sdk.md#the-principal-planes).
 
-**The plane and everything on it are double precision**, from the document
-through the solver to OpenCASCADE: `SketchPlane` holds `glm::dvec3`, every
-entity coordinate is a `glm::dvec2`, and JSON reads and writes them as the
-doubles they are. A feature starts on its plane, so a value rounded here
+**The plane and everything on it are double precision**, like the rest of the
+model ([../conventions.md](../conventions.md#the-model-is-double)), from the
+document through the solver to OpenCASCADE: `SketchPlane` holds `glm::dvec3`,
+every entity coordinate is a `glm::dvec2`, and JSON reads and writes them as
+the doubles they are. A feature starts on its plane, so a value rounded here
 becomes a face microns off the one it was meant to meet: through float, a
 plane typed at z = 13.4 was 13.39999962, a pocket cut from it kept a 0.4 µm
 skin over itself, and an expression-driven sketch re-solved from a rounded
 seed on every regeneration. Float appears only where a value is handed to the
 renderers (`GetPlaneMatrix`, the overlays) or read off the screen (a pick
 widens into the sketch). A plane built from a face takes the B-rep face's
-frame (`CADShape::FacePlane`'s `dvec3` form), never the render mesh's. A frame
-that is already orthonormal is kept bit for bit, so a plane saves and loads
-unchanged.
+frame (`CADShape::FacePlane`), never the render mesh's. A frame that is
+already orthonormal is kept bit for bit, so a plane saves and loads unchanged.
 
 ### Entities
 

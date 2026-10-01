@@ -29,9 +29,9 @@ static fs::path TempFile(const std::string& name) {
 TEST_CASE("Sphere and cylinder features produce bodies", "[feature]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<SphereFeature>("Ball", glm::vec3(1, 2, 3), 1.5));
+      std::make_unique<SphereFeature>("Ball", glm::dvec3(1, 2, 3), 1.5));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Rod", glm::vec3(0), glm::vec3(0, 0, 1), 1.0, 4.0));
+      "Rod", glm::dvec3(0), glm::dvec3(0, 0, 1), 1.0, 4.0));
 
   REQUIRE(doc.GetBodies().size() == 2);
   const double sphereVol = 4.0 / 3.0 * 3.14159265358979 * 1.5 * 1.5 * 1.5;
@@ -43,8 +43,8 @@ TEST_CASE("Sphere and cylinder features produce bodies", "[feature]") {
 TEST_CASE("ImportFeature loads a STEP file centered at origin",
           "[feature][io]") {
   // Author a box far from the origin and export it
-  CADShape box = CADKernel::Instance().CreateBox(glm::vec3(10, 20, 30),
-                                                 glm::vec3(12, 22, 32));
+  CADShape box = CADKernel::Instance().CreateBox(glm::dvec3(10, 20, 30),
+                                                 glm::dvec3(12, 22, 32));
   fs::path stepPath = TempFile("designer_test_import.step");
   std::vector<CADShape> shapes{box};
   REQUIRE(CADKernel::Instance().SaveSTEP(stepPath.string(), shapes));
@@ -56,12 +56,12 @@ TEST_CASE("ImportFeature loads a STEP file centered at origin",
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0, 1e-6));
 
   // The import should be re-centered on the origin
-  glm::vec3 min, max;
+  glm::dvec3 min, max;
   doc.GetBodies()[0].shape.GetBoundingBox(min, max);
-  glm::vec3 center = (min + max) * 0.5f;
-  CHECK_THAT(center.x, WithinAbs(0.0f, 0.1f));
-  CHECK_THAT(center.y, WithinAbs(0.0f, 0.1f));
-  CHECK_THAT(center.z, WithinAbs(0.0f, 0.1f));
+  glm::dvec3 center = (min + max) * 0.5;
+  CHECK_THAT(center.x, WithinAbs(0.0, 0.1));
+  CHECK_THAT(center.y, WithinAbs(0.0, 0.1));
+  CHECK_THAT(center.z, WithinAbs(0.0, 0.1));
 
   fs::remove(stepPath);
 }
@@ -72,8 +72,8 @@ TEST_CASE("A seeded ImportFeature uses the caller's geometry once, then the "
   // The GUI import worker parses a STEP to decide part-vs-assembly; a
   // single-product file would then be read a SECOND time by the feature's
   // first regen — the whole file twice, ~12 s each at 48 MB.
-  CADShape box = CADKernel::Instance().CreateBox(glm::vec3(10, 20, 30),
-                                                 glm::vec3(12, 22, 32));
+  CADShape box = CADKernel::Instance().CreateBox(glm::dvec3(10, 20, 30),
+                                                 glm::dvec3(12, 22, 32));
   fs::path stepPath = TempFile("designer_test_seeded.step");
   std::vector<CADShape> shapes{box};
   REQUIRE(CADKernel::Instance().SaveSTEP(stepPath.string(), shapes));
@@ -89,9 +89,9 @@ TEST_CASE("A seeded ImportFeature uses the caller's geometry once, then the "
   // Seeded or not, the result is the same import: one body, centered.
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0, 1e-6));
-  glm::vec3 mn, mx;
+  glm::dvec3 mn, mx;
   doc.GetBodies()[0].shape.GetBoundingBox(mn, mx);
-  CHECK_THAT(glm::length((mn + mx) * 0.5f), WithinAbs(0.0f, 0.1f));
+  CHECK_THAT(glm::length((mn + mx) * 0.5), WithinAbs(0.0, 0.1));
 
   // The seed is consumed, not sticky: a re-execution goes back to the file, so
   // editing the source still updates the part. Deleting the file is how this
@@ -115,12 +115,12 @@ TEST_CASE("ImportFeature fails cleanly on a missing file", "[feature][io]") {
 TEST_CASE("Document JSON roundtrip preserves features and geometry",
           "[serialization]") {
   Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(1, 0, -2), 2.0,
+                                              3.0, 4.0));
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(1, 0, -2), 2.0, 3.0, 4.0));
-  doc.AddFeature(
-      std::make_unique<SphereFeature>("Ball", glm::vec3(5, 0, 0), 1.5));
+      std::make_unique<SphereFeature>("Ball", glm::dvec3(5, 0, 0), 1.5));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Rod", glm::vec3(-3, 0, 0), glm::vec3(0, 1, 0), 0.5, 2.0));
+      "Rod", glm::dvec3(-3, 0, 0), glm::dvec3(0, 1, 0), 0.5, 2.0));
 
   fs::path path = TempFile("designer_test_doc.json");
   std::string error;
@@ -144,12 +144,12 @@ TEST_CASE("Document JSON roundtrip preserves features and geometry",
 TEST_CASE("Feature material round-trips and stamps its body",
           "[serialization]") {
   Document doc;
-  auto box = std::make_unique<BoxFeature>("Base", glm::vec3(0), 2.0, 2.0, 2.0);
+  auto box = std::make_unique<BoxFeature>("Base", glm::dvec3(0), 2.0, 2.0, 2.0);
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   // A second body left at the default (empty) material.
   doc.AddFeature(
-      std::make_unique<SphereFeature>("Ball", glm::vec3(5, 0, 0), 1.0));
+      std::make_unique<SphereFeature>("Ball", glm::dvec3(5, 0, 0), 1.0));
 
   // The creating feature stamps its material onto the body it produces.
   REQUIRE(doc.GetBodies().size() == 2);
@@ -181,7 +181,7 @@ TEST_CASE("DistancePL dimension and its expression round-trip",
   sketch::Constraint dim{sketch::ConstraintKind::DistancePL, {p0, 0}, {l0, 0}};
   dim.value = 2.0;
   dim.valueExpr = "4/2";
-  dim.labelOffset = {0.5f, 0.0f};
+  dim.labelOffset = {0.5, 0.0};
   sk->constraints.push_back(dim);
   doc.AddFeature(std::move(sk));
 
@@ -200,11 +200,11 @@ TEST_CASE("DistancePL dimension and its expression round-trip",
   CHECK(c.b.entity == l0);
   CHECK_THAT(c.value, WithinAbs(2.0, 1e-9));
   CHECK(c.valueExpr == "4/2");
-  CHECK_THAT(c.labelOffset.x, WithinAbs(0.5f, 1e-6f));
+  CHECK_THAT(c.labelOffset.x, WithinAbs(0.5, 1e-6));
   // The expression re-evaluated + solved on load keeps the point 2 off the
   // line (it already was — regeneration must not move it).
-  const glm::vec2 p = std::get<sketch::Point>(lsk->entities[1]).p;
-  CHECK_THAT(p.y, WithinAbs(2.0f, 1e-3f));
+  const glm::dvec2 p = std::get<sketch::Point>(lsk->entities[1]).p;
+  CHECK_THAT(p.y, WithinAbs(2.0, 1e-3));
 
   fs::remove(path);
 }
@@ -213,7 +213,7 @@ TEST_CASE("Centered rectangle's symmetric-about-point anchor round-trips",
           "[serialization][sketch]") {
   Document doc;
   auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
-  const auto ids = sk->AddRectangleCentered({1.0f, 0.5f}, {2.0f, 1.0f});
+  const auto ids = sk->AddRectangleCentered({1.0, 0.5}, {2.0, 1.0});
   doc.AddFeature(std::move(sk));
 
   fs::path path = TempFile("designer_test_center_rect.json");
@@ -270,8 +270,8 @@ namespace {
 Document DocWithStudy() {
   Document doc;
   doc.SetParameter("load_n", "1000");
-  doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 10.0, 4.0, 4.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 10.0,
+                                              4.0, 4.0));
   fem::Study& s = doc.AddStudy("Static 1");
   s.meshSize = 5.0;
   s.meshSizeExpr = "";
@@ -349,7 +349,7 @@ TEST_CASE("A document with no studies writes no studies key or dir",
           "[serialization][fem]") {
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 1.0, 1.0, 1.0));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0, 0, 0), 1.0, 1.0, 1.0));
   // Single-file: no "studies" key.
   fs::path path = TempFile("designer_test_nostudy.json");
   std::string error;
@@ -371,7 +371,7 @@ TEST_CASE("A document with no studies writes no studies key or dir",
 TEST_CASE("Modal analysis type + gravity round-trip (v32)",
           "[serialization][fem]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100.0,
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::dvec3(0, 0, 0), 100.0,
                                               10.0, 10.0));
   fem::Study& modal = doc.AddStudy("Modes");
   modal.type = fem::AnalysisType::Modal;
@@ -388,7 +388,7 @@ TEST_CASE("Modal analysis type + gravity round-trip (v32)",
   {
     Document plain;
     plain.AddFeature(
-        std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 1, 1, 1));
+        std::make_unique<BoxFeature>("B", glm::dvec3(0, 0, 0), 1, 1, 1));
     plain.AddStudy("S");
     fs::path p2 = TempFile("designer_test_plainstudy.json");
     REQUIRE(testio::Save(plain, p2.string()));
@@ -431,9 +431,9 @@ fs::path MergeCaseProject(const std::string& name) {
       ("designer_merge_" + name + "_" + std::to_string(::getpid()) + ".dsgn");
   fs::remove_all(dir);
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::dvec3(0), 2, 2, 2));
   doc.AddFeature(
-      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 2, 2));
+      std::make_unique<BoxFeature>("B", glm::dvec3(5, 0, 0), 2, 2, 2));
   REQUIRE(testio::Save(doc, dir.string())); // .dsgn ⇒ the directory format
   return dir;
 }
@@ -532,7 +532,7 @@ TEST_CASE("The directory form round-trips through a folder pick", "[io]") {
   const std::string target = DocumentIO::ProjectSaveTarget(picked.string());
   Document doc;
   doc.AddFeature(
-      std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0, 10.0, 10.0));
+      std::make_unique<BoxFeature>("Base", glm::dvec3(0), 10.0, 10.0, 10.0));
   REQUIRE(DocumentIO::Save(doc, target));
   // A DIRECTORY: what a folder picker can hand back, unlike a flat file.
   CHECK(fs::is_directory(target));
@@ -594,10 +594,10 @@ TEST_CASE("describe's feature table covers every type a document can hold",
   // in the table. FeatureToJson would throw "Unserializable feature type" for
   // anything it cannot write, so this also pins To/From agreement.
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
-  doc.AddFeature(std::make_unique<SphereFeature>("S", glm::vec3(0), 1));
-  doc.AddFeature(std::make_unique<CylinderFeature>("C", glm::vec3(0),
-                                                   glm::vec3(0, 1, 0), 1, 1));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::dvec3(0), 1, 1, 1));
+  doc.AddFeature(std::make_unique<SphereFeature>("S", glm::dvec3(0), 1));
+  doc.AddFeature(std::make_unique<CylinderFeature>("C", glm::dvec3(0),
+                                                   glm::dvec3(0, 1, 0), 1, 1));
 
   const auto types = DocumentIO::FeatureTypes();
   for (size_t i = 0; i < doc.FeatureCount(); i++) {

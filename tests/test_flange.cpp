@@ -147,7 +147,7 @@ TEST_CASE("an edge flange bends a wall up and records the bend",
   CHECK_THAT(bend.axisOrigin.z, WithinAbs(-kMinRadius, 1e-6));
   glm::dvec3 lo, hi;
   {
-    glm::vec3 l, h;
+    glm::dvec3 l, h;
     doc.GetBodies()[0].shape.GetBoundingBox(l, h);
     lo = l;
     hi = h;
@@ -172,7 +172,7 @@ TEST_CASE("the picked edge chooses which way the wall folds", "[sheetmetal]") {
   REQUIRE(doc.GetBodies()[0].bends.size() == 1);
   CHECK_THAT(doc.GetBodies()[0].bends[0].axisOrigin.z,
              WithinAbs(kThickness + kMinRadius, 1e-6));
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
   CHECK(hi.z > kThickness + kMinRadius);
   CHECK_THAT(static_cast<double>(lo.z), WithinAbs(0.0, 1e-6));

@@ -260,9 +260,9 @@ void BuildRig(Rig& rig, double fillet = 0.0) {
   ui::SetActivePart(state, rig.shaftTab);
   Document& doc = *state.document;
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Collar", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 10.0, 10.0));
+      "Collar", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), 10.0, 10.0));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::vec3(0, 0, 10), glm::vec3(0, 0, 1), 5.0, 40.0));
+      "Journal", glm::dvec3(0, 0, 10), glm::dvec3(0, 0, 1), 5.0, 40.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Join", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
       BooleanOp::Union));
@@ -332,7 +332,7 @@ TEST_CASE("A bearing is placed on a picked journal and mated there",
   CHECK(fit.shoulder);
   // Side A on the shoulder plane, the axis up the journal.
   CHECK_THAT(fit.position.z, WithinAbs(10.0, 1e-5));
-  CHECK_THAT((fit.orientation * glm::vec3(0, 0, 1)).z, WithinAbs(1.0, 1e-5));
+  CHECK_THAT((fit.orientation * glm::dvec3(0, 0, 1)).z, WithinAbs(1.0, 1e-5));
   CHECK_THAT(fit.summary, ContainsSubstring("Ø20 shoulder"));
   CHECK(state.assembly->GetOccurrences().size() ==
         1); // a dry run places nothing
@@ -370,10 +370,10 @@ TEST_CASE("A bearing is placed on a picked journal and mated there",
   CHECK(mate->type == MateType::Fastened);
   CHECK(mate->a.anchor.face.name == rig.journal.name);
   CHECK(BearingFeature::RoleOf(mate->b.anchor.face.name) == "bore");
-  const glm::vec3 before = bearing->position;
+  const glm::dvec3 before = bearing->position;
   CHECK(ui::SolveActiveAssembly(state) == 0);
   bearing = state.assembly->FindById(fit.occurrence);
-  CHECK(glm::length(bearing->position - before) < 1e-4f);
+  CHECK(glm::length(bearing->position - before) < 1e-4);
 
   // The generated part is filed with the standard parts.
   bool filed = false;
@@ -557,7 +557,7 @@ TEST_CASE("check_seat reads a placed bearing and the seat it is on",
     CHECK(withCatalog.at("status") == "fail");
 
     // Moved off its shoulder, the ring is not seated.
-    state.assembly->FindById(fit.occurrence)->position.z += 1.0f;
+    state.assembly->FindById(fit.occurrence)->position.z += 1.0;
     const nlohmann::json off =
         ui::CheckSeat(state, fit.occurrence, nullptr, "");
     for (const auto& c : off.at("checks"))
@@ -608,16 +608,16 @@ TEST_CASE("A bearing goes in a housing bore by its outside",
   Document& doc = *state.document;
   // A 20 mm plate, a Ø20 through hole and a Ø30 counterbore 9 deep from the
   // top: the seat for a 6200's outer ring, the step its shoulder.
-  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::vec3(-30, -30, 0),
+  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::dvec3(-30, -30, 0),
                                               60.0, 60.0, 20.0));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Through", glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), 10.0, 22.0));
+      "Through", glm::dvec3(0, 0, -1), glm::dvec3(0, 0, 1), 10.0, 22.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
       BooleanOp::Subtract));
   const uint64_t drilled = doc.GetFeatures().back()->GetId();
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Counterbore", glm::vec3(0, 0, 11), glm::vec3(0, 0, 1), 15.0, 10.0));
+      "Counterbore", glm::dvec3(0, 0, 11), glm::dvec3(0, 0, 1), 15.0, 10.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Bore", drilled, doc.GetFeatures().back()->GetId(), BooleanOp::Subtract));
   REQUIRE(doc.Regenerate());
@@ -650,7 +650,7 @@ TEST_CASE("A bearing goes in a housing bore by its outside",
   CHECK_FALSE(fit.shaft);
   // On the step at z = 11, facing out of the bore.
   CHECK_THAT(fit.position.z, WithinAbs(11.0, 1e-5));
-  CHECK_THAT((fit.orientation * glm::vec3(0, 0, 1)).z, WithinAbs(1.0, 1e-5));
+  CHECK_THAT((fit.orientation * glm::dvec3(0, 0, 1)).z, WithinAbs(1.0, 1e-5));
   CHECK(fit.overhang == 0.0);
   const nlohmann::json r = ui::CheckSeat(state, fit.occurrence, nullptr, "");
   INFO(r.dump(2));
@@ -685,17 +685,17 @@ TEST_CASE("A printed housing is fitted and checked at what it prints",
                           nullptr)
            .transform([](const printfit::Allowance& a) { return a.modelMm; });
   REQUIRE(model > 30.0);
-  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::vec3(-30, -30, 0),
+  doc.AddFeature(std::make_unique<BoxFeature>("Plate", glm::dvec3(-30, -30, 0),
                                               60.0, 60.0, 20.0));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Through", glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), 10.0, 22.0));
+      "Through", glm::dvec3(0, 0, -1), glm::dvec3(0, 0, 1), 10.0, 22.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
       BooleanOp::Subtract));
   const uint64_t drilled = doc.GetFeatures().back()->GetId();
-  doc.AddFeature(
-      std::make_unique<CylinderFeature>("Counterbore", glm::vec3(0, 0, 11),
-                                        glm::vec3(0, 0, 1), model / 2.0, 10.0));
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Counterbore", glm::dvec3(0, 0, 11), glm::dvec3(0, 0, 1), model / 2.0,
+      10.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Bore", drilled, doc.GetFeatures().back()->GetId(), BooleanOp::Subtract));
   REQUIRE(doc.Regenerate());

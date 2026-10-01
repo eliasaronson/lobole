@@ -320,7 +320,7 @@ bool WormFeature::Execute(RegenContext& ctx) {
           const gp_Pnt p =
               o.Translated(gp_Vec(d) * (v + outward * 0.5 * k * sz.axialPitch) +
                            radial * probe);
-          if (blank.body->shape.ContainsPoint(glm::vec3(p.X(), p.Y(), p.Z())))
+          if (blank.body->shape.ContainsPoint(glm::dvec3(p.X(), p.Y(), p.Z())))
             return false;
         }
       return true;

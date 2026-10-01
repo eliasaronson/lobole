@@ -78,7 +78,7 @@ bool PlacedPartsBounds(const Setup& setup, const std::vector<Body>& bodies,
   hi = glm::dvec3(std::numeric_limits<double>::lowest());
   bool any = false;
   for (const Body& b : BodiesInSetupFrame(setup, bodies)) {
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     // TIGHT, like the stock. OCC bounds a B-spline by its CONTROL POINTS,
     // which lie outside the surface -- so this asked the same part for its
     // size and got a different answer from `StockBoundsFramed`, which was

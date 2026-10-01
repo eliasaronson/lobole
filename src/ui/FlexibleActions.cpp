@@ -215,9 +215,9 @@ std::string MateLabelAt(AppState& state, const std::vector<uint64_t>& path,
   return (F ? OccName(*F) : std::string("?")) + " / " + MateName(*m);
 }
 
-std::optional<glm::mat4> MateConnectorWorldAt(AppState& state,
-                                              const std::vector<uint64_t>& path,
-                                              const Connector& c) {
+std::optional<glm::dmat4>
+MateConnectorWorldAt(AppState& state, const std::vector<uint64_t>& path,
+                     const Connector& c) {
   if (path.empty())
     return ConnectorWorldFrame(state, c);
   if (!state.assembly)
@@ -299,9 +299,9 @@ bool IsInnerOccurrenceSelected(const AppState& state, uint64_t placement,
   return false;
 }
 
-glm::mat4 InnerDisplayMatrix(AppState& state, const Occurrence& placement,
-                             const Occurrence& inner) {
-  return glm::translate(glm::mat4(1.0f),
+glm::dmat4 InnerDisplayMatrix(AppState& state, const Occurrence& placement,
+                              const Occurrence& inner) {
+  return glm::translate(glm::dmat4(1.0),
                         ExplodeInnerOffset(state, placement.id, {inner.id})) *
          DisplayMatrix(state, placement) *
          assembly::InnerPlacement(placement, inner);

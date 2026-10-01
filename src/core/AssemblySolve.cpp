@@ -26,8 +26,8 @@ namespace {
 // The same composition ui::OccurrenceMatrix does; duplicated here (four
 // lines) rather than pulling the UI layer into core, which is where every
 // other assembly walk already lives.
-glm::mat4 PlacementOf(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 PlacementOf(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 
@@ -46,12 +46,12 @@ struct FlattenCtx {
 // `owner` is the placement whose sub-assembly `asmDoc` is when that
 // placement is FLEXIBLE (v129): its own poses place what is inside.
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
-                 const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
+                 const glm::dmat4& parentWorld, uint64_t rootOccurrenceId,
                  bool parentVisible, int depth, uint64_t configurationId,
                  const Occurrence* owner);
 
 bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
-                       const glm::mat4& local, const glm::mat4& world,
+                       const glm::dmat4& local, const glm::dmat4& world,
                        uint64_t rootOccurrenceId, bool visible, int depth) {
   const AssemblyDocument* sub = ctx.asmById(occ.partId);
   if (sub == nullptr)
@@ -87,7 +87,7 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
 }
 
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
-                 const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
+                 const glm::dmat4& parentWorld, uint64_t rootOccurrenceId,
                  bool parentVisible, int depth, uint64_t configurationId,
                  const Occurrence* owner) {
   if (depth > ctx.maxDepth) {
@@ -103,9 +103,9 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
     const bool visible =
         parentVisible && occ.visible &&
         !asmDoc.OccurrenceSuppressedIn(configurationId, occ.id);
-    const glm::mat4 local =
+    const glm::dmat4 local =
         owner != nullptr ? InnerPlacement(*owner, occ) : PlacementOf(occ);
-    const glm::mat4 world = parentWorld * local;
+    const glm::dmat4 world = parentWorld * local;
     // The TOP-LEVEL occurrence owns everything below it — that is what makes
     // a sub-assembly one contact node, one explode step, one drawing ref.
     const uint64_t root = rootOccurrenceId ? rootOccurrenceId : occ.id;
@@ -151,7 +151,7 @@ Flatten(const AssemblyDocument& top, const PartResolver& partById,
         const AssemblyResolver& asmById, int maxDepth) {
   FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}, {}, {}};
   // The top itself uses its own active configuration (nobody placed it).
-  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0, 0, nullptr))
+  if (!FlattenInto(ctx, top, glm::dmat4(1.0), 0, true, 0, 0, nullptr))
     return std::unexpected(ctx.error);
   return ctx.out;
 }
@@ -349,15 +349,15 @@ namespace {
 
 // The occurrence's own placement matrix (translation + orientation). Mirrors
 // ui::OccurrenceMatrix, kept here so the solver has no UI dependency.
-glm::mat4 OccMatrix(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) *
+glm::dmat4 OccMatrix(const Occurrence& o) {
+  return glm::translate(glm::dmat4(1.0), o.position) *
          glm::mat4_cast(o.orientation);
 }
 
 // The one frame builder (core/FrameMath.h): origin, in-plane X hint, primary
 // Z, columns X Y Z origin, exactly orthonormal.
-glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
-                      const glm::vec3& zAxis) {
+glm::dmat4 FrameMatrix(const glm::dvec3& origin, const glm::dvec3& xHint,
+                       const glm::dvec3& zAxis) {
   return frame::Build(origin, xHint, zAxis);
 }
 
@@ -368,7 +368,7 @@ glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
 // dx,dy; ball uses R_ball. An optional 180° flip about X makes two touching
 // planar faces oppose normals. For a fastened mate with no flip and zero DOF
 // this is the identity ⇒ the two frames coincide exactly.
-glm::mat4 MateAdjust(const Mate& m) {
+glm::dmat4 MateAdjust(const Mate& m) {
   // ONE definition of this composition, in AssemblyLoopSolve — the loop solver
   // evaluates the same transform thousands of times per solve, and a second
   // copy of a transform in this codebase has drifted from the first before.
@@ -376,10 +376,10 @@ glm::mat4 MateAdjust(const Mate& m) {
                        m.ballRotation);
 }
 
-void Decompose(const glm::mat4& m, glm::vec3& position,
-               glm::quat& orientation) {
-  position = glm::vec3(m[3]);
-  orientation = glm::normalize(glm::quat_cast(glm::mat3(m)));
+void Decompose(const glm::dmat4& m, glm::dvec3& position,
+               glm::dquat& orientation) {
+  position = glm::dvec3(m[3]);
+  orientation = glm::normalize(glm::quat_cast(glm::dmat3(m)));
 }
 
 // Short, stable rendering of a millimetre figure for a mate error message.
@@ -441,11 +441,11 @@ std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
 
 } // namespace
 
-std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
-                                             const AssemblyDocument& asmDoc,
-                                             const PartResolver& partById,
-                                             std::string* whyNot,
-                                             const AssemblyResolver& asmById) {
+std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
+                                              const AssemblyDocument& asmDoc,
+                                              const PartResolver& partById,
+                                              std::string* whyNot,
+                                              const AssemblyResolver& asmById) {
   const auto fail = [&](std::string why) {
     if (whyNot)
       *whyNot = std::move(why);
@@ -459,7 +459,7 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
   // the transform from the UNIT's frame down to that part. Everything below
   // then works on a part exactly as it always did, and the frame comes back
   // pre-multiplied — so the caller still just composes the occurrence matrix.
-  glm::mat4 innerXf(1.0f);
+  glm::dmat4 innerXf(1.0);
   const Document* partForFace = nullptr;
   if (!c.innerPath.empty()) {
     if (occ->refKind != OccurrenceRef::Assembly)
@@ -495,7 +495,7 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     partForFace = innerPart; // resolve the face on the part the path names
   }
   if (c.anchor.origin)
-    return glm::mat4(1.0f); // the part's coordinate origin
+    return glm::dmat4(1.0); // the part's coordinate origin
 
   const Document* part =
       partForFace ? partForFace : partById(occ->partId, occ->configurationId);
@@ -565,7 +565,7 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
       return fail(std::move(why));
     }
 
-    glm::vec3 origin, primary, xHint;
+    glm::dvec3 origin, primary, xHint;
     bool ok = body.shape.FacePlane(*faceIdx, origin, primary, xHint) ||
               body.shape.FaceAxis(*faceIdx, origin, primary, xHint);
     if (!ok)
@@ -579,7 +579,7 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     if (c.anchor.snapEdge.IsSet()) {
       if (const auto edgeIdx =
               body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
-        glm::vec3 snap;
+        glm::dvec3 snap;
         // A CORNER (v65) when a second edge is named: the vertex the two
         // share. Falls back to the first edge's own point when they share
         // none or more than one — an ambiguous pair names no single corner,
@@ -613,11 +613,11 @@ int ApplyAttachments(AssemblyDocument& asmDoc) {
       continue; // the parent went; the rider keeps its last pose
     if (parent->attachedTo != 0)
       continue; // one level (see the header)
-    const glm::mat4 world = PlacementOf(*parent) *
-                            glm::translate(glm::mat4(1.0f), o.attachOffset) *
-                            glm::mat4_cast(o.attachRotation);
-    glm::vec3 pos;
-    glm::quat rot;
+    const glm::dmat4 world = PlacementOf(*parent) *
+                             glm::translate(glm::dmat4(1.0), o.attachOffset) *
+                             glm::mat4_cast(o.attachRotation);
+    glm::dvec3 pos;
+    glm::dquat rot;
     Decompose(world, pos, rot);
     if (pos != o.position || rot != o.orientation) {
       o.position = pos;
@@ -651,9 +651,9 @@ double MateDofValue(const Mate& m, MateDof dof) {
 
 void SetMateDof(Mate& m, MateDof dof, double value) {
   if (dof == MateDof::Rotation)
-    m.rotation = static_cast<float>(value);
+    m.rotation = value;
   else
-    m.offset = static_cast<float>(value);
+    m.offset = value;
 }
 
 namespace {
@@ -690,10 +690,10 @@ double RelationValue(const Relation& r, double a) {
 
 namespace {
 // How far a freewheel's output may stand behind its drive line and still
-// count as ON it. Mate DOFs are stored as float, so a value written as the
-// line reads back a few ulps off it; without this slack a second
-// propagation would read that as the input going backwards and grow `lead`
-// by rounding noise on every pass.
+// count as ON it. The line is recomputed on every pass, and a loop solve may
+// have moved the output by its closing tolerance since; without this slack a
+// second propagation would read that as the input going backwards and grow
+// `lead` by rounding noise on every pass.
 double FreewheelSlack(double v) { return 1e-6 * std::max(1.0, std::abs(v)); }
 } // namespace
 
@@ -1079,7 +1079,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
   struct Held {
     size_t index;
     MateDof dof;
-    float authored;
+    double authored;
   };
   std::vector<Held> held;
   if (const Configuration* cfg = asmDoc.ActiveConfig())
@@ -1113,8 +1113,8 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
   // or keep their stored transforms.
   struct MateFrames {
     bool usable = false;
-    glm::mat4 fa{1.0f};
-    glm::mat4 fb{1.0f};
+    glm::dmat4 fa{1.0};
+    glm::dmat4 fb{1.0};
   };
   std::vector<MateFrames> frames(asmDoc.GetMates().size());
 
@@ -1158,7 +1158,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
   }
 
   // Placement state: an occurrence's solved world transform, once known.
-  std::unordered_map<uint64_t, glm::mat4> world;
+  std::unordered_map<uint64_t, glm::dmat4> world;
   const auto isPlaced = [&](uint64_t occId) { return world.count(occId) != 0; };
 
   // A6: the same propagation, now recording the SHAPE of the walk — which
@@ -1225,7 +1225,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
           {h.index, h.dof, MateDofValue(asmDoc.GetMates()[h.index], h.dof)});
 
   std::vector<bool> classified(asmDoc.GetMates().size(), false);
-  const auto pin = [&](uint64_t occId, const glm::mat4& at) {
+  const auto pin = [&](uint64_t occId, const glm::dmat4& at) {
     world[occId] = at;
     loop.anchor.emplace_back(occId, at);
   };
@@ -1249,17 +1249,17 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
         const uint64_t aId = mate.a.occurrenceId;
         const uint64_t bId = mate.b.occurrenceId;
         const bool aP = isPlaced(aId), bP = isPlaced(bId);
-        const glm::mat4 adjust = MateAdjust(mate);
+        const glm::dmat4 adjust = MateAdjust(mate);
 
         if (aP && !bP) {
           // b's connector frame = a's connector world frame · adjust.
-          const glm::mat4 wa = world[aId] * frames[i].fa;
+          const glm::dmat4 wa = world[aId] * frames[i].fa;
           world[bId] = wa * adjust * glm::inverse(frames[i].fb);
           loop.tree.push_back({i, aId, bId, false});
           classified[i] = true;
           progress = true;
         } else if (bP && !aP) {
-          const glm::mat4 wb = world[bId] * frames[i].fb;
+          const glm::dmat4 wb = world[bId] * frames[i].fb;
           world[aId] = wb * glm::inverse(adjust) * glm::inverse(frames[i].fa);
           loop.tree.push_back({i, bId, aId, true});
           classified[i] = true;
@@ -1405,8 +1405,8 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     const auto it = world.find(o.id);
     if (it == world.end())
       continue;
-    glm::vec3 pos;
-    glm::quat rot;
+    glm::dvec3 pos;
+    glm::dquat rot;
     Decompose(it->second, pos, rot);
     if (pos != o.position || rot != o.orientation)
       report.placed++;
@@ -1455,7 +1455,7 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     const double want =
         RelationValue(r, MateDofValue(*a, r.dofA)) + rideOn(r.mateB, r.dofB);
     const double got = MateDofValue(*b, r.dofB);
-    // Mate DOFs are stored as float: allow its precision at the magnitude.
+    // A loop closes to a tolerance, not exactly: allow it at the magnitude.
     if (std::abs(want - got) > 1e-4 * std::max(1.0, std::abs(want))) {
       const bool rot = r.dofB == MateDof::Rotation;
       const double k = rot ? angles::kDegPerRad : 1.0;
@@ -1529,7 +1529,7 @@ AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
       out.massKnown = false;
       continue;
     }
-    const glm::dmat4 xf = glm::dmat4(inst.world);
+    const glm::dmat4& xf = inst.world;
     const glm::dvec3 worldCom =
         glm::dvec3(xf * glm::dvec4(mass->centerOfMass, 1.0));
 

@@ -423,7 +423,7 @@ void VisitRefs(const std::vector<ElementRef>& refs,
 
 class BoxFeature : public Feature {
 public:
-  BoxFeature(const std::string& name, const glm::vec3& position, double width,
+  BoxFeature(const std::string& name, const glm::dvec3& position, double width,
              double height, double depth);
 
   std::string TypeName() const override { return "Box"; }
@@ -448,14 +448,14 @@ public:
     visit(depthExpr, depth);
   }
 
-  glm::vec3 position;
+  glm::dvec3 position;
   double width, height, depth;
   std::string widthExpr, heightExpr, depthExpr;
 };
 
 class SphereFeature : public Feature {
 public:
-  SphereFeature(const std::string& name, const glm::vec3& center,
+  SphereFeature(const std::string& name, const glm::dvec3& center,
                 double radius);
 
   std::string TypeName() const override { return "Sphere"; }
@@ -473,15 +473,15 @@ public:
     visit(radiusExpr, radius);
   }
 
-  glm::vec3 center;
+  glm::dvec3 center;
   double radius;
   std::string radiusExpr;
 };
 
 class CylinderFeature : public Feature {
 public:
-  CylinderFeature(const std::string& name, const glm::vec3& center,
-                  const glm::vec3& direction, double radius, double height);
+  CylinderFeature(const std::string& name, const glm::dvec3& center,
+                  const glm::dvec3& direction, double radius, double height);
 
   std::string TypeName() const override { return "Cylinder"; }
 
@@ -499,8 +499,8 @@ public:
     visit(heightExpr, height);
   }
 
-  glm::vec3 center;
-  glm::vec3 direction;
+  glm::dvec3 center;
+  glm::dvec3 direction;
   double radius, height;
   std::string radiusExpr, heightExpr;
 };
@@ -556,7 +556,7 @@ public:
   // What the last Execute translated the shapes by — zero when keepOrigin.
   // Reported by the RPC so a caller never has to discover the move by
   // measuring a bounding box.
-  glm::vec3 Shift() const { return m_shift; }
+  glm::dvec3 Shift() const { return m_shift; }
   // A hash of the file's BYTES, cached by path + size + mtime, so the chain
   // hash can key an import on what it imports rather than where the file
   // sits: saving a project adopts staged imports into the project directory
@@ -588,7 +588,7 @@ public:
   }
 
 private:
-  glm::vec3 m_shift{0.0f}; // what the last Execute centred by
+  glm::dvec3 m_shift{0.0}; // what the last Execute centred by
 
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 

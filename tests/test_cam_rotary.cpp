@@ -2100,7 +2100,7 @@ TEST_CASE("cam rotary: an op at several indices derives where its floor "
   cam::Target side;
   side.ref = WallNear(*doc, 20.0, 30.0); // the +Y face
   const auto facesUp = [&](const cam::Setup& s) {
-    glm::vec3 n(0.0f);
+    glm::dvec3 n(0.0);
     return cam::FaceNormalOf(cam::BodiesInSetupFrame(s, bodies), side.ref, n) &&
            n.z > 0.99f;
   };
@@ -2182,7 +2182,7 @@ TEST_CASE("cam rotary: an indexed cut and the rotary check turn the part the "
 
   // The +Y face, turned up the way "Turn a face up" turns it.
   const ElementRef plusY = WallNear(*doc, 30.0, 8.0);
-  glm::vec3 n(0.0f);
+  glm::dvec3 n(0.0);
   REQUIRE(cam::FaceNormalOf(bodies, plusY, n));
   REQUIRE(n.y > 0.999f);
   double a = 0.0;

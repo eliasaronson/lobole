@@ -137,7 +137,7 @@ namespace {
 // transform (real geometry, not the exploded display offset).
 struct MeasureSource {
   const std::vector<Body>* bodies = nullptr;
-  glm::mat4 xf{1.0f};
+  glm::dmat4 xf{1.0};
   std::string prefix; // "OccurrenceName: " on assemblies, "" on parts
 };
 // An OCCURRENCE measures as every leaf body under it, already placed in
@@ -164,19 +164,19 @@ std::optional<MeasureSource> ResolveOccurrenceBodies(AppState& state,
   if (store.empty())
     return std::nullopt;
   // Already in world space, so the transform is identity.
-  return MeasureSource{&store, glm::mat4(1.0f), occ->name + ": "};
+  return MeasureSource{&store, glm::dmat4(1.0), occ->name + ": "};
 }
 
 std::optional<MeasureSource>
 ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
   if (e.occurrenceId == 0) {
     if (state.document)
-      return MeasureSource{&state.document->GetBodies(), glm::mat4(1.0f), ""};
+      return MeasureSource{&state.document->GetBodies(), glm::dmat4(1.0), ""};
     // A JOB tab: its parts, laid out -- which is what the viewport draws, so
     // no transform. The tool was greyed out here for want of this branch,
     // while the pick pipeline underneath it already knew the job's bodies.
     if (state.job)
-      return MeasureSource{&JobPlacedBodies(state), glm::mat4(1.0f), ""};
+      return MeasureSource{&JobPlacedBodies(state), glm::dmat4(1.0), ""};
     return std::nullopt;
   }
   if (!state.assembly)
@@ -207,7 +207,7 @@ struct MeasureOut {
   std::string readout;
   MeasureState::Dimension dimension;
   bool hasLine = false;
-  glm::vec3 lineA{0.0f}, lineB{0.0f};
+  glm::dvec3 lineA{0.0}, lineB{0.0};
 };
 
 // Everything needed to measure one pick, with the world-placed bodies of an
@@ -226,7 +226,7 @@ Resolved ResolveTargetFor(AppState& state, const MeasureState::Element& e) {
     if (!src)
       return r;
     r.target.bodies = &r.owned;
-    r.target.xf = glm::mat4(1.0f);
+    r.target.xf = glm::dmat4(1.0);
     r.target.ref = ElementRef{0, ""}; // whole set
     r.prefix = src->prefix;
     r.ok = true;
@@ -284,15 +284,15 @@ std::string WholeName(AppState& state, const MeasureState::Element& e) {
 }
 
 // The world-space point a CORNER measurable resolves to, if it still does.
-std::optional<glm::vec3> CornerWorldPoint(AppState& state,
-                                          const MeasureState::Element& e) {
+std::optional<glm::dvec3> CornerWorldPoint(AppState& state,
+                                           const MeasureState::Element& e) {
   const auto src = ResolveMeasureSource(state, e);
   if (!src)
     return std::nullopt;
   const auto p = Measure::CornerOf(*src->bodies, e.ref, e.ref2);
   if (!p)
     return std::nullopt;
-  return glm::vec3(src->xf * glm::vec4(*p, 1.0f));
+  return glm::dvec3(src->xf * glm::dvec4(*p, 1.0));
 }
 
 MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
@@ -474,7 +474,7 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
     // nothing. Signed, not absolute — "40 mm in X" and "-40 mm in X" are a
     // part and its mirror image, and std::abs threw away which.
     if (!touching) {
-      const glm::vec3 delta = d->pointB - d->pointA;
+      const glm::dvec3 delta = d->pointB - d->pointA;
       distLine += "\ndx " + units::FormatLength(delta.x, u) + "  dy " +
                   units::FormatLength(delta.y, u) + "  dz " +
                   units::FormatLength(delta.z, u);
@@ -535,8 +535,8 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   dim.label = units::FormatLength(at.distance, u);
   // Witness lines back to where the extrema actually landed, so a
   // re-anchored dimension still says which two things it spans.
-  dim.hasWitness = anchors && (glm::distance(at.pointA, d->pointA) > 1e-4f ||
-                               glm::distance(at.pointB, d->pointB) > 1e-4f);
+  dim.hasWitness = anchors && (glm::distance(at.pointA, d->pointA) > 1e-4 ||
+                               glm::distance(at.pointB, d->pointB) > 1e-4);
   dim.witnessA = d->pointA;
   dim.witnessB = d->pointB;
 
@@ -550,24 +550,24 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
     const auto anchorA = Measure::AnchorOf(*ra.target.bodies, ea.ref);
     const auto anchorB = Measure::AnchorOf(*rb.target.bodies, eb.ref);
     if (da && db && anchorA && anchorB) {
-      const glm::vec3 at3 = d->pointA; // the contact point
+      const glm::dvec3 at3 = d->pointA; // the contact point
       // An unsigned direction (a line edge) gets the sign that points
       // along the element and away from the contact, so the ray lies on
       // the edge you can see rather than off into space.
       const auto orient = [&](const Measure::Direction& dir,
-                              const glm::vec3& anchor, const glm::mat4& xf) {
-        glm::vec3 v =
-            glm::normalize(glm::vec3(glm::mat3(xf) * glm::vec3(dir.dir)));
-        if (!dir.oriented && glm::dot(v, anchor - at3) < 0.0f)
+                              const glm::dvec3& anchor, const glm::dmat4& xf) {
+        glm::dvec3 v =
+            glm::normalize(glm::dvec3(glm::dmat3(xf) * glm::dvec3(dir.dir)));
+        if (!dir.oriented && glm::dot(v, anchor - at3) < 0.0)
           v = -v;
         return v;
       };
       dim.arcAt = at3;
       dim.arcFrom =
-          orient(*da, glm::vec3(ra.target.xf * glm::vec4(*anchorA, 1.0f)),
+          orient(*da, glm::dvec3(ra.target.xf * glm::dvec4(*anchorA, 1.0)),
                  ra.target.xf);
       dim.arcTo =
-          orient(*db, glm::vec3(rb.target.xf * glm::vec4(*anchorB, 1.0f)),
+          orient(*db, glm::dvec3(rb.target.xf * glm::dvec4(*anchorB, 1.0)),
                  rb.target.xf);
       dim.arcLabel = units::FormatAngle(ang->degrees, u);
       dim.hasArc = true;

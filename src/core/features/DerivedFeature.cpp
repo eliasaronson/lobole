@@ -18,15 +18,14 @@ DerivedFeature::DerivedFeature(const std::string& name, uint64_t sourcePart)
   m_name = name;
 }
 
-glm::mat4 DerivedFeature::Placement() const {
-  return glm::translate(glm::mat4(1.0f), position) *
+glm::dmat4 DerivedFeature::Placement() const {
+  return glm::translate(glm::dmat4(1.0), position) *
          glm::mat4_cast(orientation);
 }
 
 bool DerivedFeature::IdentityPlacement() const {
-  const glm::quat q = glm::normalize(orientation);
-  return glm::length(position) < 1e-9f &&
-         std::abs(std::abs(q.w) - 1.0f) < 1e-9f;
+  const glm::dquat q = glm::normalize(orientation);
+  return glm::length(position) < 1e-9 && std::abs(std::abs(q.w) - 1.0) < 1e-9;
 }
 
 std::string
@@ -57,7 +56,7 @@ bool DerivedFeature::Execute(RegenContext& ctx) {
     return false;
   }
   const bool identity = IdentityPlacement();
-  const glm::mat4 xf = Placement();
+  const glm::dmat4 xf = Placement();
   for (const DerivedBody& sb : snapshot) {
     auto cached = m_decoded.find(sb.asset);
     if (cached == m_decoded.end()) {

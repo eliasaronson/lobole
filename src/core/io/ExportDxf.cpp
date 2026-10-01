@@ -259,10 +259,10 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
     // was as thick as it was wide. A suspension tab welded to an angled tube
     // was refused for not being flat while the identical tab on a
     // straight-ahead tube went out fine.
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     drawing.body.GetBoundingBox(lo, hi);
     const gp_Dir n = plane.Axis().Direction();
-    const glm::vec3 size = hi - lo;
+    const glm::dvec3 size = hi - lo;
     const double longest = std::max({size.x, size.y, size.z});
     double nearest = 0.0, furthest = 0.0;
     {

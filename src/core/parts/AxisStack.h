@@ -41,7 +41,7 @@ struct StackSegment {
 // One placed body to traverse: its shape and where the assembly puts it.
 struct PlacedBody {
   const Body* body = nullptr;
-  glm::mat4 world{1.0f};
+  glm::dmat4 world{1.0};
   std::string part;
   uint64_t partId = 0;
   uint64_t occurrence = 0;

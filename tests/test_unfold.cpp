@@ -99,7 +99,7 @@ double Allowance() { return sheet::BendAllowance(kQuarter, kR, kK, kT); }
 // left unrotated, or rotated by the wrong angle or about the wrong sense,
 // shows up here immediately.
 double ThicknessOf(const Body& body) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   body.shape.GetBoundingBox(lo, hi);
   return hi.z - lo.z;
 }
@@ -147,7 +147,7 @@ TEST_CASE("one bend flattens to the blank it was cut from",
   // The OUTLINE, not just the thickness: a wall folded the wrong way round
   // still lands flat and still has the right volume — it lands on the wrong
   // side of the bend line. Only the blank's extent catches that.
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   flat.shape.GetBoundingBox(lo, hi);
   CHECK_THAT(static_cast<double>(hi.x - lo.x), WithinAbs(kW, 1e-6));
   CHECK_THAT(static_cast<double>(hi.y - lo.y),
@@ -185,7 +185,7 @@ TEST_CASE("two flanges off one panel both lie down", "[sheetmetal][unfold]") {
 
   // The blank grew in Y by both allowances and both walls, and not at all
   // in X — which says the walls came down the right way round.
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   flat.shape.GetBoundingBox(lo, hi);
   CHECK_THAT(static_cast<double>(hi.x - lo.x), WithinAbs(kW, 1e-6));
   CHECK_THAT(static_cast<double>(hi.y - lo.y),
@@ -203,7 +203,7 @@ TEST_CASE("a flange on a flange unfolds through the chain",
   // 20 mm below the blank (the picked edge was the underside at z = 0... the
   // wall folded up from the TOP face, so its tip is at z = kT + kR + 20).
   const Body& folded = doc.GetBodies()[0];
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   folded.shape.GetBoundingBox(lo, hi);
   const double tip = hi.z;
   const std::string edge = EdgeNamed(folded, {0, lo.y, tip}, {kW, lo.y, tip});

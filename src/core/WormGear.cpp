@@ -1265,16 +1265,16 @@ bool CutSpacesBySectors(const TopoDS_Shape& body, const gp_Ax3& frame,
 
 double RelationRatio(const AssemblyDocument& asmDoc, const Mate& wormMate,
                      const Mate& wheelMate, bool samePath, bool topLevel,
-                     const glm::mat4& wormFrame, const glm::mat4& wheelFrame,
+                     const glm::dmat4& wormFrame, const glm::dmat4& wheelFrame,
                      int starts, int teeth, bool rightHanded,
                      std::string* why) {
   if (starts <= 0 || teeth <= 0) {
     Fail(why, "starts and teeth are positive counts");
     return 0.0;
   }
-  const glm::dvec3 u = glm::normalize(glm::dvec3(glm::vec3(wormFrame[2])));
-  const glm::dvec3 w = glm::normalize(glm::dvec3(glm::vec3(wheelFrame[2])));
-  const glm::dvec3 pu{glm::vec3(wormFrame[3])}, pw{glm::vec3(wheelFrame[3])};
+  const glm::dvec3 u = glm::normalize(glm::dvec3(wormFrame[2]));
+  const glm::dvec3 w = glm::normalize(glm::dvec3(wheelFrame[2]));
+  const glm::dvec3 pu{glm::dvec3(wormFrame[3])}, pw{glm::dvec3(wheelFrame[3])};
   const glm::dvec3 n = glm::cross(u, w);
   const double off = glm::dot(pu - pw, n);
   if (glm::length(n) < 1e-3 || std::abs(off) < 1e-6) {

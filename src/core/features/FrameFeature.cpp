@@ -34,8 +34,8 @@ FrameFeature::FrameFeature(const std::string& name, FrameKind kind)
 }
 
 bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
-                         glm::vec3& origin, glm::vec3& axis, glm::vec3& xHint,
-                         bool& circular, std::string& why) {
+                         glm::dvec3& origin, glm::dvec3& axis,
+                         glm::dvec3& xHint, bool& circular, std::string& why) {
   circular = false;
   const Body* owner = nullptr;
   for (const Body& b : bodies) {
@@ -45,7 +45,7 @@ bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
     // A face name is tried before an edge name of the same spelling; the
     // two maps never share names in practice, but the order is explicit.
     if (const auto faceIdx = b.elementMap.Resolve(ref.name)) {
-      glm::vec3 o, primary, x;
+      glm::dvec3 o, primary, x;
       if (b.shape.FacePlane(*faceIdx, o, primary, x)) {
         origin = o;
         axis = primary;
@@ -66,7 +66,7 @@ bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
     }
     if (const auto edgeIdx = b.elementMap.ResolveEdge(ref.name)) {
       const auto info = Measure::DescribeEdgeAt(b, *edgeIdx);
-      glm::vec3 p;
+      glm::dvec3 p;
       if (!info || !info->hasAxis || !b.shape.EdgeSnapPoint(*edgeIdx, p)) {
         why = "edge '" + ref.name +
               "' is not circular — a frame needs a circle or arc (centre + "
@@ -75,7 +75,7 @@ bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
       }
       origin = p;
       axis = info->axis;
-      xHint = glm::vec3(0.0f); // Build picks a deterministic perpendicular
+      xHint = glm::dvec3(0.0); // Build picks a deterministic perpendicular
       circular = true;
       return true;
     }
@@ -107,12 +107,12 @@ bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
 bool FrameFeature::Execute(RegenContext& ctx) {
   switch (kind) {
   case FrameKind::Explicit: {
-    if (glm::dot(zAxis, zAxis) < 1e-12f) {
+    if (glm::dot(zAxis, zAxis) < 1e-12) {
       SetError("z_axis is zero");
       return false;
     }
     m_frame =
-        frame::Build(glm::vec3(origin[0], origin[1], origin[2]), xAxis, zAxis);
+        frame::Build(glm::dvec3(origin[0], origin[1], origin[2]), xAxis, zAxis);
     return true;
   }
   case FrameKind::FromElement: {
@@ -122,7 +122,7 @@ bool FrameFeature::Execute(RegenContext& ctx) {
       return false;
     }
     if (elements.size() == 1) {
-      glm::vec3 o, z, x;
+      glm::dvec3 o, z, x;
       bool circular = false;
       std::string why;
       if (!frame::ElementFrame(ctx.bodies, elements[0], o, z, x, circular,
@@ -136,9 +136,9 @@ bool FrameFeature::Execute(RegenContext& ctx) {
     // A bolt circle: every element circular, axes parallel, origin at the
     // mean of the centres, X toward the first hole so the frame is oriented
     // by the pattern and not by an accident of the kernel.
-    glm::vec3 sum(0.0f), z0(0.0f), first(0.0f);
+    glm::dvec3 sum(0.0), z0(0.0), first(0.0);
     for (size_t i = 0; i < elements.size(); i++) {
-      glm::vec3 o, z, x;
+      glm::dvec3 o, z, x;
       bool circular = false;
       std::string why;
       if (!frame::ElementFrame(ctx.bodies, elements[i], o, z, x, circular,
@@ -157,14 +157,14 @@ bool FrameFeature::Execute(RegenContext& ctx) {
         first = o;
       } else {
         // An axis has no sign; align each with the first before comparing.
-        if (glm::dot(z, z0) < 0.0f)
+        if (glm::dot(z, z0) < 0.0)
           z = -z;
-        const float cosang = glm::dot(glm::normalize(z), glm::normalize(z0));
-        if (cosang < 0.9962f) { // > 5 degrees apart
+        const double cosang = glm::dot(glm::normalize(z), glm::normalize(z0));
+        if (cosang < 0.9962) { // > 5 degrees apart
           SetError("element " + std::to_string(i + 1) + " ('" +
                    elements[i].name + "') is not parallel to the first (" +
-                   std::to_string(std::acos(std::min(1.0f, cosang)) * 180.0f /
-                                  3.14159265f) +
+                   std::to_string(std::acos(std::min(1.0, cosang)) * 180.0 /
+                                  3.14159265) +
                    " degrees off) — a bolt circle's holes share one axis "
                    "direction");
           return false;
@@ -172,9 +172,9 @@ bool FrameFeature::Execute(RegenContext& ctx) {
       }
       sum += o;
     }
-    const glm::vec3 centre = sum / static_cast<float>(elements.size());
-    const glm::vec3 toFirst = first - centre;
-    if (glm::dot(toFirst, toFirst) < 1e-12f) {
+    const glm::dvec3 centre = sum / static_cast<double>(elements.size());
+    const glm::dvec3 toFirst = first - centre;
+    if (glm::dot(toFirst, toFirst) < 1e-12) {
       SetError("the elements are concentric — a bolt circle's centres must "
                "differ (for one hole, name that hole alone)");
       return false;
@@ -183,7 +183,7 @@ bool FrameFeature::Execute(RegenContext& ctx) {
     return true;
   }
   case FrameKind::Offset: {
-    glm::mat4 parent(1.0f);
+    glm::dmat4 parent(1.0);
     if (parentId != 0) {
       const Feature* pf = ctx.FindById(parentId);
       const auto* parentFrame = dynamic_cast<const FrameFeature*>(pf);
@@ -204,19 +204,20 @@ bool FrameFeature::Execute(RegenContext& ctx) {
       }
       parent = parentFrame->Matrix();
     }
-    const glm::mat4 t = glm::translate(
-        glm::mat4(1.0f), glm::vec3(offset[0], offset[1], offset[2]));
-    const glm::mat4 r =
-        glm::rotate(glm::mat4(1.0f), glm::radians(float(rotationDeg[0])),
-                    glm::vec3(1, 0, 0)) *
-        glm::rotate(glm::mat4(1.0f), glm::radians(float(rotationDeg[1])),
-                    glm::vec3(0, 1, 0)) *
-        glm::rotate(glm::mat4(1.0f), glm::radians(float(rotationDeg[2])),
-                    glm::vec3(0, 0, 1));
-    const glm::mat4 m = parent * t * r;
+    const glm::dmat4 t = glm::translate(
+        glm::dmat4(1.0), glm::dvec3(offset[0], offset[1], offset[2]));
+    const glm::dmat4 r =
+        glm::rotate(glm::dmat4(1.0), glm::radians(double(rotationDeg[0])),
+                    glm::dvec3(1, 0, 0)) *
+        glm::rotate(glm::dmat4(1.0), glm::radians(double(rotationDeg[1])),
+                    glm::dvec3(0, 1, 0)) *
+        glm::rotate(glm::dmat4(1.0), glm::radians(double(rotationDeg[2])),
+                    glm::dvec3(0, 0, 1));
+    const glm::dmat4 m = parent * t * r;
     // Re-orthonormalize through Build so float drift never accumulates
     // down a chain of offsets.
-    m_frame = frame::Build(glm::vec3(m[3]), glm::vec3(m[0]), glm::vec3(m[2]));
+    m_frame =
+        frame::Build(glm::dvec3(m[3]), glm::dvec3(m[0]), glm::dvec3(m[2]));
     return true;
   }
   }

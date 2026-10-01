@@ -1079,7 +1079,7 @@ json FeatureToJson(const Feature& feature) {
     case Curve3DKind::ControlPoly:
     case Curve3DKind::BentPath: {
       json pts = json::array();
-      for (const glm::vec3& p : cv->points)
+      for (const glm::dvec3& p : cv->points)
         pts.push_back(Vec3ToJson(p));
       j["points"] = std::move(pts);
       if (cv->kind == Curve3DKind::ControlPoly)

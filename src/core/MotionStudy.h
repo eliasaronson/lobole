@@ -73,13 +73,13 @@ struct Sample {
   double residualMm = 0.0;
   // Placement of every top-level occurrence at this sample, by id. The
   // export and the scrub read these; nothing else in the document does.
-  std::vector<std::pair<uint64_t, glm::mat4>> worlds;
+  std::vector<std::pair<uint64_t, glm::dmat4>> worlds;
   // v129: every MOVING occurrence inside a flexible placement, in world
   // space, keyed by its path {root, occurrence}. What folds into the root
   // is where the root is.
   struct LeafWorld {
     uint64_t root = 0, occurrence = 0;
-    glm::mat4 world{1.0f};
+    glm::dmat4 world{1.0};
   };
   std::vector<LeafWorld> leaves;
   std::vector<Clash> clashes;

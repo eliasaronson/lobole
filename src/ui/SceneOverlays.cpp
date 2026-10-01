@@ -152,10 +152,10 @@ float DocumentReach(AppState& state) {
     return state.sceneReach;
   float reach = 0.0f;
   for (const auto& body : doc->GetBodies()) {
-    glm::vec3 mn, mx;
+    glm::dvec3 mn, mx;
     body.shape.GetBoundingBox(mn, mx);
     for (int i = 0; i < 3; i++)
-      reach = std::max({reach, std::abs(mn[i]), std::abs(mx[i])});
+      reach = std::max({reach, float(std::abs(mn[i])), float(std::abs(mx[i]))});
   }
   state.sceneReachDoc = doc;
   state.sceneReachVersion = doc->Version();

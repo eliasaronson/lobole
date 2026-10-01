@@ -14,54 +14,42 @@
 
 namespace assembly {
 
-namespace {
-
-// THE definition of a mate's adjustment, once, at whatever precision the
-// caller needs. The placement pass wants float (its transforms are float and
-// its results are golden-tested); the loop solver wants double, because
-// accumulating a chain of float matrices leaves ~1e-3 mm of noise at
-// 100 mm scale — enough to swamp a finite-difference Jacobian and stall the
-// solve just short of closing.
-template <typename T>
-glm::mat<4, 4, T> MateAdjustT(bool flipped, T rotation, T offset, T dx, T dy,
-                              const glm::qua<T>& ballRotation) {
-  glm::mat<4, 4, T> a(T(1));
-  a = glm::translate(a, glm::vec<3, T>(dx, dy, offset));
-  a = glm::rotate(a, rotation, glm::vec<3, T>(T(0), T(0), T(1)));
+// THE definition of a mate's adjustment, in double like everything it
+// composes: a chain of float matrices left ~1e-3 mm of noise at 100 mm
+// scale, enough to swamp the loop solver's finite-difference Jacobian and
+// stall it just short of closing.
+glm::dmat4 MateAdjustFor(bool flipped, double rotation, double offset,
+                         double dx, double dy, const glm::dquat& ballRotation) {
+  glm::dmat4 a(1.0);
+  a = glm::translate(a, glm::dvec3(dx, dy, offset));
+  a = glm::rotate(a, rotation, glm::dvec3(0.0, 0.0, 1.0));
   a *= glm::mat4_cast(ballRotation);
   if (flipped)
-    a = glm::rotate(a, glm::pi<T>(), glm::vec<3, T>(T(1), T(0), T(0)));
+    a = glm::rotate(a, glm::pi<double>(), glm::dvec3(1.0, 0.0, 0.0));
   return a;
 }
 
-} // namespace
-
-glm::mat4 MateAdjustFor(bool flipped, float rotation, float offset, float dx,
-                        float dy, const glm::quat& ballRotation) {
-  return MateAdjustT<float>(flipped, rotation, offset, dx, dy, ballRotation);
-}
-
-bool DeriveMateDofs(const glm::mat4& rel, MateDerive how, bool& flipped,
-                    float& rotation, float& dx, float& dy, float& offset) {
+bool DeriveMateDofs(const glm::dmat4& rel, MateDerive how, bool& flipped,
+                    double& rotation, double& dx, double& dy, double& offset) {
   // A fastened adjust is T(dx,dy,offset) * Rz(rotation) * [Rx(180)]. Its
   // rotation part is therefore determined by the third column's sign and one
   // atan2, and its translation IS the fourth column.
-  const bool over = rel[2][2] < 0.0f;
-  const float turn = std::atan2(rel[0][1], rel[0][0]);
-  const float tx = how == MateDerive::Pose ? rel[3][0] : 0.0f;
-  const float ty = how == MateDerive::Pose ? rel[3][1] : 0.0f;
-  const float tz = how == MateDerive::Pose ? rel[3][2] : 0.0f;
+  const bool over = rel[2][2] < 0.0;
+  const double turn = std::atan2(rel[0][1], rel[0][0]);
+  const double tx = how == MateDerive::Pose ? rel[3][0] : 0.0;
+  const double ty = how == MateDerive::Pose ? rel[3][1] : 0.0;
+  const double tz = how == MateDerive::Pose ? rel[3][2] : 0.0;
 
   // Compose it back and insist it is what we were given. `Twist` discards the
   // translation deliberately, so only the rotation is checked there — but it
   // is checked, which is what separates "turned a quarter out" from "these
   // two frames are skew and no turn will seat them".
-  const glm::mat4 back =
-      MateAdjustFor(over, turn, tz, tx, ty, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+  const glm::dmat4 back =
+      MateAdjustFor(over, turn, tz, tx, ty, glm::dquat(1.0, 0.0, 0.0, 0.0));
   const int cols = how == MateDerive::Pose ? 4 : 3;
   for (int c = 0; c < cols; c++)
     for (int r = 0; r < 3; r++)
-      if (std::abs(back[c][r] - rel[c][r]) > 1e-3f)
+      if (std::abs(back[c][r] - rel[c][r]) > 1e-3)
         return false;
 
   flipped = over;
@@ -96,8 +84,8 @@ namespace {
 constexpr double kCloseTolMm = 1e-3;
 
 glm::dmat4 AdjustOfD(const LoopMate& m) {
-  return MateAdjustT<double>(m.flipped, m.rotation, m.offset, m.dx, m.dy,
-                             glm::dquat(m.ballRotation));
+  return MateAdjustFor(m.flipped, m.rotation, m.offset, m.dx, m.dy,
+                       m.ballRotation);
 }
 
 // Rotation vector of R (axis * angle). Via the quaternion rather than the
@@ -198,9 +186,7 @@ std::vector<double> SeedQ(const std::vector<LoopMate>& mates,
   return q;
 }
 
-// Mate i's adjustment at the given q, in double, WITHOUT round-tripping
-// through the float fields of LoopMate — that narrowing is what the solver
-// must not do until it is finished.
+// Mate i's adjustment at the given q, without writing q into the LoopMate.
 //
 // Scalars are absolute (seeded from the stored pose); the ball rotation is a
 // so(3) DELTA composed onto its seed, which keeps the unknown unconstrained —
@@ -211,21 +197,21 @@ glm::dmat4 AdjustAt(const LoopMate& seed, int col,
     return AdjustOfD(seed);
   switch (seed.type) {
   case MateType::Revolute:
-    return MateAdjustT<double>(seed.flipped, q[col], seed.offset, seed.dx,
-                               seed.dy, glm::dquat(seed.ballRotation));
+    return MateAdjustFor(seed.flipped, q[col], seed.offset, seed.dx, seed.dy,
+                         seed.ballRotation);
   case MateType::Slider:
-    return MateAdjustT<double>(seed.flipped, seed.rotation, q[col], seed.dx,
-                               seed.dy, glm::dquat(seed.ballRotation));
+    return MateAdjustFor(seed.flipped, seed.rotation, q[col], seed.dx, seed.dy,
+                         seed.ballRotation);
   case MateType::Cylindrical:
-    return MateAdjustT<double>(seed.flipped, q[col], q[col + 1], seed.dx,
-                               seed.dy, glm::dquat(seed.ballRotation));
+    return MateAdjustFor(seed.flipped, q[col], q[col + 1], seed.dx, seed.dy,
+                         seed.ballRotation);
   case MateType::Planar:
-    return MateAdjustT<double>(seed.flipped, q[col + 2], seed.offset, q[col],
-                               q[col + 1], glm::dquat(seed.ballRotation));
+    return MateAdjustFor(seed.flipped, q[col + 2], seed.offset, q[col],
+                         q[col + 1], seed.ballRotation);
   case MateType::Ball:
-    return MateAdjustT<double>(
+    return MateAdjustFor(
         seed.flipped, seed.rotation, seed.offset, seed.dx, seed.dy,
-        glm::normalize(glm::dquat(seed.ballRotation) *
+        glm::normalize(seed.ballRotation *
                        ExpSo3(glm::dvec3(q[col], q[col + 1], q[col + 2]))));
   case MateType::Fastened:
     break;
@@ -233,8 +219,7 @@ glm::dmat4 AdjustAt(const LoopMate& seed, int col,
   return AdjustOfD(seed);
 }
 
-// Narrowed back into LoopMate fields — done ONCE, at the end, because the
-// document stores these as floats.
+// Written back into LoopMate fields ONCE, at the end.
 std::vector<LoopMate> ApplyQ(const std::vector<LoopMate>& seed,
                              const Packing& pack,
                              const std::vector<double>& q) {
@@ -246,24 +231,23 @@ std::vector<LoopMate> ApplyQ(const std::vector<LoopMate>& seed,
     LoopMate& m = out[i];
     switch (m.type) {
     case MateType::Revolute:
-      m.rotation = static_cast<float>(q[c]);
+      m.rotation = q[c];
       break;
     case MateType::Slider:
-      m.offset = static_cast<float>(q[c]);
+      m.offset = q[c];
       break;
     case MateType::Cylindrical:
-      m.rotation = static_cast<float>(q[c]);
-      m.offset = static_cast<float>(q[c + 1]);
+      m.rotation = q[c];
+      m.offset = q[c + 1];
       break;
     case MateType::Planar:
-      m.dx = static_cast<float>(q[c]);
-      m.dy = static_cast<float>(q[c + 1]);
-      m.rotation = static_cast<float>(q[c + 2]);
+      m.dx = q[c];
+      m.dy = q[c + 1];
+      m.rotation = q[c + 2];
       break;
     case MateType::Ball:
-      m.ballRotation = glm::quat(
-          glm::normalize(glm::dquat(seed[i].ballRotation) *
-                         ExpSo3(glm::dvec3(q[c], q[c + 1], q[c + 2]))));
+      m.ballRotation = glm::normalize(
+          seed[i].ballRotation * ExpSo3(glm::dvec3(q[c], q[c + 1], q[c + 2])));
       break;
     case MateType::Fastened:
       break;
@@ -273,14 +257,14 @@ std::vector<LoopMate> ApplyQ(const std::vector<LoopMate>& seed,
 }
 
 // ONE tree walk, in double, driven by per-mate adjustments the caller chose.
-// Both the public float EvaluateTree and every residual evaluation inside the
+// Both the public EvaluateTree and every residual evaluation inside the
 // solver go through here, so there is no second copy of the composition to
 // drift.
 std::unordered_map<uint64_t, glm::dmat4>
 WalkTree(const LoopProblem& problem, const std::vector<glm::dmat4>& adjust) {
   std::unordered_map<uint64_t, glm::dmat4> world;
   for (const auto& [id, m] : problem.anchor)
-    world[id] = glm::dmat4(m);
+    world[id] = m;
   // In placement order, so every edge's `from` is already known.
   for (const LoopTreeEdge& e : problem.tree) {
     const auto from = world.find(e.from);
@@ -358,18 +342,13 @@ std::vector<glm::dmat4> AdjustsFrom(const std::vector<LoopMate>& mates) {
 
 } // namespace
 
-std::unordered_map<uint64_t, glm::mat4>
+std::unordered_map<uint64_t, glm::dmat4>
 EvaluateTree(const LoopProblem& problem, const std::vector<LoopMate>& mates) {
   std::vector<glm::dmat4> adjust;
   adjust.reserve(problem.mates.size());
   for (size_t i = 0; i < problem.mates.size(); i++)
     adjust.push_back(AdjustOfD(i < mates.size() ? mates[i] : problem.mates[i]));
-  const auto world = WalkTree(problem, adjust);
-  std::unordered_map<uint64_t, glm::mat4> out;
-  out.reserve(world.size());
-  for (const auto& [id, m] : world)
-    out[id] = glm::mat4(m);
-  return out;
+  return WalkTree(problem, adjust);
 }
 
 #ifdef HAVE_EIGEN
@@ -612,9 +591,7 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
   sol.residualMm = r.lpNorm<Eigen::Infinity>();
   sol.converged = sol.residualMm < kCloseTolMm;
   sol.solved = ApplyQ(problem.mates, pack, q);
-  sol.world.reserve(world.size());
-  for (const auto& [id, m] : world)
-    sol.world[id] = glm::mat4(m);
+  sol.world = world;
 
   // Which cut mates could not close, by their own residual block — and by
   // how much, each its own: the component's worst belongs to one of them.

@@ -81,7 +81,7 @@ std::string At(const gp_Pnt& p) {
 }
 
 Bnd_Box BoxOf(const CADShape& shape) {
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   shape.GetBoundingBox(lo, hi); // memoised on the shape
   Bnd_Box box;
   box.Update(lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
@@ -316,7 +316,7 @@ std::string Mm(double v) {
 
 double FuzzyTolerance(const CADShape& target, const CADShape& tool) {
   const auto diag = [](const CADShape& s) {
-    glm::vec3 lo, hi;
+    glm::dvec3 lo, hi;
     s.GetBoundingBox(lo, hi);
     return static_cast<double>(glm::length(hi - lo));
   };
@@ -398,7 +398,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     // A reference body (a Derived ghost) is never a target: the first solid
     // drawn on a derived face becomes this part's own body, which is the
     // whole point of drawing there.
-    glm::vec3 pmin, pmax;
+    glm::dvec3 pmin, pmax;
     shape.GetBoundingBox(pmin, pmax);
     int target = -1;
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
@@ -406,7 +406,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
         continue;
       if (target < 0)
         target = i; // the last non-reference body, unless one overlaps
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (BoxesOverlap(pmin, pmax, bmin, bmax)) {
         target = i;
@@ -470,7 +470,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
       if (i == target || bodies[i].reference)
         continue;
-      glm::vec3 bmin, bmax;
+      glm::dvec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (!BoxesOverlap(pmin, pmax, bmin, bmax))
         continue;

@@ -301,7 +301,7 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
         continue;
       for (const CurveFeature::Bend& b : curve->Bends()) {
         fm.bends.push_back({b.angleDeg, b.radius, b.straightBefore, b.rollDeg});
-        fm.corners.push_back(glm::dvec3(b.corner));
+        fm.corners.push_back(b.corner);
       }
       frame.push_back(std::move(fm));
     }

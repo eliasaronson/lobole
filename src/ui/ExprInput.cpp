@@ -253,10 +253,6 @@ bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out,
   return true;
 }
 
-bool ExprCommitOnLastItem(AppState& state, double* out) {
-  return ExprCommitOnItem(state, ImGui::GetItemID(), out);
-}
-
 // The id of the text field inside an InputScalar. With step buttons ImGui
 // wraps it in PushID(label) + InputText(""), so the group's id is not the
 // one to watch; without them the field IS the item. InputScalarN nests one
@@ -393,16 +389,6 @@ bool ExprDragN(AppState& state, const char* label, T* v, int n, float speed) {
 
 } // namespace
 
-bool ExprDragFloat2(AppState& state, const char* label, float v[2],
-                    float speed) {
-  return ExprDragN(state, label, v, 2, speed);
-}
-
-bool ExprDragFloat3(AppState& state, const char* label, float v[3],
-                    float speed) {
-  return ExprDragN(state, label, v, 3, speed);
-}
-
 bool ExprDragFloat2(AppState& state, const char* label, double v[2],
                     float speed) {
   return ExprDragN(state, label, v, 2, speed);
@@ -411,17 +397,6 @@ bool ExprDragFloat2(AppState& state, const char* label, double v[2],
 bool ExprDragFloat3(AppState& state, const char* label, double v[3],
                     float speed) {
   return ExprDragN(state, label, v, 3, speed);
-}
-
-bool ExprInputFloat(AppState& state, const char* label, float* v,
-                    const char* fmt) {
-  bool changed = ImGui::InputFloat(label, v, 0.0f, 0.0f, fmt);
-  double expr = 0.0;
-  if (ExprCommitOnLastItem(state, &expr)) {
-    *v = static_cast<float>(expr);
-    changed = true;
-  }
-  return changed;
 }
 
 bool ExprInputInt(AppState& state, const char* label, int* v,
@@ -436,16 +411,17 @@ bool ExprInputInt(AppState& state, const char* label, int* v,
   return changed;
 }
 
-bool ExprInputFloat3(AppState& state, const char* label, float v[3],
-                     const char* fmt) {
+bool ExprInputDouble3(AppState& state, const char* label, double v[3],
+                      const char* fmt) {
   ImGuiID fields[3];
   for (int i = 0; i < 3; i++)
     fields[i] = InnerFieldId(label, i);
-  bool changed = ImGui::InputFloat3(label, v, fmt);
+  bool changed = ImGui::InputScalarN(label, ImGuiDataType_Double, v, 3, nullptr,
+                                     nullptr, fmt);
   for (int i = 0; i < 3; i++) {
     double expr = 0.0;
     if (ExprCommitOnItem(state, fields[i], &expr)) {
-      v[i] = static_cast<float>(expr);
+      v[i] = expr;
       changed = true;
     }
   }

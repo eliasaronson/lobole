@@ -696,16 +696,16 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
-    glm::vec3 mn, mx;
+    glm::dvec3 mn, mx;
     Doc()->GetBodies()[0].shape.GetBoundingBox(mn, mx);
-    const glm::vec3 c = (mn + mx) * 0.5f;
+    const glm::vec3 c = (mn + mx) * 0.5;
 
     // Look down at the top face from a slight angle so it is clear to hit.
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(c);
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
     s_App->camera->SetPosition(c + glm::normalize(glm::vec3(0.4f, 1.0f, 0.5f)) *
-                                       glm::length(mx - mn) * 5.0f);
+                                       float(glm::length(mx - mn)) * 5.0f);
     ctx->Yield();
 
     s_App->measure = ui::MeasureState{};
@@ -828,9 +828,9 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
-    const glm::vec3 bodyCenter = (min + max) * 0.5f;
+    const glm::vec3 bodyCenter = (min + max) * 0.5;
 
     // File/New does not reset the camera, so the orbit/pan/zoom left by earlier
     // viewport tests leaks in (the default box is off-origin, so it can even
@@ -1537,11 +1537,11 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(input != nullptr);
     const auto eb = Measure::ElementBounds(*input, ref);
     IM_CHECK(eb.has_value());
-    const glm::vec3 P = (eb->min + eb->max) * 0.5f;
+    const glm::vec3 P = (eb->min + eb->max) * 0.5;
     const glm::vec3 T = glm::normalize(eb->max - eb->min);
-    glm::vec3 bmin, bmax;
+    glm::dvec3 bmin, bmax;
     (*input)[0].shape.GetBoundingBox(bmin, bmax);
-    const glm::vec3 bodyCenter = (bmin + bmax) * 0.5f;
+    const glm::vec3 bodyCenter = (bmin + bmax) * 0.5;
     glm::vec3 out = P - bodyCenter;
     out -= glm::dot(out, T) * T;
     IM_CHECK(glm::length(out) > 1e-4f);
@@ -1553,7 +1553,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f) +
                                glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
-                                   (glm::length(bmax - bmin) * 2.5f));
+                                   (float(glm::length(bmax - bmin)) * 2.5f));
     ctx->Yield(2);
 
     const float L = 0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
@@ -1946,9 +1946,9 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box");
 
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
-    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 center = (min + max) * 0.5;
     const float radius = glm::length(max - min) * 0.5f;
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(center);
@@ -2219,7 +2219,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;
 
@@ -2238,14 +2238,14 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3); // resync builds the occurrence meshes
 
     // Slightly-elevated view centered between the boxes; top faces clear.
-    const glm::vec3 cA = (min + max) * 0.5f;
+    const glm::vec3 cA = (min + max) * 0.5;
     const glm::vec3 mid = cA + glm::vec3(5.0f, 0.0f, 0.0f);
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(mid +
                                glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
-                                   glm::length(max - min) * 6.0f);
+                                   float(glm::length(max - min)) * 6.0f);
     ctx->Yield();
 
     s_App->measure = ui::MeasureState{};

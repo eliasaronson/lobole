@@ -192,7 +192,7 @@ struct SectorCut {
 [[nodiscard]] double
 RelationRatio(const AssemblyDocument& asmDoc, const Mate& wormMate,
               const Mate& wheelMate, bool samePath, bool topLevel,
-              const glm::mat4& wormFrame, const glm::mat4& wheelFrame,
+              const glm::dmat4& wormFrame, const glm::dmat4& wheelFrame,
               int starts, int teeth, bool rightHanded, std::string* why);
 
 } // namespace worm

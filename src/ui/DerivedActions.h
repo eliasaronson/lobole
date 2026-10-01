@@ -28,7 +28,7 @@ struct DerivedSource {
   uint64_t slotId = 0;
   std::string name;
   uint64_t occurrenceId = 0; // 0 = a plain part of the project
-  glm::mat4 placement{1.0f}; // identity for a plain part
+  glm::dmat4 placement{1.0}; // identity for a plain part
 };
 std::vector<DerivedSource> DerivedSourceCandidates(AppState& state);
 

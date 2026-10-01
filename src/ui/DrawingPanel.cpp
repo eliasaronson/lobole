@@ -841,7 +841,7 @@ void DrawAddViewToolWindow(AppState& state) {
   // Add view opens.
   BeginToolWindowFrame(state, "Add view");
   static int srcIdx = 0, orientIdx = 0;
-  static float addScale = 1.0f;
+  static double addScale = 1.0;
   static uint64_t addConfig = 0; // 0 = the part's active configuration
   std::vector<const PartSlot*> partSlots;
   for (const PartSlot& s : state.parts)
@@ -896,7 +896,7 @@ void DrawAddViewToolWindow(AppState& state) {
     ImGui::Combo("###dwg_orientation", &orientIdx, kOrientLabels,
                  IM_ARRAYSIZE(kOrientLabels));
     LeftLabel("Scale");
-    ExprInputFloat(state, "###dwg_scale", &addScale, "%.3f");
+    ExprInputDouble(state, "###dwg_scale", &addScale, "%.3f");
     if (ImGui::Button("Add view###dwg_add_view")) {
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);

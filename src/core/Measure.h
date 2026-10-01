@@ -28,7 +28,7 @@ struct ThreadSpan {
 
 // Every thread `body` carries, in world coordinates.
 [[nodiscard]] std::vector<ThreadSpan> ThreadSpansOf(const Body& body,
-                                                    const glm::mat4& world);
+                                                    const glm::dmat4& world);
 
 struct Element {
   std::string kind;    // "face" | "edge"
@@ -46,7 +46,7 @@ struct Element {
   bool hasRadius = false;
   // The axis direction of a cylinder/cone/torus face or a circular edge. Its
   // SIGN is arbitrary (an axis has no outward), so compare with |dot|.
-  glm::vec3 axis{0.0f};
+  glm::dvec3 axis{0.0};
   bool hasAxis = false;
 };
 
@@ -64,14 +64,12 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 // the way out should not add loss the caller cannot see. A box at 164.8 now
 // reports 164.8 and not 164.800003.
 //
-// Geometry built on a sketch is double end to end too (SketchPlane holds
-// glm::dvec3), so a panel drawn on a plane at -172.8 sits at -172.8. Other
-// document positions are still float32 -- a primitive's position, an
-// occurrence's placement -- so a CALLER filtering on a position needs a
-// tolerance suited to the magnitude: a 1e-6 window matches NOTHING at
-// cabinet scale where a float went in, silently, since an empty pick list
-// looks exactly like nothing to do
-// (docs/inspect/README.md#positions-are-float32).
+// The model is double end to end as well -- a sketch plane, a primitive's
+// position, an occurrence's placement -- so a panel drawn on a plane at
+// -172.8 sits at -172.8 (docs/conventions.md#the-model-is-double). A CALLER
+// filtering on a COMPUTED position still wants a tolerance suited to the
+// magnitude, since arithmetic rounds and an empty pick list looks exactly
+// like nothing to do (docs/inspect/README.md#positions-are-double).
 struct FaceInfo {
   std::string kind; // "plane"|"cylinder"|"cone"|"sphere"|"torus"|"other"
   double area = 0.0;
@@ -101,9 +99,9 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);
 // with every body of B (placed by xfB) and the volumes summed. The part-tab
 // check is the identity-transform special case. nullopt on an OCC failure.
 std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
-                                         const glm::mat4& xfA,
+                                         const glm::dmat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB);
+                                         const glm::dmat4& xfB);
 
 // Contact probe between two rigidly placed body sets (V1): total pairwise
 // intersection volume plus the exact minimum separation. distance is 0
@@ -138,16 +136,16 @@ struct SetContact {
 // intersecting them. A motion study reads only the volume, so for 20,403 checks
 // it was paying about two thirds of its time for a number it threw away.
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
-                                         const glm::mat4& xfA,
+                                         const glm::dmat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB,
+                                         const glm::dmat4& xfB,
                                          bool wantDistance = true);
 
 // Axis-aligned world bounds of a placed body set — the cheap prefilter the
 // assembly contact_report sweep runs before paying for ContactBetween.
 // False when the set has no valid shapes.
-bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
-                 glm::vec3& min, glm::vec3& max);
+bool WorldBounds(const std::vector<Body>& bodies, const glm::dmat4& xf,
+                 glm::dvec3& min, glm::dvec3& max);
 
 // True when the two placed body sets are further apart than `gap`, judged by
 // their ORIENTED boxes — the second prefilter, for the case an axis-aligned
@@ -162,9 +160,9 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
 // Conservative in the only direction that matters: it returns true only when
 // the boxes are provably apart, so a pair it rejects cannot be touching.
 [[nodiscard]] bool SeparatedByOBB(const std::vector<Body>& a,
-                                  const glm::mat4& xfA,
+                                  const glm::dmat4& xfA,
                                   const std::vector<Body>& b,
-                                  const glm::mat4& xfB, double gap);
+                                  const glm::dmat4& xfB, double gap);
 
 // V4 compare_geometry: boolean diff between two placed body sets. missing =
 // vol(A − B) (reference not covered), extra = vol(B − A) (beyond the
@@ -183,15 +181,15 @@ struct SetCompare {
   double common = 0.0, missing = 0.0, extra = 0.0;
   double surfaceA = 0.0, surfaceB = 0.0;
   glm::dvec3 comA{0.0}, comB{0.0};
-  glm::vec3 minA{0.0f}, maxA{0.0f}, minB{0.0f}, maxB{0.0f};
+  glm::dvec3 minA{0.0}, maxA{0.0}, minB{0.0}, maxB{0.0};
   int facesA = 0, facesB = 0, edgesA = 0, edgesB = 0;
 };
 // `overlap` false skips the three booleans — everything else (volumes,
 // surfaces, centres, bounds, the face/edge census) is measured from the two
 // shapes directly and costs milliseconds.
 std::optional<SetCompare>
-CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
-                const std::vector<Body>& bodiesB, const glm::mat4& xfB,
+CompareBodySets(const std::vector<Body>& bodiesA, const glm::dmat4& xfA,
+                const std::vector<Body>& bodiesB, const glm::dmat4& xfB,
                 CADShape* missingOut = nullptr, CADShape* extraOut = nullptr,
                 bool overlap = true);
 
@@ -263,9 +261,9 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodies,
 // world transform before the angle. Translation cannot change an angle, so
 // only the rotation part is used.
 std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
-                                 const ElementRef& a, const glm::mat4& xfA,
+                                 const ElementRef& a, const glm::dmat4& xfA,
                                  const std::vector<Body>& bodiesB,
-                                 const ElementRef& b, const glm::mat4& xfB);
+                                 const ElementRef& b, const glm::dmat4& xfB);
 
 // WHICH distance between two elements. Minimum is the one every CAD system
 // defaults to and the only one this used to offer; the other two answer
@@ -298,8 +296,8 @@ std::optional<double> Distance(const std::vector<Body>& bodies,
 // the dx/dy/dz readout.
 struct DistanceResult {
   double distance = 0.0;
-  glm::vec3 pointA{0.0f}; // closest point on element a
-  glm::vec3 pointB{0.0f}; // closest point on element b
+  glm::dvec3 pointA{0.0}; // closest point on element a
+  glm::dvec3 pointB{0.0}; // closest point on element b
 };
 std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
                                                const ElementRef& a,
@@ -311,8 +309,8 @@ std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
 // the identity-transform special case of this.
 std::optional<DistanceResult>
 DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
-                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-                 const ElementRef& b, const glm::mat4& xfB);
+                 const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::dmat4& xfB);
 
 // The same, for a chosen DistanceKind. Minimum is DistanceDetailed. Maximum
 // walks the tessellated boundary of each element for the furthest pair —
@@ -321,8 +319,8 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
 // rather than exact and wrong. Centres is the two anchors.
 std::optional<DistanceResult>
 DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
-               const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-               const ElementRef& b, const glm::mat4& xfB, DistanceKind kind);
+               const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+               const ElementRef& b, const glm::dmat4& xfB, DistanceKind kind);
 
 // MEASURABLES: a named element, or a whole placed shape.
 //
@@ -340,7 +338,7 @@ DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
 // remember to write.
 struct Target {
   const std::vector<Body>* bodies = nullptr;
-  glm::mat4 xf{1.0f};
+  glm::dmat4 xf{1.0};
   ElementRef ref; // name empty => the whole set
   bool Whole() const { return ref.name.empty(); }
 };
@@ -350,7 +348,7 @@ struct Target {
 struct SetMeasure {
   double volume = 0.0;
   double surfaceArea = 0.0;
-  glm::vec3 size{0.0f}; // world-axis-aligned bounding box extents
+  glm::dvec3 size{0.0}; // world-axis-aligned bounding box extents
   int solids = 0;
 };
 std::optional<SetMeasure> DescribeTarget(const Target& t);
@@ -362,8 +360,8 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
 // The point on a target closest to (or, for Maximum, furthest from) `p` —
 // what a POINT measurable measures against. A corner is a point, so its side
 // of a measurement is exact and only the other side needs solving.
-std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
-                                        DistanceKind kind);
+std::optional<glm::dvec3> NearestPointOn(const Target& t, const glm::dvec3& p,
+                                         DistanceKind kind);
 
 // Whether two WHOLE measurables overlap, and by how much — so a pair of
 // parts that interpenetrate reports as a clash rather than as distance 0,
@@ -416,14 +414,14 @@ const char* FacingWord(const glm::dvec3& unitDir);
 //
 // A corner has no stable name of its own: the ElementMap names faces and
 // edges, not vertices. Two named edges do, so their shared vertex does too.
-std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
-                                  const ElementRef& edgeA,
-                                  const ElementRef& edgeB);
+std::optional<glm::dvec3> CornerOf(const std::vector<Body>& bodies,
+                                   const ElementRef& edgeA,
+                                   const ElementRef& edgeB);
 
 // A representative point ON an element: a face's centre of mass, an edge's
 // parametric midpoint. Where a dimension should attach when it has a choice.
-std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
-                                  const ElementRef& ref);
+std::optional<glm::dvec3> AnchorOf(const std::vector<Body>& bodies,
+                                   const ElementRef& ref);
 
 // The element's CENTRE, which for anything round is not a point on it.
 //
@@ -434,8 +432,8 @@ std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
 // centre is its centre; a cylinder's, cone's or torus's is the point on its
 // axis nearest the face; a sphere's is the sphere's. Everything else has no
 // centre distinct from its anchor and falls back to it.
-std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
-                                  const ElementRef& ref);
+std::optional<glm::dvec3> CentreOf(const std::vector<Body>& bodies,
+                                   const ElementRef& ref);
 
 // The whole circle a circular EDGE lies on, read off every edge of the same
 // body that lies on it (same centre, axis and radius, to a tolerance relative
@@ -470,15 +468,15 @@ std::optional<RimCircle> RimCircleOf(const std::vector<Body>& bodies,
 // `parallel` comes from Angle(); pass false when there is no angle to take.
 std::optional<DistanceResult>
 DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
-                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
-                 const ElementRef& b, const glm::mat4& xfB, bool parallel);
+                 const glm::dmat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::dmat4& xfB, bool parallel);
 
 // Axis-aligned bounding box of one resolved element (face or edge), in the
 // bodies' own (part-local) space — feeds zoom-to-selection. nullopt when the
 // ref no longer resolves.
 struct Bounds {
-  glm::vec3 min{0.0f};
-  glm::vec3 max{0.0f};
+  glm::dvec3 min{0.0};
+  glm::dvec3 max{0.0};
 };
 std::optional<Bounds> ElementBounds(const std::vector<Body>& bodies,
                                     const ElementRef& ref);
@@ -488,8 +486,8 @@ std::optional<Bounds> ElementBounds(const std::vector<Body>& bodies,
 // their intersection with the plane. 0 when the plane misses everything;
 // nullopt on an OCC failure.
 std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
-                                       const glm::vec3& origin,
-                                       const glm::vec3& normal);
+                                       const glm::dvec3& origin,
+                                       const glm::dvec3& normal);
 
 // The same cut, decomposed into its CONNECTED REGIONS — one entry per island
 // of material the plane crosses, with that island's area and centroid.
@@ -536,8 +534,8 @@ struct SectionRegion {
   std::vector<SectionLoop> loops;
 };
 std::optional<std::vector<SectionRegion>>
-CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
-                    const glm::vec3& normal, bool withLoops = false);
+CrossSectionRegions(const std::vector<Body>& bodies, const glm::dvec3& origin,
+                    const glm::dvec3& normal, bool withLoops = false);
 
 // The section-cut cap faces (I3 v2, C4): one CADShape per body — the body's
 // intersection with the section plane, lying on the plane — for rendering a
@@ -581,10 +579,10 @@ struct SectionCapCache {
   }
 };
 
-std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
-                                  const glm::vec3& origin,
-                                  const glm::vec3& normal,
-                                  const std::vector<glm::vec4>& trimPlanes = {},
-                                  SectionCapCache* cache = nullptr);
+std::vector<CADShape>
+SectionCaps(const std::vector<Body>& bodies, const glm::dvec3& origin,
+            const glm::dvec3& normal,
+            const std::vector<glm::dvec4>& trimPlanes = {},
+            SectionCapCache* cache = nullptr);
 
 } // namespace Measure

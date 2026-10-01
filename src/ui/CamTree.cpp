@@ -380,7 +380,7 @@ void NewSetup(AppState& state) {
   state.camActiveSetup = fresh.id;
   (void)cam::RecomputeOrigin(fresh, JobBodies(state));
   fresh.safeZ = DeriveJobSafeZ(state, fresh);
-  state.camSafeZEdit = static_cast<float>(fresh.safeZ);
+  state.camSafeZEdit = fresh.safeZ;
   MarkJobEdited(state);
 }
 
@@ -408,7 +408,7 @@ void FlipSetup(AppState& state, uint64_t setupId) {
   other.safeZ = DeriveJobSafeZ(state, other);
   (void)cam::RecomputeOrigin(other, JobBodies(state));
   state.camActiveSetup = other.id;
-  state.camSafeZEdit = static_cast<float>(other.safeZ);
+  state.camSafeZEdit = other.safeZ;
   MarkJobEdited(state);
 }
 
@@ -433,7 +433,7 @@ void DuplicateSetup(AppState& state, uint64_t setupId) {
   for (cam::Placement& pl : made.placements)
     pl.id = state.job->AllocateId();
   state.camActiveSetup = made.id;
-  state.camSafeZEdit = static_cast<float>(made.safeZ);
+  state.camSafeZEdit = made.safeZ;
   state.job->BumpVersion();
   MarkJobEdited(state);
 }
@@ -527,14 +527,14 @@ void DrawSetupStep(AppState& state) {
     // height in Z -- a sheet is as thick as what it is cut into. With no
     // parts there is no thickness to derive, so the fields wait.
     const cam::Machine* mc = cam::FindMachine(state.machines, ns.machine);
-    if (ns.sheet.x <= 0.0f && mc != nullptr && mc->HasWorkArea()) {
-      ns.sheet.x = static_cast<float>(mc->travelMax.x - mc->travelMin.x);
-      ns.sheet.y = static_cast<float>(mc->travelMax.y - mc->travelMin.y);
+    if (ns.sheet.x <= 0.0 && mc != nullptr && mc->HasWorkArea()) {
+      ns.sheet.x = mc->travelMax.x - mc->travelMin.x;
+      ns.sheet.y = mc->travelMax.y - mc->travelMin.y;
     }
-    if (ns.sheet.z <= 0.0f && !bodies.empty()) {
-      glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+    if (ns.sheet.z <= 0.0 && !bodies.empty()) {
+      glm::dvec3 lo(DBL_MAX), hi(-DBL_MAX);
       for (const Body& body : bodies) {
-        glm::vec3 bmin, bmax;
+        glm::dvec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
         lo = glm::min(lo, bmin);
         hi = glm::max(hi, bmax);
@@ -542,9 +542,7 @@ void DrawSetupStep(AppState& state) {
       ns.sheet.z = hi.z - lo.z;
     }
     ImGui::SetNextItemWidth(200.0f);
-    float sheet[3] = {ns.sheet.x, ns.sheet.y, ns.sheet.z};
-    if (ExprDragFloat3(state, "mm###cam_new_sheet", sheet, 1.0f))
-      ns.sheet = {sheet[0], sheet[1], sheet[2]};
+    ExprDragFloat3(state, "mm###cam_new_sheet", &ns.sheet.x, 1.0f);
     if (bodies.empty())
       ImGui::TextDisabled("(thickness follows the parts — add one below)");
   }
@@ -552,7 +550,7 @@ void DrawSetupStep(AppState& state) {
   // The step CHANGES the document or REFUSES visibly (u10): no machine is a
   // refusal here, said above, and the button does nothing else.
   const bool canCreate =
-      !state.machines.empty() && (!ns.fixedSheet || ns.sheet.x > 0.0f);
+      !state.machines.empty() && (!ns.fixedSheet || ns.sheet.x > 0.0);
   ImGui::BeginDisabled(!canCreate);
   if (ImGui::Button("Create setup###cam_add_setup")) {
     cam::Setup& fresh = state.job->AddSetup();
@@ -567,7 +565,7 @@ void DrawSetupStep(AppState& state) {
     // Safe Z clear of the stock, not the struct's bare 5 mm -- which sits
     // inside anything taller than that (docs/cam/setup.md#safe-z).
     fresh.safeZ = cam::DeriveSafeZ(fresh, bodies);
-    state.camSafeZEdit = static_cast<float>(fresh.safeZ);
+    state.camSafeZEdit = fresh.safeZ;
     // CAM edits live in the document but bump no document version (the same
     // as study edits), so this is what keeps the save prompt honest.
     MarkJobEdited(state);
@@ -1478,7 +1476,7 @@ void DrawCamPanel(AppState& state) {
     (void)cam::RecomputeOrigin(*active, JobBodies(state));
     if (dirty || active->origin != origin)
       MarkJobEdited(state);
-    state.camSafeZEdit = static_cast<float>(active->safeZ);
+    state.camSafeZEdit = active->safeZ;
     RefreshCamToolpaths(state);
     // A verdict about the PREVIOUS toolpath is worse than no verdict.
     state.camVerdict.clear();
@@ -1587,25 +1585,24 @@ bool DrawCamSetupEditor(AppState& state) {
   // the first -- so this is where that refusal sends you.
   ImGui::SeparatorText("Stock and safety");
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragFloat(state, "Safe Z###cam_safez",
-                    reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f,
-                    -FLT_MAX, FLT_MAX, "%.3f"))
+  if (ExprDragDouble(state, "Safe Z###cam_safez", &state.camSafeZEdit, 0.5f,
+                     -DBL_MAX, DBL_MAX, "%.3f"))
     dirty = true;
   ImGui::SetItemTooltip("Rapid height above the stock top");
-  float above = static_cast<float>(setup->stock.margin.z);
+  double above = setup->stock.margin.z;
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragFloat(state, "Above the part###cam_stock_above", &above, 0.1f,
-                    0.0f, 100.0f, "%.2f")) {
+  if (ExprDragDouble(state, "Above the part###cam_stock_above", &above, 0.1f,
+                     0.0, 100.0, "%.2f")) {
     setup->stock.margin.z = above;
     dirty = true;
   }
   ImGui::SetItemTooltip("Material sitting on top of the part — what a "
                         "facing pass removes. Picking the top face sets "
                         "this to zero.");
-  float around = static_cast<float>(setup->stock.margin.x);
+  double around = setup->stock.margin.x;
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragFloat(state, "Around it###cam_stock_around", &around, 0.1f, 0.0f,
-                    100.0f, "%.2f")) {
+  if (ExprDragDouble(state, "Around it###cam_stock_around", &around, 0.1f, 0.0,
+                     100.0, "%.2f")) {
     setup->stock.margin.x = around;
     setup->stock.margin.y = around;
     dirty = true;
@@ -1631,12 +1628,12 @@ bool DrawCamSetupEditor(AppState& state) {
   }
   if (setup->stock.mode == cam::StockMode::Fixed) {
     for (int a = 0; a < 3; a++) {
-      float v = static_cast<float>(setup->stock.size[a]);
+      double v = setup->stock.size[a];
       ImGui::SetNextItemWidth(58.0f);
       const char* ids[3] = {"###stock_sx", "###stock_sy", "###stock_sz"};
       if (a > 0)
         ImGui::SameLine();
-      if (ExprDragFloat(state, ids[a], &v, 0.5f, 0.0f, 100000.0f, "%.1f")) {
+      if (ExprDragDouble(state, ids[a], &v, 0.5f, 0.0, 100000.0, "%.1f")) {
         setup->stock.size[a] = v;
         dirty = true;
       }
@@ -1668,10 +1665,10 @@ bool DrawCamSetupEditor(AppState& state) {
   ImGui::TextDisabled("%.2f %.2f %.2f", setup->origin.x, setup->origin.y,
                       setup->origin.z);
 
-  float below = static_cast<float>(setup->stock.bottomMargin);
+  double below = setup->stock.bottomMargin;
   ImGui::SetNextItemWidth(90.0f);
-  if (ExprDragFloat(state, "Below it###cam_stock_below", &below, 0.1f, 0.0f,
-                    100.0f, "%.2f")) {
+  if (ExprDragDouble(state, "Below it###cam_stock_below", &below, 0.1f, 0.0,
+                     100.0, "%.2f")) {
     setup->stock.bottomMargin = below;
     dirty = true;
   }
@@ -1705,10 +1702,10 @@ bool DrawCamSetupEditor(AppState& state) {
                         "no rotary axis.");
   if (setup->machine.hasRotaryAxis) {
     ImGui::SeparatorText("Rotary");
-    float indexA = static_cast<float>(setup->rotationA);
+    double indexA = setup->rotationA;
     ImGui::SetNextItemWidth(90.0f);
-    if (ExprDragFloat(state, "A index###cam_index_a", &indexA, 0.5f, -360.0f,
-                      360.0f, "%.2f°")) {
+    if (ExprDragDouble(state, "A index###cam_index_a", &indexA, 0.5f, -360.0,
+                       360.0, "%.2f°")) {
       setup->rotationA = indexA;
       dirty = true;
     }
@@ -1734,10 +1731,10 @@ bool DrawCamSetupEditor(AppState& state) {
                             "cutter off that end.");
       if (chuck) {
         ImGui::SameLine();
-        float grip = static_cast<float>(setup->gripLength);
+        double grip = setup->gripLength;
         ImGui::SetNextItemWidth(70.0f);
-        if (ExprDragFloat(state, "mm in the jaws (0 = machine's)###cam_grip",
-                          &grip, 0.5f, 0.0f, 200.0f, "%.1f")) {
+        if (ExprDragDouble(state, "mm in the jaws (0 = machine's)###cam_grip",
+                           &grip, 0.5f, 0.0, 200.0, "%.1f")) {
           setup->gripLength = grip;
           dirty = true;
         }
@@ -1779,7 +1776,7 @@ bool DrawCamSetupEditor(AppState& state) {
     state.camVerdict.clear();
     state.camLeftover.clear();
   } else {
-    state.camSafeZEdit = static_cast<float>(setup->safeZ);
+    state.camSafeZEdit = setup->safeZ;
   }
   if (!state.camNote.empty())
     ImGui::TextDisabled("%s", state.camNote.c_str());
@@ -1845,11 +1842,11 @@ bool DrawCamPartEditor(AppState& state) {
       // Through the expression wrapper, like every other numeric field here:
       // a raw drag reads "10/2" as 10. The axis is named INSIDE the field.
       const float w = ImGui::GetFontSize() * 5.5f;
-      float x = static_cast<float>(place->pos.x);
-      float y = static_cast<float>(place->pos.y);
+      double x = place->pos.x;
+      double y = place->pos.y;
       ImGui::SetNextItemWidth(w);
-      if (ExprDragFloat(state, "###cam_place_x", &x, 0.5f, 0.0f, 0.0f,
-                        "X %.2f")) {
+      if (ExprDragDouble(state, "###cam_place_x", &x, 0.5f, 0.0, 0.0,
+                         "X %.2f")) {
         place->pos.x = x;
         state.job->BumpVersion();
         dirty = true;
@@ -1857,18 +1854,18 @@ bool DrawCamPartEditor(AppState& state) {
       ImGui::SetItemTooltip("Where on the stock, along X (setup space)");
       ImGui::SameLine();
       ImGui::SetNextItemWidth(w);
-      if (ExprDragFloat(state, "###cam_place_y", &y, 0.5f, 0.0f, 0.0f,
-                        "Y %.2f")) {
+      if (ExprDragDouble(state, "###cam_place_y", &y, 0.5f, 0.0, 0.0,
+                         "Y %.2f")) {
         place->pos.y = y;
         state.job->BumpVersion();
         dirty = true;
       }
       ImGui::SetItemTooltip("Where on the stock, along Y (setup space)");
       ImGui::SameLine();
-      float rot = static_cast<float>(place->rotZdeg);
+      double rot = place->rotZdeg;
       ImGui::SetNextItemWidth(w);
-      if (ExprDragFloat(state, "###cam_place_rot", &rot, 1.0f, -360.0f, 360.0f,
-                        "%.1f°")) {
+      if (ExprDragDouble(state, "###cam_place_rot", &rot, 1.0f, -360.0, 360.0,
+                         "%.1f°")) {
         place->rotZdeg = rot;
         state.job->BumpVersion();
         dirty = true;

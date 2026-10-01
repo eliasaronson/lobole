@@ -697,7 +697,7 @@ void TextToolActivated(AppState& state) {
     const std::vector<std::string>& fonts = sketch::TextFontNames();
     edit.textEditId = picked->id;
     edit.textString = picked->text;
-    edit.textHeight = static_cast<float>(picked->height);
+    edit.textHeight = picked->height;
     edit.textFont = static_cast<int>(
         std::find(fonts.begin(), fonts.end(), picked->font) - fonts.begin());
     edit.textHAlign = static_cast<int>(picked->halign);

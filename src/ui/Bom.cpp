@@ -249,9 +249,9 @@ FastenerReport CheckFasteners(AppState& state) {
     // Its own placement IS the derivation: the bearing face is the frame's
     // z = 0 and the shank runs +Z, so the rim and the axis come back out of
     // the matrix with nothing stored.
-    const glm::vec3 origin(flat[i].world * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-    const glm::vec3 axis = glm::normalize(
-        glm::vec3(flat[i].world * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)));
+    const glm::dvec3 origin(flat[i].world * glm::dvec4(0.0, 0.0, 0.0, 1.0));
+    const glm::dvec3 axis = glm::normalize(
+        glm::dvec3(flat[i].world * glm::dvec4(0.0, 0.0, 1.0, 0.0)));
 
     std::vector<parts::PlacedBody> others;
     for (size_t b = 0; b < all.size(); b++)
@@ -263,8 +263,8 @@ FastenerReport CheckFasteners(AppState& state) {
     finding.part = screw->Designation();
 
     const double reach = 10000.0;
-    const std::vector<parts::StackSegment> stack = parts::TraverseAxis(
-        others, glm::dvec3(origin), glm::dvec3(axis), probe, reach);
+    const std::vector<parts::StackSegment> stack =
+        parts::TraverseAxis(others, origin, axis, probe, reach);
     if (stack.empty()) {
       finding.why = "spans nothing — there is no material on its axis, so it "
                     "is holding the two halves of the air together";

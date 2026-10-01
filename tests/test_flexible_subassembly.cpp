@@ -38,7 +38,8 @@ Connector Origin(uint64_t occ) {
   return c;
 }
 
-std::unique_ptr<Document> BoxPart(const glm::vec3& lo, const glm::vec3& size) {
+std::unique_ptr<Document> BoxPart(const glm::dvec3& lo,
+                                  const glm::dvec3& size) {
   auto doc = std::make_unique<Document>();
   doc->AddFeature(
       std::make_unique<BoxFeature>("Block", lo, size.x, size.y, size.z));
@@ -84,7 +85,7 @@ struct Rig {
   const Occurrence& Unit() const { return *top.FindById(unitOcc); }
 };
 
-uint64_t PlaceUnit(Rig& r, glm::vec3 at, bool flexible, std::string name) {
+uint64_t PlaceUnit(Rig& r, glm::dvec3 at, bool flexible, std::string name) {
   Occurrence u;
   u.name = std::move(name);
   u.partId = kSubSlot;
@@ -117,7 +118,7 @@ Rig MakeRig(bool withStop = false, bool withChain = true) {
     s.name = "Stop";
     s.partId = 12;
     s.fixed = true;
-    s.position = glm::vec3(0.0f, 20.0f, 0.0f); // on the circle at 90 deg
+    s.position = glm::dvec3(0.0, 20.0, 0.0); // on the circle at 90 deg
     r.stopOcc = r.sub.AddOccurrence(std::move(s));
   }
   Mate cm;
@@ -159,12 +160,12 @@ Rig MakeRig(bool withStop = false, bool withChain = true) {
 }
 
 // Where the crank's tip is, in the world, per the flattened tree.
-glm::vec3 CrankTip(Rig& r, uint64_t unit) {
+glm::dvec3 CrankTip(Rig& r, uint64_t unit) {
   auto flat = assembly::Flatten(r.top, r.Parts(), r.Subs());
   REQUIRE(flat.has_value());
   for (const assembly::FlatInstance& inst : *flat)
     if (inst.rootOccurrenceId == unit && inst.partId == 11)
-      return glm::vec3(inst.world * glm::vec4(30, 0, 0, 1));
+      return glm::dvec3(inst.world * glm::dvec4(30, 0, 0, 1));
   FAIL("no crank leaf under the unit");
   return {};
 }
@@ -187,7 +188,7 @@ TEST_CASE("A parent relation turns a flexible unit's inner mate",
   Drive(r, kPi / 2.0);
 
   // The crank turned a quarter, about the unit's own axis at (100, 0, 0).
-  const glm::vec3 tip = CrankTip(r, r.unitOcc);
+  const glm::dvec3 tip = CrankTip(r, r.unitOcc);
   CHECK_THAT(tip.x, WithinAbs(100.0, 1e-3));
   CHECK_THAT(tip.y, WithinAbs(30.0, 1e-3));
   const InnerMateDof* d = r.Unit().FindInnerMateDof(r.crankMate);
@@ -199,12 +200,12 @@ TEST_CASE("A parent relation turns a flexible unit's inner mate",
 
   // The rigid placement did not move, and the shared document was not
   // written: its crank mate still stands where it was authored.
-  const glm::vec3 still = CrankTip(r, rigid);
+  const glm::dvec3 still = CrankTip(r, rigid);
   CHECK_THAT(still.x, WithinAbs(30.0, 1e-3));
   CHECK_THAT(still.y, WithinAbs(100.0, 1e-3));
-  CHECK(r.sub.FindMateById(r.crankMate)->rotation == 0.0f);
+  CHECK(r.sub.FindMateById(r.crankMate)->rotation == 0.0);
   CHECK(r.sub.FindById(r.crankOcc)->orientation ==
-        glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+        glm::dquat(1.0, 0.0, 0.0, 0.0));
 
   // Solving again moves nothing: the poses re-solve to themselves.
   const std::vector<InnerPose> before = r.Unit().innerPoses;
@@ -229,8 +230,8 @@ TEST_CASE("Two flexible placements of one sub-assembly pose independently",
   assembly::Solve(r.top, r.Parts(), r.Subs(),
                   {r.crankMate, MateDof::Rotation, p2});
 
-  const glm::vec3 a = CrankTip(r, r.unitOcc) - glm::vec3(100, 0, 0);
-  const glm::vec3 b = CrankTip(r, second) - glm::vec3(0, 100, 0);
+  const glm::dvec3 a = CrankTip(r, r.unitOcc) - glm::dvec3(100, 0, 0);
+  const glm::dvec3 b = CrankTip(r, second) - glm::dvec3(0, 100, 0);
   CHECK_THAT(std::atan2(a.y, a.x), WithinAbs(kPi / 6.0, 1e-4)); // no fighting
   CHECK_THAT(std::atan2(b.y, b.x), WithinAbs(kPi / 3.0, 1e-4));
   CHECK_THAT(
@@ -239,9 +240,9 @@ TEST_CASE("Two flexible placements of one sub-assembly pose independently",
 
   // Undo: the snapshot brings the second unit back to where it stood.
   r.top = snapshot;
-  const glm::vec3 back = CrankTip(r, second) - glm::vec3(0, 100, 0);
+  const glm::dvec3 back = CrankTip(r, second) - glm::dvec3(0, 100, 0);
   CHECK_THAT(std::atan2(back.y, back.x), WithinAbs(0.0, 1e-4));
-  const glm::vec3 kept = CrankTip(r, r.unitOcc) - glm::vec3(100, 0, 0);
+  const glm::dvec3 kept = CrankTip(r, r.unitOcc) - glm::dvec3(100, 0, 0);
   CHECK_THAT(std::atan2(kept.y, kept.x), WithinAbs(kPi / 6.0, 1e-4));
 }
 
@@ -249,12 +250,11 @@ TEST_CASE("A flexible unit runs under its own configuration",
           "[assembly][solver][motion]") {
   Rig r = MakeRig(false, /*withChain=*/false);
   Configuration& held = r.sub.AddConfiguration("Held");
-  held.mateOverrides.push_back(
-      {r.crankMate, static_cast<float>(kPi / 4.0), std::nullopt});
+  held.mateOverrides.push_back({r.crankMate, kPi / 4.0, std::nullopt});
   const uint64_t heldId = held.id;
   r.top.FindById(r.unitOcc)->configurationId = heldId;
   assembly::Solve(r.top, r.Parts(), r.Subs());
-  const glm::vec3 a = CrankTip(r, r.unitOcc) - glm::vec3(100, 0, 0);
+  const glm::dvec3 a = CrankTip(r, r.unitOcc) - glm::dvec3(100, 0, 0);
   CHECK_THAT(std::atan2(a.y, a.x), WithinAbs(kPi / 4.0, 1e-4));
   // The sub's own active configuration is untouched: the placement chose.
   CHECK(r.sub.ActiveConfiguration() == 0);
@@ -280,7 +280,7 @@ TEST_CASE("A motion study checks a flexible unit leaf by leaf",
   w.name = "Wall";
   w.partId = 13;
   w.fixed = true;
-  w.position = glm::vec3(80.0f, 0.0f, 0.0f);
+  w.position = glm::dvec3(80.0, 0.0, 0.0);
   const uint64_t wall = r.top.AddOccurrence(std::move(w));
 
   MotionStudy s;
@@ -413,7 +413,7 @@ TEST_CASE("An origin anchor with an inner path is the origin it names",
   // before it walked the path, so it gave the UNIT's origin.
   Rig r = MakeRig(false, false);
   r.top.FindById(r.unitOcc)->flexible = false;
-  r.sub.FindById(r.crankOcc)->position = glm::vec3(5.0f, 7.0f, 0.0f);
+  r.sub.FindById(r.crankOcc)->position = glm::dvec3(5.0, 7.0, 0.0);
   Connector c = Origin(r.unitOcc);
   c.innerPath = {r.crankOcc};
   const auto f =

@@ -157,7 +157,7 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
   const auto matType =
       CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
-  if (mp.youngGPa <= 0.0f) {
+  if (mp.youngGPa <= 0.0) {
     if (error)
       *error = Quote(label) + ": material '" +
                (body.material.empty() ? "default" : body.material) +
@@ -167,7 +167,7 @@ bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
   const bool needsDensity =
       type == AnalysisType::Modal ||
       (gravity.x != 0 || gravity.y != 0 || gravity.z != 0);
-  if (needsDensity && mp.density <= 0.0f) {
+  if (needsDensity && mp.density <= 0.0) {
     if (error)
       *error = Quote(label) + ": material has no density (needed for " +
                std::string(type == AnalysisType::Modal ? "modal analysis"
@@ -271,7 +271,7 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   // Pre-flight: a support that interpenetrates the part is a press fit, and
   // P0 showed what fusing one does (the port tube's slivers). Refuse, naming
   // the pair, with `ignored` as the named way out.
-  const glm::mat4 I(1.0f);
+  const glm::dmat4 I(1.0);
   const auto overlapCheck = [&](const std::string& nameA,
                                 const std::vector<Body>& a,
                                 const std::string& nameB,
@@ -419,14 +419,14 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
     const std::string bodyLabel =
         meshedOcc->name + (meshedBodies.size() > 1 ? "/" + body.name : "");
-    if (mp.youngGPa <= 0.0f)
+    if (mp.youngGPa <= 0.0)
       return fail(Quote(bodyLabel) + ": material '" +
                   (body.material.empty() ? "default" : body.material) +
                   "' has no stiffness data");
     const bool needsDensity =
         study.type == AnalysisType::Modal ||
         (study.gravity.x != 0 || study.gravity.y != 0 || study.gravity.z != 0);
-    if (needsDensity && mp.density <= 0.0f)
+    if (needsDensity && mp.density <= 0.0)
       return fail(Quote(bodyLabel) + ": material has no density (needed for " +
                   std::string(study.type == AnalysisType::Modal
                                   ? "modal analysis"

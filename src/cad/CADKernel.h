@@ -105,7 +105,8 @@ public:
   // GenerateMesh writes a triangulation INTO the shape, so a box that read
   // one would be remembered from before the mesh existed and quietly disagree
   // with the same call made after.
-  void GetBoundingBox(glm::vec3& min, glm::vec3& max, bool tight = false) const;
+  void GetBoundingBox(glm::dvec3& min, glm::dvec3& max,
+                      bool tight = false) const;
   // The tight box is ALSO remembered by shape identity and location, for
   // LOCATED shapes: every CADShape holding the same TShape at the same
   // placement is the same point set, so a copy framed again -- a job tab
@@ -116,12 +117,12 @@ public:
   // `RememberTightBox` puts a box computed ELSEWHERE -- on a detached copy,
   // by a worker -- on `shape` and under its identity. The caller vouches that
   // it is `shape`'s box.
-  static void RememberTightBox(const CADShape& shape, const glm::vec3& min,
-                               const glm::vec3& max);
+  static void RememberTightBox(const CADShape& shape, const glm::dvec3& min,
+                               const glm::dvec3& max);
   [[nodiscard]] bool HasTightBox() const;
   // The tight box, computed, reading and writing no memo -- for a worker
   // bounding a detached copy whose answer belongs to another shape.
-  void ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const;
+  void ExactBoxUnmemoized(glm::dvec3& min, glm::dvec3& max) const;
   [[nodiscard]] static size_t SharedTightBoxCount();
   static void ForgetSharedTightBoxes();
   // A deep copy (BRepBuilderAPI_Copy) at NO location: it shares no TShape
@@ -147,7 +148,7 @@ public:
   struct MassProps {
     double volume = 0.0;
     double surfaceArea = 0.0;
-    glm::vec3 centerOfMass{0.0f};
+    glm::dvec3 centerOfMass{0.0};
     double inertia[3][3] = {}; // about centerOfMass, world-axis aligned
   };
   bool ComputeMassProps(MassProps& out) const;
@@ -163,7 +164,7 @@ public:
   // locations are similarity-only. A copy moved by quarter turns and a
   // translation carries the tight box, permuted; any other starts cold
   // (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape).
-  CADShape Transformed(const glm::mat4& m) const;
+  CADShape Transformed(const glm::dmat4& m) const;
   void Translate(const glm::dvec3& offset);
   void Rotate(const glm::dvec3& axis, double angle);
   // Rotates `angle` radians about the axis through `point` along `dir`
@@ -195,12 +196,8 @@ public:
   // `center` = the face centroid, `normal` = the outward face normal, `uAxis`
   // = a deterministic in-plane axis. Returns false if the index is out of
   // range or the face is not planar (topological naming, sketch-on-face).
-  // The double form is what a sketch plane is built from; the float one
-  // narrows it.
   bool FacePlane(int faceIndex, glm::dvec3& center, glm::dvec3& normal,
                  glm::dvec3& uAxis) const;
-  bool FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
-                 glm::vec3& uAxis) const;
 
   // For the cylindrical face at `faceIndex` (same explorer order as
   // FacePlane), outputs an axis frame: cylinder -> origin = face centroid
@@ -211,15 +208,15 @@ public:
   // (unit) axis direction, `xAxis` = a deterministic perpendicular. Returns
   // false if the index is out of range or the face is none of those. Used by
   // A3 mate connectors (assemblies A3).
-  bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
-                glm::vec3& xAxis) const;
+  bool FaceAxis(int faceIndex, glm::dvec3& origin, glm::dvec3& axis,
+                glm::dvec3& xAxis) const;
 
   // Is this point inside the solid (on the boundary counts)? A direct
   // classification, not a ray cast: nothing about it depends on where the
   // query starts or which way it points, which is what makes it the right
   // test for "does this hole meet any material" — a ray bundle offset
   // around the bore can begin INSIDE a boss and report the boss absent.
-  [[nodiscard]] bool ContainsPoint(const glm::vec3& p,
+  [[nodiscard]] bool ContainsPoint(const glm::dvec3& p,
                                    double tol = 1.0e-6) const;
   // The same question for many points, with ONE classifier: building it walks
   // every face of the solid, and a caller asking point by point paid that per
@@ -227,7 +224,7 @@ public:
   // `ContainsPoint` and spent two minutes building classifiers. Points outside
   // the shape's box are answered without asking.
   [[nodiscard]] std::vector<bool>
-  ContainsPoints(const std::vector<glm::vec3>& points,
+  ContainsPoints(const std::vector<glm::dvec3>& points,
                  double tol = 1.0e-6) const;
 
   // Identity INCLUDING placement: the underlying geometry plus where this
@@ -254,7 +251,7 @@ public:
   // drilled and hovered.
   struct FaceSnap {
     int edgeIndex = -1;
-    glm::vec3 point{0.0f};
+    glm::dvec3 point{0.0};
     bool circleCenter = false; // false => an edge midpoint
   };
   void FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const;
@@ -274,20 +271,20 @@ public:
   // hovers.
   struct FaceCorner {
     int edgeA = -1, edgeB = -1; // ElementMap::edgeNames order, edgeA < edgeB
-    glm::vec3 point{0.0f};
+    glm::dvec3 point{0.0};
   };
   void FaceCorners(int faceIndex, std::vector<FaceCorner>& out) const;
 
   // Where two edges meet, for resolving a stored corner anchor. False when
   // they share no vertex or — the ambiguous case above — more than one.
-  bool CornerPoint(int edgeA, int edgeB, glm::vec3& point) const;
+  bool CornerPoint(int edgeA, int edgeB, glm::dvec3& point) const;
 
   // The characteristic point of the edge at `edgeIndex` (same order): a
   // circular edge's center, else the edge's midpoint. Returns false if out of
   // range. Used to derive a snapped connector frame origin — ONE edge, once
   // per mate per solve, so its whole-shape map is not in a hot path. Anything
   // resolving a whole face's worth of these wants FaceSnapPoints.
-  bool EdgeSnapPoint(int edgeIndex, glm::vec3& point) const;
+  bool EdgeSnapPoint(int edgeIndex, glm::dvec3& point) const;
 
   // Access to underlying shape
   const TopoDS_Shape& GetShape() const { return m_shape; }
@@ -351,7 +348,7 @@ private:
   // fails on one.
   void SetShape(const TopoDS_Shape& shape);
   // Transformed's: the tight box onto a copy moved by quarter turns.
-  void CarryBoxes(const glm::mat3& basis, const glm::vec3& shift,
+  void CarryBoxes(const glm::dmat3& basis, const glm::dvec3& shift,
                   CADShape& to) const;
 
   TopoDS_Shape m_shape;
@@ -361,8 +358,8 @@ private:
   // note on GetBoundingBox for why it cannot go stale, and for the
   // single-threaded-warm rule it shares with OCC's own lazy caches.
   mutable bool m_boxValid[2] = {false, false};
-  mutable glm::vec3 m_boxMin[2] = {glm::vec3(0.0f), glm::vec3(0.0f)};
-  mutable glm::vec3 m_boxMax[2] = {glm::vec3(0.0f), glm::vec3(0.0f)};
+  mutable glm::dvec3 m_boxMin[2] = {glm::dvec3(0.0), glm::dvec3(0.0)};
+  mutable glm::dvec3 m_boxMax[2] = {glm::dvec3(0.0), glm::dvec3(0.0)};
 };
 
 class CADKernel {
@@ -370,7 +367,7 @@ public:
   static CADKernel& Instance();
 
   // Primitive creation
-  CADShape CreateBox(const glm::vec3& corner1, const glm::vec3& corner2);
+  CADShape CreateBox(const glm::dvec3& corner1, const glm::dvec3& corner2);
   CADShape CreateBox(double width, double height, double depth);
 
   CADShape CreateSphere(const glm::dvec3& center, double radius);
@@ -399,7 +396,7 @@ public:
   };
   struct ImportedInstance {
     size_t product = 0;        // index into ImportedModel::products
-    glm::mat4 transform{1.0f}; // composed placement (world of the file)
+    glm::dmat4 transform{1.0}; // composed placement (world of the file)
     std::string name;          // instance label name ("" when unnamed)
   };
   struct ImportedModel {
@@ -449,7 +446,7 @@ public:
   struct StepComponent {
     bool isAssembly = false; // `index` into assemblies, else into parts
     size_t index = 0;
-    glm::mat4 local{1.0f}; // rigid placement in the parent
+    glm::dmat4 local{1.0}; // rigid placement in the parent
     std::string name;      // the instance's name ("" = unnamed)
   };
   struct StepAssembly {
@@ -494,8 +491,8 @@ private:
   gp_Pnt ToOCCPoint(const glm::dvec3& point) const;
   gp_Vec ToOCCVector(const glm::dvec3& vector) const;
   gp_Dir ToOCCDirection(const glm::dvec3& direction) const;
-  glm::vec3 FromOCCPoint(const gp_Pnt& point) const;
-  glm::vec3 FromOCCVector(const gp_Vec& vector) const;
+  glm::dvec3 FromOCCPoint(const gp_Pnt& point) const;
+  glm::dvec3 FromOCCVector(const gp_Vec& vector) const;
 };
 
 #else
@@ -512,11 +509,11 @@ public:
   bool IsValid() const { return false; }
   const void* GeometryId() const { return nullptr; }
   bool SameGeometryAs(const CADShape&) const { return false; }
-  static void RememberTightBox(const CADShape&, const glm::vec3&,
-                               const glm::vec3&) {}
+  static void RememberTightBox(const CADShape&, const glm::dvec3&,
+                               const glm::dvec3&) {}
   bool HasTightBox() const { return false; }
-  void ExactBoxUnmemoized(glm::vec3& min, glm::vec3& max) const {
-    min = max = glm::vec3(0);
+  void ExactBoxUnmemoized(glm::dvec3& min, glm::dvec3& max) const {
+    min = max = glm::dvec3(0);
   }
   static size_t SharedTightBoxCount() { return 0; }
   static void ForgetSharedTightBoxes() {}
@@ -525,8 +522,8 @@ public:
   double Volume() const { return 0.0; }
   int SolidCount() const { return 0; }
   int FaceCount() const { return 0; }
-  void GetBoundingBox(glm::vec3& min, glm::vec3& max) const {
-    min = max = glm::vec3(0);
+  void GetBoundingBox(glm::dvec3& min, glm::dvec3& max) const {
+    min = max = glm::dvec3(0);
   }
 
   struct Vertex {
@@ -547,28 +544,27 @@ public:
     return {};
   }
   std::vector<CADShape> SplitSolids() const { return {}; }
-  bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const {
-    return false;
-  }
   bool FacePlane(int, glm::dvec3&, glm::dvec3&, glm::dvec3&) const {
     return false;
   }
-  bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
+  bool FaceAxis(int, glm::dvec3&, glm::dvec3&, glm::dvec3&) const {
+    return false;
+  }
   struct FaceSnap {
     int edgeIndex = -1;
-    glm::vec3 point{0.0f};
+    glm::dvec3 point{0.0};
     bool circleCenter = false;
   };
   void FaceSnapPoints(int, std::vector<FaceSnap>&) const {}
   struct FaceCorner {
     int edgeA = -1, edgeB = -1;
-    glm::vec3 point{0.0f};
+    glm::dvec3 point{0.0};
   };
   void FaceCorners(int, std::vector<FaceCorner>&) const {}
-  bool CornerPoint(int, int, glm::vec3&) const { return false; }
-  bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
-  bool ContainsPoint(const glm::vec3&, double = 1.0e-6) const { return false; }
-  std::vector<bool> ContainsPoints(const std::vector<glm::vec3>& p,
+  bool CornerPoint(int, int, glm::dvec3&) const { return false; }
+  bool EdgeSnapPoint(int, glm::dvec3&) const { return false; }
+  bool ContainsPoint(const glm::dvec3&, double = 1.0e-6) const { return false; }
+  std::vector<bool> ContainsPoints(const std::vector<glm::dvec3>& p,
                                    double = 1.0e-6) const {
     return std::vector<bool>(p.size(), false);
   }
@@ -582,7 +578,7 @@ public:
     return instance;
   }
 
-  CADShape CreateBox(const glm::vec3& corner1, const glm::vec3& corner2) {
+  CADShape CreateBox(const glm::dvec3& corner1, const glm::dvec3& corner2) {
     return CADShape();
   }
   CADShape CreateBox(double width, double height, double depth) {

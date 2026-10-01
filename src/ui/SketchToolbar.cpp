@@ -190,7 +190,7 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   glm::dvec2 vec = op.vec;
   glm::dvec2 vec2 = op.vec2;
   int count2 = op.count2;
-  float angleDeg = static_cast<float>(glm::degrees(op.scalar));
+  double angleDeg = glm::degrees(op.scalar);
   bool changed = false;
   ImGui::SetNextItemWidth(90);
   changed |= ExprDragInt(state, "Count", &count, 0.1f, 2, 1000);
@@ -198,8 +198,8 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
     ImGui::SetNextItemWidth(140);
     changed |= ExprDragFloat2(state, "Centre", &vec.x, 0.05f);
     ImGui::SetNextItemWidth(90);
-    changed |= ExprDragFloat(state, "Angle", &angleDeg, 0.5f, -360.0f, 360.0f,
-                             "%.1f deg");
+    changed |= ExprDragDouble(state, "Angle", &angleDeg, 0.5f, -360.0, 360.0,
+                              "%.1f deg");
   } else {
     ImGui::SetNextItemWidth(140);
     changed |= ExprDragFloat2(state, "Step", &vec.x, 0.05f);
@@ -449,8 +449,8 @@ void DrawSketchToolWindow(AppState& state) {
     BeginToolWindowFrame(state, "Sketch Fillet");
     ImGui::TextUnformatted("Click a corner where two lines meet.");
     ImGui::SetNextItemWidth(90);
-    ExprDragFloat(state, "Radius##fillet", &edit.filletRadius, 0.02f, 0.01f,
-                  1e6f, "%.3f");
+    ExprDragDouble(state, "Radius##fillet", &edit.filletRadius, 0.02f, 0.01,
+                   1e6, "%.3f");
     // The number above is the NEXT fillet's radius — an existing fillet does
     // not follow it, which reads as "the box does nothing" the first time.
     // The arc stays tangent-constrained, so a radius dimension resizes it.
@@ -501,8 +501,8 @@ void DrawSketchToolWindow(AppState& state) {
         ImGui::TextDisabled("Centred on point of entity %u",
                             edit.patternCenterRef.entity);
       ImGui::SetNextItemWidth(80);
-      ExprDragFloat(state, "Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0f,
-                    360.0f, "%.1f deg");
+      ExprDragDouble(state, "Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0,
+                     360.0, "%.1f deg");
     }
     ImGui::Checkbox("Linked##pat", &edit.linkGenerative);
     ImGui::Separator();
@@ -516,8 +516,8 @@ void DrawSketchToolWindow(AppState& state) {
     BeginToolWindowFrame(state, "Offset");
     geometryRow("Loop");
     ImGui::SetNextItemWidth(90);
-    ExprDragFloat(state, "Distance##off", &edit.offsetDistance, 0.02f, -1e6f,
-                  1e6f, "%.3f");
+    ExprDragDouble(state, "Distance##off", &edit.offsetDistance, 0.02f, -1e6,
+                   1e6, "%.3f");
     ImGui::SameLine();
     ImGui::Checkbox("Round corners##off", &edit.offsetJoinArc);
     ImGui::Separator();
@@ -534,7 +534,7 @@ void DrawSketchToolWindow(AppState& state) {
     } else {
       ImGui::TextUnformatted("Real distance between the two points:");
       ImGui::SetNextItemWidth(120);
-      ExprInputFloat(state, "##calibdist", &edit.calibDistance, "%.4g");
+      ExprInputDouble(state, "##calibdist", &edit.calibDistance, "%.4g");
       ImGui::Checkbox("Align to axis", &edit.calibAlignAxis);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Also rotate the image so the two points sit on the "
@@ -595,8 +595,8 @@ void DrawSketchToolWindow(AppState& state) {
       edit.textString = buf;
     changed |= ImGui::IsItemDeactivatedAfterEdit();
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
-    changed |= ExprInputFloat(state, "Cap height (mm)###tx_height",
-                              &edit.textHeight, "%.3g");
+    changed |= ExprInputDouble(state, "Cap height (mm)###tx_height",
+                               &edit.textHeight, "%.3g");
     const std::vector<std::string>& fonts = sketch::TextFontNames();
     const int fontIdx =
         std::clamp(edit.textFont, 0, static_cast<int>(fonts.size()) - 1);

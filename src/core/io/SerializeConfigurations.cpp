@@ -70,9 +70,9 @@ Configuration ConfigurationFromJson(const json& j) {
     MateOverride o;
     o.mate = oj.at("mate").get<uint64_t>();
     if (oj.contains("rotation"))
-      o.rotation = oj.at("rotation").get<float>();
+      o.rotation = oj.at("rotation").get<double>();
     if (oj.contains("offset"))
-      o.offset = oj.at("offset").get<float>();
+      o.offset = oj.at("offset").get<double>();
     c.mateOverrides.push_back(o);
   }
   return c;

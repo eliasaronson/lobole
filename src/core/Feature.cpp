@@ -60,7 +60,7 @@ const Feature* RegenContext::FindById(uint64_t id) const {
   return nullptr;
 }
 
-BoxFeature::BoxFeature(const std::string& name, const glm::vec3& position,
+BoxFeature::BoxFeature(const std::string& name, const glm::dvec3& position,
                        double width, double height, double depth)
     : position(position), width(width), height(height), depth(depth) {
   m_name = name;
@@ -82,7 +82,7 @@ bool BoxFeature::Execute(RegenContext& ctx) {
   return true;
 }
 
-SphereFeature::SphereFeature(const std::string& name, const glm::vec3& center,
+SphereFeature::SphereFeature(const std::string& name, const glm::dvec3& center,
                              double radius)
     : center(center), radius(radius) {
   m_name = name;
@@ -103,8 +103,8 @@ bool SphereFeature::Execute(RegenContext& ctx) {
 }
 
 CylinderFeature::CylinderFeature(const std::string& name,
-                                 const glm::vec3& center,
-                                 const glm::vec3& direction, double radius,
+                                 const glm::dvec3& center,
+                                 const glm::dvec3& direction, double radius,
                                  double height)
     : center(center), direction(direction), radius(radius), height(height) {
   m_name = name;
@@ -213,7 +213,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     if (scale != 1.0)
       shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
-    model.instances.push_back({0, glm::mat4(1.0f), ""});
+    model.instances.push_back({0, glm::dmat4(1.0), ""});
   } else if (hasExt(".brep")) {
     // Native BREP sidecar (assembly import extracts per-part geometry as
     // .brep, I2): one anonymous product at identity.
@@ -226,7 +226,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     if (scale != 1.0)
       shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
-    model.instances.push_back({0, glm::mat4(1.0f), ""});
+    model.instances.push_back({0, glm::dmat4(1.0), ""});
   } else if (!CADKernel::Instance().LoadSTEPStructured(path, model)) {
     SetError("failed to read '" + path +
              "' as STEP (expected .step/.stp, .brep, or .stl)");
@@ -253,10 +253,10 @@ bool ImportFeature::Execute(RegenContext& ctx) {
 
   // Combined bounding box over valid shapes, so the whole import is centered
   // as one unit and shapes keep their relative placement.
-  glm::vec3 combinedMin(0.0f), combinedMax(0.0f);
+  glm::dvec3 combinedMin(0.0), combinedMax(0.0);
   bool haveBounds = false;
   for (const auto& p : placed) {
-    glm::vec3 min, max;
+    glm::dvec3 min, max;
     p.shape.GetBoundingBox(min, max);
     combinedMin = haveBounds ? glm::min(combinedMin, min) : min;
     combinedMax = haveBounds ? glm::max(combinedMax, max) : max;
@@ -271,13 +271,13 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   // warning and not a refusal — a genuinely tiny part is legitimate — but it
   // names the fix, so the part is not quietly 1000x too small.
   if (takesUnits) {
-    const glm::vec3 extent = combinedMax - combinedMin;
-    float largest = extent.x;
+    const glm::dvec3 extent = combinedMax - combinedMin;
+    double largest = extent.x;
     if (extent.y > largest)
       largest = extent.y;
     if (extent.z > largest)
       largest = extent.z;
-    if (largest < 1.0f) {
+    if (largest < 1.0) {
       char across[32];
       std::snprintf(across, sizeof across, "%.3g", largest);
       SetWarning(std::string("only ") + across + " mm across, read as " +
@@ -290,8 +290,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   // own coordinates. Recorded either way: an import that MOVED and did not
   // say so is how a fit check against a neighbour part compares two things
   // that are not where it thinks they are.
-  const glm::vec3 center =
-      keepOrigin ? glm::vec3(0.0f) : (combinedMin + combinedMax) * 0.5f;
+  const glm::dvec3 center =
+      keepOrigin ? glm::dvec3(0.0) : (combinedMin + combinedMax) * 0.5;
   m_shift = -center;
 
   // Real-world assembly STEPs run to hundreds of instances (the Waveshare

@@ -93,6 +93,6 @@ public:
 // mid-body, and 1.0 above a datum that already sits on the body's top face is
 // a knife in mid-air. Both the tool's initial default and its re-derivation
 // on a plane change go through here.
-double CenteredSplitOffset(const glm::vec3& planeOrigin,
-                           const glm::vec3& planeNormal, const glm::vec3& bmin,
-                           const glm::vec3& bmax);
+double CenteredSplitOffset(const glm::dvec3& planeOrigin,
+                           const glm::dvec3& planeNormal,
+                           const glm::dvec3& bmin, const glm::dvec3& bmax);

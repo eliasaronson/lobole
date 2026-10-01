@@ -371,12 +371,12 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
         }
       }
     }
-    glm::vec3 mn(0.0f), mx(0.0f);
+    glm::dvec3 mn(0.0), mx(0.0);
     bool haveBox = false;
     int count = 0;
     if (doc != nullptr) {
       for (const Body& b : doc->GetBodies()) {
-        glm::vec3 bmn(0.0f), bmx(0.0f);
+        glm::dvec3 bmn(0.0), bmx(0.0);
         b.shape.GetBoundingBox(bmn, bmx);
         mn = haveBox ? glm::min(mn, bmn) : bmn;
         mx = haveBox ? glm::max(mx, bmx) : bmx;
@@ -389,7 +389,7 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
         if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
           continue;
         const Document* pd = ui::OccurrencePartDoc(state, o);
-        glm::vec3 bmn(0.0f), bmx(0.0f);
+        glm::dvec3 bmn(0.0), bmx(0.0);
         if (pd == nullptr ||
             !Measure::WorldBounds(pd->GetBodies(), ui::OccurrenceMatrix(o), bmn,
                                   bmx))
@@ -499,7 +499,10 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       if (target.RefuseIfDisabled(ctx))
         return;
       if (value.is_number()) {
-        ctx->ItemInputValue(target.Ref(), value.get<float>());
+        // Typed as the JSON spells it, which is the shortest text that reads
+        // back as the same double: the engine's float overload types "%f"
+        // of a float, so 24.7 arrived as 24.700001.
+        ctx->ItemInputValue(target.Ref(), value.dump().c_str());
       } else {
         ctx->ItemInputValue(target.Ref(), value.get<std::string>().c_str());
       }
@@ -1071,15 +1074,18 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
             continue;
           }
           const Document* pd = ui::OccurrencePartDoc(state, *found);
+          glm::dvec3 lo(0.0), hi(0.0);
           if (pd == nullptr ||
               !Measure::WorldBounds(pd->GetBodies(),
-                                    ui::OccurrenceMatrix(*found),
-                                    m_sheet.focusMin, m_sheet.focusMax)) {
+                                    ui::OccurrenceMatrix(*found), lo, hi)) {
             RespondError(request.client, request.id,
                          "occurrence '" + found->name +
                              "' has no geometry to frame");
             continue;
           }
+          // The camera frames in float; the box narrows here.
+          m_sheet.focusMin = glm::vec3(lo);
+          m_sheet.focusMax = glm::vec3(hi);
           m_sheet.hasFocus = true;
           m_sheet.footer.insert(m_sheet.footer.begin(),
                                 "FOCUS: " + found->name);

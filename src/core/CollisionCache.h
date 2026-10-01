@@ -26,8 +26,8 @@ public:
   };
   explicit ExactContactCache(size_t capacity = 50000) : capacity_(capacity) {}
 
-  Answer Check(const CADShape& a, const glm::mat4& worldA, const CADShape& b,
-               const glm::mat4& worldB) {
+  Answer Check(const CADShape& a, const glm::dmat4& worldA, const CADShape& b,
+               const glm::dmat4& worldB) {
     Key key{};
     key.a = reinterpret_cast<uintptr_t>(a.GeometryId());
     key.b = reinterpret_cast<uintptr_t>(b.GeometryId());
@@ -38,9 +38,9 @@ public:
     for (const auto* world : {&worldA, &worldB})
       for (int c = 0; c < 4; ++c)
         for (int r = 0; r < 4; ++r) {
-          const float value = (*world)[c][r];
+          const double value = (*world)[c][r];
           finite = finite && std::isfinite(value);
-          key.poses[i++] = std::bit_cast<uint32_t>(value);
+          key.poses[i++] = std::bit_cast<uint64_t>(value);
         }
     if (finite) {
       std::lock_guard lock(mutex_);
@@ -83,7 +83,7 @@ private:
   struct Key {
     uintptr_t a = 0, b = 0;
     uint64_t localA = 0, localB = 0;
-    std::array<uint32_t, 32> poses{};
+    std::array<uint64_t, 32> poses{};
     auto operator<=>(const Key&) const = default;
   };
   struct Entry {

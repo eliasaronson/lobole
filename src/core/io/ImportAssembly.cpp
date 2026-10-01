@@ -56,7 +56,7 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
 
   // One part per product: geometry re-centered at the part origin (parts
   // model around their own origin; the offset moves into the occurrence).
-  std::vector<glm::vec3> centers(model.products.size(), glm::vec3(0.0f));
+  std::vector<glm::dvec3> centers(model.products.size(), glm::dvec3(0.0));
   std::vector<bool> productUsable(model.products.size(), false);
   std::set<std::string> usedNames;
   for (size_t i = 0; i < model.products.size(); i++) {
@@ -64,9 +64,9 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
     if (!product.shape.IsValid())
       continue;
 
-    glm::vec3 min(0.0f), max(0.0f);
+    glm::dvec3 min(0.0), max(0.0);
     product.shape.GetBoundingBox(min, max);
-    centers[i] = (min + max) * 0.5f;
+    centers[i] = (min + max) * 0.5;
 
     std::string base = !product.name.empty()
                            ? product.name
@@ -76,7 +76,7 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
       name = base + " " + std::to_string(n);
     usedNames.insert(name);
 
-    CADShape centered = product.shape.Transformed(glm::mat4(1.0f));
+    CADShape centered = product.shape.Transformed(glm::dmat4(1.0));
     centered.Translate(-centers[i]);
     const std::string brep =
         (std::filesystem::path(destDir) /
@@ -109,13 +109,13 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
       continue;
     // Part geometry is centered, so the placement composes the instance
     // transform with the centering offset: world = M * T(center).
-    const glm::mat4 placed =
-        inst.transform * glm::translate(glm::mat4(1.0f), centers[inst.product]);
+    const glm::dmat4 placed =
+        inst.transform * glm::translate(glm::dmat4(1.0), centers[inst.product]);
     PlannedOccurrence occ;
     occ.part = partOf[inst.product];
     occ.name = !inst.name.empty() ? inst.name : plan.parts[occ.part].name;
-    occ.position = glm::vec3(placed[3]);
-    occ.orientation = glm::normalize(glm::quat_cast(glm::mat3(placed)));
+    occ.position = glm::dvec3(placed[3]);
+    occ.orientation = glm::normalize(glm::quat_cast(glm::dmat3(placed)));
     plan.occurrences.push_back(std::move(occ));
   }
 

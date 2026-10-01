@@ -553,7 +553,7 @@ TEST_CASE("cam relief: a dogbone clears a pocket's corners, and the verifier "
   ElementRef floor;
   for (const Body& b : doc->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
           std::abs(o.z - 12.0f) < 1e-4f)
         floor = ElementRef{b.createdBy, name};
@@ -759,7 +759,7 @@ TEST_CASE("cam lead: a profile leaves the wall on a tangent arc",
   ElementRef wall;
   for (const Body& b : doc2->GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
-      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
       if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f &&
           o.x > 9.0f && o.x < 51.0f && o.y > 14.0f && o.y < 26.0f)
         wall = ElementRef{b.createdBy, name};
@@ -992,7 +992,7 @@ TEST_CASE("cam profile: cutting INSIDE a face cuts its openings", "[cam]") {
     ElementRef out;
     for (const Body& b : doc.GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
-        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        glm::dvec3 o(0.0), n(0.0), u(0.0);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
             std::abs(o.z - z) < 1e-3)
           out = ElementRef{b.createdBy, name};

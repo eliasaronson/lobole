@@ -38,7 +38,7 @@ Rig BuildRig(ImGuiTestContext* ctx) {
   ToolbarCreateAccept(ctx, "###tb_box");
   ctx->Yield();
   const uint64_t partId = s_App->parts[0].id;
-  glm::vec3 lo, hi;
+  glm::dvec3 lo, hi;
   ui::PartDocById(*s_App, partId)->GetBodies()[0].shape.GetBoundingBox(lo, hi);
   const glm::vec3 size = hi - lo;
   r.height = size.z;
@@ -404,20 +404,20 @@ void RegisterFlexibleGuiTests(ImGuiTestEngine* engine) {
     const Occurrence* crank =
         ui::AssemblyDocById(*s_App, s_App->parts[r.unitIdx].id)
             ->FindById(r.crankOcc);
-    const glm::mat4 world = ui::InnerDisplayMatrix(*s_App, Unit(r), *crank);
-    glm::vec3 lo, hi;
+    const glm::dmat4 world = ui::InnerDisplayMatrix(*s_App, Unit(r), *crank);
+    glm::dvec3 lo, hi;
     ui::OccurrencePartDoc(*s_App, *crank)
         ->GetBodies()[0]
         .shape.GetBoundingBox(lo, hi);
-    const glm::vec3 mid = glm::vec3(world * glm::vec4((lo + hi) * 0.5f, 1.0f));
+    const glm::vec3 mid = glm::vec3(world * glm::dvec4((lo + hi) * 0.5, 1.0));
     const glm::vec3 top =
-        glm::vec3(world * glm::vec4((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f,
-                                    hi.z, 1.0f));
+        glm::vec3(world * glm::dvec4((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5,
+                                     hi.z, 1.0));
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(mid);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(mid + glm::vec3(0.0f, 0.0f, 1.0f) *
-                                         glm::length(hi - lo) * 6.0f *
+                                         float(glm::length(hi - lo)) * 6.0f *
                                          LensScale());
     ctx->Yield(3);
     ctx->MouseMoveToPos(WorldToWindow(top));
@@ -536,7 +536,8 @@ void RegisterFlexibleGuiTests(ImGuiTestEngine* engine) {
         continue;
       const auto xf = s_App->meshRenderer->GetInstanceTransform(m.meshId);
       IM_CHECK_SILENT(xf.has_value());
-      const glm::mat4 expect = ui::DisplayMatrixOf(*s_App, Unit(r)) * m.localXf;
+      const glm::mat4 expect(ui::DisplayMatrixOf(*s_App, Unit(r)) *
+                             glm::dmat4(m.localXf));
       const float dz = (*xf)[3].z - expect[3].z;
       if (!m.innerPath.empty() && m.innerPath[0] == r.crankOcc) {
         IM_CHECK(std::abs(dz - 3.0f * r.height) < 1e-3f);

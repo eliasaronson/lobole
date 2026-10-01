@@ -153,22 +153,24 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // pairs that meet twice name no single point and are not offered.
   std::vector<CADShape::FaceCorner> corners;
   body.shape.FaceCorners(static_cast<int>(hit.faceIndex), corners);
-  const glm::mat4 xf = OccurrenceMatrix(*occ);
-  glm::vec3 faceOrigin, faceNormal, faceXAxis;
+  const glm::dmat4 xf = OccurrenceMatrix(*occ);
+  glm::dvec3 faceOrigin, faceNormal, faceXAxis;
   const bool hasFaceFrame =
       body.shape.FacePlane(static_cast<int>(hit.faceIndex), faceOrigin,
                            faceNormal, faceXAxis) ||
       body.shape.FaceAxis(static_cast<int>(hit.faceIndex), faceOrigin,
                           faceNormal, faceXAxis);
-  const glm::vec3 worldFaceOrigin = glm::vec3(xf * glm::vec4(faceOrigin, 1.0f));
-  float best =
-      hasFaceFrame ? glm::length(worldFaceOrigin - hit.point) : FLT_MAX;
+  const glm::dvec3 worldFaceOrigin =
+      glm::dvec3(xf * glm::dvec4(faceOrigin, 1.0));
+  double best = hasFaceFrame
+                    ? glm::length(worldFaceOrigin - glm::dvec3(hit.point))
+                    : DBL_MAX;
   for (const CADShape::FaceSnap& snap : snaps) {
     const std::string* edgeName = body.elementMap.EdgeNameOf(snap.edgeIndex);
     if (!edgeName) // an unnamed edge cannot be stored on the anchor
       continue;
-    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(snap.point, 1.0f));
-    const float distance = glm::length(worldPoint - hit.point);
+    const glm::dvec3 worldPoint = glm::dvec3(xf * glm::dvec4(snap.point, 1.0));
+    const double distance = glm::length(worldPoint - glm::dvec3(hit.point));
     if (distance >= best)
       continue;
     best = distance;
@@ -182,8 +184,9 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
     const std::string* nameB = body.elementMap.EdgeNameOf(corner.edgeB);
     if (!nameA || !nameB) // both halves must be nameable, or it is not stable
       continue;
-    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(corner.point, 1.0f));
-    const float distance = glm::length(worldPoint - hit.point);
+    const glm::dvec3 worldPoint =
+        glm::dvec3(xf * glm::dvec4(corner.point, 1.0));
+    const double distance = glm::length(worldPoint - glm::dvec3(hit.point));
     if (distance >= best)
       continue;
     best = distance;
@@ -194,8 +197,8 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   return true;
 }
 
-std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
-                                             const Connector& c) {
+std::optional<glm::dmat4> ConnectorWorldFrame(AppState& state,
+                                              const Connector& c) {
   if (!state.assembly)
     return std::nullopt;
   const assembly::PartResolver resolve = PartResolverFor(state);

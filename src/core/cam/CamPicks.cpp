@@ -48,7 +48,7 @@ namespace {
 // same walk, and doing it twice was how the two disagreed about which face a
 // name meant.
 bool FindFace(const std::vector<Body>& bodies, const ElementRef& ref,
-              TopoDS_Face& face, glm::vec3& centre, glm::vec3& normal,
+              TopoDS_Face& face, glm::dvec3& centre, glm::dvec3& normal,
               uint64_t jobPartId) {
   if (!ref.IsSet())
     return false;
@@ -64,7 +64,7 @@ bool FindFace(const std::vector<Body>& bodies, const ElementRef& ref,
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
     if (!idx)
       continue;
-    glm::vec3 uAxis(0.0f);
+    glm::dvec3 uAxis(0.0);
     if (!body.shape.FacePlane(*idx, centre, normal, uAxis))
       return false;
     int i = 0;
@@ -154,7 +154,7 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
     if (!idx)
       continue; // a part is several bodies; only one owns the name
-    glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
+    glm::dvec3 centre(0.0), normal(0.0), uAxis(0.0);
     if (!body.shape.FacePlane(*idx, centre, normal, uAxis)) {
       out.why = "pick a flat face — that one is curved";
       return out;
@@ -162,14 +162,14 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
     // A 2.5D job cuts in Z, so a face it can machine to is level. A tilted
     // face has no single depth, and guessing one puts the cut somewhere the
     // user did not point at.
-    if (std::abs(normal.z) < 0.99f) {
+    if (std::abs(normal.z) < 0.99) {
       out.why = "pick a level face — a tilted one has no single depth";
       return out;
     }
     // Level and facing DOWN is a ceiling: the spindle comes from above and
     // cannot reach it. It was pocketed anyway, as if the cutter went through
     // the part to get there (a rotary mitre indexed the wrong way round).
-    if (normal.z < 0.0f) {
+    if (normal.z < 0.0) {
       out.why = "that face points down, away from the spindle — turn the "
                 "part over (lay_face_up, flip, or the rotary 180° round)";
       return out;
@@ -310,9 +310,9 @@ bool FindVerticalWallFace(const std::vector<Body>& bodies,
 bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref,
                 uint64_t jobPartId) {
   TopoDS_Face face;
-  glm::vec3 centre(0.0f), normal(0.0f);
+  glm::dvec3 centre(0.0), normal(0.0);
   if (FindFace(bodies, ref, face, centre, normal, jobPartId))
-    return std::abs(normal.z) < 0.01f;
+    return std::abs(normal.z) < 0.01;
   glm::dvec2 onWall(0.0);
   return FindVerticalWallFace(bodies, ref, face, onWall, jobPartId);
 }
@@ -322,10 +322,10 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
                               uint64_t jobPartId) {
   WallContour out;
   TopoDS_Face face;
-  glm::vec3 centre(0.0f), normal(0.0f);
+  glm::dvec3 centre(0.0), normal(0.0);
   glm::dvec2 at(0.0);
   if (FindFace(bodies, ref, face, centre, normal, jobPartId)) {
-    if (std::abs(normal.z) >= 0.01f) {
+    if (std::abs(normal.z) >= 0.01) {
       out.why = "pick a wall — that face is level, so it is a floor to clear "
                 "rather than a contour to follow";
       return out;

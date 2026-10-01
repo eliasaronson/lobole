@@ -177,13 +177,13 @@ std::string MotionPlaybackRefusal(AppState& state, uint64_t studyId);
 void TickMotionPlayback(AppState& state, double now);
 // The playback pose of a TOP-LEVEL occurrence, if playback is showing one.
 bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
-                         glm::mat4& world);
+                         glm::dmat4& world);
 // v129: a mesh INSIDE a flexible placement moves on its own. Given where the
 // mesh sits in `root`'s frame now (`docLocal`, DocumentRenderMesh::localXf)
 // and its path below root, the played place in root's PLAYED frame; false
 // when playback has no pose of its own for it (it folds into the root).
 bool MotionPlaybackLocal(AppState& state, const Occurrence& root,
                          const std::vector<uint64_t>& innerPath,
-                         const glm::mat4& docLocal, glm::mat4& local);
+                         const glm::dmat4& docLocal, glm::dmat4& local);
 
 } // namespace ui

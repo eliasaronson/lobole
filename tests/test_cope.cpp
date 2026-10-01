@@ -101,7 +101,7 @@ TEST_CASE("A cope cuts to the OUTSIDE of a hollow neighbour", "[tube][cope]") {
       braceBody = &b;
   }
   REQUIRE(braceBody != nullptr);
-  glm::vec3 lo{0.0f}, hi{0.0f};
+  glm::dvec3 lo{0.0}, hi{0.0};
   braceBody->shape.GetBoundingBox(lo, hi, /*tight=*/true);
   // The deepest the brace reaches toward the run's axis: with equal-radius
   // tubes this would be 0, and with a smaller brace into a bigger run it
@@ -258,7 +258,7 @@ TEST_CASE("A corner is MITRED, and the member stops at its node",
       body = &x;
   }
   REQUIRE(body != nullptr);
-  glm::vec3 lo{0.0f}, hi{0.0f};
+  glm::dvec3 lo{0.0}, hi{0.0};
   body->shape.GetBoundingBox(lo, hi, /*tight=*/true);
   CHECK(lo.x > -13.0f); // was -25.4 drawn long; the wall half-width is 12.7
 }
@@ -289,7 +289,7 @@ TEST_CASE("A mitre's angle follows the corner", "[tube][cope]") {
         body = &x;
     }
     REQUIRE(body != nullptr);
-    glm::vec3 lo{0.0f}, hi{0.0f};
+    glm::dvec3 lo{0.0}, hi{0.0};
     body->shape.GetBoundingBox(lo, hi, /*tight=*/true);
     return static_cast<double>(lo.x); // how far past the node it still runs
   };
