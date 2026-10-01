@@ -66,12 +66,31 @@ Built: see docs/tolerances/README.md#printed-parts.
 
 ### 5. The head, assembled
 
-- The parts, the assembly, mates, and the two worm relations.
-- Motion studies: pan through 360° and tilt through ±90° with the camera
-  plate on, clash-checked at every sample, driven from the worm shafts so the
-  relations are what move the axes.
-- Clearance assertions: the camera body clears the yoke at full tilt.
-- A BOM with the bearings and the bought screws.
+Built: see [generators/pantilt/README.md](../../generators/pantilt/README.md).
+The numbers that matter:
+
+- **Sizes from the load.** Module 1.95 by Lewis at 3 g, taken up to 2:
+  d1 20, d2 80, centre distance 50, face 13.4. A PETG shaft for the 3 g
+  moment needs Ø14.4, so the main bearings are 6002 (four); the worm
+  journals need Ø8.5, so 609 (four). The arms put the tilt axis 224 mm up:
+  the camera reaches 160 mm below it in ±90° of tilt.
+- **Masses.** Head without the camera 1.51 kg (base plate 260 g of
+  aluminium, yoke 589 g, tilt wheel and shaft 126 g, cradle 92 g, pan wheel
+  73 g, each worm 23 g); with the 1.5 kg camera, 3.01 kg.
+- **Motion.** Pan 360° (40 worm turns) and tilt ±90° (±40 turns), driven
+  from the worm shafts, 48 samples each, every pair checked exactly: both
+  clean, no unsolved sample. They cost 715 s and 360 s.
+- **Clearances.** The camera clears the yoke by 4.8 mm at −90° (the designed
+  `cam_clear`), 10.2 mm at 0 and +90°; the cradle runs 1.2 mm off the arms.
+  The standing exact sweep is clean.
+- **Fits.** The eight bearing seats are reported transition fits (K7 in the
+  aluminium pocket; ±0.15 on the printed bores, modelled 0.3 over and read at
+  what they print). `check_seat` passes every outer ring; the inner rings
+  are unverified, since a one-solid bearing in a mechanism is mated to one
+  seat only. The 14 other rows are frame-anchored mates, which have no
+  surface to size.
+- **Bought parts.** 4 × 6002, 4 × 609, 4 × M4x16 into the plate, 8 × M4x25
+  with nuts and washers through the worm blocks, the 1/4-20 camera screw.
 
 ### 6. The yoke: FEM and topology
 

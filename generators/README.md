@@ -33,6 +33,7 @@ the one announced instance or take `--port`; they never guess:
 | `fpv_drone/` | a 5-inch FPV quadcopter, with sheets, loads and G-code | [README](fpv_drone/README.md) |
 | `grill/` | a three-burner gas grill in brake-formed sheet | [README](grill/README.md) |
 | `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
+| `pantilt/` | a geared pan/tilt head for a 1.5 kg camera: two worm pairs, bearings, a machined base plate, printed PETG yoke | [README](pantilt/README.md) |
 | `pes_pump/` | the Bosch PES4M injection pump for the OM615 | [README](pes_pump/README.md) |
 | `smart_speaker/` | a two-way floorstanding loudspeaker cabinet | [README](smart_speaker/README.md) |
 | `so101_gripper/` | a parallel-jaw wrist gripper for the SO-101 arm | [README](so101_gripper/README.md) |
