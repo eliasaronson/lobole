@@ -245,7 +245,7 @@ std::string BeginPrimitiveOn(AppState& state, const primitive::On& on) {
           primitive::ApplyDefaults(spec, *placement, FallbackSize(state));
       !why.empty())
     return std::string(KindLabel(kind)) + ": " + why;
-  if (std::string why = primitive::EvaluateDims(spec, doc.Symbols());
+  if (std::string why = primitive::EvaluateDims(spec, primitive::Symbols(doc));
       !why.empty())
     return std::string(KindLabel(kind)) + ": " + why;
   // The defaults are now the spec's own numbers: the fields show them, and

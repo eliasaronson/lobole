@@ -119,6 +119,12 @@ struct Placement {
 [[nodiscard]] std::string ApplyDefaults(Spec& spec, const Placement& placement,
                                         double fallbackSize = 0.0);
 
+// The table a primitive's expressions evaluate against: the project's
+// variables overlaid with the part's own. Not Document::Symbols() alone,
+// which is the LAST regeneration's table and is empty in a part that has not
+// regenerated yet -- a project variable was "unknown" in a fresh part.
+[[nodiscard]] SymbolTable Symbols(const Document& doc);
+
 // Evaluates every dimension's expression against `symbols` into its value.
 // A size must come out positive. Returns "" or the refusal.
 [[nodiscard]] std::string EvaluateDims(Spec& spec, const SymbolTable& symbols);

@@ -403,6 +403,24 @@ TEST_CASE("a primitive without a reference is refused, naming what is "
       "Frame");
 }
 
+TEST_CASE("a fresh part's primitive sees the project's variables",
+          "[primitives]") {
+  // Before its first regeneration a part's own table is empty; a project
+  // variable must still resolve (the fpv drone's receiver).
+  const SymbolTable project = {{"pv", 7.0}};
+  Document doc;
+  doc.SetProjectSymbols(&project);
+  CommandStack commands;
+  const auto box = AddJson(doc, commands,
+                           {{"type", "Box"},
+                            {"on", "Top"},
+                            {"width", 1.0},
+                            {"width_expr", "pv"},
+                            {"depth", 2.0},
+                            {"height", 3.0}});
+  CHECK_THAT(VolumeOf(doc, box.solidId), WithinRel(7.0 * 2.0 * 3.0, 1e-9));
+}
+
 TEST_CASE("a primitive's two ids can be pinned", "[primitives]") {
   Document doc;
   CommandStack commands;

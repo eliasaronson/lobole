@@ -588,6 +588,15 @@ void BindSketch(Feature& solid, uint64_t sketchId) {
   }
 }
 
+SymbolTable Symbols(const Document& doc) {
+  SymbolTable out;
+  if (const SymbolTable* project = doc.ProjectSymbols())
+    out = *project;
+  for (const auto& [name, value] : doc.Symbols())
+    out[name] = value;
+  return out;
+}
+
 Added Add(Document& doc, CommandStack& commands, Spec spec,
           double fallbackSize) {
   const std::string type = KindName(spec.kind);
@@ -601,7 +610,7 @@ Added Add(Document& doc, CommandStack& commands, Spec spec,
   if (const std::string why = ApplyDefaults(spec, *placement, fallbackSize);
       !why.empty())
     throw std::runtime_error(type + ": " + why);
-  if (const std::string why = EvaluateDims(spec, doc.Symbols()); !why.empty())
+  if (const std::string why = EvaluateDims(spec, Symbols(doc)); !why.empty())
     throw std::runtime_error(type + ": " + why);
   Expansion ex = Expand(spec, *placement);
   const size_t depth = commands.UndoDepth();
