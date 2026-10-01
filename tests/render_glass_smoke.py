@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -99,12 +100,8 @@ def main():
         d.request("new_project", {})
         # The block: 20 mm, red. The pane: 2 mm thick, well in front of it
         # and wider than it, square to the camera.
-        d.request("add_feature", {"feature": {
-            "type": "Box", "name": "Block", "position": [0, 0, 0],
-            "width": 20, "height": 20, "depth": 20}})
-        d.request("add_feature", {"feature": {
-            "type": "Box", "name": "Pane", "position": [-15, -20, -10],
-            "width": 50, "height": 2, "depth": 40}})
+        box(d, (0, 0, 0), (20, 20, 20), "Block")
+        box(d, (-15, -20, -10), (50, 2, 40), "Pane")
         d.request("set_appearance", {"body": 0, "color": [0.85, 0.04, 0.04],
                                      "metallic": 0.0, "roughness": 0.5})
         d.request("set_camera", {"target": [10, 10, 10],

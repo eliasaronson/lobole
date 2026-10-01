@@ -15,6 +15,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 PETG = {"process": "fdm", "material": "petg"}
 
@@ -47,9 +48,7 @@ def round_faces(d):
 def bored_part(d, name, diameter):
     """A block with one bore through it; returns the bore face."""
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Body", "position": [-15, -15, 0],
-        "width": 30, "height": 30, "depth": 12})
+    box(d, (-15, -15, 0), (30, 30, 12), "Body")
     d.call("add_feature", feature={
         "type": "Sketch", "name": "Centre",
         "plane": {"origin": [0, 0, 12], "normal": [0, 0, 1],
@@ -66,9 +65,7 @@ def bored_part(d, name, diameter):
 
 def pin(d, name, diameter):
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Pin", "center": [0, 0, 0],
-        "direction": [0, 0, 1], "radius": diameter / 2.0, "height": 30})
+    cylinder(d, (0, 0, 0), "z", diameter / 2.0, 30, "Pin")
     return round_faces(d)[0]
 
 

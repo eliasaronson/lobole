@@ -52,9 +52,11 @@ def main():
         a = connect(app.port)
         a.new()
         alpha = a.part("alpha")
-        alpha.box(position=(0, 0, 0), w=10, h=10, d=10, name="A")
+        alpha.box("Top", width=10, depth=10, height=10, at=(0, 0),
+                  centered=False, name="A")
         beta = a.part("beta")
-        beta.box(position=(0, 0, 0), w=20, h=20, d=20, name="B")
+        beta.box("Top", width=20, depth=20, height=20, at=(0, 0),
+                 centered=False, name="B")
 
         def active_bodies():
             """What the ACTIVE tab holds — the tab's own identity, read

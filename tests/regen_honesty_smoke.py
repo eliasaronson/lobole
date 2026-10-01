@@ -30,6 +30,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 
 
@@ -74,13 +75,11 @@ def main():
         # A 20 mm box with a variable-driven fillet: small enough to build,
         # and an override can make the radius impossible for the geometry.
         d.call("set_variable", name="r", expression="2")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 20, "height": 20, "depth": 20})
+        blk = box(d, (0, 0, 0), (20, 20, 20), "B")["id"]
         edges = d.call("list_elements", body=0)["bodies"][0]["edges"]
         r = d.call("add_feature", feature={
             "type": "Fillet", "name": "F", "radius": 2, "radius_expr": "r",
-            "edges": [{"feature_id": 1, "element": edges[0]["name"]}]})
+            "edges": [{"feature_id": blk, "element": edges[0]["name"]}]})
         healthy(r, "the fillet builds to start with")
 
         cfg = d.call("add_configuration", name="huge")["id"]
@@ -170,11 +169,8 @@ def main():
         ids = []
         for side in (1, -1):
             drop = [axle_x, side * dy, axle_z]
-            ids.append(d.call("add_feature", feature={
-                "type": "Cylinder", "name": f"Dropout {side}",
-                "center": [axle_x, side * dy - 2.5, axle_z],
-                "direction": [0, 1, 0], "radius": 26.0, "height": 5.0,
-            })["id"])
+            ids.append(cylinder(d, [axle_x, side * dy - 2.5, axle_z], "y",
+                                26.0, 5.0, f"Dropout {side}")["id"])
             ids.append(bowed(f"Chainstay {side}", [0.0, side * 22.0, 12.0],
                              drop, [0, side, 0], 5.0, 16.0))
             ids.append(bowed(f"Seatstay {side}", [-168.7, side * 11.0, 519.3],
@@ -184,10 +180,8 @@ def main():
             weld = d.call("add_feature", feature={
                 "type": "Boolean", "name": f"Weld {k}", "target_id": weld,
                 "tool_id": tool, "op": "union"})["id"]
-        bore = d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Axle bore",
-            "center": [axle_x, -70.0, axle_z], "direction": [0, 1, 0],
-            "radius": 4.55, "height": 140.0})["id"]
+        bore = cylinder(d, [axle_x, -70.0, axle_z], "y", 4.55, 140.0,
+                        "Axle bore")["id"]
         reg = d.call("add_feature", feature={
             "type": "Boolean", "name": "One-pass bore", "target_id": weld,
             "tool_id": bore, "op": "subtract"})["regen"]

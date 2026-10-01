@@ -17,6 +17,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, sphere  # noqa: E402
 
 
 
@@ -197,8 +198,7 @@ def main():
         # A SPHERE defines no direction, and an angle against one is REFUSED
         # naming which element and what would work — not answered with a
         # plausible zero.
-        d.call("add_feature", feature={"type": "Sphere", "name": "Ball",
-                                       "center": [0, 0, 100], "radius": 3})
+        sphere(d, (0, 0, 100), 3, "Ball")
         ball = None
         for b in d.call("list_elements")["bodies"]:
             if b["name"] == "Ball":
@@ -217,13 +217,9 @@ def main():
         # apart — two lofted propellers 151 mm apart took 55 s, and the same
         # answer off the tessellations takes 40 ms.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (0, 0, 0), (10, 10, 10), "A")
         d.call("add_part", name="second")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (0, 0, 0), (10, 10, 10), "B")
         asm = d.call("add_assembly", name="pair")
         first = d.call("add_occurrence", part="Part 1",
                        transform={"position": [0, 0, 0],

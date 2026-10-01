@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -57,9 +58,7 @@ def main():
         # further than that — which is the whole case. (A LONG thin part
         # does not do it: 6 x 0.4 x 0.3 m fits at 5.1 m, inside the old
         # limit, because the fit is tight to the silhouette.)
-        d.request("add_feature", {"feature": {
-            "type": "Box", "name": "Span", "position": [0, 0, 0],
-            "width": 8000, "depth": 4000, "height": 3000}})
+        box(d, (0, 0, 0), (8000, 3000, 4000), "Span")
         d.request("fit_view", {})
 
         out = os.path.join(scratch, "reach.png")
@@ -97,9 +96,7 @@ def main():
         expect(not warnings, f"the still reported no complaint ({warnings})")
 
         # And a still that frames nothing is REPORTED, not silently saved.
-        d.request("add_feature", {"feature": {
-            "type": "Box", "name": "Span", "position": [0, 0, 0],
-            "width": 8000, "depth": 4000, "height": 3000}})
+        box(d, (0, 0, 0), (8000, 3000, 4000), "Span")
         d.request("fit_view", {})
         d.request("set_camera", {"target": [400000, 0, 0]})
         empty = os.path.join(scratch, "empty.png")

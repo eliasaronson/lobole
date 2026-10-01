@@ -64,7 +64,7 @@ with (
     # A separate M8 fixture exercises two standards actually in the native table.
     app.new()
     shaft = app.part("Pitch fixture shaft")
-    shaft.cylinder(d=8, h=12)
+    shaft.cylinder("Top", d=8, height=12)
     shaft.frame("origin")
     handle = shaft.thread(shaft.faces(kind="cylinder", radius=4)[0], "M8")
     fixture = app.assembly("Pitch fixture")

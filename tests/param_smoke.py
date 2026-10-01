@@ -121,14 +121,15 @@ def test_drives_geometry(binary):
         W = part.param("wall", 4.0)
         # Ordinary Python arithmetic — the point is that this is what a
         # generator would already have written.
-        part.box(w=L, h=L / 2, d=W * 2)
+        part.box("Top", width=L, depth=L / 2, height=W * 2, at=(0, 0),
+                 centered=False)
 
         expect(abs(volume(sdk) - 110 * 55 * 8) < 1e-6, "as built")
         part.var("arm_len", 200)
         expect(abs(volume(sdk) - 200 * 100 * 8) < 1e-6,
-               "arm_len drives width AND height (h was arm_len/2)")
+               "arm_len drives width AND depth (depth was arm_len/2)")
         part.var("wall", 10)
-        expect(abs(volume(sdk) - 200 * 100 * 20) < 1e-6, "wall drives depth")
+        expect(abs(volume(sdk) - 200 * 100 * 20) < 1e-6, "wall drives height")
 
         # A derived parameter is defined ONCE, in the document.
         D = part.param("bolt_out", "arm_len - 18")
@@ -150,10 +151,13 @@ def test_perturbation(binary):
             part = sdk.part("Arm")
             L = part.param("arm_len", 110.0)
             W = part.param("wall", 4.0)
-            part.box(w=L, h=L / 2, d=W * 2, name="Driven")
+            part.box("Top", width=L, depth=L / 2, height=W * 2, at=(0, 0),
+                     centered=False, name="Driven")
             # A second body deliberately NOT driven by arm_len. If the diff
             # cannot tell it apart, the test is measuring nothing.
-            part.box(position=(0, 0, 100), w=7.0, h=7.0, d=W, name="Free")
+            part.box(part.datum_plane("xy", 100, name="Free plane"),
+                     width=7.0, depth=7.0, height=W, at=(0, 0),
+                     centered=False, name="Free")
             sdk.call("save_project", path=path)
             before = load_doc(path)
 
@@ -162,21 +166,43 @@ def test_perturbation(binary):
             after = load_doc(path)
 
         moved = moved_fields(before, after)
-        # Anything mentioning the untouched body must not have moved.
-        free = sorted(p for p in moved if "Free" in p)
+        # A box is stored as a dimensioned sketch and an extrude
+        # (docs/modeling/README.md#primitives), one file each; find the
+        # files by the feature names they carry.
+        def files(pred):
+            return [f".{k}" for k, v in before.items()
+                    if isinstance(v, dict) and pred(v.get("name", ""))]
+        # Anything belonging to the untouched body (its plane, its sketch,
+        # its extrude) must not have moved.
+        free_files = files(lambda n: n.startswith("Free"))
+        expect(len(free_files) == 3, f"the Free box's files: {free_files}")
+        free = sorted(p for p in moved
+                      if any(p.startswith(f + ".") for f in free_files))
         expect(not free, f"a body not driven by arm_len moved: {free}")
 
         numeric = sorted(p for p in moved
                          if not p.endswith(".value") or "variable" not in p)
         expect(moved, "nudging a variable changed nothing — the dimension is "
                       "a literal, not an expression")
-        # The width and height of the driven box, plus the variable itself.
-        expect(any("width" in p for p in moved),
+        # The driven box's width (u) and depth (v) are the sketch's two
+        # dimensions; its height is the extrude's distance.
+        (sketch_file,) = files(lambda n: n == "Driven sketch")
+        (extrude_file,) = files(lambda n: n == "Driven")
+        sketch = before[sketch_file[1:]]
+        dims = {c.get("expr"): i for i, c in enumerate(sketch["constraints"])
+                if c.get("expr")}
+
+        def dim_moved(expr):
+            expect(expr in dims, f"no dimension driven by {expr}: {dims}")
+            return f"{sketch_file}.constraints[{dims[expr]}].value" in moved
+
+        expect(dim_moved("arm_len"),
                f"width did not follow arm_len; moved: {numeric}")
-        expect(any("height" in p for p in moved),
-               f"height did not follow arm_len/2; moved: {numeric}")
-        expect(not any("depth" in p for p in moved),
-               f"depth is driven by wall and must NOT move: {numeric}")
+        expect(dim_moved("(arm_len / 2.0)"),
+               f"depth did not follow arm_len/2; moved: {numeric}")
+        expect(f"{extrude_file}.distance" not in moved
+               and not any(p.startswith(extrude_file + ".") for p in moved),
+               f"height is driven by wall and must NOT move: {numeric}")
 
 
 def main():

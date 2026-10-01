@@ -52,6 +52,7 @@ container matching the runner, and `--pixel-record` writes that baseline.
 """
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -85,7 +86,23 @@ def driver_slug(gpu):
     return slug.strip("-")
 
 
-def build_scene(d):
+# The scene's solids, as STORED primitives at world positions. add_feature
+# no longer makes these (a Box is now a sketch and an extrude placed `on`
+# something, docs/modeling/README.md#primitives), but a document holding them
+# still loads -- and the baseline is the tessellation of THESE shapes. An
+# extrude of the same box meshes differently, so rebuilding the scene the new
+# way would move pixels for a reason that is not a renderer change.
+SCENE_FEATURES = [
+    {"type": "Box", "name": "Plate", "position": [0, 0, 0],
+     "width": 160, "height": 110, "depth": 12},
+    {"type": "Cylinder", "name": "Post", "center": [52, 55, 12],
+     "direction": [0, 0, 1], "radius": 16, "height": 54},
+    {"type": "Box", "name": "Block", "position": [104, 30, 12],
+     "width": 34, "height": 50, "depth": 30},
+]
+
+
+def build_scene(d, scratch):
     """One scene, exercising the paths a renderer refactor puts at risk.
 
     Deliberately not a single box: shading needs curvature, the outline pass
@@ -94,17 +111,26 @@ def build_scene(d):
     element here is placed by explicit coordinates, because a scene that
     depends on framing or on a default would change when those change and the
     failure would read as a renderer bug.
+
+    The document is written as a file and opened: an empty project saved by
+    this build (so the file is at the current format version, and nothing
+    is migrated on the way in) with SCENE_FEATURES put in it.
     """
     d.call("new_project")
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Plate", "position": [0, 0, 0],
-        "width": 160, "height": 110, "depth": 12})
-    d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Post", "center": [52, 55, 12],
-        "direction": [0, 0, 1], "radius": 16, "height": 54})
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Block", "position": [104, 30, 12],
-        "width": 34, "height": 50, "depth": 30})
+    path = os.path.join(scratch, "scene.json")
+    d.call("save_project", path=path)
+    with open(path) as f:
+        doc = json.load(f)
+    if doc.get("features") != []:
+        raise AssertionError(f"an empty project saves with an empty feature "
+                             f"list, as one file: {doc}")
+    doc["features"] = SCENE_FEATURES
+    with open(path, "w") as f:
+        json.dump(doc, f, indent=2)
+    d.call("open_project", path=path)
+    bodies = d.call("get_state")["bodies"]
+    if len(bodies) != 3:
+        raise AssertionError(f"the scene is three bodies: {bodies}")
     # An explicit camera, never fit_view: fitting is derived from the
     # framebuffer and from the model bounds, so it would silently re-frame the
     # shot whenever either moved and every pixel would differ for a reason
@@ -162,7 +188,7 @@ def main():
         print(f"  device: {gpu}")
         print(f"  baseline: {os.path.relpath(baseline, HERE)}")
 
-        build_scene(d)
+        build_scene(d, scratch)
         # Render twice and keep the SECOND. The first differs from the steady
         # state — reproducibly, but it is a warm-up artifact (the outline
         # settle pass and the AO buffer), and the steady state is both what a

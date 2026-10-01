@@ -13,6 +13,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 import designer_replay  # noqa: E402
 
 
@@ -54,9 +55,8 @@ def main():
         d.call("add_feature", feature={
             "type": "Extrude", "name": "Pad", "sketch_id": sk["id"],
             "distance": 1.0, "distance_expr": "w / 2", "mode": "new_body"})
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Oops", "position": [50, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        # One call and one undo step, though it adds a sketch and an extrude.
+        box(d, (50, 0, 0), (1, 1, 1), "Oops")
         d.call("undo")  # the recording carries the mistake AND its undo
         d.call("set_variable", name="w", expression="6")
         recorded = d.call("get_state")

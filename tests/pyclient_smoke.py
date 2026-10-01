@@ -74,7 +74,8 @@ def main():
                "measure via client")
 
         # box() helper + multi-body state.
-        d.box(position=(60, 0, 0), width=2, height=2, depth=2, name="Blk")
+        d.box("Top", width=2, depth=2, height=2, at=(60, 0), centered=False,
+              name="Blk")
         expect(len(d.bodies()) == 2, "box helper added a body")
         d.close()
         print("pyclient_smoke: all assertions passed")

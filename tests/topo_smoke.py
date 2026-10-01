@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 SKIP = 77  # ctest SKIP_RETURN_CODE: built without Netgen
 
@@ -66,17 +67,18 @@ def main():
 
         # --- a steel design envelope ---------------------------------------
         d.call("new_project")
-        r = d.call("add_feature", feature={"type": "Box", "name": "Envelope",
-                                           "position": [0, 0, 0],
-                                           "width": 80, "height": 24,
-                                           "depth": 16})
+        r = box(d, (0, 0, 0), (80, 24, 16), "Envelope")
         fid = r["id"]
         d.call("set_material", feature_id=fid, material="steel")
 
         els = d.call("list_elements")["bodies"][0]
         created_by = els["created_by"]
-        faces = [f["name"] for f in els["faces"]]
-        fixed_face, load_face = faces[0], faces[1]  # an opposite pair
+        # The two END faces, 80 mm apart: fixed at -X, loaded at +X.
+        def end(sign):
+            (name,) = [f["name"] for f in els["faces"]
+                       if abs(f["normal"][0] - sign) < 1e-6]
+            return name
+        fixed_face, load_face = end(-1.0), end(1.0)  # an opposite pair
 
         # --- a topology study (type set at creation, one call) --------------
         # `kind` is still accepted; the REPLY says `type`, which is what the

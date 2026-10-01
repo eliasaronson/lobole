@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 try:
     from PIL import Image
@@ -86,19 +87,14 @@ def main():
         # sky. A post is the shape that made the original bug visible: tall,
         # thin, and far from the region it wrongly darkened.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 400, "height": 10, "depth": 200})
+        shapes.box(d, (0, 0, 0), (400, 10, 200), "Plate")
         # Two walls 2 mm apart at one end: a slot narrower than the AO
         # kernel, so occlusion there is strong and LOCAL. A lone post gives
         # almost nothing to measure — the radius is crevice-scale (capped at
         # 2.5 model units), which is the whole point of the effect.
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Wall A", "position": [330, 10, 40],
-            "width": 14, "height": 70, "depth": 120})
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Wall B", "position": [346, 10, 40],
-            "width": 14, "height": 70, "depth": 120})
+        walls_ids = [
+            shapes.box(d, (330, 10, 40), (14, 70, 120), "Wall A")["id"],
+            shapes.box(d, (346, 10, 40), (14, 70, 120), "Wall B")["id"]]
 
         # A fixed camera: this test compares regions by screen fraction, so it
         # must not depend on fit heuristics that change with the model. The
@@ -121,8 +117,8 @@ def main():
         # A third frame with the walls suppressed locates them on screen
         # without projecting anything by hand: whatever changes between this
         # and the frame above IS the walls.
-        walls_ids = [f["id"] for f in d.call("get_state")["features"]
-                     if f["name"].startswith("Wall")]
+        # (The walls' solids: each stands on a datum plane and a sketch of
+        # its own, which are not the walls.)
         for fid in walls_ids:
             d.call("suppress_feature", feature_id=fid, suppressed=True)
         d.call("screenshot", path=shot_bare)

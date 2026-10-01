@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 
 def expect(condition, message):
@@ -41,9 +42,7 @@ def refused(d, method, needles, **kw):
 
 def box(d, name, lo, size):
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Block", "position": list(lo),
-        "width": size[0], "height": size[1], "depth": size[2]})
+    shapes.box(d, lo, size, "Block")
 
 
 def main():

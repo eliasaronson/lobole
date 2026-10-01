@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -68,9 +69,7 @@ def main():
     try:
         d = Designer(app.port, timeout=300)
         d.request("new_project", {})
-        d.request("add_feature", {"feature": {
-            "type": "Box", "name": "Block", "position": [0, 0, 0],
-            "width": 40, "depth": 30, "height": 20}})
+        box(d, (0, 0, 0), (40, 20, 30), "Block")
         d.request("fit_view", {})
 
         before = os.path.join(scratch, "before.png")

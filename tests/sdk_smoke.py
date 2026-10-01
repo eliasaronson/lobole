@@ -23,6 +23,7 @@ sys.path.insert(0, HERE)
 import designer_sdk as sdk  # noqa: E402
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -382,9 +383,7 @@ def check_cam_op_fields(app):
     if not app.call("ping").get("features", {}).get("cam", True):
         return
     app.new()
-    app.call("add_feature", feature={
-        "type": "Box", "name": "Block", "position": [0, 0, 0],
-        "width": 40, "height": 30, "depth": 20})
+    box(app, (0, 0, 0), (40, 30, 20), "Block")
     app.call("machine_part")
     sid = app.add_cam_setup(name="fields")["id"]
     app.set_cam_setup(id=sid, has_rotary_axis=True)
@@ -412,7 +411,7 @@ def check_part_is_a_choice(app):
     because the name matched and the SDK opened it without a word."""
     app.new()
     mine = app.part("engine block")
-    mine.box(w=10, h=10, d=10)
+    mine.box("Top", width=10, depth=10, height=10, at=(0, 0), centered=False)
     expect(app.part("engine block").id == mine.id,
            "a client switching back to a part it created gets that part")
     rig = app.assembly("engine")
@@ -444,6 +443,51 @@ def check_part_is_a_choice(app):
     # Ids are per project: a new project forgets what the client created.
     other.new()
     refused(lambda: other.part("Part 1"), "already exists")
+
+
+def extrude_distance(part, name, distance):
+    """A box's height is its Extrude's distance (a Box is stored as a sketch
+    and an extrude, docs/modeling/README.md#primitives): edit it there."""
+    part.activate()
+    feats = part.app.call("get_state")["features"]
+    (i,) = [i for i, f in enumerate(feats)
+            if f["name"] == name and f["type"] == "Extrude"]
+    part.app.modify_feature(index=i, feature=dict(feats[i], distance=distance))
+
+
+def check_primitives_take_on(app):
+    """A primitive stands ON something -- a face, a plane, a frame, a sketch
+    or a named world plane -- and is placed by `at=(u, v)` in its frame. The
+    world-position spellings are refused BY NAME before anything reaches the
+    app: they used to work, so they are what a script will send."""
+    app.new()
+    part = app.part("primitives")
+    refused(lambda: part.box((0, 0, 0), width=10, depth=10, height=10),
+            "`on` must be", "no bare world position")
+    refused(lambda: part.box(position=(0, 0, 0), w=10, h=10, d=10),
+            "`position=` is now `on=`")
+    refused(lambda: part.box("Top", w=10, depth=10, height=10),
+            "`w=` is now `width=`")
+    refused(lambda: part.cylinder(center=(0, 0, 0), d=6, height=5),
+            "`center=` is now `on=`")
+    refused(lambda: part.cylinder("Top", d=6, h=5), "`h=` is now `height=`")
+    refused(lambda: part.sphere(center=(0, 0, 0), d=6),
+            "`center=` is now `on=`")
+    expect(not part.bodies(reference=False),
+           "nothing that was refused reached the document")
+    # width along u (+X on Top), depth along v (+Y), height along the normal;
+    # `at` is the centre unless centered=False.
+    part.box("Top", width=40, depth=30, height=20, at=(5, 0))
+    lo, hi = part.bbox()
+    expect(max(abs(a - b) for a, b in zip((*lo, *hi),
+                                          (-15, -15, 0, 25, 15, 20))) < 1e-3,
+           f"a box on Top at (5, 0): {lo} .. {hi}")
+    ball = app.part("ball")
+    ball.sphere("Top", d=10, at=(100, 0))
+    lo, hi = ball.bbox()
+    expect(max(abs(a - b) for a, b in zip((*lo, *hi),
+                                          (95, -5, -5, 105, 5, 5))) < 1e-3,
+           f"a sphere's centre is ON its plane: {lo} .. {hi}")
 
 
 def check_flipped_planes(app):
@@ -581,7 +625,7 @@ def main():
         # ---- A bolt circle, and the frame that names it -----------------
         plate = app.part("plate")
         plate.var("pcd", 60).var("bolt_d", 6.6)
-        plate.box(position=(-50, -50, 0), w=100, h=100, d=8, name="Plate")
+        plate.box("Top", width=100, depth=100, height=8, name="Plate")
         top = plate.body().face(kind="plane", normal=(0, 0, 1))
         hole, frame = plate.bolt_circle(top.plane(), n=6, pcd=60, d=6.6)
         plate.check()
@@ -610,7 +654,7 @@ def main():
             (0, 0), 6, r=5, rotate=0.5), "rotate_deg", "radians")
 
         flange = app.part("flange")
-        flange.box(position=(-50, -50, 0), w=100, h=100, d=8, name="Flange")
+        flange.box("Top", width=100, depth=100, height=8, name="Flange")
         ftop = flange.body().face(kind="plane", normal=(0, 0, 1))
         flange.bolt_circle(ftop.plane(), n=4, pcd=60, d=6.6, start_deg=45)
         flange.check()
@@ -623,7 +667,7 @@ def main():
         # No step: the copies go evenly round a full turn, not all back onto
         # the original (the old 360 default).
         spokes = app.part("spokes")
-        lug = spokes.cylinder(center=(30, 0, 0), d=6, h=5)
+        lug = spokes.cylinder("Top", d=6, height=5, at=(30, 0))
         spokes.pattern(lug, 4, circular="z")
         spokes.check()
         lo, hi = spokes.bbox()
@@ -650,7 +694,7 @@ def main():
         # second — the sketch projects the edges and the Hole takes their
         # centres.
         cover = app.part("cover")
-        cover.box(position=(-50, -50, 0), w=100, h=100, d=4, name="Cover")
+        cover.box("Top", width=100, depth=100, height=4, name="Cover")
         d1 = cover.frame("origin", origin=(0, 0, 0))
         cover.app.add_feature(feature={
             "type": "Derived", "name": "Plate ghost",
@@ -719,11 +763,11 @@ def main():
         # seat without changing what the seat is.
         block = app.part("block")
         block.var("t", 10)
-        block.box(position=(-20, -20, 0), w=40, h=40, d=10, name="Block")
+        block.box("Top", width=40, depth=40, height=10, name="Block")
         block.frame("top", of=block.body().face(kind="plane",
                                                 normal=(0, 0, 1)))
         lid = app.part("lid")
-        lid.box(position=(-20, -20, 0), w=40, h=40, d=3, name="Lid")
+        lid.box("Top", width=40, depth=40, height=3, name="Lid")
         rig2 = app.assembly("rig2")
         bo = rig2.place(block, fixed=True)
         lo = rig2.place(lid)
@@ -736,11 +780,7 @@ def main():
                "a lid seated on its block touches without interfering")
         expect(abs(lo.frame().origin.z - 10.0) < 0.01,
                f"the lid seats on the block: {lo.frame().origin}")
-        block.activate()
-        block.app.modify_feature(
-            index=0, feature={"type": "Box", "name": "Block",
-                              "position": [-20, -20, 0], "width": 40,
-                              "height": 40, "depth": 25})
+        extrude_distance(block, "Block", 25)
         rig2.activate()
         rig2.solve()
         expect(abs(lo.frame().origin.z - 25.0) < 0.01,
@@ -752,11 +792,7 @@ def main():
         # with it — it does not quietly leave the part at its last good pose.
         # Thickening the plate stops its bolt holes breaking the top surface,
         # so that face stops being the one the seat was built from.
-        plate.activate()
-        plate.app.modify_feature(
-            index=0, feature={"type": "Box", "name": "Plate",
-                              "position": [-50, -50, 0], "width": 100,
-                              "height": 100, "depth": 12})
+        extrude_distance(plate, "Plate", 12)
         asm.activate()
         r = asm.solve()
         expect(r["errored_mates"] == 1,
@@ -824,6 +860,9 @@ def main():
         expect(f.volume() > 0, "still measurable after a material")
         # ---- part(name) creates; opening another's is asked for ---------
         check_part_is_a_choice(app)
+
+        # ---- A primitive stands on something, never at a world point ---
+        check_primitives_take_on(app)
 
         # ---- A flipped plane extrudes the other way ---------------------
         check_flipped_planes(app)

@@ -234,20 +234,27 @@ async def run(port):
             # execute_script (R11): the loop-and-computed-args path for
             # MCP-only agents — `d` arrives pre-bound to the attached
             # instance, prints come back, and the work LANDS in the model.
+            # A Box stands `on` something and is stored as a sketch plus an
+            # extrude (docs/modeling/README.md#primitives): two features each.
             before = len((await call("get_state"))["features"])
             run_out = await call("execute_script", script=(
                 "for k in range(3):\n"
                 "    r = d.request('add_feature', {'feature': {\n"
-                "        'type': 'Box', 'name': f'grid {k}',\n"
-                "        'position': [50 + 12 * k, 0, 0],\n"
-                "        'width': 8, 'height': 8, 'depth': 4 + k}})\n"
+                "        'type': 'Box', 'name': f'grid {k}', 'on': 'Top',\n"
+                "        'centered': False, 'offset': [50 + 12 * k, 0],\n"
+                "        'width': 8, 'depth': 8, 'height': 4 + k}})\n"
                 "    assert r['regen']['ok']\n"
                 "print('made', 3)\n"))
             expect(run_out["exit"] == 0, f"script exit 0 ({run_out})")
             expect("made 3" in run_out["stdout"], f"stdout ({run_out})")
             after = (await call("get_state"))["features"]
-            expect(len(after) == before + 3,
+            expect(len(after) == before + 6,
                    f"the scripted boxes landed ({before}->{len(after)})")
+            grid = [b for b in (await call("get_state"))["bodies"]
+                    if b["name"].startswith("grid ")]
+            expect(sorted(round(b["volume"], 6) for b in grid)
+                   == [256.0, 320.0, 384.0],
+                   f"8 x 8 x (4 + k) each: {grid}")
 
     print("mcp_smoke: all assertions passed")
 

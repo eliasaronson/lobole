@@ -15,8 +15,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
-BOX = {"type": "Box", "name": "Box 1", "position": [0, 0, 0],
-       "width": 2, "height": 2, "depth": 2}
+def box_on_top(name, x, y, size):
+    """A Box standing on the Top plane with its low corner at (x, y, 0) and
+    extents `size` (X, Y, Z). It is stored as a Sketch plus an Extrude
+    (docs/modeling/README.md#primitives): TWO features, one undo step, and
+    the add_feature answer's id is the Extrude's."""
+    return {"type": "Box", "name": name, "on": "Top", "centered": False,
+            "offset": [x, y], "width": size[0], "depth": size[1],
+            "height": size[2]}
+
+
+BOX = box_on_top("Box 1", 0, 0, (2, 2, 2))
 
 
 
@@ -149,13 +158,17 @@ def main():
         phase("Semantic tier")
         # Semantic tier: features as JSON
         d.call("new_project")
-        d.call("add_feature", feature=BOX)
+        added = d.call("add_feature", feature=BOX)
         state = d.call("get_state")
-        expect(len(state["features"]) == 1, "one feature")
+        expect([f["type"] for f in state["features"]] == ["Sketch", "Extrude"],
+               f"a box is a sketch and an extrude: {state['features']}")
+        expect(added["id"] == state["features"][1]["id"]
+               and added["index"] == 1, f"the answer names the solid: {added}")
         expect(abs(state["bodies"][0]["volume"] - 8.0) < 1e-6, "volume 8")
 
-        modified = dict(BOX, width=5)
-        d.call("modify_feature", index=0, feature=modified)
+        # Its height is the extrude's distance: the edit is on the Extrude.
+        modified = dict(state["features"][1], distance=5.0)
+        d.call("modify_feature", index=1, feature=modified)
         state = d.call("get_state")
         expect(abs(state["bodies"][0]["volume"] - 20.0) < 1e-6, "volume 20")
 
@@ -167,9 +180,10 @@ def main():
 
         d.call("key_press", chord="Ctrl+Z")
         state = d.call("get_state")
-        expect(len(state["features"]) == 0, "undo via keyboard")
+        expect(len(state["features"]) == 0,
+               "undo via keyboard (the box's two features are one step)")
         d.call("key_press", chord="Ctrl+Y")
-        expect(len(d.call("get_state")["features"]) == 1, "redo via keyboard")
+        expect(len(d.call("get_state")["features"]) == 2, "redo via keyboard")
 
         phase("Viewport")
         # Viewport: rotate the camera like a human drag
@@ -201,7 +215,7 @@ def main():
         d.call("new_project")
         expect(len(d.call("get_state")["features"]) == 0, "cleared")
         d.call("open_project", path=project)
-        expect(len(d.call("get_state")["features"]) == 1, "reloaded")
+        expect(len(d.call("get_state")["features"]) == 2, "reloaded")
 
         phase("Sketch + extrude entirely over the RPC")
         # Sketch + extrude entirely over the RPC: add the sketch, reference it
@@ -365,12 +379,8 @@ def main():
         # Boolean: two overlapping boxes combined into one body. Box A [0,2]^3,
         # box B [1,3]x[0,2]^2; overlap = 4, each volume 8.
         d.call("new_project")
-        ba = d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
-        bb = d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [1, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        ba = d.call("add_feature", feature=box_on_top("A", 0, 0, (2, 2, 2)))
+        bb = d.call("add_feature", feature=box_on_top("B", 1, 0, (2, 2, 2)))
         expect(len(d.call("get_state")["bodies"]) == 2, "two boxes")
         boo = d.call("add_feature", feature={
             "type": "Boolean", "name": "Cut", "op": "subtract",
@@ -379,7 +389,7 @@ def main():
         expect(len(st["bodies"]) == 1, "boolean consumes both into one body")
         expect(abs(st["bodies"][0]["volume"] - 4.0) < 1e-4, "subtract = 8 - 4")
         # Switch the op to union via modify_feature -> volume 12.
-        d.call("modify_feature", index=2, feature={
+        d.call("modify_feature", index=boo["index"], feature={
             "type": "Boolean", "name": "Cut", "op": "union",
             "target_id": ba["id"], "tool_id": bb["id"], "id": boo["id"]})
         vol = d.call("get_state")["bodies"][0]["volume"]
@@ -390,9 +400,7 @@ def main():
         # variable changes the number of bodies. A mirror across a base plane.
         d.call("new_project")
         d.call("set_variable", name="n", expression="3")
-        pbox = d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        pbox = d.call("add_feature", feature=box_on_top("A", 0, 0, (2, 2, 2)))
         d.call("add_feature", feature={
             "type": "Pattern", "name": "Arr", "kind": "linear",
             "source_id": pbox["id"], "axis": {"kind": "x"},
@@ -404,9 +412,8 @@ def main():
                "editing the count variable rebuilds the pattern")
 
         d.call("new_project")
-        mbox = d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [1, 0, 0],
-            "width": 2, "height": 2, "depth": 2})  # clear of x=0
+        mbox = d.call("add_feature",
+                      feature=box_on_top("A", 1, 0, (2, 2, 2)))  # clear of x=0
         d.call("add_feature", feature={
             "type": "Pattern", "name": "Mir", "kind": "mirror",
             "source_id": mbox["id"], "base_plane": "yz"})
@@ -753,7 +760,7 @@ def main():
         mb = d.call("add_feature", feature=BOX)
         d.call("set_material", feature_id=mb["id"], material="steel")
         mstate = d.call("get_state")
-        expect(mstate["features"][0].get("material") == "steel",
+        expect(mstate["features"][mb["index"]].get("material") == "steel",
                "material set on feature")
         expect(mstate["bodies"][0]["material"] == "steel",
                "material stamped on body")
@@ -765,7 +772,7 @@ def main():
         # By body index: resolves createdBy to the same feature path.
         d.call("set_material", body=0, material="brass")
         mstate = d.call("get_state")
-        expect(mstate["features"][0].get("material") == "brass",
+        expect(mstate["features"][mb["index"]].get("material") == "brass",
                "set_material by body index reaches the creating feature")
         expect(mstate["bodies"][0]["material"] == "brass",
                "by-body material stamped on body")
@@ -813,9 +820,8 @@ def main():
         # round's inside-a-barrel shots) — a near-uniform frame. (An empty
         # scene shows the environment, and emptiness is get_state's job.)
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Room", "position": [0, 0, 0],
-            "width": 500, "height": 500, "depth": 500})
+        d.call("add_feature",
+               feature=box_on_top("Room", 0, 0, (500, 500, 500)))
         d.call("set_camera", eye=[250, 250, 250], target=[250, 250, 260])
         blank = os.path.join(tmp, "inside.png")
         r = d.call("screenshot", path=blank)
@@ -834,9 +840,7 @@ def main():
         # carries body count + bbox; the PNG is a real composite (bigger
         # than a single tile's worth of black).
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 20, "height": 10, "depth": 5})
+        d.call("add_feature", feature=box_on_top("B", 0, 0, (20, 10, 5)))
         sheet = os.path.join(tmp, "sheet.png")
         r = d.call("render_sheet", path=sheet, views=["iso", "front"])
         expect(os.path.exists(sheet) and os.path.getsize(sheet) > 5000,
@@ -951,9 +955,7 @@ def main():
         # Mutating RPCs return a regen summary: failures arrive with the call
         # that caused them, root vs collateral distinguished.
         d.call("new_project")
-        r = d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        r = d.call("add_feature", feature=box_on_top("A", 0, 0, (2, 2, 2)))
         expect(r["regen"]["ok"] and r["regen"]["failed"] == []
                and r["regen"]["warnings"] == [],
                "healthy add_feature reports regen.ok with no warnings")
@@ -973,8 +975,8 @@ def main():
         expect(any("removed no material" in w["warning"]
                    for w in r["regen"]["warnings"]),
                f"no-op cut warning rides the summary: {r['regen']}")
+        d.call("delete_feature", index=3)
         d.call("delete_feature", index=2)
-        d.call("delete_feature", index=1)
 
         # ...and the other end of the same question: a cut that consumes
         # EVERY body. One body of several may legitimately go, but a part
@@ -995,8 +997,8 @@ def main():
         expect(any("consumed EVERY body" in w["warning"]
                    for w in r["regen"]["warnings"]),
                f"a cut that eats the part says so: {r['regen']}")
+        d.call("delete_feature", index=3)
         d.call("delete_feature", index=2)
-        d.call("delete_feature", index=1)
         r = d.call("add_feature", feature={
             "type": "Extrude", "name": "Bad", "sketch_id": 9999,
             "distance": 1.0, "mode": "new_body"})
@@ -1010,7 +1012,9 @@ def main():
                       "uAxis": [1, 0, 0]},
             "entities": [{"type": "circle", "center": [20, 0],
                           "radius": 1.0}]})
-        d.call("delete_feature", index=0)  # remove the box: Bad is now root
+        # Remove the box (its extrude, then its sketch): Bad is now root.
+        d.call("delete_feature", index=1)
+        d.call("delete_feature", index=0)
         r = d.call("add_feature", feature={
             "type": "Extrude", "name": "Collateral", "sketch_id": skc["id"],
             "distance": 1.0, "mode": "cut"})
@@ -1152,8 +1156,7 @@ def main():
         d.call("add_feature", feature=BOX)
         bidx = d.call("add_part", name="B2")["index"]
         d.call("set_active_part", index=bidx)
-        d.call("add_feature", feature=dict(BOX, name="Box B",
-                                           position=[10, 0, 0]))
+        d.call("add_feature", feature=dict(BOX, name="Box B", offset=[10, 0]))
         aidx = d.call("add_assembly", name="ExpAsm")["index"]
         d.call("set_active_part", index=aidx)
         d.call("add_occurrence", part="Part 1")
@@ -1199,9 +1202,8 @@ def main():
         # assembly question the tool could ask, a script could not. Nothing
         # asserted the two agreed, because the RPC could not be asked.
         d.call("new_project")
-        d.call("add_feature", feature={"type": "Box", "name": "Plate",
-                                       "position": [0, 0, 0],
-                                       "width": 20, "height": 20, "depth": 20})
+        d.call("add_feature",
+               feature=box_on_top("Plate", 0, 0, (20, 20, 20)))
         d.call("add_assembly")
         d.call("add_occurrence", part="Part 1")
         occ2 = d.call("add_occurrence", part="Part 1",

@@ -20,6 +20,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 
 def expect(condition, message):
@@ -49,9 +50,7 @@ def bore_face(d):
 def housing(d, name, diameter=20.0):
     """A block with one bore drilled through it."""
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Body", "position": [-20, -20, 0],
-        "width": 40, "height": 40, "depth": 30})
+    box(d, (-20, -20, 0), (40, 40, 30), "Body")
     d.call("add_feature", feature={
         "type": "Sketch", "name": "Centre",
         "plane": {"origin": [0, 0, 30], "normal": [0, 0, 1],
@@ -66,9 +65,7 @@ def housing(d, name, diameter=20.0):
 
 def shaft(d, name, diameter=20.0):
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Cylinder", "name": "Journal", "center": [0, 0, 0],
-        "direction": [0, 0, 1], "radius": diameter / 2.0, "height": 60})
+    cylinder(d, (0, 0, 0), "z", diameter / 2.0, 60, "Journal")
     return bore_face(d)
 
 
@@ -236,14 +233,18 @@ def main():
         # Diameters are the easy half. A distance tolerance names a second
         # face and the nominal is measured between them.
         d.call("add_part", name="Plate")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Slab", "position": [0, 0, 0],
-            "width": 40, "height": 40, "depth": 10})
-        faces = [f["name"] for b in d.call("list_elements")["bodies"]
-                 for f in b.get("faces", []) if f.get("kind") == "plane"]
-        expect(len(faces) == 6, f"a box has six planar faces: {faces}")
-        pid = {f["name"]: f["id"]
-               for f in d.call("get_state")["features"]}["Slab"]
+        pid = box(d, (0, 0, 0), (40, 40, 10), "Slab")["id"]
+        planar = [f for b in d.call("list_elements")["bodies"]
+                  for f in b.get("faces", []) if f.get("kind") == "plane"]
+        expect(len(planar) == 6, f"a box has six planar faces: {planar}")
+        # In a fixed order, by outward normal: -X, +X, -Y, +Y, -Z, +Z. So
+        # faces[0] and faces[1] are the two walls the 40 mm width lies
+        # between, whatever order the extrude happened to name them in.
+        def by_normal(f):
+            n = f["normal"]
+            axis = max(range(3), key=lambda k: abs(n[k]))
+            return 2 * axis + (1 if n[axis] > 0 else 0)
+        faces = [f["name"] for f in sorted(planar, key=by_normal)]
 
         r = d.call("set_tolerance", feature_id=pid, element=faces[0],
                    b={"feature_id": pid, "element": faces[1]},

@@ -22,6 +22,7 @@ from smoke_app import launch_app  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 _T0 = time.time()
 _PHASE = "startup"
@@ -84,9 +85,7 @@ def main():
                f"registry mode is offscreen ({info})")
 
         phase("the document engine is intact")
-        r = d.call("add_feature", feature={
-            "type": "Box", "name": "Box 1", "position": [0, 0, 0],
-            "width": 20, "height": 30, "depth": 40})
+        r = box(d, (0, 0, 0), (20, 30, 40), "Box 1")
         expect(r.get("regen", {}).get("ok"), f"box regenerates ({r})")
         mp = d.call("mass_properties")
         expect(abs(mp["total"]["volume"] - 24000.0) < 1.0,
@@ -94,9 +93,7 @@ def main():
         # A second box forming a step: the concave corner is where shadows
         # and AO visibly land, so the render-option toggle below has pixels
         # to change on ANY device (a lone convex box barely self-shadows).
-        r = d.call("add_feature", feature={
-            "type": "Box", "name": "Box 2", "position": [20, 0, 0],
-            "width": 20, "height": 12, "depth": 40})
+        r = box(d, (20, 0, 0), (20, 12, 40), "Box 2")
         expect(r.get("regen", {}).get("ok"), f"step regenerates ({r})")
 
         phase("the projection is LAZY: edits nobody looks at cost nothing")
@@ -107,11 +104,13 @@ def main():
         def syncs():
             return app.log().count("Document synced")
 
+        def feature_count():
+            return len(d.call("get_state")["features"])
+
         before = syncs()
+        first_lazy = feature_count()
         for i in range(5):
-            d.call("add_feature", feature={
-                "type": "Box", "name": f"Lazy {i}", "position": [0, 0, 60 + i * 30],
-                "width": 10, "height": 10, "depth": 10})
+            box(d, (0, 0, 60 + i * 30), (10, 10, 10), f"Lazy {i}")
         time.sleep(0.5)  # several ticks: an eager loop would have projected
         expect(syncs() == before,
                f"5 edits with nothing looking projected nothing "
@@ -124,7 +123,9 @@ def main():
         # every box added above has to be in the count it drew.
         expect(f"{5 + 2} bodies" in app.log().rsplit("Document synced", 1)[-1],
                "the projection the capture forced is the current document")
-        for i in reversed(range(2, 7)):  # the five, after Box 1 and Box 2
+        # The five (each a datum plane, a sketch and an extrude), after
+        # Box 1 and Box 2; last first, so nothing is left naming a deleted one.
+        for i in reversed(range(first_lazy, feature_count())):
             d.call("delete_feature", index=i)
         time.sleep(0.2)
 
@@ -132,13 +133,13 @@ def main():
         # get_state is the hot poll and does NOT force a projection, so after
         # an edit the volatile bodies[].mesh id would describe superseded
         # geometry. It is omitted instead: absent is loud, wrong is silent.
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Stale probe", "position": [0, 0, 200],
-            "width": 10, "height": 10, "depth": 10})
+        probe_first = feature_count()
+        box(d, (0, 0, 200), (10, 10, 10), "Stale probe")
         bodies = d.call("get_state")["bodies"]
         expect(all("mesh" not in b for b in bodies),
                f"no render ids while the projection is behind ({bodies})")
-        d.call("delete_feature", index=2)
+        for i in reversed(range(probe_first, feature_count())):
+            d.call("delete_feature", index=i)
         d.request("screenshot", {"path": os.path.join(tmp, "current.png")})
         bodies = d.call("get_state")["bodies"]
         expect(all("mesh" in b for b in bodies),
@@ -304,9 +305,7 @@ def main():
             # picture itself: a program whose A moves plays now, on a radius
             # field, instead of being refused (docs/cam/rotary.md#the-rotary-picture).
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Cylinder", "name": "Bar", "center": [0, 0, 0],
-                "direction": [1, 0, 0], "radius": 15.0, "height": 40.0})
+            cylinder(d, (0, 0, 0), "x", 15.0, 40.0, "Bar")
             job = d.call("machine_part")
             sid = d.call("add_cam_setup", name="Trunnion", post="mach3")["id"]
             # How the rotary is installed, stated: without it a setup held

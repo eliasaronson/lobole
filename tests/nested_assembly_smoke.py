@@ -20,6 +20,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 FAILURES = []
 
@@ -55,9 +56,7 @@ def main(binary):
         # --- a part, and a "Gangway" assembly that places it twice ----------
         d.call("add_part", name="Board")
         d.call("set_active_part", name="Board")
-        d.call("add_feature", feature={"type": "Box", "name": "B",
-                                       "position": [0, 0, 0],
-                                       "width": 100, "height": 10, "depth": 20})
+        box(d, (0, 0, 0), (100, 10, 20), "B")
         d.call("add_assembly", name="Gangway")
         d.call("set_active_part", name="Gangway")
         d.call("add_occurrence", part="Board", transform={"position": [0, 0, 0]})

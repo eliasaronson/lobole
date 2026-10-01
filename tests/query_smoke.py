@@ -14,6 +14,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -38,9 +39,7 @@ def main():
     try:
         d = Designer.wait_for(app.port)
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Block", "position": [0, 0, 0],
-            "width": 30, "height": 20, "depth": 10})
+        box(d, (0, 0, 0), (30, 20, 10), "Block")
         sk = d.call("add_feature", feature={
             "type": "Sketch", "name": "Holes",
             "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],

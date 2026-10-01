@@ -29,6 +29,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -46,9 +47,7 @@ def build(d, side):
     for i in range(n):
         d.call("add_part", name=f"blk{i}")
         d.call("set_active_part", part=f"blk{i}")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (0, 0, 0), (10, 10, 10), "B")
     d.call("add_assembly", name="rig")
     d.call("set_active_part", part="rig")
     for i in range(n):

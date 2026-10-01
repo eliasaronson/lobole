@@ -19,6 +19,7 @@ import json as jsonlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -63,9 +64,7 @@ def main():
         # --- a part with a real material -----------------------------------
         d.call("new_project")
         d.call("add_part", name="widget")
-        blk = d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 10, "height": 6, "depth": 4})
+        blk = box(d, (0, 0, 0), (10, 6, 4), "Blk")
         d.call("set_material", feature_id=blk["id"], material="steel")
 
         glb = os.path.join(tmp, "widget.glb")
@@ -119,9 +118,7 @@ def main():
 
         # --- an assembly: two occurrences of one part (instanced) + a second
         d.call("add_part", name="pin")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "P", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 8})
+        box(d, (0, 0, 0), (2, 2, 8), "P")
         d.call("add_assembly", name="rig")
         d.call("add_occurrence", part="widget", fixed=True)
         d.call("add_occurrence", part="pin",

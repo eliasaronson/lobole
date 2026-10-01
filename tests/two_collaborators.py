@@ -43,9 +43,24 @@ def start(binary, env):
     return app, Designer(app.port)
 
 
-def box(name, width):
-    return {"type": "Box", "name": name, "position": [0, 0, 0],
-            "width": width, "height": 20, "depth": 20}
+def box(name, height):
+    """A 20 x 20 block, `height` tall. It is stored as a Sketch and an
+    Extrude (docs/modeling/README.md#primitives); the height is the
+    Extrude's distance, which is the field the two people below fight over."""
+    return {"type": "Box", "name": name, "on": "Top", "centered": False,
+            "offset": [0, 0], "width": 20, "depth": 20, "height": height}
+
+
+def extrude(client):
+    """(index, JSON) of the one Extrude in the client's part."""
+    feats = client.call("get_state")["features"]
+    (i,) = [i for i, f in enumerate(feats) if f["type"] == "Extrude"]
+    return i, feats[i]
+
+
+def set_height(client, height):
+    i, f = extrude(client)
+    client.call("modify_feature", index=i, feature=dict(f, distance=height))
 
 
 def main():
@@ -80,15 +95,16 @@ def main():
         bob_dir = os.path.join(tmp, "bob.dsgn")
         bob.call("clone_project", url=bare, path=bob_dir)
         state = bob.call("get_state")
-        expect(len(state["features"]) == 1, "Bob has Alice's feature")
-        expect(abs(state["features"][0]["width"] - 40.0) < 1e-6, "and its size")
+        expect([f["type"] for f in state["features"]] == ["Sketch", "Extrude"],
+               f"Bob has Alice's features: {state['features']}")
+        expect(abs(extrude(bob)[1]["distance"] - 40.0) < 1e-6, "and its size")
 
         phase("Both change the same feature")
-        alice.call("modify_feature", index=0, feature=box("Body", 50))
+        set_height(alice, 50)
         alice.call("save_project", path=alice_dir)
         expect(alice.call("push")["status"] == "pushed", "Alice pushes first")
 
-        bob.call("modify_feature", index=0, feature=box("Body", 60))
+        set_height(bob, 60)
         bob.call("save_project", path=bob_dir)
 
         phase("Bob's push is rejected, because Alice got there first")
@@ -104,11 +120,11 @@ def main():
         conflicts = bob.call("conflict_list")
         items = [c for c in conflicts["conflicts"] if c["kind"] == "item"]
         expect(len(items) == 1, f"one item conflict: {conflicts}")
-        expect(items[0]["item_kind"] == "Box", f"a Box: {items[0]}")
-        widths = {f["field"]: (f["mine"], f["theirs"])
+        expect(items[0]["item_kind"] == "Extrude", f"an Extrude: {items[0]}")
+        fields = {f["field"]: (f["mine"], f["theirs"])
                   for f in items[0]["fields"]}
-        expect("width" in widths, f"about the width: {items[0]}")
-        expect(widths["width"] == ("60", "50"), f"his vs hers: {widths}")
+        expect("distance" in fields, f"about the distance: {items[0]}")
+        expect(fields["distance"] == ("60", "50"), f"his vs hers: {fields}")
 
         phase("Bob keeps his, finishes, and pushes")
         bob.call("conflict_resolve", path=items[0]["path"], take="mine")
@@ -120,8 +136,8 @@ def main():
         expect(pulled["status"] in ("fast_forward", "merged", "up_to_date"),
                f"clean for Alice: {pulled}")
         state = alice.call("get_state")
-        expect(abs(state["features"][0]["width"] - 60.0) < 1e-6,
-               f"Bob's resolution arrived: {state['features'][0]}")
+        expect(abs(extrude(alice)[1]["distance"] - 60.0) < 1e-6,
+               f"Bob's resolution arrived: {state['features']}")
         # THE BAR: not "git exited 0" but "the project still works".
         expect(len(state["bodies"]) == 1, "and it regenerates to a body")
         expect(state["bodies"][0]["volume"] > 0, "with real volume")
@@ -130,7 +146,7 @@ def main():
         alice.call("checkpoint_create", name="before the lid")
         alice.call("push")
         bob.call("pull")
-        bob.call("modify_feature", index=0, feature=box("Body", 70))
+        set_height(bob, 70)
         bob.call("save_project", path=bob_dir)
         bob.call("checkpoint_create", name="before the lid")
         named = [c for c in bob.call("checkpoint_list")["checkpoints"]

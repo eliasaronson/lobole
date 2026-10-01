@@ -16,6 +16,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -69,10 +70,8 @@ def main():
         expect(variable(d, "od")["value"] == 32, variable(d, "od"))
 
         # A feature reads one too: a box as wide as a 6002 is thick.
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Block", "position": [0, 0, 0],
-            "width": 1, "height": 10, "depth": 10,
-            "width_expr": "lookup('bearings', 6002, 'B')"})
+        box(d, (0, 0, 0), (1, 10, 10), "Block",
+            width_expr="lookup('bearings', 6002, 'B')")
         vol = d.call("mass_properties")["bodies"][0]["volume"]
         expect(abs(vol - 900.0) < 1e-6, f"9 x 10 x 10: {vol}")
 
@@ -127,8 +126,9 @@ def main():
 
         d.call("delete_variable", name="od")
         d.call("delete_variable", name="size")
-        # The box still reads it.
-        refused(d, "delete_table", "feature 'Block'", name="bearings")
+        # The box still reads it -- through its sketch, whose width
+        # dimension carries the lookup (a Box is a sketch and an extrude).
+        refused(d, "delete_table", "feature 'Block sketch'", name="bearings")
 
         print("tables_smoke: all checks passed")
         return 0
