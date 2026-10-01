@@ -51,6 +51,10 @@ spell out the V axis, entity builders, an arc through three points, a
 `check` that raises on a failed regeneration, and `connect`. Most newer
 generators use the SDK (`tools/designer_sdk.py`) directly.
 
+What a generator makes goes to the untracked `scratch/<name>/`, or under
+`$DESIGNER_SCRATCH` when that is set (the tests below run each in a private
+directory that way); those with an `--out` take that instead.
+
 Conventions every generator here keeps:
 
 - **The run refuses to save what it has not checked**, and gates on a
@@ -69,6 +73,45 @@ Conventions every generator here keeps:
   derive: "twist"`) takes the turn from the placement instead of guessing.
 - **Dimensions carry their provenance**: sourced, read off a photograph,
   assumed, or a design choice, said on the line that holds them.
+
+## The big generators as tests
+
+A core change can break a generator that no unit test covers: a whole
+generator puts hundreds of features, mates and checks in one document. So
+the big ones run as tests, each its cheapest stage that still checks, from
+nothing, against its own instance (`tests/smoke_app.py`: private
+`XDG_STATE_HOME` and config) and writing to a private directory, never
+`scratch/`:
+
+    ctest -C generators -L generators -j2      # in build/, ~6 min
+
+| test | runs | measured alone | budget |
+|---|---|---|---|
+| `generator_om615` | `om615.py --stage preview` (headless) | 221 s | 420 s |
+| `generator_pes_pump` | `pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns (offscreen) | 44 s | 180 s |
+| `generator_chess` | `run_all.sh --only board`: every design stage, then the board's CAM job verified and posted (offscreen) | 140 s | 360 s |
+| `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
+
+A test passes when the generator exits 0 AND its own success marker is in
+its output (om615's `preview passed`, the pump's GLB and screenshots, the
+chess and pan/tilt logs' final `done`, the pan/tilt's `every setup ok and
+complete`): exit 0 without the marker means it stopped early. Past its
+budget the generator's process group is killed and the test says so; a
+failure keeps the output directory and names it, with the generator's last
+lines. `tests/generator_runs.py` holds the table, `tests/CMakeLists.txt` the
+budgets.
+
+They are registered for the ctest configuration `generators` only, so a
+plain `ctest` -- the headless suite, CI, the nix sandbox -- never runs them,
+and labelled `generators` and `slow`. `tools/merge-branch.sh --full` runs
+them after the headless suite, two at a time.
+
+Not covered: the pan/tilt yoke's statics and topology (`yoke_topo`, 25
+minutes, and a topology result kept in a 25 MB project), and the chess set's
+other CAM jobs (six more minutes). A run from nothing resolves every name
+by this binary, so it catches a generator that picks by a name the app no
+longer makes; it cannot catch an OLD document whose stored names no longer
+resolve, since no fixture from an older binary is kept.
 
 ## gear.py and gear_train.py
 

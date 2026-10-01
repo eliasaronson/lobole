@@ -879,6 +879,30 @@ add_test(NAME generators_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
 
+# The big generators as tests (generators/README.md#the-big-generators-as-tests):
+# each one's cheapest checking stage from nothing, against its own instance.
+# Minutes each, and a GPU for the offscreen ones, so they run only when asked
+# for: CONFIGURATIONS keeps every plain ctest -- the headless suite, CI, the
+# nix sandbox's check -- from seeing them at all, and
+#   ctest -C generators -L generators
+# runs them (tools/merge-branch.sh --full does, after the headless suite).
+# They are `slow` too, for anything that does pass -C generators.
+# The budget (s) is about twice the run measured alone on the development
+# machine -- om615 217, pes_pump 44, chess 140, pantilt 349 -- for a loaded
+# one. The TIMEOUT is the budget plus a minute: the script kills its
+# generator at the budget and says so, which a ctest kill would not.
+foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720)
+  string(REPLACE ":" ";" gen_budget "${gen_budget}")
+  list(GET gen_budget 0 gen)
+  list(GET gen_budget 1 budget)
+  math(EXPR gen_timeout "${budget} + 60")
+  add_test(NAME generator_${gen} CONFIGURATIONS generators
+           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generator_runs.py
+                   $<TARGET_FILE:designer> ${gen} ${budget})
+  set_tests_properties(generator_${gen} PROPERTIES
+                       LABELS "generators;slow" TIMEOUT ${gen_timeout})
+endforeach()
+
 # Same for the python client every script and smoke test imports.
 add_test(NAME py_client_compiles
          COMMAND python3 -c

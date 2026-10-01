@@ -2,7 +2,8 @@
 # Land a worktree branch on main: cherry-pick, build, test, remove the worktree.
 #
 #   tools/merge-branch.sh BRANCH            # test-fast after the build
-#   tools/merge-branch.sh BRANCH --full     # the headless suite and the GUI suite
+#   tools/merge-branch.sh BRANCH --full     # the headless suite, the big
+#                                           # generators and the GUI suite
 #
 # The cherry-pick happens under build/'s lock (tools/build.sh), so it never
 # lands while a build of this tree is compiling. A conflict stops here with
@@ -56,6 +57,16 @@ fi
 "$root/tools/build.sh"
 if [ "$full" = 1 ]; then
   nix-shell shell.nix --run "cd build && ctest -LE gui -j$("$root/tools/build-jobs" 700)" | grep -E 'tests passed|\(Failed\)'
+  # The big generators, each from nothing on its own instance
+  # (generators/README.md#the-big-generators-as-tests): after the headless
+  # suite, not beside it -- two at a time is what memory and one GPU take.
+  # The verdict, and on a failure the test's own message: why (exit code,
+  # budget, no success marker), where its output was kept, and the last
+  # lines the generator printed -- not the app's whole log, which follows.
+  "$root/tools/nix-run" "cd '$root/build' && ctest -C generators -L generators -j2 --output-on-failure" |
+    awk '/tests passed|\(Failed\)|\(Timeout\)/ { print; next }
+         /^[a-z0-9_]+: (exit|over its budget)/ { n = 40 }
+         n > 0 { print; n-- }'
   # The verdict, and on a failure what failed and where it is archived with
   # its seed: the last line alone ("SOME FAILED") invites a re-run, which
   # passes and hides an order-dependent failure the archive can replay.

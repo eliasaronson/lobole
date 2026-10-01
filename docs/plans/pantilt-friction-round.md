@@ -81,16 +81,8 @@ the generator's hand-placed balloons removed.
 
 ## F. The big generators as tests
 
-**Problem.** A core change broke the OM615 generator, and nobody saw it for
-three days.
-
-**Fix.** A `[generators]` ctest label (tagged `[slow]`) that runs each major
-generator's cheapest checking stage against a private headless instance:
-om615 `--stage preview`, pes_pump `--no-studies`, chess (a cheap stage) and
-pantilt `--from assembly` with saved results reused. Each must finish under a
-stated time and end clean. `tools/merge-branch.sh --full` runs it.
-
-**Verified by:** reverting the body-mode fix makes the om615 test fail.
+Built: see [the big generators as
+tests](../../generators/README.md#the-big-generators-as-tests).
 
 ## Order
 
