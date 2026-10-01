@@ -1,0 +1,68 @@
+{
+  "format": "designer-document",
+  "version": 149,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Plate",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 40,
+      "height": 40,
+      "depth": 20
+    },
+    {
+      "type": "Sketch",
+      "name": "Centre",
+      "id": 2,
+      "next_entity_id": 2,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "point",
+          "id": 1,
+          "p": [
+            20,
+            20
+          ]
+        }
+      ],
+      "constraints": []
+    },
+    {
+      "type": "Hole",
+      "name": "M6 tapped",
+      "id": 3,
+      "sketch_id": 2,
+      "hole_kind": "simple",
+      "diameter": 1.0,
+      "depth": 12.0,
+      "fit": {
+        "thread": "M6",
+        "kind": "tapped"
+      },
+      "drill_point_deg": 140.0,
+      "thread_depth": 8.0
+    }
+  ]
+}

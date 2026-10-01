@@ -39,7 +39,11 @@ namespace {
 // features the same way, so a reopened pan/tilt head lost both: every screw
 // in a tapped hole read as an exact clash of its thread's depth, and the
 // base plate's 3/8-16 had no thread for CAM to mill.
-constexpr int kGeometryFormat = 3;
+// 4: holes. A body's HoleMarks (what a CAM drill reads of a hole's point,
+// and the job's list of what it does not cut) are stamped by the Hole the
+// same way; and a Hole's derived drill point changes what an unchanged
+// recipe builds, so a blob baked before it is rebuilt rather than read.
+constexpr int kGeometryFormat = 4;
 
 // A bend record, whole. It is not document data — the features stamp it on
 // every regeneration — but a baked open regenerates nothing, so the blob has
@@ -136,6 +140,30 @@ ThreadMark ThreadMarkFromJson(const json& j) {
   t.length = j.value("length", 0.0);
   t.modeled = j.value("modeled", false);
   return t;
+}
+
+json HoleMarkToJson(const HoleMark& h) {
+  return json{{"bore", RefJson(h.bore)},
+              {"feature", h.featureId},
+              {"name", h.feature},
+              {"diameter", h.diameter},
+              {"depth", h.depth},
+              {"through", h.through},
+              {"point_angle_deg", h.pointAngleDeg},
+              {"thread", h.thread}};
+}
+
+HoleMark HoleMarkFromJson(const json& j) {
+  HoleMark h;
+  h.bore = RefFromJson(j.value("bore", json()));
+  h.featureId = j.value("feature", uint64_t{0});
+  h.feature = j.value("name", std::string{});
+  h.diameter = j.value("diameter", 0.0);
+  h.depth = j.value("depth", 0.0);
+  h.through = j.value("through", false);
+  h.pointAngleDeg = j.value("point_angle_deg", 180.0);
+  h.thread = j.value("thread", std::string{});
+  return h;
 }
 
 BendRegion BendFromJson(const json& j) {
@@ -323,6 +351,12 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
           marks.push_back(ThreadMarkToJson(t));
         entry["threads"] = std::move(marks);
       }
+      if (!body.holes.empty()) {
+        json holes = json::array();
+        for (const HoleMark& h : body.holes)
+          holes.push_back(HoleMarkToJson(h));
+        entry["holes"] = std::move(holes);
+      }
       index["bodies"].push_back(std::move(entry));
       wanted.push_back(file);
     }
@@ -416,6 +450,8 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
         body.threadRegions.push_back(ThreadRegionFromJson(t));
       for (const json& t : bj.value("threads", json::array()))
         body.threads.push_back(ThreadMarkFromJson(t));
+      for (const json& h : bj.value("holes", json::array()))
+        body.holes.push_back(HoleMarkFromJson(h));
       bodies.push_back(std::move(body));
     }
     if (bodies.empty())

@@ -41,6 +41,8 @@ void FollowModifiedFaces(std::vector<Body>& bodies) {
       follow(b.elementMap, t.face);
     for (ThreadRegion& t : b.threadRegions)
       follow(b.elementMap, t.face);
+    for (HoleMark& h : b.holes)
+      follow(b.elementMap, h.bore);
   }
 }
 

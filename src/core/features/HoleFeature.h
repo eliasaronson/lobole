@@ -32,6 +32,9 @@ public:
   // the internal thread on every bore it cut, so a screw in it engages
   // rather than clashes. Nothing else wrote one but a `Thread` feature.
   void RecordTapping(std::vector<Body>& bodies) const;
+  // Every bore it cut, as a HoleMark on its body: what CAM reads of a
+  // hole's point and thread, and of a hole no operation cuts.
+  void RecordHoles(std::vector<Body>& bodies) const;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(sketchId); // the hole-centre sketch
@@ -47,7 +50,14 @@ public:
   void VisitExprs(const ExprVisitor& visit) override {
     visit(diameterExpr, diameter);
     visit(depthExpr, depth);
+    visit(threadDepthExpr, threadDepth);
   }
+
+  // The drill point at a blind floor and how deep a tapped fit is threaded,
+  // as cut: the stated value, or the one derived when it is 0
+  // (docs/modeling/holes-and-threads.md#hole). Valid after Execute.
+  [[nodiscard]] double PointAngleUsed() const;
+  [[nodiscard]] double ThreadDepthUsed() const;
 
   uint64_t sketchId = 0;
   HoleKind kind = HoleKind::Simple;
@@ -72,6 +82,20 @@ public:
   std::string depthExpr;
   bool through = false; // drill far enough to pierce any body below
 
+  // The included angle of the drill's point, degrees, that a BLIND hole's
+  // floor is modelled with: a cone under the bore, its face role `point`.
+  // 0 = derived: a hole with a fit is drilled to a drill table's size, and
+  // those tables are ISO 235 jobber drills, whose point is 118 degrees; a
+  // plain diameter says nothing about how it is made and keeps its flat
+  // floor. 180 states a flat floor. Read by nothing on a through hole.
+  double pointAngleDeg = 0.0;
+  // A tapped fit's thread depth from the mouth, mm. 0 = derived: the drilled
+  // depth less the three pitches a blind-hole tap's lead (ISO 8830 form C,
+  // 2-3 threads) cuts no full thread in; the whole bore when through. Refused
+  // without a tapped fit, and deeper than the hole.
+  double threadDepth = 0.0;
+  std::string threadDepthExpr;
+
   // Counterbore: a `cbDiameter` recess `cbDepth` deep at the surface.
   double cbDiameter = 2.0;
   double cbDepth = 0.5;
@@ -85,6 +109,9 @@ private:
                   const std::vector<uint32_t>& entities, const glm::dvec3& axis,
                   double boreDepth, ElementMap& out) const;
 
+  // The sketch entities whose hole has no floor in material for a point to
+  // be on (drilled on into a pocket): their HoleMark says flat.
+  std::vector<uint32_t> m_unpointed;
   // The last-drilled tool and its names (ToolShape).
   CADShape m_tool;
   ElementMap m_toolMap;

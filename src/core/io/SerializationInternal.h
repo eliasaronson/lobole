@@ -17,10 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    148; // v148: a topology result's `input_hash` ("0x" + 16 hex digits):
+    149; // v148: a topology result's `input_hash` ("0x" + 16 hex digits):
          //      what produced it, so a reopened project reuses it for the
          //      same inputs and reads it stale otherwise
          //      (docs/simulation/README.md#studies-as-jobs).
+         // v149: Hole `drill_point_deg` (a blind floor's point; absent =
+         //      derived) and `thread_depth` (+_expr; a tapped fit's thread
+         //      from the mouth; absent = derived)
+         //      (docs/modeling/holes-and-threads.md#hole).
          // v147: drawings -- a view's `section` (a section view), a note's
          //      `style` (balloon, datum) and table `bom` (a parts list), and
          //      the title block's `material` and `scale`

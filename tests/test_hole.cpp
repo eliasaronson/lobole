@@ -331,3 +331,113 @@ TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
   CHECK_FALSE(hole->GetError().empty());
   CHECK(hole->GetError().find("bore") != std::string::npos);
 }
+
+// A blind hole drilled for a thread is modelled as drilled: its floor is a
+// jobber drill's 118-degree point, and it is threaded short of that floor by
+// a tap's lead (docs/modeling/holes-and-threads.md#hole).
+TEST_CASE("a blind tapped hole has a drill point and a thread short of it",
+          "[hole]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 20, 20, 20));
+  const uint64_t sk = PointSketch(doc, 20.0, {{10, 10}});
+  auto ho =
+      std::make_unique<HoleFeature>("M6", sk, HoleKind::Simple, 1.0, 12.0);
+  ho->fitThread = "M6";
+  ho->fitKind = "tapped";
+  doc.AddFeature(std::move(ho));
+  REQUIRE(doc.Regenerate());
+  const auto* hole = dynamic_cast<const HoleFeature*>(doc.GetFeature(2));
+  REQUIRE(hole != nullptr);
+  CHECK(hole->PointAngleUsed() == 118.0);
+  // M6 coarse is 1 mm a pitch: 12 less three pitches of the tap's lead.
+  CHECK_THAT(hole->ThreadDepthUsed(), WithinRel(9.0, 1e-9));
+  const Body& body = doc.GetBodies()[0];
+  // The cone: 5 mm across (M6's tap drill), 118 degrees, under 12 mm of bore.
+  const double r = 2.5, cone = r / std::tan(59.0 * M_PI / 180.0);
+  CHECK_THAT(body.shape.Volume(),
+             WithinRel(8000.0 - M_PI * r * r * 12.0 - M_PI * r * r * cone / 3.0,
+                       1e-6));
+  bool point = false;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const topo::ElementOrigin o = topo::DecodeElementName(name);
+    point = point || (o.ok && o.role == topo::ElementRole::DrillPoint);
+  }
+  CHECK(point);
+  REQUIRE(body.holes.size() == 1);
+  CHECK(body.holes[0].pointAngleDeg == 118.0);
+  CHECK(body.holes[0].depth == 12.0);
+  CHECK(body.holes[0].thread == "M6");
+  CHECK(body.holes[0].feature == "M6");
+  REQUIRE(body.threads.size() == 1);
+  CHECK_THAT(body.threads[0].length, WithinRel(9.0, 1e-9));
+  REQUIRE(body.threadRegions.size() == 1);
+  CHECK_THAT(body.threadRegions[0].length, WithinRel(9.0, 1e-9));
+}
+
+TEST_CASE("a hole's point and thread depth are stated, refused and saved",
+          "[hole]") {
+  const auto build = [](auto&& edit) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(
+        std::make_unique<BoxFeature>("B", glm::vec3(0), 20, 20, 20));
+    const uint64_t sk = PointSketch(*doc, 20.0, {{10, 10}});
+    auto ho =
+        std::make_unique<HoleFeature>("H", sk, HoleKind::Simple, 5.0, 12.0);
+    edit(*ho);
+    doc->AddFeature(std::move(ho));
+    doc->Regenerate();
+    return doc;
+  };
+  // A plain diameter says nothing about how it is made: a flat floor.
+  {
+    auto doc = build([](HoleFeature&) {});
+    CHECK(doc->GetBodies()[0].holes.at(0).pointAngleDeg == 180.0);
+    CHECK_THAT(doc->GetBodies()[0].shape.Volume(),
+               WithinRel(8000.0 - M_PI * 6.25 * 12.0, 1e-6));
+  }
+  // Stated: a 140 degree point, and an M6 threaded 10 deep.
+  auto stated = build([](HoleFeature& h) {
+    h.pointAngleDeg = 140.0;
+    h.fitThread = "M6";
+    h.fitKind = "tapped";
+    h.threadDepth = 10.0;
+  });
+  REQUIRE(stated->GetFeature(2)->GetError().empty());
+  CHECK(stated->GetBodies()[0].holes.at(0).pointAngleDeg == 140.0);
+  CHECK(stated->GetBodies()[0].threads.at(0).length == 10.0);
+  const std::string path =
+      (std::filesystem::temp_directory_path() / "hole-point-depth.dsgn")
+          .string();
+  REQUIRE(testio::Save(*stated, path));
+  const auto loaded = testio::Load(path);
+  REQUIRE(loaded != nullptr);
+  const auto* back = dynamic_cast<const HoleFeature*>(loaded->GetFeature(2));
+  REQUIRE(back != nullptr);
+  CHECK(back->pointAngleDeg == 140.0);
+  CHECK(back->threadDepth == 10.0);
+  // Refused, never read as something else.
+  CHECK_THAT(build([](HoleFeature& h) { h.threadDepth = 5.0; })
+                 ->GetFeature(2)
+                 ->GetError(),
+             Catch::Matchers::ContainsSubstring("TAPPED"));
+  CHECK_THAT(build([](HoleFeature& h) { h.pointAngleDeg = 10.0; })
+                 ->GetFeature(2)
+                 ->GetError(),
+             Catch::Matchers::ContainsSubstring("30 to 180"));
+  CHECK_THAT(build([](HoleFeature& h) {
+               h.fitThread = "M6";
+               h.fitKind = "tapped";
+               h.threadDepth = 13.0;
+             })
+                 ->GetFeature(2)
+                 ->GetError(),
+             Catch::Matchers::ContainsSubstring("no deeper"));
+  // A through hole is threaded through, whatever its point.
+  auto through = build([](HoleFeature& h) {
+    h.fitThread = "M6";
+    h.fitKind = "tapped";
+    h.through = true;
+  });
+  CHECK(through->GetBodies()[0].threads.at(0).length == 0.0);
+  CHECK(through->GetBodies()[0].holes.at(0).through);
+}
