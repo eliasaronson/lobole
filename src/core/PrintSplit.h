@@ -32,7 +32,9 @@ struct Piece {
   glm::dvec3 cellMin{0.0}, cellMax{0.0};
   glm::dvec3 min{0.0}, max{0.0}; // the piece's own bounds
   double volume = 0.0;           // mm^3
-  int solids = 0;                // a cell can hold several
+  // Solids in the piece: a cell's solids are pieces of their own when a box
+  // can take each alone, and one piece when their boxes interlock.
+  int solids = 0;
   bool fits = false;
   // How it goes on the bed: which of the piece's axes lies along the bed's
   // x, y and z (z = up). Meaningful when `fits`.

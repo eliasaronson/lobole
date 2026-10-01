@@ -253,6 +253,10 @@ struct StudyRuntime {
   double shapeThreshold = 0.0;
   int shapeIslandTets = 0;
   double shapeVolume = 0.0; // mm^3, of the solid that was solved
+  // When the volume-matched level left a loaded face unconnected to a
+  // support, that level; `shapeThreshold` is then the highest one that
+  // carries every load (0 = not lowered).
+  double shapeThresholdLoweredFrom = 0.0;
 };
 
 // (Document is forward-declared at global scope by FemStudy.h.)
@@ -293,6 +297,7 @@ struct StudyJobInput {
   double shapeThreshold = 0.0;
   int shapeIslandTets = 0;
   double shapeVolume = 0.0;
+  double shapeThresholdLoweredFrom = 0.0;
 };
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
                   std::string* error);
@@ -351,6 +356,7 @@ struct StudyPlan {
   double shapeThreshold = 0.0;
   int shapeIslandTets = 0;
   double shapeVolume = 0.0;
+  double shapeThresholdLoweredFrom = 0.0;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
   std::vector<StudyBodyPlan> bodies;

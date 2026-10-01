@@ -138,6 +138,17 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
                    std::string* error, JobStart* job = nullptr);
 
+// The two static studies check_topology solves
+// (docs/topopt/README.md#a-static-study-of-the-optimised-shape): '<name>:
+// shape' (the result at `threshold`, 0 = volume-matched) and '<name>: solid'
+// (its whole design domain), with the topology study's supports, loads and
+// cases. Made when absent, refreshed when present (found by what they are,
+// not by name), each one undoable edit. False + *error when `topoId` is not
+// a topology study of `doc`.
+bool EnsureTopologyCheckStudies(AppState& state, Document& doc, uint64_t topoId,
+                                double threshold, uint64_t* shapeId,
+                                uint64_t* solidId, std::string* error);
+
 // mesh_study off the frame: plan on this thread, mesh on a worker, and keep
 // what it found as a MeshReport for study_status (`meshing: true` while it
 // runs, then `mesh: {...}`). One mesh run at a time, per study.

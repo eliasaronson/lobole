@@ -610,6 +610,9 @@ struct SimulationState {
   std::string pendingMagnitudeExpr;
   glm::dvec3 pendingDirection{0.0, -1.0, 0.0};
   bool directionOverridden = false;
+  // The load case the next force or pressure goes in, on a study with cases
+  // (docs/topopt/README.md#load-cases); empty or gone = the first.
+  std::string pendingCase;
 
   // Result overlay display. VonMises/Displacement are static/modal fields;
   // Shape (the optimized iso-surface as a grey body) and Density (a colormap

@@ -4,15 +4,20 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/Units.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteProject.h" // RequireFreshTabName
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById, SnapshotAssembly, OccurrenceMatrix
 #include "ui/BackgroundJobs.h"
+#include "ui/DocumentSlots.h" // AddPart, SetActivePart
+#include "ui/ImportActions.h"
 #include "ui/SimulationActions.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -533,6 +538,19 @@ static constexpr MethodDoc SimulationMethods[] = {
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
      "path, smooth, study, threshold"},
+    {"topo_to_body",
+     "A topology result as a body to model against {study, path, name?, "
+     "threshold?, smooth?}: the smoothed iso-surface (export_topo_stl's) is "
+     "written to `path` and imported, in the part's own coordinates, as a "
+     "new part `name` (default '<study> shape') with the design body's "
+     "material -- a sewn solid of the surface's triangles that booleans, "
+     "measures, sections and derived copies take. The import re-reads "
+     "`path` when it regenerates, so keep the file with the project. "
+     "Returns the part, its volume_mm3, the triangle count and whether the "
+     "surface was watertight (docs/topopt/README.md#a-body-from-the-result).",
+     "name, path, smooth, study, threshold", remote::NotInBatch,
+     "{part, part_id, path, triangles, watertight, threshold, volume_mm3, "
+     "valid}"},
 };
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 
@@ -567,40 +585,22 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
 
   // The two studies, found by what they are (a static study of this result,
   // whole or not) so a second check refreshes them rather than adding more.
-  const auto ensure = [&](bool whole) -> uint64_t {
-    uint64_t sid = 0;
-    for (const fem::Study& s : host.Studies())
-      if (s.type == fem::AnalysisType::Static && s.shapeFrom.study == id &&
-          s.shapeFrom.whole == whole)
-        sid = s.id;
-    if (sid == 0)
-      sid = host.Add(topo.name + (whole ? ": solid" : ": shape"),
-                     fem::AnalysisType::Static)
-                .id;
-    std::vector<fem::Load> loads = topo.loads;
-    for (fem::Load& l : loads)
-      l.id = host.AllocateId();
-    host.Modify(sid, "Check topology", [&](fem::Study& s) {
-      s.loads = loads;
-      s.loadCases = topo.loadCases;
-      s.refinements.clear();
-      s.gravity = glm::dvec3(0.0);
-      s.shapeFrom = fem::ShapeSource{id, whole ? 0.0 : threshold, whole};
-    });
-    std::string err;
+  uint64_t shapeId = 0, solidId = 0;
+  std::string err;
+  if (!ui::EnsureTopologyCheckStudies(state, *doc, id, threshold, &shapeId,
+                                      &solidId, &err))
+    throw std::runtime_error("check_topology: " + err);
+  for (const uint64_t sid : {shapeId, solidId}) {
     ui::JobStart start;
-    if (!ui::ReuseStudyResult(state, doc, nullptr, sid, &start)) {
-      if (!ui::RunStudyAndCache(*doc, sid, &err))
-        throw std::runtime_error(
-            "check_topology: " +
-            std::string(whole ? "the solid" : "the shape") + ": " + err);
-      if (const fem::StudyRuntime* done = host.Results(sid))
-        ui::RememberStudyResult(state, *done);
-    }
-    return sid;
-  };
-  const uint64_t shapeId = ensure(false);
-  const uint64_t solidId = ensure(true);
+    if (ui::ReuseStudyResult(state, doc, nullptr, sid, &start))
+      continue;
+    if (!ui::RunStudyAndCache(*doc, sid, &err))
+      throw std::runtime_error(
+          "check_topology: " +
+          std::string(sid == shapeId ? "the shape" : "the solid") + ": " + err);
+    if (const fem::StudyRuntime* done = host.Results(sid))
+      ui::RememberStudyResult(state, *done);
+  }
   const fem::StudyRuntime* shape = host.Results(shapeId);
   const fem::StudyRuntime* solid = host.Results(solidId);
   const fem::Study* shapeStudy = host.Find(shapeId);
@@ -644,6 +644,7 @@ json CheckTopology(ui::AppState& state, Host& host, Document* doc,
   }
   return json{{"topology", id},
               {"threshold", shape->shapeThreshold},
+              {"threshold_lowered_from", shape->shapeThresholdLoweredFrom},
               {"shape_study", shapeId},
               {"solid_study", solidId},
               {"dropped_tets", shape->shapeIslandTets},
@@ -1595,11 +1596,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["cases"] = std::move(cases);
     }
     if (s->shapeFrom.study != 0)
-      result["shape"] = {{"from", s->shapeFrom.study},
-                         {"whole", s->shapeFrom.whole},
-                         {"threshold", rt->shapeThreshold},
-                         {"volume_mm3", rt->shapeVolume},
-                         {"dropped_tets", rt->shapeIslandTets}};
+      result["shape"] = {
+          {"from", s->shapeFrom.study},
+          {"whole", s->shapeFrom.whole},
+          {"threshold", rt->shapeThreshold},
+          {"volume_mm3", rt->shapeVolume},
+          {"dropped_tets", rt->shapeIslandTets},
+          {"threshold_lowered_from", rt->shapeThresholdLoweredFrom}};
     {
       // An FEM factor of safety is a PREDICTION (core/Receipt.h). It is a
       // linear-elastic solver's estimate on a tetrahedral approximation of
@@ -1778,6 +1781,70 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                 {"triangles", stats.triangles},
                 {"boundary_edges", stats.boundaryEdges},
                 {"watertight", stats.watertight}};
+  }
+  if (m == "topo_to_body") {
+    ui::ReapBackgroundJobs(state);
+    topoOnly();
+    const uint64_t id = p.at("study").get<uint64_t>();
+    const fem::Study& s = host.Require(id);
+    if (s.type != fem::AnalysisType::Topology)
+      throw std::runtime_error("topo_to_body: not a topology study");
+    const fem::StudyRuntime* rt = host.Results(id);
+    if (!rt || rt->bodies.empty())
+      throw std::runtime_error("topo_to_body: the study has no result");
+    const fem::StudyBodyResult& b = rt->bodies.front();
+    const double thr =
+        p.contains("threshold") && p.at("threshold").get<double>() > 0
+            ? p.at("threshold").get<double>()
+            : fem::AutoIsoThreshold(b.mesh, b.density,
+                                    rt->volumeFractionAchieved);
+    const std::string path = p.at("path").get<std::string>();
+    const std::string name = p.value("name", s.name + " shape");
+    RequireFreshTabName(state, name);
+    std::string material;
+    if (b.bodyIndex >= 0 &&
+        b.bodyIndex < static_cast<int>(doc->GetBodies().size()))
+      material = doc->GetBodies()[b.bodyIndex].material;
+    std::string err;
+    fem::TopoStlStats stats;
+    if (!fem::ExportTopoStl(b.mesh, b.density, thr, p.value("smooth", 3), path,
+                            &err, &stats))
+      throw std::runtime_error("topo_to_body: " + err);
+    const uint64_t wasActive = state.parts[state.activePart].id;
+    const size_t slot = ui::AddPart(state, name);
+    const uint64_t partId = state.parts[slot].id;
+    if (!ui::ImportAsFeature(state, path, nullptr, &err,
+                             units::Length::Millimetre, /*keepOrigin=*/true))
+      throw std::runtime_error("topo_to_body: " + err);
+    Document* made = state.document.get();
+    if (!material.empty() && made->FeatureCount() > 0) {
+      Feature* imp = made->GetFeature(made->FeatureCount() - 1);
+      const json before = DocumentIO::FeatureToJson(*imp);
+      json after = before;
+      after["material"] = material;
+      state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                  made->FeatureCount() - 1, before, after),
+                              *made);
+    }
+    double volume = 0.0;
+    bool valid = !made->GetBodies().empty();
+    for (const Body& body : made->GetBodies()) {
+      volume += body.shape.Volume();
+      valid = valid && Measure::CheckGeometry(body.shape).valid;
+    }
+    for (size_t i = 0; i < state.parts.size(); ++i)
+      if (state.parts[i].id == wasActive) {
+        ui::SetActivePart(state, i);
+        break;
+      }
+    return json{{"part", name},
+                {"part_id", partId},
+                {"path", path},
+                {"triangles", stats.triangles},
+                {"watertight", stats.watertight},
+                {"threshold", thr},
+                {"volume_mm3", volume},
+                {"valid", valid}};
   }
   if (m == "enter_simulation") {
     // Enter the FEM simulation workspace (the GUI mode), optionally selecting a

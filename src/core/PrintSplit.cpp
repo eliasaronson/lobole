@@ -133,23 +133,86 @@ std::optional<Plan> PlanCuts(const TopoDS_Shape& shapeIn, const glm::dvec3& bed,
           return fail("the cut cell " + Mm(c1 - c0) +
                       " did not intersect "
                       "cleanly with the body");
-        const TopoDS_Shape part = common.Shape();
-        Piece pc;
-        for (TopExp_Explorer ex(part, TopAbs_SOLID); ex.More(); ex.Next())
-          ++pc.solids;
-        if (pc.solids == 0)
+        // A cell can hold several solids (a U cut above its base is two
+        // posts). Each is its own piece when a box can take it alone: the
+        // solids whose padded boxes overlap go together, and a group whose
+        // box would reach into another's goes with it.
+        struct Solid {
+          glm::dvec3 lo, hi;
+          double volume;
+        };
+        std::vector<Solid> solids;
+        for (TopExp_Explorer ex(common.Shape(), TopAbs_SOLID); ex.More();
+             ex.Next()) {
+          GProp_GProps props;
+          BRepGProp::VolumeProperties(ex.Current(), props);
+          Solid sd{{}, {}, props.Mass()};
+          if (sd.volume < 1e-6 || !Bounds(ex.Current(), sd.lo, sd.hi))
+            continue;
+          solids.push_back(sd);
+        }
+        if (solids.empty())
           continue;
-        GProp_GProps props;
-        BRepGProp::VolumeProperties(part, props);
-        pc.volume = props.Mass();
-        if (pc.volume < 1e-6)
-          continue;
-        if (!Bounds(part, pc.min, pc.max))
-          continue;
-        pc.cellMin = c0;
-        pc.cellMax = c1;
-        pc.fits = FitsBed(pc.Size(), bed, &pc.orientation);
-        plan.pieces.push_back(pc);
+        constexpr double kPad = 0.5; // mm round each solid's box
+        const auto overlap = [](const glm::dvec3& a0, const glm::dvec3& a1,
+                                const glm::dvec3& b0, const glm::dvec3& b1) {
+          return a0.x < b1.x && b0.x < a1.x && a0.y < b1.y && b0.y < a1.y &&
+                 a0.z < b1.z && b0.z < a1.z;
+        };
+        std::vector<int> group(solids.size());
+        for (size_t s = 0; s < solids.size(); ++s)
+          group[s] = static_cast<int>(s);
+        const auto boxOf = [&](int g, glm::dvec3& b0, glm::dvec3& b1) {
+          bool first = true;
+          for (size_t s = 0; s < solids.size(); ++s)
+            if (group[s] == g) {
+              b0 = first ? solids[s].lo : glm::min(b0, solids[s].lo);
+              b1 = first ? solids[s].hi : glm::max(b1, solids[s].hi);
+              first = false;
+            }
+          b0 = glm::max(b0 - kPad, c0);
+          b1 = glm::min(b1 + kPad, c1);
+        };
+        for (bool merged = true; merged;) {
+          merged = false;
+          for (size_t a = 0; a < solids.size() && !merged; ++a)
+            for (size_t b = 0; b < solids.size() && !merged; ++b) {
+              if (group[a] == group[b])
+                continue;
+              glm::dvec3 a0, a1;
+              boxOf(group[a], a0, a1);
+              if (!overlap(a0, a1, solids[b].lo, solids[b].hi))
+                continue;
+              const int from = group[b], to = group[a];
+              for (int& g : group)
+                if (g == from)
+                  g = to;
+              merged = true;
+            }
+        }
+        std::vector<int> groups(group);
+        std::sort(groups.begin(), groups.end());
+        groups.erase(std::unique(groups.begin(), groups.end()), groups.end());
+        for (int g : groups) {
+          Piece pc;
+          bool first = true;
+          for (size_t s = 0; s < solids.size(); ++s)
+            if (group[s] == g) {
+              ++pc.solids;
+              pc.volume += solids[s].volume;
+              pc.min = first ? solids[s].lo : glm::min(pc.min, solids[s].lo);
+              pc.max = first ? solids[s].hi : glm::max(pc.max, solids[s].hi);
+              first = false;
+            }
+          if (groups.size() == 1) {
+            pc.cellMin = c0;
+            pc.cellMax = c1;
+          } else {
+            boxOf(g, pc.cellMin, pc.cellMax);
+          }
+          pc.fits = FitsBed(pc.Size(), bed, &pc.orientation);
+          plan.pieces.push_back(pc);
+        }
       }
   if (plan.pieces.empty())
     return fail("the cuts leave no piece of the body");

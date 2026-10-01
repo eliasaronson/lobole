@@ -336,6 +336,64 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   return true;
 }
 
+bool EnsureTopologyCheckStudies(AppState& state, Document& doc, uint64_t topoId,
+                                double threshold, uint64_t* shapeId,
+                                uint64_t* solidId, std::string* error) {
+  const fem::Study* found = doc.FindStudy(topoId);
+  if (found == nullptr || found->type != fem::AnalysisType::Topology) {
+    if (error)
+      *error = "study " + std::to_string(topoId) +
+               " is not a topology study of this part";
+    return false;
+  }
+  const fem::Study topo = *found; // a copy: studies are added below
+  const auto ensure = [&](bool whole) {
+    uint64_t sid = 0;
+    for (const fem::Study& s : doc.GetStudies())
+      if (s.type == fem::AnalysisType::Static && s.shapeFrom.study == topoId &&
+          s.shapeFrom.whole == whole)
+        sid = s.id;
+    if (sid == 0) {
+      auto cmd = std::make_unique<AddStudyCommand>(
+          topo.name + (whole ? ": solid" : ": shape"),
+          fem::AnalysisType::Static);
+      AddStudyCommand* raw = cmd.get();
+      state.commands->Execute(std::move(cmd), doc);
+      sid = raw->StudyId();
+    }
+    const fem::Study& have = *doc.FindStudy(sid);
+    fem::Study next = have;
+    next.loads = topo.loads;
+    next.loadCases = topo.loadCases;
+    next.refinements.clear();
+    next.gravity = glm::dvec3(0.0);
+    next.shapeFrom = fem::ShapeSource{topoId, whole ? 0.0 : threshold, whole};
+    // Unchanged but for the load ids: left alone, so its input hash -- and
+    // a stored answer -- still hold.
+    const auto withoutIds = [](fem::Study st) {
+      for (fem::Load& l : st.loads)
+        l.id = 0;
+      return DocumentIO::StudyToJson(st);
+    };
+    if (withoutIds(next) == withoutIds(have))
+      return sid;
+    for (fem::Load& l : next.loads)
+      l.id = doc.AllocateId();
+    state.commands->Execute(std::make_unique<ModifyStudyCommand>(
+                                "Check topology", DocumentIO::StudyToJson(have),
+                                DocumentIO::StudyToJson(next)),
+                            doc);
+    return sid;
+  };
+  const uint64_t a = ensure(false);
+  const uint64_t b = ensure(true);
+  if (shapeId)
+    *shapeId = a;
+  if (solidId)
+    *solidId = b;
+  return true;
+}
+
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
                    std::string* error, JobStart* jobStart) {
   const auto fail = [&](const std::string& m) {

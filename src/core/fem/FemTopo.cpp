@@ -479,6 +479,43 @@ std::vector<int> TetComponents(const FemMesh& mesh,
   return comp;
 }
 
+std::vector<int> TetFaceComponents(const FemMesh& mesh,
+                                   const std::vector<char>& solid, int* count) {
+  const int n = static_cast<int>(mesh.tets.size());
+  std::vector<int> comp(n, -1);
+  int components = 0;
+  if (static_cast<int>(solid.size()) != n) {
+    if (count)
+      *count = 0;
+    return comp;
+  }
+  const auto owners = FaceOwners(mesh);
+  std::vector<int> stack;
+  for (int seed = 0; seed < n; ++seed) {
+    if (!solid[seed] || comp[seed] >= 0)
+      continue;
+    comp[seed] = components;
+    stack.push_back(seed);
+    while (!stack.empty()) {
+      const int e = stack.back();
+      stack.pop_back();
+      const auto& t = mesh.tets[e];
+      for (const TetFace& f : kTetFaces) {
+        const auto& o = owners.at(FaceKey(t[f.c[0]], t[f.c[1]], t[f.c[2]]));
+        const int other = o[0] == e ? o[1] : o[0];
+        if (other >= 0 && solid[other] && comp[other] < 0) {
+          comp[other] = components;
+          stack.push_back(other);
+        }
+      }
+    }
+    ++components;
+  }
+  if (count)
+    *count = components;
+  return comp;
+}
+
 double TetSetVolume(const FemMesh& mesh, const std::vector<char>& keep) {
   double v = 0.0;
   for (size_t e = 0; e < mesh.tets.size() && e < keep.size(); ++e)

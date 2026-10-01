@@ -199,6 +199,97 @@ void DrawMaterialCheck(AppState& state) {
   }
 }
 
+// Load cases (docs/topopt/README.md#load-cases): the list with each case's
+// weight, Add, and the case the next force or pressure goes in. A part's
+// static or topology study only.
+void DrawLoadCases(AppState& state, const fem::Study& s) {
+  SimulationState& sim = state.simulation;
+  const StudyHost host = StudyHostOf(state);
+  if (host.IsAssembly() || s.type == fem::AnalysisType::Modal)
+    return;
+  ImGui::SeparatorText("Load cases");
+  if (s.loadCases.empty())
+    ImGui::TextColored(kMuted, "One case: every load acts together.");
+  std::string removeCase;
+  for (size_t i = 0; i < s.loadCases.size(); ++i) {
+    const fem::LoadCase& c = s.loadCases[i];
+    const bool used =
+        std::any_of(s.loads.begin(), s.loads.end(),
+                    [&](const fem::Load& l) { return l.loadCase == c.name; });
+    ImGui::PushID(static_cast<int>(i));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(c.name.c_str());
+    if (s.type == fem::AnalysisType::Topology) {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+      double w = c.weight;
+      if (ImGui::InputDouble("###case_weight", &w, 0.0, 0.0, "%.3g"))
+        sim.placeRefusal.clear();
+      if (ImGui::IsItemDeactivatedAfterEdit() && w > 0.0 && w != c.weight) {
+        const std::string name = c.name;
+        ModifyStudy(state, s.id, "Set load case weight", [&](fem::Study& cs) {
+          for (fem::LoadCase& lc : cs.loadCases)
+            if (lc.name == name) {
+              lc.weight = w;
+              lc.weightExpr.clear();
+            }
+        });
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Weight in the objective: the run minimises the "
+                          "weighted sum of the cases' compliances.");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(used);
+    if (ImGui::SmallButton(ICON_FA_TRASH_CAN "###case_del"))
+      removeCase = c.name;
+    ImGui::EndDisabled();
+    if (used && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Loads are in this case; remove them first.");
+    ImGui::PopID();
+  }
+  if (!removeCase.empty())
+    ModifyStudy(state, s.id, "Remove load case", [&](fem::Study& cs) {
+      cs.loadCases.erase(std::remove_if(cs.loadCases.begin(),
+                                        cs.loadCases.end(),
+                                        [&](const fem::LoadCase& c) {
+                                          return c.name == removeCase;
+                                        }),
+                         cs.loadCases.end());
+    });
+  if (ImGui::Button(ICON_FA_PLUS " Add case###case_add")) {
+    // The first case takes every force and pressure there is, so the study
+    // stays one it can run.
+    std::string name;
+    for (int n = static_cast<int>(s.loadCases.size()) + 1;; ++n) {
+      name = "Case " + std::to_string(n);
+      if (s.FindLoadCase(name) < 0)
+        break;
+    }
+    ModifyStudy(state, s.id, "Add load case", [&](fem::Study& cs) {
+      const bool first = cs.loadCases.empty();
+      cs.loadCases.push_back({name, 1.0, ""});
+      if (first)
+        for (fem::Load& l : cs.loads)
+          if (l.type != fem::LoadType::Fixed)
+            l.loadCase = name;
+    });
+    sim.pendingCase = name;
+  }
+  if (!s.loadCases.empty() && (sim.tool == SimulationState::Tool::Force ||
+                               sim.tool == SimulationState::Tool::Pressure)) {
+    int k = std::max(0, s.FindLoadCase(sim.pendingCase));
+    LeftLabel("In case");
+    if (ImGui::BeginCombo("###sim_pending_case", s.loadCases[k].name.c_str())) {
+      for (size_t i = 0; i < s.loadCases.size(); ++i)
+        if (ImGui::Selectable(s.loadCases[i].name.c_str(),
+                              static_cast<int>(i) == k))
+          sim.pendingCase = s.loadCases[i].name;
+      ImGui::EndCombo();
+    }
+  }
+}
+
 void DrawLoads(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
 
@@ -247,6 +338,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     }
   }
 
+  DrawLoadCases(state, s);
+
   if (s.loads.empty()) {
     ImGui::TextColored(kMuted, "No loads yet.");
     return;
@@ -277,6 +370,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
                     l.type == fem::LoadType::Force ? " N" : " MPa");
       row.tail = buf;
+      if (!l.loadCase.empty())
+        row.tail += "  " + l.loadCase;
     }
     if (l.type == fem::LoadType::Force) {
       // A force's direction decides the answer; showing only its magnitude
@@ -428,6 +523,45 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
                      nullptr, FLT_MAX, FLT_MAX, ImVec2(-FLT_MIN, 40));
   }
 
+  for (size_t k = 0; k < rt->caseNames.size(); ++k)
+    ImGui::TextColored(kMuted, "  %s: %.4g (x %.3g)", rt->caseNames[k].c_str(),
+                       k < rt->caseCompliance.size() ? rt->caseCompliance[k]
+                                                     : 0.0,
+                       k < rt->caseWeights.size() ? rt->caseWeights[k] : 1.0);
+  for (const fem::KeepOutReport& k : rt->keepOuts)
+    ImGui::TextColored(kMuted, ICON_FA_BAN " %s: %d tets out", k.what.c_str(),
+                       k.tets);
+  if (rt->islands.tets > 0)
+    ImGui::TextColored(
+        kStale, "Removed %d loose piece%s (%d tets, %.0f mm3)%s",
+        rt->islands.components, rt->islands.components == 1 ? "" : "s",
+        rt->islands.tets, rt->islands.volume,
+        rt->islands.keepFaces.empty() ? "" : ", holding keep faces");
+  if (rt->islands.loadPathBroken)
+    ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION
+                       " A load reaches no support: the shape is broken");
+  // A static study of the shape and of the solid domain, before anything is
+  // modelled from it: both are made (or refreshed) and the shape is run.
+  if (!doc->StudyResultsStale(s.id) &&
+      ImGui::Button(ICON_FA_SCALE_BALANCED " Check shape###topo_check")) {
+    uint64_t shapeId = 0, solidId = 0;
+    std::string err;
+    if (!EnsureTopologyCheckStudies(state, *doc, s.id, 0.0, &shapeId, &solidId,
+                                    &err)) {
+      LOG_WARN("check shape: {}", err);
+    } else {
+      JobStart start;
+      if (!StartStudyRun(state, *doc, shapeId, &err, &start))
+        LOG_WARN("check shape: {}", err);
+      sim.activeStudyId = shapeId;
+      sim.field = SimulationState::Field::None;
+    }
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("A static study of the optimised shape and one of the "
+                      "solid design domain, with these loads and cases. The "
+                      "shape's runs now; run the solid's to compare.");
+
   // Display: the grey iso-surface (Shape), the density colormap (Density), or
   // the normal model (Off), plus the iso-surface threshold.
   ImGui::SeparatorText("Display");
@@ -563,8 +697,30 @@ void DrawResults(AppState& state, const fem::Study& s) {
     return;
   }
 
-  ImGui::Text("Max von Mises: %.3g MPa", rt->maxVonMises);
-  ImGui::Text("Max displacement: %.4g mm", rt->maxDisplacement);
+  if (s.shapeFrom.study != 0)
+    ImGui::TextColored(kMuted, "Shape of study %llu at %.2f: %.0f mm3",
+                       static_cast<unsigned long long>(s.shapeFrom.study),
+                       rt->shapeThreshold, rt->shapeVolume);
+  if (rt->caseNames.empty()) {
+    ImGui::Text("Max von Mises: %.3g MPa", rt->maxVonMises);
+    ImGui::Text("Max displacement: %.4g mm", rt->maxDisplacement);
+  } else {
+    // Each case's maxima; the selected one is what the viewport shows.
+    sim.activeCase = std::clamp(sim.activeCase, 0,
+                                static_cast<int>(rt->caseNames.size()) - 1);
+    for (size_t k = 0; k < rt->caseNames.size(); ++k) {
+      double vm = 0.0, disp = 0.0;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        vm = std::max(vm, b.Case(static_cast<int>(k)).maxVonMises);
+        disp = std::max(disp, b.Case(static_cast<int>(k)).maxDisplacement);
+      }
+      char lbl[160];
+      std::snprintf(lbl, sizeof(lbl), "%s:  %.4g mm, %.3g MPa###case_sel_%zu",
+                    rt->caseNames[k].c_str(), disp, vm, k);
+      if (ImGui::Selectable(lbl, sim.activeCase == static_cast<int>(k)))
+        sim.activeCase = static_cast<int>(k);
+    }
+  }
 
   // Field overlay controls (display only; no command). Each RadioButton must
   // draw every frame, so evaluate them independently (no short-circuit).
@@ -741,6 +897,58 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
 }
 
 // Everything below the study list, for either host.
+// Keep-outs (docs/topopt/README.md#keep-outs): the list, and another body of
+// the part to keep out of (a neighbour arrives as a Derived reference body).
+// A box is set over RPC (add_keep_out {box_min, box_max}).
+void DrawKeepOuts(AppState& state, const fem::Study& s) {
+  const Document* doc = state.document.get();
+  if (doc == nullptr)
+    return;
+  int removeAt = -1;
+  for (size_t i = 0; i < s.keepOuts.size(); ++i) {
+    const fem::KeepOut& k = s.keepOuts[i];
+    char box[160];
+    std::snprintf(box, sizeof(box), "box [%.4g, %.4g, %.4g]-[%.4g, %.4g, %.4g]",
+                  k.boxMin.x, k.boxMin.y, k.boxMin.z, k.boxMax.x, k.boxMax.y,
+                  k.boxMax.z);
+    ListRowSpec row;
+    row.glyph = ICON_FA_BAN;
+    row.label = (k.body.empty() ? std::string(box) : "body " + k.body) +
+                "###keepout_row_" + std::to_string(i);
+    row.menuId = "###keepout_ctx_" + std::to_string(i);
+    const int at = static_cast<int>(i);
+    row.menu = [&removeAt, at] {
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###keepout_del"))
+        removeAt = at;
+    };
+    ListRow(row);
+  }
+  if (removeAt >= 0)
+    ModifyStudy(state, s.id, "Remove keep-out", [&](fem::Study& cs) {
+      if (removeAt < static_cast<int>(cs.keepOuts.size()))
+        cs.keepOuts.erase(cs.keepOuts.begin() + removeAt);
+    });
+  if (ImGui::BeginCombo("###topo_keepout_body", ICON_FA_BAN " Keep out of...",
+                        ImGuiComboFlags_NoArrowButton)) {
+    for (const Body& b : doc->GetBodies()) {
+      const bool have =
+          std::any_of(s.keepOuts.begin(), s.keepOuts.end(),
+                      [&](const fem::KeepOut& k) { return k.body == b.name; });
+      if (ImGui::Selectable(b.name.c_str(), false,
+                            have ? ImGuiSelectableFlags_Disabled : 0)) {
+        const std::string name = b.name;
+        ModifyStudy(state, s.id, "Add keep-out", [&](fem::Study& cs) {
+          cs.keepOuts.push_back({name, {}, {}});
+        });
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("A body the result must leave empty: its tets are "
+                      "removed before the run.");
+}
+
 void DrawStudyBody(AppState& state, const fem::Study* s) {
   ImGui::Spacing();
   char name[128];
@@ -863,6 +1071,7 @@ void DrawStudyBody(AppState& state, const fem::Study* s) {
                            }),
             cs.keepFaces.end());
       });
+    DrawKeepOuts(state, *s);
   } else {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
@@ -1673,6 +1882,12 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   if (load.type != fem::LoadType::Fixed) {
     load.magnitude = sim.pendingMagnitude;
     load.magnitudeExpr = sim.pendingMagnitudeExpr;
+    // On a study with load cases it goes in the one chosen (the first when
+    // none is, or the chosen one is gone).
+    if (!s->loadCases.empty())
+      load.loadCase = s->FindLoadCase(sim.pendingCase) >= 0
+                          ? sim.pendingCase
+                          : s->loadCases.front().name;
   }
   if (load.type == fem::LoadType::Force && faceDoc) {
     // The face decides the direction unless the user asked for a specific

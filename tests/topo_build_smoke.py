@@ -154,6 +154,16 @@ def main():
         expect(len(d.call("list_studies")["studies"]) == 3,
                "no third study from a second check")
 
+        # --- the result as a body ----------------------------------------
+        stl = os.path.join(tmp, "bar_shape.stl")
+        body = d.call("topo_to_body", study=s, path=stl)
+        expect(body["valid"] and body["volume_mm3"] > 0,
+               f"the shape imports as a valid solid: {body}")
+        expect(body["volume_mm3"] < 120 * 30 * 30, f"lighter: {body}")
+        names = [p["name"] for p in d.call("list_parts")["parts"]]
+        expect("Bar shape" in names, f"its own part: {names}")
+        refused(d, "topo_to_body", "Bar shape", study=s, path=stl)
+
         # --- split for printing ------------------------------------------
         d.call("set_result_display", field="none")
         plan = d.call("split_for_printing", bed_mm=[50, 50, 50],

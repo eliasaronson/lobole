@@ -210,6 +210,13 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
 std::vector<int> TetComponents(const FemMesh& mesh,
                                const std::vector<char>& solid, int* count);
 
+// The same, with two tets connected only when they share a triangular face:
+// what carries load as a solid. Tets that meet at an edge or a corner are a
+// hinge to a static solve, so a static study of a shape keeps only what is
+// face-connected to its supports.
+std::vector<int> TetFaceComponents(const FemMesh& mesh,
+                                   const std::vector<char>& solid, int* count);
+
 // The connectivity filter (docs/topopt/README.md#connectivity): at
 // `threshold`, every component that holds no tet of `anchor` (supports and
 // loads) has its density set to 0. `loaded` marks the tets carrying a load,

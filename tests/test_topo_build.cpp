@@ -427,7 +427,7 @@ TEST_CASE("A split's pieces fit the bed or the split is refused",
     CHECK(o[1] == 0); // its x along the bed's y
     CHECK_FALSE(printsplit::FitsBed({100, 30, 10}, {20, 120, 20}));
   }
-  SECTION("a cell can hold two solids") {
+  SECTION("a cell's separate solids are pieces of their own") {
     // A U: two posts on a base, cut above the base.
     TopoDS_Shape u =
         BRepAlgoAPI_Fuse(
@@ -440,8 +440,15 @@ TEST_CASE("A split's pieces fit the bed or the split is refused",
             .Shape();
     auto plan = printsplit::PlanCuts(u, {100, 100, 100}, {{2, 10.0}}, &err);
     REQUIRE(plan);
-    REQUIRE(plan->pieces.size() == 2);
-    CHECK(plan->pieces[1].solids == 2);
+    // The base, and each post on its own: a box takes each alone.
+    REQUIRE(plan->pieces.size() == 3);
+    double v = 0.0;
+    for (const auto& p : plan->pieces) {
+      CHECK(p.solids == 1);
+      v += p.volume;
+    }
+    CHECK_THAT(v, WithinRel(60.0 * 100 + 2 * 50.0 * 100, 1e-9));
+    CHECK_THAT(plan->pieces[1].Size().z, WithinAbs(50.0, 1e-6));
   }
 }
 

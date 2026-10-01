@@ -335,6 +335,59 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(rt->maxVonMises < 31.5);
   };
 
+  // Load cases (docs/topopt/README.md#load-cases), clicked: the first case
+  // takes the force there is, a force placed while a second is chosen goes
+  // in it, and the run answers each case, the viewport showing the one
+  // picked.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "load_cases_take_the_force_placed_in_them");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###case_add");
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/###case_add");
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(studyId);
+    IM_CHECK_EQ(st->loadCases.size(), (size_t)2);
+    IM_CHECK(st->loads[1].loadCase == st->loadCases[0].name);
+
+    // Arm the force tool; the case it goes in is chosen in the panel.
+    ctx->ItemClick("//###ToolWindow/###sim_bc_force");
+    ctx->Yield();
+    ctx->ItemClick("//###ToolWindow/###sim_pending_case");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Case 2").c_str());
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.pendingCase == "Case 2");
+    // Sideways on the far end face (the pick itself is the placement tests'
+    // business): the same path a click takes.
+    const uint64_t cb = Doc()->GetBodies()[0].createdBy;
+    ui::SimulationApplyToFace(*s_App,
+                              ElementRef{cb, std::to_string(cb) + "/face1"});
+    ctx->Yield(2);
+    st = Doc()->FindStudy(studyId);
+    IM_CHECK_EQ(st->loads.size(), (size_t)3);
+    IM_CHECK(st->loads[2].loadCase == "Case 2");
+
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    IM_CHECK_EQ(rt->caseNames.size(), (size_t)2);
+    IM_CHECK_EQ(rt->bodies[0].cases.size(), (size_t)2);
+    // Case 1 bends the beam down, case 2 pushes its end: different answers.
+    IM_CHECK(std::abs(rt->bodies[0].Case(0).maxDisplacement -
+                      rt->bodies[0].Case(1).maxDisplacement) > 1e-6);
+    ctx->ItemClick("//###ToolWindow/###case_sel_1");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->simulation.activeCase, 1);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
   t = IM_REGISTER_TEST(engine, "sim", "topology_holds_its_volume_target");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 60.0);

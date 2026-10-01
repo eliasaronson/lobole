@@ -1107,6 +1107,48 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   CheckSameRun(*cpuRes, *gpuRes);
 }
 
+// Several load cases (docs/topopt/README.md#load-cases): the GPU solver is
+// handed each case in turn on the same scales, so it must answer every case
+// as the CPU does -- the design and each case's own compliance.
+TEST_CASE("femgpu: load cases land on the CPU design via the GPU solver",
+          "[femgpu][cg][slow]") {
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
+  INFO("device: " << solver->DeviceName());
+
+  fem::FemMesh mesh = GenerateBoxMesh(10, 4, 4, 100, 40, 40);
+  fem::Material steel{210000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  std::vector<fem::TopoCase> cases(2);
+  for (int k = 0; k < 2; ++k) {
+    fem::FaceLoad load;
+    load.type = fem::LoadType::Force;
+    load.tris = TrisAtPlane(mesh, 0, 100.0, 1e-6);
+    load.magnitude = k == 0 ? 1000.0 : 600.0;
+    load.direction = k == 0 ? glm::dvec3(0, 0, -1) : glm::dvec3(0, 1, 0);
+    cases[k] = {k == 0 ? "down" : "side", k == 0 ? 1.0 : 2.0, {load}};
+  }
+  fem::TopoParams params;
+  params.filterRadius = 25.0;
+  params.maxIterations = 20;
+
+  std::string err;
+  auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, cases, params, &err,
+                                      {}, {}, nullptr);
+  REQUIRE(cpuRes.has_value());
+  auto gpuRes = fem::TopologyOptimize(mesh, steel, fixed, cases, params, &err,
+                                      {}, {}, solver.get());
+  INFO(err);
+  REQUIRE(gpuRes.has_value());
+  CheckSameRun(*cpuRes, *gpuRes);
+  REQUIRE(gpuRes->caseCompliance.size() == 2);
+  for (int k = 0; k < 2; ++k)
+    CHECK_THAT(gpuRes->caseCompliance[k],
+               WithinRel(cpuRes->caseCompliance[k], 1e-4));
+}
+
 // A dogfooding round (2026-08-23) ran the FIRST thing anyone would try —
 // a steel cantilever, fixed at one end, 100 N on the other — and the GPU
 // solver returned a ZERO displacement field: compliance 0, every sensitivity

@@ -11,6 +11,8 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -422,46 +424,135 @@ bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
   if (!src.whole && (src.threshold < 0.0 || src.threshold >= 1.0))
     return fail("shape threshold " + std::to_string(src.threshold) +
                 " is not in [0, 1) (0 = the volume-matched level)");
+  // The field thresholded is the density averaged onto the corners and back
+  // onto each tet -- the field the iso-surface (the Shape view, the STL) is
+  // drawn from. Per tet, a member one or two tets wide at its threshold is a
+  // chain that meets itself at edges: a hinge to a static solve, which then
+  // reports the swing of a loose sliver as the part's deflection.
+  std::vector<double> nodeD(m.nodes.size(), 0.0);
+  std::vector<int> nodeN(m.nodes.size(), 0);
+  for (size_t e = 0; e < n; ++e)
+    for (int i = 0; i < 4; ++i) {
+      nodeD[m.tets[e][i]] += tb.density[e];
+      ++nodeN[m.tets[e][i]];
+    }
+  std::vector<double> smooth(n, 0.0);
+  for (size_t e = 0; e < n; ++e) {
+    for (int i = 0; i < 4; ++i) {
+      const int v = m.tets[e][i];
+      smooth[e] += 0.25 * nodeD[v] / std::max(1, nodeN[v]);
+    }
+    // A frozen tet (a support, a load, a keep face) stays, whatever its
+    // neighbours.
+    if (tb.density[e] >= 1.0 - 1e-9)
+      smooth[e] = 1.0;
+  }
   const double thr =
       src.whole ? 0.0
       : src.threshold > 0.0
           ? src.threshold
-          : AutoIsoThreshold(m, tb.density, rt->volumeFractionAchieved);
+          : AutoIsoThreshold(m, smooth, rt->volumeFractionAchieved);
 
-  // The supports' tets, which the solid must reach.
+  // The supports' tets, which the solid must reach, and the loaded faces,
+  // which must reach a support through it.
   std::set<int> fixedFaces;
+  std::map<int, uint64_t> loadedFaces; // face index -> a load on it
   for (const auto& [faceIndex, load] : bp.loads)
     if (load.type == LoadType::Fixed)
       fixedFaces.insert(faceIndex);
+    else
+      loadedFaces.emplace(faceIndex, load.id);
   std::vector<char> fixedNode(m.nodes.size(), 0);
   for (const FemMesh::BoundaryTri& t : m.boundary)
     if (fixedFaces.count(t.faceIndex))
       for (int v : t.nodes)
         fixedNode[v] = 1;
-  std::vector<char> solid(n, 0), anchored(n, 0);
-  for (size_t e = 0; e < n; ++e) {
-    solid[e] = src.whole || tb.density[e] >= thr;
+  std::vector<char> anchored(n, 0);
+  for (size_t e = 0; e < n; ++e)
     for (int v : m.tets[e])
       anchored[e] |= fixedNode[v];
-  }
-  int count = 0;
-  const std::vector<int> comp = TetComponents(m, solid, &count);
-  std::vector<char> reaches(count, 0);
+  // A loaded face's triangles, by the tet that owns each (the one that has
+  // all three of its corners).
+  std::vector<std::vector<int>> tetsOfNode(m.nodes.size());
   for (size_t e = 0; e < n; ++e)
-    if (comp[e] >= 0 && anchored[e])
-      reaches[comp[e]] = 1;
-  int dropped = 0;
-  for (size_t e = 0; e < n; ++e)
-    if (solid[e] && !reaches[comp[e]]) {
-      solid[e] = 0;
-      ++dropped;
+    for (int i = 0; i < 4; ++i)
+      tetsOfNode[m.tets[e][i]].push_back(static_cast<int>(e));
+  std::map<int, std::vector<int>> loadedTets; // face index -> owner tets
+  for (const FemMesh::BoundaryTri& t : m.boundary) {
+    if (!loadedFaces.count(t.faceIndex))
+      continue;
+    for (int e : tetsOfNode[t.nodes[0]]) {
+      int shared = 0;
+      for (int i = 0; i < 4; ++i)
+        shared += m.tets[e][i] == t.nodes[0] || m.tets[e][i] == t.nodes[1] ||
+                  m.tets[e][i] == t.nodes[2];
+      if (shared == 3)
+        loadedTets[t.faceIndex].push_back(e);
     }
+  }
+
+  // The solid at `level`: what is at or above it and face-connected to a
+  // support (a tet that meets the rest at an edge or a corner is a hinge,
+  // and a solve hands back its free swing as the answer). Returns the first
+  // loaded face it leaves out, or -1.
+  std::vector<char> solid(n, 0);
+  int dropped = 0;
+  const auto cut = [&](double level) {
+    for (size_t e = 0; e < n; ++e)
+      solid[e] = src.whole || smooth[e] >= level;
+    int count = 0;
+    const std::vector<int> comp = TetFaceComponents(m, solid, &count);
+    std::vector<char> reaches(count, 0);
+    for (size_t e = 0; e < n; ++e)
+      if (comp[e] >= 0 && anchored[e])
+        reaches[comp[e]] = 1;
+    dropped = 0;
+    for (size_t e = 0; e < n; ++e)
+      if (solid[e] && !reaches[comp[e]]) {
+        solid[e] = 0;
+        ++dropped;
+      }
+    for (const auto& [fi, tets] : loadedTets) {
+      bool any = false;
+      for (int e : tets)
+        any = any || solid[e];
+      if (!any)
+        return fi;
+    }
+    return -1;
+  };
+  double level = thr;
+  int lost = cut(level);
+  if (lost >= 0 && !src.whole && src.threshold > 0.0)
+    return fail("at threshold " + std::to_string(thr) + " the face of load " +
+                std::to_string(loadedFaces[lost]) +
+                " is not connected to a support through the shape (only "
+                "through tets meeting at edges or corners); a lower "
+                "threshold keeps more of it");
+  if (lost >= 0 && !src.whole) {
+    // The volume-matched shape does not carry every load to a support: the
+    // highest level that does, found by bisection, and said
+    // (StudyRuntime::shapeThresholdLowered).
+    double lo = 0.0, hi = thr;
+    if (cut(lo) >= 0)
+      return fail("the face of load " + std::to_string(loadedFaces[lost]) +
+                  " is not connected to a support through any of topology "
+                  "study '" +
+                  topo->name + "'s result");
+    for (int it = 0; it < 24; ++it) {
+      const double mid = 0.5 * (lo + hi);
+      (cut(mid) < 0 ? lo : hi) = mid;
+    }
+    level = lo;
+    cut(level);
+    out.shapeThresholdLoweredFrom = thr;
+  }
   auto mesh = std::make_shared<FemMesh>(ExtractSubMesh(m, solid));
   if (mesh->tets.empty())
     return fail("no tet of topology study '" + topo->name + "' at threshold " +
                 std::to_string(thr) + " is connected to a support");
   out.sourceDigest = rt->densityDigest;
-  out.shapeThreshold = thr;
+  out.shapeThreshold = level;
   out.shapeIslandTets = dropped;
   out.shapeVolume = TetSetVolume(m, solid);
   bp.premeshed = std::move(mesh);
@@ -597,6 +688,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
   out.shapeThreshold = plan.shapeThreshold;
   out.shapeIslandTets = plan.shapeIslandTets;
   out.shapeVolume = plan.shapeVolume;
+  out.shapeThresholdLoweredFrom = plan.shapeThresholdLoweredFrom;
   std::string err;
   auto fail = [&](const std::string& m) {
     if (error)
@@ -721,6 +813,7 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
   rt.shapeThreshold = in.shapeThreshold;
   rt.shapeIslandTets = in.shapeIslandTets;
   rt.shapeVolume = in.shapeVolume;
+  rt.shapeThresholdLoweredFrom = in.shapeThresholdLoweredFrom;
   std::string err;
   auto fail = [&](const std::string& m) {
     if (error)
@@ -936,11 +1029,19 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
   // not design space (docs/topopt/README.md#keep-outs).
   if (!keepOuts.empty()) {
     const FemMesh& full = *meshed;
-    std::map<int, std::string> nodeAnchor;
+    // The triangles of those faces, by their sorted corners: a keep-out may
+    // not take a tet one of them is a face of. (A tet that only touches such
+    // a face at an edge or a corner carries none of it, and goes.)
+    const auto triKey = [](int a, int b, int c) {
+      std::array<int, 3> k{a, b, c};
+      std::sort(k.begin(), k.end());
+      return k;
+    };
+    std::map<std::array<int, 3>, std::string> anchorTri;
     for (const FemMesh::BoundaryTri& t : full.boundary)
       if (auto it = anchorFace.find(t.faceIndex); it != anchorFace.end())
-        for (int v : t.nodes)
-          nodeAnchor.emplace(v, it->second);
+        anchorTri.emplace(triKey(t.nodes[0], t.nodes[1], t.nodes[2]),
+                          it->second);
     std::vector<char> keep(full.tets.size(), 1);
     for (size_t i = 0; i < keepOuts.size(); ++i) {
       const KeepOutShape& ks = keepOuts[i];
@@ -958,8 +1059,11 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
           if (cls.State() != TopAbs_IN)
             continue;
         }
-        for (int v : t)
-          if (auto it = nodeAnchor.find(v); it != nodeAnchor.end())
+        static constexpr int kFace[4][3] = {
+            {0, 1, 2}, {0, 1, 3}, {1, 2, 3}, {0, 2, 3}};
+        for (const auto& fc : kFace)
+          if (auto it = anchorTri.find(triKey(t[fc[0]], t[fc[1]], t[fc[2]]));
+              it != anchorTri.end())
             return fail("keep-out " + std::to_string(i + 1) + " (" +
                         KeepOutLabel(study.keepOuts[i]) +
                         ") takes material that " + it->second +
