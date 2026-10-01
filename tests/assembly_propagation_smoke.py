@@ -17,6 +17,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -63,9 +64,7 @@ def main():
 
         # --- arm + assembly: arm fastened onto the pad's top face -----------
         d.call("add_part", name="arm")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        box(d, (0, 0, 0), (2, 2, 2), "Blk")
         d.call("add_assembly", name="rig")
         o1 = d.call("add_occurrence", part="base", fixed=True)["id"]
         o2 = d.call("add_occurrence", part="arm",

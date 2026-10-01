@@ -18,6 +18,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -46,9 +47,7 @@ def main():
         # --- block: 10x10x10 steel cube; pin: 2x2x2, no material ------------
         d.call("new_project")
         d.call("add_part", name="block")
-        blk = d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        blk = box(d, (0, 0, 0), (10, 10, 10), "Blk")
         d.call("set_material", feature_id=blk["id"], material="steel")
         mp = d.call("mass_properties")  # refactored path: same numbers as BOM
         expect(abs(mp["total"]["volume"] - 1000.0) < 1e-6,
@@ -57,9 +56,7 @@ def main():
         expect(steel_g and steel_g > 0, f"steel block has a mass: {mp['total']}")
 
         d.call("add_part", name="pin")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Pin", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        box(d, (0, 0, 0), (2, 2, 2), "Pin")
 
         d.call("add_assembly", name="rig")
         d.call("add_occurrence", part="block", fixed=True)
@@ -87,7 +84,8 @@ def main():
         # --- assign the pin a material: total becomes known -----------------
         parts = {p["name"]: p for p in d.call("list_parts")["parts"]}
         d.call("set_active_part", index=parts["pin"]["index"])
-        pin_feat = d.call("get_state")["features"][0]
+        pin_feat = [f for f in d.call("get_state")["features"]
+                    if f["type"] == "Extrude"][0]
         d.call("set_material", feature_id=pin_feat["id"], material="aluminum")
         d.call("set_active_part", index=parts["rig"]["index"])
         bom = d.call("bom")

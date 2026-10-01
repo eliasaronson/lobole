@@ -18,6 +18,7 @@ import json as jsonlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 
 
@@ -45,13 +46,9 @@ def main():
 
         # --- A project with a part + a drawing -----------------------------
         d.call("new_project")  # starts with one part ("Part 1")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 40, "height": 20, "depth": 20})
+        blk = box(d, (0, 0, 0), (40, 20, 20), "Blk")
         # A cylinder body so views carry silhouettes (the "shaft" case).
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Shaft", "center": [60, 10, 0],
-            "direction": [0, 0, 1], "radius": 8, "height": 30})
+        cylinder(d, (60, 10, 0), "z", 8, 30, "Shaft")
 
         dwg = d.call("create_drawing", name="bracket-dwg", sheet={
             "size": "a3", "landscape": True,
@@ -174,9 +171,7 @@ def main():
         # centre-to-centre.
         d.call("add_part", name="r2plate")
         d.call("set_active_part", name="r2plate")
-        d.call("add_feature", feature={"type": "Box", "name": "plate",
-               "position": [0, 0, 0], "width": 100, "height": 80,
-               "depth": 10})
+        box(d, (0, 0, 0), (100, 80, 10), "plate")
         sk = d.call("add_feature", feature={
             "type": "Sketch", "name": "holes",
             "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],
@@ -265,9 +260,7 @@ def main():
         # there. Auto-placement must lay the sheet out (one scale, no view on
         # another, none on the title block) or say so.
         d.call("add_part", name="tallbody")
-        d.call("add_feature", feature={"type": "Box", "name": "body",
-               "position": [-5, -22, -28], "width": 87, "height": 43,
-               "depth": 60})
+        box(d, (-5, -22, -28), (87, 43, 60), "body")
         d.call("create_drawing", name="tallbody-dwg", sheet={"size": "a3"})
         ids = [d.call("add_drawing_view", source="tallbody", orientation=o)["id"]
                for o in ("front", "top", "right", "iso")]
@@ -443,7 +436,7 @@ def main():
         geo2 = d.call("list_drawing_geometry", view=front_id)["geometry"]
         expect(all("visible" in g for g in geo2),
                f"geometry rows carry visibility: {geo2[0]}")
-        expect(any(g.get("source_feature", {}).get("type") == "Box"
+        expect(any(g.get("source_feature", {}).get("type") == "Extrude"
                    for g in geo2),
                f"geometry rows name their source feature: {geo2[0]}")
         circles = [g for g in geo2 if g.get("type") == "circle"]
@@ -479,7 +472,8 @@ def main():
         part_idx = [p for p in d.call("list_parts")["parts"]
                     if p["name"] == "Part 1"][0]["index"]
         d.call("set_active_part", index=part_idx)
-        d.call("delete_feature", index=0)  # the Box
+        # The box's Extrude (its sketch makes no body, so stays).
+        d.call("delete_feature", index=blk["index"])
         dwg_idx = [p for p in d.call("list_parts")["parts"]
                    if p["name"] == "bracket-dwg"][0]["index"]
         d.call("set_active_part", index=dwg_idx)
@@ -494,9 +488,7 @@ def main():
         # offset and landed 12 mm from its own hole — on the part. Every
         # sheet with a hole callout on it was wrong.
         d.call("add_part", name="callout-plate")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "plate", "position": [-50, -40, 0],
-            "width": 100, "height": 80, "depth": 3})
+        box(d, (-50, -40, 0), (100, 80, 3), "plate")
         centres = d.call("add_feature", feature={
             "type": "Sketch", "name": "centres",
             "plane": {"origin": [0, 0, 3], "normal": [0, 0, 1],

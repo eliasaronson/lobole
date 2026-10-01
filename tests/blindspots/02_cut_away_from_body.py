@@ -6,12 +6,11 @@ is wrong — which made this invisible until digests/warnings existed.
 Incident: the strict-inputs smoke's own first draft cut upward off the
 block (this session); same class as countless "cut did nothing" loops.
 """
+from smoke_shapes import box  # noqa: E402  (tests/ is on the path)
 
 
 def run(d, expect):
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Block", "position": [0, 0, 0],
-        "width": 20, "height": 20, "depth": 20})
+    box(d, (0, 0, 0), (20, 20, 20), "Block")
     sk = d.call("add_feature", feature={
         "type": "Sketch", "name": "Top",
         "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],

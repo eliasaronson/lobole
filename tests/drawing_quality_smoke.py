@@ -59,7 +59,8 @@ def main():
         a = connect(app.port)
         a.new()
         p = a.part("blk")
-        p.box(position=(0, 0, 0), w=40, h=30, d=20, name="B")
+        p.box("Top", width=40, depth=30, height=20, at=(0, 0), centered=False,
+              name="B")
         # A hole, so there is a curved edge with hidden segments to classify.
         s = p.sketch(Plane.xy(-5), name="Bore")
         s.circle((20, 15), d=10.0)
@@ -124,7 +125,8 @@ def main():
         # update_drawing has nothing to spend a budget on.
         a.set_drawing_view(id=fast["id"], quality="exact")
         p.activate()
-        p.box(position=(0, 0, 40), w=10, h=10, d=10, name="Boss")
+        p.box(p.datum_plane("xy", 40, name="Boss plane"), width=10, depth=10,
+              height=10, at=(0, 0), centered=False, name="Boss")
         a.set_active_part(part="sheet")
         t = time.time()
         r = a.update_drawing(budget_s=0.0000001, _timeout=300)

@@ -17,6 +17,7 @@ import json as jsonlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -46,13 +47,9 @@ def main():
         d.call("new_project")  # starts with one part ("Part 1")
         # Rename-free: the default part is index 0. Add a named part "base".
         base = d.call("add_part", name="base")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 4, "height": 4, "depth": 4})
+        box(d, (0, 0, 0), (4, 4, 4), "Blk")
         arm = d.call("add_part", name="arm")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 2, "height": 6, "depth": 2})
+        box(d, (0, 0, 0), (2, 6, 2), "Blk")
 
         asmResult = d.call("add_assembly", name="robot")
         asmId = asmResult["id"]

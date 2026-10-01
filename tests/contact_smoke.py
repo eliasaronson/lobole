@@ -17,6 +17,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 
 
@@ -53,20 +54,14 @@ def main():
         d.call("new_project")
 
         # --- Part tab: two bodies, touching then apart ---------------------
-        d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [10, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (0, 0, 0), (10, 10, 10), "A")
+        box(d, (10, 0, 0), (10, 10, 10), "B")
         r = d.call("interference", a=0, b=1)
         expect(r["state"] == "touching", f"tangent boxes: {r}")
         expect(abs(r["distance"]) < 1e-6, f"tangent distance: {r}")
         expect(not r["clash"], f"tangent clash: {r}")
 
-        d.call("add_feature", feature={
-            "type": "Box", "name": "C", "position": [25, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (25, 0, 0), (10, 10, 10), "C")
         r = d.call("interference", a=1, b=2)
         expect(r["state"] == "clear", f"apart boxes: {r}")
         expect(abs(r["distance"] - 5.0) < 1e-6, f"apart distance: {r}")
@@ -97,25 +92,17 @@ def main():
         # keep getting right.
         d.call("add_part", name="Sleeve")
         d.call("set_active_part", name="Sleeve")
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Sleeve", "center": [0, 0, 0],
-            "direction": [0, 0, 1], "radius": 10, "height": 40})
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Bore", "center": [0, 0, -1],
-            "direction": [0, 0, 1], "radius": 6, "height": 42})
+        cylinder(d, (0, 0, 0), "z", 10, 40, "Sleeve")
+        cylinder(d, (0, 0, -1), "z", 6, 42, "Bore")
         d.call("add_feature", feature={
             "type": "Boolean", "name": "Tube", "target_id":
             d.call("get_state")["features"][0]["id"], "tool_id":
             d.call("get_state")["features"][1]["id"], "op": "subtract"})
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Rod", "center": [0, 0, 5],
-            "direction": [0, 0, 1], "radius": 6, "height": 30})
+        cylinder(d, (0, 0, 5), "z", 6, 30, "Rod")
         cg = d.call("check_geometry")
         expect(cg["connected"], f"a rod touching its sleeve's bore: {cg}")
 
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Free", "center": [0, 0, 8],
-            "direction": [0, 0, 1], "radius": 3, "height": 10})
+        cylinder(d, (0, 0, 8), "z", 3, 10, "Free")
         cg = d.call("check_geometry")
         expect(not cg["connected"],
                f"a 3 mm rod floating inside the same bore: {cg}")

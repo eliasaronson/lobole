@@ -47,7 +47,7 @@ def rig(sdk, gap_mm=25.0):
     """Two pins, `gap_mm` apart on X. Each is Ø10, so the gap is gap_mm - 10."""
     sdk.call("new_project")
     part = sdk.part("Pin")
-    part.cylinder(d=10, h=20)
+    part.cylinder("Top", d=10, height=20)
     sdk.assembly("Rig")
     a = sdk.call("add_occurrence", part="Pin")["id"]
     b = sdk.call("add_occurrence", part="Pin")["id"]
@@ -83,7 +83,8 @@ def main():
                f"the tolerance is subtracted, not trusted flat: {row}")
 
         # The non-event: something else entirely changes.
-        sdk.part("Bracket").box(w=5, h=5, d=5)
+        sdk.part("Bracket").box("Top", width=5, depth=5, height=5, at=(0, 0),
+                                centered=False)
         sdk.call("set_active_part", part="Rig")
         expect(standing(sdk) == "holds",
                "an unrelated part must NOT make a clearance stale — that is "

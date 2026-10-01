@@ -18,6 +18,7 @@ import json as jsonlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -128,9 +129,7 @@ def main():
         # --- Assembly configurations: occurrence suppression (C4) ----------
         d.call("new_project")
         d.call("add_part", name="widget")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "W", "position": [0, 0, 0],
-            "width": 5, "height": 5, "depth": 5})
+        box(d, (0, 0, 0), (5, 5, 5), "W")
         d.call("add_configuration", name="Small")
         d.call("add_assembly", name="rig")
         o1 = d.call("add_occurrence", part="widget", fixed=True)["id"]

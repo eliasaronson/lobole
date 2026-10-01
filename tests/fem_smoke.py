@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_app import launch  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 SKIP = 77  # ctest SKIP_RETURN_CODE: built without Netgen
 
@@ -49,19 +50,17 @@ def build_bar(d):
     Returns (study_id, created_by, fixed_face, load_face)."""
     d.call("new_project")
     d.call("set_variable", name="load_n", expression="10000")
-    fid = d.call("add_feature", feature={"type": "Box", "name": "Bar",
-                                         "position": [0, 0, 0],
-                                         "width": 100, "height": 10,
-                                         "depth": 10})["id"]
+    fid = shapes.box(d, (0, 0, 0), (100, 10, 10), "Bar")["id"]
     d.call("set_material", feature_id=fid, material="steel")
 
     els = d.call("list_elements")["bodies"][0]
     created_by = els["created_by"]
-    faces = [f["name"] for f in els["faces"]]
-    # x=0 and x=100 are face0/face1 in the primitive naming. Which pair does
-    # not matter here: the physics is test_fem.cpp's job, and any opposite
-    # pair exercises the same RPCs.
-    fixed_face, load_face = faces[0], faces[1]
+    # The bar's two ends, x=0 and x=100, found by their normals. The physics
+    # is test_fem.cpp's job; any opposite pair exercises the same RPCs.
+    def end(sign):
+        return [f["name"] for f in els["faces"]
+                if abs(f["normal"][0] - sign) < 1e-6][0]
+    fixed_face, load_face = end(-1.0), end(1.0)
 
     study = d.call("add_study", name="Pull")["id"]
     d.call("set_study", study=study, mesh_size=4.0)
@@ -83,10 +82,7 @@ def assembly_study(d):
     for name in ("Lower", "Upper"):
         slot = d.call("add_part", name=name)
         d.call("set_active_part", part=slot["id"])
-        fid = d.call("add_feature", feature={"type": "Box", "name": name,
-                                             "position": [0, 0, 0],
-                                             "width": 100, "height": 100,
-                                             "depth": 16})["id"]
+        fid = shapes.box(d, (0, 0, 0), (100, 100, 16), name)["id"]
         d.call("set_material", feature_id=fid, material="steel")
         els = d.call("list_elements")["bodies"][0]
         top = [f["name"] for f in els["faces"]
@@ -168,9 +164,11 @@ def assembly_study(d):
     d.call("run_study", study=study)
     expect(d.call("study_results", study=study)["stale"] is False, "fresh")
     d.call("set_active_part", part=parts["Upper"][0])
-    box = d.call("get_state")["features"][0]
+    # The block's thickness is its Extrude's distance (16 -> 18).
+    box = [f for f in d.call("get_state")["features"]
+           if f["type"] == "Extrude"][0]
     spec = dict(box)
-    spec["depth"] = 18
+    spec["distance"] = 18
     d.call("modify_feature", feature_id=box["id"], feature=spec)
     d.call("set_active_part", part=asm["id"])
     expect(d.call("study_results", study=study)["stale"] is True,

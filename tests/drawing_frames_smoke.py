@@ -22,6 +22,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 
 def expect(cond, msg):
@@ -57,9 +58,7 @@ def main():
         d = Designer.wait_for(app.port)
         d.call("new_project")
         d.call("add_part", name="plate")
-        box = d.call("add_feature", feature={
-            "type": "Box", "name": "plate", "position": [-20, -10, 0],
-            "width": 40, "height": 20, "depth": 10})
+        box = shapes.box(d, (-20, -10, 0), (40, 20, 10), "plate")
         refused(d, "set_material", "aluminum_6082_t6", feature_id=box["id"],
                 material="6082")
         d.call("set_material", feature_id=box["id"],
@@ -73,9 +72,7 @@ def main():
             "type": "Hole", "name": "bore", "sketch_id": centre["id"],
             "hole_kind": "simple", "diameter": 8.0, "through": True})
         d.call("add_part", name="pin")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "pin", "position": [0, 0, 0],
-            "width": 5, "height": 5, "depth": 5})
+        shapes.box(d, (0, 0, 0), (5, 5, 5), "pin")
         d.call("add_assembly", name="asm")
         d.call("add_occurrence", part="plate", fixed=True)
         for i in range(4):

@@ -57,11 +57,14 @@ def main():
         app = sdk.App(Designer.wait_for(proc.port))
         app.new()
         housing = app.part("housing")
-        housing.box(position=(-40, -5, -5), w=8, h=10, d=10)
+        housing.box(housing.datum_plane("xy", -5), width=8, depth=10,
+                    height=10, at=(-40, -5), centered=False)
         crank = app.part("crank")
-        crank.box(position=(2, -2, -2), w=28, h=4, d=4)
+        crank.box(crank.datum_plane("xy", -2), width=28, depth=4, height=4,
+                  at=(2, -2), centered=False)
         frame = app.part("frame")
-        frame.box(position=(-5, -5, -30), w=10, h=10, d=10)
+        frame.box(frame.datum_plane("xy", -30), width=10, depth=10,
+                  height=10, at=(-5, -5), centered=False)
 
         sub = app.assembly("crank unit")
         ho = sub.place(housing, fixed=True, name="housing")

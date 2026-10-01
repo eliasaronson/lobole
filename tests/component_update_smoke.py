@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'tools'))
-from designer_sdk import App, SdkError
+from designer_sdk import App, Plane, SdkError
 from designer_remote import Designer
 from designer_components import claim, plan
 from designer_validation import validate
@@ -30,7 +30,13 @@ def main():
                 def build(a):
                     p = a.part('housing')
                     p.var('width', width)
-                    p.box(w='width', h=3, d=4, name='Casting')
+                    # A sketch and an extrude, not part.box: a primitive
+                    # expands into two features from one add_feature, which
+                    # the staging part cannot give stable ids to (it passes
+                    # `id`, and a Box refuses it).
+                    s = p.sketch(Plane.yz(), name='Casting profile')
+                    s.rect((0, 0), (3, 4))
+                    p.extrude(s.add(), 'width', name='Casting')
                     return p
                 return build
             part = builder(2)(app)

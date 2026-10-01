@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -78,9 +79,7 @@ def build_job(d, stepover, tool_mm=4.0, stepdown=3.0, ops=3):
     `ops` operations that differ only in stepover (so none is a cache hit
     on another): seconds of passes, and a fine verify on top."""
     d.call("new_project")
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Plate", "position": [-40, -30, 0],
-        "width": 80, "height": 60, "depth": 20})
+    box(d, (-40, -30, 0), (80, 60, 20), "Plate")
     sk = d.call("add_feature", feature={
         "type": "Sketch", "name": "Pocket sketch",
         "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],

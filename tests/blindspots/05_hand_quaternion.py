@@ -9,12 +9,12 @@ re-deriving the arithmetic by hand.
 """
 import math
 
+from smoke_shapes import box  # noqa: E402  (tests/ is on the path)
+
 
 def run(d, expect):
     # An asymmetric slab, so a wrong rotation is geometrically visible.
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Slab", "position": [0, 0, 0],
-        "width": 40, "height": 10, "depth": 4})
+    box(d, (0, 0, 0), (40, 10, 4), "Slab")
     part = d.call("list_parts")["parts"][0]["name"]
     d.call("add_assembly", name="Rig")
     d.call("set_active_part", name="Rig")

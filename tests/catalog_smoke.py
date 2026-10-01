@@ -25,7 +25,7 @@ def main(binary):
         app = App(running.designer)
         app.new()
         part = app.part("test block")
-        part.box(w=10, h=10, d=10)
+        part.box("Top", width=10, depth=10, height=10, at=(0, 0), centered=False)
         file = Path(temp) / "bearings.csv"
         original = "designation,bore_diameter,outer_diameter,width,shaft_min,shaft_max,notes\nB-25,25,52,15,24.99,25.01,not a verified rule\n"
         file.write_text(original)

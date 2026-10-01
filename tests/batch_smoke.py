@@ -18,6 +18,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -112,9 +113,7 @@ def main():
         expect(len(d.call("get_state")["features"]) == 0, "back to empty")
 
         # ---- A failed call rolls the WHOLE batch back -------------------
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Anchor", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        box(d, (0, 0, 0), (10, 10, 10), "Anchor")
         before = d.call("get_state")["features"]
         err = refused(d, "batch",
                       ["call 3", "rolled back", "as it was before the batch",
@@ -151,8 +150,8 @@ def main():
                 "type": "Sketch", "name": "T1", "plane": plane(),
                 "entities": []}}},
             {"method": "add_feature", "params": {
-                "feature": {"type": "Box", "name": "T2", "position": [0, 0, 0],
-                            "width": 1, "height": 1, "depth": 1},
+                "feature": {"type": "Box", "name": "T2", "on": "Top",
+                            "width": 1, "depth": 1, "height": 1},
                 "wibble": 3}}])
         expect(len(d.call("get_state")["features"]) == len(before),
                "a rejected key rolls the batch back like any other failure")
@@ -220,9 +219,7 @@ def main():
         # In its own part, so the volume below is about these six holes and
         # nothing else the script has left lying around.
         d.call("add_part", name="drill")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Slab", "position": [-30, -15, 0],
-            "width": 60, "height": 30, "depth": 8})
+        box(d, (-30, -15, 0), (60, 30, 8), "Slab")
         holes = []
         for i in range(6):
             holes.append({"method": "add_feature", "params": {"feature": {
@@ -263,7 +260,8 @@ def main():
                 "type": "Extrude", "name": "R2",
                 "sketch_id": {"$ref": 1, "key": "wibble"},
                 "distance": 1.0, "mode": "new_body"}}}])
-        expect(len(d.call("get_state")["features"]) == 1,
+        # The slab alone: its Sketch and its Extrude.
+        expect(len(d.call("get_state")["features"]) == 2,
                "and a refused $ref leaves nothing behind")
         d.call("set_active_part", part=first_part)
 
@@ -272,12 +270,14 @@ def main():
         # non-deferrable call flushes the pending regeneration first.
         r = d.call("batch", calls=[
             {"method": "add_feature", "params": {"feature": {
-                "type": "Box", "name": "Slab", "position": [50, 0, 0],
-                "width": 4, "height": 4, "depth": 4}}},
+                "type": "Box", "name": "Slab", "on": "Top",
+                "centered": False, "offset": [50, 0],
+                "width": 4, "depth": 4, "height": 4}}},
             {"method": "mass_properties", "params": {}},
             {"method": "add_feature", "params": {"feature": {
-                "type": "Box", "name": "Slab2", "position": [70, 0, 0],
-                "width": 2, "height": 2, "depth": 2}}}])
+                "type": "Box", "name": "Slab2", "on": "Top",
+                "centered": False, "offset": [70, 0],
+                "width": 2, "depth": 2, "height": 2}}}])
         vol = r["results"][1]["result"]["total"]["volume"]
         expect(abs(vol - (1000.0 + 64.0)) < 1e-6,
                f"the query saw the box the same batch had just added, and "
@@ -293,9 +293,7 @@ def main():
 
         # ---- An assembly batch is one snapshot -------------------------
         d.call("add_part", name="cube")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "C", "position": [0, 0, 0],
-            "width": 5, "height": 5, "depth": 5})
+        box(d, (0, 0, 0), (5, 5, 5), "C")
         d.call("add_assembly", name="rig")
         r = d.call("batch", calls=[
             {"method": "add_occurrence", "params": {"part": "cube",

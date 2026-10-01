@@ -12,6 +12,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 
@@ -39,12 +40,10 @@ def main():
 
         # Two 10-cubes overlapping by 8 in x: IoU 800/1200, symmetric
         # precision/recall, CoM offset exactly the 2 mm shift.
-        d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [2, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        # B's width is a variable, so the golden check below can shrink it.
+        d.call("set_variable", name="b_width", expression="10")
+        box(d, (0, 0, 0), (10, 10, 10), "A")
+        box(d, (2, 0, 0), (10, 10, 10), "B", width_expr="b_width")
         r = d.call("compare_geometry", a=0, b=1)
         expect(abs(r["iou"] - 800.0 / 1200.0) < 1e-3, f"iou: {r['iou']}")
         expect(abs(r["precision"] - 0.8) < 1e-3, f"precision: {r}")
@@ -124,9 +123,7 @@ def main():
                f"golden verdicts: {r['verdicts']}")
 
         # ...and a real deviation against the same golden: shrink box B.
-        d.call("modify_feature", index=1, feature={
-            "type": "Box", "name": "B", "position": [2, 0, 0],
-            "width": 5, "height": 10, "depth": 10})
+        d.call("set_variable", name="b_width", expression="5")
         r = d.call("compare_geometry", golden_path=golden)
         expect(r["iou"] < 0.999, f"deviation iou: {r['iou']}")
         expect(any("under-generating" in v or "undersized" in v

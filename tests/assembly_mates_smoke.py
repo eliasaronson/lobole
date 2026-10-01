@@ -20,6 +20,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, sphere  # noqa: E402
 
 
 
@@ -48,13 +49,9 @@ def main():
         # --- Project: two box parts + an assembly --------------------------
         d.call("new_project")
         d.call("add_part", name="base")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 4, "height": 4, "depth": 4})
+        box(d, (0, 0, 0), (4, 4, 4), "Blk")
         d.call("add_part", name="arm")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 2, "height": 6, "depth": 2})
+        box(d, (0, 0, 0), (2, 6, 2), "Blk")
         d.call("add_assembly", name="robot")
 
         # base grounded at the origin; arm parked far away so the solve visibly
@@ -243,13 +240,10 @@ def main():
         # APEX; a ball mate coincides the two.
         d.call("add_part", name="ballpart")
         d.call("set_active_part", name="ballpart")
-        d.call("add_feature", feature={"type": "Sphere", "name": "Ball",
-                                       "center": [0, 0, 0], "radius": 5})
+        sphere(d, (0, 0, 0), 5, "Ball")
         d.call("add_part", name="seat")
         d.call("set_active_part", name="seat")
-        d.call("add_feature", feature={"type": "Box", "name": "Block",
-                                       "position": [-10, -10, -10],
-                                       "width": 20, "height": 20, "depth": 10})
+        box(d, (-10, -10, -10), (20, 20, 10), "Block")
         sks = d.call("add_feature", feature={
             "type": "Sketch", "name": "C",
             "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],

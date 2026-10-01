@@ -55,7 +55,11 @@ def main():
             part.var('diameter', 12)
             axis = V(1, 2, 3).unit()
             origin = V(7, 11, 19)
-            body = part.cylinder(center=origin, direction=axis, d='diameter', h=23)
+            # Standing on a frame whose Z is the axis, its base circle centred
+            # on the frame's origin.
+            seat = part.frame('axis', origin=origin, z=axis,
+                              x=V(0, 0, 1).cross(axis).unit())
+            body = part.cylinder(seat, d='diameter', height=23)
             # Read another part without switching the visible tab.
             other = app.part('visible part')
             other.var('diameter', 40)
@@ -175,7 +179,7 @@ def main():
             # A new project can reuse IDs/version counters; identity must differ.
             app.new()
             replacement = app.part('replacement')
-            replacement.cylinder(d=12, h=23)
+            replacement.cylinder('Top', d=12, height=23)
             refusal(reopened.validate, 'stale_snapshot')
             print('inspection contracts: parity, centers, zero-RPC reads, budgets, stale revisions passed')
 

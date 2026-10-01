@@ -43,7 +43,8 @@ def plate(app, name, thickness, hole_from=-5.0, hole_depth=None):
     """A square plate with a clearance hole through it, and frames on both
     faces."""
     p = app.part(name)
-    p.box(position=(-40, -40, 0), w=80, h=80, d=thickness, name="P")
+    p.box("Top", width=80, depth=80, height=thickness, at=(-40, -40),
+          centered=False, name="P")
     s = p.sketch(Plane.xy(hole_from), name="Hole")
     s.circle((0, 0), d=11.0)
     p.extrude(s.add(), hole_depth or (thickness + 10.0), mode="cut",
@@ -70,7 +71,8 @@ def blind_rig(app):
     ends 45 mm down: 20 of plate, then the hole's floor."""
     app.new()
     b = app.part("base")
-    b.box(position=(-40, -40, 0), w=80, h=80, d=60, name="Base")
+    b.box("Top", width=80, depth=80, height=60, at=(-40, -40),
+          centered=False, name="Base")
     sk = b.sketch(Plane.xy(60, flip=True), name="Blind")
     sk.circle((0, 0), d=11.0)
     b.extrude(sk.add(), 25.0, mode="cut", name="Blind")

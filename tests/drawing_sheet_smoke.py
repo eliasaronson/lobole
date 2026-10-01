@@ -20,6 +20,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(cond, msg):
@@ -50,9 +51,7 @@ def main():
         d.call("new_project")
         # A 40 x 20 x 10 plate with a Ø8 bore through it, held to H7.
         d.call("add_part", name="plate")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "plate", "position": [-20, -10, 0],
-            "width": 40, "height": 20, "depth": 10})
+        box(d, (-20, -10, 0), (40, 20, 10), "plate")
         centre = d.call("add_feature", feature={
             "type": "Sketch", "name": "centre",
             "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],
@@ -68,9 +67,7 @@ def main():
         d.call("set_tolerance", feature_id=bore[0][0], element=bore[0][1],
                **{"class": "H7"})
         d.call("add_part", name="pin")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "pin", "position": [0, 0, 0],
-            "width": 5, "height": 5, "depth": 5})
+        box(d, (0, 0, 0), (5, 5, 5), "pin")
         d.call("add_assembly", name="asm")
         d.call("add_occurrence", part="plate", fixed=True)
         pin = d.call("add_occurrence", part="pin", transform={

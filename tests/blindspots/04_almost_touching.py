@@ -5,12 +5,11 @@ Members meant to be bolted end up floating next to each other.
 Incident: the dock's v2 barrel stops, left hanging in mid-air when the
 rails moved but the stops' height didn't; caught by human eyes only.
 """
+from smoke_shapes import box  # noqa: E402  (tests/ is on the path)
 
 
 def run(d, expect):
-    d.call("add_feature", feature={
-        "type": "Box", "name": "B", "position": [0, 0, 0],
-        "width": 20, "height": 20, "depth": 20})
+    box(d, (0, 0, 0), (20, 20, 20), "B")
     part = d.call("list_parts")["parts"][0]["name"]
     d.call("add_assembly", name="Rig")
     d.call("set_active_part", name="Rig")

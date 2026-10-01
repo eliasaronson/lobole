@@ -6,12 +6,11 @@ removes nothing — silently, before the no-op warning existed.
 Incident: the eye-bracket demo ramp cut (memory: designer-sketch-plane-
 vaxis), re-hit in cut form on the Alpair enclosure.
 """
+from smoke_shapes import box  # noqa: E402  (tests/ is on the path)
 
 
 def run(d, expect):
-    d.call("add_feature", feature={
-        "type": "Box", "name": "Block", "position": [0, 0, 0],
-        "width": 20, "height": 20, "depth": 20})
+    box(d, (0, 0, 0), (20, 20, 20), "Block")
 
     # WRONG: top plane with normal +Y -> V = -Z; the circle at v=+10 lands
     # at world z=-10, off the block, and the cut extrudes upward besides.

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from designer_sdk import Plane, connect  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 
 def expect(condition, message):
@@ -77,9 +78,7 @@ def part_checks(d):
 def assembly_checks(d):
     def box(name, lo, size):
         d.call("add_part", name=name)
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Block", "position": list(lo),
-            "width": size[0], "height": size[1], "depth": size[2]})
+        shapes.box(d, list(lo), (size[0], size[1], size[2]), "Block")
     d.call("new_project")
     box("arm", (2, -2, -2), (28, 4, 4))
     box("stop", (-2, -2, -2), (4, 4, 4))

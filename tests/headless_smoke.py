@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+import smoke_shapes as shapes  # noqa: E402
 
 
 def pose_of(d, occ_id):
@@ -368,14 +369,10 @@ def main():
         # and an assembly tab autosaved nothing at all.
         multi = os.path.join(tmp, "multi.dsgn")
         d.call("new_project")
-        d.call("add_feature", feature={"type": "Box", "name": "PartOneBody",
-                                       "position": [0, 0, 0],
-                                       "width": 10, "height": 10, "depth": 10})
+        p1 = shapes.box(d, (0, 0, 0), (10, 10, 10), "PartOneBody")
         d.call("add_part", name="Second")
         d.call("set_active_part", name="Second")
-        d.call("add_feature", feature={"type": "Box", "name": "PartTwoBody",
-                                       "position": [0, 0, 0],
-                                       "width": 20, "height": 20, "depth": 20})
+        shapes.box(d, (0, 0, 0), (20, 20, 20), "PartTwoBody")
         d.call("add_assembly", name="Asm")
         d.call("save_project", path=multi)
         sidecars = multi + ".autosave.d"
@@ -383,9 +380,9 @@ def main():
 
         # Dirty a part that is NOT the open tab, and the assembly tab too.
         d.call("set_active_part", name="Part 1")
-        d.call("modify_feature", index=0, feature={
-            "type": "Box", "name": "PartOneBody", "position": [0, 0, 0],
-            "width": 44, "height": 10, "depth": 10})
+        grow = dict(next(f for f in d.call("get_state")["features"]
+                         if f["id"] == p1["id"]), distance=44)
+        d.call("modify_feature", feature_id=p1["id"], feature=grow)
         d.call("set_active_part", name="Asm")  # an assembly tab is open
         d.call("autosave_now")
         expect(os.path.isdir(sidecars), "the project autosaved from an "
@@ -407,9 +404,7 @@ def main():
         # it all with no message.
         moved = os.path.join(tmp, "moved.dsgn")
         d.call("new_project")
-        d.call("add_feature", feature={"type": "Box", "name": "Box 1",
-                                       "position": [0, 0, 0],
-                                       "width": 2, "height": 2, "depth": 2})
+        shapes.box(d, (0, 0, 0), (2, 2, 2), "Box 1")
         d.call("save_project", path=moved)
         expect(not d.call("project_changed_on_disk")["changed"],
                "a project just saved has not moved")
@@ -492,9 +487,7 @@ def main():
         # Rib (v36): an open profile above a box grows a stiffener down to it
         # — the generic add_feature path carries the new type.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Base", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        shapes.box(d, (0, 0, 0), (10, 10, 10), "Base")
         rib_sk = d.call("add_feature", feature={
             "type": "Sketch", "name": "RibProfile",
             "plane": {"origin": [5, 5, 15], "normal": [0, 0, -1],
@@ -511,9 +504,7 @@ def main():
         phase("Cosmetic thread")
         # Cosmetic thread (v36): annotates a cylindrical face, geometry
         # untouched.
-        cyl = d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Boss", "center": [30, 0, 0],
-            "direction": [0, 0, 1], "radius": 4.0, "height": 20.0})
+        cyl = shapes.cylinder(d, (30, 0, 0), "z", 4.0, 20.0, "Boss")
         els = next(b for b in d.call("list_elements")["bodies"]
                    if b["created_by"] == cyl["id"])
         boss_before = next(b for b in d.call("get_state")["bodies"]
@@ -534,9 +525,7 @@ def main():
         phase("Draft")
         # Draft (M8): taper a box's side faces; volume drops
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        shapes.box(d, (0, 0, 0), (10, 10, 10), "Blk")
         bx = d.call("list_elements")["bodies"][0]
         # A side face: pick the first whose name resolves; the feature rejects
         # caps, so try faces until one drafts. Use get_state face normals via
@@ -566,9 +555,7 @@ def main():
         # Hole wizard (M8): a 4-hole bolt pattern from one point sketch,
         # then interference (I4) between two boxes.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 4})
+        shapes.box(d, (0, 0, 0), (10, 10, 4), "Plate")
         holes = d.call("add_feature", feature={
             "type": "Sketch", "name": "Bolts",
             "plane": {"origin": [0, 0, 4], "normal": [0, 0, 1],
@@ -594,13 +581,9 @@ def main():
         d.call("new_project")
         expect(d.call("list_parts")["parts"][0]["name"] == "Part 1",
                "starts with one part")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        shapes.box(d, (0, 0, 0), (2, 2, 2), "A")
         d.call("add_part", name="Arm")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 3, "height": 3, "depth": 3})
+        shapes.box(d, (0, 0, 0), (3, 3, 3), "B")
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
                "part 2 has its own box")
         d.call("set_active_part", index=0)
@@ -652,9 +635,7 @@ def main():
         # widen its gate — three of those six say in their own comments that
         # they were fixed to cover the whole project, and stayed gated.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        shapes.box(d, (0, 0, 0), (10, 10, 10), "B")
         d.call("add_assembly", name="Rig")
         d.call("create_drawing", name="Sheet")
         proj = os.path.join(tmp, "tabkinds.dsgn")
@@ -841,9 +822,7 @@ def main():
         phase("Section")
         # Section (I3): cross-section area of a plate at a mid-cut
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "P", "position": [0, 0, 0],
-            "width": 4, "height": 5, "depth": 6})
+        shapes.box(d, (0, 0, 0), (4, 5, 6), "P")
         # set_section just toggles the viewport clip (no visible effect
         # headless), but the RPC must accept and clear it without error.
         d.call("set_section", enabled=True, base_plane="yz", offset=0.0)
@@ -895,7 +874,7 @@ def main():
                f"cut sits on the datum: d={upd['d']}")
         # Move the datum (keeping its id) — the cut follows it, which is the
         # whole reason to reference one.
-        d.call("modify_feature", index=1, feature={
+        d.call("modify_feature", index=dat["index"], feature={
             "type": "DatumPlane", "id": dat["id"], "name": "D",
             "kind": "offset", "base_plane": "xy", "offset": 4.0})
         after = [s for s in d.call("list_sections")["sections"]
@@ -915,7 +894,7 @@ def main():
         # to disk as "0-box.json", and dangled every OTHER reference to it
         # too. Identity is now preserved unless you name a different one, so
         # "this is a different feature" has to be said out loud.
-        d.call("modify_feature", index=1, feature={
+        d.call("modify_feature", index=dat["index"], feature={
             "type": "DatumPlane", "id": 9001, "name": "D2", "kind": "offset",
             "base_plane": "xy", "offset": 4.0})
         dangling = [s for s in d.call("list_sections")["sections"]
@@ -944,18 +923,14 @@ def main():
         phase("Interference")
         # Interference: two overlapping boxes clash; disjoint ones don't.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "A", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
-        d.call("add_feature", feature={
-            "type": "Box", "name": "B", "position": [1, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        d.call("set_variable", name="b_x", expression="1")
+        shapes.box(d, (0, 0, 0), (2, 2, 2), "A")
+        shapes.box(d, (1, 0, 0), (2, 2, 2), "B", offset_expr=["b_x", "0"])
         clash = d.call("interference", a=0, b=1)
         expect(clash["clash"] and abs(clash["volume"] - 4.0) < 1e-3,
                "overlapping boxes clash with overlap volume 4")
-        d.call("modify_feature", index=1, feature={
-            "type": "Box", "name": "B", "position": [10, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        # Move B clear: its sketch's offset follows the variable.
+        d.call("set_variable", name="b_x", expression="10")
         expect(not d.call("interference", a=0, b=1)["clash"],
                "disjoint boxes do not clash")
 
@@ -964,9 +939,7 @@ def main():
         # cube part — overlapping placements clash; a flipped fastened mate
         # seats them flush (contact only) and the clash clears.
         d.call("new_project")
-        boxf = d.call("add_feature", feature={
-            "type": "Box", "name": "Cube", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        boxf = shapes.box(d, (0, 0, 0), (2, 2, 2), "Cube")
         d.call("set_material", feature_id=boxf["id"], material="aluminum")
         cube = d.call("list_elements")["bodies"][0]
         # #8: every face reports its outward unit surface normal. A box's six
@@ -1536,9 +1509,7 @@ def main():
         phase("Shell")
         # Shell (M8): hollow a box into a bin via list_elements face name
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        shapes.box(d, (0, 0, 0), (10, 10, 10), "Blk")
         bels = d.call("list_elements")["bodies"][0]
         d.call("add_feature", feature={
             "type": "Shell", "name": "Bin", "body_id": bels["created_by"],
@@ -1554,9 +1525,7 @@ def main():
         # Export STEP/STL/BREP (E1), then re-import the STEP to verify it
         # round-trips to the same volume.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 2, "height": 3, "depth": 4})
+        shapes.box(d, (0, 0, 0), (2, 3, 4), "Blk")
         step = os.path.join(tmp, "part.step")
         stl = os.path.join(tmp, "part.stl")
         brep = os.path.join(tmp, "part.brep")
@@ -1617,9 +1586,7 @@ def main():
         # lands on the origin — 47 clashing pairs, on a cabinet whose four
         # bought assemblies all stacked in the top corner.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Away", "position": [400, 0, 0],
-            "width": 10, "height": 10, "depth": 10})
+        shapes.box(d, (400, 0, 0), (10, 10, 10), "Away")
         placed = os.path.join(tmp, "placed.step")
         d.call("export_step", path=placed)
         for keep, want in ((False, 0.0), (True, 405.0)):
@@ -1640,9 +1607,7 @@ def main():
         # sidecars stage under the app state dir until the next save adopts
         # them into <project>/imported/.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Mine", "position": [0, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        shapes.box(d, (0, 0, 0), (1, 1, 1), "Mine")
         rep = d.call("import_step", path=step, as_assembly=True)
         expect(len(rep["occurrences"]) == 1,
                "assembly import works without a saved project")
@@ -1685,9 +1650,7 @@ def main():
         phase("Checkpoints")
         # Checkpoints (F4): create, list, mutate, restore, and error paths
         d.call("new_project")  # fresh document: no project path yet
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Seed", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        shapes.box(d, (0, 0, 0), (2, 2, 2), "Seed")
         try:
             d.call("checkpoint_create", name="nope")
             expect(False, "checkpoint without a saved project must fail")
@@ -1699,9 +1662,7 @@ def main():
         expect(os.path.exists(cp_project + ".checkpoints/v1.json"),
                "checkpoint file written beside the project")
         volume_before = d.call("get_state")["bodies"][0]["volume"]
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Extra", "position": [90, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        shapes.box(d, (90, 0, 0), (1, 1, 1), "Extra")
         expect(len(d.call("get_state")["bodies"]) == 2, "mutated after cp")
         cps = d.call("checkpoint_list")["checkpoints"]
         expect([c["name"] for c in cps] == ["v1"], "checkpoint listed")
@@ -1720,9 +1681,7 @@ def main():
         # Directory format + git history (F3+F5): saves commit, checkpoints
         # tag, restore rewinds
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Base", "position": [0, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        shapes.box(d, (0, 0, 0), (2, 2, 2), "Base")
         proj = os.path.join(tmp, "gitproj.dsgn")
         d.call("save_project", path=proj, message="first")
         expect(os.path.isdir(proj) and
@@ -1730,24 +1689,21 @@ def main():
                "directory project written")
         expect(os.path.isdir(os.path.join(proj, ".git")),
                "save initialized a git repo")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "More", "position": [5, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        shapes.box(d, (5, 0, 0), (1, 1, 1), "More")
         d.call("save_project", path=proj, message="second")
         log = d.call("history_log")["log"]
         expect([e["subject"] for e in log] == ["second", "first"],
                "one commit per save, newest first")
         d.call("checkpoint_create", name="beta")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Even more", "position": [10, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        shapes.box(d, (10, 0, 0), (1, 1, 1), "Even more")
         d.call("save_project", path=proj, message="third")
         d.call("history_restore", commit=log[-1]["hash"])  # back to "first"
-        expect(len(d.call("get_state")["features"]) == 1,
-               "restored the first commit's single feature")
-        d.call("history_restore", commit="cp/beta")  # checkpoint tag works
+        # A box is two features: its Sketch and its Extrude.
         expect(len(d.call("get_state")["features"]) == 2,
-               "restored the checkpoint tag")
+               "restored the first commit's single box")
+        d.call("history_restore", commit="cp/beta")  # checkpoint tag works
+        expect(len(d.call("get_state")["features"]) == 4,
+               "restored the checkpoint tag (two boxes)")
         try:
             d.call("history_restore", commit="nonsense")
             expect(False, "unknown commit must fail")
@@ -1760,13 +1716,9 @@ def main():
         # that exists in the version but not now could never come back, and
         # on a multi-part project the other tabs were simply not in the file.
         d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Base", "position": [0, 0, 0],
-            "width": 4, "height": 4, "depth": 4})
+        shapes.box(d, (0, 0, 0), (4, 4, 4), "Base")
         d.call("add_part", name="Lid")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 4, "height": 1, "depth": 4})
+        shapes.box(d, (0, 0, 0), (4, 1, 4), "Plate")
         multi = os.path.join(tmp, "multipart.dsgn")
         d.call("save_project", path=multi)
         d.call("checkpoint_create", name="both parts")
@@ -1775,9 +1727,7 @@ def main():
 
         # Delete a whole part AND edit the survivor, then go back.
         d.call("set_active_part", index=0)
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Wart", "position": [20, 0, 0],
-            "width": 1, "height": 1, "depth": 1})
+        shapes.box(d, (20, 0, 0), (1, 1, 1), "Wart")
         d.call("delete_part", index=1)
         d.call("save_project", path=multi)
         expect(len(d.call("list_parts")["parts"]) == 1, "part deleted")
@@ -1786,8 +1736,8 @@ def main():
         names = [pp["name"] for pp in d.call("list_parts")["parts"]]
         expect(names == ["Part 1", "Lid"],
                f"the deleted part came back: {names}")
-        expect(len(d.call("get_state")["features"]) == 1,
-               "and the survivor's later edit is gone")
+        expect(len(d.call("get_state")["features"]) == 2,
+               "and the survivor's later edit is gone (one box)")
         # Linear history: the state we left is still reachable.
         expect(len(d.call("history_log")["log"]) >= 4,
                "the restore is itself a version")
@@ -1824,9 +1774,7 @@ def main():
             expect_error(d, "save_machine", "haas",
                          machine={"name": "Haas", "post": "haas"})
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Plate")
             d.call("machine_part")
             on = d.call("add_cam_setup", name="On the router", machine="Smoke router")
             expect(on["machine"]["name"] == "Smoke router" and
@@ -1892,9 +1840,7 @@ def main():
         else:
             # One undo step per RPC that changes the job (router-round.md R7).
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Plate")
             d.call("machine_part")
             undo_setup = d.call("add_cam_setup", name="Undo")["id"]
             d.call("add_cam_op", setup=undo_setup, type="profile",
@@ -1918,21 +1864,20 @@ def main():
         # names a face on each: lay_face_up refuses to guess, and takes `part`.
         if has_cam:
             d.call("new_project")
-            first = d.call("add_feature", feature={
-                "type": "Box", "name": "A", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            first = shapes.box(d, (0, 0, 0), (40, 30, 20), "A")
             d.call("add_part", name="B")
-            second = d.call("add_feature", feature={
-                "type": "Box", "name": "B", "position": [0, 0, 0],
-                "width": 30, "height": 30, "depth": 10})
+            second = shapes.box(d, (0, 0, 0), (30, 30, 10), "B")
             expect(first["id"] == second["id"],
                    f"both parts' first feature share an id: {first} {second}")
             d.call("machine_part", part="Part 1")
             jp = d.call("add_job_part", part="B")["id"]
             sid = d.call("add_cam_setup", name="Both")["id"]
+            # The top cap: an Extrude names it `<id>/cap1` in BOTH parts
+            # (a side face is named by its sketch entity, which differs).
             face = next(f["name"] for f in
                         d.call("list_elements", part="B")["bodies"][0]["faces"]
-                        if f["normal"][0] > 0.999)
+                        if f["normal"][2] > 0.999)
+            expect(face.endswith("/cap1"), f"the top cap: {face}")
             pick = {"feature_id": second["id"], "element": face}
             expect_error(d, "set_cam_setup", "say which", id=sid,
                          lay_face_up=pick)
@@ -1946,13 +1891,9 @@ def main():
         # sees -- a keep-out box, or any part the job does not cut.
         if has_cam:
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Plate")
             d.call("add_part", name="Clamp")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Jaw", "position": [0, 0, 0],
-                "width": 8, "height": 10, "depth": 30})
+            shapes.box(d, (0, 0, 0), (8, 10, 30), "Jaw")
             d.call("machine_part", part="Part 1")
             sid = d.call("add_cam_setup", name="Clamped")["id"]
             d.call("add_cam_op", setup=sid, type="profile", top_z=21.0,
@@ -2054,9 +1995,7 @@ def main():
             d.call("new_project")
             for name in ("Plate A", "Plate B"):
                 d.call("add_part", name=name)
-                d.call("add_feature", feature={
-                    "type": "Box", "name": name, "position": [0, 0, 0],
-                    "width": 40, "height": 30, "depth": 20})
+                shapes.box(d, (0, 0, 0), (40, 30, 20), name)
                 d.call("machine_part", name=f"Job {name[-1]}")
             # Job B is the tab in front; every call below names Job A.
             a = d.call("add_cam_setup", job="Job A", name="A's setup")["id"]
@@ -2094,9 +2033,7 @@ def main():
             # so a script that wrote an adaptive op read back a profile and had no
             # way to know.
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Plate")
             # A setup lives in a JOB document since v73, so machining a part is
             # two steps: make the job, then add setups on it.
             d.call("machine_part")
@@ -2118,9 +2055,7 @@ def main():
             # cleared, so adaptive falls back to the concentric strategy and SAYS
             # which one cut it (docs/cam/operations.md#pocket-and-adaptive).
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [-100, -60, 0],
-                "width": 200, "height": 120, "depth": 20})
+            shapes.box(d, (-100, -60, 0), (200, 120, 20), "Plate")
             d.call("add_feature", feature={
                 "type": "Sketch", "name": "Pocket sketch",
                 "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
@@ -2172,9 +2107,7 @@ def main():
                          targets=[floor], top_z=1.0, bottom_z=0.0)
 
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Plate", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Plate")
             d.call("machine_part")
             cam_setup = d.call("add_cam_setup", name="Job")["id"]
             # Arc fitting is a property of the machine, so it persists and the
@@ -2457,9 +2390,7 @@ def main():
         # from each op's OWN answer, so this grows with the table.
         if has_cam:
             d.call("new_project")
-            d.call("add_feature", feature={
-                "type": "Box", "name": "Block", "position": [0, 0, 0],
-                "width": 40, "height": 30, "depth": 20})
+            shapes.box(d, (0, 0, 0), (40, 30, 20), "Block")
             d.call("machine_part")
             sid = d.call("add_cam_setup", name="Every field")["id"]
             d.call("set_cam_setup", id=sid, has_rotary_axis=True, tool={
@@ -2584,9 +2515,7 @@ def main():
         saved_features = len(d.call("get_state")["features"])
         expect(not os.path.exists(crash_project + ".autosave"),
                "clean save leaves no sidecar")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Unsaved work", "position": [50, 0, 0],
-            "width": 2, "height": 2, "depth": 2})
+        shapes.box(d, (50, 0, 0), (2, 2, 2), "Unsaved work")
         # The app's 1 s autosave timer is driven by its main loop, which a
         # loaded machine starves; 60 s of budget, and the real elapsed time is
         # printed so a creeping regression is visible before it fails.
@@ -2623,7 +2552,8 @@ def main():
             expect(len(d2.call("get_state")["features"]) == saved_features,
                    "the saved file itself has the pre-crash features")
             d2.call("open_project", path=r["autosave_path"])
-            expect(len(d2.call("get_state")["features"]) == saved_features + 1,
+            # The unsaved box: its Sketch and its Extrude.
+            expect(len(d2.call("get_state")["features"]) == saved_features + 2,
                    "the autosave carries the unsaved work")
             d2.call("save_project", path=crash_project)
             expect(not os.path.exists(crash_project + ".autosave"),

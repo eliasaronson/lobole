@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -58,9 +59,7 @@ def main():
         d = Designer.wait_for(app.port)
         d.call("new_project")
         d.call("add_part", name="servo")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Body", "position": [0, 0, 0],
-            "width": 20, "height": 10, "depth": 5})
+        servo_body = box(d, (0, 0, 0), (20, 10, 5), "Body")["id"]
         servo = part_id(d, "servo")
         d.call("add_part", name="jaw")
         jaw = part_id(d, "jaw")
@@ -90,9 +89,8 @@ def main():
         refused(d, "export_step", "reference",
                 path=os.path.join(tmp, "jaw.step"))
         # Matter of the jaw's own beside the ghost: only it counts.
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Jaw", "position": [0, 0, -4],
-            "width": 20, "height": 10, "depth": 4})
+        # z -4..0: on Top, extruded down.
+        box(d, (0, 0, 0), (20, 10, 4), "Jaw", reversed=True)
         mass = d.call("mass_properties")
         expect(abs(mass["total"]["volume"] - 800.0) < 1e-6, mass)
         expect(len(mass["bodies"]) == 1, mass)
@@ -101,9 +99,18 @@ def main():
 
         # The source moves. The copy says so and stays as it was.
         d.call("set_active_part", part="servo")
-        d.call("modify_feature", index=0, feature={
-            "type": "Box", "name": "Body", "position": [0, 0, 0],
-            "width": 40, "height": 10, "depth": 5})
+        # Widen the body 20 -> 40 along X: its sketch, solved by hand (the
+        # far side moves and the width dimension says so).
+        sk = next(f for f in d.call("get_state")["features"]
+                  if f["type"] == "Sketch")
+        for e in sk["entities"]:
+            for end in ("a", "b"):
+                if abs(e[end][0] - 20.0) < 1e-9:
+                    e[end][0] = 40.0
+        for c in sk["constraints"]:
+            if c["kind"] == "distance_x" and abs(c["value"] - 20.0) < 1e-9:
+                c["value"] = 40.0
+        d.call("modify_feature", feature_id=sk["id"], feature=sk)
         d.call("set_active_part", part="jaw")
         row = derived_row(d)
         expect(row["stale"] is True, f"moved source not reported: {row}")
@@ -169,7 +176,8 @@ def main():
         d.call("open_project", path=path)
         d.call("set_active_part", part="jaw")
         feats = d.call("get_state")["features"]
-        expect([f["type"] for f in feats] == ["Derived", "Box", "Derived"],
+        expect([f["type"] for f in feats] ==
+               ["Derived", "Sketch", "Extrude", "Derived"],
                [f["type"] for f in feats])
         expect(all(f["stale"] is False for f in feats if f["type"] == "Derived"),
                feats)
@@ -179,9 +187,7 @@ def main():
         # body of a STEP (a camera module arrives as 197), so the created_by
         # filter cannot reach into it.
         d.call("set_active_part", part="servo")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Lug", "position": [0, 0, 20],
-            "width": 5, "height": 5, "depth": 5})
+        box(d, (0, 0, 20), (5, 5, 5), "Lug")
         d.call("set_active_part", part="jaw")
         r = d.call("add_feature", feature={
             "type": "Derived", "name": "lug only", "source_part": servo,
@@ -195,7 +201,7 @@ def main():
             "body_names": ["Flange"]})
         refused(d, "add_feature", "narrow TOGETHER", feature={
             "type": "Derived", "name": "x", "source_part": servo,
-            "bodies": [1], "body_names": ["Lug"]})
+            "bodies": [servo_body], "body_names": ["Lug"]})
 
         # v133: a copy taken in a configuration the source does not have
         # active -- one member of a family -- named, stored as its id, and

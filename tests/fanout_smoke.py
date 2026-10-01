@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -37,9 +38,7 @@ def expect(condition, message):
 def build_part(d, name, size):
     """One agent's share of the work: a part, in its own instance."""
     d.call("add_part", name=name)
-    d.call("add_feature", feature={
-        "type": "Box", "name": name, "position": [0, 0, 0],
-        "width": size, "height": size, "depth": size})
+    box(d, (0, 0, 0), (size, size, size), name)
     return d.call("mass_properties")["total"]["volume"]
 
 
@@ -122,9 +121,7 @@ def main():
         b.call("new_project")
         b.call("open_project", path=shared)
         # A writes first; B's copy of the directory is now stale.
-        a.call("add_feature", feature={
-            "type": "Box", "name": "A's edit", "position": [50, 0, 0],
-            "width": 5, "height": 5, "depth": 5})
+        box(a, (50, 0, 0), (5, 5, 5), "A's edit")
         a.call("save_project", path=shared)
         expect(b.call("project_changed_on_disk")["changed"],
                "B can see the directory moved under it")

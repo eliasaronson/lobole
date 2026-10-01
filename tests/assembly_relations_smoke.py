@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 
 def expect(condition, message):
@@ -52,13 +53,9 @@ def main():
         d = Designer.wait_for(app.port)
         d.call("new_project")
         d.call("add_part", name="carrier")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 80, "height": 20, "depth": 5})
+        box(d, (0, 0, 0), (80, 20, 5), "Blk")
         d.call("add_part", name="gear")
-        d.call("add_feature", feature={
-            "type": "Cylinder", "name": "Disc", "center": [0, 0, 0],
-            "direction": [0, 0, 1], "radius": 12, "height": 6})
+        cylinder(d, (0, 0, 0), "z", 12, 6, "Disc")
         d.call("add_assembly", name="train")
         carrier = d.call("add_occurrence", part="carrier", fixed=True)["id"]
         pinion = d.call("add_occurrence", part="gear")["id"]
@@ -116,9 +113,7 @@ def main():
         # axis — which is never a rack, and is refused in words. Faces whose
         # normal is the travel direction make it one.
         d.call("add_part", name="rack")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Bar", "position": [0, 0, 0],
-            "width": 100, "height": 8, "depth": 6})
+        box(d, (0, 0, 0), (100, 8, 6), "Bar")
         d.call("set_active_part", name="train")
         rack = d.call("add_occurrence", part="rack")["id"]
         up = origin_mate(d, "slider", carrier, rack)

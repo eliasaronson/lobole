@@ -22,6 +22,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
+from smoke_shapes import box  # noqa: E402
 
 
 def expect(condition, message):
@@ -143,13 +144,9 @@ def main():
 
         d.call("new_project")
         d.call("add_part", name="base")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 4, "height": 4, "depth": 4})
+        box(d, (0, 0, 0), (4, 4, 4), "Blk")
         d.call("add_part", name="arm")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Blk", "position": [0, 0, 0],
-            "width": 2, "height": 6, "depth": 2})
+        box(d, (0, 0, 0), (2, 6, 2), "Blk")
 
         # --- Three bolts through a flange ----------------------------------
         # Three identical fastened mates between the same pair. Two of them
