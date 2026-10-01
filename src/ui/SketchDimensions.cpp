@@ -44,8 +44,8 @@ namespace ui {
 namespace {
 
 // UV of a point ref against the live sketch (datum origin/axes included).
-std::optional<glm::vec2> TargetUV(const SketchFeature& sk,
-                                  const sketch::PointRef& r) {
+std::optional<glm::dvec2> TargetUV(const SketchFeature& sk,
+                                   const sketch::PointRef& r) {
   if (sketch::IsDatum(r.entity))
     return sketch::DatumPointUV(r.entity, r.which);
   const size_t idx = sk.IndexOfEntity(r.entity);
@@ -55,7 +55,7 @@ std::optional<glm::vec2> TargetUV(const SketchFeature& sk,
 }
 
 // Direction of a line entity or datum axis (unnormalized), nullopt otherwise.
-std::optional<glm::vec2> LineDirOf(const SketchFeature& sk, uint32_t id) {
+std::optional<glm::dvec2> LineDirOf(const SketchFeature& sk, uint32_t id) {
   if (sketch::IsDatum(id)) {
     const auto ep = sketch::DatumAxisEndpoints(id);
     return ep.second - ep.first;
@@ -69,14 +69,14 @@ std::optional<glm::vec2> LineDirOf(const SketchFeature& sk, uint32_t id) {
 }
 
 // Perpendicular distance from p to the INFINITE line through entity `lineId`.
-double PointToLineDistance(const SketchFeature& sk, glm::vec2 p,
+double PointToLineDistance(const SketchFeature& sk, glm::dvec2 p,
                            uint32_t lineId) {
   const auto a = TargetUV(sk, {lineId, 0});
   const auto dir = LineDirOf(sk, lineId);
-  if (!a || !dir || glm::length(*dir) < 1e-9f)
+  if (!a || !dir || glm::length(*dir) < 1e-9)
     return 0.0;
-  const glm::vec2 d = glm::normalize(*dir);
-  const glm::vec2 r = p - *a;
+  const glm::dvec2 d = glm::normalize(*dir);
+  const glm::dvec2 r = p - *a;
   return std::abs(d.x * r.y - d.y * r.x);
 }
 
@@ -85,7 +85,7 @@ double PointToLineDistance(const SketchFeature& sk, glm::vec2 p,
 // Dimension tool's commit tail). Clears the accumulated targets either way.
 void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
                              double value, std::vector<sketch::PointRef> refs,
-                             const glm::vec2* labelOffset = nullptr) {
+                             const glm::dvec2* labelOffset = nullptr) {
   SketchEditState& edit = state.sketchEdit;
   edit.selected = std::move(refs);
   const bool ok = ApplySketchConstraint(state, kind, value, {}, labelOffset);
@@ -134,9 +134,9 @@ void ResolveAccumulatedTargets(AppState& state, const SketchFeature& sketch) {
       edit.dimPickBody.clear();
       return;
     }
-    const glm::vec2 u = glm::normalize(*da), v = glm::normalize(*db);
-    const float cross = u.x * v.y - u.y * v.x;
-    if (std::abs(cross) < 0.01f) {
+    const glm::dvec2 u = glm::normalize(*da), v = glm::normalize(*db);
+    const double cross = u.x * v.y - u.y * v.x;
+    if (std::abs(cross) < 0.01) {
       // Parallel (within tolerance): the perpendicular distance, dimensioned
       // from an endpoint of the first line to the second (the standard
       // parallel-distance recipe — no parallel constraint is implied).
@@ -149,7 +149,7 @@ void ResolveAccumulatedTargets(AppState& state, const SketchFeature& sketch) {
       // the current wedge is positive and pin exactly it.
       const double ang = std::atan2(std::abs(cross), glm::dot(u, v));
       sketch::PointRef refA = A, refB = B;
-      if (cross < 0.0f)
+      if (cross < 0.0)
         std::swap(refA, refB);
       CommitInferredDimension(state, K::Angle, ang, {refA, refB});
     }
@@ -178,7 +178,7 @@ void ResolveAccumulatedTargets(AppState& state, const SketchFeature& sketch) {
 // The placement click: derive kind/order/value/label from the cursor and
 // commit through the shared tail (which opens the inline editor).
 void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
-                           glm::vec2 cursor) {
+                           glm::dvec2 cursor) {
   SketchEditState& edit = state.sketchEdit;
   edit.dimPlacing = false;
   if (edit.dimPlacePair) {
@@ -193,7 +193,7 @@ void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
                             &p->labelOffset);
     return;
   }
-  const glm::vec2 off = FixedPlacementLabelOffset(
+  const glm::dvec2 off = FixedPlacementLabelOffset(
       sketch, edit.dimPlaceKind, edit.dimPlaceA, edit.dimPlaceB, cursor);
   std::vector<sketch::PointRef> refs = {edit.dimPlaceA};
   if (edit.dimPlaceKind == sketch::ConstraintKind::DistancePL)
@@ -297,28 +297,27 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
 
 // Label offset that puts a fixed-kind placement's label at (or nearest to)
 // the cursor, per that kind's rendering geometry.
-glm::vec2 FixedPlacementLabelOffset(const SketchFeature& sk,
-                                    sketch::ConstraintKind kind,
-                                    const sketch::PointRef& a,
-                                    const sketch::PointRef& b,
-                                    glm::vec2 cursor) {
+glm::dvec2 FixedPlacementLabelOffset(const SketchFeature& sk,
+                                     sketch::ConstraintKind kind,
+                                     const sketch::PointRef& a,
+                                     const sketch::PointRef& b,
+                                     glm::dvec2 cursor) {
   using K = sketch::ConstraintKind;
   if (kind == K::Radius || kind == K::Diameter) {
     const size_t ci = sk.IndexOfEntity(a.entity);
     if (ci == SIZE_MAX)
-      return {0.7f, 0.7f};
-    glm::vec2 center{0.0f};
-    float radius = 0.0f;
-    glm::vec2 dir(0.7071f, 0.7071f); // the renderer's circle leader anchor
+      return {0.7, 0.7};
+    glm::dvec2 center{0.0};
+    double radius = 0.0;
+    glm::dvec2 dir(0.7071, 0.7071); // the renderer's circle leader anchor
     if (const auto* c = std::get_if<sketch::Circle>(&sk.entities[ci])) {
       center = c->center;
-      radius = static_cast<float>(c->radius);
+      radius = c->radius;
     } else if (const auto* arc = std::get_if<sketch::Arc>(&sk.entities[ci])) {
       center = arc->center;
-      radius = static_cast<float>(arc->radius);
+      radius = arc->radius;
       const double midA = 0.5 * (arc->startAngle + arc->endAngle);
-      dir = {static_cast<float>(std::cos(midA)),
-             static_cast<float>(std::sin(midA))};
+      dir = {(std::cos(midA)), (std::sin(midA))};
     }
     return cursor - center - dir * radius; // label lands exactly at cursor
   }
@@ -327,16 +326,16 @@ glm::vec2 FixedPlacementLabelOffset(const SketchFeature& sk,
     const auto p = TargetUV(sk, a);
     const auto la = TargetUV(sk, {b.entity, 0});
     const auto dirO = LineDirOf(sk, b.entity);
-    if (!p || !la || !dirO || glm::length(*dirO) < 1e-6f)
-      return {0.0f, 0.8f};
-    const glm::vec2 d = glm::normalize(*dirO);
-    const glm::vec2 foot = *la + d * glm::dot(*p - *la, d);
-    glm::vec2 off = d * glm::dot(cursor - 0.5f * (*p + foot), d);
-    if (glm::length(off) < 1e-3f)
-      off = d * 0.05f;
+    if (!p || !la || !dirO || glm::length(*dirO) < 1e-6)
+      return {0.0, 0.8};
+    const glm::dvec2 d = glm::normalize(*dirO);
+    const glm::dvec2 foot = *la + d * glm::dot(*p - *la, d);
+    glm::dvec2 off = d * glm::dot(cursor - 0.5 * (*p + foot), d);
+    if (glm::length(off) < 1e-3)
+      off = d * 0.05;
     return off;
   }
-  return {0.7f, 0.7f};
+  return {0.7, 0.7};
 }
 
 // Project tool: click a body's edge or face to add it as LIVE external
@@ -418,13 +417,13 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
     const auto db = LineDirOf(sketch, pick.ref.entity);
     if (!da || !db)
       return false;
-    const glm::vec2 u = glm::normalize(*da), v = glm::normalize(*db);
-    const float cross = u.x * v.y - u.y * v.x;
+    const glm::dvec2 u = glm::normalize(*da), v = glm::normalize(*db);
+    const double cross = u.x * v.y - u.y * v.x;
     // Keep the accumulation in sync so an Esc drops back to the two targets.
     edit.selected = {{lineId, sketch::kWholeEntity},
                      {pick.ref.entity, sketch::kWholeEntity}};
     edit.dimPickBody = {true, true};
-    if (std::abs(cross) < 0.01f) {
+    if (std::abs(cross) < 0.01) {
       const auto p = TargetUV(sketch, {lineId, 0});
       const double dist =
           p ? PointToLineDistance(sketch, *p, pick.ref.entity) : 0.0;
@@ -434,7 +433,7 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
       edit.dimPlacing = false; // angle commits immediately (as ever)
       const double ang = std::atan2(std::abs(cross), glm::dot(u, v));
       sketch::PointRef refA{lineId, 0}, refB{pick.ref.entity, 0};
-      if (cross < 0.0f)
+      if (cross < 0.0)
         std::swap(refA, refB);
       CommitInferredDimension(state, K::Angle, ang, {refA, refB});
     }
@@ -462,31 +461,31 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
 std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
                                                    sketch::PointRef A,
                                                    sketch::PointRef B,
-                                                   glm::vec2 cursor) {
+                                                   glm::dvec2 cursor) {
   const auto paOpt = TargetUV(sk, A), pbOpt = TargetUV(sk, B);
   if (!paOpt || !pbOpt)
     return std::nullopt;
-  glm::vec2 pa = *paOpt, pb = *pbOpt;
-  const glm::vec2 span = pb - pa;
-  const float len = glm::length(span);
-  if (len < 1e-6f)
+  glm::dvec2 pa = *paOpt, pb = *pbOpt;
+  const glm::dvec2 span = pb - pa;
+  const double len = glm::length(span);
+  if (len < 1e-6)
     return std::nullopt;
-  const glm::vec2 d = span / len;
-  const glm::vec2 n(-d.y, d.x); // the aligned dimension's offset direction
-  const glm::vec2 mid = 0.5f * (pa + pb);
-  const glm::vec2 off = cursor - mid;
-  const glm::vec2 u = glm::length(off) > 1e-6f ? glm::normalize(off) : n;
+  const glm::dvec2 d = span / len;
+  const glm::dvec2 n(-d.y, d.x); // the aligned dimension's offset direction
+  const glm::dvec2 mid = 0.5 * (pa + pb);
+  const glm::dvec2 off = cursor - mid;
+  const glm::dvec2 u = glm::length(off) > 1e-6 ? glm::normalize(off) : n;
 
   PairPlacement out;
   out.a = A;
   out.b = B;
-  const bool axisParallel = std::abs(d.x) < 0.01f || std::abs(d.y) < 0.01f;
-  if (axisParallel || std::abs(glm::dot(u, n)) > 0.924f) {
+  const bool axisParallel = std::abs(d.x) < 0.01 || std::abs(d.y) < 0.01;
+  if (axisParallel || std::abs(glm::dot(u, n)) > 0.924) {
     out.kind = sketch::ConstraintKind::Distance;
     out.value = len;
     out.labelOffset = n * glm::dot(off, n);
-    if (glm::length(out.labelOffset) < 1e-3f)
-      out.labelOffset = n * 0.05f; // a zero offset would re-seed on render
+    if (glm::length(out.labelOffset) < 1e-3)
+      out.labelOffset = n * 0.05; // a zero offset would re-seed on render
   } else if (std::abs(u.y) > std::abs(u.x)) {
     out.kind = sketch::ConstraintKind::DistanceX;
     if (pb.x < pa.x) { // the constraint is signed b.x - a.x: keep it positive
@@ -495,7 +494,7 @@ std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
     }
     out.value = std::abs(span.x);
     // x stays 0 — the item-5 drag axis for DistanceX is vertical-only.
-    out.labelOffset = {0.0f, cursor.y - std::min(pa.y, pb.y)};
+    out.labelOffset = {0.0, cursor.y - std::min(pa.y, pb.y)};
   } else {
     out.kind = sketch::ConstraintKind::DistanceY;
     if (pb.y < pa.y) {
@@ -503,7 +502,7 @@ std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
       std::swap(pa, pb);
     }
     out.value = std::abs(span.y);
-    out.labelOffset = {cursor.x - std::min(pa.x, pb.x), 0.0f};
+    out.labelOffset = {cursor.x - std::min(pa.x, pb.x), 0.0};
   }
   return out;
 }

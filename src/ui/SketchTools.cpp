@@ -144,7 +144,7 @@ Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
 // captures the mouse-down baseline. Leaves the session inactive if the sketch
 // is conflicting (BeginDrag refused).
 void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
-                      const SketchPick& pick, glm::vec2 cursorUV) {
+                      const SketchPick& pick, glm::dvec2 cursorUV) {
   SketchDragSession& drag = state.sketchDrag;
   drag = SketchDragSession{}; // reset (drops any prior solver)
   const size_t eidx = sketch.IndexOfEntity(pick.ref.entity);
@@ -178,7 +178,7 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
     ok = drag.solver->BeginDrag(drag.points);
   } else {
     drag.mode = SketchDragSession::Mode::Point;
-    glm::vec2 pos = cursorUV;
+    glm::dvec2 pos = cursorUV;
     if (auto* p = std::get_if<sketch::Point>(&e))
       pos = p->p;
     else if (auto* l = std::get_if<sketch::Line>(&e))
@@ -205,7 +205,7 @@ uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
   std::vector<std::pair<uint8_t, sketch::Snap>> snaps;
   if (infer) {
     for (uint8_t which : InferrablePoints(entity)) {
-      const glm::vec2 p = sketch::EntityPointUV(entity, which);
+      const glm::dvec2 p = sketch::EntityPointUV(entity, which);
       const float ppu = PixelsPerUV(state, sketch.plane, p);
       snaps.emplace_back(
           which, sketch::InferPoint(sketch.entities, p, std::nullopt, 0, ppu));
@@ -234,17 +234,17 @@ uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
 // Per-frame while dragging: retarget from the cursor delta, re-solve, write
 // back.
 void UpdateDragSession(AppState& state, SketchFeature& sketch,
-                       glm::vec2 cursorUV) {
+                       glm::dvec2 cursorUV) {
   SketchDragSession& drag = state.sketchDrag;
   if (!drag.active || !drag.solver)
     return;
   if (drag.mode == SketchDragSession::Mode::CircleRim) {
     drag.solver->SetRadiusTarget(glm::length(cursorUV - drag.circleCenter));
   } else {
-    const glm::vec2 delta = cursorUV - drag.initialCursor;
-    std::vector<glm::vec2> targets;
+    const glm::dvec2 delta = cursorUV - drag.initialCursor;
+    std::vector<glm::dvec2> targets;
     targets.reserve(drag.initialPos.size());
-    for (const glm::vec2& ip : drag.initialPos)
+    for (const glm::dvec2& ip : drag.initialPos)
       targets.push_back(ip + delta);
     drag.solver->SetDragTargets(targets);
   }
@@ -260,7 +260,7 @@ void UpdateDragSession(AppState& state, SketchFeature& sketch,
 // inferred against the pre-existing geometry (before the four sides are added,
 // so the rectangle can't snap to itself) and the implied constraints applied.
 void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
-                     glm::vec2 c1, glm::vec2 c2, bool infer) {
+                     glm::dvec2 c1, glm::dvec2 c2, bool infer) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   std::optional<sketch::Snap> s1, s2;
   if (infer) {
@@ -296,7 +296,7 @@ void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
 // anchored centre point) as one undo record. With `infer`, the CENTRE point
 // and the clicked corner are inferred against the pre-existing geometry.
 void CommitCenterRectangle(AppState& state, SketchFeature& sketch, size_t index,
-                           glm::vec2 center, glm::vec2 corner, bool infer) {
+                           glm::dvec2 center, glm::dvec2 corner, bool infer) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   std::optional<sketch::Snap> s1, s2;
   if (infer) {
@@ -329,17 +329,17 @@ void CommitCenterRectangle(AppState& state, SketchFeature& sketch, size_t index,
 
 // Intersects a screen ray with a plane; returns UV on the plane, or nullopt
 // if parallel.
-std::optional<glm::vec2> RayToPlaneUV(const Ray& ray,
-                                      const SketchPlane& plane) {
-  const glm::vec3 n = plane.GetNormal();
-  const float denom = glm::dot(ray.direction, n);
-  if (std::abs(denom) < 1e-6f)
+std::optional<glm::dvec2> RayToPlaneUV(const Ray& ray,
+                                       const SketchPlane& plane) {
+  const glm::dvec3 n = plane.GetNormal();
+  const glm::dvec3 o(ray.origin), dir(ray.direction);
+  const double denom = glm::dot(dir, n);
+  if (std::abs(denom) < 1e-6)
     return std::nullopt;
-  const float t = glm::dot(plane.GetOrigin() - ray.origin, n) / denom;
-  if (t < 0.0f)
+  const double t = glm::dot(plane.GetOrigin() - o, n) / denom;
+  if (t < 0.0)
     return std::nullopt;
-  glm::vec3 world = ray.origin + t * ray.direction;
-  return plane.WorldToPlane(world);
+  return plane.WorldToPlane(o + t * dir);
 }
 
 // Mouse-up: end the drag and commit one undoable edit from the baseline.
@@ -361,9 +361,9 @@ void EndDragSession(AppState& state, SketchFeature& sketch) {
 // parallel-perpendicular constraints (each kept only if it bites). `infer`
 // off (auto-constrain disabled or Ctrl held) places the raw line.
 void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
-                glm::vec2 a, glm::vec2 b, bool infer) {
+                glm::dvec2 a, glm::dvec2 b, bool infer) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  glm::vec2 pa = a, pb = b;
+  glm::dvec2 pa = a, pb = b;
   std::vector<sketch::Constraint> candidates;
   uint32_t id = 0;
   if (infer) {
@@ -399,9 +399,9 @@ LineVertex3D LineVertex(const glm::vec3& p) {
 
 // Approximate pixels per UV unit at `uv` (from the current zoom), for turning
 // the inference's pixel tolerances into UV distances.
-float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::vec2 uv) {
+float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::dvec2 uv) {
   glm::vec2 s0 = SketchUVToScreen(state, plane, uv);
-  glm::vec2 s1 = SketchUVToScreen(state, plane, uv + glm::vec2(1.0f, 0.0f));
+  glm::vec2 s1 = SketchUVToScreen(state, plane, uv + glm::dvec2(1.0, 0.0));
   return glm::length(s1 - s0);
 }
 
@@ -503,8 +503,8 @@ uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
   return BeginSketch(state, std::move(sketch), plane, name, purpose);
 }
 
-bool BeginHoleSketchOnFace(AppState& state, uint32_t meshId,
-                           uint32_t faceIndex) {
+bool ExactFacePlane(const AppState& state, uint32_t meshId, uint32_t faceIndex,
+                    glm::dvec3& origin, glm::dvec3& normal, glm::dvec3& uAxis) {
   if (!state.document)
     return false;
   const auto& meshes = state.documentMeshes;
@@ -514,10 +514,16 @@ bool BeginHoleSketchOnFace(AppState& state, uint32_t meshId,
   if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
     return false;
   const Body& body = state.document->GetBodies()[it->bodyIndex];
+  return body.shape.FacePlane(static_cast<int>(faceIndex), origin, normal,
+                              uAxis);
+}
+
+bool BeginHoleSketchOnFace(AppState& state, uint32_t meshId,
+                           uint32_t faceIndex) {
   // The B-Rep planarity gate: FacePlane fails on curved faces and hands back
   // the exact frame for planar ones.
-  glm::vec3 origin, normal, uAxis;
-  if (!body.shape.FacePlane(static_cast<int>(faceIndex), origin, normal, uAxis))
+  glm::dvec3 origin, normal, uAxis;
+  if (!ExactFacePlane(state, meshId, faceIndex, origin, normal, uAxis))
     return false;
   const SketchPlane plane(origin, normal, uAxis);
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
@@ -578,7 +584,7 @@ void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
   if (state.sketchClipboard.empty())
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  const glm::vec2 d(0.5f, 0.5f);
+  const glm::dvec2 d(0.5, 0.5);
   for (sketch::Entity e : state.sketchClipboard) {
     std::visit(
         [&](auto& ent) {
@@ -594,7 +600,7 @@ void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
                                std::is_same_v<T, sketch::EllipseArc>) {
             ent.center += d;
           } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
-            for (glm::vec2& pole : ent.poles)
+            for (glm::dvec2& pole : ent.poles)
               pole += d;
           } else if constexpr (std::is_same_v<T, sketch::Text>) {
             ent.anchor += d;
@@ -662,7 +668,7 @@ void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
   sketch::DerivedOp op;
   op.kind = sketch::DerivedKind::LinkedCopy;
   op.sourceIds = state.sketchClipboardIds;
-  op.vec = glm::vec2(0.5f, 0.5f); // paste offset
+  op.vec = glm::dvec2(0.5, 0.5); // paste offset
   op.count = 2;
   op.sourceSketchId = opSourceId;
   sketch.derived.push_back(op);

@@ -1046,7 +1046,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         // steps the caller drew in their head. Two errors in one number, and
         // the sketch it builds looks deliberate.
         result["generated"] = sk->AddCircularPattern(
-            sources, {c[0].get<float>(), c[1].get<float>()},
+            sources, {c[0].get<double>(), c[1].get<double>()},
             AngleParam(p.contains("angle"), p.value("angle", 0.0),
                        p.contains("angle_deg"), p.value("angle_deg", 0.0),
                        "angle", "angle_deg", 0.0),
@@ -1054,7 +1054,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       } else {
         const auto& s = p.at("step");
         result["generated"] = sk->AddLinearPattern(
-            sources, {s[0].get<float>(), s[1].get<float>()}, count, link);
+            sources, {s[0].get<double>(), s[1].get<double>()}, count, link);
       }
     } else if (m == "offset") {
       std::vector<uint32_t> chain;
@@ -1139,14 +1139,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ext = ".png";
       ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
       // Centre the image on the requested point (default plane origin).
-      glm::vec2 center(0.0f, 0.0f);
+      glm::dvec2 center(0.0, 0.0);
       if (p.contains("at")) {
         const auto& a = p.at("at");
-        center = {a[0].get<float>(), a[1].get<float>()};
+        center = {a[0].get<double>(), a[1].get<double>()};
       }
       ri.origin =
-          center - 0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
-                       float(ri.unitsPerPixel);
+          center - 0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
       doc->SetAsset(ri.asset, std::move(bytes));
       result = {{"image_id", id},
                 {"width_px", ri.widthPx},
@@ -1158,8 +1157,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const std::string al = p.value("align", std::string("none"));
       const int align = al == "horizontal" ? 0 : al == "vertical" ? 1 : -1;
       if (!sk->CalibrateImage(p.at("image_id").get<uint32_t>(),
-                              {a[0].get<float>(), a[1].get<float>()},
-                              {b[0].get<float>(), b[1].get<float>()},
+                              {a[0].get<double>(), a[1].get<double>()},
+                              {b[0].get<double>(), b[1].get<double>()},
                               p.at("distance").get<double>(), align))
         throw std::runtime_error(
             "calibration failed (unknown image or coincident points)");
@@ -1182,7 +1181,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
       if (p.contains("origin")) {
         const auto& o = p.at("origin");
-        ri.origin = {o[0].get<float>(), o[1].get<float>()};
+        ri.origin = {o[0].get<double>(), o[1].get<double>()};
       }
       result["ok"] = true;
     } else if (m == "delete_reference_image") {

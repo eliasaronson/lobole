@@ -50,18 +50,18 @@ sketch::Text Label(const std::string& s, double h,
 // The extent of every point a label's segments carry (poles included: a
 // glyph's ink never leaves its control hull, and the stems are lines).
 struct Extent {
-  glm::vec2 lo{1e9f}, hi{-1e9f};
+  glm::dvec2 lo{1e9}, hi{-1e9};
 };
 Extent InkExtent(const sketch::TextGeometry& g) {
   Extent e;
   for (const sketch::TextContour& c : g.contours)
     for (const sketch::Entity& seg : c.segments) {
-      std::vector<glm::vec2> pts;
+      std::vector<glm::dvec2> pts;
       if (const auto* l = std::get_if<sketch::Line>(&seg))
         pts = {l->a, l->b};
       else if (const auto* b = std::get_if<sketch::BSpline>(&seg))
         pts = b->poles;
-      for (const glm::vec2& p : pts) {
+      for (const glm::dvec2& p : pts) {
         e.lo = glm::min(e.lo, p);
         e.hi = glm::max(e.hi, p);
       }
@@ -116,7 +116,7 @@ TEST_CASE("A label's cap height and advance match the font", "[sketch][text]") {
 
 TEST_CASE("Alignment and angle place the box on the anchor", "[sketch][text]") {
   sketch::Text t = Label("H", 10.0);
-  t.anchor = {5.0f, 5.0f};
+  t.anchor = {5.0, 5.0};
   t.halign = sketch::TextHAlign::Center;
   t.valign = sketch::TextVAlign::Top;
   auto g = sketch::BuildTextGeometry(t);
@@ -144,7 +144,7 @@ TEST_CASE("A label survives a save and reload", "[sketch][text]") {
     Document doc;
     auto sk = std::make_unique<SketchFeature>("Sk", kXY);
     sketch::Text t = Label("Rook 8", 6.5, "hershey");
-    t.anchor = {1.0f, 2.0f};
+    t.anchor = {1.0, 2.0};
     t.angle = 0.25;
     t.halign = sketch::TextHAlign::Right;
     t.valign = sketch::TextVAlign::Middle;
@@ -166,7 +166,7 @@ TEST_CASE("A label survives a save and reload", "[sketch][text]") {
   CHECK_THAT(t->height, WithinRel(6.5, 1e-12));
   CHECK_THAT(t->angle, WithinRel(0.25, 1e-12));
   CHECK_THAT(t->spacing, WithinRel(0.75, 1e-12));
-  CHECK(t->anchor == glm::vec2(1.0f, 2.0f));
+  CHECK(t->anchor == glm::dvec2(1.0, 2.0));
   CHECK(t->halign == sketch::TextHAlign::Right);
   CHECK(t->valign == sketch::TextVAlign::Middle);
   CHECK(sk->entityExprs.at(id).at("height") == "6.5");

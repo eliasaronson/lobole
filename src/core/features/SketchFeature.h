@@ -23,17 +23,17 @@ namespace sketch {
 // constraints and snapping but is excluded from the extrude profile and drawn
 // dashed/dimmed.
 struct Point {
-  glm::vec2 p;
+  glm::dvec2 p;
   uint32_t id = 0;
   bool construction = false;
 };
 struct Line {
-  glm::vec2 a, b;
+  glm::dvec2 a, b;
   uint32_t id = 0;
   bool construction = false;
 };
 struct Circle {
-  glm::vec2 center;
+  glm::dvec2 center;
   double radius;
   uint32_t id = 0;
   bool construction = false;
@@ -43,7 +43,7 @@ struct Circle {
 // produced only at shape-build time. `endAngle` is normalized so the CCW sweep
 // `endAngle - startAngle` lies in (0, 2π).
 struct Arc {
-  glm::vec2 center;
+  glm::dvec2 center;
   double radius;
   double startAngle;
   double endAngle;
@@ -53,7 +53,7 @@ struct Arc {
 // A full ellipse: major axis is `rotation` radians from the +U axis. `which`
 // 0 addresses the centre.
 struct Ellipse {
-  glm::vec2 center;
+  glm::dvec2 center;
   double rMajor;
   double rMinor;
   double rotation;
@@ -69,7 +69,7 @@ struct Ellipse {
 // Designer has no full draw tool for it in v1 — it exists for import + profile
 // use).
 struct EllipseArc {
-  glm::vec2 center;
+  glm::dvec2 center;
   double rMajor;
   double rMinor;
   double rotation;
@@ -89,7 +89,7 @@ struct EllipseArc {
 // defaults (see BSplineKnots), keeping serialization small and every pole
 // addressable by `PointRef::which` (uint8_t; poles capped at 255).
 struct BSpline {
-  std::vector<glm::vec2> poles;
+  std::vector<glm::dvec2> poles;
   int degree = 3;
   uint32_t id = 0;
   bool construction = false;
@@ -106,7 +106,7 @@ struct BSpline {
 enum class TextHAlign : uint8_t { Left, Center, Right };
 enum class TextVAlign : uint8_t { Baseline, Bottom, Middle, Top };
 struct Text {
-  glm::vec2 anchor{0.0f};
+  glm::dvec2 anchor{0.0};
   std::string text;          // UTF-8, one line
   std::string font = "sans"; // a bundled font by name (sketch::TextFontNames)
   double height = 0.0;       // CAP height, sketch units (mm)
@@ -121,7 +121,7 @@ struct Text {
 // UV of a text label's anchor (which 0) or box corner (which 1..4). Defined in
 // core/sketch/SketchText.cpp: the box needs the font's metrics. A label whose
 // layout fails (unknown font, missing glyph) answers its anchor.
-glm::vec2 TextPointUV(const Text& text, uint8_t which);
+glm::dvec2 TextPointUV(const Text& text, uint8_t which);
 
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
@@ -145,7 +145,7 @@ using Entity =
 struct ReferenceImage {
   uint32_t id = 0;              // stable within the sketch (1-based; 0 = none)
   std::string asset;            // Document asset key for the pixel data
-  glm::vec2 origin{0.0f, 0.0f}; // plane-UV of the image's (0,0) pixel corner
+  glm::dvec2 origin{0.0, 0.0};  // plane-UV of the image's (0,0) pixel corner
   double rotation = 0.0;        // radians CCW about `origin`
   double unitsPerPixel = 1.0;   // plane units per image pixel (the scale)
   double opacity = 0.5;         // 0..1 blend over the sketch background
@@ -183,10 +183,10 @@ inline std::vector<double> BSplineKnots(int n, int p) {
 }
 
 // Evaluate the clamped B-spline at global parameter u in [0, n-p] (de Boor).
-inline glm::vec2 BSplineEvalUV(const BSpline& s, double u) {
+inline glm::dvec2 BSplineEvalUV(const BSpline& s, double u) {
   const int n = static_cast<int>(s.poles.size());
   if (n == 0)
-    return glm::vec2(0.0f);
+    return glm::dvec2(0.0);
   const int p = BSplineDegree(s);
   if (p == 0)
     return s.poles[0];
@@ -200,24 +200,23 @@ inline glm::vec2 BSplineEvalUV(const BSpline& s, double u) {
   int k = p;
   while (k < n - 1 && U[k + 1] <= u)
     k++;
-  std::vector<glm::vec2> d(p + 1);
+  std::vector<glm::dvec2> d(p + 1);
   for (int j = 0; j <= p; j++)
     d[j] = s.poles[j + k - p];
   for (int r = 1; r <= p; r++) {
     for (int j = p; j >= r; j--) {
       const double denom = U[j + 1 + k - r] - U[j + k - p];
-      const float a =
-          denom > 1e-12 ? static_cast<float>((u - U[j + k - p]) / denom) : 0.0f;
-      d[j] = (1.0f - a) * d[j - 1] + a * d[j];
+      const double a = denom > 1e-12 ? ((u - U[j + k - p]) / denom) : 0.0;
+      d[j] = (1.0 - a) * d[j - 1] + a * d[j];
     }
   }
   return d[p];
 }
 
 // Samples the spline into a polyline (`segsPerSpan` segments per knot span).
-inline std::vector<glm::vec2> BSplineSampleUV(const BSpline& s,
-                                              int segsPerSpan = 16) {
-  std::vector<glm::vec2> pts;
+inline std::vector<glm::dvec2> BSplineSampleUV(const BSpline& s,
+                                               int segsPerSpan = 16) {
+  std::vector<glm::dvec2> pts;
   const int n = static_cast<int>(s.poles.size());
   if (n == 0)
     return pts;
@@ -237,40 +236,39 @@ inline std::vector<glm::vec2> BSplineSampleUV(const BSpline& s,
 // Builds an ellipse from three clicks: centre, a point on the major axis (sets
 // rMajor + rotation), and a third point whose perpendicular distance to the
 // major axis sets rMinor.
-inline Ellipse EllipseFromClicks(glm::vec2 center, glm::vec2 majorEnd,
-                                 glm::vec2 minorPt) {
-  const glm::vec2 maj = majorEnd - center;
+inline Ellipse EllipseFromClicks(glm::dvec2 center, glm::dvec2 majorEnd,
+                                 glm::dvec2 minorPt) {
+  const glm::dvec2 maj = majorEnd - center;
   const double rMajor = glm::length(maj);
   const double rotation = std::atan2(maj.y, maj.x);
   // Perpendicular (minor-axis) direction, and the third point's distance to it.
-  const glm::vec2 minorDir(-std::sin(rotation), std::cos(rotation));
+  const glm::dvec2 minorDir(-std::sin(rotation), std::cos(rotation));
   const double rMinor = std::abs(glm::dot(minorPt - center, minorDir));
   return Ellipse{center, rMajor, rMinor, rotation};
 }
 
 // UV of a point on the ellipse at parametric angle `t` (before/after rotation).
-inline glm::vec2 EllipsePointUV(const Ellipse& e, double t) {
+inline glm::dvec2 EllipsePointUV(const Ellipse& e, double t) {
   const double x = e.rMajor * std::cos(t), y = e.rMinor * std::sin(t);
   const double c = std::cos(e.rotation), s = std::sin(e.rotation);
-  return e.center + glm::vec2(static_cast<float>(c * x - s * y),
-                              static_cast<float>(s * x + c * y));
+  return e.center + glm::dvec2((c * x - s * y), (s * x + c * y));
 }
 
 // UV of a point on the elliptical arc at ellipse parameter `t`.
-inline glm::vec2 EllipseArcEvalUV(const EllipseArc& e, double t) {
+inline glm::dvec2 EllipseArcEvalUV(const EllipseArc& e, double t) {
   const double x = e.rMajor * std::cos(t), y = e.rMinor * std::sin(t);
   const double c = std::cos(e.rotation), s = std::sin(e.rotation);
-  return e.center + glm::vec2(static_cast<float>(c * x - s * y),
-                              static_cast<float>(s * x + c * y));
+  return e.center + glm::dvec2((c * x - s * y), (s * x + c * y));
 }
 
 // The ellipse parameter t of a point p on the ellipse (center/rMajor/rMinor/
 // rotation) — the inverse of EllipseArcEvalUV. Used when a reflection has to
 // re-derive the swept params of the mirrored arc.
-inline double EllipseParamOfPoint(glm::vec2 center, double rMajor,
-                                  double rMinor, double rotation, glm::vec2 p) {
+inline double EllipseParamOfPoint(glm::dvec2 center, double rMajor,
+                                  double rMinor, double rotation,
+                                  glm::dvec2 p) {
   const double c = std::cos(rotation), s = std::sin(rotation);
-  const glm::vec2 d = p - center;
+  const glm::dvec2 d = p - center;
   const double lx = c * d.x + s * d.y;  // component along the major axis
   const double ly = -s * d.x + c * d.y; // along the minor axis
   return std::atan2(ly / rMinor, lx / rMajor);
@@ -278,7 +276,7 @@ inline double EllipseParamOfPoint(glm::vec2 center, double rMajor,
 
 // UV of one of an elliptical arc's referenced points: 0 = center, 1 = start,
 // 2 = end (matching the CCW startParam/endParam). Mirrors ArcPointUV.
-inline glm::vec2 EllipseArcPointUV(const EllipseArc& e, uint8_t which) {
+inline glm::dvec2 EllipseArcPointUV(const EllipseArc& e, uint8_t which) {
   if (which == 1)
     return EllipseArcEvalUV(e, e.startParam);
   if (which == 2)
@@ -288,8 +286,8 @@ inline glm::vec2 EllipseArcPointUV(const EllipseArc& e, uint8_t which) {
 
 // Samples the elliptical arc into a polyline along its CCW sweep. `segs` <= 0
 // picks a count proportional to the swept angle (like Arc's tessellation).
-inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
-                                                 int segs = 0) {
+inline std::vector<glm::dvec2> EllipseArcSampleUV(const EllipseArc& e,
+                                                  int segs = 0) {
   double s = e.startParam, en = e.endParam;
   while (en <= s)
     en += 2.0 * M_PI; // CCW-always
@@ -297,7 +295,7 @@ inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
   if (segs <= 0)
     segs =
         std::max(2, static_cast<int>(std::lround(32 * sweep / (2.0 * M_PI))));
-  std::vector<glm::vec2> pts;
+  std::vector<glm::dvec2> pts;
   pts.reserve(segs + 1);
   for (int i = 0; i <= segs; i++)
     pts.push_back(EllipseArcEvalUV(e, s + sweep * i / segs));
@@ -306,14 +304,14 @@ inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
 
 // UV of one of an arc's referenced points: which 0 = center, 1 = start, 2 = end
 // (start/end matching CCW startAngle/endAngle). Mirrors Circle's center = 0.
-inline glm::vec2 ArcPointUV(const Arc& arc, uint8_t which) {
-  const float r = static_cast<float>(arc.radius);
+inline glm::dvec2 ArcPointUV(const Arc& arc, uint8_t which) {
+  const double r = arc.radius;
   if (which == 1)
     return arc.center +
-           r * glm::vec2(std::cos(arc.startAngle), std::sin(arc.startAngle));
+           r * glm::dvec2(std::cos(arc.startAngle), std::sin(arc.startAngle));
   if (which == 2)
     return arc.center +
-           r * glm::vec2(std::cos(arc.endAngle), std::sin(arc.endAngle));
+           r * glm::dvec2(std::cos(arc.endAngle), std::sin(arc.endAngle));
   return arc.center;
 }
 
@@ -334,8 +332,8 @@ inline void SetConstruction(Entity& e, bool c) {
 // Builds a CCW arc centred at `center`, starting at `start`, sweeping CCW to
 // the ray toward `endDir`. Radius = |start - center|; the sweep is normalized
 // into (0, 2π].
-inline Arc ArcCenterStartEnd(glm::vec2 center, glm::vec2 start,
-                             glm::vec2 endDir) {
+inline Arc ArcCenterStartEnd(glm::dvec2 center, glm::dvec2 start,
+                             glm::dvec2 endDir) {
   const double r = glm::length(start - center);
   double a0 = std::atan2(start.y - center.y, start.x - center.x);
   double a1 = std::atan2(endDir.y - center.y, endDir.x - center.x);
@@ -346,8 +344,8 @@ inline Arc ArcCenterStartEnd(glm::vec2 center, glm::vec2 start,
 
 // Builds the CCW arc through three points: from `p0` to `p1`, bulging through
 // `through`. Returns nullopt if the points are collinear (no circumcircle).
-inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
-                                             glm::vec2 p1) {
+inline std::optional<Arc> ArcFromThreePoints(glm::dvec2 p0, glm::dvec2 through,
+                                             glm::dvec2 p1) {
   const double ax = p0.x, ay = p0.y, bx = through.x, by = through.y, cx = p1.x,
                cy = p1.y;
   const double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
@@ -355,12 +353,13 @@ inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
     return std::nullopt;
   const double a2 = ax * ax + ay * ay, b2 = bx * bx + by * by,
                c2 = cx * cx + cy * cy;
-  glm::vec2 center(static_cast<float>(
-                       (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d),
-                   static_cast<float>(
-                       (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d));
+  glm::dvec2 center(
+      static_cast<double>((a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) /
+                          d),
+      static_cast<double>((a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) /
+                          d));
   const double r = glm::length(p0 - center);
-  auto ang = [&](glm::vec2 p) {
+  auto ang = [&](glm::dvec2 p) {
     return std::atan2(p.y - center.y, p.x - center.x);
   };
   auto wrap = [](double x) {
@@ -378,13 +377,13 @@ inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
 }
 
 // Reflects a point across the infinite line through a and b.
-inline glm::vec2 ReflectPoint(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
-  glm::vec2 d = b - a;
-  float len2 = glm::dot(d, d);
-  if (len2 < 1e-12f)
+inline glm::dvec2 ReflectPoint(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b) {
+  glm::dvec2 d = b - a;
+  double len2 = glm::dot(d, d);
+  if (len2 < 1e-12)
     return p;                          // degenerate axis: identity
-  float t = glm::dot(p - a, d) / len2; // projection param along the axis
-  glm::vec2 foot = a + t * d;
+  double t = glm::dot(p - a, d) / len2; // projection param along the axis
+  glm::dvec2 foot = a + t * d;
   return foot + (foot - p); // p mirrored through its foot on the axis
 }
 
@@ -392,7 +391,7 @@ inline glm::vec2 ReflectPoint(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
 // arc CCW-always invariant. A reflection reverses orientation, so an arc's
 // swept endpoints are reflected and its start/end angles recomputed (the old
 // start maps to the new *end*).
-inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
+inline Entity ReflectEntity(const Entity& e, glm::dvec2 a, glm::dvec2 b) {
   Entity out = std::visit(
       [&](const auto& g) -> Entity {
         using T = std::decay_t<decltype(g)>;
@@ -404,9 +403,9 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           return Circle{ReflectPoint(g.center, a, b), g.radius};
         else if constexpr (std::is_same_v<T, Arc>) {
           // Reflected start becomes the new end (winding flips).
-          glm::vec2 c = ReflectPoint(g.center, a, b);
-          glm::vec2 s = ReflectPoint(ArcPointUV(g, 1), a, b);
-          glm::vec2 en = ReflectPoint(ArcPointUV(g, 2), a, b);
+          glm::dvec2 c = ReflectPoint(g.center, a, b);
+          glm::dvec2 s = ReflectPoint(ArcPointUV(g, 1), a, b);
+          glm::dvec2 en = ReflectPoint(ArcPointUV(g, 2), a, b);
           double a0 = std::atan2(en.y - c.y, en.x - c.x);
           double a1 = std::atan2(s.y - c.y, s.x - c.x);
           while (a1 <= a0)
@@ -414,18 +413,18 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           return Arc{c, g.radius, a0, a1};
         } else if constexpr (std::is_same_v<T, Ellipse>) {
           // Ellipse: reflect the centre and the major-axis direction.
-          glm::vec2 c = ReflectPoint(g.center, a, b);
-          glm::vec2 maj = ReflectPoint(EllipsePointUV(g, 0.0), a, b);
+          glm::dvec2 c = ReflectPoint(g.center, a, b);
+          glm::dvec2 maj = ReflectPoint(EllipsePointUV(g, 0.0), a, b);
           return Ellipse{c, g.rMajor, g.rMinor,
                          std::atan2(maj.y - c.y, maj.x - c.x)};
         } else if constexpr (std::is_same_v<T, EllipseArc>) {
           // Reflect centre + major axis; winding flips, so the reflected old
           // end becomes the new start and the params are re-derived.
-          glm::vec2 c = ReflectPoint(g.center, a, b);
-          glm::vec2 majTip = ReflectPoint(EllipseArcEvalUV(g, 0.0), a, b);
+          glm::dvec2 c = ReflectPoint(g.center, a, b);
+          glm::dvec2 majTip = ReflectPoint(EllipseArcEvalUV(g, 0.0), a, b);
           double rot2 = std::atan2(majTip.y - c.y, majTip.x - c.x);
-          glm::vec2 s2 = ReflectPoint(EllipseArcPointUV(g, 1), a, b);
-          glm::vec2 e2 = ReflectPoint(EllipseArcPointUV(g, 2), a, b);
+          glm::dvec2 s2 = ReflectPoint(EllipseArcPointUV(g, 1), a, b);
+          glm::dvec2 e2 = ReflectPoint(EllipseArcPointUV(g, 2), a, b);
           double p0 = EllipseParamOfPoint(c, g.rMajor, g.rMinor, rot2, e2);
           double p1 = EllipseParamOfPoint(c, g.rMajor, g.rMinor, rot2, s2);
           while (p1 <= p0)
@@ -436,14 +435,13 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           // not — a mirrored label still reads (docs/sketching/README.md#text).
           Text t = g;
           t.anchor = ReflectPoint(g.anchor, a, b);
-          const glm::vec2 dir(static_cast<float>(std::cos(g.angle)),
-                              static_cast<float>(std::sin(g.angle)));
-          const glm::vec2 tip = ReflectPoint(g.anchor + dir, a, b) - t.anchor;
+          const glm::dvec2 dir((std::cos(g.angle)), (std::sin(g.angle)));
+          const glm::dvec2 tip = ReflectPoint(g.anchor + dir, a, b) - t.anchor;
           t.angle = std::atan2(tip.y, tip.x);
           return t;
         } else { // BSpline: reflect every pole
           BSpline bs = g;
-          for (glm::vec2& pole : bs.poles)
+          for (glm::dvec2& pole : bs.poles)
             pole = ReflectPoint(pole, a, b);
           return bs;
         }
@@ -455,7 +453,7 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
 }
 
 // Translates an entity by `t`, preserving id/construction (angles unchanged).
-inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
+inline Entity TranslateEntity(const Entity& e, glm::dvec2 t) {
   Entity out = std::visit(
       [&](const auto& g) -> Entity {
         using T = std::decay_t<decltype(g)>;
@@ -478,7 +476,7 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
           return moved;
         } else { // BSpline: translate every pole
           BSpline bs = g;
-          for (glm::vec2& pole : bs.poles)
+          for (glm::dvec2& pole : bs.poles)
             pole += t;
           return bs;
         }
@@ -492,12 +490,11 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
 // Rotates an entity by `ang` (radians, CCW) about `center`, preserving
 // id/construction and the arc CCW-always invariant (adding `ang` to both arc
 // angles keeps the sweep).
-inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
-  const float c = static_cast<float>(std::cos(ang)),
-              s = static_cast<float>(std::sin(ang));
-  auto rot = [&](glm::vec2 p) {
-    glm::vec2 d = p - center;
-    return center + glm::vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+inline Entity RotateEntity(const Entity& e, glm::dvec2 center, double ang) {
+  const double c = (std::cos(ang)), s = (std::sin(ang));
+  auto rot = [&](glm::dvec2 p) {
+    glm::dvec2 d = p - center;
+    return center + glm::dvec2(c * d.x - s * d.y, s * d.x + c * d.y);
   };
   Entity out = std::visit(
       [&](const auto& g) -> Entity {
@@ -523,7 +520,7 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
           return turned;
         } else { // BSpline: rotate every pole
           BSpline bs = g;
-          for (glm::vec2& pole : bs.poles)
+          for (glm::dvec2& pole : bs.poles)
             pole = rot(pole);
           return bs;
         }
@@ -537,9 +534,9 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
 // UV of the point a ref addresses, for any alternative: Point → p; Line →
 // a (which 0) / b (which 1); Circle → center; Arc → center/start/end per
 // ArcPointUV. Single source of truth for RefUV / EntityPoints / EntityDots.
-inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
+inline glm::dvec2 EntityPointUV(const Entity& e, uint8_t which) {
   return std::visit(
-      [which](const auto& g) -> glm::vec2 {
+      [which](const auto& g) -> glm::dvec2 {
         using T = std::decay_t<decltype(g)>;
         if constexpr (std::is_same_v<T, Point>)
           return g.p;
@@ -557,7 +554,7 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
           return which == 0 ? g.anchor : TextPointUV(g, which);
         else { // BSpline: which addresses pole k
           if (g.poles.empty())
-            return glm::vec2(0.0f);
+            return glm::dvec2(0.0);
           return which < g.poles.size() ? g.poles[which] : g.poles.back();
         }
       },
@@ -579,8 +576,8 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
 std::vector<std::string> EntityExprFields(const Entity& e);
 // {pole index, is x} for a spline field "p<k>x"/"p<k>y", else nullopt.
 std::optional<std::pair<size_t, bool>> PoleField(const std::string& field);
-// Read / write one such field (radius stays double; vec2 coords go through
-// float). nullopt / false when the field doesn't apply to the entity kind.
+// Read / write one such field. nullopt / false when the field doesn't apply
+// to the entity kind.
 std::optional<double> GetEntityField(const Entity& e, const std::string& field);
 bool SetEntityField(Entity& e, const std::string& field, double value);
 
@@ -620,19 +617,19 @@ inline bool IsDatum(uint32_t id) { return id >= kDatumBase; }
 
 // UV of a datum ref's point. Origin = (0,0); an axis's which 0 = origin, which
 // 1 = its unit-direction end.
-inline glm::vec2 DatumPointUV(uint32_t entity, uint8_t which) {
+inline glm::dvec2 DatumPointUV(uint32_t entity, uint8_t which) {
   if (entity == kAxisX)
-    return which == 1 ? glm::vec2(1.0f, 0.0f) : glm::vec2(0.0f, 0.0f);
+    return which == 1 ? glm::dvec2(1.0, 0.0) : glm::dvec2(0.0, 0.0);
   if (entity == kAxisY)
-    return which == 1 ? glm::vec2(0.0f, 1.0f) : glm::vec2(0.0f, 0.0f);
-  return glm::vec2(0.0f, 0.0f); // origin
+    return which == 1 ? glm::dvec2(0.0, 1.0) : glm::dvec2(0.0, 0.0);
+  return glm::dvec2(0.0, 0.0); // origin
 }
 
 // The two points (a, b) defining a datum axis line (kAxisX / kAxisY).
-inline std::pair<glm::vec2, glm::vec2> DatumAxisEndpoints(uint32_t entity) {
+inline std::pair<glm::dvec2, glm::dvec2> DatumAxisEndpoints(uint32_t entity) {
   if (entity == kAxisY)
-    return {{0.0f, 0.0f}, {0.0f, 1.0f}};
-  return {{0.0f, 0.0f}, {1.0f, 0.0f}}; // kAxisX
+    return {{0.0, 0.0}, {0.0, 1.0}};
+  return {{0.0, 0.0}, {1.0, 0.0}}; // kAxisX
 }
 
 enum class ConstraintKind {
@@ -674,7 +671,7 @@ struct Constraint {
   PointRef a, b;
   double value = 0.0;          // Distance / Radius / Angle dimension
   PointRef c;                  // third ref (Symmetric: the symmetry line)
-  glm::vec2 labelOffset{0.0f}; // dimension annotation placement (UV)
+  glm::dvec2 labelOffset{0.0}; // dimension annotation placement (UV)
   // Optional expression driving `value` (empty = plain literal). Evaluated
   // against the document's parameter table on every regeneration; kept last
   // in the struct so existing aggregate initializers stay valid.
@@ -708,14 +705,14 @@ enum class DerivedKind {
 struct DerivedOp {
   DerivedKind kind;
   std::vector<uint32_t> sourceIds;
-  glm::vec2 vec{0.0f}; // Linear: per-step translation. Circular: centre (UV).
+  glm::dvec2 vec{0.0}; // Linear: per-step translation. Circular: centre (UV).
                        // LinkedCopy: the paste offset.
   double scalar = 0.0; // Circular: step angle (radians). Linear: unused.
   int count = 2;       // total instances including the seed (count-1 generated)
   // Linear only (v50): second grid direction. count2 = 1 keeps the pattern
   // 1D; instances flatten row-major (k = row*count + col), so the Inst
   // records need no new fields.
-  glm::vec2 vec2{0.0f};
+  glm::dvec2 vec2{0.0};
   int count2 = 1;
   // Mirror only (v51): the axis line entity (or X/Y datum axis id) the
   // copies reflect across — resolved fresh each regeneration.
@@ -808,8 +805,8 @@ public:
   // 0 (horizontal) or 1 (vertical) the image is also rotated so the p1->p2 line
   // lands on that axis; any other value leaves the rotation unchanged. No-op
   // (returns false) if `id` is unknown or the two points coincide.
-  bool CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2, double distance,
-                      int alignAxis = -1);
+  bool CalibrateImage(uint32_t id, glm::dvec2 p1, glm::dvec2 p2,
+                      double distance, int alignAxis = -1);
   // Index of the entity with the given id, or SIZE_MAX if none. Linear scan —
   // sketches hold few entities, and this avoids a desync-prone cached map.
   size_t IndexOfEntity(uint32_t id) const;
@@ -838,13 +835,13 @@ public:
   // constraints. Corners derive from the opposite corners c1, c2. Returns the
   // four line ids (bottom, right, top, left). Each side is individually
   // editable and trimmable.
-  std::array<uint32_t, 4> AddRectangle(glm::vec2 c1, glm::vec2 c2);
+  std::array<uint32_t, 4> AddRectangle(glm::dvec2 c1, glm::dvec2 c2);
 
   // Centre + corner rectangle: AddRectangle's four sides PLUS a centre Point
   // entity anchored midway between the diagonal corners (Symmetric-about-a-
   // point). Returns {bottom, right, top, left, centre point}.
-  std::array<uint32_t, 5> AddRectangleCentered(glm::vec2 center,
-                                               glm::vec2 corner);
+  std::array<uint32_t, 5> AddRectangleCentered(glm::dvec2 center,
+                                               glm::dvec2 corner);
 
   // Splits the line `id` at point P (assumed on the segment). Piece 1 keeps
   // `id` (its far endpoint becomes P); piece 2 is a new line P -> original-end.
@@ -853,14 +850,14 @@ public:
   // H/V/parallel/perpendicular are copied onto piece 2 (so it stays aligned),
   // and a coincident joins the two pieces at the cut. Returns piece 2's id, or
   // 0 if `id` isn't a line or P is at an endpoint (degenerate).
-  uint32_t SplitEntity(uint32_t id, glm::vec2 P);
+  uint32_t SplitEntity(uint32_t id, glm::dvec2 P);
 
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
   // in, bounded by the line's intersections with other lines (via SplitEntity +
   // DeleteEntity). With no bracketing intersection the whole line is deleted.
   // Returns true if anything changed. Lines only — circles and arcs are
   // trimmed by TrimCurveAt.
-  bool TrimLineAt(uint32_t id, glm::vec2 clickUV);
+  bool TrimLineAt(uint32_t id, glm::dvec2 clickUV);
 
   // Trims the circle or arc `id` at `clickUV`: removes the angular span the
   // click falls in, bounded by the curve's intersections with other lines (and
@@ -868,14 +865,14 @@ public:
   // of the removed span, keeping the id); a trimmed arc becomes up to two arcs
   // (the first keeps the id, the rest are new entities). With no bracketing
   // crossing the whole curve is deleted. Returns true if anything changed.
-  bool TrimCurveAt(uint32_t id, glm::vec2 clickUV);
+  bool TrimCurveAt(uint32_t id, glm::dvec2 clickUV);
 
   // The span (two UV endpoints) that TrimLineAt would remove for a click on
   // line `id` at `clickUV` — the sub-segment bounded by neighbouring crossings.
   // For a hover preview so the user sees exactly what trim will delete. Nullopt
   // if `id` isn't a line.
-  std::optional<std::pair<glm::vec2, glm::vec2>>
-  TrimSpanAt(uint32_t id, glm::vec2 clickUV) const;
+  std::optional<std::pair<glm::dvec2, glm::dvec2>>
+  TrimSpanAt(uint32_t id, glm::dvec2 clickUV) const;
 
   // Mirrors `sourceIds` across the line entity `axisLineId`, appending the
   // reflected copies (fresh ids) and returning their ids. When `link` is true
@@ -903,13 +900,13 @@ public:
   // step2/count2 = the optional second grid direction (v50); count2 = 1
   // keeps it a 1D row.
   std::vector<uint32_t> AddLinearPattern(const std::vector<uint32_t>& sourceIds,
-                                         glm::vec2 step, int count, bool link,
-                                         glm::vec2 step2 = {0.0f, 0.0f},
+                                         glm::dvec2 step, int count, bool link,
+                                         glm::dvec2 step2 = {0.0, 0.0},
                                          int count2 = 1);
   std::vector<uint32_t>
   // centerEntity/centerWhich (v51): optional entity-point reference the
   // centre tracks across regenerations; 0 = the baked `center` coordinate.
-  AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::vec2 center,
+  AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::dvec2 center,
                      double stepAngle, int count, bool link,
                      uint32_t centerEntity = 0, uint8_t centerWhich = 0);
 
@@ -1010,8 +1007,8 @@ private:
   // Shared by TrimLineAt/TrimSpanAt: for line `id` at `clickUV`, outputs the
   // line origin `a`, direction `ab`, and the [tLo,tHi] span to remove. Returns
   // false if `id` isn't a line.
-  bool TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a, glm::vec2& ab,
-                   float& tLo, float& tHi) const;
+  bool TrimBracket(uint32_t id, glm::dvec2 clickUV, glm::dvec2& a,
+                   glm::dvec2& ab, double& tLo, double& tHi) const;
 };
 
 // Resolves a face ElementRef to a work plane (planar faces only): shared by

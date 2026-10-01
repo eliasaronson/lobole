@@ -187,8 +187,8 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
   sourcesRow();
   int count = op.count;
-  glm::vec2 vec = op.vec;
-  glm::vec2 vec2 = op.vec2;
+  glm::dvec2 vec = op.vec;
+  glm::dvec2 vec2 = op.vec2;
   int count2 = op.count2;
   float angleDeg = static_cast<float>(glm::degrees(op.scalar));
   bool changed = false;
@@ -845,21 +845,21 @@ void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
   // Found by the U10 defaults gate.
   AxisRef axis;
   {
-    const glm::vec3 n = sketch.plane.GetNormal();
+    const glm::dvec3 n = sketch.plane.GetNormal();
     // In-plane means perpendicular to the normal. Prefer the plane's own U
     // direction, then V, then whichever world axis is most perpendicular.
-    const glm::vec3 candidates[3] = {glm::vec3(1, 0, 0), glm::vec3(0, 1, 0),
-                                     glm::vec3(0, 0, 1)};
+    const glm::dvec3 candidates[3] = {glm::dvec3(1, 0, 0), glm::dvec3(0, 1, 0),
+                                      glm::dvec3(0, 0, 1)};
     const AxisRef::Kind kinds[3] = {AxisRef::Kind::X, AxisRef::Kind::Y,
                                     AxisRef::Kind::Z};
     int best = 1; // Y, the historical default
-    float bestScore = -1.0f;
+    double bestScore = -1.0;
     for (int i = 0; i < 3; i++) {
-      if (std::abs(glm::dot(candidates[i], n)) > 1e-3f)
+      if (std::abs(glm::dot(candidates[i], n)) > 1e-3)
         continue; // not in the plane
       // Among in-plane axes, the one closest to the sketch's V direction
       // makes the familiar "spin the profile about its vertical" default.
-      const float score =
+      const double score =
           std::abs(glm::dot(candidates[i], sketch.plane.GetVAxis()));
       if (score > bestScore) {
         bestScore = score;
@@ -897,7 +897,7 @@ namespace {
 glm::dvec2 FaceExtent(const SketchFeature& sketch) {
   glm::dvec2 lo(1e30), hi(-1e30);
   bool any = false;
-  const auto note = [&](const glm::vec2& p) {
+  const auto note = [&](const glm::dvec2& p) {
     lo = glm::min(lo, glm::dvec2(p)), hi = glm::max(hi, glm::dvec2(p));
     any = true;
   };
@@ -905,12 +905,12 @@ glm::dvec2 FaceExtent(const SketchFeature& sketch) {
     if (const auto* l = std::get_if<sketch::Line>(&e); l && l->construction)
       note(l->a), note(l->b);
     else if (const auto* a = std::get_if<sketch::Arc>(&e); a && a->construction)
-      note(a->center - glm::vec2(a->radius)),
-          note(a->center + glm::vec2(a->radius));
+      note(a->center - glm::dvec2(a->radius)),
+          note(a->center + glm::dvec2(a->radius));
     else if (const auto* c = std::get_if<sketch::Circle>(&e);
              c && c->construction)
-      note(c->center - glm::vec2(c->radius)),
-          note(c->center + glm::vec2(c->radius));
+      note(c->center - glm::dvec2(c->radius)),
+          note(c->center + glm::dvec2(c->radius));
   }
   return any ? hi - lo : glm::dvec2(0.0);
 }

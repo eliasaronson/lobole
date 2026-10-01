@@ -119,17 +119,17 @@ void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
   for (const auto& entity : sk.entities) {
     // Points render as a small world-space cross
     if (std::holds_alternative<sketch::Point>(entity)) {
-      glm::vec2 uv = std::get<sketch::Point>(entity).p;
-      glm::vec3 c = sk.plane.PlaneToWorld(uv);
-      glm::vec3 u = sk.plane.GetUAxis() * 0.05f;
-      glm::vec3 v = sk.plane.GetVAxis() * 0.05f;
+      const glm::vec3 c =
+          sk.plane.PlaneToWorld(std::get<sketch::Point>(entity).p);
+      const glm::vec3 u = glm::vec3(sk.plane.GetUAxis()) * 0.05f;
+      const glm::vec3 v = glm::vec3(sk.plane.GetVAxis()) * 0.05f;
       out.push_back(LineVertex(c - u, color));
       out.push_back(LineVertex(c + u, color));
       out.push_back(LineVertex(c - v, color));
       out.push_back(LineVertex(c + v, color));
       continue;
     }
-    for (const std::vector<glm::vec2>& poly :
+    for (const std::vector<glm::dvec2>& poly :
          sketch::TessellateEntityPolylines(entity)) {
       for (size_t i = 0; i + 1 < poly.size(); i++) {
         out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i]), color));
@@ -226,9 +226,9 @@ std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane,
 
 void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
                      float half, std::vector<LineVertex3D>& quads) {
-  glm::vec3 o = plane.GetOrigin();
-  glm::vec3 u = plane.GetUAxis() * half;
-  glm::vec3 v = plane.GetVAxis() * half;
+  const glm::vec3 o = plane.GetOrigin();
+  const glm::vec3 u = glm::vec3(plane.GetUAxis()) * half;
+  const glm::vec3 v = glm::vec3(plane.GetVAxis()) * half;
   glm::vec3 a = o - u - v, b = o + u - v, c = o + u + v, d = o - u + v;
   for (const glm::vec3& p : {a, b, c, a, c, d}) {
     quads.push_back(LineVertex(p, color));

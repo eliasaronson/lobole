@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <type_traits>
 
 namespace ui {
 
@@ -353,8 +354,8 @@ namespace {
 // ImGui's DragFloatN does. ImGui's own DragScalarN cannot be reused: each
 // component needs its own stand-in text field, and the stand-in REPLACES the
 // drag rather than sitting beside it.
-bool ExprDragFloatN(AppState& state, const char* label, float* v, int n,
-                    float speed) {
+template <class T>
+bool ExprDragN(AppState& state, const char* label, T* v, int n, float speed) {
   static const char* const kIds[3] = {"##x", "##y", "##z"};
   // Grouped exactly as ImGui's DragScalarN groups its components: EndGroup
   // forwards the active/deactivated status of whichever component the user
@@ -372,8 +373,11 @@ bool ExprDragFloatN(AppState& state, const char* label, float* v, int n,
     if (i > 0)
       ImGui::SameLine(0.0f, inner);
     ImGui::SetNextItemWidth(each);
-    changed |=
-        ExprDragFloat(state, kIds[i], &v[i], speed, -FLT_MAX, FLT_MAX, "%.3f");
+    if constexpr (std::is_same_v<T, double>)
+      changed |= ExprDragDouble(state, kIds[i], &v[i], speed, 0.0, 0.0, "%.3f");
+    else
+      changed |= ExprDragFloat(state, kIds[i], &v[i], speed, -FLT_MAX, FLT_MAX,
+                               "%.3f");
   }
   const char* hidden = std::strstr(label, "##");
   const int visible = hidden != nullptr ? static_cast<int>(hidden - label)
@@ -391,12 +395,22 @@ bool ExprDragFloatN(AppState& state, const char* label, float* v, int n,
 
 bool ExprDragFloat2(AppState& state, const char* label, float v[2],
                     float speed) {
-  return ExprDragFloatN(state, label, v, 2, speed);
+  return ExprDragN(state, label, v, 2, speed);
 }
 
 bool ExprDragFloat3(AppState& state, const char* label, float v[3],
                     float speed) {
-  return ExprDragFloatN(state, label, v, 3, speed);
+  return ExprDragN(state, label, v, 3, speed);
+}
+
+bool ExprDragFloat2(AppState& state, const char* label, double v[2],
+                    float speed) {
+  return ExprDragN(state, label, v, 2, speed);
+}
+
+bool ExprDragFloat3(AppState& state, const char* label, double v[3],
+                    float speed) {
+  return ExprDragN(state, label, v, 3, speed);
 }
 
 bool ExprInputFloat(AppState& state, const char* label, float* v,

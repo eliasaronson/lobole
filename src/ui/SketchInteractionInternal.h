@@ -33,46 +33,46 @@ struct PairPlacement {
   sketch::ConstraintKind kind = sketch::ConstraintKind::Distance;
   sketch::PointRef a, b; // ordered so the solver's signed value is positive
   double value = 0.0;
-  glm::vec2 labelOffset{0.0f};
+  glm::dvec2 labelOffset{0.0};
 };
 
 bool CommitMirrorAcross(AppState& state, SketchFeature& sketch, size_t index,
                         uint32_t axisEntity);
 
 void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
-                      const SketchPick& pick, glm::vec2 cursorUV);
+                      const SketchPick& pick, glm::dvec2 cursorUV);
 
 std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
                                                    sketch::PointRef A,
                                                    sketch::PointRef B,
-                                                   glm::vec2 cursor);
+                                                   glm::dvec2 cursor);
 
 void CommitCenterRectangle(AppState& state, SketchFeature& sketch, size_t index,
-                           glm::vec2 center, glm::vec2 corner, bool infer);
+                           glm::dvec2 center, glm::dvec2 corner, bool infer);
 
 // Returns the committed entity's stable id.
 uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
                       const sketch::Entity& entity, bool infer);
 
 void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
-                glm::vec2 a, glm::vec2 b, bool infer);
+                glm::dvec2 a, glm::dvec2 b, bool infer);
 
 void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
-                           glm::vec2 cursor);
+                           glm::dvec2 cursor);
 
 void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
-                     glm::vec2 c1, glm::vec2 c2, bool infer);
+                     glm::dvec2 c1, glm::dvec2 c2, bool infer);
 
 void EndDragSession(AppState& state, SketchFeature& sketch);
 
-std::vector<std::pair<uint8_t, glm::vec2>>
+std::vector<std::pair<uint8_t, glm::dvec2>>
 EntityPoints(const sketch::Entity& e);
 
-glm::vec2 FixedPlacementLabelOffset(const SketchFeature& sk,
-                                    sketch::ConstraintKind kind,
-                                    const sketch::PointRef& a,
-                                    const sketch::PointRef& b,
-                                    glm::vec2 cursor);
+glm::dvec2 FixedPlacementLabelOffset(const SketchFeature& sk,
+                                     sketch::ConstraintKind kind,
+                                     const sketch::PointRef& a,
+                                     const sketch::PointRef& b,
+                                     glm::dvec2 cursor);
 
 void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
                           const SketchPick& pick);
@@ -82,22 +82,30 @@ bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
 
 LineVertex3D LineVertex(const glm::vec3& p);
 
-float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::vec2 uv);
+float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::dvec2 uv);
 
-std::optional<glm::vec2> RayToPlaneUV(const Ray& ray, const SketchPlane& plane);
+std::optional<glm::dvec2> RayToPlaneUV(const Ray& ray,
+                                       const SketchPlane& plane);
 
-std::optional<glm::vec2> RefUV(const SketchFeature& sk,
-                               const sketch::PointRef& r);
+// The B-rep frame of the planar face behind a picked render-mesh face, in
+// double (CADShape::FacePlane). False when the mesh is not a document body's
+// or the face is curved.
+bool ExactFacePlane(const AppState& state, uint32_t meshId, uint32_t faceIndex,
+                    glm::dvec3& origin, glm::dvec3& normal, glm::dvec3& uAxis);
+
+std::optional<glm::dvec2> RefUV(const SketchFeature& sk,
+                                const sketch::PointRef& r);
 
 bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
                          const SketchPick& pick);
 
 Ray ScreenRay(AppState& state, const glm::vec2& mousePos);
 
-glm::vec2 SeedLabelOffset(const SketchFeature& sk, const sketch::Constraint& c);
+glm::dvec2 SeedLabelOffset(const SketchFeature& sk,
+                           const sketch::Constraint& c);
 
 void UpdateDragSession(AppState& state, SketchFeature& sketch,
-                       glm::vec2 cursorUV);
+                       glm::dvec2 cursorUV);
 
 // Body hit tolerance for the interactive sketch tools (endpoints get +4 px on
 // top — see PickSketchCandidates). Was 12; lines were hard to hit.

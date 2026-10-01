@@ -49,8 +49,8 @@ std::string Join(const std::vector<std::string>& items, size_t show) {
 }
 // The span of a ray that lies inside an axis-aligned box, as [from, to]
 // along `dir`. False when the ray misses it altogether.
-bool ClipToBox(const glm::vec3& origin, const glm::vec3& dir,
-               const glm::vec3& lo, const glm::vec3& hi, double* from,
+bool ClipToBox(const glm::dvec3& origin, const glm::dvec3& dir,
+               const glm::dvec3& lo, const glm::dvec3& hi, double* from,
                double* to) {
   double t0 = *from, t1 = *to;
   for (int i = 0; i < 3; i++) {
@@ -80,8 +80,8 @@ bool ClipToBox(const glm::vec3& origin, const glm::vec3& dir,
 // cannot be right for every part: a thin ledge 160 mm up a yoke, drilled
 // through, sat between the first two of nine samples spread over the whole
 // height, and three correct holes were reported as drilling air.
-bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::vec3& c,
-                       const glm::vec3& axis, double from, double to) {
+bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::dvec3& c,
+                       const glm::dvec3& axis, double from, double to) {
   if (to <= from)
     return false;
   const gp_Lin line(gp_Pnt(c.x, c.y, c.z), gp_Dir(axis.x, axis.y, axis.z));
@@ -100,7 +100,7 @@ bool AxisMeetsMaterial(const std::vector<Body>& bodies, const glm::vec3& c,
       if (cuts[i + 1] - cuts[i] < 1e-6)
         continue;
       const double t = 0.5 * (cuts[i] + cuts[i + 1]);
-      if (b.shape.ContainsPoint(c + axis * float(t)))
+      if (b.shape.ContainsPoint(glm::vec3(c + axis * t)))
         return true;
     }
   }
@@ -154,12 +154,12 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // Arcs count too, and coincident centres merge: a hole whose wall the
   // source split in two (the camera PCB's) projects as two half-arcs, and a
   // cylinder projected along its axis as two circles.
-  std::vector<glm::vec3> centers;
+  std::vector<glm::dvec3> centers;
   std::vector<uint32_t> entities; // the sketch entity each centre came from
-  const auto add = [&](const glm::vec2& uv, uint32_t entity) {
-    const glm::vec3 w = sk->plane.PlaneToWorld(uv);
-    for (const glm::vec3& c : centers)
-      if (glm::length(c - w) < 1e-4f)
+  const auto add = [&](const glm::dvec2& uv, uint32_t entity) {
+    const glm::dvec3 w = sk->plane.PlaneToWorld(uv);
+    for (const glm::dvec3& c : centers)
+      if (glm::length(c - w) < 1e-4)
         return;
     centers.push_back(w);
     entities.push_back(entity);
@@ -177,18 +177,18 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  const glm::vec3 axis = -sk->plane.GetNormal(); // drill into the material
+  const glm::dvec3 axis = -sk->plane.GetNormal(); // drill into the material
   // Through-all: drill well past any body (bbox diagonal of all bodies).
-  glm::vec3 lo(1e30f), hi(-1e30f);
+  glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : ctx.bodies) {
     glm::vec3 bmin, bmax;
     b.shape.GetBoundingBox(bmin, bmax);
-    lo = glm::min(lo, bmin);
-    hi = glm::max(hi, bmax);
+    lo = glm::min(lo, glm::dvec3(bmin));
+    hi = glm::max(hi, glm::dvec3(bmax));
   }
   double boreDepth = depth;
   if (through)
-    boreDepth = ctx.bodies.empty() ? depth : glm::length(hi - lo) + 1.0f;
+    boreDepth = ctx.bodies.empty() ? depth : glm::length(hi - lo) + 1.0;
 
   auto& kernel = CADKernel::Instance();
   const double r = diameter / 2.0;
@@ -205,16 +205,16 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   std::vector<CADShape> tools;
   tools.reserve(centers.size());
   // Drilled from a face it was sketched on, a bore starts a hair behind the
-  // plane when that face lies within the plane's single-precision rounding
-  // (CoplanarStartSlack): a counterbore cut from z = 13.4 kept a 0.4 um skin
-  // over it. Not for a countersink, whose cone is sized at the plane.
+  // plane when that face lies within single-precision rounding of it -- a
+  // face placed through float (CoplanarStartSlack): otherwise a counterbore
+  // keeps a sub-micron skin over it. Not for a countersink, whose cone is
+  // sized at the plane.
   double slack = 0.0;
   if (kind != HoleKind::Countersink)
-    for (const glm::vec3& c : centers)
-      slack = std::max(slack, CoplanarStartSlack(ctx.bodies, glm::dvec3(c),
-                                                 glm::dvec3(axis), true));
-  for (const glm::vec3& c0 : centers) {
-    const glm::vec3 c = c0 - axis * float(slack);
+    for (const glm::dvec3& c : centers)
+      slack = std::max(slack, CoplanarStartSlack(ctx.bodies, c, axis, true));
+  for (const glm::dvec3& c0 : centers) {
+    const glm::dvec3 c = c0 - axis * slack;
     CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth + slack);
     if (kind == HoleKind::Counterbore && cbDiameter > diameter &&
         cbDepth > 1e-9) {
@@ -280,7 +280,7 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // worse than none, so this asks the question directly instead.
   {
     std::vector<std::string> empty;
-    for (const glm::vec3& c : centers) {
+    for (const glm::dvec3& c : centers) {
       // Asked over the span where material CAN be — the bore clipped to the
       // bodies' box — not over the bore's own length, which for a through
       // hole is a bounding-box diagonal.
@@ -370,9 +370,9 @@ void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
 // hole's faces, so nothing could ask for "the bores", and adding a point
 // renumbered the rest (docs/modeling/toponaming.md#naming-grammar).
 void HoleFeature::NameByRole(const CADShape& tool,
-                             const std::vector<glm::vec3>& centers,
+                             const std::vector<glm::dvec3>& centers,
                              const std::vector<uint32_t>& entities,
-                             const glm::vec3& axis, double boreDepth,
+                             const glm::dvec3& axis, double boreDepth,
                              ElementMap& out) const {
   out = {};
   const gp_Dir dir(axis.x, axis.y, axis.z);
@@ -417,7 +417,7 @@ void HoleFeature::NameByRole(const CADShape& tool,
       }
     }
     if (s.GetType() == GeomAbs_Plane) {
-      const glm::vec3& c = centers[site];
+      const glm::dvec3& c = centers[site];
       const double t = gp_Vec(gp_Pnt(c.x, c.y, c.z), p).Dot(gp_Vec(dir));
       if (same(t, boreDepth))
         role = "bottom";

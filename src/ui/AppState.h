@@ -178,19 +178,19 @@ struct SketchEditState {
   // sketch, Shift+E, File/New) SHOULD clear it, and does, for free.
   SketchPurpose purpose = SketchPurpose::Freeform;
   bool hasPendingPoint = false; // first click of a two-click entity placed
-  glm::vec2 pendingPoint{0.0f};
+  glm::dvec2 pendingPoint{0.0};
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
-  glm::vec2 pendingPoint2{0.0f};
+  glm::dvec2 pendingPoint2{0.0};
   // Third/fourth clicks — only the 5-click elliptic-arc tool uses these
   // (centre, major-axis end, minor radius, start; the 5th click commits).
   bool hasPendingPoint3 = false;
-  glm::vec2 pendingPoint3{0.0f};
+  glm::dvec2 pendingPoint3{0.0};
   bool hasPendingPoint4 = false;
-  glm::vec2 pendingPoint4{0.0f};
-  glm::vec2 hoverPoint{0.0f};
+  glm::dvec2 pendingPoint4{0.0};
+  glm::dvec2 hoverPoint{0.0};
   // Spline tool: control poles placed so far. Committed as a BSpline on Enter
   // or a double-click (>= 2 poles); Escape or a tool switch clears them.
-  std::vector<glm::vec2> splinePoles;
+  std::vector<glm::dvec2> splinePoles;
 
   // Box (rubber-band) selection in progress (Select tool). Screen px; the
   // window/crossing sense is boxEnd.x < boxStart.x (right→left = crossing).
@@ -210,11 +210,11 @@ struct SketchEditState {
   // Pattern tool params (applied to the current selection).
   bool patternCircular = false;
   int patternCount = 3;
-  glm::vec2 patternStep{2.0f, 0.0f}; // linear per-step translation
+  glm::dvec2 patternStep{2.0, 0.0}; // linear per-step translation
   // Second grid direction (v50): count2 = 1 keeps the pattern 1D.
   int patternCount2 = 1;
-  glm::vec2 patternStep2{0.0f, 2.0f};
-  glm::vec2 patternCenter{0.0f}; // circular centre
+  glm::dvec2 patternStep2{0.0, 2.0};
+  glm::dvec2 patternCenter{0.0}; // circular centre
   float patternAngleDeg = 60.0f; // circular step angle
   // Circular centre picking (v51): armed by the session's Pick button — the
   // next canvas click sets the centre; hitting an entity point stores its
@@ -313,14 +313,14 @@ struct SketchEditState {
   // the fan).
   uint32_t glyphExpandedEntity = 0;
   uint32_t calibImageId = 0;
-  glm::vec2 calibP1{0.0f, 0.0f};
-  glm::vec2 calibP2{0.0f, 0.0f};
+  glm::dvec2 calibP1{0.0, 0.0};
+  glm::dvec2 calibP2{0.0, 0.0};
   // Drag-to-move for the selected reference image (SketchTool::Image): the
   // grab point (plane UV) and the image's origin at grab. Commits like the
   // opacity slider: baseline at grab, one command on release.
   bool imageDragActive = false;
-  glm::vec2 imageDragGrabUV{0.0f, 0.0f};
-  glm::vec2 imageDragStartOrigin{0.0f, 0.0f};
+  glm::dvec2 imageDragGrabUV{0.0, 0.0};
+  glm::dvec2 imageDragStartOrigin{0.0, 0.0};
   int calibStage = 0;
   bool calibAlignAxis = false; // also rotate so p1->p2 lands on the U axis
   float calibDistance = 10.0f; // the typed real-world distance
@@ -343,8 +343,8 @@ struct SketchEditState {
   // Trim tool: the sub-segment the cursor would remove, highlighted so it's
   // clear what a click deletes. In plane UV.
   bool hasTrimPreview = false;
-  glm::vec2 trimPreviewA{0.0f};
-  glm::vec2 trimPreviewB{0.0f};
+  glm::dvec2 trimPreviewA{0.0};
+  glm::dvec2 trimPreviewB{0.0};
 
   // Auto-constraint inference (snap + constrain while drawing). Toggle in the
   // toolbar; hold Ctrl to suppress for one click.
@@ -387,10 +387,10 @@ struct SketchDragSession {
   std::unique_ptr<sketch::Solver> solver;
   // Dragged points (Point / LineBody / SketchTranslate).
   std::vector<sketch::PointRef> points;
-  std::vector<glm::vec2> initialPos; // their UV positions at mouse-down
-  glm::vec2 initialCursor{0.0f};
+  std::vector<glm::dvec2> initialPos; // their UV positions at mouse-down
+  glm::dvec2 initialCursor{0.0};
   uint32_t circleId = 0;        // CircleRim
-  glm::vec2 circleCenter{0.0f}; // CircleRim: radius = |cursor - centre|
+  glm::dvec2 circleCenter{0.0}; // CircleRim: radius = |cursor - centre|
   size_t featureIndex = 0;      // sketch index for the commit
 };
 

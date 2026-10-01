@@ -20,8 +20,8 @@ namespace sketch {
 // up by ShapeFix_Wire at build time.
 struct LoopEdge {
   bool arc = false;
-  glm::vec2 a{0.0f}, b{0.0f};
-  glm::vec2 center{0.0f};
+  glm::dvec2 a{0.0}, b{0.0};
+  glm::dvec2 center{0.0};
   double radius = 0.0;
   double angStart = 0.0, angEnd = 0.0; // CCW span (arc only)
   uint32_t entityId = 0; // stable id of the generating sketch entity
@@ -126,7 +126,7 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
 // axis must lie in the sketch plane and the profile must not cross it; a
 // self-intersecting or degenerate result is rejected (invalid CADShape).
 CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
-                      const glm::vec3& axisOrigin, const glm::vec3& axisDir,
+                      const glm::dvec3& axisOrigin, const glm::dvec3& axisDir,
                       double angleRadians, bool reversed, bool symmetric);
 
 // Like BuildRevolve, but also fills `out` with stable names (topological
@@ -137,27 +137,27 @@ CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
 // On failure `error` (optional) receives the reason.
 CADShape BuildRevolveNamed(const SketchPlane& plane,
                            const std::vector<Loop>& loops,
-                           const glm::vec3& axisOrigin,
-                           const glm::vec3& axisDir, double angleRadians,
+                           const glm::dvec3& axisOrigin,
+                           const glm::dvec3& axisDir, double angleRadians,
                            bool reversed, bool symmetric, uint64_t featureTag,
                            ElementMap& out, std::string* error = nullptr);
 
 // Tessellates one entity into a UV polyline for rendering/preview: Line = 2
 // points, Circle = 33 (closed, 32 segments), Point = empty (rendered as a
 // marker elsewhere).
-std::vector<glm::vec2> TessellateEntity(const Entity& entity);
+std::vector<glm::dvec2> TessellateEntity(const Entity& entity);
 
 // Every polyline an entity draws as: TessellateEntity's one for most kinds,
 // one per glyph contour for a text label (whose glyphs must not be joined).
 // A label that cannot be laid out draws nothing.
-std::vector<std::vector<glm::vec2>>
+std::vector<std::vector<glm::dvec2>>
 TessellateEntityPolylines(const Entity& entity);
 
 // If segments [a1,b1] and [a2,b2] properly cross, returns the crossing's
 // parameter t in [0,1] along the *first* segment; nullopt if parallel or the
 // crossing lies outside either segment. Used to find trim cut points.
-std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
-                                      glm::vec2 b2);
+std::optional<double> SegmentIntersect(glm::dvec2 a1, glm::dvec2 b1,
+                                       glm::dvec2 a2, glm::dvec2 b2);
 
 // Offsets a single closed loop formed by `chain` (lines + arcs) by `distance`
 // (signed) on the given plane, delegating corner treatment to OCCT
@@ -174,10 +174,10 @@ std::vector<Entity> OffsetLoop(const SketchPlane& plane,
 std::vector<uint32_t> LoopEntityIds(const Loop& loop);
 
 // Even-odd point-in-loop test in plane UV (arcs sampled to segments).
-bool PointInLoop(const Loop& loop, const glm::vec2& p);
+bool PointInLoop(const Loop& loop, const glm::dvec2& p);
 
 // The loop's boundary as a sampled UV polygon (region-pick overlays).
-std::vector<glm::vec2> LoopBoundaryPolygon(const Loop& loop);
+std::vector<glm::dvec2> LoopBoundaryPolygon(const Loop& loop);
 
 // Projects a body face's boundary edges into plane-UV sketch entities
 // (construction): lines and full circles map exactly, circular arcs map to

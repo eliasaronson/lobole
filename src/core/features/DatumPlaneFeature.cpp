@@ -12,26 +12,26 @@ namespace {
 
 // Near-parallel test for unit vectors; the tolerance is generous because a
 // nearly-degenerate plane is as useless as an exactly-degenerate one.
-bool NearlyParallel(const glm::vec3& a, const glm::vec3& b) {
+bool NearlyParallel(const glm::dvec3& a, const glm::dvec3& b) {
   return std::abs(glm::dot(a, b)) > 0.999;
 }
 
 } // namespace
 
 bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
-                 glm::vec3& outOrigin, glm::vec3& outDir) {
+                 glm::dvec3& outOrigin, glm::dvec3& outDir) {
   switch (ref.kind) {
   case AxisRef::Kind::X:
-    outOrigin = glm::vec3(0.0f);
-    outDir = glm::vec3(1.0f, 0.0f, 0.0f);
+    outOrigin = glm::dvec3(0.0);
+    outDir = glm::dvec3(1.0, 0.0, 0.0);
     return true;
   case AxisRef::Kind::Y:
-    outOrigin = glm::vec3(0.0f);
-    outDir = glm::vec3(0.0f, 1.0f, 0.0f);
+    outOrigin = glm::dvec3(0.0);
+    outDir = glm::dvec3(0.0, 1.0, 0.0);
     return true;
   case AxisRef::Kind::Z:
-    outOrigin = glm::vec3(0.0f);
-    outDir = glm::vec3(0.0f, 0.0f, 1.0f);
+    outOrigin = glm::dvec3(0.0);
+    outDir = glm::dvec3(0.0, 0.0, 1.0);
     return true;
   case AxisRef::Kind::SketchLine: {
     const auto* sketch =
@@ -47,10 +47,10 @@ bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
     if (line == nullptr) {
       return false;
     }
-    const glm::vec3 a = sketch->plane.PlaneToWorld(line->a);
-    const glm::vec3 b = sketch->plane.PlaneToWorld(line->b);
-    const glm::vec3 d = b - a;
-    if (glm::dot(d, d) < 1e-12f) {
+    const glm::dvec3 a = sketch->plane.PlaneToWorld(line->a);
+    const glm::dvec3 b = sketch->plane.PlaneToWorld(line->b);
+    const glm::dvec3 d = b - a;
+    if (glm::dot(d, d) < 1e-12) {
       return false; // zero-length line
     }
     outOrigin = a;
@@ -62,8 +62,8 @@ bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
     if (glm::dot(d, d) < 1e-18) {
       return false; // no direction to turn about
     }
-    outOrigin = glm::vec3(ref.origin);
-    outDir = glm::vec3(glm::normalize(d));
+    outOrigin = glm::dvec3(ref.origin);
+    outDir = glm::dvec3(glm::normalize(d));
     return true;
   }
   case AxisRef::Kind::DatumAxis: {
@@ -109,8 +109,7 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
       return false;
     }
     const double d = flip ? -offset : offset;
-    m_outPlane = SketchPlane(parent->GetOrigin() +
-                                 parent->GetNormal() * static_cast<float>(d),
+    m_outPlane = SketchPlane(parent->GetOrigin() + parent->GetNormal() * d,
                              parent->GetNormal(), parent->GetUAxis());
     return true;
   }
@@ -120,8 +119,8 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
       SetError("parent plane not found");
       return false;
     }
-    glm::vec3 axisOrigin{0.0f};
-    glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
+    glm::dvec3 axisOrigin{0.0};
+    glm::dvec3 axisDir{1.0, 0.0, 0.0};
     if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
       SetError("axis not found");
       return false;
@@ -130,16 +129,16 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
       SetError("axis is parallel to the parent normal");
       return false;
     }
-    const float rad = glm::radians(static_cast<float>(angleDeg));
-    const glm::mat3 rot(glm::rotate(glm::mat4(1.0f), rad, axisDir));
+    const double rad = glm::radians(angleDeg);
+    const glm::dmat3 rot(glm::rotate(glm::dmat4(1.0), rad, axisDir));
     // The rotated plane hinges on the axis: the axis lies in the plane
     // (uAxis follows it) and the parent normal tips around it.
     m_outPlane = SketchPlane(axisOrigin, rot * parent->GetNormal(), axisDir);
     return true;
   }
   case DatumPlaneKind::ThroughPoints: {
-    const glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
-    if (glm::dot(n, n) < 1e-12f) {
+    const glm::dvec3 n = glm::cross(p1 - p0, p2 - p0);
+    if (glm::dot(n, n) < 1e-12) {
       SetError("the three points are collinear");
       return false;
     }

@@ -40,8 +40,8 @@ bool SplitFeature::Execute(RegenContext& ctx) {
   }
 
   // Resolve the knife to a point + normal defining the cutting plane.
-  glm::vec3 origin{0.0f};
-  glm::vec3 normal{0.0f, 0.0f, 1.0f};
+  glm::dvec3 origin{0.0};
+  glm::dvec3 normal{0.0, 0.0, 1.0};
   if (knife == SplitKnifeKind::Plane) {
     const auto plane = ResolveParentPlane(ctx, datumId, basePlane);
     if (!plane) {
@@ -49,7 +49,7 @@ bool SplitFeature::Execute(RegenContext& ctx) {
       return false;
     }
     normal = plane->GetNormal();
-    origin = plane->GetOrigin() + normal * static_cast<float>(offset);
+    origin = plane->GetOrigin() + normal * offset;
   } else { // Face
     if (face.featureId != bodyId) {
       SetError("the knife face must belong to the split body");
@@ -60,7 +60,7 @@ bool SplitFeature::Execute(RegenContext& ctx) {
       SetError("the knife face '" + face.name + "' no longer exists");
       return false;
     }
-    glm::vec3 uAxis;
+    glm::dvec3 uAxis;
     if (!body->shape.FacePlane(*idx, origin, normal, uAxis)) {
       SetError("the knife face is not planar");
       return false;
@@ -72,8 +72,8 @@ bool SplitFeature::Execute(RegenContext& ctx) {
   // still fully crossed. Half-extent = the bounding-box diagonal (generous).
   glm::vec3 bmin, bmax;
   body->shape.GetBoundingBox(bmin, bmax);
-  const glm::vec3 center = (bmin + bmax) * 0.5f;
-  const glm::vec3 proj = center - glm::dot(center - origin, normal) * normal;
+  const glm::dvec3 center = (glm::dvec3(bmin) + glm::dvec3(bmax)) * 0.5;
+  const glm::dvec3 proj = center - glm::dot(center - origin, normal) * normal;
   const double h =
       std::max(1e-3, static_cast<double>(glm::length(bmax - bmin)));
 
@@ -107,17 +107,17 @@ bool SplitFeature::Execute(RegenContext& ctx) {
       // identical in the viewport when the plane is edge-on. Say where the
       // knife is, in the one number that matters — distance along its own
       // normal — so the offset to type is arithmetic, not trial and error.
-      float lo = std::numeric_limits<float>::max();
-      float hi = std::numeric_limits<float>::lowest();
+      double lo = std::numeric_limits<double>::max();
+      double hi = std::numeric_limits<double>::lowest();
       for (int c = 0; c < 8; c++) {
-        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                               (c & 2) ? bmax.y : bmin.y,
-                               (c & 4) ? bmax.z : bmin.z);
-        const float d = glm::dot(corner, normal);
+        const glm::dvec3 corner((c & 1) ? bmax.x : bmin.x,
+                                (c & 2) ? bmax.y : bmin.y,
+                                (c & 4) ? bmax.z : bmin.z);
+        const double d = glm::dot(corner, normal);
         lo = std::min(lo, d);
         hi = std::max(hi, d);
       }
-      const float knife = glm::dot(origin, normal);
+      const double knife = glm::dot(origin, normal);
       char msg[192];
       if (knife <= lo || knife >= hi) {
         std::snprintf(msg, sizeof(msg),

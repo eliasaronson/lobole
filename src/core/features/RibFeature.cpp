@@ -40,16 +40,16 @@ RibFeature::RibFeature(const std::string& name, uint64_t sketchId,
 namespace {
 // Bbox corner projections onto a direction: the [min, max] span of the shape
 // along `dir`, for classifying cut components against the profile plane.
-void ProjectionSpan(const CADShape& shape, const glm::vec3& dir, float& lo,
-                    float& hi) {
+void ProjectionSpan(const CADShape& shape, const glm::dvec3& dir, double& lo,
+                    double& hi) {
   glm::vec3 mn, mx;
   shape.GetBoundingBox(mn, mx);
-  lo = FLT_MAX;
-  hi = -FLT_MAX;
+  lo = DBL_MAX;
+  hi = -DBL_MAX;
   for (int c = 0; c < 8; c++) {
-    const glm::vec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
-                           (c & 4) ? mx.z : mn.z);
-    const float p = glm::dot(corner, dir);
+    const glm::dvec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
+                            (c & 4) ? mx.z : mn.z);
+    const double p = glm::dot(corner, dir);
     lo = std::min(lo, p);
     hi = std::max(hi, p);
   }
@@ -89,7 +89,7 @@ bool RibFeature::Execute(RegenContext& ctx) {
     }
   }
 
-  glm::vec3 N = glm::normalize(sk->plane.GetNormal());
+  glm::dvec3 N = glm::normalize(sk->plane.GetNormal());
   if (flipDirection)
     N = -N;
 
@@ -99,9 +99,9 @@ bool RibFeature::Execute(RegenContext& ctx) {
     // wire into the sketch plane's local frame, offset there, and move the
     // result back. Round ends (GeomAbs_Arc) — a spanning rib's ends are cut
     // away by the walls it runs into anyway.
-    const glm::vec3 o = sk->plane.GetOrigin();
-    const glm::vec3 u = sk->plane.GetUAxis();
-    const glm::vec3 pn = sk->plane.GetNormal();
+    const glm::dvec3 o = sk->plane.GetOrigin();
+    const glm::dvec3 u = sk->plane.GetUAxis();
+    const glm::dvec3 pn = sk->plane.GetNormal();
     const gp_Ax3 planeAx(gp_Pnt(o.x, o.y, o.z), gp_Dir(pn.x, pn.y, pn.z),
                          gp_Dir(u.x, u.y, u.z));
     gp_Trsf toLocal;
@@ -171,9 +171,9 @@ bool RibFeature::Execute(RegenContext& ctx) {
       lo = glm::min(lo, mn);
       hi = glm::max(hi, mx);
     }
-    const float L =
-        2.0f * (glm::length(hi - lo) + glm::length(o - (lo + hi) * 0.5f)) +
-        static_cast<float>(thickness) + 1.0f;
+    const double L = 2.0 * (glm::length(glm::dvec3(hi - lo)) +
+                            glm::length(o - glm::dvec3(lo + hi) * 0.5)) +
+                     thickness + 1.0;
 
     BRepPrimAPI_MakePrism prism(mkFace.Face(),
                                 gp_Vec(N.x * L, N.y * L, N.z * L));
@@ -215,11 +215,11 @@ bool RibFeature::Execute(RegenContext& ctx) {
       SetError("rib trim against the body failed");
       return false;
     }
-    const float base = glm::dot(o, N); // every plane point projects here
-    const float eps = std::max(1e-4f * L, 1e-5f);
+    const double base = glm::dot(o, N); // every plane point projects here
+    const double eps = std::max(1e-4 * L, 1e-5);
     std::vector<CADShape> kept;
     for (CADShape& comp : cut.SplitSolids()) {
-      float clo, chi;
+      double clo, chi;
       ProjectionSpan(comp, N, clo, chi);
       if (clo - base > eps)
         continue; // starts past the plane: beyond the body, not rib material

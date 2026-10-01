@@ -23,8 +23,9 @@ using Catch::Matchers::WithinRel;
 namespace {
 // A sketch of points on a plane at height z (normal +Z).
 uint64_t PointSketch(Document& doc, double z,
-                     const std::vector<glm::vec2>& pts) {
-  SketchPlane plane(glm::vec3(0, 0, z), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+                     const std::vector<glm::dvec2>& pts) {
+  SketchPlane plane(glm::dvec3(0, 0, z), glm::dvec3(0, 0, 1),
+                    glm::dvec3(1, 0, 0));
   auto sk = std::make_unique<SketchFeature>("Holes", plane);
   for (const auto& p : pts)
     sk->AddEntity(sketch::Point{p});
@@ -79,7 +80,7 @@ TEST_CASE("Counterbore removes more than a simple hole", "[hole]") {
 TEST_CASE("A hole names its faces by role and by point", "[hole][toponaming]") {
   // Named by position, every hole's faces interleaved (7/face0..n), nothing
   // could ask for "the bores", and adding a point renamed the others.
-  const auto build = [](const std::vector<glm::vec2>& pts) {
+  const auto build = [](const std::vector<glm::dvec2>& pts) {
     auto doc = std::make_unique<Document>();
     doc->AddFeature(
         std::make_unique<BoxFeature>("B", glm::vec3(0), 40, 10, 10));
@@ -266,13 +267,14 @@ TEST_CASE("a through hole in a thin ledge far above the rest is not air",
 }
 
 TEST_CASE("a counterbore drilled from a face keeps no skin over it", "[hole]") {
-  // A sketch plane is single precision: at z = 13.4 it is 13.39999962, and a
-  // counterbore drilled from it into a part whose top is at 13.4 kept a
-  // 0.4 um skin over the counterbore, sealing it.
+  // A box placed at z = 24.7 sits at 24.70000076 (a primitive's position is
+  // single precision), so its top is 0.76 um above a plane typed at 29.7. A
+  // counterbore drilled from that plane kept a skin over itself, sealing it;
+  // the bores start a hair behind the plane instead (CoplanarStartSlack).
   Document doc;
-  doc.AddFeature(
-      std::make_unique<BoxFeature>("B", glm::vec3(0), 20.0, 20.0, 13.4));
-  const uint64_t sk = PointSketch(doc, 13.4, {{10, 10}});
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 24.7), 20.0,
+                                              20.0, 13.4));
+  const uint64_t sk = PointSketch(doc, 24.7 + 13.4, {{10, 10}});
   auto ho =
       std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 4.5, 0.0);
   ho->through = true;
@@ -292,7 +294,7 @@ TEST_CASE("a counterbore drilled from a face keeps no skin over it", "[hole]") {
     gp_Dir n = s.Plane().Axis().Direction();
     if (f.Orientation() == TopAbs_REVERSED)
       n.Reverse();
-    if (n.Z() < -0.5 && s.Plane().Location().Z() > 13.0)
+    if (n.Z() < -0.5 && s.Plane().Location().Z() > 37.0)
       lids++;
   }
   CHECK(lids == 0);

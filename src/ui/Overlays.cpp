@@ -37,10 +37,10 @@ void DrawDatumLabels(AppState& state) {
     if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f)) {
       // Label near a corner of the 3-unit quad.
       glm::vec2 s =
-          SketchUVToScreen(state, dp->OutputPlane(), glm::vec2(2.6f, 2.6f));
+          SketchUVToScreen(state, dp->OutputPlane(), glm::dvec2(2.6, 2.6));
       dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
     } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {
-      const glm::vec3 end = da->Origin() + da->Direction() * 3.0f;
+      const glm::vec3 end = da->Origin() + da->Direction() * 3.0;
       glm::vec2 s = WorldToScreen(state, end);
       dl->AddText(ImVec2(s.x, s.y), col, da->GetName().c_str());
     } else if (auto* fr = dynamic_cast<FrameFeature*>(f)) {

@@ -296,14 +296,15 @@ std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray) {
   const SketchFeature* sk = SlotFeatureSketch(state);
   if (sk == nullptr)
     return std::nullopt;
-  const glm::vec3 n = sk->plane.GetNormal();
-  const float denom = glm::dot(ray.direction, n);
-  if (std::abs(denom) < 1e-6f)
+  const glm::dvec3 n = sk->plane.GetNormal();
+  const glm::dvec3 o(ray.origin), dir(ray.direction);
+  const double denom = glm::dot(dir, n);
+  if (std::abs(denom) < 1e-6)
     return std::nullopt; // plane edge-on
-  const float t = glm::dot(sk->plane.GetOrigin() - ray.origin, n) / denom;
-  if (t <= 0.0f)
+  const double t = glm::dot(sk->plane.GetOrigin() - o, n) / denom;
+  if (t <= 0.0)
     return std::nullopt;
-  const glm::vec2 uv = sk->plane.WorldToPlane(ray.origin + t * ray.direction);
+  const glm::dvec2 uv = sk->plane.WorldToPlane(o + t * dir);
 
   const std::vector<sketch::Loop> loops = sketch::BuildLoops(sk->entities);
   const sketch::Loop* innermost = nullptr;
@@ -895,7 +896,7 @@ void AppendRegionPickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   const glm::vec4 kHover{1.00f, 0.85f, 0.30f, 1.0f};
   const glm::vec4 kSelected{0.35f, 0.80f, 1.00f, 1.0f};
   const auto drawLoop = [&](const sketch::Loop& loop, const glm::vec4& color) {
-    const std::vector<glm::vec2> poly = sketch::LoopBoundaryPolygon(loop);
+    const std::vector<glm::dvec2> poly = sketch::LoopBoundaryPolygon(loop);
     for (size_t i = 0; i < poly.size(); i++) {
       const glm::vec3 a = sk->plane.PlaneToWorld(poly[i]);
       const glm::vec3 b = sk->plane.PlaneToWorld(poly[(i + 1) % poly.size()]);

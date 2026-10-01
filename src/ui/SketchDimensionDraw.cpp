@@ -48,15 +48,15 @@ namespace {
 // span (the along-span slide shears the line past its extension lines);
 // angle dims are handled radially at the drag site; radius/diameter leaders
 // stay free (the leader legitimately follows the label anywhere).
-glm::vec2 ConstrainLabelOffset(const SketchFeature& sk,
-                               const sketch::Constraint& con, glm::vec2 off) {
+glm::dvec2 ConstrainLabelOffset(const SketchFeature& sk,
+                                const sketch::Constraint& con, glm::dvec2 off) {
   using K = sketch::ConstraintKind;
   switch (con.kind) {
   case K::Distance: {
     const auto a = RefUV(sk, con.a), b = RefUV(sk, con.b);
-    if (!a || !b || glm::length(*b - *a) < 1e-6f)
+    if (!a || !b || glm::length(*b - *a) < 1e-6)
       return off;
-    const glm::vec2 d = glm::normalize(*b - *a);
+    const glm::dvec2 d = glm::normalize(*b - *a);
     return off - d * glm::dot(off, d); // perpendicular-to-span only
   }
   case K::DistancePL: {
@@ -64,24 +64,24 @@ glm::vec2 ConstrainLabelOffset(const SketchFeature& sk,
     // allowed offset is therefore along the LINE's direction.
     const auto la = RefUV(sk, {con.b.entity, 0});
     const auto lb = RefUV(sk, {con.b.entity, 1});
-    if (!la || !lb || glm::length(*lb - *la) < 1e-6f)
+    if (!la || !lb || glm::length(*lb - *la) < 1e-6)
       return off;
-    const glm::vec2 d = glm::normalize(*lb - *la);
+    const glm::dvec2 d = glm::normalize(*lb - *la);
     return d * glm::dot(off, d);
   }
   case K::DistanceX:
-    return {0.0f, off.y}; // the dimension line only moves vertically
+    return {0.0, off.y}; // the dimension line only moves vertically
   case K::DistanceY:
-    return {off.x, 0.0f};
+    return {off.x, 0.0};
   default:
     return off;
   }
 }
 
 // A filled arrowhead at `tip` pointing along `dir` (screen space).
-void Arrow(ImDrawList* dl, ImVec2 tip, glm::vec2 dir, ImU32 col) {
-  glm::vec2 n{-dir.y, dir.x};
-  const float len = 9.0f, w = 3.5f;
+void Arrow(ImDrawList* dl, ImVec2 tip, glm::dvec2 dir, ImU32 col) {
+  glm::dvec2 n{-dir.y, dir.x};
+  const double len = 9.0, w = 3.5;
   ImVec2 base(tip.x - dir.x * len, tip.y - dir.y * len);
   dl->AddTriangleFilled(tip, ImVec2(base.x + n.x * w, base.y + n.y * w),
                         ImVec2(base.x - n.x * w, base.y - n.y * w), col);
@@ -97,13 +97,13 @@ bool ReflectPLPoint(SketchFeature& sk, const sketch::Constraint& con) {
   const auto lb = RefUV(sk, {con.b.entity, 1});
   if (!p || !la || !lb)
     return false;
-  const glm::vec2 dv = *lb - *la;
-  const float len = glm::length(dv);
-  if (len < 1e-6f)
+  const glm::dvec2 dv = *lb - *la;
+  const double len = glm::length(dv);
+  if (len < 1e-6)
     return false;
-  const glm::vec2 d = dv / len;
-  const glm::vec2 n(-d.y, d.x);
-  const glm::vec2 target = *p - 2.0f * n * glm::dot(*p - *la, n);
+  const glm::dvec2 d = dv / len;
+  const glm::dvec2 n(-d.y, d.x);
+  const glm::dvec2 target = *p - 2.0 * n * glm::dot(*p - *la, n);
   const size_t idx = sk.IndexOfEntity(con.a.entity);
   if (idx == SIZE_MAX)
     return false; // datum refs can't move
@@ -186,8 +186,8 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
 } // namespace
 
 // UV position of a point ref (line endpoint / point / circle centre / datum).
-std::optional<glm::vec2> RefUV(const SketchFeature& sk,
-                               const sketch::PointRef& r) {
+std::optional<glm::dvec2> RefUV(const SketchFeature& sk,
+                                const sketch::PointRef& r) {
   if (sketch::IsDatum(r.entity))
     return sketch::DatumPointUV(r.entity, r.which);
   size_t idx = sk.IndexOfEntity(r.entity);
@@ -208,7 +208,7 @@ namespace {
 // past — and ImGui is told to re-read the buffer on the frame after that,
 // or its copy wins and the field commits the prefix.
 bool CompletingDimInput(AppState& state, const char* id, char* buf,
-                        size_t bufSize, float width) {
+                        size_t bufSize, double width) {
   static ImGuiID reloadId = 0;
   static int reloadCaret = -1;
   const ImGuiID fieldId = ImGui::GetID(id);
@@ -252,20 +252,20 @@ void DrawDimensions(AppState& state) {
   ImGuiIO& io = ImGui::GetIO();
   const ImU32 col = IM_COL32(120, 200, 255, 235);
   const ImU32 colHot = IM_COL32(255, 220, 130, 255);
-  auto scr = [&](glm::vec2 uv) {
-    glm::vec2 s = SketchUVToScreen(state, sketch->plane, uv);
+  auto scr = [&](glm::dvec2 uv) {
+    glm::dvec2 s = SketchUVToScreen(state, sketch->plane, uv);
     return ImVec2(s.x, s.y);
   };
   // Screen-pixel delta → sketch-UV delta around `at` (the plane can sit
   // rotated/foreshortened on screen): invert the local 2x2 screen basis.
-  auto uvDelta = [&](const ImVec2& d, glm::vec2 at) -> glm::vec2 {
+  auto uvDelta = [&](const ImVec2& d, glm::dvec2 at) -> glm::dvec2 {
     const ImVec2 o = scr(at);
-    const ImVec2 px = scr(at + glm::vec2(1.0f, 0.0f));
-    const ImVec2 py = scr(at + glm::vec2(0.0f, 1.0f));
-    const glm::vec2 bx(px.x - o.x, px.y - o.y), by(py.x - o.x, py.y - o.y);
-    const float det = bx.x * by.y - bx.y * by.x;
-    if (std::abs(det) < 1e-9f)
-      return {0.0f, 0.0f};
+    const ImVec2 px = scr(at + glm::dvec2(1.0, 0.0));
+    const ImVec2 py = scr(at + glm::dvec2(0.0, 1.0));
+    const glm::dvec2 bx(px.x - o.x, px.y - o.y), by(py.x - o.x, py.y - o.y);
+    const double det = bx.x * by.y - bx.y * by.x;
+    if (std::abs(det) < 1e-9)
+      return {0.0, 0.0};
     return {(d.x * by.y - d.y * by.x) / det, (bx.x * d.y - bx.y * d.x) / det};
   };
 
@@ -322,7 +322,7 @@ void DrawDimensions(AppState& state) {
     // zero (files from before offsets were written) — a per-kind legible
     // default. A drag materializes the drawn offset into the constraint
     // first, so the label never jumps when grabbed.
-    glm::vec2 effOff = con.labelOffset;
+    glm::dvec2 effOff = con.labelOffset;
     using K = sketch::ConstraintKind;
 
     if (con.kind == K::Radius || con.kind == K::Diameter) {
@@ -330,36 +330,35 @@ void DrawDimensions(AppState& state) {
       if (ci == SIZE_MAX)
         continue;
       const auto& ent = sketch->entities[ci];
-      glm::vec2 center;
-      float radius;
-      glm::vec2 dir(0.7071f, 0.7071f); // circle: 45° leader
+      glm::dvec2 center;
+      double radius;
+      glm::dvec2 dir(0.7071, 0.7071); // circle: 45° leader
       if (auto* circ = std::get_if<sketch::Circle>(&ent)) {
         center = circ->center;
-        radius = static_cast<float>(circ->radius);
+        radius = circ->radius;
       } else if (auto* arc = std::get_if<sketch::Arc>(&ent)) {
         center = arc->center;
-        radius = static_cast<float>(arc->radius);
+        radius = arc->radius;
         double mid =
             0.5 * (arc->startAngle + arc->endAngle); // within the sweep
-        dir = {static_cast<float>(std::cos(mid)),
-               static_cast<float>(std::sin(mid))};
+        dir = {(std::cos(mid)), (std::sin(mid))};
       } else {
         continue;
       }
-      if (glm::length(effOff) < 1e-4f)
+      if (glm::length(effOff) < 1e-4)
         effOff = SeedLabelOffset(*sketch, con);
       // The label sits at rim + offset; the rim anchor follows the label
       // around the circle so the leader is always radial, with the arrowhead
       // touching the rim from the label's side.
-      glm::vec2 labelUV = center + dir * radius + effOff;
-      const glm::vec2 fromCenter = labelUV - center;
-      const glm::vec2 rdir =
-          glm::length(fromCenter) > 1e-5f ? glm::normalize(fromCenter) : dir;
-      const glm::vec2 rimUV = center + rdir * radius;
+      glm::dvec2 labelUV = center + dir * radius + effOff;
+      const glm::dvec2 fromCenter = labelUV - center;
+      const glm::dvec2 rdir =
+          glm::length(fromCenter) > 1e-5 ? glm::normalize(fromCenter) : dir;
+      const glm::dvec2 rimUV = center + rdir * radius;
       const ImVec2 rimS = scr(rimUV), labS = scr(labelUV);
-      dl->AddLine(rimS, labS, col, 1.4f);
-      const glm::vec2 lead(rimS.x - labS.x, rimS.y - labS.y);
-      if (glm::length(lead) > 1e-3f)
+      dl->AddLine(rimS, labS, col, 1.4);
+      const glm::dvec2 lead(rimS.x - labS.x, rimS.y - labS.y);
+      if (glm::length(lead) > 1e-3)
         Arrow(dl, rimS, glm::normalize(lead), col);
       // |value|: a negative-evaluating expr means a flip, never a "-R".
       snprintf(label, sizeof(label),
@@ -368,46 +367,46 @@ void DrawDimensions(AppState& state) {
       labelPos = labS;
     } else if (con.kind == K::Angle) {
       snprintf(label, sizeof(label), "%.1f\xC2\xB0",
-               std::abs(con.value) * 57.2957795f);
+               std::abs(con.value) * 57.2957795);
       const auto a0 = RefUV(*sketch, {con.a.entity, 0});
       const auto a1 = RefUV(*sketch, {con.a.entity, 1});
       const auto b0 = RefUV(*sketch, {con.b.entity, 0});
       const auto b1 = RefUV(*sketch, {con.b.entity, 1});
       if (!a0 || !a1 || !b0 || !b1)
         continue;
-      const glm::vec2 da = *a1 - *a0, db = *b1 - *b0;
-      const float cross = da.x * db.y - da.y * db.x;
-      if (std::abs(cross) < 1e-9f || glm::length(da) < 1e-6f ||
-          glm::length(db) < 1e-6f) {
+      const glm::dvec2 da = *a1 - *a0, db = *b1 - *b0;
+      const double cross = da.x * db.y - da.y * db.x;
+      if (std::abs(cross) < 1e-9 || glm::length(da) < 1e-6 ||
+          glm::length(db) < 1e-6) {
         // (Near-)parallel lines: no usable vertex — plain label fallback.
-        labelPos = scr(*a0 + effOff + glm::vec2(0.3f, 0.3f));
+        labelPos = scr(*a0 + effOff + glm::dvec2(0.3, 0.3));
       } else {
         // Vertex = the infinite lines' intersection.
-        const float t =
+        const double t =
             ((b0->x - a0->x) * db.y - (b0->y - a0->y) * db.x) / cross;
-        const glm::vec2 inter = *a0 + da * t;
-        if (glm::length(effOff) < 1e-4f)
+        const glm::dvec2 inter = *a0 + da * t;
+        if (glm::length(effOff) < 1e-4)
           effOff = SeedLabelOffset(*sketch, con);
-        const float rUV = std::max(glm::length(effOff), 0.35f);
+        const double rUV = std::max(glm::length(effOff), 0.35);
         // Pick the direction signs whose wedge best matches the stored
         // angle, preferring the side the label offset points to — dragging
         // the label across the vertex flips the measured wedge, the way
         // other CAD flips dimension quadrants.
-        const glm::vec2 offDir = glm::normalize(effOff);
-        glm::vec2 u = glm::normalize(da), v = glm::normalize(db);
-        float bestScore = 1e30f;
-        glm::vec2 bu = u, bv = v;
+        const glm::dvec2 offDir = glm::normalize(effOff);
+        glm::dvec2 u = glm::normalize(da), v = glm::normalize(db);
+        double bestScore = 1e30;
+        glm::dvec2 bu = u, bv = v;
         for (int su = -1; su <= 1; su += 2)
           for (int sv = -1; sv <= 1; sv += 2) {
-            const glm::vec2 cu = u * (float)su, cv = v * (float)sv;
-            const float ang =
-                std::acos(std::clamp(glm::dot(cu, cv), -1.0f, 1.0f));
-            const glm::vec2 mid = cu + cv;
-            const float midDot = glm::length(mid) > 1e-4f
-                                     ? glm::dot(glm::normalize(mid), offDir)
-                                     : 0.0f;
-            const float score =
-                std::abs(ang - std::abs((float)con.value)) * 4.0f - midDot;
+            const glm::dvec2 cu = u * (double)su, cv = v * (double)sv;
+            const double ang =
+                std::acos(std::clamp(glm::dot(cu, cv), -1.0, 1.0));
+            const glm::dvec2 mid = cu + cv;
+            const double midDot = glm::length(mid) > 1e-4
+                                      ? glm::dot(glm::normalize(mid), offDir)
+                                      : 0.0;
+            const double score =
+                std::abs(ang - std::abs((double)con.value)) * 4.0 - midDot;
             if (score < bestScore) {
               bestScore = score;
               bu = cu;
@@ -416,42 +415,43 @@ void DrawDimensions(AppState& state) {
           }
         // Sweep from bu to bv the short way; sample the arc in UV so the
         // curve stays correct under the plane's screen projection.
-        const float aStart = std::atan2(bu.y, bu.x);
-        float sweep = std::atan2(bv.y, bv.x) - aStart;
-        while (sweep > glm::pi<float>())
-          sweep -= 2.0f * glm::pi<float>();
-        while (sweep < -glm::pi<float>())
-          sweep += 2.0f * glm::pi<float>();
+        const double aStart = std::atan2(bu.y, bu.x);
+        double sweep = std::atan2(bv.y, bv.x) - aStart;
+        while (sweep > glm::pi<double>())
+          sweep -= 2.0 * glm::pi<double>();
+        while (sweep < -glm::pi<double>())
+          sweep += 2.0 * glm::pi<double>();
         const int kSegs = 24;
         ImVec2 prev = scr(inter + bu * rUV);
         for (int s = 1; s <= kSegs; s++) {
-          const float ang = aStart + sweep * (float)s / kSegs;
+          const double ang = aStart + sweep * (double)s / kSegs;
           const ImVec2 p =
-              scr(inter + glm::vec2(std::cos(ang), std::sin(ang)) * rUV);
-          dl->AddLine(prev, p, col, 1.4f);
+              scr(inter + glm::dvec2(std::cos(ang), std::sin(ang)) * rUV);
+          dl->AddLine(prev, p, col, 1.4);
           prev = p;
         }
         // Arrowheads at the arc ends, tangent to the arc and pointing away
         // from its body; thin extension rays from the vertex so short lines
         // still meet their dimension.
-        const float sgn = sweep >= 0.0f ? 1.0f : -1.0f;
-        const auto arcArrow = [&](float ang, float outSign) {
-          const glm::vec2 p =
-              inter + glm::vec2(std::cos(ang), std::sin(ang)) * rUV;
-          const glm::vec2 tUV =
-              glm::vec2(-std::sin(ang), std::cos(ang)) * sgn * outSign;
-          const ImVec2 ps = scr(p), qs = scr(p + tUV * 0.1f);
-          const glm::vec2 d(qs.x - ps.x, qs.y - ps.y);
-          if (glm::length(d) > 1e-3f)
+        const double sgn = sweep >= 0.0 ? 1.0 : -1.0;
+        const auto arcArrow = [&](double ang, double outSign) {
+          const glm::dvec2 p =
+              inter + glm::dvec2(std::cos(ang), std::sin(ang)) * rUV;
+          const glm::dvec2 tUV =
+              glm::dvec2(-std::sin(ang), std::cos(ang)) * sgn * outSign;
+          const ImVec2 ps = scr(p), qs = scr(p + tUV * 0.1);
+          const glm::dvec2 d(qs.x - ps.x, qs.y - ps.y);
+          if (glm::length(d) > 1e-3)
             Arrow(dl, ps, glm::normalize(d), col);
         };
-        arcArrow(aStart, -1.0f);
-        arcArrow(aStart + sweep, 1.0f);
-        dl->AddLine(scr(inter), scr(inter + bu * rUV * 1.08f), col, 0.8f);
-        dl->AddLine(scr(inter), scr(inter + bv * rUV * 1.08f), col, 0.8f);
+        arcArrow(aStart, -1.0);
+        arcArrow(aStart + sweep, 1.0);
+        dl->AddLine(scr(inter), scr(inter + bu * rUV * 1.08), col, 0.8);
+        dl->AddLine(scr(inter), scr(inter + bv * rUV * 1.08), col, 0.8);
         // Label on the arc's midpoint.
-        const float aMid = aStart + sweep * 0.5f;
-        labelPos = scr(inter + glm::vec2(std::cos(aMid), std::sin(aMid)) * rUV);
+        const double aMid = aStart + sweep * 0.5;
+        labelPos =
+            scr(inter + glm::dvec2(std::cos(aMid), std::sin(aMid)) * rUV);
       }
     } else { // Distance / DistanceX / DistanceY / DistancePL (points a, b)
       auto a = RefUV(*sketch, con.a), b = RefUV(*sketch, con.b);
@@ -462,17 +462,17 @@ void DrawDimensions(AppState& state) {
         const auto lb = RefUV(*sketch, {con.b.entity, 1});
         b = std::nullopt;
         if (la && lb) {
-          const glm::vec2 d = *lb - *la;
-          const float len2 = glm::dot(d, d);
-          if (len2 > 1e-12f)
+          const glm::dvec2 d = *lb - *la;
+          const double len2 = glm::dot(d, d);
+          if (len2 > 1e-12)
             b = *la + d * (glm::dot(*a - *la, d) / len2);
         }
       }
       if (!a || !b)
         continue;
-      if (glm::length(effOff) < 1e-4f)
+      if (glm::length(effOff) < 1e-4)
         effOff = SeedLabelOffset(*sketch, con);
-      glm::vec2 da = *a + effOff, db = *b + effOff;
+      glm::dvec2 da = *a + effOff, db = *b + effOff;
       if (con.kind == K::DistanceX)
         da.y = db.y = std::min(a->y, b->y) + effOff.y;
       else if (con.kind == K::DistanceY)
@@ -481,40 +481,40 @@ void DrawDimensions(AppState& state) {
       // Extension lines overshoot the dimension line a touch (drafting
       // convention); they start just off the measured points.
       const auto extend = [&](ImVec2 from, ImVec2 to) {
-        glm::vec2 d(to.x - from.x, to.y - from.y);
-        const float len = glm::length(d);
-        if (len < 1e-3f)
+        glm::dvec2 d(to.x - from.x, to.y - from.y);
+        const double len = glm::length(d);
+        if (len < 1e-3)
           return to;
         d /= len;
-        return ImVec2(to.x + d.x * 4.0f, to.y + d.y * 4.0f);
+        return ImVec2(to.x + d.x * 4.0, to.y + d.y * 4.0);
       };
-      dl->AddLine(sa, extend(sa, sda), col, 1.0f);
-      dl->AddLine(sb, extend(sb, sdb), col, 1.0f);
-      dl->AddLine(sda, sdb, col, 1.4f); // dimension line
+      dl->AddLine(sa, extend(sa, sda), col, 1.0);
+      dl->AddLine(sb, extend(sb, sdb), col, 1.0);
+      dl->AddLine(sda, sdb, col, 1.4); // dimension line
       double v = con.kind == K::DistanceX   ? std::abs(b->x - a->x)
                  : con.kind == K::DistanceY ? std::abs(b->y - a->y)
                                             : glm::length(*b - *a);
       snprintf(label, sizeof(label), "%.3g", v);
-      glm::vec2 d{sdb.x - sda.x, sdb.y - sda.y};
-      float L = std::sqrt(d.x * d.x + d.y * d.y);
-      if (L > 1e-3f) {
+      glm::dvec2 d{sdb.x - sda.x, sdb.y - sda.y};
+      double L = std::sqrt(d.x * d.x + d.y * d.y);
+      if (L > 1e-3) {
         d /= L;
         // Arrows inside when the value + heads fit between the extension
         // lines; flipped outside (with short tails) when the span is tight.
-        const float need = ImGui::CalcTextSize(label).x + 2.0f * 9.0f + 14.0f;
+        const double need = ImGui::CalcTextSize(label).x + 2.0 * 9.0 + 14.0;
         if (L >= need) {
           Arrow(dl, sda, d, col);
           Arrow(dl, sdb, {-d.x, -d.y}, col);
         } else {
           Arrow(dl, sda, {-d.x, -d.y}, col);
           Arrow(dl, sdb, d, col);
-          dl->AddLine(sda, ImVec2(sda.x - d.x * 16.0f, sda.y - d.y * 16.0f),
-                      col, 1.4f);
-          dl->AddLine(sdb, ImVec2(sdb.x + d.x * 16.0f, sdb.y + d.y * 16.0f),
-                      col, 1.4f);
+          dl->AddLine(sda, ImVec2(sda.x - d.x * 16.0, sda.y - d.y * 16.0), col,
+                      1.4);
+          dl->AddLine(sdb, ImVec2(sdb.x + d.x * 16.0, sdb.y + d.y * 16.0), col,
+                      1.4);
         }
       }
-      labelPos = ImVec2((sda.x + sdb.x) * 0.5f, (sda.y + sdb.y) * 0.5f);
+      labelPos = ImVec2((sda.x + sdb.x) * 0.5, (sda.y + sdb.y) * 0.5);
     }
 
     // Value pill: rounded, highlighted under the cursor — the affordance for
@@ -525,9 +525,9 @@ void DrawDimensions(AppState& state) {
     if (!con.valueExpr.empty())
       shown = con.valueExpr + " = " + shown;
     const ImVec2 tsz = ImGui::CalcTextSize(shown.c_str());
-    ImVec2 tp(labelPos.x - tsz.x * 0.5f, labelPos.y - tsz.y * 0.5f);
-    const ImVec2 pmin(tp.x - 5.0f, tp.y - 2.0f);
-    const ImVec2 pmax(tp.x + tsz.x + 5.0f, tp.y + tsz.y + 2.0f);
+    ImVec2 tp(labelPos.x - tsz.x * 0.5, labelPos.y - tsz.y * 0.5);
+    const ImVec2 pmin(tp.x - 5.0, tp.y - 2.0);
+    const ImVec2 pmax(tp.x + tsz.x + 5.0, tp.y + tsz.y + 2.0);
     const bool overLabel = io.MousePos.x >= pmin.x && io.MousePos.x <= pmax.x &&
                            io.MousePos.y >= pmin.y && io.MousePos.y <= pmax.y;
     // Pills are inert during placement — the ghost must not latch dimHot
@@ -539,7 +539,7 @@ void DrawDimensions(AppState& state) {
     const bool hot = interactive && (overLabel || dragging);
     // Selected pill: accent fill + a heavier ring, distinct from hover.
     const bool selCon = edit.selectedConstraint == i;
-    const float rounding = (pmax.y - pmin.y) * 0.5f;
+    const double rounding = (pmax.y - pmin.y) * 0.5;
     dl->AddRectFilled(pmin, pmax,
                       selCon ? IM_COL32(84, 66, 26, 250)
                       : hot  ? IM_COL32(45, 62, 82, 245)
@@ -547,7 +547,7 @@ void DrawDimensions(AppState& state) {
                       rounding);
     dl->AddRect(pmin, pmax,
                 (hot || selCon) ? colHot : IM_COL32(96, 150, 200, 150),
-                rounding, 0, selCon ? 2.2f : 1.2f);
+                rounding, 0, selCon ? 2.2 : 1.2);
     dl->AddText(tp, (hot || selCon) ? IM_COL32(255, 240, 200, 255) : col,
                 shown.c_str());
 
@@ -564,16 +564,16 @@ void DrawDimensions(AppState& state) {
     }
     if (dragging) {
       if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        if (std::abs(io.MouseDelta.x) + std::abs(io.MouseDelta.y) > 0.0f) {
-          const glm::vec2 prev = con.labelOffset;
-          glm::vec2 next = prev + uvDelta(io.MouseDelta, glm::vec2(0.0f));
+        if (std::abs(io.MouseDelta.x) + std::abs(io.MouseDelta.y) > 0.0) {
+          const glm::dvec2 prev = con.labelOffset;
+          glm::dvec2 next = prev + uvDelta(io.MouseDelta, glm::dvec2(0.0));
           if (con.kind == K::Angle) {
             // Radial only: the label slides along its current direction
             // (changing the arc radius), never around the vertex.
-            const float len = glm::length(prev);
-            if (len > 1e-4f) {
-              const glm::vec2 dir = prev / len;
-              next = dir * std::max(glm::dot(next, dir), 0.15f);
+            const double len = glm::length(prev);
+            if (len > 1e-4) {
+              const glm::dvec2 dir = prev / len;
+              next = dir * std::max(glm::dot(next, dir), 0.15);
             }
           } else {
             next = ConstrainLabelOffset(*sketch, con, next);
@@ -621,15 +621,15 @@ void DrawDimensions(AppState& state) {
         editError.clear();
       }
       ImGui::SetNextWindowPos(ImVec2(tp.x - 4, tp.y - 4));
-      ImGui::SetNextWindowBgAlpha(0.95f);
+      ImGui::SetNextWindowBgAlpha(0.95);
       ImGui::Begin("##dimedit", nullptr,
                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                        ImGuiWindowFlags_NoMove |
                        ImGuiWindowFlags_AlwaysAutoResize |
                        ImGuiWindowFlags_NoSavedSettings);
-      bool commit = CompletingDimInput(state, "##v", buf, sizeof(buf), 120.0f);
+      bool commit = CompletingDimInput(state, "##v", buf, sizeof(buf), 120.0);
       if (!editError.empty())
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+        ImGui::TextColored(ImVec4(0.95, 0.45, 0.45, 1.0), "%s",
                            editError.c_str());
       ImGui::End();
       if (commit) {
@@ -738,24 +738,23 @@ void DrawDimensionOnCreate(AppState& state) {
     if (seed.empty())
       return;
     snprintf(buf, sizeof(buf), "%s", seed.c_str());
-    s_pos = ImVec2(io.MousePos.x + 14.0f, io.MousePos.y + 14.0f);
+    s_pos = ImVec2(io.MousePos.x + 14.0, io.MousePos.y + 14.0);
     editError.clear();
     edit.dimOnCreateOpen = true;
     return; // draw + focus from the next frame
   }
 
   ImGui::SetNextWindowPos(s_pos);
-  ImGui::SetNextWindowBgAlpha(0.95f);
+  ImGui::SetNextWindowBgAlpha(0.95);
   ImGui::Begin("##dimoncreate", nullptr,
                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
                    ImGuiWindowFlags_NoSavedSettings);
   ImGui::TextUnformatted(what);
   ImGui::SameLine();
-  bool commit = CompletingDimInput(state, "##docv", buf, sizeof(buf), 110.0f);
+  bool commit = CompletingDimInput(state, "##docv", buf, sizeof(buf), 110.0);
   if (!editError.empty())
-    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
-                       editError.c_str());
+    ImGui::TextColored(ImVec4(0.95, 0.45, 0.45, 1.0), "%s", editError.c_str());
   ImGui::End();
 
   if (commit) {
@@ -900,9 +899,9 @@ void DrawConstraintGlyphs(AppState& state) {
                       selCon ? IM_COL32(84, 66, 26, 250)
                       : over ? IM_COL32(45, 62, 52, 235)
                              : IM_COL32(25, 32, 28, 200),
-                      2.0f);
+                      2.0);
     if (selCon)
-      dl->AddRect(rmin, rmax, colSel, 2.0f);
+      dl->AddRect(rmin, rmax, colSel, 2.0);
     dl->AddText(p, selCon ? colSel : col, text);
     return rmax;
   };
@@ -911,8 +910,8 @@ void DrawConstraintGlyphs(AppState& state) {
     auto uv = RefUV(*sketch, {entity, 0});
     if (!uv)
       continue;
-    const glm::vec2 s = SketchUVToScreen(state, sketch->plane, *uv);
-    const ImVec2 base(s.x + 10.0f, s.y - 16.0f);
+    const glm::dvec2 s = SketchUVToScreen(state, sketch->plane, *uv);
+    const ImVec2 base(s.x + 10.0, s.y - 16.0);
     const bool expanded = edit.glyphExpandedEntity == entity;
     // A selected constraint keeps its entity's stack expanded too, so the
     // accent doesn't hide inside a summary badge.
@@ -923,14 +922,14 @@ void DrawConstraintGlyphs(AppState& state) {
     if (items.size() <= 2 || expanded || holdsSelection) {
       // Fan out horizontally with real widths; track the union rect so a
       // hover-expansion stays open while the cursor is over the fan.
-      float x = base.x;
+      double x = base.x;
       ImVec2 unionMin(base.x - 4, base.y - 4), unionMax(base.x, base.y);
       for (const BadgeItem& it : items) {
         const ImVec2 rmax = drawOne(ImVec2(x, base.y), it.text, it.ci,
                                     /*summary=*/false);
         unionMax.x = std::max(unionMax.x, rmax.x + 4);
         unionMax.y = std::max(unionMax.y, rmax.y + 4);
-        x = rmax.x + 6.0f;
+        x = rmax.x + 6.0;
       }
       if (expanded && io.MousePos.x >= unionMin.x &&
           io.MousePos.x <= unionMax.x && io.MousePos.y >= unionMin.y &&

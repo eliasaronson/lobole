@@ -509,14 +509,15 @@ glm::dvec2 AlignOffset(const Text& t, const Layout& lay) {
 struct Placement {
   glm::dvec2 anchor, offset;
   double c, s;
-  glm::vec2 operator()(glm::dvec2 local) const {
+  glm::dvec2 operator()(glm::dvec2 local) const {
     const glm::dvec2 p = local + offset;
-    return glm::vec2(anchor + glm::dvec2(c * p.x - s * p.y, s * p.x + c * p.y));
+    return glm::dvec2(anchor +
+                      glm::dvec2(c * p.x - s * p.y, s * p.x + c * p.y));
   }
 };
 
-std::array<glm::vec2, 4> Box(const Text& t, const Layout& lay,
-                             const Placement& place) {
+std::array<glm::dvec2, 4> Box(const Text& t, const Layout& lay,
+                              const Placement& place) {
   const double lo = lay.metrics.descender * t.height;
   const double hi = lay.metrics.ascender * t.height;
   return {place({0.0, lo}), place({lay.width, lo}), place({lay.width, hi}),
@@ -627,14 +628,14 @@ std::expected<TextGeometry, std::string> BuildTextGeometry(const Text& t) {
       tc.glyph = static_cast<uint32_t>(gi);
       tc.contour = static_cast<uint32_t>(ci);
       tc.closed = rc.closed;
-      glm::vec2 prevEnd{0.0f};
+      glm::dvec2 prevEnd{0.0};
       for (size_t si = 0; si < rc.segs.size(); si++) {
         const RawSegment& rs = rc.segs[si];
-        std::vector<glm::vec2> pts;
+        std::vector<glm::dvec2> pts;
         pts.reserve(rs.pts.size());
         for (const glm::dvec2& p : rs.pts)
           pts.push_back(place({pg.x + p.x * h, p.y * h}));
-        // Float32 placement must not open a joint the font closed.
+        // Placement rounding must not open a joint the font closed.
         if (si > 0)
           pts.front() = prevEnd;
         prevEnd = pts.back();
@@ -653,7 +654,7 @@ std::expected<TextGeometry, std::string> BuildTextGeometry(const Text& t) {
       if (tc.segments.empty())
         continue;
       if (rc.closed) {
-        const glm::vec2 start = EntityPointUV(tc.segments.front(), 0);
+        const glm::dvec2 start = EntityPointUV(tc.segments.front(), 0);
         Entity& last = tc.segments.back();
         if (auto* l = std::get_if<Line>(&last))
           l->b = start;
@@ -666,7 +667,7 @@ std::expected<TextGeometry, std::string> BuildTextGeometry(const Text& t) {
   return out;
 }
 
-glm::vec2 TextPointUV(const Text& t, uint8_t which) {
+glm::dvec2 TextPointUV(const Text& t, uint8_t which) {
   if (which == 0)
     return t.anchor;
   auto lay = LayOut(t, /*withGlyphs=*/false);
@@ -674,7 +675,7 @@ glm::vec2 TextPointUV(const Text& t, uint8_t which) {
     return t.anchor;
   const Placement place{glm::dvec2(t.anchor), AlignOffset(t, *lay),
                         std::cos(t.angle), std::sin(t.angle)};
-  const std::array<glm::vec2, 4> box = Box(t, *lay, place);
+  const std::array<glm::dvec2, 4> box = Box(t, *lay, place);
   return which >= 1 && which <= 4 ? box[which - 1] : t.anchor;
 }
 

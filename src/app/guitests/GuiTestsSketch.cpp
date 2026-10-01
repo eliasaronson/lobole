@@ -1927,12 +1927,12 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(sk->entities.size(), (size_t)5); // 4 sides + centre point
     // Clicks quantize to pixels (~0.005 UV here): loose bound on placement,
     // then exact bounds against the ACTUAL centre below.
-    const glm::vec2 c0 = std::get<sketch::Point>(sk->entities[4]).p;
-    IM_CHECK_LE(glm::length(c0 - glm::vec2(0.5f, 0.25f)), 0.05f);
+    const glm::dvec2 c0 = std::get<sketch::Point>(sk->entities[4]).p;
+    IM_CHECK_LE(glm::length(c0 - glm::dvec2(0.5, 0.25)), 0.05f);
     // The diagonal corners sit symmetric about the centre.
     const auto& bottom0 = std::get<sketch::Line>(sk->entities[0]);
     const auto& top0 = std::get<sketch::Line>(sk->entities[2]);
-    IM_CHECK_LE(glm::length(0.5f * (bottom0.a + top0.a) - c0), 1e-3f);
+    IM_CHECK_LE(glm::length(0.5 * (bottom0.a + top0.a) - c0), 1e-3f);
     const uint32_t pointId = sketch::EntityId(sk->entities[4]);
     const uint32_t l0 = sketch::EntityId(sk->entities[0]);
     bool anchored = false;
@@ -2121,7 +2121,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
 
     SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
     IM_CHECK(sk != nullptr && sk->images.size() == 1);
-    const glm::vec2 origin0 = sk->images[0].origin;
+    const glm::dvec2 origin0 = sk->images[0].origin;
     // Insert centres the image on the plane origin, so UV (0,0) is on it.
     const glm::vec2 from =
         ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 0.0f));
@@ -2138,7 +2138,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     sk = ui::ResolveActiveSketch(*s_App);
     IM_CHECK(sk != nullptr && sk->images.size() == 1);
-    const glm::vec2 moved = sk->images[0].origin - origin0;
+    const glm::dvec2 moved = sk->images[0].origin - origin0;
     // The image followed the mouse by the dragged UV span.
     IM_CHECK(std::abs(moved.x - 3.0f) < 0.2f);
     IM_CHECK(std::abs(moved.y - 2.0f) < 0.2f);

@@ -407,12 +407,16 @@ inline constexpr int kVersion =
 // (v61: expression-driven Box/Sphere/Cylinder dimensions)
 // (v57: mate connector inner_path)
 
-inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
+// Positions are read and written as doubles: a JSON number is one, and a
+// sketch plane at z = 13.4 read through float lands 0.4 um below a face at
+// 13.4 (docs/sketching/README.md#plane). A float field takes the narrowing
+// where it is assigned.
+inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
-inline glm::vec3 Vec3FromJson(const nlohmann::json& j) {
-  return glm::vec3(j.at(0).get<float>(), j.at(1).get<float>(),
-                   j.at(2).get<float>());
+inline glm::dvec3 Vec3FromJson(const nlohmann::json& j) {
+  return glm::dvec3(j.at(0).get<double>(), j.at(1).get<double>(),
+                    j.at(2).get<double>());
 }
 
 // Quaternion as [x, y, z, w] (glm stores (w,x,y,z); JSON order matches the
@@ -425,11 +429,11 @@ inline glm::quat QuatFromJson(const nlohmann::json& j) {
                    j.at(1).get<float>(), j.at(2).get<float>()); // (w,x,y,z)
 }
 
-inline nlohmann::json Vec2ToJson(const glm::vec2& v) {
+inline nlohmann::json Vec2ToJson(const glm::dvec2& v) {
   return nlohmann::json::array({v.x, v.y});
 }
-inline glm::vec2 Vec2FromJson(const nlohmann::json& j) {
-  return glm::vec2(j.at(0).get<float>(), j.at(1).get<float>());
+inline glm::dvec2 Vec2FromJson(const nlohmann::json& j) {
+  return glm::dvec2(j.at(0).get<double>(), j.at(1).get<double>());
 }
 
 inline nlohmann::json ElementRefJson(const ElementRef& ref) {

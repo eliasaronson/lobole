@@ -57,7 +57,7 @@ struct TextGeometry {
   std::vector<TextContour> contours;
   // The label's box from the FONT's metrics (not the string's ink), so a row
   // of labels lines up: bottom-left, bottom-right, top-right, top-left.
-  std::array<glm::vec2, 4> box{};
+  std::array<glm::dvec2, 4> box{};
   double width = 0.0; // advance of the whole string incl. spacing, mm
 };
 

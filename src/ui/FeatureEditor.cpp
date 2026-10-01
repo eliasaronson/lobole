@@ -124,7 +124,8 @@ bool LabeledCombo(const char* label, int* sel, const char* const items[],
 }
 
 // Labels-left drop-in for the xyz drag rows.
-bool DragFloat3Row(AppState& state, const char* label, float* v) {
+template <class T>
+bool DragFloat3Row(AppState& state, const char* label, T* v) {
   LeftLabel(label);
   const std::string id = std::string("##") + label;
   return ExprDragFloat3(state, id.c_str(), v, 0.05f);

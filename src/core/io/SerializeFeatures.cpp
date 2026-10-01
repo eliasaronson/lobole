@@ -96,7 +96,7 @@ json EntityToJson(const sketch::Entity& entity) {
           return t;
         } else { // BSpline
           json poles = json::array();
-          for (const glm::vec2& p : e.poles)
+          for (const glm::dvec2& p : e.poles)
             poles.push_back(Vec2ToJson(p));
           return {{"type", "spline"},
                   {"poles", std::move(poles)},
@@ -1753,7 +1753,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // Pre-v5 rigid "rect" entities are expanded into four lines below. During
     // loading they occupy a placeholder slot (preserving order/indexing so the
     // pre-v4 index migration stays correct); their corners are remembered.
-    std::vector<std::pair<glm::vec2, glm::vec2>> legacyRects;
+    std::vector<std::pair<glm::dvec2, glm::dvec2>> legacyRects;
     std::vector<size_t> rectSlots; // placeholder positions in sk->entities
     // v38 entity coordinate expressions, collected POSITIONALLY: RPC-sent
     // entities carry no id yet (the pre-v4 migration below stamps them), so
@@ -1762,8 +1762,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         pendingEntityExprs;
     for (const auto& ej : j.value("entities", json::array())) {
       if (ej.value("type", "") == "rect") {
-        glm::vec2 c1 = Vec2FromJson(ej.at("c1"));
-        glm::vec2 c2 = Vec2FromJson(ej.at("c2"));
+        glm::dvec2 c1 = Vec2FromJson(ej.at("c1"));
+        glm::dvec2 c2 = Vec2FromJson(ej.at("c2"));
         sketch::Entity ph =
             sketch::Line{c1, c2}; // placeholder, preserves order
         sketch::SetEntityId(ph, ej.value("id", uint32_t{0}));

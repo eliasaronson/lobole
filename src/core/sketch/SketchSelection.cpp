@@ -7,19 +7,19 @@
 namespace sketch {
 
 namespace {
-bool Inside(glm::vec2 p, glm::vec2 mn, glm::vec2 mx) {
+bool Inside(glm::dvec2 p, glm::dvec2 mn, glm::dvec2 mx) {
   return p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y;
 }
 
 // Liang–Barsky: does segment [a,b] intersect (or lie within) the AABB [mn,mx]?
-bool SegmentHitsRect(glm::vec2 a, glm::vec2 b, glm::vec2 mn, glm::vec2 mx) {
-  float t0 = 0.0f, t1 = 1.0f;
-  const glm::vec2 d = b - a;
-  auto clip = [&](float p, float q) {
-    if (std::abs(p) < 1e-9f)
-      return q >= 0.0f; // parallel to this edge: inside iff on the inner side
-    const float r = q / p;
-    if (p < 0.0f) {
+bool SegmentHitsRect(glm::dvec2 a, glm::dvec2 b, glm::dvec2 mn, glm::dvec2 mx) {
+  double t0 = 0.0, t1 = 1.0;
+  const glm::dvec2 d = b - a;
+  auto clip = [&](double p, double q) {
+    if (std::abs(p) < 1e-9)
+      return q >= 0.0; // parallel to this edge: inside iff on the inner side
+    const double r = q / p;
+    if (p < 0.0) {
       if (r > t1)
         return false;
       if (r > t0)
@@ -38,10 +38,10 @@ bool SegmentHitsRect(glm::vec2 a, glm::vec2 b, glm::vec2 mn, glm::vec2 mx) {
 
 // Screen-space sample points of an entity: a Point is its single point (which
 // TessellateEntity leaves empty), everything else its tessellated polyline.
-std::vector<glm::vec2>
+std::vector<glm::dvec2>
 SamplePoints(const Entity& e,
-             const std::function<glm::vec2(glm::vec2)>& project) {
-  std::vector<glm::vec2> uv;
+             const std::function<glm::dvec2(glm::dvec2)>& project) {
+  std::vector<glm::dvec2> uv;
   if (auto* p = std::get_if<Point>(&e))
     uv = {p->p};
   else if (std::holds_alternative<Text>(e)) // every glyph's outline
@@ -49,7 +49,7 @@ SamplePoints(const Entity& e,
       uv.insert(uv.end(), poly.begin(), poly.end());
   else
     uv = TessellateEntity(e);
-  std::vector<glm::vec2> screen;
+  std::vector<glm::dvec2> screen;
   screen.reserve(uv.size());
   for (const auto& q : uv)
     screen.push_back(project(q));
@@ -58,16 +58,16 @@ SamplePoints(const Entity& e,
 } // namespace
 
 std::vector<uint32_t>
-BoxSelect(const std::vector<Entity>& entities, glm::vec2 rectMin,
-          glm::vec2 rectMax, bool crossing,
-          const std::function<glm::vec2(glm::vec2)>& project) {
-  const glm::vec2 mn(std::min(rectMin.x, rectMax.x),
-                     std::min(rectMin.y, rectMax.y));
-  const glm::vec2 mx(std::max(rectMin.x, rectMax.x),
-                     std::max(rectMin.y, rectMax.y));
+BoxSelect(const std::vector<Entity>& entities, glm::dvec2 rectMin,
+          glm::dvec2 rectMax, bool crossing,
+          const std::function<glm::dvec2(glm::dvec2)>& project) {
+  const glm::dvec2 mn(std::min(rectMin.x, rectMax.x),
+                      std::min(rectMin.y, rectMax.y));
+  const glm::dvec2 mx(std::max(rectMin.x, rectMax.x),
+                      std::max(rectMin.y, rectMax.y));
   std::vector<uint32_t> out;
   for (const auto& e : entities) {
-    const std::vector<glm::vec2> pts = SamplePoints(e, project);
+    const std::vector<glm::dvec2> pts = SamplePoints(e, project);
     if (pts.empty())
       continue;
     bool keep = false;

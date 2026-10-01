@@ -105,16 +105,19 @@ CheckedBoolean CheckedBooleanNamed(
 
 // How far a cut (or add) tool drawn on a sketch plane must start BEHIND that
 // plane, so that a body face the plane was meant to lie on is opened (or
-// fused to) rather than missed by a hair. A sketch plane is single precision:
-// a plane at z = 13.4 is stored as 13.39999962, and a cut from it down into a
-// body whose top is at 13.4 left a 0.4 um skin over the pocket -- a sealed
-// counterbore that passed BRepCheck, and a bearing seat with a "shoulder" at
-// both ends. An add from a plane that rounds the other way leaves the same
-// gap and two solids. Returns 0 unless some planar face of `bodies` lies
-// within single-precision rounding of the plane through `origin`, square to
-// `sweep`, and faces the way the tool meets it: AGAINST the sweep for a cut
-// (the tool goes into the material behind it), WITH it for an add (the tool
-// grows out of it). Otherwise twice that rounding, scaled to the coordinates.
+// fused to) rather than missed by a hair. A sketch plane is exact (double),
+// and a face made from one lies on it; but a face can come from a value that
+// went through float -- a primitive's position is a glm::vec3, so a box
+// placed at z = 24.7 sits at 24.70000076 -- and a cut from a plane typed at
+// that face's height then keeps a sub-micron skin over the pocket (a sealed
+// counterbore that passes BRepCheck), or an add leaves two solids. Returns 0
+// unless some planar face of `bodies` lies within single-precision rounding
+// of the plane through `origin` -- but not ON it, to double precision: that
+// coplanar boolean needs no help, and a moved tool would leave the feature's
+// own face off its plane -- square to `sweep`, and faces the way the tool
+// meets it: AGAINST the sweep for a cut (the tool goes into the
+// material behind it), WITH it for an add (the tool grows out of it).
+// Otherwise twice that rounding, scaled to the coordinates.
 [[nodiscard]] double CoplanarStartSlack(const std::vector<Body>& bodies,
                                         const glm::dvec3& origin,
                                         const glm::dvec3& sweep, bool cut);

@@ -446,7 +446,7 @@ TEST_CASE("A filleted spline head fused to a turned base names every edge",
   sketch::BSpline outline;
   // The knight's side outline (generators/chess/build_piece.py KNIGHT_HEAD),
   // closed by repeating the first pole.
-  const std::vector<glm::vec2> poles = {
+  const std::vector<glm::dvec2> poles = {
       {17, -9},       {26, -10.5f},  {35, -10},   {45, -7.5f}, {51, -5.5f},
       {54.4f, -4.5f}, {54.8f, 2.5f}, {52, 3.2f},  {49, 4},     {44, 9},
       {39, 13.5f},    {35, 14.8f},   {31.5f, 13}, {31, 9},     {33, 5},
