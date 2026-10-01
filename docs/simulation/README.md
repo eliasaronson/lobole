@@ -66,6 +66,62 @@ re-solved automatically — meshing and solving take seconds to minutes and
 stay an explicit act. A study reopened from disk carries its setup and no
 answers; `study_results` refuses it with "study has not been run".
 
+## Studies as jobs
+
+Design note (the pan/tilt friction round, workstream A). An exact motion
+study is minutes and a topology study was two hours on the CPU, yet a study
+has no handle, keeps running after its client dies, is run again whole by
+`leave_at`, and is repeated identically by a rebuild because nothing ties a
+result to its inputs.
+
+**The shape of the fix.**
+
+- **A job id.** Every `BackgroundJob` gets a monotonic `id`. A long study
+  (motion, static, modal, topology, and the mesh-only run) started over RPC
+  answers `job: <id>`; `study_status {job}` reports it (kind, study,
+  running, fraction, elapsed, and once it ends its outcome: done, cancelled,
+  failed) and `cancel_study {job}` cancels it. An id that names no job,
+  running or recently finished, is refused naming the ones that exist.
+- **Owned by its client.** The RPC session numbers each connection; a study
+  job started by a connection is cancelled when that connection closes,
+  unless the call passed `outlive_client: true`. A synchronous motion run
+  polls the same thing. Jobs the GUI starts have no owner.
+- **Results keyed by inputs.** A run computes a 64-bit input hash of exactly
+  what produces its answer: the bodies' exact B-Rep (`BinTools` bytes, as
+  CAM keys its surfaces), names and materials (with the library's numbers),
+  the study's definition with its expressions evaluated, and for an
+  assembly every occurrence, mate (with its current value: the run starts
+  from the pose), relation and configuration, through every sub-assembly.
+  The result carries `input_hash`. A run whose hash matches a stored result
+  (the study's own, or one of the session's recent results) is answered from
+  it with `reused: true` and nothing computed; `recompute: true` runs anyway.
+  Topology results are saved with the project, so the hash is saved with
+  them and a reopened project reuses its result, and reads stale when the
+  part moved under it.
+- **`leave_at` from the samples.** The recorded sample's placements and
+  mate values are written into the live assembly and solved once; a value
+  between samples starts from the nearest one and is the same single solve.
+- **Cheaper exact checks.** The run solves every sample once (the separate
+  kinematics pass goes), then checks every sample's candidate pairs in one
+  parallel batch rather than sample by sample, so a pair that costs seconds
+  at every pose stops serialising the run. A pair whose relative pose
+  repeats one already checked in the run (a dwell, a full turn) is checked
+  once, and the session's exact-contact cache also matches a clear answer by
+  relative pose, so a re-run that lands a hair away is still a hit.
+
+**Files.** `src/ui/BackgroundJob{,s}.{h,cpp}`, `src/remote/RemoteSession.cpp`
+and `RemoteServer.h`, `src/core/InputHash.{h,cpp}`, `src/core/MotionStudy.*`,
+`src/core/CollisionCache.h`, `src/ui/MotionActions.cpp`,
+`src/ui/SimulationActions.cpp`, `src/core/fem/` (the hash, the saved
+result), `src/remote/Remote{Motion,Simulation,Dispatch}.cpp`, and the Study
+panel.
+
+**Verified by:** a second identical run reused in well under a second; a
+change to each class of input (geometry, mates, relations, settings, loads,
+materials, configuration) missing; a reopened topology result reused; a
+cancel by id and a client disconnect stopping a job; `leave_at` costing one
+solve; and the pan/tilt head's pan study timed before and after.
+
 ## Meshing
 
 `fem::Mesh` (`src/core/fem/FemMesher.{h,cpp}`) wraps Netgen's C++
