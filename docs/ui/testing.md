@@ -157,9 +157,9 @@ makes a widget unreachable by name:
   not read as an addressing problem.
 - The tool window is `###ToolWindow` for every tool, so
   `//Hole###ToolWindow` drives whichever session is open.
-- Primitives are placed by their min corner, so a guessed face centre lands
-  on an edge, which correctly outranks the face in the pick. Derive click
-  points from `GetBoundingBox`.
+- A face centre guessed from a primitive's sizes can land on an edge, which
+  correctly outranks the face in the pick. Derive click points from
+  `GetBoundingBox`.
 - A test that types through `ItemInputValue` clears the field with Ctrl+A
   first, so it tests the commit, not how the field opens. If what changed is
   how a field opens, open it and type.

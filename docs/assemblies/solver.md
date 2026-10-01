@@ -43,8 +43,8 @@ down to the part); the frame comes back in the top-level occurrence's space.
 its own to offer, so X is the surface's reference direction — where its
 parameter u is 0, which is where the seam of a whole cylinder lies. It is
 the surface's, not the seam edge's: it comes from the feature that made the
-surface (a sketched circle's is its sketch plane's U axis, an imported or
-primitive cylinder's its placement), so it is the same after every
+surface (a sketched circle's is its sketch plane's U axis, an imported
+cylinder's its placement), so it is the same after every
 regeneration and survives a boolean that splits or trims the face, which
 keeps the surface even where it moves the seam edge. So a frame on a worm,
 a cam or a keyed shaft is reproducible from the face alone, and a mate's

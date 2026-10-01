@@ -128,7 +128,8 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   its sorted boundary-edge names joined with `,` plus `;L`.
 - **Primitives and rebuilt shapes** (`topo::NamePrimitiveElements`): every face
   `<prefix>/face<i>` in index order, then the fallback passes. Used by
-  Box/Sphere/Cylinder/Import (a multi-body import adds a body ordinal,
+  Import, the stored Box/Sphere/Cylinder an older document carries
+  ([primitives](README.md#primitives)) (a multi-body import adds a body ordinal,
   `<tag>/b1`) and by features that rebuild topology wholesale — shell, draft,
   split, sweep, loft, pipe and rib tools, fasteners.
 - **Holes** (`HoleFeature::NameByRole`) name each drilled face by what it is,

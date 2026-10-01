@@ -59,7 +59,7 @@ reports done, a person before a review. Every box is one RPC call. The MCP
 | symptom | likely cause | fix |
 | --- | --- | --- |
 | A cut or add changed nothing (warning set) | The sketch plane's V axis points away (V = normal × uAxis), or the profile misses the body | Re-plane: normal −Y with uAxis +X gives V = +Z; check the digest delta |
-| `unknown field 'x' for T` | A typo, or a field that type never had (a Box has no `mode`) | Read `describe` → `feature_types[].params` for T |
+| `unknown field 'x' for T` | A typo, or a field that type never had (a Fillet has no `mode`) | Read `describe` → `feature_types[].params` for T |
 | BOM mass null | A body has no material (`bom.warnings` names it) | `set_material` on that body's creating feature |
 | `contact_report` shows two or more components | A member's coordinates drifted from the geometry it should touch | The component listing names the floater; fix its placement, prefer a mate onto a named frame |
 | A near miss at 0.1–1 mm | An arithmetic slip in a position (an offset applied once instead of twice) | Recompute from the mating face, then assert `touching` |

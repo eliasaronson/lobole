@@ -289,8 +289,8 @@ Scripts and AI assistants can drive a live session over JSON-RPC
 ./designer --remote 8437
 python3 tools/designer_remote.py 8437 get_state
 python3 tools/designer_remote.py 8437 add_feature \
-    '{"feature": {"type": "Box", "name": "Box 1", "position": [0,0,0],
-                  "width": 2, "height": 2, "depth": 2}}'
+    '{"feature": {"type": "Box", "name": "Box 1", "on": "Top",
+                  "width": 2, "depth": 2, "height": 2}}'
 python3 tools/designer_remote.py 8437 menu_click '{"path": "Edit/Undo"}'
 python3 tools/designer_remote.py 8437 screenshot '{"path": "/tmp/view.png"}'
 ```

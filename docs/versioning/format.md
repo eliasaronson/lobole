@@ -15,7 +15,7 @@ baked geometry and autosave are in [README.md](README.md).
   "format": "designer-document",
   "version": 135,
   "parameters": [ {"name": "width", "expression": "40", "comment": "…"} ],
-  "features":   [ {"type": "Box", "id": 1, "name": "Box 1", "…": "…"} ]
+  "features":   [ {"type": "Sketch", "id": 1, "name": "Sketch 1", "…": "…"} ]
 }
 ```
 

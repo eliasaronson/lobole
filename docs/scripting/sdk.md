@@ -9,7 +9,7 @@ from designer_sdk import connect
 app = connect()                         # the one announced instance, or port=
 part = app.part("piston")               # create a part tab (create=False opens one)
 bore = part.param("bore", 86)           # a variable, and a Param that knows it
-body = part.cylinder(d="bore", h=40)    # a Body
+body = part.cylinder("Top", d="bore", height=40)  # a Body: a sketch + extrude
 part.fillet(body.edges(circular=True), r=2)
 seat = part.frame("wrist_pin", body.faces(kind="cylinder")[0])
 part.check()                            # raises on any broken feature

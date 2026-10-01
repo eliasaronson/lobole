@@ -97,8 +97,7 @@ just as a double is.
 
 ## The model is double
 
-**Everything that is a fact about the part is a double**: a primitive's
-position, a sketch plane and every coordinate on it, a frame, a curve's
+**Everything that is a fact about the part is a double**: a sketch plane and every coordinate on it, a frame, a curve's
 points, an occurrence's placement and attachment, a mate's values and a
 configuration's holds, the assembly solve and the frames it composes, a CAM
 setup's frame and the fields that place parts and fixtures in it, a physical

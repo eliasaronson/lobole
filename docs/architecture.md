@@ -27,7 +27,7 @@ Includes are relative to `src/` (`#include "core/Document.h"`).
 | directory | what lives there |
 |---|---|
 | `src/core/` | the document model, flat: `Document`, `Feature`, `Command`, `Expression`, `Occurrence` (assemblies), `Measure`, `Units`, `Angles.h`, `Conventions.h`, `Parallel.h`, `Receipt.h` |
-| `src/core/features/` | one file pair per feature type (`ExtrudeFeature`, `HoleFeature`, `DerivedFeature`, the sheet-metal and tube features, …); the four primitives (`Box`, `Sphere`, `Cylinder`, `Import`) are inline in `core/Feature.h` |
+| `src/core/features/` | one file pair per feature type (`ExtrudeFeature`, `HoleFeature`, `DerivedFeature`, the sheet-metal and tube features, …); `ImportFeature` and the stored primitives an older document carries (`Box`, `Sphere`, `Cylinder`) are inline in `core/Feature.h`; the Box/Cylinder/Sphere tool, which adds a sketch and an extrude, is `core/Primitives.{h,cpp}` |
 | `src/core/sketch/` | the 2D sketch solver (PlaneGCS), profiles, inference, selection |
 | `src/core/io/` | serialization, split by domain (`Serialize{Features,Assembly,Studies,Configurations,Cam}.cpp`, shared `SerializationInternal.h`), the git vault, merge, autosave, checkpoints, settings, keymap |
 | `src/core/{cam,drawing,fem,parts,catalog,sheet,tube}/` | one directory per domain |

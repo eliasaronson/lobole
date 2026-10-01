@@ -98,7 +98,7 @@ worse than a missing row, because an agent trusts it instead of guessing.
   fails before any mutation. Inside `batch` the refusal rolls the batch back.
 - **Strict feature JSON.** `add_feature` / `modify_feature` build the
   feature, serialize it back, and refuse any request key not in the round
-  trip or the type's documented fields ("unknown field 'mode' for Box"). A
+  trip or the type's documented fields ("unknown field 'mode' for Fillet"). A
   documented key whose value is the default, and so does not serialize back
   (`units: "mm"`), is accepted.
 - **Wrong types.** A `json::exception` from a handler is reported as a

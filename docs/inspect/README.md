@@ -364,7 +364,7 @@ partner, and an all-pairs sweep is quadratic.
 ## Positions are double
 
 The model is double ([../conventions.md](../conventions.md#the-model-is-double)):
-a box placed at 164.8 has a face at the double nearest 164.8, and `Measure`
+a face built at 164.8 sits at the double nearest 164.8, and `Measure`
 reports it as that, in doubles, like sketch planes and sketch geometry
 ([../sketching/README.md](../sketching/README.md#plane)). A filter on a
 COMPUTED position still wants a tolerance sized to its magnitude, since

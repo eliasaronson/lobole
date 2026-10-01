@@ -158,10 +158,11 @@ body as it was.
 
 A Box, Cylinder or Sphere is a one-call tool that stores what a person
 would have drawn: a Sketch on what it is placed on, constrained and
-dimensioned, and an Extrude (a Sphere: a Revolve) of it. A primitive placed
-at a world coordinate followed nothing (a boss at z = 24.7 stayed there when
-the plate became 30), read as a number instead of an intent, and was a
-second dialect a person had to rebuild to edit. It is for a fixture, a
+dimensioned, and an Extrude (a Sphere: a Revolve) of it. A solid placed at
+a world coordinate follows nothing (a boss at z = 24.7 stays there when the
+plate becomes 30), reads as a number instead of an intent, and is a second
+dialect a person has to rebuild to edit; this one is ordinary history on
+what it stands on. It is for a fixture, a
 stand-in or a first rough block; a part is modelled on its faces and planes
 from sketches.
 
@@ -204,8 +205,8 @@ from sketches.
   sketch failed fails too, rather than building from the sketch's last plane.
 
 The stored `BoxFeature`, `CylinderFeature` and `SphereFeature`
-(`src/core/Feature.h`) remain for two readers only: documents saved before
-this (they load, regenerate and save as they were; their faces keep the
+(`src/core/Feature.h`) remain for two readers only: older documents that carry
+one (they load, regenerate and save as they were; their faces keep the
 names `<id>/face<i>`, and the feature editor still edits one), and core
 tests that want a one-line solid. Nothing an agent or a person reaches
 creates one: not `add_feature`, `modify_feature`, the SDK, the MCP surface
@@ -243,8 +244,8 @@ or the GUI. The saved form did not change, so this is not a format version.
   where the two touch, splitting a face and renaming it.
 - **A tool starts on its plane, and a face typed at the same height is on it
   too.** The model is double
-  ([../conventions.md](../conventions.md#the-model-is-double)), so a box
-  placed at z = 24.7 has its face at the double nearest 24.7, where a sketch
+  ([../conventions.md](../conventions.md#the-model-is-double)), so a face
+  built at z = 24.7 sits at the double nearest 24.7, where a sketch
   plane typed at 24.7 is, and OpenCASCADE cuts and fuses an exactly coplanar
   face cleanly. While primitives were placed in float the face sat at
   24.70000076: a pocket cut from the plane kept a sealed skin over itself and

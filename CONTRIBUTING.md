@@ -203,8 +203,8 @@ Then drive it from Python:
 import sys; sys.path.insert(0, "tools")
 from designer_remote import Designer
 d = Designer(8437)
-d.call("add_feature", feature={"type": "Box", "name": "B", "position": [0,0,0],
-                               "width": 10, "height": 4, "depth": 6})
+d.call("add_feature", feature={"type": "Box", "name": "B", "on": "Top",
+                               "width": 10, "depth": 6, "height": 4})
 print(d.call("get_state")["bodies"][0]["volume"])
 ```
 
