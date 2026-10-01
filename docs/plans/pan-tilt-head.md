@@ -95,15 +95,46 @@ The numbers that matter:
 
 ### 6. The yoke: FEM and topology
 
-- A static study of the solid yoke under the camera load at 3 g (handling),
-  giving the deflection at the lens and the factor of safety.
-- A topology study of the yoke. The keep faces are the bearing bosses, the
-  worm housing and the camera plate seat; the volume fraction is chosen for a
-  stated stiffness target.
-- Re-model over the shape guide, then run the static study again, and compare
-  mass and lens deflection with the solid yoke.
-- Record what the re-modelling cost: no B-rep comes back from a topology
-  study today. That cost is this phase's finding.
+Built: see [generators/pantilt/README.md#the-yoke-under-load](../../generators/pantilt/README.md#the-yoke-under-load)
+and `probe_study` ([docs/simulation/README.md#probing-a-face](../simulation/README.md#probing-a-face)).
+The numbers that matter:
+
+- **Solid yoke** (phase 5's, 591 g) at 3 g level: the lens moves 5.5 mm and
+  the camera pitches 92' -- 31' under its own weight. Tilted to the longest
+  lever, 10.3 mm and 210'; sideways, 13.1 mm. Factor of safety 2.7 against
+  PETG's yield, 2.2 across layers (sideways, 18 MPa).
+- **Topology**, the envelope at the solid's volume (fraction 0.48), the
+  gear's worst case: 30 iterations, 2 h on the CPU (the GPU solver fails on
+  the first solve of a part this slender). Its layout follows its one load
+  case -- the -Y arm a single strut, an empty quadrant where the pan blocks
+  bolt -- so the re-model reads it rather than traces it.
+- **Re-modelled yoke**, 1051 g: the lens 1.8 mm / 29' level (a third of the
+  solid's, the stated target), 3.2 mm tilted, 4.2 mm sideways; factor of
+  safety 2.4, 1.9 across layers. It is 1.8 times the mass for 3.1 times the
+  stiffness: held at its underside instead, the lens moves 0.46 mm, so three
+  quarters of what is left is the Ø15 PETG pan journal and the base around
+  it. The pan bearings were sized for strength; their stiffness is what a
+  lighter yoke would need next.
+- **Printed** as three pieces on a 256 mm bed (base, each arm), bolted with
+  four ISO 4762 M4 and nuts; the assembly's sweep and both motion studies
+  run clean with it.
+- **A phase-5 defect:** the pan journal stopped inside the wheel's bearing
+  and never reached the plate's, so the yoke hung on one bearing. Fixed.
+
+**What the re-modelling cost.** About four hours of a session after the
+study, eight build-and-study iterations at 3 to 6 minutes each, and some
+200 lines of generator. Nothing comes back from the study but a picture and
+an STL: the density was read off section screenshots taken by hand (the two
+arms overlap in any whole view), each window was a polygon whose insets were
+computed in Python, and no static study can be run on the optimised shape
+itself, so whether the layout meets the target is only known after the
+re-model is built. There is no snapping to the shape guide, one load case
+per study (the layout is that case's), and no keep-out body: the first
+envelope overlapped the tilt worm's blocks and it showed only in the result.
+The other cost was getting a study to run at all: the solid yoke would not
+mesh (5 µm slivers from single-precision sketch planes, which main has
+since made double), the advice to Refine it renamed every face, and the
+app's topology had run on the CPU for a month (fixed here).
 
 ### 7. The base plate on the 6090
 

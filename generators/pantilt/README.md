@@ -143,5 +143,80 @@ real bore size error, which is the K7 question above.
 - The flipped setup's playback shows the waste Top already removed from
   below it as a solid slab: a height map seen from above cannot hold an
   undercut. The check reads it from Top's program and is right.
-- The yoke is about 250 mm tall, more than many printers' Z: phase 6
-  (topology) is where it gets lighter, and it may have to be split.
+- The yoke prints as three pieces bolted together (below); the studies
+  model it as one solid, so the joint is taken as bonded.
+
+## The yoke under load
+
+`build_yoke_topo.py`; the numbers are `yoke_topo_report.json`'s.
+
+**The load.** The camera at 3 g, followed down its path (`yoke_loads.py`):
+the camera, cradle, wheel and shaft are one body on two bearings (radial at
+both, axial at +Y); the wheel's tooth force at the worm holds the tilt, so
+it cancels the load's moment about the axis, plus a separating force of
+tan 20 deg of it; the worm hands its thrust to the ledge. The yoke is fixed
+on its pan journal and collar. Three cases: 3 g down, level (the working
+pose); 3 g down at 63.4 deg of tilt, where the CoM's lever is longest (the
+tooth force 98.7 N, the spec's `wheel_ft_3g`); 3 g sideways. The lens is
+not in the study: its motion is carried from what the two bearing bores
+and the ledge did (`probe_study`): the shaft's line through the bores, its
+turn from the wheel's teeth following the worm, the lens 160 mm in front of
+and 80 above the axis.
+
+| 3 g | solid yoke, 591 g | the head's yoke, 1051 g |
+|---|---|---|
+| level: lens / camera pitch | 5.5 mm / 92' | 1.8 mm / 29' |
+| tilted 63 deg: lens / pitch | 10.3 mm / 210' | 3.2 mm / 65' |
+| sideways: lens | 13.1 mm | 4.2 mm |
+| largest von Mises (sideways) | 18.3 MPa | 21.2 MPa |
+| factor of safety, PETG yield 50 / across layers 40 | 2.7 / 2.2 | 2.4 / 1.9 |
+
+The solid yoke is phase 5's with the pan journal fixed (below). Mesh
+arm_t / 3, about 54k and 112k tet10s.
+
+**The topology study** is of `yoke_envelope`: the base out to the pan
+blocks' far edge on both sides, a hub under it down to the wheel, each arm a
+plate across that width up to the tilt axis -- inside the tilt worm's
+blocks and their nuts above and under the ledge. The seats, shoulders,
+reliefs and screw holes are kept. Its volume fraction is the solid yoke's
+volume in the envelope (0.48): the stiffest layout of the same material,
+and the target asked of the re-model is the lens at most a third of the
+solid yoke's at 3 g level. The study's case is the tilted one (the gear's
+worst); 30 iterations at an 8 mm mesh, 33k tets, two hours on the CPU (the
+GPU solver fails on it at the first solve, docs/topopt/README.md). Its
+compliance settled from iteration 15 (139, from 171 at iteration 5); it did
+not reach the change tolerance.
+
+What it says (`yoke_topo_{density,shape}_{iso,arm_pos,arm_neg,base_top,
+base_under}.png`), read critically:
+
+- The +Y arm (the gear's side) stays a solid plate; the -Y arm becomes a
+  single strut from the bearing to the -X end of its foot, along that
+  case's bearing load. One load case, so one strut: under the level or the
+  sideways load it would bend. The re-model makes both arms A-frames.
+- The base stays solid on -X and +Y and empties the +X/-Y quadrant --
+  where the pan worm's blocks bolt on, which no case loads. The re-model
+  keeps it.
+- The screw holes' kept rings float free under the base: a keep face
+  freezes the tets it touches, connected or not.
+
+**The re-model** (`build_yoke.lighten`): A-frame arms with windows, the +Y
+arm solid above the ledge; a web under the tilt worm, from the base to the
+ledge, which with the arm closes a box (the worm's thrust 24 mm outboard of
+a 12 mm plate twisted it); a windowed base on a keel grillage down to the
+wheel; foot flanges, two ISO 4762 M4 each side through the base with ISO
+4032 nuts. Held at its underside instead of its journal, the re-modelled
+yoke's lens moves 0.46 mm at 3 g level: three quarters of the 1.8 mm is the
+Ø15 PETG journal and the base around it -- the pan bearing pair, sized for
+strength, is what limits the stiffness, and topology cannot reach it.
+
+**Printing.** On a 256 mm cube (it also fits a 250 x 210 x 220 bed) as
+three pieces split at the base's top, `yoke_print_*.stl`: the base (564 g,
+159 x 206, 43 high, top face down), the +Y arm with the web and the ledge
+(339 g, upright, 187 high; the ledge outboard of the web on support) and
+the -Y arm (148 g, on its inner face, 24 high). Whole, the yoke fits the
+volume but has no orientation without supports under a 220 mm U.
+
+The assembly re-runs with it: the standing sweep and both motion studies
+are clean; the camera now passes the A-frames 1.2 mm off at full tilt (the
+designed running gap), where it passed empty space beside the old arms.
