@@ -474,6 +474,32 @@ TEST_CASE("check_fits reads a bearing seat with the ring's own band",
   REQUIRE(fits.size() == 1);
   CHECK(fits[0].status == "unverified");
   CHECK_THAT(fits[0].reason, ContainsSubstring("needs a shaft class"));
+
+  // A mate on a FLAT face is not a fit at all: the interface a bolt clamps,
+  // a ring's side on its shoulder. It used to be listed as an unverified fit
+  // ("carries no tolerance"), and on the pan/tilt head eighteen such rows
+  // buried the eight bearing seats.
+  const Document* shaftDoc = shaft;
+  ElementRef shoulder;
+  for (const auto& [index, mapped] :
+       shaftDoc->GetBodies().front().elementMap.names) {
+    const auto face =
+        Measure::DescribeFaceAt(shaftDoc->GetBodies().front(), index);
+    if (face && face->kind == "plane" &&
+        std::abs(face->centroid.z - 10.0) < 1e-6)
+      shoulder = ElementRef{shaftDoc->GetBodies().front().createdBy, mapped};
+  }
+  REQUIRE(shoulder.IsSet());
+  Mate flat;
+  flat.type = MateType::Fastened;
+  flat.name = "Ring on shoulder";
+  flat.a.occurrenceId = rig.shaftOcc;
+  flat.a.anchor.face = shoulder;
+  flat.b.occurrenceId = fit.occurrence;
+  flat.b.anchor.face = rig.journal; // any face of the other part; a is flat
+  state.assembly->AddMate(flat);
+  fits = ui::CheckFits(state);
+  CHECK(fits.size() == 1);
 }
 
 TEST_CASE("check_seat reads a placed bearing and the seat it is on",

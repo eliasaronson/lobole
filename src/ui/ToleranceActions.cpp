@@ -32,6 +32,7 @@ struct Side {
   // The part is printed: its diameter is what it is MODELLED at, and the fit
   // is at what that prints.
   std::optional<printfit::Process> print;
+  bool notRound = false; // the face is flat: the joint is not a fit
 };
 
 // 8.2 -> "8.2", 8 -> "8", 7.0466 -> "7.047": millimetres as a person writes
@@ -312,6 +313,15 @@ std::vector<FitCheck> CheckFits(AppState& state) {
       side.diameter = ring->nominal;
       return side;
     }
+    const auto el = Measure::Describe(pd->GetBodies(), c.anchor.face);
+    if (el && !el->hasRadius) {
+      // A flat face has no size: the joint is not a fit at all (the
+      // interface a bolt clamps, a part sat on a face), and listing it as an
+      // unverified fit buried the head's eight bearing seats under eighteen
+      // such rows.
+      side.notRound = true;
+      return side;
+    }
     side.tol = pd->ToleranceFor(c.anchor.face);
     if (!side.tol) {
       side.reason = std::string(which) + " (" + side.occurrence + ") face " +
@@ -319,8 +329,7 @@ std::vector<FitCheck> CheckFits(AppState& state) {
                     " carries no tolerance (set_tolerance on that part)";
       return side;
     }
-    const auto el = Measure::Describe(pd->GetBodies(), c.anchor.face);
-    if (!el || !el->hasRadius) {
+    if (!el) {
       side.reason = std::string(which) + " (" + side.occurrence + ") face " +
                     c.anchor.face.name + " no longer resolves to a round face";
       return side;
@@ -372,6 +381,8 @@ std::vector<FitCheck> CheckFits(AppState& state) {
 
     const Side a = resolveSide(mate.a, "a");
     const Side b = resolveSide(mate.b, "b");
+    if (a.notRound || b.notRound)
+      continue; // a flat face: not a fit
     if (!a.reason.empty() || !b.reason.empty()) {
       stop(!a.reason.empty() ? a.reason : b.reason);
       continue;

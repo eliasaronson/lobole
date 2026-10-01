@@ -80,7 +80,9 @@ I/O, mirroring `ThreadStandards`:
   cylindrical) fails an interference fit and warns on a transition fit; a
   fastened round joint is `reported`, not judged, because a shrunk-on gear and a
   bolt through a clearance hole are both fastened and want opposite fits.
-  Anything not fully answerable — an anchor that is a frame, an untoleranced
+  A mate on a flat face is not a fit and is not listed (the interface a bolt
+  clamps, a part sat on a face). Anything not fully answerable — an anchor
+  that is a frame, an untoleranced
   side, two basic sizes, a side with explicit deviations (which cannot say which
   side is the bore), both sides the same case — is `unverified` with the
   reason, never a pass. It reaches into sub-assemblies, naming each side by its
