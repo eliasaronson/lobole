@@ -2,6 +2,8 @@
 
 #include "cad/CADKernel.h"
 
+#include <BRepTools_History.hxx>
+#include <TopoDS_Shape.hxx>
 #include <glm/glm.hpp>
 #include <gp_Ax3.hxx>
 #include <gp_Pnt2d.hxx>
@@ -129,13 +131,45 @@ struct HobStats {
 // `blankRadius` the blank's.
 struct WheelTools {
   CADShape rim;
-  CADShape spaces;
+  CADShape spaces; // z2 solids, space i turned i pitches about the axis
+  // Where the spaces live, for cutting them by replication
+  // (CutSpacesBySectors): a ring about the axis, `innerRadius` (under every
+  // root) to `outerRadius` (past the blank), `halfHeight` either side of the
+  // mid-plane (past every space's ends). `lowerSplit` and `upperSplit` are
+  // angles from the frame's XDirection about its axis, below and above the
+  // mid-plane, that run inside space 0 from root to tip wherever the wheel
+  // has material: a sector bounded there and one pitch on holds one whole
+  // tooth and cuts no tooth face.
+  double innerRadius = 0.0, outerRadius = 0.0, halfHeight = 0.0;
+  double lowerSplit = 0.0, upperSplit = 0.0;
 };
 [[nodiscard]] bool WheelCutTools(const gp_Ax3& frame, double halfFace,
                                  double blankRadius, const PairSpec& spec,
                                  double crowning, const HobOptions& options,
                                  WheelTools* out, HobStats* stats,
                                  std::string* why);
+
+// The wheel's teeth cut from `body` (already throated) by replication
+// (docs/modeling/worm-gears.md#how-the-teeth-are-cut): the ring of the body
+// the spaces reach is cut once, a pitch-wide sector of it less spaces 0 and 1,
+// and that sector is turned z2 times and glued back. The one boolean against
+// a lofted space costs what forty did. Refused (false, `why`) when that ring
+// is not a solid of revolution about the wheel's axis — something already
+// cut into it would be copied round — or when a step fails; the caller then
+// cuts the spaces the ordinary way.
+//
+// `history` maps every face and edge of `body` and of `tools.spaces` onto
+// `result`, as one boolean's would. `removed` is what the cut took: z2 times
+// the sector's loss, for the caller to check the result's volume against.
+struct SectorCut {
+  TopoDS_Shape result;
+  Handle(BRepTools_History) history;
+  double removed = 0.0;
+};
+[[nodiscard]] bool CutSpacesBySectors(const TopoDS_Shape& body,
+                                      const gp_Ax3& frame, int teeth,
+                                      const WheelTools& tools, SectorCut* out,
+                                      std::string* why);
 
 // The ratio of a worm relation (docs/assemblies/relations.md#worm): the
 // wheel's mate turns this much per radian of the worm's. Its size is

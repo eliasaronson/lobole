@@ -9,23 +9,38 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "cad/NonDestructiveBoolean.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 #include "core/WormGear.h"
+#include "core/features/BooleanFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/WormFeature.h"
 #include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRep_Builder.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
@@ -419,4 +434,245 @@ TEST_CASE("A worm pair meshes through a turn with no clash", "[worm][slow]") {
     CHECK_FALSE(wrong.clean);
     CHECK(WorstClash(wrong) > 0.5);
   }
+}
+
+namespace {
+
+// The throated blank of the head's wheel, the way the feature throats it,
+// with a bore and five lightening holes drilled through its web (all inside
+// the root) when `holes`, and the tools that cut its teeth.
+struct Throated {
+  gp_Ax3 frame;
+  worm::WheelTools tools;
+  worm::HobStats stats;
+  TopoDS_Shape body;
+};
+Throated HeadWheel(bool holes) {
+  Throated t;
+  worm::PairSpec spec;
+  spec.teeth = 40;
+  spec.module = 2.0;
+  spec.wormPitchDia = 20.0;
+  t.frame = gp_Ax3(gp_Pnt(0, 0, 6.5), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0));
+  t.frame.Rotate(gp_Ax1(gp_Pnt(0, 0, 6.5), gp_Dir(0, 0, 1)), kPi / 40);
+  std::string why;
+  REQUIRE(worm::WheelCutTools(t.frame, 6.5, 43.0, spec, 0.1, {}, &t.tools,
+                              &t.stats, &why));
+  TopoDS_Shape blank = BRepPrimAPI_MakeCylinder(
+                           gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 43.0, 13.0)
+                           .Shape();
+  if (holes) {
+    TopoDS_Compound drill;
+    BRep_Builder bb;
+    bb.MakeCompound(drill);
+    bb.Add(drill, BRepPrimAPI_MakeCylinder(
+                      gp_Ax2(gp_Pnt(0, 0, -1), gp_Dir(0, 0, 1)), 10.0, 15.0)
+                      .Shape());
+    for (int k = 0; k < 5; k++)
+      bb.Add(drill, BRepPrimAPI_MakeCylinder(
+                        gp_Ax2(gp_Pnt(22.0 * std::cos(k * 2 * kPi / 5),
+                                      22.0 * std::sin(k * 2 * kPi / 5), -1),
+                               gp_Dir(0, 0, 1)),
+                        3.0, 15.0)
+                        .Shape());
+    BRepAlgoAPI_Cut drilled;
+    REQUIRE(cad::BuildNonDestructive(drilled, blank, drill));
+    blank = drilled.Shape();
+  }
+  BRepAlgoAPI_Cut throat;
+  REQUIRE(cad::BuildNonDestructive(throat, blank, t.tools.rim.GetShape()));
+  t.body = throat.Shape();
+  return t;
+}
+
+double VolumeOf(const TopoDS_Shape& s) {
+  GProp_GProps props;
+  BRepGProp::VolumeProperties(s, props);
+  return props.Mass();
+}
+
+int FaceCount(const TopoDS_Shape& s) {
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(s, TopAbs_FACE, faces);
+  return faces.Extent();
+}
+
+} // namespace
+
+TEST_CASE("Teeth cut by replication are the teeth cut whole", "[worm][slow]") {
+  // The whole cut, forty spaces at once, is the reference: the same volume
+  // to a part in a million, and the same points inside it.
+  const Throated plain = HeadWheel(false);
+  BRepAlgoAPI_Cut whole;
+  REQUIRE(cad::BuildNonDestructive(whole, plain.body,
+                                   plain.tools.spaces.GetShape()));
+  const double wholeVolume = VolumeOf(whole.Shape());
+
+  worm::SectorCut cut;
+  std::string why;
+  const bool replicated = worm::CutSpacesBySectors(plain.body, plain.frame, 40,
+                                                   plain.tools, &cut, &why);
+  INFO(why);
+  REQUIRE(replicated);
+  CHECK(BRepCheck_Analyzer(cut.result).IsValid());
+  CHECK(CADShape(cut.result).SolidCount() == 1);
+  const double v = VolumeOf(cut.result);
+  CHECK_THAT(v, WithinRel(wholeVolume, 1e-6));
+  CHECK_THAT(VolumeOf(plain.body) - v, WithinRel(cut.removed, 1e-6));
+  // Splitting faces at the sectors and merging them back leaves the faces
+  // the whole cut has, but for the root of the one space where the ring of
+  // copies closes, and the blank's seam.
+  CHECK(std::abs(FaceCount(cut.result) - FaceCount(whole.Shape())) <= 2);
+  // The same solid: points all through the teeth classify alike.
+  BRepClass3d_SolidClassifier a(whole.Shape()), b(cut.result);
+  int differ = 0, inside = 0, outside = 0;
+  for (int i = 0; i < 400; i++) {
+    const double ang = 2 * kPi * i / 400.0 + 0.37 * i;
+    const double rad = 36.0 + 7.0 * std::fmod(0.618 * i, 1.0);
+    const double z = 13.0 * std::fmod(0.414 * i, 1.0);
+    const gp_Pnt p(rad * std::cos(ang), rad * std::sin(ang), z);
+    a.Perform(p, 1e-6);
+    b.Perform(p, 1e-6);
+    inside += a.State() == TopAbs_IN;
+    outside += a.State() == TopAbs_OUT;
+    differ += a.State() != b.State();
+  }
+  CHECK(inside > 100);
+  CHECK(outside > 50);
+  CHECK(differ == 0);
+
+  // The history carries every space's faces onto the wheel.
+  int spaceFacesOnWheel = 0;
+  TopTools_IndexedMapOfShape resultFaces;
+  TopExp::MapShapes(cut.result, TopAbs_FACE, resultFaces);
+  for (TopExp_Explorer ex(plain.tools.spaces.GetShape(), TopAbs_FACE);
+       ex.More(); ex.Next())
+    for (const TopoDS_Shape& m : cut.history->Modified(ex.Current()))
+      spaceFacesOnWheel += resultFaces.Contains(m);
+  CHECK(spaceFacesOnWheel >= 40 * 3);
+
+  // A blank drilled through its web is split: the ring is replicated, the
+  // rest kept, and the holes take exactly their own volume.
+  const Throated drilled = HeadWheel(true);
+  worm::SectorCut split;
+  REQUIRE(worm::CutSpacesBySectors(drilled.body, drilled.frame, 40,
+                                   drilled.tools, &split, &why));
+  CHECK(BRepCheck_Analyzer(split.result).IsValid());
+  CHECK(CADShape(split.result).SolidCount() == 1);
+  const double holes = kPi * 13.0 * (10.0 * 10.0 + 5 * 3.0 * 3.0);
+  CHECK_THAT(VolumeOf(split.result), WithinRel(wholeVolume - holes, 1e-6));
+}
+
+namespace {
+
+// The stable name of the body's largest cylindrical face: the rim.
+std::string RimFaceName(const Body& body) {
+  int i = 0, best = -1;
+  double radius = 0.0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), i++) {
+    BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+    if (s.GetType() == GeomAbs_Cylinder && s.Cylinder().Radius() > radius) {
+      radius = s.Cylinder().Radius();
+      best = i;
+    }
+  }
+  return best < 0 ? std::string{} : body.elementMap.names.at(best);
+}
+
+// The head's wheel blank with each of `drills` (a point on the axis of a
+// hole along Z, and its radius) cut from it first, then the wheel.
+std::unique_ptr<Document>
+DrilledWheel(const std::vector<std::pair<glm::vec3, double>>& drills) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Blank", glm::vec3(0.0f), glm::vec3(0, 0, 1), 43.0, 13.0));
+  // A boolean's result is the body of the boolean that made it.
+  uint64_t owner = doc->GetFeature(0)->GetId();
+  for (const auto& [at, radius] : drills) {
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Drill", at, glm::vec3(0, 0, 1), radius, 15.0));
+    doc->AddFeature(std::make_unique<BooleanFeature>(
+        "Cut", owner, doc->GetFeature(doc->FeatureCount() - 1)->GetId(),
+        BooleanOp::Subtract));
+    owner = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+  }
+  const Body& body = doc->GetBodies().at(0);
+  doc->AddFeature(std::make_unique<WormWheelFeature>(
+      "Wheel", ElementRef{owner, RimFaceName(body)}));
+  return doc;
+}
+
+const WormWheelFeature& Wheel(const Document& doc) {
+  const auto* w = dynamic_cast<const WormWheelFeature*>(
+      doc.GetFeature(doc.FeatureCount() - 1));
+  REQUIRE(w != nullptr);
+  return *w;
+}
+
+} // namespace
+
+TEST_CASE("A drilled wheel is replicated and keeps the blank's names",
+          "[worm][slow]") {
+  // A bore and a lightening hole, both inside the root: the web is not
+  // revolved, the rim is.
+  auto doc =
+      DrilledWheel({{glm::vec3(0, 0, -1), 10.0}, {glm::vec3(22, 0, -1), 3.0}});
+  const WormWheelFeature& w = Wheel(*doc);
+  INFO(w.GetError());
+  REQUIRE(w.GetError().empty());
+  CHECK(w.ReportJson().at("teeth_cut") == "replicated");
+  const Body& body = doc->GetBodies().at(0);
+  CHECK(body.shape.SolidCount() == 1);
+  // Every face is named, and no two alike; the bore and the hole, which the
+  // wheel never touched, keep the names they had.
+  std::vector<std::string> names;
+  int faces = 0, holes = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), faces++) {
+    const std::string* name = body.elementMap.NameOf(faces);
+    REQUIRE(name != nullptr);
+    names.push_back(*name);
+    BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+    if (s.GetType() == GeomAbs_Cylinder && s.Cylinder().Radius() < 20.0) {
+      holes++;
+      INFO(*name);
+      CHECK(name->find(";M" + std::to_string(w.GetId())) == std::string::npos);
+    }
+  }
+  CHECK(holes == 2);
+  std::sort(names.begin(), names.end());
+  CHECK(std::adjacent_find(names.begin(), names.end()) == names.end());
+}
+
+TEST_CASE("A rim that is not revolved has its teeth cut whole",
+          "[worm][slow]") {
+  // A hole through the rim, where the teeth go: replicating a sector would
+  // copy it round, so the wheel cuts the forty spaces at once.
+  auto doc = DrilledWheel({{glm::vec3(39.0, 0, -1), 1.0}});
+  const WormWheelFeature& w = Wheel(*doc);
+  INFO(w.GetError());
+  REQUIRE(w.GetError().empty());
+  CHECK(w.ReportJson().at("teeth_cut") == "whole");
+  CHECK(doc->GetBodies().at(0).shape.SolidCount() == 1);
+}
+
+TEST_CASE("An undone wheel edit comes back from its inputs", "[worm][slow]") {
+  auto doc = WheelPart(true);
+  const double v0 = doc->GetBodies().at(0).shape.Volume();
+  const ElementMap names0 = doc->GetBodies().at(0).elementMap;
+  CHECK_FALSE(Wheel(*doc).ReportJson().at("reused").get<bool>());
+  const auto edit = [&](int teeth) {
+    auto w = Wheel(*doc).Clone();
+    dynamic_cast<WormWheelFeature&>(*w).teeth = teeth;
+    doc->ReplaceFeature(1, std::move(w));
+  };
+  edit(41);
+  CHECK_FALSE(Wheel(*doc).ReportJson().at("reused").get<bool>());
+  CHECK(doc->GetBodies().at(0).shape.Volume() != v0);
+  edit(40); // as an undo does
+  CHECK(Wheel(*doc).ReportJson().at("reused").get<bool>());
+  CHECK(doc->GetBodies().at(0).shape.Volume() == v0);
+  CHECK(doc->GetBodies().at(0).elementMap.names == names0.names);
+  CHECK(doc->GetBodies().at(0).elementMap.edgeNames == names0.edgeNames);
 }

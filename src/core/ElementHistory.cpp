@@ -296,6 +296,18 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
   }
 }
 
+ElementMap NamesThroughHistory(const CADShape& target,
+                               const ElementMap& targetMap,
+                               const CADShape& tool, const ElementMap& toolMap,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag) {
+  ElementMap out = PropagateNames(
+      {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, history,
+      TopTools_ListOfShape(), result.GetShape(), featureTag);
+  FallbackPasses(result.GetShape(), out);
+  return out;
+}
+
 namespace {
 
 // Shared tail of both blend makers: build, verify, propagate, fall back.

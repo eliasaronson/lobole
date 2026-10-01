@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+class BRepTools_History;
+
 // Propagation of stable element names through history-reporting OCC operations
 // (topological naming, T5). Each function keeps the OCC maker alive, folds its
 // Modified/Generated/IsDeleted reports into a BRepTools_History, and rewrites
@@ -37,6 +39,17 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& toolMap, uint64_t featureTag,
                       ElementMap& out, std::string* error = nullptr,
                       double fuzzy = 0.0);
+
+// Names for `result` from a history the caller built itself, for a chain of
+// operations that stands for one boolean of `target` and `tool` (the worm
+// wheel's teeth cut by replication, WormGear.h's CutSpacesBySectors): every
+// face and edge of either input is placed as BooleanNamed places it —
+// kept, ";M", ";G" — then the U/L passes. There are no section edges.
+ElementMap NamesThroughHistory(const CADShape& target,
+                               const ElementMap& targetMap,
+                               const CADShape& tool, const ElementMap& toolMap,
+                               const BRepTools_History& history,
+                               const CADShape& result, uint64_t featureTag);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named
