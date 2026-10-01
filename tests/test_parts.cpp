@@ -50,6 +50,25 @@ TEST_CASE("Axis traversal keeps material when the ray has one crossing",
     CHECK(past.blind);
     CHECK_THAT(past.end, WithinAbs(20.0, 1e-6));
   }
+  SECTION("A gap no screw of the size spans ends the joint") {
+    // A plate and a block 200 mm further along the axis (a yoke's base and
+    // the camera above it): no M4 is longer than 40, so the joint is the
+    // plate alone, and it is not blind -- a nut goes on its far face.
+    const std::vector<parts::StackSegment> stack{{"base", 1, 1, 0.0, 12.8},
+                                                 {"camera", 2, 2, 212.8, 300}};
+    const std::vector<parts::StackSegment> onAxis{{"camera", 2, 2, 212.8, 300}};
+    const parts::JointExtent unbounded = parts::JointEnd(stack, onAxis, 0.0);
+    CHECK(unbounded.blind); // what it said: a blind hole in the camera
+    const parts::JointExtent bounded =
+        parts::JointEnd(stack, onAxis, 0.0, 0.0, 40.0);
+    CHECK_FALSE(bounded.blind);
+    CHECK_THAT(bounded.end, WithinAbs(12.8, 1e-9));
+    // A gap a screw CAN span is still spanned (and named by the caller).
+    const std::vector<parts::StackSegment> near{{"a", 1, 1, 0.0, 5.0},
+                                                {"b", 2, 2, 8.0, 13.0}};
+    CHECK_THAT(parts::JointEnd(near, {}, 0.0, 0.0, 40.0).end,
+               WithinAbs(13.0, 1e-9));
+  }
   SECTION("The ray starts inside material") {
     const auto spans =
         parts::TraverseAxis(placed, {0, 0, 25}, {0, 0, 1}, 0, 50);

@@ -101,13 +101,21 @@ TraverseAxis(const std::vector<PlacedBody>& placed, const glm::dvec3& origin,
 // beyond it — re-derived as a much longer joint ending in that wall, and a
 // correct screw was reported as having no thread in a part it does not touch
 // (docs/parts/README.md#deriving-a-fastener-from-a-hole).
+//
+// `maxSpan` is the longest screw of this size that is made (0 for no bound).
+// A gap along the axis longer than that is not part of any joint such a
+// screw could make: the joint ends at the near side of it. Without it a
+// bolt through a pan/tilt yoke's base, whose line carries on 200 mm up
+// through the air into the camera, was sized to reach the camera and its
+// nut refused as "a blind hole".
 struct JointExtent {
   double end = 0.0;   // how far down the axis the joint reaches, in mm
   bool blind = false; // it stopped ON material, not in daylight
 };
 [[nodiscard]] JointExtent JointEnd(const std::vector<StackSegment>& stack,
                                    const std::vector<StackSegment>& onAxis,
-                                   double truncate, double threadEnd = 0.0);
+                                   double truncate, double threadEnd = 0.0,
+                                   double maxSpan = 0.0);
 
 // Where the first thread of `designation` on this axis ENDS, measured from
 // `origin` along `dir`, or 0 when the axis enters none. Internal threads

@@ -237,7 +237,25 @@ double ThreadEndAlong(const std::vector<PlacedBody>& placed,
 
 JointExtent JointEnd(const std::vector<StackSegment>& stack,
                      const std::vector<StackSegment>& onAxis, double truncate,
-                     double threadEnd) {
+                     double threadEnd, double maxSpan) {
+  // A gap no screw of this size can span ends the joint before it: what lies
+  // beyond is somebody else's part, however it lines up.
+  if (maxSpan > 0.0) {
+    double reached = -1.0;
+    for (const StackSegment& seg : stack) {
+      if (reached >= 0.0 && seg.enter - reached > maxSpan) {
+        std::vector<StackSegment> nearStack, nearAxis;
+        for (const StackSegment& s : stack)
+          if (s.enter < reached + 1e-6)
+            nearStack.push_back(s);
+        for (const StackSegment& s : onAxis)
+          if (s.enter < reached + 1e-6)
+            nearAxis.push_back(s);
+        return JointEnd(nearStack, nearAxis, truncate, threadEnd, 0.0);
+      }
+      reached = std::max(reached, seg.exit);
+    }
+  }
   JointExtent e;
   // Anything on the axis stops the screw there, whatever the plates beside it
   // do. `onAxis` is already in ray order, so its first hit is the near one.

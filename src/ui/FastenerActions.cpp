@@ -690,8 +690,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // check re-derived it.
   const double threadEnds = parts::ThreadEndAlong(placed, glm::dvec3(centre),
                                                   glm::dvec3(-axis), fit.size);
-  const parts::JointExtent extent =
-      parts::JointEnd(stack, onAxis, truncate, threadEnds);
+  const auto range = parts::LengthRange(screwProfile->stem, fit.size, nullptr);
+  const parts::JointExtent extent = parts::JointEnd(
+      stack, onAxis, truncate, threadEnds, range ? range->second : 0.0);
   fit.blind = extent.blind;
   // The summary is bounded by the JOINT, not by the far-end pick alone: in a
   // blind hole the screw reaches the floor, so listing the block's full

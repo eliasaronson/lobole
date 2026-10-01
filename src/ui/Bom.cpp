@@ -324,8 +324,9 @@ FastenerReport CheckFasteners(AppState& state) {
     const double threadEnds = parts::ThreadEndAlong(
         others, glm::dvec3(origin), glm::dvec3(axis), screw->size);
     // The SAME answer fit_fastener derived from, from the same helper.
-    const parts::JointExtent extent =
-        parts::JointEnd(stack, onAxis, nutEnds, threadEnds);
+    const auto range = parts::LengthRange(profile->stem, screw->size, nullptr);
+    const parts::JointExtent extent = parts::JointEnd(
+        stack, onAxis, nutEnds, threadEnds, range ? range->second : 0.0);
     const double grip = extent.end;
 
     // A nut BURIED IN A PART, which is the other way a joint comes apart and

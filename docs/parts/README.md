@@ -131,7 +131,11 @@ screw body in a part, mass and BOM would count it as the part, and
   `check_fasteners` so the two agree: a blind floor, the end of a tapped
   thread the screw engages (`ThreadEndAlong`), or a caller's bound — the
   optional second pick, or (when checking) the joint's own nut, the first nut
-  along the axis and any jam nut against it.
+  along the axis and any jam nut against it. A gap longer than the longest
+  screw of that size is made in also ends it, at its near side: past it is
+  another part that happens to lie on the line (the pan/tilt head's block
+  screws point at the camera 200 mm above the yoke), and without the bound
+  the joint was sized to reach it and the nut refused as a blind hole.
 - **Length.** Through: grip + washers + the nut's height (every thread of the
   nut engaged), snapped **up** to a stocked length. Blind: snapped **down** so
   the screw cannot bottom out, and refused if the hole is shallower than one
