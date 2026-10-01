@@ -83,7 +83,20 @@ std::optional<FemResults>
 Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
       const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
       std::string* error, const glm::dvec3& gravityAccel) {
-  auto fail = [&](const std::string& m) -> std::optional<FemResults> {
+  auto all =
+      SolveCases(mesh, byDomain, fixedNodes, {loads}, error, gravityAccel);
+  if (!all)
+    return std::nullopt;
+  return std::move(all->front());
+}
+
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const std::vector<int>& fixedNodes,
+           const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
+           const glm::dvec3& gravityAccel) {
+  auto fail =
+      [&](const std::string& m) -> std::optional<std::vector<FemResults>> {
     if (error)
       *error = m;
     return std::nullopt;
@@ -160,14 +173,11 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
     K.setFromTriplets(triplets.begin(), triplets.end());
   }
 
-  // Consistent nodal load vector: face tractions (shared with the topology
-  // loop), then the optional gravity body force.
+  if (cases.empty())
+    return fail("no load case to solve");
+  // Consistent nodal load vector: the gravity body force every case shares,
+  // then each case's face tractions (shared with the topology loop).
   Eigen::VectorXd F = Eigen::VectorXd::Zero(nFree);
-  {
-    std::string loadErr;
-    if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
-      return fail(loadErr);
-  }
   auto addNodal = [&](int node, const Vector3d& fv) {
     for (int k = 0; k < 3; ++k) {
       const int g = dofMap[3 * node + k];
@@ -202,88 +212,101 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
   }
 
-  // Solve the reduced system.
+  // Factorise once; every case is one right-hand side.
   Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
   solver.compute(K);
   if (solver.info() != Eigen::Success)
     return fail(
         "model is insufficiently constrained (singular stiffness matrix)");
-  const Eigen::VectorXd u = solver.solve(F);
-  if (solver.info() != Eigen::Success)
-    return fail("linear solve failed");
-  // SimplicialLDLT can factor a singular K (a rigid-body mode the fixed faces
-  // didn't kill) with a near-zero pivot and still report Success, then return a
-  // garbage solution. The robust signal is the residual: a genuine solution
-  // satisfies K u = F, an under-constrained one does not.
-  if (!u.allFinite() || (F.norm() > 0 && (K * u - F).norm() > 1e-6 * F.norm()))
-    return fail(
-        "model is insufficiently constrained (singular stiffness matrix)");
+  std::vector<FemResults> all;
+  all.reserve(cases.size());
+  const Eigen::VectorXd Fgravity = F;
+  for (const std::vector<FaceLoad>& loads : cases) {
+    Eigen::VectorXd F = Fgravity;
+    {
+      std::string loadErr;
+      if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
+        return fail(loadErr);
+    }
+    const Eigen::VectorXd u = solver.solve(F);
+    if (solver.info() != Eigen::Success)
+      return fail("linear solve failed");
+    // SimplicialLDLT can factor a singular K (a rigid-body mode the fixed faces
+    // didn't kill) with a near-zero pivot and still report Success, then return
+    // a garbage solution. The robust signal is the residual: a genuine solution
+    // satisfies K u = F, an under-constrained one does not.
+    if (!u.allFinite() ||
+        (F.norm() > 0 && (K * u - F).norm() > 1e-6 * F.norm()))
+      return fail(
+          "model is insufficiently constrained (singular stiffness matrix)");
 
-  // Expand to full displacement (fixed DOFs are zero).
-  FemResults out;
-  out.displacement.resize(nNodes);
-  for (int n = 0; n < nNodes; ++n) {
-    Vector3d d(0, 0, 0);
-    for (int k = 0; k < 3; ++k) {
-      const int g = dofMap[3 * n + k];
-      if (g >= 0)
-        d(k) = u(g);
+    // Expand to full displacement (fixed DOFs are zero).
+    FemResults out;
+    out.displacement.resize(nNodes);
+    for (int n = 0; n < nNodes; ++n) {
+      Vector3d d(0, 0, 0);
+      for (int k = 0; k < 3; ++k) {
+        const int g = dofMap[3 * n + k];
+        if (g >= 0)
+          d(k) = u(g);
+      }
+      out.displacement[n] = glm::dvec3(d(0), d(1), d(2));
     }
-    out.displacement[n] = glm::dvec3(d(0), d(1), d(2));
-  }
 
-  // Nodal stress recovery: evaluate element stress at each of its 10 nodes,
-  // accumulate to global nodes weighted by element volume, then average.
-  std::vector<Eigen::Matrix<double, 6, 1>> stressAccum(
-      nNodes, Eigen::Matrix<double, 6, 1>::Zero());
-  std::vector<double> weight(nNodes, 0.0);
-  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
-    const auto& tet = mesh.tets[ti];
-    const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
-    Vector3d X[10];
-    Eigen::Matrix<double, 30, 1> ue;
-    for (int i = 0; i < 10; ++i) {
-      const auto& p = mesh.nodes[tet[i]];
-      X[i] = Vector3d(p.x, p.y, p.z);
-      const auto& d = out.displacement[tet[i]];
-      ue(3 * i + 0) = d.x;
-      ue(3 * i + 1) = d.y;
-      ue(3 * i + 2) = d.z;
+    // Nodal stress recovery: evaluate element stress at each of its 10 nodes,
+    // accumulate to global nodes weighted by element volume, then average.
+    std::vector<Eigen::Matrix<double, 6, 1>> stressAccum(
+        nNodes, Eigen::Matrix<double, 6, 1>::Zero());
+    std::vector<double> weight(nNodes, 0.0);
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
+      Vector3d X[10];
+      Eigen::Matrix<double, 30, 1> ue;
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+        const auto& d = out.displacement[tet[i]];
+        ue(3 * i + 0) = d.x;
+        ue(3 * i + 1) = d.y;
+        ue(3 * i + 2) = d.z;
+      }
+      // Element volume (from the centroid Gauss sum) as the averaging weight.
+      double vol = 0.0;
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        vol += kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+      }
+      for (int i = 0; i < 10; ++i) {
+        Eigen::Matrix<double, 6, 30> B;
+        StrainDisp(X, kNodeRST[i][0], kNodeRST[i][1], kNodeRST[i][2], B);
+        const Eigen::Matrix<double, 6, 1> s = D * (B * ue);
+        stressAccum[tet[i]] += vol * s;
+        weight[tet[i]] += vol;
+      }
     }
-    // Element volume (from the centroid Gauss sum) as the averaging weight.
-    double vol = 0.0;
-    for (const auto& g : kTetGauss) {
-      Eigen::Matrix<double, 6, 30> B;
-      vol += kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
-    }
-    for (int i = 0; i < 10; ++i) {
-      Eigen::Matrix<double, 6, 30> B;
-      StrainDisp(X, kNodeRST[i][0], kNodeRST[i][1], kNodeRST[i][2], B);
-      const Eigen::Matrix<double, 6, 1> s = D * (B * ue);
-      stressAccum[tet[i]] += vol * s;
-      weight[tet[i]] += vol;
-    }
-  }
 
-  out.vonMises.resize(nNodes, 0.0);
-  for (int n = 0; n < nNodes; ++n) {
-    if (weight[n] > 0) {
-      const Eigen::Matrix<double, 6, 1> s = stressAccum[n] / weight[n];
-      out.vonMises[n] = VonMises(s);
+    out.vonMises.resize(nNodes, 0.0);
+    for (int n = 0; n < nNodes; ++n) {
+      if (weight[n] > 0) {
+        const Eigen::Matrix<double, 6, 1> s = stressAccum[n] / weight[n];
+        out.vonMises[n] = VonMises(s);
+      }
+      if (out.vonMises[n] > out.maxVonMises) {
+        out.maxVonMises = out.vonMises[n];
+        out.maxVmNode = n;
+        out.maxVmAt = mesh.nodes[n];
+      }
+      const double dmag = glm::length(out.displacement[n]);
+      if (dmag > out.maxDisplacement) {
+        out.maxDisplacement = dmag;
+        out.maxDispNode = n;
+        out.maxDispAt = mesh.nodes[n];
+      }
     }
-    if (out.vonMises[n] > out.maxVonMises) {
-      out.maxVonMises = out.vonMises[n];
-      out.maxVmNode = n;
-      out.maxVmAt = mesh.nodes[n];
-    }
-    const double dmag = glm::length(out.displacement[n]);
-    if (dmag > out.maxDisplacement) {
-      out.maxDisplacement = dmag;
-      out.maxDispNode = n;
-      out.maxDispAt = mesh.nodes[n];
-    }
+    all.push_back(std::move(out));
   }
-  return out;
+  return all;
 }
 
 #ifdef HAVE_SPECTRA
@@ -564,6 +587,15 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
                                 const glm::dvec3& gravityAccel) {
   return Solve(mesh, std::vector<Material>{material}, fixedNodes, loads, error,
                gravityAccel);
+}
+
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh&, const std::vector<Material>&,
+           const std::vector<int>&, const std::vector<std::vector<FaceLoad>>&,
+           std::string* error, const glm::dvec3&) {
+  if (error)
+    *error = "built without FEM solver support (Eigen not found)";
+  return std::nullopt;
 }
 
 std::optional<std::vector<FemResults::ModeShape>>

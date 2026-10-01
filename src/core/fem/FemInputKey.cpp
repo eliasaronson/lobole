@@ -14,7 +14,7 @@ namespace {
 // The algorithm's version: a change to what a solve computes bumps it, so no
 // answer stored before (topology results are saved with the project) is
 // handed out as one from after.
-constexpr const char* kFemAlgorithm = "fem/1";
+constexpr const char* kFemAlgorithm = "fem/2";
 
 // The study as evaluated: what the mesher and solver are handed.
 nlohmann::json Definition(const Study& study) {
@@ -35,6 +35,12 @@ uint64_t StudyInputKey(const Document& doc, const Study& studyIn) {
   h.Str(kFemAlgorithm);
   h.Json(Definition(study));
   h.Bodies(doc.GetBodies());
+  // A static study of a topology result reads that result: its density is
+  // an input (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
+  if (study.shapeFrom.study != 0) {
+    const StudyRuntime* src = doc.StudyResults(study.shapeFrom.study);
+    h.U64(src != nullptr ? src->densityDigest : 0);
+  }
   return h.Digest();
 }
 

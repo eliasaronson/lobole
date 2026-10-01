@@ -11,7 +11,9 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
+#include <cstdio>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -145,11 +147,73 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
     eval(l.magnitudeExpr, l.magnitude, "load magnitude");
   for (auto& pt : study.participants)
     eval(pt.meshSizeExpr, pt.meshSize, "participant mesh size");
+  for (auto& c : study.loadCases)
+    eval(c.weightExpr, c.weight, "load case '" + c.name + "' weight");
   if (study.type == AnalysisType::Topology) {
     eval(study.volumeFractionExpr, study.volumeFraction, "volume fraction");
     eval(study.filterRadiusExpr, study.filterRadius, "filter radius");
   }
   return ok;
+}
+
+bool ValidateLoadCases(const Study& study, std::string* error) {
+  auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  const auto known = [&] {
+    std::string k;
+    for (const LoadCase& c : study.loadCases)
+      k += (k.empty() ? "" : ", ") + ("'" + c.name + "'");
+    return k;
+  };
+  if (study.loadCases.empty()) {
+    for (const Load& l : study.loads)
+      if (!l.loadCase.empty())
+        return fail("load " + std::to_string(l.id) + " names load case '" +
+                    l.loadCase +
+                    "', and the study has none (set_study load_cases)");
+    return true;
+  }
+  if (study.type == AnalysisType::Modal)
+    return fail("a modal study has no loads to put in load cases; load cases "
+                "belong to static and topology studies");
+  for (size_t i = 0; i < study.loadCases.size(); ++i) {
+    const LoadCase& c = study.loadCases[i];
+    if (c.name.empty())
+      return fail("load case " + std::to_string(i + 1) + " has no name");
+    for (size_t j = 0; j < i; ++j)
+      if (study.loadCases[j].name == c.name)
+        return fail("load case '" + c.name + "' is named twice");
+    if (!(c.weight > 0.0))
+      return fail("load case '" + c.name + "': weight " +
+                  std::to_string(c.weight) + " is not positive");
+  }
+  std::vector<int> count(study.loadCases.size(), 0);
+  for (const Load& l : study.loads) {
+    if (l.type == LoadType::Fixed) {
+      if (!l.loadCase.empty())
+        return fail("load " + std::to_string(l.id) +
+                    " is a support in load case '" + l.loadCase +
+                    "': supports hold in every case, so a support names none");
+      continue;
+    }
+    const int k = study.FindLoadCase(l.loadCase);
+    if (k < 0)
+      return fail(l.loadCase.empty()
+                      ? "load " + std::to_string(l.id) +
+                            " is in no load case; the study's cases are " +
+                            known()
+                      : "load " + std::to_string(l.id) + " names load case '" +
+                            l.loadCase + "'; the study's cases are " + known());
+    ++count[k];
+  }
+  for (size_t i = 0; i < count.size(); ++i)
+    if (count[i] == 0)
+      return fail("load case '" + study.loadCases[i].name +
+                  "' has no force or pressure in it");
+  return true;
 }
 
 // featureId 0 = "whichever body has this element". An element name looks
@@ -316,6 +380,96 @@ bool MeshStudy(const Document& doc, Study& study,
   return true;
 }
 
+namespace {
+
+// The mesh of a static study of a topology result (ShapeSource): the result's
+// tets at or above the threshold, or all of them when `whole`, less what is
+// not face-connected to a support. Fills bp.premeshed and the plan's report.
+bool PlanShapeMesh(const Document& doc, const Study& study, int bodyIndex,
+                   StudyBodyPlan& bp, StudyPlan& out, std::string* error) {
+  auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  const ShapeSource& src = study.shapeFrom;
+  if (study.type != AnalysisType::Static)
+    return fail("only a static study takes its shape from a topology result");
+  const Study* topo = doc.FindStudy(src.study);
+  if (topo == nullptr || topo->type != AnalysisType::Topology)
+    return fail("shape_from names study " + std::to_string(src.study) +
+                ", which is not a topology study of this part");
+  const StudyRuntime* rt = doc.StudyResults(src.study);
+  if (rt == nullptr || rt->bodies.empty())
+    return fail("topology study '" + topo->name +
+                "' has no result to take a shape from: run it first");
+  if (doc.StudyResultsStale(src.study))
+    return fail("topology study '" + topo->name +
+                "' is stale: the part changed after it ran, so its shape is "
+                "not this part's -- run it again first");
+  const StudyBodyResult& tb = rt->bodies.front();
+  if (tb.bodyIndex != bodyIndex)
+    return fail("the loads are on body '" + doc.GetBodies()[bodyIndex].name +
+                "', and topology study '" + topo->name + "' optimised '" +
+                tb.bodyName + "'");
+  if (!study.refinements.empty())
+    return fail("a study of a topology result meshes nothing, so it takes no "
+                "refinements: the mesh is the result's");
+  const FemMesh& m = tb.mesh;
+  const size_t n = m.tets.size();
+  if (tb.density.size() != n)
+    return fail("topology study '" + topo->name + "' has no density field");
+  if (!src.whole && (src.threshold < 0.0 || src.threshold >= 1.0))
+    return fail("shape threshold " + std::to_string(src.threshold) +
+                " is not in [0, 1) (0 = the volume-matched level)");
+  const double thr =
+      src.whole ? 0.0
+      : src.threshold > 0.0
+          ? src.threshold
+          : AutoIsoThreshold(m, tb.density, rt->volumeFractionAchieved);
+
+  // The supports' tets, which the solid must reach.
+  std::set<int> fixedFaces;
+  for (const auto& [faceIndex, load] : bp.loads)
+    if (load.type == LoadType::Fixed)
+      fixedFaces.insert(faceIndex);
+  std::vector<char> fixedNode(m.nodes.size(), 0);
+  for (const FemMesh::BoundaryTri& t : m.boundary)
+    if (fixedFaces.count(t.faceIndex))
+      for (int v : t.nodes)
+        fixedNode[v] = 1;
+  std::vector<char> solid(n, 0), anchored(n, 0);
+  for (size_t e = 0; e < n; ++e) {
+    solid[e] = src.whole || tb.density[e] >= thr;
+    for (int v : m.tets[e])
+      anchored[e] |= fixedNode[v];
+  }
+  int count = 0;
+  const std::vector<int> comp = TetComponents(m, solid, &count);
+  std::vector<char> reaches(count, 0);
+  for (size_t e = 0; e < n; ++e)
+    if (comp[e] >= 0 && anchored[e])
+      reaches[comp[e]] = 1;
+  int dropped = 0;
+  for (size_t e = 0; e < n; ++e)
+    if (solid[e] && !reaches[comp[e]]) {
+      solid[e] = 0;
+      ++dropped;
+    }
+  auto mesh = std::make_shared<FemMesh>(ExtractSubMesh(m, solid));
+  if (mesh->tets.empty())
+    return fail("no tet of topology study '" + topo->name + "' at threshold " +
+                std::to_string(thr) + " is connected to a support");
+  out.sourceDigest = rt->densityDigest;
+  out.shapeThreshold = thr;
+  out.shapeIslandTets = dropped;
+  out.shapeVolume = TetSetVolume(m, solid);
+  bp.premeshed = std::move(mesh);
+  return true;
+}
+
+} // namespace
+
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                std::string* error) {
   out = StudyPlan{};
@@ -330,9 +484,13 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
   std::string err;
   if (!EvaluateStudyExprs(study, doc.Symbols(), &err))
     return fail(err);
+  if (!ValidateLoadCases(study, &err))
+    return fail(err);
   out.type = study.type;
   out.numModes = study.numModes;
   out.gravity = study.gravity;
+  for (const LoadCase& c : study.loadCases)
+    out.caseNames.push_back(c.name);
 
   const auto& bodies = doc.GetBodies();
 
@@ -411,10 +569,18 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     // A deep copy: the mesher writes triangulation into the faces it
     // meshes, and this shape may be meshed on a worker while the document's
     // own is being drawn.
-    bp.shape = BRepBuilderAPI_Copy(body.shape.GetShape()).Shape();
     bp.settings = plan.settings;
     for (const auto& [faceIndex, loadIdx] : plan.loads)
       bp.loads.push_back({faceIndex, study.loads[loadIdx]});
+    if (study.shapeFrom.study != 0) {
+      // A static study of a topology result: its mesh is cut from the
+      // result, nothing is meshed
+      // (docs/topopt/README.md#a-static-study-of-the-optimised-shape).
+      if (!PlanShapeMesh(doc, study, bodyIndex, bp, out, &err))
+        return fail(err);
+    } else {
+      bp.shape = BRepBuilderAPI_Copy(body.shape.GetShape()).Shape();
+    }
     out.bodies.push_back(std::move(bp));
   }
   return true;
@@ -426,6 +592,11 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
   out.type = plan.type;
   out.numModes = plan.numModes;
   out.gravity = plan.gravity;
+  out.caseNames = plan.caseNames;
+  out.sourceDigest = plan.sourceDigest;
+  out.shapeThreshold = plan.shapeThreshold;
+  out.shapeIslandTets = plan.shapeIslandTets;
+  out.shapeVolume = plan.shapeVolume;
   std::string err;
   auto fail = [&](const std::string& m) {
     if (error)
@@ -433,7 +604,8 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     return false;
   };
   for (const StudyBodyPlan& bp : plan.bodies) {
-    auto mesh = Mesh(bp.shape, bp.settings, &err);
+    auto mesh = bp.premeshed ? std::optional<FemMesh>(*bp.premeshed)
+                             : Mesh(bp.shape, bp.settings, &err);
     if (!mesh)
       return fail("body '" + bp.bodyName + "': " + err);
 
@@ -476,6 +648,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     // contribute their tri indices.
     std::set<int> fixedSet;
     std::vector<FaceLoad> faceLoads;
+    std::vector<std::vector<FaceLoad>> caseLoads(plan.caseNames.size());
     for (const auto& [faceIndex, load] : bp.loads) {
       if (load.type == LoadType::Fixed) {
         for (const auto& tri : mesh->boundary)
@@ -490,7 +663,21 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
         for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
           if (mesh->boundary[t].faceIndex == faceIndex)
             fl.tris.push_back(t);
-        faceLoads.push_back(std::move(fl));
+        if (fl.tris.empty() && bp.premeshed)
+          return fail("body '" + bp.bodyName + "': load " +
+                      std::to_string(load.id) +
+                      "'s face has no material left in the optimised shape");
+        if (plan.caseNames.empty()) {
+          faceLoads.push_back(std::move(fl));
+          continue;
+        }
+        size_t k = 0;
+        while (k < plan.caseNames.size() && plan.caseNames[k] != load.loadCase)
+          ++k;
+        if (k == plan.caseNames.size())
+          return fail("load " + std::to_string(load.id) + " names load case '" +
+                      load.loadCase + "', which the study does not have");
+        caseLoads[k].push_back(std::move(fl));
       }
     }
     if (fixedSet.empty())
@@ -503,6 +690,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     jb.materials = std::move(materials);
     jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
     jb.faceLoads = std::move(faceLoads);
+    jb.caseLoads = std::move(caseLoads);
     jb.mesh = std::move(*mesh);
     out.bodies.push_back(std::move(jb));
   }
@@ -528,6 +716,11 @@ bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
                         std::string* error) {
   rt = StudyRuntime{};
+  rt.caseNames = in.caseNames;
+  rt.sourceDigest = in.sourceDigest;
+  rt.shapeThreshold = in.shapeThreshold;
+  rt.shapeIslandTets = in.shapeIslandTets;
+  rt.shapeVolume = in.shapeVolume;
   std::string err;
   auto fail = [&](const std::string& m) {
     if (error)
@@ -550,24 +743,32 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
       sbr.results.modes = std::move(*modes);
     } else {
       const glm::dvec3 g = in.gravity * 1000.0; // m/s^2 -> mm/s^2
-      auto res =
-          jb.materials.empty()
-              ? Solve(jb.mesh, jb.mat, jb.fixedNodes, jb.faceLoads, &err, g)
-              : Solve(jb.mesh, jb.materials, jb.fixedNodes, jb.faceLoads, &err,
-                      g);
-      if (!res)
+      // Every case on one factorisation; without cases, the one set of loads.
+      const std::vector<std::vector<FaceLoad>> rhs =
+          jb.caseLoads.empty()
+              ? std::vector<std::vector<FaceLoad>>{jb.faceLoads}
+              : jb.caseLoads;
+      const std::vector<Material> mats =
+          jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
+      auto all = SolveCases(jb.mesh, mats, jb.fixedNodes, rhs, &err, g);
+      if (!all)
         return fail("body '" + jb.bodyName + "': " + err);
-      if (res->maxVonMises > rt.maxVonMises) {
-        rt.maxVonMises = res->maxVonMises;
-        rt.maxVmAt = res->maxVmAt;
-        rt.maxVmBody = jb.bodyName;
+      // The maxima a summary reads are the worst over the cases.
+      for (const FemResults& c : *all) {
+        if (c.maxVonMises > rt.maxVonMises) {
+          rt.maxVonMises = c.maxVonMises;
+          rt.maxVmAt = c.maxVmAt;
+          rt.maxVmBody = jb.bodyName;
+        }
+        if (c.maxDisplacement > rt.maxDisplacement) {
+          rt.maxDisplacement = c.maxDisplacement;
+          rt.maxDispAt = c.maxDispAt;
+          rt.maxDispBody = jb.bodyName;
+        }
       }
-      if (res->maxDisplacement > rt.maxDisplacement) {
-        rt.maxDisplacement = res->maxDisplacement;
-        rt.maxDispAt = res->maxDispAt;
-        rt.maxDispBody = jb.bodyName;
-      }
-      sbr.results = std::move(*res);
+      sbr.results = all->front();
+      if (!jb.caseLoads.empty())
+        sbr.cases = std::move(*all);
     }
     sbr.mesh = std::move(jb.mesh);
     rt.bodies.push_back(std::move(sbr));
@@ -588,6 +789,20 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
   return true;
 }
 
+namespace {
+
+// What a keep-out names, for its report and its refusals.
+std::string KeepOutLabel(const KeepOut& k) {
+  if (!k.body.empty())
+    return "body '" + k.body + "'";
+  char buf[160];
+  std::snprintf(buf, sizeof(buf), "box [%g, %g, %g]-[%g, %g, %g]", k.boxMin.x,
+                k.boxMin.y, k.boxMin.z, k.boxMax.x, k.boxMax.y, k.boxMax.z);
+  return buf;
+}
+
+} // namespace
+
 bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
                      std::string* error) {
   out = TopoInput{};
@@ -604,6 +819,8 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
     return fail(err);
   if (study.volumeFraction <= 0.0 || study.volumeFraction >= 1.0)
     return fail("volume fraction must be in (0, 1)");
+  if (!ValidateLoadCases(study, &err))
+    return fail(err);
 
   const auto& bodies = doc.GetBodies();
 
@@ -643,32 +860,146 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
                 (body.material.empty() ? "default" : body.material) +
                 "' has no stiffness data");
 
-  // Keep faces (frozen solid beyond the auto-frozen support/load skin).
-  std::set<int> keepFaceIdx;
+  // Keep faces (frozen solid beyond the auto-frozen support/load skin), by
+  // keep-face index so an island can say which it took.
+  std::vector<int> keepFaceIdx(study.keepFaces.size(), -1);
   for (size_t i = 0; i < study.keepFaces.size(); ++i) {
     ResolvedFace rf;
     if (!ResolveFace(doc, study.keepFaces[i],
                      "keep face " + std::to_string(i + 1), rf, &err))
       return fail(err);
     if (rf.bodyIndex == bodyIndex)
-      keepFaceIdx.insert(rf.faceIndex);
+      keepFaceIdx[i] = rf.faceIndex;
   }
 
-  auto mesh = Mesh(body.shape.GetShape(), settings, &err);
-  if (!mesh)
+  // Keep-outs, resolved before anything is meshed: a body the part does not
+  // have, the design body itself and an empty box are refused by name.
+  struct KeepOutShape {
+    const TopoDS_Shape* shape = nullptr; // a body's; null = the box
+    glm::dvec3 lo{0.0}, hi{0.0};         // the box, or the body's bounds
+  };
+  std::vector<KeepOutShape> keepOuts;
+  for (size_t i = 0; i < study.keepOuts.size(); ++i) {
+    const KeepOut& k = study.keepOuts[i];
+    KeepOutShape ks;
+    if (!k.body.empty()) {
+      const Body* hit = nullptr;
+      std::string names;
+      for (const Body& b : bodies) {
+        names += (names.empty() ? "" : ", ") + ("'" + b.name + "'");
+        if (b.name == k.body)
+          hit = &b;
+      }
+      if (hit == nullptr)
+        return fail("keep-out " + std::to_string(i + 1) +
+                    ": the part has no "
+                    "body '" +
+                    k.body + "' (it has " + names +
+                    "); a neighbour's geometry arrives as a Derived "
+                    "reference body");
+      if (hit == &body)
+        return fail("keep-out " + std::to_string(i + 1) + ": '" + k.body +
+                    "' is the body being optimised");
+      ks.shape = &hit->shape.GetShape();
+      if (!Measure::WorldBounds({*hit}, glm::dmat4(1.0), ks.lo, ks.hi))
+        return fail("keep-out " + std::to_string(i + 1) + ": body '" + k.body +
+                    "' has no shape");
+    } else {
+      if (!(k.boxMax.x > k.boxMin.x && k.boxMax.y > k.boxMin.y &&
+            k.boxMax.z > k.boxMin.z))
+        return fail("keep-out " + std::to_string(i + 1) + ": " +
+                    KeepOutLabel(k) +
+                    " is empty: its max must exceed its min on every axis");
+      ks.lo = k.boxMin;
+      ks.hi = k.boxMax;
+    }
+    keepOuts.push_back(ks);
+  }
+
+  auto meshed = Mesh(body.shape.GetShape(), settings, &err);
+  if (!meshed)
     return fail("body '" + body.name + "': " + err);
 
-  // Fixed nodes + face tractions + keep nodes, exactly as the static solve
-  // resolves them (fixed faces contribute their nodes; force/pressure faces
-  // their tri indices; keep faces their nodes).
+  // The faces that carry a support, a load or a keep, which no keep-out may
+  // take a tet of.
+  std::map<int, std::string> anchorFace; // face index -> what holds it
+  for (const auto& [faceIndex, loadIdx] : bodyLoads[bodyIndex])
+    anchorFace.emplace(
+        faceIndex,
+        (study.loads[loadIdx].type == LoadType::Fixed ? "support " : "load ") +
+            std::to_string(study.loads[loadIdx].id));
+  for (size_t i = 0; i < keepFaceIdx.size(); ++i)
+    if (keepFaceIdx[i] >= 0)
+      anchorFace.emplace(keepFaceIdx[i], "keep face " + std::to_string(i + 1));
+
+  // A tet whose centroid lies inside a keep-out leaves the mesh: void, and
+  // not design space (docs/topopt/README.md#keep-outs).
+  if (!keepOuts.empty()) {
+    const FemMesh& full = *meshed;
+    std::map<int, std::string> nodeAnchor;
+    for (const FemMesh::BoundaryTri& t : full.boundary)
+      if (auto it = anchorFace.find(t.faceIndex); it != anchorFace.end())
+        for (int v : t.nodes)
+          nodeAnchor.emplace(v, it->second);
+    std::vector<char> keep(full.tets.size(), 1);
+    for (size_t i = 0; i < keepOuts.size(); ++i) {
+      const KeepOutShape& ks = keepOuts[i];
+      std::vector<char> inside(full.tets.size(), 0);
+      for (size_t e = 0; e < full.tets.size(); ++e) {
+        const auto& t = full.tets[e];
+        const glm::dvec3 c = 0.25 * (full.nodes[t[0]] + full.nodes[t[1]] +
+                                     full.nodes[t[2]] + full.nodes[t[3]]);
+        if (c.x < ks.lo.x || c.y < ks.lo.y || c.z < ks.lo.z || c.x > ks.hi.x ||
+            c.y > ks.hi.y || c.z > ks.hi.z)
+          continue;
+        if (ks.shape != nullptr) {
+          BRepClass3d_SolidClassifier cls(*ks.shape, gp_Pnt(c.x, c.y, c.z),
+                                          1e-6);
+          if (cls.State() != TopAbs_IN)
+            continue;
+        }
+        for (int v : t)
+          if (auto it = nodeAnchor.find(v); it != nodeAnchor.end())
+            return fail("keep-out " + std::to_string(i + 1) + " (" +
+                        KeepOutLabel(study.keepOuts[i]) +
+                        ") takes material that " + it->second +
+                        " is on: a keep-out must clear the supports, loads "
+                        "and keep faces");
+        inside[e] = 1;
+      }
+      KeepOutReport rep;
+      rep.what = KeepOutLabel(study.keepOuts[i]);
+      for (size_t e = 0; e < inside.size(); ++e)
+        if (inside[e] && keep[e]) {
+          keep[e] = 0;
+          ++rep.tets;
+        }
+      rep.volume = TetSetVolume(full, inside);
+      out.keepOuts.push_back(rep);
+    }
+    meshed = ExtractSubMesh(full, keep);
+    if (meshed->tets.empty())
+      return fail("the keep-outs take the whole of body '" + body.name + "'");
+  }
+  FemMesh& mesh = *meshed;
+
+  // Fixed nodes + face tractions per case + keep nodes, exactly as the static
+  // solve resolves them (fixed faces contribute their nodes; force/pressure
+  // faces their tri indices; keep faces their nodes).
   std::set<int> fixedSet, keepSet;
-  std::vector<FaceLoad> faceLoads;
+  const size_t nCases = std::max<size_t>(1, study.loadCases.size());
+  std::vector<TopoCase> cases(nCases);
+  for (size_t k = 0; k < study.loadCases.size(); ++k) {
+    cases[k].name = study.loadCases[k].name;
+    cases[k].weight = study.loadCases[k].weight;
+    out.caseNames.push_back(study.loadCases[k].name);
+  }
   bool hasFixed = false, hasApplied = false;
   for (const auto& [faceIndex, loadIdx] : bodyLoads[bodyIndex]) {
     const Load& load = study.loads[loadIdx];
     if (load.type == LoadType::Fixed) {
       hasFixed = true;
-      for (const auto& tri : mesh->boundary)
+      for (const auto& tri : mesh.boundary)
         if (tri.faceIndex == faceIndex)
           for (int n : tri.nodes)
             fixedSet.insert(n);
@@ -678,10 +1009,12 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       fl.type = load.type;
       fl.magnitude = load.magnitude;
       fl.direction = load.direction;
-      for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
-        if (mesh->boundary[t].faceIndex == faceIndex)
+      for (int t = 0; t < static_cast<int>(mesh.boundary.size()); ++t)
+        if (mesh.boundary[t].faceIndex == faceIndex)
           fl.tris.push_back(t);
-      faceLoads.push_back(std::move(fl));
+      const int k =
+          study.loadCases.empty() ? 0 : study.FindLoadCase(load.loadCase);
+      cases[k].loads.push_back(std::move(fl));
     }
   }
   if (!hasFixed)
@@ -690,20 +1023,26 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
     return fail("topology optimization needs a force or pressure load");
   if (fixedSet.empty())
     return fail("body '" + body.name + "': fixed face meshed to no nodes");
-  for (int fi : keepFaceIdx)
-    for (const auto& tri : mesh->boundary)
-      if (tri.faceIndex == fi)
-        for (int n : tri.nodes)
+  out.keepFaceTris.assign(study.keepFaces.size(), {});
+  for (size_t i = 0; i < keepFaceIdx.size(); ++i) {
+    if (keepFaceIdx[i] < 0)
+      continue;
+    for (int t = 0; t < static_cast<int>(mesh.boundary.size()); ++t)
+      if (mesh.boundary[t].faceIndex == keepFaceIdx[i]) {
+        out.keepFaceTris[i].push_back(t);
+        for (int n : mesh.boundary[t].nodes)
           keepSet.insert(n);
+      }
+  }
 
   out.bodyIndex = bodyIndex;
   out.bodyName = body.name;
-  out.mesh = std::move(*mesh);
+  out.mesh = std::move(mesh);
   // Density is unused (gravity is intentionally excluded from the TO
   // objective).
   out.material = Material{mp.youngGPa * 1000.0, mp.poisson, 0.0};
   out.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
-  out.loads = std::move(faceLoads);
+  out.cases = std::move(cases);
   out.keepNodes.assign(keepSet.begin(), keepSet.end());
   out.params.volumeFraction = study.volumeFraction;
   out.params.filterRadius = study.filterRadius;
@@ -718,13 +1057,55 @@ StudyRuntime MakeTopoRuntime(TopoInput& input, const TopoResult& result) {
   sbr.bodyIndex = input.bodyIndex;
   sbr.bodyName = input.bodyName;
   sbr.density = result.density;
-  sbr.mesh = std::move(input.mesh);
-  rt.bodies.push_back(std::move(sbr));
   rt.iterations = result.iterations;
   rt.converged = result.converged;
   rt.cancelled = result.cancelled;
   rt.volumeFractionAchieved = result.volumeFractionAchieved;
   rt.complianceHistory = result.complianceHistory;
+  rt.caseNames = input.caseNames;
+  for (const TopoCase& c : input.cases)
+    rt.caseWeights.push_back(c.weight);
+  rt.caseCompliance = result.caseCompliance;
+  rt.keepOuts = input.keepOuts;
+  rt.islands = result.islands;
+  // Which keep faces an island took: a face any of whose triangles' tets
+  // were removed.
+  if (!result.islandTets.empty()) {
+    std::set<int> gone(result.islandTets.begin(), result.islandTets.end());
+    std::set<int> goneNodes;
+    for (int e : gone)
+      for (int v : input.mesh.tets[e])
+        goneNodes.insert(v);
+    for (size_t i = 0; i < input.keepFaceTris.size(); ++i) {
+      bool hit = false;
+      for (int t : input.keepFaceTris[i]) {
+        // A boundary triangle belongs to the removed tet whose corners
+        // include all three of its own.
+        const auto& tri = input.mesh.boundary[t].nodes;
+        if (goneNodes.count(tri[0]) && goneNodes.count(tri[1]) &&
+            goneNodes.count(tri[2])) {
+          for (int e : gone) {
+            int shared = 0;
+            for (int c = 0; c < 4; ++c)
+              shared += input.mesh.tets[e][c] == tri[0] ||
+                        input.mesh.tets[e][c] == tri[1] ||
+                        input.mesh.tets[e][c] == tri[2];
+            if (shared == 3) {
+              hit = true;
+              break;
+            }
+          }
+        }
+        if (hit)
+          break;
+      }
+      if (hit)
+        rt.islands.keepFaces.push_back(static_cast<int>(i));
+    }
+  }
+  sbr.mesh = std::move(input.mesh);
+  rt.densityDigest = DensityDigest(sbr.mesh, sbr.density);
+  rt.bodies.push_back(std::move(sbr));
   return rt;
 }
 
@@ -734,9 +1115,9 @@ bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
   if (!PrepareTopology(doc, study, input, error))
     return false;
   std::string err;
-  auto res =
-      TopologyOptimize(input.mesh, input.material, input.fixedNodes,
-                       input.loads, input.params, &err, {}, input.keepNodes);
+  auto res = TopologyOptimize(input.mesh, input.material, input.fixedNodes,
+                              input.cases, input.params, &err, {},
+                              input.keepNodes, nullptr);
   if (!res) {
     study.error = "body '" + input.bodyName + "': " + err;
     if (error)

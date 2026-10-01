@@ -638,6 +638,7 @@ struct SimulationState {
   // occurrence that is not the meshed one), shown in the panel.
   std::string placeRefusal;
   int activeMode = 0;       // modal: which mode shape the overlay displays
+  int activeCase = 0;       // static with load cases: which case it shows
   // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
   float topoThreshold = 0.0f;
   // The MeshRenderer instance holding the extracted iso-surface (0 = none), and

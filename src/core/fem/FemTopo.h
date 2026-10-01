@@ -61,6 +61,13 @@ struct TopoProgress {
 // (filtered) element density in [0,1], one entry per mesh tet, in tet order.
 struct TopoResult {
   std::vector<double> density;
+  // Each load case's compliance F.u at the last iteration (unweighted).
+  std::vector<double> caseCompliance;
+  // What the connectivity filter removed after the last iteration
+  // (`keepFaces` is left for the caller, which knows the faces), and the
+  // tets it removed.
+  TopoIslands islands;
+  std::vector<int> islandTets;
   std::vector<double> complianceHistory;
   int iterations = 0;
   bool converged = false; // true if it hit changeTol before the cap
@@ -109,6 +116,13 @@ public:
   }
 };
 
+// One load case of a run: its face loads and its weight in the objective.
+struct TopoCase {
+  std::string name;
+  double weight = 1.0;
+  std::vector<FaceLoad> loads;
+};
+
 // Minimizes compliance u^T K u subject to a volume-fraction constraint over the
 // mesh, treating each tet's density as a design variable. Every tet touching a
 // fixed node or a loaded boundary triangle is frozen solid (density 1) so
@@ -133,6 +147,21 @@ std::optional<TopoResult> TopologyOptimize(
     const TopoParams& params, std::string* error,
     const std::function<bool(const TopoProgress&)>& progress = {},
     const std::vector<int>& keepNodes = {}, TopoLinearSolver* solver = nullptr);
+
+// The same over several load cases (docs/topopt/README.md#load-cases): the
+// objective is sum_i w_i c_i, each case solved on the same K every iteration
+// (warm-started from its own last displacement), the sensitivities summed with
+// the same weights. Every tet touching any case's loaded triangles is frozen.
+// The single-case form above is this with one case of weight 1. After the
+// last iteration the connectivity filter runs (RemoveIslands): components with
+// no support and no load are set to density 0 and reported.
+std::optional<TopoResult>
+TopologyOptimize(const FemMesh& mesh, const Material& material,
+                 const std::vector<int>& fixedNodes,
+                 const std::vector<TopoCase>& cases, const TopoParams& params,
+                 std::string* error,
+                 const std::function<bool(const TopoProgress&)>& progress,
+                 const std::vector<int>& keepNodes, TopoLinearSolver* solver);
 
 // True when the build links Eigen (same gate as the static solver).
 bool TopoAvailable();
@@ -173,6 +202,39 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
                    double threshold, int smoothIters, const std::string& path,
                    std::string* error, TopoStlStats* stats = nullptr);
 
+// ---- Sub-meshes and connectivity (pure geometry) --------------------------
+
+// The connected components of the tets where `solid` is nonzero (two tets
+// are connected when they share a corner node); -1 for the others.
+// `count` receives the number of components.
+std::vector<int> TetComponents(const FemMesh& mesh,
+                               const std::vector<char>& solid, int* count);
+
+// The connectivity filter (docs/topopt/README.md#connectivity): at
+// `threshold`, every component that holds no tet of `anchor` (supports and
+// loads) has its density set to 0. `loaded` marks the tets carrying a load,
+// for loadPathBroken: a component with a load and no support. Returns what
+// was removed; `removed` (optional) receives the tets.
+TopoIslands RemoveIslands(const FemMesh& mesh, std::vector<double>& density,
+                          double threshold, const std::vector<char>& supported,
+                          const std::vector<char>& loaded,
+                          std::vector<int>* removed = nullptr);
+
+// The tets where `keep` is nonzero as a mesh of their own: nodes renumbered,
+// the boundary triangles of kept tets kept with their face index, and every
+// face a kept tet now exposes added as a triangle with face index -1, wound
+// as the mesh's own boundary is. `tetMap` (optional) receives, per new tet,
+// its index in `mesh`. A domain record is carried through.
+FemMesh ExtractSubMesh(const FemMesh& mesh, const std::vector<char>& keep,
+                       std::vector<int>* tetMap = nullptr);
+
+// The volume of the tets where `keep` is nonzero (corner tets), mm^3.
+double TetSetVolume(const FemMesh& mesh, const std::vector<char>& keep);
+
+// A digest of a topology result's mesh size and density field
+// (StudyRuntime::densityDigest).
+uint64_t DensityDigest(const FemMesh& mesh, const std::vector<double>& density);
+
 // ---- Study orchestration (async-ready) ------------------------------------
 
 // A self-contained topology-optimization job: everything TopologyOptimize
@@ -185,9 +247,14 @@ struct TopoInput {
   FemMesh mesh;
   Material material;
   std::vector<int> fixedNodes;
-  std::vector<FaceLoad> loads;
+  std::vector<TopoCase> cases; // one, unnamed, on a study without cases
   std::vector<int> keepNodes;
   TopoParams params;
+  // Per keep face (Study::keepFaces order), its boundary triangles in `mesh`:
+  // which keep faces an island took is answered from these.
+  std::vector<std::vector<int>> keepFaceTris;
+  std::vector<KeepOutReport> keepOuts;
+  std::vector<std::string> caseNames; // empty on a study without cases
 };
 
 // Main-thread preparation: evaluates the study's expressions, resolves its

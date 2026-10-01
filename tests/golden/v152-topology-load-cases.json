@@ -1,0 +1,60 @@
+{
+  "format": "designer-document",
+  "version": 152,
+  "parameters": [
+    {"name": "w_side", "expression": "2", "comment": "the sideways case's weight"}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 5.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "Generative 1", "analysis": "topology",
+     "volume_fraction": 0.3, "filter_radius": 2.5, "max_iterations": 40,
+     "keep_outs": [
+       {"box_min": [1, -1, 3], "box_max": [3, 3, 6]},
+       {"body": "Pad"}
+     ],
+     "load_cases": [
+       {"name": "down", "weight": 1.0},
+       {"name": "side", "weight": 2.0, "weight_expr": "w_side"}
+     ],
+     "mesh_size": 1.0,
+     "loads": [
+       {"id": 4, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/cap0"}, "magnitude": 0.0},
+       {"id": 5, "type": "force",
+        "face": {"feature_id": 2, "element": "2/g1"},
+        "magnitude": 500.0, "direction": [0, 0, -1], "case": "down"},
+       {"id": 6, "type": "force",
+        "face": {"feature_id": 2, "element": "2/g1"},
+        "magnitude": 200.0, "direction": [0, 1, 0], "case": "side"}
+     ]},
+    {"type": "Study", "id": 7, "name": "Generative 1: shape",
+     "shape_from": {"study": 3, "threshold": 0.4},
+     "load_cases": [
+       {"name": "down", "weight": 1.0},
+       {"name": "side", "weight": 1.0}
+     ],
+     "mesh_size": 0.0,
+     "loads": [
+       {"id": 8, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/cap0"}, "magnitude": 0.0},
+       {"id": 9, "type": "force",
+        "face": {"feature_id": 2, "element": "2/g1"},
+        "magnitude": 500.0, "direction": [0, 0, -1], "case": "down"},
+       {"id": 10, "type": "force",
+        "face": {"feature_id": 2, "element": "2/g1"},
+        "magnitude": 200.0, "direction": [0, 1, 0], "case": "side"}
+     ]}
+  ]
+}

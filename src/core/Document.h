@@ -337,11 +337,10 @@ public:
   // Monotonic counter bumped on every StoreStudyResults; lets the field
   // overlay detect a re-solve (study edits don't bump Version()).
   uint64_t StudyResultsEpoch() const { return m_studyResultsEpoch; }
-  bool StudyResultsStale(uint64_t studyId) const {
-    auto it = m_studyRuntime.find(studyId);
-    return it == m_studyRuntime.end() ? true
-                                      : it->second.solvedAtVersion != m_version;
-  }
+  // Stale when solved at another version, and a static study of a topology
+  // result (fem::ShapeSource) also when that result is stale, gone, or no
+  // longer the one it was cut from.
+  bool StudyResultsStale(uint64_t studyId) const;
 
   // ---- Tolerances (docs/tolerances/README.md) ------------------------------
   // Permitted variation of measured features, keyed by element. Like studies

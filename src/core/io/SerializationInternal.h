@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    151; // v151: drawings -- a view's `detail` {view, center [x, y, z],
+    152; // v152: studies -- `load_cases` [{name, weight, weight_expr?}] and a
+         //      force's or pressure's `case`; a topology study's `keep_outs`
+         //      [{body} | {box_min, box_max}]; a static study's `shape_from`
+         //      {study, threshold? | whole?}. A topology result carries
+         //      `cases` [{name, weight, compliance}], `keep_outs` and
+         //      `islands` (docs/topopt/README.md#topology-you-can-build-from).
+         // v151: drawings -- a view's `detail` {view, center [x, y, z],
          //      radius_mm, label} (docs/drawings/README.md#detail-views); a
          //      note's `style: "fcf"` with its frame in `fcf` {symbol,
          //      tolerance_mm, diameter?, modifier?, datums} and `dim`, the

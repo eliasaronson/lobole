@@ -5,6 +5,7 @@
 #include "core/InputHash.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/fem/FemTopo.h"
 
 #include <nlohmann/json.hpp>
 
@@ -50,6 +51,36 @@ json StudyToJson(const fem::Study& s) {
       for (const ElementRef& f : s.keepFaces)
         j["keep_faces"].push_back(ElementRefJson(f));
     }
+    // Keep-outs (v152): a body of the part by name, or a box.
+    if (!s.keepOuts.empty()) {
+      j["keep_outs"] = json::array();
+      for (const fem::KeepOut& k : s.keepOuts)
+        j["keep_outs"].push_back(
+            k.body.empty()
+                ? json{{"box_min", {k.boxMin.x, k.boxMin.y, k.boxMin.z}},
+                       {"box_max", {k.boxMax.x, k.boxMax.y, k.boxMax.z}}}
+                : json{{"body", k.body}});
+    }
+  }
+  // Load cases (v152): absent on a study without, so earlier files re-save
+  // byte-identically.
+  if (!s.loadCases.empty()) {
+    j["load_cases"] = json::array();
+    for (const fem::LoadCase& c : s.loadCases) {
+      json cj = {{"name", c.name}, {"weight", c.weight}};
+      if (!c.weightExpr.empty())
+        cj["weight_expr"] = c.weightExpr;
+      j["load_cases"].push_back(std::move(cj));
+    }
+  }
+  // A static study of a topology result (v152).
+  if (s.shapeFrom.study != 0) {
+    json sj = {{"study", s.shapeFrom.study}};
+    if (s.shapeFrom.whole)
+      sj["whole"] = true;
+    else if (s.shapeFrom.threshold != 0.0)
+      sj["threshold"] = s.shapeFrom.threshold;
+    j["shape_from"] = std::move(sj);
   }
   j["mesh_size"] = s.meshSize;
   if (!s.meshSizeExpr.empty())
@@ -100,6 +131,8 @@ json StudyToJson(const fem::Study& s) {
         lj["magnitude_expr"] = l.magnitudeExpr;
       if (l.type == fem::LoadType::Force)
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
+      if (!l.loadCase.empty())
+        lj["case"] = l.loadCase;
       j["loads"].push_back(std::move(lj));
     }
   }
@@ -131,6 +164,45 @@ fem::Study StudyFromJson(const json& j) {
   s.maxIterations = j.value("max_iterations", 60);
   for (const json& fj : j.value("keep_faces", json::array()))
     s.keepFaces.push_back(ElementRefFromJson(fj));
+  const auto vec3 = [](const json& v, const char* what) {
+    if (!v.is_array() || v.size() != 3)
+      throw std::runtime_error(std::string("keep-out ") + what +
+                               " is not [x, y, z]");
+    return glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                      v.at(2).get<double>());
+  };
+  for (const json& kj : j.value("keep_outs", json::array())) {
+    fem::KeepOut k;
+    if (kj.contains("body")) {
+      k.body = kj.at("body").get<std::string>();
+      if (k.body.empty())
+        throw std::runtime_error("a keep-out's body is named by an empty "
+                                 "string");
+    } else if (kj.contains("box_min") && kj.contains("box_max")) {
+      k.boxMin = vec3(kj.at("box_min"), "box_min");
+      k.boxMax = vec3(kj.at("box_max"), "box_max");
+    } else {
+      throw std::runtime_error("a keep-out is {body} or {box_min, box_max}: " +
+                               kj.dump());
+    }
+    s.keepOuts.push_back(std::move(k));
+  }
+  for (const json& cj : j.value("load_cases", json::array())) {
+    fem::LoadCase c;
+    c.name = cj.at("name").get<std::string>();
+    c.weight = cj.value("weight", 1.0);
+    c.weightExpr = cj.value("weight_expr", std::string{});
+    s.loadCases.push_back(std::move(c));
+  }
+  if (j.contains("shape_from")) {
+    const json& sj = j.at("shape_from");
+    s.shapeFrom.study = sj.at("study").get<uint64_t>();
+    s.shapeFrom.whole = sj.value("whole", false);
+    s.shapeFrom.threshold = sj.value("threshold", 0.0);
+    if (s.type != fem::AnalysisType::Static)
+      throw std::runtime_error("study " + std::to_string(s.id) +
+                               ": only a static study takes shape_from");
+  }
   s.meshSize = j.value("mesh_size", 0.0);
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
 
@@ -173,6 +245,7 @@ fem::Study StudyFromJson(const json& j) {
                                ": only a fixed support anchors on a contact");
     l.magnitude = lj.value("magnitude", 0.0);
     l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
+    l.loadCase = lj.value("case", std::string{});
     if (lj.contains("direction")) {
       const auto& d = lj.at("direction");
       l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
@@ -200,6 +273,30 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
   // whose inputs hash the same, and reads it stale when they do not.
   if (rt.inputHash != 0)
     out["input_hash"] = inputhash::Hex(rt.inputHash);
+  // The load cases and what each one came to (v152).
+  if (!rt.caseNames.empty()) {
+    json cases = json::array();
+    for (size_t k = 0; k < rt.caseNames.size(); ++k)
+      cases.push_back(
+          {{"name", rt.caseNames[k]},
+           {"weight", k < rt.caseWeights.size() ? rt.caseWeights[k] : 1.0},
+           {"compliance",
+            k < rt.caseCompliance.size() ? rt.caseCompliance[k] : 0.0}});
+    out["cases"] = std::move(cases);
+  }
+  // What the keep-outs took and the connectivity filter removed (v152).
+  if (!rt.keepOuts.empty()) {
+    json ko = json::array();
+    for (const fem::KeepOutReport& k : rt.keepOuts)
+      ko.push_back({{"what", k.what}, {"tets", k.tets}, {"volume", k.volume}});
+    out["keep_outs"] = std::move(ko);
+  }
+  out["islands"] = {{"threshold", rt.islands.threshold},
+                    {"components", rt.islands.components},
+                    {"tets", rt.islands.tets},
+                    {"volume", rt.islands.volume},
+                    {"keep_faces", rt.islands.keepFaces},
+                    {"load_path_broken", rt.islands.loadPathBroken}};
   json bodies = json::array();
   for (const fem::StudyBodyResult& b : rt.bodies) {
     json nodes = json::array();
@@ -270,6 +367,26 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     b.mesh.stats.tetCount = b.mesh.tets.size();
     rt.bodies.push_back(std::move(b));
   }
+  for (const json& cj : j.value("cases", json::array())) {
+    rt.caseNames.push_back(cj.at("name").get<std::string>());
+    rt.caseWeights.push_back(cj.value("weight", 1.0));
+    rt.caseCompliance.push_back(cj.value("compliance", 0.0));
+  }
+  for (const json& kj : j.value("keep_outs", json::array()))
+    rt.keepOuts.push_back({kj.value("what", std::string{}), kj.value("tets", 0),
+                           kj.value("volume", 0.0)});
+  if (j.contains("islands")) {
+    const json& ij = j.at("islands");
+    rt.islands.threshold = ij.value("threshold", 0.0);
+    rt.islands.components = ij.value("components", 0);
+    rt.islands.tets = ij.value("tets", 0);
+    rt.islands.volume = ij.value("volume", 0.0);
+    rt.islands.keepFaces = ij.value("keep_faces", std::vector<int>{});
+    rt.islands.loadPathBroken = ij.value("load_path_broken", false);
+  }
+  if (!rt.bodies.empty())
+    rt.densityDigest =
+        fem::DensityDigest(rt.bodies.front().mesh, rt.bodies.front().density);
   return rt;
 }
 

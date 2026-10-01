@@ -39,6 +39,9 @@ GATED_ON_PURPOSE = {
     # A pending (preview) feature only ever exists on a part tab.
     "accept_pending": "a pending feature only exists on a part tab",
     "cancel_pending": "a pending feature only exists on a part tab",
+    # Its source is the active part's body unless `part` names another; the
+    # handler reads the part document through its helper.
+    "split_for_printing": "it cuts the active part's body by default",
     # orient_to_face sat here ("assembly-tab behaviour unverified") until
     # --offscreen provided a render surface to verify on; it is ungated now
     # and tests/offscreen_smoke.py pins its assembly-tab behaviour.

@@ -129,6 +129,19 @@ Document::Document(const Document& other, bool reuseGeometry)
     rt.solvedAtVersion = other.StudyResultsStale(id) ? 0 : m_version;
 }
 
+bool Document::StudyResultsStale(uint64_t studyId) const {
+  auto it = m_studyRuntime.find(studyId);
+  if (it == m_studyRuntime.end() || it->second.solvedAtVersion != m_version)
+    return true;
+  const fem::Study* s = FindStudy(studyId);
+  if (s == nullptr || s->shapeFrom.study == 0 || s->shapeFrom.study == studyId)
+    return false;
+  const auto src = m_studyRuntime.find(s->shapeFrom.study);
+  return src == m_studyRuntime.end() ||
+         src->second.solvedAtVersion != m_version ||
+         src->second.densityDigest != it->second.sourceDigest;
+}
+
 Feature* Document::GetFeature(size_t index) {
   return index < m_features.size() ? m_features[index].get() : nullptr;
 }

@@ -310,6 +310,7 @@ set(core_sources
     src/core/io/ProjectStamp.cpp
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
+    src/core/PrintSplit.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
     src/core/PrintAllowance.cpp

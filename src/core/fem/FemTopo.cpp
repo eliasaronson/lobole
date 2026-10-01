@@ -382,6 +382,268 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
   return true;
 }
 
+// ---- Sub-meshes and connectivity (always compiled; pure geometry) --------
+namespace {
+
+// The four faces of a tet10 by their corners, each with the corner it does
+// not touch (to wind it outward) and the midside nodes of its three edges in
+// the canonical tri6 order (0,1)(1,2)(2,0).
+struct TetFace {
+  int c[3];
+  int opposite;
+  int mid[3];
+};
+// tet10 edges: 4=(0,1) 5=(1,2) 6=(2,0) 7=(0,3) 8=(1,3) 9=(2,3).
+constexpr TetFace kTetFaces[4] = {
+    {{0, 1, 2}, 3, {4, 5, 6}},
+    {{0, 1, 3}, 2, {4, 8, 7}},
+    {{1, 2, 3}, 0, {5, 9, 8}},
+    {{0, 2, 3}, 1, {6, 9, 7}},
+};
+
+// A face's key: its three corner nodes, sorted, packed.
+uint64_t FaceKey(int a, int b, int c) {
+  if (a > b)
+    std::swap(a, b);
+  if (b > c)
+    std::swap(b, c);
+  if (a > b)
+    std::swap(a, b);
+  return (static_cast<uint64_t>(a) << 42) | (static_cast<uint64_t>(b) << 21) |
+         static_cast<uint64_t>(c);
+}
+
+// Every tet face -> the (one or two) tets that have it.
+std::unordered_map<uint64_t, std::array<int, 2>>
+FaceOwners(const FemMesh& mesh) {
+  std::unordered_map<uint64_t, std::array<int, 2>> owners;
+  owners.reserve(mesh.tets.size() * 3);
+  for (int e = 0; e < static_cast<int>(mesh.tets.size()); ++e) {
+    const auto& t = mesh.tets[e];
+    for (const TetFace& f : kTetFaces) {
+      auto [it, fresh] = owners.try_emplace(
+          FaceKey(t[f.c[0]], t[f.c[1]], t[f.c[2]]), std::array<int, 2>{e, -1});
+      if (!fresh)
+        it->second[1] = e;
+    }
+  }
+  return owners;
+}
+
+} // namespace
+
+std::vector<int> TetComponents(const FemMesh& mesh,
+                               const std::vector<char>& solid, int* count) {
+  // Union-find over the corner nodes: two solid tets that share a corner are
+  // one piece. Sharing a face is too strict on a tet mesh: a SIMP member at
+  // its threshold is a chain of tets that often meet at an edge, and the
+  // iso-surface (which averages density onto the nodes) draws it whole.
+  const int n = static_cast<int>(mesh.tets.size());
+  std::vector<int> comp(n, -1);
+  if (static_cast<int>(solid.size()) != n) {
+    if (count)
+      *count = 0;
+    return comp;
+  }
+  std::vector<int> parent(mesh.nodes.size());
+  for (size_t i = 0; i < parent.size(); ++i)
+    parent[i] = static_cast<int>(i);
+  const auto find = [&](int x) {
+    while (parent[x] != x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  for (int e = 0; e < n; ++e) {
+    if (!solid[e])
+      continue;
+    const auto& t = mesh.tets[e];
+    const int r0 = find(t[0]);
+    for (int i = 1; i < 4; ++i) {
+      const int ri = find(t[i]);
+      if (ri != r0)
+        parent[ri] = r0;
+    }
+  }
+  std::unordered_map<int, int> label;
+  for (int e = 0; e < n; ++e) {
+    if (!solid[e])
+      continue;
+    const int root = find(mesh.tets[e][0]);
+    auto [it, fresh] = label.try_emplace(root, static_cast<int>(label.size()));
+    comp[e] = it->second;
+  }
+  if (count)
+    *count = static_cast<int>(label.size());
+  return comp;
+}
+
+double TetSetVolume(const FemMesh& mesh, const std::vector<char>& keep) {
+  double v = 0.0;
+  for (size_t e = 0; e < mesh.tets.size() && e < keep.size(); ++e)
+    if (keep[e])
+      v += CornerTetVolume(mesh, mesh.tets[e]);
+  return v;
+}
+
+TopoIslands RemoveIslands(const FemMesh& mesh, std::vector<double>& density,
+                          double threshold, const std::vector<char>& supported,
+                          const std::vector<char>& loaded,
+                          std::vector<int>* removed) {
+  TopoIslands out;
+  out.threshold = threshold;
+  const size_t n = mesh.tets.size();
+  if (density.size() != n || supported.size() != n || loaded.size() != n)
+    return out;
+  std::vector<char> solid(n, 0);
+  for (size_t e = 0; e < n; ++e)
+    solid[e] = density[e] >= threshold || supported[e] || loaded[e];
+  int count = 0;
+  const std::vector<int> comp = TetComponents(mesh, solid, &count);
+  std::vector<char> hasSupport(count, 0), hasLoad(count, 0);
+  for (size_t e = 0; e < n; ++e)
+    if (comp[e] >= 0) {
+      hasSupport[comp[e]] |= supported[e];
+      hasLoad[comp[e]] |= loaded[e];
+    }
+  std::vector<char> gone(count, 0);
+  for (int c = 0; c < count; ++c) {
+    if (!hasSupport[c] && !hasLoad[c]) {
+      gone[c] = 1;
+      ++out.components;
+    }
+    if (hasLoad[c] && !hasSupport[c])
+      out.loadPathBroken = true;
+  }
+  for (size_t e = 0; e < n; ++e)
+    if (comp[e] >= 0 && gone[comp[e]]) {
+      density[e] = 0.0;
+      ++out.tets;
+      out.volume += CornerTetVolume(mesh, mesh.tets[e]);
+      if (removed)
+        removed->push_back(static_cast<int>(e));
+    }
+  return out;
+}
+
+FemMesh ExtractSubMesh(const FemMesh& mesh, const std::vector<char>& keep,
+                       std::vector<int>* tetMap) {
+  FemMesh out;
+  const size_t n = mesh.tets.size();
+  if (keep.size() != n)
+    return out;
+  std::vector<int> nodeMap(mesh.nodes.size(), -1);
+  const auto mapNode = [&](int old) {
+    if (nodeMap[old] < 0) {
+      nodeMap[old] = static_cast<int>(out.nodes.size());
+      out.nodes.push_back(mesh.nodes[old]);
+    }
+    return nodeMap[old];
+  };
+  if (tetMap)
+    tetMap->clear();
+  for (size_t e = 0; e < n; ++e) {
+    if (!keep[e])
+      continue;
+    std::array<int, 10> t;
+    for (int i = 0; i < 10; ++i)
+      t[i] = mapNode(mesh.tets[e][i]);
+    out.tets.push_back(t);
+    if (!mesh.tetDomain.empty())
+      out.tetDomain.push_back(mesh.tetDomain[e]);
+    if (tetMap)
+      tetMap->push_back(static_cast<int>(e));
+  }
+
+  // The mesh's winding: does its first boundary triangle face away from the
+  // tet it bounds? New faces are wound the same way.
+  const auto owners = FaceOwners(mesh);
+  const auto facesAway = [&](const std::array<int, 3>& c, int tet) {
+    const auto& t = mesh.tets[tet];
+    glm::dvec3 centroid(0.0);
+    for (int i = 0; i < 4; ++i)
+      centroid += 0.25 * mesh.nodes[t[i]];
+    const glm::dvec3 a = mesh.nodes[c[0]], b = mesh.nodes[c[1]],
+                     d = mesh.nodes[c[2]];
+    return glm::dot(glm::cross(b - a, d - a), a - centroid) > 0.0;
+  };
+  bool outward = true;
+  for (const FemMesh::BoundaryTri& bt : mesh.boundary) {
+    const auto it = owners.find(FaceKey(bt.nodes[0], bt.nodes[1], bt.nodes[2]));
+    if (it == owners.end())
+      continue;
+    outward = facesAway({bt.nodes[0], bt.nodes[1], bt.nodes[2]}, it->second[0]);
+    break;
+  }
+
+  // The original boundary of the kept tets, then each face a removed (or
+  // absent) neighbour now exposes.
+  std::unordered_map<uint64_t, char> onBoundary;
+  for (const FemMesh::BoundaryTri& bt : mesh.boundary) {
+    const uint64_t k = FaceKey(bt.nodes[0], bt.nodes[1], bt.nodes[2]);
+    onBoundary[k] = 1;
+    const auto it = owners.find(k);
+    if (it == owners.end() || !keep[it->second[0]])
+      continue;
+    FemMesh::BoundaryTri nt;
+    for (int i = 0; i < 6; ++i)
+      nt.nodes[i] = mapNode(bt.nodes[i]);
+    nt.faceIndex = bt.faceIndex;
+    out.boundary.push_back(nt);
+  }
+  for (size_t e = 0; e < n; ++e) {
+    if (!keep[e])
+      continue;
+    const auto& t = mesh.tets[e];
+    for (const TetFace& f : kTetFaces) {
+      const uint64_t k = FaceKey(t[f.c[0]], t[f.c[1]], t[f.c[2]]);
+      if (onBoundary.count(k))
+        continue;
+      const auto& o = owners.at(k);
+      const int other = o[0] == static_cast<int>(e) ? o[1] : o[0];
+      if (other >= 0 && keep[other])
+        continue;
+      std::array<int, 3> c = {t[f.c[0]], t[f.c[1]], t[f.c[2]]};
+      std::array<int, 3> m = {t[f.mid[0]], t[f.mid[1]], t[f.mid[2]]};
+      if (facesAway(c, static_cast<int>(e)) != outward) {
+        // Reverse the winding: corners (0,2,1), edges (0,2)(2,1)(1,0).
+        std::swap(c[1], c[2]);
+        m = {m[2], m[1], m[0]};
+      }
+      FemMesh::BoundaryTri nt;
+      for (int i = 0; i < 3; ++i) {
+        nt.nodes[i] = nodeMap[c[i]];
+        nt.nodes[3 + i] = nodeMap[m[i]];
+      }
+      nt.faceIndex = -1;
+      out.boundary.push_back(nt);
+    }
+  }
+  out.stats.nodeCount = out.nodes.size();
+  out.stats.tetCount = out.tets.size();
+  out.stats.worstQuality = mesh.stats.worstQuality;
+  return out;
+}
+
+uint64_t DensityDigest(const FemMesh& mesh,
+                       const std::vector<double>& density) {
+  // FNV-1a over the counts and the density's bytes.
+  uint64_t h = 1469598103934665603ull;
+  const auto mix = [&](const void* p, size_t len) {
+    const auto* b = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < len; ++i) {
+      h ^= b[i];
+      h *= 1099511628211ull;
+    }
+  };
+  const uint64_t counts[2] = {mesh.nodes.size(), mesh.tets.size()};
+  mix(counts, sizeof(counts));
+  if (!density.empty())
+    mix(density.data(), density.size() * sizeof(double));
+  return h == 0 ? 1 : h;
+}
+
 #ifdef HAVE_FEM_SOLVER
 
 bool TopoAvailable() { return true; }
@@ -436,6 +698,19 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
                  std::string* error,
                  const std::function<bool(const TopoProgress&)>& progress,
                  const std::vector<int>& keepNodes, TopoLinearSolver* solver) {
+  std::vector<TopoCase> one(1);
+  one[0].loads = loads;
+  return TopologyOptimize(mesh, material, fixedNodes, one, params, error,
+                          progress, keepNodes, solver);
+}
+
+std::optional<TopoResult>
+TopologyOptimize(const FemMesh& mesh, const Material& material,
+                 const std::vector<int>& fixedNodes,
+                 const std::vector<TopoCase>& cases, const TopoParams& params,
+                 std::string* error,
+                 const std::function<bool(const TopoProgress&)>& progress,
+                 const std::vector<int>& keepNodes, TopoLinearSolver* solver) {
   auto fail = [&](const std::string& m) -> std::optional<TopoResult> {
     if (error)
       *error = m;
@@ -451,8 +726,18 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
     return fail("volume fraction must be in (0, 1)");
   if (fixedNodes.empty())
     return fail("topology optimization needs a fixed support");
-  if (loads.empty())
+  if (cases.empty())
     return fail("topology optimization needs at least one load");
+  for (const TopoCase& c : cases) {
+    if (c.loads.empty())
+      return fail(c.name.empty()
+                      ? std::string("topology optimization needs at least one "
+                                    "load")
+                      : "load case '" + c.name + "' has no load");
+    if (!(c.weight > 0.0))
+      return fail("load case '" + c.name + "': weight must be positive");
+  }
+  const int nCases = static_cast<int>(cases.size());
 
   const double E0 = material.youngMPa;
   const double Emin = 1e-6 * E0; // ersatz void stiffness (modified SIMP)
@@ -488,23 +773,26 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   for (int n : fixedNodes)
     if (n >= 0 && n < nNodes)
       fixedNode[n] = 1;
-  std::vector<char> loadedNode(nNodes, 0);
-  for (const FaceLoad& load : loads)
-    for (int ti : load.tris)
-      if (ti >= 0 && ti < static_cast<int>(mesh.boundary.size()))
-        for (int n : mesh.boundary[ti].nodes)
-          loadedNode[n] = 1;
+  std::vector<char> loadedNode(nNodes, 0), keepNode(nNodes, 0);
+  for (const TopoCase& c : cases)
+    for (const FaceLoad& load : c.loads)
+      for (int ti : load.tris)
+        if (ti >= 0 && ti < static_cast<int>(mesh.boundary.size()))
+          for (int n : mesh.boundary[ti].nodes)
+            loadedNode[n] = 1;
   for (int n : keepNodes) // user keep-faces freeze solid too
     if (n >= 0 && n < nNodes)
-      loadedNode[n] = 1;
-  std::vector<char> frozen(nTets, 0);
+      keepNode[n] = 1;
+  // Frozen solid: touching a support, a load or a keep face. Only the first
+  // two anchor the connectivity filter: a keep face says "solid if here",
+  // not "connected to something".
+  std::vector<char> frozen(nTets, 0), supportTet(nTets, 0), loadTet(nTets, 0);
   for (int e = 0; e < nTets; ++e)
     for (int i = 0; i < 10; ++i) {
       const int n = mesh.tets[e][i];
-      if (fixedNode[n] || loadedNode[n]) {
-        frozen[e] = 1;
-        break;
-      }
+      supportTet[e] |= fixedNode[n];
+      loadTet[e] |= loadedNode[n];
+      frozen[e] |= fixedNode[n] | loadedNode[n] | keepNode[n];
     }
 
   // ---- Density filter: uniform grid over centroids, cell size R -----------
@@ -597,14 +885,17 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   const int nFree = dofs.nFree;
   if (nFree == 0)
     return fail("model is fully constrained (no free DOF)");
-  Eigen::VectorXd F = Eigen::VectorXd::Zero(nFree);
-  {
+  std::vector<Eigen::VectorXd> Fc(nCases, Eigen::VectorXd::Zero(nFree));
+  for (int c = 0; c < nCases; ++c) {
     std::string loadErr;
-    if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
+    if (!AssembleFaceLoads(mesh, cases[c].loads, dofMap, Fc[c], &loadErr))
       return fail(loadErr);
+    if (Fc[c].norm() <= 0)
+      return fail(cases[c].name.empty()
+                      ? std::string("loads integrate to zero force")
+                      : "load case '" + cases[c].name +
+                            "': loads integrate to zero force");
   }
-  if (F.norm() <= 0)
-    return fail("loads integrate to zero force");
 
   // ---- Design variables: uniform feasible start --------------------------
   // The design variable IS the physical density (sensitivity filtering); frozen
@@ -627,7 +918,7 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
                            Eigen::IncompleteCholesky<double>>
       cg;
   cg.setTolerance(1e-6);
-  Eigen::VectorXd uPrev = Eigen::VectorXd::Zero(nFree);
+  std::vector<Eigen::VectorXd> uPrev(nCases, Eigen::VectorXd::Zero(nFree));
   std::vector<Eigen::Triplet<double>> trip;
   const auto reserveTriplets = [&] {
     if (trip.capacity() == 0)
@@ -639,16 +930,34 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   // External solver (the GPU seam): set up once, then hand it the per-element
   // scales each iteration instead of assembling K here.
   std::vector<double> scaleE(nTets, 1.0);
-  std::vector<double> uExt, Fext;
+  // Per case: the load and the warm start carried between iterations.
+  std::vector<std::vector<double>> uExt(nCases), Fext(nCases);
   if (solver) {
     std::string serr;
     if (!solver->Setup(mesh, material, dofMap, nFree, &serr))
       return fail("linear solver setup failed: " + serr);
-    Fext.assign(F.data(), F.data() + nFree);
-    uExt.assign(nFree, 0.0); // carries the warm start between iterations
+    for (int c = 0; c < nCases; ++c) {
+      Fext[c].assign(Fc[c].data(), Fc[c].data() + nFree);
+      uExt[c].assign(nFree, 0.0);
+    }
   }
-
   TopoResult result;
+  result.caseCompliance.assign(nCases, 0.0);
+  // The connectivity filter (docs/topopt/README.md#connectivity), on the
+  // design that is handed back — finished or cancelled: at the
+  // volume-matched threshold, components holding no support and no load go.
+  const auto finish = [&](TopoResult& r) {
+    const double thr =
+        AutoIsoThreshold(mesh, r.density, r.volumeFractionAchieved);
+    r.islands =
+        RemoveIslands(mesh, r.density, thr, supportTet, loadTet, &r.islandTets);
+    if (r.islands.tets > 0) {
+      double v = 0.0;
+      for (int e = 0; e < nTets; ++e)
+        v += volE[e] * r.density[e];
+      r.volumeFractionAchieved = v / Vtot;
+    }
+  };
   result.density.assign(nTets, 0.0);
   std::vector<double> dcRaw(nTets, 0.0), dcFilt(nTets, 0.0);
   constexpr double kGamma = 1e-3; // sensitivity-filter divide-by-zero guard
@@ -682,91 +991,111 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
       scaleE[e] = (Emin + std::pow(x[e], p) * (E0 - Emin)) / E0;
 
     pclk::time_point tp = pclk::now();
-    Eigen::VectorXd u(nFree);
-    if (solver) {
-      // External (GPU) solver: matrix-free, warm-started via uExt.
-      std::string serr;
-      if (solver->Solve(scaleE, Fext, uExt, &serr)) {
-        for (int i = 0; i < nFree; ++i)
-          u(i) = uExt[i];
-        if (!u.allFinite())
-          serr = "solver returned a non-finite displacement";
+    // The stiffness is the same for every case: the CPU path assembles and
+    // preconditions it once an iteration, then each case is one solve.
+    bool cpuReady = false;
+    // Outlives the case loop: the CG keeps a reference to the matrix it was
+    // computed on.
+    Eigen::SparseMatrix<double> K(nFree, nFree);
+    std::vector<Eigen::VectorXd> uc(nCases, Eigen::VectorXd(nFree));
+    for (int c = 0; c < nCases; ++c) {
+      Eigen::VectorXd& u = uc[c];
+      if (solver) {
+        // External (GPU) solver: matrix-free, warm-started via uExt[c].
+        std::string serr;
+        if (solver->Solve(scaleE, Fext[c], uExt[c], &serr)) {
+          for (int i = 0; i < nFree; ++i)
+            u(i) = uExt[c][i];
+          if (!u.allFinite())
+            serr = "solver returned a non-finite displacement";
+        }
+        if (!serr.empty()) {
+          // The built-in path is the oracle and the documented fallback, so
+          // a failed external solve DROPS the solver and finishes on the CPU
+          // rather than failing the run — and rather than the older
+          // behaviour, which was to accept whatever came back. The fp32 GPU
+          // CG makes no progress at all on a slender bending problem (a
+          // beam-shaped part is ill-conditioned enough to defeat it), and its
+          // zero displacement field read as a valid answer: zero compliance,
+          // zero sensitivities, and an OC step with nothing to react to,
+          // which reports "converged" on the second iteration with the
+          // volume constraint abandoned. Every case is solved again on the
+          // CPU this iteration, so no case mixes the two solvers.
+          result.solverFallback = serr;
+          solver = nullptr;
+          reserveTriplets();
+          for (auto& up : uPrev)
+            up.setZero(); // the external warm start never reached uPrev
+          c = -1;         // start the cases over on the CPU
+          continue;
+        }
+        continue;
       }
-      if (!serr.empty()) {
-        // The built-in path is the oracle and the documented fallback, so a
-        // failed external solve DROPS the solver and finishes on the CPU
-        // rather than failing the run — and rather than the older behaviour,
-        // which was to accept whatever came back. The fp32 GPU CG makes no
-        // progress at all on a slender bending problem (a beam-shaped part
-        // is ill-conditioned enough to defeat it), and its zero displacement
-        // field read as a valid answer: zero compliance, zero sensitivities,
-        // and an OC step with nothing to react to, which reports "converged"
-        // on the second iteration with the volume constraint abandoned.
-        result.solverFallback = serr;
-        solver = nullptr;
-        reserveTriplets();
-        uPrev.setZero(); // the external warm start never reached uPrev
-      }
-    }
-    if (!solver) {
-      // Built-in path: assemble K(x) and run the Eigen CG-IC.
-      trip.clear();
-      for (int e = 0; e < nTets; ++e) {
-        const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
-        const auto& tet = mesh.tets[e];
-        for (int a = 0; a < 30; ++a) {
-          const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-          if (ga < 0)
-            continue;
-          for (int b = 0; b < 30; ++b) {
-            const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-            if (gb < 0)
+      if (!cpuReady) {
+        // Built-in path: assemble K(x) and precondition the Eigen CG-IC.
+        trip.clear();
+        for (int e = 0; e < nTets; ++e) {
+          const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
+          const auto& tet = mesh.tets[e];
+          for (int a = 0; a < 30; ++a) {
+            const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+            if (ga < 0)
               continue;
-            trip.emplace_back(ga, gb, scaleE[e] * Ke0(a, b));
+            for (int b = 0; b < 30; ++b) {
+              const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+              if (gb < 0)
+                continue;
+              trip.emplace_back(ga, gb, scaleE[e] * Ke0(a, b));
+            }
           }
         }
+        K.setFromTriplets(trip.begin(), trip.end());
+        cg.compute(K);
+        if (cg.info() != Eigen::Success)
+          return fail(
+              "stiffness matrix is not solvable (insufficiently constrained)");
+        cpuReady = true;
       }
-      Eigen::SparseMatrix<double> K(nFree, nFree);
-      K.setFromTriplets(trip.begin(), trip.end());
-
-      cg.compute(K);
-      if (cg.info() != Eigen::Success)
-        return fail(
-            "stiffness matrix is not solvable (insufficiently constrained)");
-      u = cg.solveWithGuess(F, uPrev);
+      u = cg.solveWithGuess(Fc[c], uPrev[c]);
       if (!u.allFinite())
         return fail("linear solve failed during optimization");
-      uPrev = u; // warm-start the next iteration
+      uPrev[c] = u; // warm-start the next iteration
     }
 
     tSolve += lap(tp);
-    const double compliance = F.dot(u);
-
-    // Expand the reduced displacement to a full per-node vector for the
-    // element strain-energy (sensitivity) evaluation.
-    std::vector<glm::dvec3> disp(nNodes, glm::dvec3(0.0));
-    for (int n = 0; n < nNodes; ++n)
-      for (int k = 0; k < 3; ++k) {
-        const int g = dofMap[3 * n + k];
-        if (g >= 0)
-          disp[n][k] = u(g);
-      }
+    // The objective: the weighted sum of the cases' compliances.
+    double compliance = 0.0;
+    for (int c = 0; c < nCases; ++c) {
+      result.caseCompliance[c] = Fc[c].dot(uc[c]);
+      compliance += cases[c].weight * result.caseCompliance[c];
+    }
 
     // Raw per-element compliance sensitivity dc/dx_e = -p x_e^(p-1)(1-Emin/E0)
-    // se with se = u_e^T Ke0 u_e (the element strain energy at full modulus).
-    // An injected solver may compute all the energies at once (GPU4 — the
-    // element matrices are resident on the device); on decline, the CPU
-    // loop below recomputes Ke0 per element, which stays the oracle.
+    // sum_c w_c se_c, with se_c = u_e^T Ke0 u_e the element strain energy of
+    // case c at full modulus. An injected solver may compute the energies at
+    // once (GPU4 — the element matrices are resident on the device); on
+    // decline, the CPU loop below recomputes Ke0 per element, which stays the
+    // oracle.
     const double coef = p * (E0 - Emin) / E0;
-    std::vector<double> seExt;
-    const bool haveSe = solver &&
-                        solver->ElementEnergies(uExt, seExt, nullptr) &&
-                        static_cast<int>(seExt.size()) == nTets;
-    for (int e = 0; e < nTets; ++e) {
-      double se;
+    std::vector<double> seSum(nTets, 0.0);
+    std::vector<glm::dvec3> disp(nNodes);
+    for (int c = 0; c < nCases; ++c) {
+      std::vector<double> seExt;
+      const bool haveSe = solver &&
+                          solver->ElementEnergies(uExt[c], seExt, nullptr) &&
+                          static_cast<int>(seExt.size()) == nTets;
       if (haveSe) {
-        se = seExt[e];
-      } else {
+        for (int e = 0; e < nTets; ++e)
+          seSum[e] += cases[c].weight * seExt[e];
+        continue;
+      }
+      // Expand the reduced displacement to a full per-node vector.
+      for (int n = 0; n < nNodes; ++n)
+        for (int k = 0; k < 3; ++k) {
+          const int g = dofMap[3 * n + k];
+          disp[n][k] = g >= 0 ? uc[c](g) : 0.0;
+        }
+      for (int e = 0; e < nTets; ++e) {
         const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
         const auto& tet = mesh.tets[e];
         Eigen::Matrix<double, 30, 1> ue;
@@ -776,10 +1105,11 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
           ue(3 * i + 1) = d.y;
           ue(3 * i + 2) = d.z;
         }
-        se = ue.dot(Ke0 * ue); // >= 0
+        seSum[e] += cases[c].weight * ue.dot(Ke0 * ue); // >= 0
       }
-      dcRaw[e] = -coef * std::pow(x[e], p - 1.0) * se; // <= 0
     }
+    for (int e = 0; e < nTets; ++e)
+      dcRaw[e] = -coef * std::pow(x[e], p - 1.0) * seSum[e]; // <= 0
     tSens += lap(tp);
     // Sensitivity filter (Sigmund): a length-scale regularizer that keeps the
     // density crisply 0/1. dcFilt_e = (sum_j H_ej x_j dcRaw_j)/(max(g,x_e)
@@ -841,6 +1171,7 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
       prog.solverFallback = result.solverFallback;
       if (!progress(prog)) { // caller cancelled: keep best-so-far
         result.cancelled = true;
+        finish(result);
         return result;
       }
     }
@@ -857,6 +1188,7 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
                  "TOPO_PROFILE: %d iters — solve %.2fs, sensitivity %.2fs, "
                  "filter %.2fs, oc+rest %.2fs\n",
                  result.iterations, tSolve, tSens, tFilter, tOc);
+  finish(result);
   return result;
 }
 
@@ -867,6 +1199,17 @@ bool TopoAvailable() { return false; }
 std::optional<TopoResult>
 TopologyOptimize(const FemMesh&, const Material&, const std::vector<int>&,
                  const std::vector<FaceLoad>&, const TopoParams&,
+                 std::string* error,
+                 const std::function<bool(const TopoProgress&)>&,
+                 const std::vector<int>&, TopoLinearSolver*) {
+  if (error)
+    *error = "built without FEM solver support (Eigen not found)";
+  return std::nullopt;
+}
+
+std::optional<TopoResult>
+TopologyOptimize(const FemMesh&, const Material&, const std::vector<int>&,
+                 const std::vector<TopoCase>&, const TopoParams&,
                  std::string* error,
                  const std::function<bool(const TopoProgress&)>&,
                  const std::vector<int>&, TopoLinearSolver*) {

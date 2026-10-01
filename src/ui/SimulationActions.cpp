@@ -51,17 +51,23 @@ void AppendStudyMarker(const AppState& state,
   // A magenta cross at the peak of the displayed field (max von Mises or max
   // displacement), warped by the same deform scale so it tracks the overlay.
   const bool vm = sim.field == SimulationState::Field::VonMises;
-  glm::vec3 at = vm ? glm::vec3(rt->maxVmAt) : glm::vec3(rt->maxDispAt);
-  // Find the peak node's displacement to warp the marker with the mesh.
+  // The peak of the case on show (the only one without cases).
+  const int k = rt->caseNames.empty() ? -1 : sim.activeCase;
+  glm::vec3 at(0.0f);
+  double best = -1.0;
   for (const fem::StudyBodyResult& b : rt->bodies) {
-    const int node = vm ? b.results.maxVmNode : b.results.maxDispNode;
-    if (node >= 0 && node < (int)b.results.displacement.size() &&
-        ((vm && b.bodyName == rt->maxVmBody) ||
-         (!vm && b.bodyName == rt->maxDispBody))) {
-      at += sim.deformScale * glm::vec3(b.results.displacement[node]);
-      break;
-    }
+    const fem::FemResults& r = b.Case(k);
+    const double v = vm ? r.maxVonMises : r.maxDisplacement;
+    const int node = vm ? r.maxVmNode : r.maxDispNode;
+    if (v <= best || node < 0 || node >= (int)r.displacement.size())
+      continue;
+    best = v;
+    // Warped by the same deform scale so it tracks the overlay.
+    at = glm::vec3(b.mesh.nodes[node]) +
+         sim.deformScale * glm::vec3(r.displacement[node]);
   }
+  if (best < 0.0)
+    return;
   const float L =
       state.camera ? std::max(0.06f * state.camera->GetDistance(), 0.1f) : 1.0f;
   const glm::vec3 col(1.0f, 0.1f, 0.8f); // magenta, distinct from CoG amber
@@ -272,7 +278,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   bg->thread = std::thread([j, job, raw]() {
     std::string err;
     auto res = fem::TopologyOptimize(
-        j->input.mesh, j->input.material, j->input.fixedNodes, j->input.loads,
+        j->input.mesh, j->input.material, j->input.fixedNodes, j->input.cases,
         j->input.params, &err,
         [j, raw](const fem::TopoProgress& p) {
           j->iteration.store(p.iteration, std::memory_order_relaxed);
@@ -1074,18 +1080,29 @@ void SyncFieldRenderer(AppState& state) {
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   const bool density = topo && sim.field == SimulationState::Field::Density;
 
+  const int caseIdx = rt->caseNames.empty() ? -1 : sim.activeCase;
   const uint64_t key =
-      ((static_cast<uint64_t>(sim.field) * 1000003ull + sim.activeStudyId) *
+      (((static_cast<uint64_t>(sim.field) * 1000003ull + sim.activeStudyId) *
+            1000003ull +
+        host.ResultsEpoch()) *
            1000003ull +
-       host.ResultsEpoch()) *
+       (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0)) *
           1000003ull +
-      (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
+      static_cast<uint64_t>(caseIdx + 1);
   if (key == sim.fieldBuiltKey) {
     hideBodies(rt);
     return;
   }
 
-  const double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
+  // The scale is the case on show's own maximum (the study's, without
+  // cases).
+  double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
+  if (caseIdx >= 0) {
+    fmax = 0.0;
+    for (const fem::StudyBodyResult& b : rt->bodies)
+      fmax = std::max(fmax, vm ? b.Case(caseIdx).maxVonMises
+                               : b.Case(caseIdx).maxDisplacement);
+  }
   const double inv = (modal || density) ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
 
   std::vector<FieldVertex> verts;
@@ -1110,7 +1127,8 @@ void SyncFieldRenderer(AppState& state) {
         if (cnt[n])
           nodeDensity[n] /= cnt[n];
     }
-    const std::vector<glm::dvec3>* disp = &b.results.displacement;
+    const fem::FemResults& shown = b.Case(caseIdx);
+    const std::vector<glm::dvec3>* disp = &shown.displacement;
     if (modal) {
       if (b.results.modes.empty())
         continue;
@@ -1130,7 +1148,7 @@ void SyncFieldRenderer(AppState& state) {
           fv.scalar = static_cast<float>(std::clamp(nodeDensity[n], 0.0, 1.0));
         } else {
           const glm::dvec3& d = (*disp)[n];
-          const double val = vm ? b.results.vonMises[n] : glm::length(d);
+          const double val = vm ? shown.vonMises[n] : glm::length(d);
           fv.displacement = glm::vec3(d);
           fv.scalar = static_cast<float>(std::clamp(val * inv, 0.0, 1.0));
         }

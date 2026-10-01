@@ -7,6 +7,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"
+#include "core/PrintSplit.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -15,9 +16,11 @@
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
+#include "remote/RemoteProject.h"    // RequireFreshTabName
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
@@ -237,6 +240,30 @@ static constexpr MethodDoc ModelingMethods[] = {
      "also returns `print`: what the print wants it modelled at, since the "
      "basic profile it cuts prints tight (docs/tolerances/README.md).",
      "feature", remote::NeedsPart | remote::Deferrable},
+    {"split_for_printing",
+     "Cut a body into pieces that fit a printer's bed, each piece its own "
+     "part {bed_mm: [x, y, z], body?, part?, cuts?: [{axis: x|y|z, at_mm}], "
+     "prefix?, dry_run?}. `bed_mm` is the build volume in MILLIMETRES; "
+     "`cuts` are axis-aligned planes in the part's coordinates (at_mm, "
+     "MILLIMETRES) -- without them the body is cut into the fewest equal "
+     "slabs along its longest axis whose pieces all fit. A piece fits when "
+     "its box fits the bed in one of the six axis-aligned orientations "
+     "(`orientation` says which of its axes lies along the bed's x, y and "
+     "z, z up). If one does not fit, NOTHING is created and the refusal "
+     "names it and its size. Each piece is a new part '<prefix>_<n>' "
+     "(default prefix '<part>_piece'): a Derived copy of the body, a box "
+     "and an intersect, so it carries the body's material and, through the "
+     "boolean, its face names, and follows the source when the Derived is "
+     "updated. `body` names the body when the part has several; `part` "
+     "(name or id) splits another part than the active one. `dry_run` "
+     "answers the plan without making parts. A body that fits whole answers "
+     "fits_whole and makes nothing "
+     "(docs/topopt/README.md#split-for-printing).",
+     "body, bed_mm, cuts, dry_run, part, prefix",
+     remote::NeedsPart | remote::NotInBatch,
+     "{part, body, bed_mm, automatic, fits_whole, cuts[]{axis, at_mm}, "
+     "pieces[]{index, size_mm, bbox_min, bbox_max, volume_mm3, solids, fits, "
+     "material, orientation{bed_x, bed_y, up}, part?, part_id?}}"},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
      "step): {feature_id} or {index}, or {all: true} for every Derived of "
@@ -396,10 +423,205 @@ std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
 
 } // namespace
 
+namespace {
+
+// split_for_printing (docs/topopt/README.md#split-for-printing).
+json SplitForPrinting(ui::AppState& state, Document& active,
+                      const RpcParams& p) {
+  // The source part: the active one, or one named.
+  size_t srcSlot = state.activePart;
+  if (p.contains("part"))
+    srcSlot = ResolveSlotIndex(state, p.at("part"));
+  if (srcSlot >= state.parts.size() ||
+      state.parts[srcSlot].kind != ui::DocKind::Part)
+    throw std::runtime_error("split_for_printing: `part` is not a part");
+  const uint64_t srcId = state.parts[srcSlot].id;
+  const std::string srcName = state.parts[srcSlot].name;
+  const Document* src =
+      srcSlot == state.activePart ? &active : ui::PartDocById(state, srcId);
+  if (src == nullptr)
+    throw std::runtime_error("split_for_printing: part '" + srcName +
+                             "' is not loaded");
+
+  // The body: by name, or the part's only one.
+  std::vector<const Body*> solids;
+  for (const Body& b : src->GetBodies())
+    if (!b.reference)
+      solids.push_back(&b);
+  const Body* body = nullptr;
+  std::string names;
+  for (const Body* b : solids)
+    names += (names.empty() ? "'" : ", '") + b->name + "'";
+  if (p.contains("body")) {
+    const std::string want = p.at("body").get<std::string>();
+    for (const Body* b : solids)
+      if (b->name == want)
+        body = b;
+    if (body == nullptr)
+      throw std::runtime_error(
+          "split_for_printing: part '" + srcName + "' has no body '" + want +
+          "' (it has " + (names.empty() ? std::string("none") : names) + ")");
+  } else if (solids.size() == 1) {
+    body = solids.front();
+  } else {
+    throw std::runtime_error(
+        "split_for_printing: part '" + srcName + "' has " +
+        std::to_string(solids.size()) + " bodies; name one with `body` (" +
+        (names.empty() ? std::string("none") : names) + ")");
+  }
+
+  const json& bj = p.at("bed_mm");
+  if (!bj.is_array() || bj.size() != 3)
+    throw std::runtime_error("bed_mm is the bed's [x, y, z] in millimetres");
+  const glm::dvec3 bed(bj.at(0).get<double>(), bj.at(1).get<double>(),
+                       bj.at(2).get<double>());
+  std::string err;
+  std::optional<printsplit::Plan> plan;
+  if (p.contains("cuts")) {
+    std::vector<printsplit::Cut> cuts;
+    for (const json& cj : p.at("cuts")) {
+      if (!cj.is_object() || !cj.contains("axis") || !cj.contains("at_mm"))
+        throw std::runtime_error("each cut is {axis: x|y|z, at_mm}");
+      const std::string a = cj.at("axis").get<std::string>();
+      if (a != "x" && a != "y" && a != "z")
+        throw std::runtime_error("a cut's axis is x, y or z, not '" + a +
+                                 "' (cuts are axis-aligned)");
+      cuts.push_back({a == "x"   ? 0
+                      : a == "y" ? 1
+                                 : 2,
+                      cj.at("at_mm").get<double>()});
+    }
+    if (cuts.empty())
+      throw std::runtime_error("cuts is empty; leave it out to have the cuts "
+                               "chosen along the longest axis");
+    plan = printsplit::PlanCuts(body->shape.GetShape(), bed, cuts, &err);
+  } else {
+    plan = printsplit::PlanAutomatic(body->shape.GetShape(), bed, &err);
+  }
+  if (!plan)
+    throw std::runtime_error("split_for_printing: " + err);
+  for (size_t i = 0; i < plan->pieces.size(); ++i) {
+    const printsplit::Piece& pc = plan->pieces[i];
+    if (!pc.fits) {
+      const glm::dvec3 s = pc.Size();
+      char buf[240];
+      std::snprintf(buf, sizeof(buf),
+                    "split_for_printing: piece %zu (%.1f x %.1f x %.1f mm) "
+                    "does not fit the %.1f x %.1f x %.1f mm bed in any "
+                    "orientation; nothing was created -- add a cut through it",
+                    i + 1, s.x, s.y, s.z, bed.x, bed.y, bed.z);
+      throw std::runtime_error(buf);
+    }
+  }
+
+  const std::string prefix = p.value("prefix", srcName + "_piece");
+  const bool dryRun = p.value("dry_run", false) || plan->fitsWhole;
+  const auto vec = [](const glm::dvec3& v) {
+    return json::array({v.x, v.y, v.z});
+  };
+  static const char* kAxis[3] = {"x", "y", "z"};
+  json pieces = json::array();
+  std::vector<std::string> partNames;
+  for (size_t i = 0; i < plan->pieces.size(); ++i) {
+    const printsplit::Piece& pc = plan->pieces[i];
+    partNames.push_back(prefix + "_" + std::to_string(i + 1));
+    pieces.push_back({{"index", i},
+                      {"size_mm", vec(pc.Size())},
+                      {"bbox_min", vec(pc.min)},
+                      {"bbox_max", vec(pc.max)},
+                      {"volume_mm3", pc.volume},
+                      {"solids", pc.solids},
+                      {"fits", pc.fits},
+                      {"material", body->material},
+                      {"orientation",
+                       {{"bed_x", kAxis[pc.orientation[0]]},
+                        {"bed_y", kAxis[pc.orientation[1]]},
+                        {"up", kAxis[pc.orientation[2]]}}}});
+  }
+  json cuts = json::array();
+  for (const printsplit::Cut& c : plan->cuts)
+    cuts.push_back({{"axis", kAxis[c.axis]}, {"at_mm", c.at}});
+  json out{{"part", srcName},
+           {"body", body->name},
+           {"bed_mm", vec(bed)},
+           {"automatic", plan->automatic},
+           {"fits_whole", plan->fitsWhole},
+           {"cuts", std::move(cuts)},
+           {"pieces", std::move(pieces)}};
+  if (dryRun)
+    return out;
+
+  // Every name is checked before anything is made.
+  for (const std::string& n : partNames)
+    RequireFreshTabName(state, n);
+  const std::string bodyName = body->name;
+  const std::string material = body->material;
+  const std::vector<printsplit::Piece> planned = plan->pieces;
+  const uint64_t wasActive = state.parts[state.activePart].id;
+  const auto add = [&](json fj) {
+    auto feature = FeatureFromJsonNamed(fj);
+    if (auto* d = dynamic_cast<DerivedFeature*>(feature.get())) {
+      ui::DerivedSource from;
+      from.slotId = d->sourcePart;
+      if (const std::string why = ui::PointDerivedAt(state, *d, from);
+          !why.empty())
+        throw std::runtime_error("split_for_printing: Derived: " + why);
+    }
+    state.commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(feature)),
+        *state.document);
+    const Feature* added =
+        state.document->GetFeature(state.document->FeatureCount() - 1);
+    if (!added->GetError().empty())
+      throw std::runtime_error("split_for_printing: " + added->TypeName() +
+                               " '" + added->GetName() +
+                               "': " + added->GetError());
+    return added->GetId();
+  };
+  for (size_t i = 0; i < planned.size(); ++i) {
+    const printsplit::Piece& pc = planned[i];
+    const size_t slot = ui::AddPart(state, partNames[i]);
+    out["pieces"][i]["part"] = partNames[i];
+    out["pieces"][i]["part_id"] = state.parts[slot].id;
+    const uint64_t derived = add({{"type", "Derived"},
+                                  {"name", bodyName},
+                                  {"source_part", srcId},
+                                  {"body_names", {bodyName}},
+                                  {"reference", false}});
+    const glm::dvec3 size = pc.cellMax - pc.cellMin;
+    const uint64_t box = add({{"type", "Box"},
+                              {"name", "Piece cell"},
+                              {"position", vec(pc.cellMin)},
+                              {"width", size.x},
+                              {"height", size.y},
+                              {"depth", size.z}});
+    json boolean = {{"type", "Boolean"},
+                    {"name", "Piece " + std::to_string(i + 1)},
+                    {"op", "intersect"},
+                    {"target_id", derived},
+                    {"tool_id", box}};
+    if (!material.empty())
+      boolean["material"] = material;
+    add(boolean);
+  }
+  // Back to the tab that was active.
+  for (size_t i = 0; i < state.parts.size(); ++i)
+    if (state.parts[i].id == wasActive) {
+      ui::SetActivePart(state, i);
+      break;
+    }
+  return out;
+}
+
+} // namespace
+
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                       const std::string& m,
                                       const RpcParams& p) {
   Document* doc = &document;
+  if (m == "split_for_printing") {
+    return SplitForPrinting(state, document, p);
+  }
   if (m == "select_feature") {
     // Select a feature by index or feature_id (-1 / 0 clears). Drives the
     // same Selection the feature tree sets, so Properties shows/edits it.

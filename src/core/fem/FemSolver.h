@@ -13,6 +13,7 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -106,6 +107,16 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
       const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
       std::string* error, const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
 
+// Several load cases on one stiffness (docs/topopt/README.md#load-cases): K
+// is assembled and factorised once, and each case is one right-hand side —
+// its face loads plus the gravity every case shares. One result per case, in
+// order; a failure in any case fails the whole.
+std::optional<std::vector<FemResults>>
+SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const std::vector<int>& fixedNodes,
+           const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
+           const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
+
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
 // at least one fixed support (v1) and material.densityTPerMM3 > 0. Returns
@@ -152,6 +163,34 @@ struct StudyBodyResult {
   FemMesh mesh;
   FemResults results;
   std::vector<double> density; // topology only: one entry per mesh.tets
+  // A static study with load cases: one result per case, in the study's
+  // order; `results` is a copy of the first. Empty without cases.
+  std::vector<FemResults> cases;
+  // The results of case `k` (the only ones when there are no cases).
+  const FemResults& Case(int k) const {
+    return k >= 0 && k < static_cast<int>(cases.size()) ? cases[k] : results;
+  }
+};
+
+// What the connectivity filter took out of a topology result
+// (docs/topopt/README.md#connectivity): the components with no support and no
+// load at the volume-matched threshold, their tets and volume, the keep faces
+// (indices into Study::keepFaces) they held, and whether a load sits in a
+// component no support reaches.
+struct TopoIslands {
+  double threshold = 0.0;
+  int components = 0;
+  int tets = 0;
+  double volume = 0.0; // mm^3
+  std::vector<int> keepFaces;
+  bool loadPathBroken = false;
+};
+
+// What one keep-out took from the design domain.
+struct KeepOutReport {
+  std::string what; // "body 'worm block'" or "box [..]-[..]"
+  int tets = 0;
+  double volume = 0.0; // mm^3
 };
 
 // A study's derived mesh + results, cached on the Document. Stale when
@@ -195,6 +234,25 @@ struct StudyRuntime {
   // "cpu (...)") and the wall time of the whole optimization.
   std::string solver;
   double solveSeconds = 0.0;
+
+  // Load cases (static and topology), in the study's order; empty without.
+  std::vector<std::string> caseNames;
+  // Topology: each case's weight and compliance at the last iteration (the
+  // objective is their weighted sum, `complianceHistory`).
+  std::vector<double> caseWeights;
+  std::vector<double> caseCompliance;
+  TopoIslands islands;
+  std::vector<KeepOutReport> keepOuts;
+  // Topology: a digest of the mesh and density, which a static study of the
+  // shape (ShapeSource) records as `sourceDigest`; it reads stale once the
+  // two differ. Computed when the result is made or loaded, never saved.
+  uint64_t densityDigest = 0;
+  uint64_t sourceDigest = 0;
+  // A shape study: the tets the solid kept, and what was dropped as not
+  // connected to a support at its threshold.
+  double shapeThreshold = 0.0;
+  int shapeIslandTets = 0;
+  double shapeVolume = 0.0; // mm^3, of the solid that was solved
 };
 
 // (Document is forward-declared at global scope by FemStudy.h.)
@@ -221,12 +279,20 @@ struct StudyJobBody {
   std::vector<Material> materials;
   std::vector<int> fixedNodes;
   std::vector<FaceLoad> faceLoads;
+  // With load cases: each case's face loads (`faceLoads` is then empty).
+  std::vector<std::vector<FaceLoad>> caseLoads;
 };
 struct StudyJobInput {
   AnalysisType type = AnalysisType::Static;
+  std::vector<std::string> caseNames;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
   std::vector<StudyJobBody> bodies;
+  // Carried from the plan of a shape study into its runtime.
+  uint64_t sourceDigest = 0;
+  double shapeThreshold = 0.0;
+  int shapeIslandTets = 0;
+  double shapeVolume = 0.0;
 };
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
                   std::string* error);
@@ -253,6 +319,9 @@ struct StudyBodyPlan {
     std::string name;
   };
   std::vector<Member> members;
+  // A static study of a topology result (ShapeSource): the mesh to solve,
+  // already cut from the result — nothing is meshed. `shape` is then null.
+  std::shared_ptr<const FemMesh> premeshed;
 };
 // Where a meshed body touches a rigid support, as the imprint found it: the
 // faces of the meshed body's imprinted shape that it shares with the rigid
@@ -276,6 +345,12 @@ struct BondPatch {
 };
 struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
+  std::vector<std::string> caseNames; // empty = one case
+  // A shape study (ShapeSource): what the runtime reports of the cut.
+  uint64_t sourceDigest = 0;
+  double shapeThreshold = 0.0;
+  int shapeIslandTets = 0;
+  double shapeVolume = 0.0;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
   std::vector<StudyBodyPlan> bodies;

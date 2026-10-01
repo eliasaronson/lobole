@@ -141,6 +141,7 @@ add_executable(designer_tests
     test_ibl.cpp
     test_fem.cpp
     test_topopt.cpp
+    test_topo_build.cpp
     test_study_inputs.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
@@ -831,6 +832,15 @@ add_test(NAME topo_smoke
 # femgpu cases so it never contends with them under `ctest -j`.
 set_tests_properties(topo_smoke PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
                      RESOURCE_LOCK gpu)
+
+# Topology you can build from
+# (docs/topopt/README.md#topology-you-can-build-from): load cases, a keep-out, the connectivity report, check_topology, a
+# case through probe_study and the display, and split_for_printing.
+add_test(NAME topo_build_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/topo_build_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(topo_build_smoke PROPERTIES TIMEOUT 240
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 # Models a bracket through the pythonic client (S3).
 add_test(NAME pyclient_smoke

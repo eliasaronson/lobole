@@ -91,6 +91,41 @@ struct Load {
   // the face you picked. "Down" comes from the world frame — a hand-written
   // axis here was once "down" in no coordinate system this app uses.
   glm::dvec3 direction = -conv::kWorldUp;
+  // The load case this force or pressure belongs to, by name
+  // (docs/topopt/README.md#load-cases). Empty on a study with no cases, and
+  // always on a support: supports are shared by every case.
+  std::string loadCase;
+};
+
+// One load case of a study (docs/topopt/README.md#load-cases): the force and
+// pressure loads that name it act together, with every support. A topology
+// study minimises the weighted sum of its cases' compliances; a static study
+// solves each case on one factorisation. value+expr convention.
+struct LoadCase {
+  std::string name;
+  double weight = 1.0;
+  std::string weightExpr;
+};
+
+// A region a topology study must leave empty
+// (docs/topopt/README.md#keep-outs): a body of the part, by name (another
+// part's arrives as a Derived reference body), or, when `body` is empty, the
+// box [boxMin, boxMax] in part coordinates (mm).
+struct KeepOut {
+  std::string body;
+  glm::dvec3 boxMin{0.0};
+  glm::dvec3 boxMax{0.0};
+};
+
+// Where a static study's mesh comes from
+// (docs/topopt/README.md#a-static-study-of-the-optimised-shape): 0 = the body
+// is meshed, as ever; otherwise the topology study `study`'s result, its tets
+// at or above `threshold` (0 = the volume-matched level) that are connected
+// to the supports, or every tet of its design domain when `whole`.
+struct ShapeSource {
+  uint64_t study = 0;
+  double threshold = 0.0;
+  bool whole = false;
 };
 
 // What a study solves for.
@@ -144,6 +179,20 @@ struct Study {
   std::string filterRadiusExpr;
   int maxIterations = 60;
   std::vector<ElementRef> keepFaces;
+  std::vector<KeepOut> keepOuts;
+
+  // Static and topology: the load cases (empty = every load is one case).
+  std::vector<LoadCase> loadCases;
+  // The index of the case named `name`, or -1.
+  int FindLoadCase(const std::string& name) const {
+    for (size_t i = 0; i < loadCases.size(); ++i)
+      if (loadCases[i].name == name)
+        return static_cast<int>(i);
+    return -1;
+  }
+
+  // Static only: mesh a topology result instead of the body.
+  ShapeSource shapeFrom;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.
@@ -170,6 +219,14 @@ const char* CpuSolverName(AnalysisType type);
 // loop, and results are never auto-solved).
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
                         std::string* error);
+
+// The load cases' rules (docs/topopt/README.md#load-cases), checked before
+// any meshing: names unique and not empty, weights positive, every force and
+// pressure naming a case the study has, no support naming one, every case
+// carrying a load; and none on a modal study, which has no loads to group.
+// A study with no cases passes when no load names one. Expressions must have
+// been evaluated.
+bool ValidateLoadCases(const Study& study, std::string* error);
 
 // The face a load/refinement ref resolves to: a body (index into
 // doc.GetBodies()) and a face index in that body (TopExp_Explorer order).

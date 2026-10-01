@@ -139,6 +139,45 @@ json StudyJobJson(ui::AppState& state, uint64_t id, bool cancel) {
                            "; study jobs: " + KnownStudyJobs(state));
 }
 
+json KeepOutJson(const fem::KeepOut& k) {
+  if (!k.body.empty())
+    return json{{"body", k.body}};
+  return json{{"box_min", {k.boxMin.x, k.boxMin.y, k.boxMin.z}},
+              {"box_max", {k.boxMax.x, k.boxMax.y, k.boxMax.z}}};
+}
+
+json ShapeFromJson(const fem::ShapeSource& s) {
+  json j{{"study", s.study}};
+  if (s.whole)
+    j["whole"] = true;
+  else
+    j["threshold"] = s.threshold;
+  return j;
+}
+
+// A load case named by `v` (its name, or its 0-based index) among `names`;
+// refused naming the cases there are.
+int CaseIndex(const std::vector<std::string>& names, const json& v) {
+  std::string known;
+  for (const std::string& n : names)
+    known += (known.empty() ? "'" : ", '") + n + "'";
+  if (names.empty())
+    throw std::runtime_error("`case`: this study has no load cases");
+  if (v.is_number_integer()) {
+    const int k = v.get<int>();
+    if (k < 0 || k >= static_cast<int>(names.size()))
+      throw std::runtime_error("`case` " + std::to_string(k) +
+                               " is out of range; the cases are " + known);
+    return k;
+  }
+  if (v.is_string())
+    for (size_t k = 0; k < names.size(); ++k)
+      if (names[k] == v.get<std::string>())
+        return static_cast<int>(k);
+  throw std::runtime_error("no load case " + v.dump() + "; the cases are " +
+                           known);
+}
+
 // Where the studies live: the active PART, or the active ASSEMBLY
 // (docs/simulation/README.md#assembly-studies). One handler, two homes — the
 // study record is the same, and the verbs are the same; what differs is how
@@ -299,7 +338,7 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"list_studies", "List studies with status.", "", remote::NoFlags,
      "studies[]{id,name,type,mesh_size,loads,refinements,has_results,stale,"
      "participants?,volume_fraction?,filter_radius?,max_iterations?,keep_faces?"
-     "}"},
+     ",keep_outs?,load_cases?,shape_from?}"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "
@@ -315,9 +354,22 @@ static constexpr MethodDoc SimulationMethods[] = {
      "(add_load {type: fixed, contact_with}), not a consequence of the role. "
      "A clamp is resolved against the whole group, so a rigid support that "
      "touches only a bonded member holds it just the same; one that touches "
-     "nothing meshed is refused by name.",
-     "filter_radius, gravity, id, max_iterations, mesh_size, name, num_modes, "
-     "participants, study, type, volume_fraction"},
+     "nothing meshed is refused by name.\n"
+     "`load_cases` is the whole list of a static or topology study's load "
+     "cases, [{name, weight?}] (weight a plain factor, default 1, or an "
+     "expression): each force or pressure then names its case (add_load "
+     "`case`) and the supports hold in all of them. A topology study "
+     "minimises the weighted sum of its cases' compliances; a static study "
+     "solves every case on one factorisation and reports each "
+     "(docs/topopt/README.md#load-cases). `shape_from` makes a STATIC study "
+     "solve a topology study's result instead of meshing the body: {study, "
+     "threshold? (0..1, 0 = the volume-matched level)} or {study, whole: "
+     "true} (every tet of its design domain, the solid reference); null "
+     "clears it "
+     "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
+     "filter_radius, gravity, id, load_cases, max_iterations, mesh_size, "
+     "name, num_modes, participants, shape_from, study, type, "
+     "volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
      "magnitude, direction?}. `magnitude` is NEWTONS for a force -- the total "
@@ -327,8 +379,11 @@ static constexpr MethodDoc SimulationMethods[] = {
      "so it is stated here rather than left to be inferred from the solver. "
      "An omitted force `direction` pushes into the picked face (the same "
      "default a GUI placement takes). A `face` is {feature_id, element}, or "
-     "just the element name — the body that has it is then found for you.",
-     "contact_with, direction, face, magnitude, occurrence, study, type"},
+     "just the element name — the body that has it is then found for you. "
+     "On a study with load cases a force or pressure names its `case`; a "
+     "support names none (it holds in every case).",
+     "case, contact_with, direction, face, magnitude, occurrence, study, "
+     "type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -342,6 +397,40 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"remove_refinement", "Remove a refinement.", "face, study"},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
      "face, study"},
+    {"add_keep_out",
+     "Topology optimization: a region the result must leave empty "
+     "{study, body} -- a body of this part, by name (a neighbour arrives as "
+     "a Derived reference body) -- or {study, box_min, box_max}, a box in "
+     "part coordinates, both corners [x, y, z] in MILLIMETRES. The tets "
+     "whose centroids fall inside are removed before the run: void, and not "
+     "design space (the volume fraction is of what remains). A body the "
+     "part does not have is refused naming those it has; a keep-out that "
+     "would take a support's, a load's or a keep face's tet is refused at "
+     "the run (docs/topopt/README.md#keep-outs). Returns its index.",
+     "body, box_max, box_min, study"},
+    {"remove_keep_out",
+     "Remove a keep-out {study, index} (0-based, as list_studies lists "
+     "them).",
+     "index, study"},
+    {"check_topology",
+     "A static check of a topology result before re-modelling from it "
+     "{study, threshold?}: makes (or refreshes) two static studies of the "
+     "result -- '<name>: shape', its tets at or above `threshold` (0..1, "
+     "default the volume-matched level) connected to the supports, and "
+     "'<name>: solid', every tet of the design domain -- with the topology "
+     "study's supports, loads and load cases, runs both (synchronously; "
+     "one factorisation each serves every case), and answers per case the "
+     "shape's and the solid's max_displacement_mm, max_von_mises_mpa and "
+     "factor_of_safety, their displacement ratio, and each one's "
+     "volume_mm3 and mass_g. The two studies stay, for probe_study {case} "
+     "and set_result_display {case}. Solid elements at a threshold, not "
+     "SIMP-penalised stiffness "
+     "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
+     "study, threshold", remote::NoFlags,
+     "{topology, threshold, shape_study, solid_study, dropped_tets, islands, "
+     "cases[]{name, shape{study, max_displacement_mm, max_displacement_at, "
+     "max_von_mises_mpa, max_von_mises_at, factor_of_safety?, volume_mm3, "
+     "mass_g?}, solid{...}, displacement_ratio}}"},
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
@@ -418,8 +507,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`screenshot` captures. It does NOT reach `render_still`: the path "
      "tracer renders the MODEL, so a still taken after this shows the "
      "undeformed part in its own material and looks like the call silently "
-     "did nothing.",
-     "deform_scale, field, mode, study, threshold"},
+     "did nothing. A static study with load cases shows `case` (its name or "
+     "0-based index).",
+     "case, deform_scale, field, mode, study, threshold"},
     {"probe_study",
      "How one FACE moved under a solved static PART study, as a rigid body "
      "{id (or study), face, at?}: the least-squares small-displacement fit "
@@ -435,14 +525,138 @@ static constexpr MethodDoc SimulationMethods[] = {
      "The maxima study_results reports are somewhere on the part; this is "
      "what one seat did. Refused on a stale study (re-run it: the face "
      "named now may not be the face that was meshed), an assembly study, "
-     "or a modal or topology one (docs/simulation/README.md#probing-a-face).",
-     "at, face, id, study"},
+     "or a modal or topology one (docs/simulation/README.md#probing-a-face). "
+     "A study with load cases takes `case` (its name or 0-based index; "
+     "default the first).",
+     "at, case, face, id, study"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
      "path, smooth, study, threshold"},
 };
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
+
+namespace {
+
+// check_topology (docs/topopt/README.md#a-static-study-of-the-optimised-shape):
+// the topology result's shape and its solid design domain, each a static
+// study with the topology study's supports, loads and cases, run now and
+// compared case by case.
+json CheckTopology(ui::AppState& state, Host& host, Document* doc,
+                   const RpcParams& p) {
+  ui::ReapBackgroundJobs(state);
+  if (host.IsAssembly() || doc == nullptr)
+    throw std::runtime_error("check_topology reads a part's topology study");
+  const uint64_t id = p.at("study").get<uint64_t>();
+  const fem::Study topo = host.Require(id); // a copy: studies are added below
+  if (topo.type != fem::AnalysisType::Topology)
+    throw std::runtime_error("check_topology: study " + std::to_string(id) +
+                             " is not a topology study");
+  const fem::StudyRuntime* trt = host.Results(id);
+  if (trt == nullptr)
+    throw std::runtime_error("check_topology: '" + topo.name +
+                             "' has not been run");
+  if (host.Stale(id))
+    throw std::runtime_error(
+        "check_topology: '" + topo.name +
+        "' is stale -- the part changed after it ran; run it again first");
+  const double threshold = p.value("threshold", 0.0);
+  if (threshold < 0.0 || threshold >= 1.0)
+    throw std::runtime_error(
+        "threshold must be in [0, 1) (0 = the volume-matched level)");
+
+  // The two studies, found by what they are (a static study of this result,
+  // whole or not) so a second check refreshes them rather than adding more.
+  const auto ensure = [&](bool whole) -> uint64_t {
+    uint64_t sid = 0;
+    for (const fem::Study& s : host.Studies())
+      if (s.type == fem::AnalysisType::Static && s.shapeFrom.study == id &&
+          s.shapeFrom.whole == whole)
+        sid = s.id;
+    if (sid == 0)
+      sid = host.Add(topo.name + (whole ? ": solid" : ": shape"),
+                     fem::AnalysisType::Static)
+                .id;
+    std::vector<fem::Load> loads = topo.loads;
+    for (fem::Load& l : loads)
+      l.id = host.AllocateId();
+    host.Modify(sid, "Check topology", [&](fem::Study& s) {
+      s.loads = loads;
+      s.loadCases = topo.loadCases;
+      s.refinements.clear();
+      s.gravity = glm::dvec3(0.0);
+      s.shapeFrom = fem::ShapeSource{id, whole ? 0.0 : threshold, whole};
+    });
+    std::string err;
+    ui::JobStart start;
+    if (!ui::ReuseStudyResult(state, doc, nullptr, sid, &start)) {
+      if (!ui::RunStudyAndCache(*doc, sid, &err))
+        throw std::runtime_error(
+            "check_topology: " +
+            std::string(whole ? "the solid" : "the shape") + ": " + err);
+      if (const fem::StudyRuntime* done = host.Results(sid))
+        ui::RememberStudyResult(state, *done);
+    }
+    return sid;
+  };
+  const uint64_t shapeId = ensure(false);
+  const uint64_t solidId = ensure(true);
+  const fem::StudyRuntime* shape = host.Results(shapeId);
+  const fem::StudyRuntime* solid = host.Results(solidId);
+  const fem::Study* shapeStudy = host.Find(shapeId);
+
+  // Mass from the material's density and the solved solid's volume.
+  const std::string material =
+      trt->bodies.empty()
+          ? std::string{}
+          : host.BodyMaterial(*shapeStudy, trt->bodies.front().bodyIndex);
+  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+      CADMaterials::MaterialLibrary::MaterialTypeFromString(material));
+  const double yield = mp.yieldMPa;
+  const auto side = [&](const fem::StudyRuntime& rt, int k, uint64_t sid) {
+    const fem::FemResults& r = rt.bodies.front().Case(k);
+    json j{
+        {"study", sid},
+        {"max_displacement_mm", r.maxDisplacement},
+        {"max_displacement_at", {r.maxDispAt.x, r.maxDispAt.y, r.maxDispAt.z}},
+        {"max_von_mises_mpa", r.maxVonMises},
+        {"max_von_mises_at", {r.maxVmAt.x, r.maxVmAt.y, r.maxVmAt.z}},
+        {"volume_mm3", rt.shapeVolume}};
+    if (yield > 0 && r.maxVonMises > 0)
+      j["factor_of_safety"] = yield / r.maxVonMises;
+    if (mp.density > 0)
+      j["mass_g"] = rt.shapeVolume * 1e-9 * mp.density * 1000.0;
+    return j;
+  };
+  json cases = json::array();
+  const size_t n = std::max<size_t>(1, shape->caseNames.size());
+  for (size_t k = 0; k < n; ++k) {
+    json a = side(*shape, static_cast<int>(k), shapeId);
+    json b = side(*solid, static_cast<int>(k), solidId);
+    const double da = a["max_displacement_mm"].get<double>();
+    const double db = b["max_displacement_mm"].get<double>();
+    json c{{"name",
+            shape->caseNames.empty() ? std::string{} : shape->caseNames[k]},
+           {"shape", std::move(a)},
+           {"solid", std::move(b)},
+           {"displacement_ratio", db > 0 ? da / db : 0.0}};
+    cases.push_back(std::move(c));
+  }
+  return json{{"topology", id},
+              {"threshold", shape->shapeThreshold},
+              {"shape_study", shapeId},
+              {"solid_study", solidId},
+              {"dropped_tets", shape->shapeIslandTets},
+              {"islands",
+               {{"components", trt->islands.components},
+                {"tets", trt->islands.tets},
+                {"volume_mm3", trt->islands.volume},
+                {"keep_faces", trt->islands.keepFaces},
+                {"load_path_broken", trt->islands.loadPathBroken}}},
+              {"cases", std::move(cases)}};
+}
+
+} // namespace
 
 std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                         const std::string& m,
@@ -537,6 +751,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           lj["magnitude"] = l.magnitude;
         if (l.type == fem::LoadType::Force)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
+        if (!l.loadCase.empty())
+          lj["case"] = l.loadCase;
         loads.push_back(std::move(lj));
       }
       json sj = {{"id", s.id},
@@ -564,7 +780,19 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         sj["filter_radius"] = eval.filterRadius;
         sj["max_iterations"] = eval.maxIterations;
         sj["keep_faces"] = eval.keepFaces.size();
+        json kos = json::array();
+        for (const fem::KeepOut& k : eval.keepOuts)
+          kos.push_back(KeepOutJson(k));
+        sj["keep_outs"] = std::move(kos);
       }
+      if (!eval.loadCases.empty()) {
+        json cs = json::array();
+        for (const fem::LoadCase& c : eval.loadCases)
+          cs.push_back({{"name", c.name}, {"weight", c.weight}});
+        sj["load_cases"] = std::move(cs);
+      }
+      if (eval.shapeFrom.study != 0)
+        sj["shape_from"] = ShapeFromJson(eval.shapeFrom);
       studies.push_back(std::move(sj));
     }
     return json{{"studies", studies}};
@@ -687,6 +915,92 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       }
       if (p.contains("max_iterations"))
         s.maxIterations = p.at("max_iterations").get<int>();
+      if (p.contains("load_cases")) {
+        const json& list = p.at("load_cases");
+        if (!list.is_array())
+          throw std::runtime_error(
+              "load_cases is a list of {name, weight?} -- the whole list");
+        std::vector<fem::LoadCase> cases;
+        for (const json& cj : list) {
+          if (!cj.is_object() || !cj.contains("name") ||
+              !cj.at("name").is_string())
+            throw std::runtime_error("each load case is {name, weight?}");
+          fem::LoadCase c;
+          c.name = cj.at("name").get<std::string>();
+          if (c.name.empty())
+            throw std::runtime_error("a load case needs a name");
+          for (const fem::LoadCase& have : cases)
+            if (have.name == c.name)
+              throw std::runtime_error("load case '" + c.name +
+                                       "' is listed twice");
+          if (cj.contains("weight")) {
+            const json& w = cj.at("weight");
+            if (w.is_string())
+              c.weightExpr = w.get<std::string>();
+            else
+              c.weight = w.get<double>();
+          }
+          if (c.weightExpr.empty() && !(c.weight > 0.0))
+            throw std::runtime_error("load case '" + c.name +
+                                     "': weight must be positive");
+          cases.push_back(std::move(c));
+        }
+        if (!cases.empty() && host.IsAssembly())
+          throw std::runtime_error(
+              "load cases are a part study's (static or topology)");
+        if (!cases.empty() && s.type == fem::AnalysisType::Modal)
+          throw std::runtime_error("a modal study has no loads to put in "
+                                   "load cases");
+        // A load may not be left naming a case that is gone.
+        for (const fem::Load& l : s.loads) {
+          if (l.loadCase.empty())
+            continue;
+          bool found = false;
+          for (const fem::LoadCase& c : cases)
+            found = found || c.name == l.loadCase;
+          if (!found)
+            throw std::runtime_error(
+                "load " + std::to_string(l.id) + " is in load case '" +
+                l.loadCase +
+                "', which the new list drops: remove or re-add that load "
+                "first");
+        }
+        s.loadCases = std::move(cases);
+      }
+      if (p.contains("shape_from")) {
+        const json& v = p.at("shape_from");
+        if (v.is_null() || (v.is_number() && v.get<double>() == 0)) {
+          s.shapeFrom = fem::ShapeSource{};
+        } else {
+          if (!v.is_object() || !v.contains("study"))
+            throw std::runtime_error(
+                "shape_from is {study, threshold?} or {study, whole: true}, "
+                "or null to mesh the body again");
+          if (host.IsAssembly())
+            throw std::runtime_error(
+                "shape_from is a part study's: a topology result is a part's");
+          if (s.type != fem::AnalysisType::Static)
+            throw std::runtime_error(
+                "only a static study takes its shape from a topology result");
+          fem::ShapeSource src;
+          src.study = v.at("study").get<uint64_t>();
+          const fem::Study* topo = doc->FindStudy(src.study);
+          if (topo == nullptr || topo->type != fem::AnalysisType::Topology)
+            throw std::runtime_error("shape_from: study " +
+                                     std::to_string(src.study) +
+                                     " is not a topology study of this part");
+          src.whole = v.value("whole", false);
+          src.threshold = v.value("threshold", 0.0);
+          if (src.threshold < 0.0 || src.threshold >= 1.0)
+            throw std::runtime_error(
+                "shape_from threshold must be in [0, 1) (0 = the "
+                "volume-matched level)");
+          if (src.whole && src.threshold != 0.0)
+            throw std::runtime_error(
+                "shape_from: whole takes every tet, so it takes no threshold");
+          s.shapeFrom = src;
+        }
+      }
     });
     return json::object();
   }
@@ -710,6 +1024,74 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       });
     }
     return json::object();
+  }
+  // A topology study's keep-outs (docs/topopt/README.md#keep-outs).
+  const auto keepOutStudy = [&](uint64_t id) {
+    topoOnly();
+    if (host.Require(id).type != fem::AnalysisType::Topology)
+      throw std::runtime_error("keep-outs belong to a topology study");
+  };
+  if (m == "remove_keep_out") {
+    const uint64_t id = p.at("study").get<uint64_t>();
+    keepOutStudy(id);
+    const int index = p.at("index").get<int>();
+    modifyStudy(id, "Remove keep-out", [&](fem::Study& s) {
+      if (index < 0 || index >= static_cast<int>(s.keepOuts.size()))
+        throw std::runtime_error("keep-out index " + std::to_string(index) +
+                                 " is out of range; the study has " +
+                                 std::to_string(s.keepOuts.size()));
+      s.keepOuts.erase(s.keepOuts.begin() + index);
+    });
+    return json::object();
+  }
+  if (m == "add_keep_out") {
+    const uint64_t id = p.at("study").get<uint64_t>();
+    keepOutStudy(id);
+    fem::KeepOut k;
+    if (p.contains("body")) {
+      if (p.contains("box_min") || p.contains("box_max"))
+        throw std::runtime_error(
+            "a keep-out is a body OR a box (box_min, box_max), not both");
+      k.body = p.at("body").get<std::string>();
+      std::string names;
+      bool found = false;
+      for (const Body& b : doc->GetBodies()) {
+        names += (names.empty() ? "'" : ", '") + b.name + "'";
+        found = found || b.name == k.body;
+      }
+      if (!found)
+        throw std::runtime_error(
+            "add_keep_out: the part has no body '" + k.body + "' (it has " +
+            names +
+            "); a neighbour's geometry arrives as a Derived reference body");
+    } else if (p.contains("box_min") && p.contains("box_max")) {
+      const auto vec = [&](const char* key) {
+        const json& v = p.at(key);
+        if (!v.is_array() || v.size() != 3)
+          throw std::runtime_error(std::string(key) +
+                                   " is a point [x, y, z] in millimetres");
+        return glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                          v.at(2).get<double>());
+      };
+      k.boxMin = vec("box_min");
+      k.boxMax = vec("box_max");
+      if (!(k.boxMax.x > k.boxMin.x && k.boxMax.y > k.boxMin.y &&
+            k.boxMax.z > k.boxMin.z))
+        throw std::runtime_error(
+            "add_keep_out: box_max must exceed box_min on every axis");
+    } else {
+      throw std::runtime_error(
+          "add_keep_out takes {study, body} or {study, box_min, box_max}");
+    }
+    size_t index = 0;
+    modifyStudy(id, "Add keep-out", [&](fem::Study& s) {
+      index = s.keepOuts.size();
+      s.keepOuts.push_back(k);
+    });
+    return json{{"index", index}};
+  }
+  if (m == "check_topology") {
+    return CheckTopology(state, host, doc, p);
   }
   if (m == "add_refinement") {
     const uint64_t id = p.at("study").get<uint64_t>();
@@ -812,6 +1194,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             if (const Occurrence* occ = host.asmDoc->FindById(l.occurrenceId))
               l.direction = glm::mat3_cast(occ->orientation) * l.direction;
         }
+    }
+    if (p.contains("case")) {
+      if (l.type == fem::LoadType::Fixed)
+        throw std::runtime_error(
+            "a support holds in every load case, so it names none; `case` "
+            "is for a force or a pressure");
+      l.loadCase = p.at("case").get<std::string>();
+      const fem::Study& st = host.Require(id);
+      if (st.FindLoadCase(l.loadCase) < 0) {
+        std::vector<std::string> names;
+        for (const fem::LoadCase& c : st.loadCases)
+          names.push_back(c.name);
+        CaseIndex(names, p.at("case")); // refuses, naming the cases
+      }
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};
@@ -1039,19 +1435,46 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         nodes += b.mesh.stats.nodeCount;
         elements += b.mesh.stats.tetCount;
       }
-      return stamp(json{{"type", "topology"},
-                        {"nodes", nodes},
-                        {"elements", elements},
-                        {"iterations", rt->iterations},
-                        {"converged", rt->converged},
-                        {"cancelled", rt->cancelled},
-                        {"volume_fraction", rt->volumeFractionAchieved},
-                        {"compliance", rt->complianceHistory.empty()
-                                           ? 0.0
-                                           : rt->complianceHistory.back()},
-                        {"solver", rt->solver},
-                        {"solve_seconds", rt->solveSeconds},
-                        {"stale", host.Stale(id)}});
+      json out{{"type", "topology"},
+               {"nodes", nodes},
+               {"elements", elements},
+               {"iterations", rt->iterations},
+               {"converged", rt->converged},
+               {"cancelled", rt->cancelled},
+               {"volume_fraction", rt->volumeFractionAchieved},
+               {"compliance", rt->complianceHistory.empty()
+                                  ? 0.0
+                                  : rt->complianceHistory.back()},
+               {"solver", rt->solver},
+               {"solve_seconds", rt->solveSeconds},
+               {"stale", host.Stale(id)}};
+      // Each case's own compliance; `compliance` is their weighted sum.
+      if (!rt->caseNames.empty()) {
+        json cases = json::array();
+        for (size_t k = 0; k < rt->caseNames.size(); ++k)
+          cases.push_back(
+              {{"name", rt->caseNames[k]},
+               {"weight",
+                k < rt->caseWeights.size() ? rt->caseWeights[k] : 1.0},
+               {"compliance",
+                k < rt->caseCompliance.size() ? rt->caseCompliance[k] : 0.0}});
+        out["cases"] = std::move(cases);
+      }
+      json kos = json::array();
+      for (const fem::KeepOutReport& k : rt->keepOuts)
+        kos.push_back(
+            {{"what", k.what}, {"tets", k.tets}, {"volume_mm3", k.volume}});
+      out["keep_outs"] = std::move(kos);
+      // What the connectivity filter removed, and the keep faces it held:
+      // a keep face nothing connects is named, not silently printed as a
+      // floating ring.
+      out["islands"] = {{"threshold", rt->islands.threshold},
+                        {"components", rt->islands.components},
+                        {"tets", rt->islands.tets},
+                        {"volume_mm3", rt->islands.volume},
+                        {"keep_faces", rt->islands.keepFaces},
+                        {"load_path_broken", rt->islands.loadPathBroken}};
+      return stamp(out);
     }
 
     // An assembly study's answer carries its role table (S1): the reader
@@ -1131,6 +1554,52 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       result["factor_of_safety"] = minFoS;
     if (!roles.empty())
       result["participants"] = roles;
+    // Load cases: each one's maxima (the top level is the worst of them).
+    if (!rt->caseNames.empty()) {
+      json cases = json::array();
+      for (size_t k = 0; k < rt->caseNames.size(); ++k) {
+        double vm = 0.0, disp = 0.0;
+        glm::dvec3 vmAt(0.0), dispAt(0.0);
+        double fos = 0.0;
+        bool caseFoS = false;
+        for (const fem::StudyBodyResult& b : rt->bodies) {
+          const fem::FemResults& r = b.Case(static_cast<int>(k));
+          if (r.maxVonMises > vm) {
+            vm = r.maxVonMises;
+            vmAt = r.maxVmAt;
+          }
+          if (r.maxDisplacement > disp) {
+            disp = r.maxDisplacement;
+            dispAt = r.maxDispAt;
+          }
+          const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
+              host.BodyMaterial(*s, b.bodyIndex));
+          const double yield =
+              CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
+          if (yield > 0 && r.maxVonMises > 0) {
+            const double f = yield / r.maxVonMises;
+            if (!caseFoS || f < fos)
+              fos = f;
+            caseFoS = true;
+          }
+        }
+        json cj = {{"name", rt->caseNames[k]},
+                   {"max_displacement_mm",
+                    {{"value", disp}, {"at", {dispAt.x, dispAt.y, dispAt.z}}}},
+                   {"max_von_mises_mpa",
+                    {{"value", vm}, {"at", {vmAt.x, vmAt.y, vmAt.z}}}}};
+        if (caseFoS)
+          cj["factor_of_safety"] = fos;
+        cases.push_back(std::move(cj));
+      }
+      result["cases"] = std::move(cases);
+    }
+    if (s->shapeFrom.study != 0)
+      result["shape"] = {{"from", s->shapeFrom.study},
+                         {"whole", s->shapeFrom.whole},
+                         {"threshold", rt->shapeThreshold},
+                         {"volume_mm3", rt->shapeVolume},
+                         {"dropped_tets", rt->shapeIslandTets}};
     {
       // An FEM factor of safety is a PREDICTION (core/Receipt.h). It is a
       // linear-elastic solver's estimate on a tetrahedral approximation of
@@ -1226,23 +1695,27 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           "face '" + face.name +
           "' is on a body this study did not solve: a part study meshes only "
           "the bodies its loads are on");
-    const auto fm = fem::FitFaceMotion(body->mesh, body->results.displacement,
-                                       rf.faceIndex);
+    const int caseIdx =
+        p.contains("case") ? CaseIndex(rt->caseNames, p.at("case")) : 0;
+    const auto fm = fem::FitFaceMotion(
+        body->mesh, body->Case(caseIdx).displacement, rf.faceIndex);
     if (!fm)
       throw std::runtime_error("face '" + face.name +
                                "' has no triangles in the study's mesh");
     const auto vec = [](const glm::dvec3& v) {
       return json::array({v.x, v.y, v.z});
     };
-    json out{{"face", face.name},
-             {"body", body->bodyName},
-             {"nodes", fm->nodes},
-             {"area_mm2", fm->area},
-             {"centroid_mm", vec(fm->centroid)},
-             {"translation_mm", vec(fm->translation)},
-             {"translation_magnitude_mm", glm::length(fm->translation)},
-             {"rotation_determined", fm->rotationDetermined},
-             {"rms_residual_mm", fm->rmsResidual}};
+    json out{
+        {"face", face.name},
+        {"body", body->bodyName},
+        {"case", rt->caseNames.empty() ? json() : json(rt->caseNames[caseIdx])},
+        {"nodes", fm->nodes},
+        {"area_mm2", fm->area},
+        {"centroid_mm", vec(fm->centroid)},
+        {"translation_mm", vec(fm->translation)},
+        {"translation_magnitude_mm", glm::length(fm->translation)},
+        {"rotation_determined", fm->rotationDetermined},
+        {"rms_residual_mm", fm->rmsResidual}};
     if (fm->rotationDetermined) {
       out["rotation_rad"] = vec(fm->rotation);
       out["rotation_magnitude_deg"] = glm::degrees(glm::length(fm->rotation));
@@ -1357,12 +1830,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           static_cast<float>(p.at("deform_scale").get<double>());
     if (p.contains("mode")) // modal: which mode shape to display (0-based)
       state.simulation.activeMode = p.at("mode").get<int>();
+    if (p.contains("case")) {
+      const fem::StudyRuntime* rt =
+          host.Results(state.simulation.activeStudyId);
+      if (!rt)
+        throw std::runtime_error("`case`: the study has not been run");
+      state.simulation.activeCase = CaseIndex(rt->caseNames, p.at("case"));
+    }
     if (p.contains("threshold")) // topology iso-surface level (0..1, 0=auto)
       state.simulation.topoThreshold =
           static_cast<float>(p.at("threshold").get<double>());
     return json{{"field", f},
                 {"deform_scale", state.simulation.deformScale},
                 {"mode", state.simulation.activeMode},
+                {"case", state.simulation.activeCase},
                 {"threshold", state.simulation.topoThreshold}};
   }
   return std::nullopt;
