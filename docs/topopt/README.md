@@ -114,33 +114,40 @@ compiled to embedded SPIR-V (`src/shaders/fem_*.comp`, `cg_*.comp`,
 - **Matrix-free SpMV** (`gpu::TopoSpmv`, `fem_spmv.comp`): one workgroup per
   tet applies `scale_e · Kₑ⁰` to its 30 DOF and scatters with float
   `atomicAdd` (requires `VK_EXT_shader_atomic_float`). K is never assembled.
+  The product is taken relative to the element's first node (see
+  [below](#mixed-precision-refinement)): identical to `Kₑ⁰·p` in exact
+  arithmetic, and it keeps a rigid translation exactly unloaded in fp32.
 - **On-device PCG** (`gpu::TopoCgSolver`): the whole loop runs in compute
   shaders recorded in 32-iteration chunks, reading back one scalar per chunk.
   fp32 needs three guards: the true residual replaces the recurrence one at
   chunk boundaries (the recurrence reads optimistic); the best iterate is
   what is returned (fp32 CG drifts past its round-off floor); a stall
   restarts from the best iterate, and two restarts with no gain end the
-  solve. The target is a 1e-5 relative residual.
+  solve. Inside the refinement loop below it runs in *last-iterate* mode
+  instead: no best-iterate bookkeeping, no restarts.
 - **Multigrid preconditioner** (default; `gpu::TopoMultigrid`,
   `mg_restrict.comp`, `mg_prolong.comp`): a two-level V(1,1) cycle. Nodes are
   aggregated once per run; each aggregate gets 6 coarse DOF (rigid-body
   modes about its centroid — piecewise-constant prolongation cannot represent
   rotation). The Galerkin coarse operator is reassembled each SIMP iteration
   from per-element blocks precomputed at setup and factorized on the CPU in
-  fp64; Chebyshev on the Jacobi-scaled operator is the smoother. The coarse
+  fp64; Chebyshev on the Jacobi-scaled operator is the smoother, aimed by a
+  power-iteration estimate of λmax(D⁻¹K) started from a fixed pseudo-random
+  vector. (Started from ones — the smoothest vector, nearly orthogonal to the
+  top eigenvector — it read 3.35 on a real SIMP system whose λmax was 5.52;
+  the smoother then amplified the top of the spectrum and the PCG made no
+  progress in 3000 iterations.) The coarse
   space is what removes the low-energy void-region modes that polynomial
   preconditioning cannot reach. If the hierarchy cannot be built, Jacobi is
   used.
-- **Element energies on the GPU** (`TopoLinearSolver::ElementEnergies`,
-  `fem_energy.comp`): the sensitivities' `uₑᵀ Kₑ⁰ uₑ` from the resident
-  fp32 element matrices, one workgroup per element, no atomics. A solver may
-  decline, and the CPU loop (the oracle) runs instead.
-- **Warm solves are capped at 128 iterations.** Past the first solve, the
-  fp32 residual floors well above the target on real SIMP systems while the
-  compliance is settled within the first hundred or so; everything after was
-  grinding at the floor. The cold first solve keeps a generous cap. A capped
-  or floored solve is accepted: SIMP reacts to element energies, not to the
-  last digit of u.
+- **Element energies in fp64** (`TopoLinearSolver::ElementEnergies`): the
+  sensitivities' `uₑᵀ Kₑ⁰ uₑ`, computed on the host from fp64 element
+  matrices `TopoGpuSolver` keeps (the upper triangle, about the size of the
+  fp32 copy). `TopoCgSolver::ElementEnergies` (`fem_energy.comp`) still
+  computes them on the device from fp32 Ke, but on a slender part that is
+  the small difference of large terms (below) and sends SIMP to a different
+  design, so the adapter does not use it. A solver may decline, and the CPU
+  loop (the oracle) runs instead.
 
 Device choice: discrete over integrated; the settings' `gpuDevice` names one.
 Software devices (llvmpipe) lose to the CPU and are not used by the app.
@@ -150,32 +157,87 @@ software device; `FEMGPU_PRECOND=mg|jacobi|cheb`, `FEMGPU_CHEB_DEGREE`,
 timing, `FEMGPU_SOLVE_TRACE=1` one line per linear solve, `FEMGPU_CG_TRACE=1`
 single-iteration chunks.
 
-### The fp32 limit on slender parts
+### Mixed-precision refinement
 
-The fp32 CG cannot solve a slender bending problem. The achieved residual
-floor tracks the part's length-to-depth ratio (about an order of magnitude
-per doubling) and not its element count; refining the mesh makes it worse,
-because κ grows as h⁻². SIMP's frozen skin (density 1 against a bulk at the
-volume fraction cubed) multiplies the conditioning by another ~20×. On a
-20:1 beam with a bending load, κ(K) reaches ~2.7e8, beyond what seven
-decimal digits can resolve, and the first, cold solve makes no progress at
-all: its best iterate is the zero initial guess. Jacobi and multigrid fail
-identically, so fp32 is the binding constraint, not the preconditioner.
+fp32 alone cannot solve a slender bending part. Dense fp64 eigenvalues of the
+reduced K (`femgpu_tests [fp32floor]`, "condition numbers"):
 
-A zero displacement field would read downstream as a converged design (zero
-compliance, zero sensitivities, the OC step walking to its bound). So
-`TopoGpuSolver::Solve` fails a solve that is unconverged with a relative
-residual ≥ 0.99, naming it, and `TopologyOptimize` then **drops the external
-solver and finishes the run on the CPU**. `TopoResult::solverFallback`
-records why, and the result's solver name says the CPU finished it —
-`study_status` too, from the iteration the solver was dropped (it used to
-name the GPU until the run ended), through `TopoProgress::solverFallback`.
-A beam-shaped part therefore optimizes correctly at CPU speed. That speed is
-real: the pan/tilt yoke's envelope (a U of 12 mm plates 220 mm tall, 38k
-tets at a 8 mm mesh) failed on the GPU at its first solve and took 2 hours
-for 30 iterations on the CPU (generators/pantilt/README.md). Getting it onto
-the GPU is
-[../plans/topopt-gpu-mixed-precision.md](../plans/topopt-gpu-mixed-precision.md).
+| case | diagonal spread | κ(K) | κ after diagonal scaling |
+|---|---|---|---|
+| cube 1:1, uniform | 12 | 3.3e+03 | 2.2e+03 |
+| beam 10:1, uniform | 12 | 3.7e+06 | 2.4e+06 |
+| beam 10:1, frozen skin + 0.027 | 220 | 8.2e+07 | 1.6e+07 |
+| beam 20:1, uniform | 12 | 1.4e+07 | 9.4e+06 |
+| beam 20:1, frozen skin + 0.027 | 170 | 2.7e+08 | 5.3e+07 |
+
+Slenderness costs ~4× in κ per doubling, SIMP's frozen skin (density 1
+against a bulk at the volume fraction cubed) another ~20×, and refining the
+mesh makes it worse (κ ∝ h⁻²). Worse than the conditioning, rounding Ke to
+fp32 changes the *operator*: Kₑ annihilates a rigid translation, a slender
+part's elements mostly translate, and the rounded Ke's ~1e-7 error times a
+translation thousands of times the element's strain made a beam 20–60 %
+too stiff ("fp32 Ke as an operator on slender parts"). `fem_spmv.comp`
+therefore works relative to each element's first node — `Sᵀ Ke' S`, Ke
+without node 0's rows and columns, S subtracting node 0's displacement —
+which is Ke in exact arithmetic and brings the error to ~1e-3; the multigrid
+coarse blocks use the same form.
+
+`TopoGpuSolver::Solve` wraps the fp32 GPU CG in fp64 refinement:
+
+```
+r = F - K·u                              (fp64, host)
+repeat until |r|/|F| < 1e-5:
+    d = fp32_cg(K, r/|r|) · |r|          (GPU, loose: 1e-1, ≤128 iterations)
+    p = d - (d·Kp_prev / p_prev·Kp_prev) p_prev   (fp64)
+    u += α p,  r -= α K·p,  α = p·r / p·Kp        (fp64)
+```
+
+- **The fp64 side** applies K from the fp64 element matrices on the host,
+  gathered by row (no atomics, fixed row blocks across threads, bit-identical
+  run to run): one product per step. On the 32,805-tet pan/tilt yoke a
+  product is ~15 ms against a 1.2–4 s solve, so an fp64 GPU kernel (at 1/64
+  rate on the RTX 4060) could save at most ~4 %; there is none.
+- **The steps are a flexible CG** (FCG(1)): each correction is
+  K-orthogonalized against the previous one and taken with the
+  energy-optimal length. An exact inner solve makes that plain refinement;
+  an inexact one cannot raise the energy error, since a step along any
+  direction minimizes it.
+- **The right-hand side is rescaled** to unit norm, so the shrinking residual
+  never wastes fp32's exponent range.
+- **The inner solve returns its last iterate** (`TopoCgSolver::Solve`,
+  `lastIterate`). CG lowers the energy error every step while the residual
+  norm first rises — by orders of magnitude on a bending load — so the best
+  iterate by norm was the zero it started from, and refinement would step by
+  nothing forever.
+- **Progress is measured by the potential energy** Π(u) = ½uᵀKu − Fᵀu, which
+  every step lowers by exactly ½α·p·r; the residual norm is not monotone.
+  The solve stops at the 1e-5 target, after three steps that gain less than
+  1e-13 of Π, or after 40 steps.
+- **The warm start** (the previous SIMP iteration's u) is first scaled by its
+  energy-optimal factor for the new stiffness — never worse than it or zero.
+- The inner tolerance 1e-1 measured fastest: 1e-2 spent iterations solving
+  the fp32 operator more exactly than it is worth.
+
+A solve that ends no better than u = 0 (relative residual ≥ 0.99) still
+fails, naming it, and `TopologyOptimize` then drops the external solver and
+finishes the run on the CPU (`TopoResult::solverFallback`; `study_status`
+says so from that iteration). A zero displacement field would read
+downstream as a converged design. A dropped solver is not retried.
+
+Measured on an RTX 4060 Laptop against the CPU path (Eigen CG-IC) and an
+exact fp64 factorization (`femgpu_tests [refinebench]`, a few SIMP
+iterations each; the GPU and CPU runs land on the same design, 0 flips):
+
+| part | tets | CPU s/iter | GPU before | GPU s/iter |
+|---|---|---|---|---|
+| beam 20:1, 200×10×20 | 1,920 | 0.88 | 1.06 (fell back) | 0.24 |
+| beam 20:1, 200×10×20 | 15,360 | 21.3 | 24.7 (fell back) | 1.40 |
+| beam 40:1, 300×7.5×15 | 12,960 | 30.7 | fell back | 1.13 |
+| cube 80³ | 10,368 | 3.7 | 1.35 | 0.69 |
+| pan/tilt yoke, 8.1 mm (app, 30 iterations) | 32,805 | 244 | fell back | 2.7 |
+
+Below a few hundred tets the CPU is as fast. The yoke's 244 s is the run that
+fell back (7313 s); its GPU run is 80 s, the same compliance history.
 
 The GPU solver is linked into `designer_app`, the library the run is
 started from (`ui::StartTopologyRun`); for a month it was linked into the
@@ -242,10 +304,15 @@ to STL is RPC-only; the panel has no button for it.
 - `tests/test_femgpu.cpp` (`femgpu_tests`, every case SKIPs without a
   compute device): SpMV and element energies against the CPU on a structured
   and a Netgen mesh; CG to tolerance; `TopologyOptimize` via the GPU landing
-  on the CPU design; a slender cantilever that either solves on the GPU or
-  falls back — never returns zeros. Hidden: `[fp32floor]` probes (residual
-  floor vs slenderness, what zeroes the solve, condition numbers, penalty
-  ramp, fp64 refinement), `[mg0gate]`, `[mgscale]`, benches.
+  on the CPU design (the same run: compliance history to 1e-4); a slender
+  cantilever solved on the GPU without falling back, and the same run as the
+  CPU's; the fp32-floor systems (cube, 10:1 and 20:1 beams, frozen skin)
+  refined to 1e-5 against an fp64 factorization, with the element energies;
+  the SpMV leaving a rigid translation exactly unloaded. Hidden:
+  `[fp32floor]` probes (residual floor vs slenderness, what zeroes the
+  solve, condition numbers, penalty ramp, fp32 Ke as an operator),
+  `[refinebench]` (SIMP GPU vs CPU vs exact on slender parts),
+  `[mg0gate]`, `[mgscale]`, benches.
 - `tests/topo_smoke.py`: start → poll → done, STL export, cancel keeping a
   best-so-far result, one run at a time. Skips without Netgen. Reloading a
   saved result is covered by `test_topopt.cpp`.
@@ -260,4 +327,6 @@ to STL is RPC-only; the panel has no button for it.
   minimum-member-size control); the current sensitivity filter leaves a grey
   band at member boundaries that the threshold and STL smoothing clean up.
 - Automatic parametric reconstruction.
-- GPU speed on slender parts (the fallback above).
+- The multigrid cycle costs ~20 ms an iteration on the 33k-tet yoke, most of
+  it the CPU coarse solve between submits; that, not the fp64 refinement, is
+  now the solve's cost.
