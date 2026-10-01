@@ -154,13 +154,49 @@ def fasteners(app, asm, o, S):
     heads = [e for e in block.body().edges(circular=True)
              if e.radius and abs(e.radius - 2.25) < 0.01
              and abs(e.midpoint[2] - z) < 0.01]
-    if len(heads) != 2 or len(rims) != 4:
-        raise SystemExit(f"screw rims: wheel {len(rims)}, block {len(heads)}")
+    # The yoke prints as a base and two arms: each arm's foot flange is
+    # bolted down through the base, the head on the flange.
+    yoke = app.part("yoke", create=False)
+    zf = S["yoke_zt"] + S["yoke_base_t"]
+    joints = [e for e in yoke.body().edges(circular=True)
+              if e.radius and abs(e.radius - 2.25) < 0.01
+              and abs(e.midpoint[2] - zf) < 0.01
+              and abs(e.midpoint[1]) > S["arm_out"]]
+    if len(heads) != 2 or len(rims) != 4 or len(joints) != 4:
+        raise SystemExit(f"screw rims: wheel {len(rims)}, block {len(heads)}"
+                         f", yoke joint {len(joints)}")
     jobs = [(o["wheel"], e, {}) for e in rims]
+    jobs += [(o["yoke"], e, {"nut": "iso4032", "washer_under_nut": True})
+             for e in joints]
     for k in ("pan_block_a", "pan_block_b", "tilt_block_a", "tilt_block_b"):
         jobs += [(o[k], e, {"nut": "iso4032", "washer_under_nut": True})
                  for e in heads]
+    # The tilt blocks' screws come out under the ledge into a gap, the nut's,
+    # and the line carries on into the +Y arm's A-frame further down: the
+    # joint ends at the ledge's underside, which is what `far_end` says
+    # (each screw takes the underside rim on its own axis; the app refuses
+    # one off it).
+    zl = S["ledge_z"] - S["yoke_base_t"]
+    unders = [e for e in yoke.body().edges(circular=True)
+              if e.radius and abs(e.radius - 2.25) < 0.01
+              and abs(e.midpoint[2] - zl) < 0.01]
+    tilt_blocks = {o[k].id for k in ("tilt_block_a", "tilt_block_b")}
     for occ, rim, kw in jobs:
+        if occ.id in tilt_blocks:
+            for under in unders:
+                far = dict(under.ref, occurrence=o["yoke"].id)
+                try:
+                    r = asm.bolt(rim, occ, standard="iso4762", far_end=far,
+                                 **kw)
+                    break
+                except Exception as e:  # off this screw's axis: the next
+                    if "off this hole's axis" not in str(e):
+                        raise
+            else:
+                raise SystemExit("a tilt block screw found no ledge rim")
+            out.append({"size": r["size"], "length_mm": r["length_mm"],
+                        "summary": r["summary"]})
+            continue
         r = asm.bolt(rim, occ, standard="iso4762", **kw)
         out.append({"size": r["size"], "length_mm": r["length_mm"],
                     "summary": r["summary"]})

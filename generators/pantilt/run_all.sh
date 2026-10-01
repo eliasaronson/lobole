@@ -7,7 +7,8 @@
 #   generators/pantilt/run_all.sh PORT --from assembly  # the saved parts,
 #                                                       # assembly only
 #
-# Stages, in order: base worms tilt yoke assembly cam. Each opens the project the
+# Stages, in order: base worms tilt yoke assembly yoke_topo cam. Each opens
+# the project the
 # one before saved; `--from` starts at one and reuses what the earlier ones
 # left in scratch/pantilt/. Run it against a scratch instance
 # (tools/headless-preview.sh --start PORT), never somebody's open document.
@@ -24,10 +25,10 @@ FROM=base
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="$2"; shift 2 ;;
-    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly cam)" >&2; exit 2 ;;
+    *) echo "run_all: unknown argument $1 (stages: base worms tilt yoke assembly yoke_topo cam)" >&2; exit 2 ;;
   esac
 done
-STAGES=(base worms tilt yoke assembly cam)
+STAGES=(base worms tilt yoke assembly yoke_topo cam)
 start=-1
 for i in "${!STAGES[@]}"; do [ "${STAGES[$i]}" = "$FROM" ] && start=$i; done
 if [ "$start" -lt 0 ]; then

@@ -167,10 +167,21 @@ compliance, zero sensitivities, the OC step walking to its bound). So
 `TopoGpuSolver::Solve` fails a solve that is unconverged with a relative
 residual ≥ 0.99, naming it, and `TopologyOptimize` then **drops the external
 solver and finishes the run on the CPU**. `TopoResult::solverFallback`
-records why, and the stored result's solver name says the CPU finished it
-(`study_status`, `study_results`). A beam-shaped part therefore optimizes
-correctly at CPU speed. Getting it onto the GPU is
+records why, and the result's solver name says the CPU finished it —
+`study_status` too, from the iteration the solver was dropped (it used to
+name the GPU until the run ended), through `TopoProgress::solverFallback`.
+A beam-shaped part therefore optimizes correctly at CPU speed. That speed is
+real: the pan/tilt yoke's envelope (a U of 12 mm plates 220 mm tall, 38k
+tets at a 8 mm mesh) failed on the GPU at its first solve and took 2 hours
+for 30 iterations on the CPU (generators/pantilt/README.md). Getting it onto
+the GPU is
 [../plans/topopt-gpu-mixed-precision.md](../plans/topopt-gpu-mixed-precision.md).
+
+The GPU solver is linked into `designer_app`, the library the run is
+started from (`ui::StartTopologyRun`); for a month it was linked into the
+`designer` executable only, where the define never reached that file, and
+every run went to the CPU. `ui::TopologyGpuBuiltIn` and a test in
+`tests/test_actions.cpp` hold the library to the build option.
 
 ## Using it
 
