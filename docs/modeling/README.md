@@ -75,6 +75,10 @@ Topic pages:
    reports `{executed, cached}`; `ClearRegenCache()` resets it.
    `TipChainHash()` is the last entry's hash; baked geometry and the Derived
    stale check key on it (baked geometry is described in the versioning area).
+   The cache holds one history, so an undone edit rebuilds what follows it;
+   the worm wheel also keeps its
+   last few results by their exact inputs
+   ([worm-gears.md](worm-gears.md#how-the-teeth-are-cut)).
 4. **Continue past failure.** A feature that fails records its error, adds
    nothing, and regeneration continues; downstream features see the bodies as
    they were and fail on their own if they needed the missing output. A
