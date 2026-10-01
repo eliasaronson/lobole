@@ -795,10 +795,26 @@ bool CADShape::FaceAxis(int faceIndex, glm::dvec3& origin, glm::dvec3& axis,
     origin = axisPoint + glm::dot(centroid - axisPoint, axis) * axis;
   }
 
-  // Deterministic perpendicular (matches FacePlane's u-axis heuristic).
-  glm::dvec3 u =
-      std::abs(axis.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
-  xAxis = glm::normalize(u - glm::dot(u, axis) * axis);
+  // X is the surface's own reference direction, where u = 0: the SEAM of a
+  // whole cylinder or cone (docs/assemblies/solver.md#connector-frames).
+  // It comes from the feature that made the surface — a sketched circle's
+  // is its sketch plane's U axis, a primitive's its placement — so it is the
+  // same after every regeneration, and a boolean that splits or trims the
+  // face keeps the surface and with it this X. A world-axis heuristic
+  // (what this was) gave every Z-axis cylinder X = +Y whatever the part, so
+  // a worm's tooth phase or a cam's lobe had to be written out by hand.
+  const gp_Dir sx = type == GeomAbs_Cone
+                        ? surf.Cone().Position().XDirection()
+                        : surf.Cylinder().Position().XDirection();
+  const glm::dvec3 seam(sx.X(), sx.Y(), sx.Z());
+  const glm::dvec3 flat = seam - glm::dot(seam, axis) * axis;
+  if (glm::length(flat) > 1e-9) {
+    xAxis = glm::normalize(flat);
+  } else { // cannot happen for a valid gp_Ax3; kept deterministic anyway
+    glm::dvec3 u =
+        std::abs(axis.y) < 0.9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0);
+    xAxis = glm::normalize(u - glm::dot(u, axis) * axis);
+  }
   return true;
 }
 

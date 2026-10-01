@@ -25,8 +25,8 @@ stored, so a part edit moves the connector with the geometry.
 | `origin: true` | the part's coordinate frame |
 | `frame: <id>` | a named Frame feature of the part — the mate as designed (a bolt-circle centre, a shaft axis). An errored Frame refuses the mate. |
 | `face: {feature_id, element}` planar | origin at the face centroid, Z the outward normal, X a deterministic in-plane axis (`CADShape::FacePlane`) |
-| … cylindrical | Z the axis, origin the face centroid projected onto the axis (`CADShape::FaceAxis`) |
-| … conical | Z the axis, origin the apex |
+| … cylindrical | Z the axis, origin the face centroid projected onto the axis, X the cylinder's **seam** (`CADShape::FaceAxis`; see below) |
+| … conical | Z the axis, origin the apex, X the cone's seam |
 | … spherical | origin the centre, Z world +Z |
 | `snap_edge` (with a face) | origin moved to that edge's characteristic point — a circular edge's centre, else its midpoint; the face still gives Z |
 | `snap_edge` + `snap_edge2` | origin at the vertex the two edges share (a corner). A corner has no persistent name of its own, but two named edges do; when they share none or more than one vertex, the origin falls back to `snap_edge`'s own point rather than guess. |
@@ -38,6 +38,20 @@ failed and, when the stored name is a prefix of current ones (a later feature
 modified the face), suggesting them. An unnamed face cannot be picked for a
 mate. Connectors on a placed sub-assembly use `inner_path` (the occurrence ids
 down to the part); the frame comes back in the top-level occurrence's space.
+
+**A round face's X is its seam.** A cylinder or cone has no in-plane axis of
+its own to offer, so X is the surface's reference direction — where its
+parameter u is 0, which is where the seam of a whole cylinder lies. It is
+the surface's, not the seam edge's: it comes from the feature that made the
+surface (a sketched circle's is its sketch plane's U axis, an imported or
+primitive cylinder's its placement), so it is the same after every
+regeneration and survives a boolean that splits or trims the face, which
+keeps the surface even where it moves the seam edge. So a frame on a worm,
+a cam or a keyed shaft is reproducible from the face alone, and a mate's
+`rotation` counts from a direction the part fixes, not from the world (until
+v149 it was a world-axis heuristic, the same for every Z-axis cylinder).
+Frame features built on a round face take the same X, and their own rotation
+turns the frame from there.
 
 Centring falls out of the connector choice: a cylindrical-face connector sits
 on the axis, so two cylinders mate coaxially; a hole-centre snap does the same

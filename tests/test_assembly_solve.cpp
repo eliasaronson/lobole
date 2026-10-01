@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <memory>
+#include <numbers>
 
 using Catch::Matchers::WithinAbs;
 
@@ -748,4 +749,62 @@ TEST_CASE("A part mated to a turned frame faces the way the frame says",
     CHECK(glm::length(faces - c.want) < 1e-4);
     CHECK(glm::length(placed.position - glm::dvec3(10, 0, 0)) < 1e-4);
   }
+}
+
+// A round face's connector X is the surface's seam (u = 0)
+// (docs/assemblies/solver.md#connector-frames): for an extruded sketch
+// circle, the sketch plane's U axis. It is the part's, not the world's, so it
+// follows the part and stays put through a regeneration and a boolean that
+// trims the face. Until v149 every Z-axis cylinder got X = world +Y.
+TEST_CASE("A cylinder's frame takes its seam as X", "[assembly][solve]") {
+  const auto seamX = [](const Document& doc) {
+    for (const Body& b : doc.GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        const auto face = Measure::DescribeFaceAt(b, index);
+        if (!face || face->kind != "cylinder")
+          continue;
+        glm::dvec3 o, z, x;
+        REQUIRE(b.shape.FaceAxis(index, o, z, x));
+        CHECK(std::abs(glm::dot(x, z)) < 1e-9);
+        return x;
+      }
+    FAIL("no cylinder");
+    return glm::dvec3(0.0);
+  };
+  const double a = 30.0 * std::numbers::pi / 180.0;
+  const glm::dvec3 u(std::cos(a), std::sin(a), 0.0);
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>(
+      "Circle", SketchPlane(glm::dvec3(0.0), glm::dvec3(0, 0, 1), u));
+  sk->AddEntity(sketch::Circle{{0, 0}, 5.0});
+  doc.AddFeature(std::move(sk));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Shaft", doc.GetFeature(0)->GetId(), 20.0, ExtrudeMode::NewBody));
+  REQUIRE(doc.Regenerate());
+  const glm::dvec3 x = seamX(doc);
+  INFO(x.x << ", " << x.y << ", " << x.z);
+  CHECK(glm::length(x - u) < 1e-9);
+
+  // Reproducible: a regeneration with another length leaves it.
+  static_cast<ExtrudeFeature*>(doc.GetFeature(1))->distance = 35.0;
+  REQUIRE(doc.Regenerate());
+  CHECK(glm::length(seamX(doc) - u) < 1e-9);
+
+  // A flat cut along the shaft trims the face (and moves its edges); the
+  // surface, and so X, stays.
+  auto flat = std::make_unique<SketchFeature>("Flat", kXY);
+  flat->AddRectangle({4, -10}, {10, 10});
+  doc.AddFeature(std::move(flat));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Cut", doc.GetFeature(2)->GetId(), 35.0, ExtrudeMode::Cut));
+  REQUIRE(doc.Regenerate());
+  CHECK(glm::length(seamX(doc) - u) < 1e-9);
+
+  // And it is the part's: turn the sketch and X turns with it.
+  auto* circle = static_cast<SketchFeature*>(doc.GetFeature(0));
+  const double b = 75.0 * std::numbers::pi / 180.0;
+  const glm::dvec3 u2(std::cos(b), std::sin(b), 0.0);
+  circle->plane = SketchPlane(glm::dvec3(0.0), glm::dvec3(0, 0, 1), u2);
+  REQUIRE(doc.Regenerate());
+  CHECK(glm::length(seamX(doc) - u2) < 1e-9);
 }
