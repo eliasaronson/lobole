@@ -254,9 +254,9 @@ def topology(app, S, env, c, target_volume, clock):
     sid = app.add_study(type="topology", name="yoke envelope")["id"]
     # About two tet10s through an arm's 12 mm (quadratic elements bend
     # well with that), and a filter twice the size: the smallest member it
-    # leaves is a printable strut. Coarse on purpose: the GPU solver gives
-    # up on this slender a part and the CPU took four minutes an iteration
-    # at arm_t/2 (docs/topopt/README.md#the-fp32-limit-on-slender-parts).
+    # leaves is a printable strut. Coarse on purpose: on the CPU this mesh
+    # took four minutes an iteration; the GPU, refined to fp64, takes about
+    # 2.7 s (docs/topopt/README.md#mixed-precision-refinement).
     h = S["arm_t"] / 1.5
     app.set_study(id=sid, mesh_size=h, volume_fraction=vf,
                   filter_radius=2 * h, max_iterations=TOPO_ITERATIONS)
