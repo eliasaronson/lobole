@@ -13,6 +13,7 @@
 #include "render/StockRenderer.h" // Viewport(): what the capture restores
 #include "thirdparty/stb_image.h"
 #include "ui/ImportJob.h"
+#include "ui/VariableActions.h"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -2586,6 +2587,66 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->projectParameters.size(), (size_t)1);
     IM_CHECK_STR_EQ(s_App->projectParameters[0].name.c_str(), "span");
     IM_CHECK_STR_EQ(s_App->projectParameters[0].expression.c_str(), "42");
+
+    showPanel(ui::kPanelModel); // or the next test starts on the wrong tab
+  };
+
+  // A project table built by clicking, and read by a variable
+  // (docs/variables/README.md#tables): every cell of the section is
+  // addressable by a stable name, and each edit goes through the same
+  // SetProjectTable the RPC uses.
+  t = IM_REGISTER_TEST(engine, "variables", "a_table_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+    showPanel(ui::kPanelVariables);
+    ctx->ItemOpen("//###Variables/###tables_header");
+    ctx->Yield(2);
+    ctx->ItemClick("//###Variables/###tables_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectTables.size(), (size_t)1);
+    IM_CHECK_STR_EQ(s_App->projectTables[0].name.c_str(), "table1");
+    ctx->ItemClick("//###Variables/###trow_add_table1");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectTables[0].rows.size(), (size_t)1);
+    ctx->ItemInputValue("//###Variables/###table_table1/###tkey_table1_0",
+                        "6002");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Variables/###table_table1/###tcell_table1_0_0",
+                        "32");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Variables/###table_table1/###tcol_table1_0", "D");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Variables/###table_name_table1", "bearings");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectTables.size(), (size_t)1);
+    const lookuptable::Table& table = s_App->projectTables[0];
+    IM_CHECK_STR_EQ(table.name.c_str(), "bearings");
+    IM_CHECK_STR_EQ(table.columns.at(0).c_str(), "D");
+    IM_CHECK_STR_EQ(table.rows.at(0).key.c_str(), "6002");
+    IM_CHECK_EQ(table.rows.at(0).values.at(0), 32.0);
+
+    // A variable reads it.
+    ctx->ItemClick("//###Variables/+ Add variable");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Variables/###vars_table/###var_expr_project_var1",
+                        "lookup(\"bearings\", 6002, \"D\")");
+    ctx->Yield(2);
+    const Parameter* od = ui::FindProjectParameter(*s_App, "var1");
+    IM_CHECK(od != nullptr);
+    IM_CHECK_STR_EQ(od->error.c_str(), "");
+    IM_CHECK_EQ(od->value, 32.0);
+    // And the table cannot be deleted from under it; the panel says why.
+    ctx->ItemClick("//###Variables/###table_del_bearings");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectTables.size(), (size_t)1);
 
     showPanel(ui::kPanelModel); // or the next test starts on the wrong tab
   };

@@ -77,10 +77,32 @@ public:
   static const ExpressionEngine& Default();
 };
 
+// Project tables in expressions (docs/variables/README.md#tables).
+// `lookup("table", key, "column")` reads a cell of a project table. The
+// tables reach an evaluation as SYMBOLS, one per cell, under names no
+// identifier can spell — so a lookup evaluates wherever a variable does,
+// with no second channel into the evaluator. The owner of the tables seeds
+// them into the scope (lookuptable::AddCellSymbols); anything that lists
+// symbols skips IsCellSymbol ones.
+namespace lookuptable {
+[[nodiscard]] std::string CellSymbol(const std::string& table,
+                                     const std::string& key,
+                                     const std::string& column);
+[[nodiscard]] bool IsCellSymbol(const std::string& name);
+[[nodiscard]] bool SplitCellSymbol(const std::string& name, std::string& table,
+                                   std::string& key, std::string& column);
+// A numeric key's one spelling: the shortest text that reads back as the
+// same double ("6002", "6.35"), so 6002 from an expression, a JSON 6002 and
+// the string "6002" are one row.
+[[nodiscard]] std::string NumericKey(double value);
+} // namespace lookuptable
+
 // Built-in engine: numbers, identifiers, + - * / ^ (right-associative,
 // binding tighter than unary minus, so -2^2 = -4), parens, the constant
 // `pi`, and functions sin cos tan sqrt abs min max floor ceil — trig in
-// degrees, matching the dimension UI.
+// degrees, matching the dimension UI — and lookup("table", key, "column"),
+// whose table and column are quoted names ("..." or '...') and whose key is
+// a quoted name or a numeric expression.
 class BuiltinExpressionEngine final : public ExpressionEngine {
 public:
   std::expected<std::unique_ptr<CompiledExpr>, ExprError>

@@ -56,9 +56,15 @@ tokens or syntax trees, so the engine can be replaced without touching
 - Unary minus and parentheses. There is no unary plus.
 - One constant, `pi`.
 
-**Functions:** `sin cos tan sqrt abs floor ceil` (one argument each) and
-`min max` (two or more). Trig functions take **degrees**, like the dimension
-UI does. There are no inverse trig functions.
+**Functions:** `sin cos tan sqrt abs floor ceil` (one argument each),
+`min max` (two or more) and `lookup("table", key, "column")`, which reads a
+project table ([tables](#tables)). Trig functions take **degrees**, like the
+dimension UI does. There are no inverse trig functions.
+
+**Quoted names** (`"..."` or `'...'`) exist only as a lookup's arguments: its
+table and column must be quoted (a bare name there would be a variable), and
+its key is a quoted name or a numeric expression. A quoted name anywhere else
+is a compile error saying where it belongs.
 
 **Unit suffixes on literals**
 
@@ -90,6 +96,56 @@ wrong number of arguments, division by zero, `sqrt` of a negative number,
 and a non-finite result are all errors. An error carries
 `{message, offset, length}`, so the UI can underline the bad span and the
 RPC can report it.
+
+## Tables
+
+A **project table** is a named grid of numbers keyed by row, so bearing and
+screw sizes live in the model rather than in a generator's Python:
+
+```
+set_table {name: "bearings", columns: ["d", "D", "B"],
+           rows: [{key: 6002, values: [15, 32, 9]},
+                  {key: 6200, d: 10, D: 30, B: 9}]}
+set_variable {name: "od", expression: "lookup(\"bearings\", size, \"D\")"}
+```
+
+- **What it is.** `lookuptable::Table` (`src/core/LookupTable.{h,cpp}`):
+  `{name, comment, columns, rows[{key, values}]}`. Cells are numbers in base
+  units (mm, degrees), like a variable's value. A table name and its column
+  names are identifiers; keys are non-empty, unique, without control
+  characters; every row has one finite value per column. Anything else is
+  refused saying what is wrong (`lookuptable::Validate`), never stored as a
+  different table.
+- **Keys** are text. A number is stored in its one spelling, the shortest
+  text that reads back as the same double (`NumericKey`: `6002`, `6.35`), so
+  `lookup(..., 6002, ...)`, `lookup(..., size, ...)` with `size = 6002`, a
+  JSON `6002` and the string `"6002"` all find one row. A text key (`"M6"`,
+  `"608"`) is matched exactly.
+- **Where it lives: the project.** `AppState::projectTables`, beside the
+  project variables, saved in `project.json` under `"tables"` (an additive
+  key; the envelope stays version 2). A lone part's flat file is the whole
+  project, so its envelope carries them (`"tables"`, format v149) and the
+  open takes them back into the project scope (`Document::TakeTables`), the
+  way the project variables travel. A malformed table refuses the open: an
+  expression reads it, and a project that lost one would load with every
+  lookup in it broken. A `Document` that keeps its own tables (a core test,
+  a file read without the app) evaluates its lookups against them.
+- **How a lookup evaluates.** The cells reach the evaluator as symbols, one
+  per cell, under names no identifier can spell
+  (`lookuptable::CellSymbol`: a unit-separator lead and three fields). They
+  are seeded as the outermost scope of the project variables
+  (`ui::SyncProjectScope`), so a project variable, a part variable and a
+  feature field all read them, through the ordinary symbol table and with
+  no second channel into the evaluator. Completion skips them.
+- **Refusals name what exists.** An unknown table names the tables, an
+  unknown key the table's keys (numerically sorted when they are numbers),
+  an unknown column the row's columns; a project with no tables says so.
+  The error is the variable's or the feature's, like any other.
+- **Edits** go through `ui::SetProjectTable` / `ui::RemoveProjectTable`
+  (`src/ui/VariableActions.cpp`), on the project variables' cross-tab
+  undo: a snapshot holds the tables beside the variables. Every edit
+  re-evaluates the project and regenerates every part. Deleting a table is
+  refused while any variable or feature field reads it, naming them.
 
 ## Evaluation
 
@@ -157,6 +213,9 @@ The RPCs are handled in `src/remote/RemoteProject.cpp`.
 | `list_variables` | none | Project variables first, then the active part's: `{name, expression, value, scope, comment?, error?}`. |
 | `rename_variable` | `name, new_name, scope?` | Without `scope`: project if a project variable has that name or no local one does, otherwise part. |
 | `delete_variable` | `name, scope?` | Same scope rule. Refused while referenced, and the refusal names the references. |
+| `set_table` | `name, columns, rows, comment?` | Adds or replaces a project table. A row is `{key, values: [...]}` or `{key, <column>: value, ...}`; a column a row names that the table does not have is refused naming the columns. Returns `{table, regen?}`. |
+| `list_tables` | `name?` | Every table, or the one named (an unknown name is refused naming the tables). |
+| `delete_table` | `name` | Refused while any expression reads it (naming them), or when there is no such table. |
 
 Every numeric feature parameter also accepts an expression, as a
 `<field>_expr` key in the feature JSON passed to `add_feature` or
@@ -180,6 +239,14 @@ Every numeric feature parameter also accepts an expression, as a
 
   "+ Add variable" creates a **project** variable. The panel has no way to
   create a part-local variable; `set_variable {scope:"part"}` does that.
+- **Tables** is a section of the same panel (`src/ui/TablesPanel.cpp`,
+  `DrawTablesSection`): "+ Add table", each table as a grid of key and
+  columns with every cell, key, column name and the table's name editable
+  in place, "+" for a column, "+ Row" (a new row copies the last row's
+  values, the next size in a series being nearer its neighbour than zero),
+  a delete button per row, and "Delete table". Every edit goes through
+  `ui::SetProjectTable`, so the panel refuses what the RPC refuses, in the
+  same words. GUI test `variables/a_table_by_clicking`.
 - **Numeric fields** (`src/ui/ExprInput.{h,cpp}`) switch to expression
   entry on Ctrl+click, double-click, or Enter on a focused field. Completion
   offers variables, functions and unit suffixes (`src/ui/ExprComplete.h`).
@@ -208,8 +275,15 @@ Every numeric feature parameter also accepts an expression, as a
   a variable moves exactly the expected JSON fields.
 - `tests/units_smoke.py` checks unit-suffixed variables over RPC, refusal
   of a variable named `mm`, and save/reopen keeping the text.
-- `tests/golden/v11-expressions.json` and `v38-entity-exprs.json` pin the
-  file format.
+- `tests/test_lookup_table.cpp` covers tables: lookup by numeric, string
+  and computed keys, the refusals naming what exists, quoted names allowed
+  only in a lookup, validation and JSON, a document's lookups driving
+  geometry through a save, and a project table re-evaluating its readers,
+  undoing, and refusing a delete while read.
+- `tests/tables_smoke.py` covers the RPCs, both row forms, and the tables
+  surviving a flat save and a project.json save.
+- `tests/golden/v11-expressions.json`, `v38-entity-exprs.json` and
+  `v149-lookup-table.json` pin the file format.
 
 ## Not built
 
@@ -218,6 +292,8 @@ Every numeric feature parameter also accepts an expression, as a
 - Variables bound to a measurement. `MeasureActions.cpp` can *create* a
   project variable from a measured value, but the variable does not follow
   the measurement afterwards.
-- Per-sketch local variables, conditionals, and string values.
+- Per-sketch local variables, conditionals, and string values (a quoted
+  name is a lookup's argument, not a value).
+- Table cells holding expressions, or text; a table per part.
 - A verb that turns the selected features' literal dimensions into named
   variables in one step (`extract_variables`).

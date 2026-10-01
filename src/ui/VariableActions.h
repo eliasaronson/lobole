@@ -58,6 +58,18 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
 const Parameter* FindProjectParameter(const AppState& state,
                                       const std::string& name);
 
+// Project tables (docs/variables/README.md#tables), on the same cross-tab
+// undo as the variables. Set adds or replaces the table of that name and
+// returns "" -- or the refusal (lookuptable::Validate's) and changes
+// nothing. Remove is refused while any expression reads the table, naming
+// them, or when there is no such table, naming the ones there are.
+[[nodiscard]] std::string SetProjectTable(AppState& state,
+                                          lookuptable::Table table);
+[[nodiscard]] std::string RemoveProjectTable(AppState& state,
+                                             const std::string& name);
+[[nodiscard]] std::vector<std::string>
+ProjectTableReferences(AppState& state, const std::string& name);
+
 bool UndoProjectVars(AppState& state);
 
 bool RedoProjectVars(AppState& state);

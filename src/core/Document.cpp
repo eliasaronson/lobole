@@ -97,6 +97,7 @@ Document::Document(const Document& other, bool reuseGeometry)
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_tube = other.m_tube;             // what check_frame and the cut list read
   m_print = other.m_print;           // what the fit checks model a print at
+  m_tables = other.m_tables;         // a lone part's project tables
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());
@@ -866,10 +867,19 @@ void Document::SetPrintProcess(std::optional<printfit::Process> p) {
 
 void Document::EvaluateParameters() {
   // Project variables (Phase V) seed the table as the outer scope, shadowed by
-  // same-named local parameters.
+  // same-named local parameters. Tables this document carries itself (no app
+  // took them into the project) join that scope as cells.
+  SymbolTable withTables;
+  const SymbolTable* outer = m_projectSymbols;
+  if (!m_tables.empty()) {
+    if (m_projectSymbols != nullptr)
+      withTables = *m_projectSymbols;
+    lookuptable::AddCellSymbols(m_tables, withTables);
+    outer = &withTables;
+  }
   const Configuration* cfg = ActiveConfig();
   if (cfg == nullptr) {
-    EvaluateParameterTable(m_parameters, m_symbols, m_projectSymbols, {});
+    EvaluateParameterTable(m_parameters, m_symbols, outer, {});
     return;
   }
   // The active configuration overrides parameter VALUES for THIS document's
@@ -913,7 +923,7 @@ void Document::EvaluateParameters() {
     }
   }
   EvaluateParameterTable(
-      augmented, m_symbols, m_projectSymbols,
+      augmented, m_symbols, outer,
       [cfg](const std::string& name) { return cfg->OverrideFor(name); });
   // Copy the evaluated value/error back into the real local table (the
   // synthetic project-override entries only needed to reach m_symbols).

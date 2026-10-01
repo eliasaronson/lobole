@@ -2,7 +2,9 @@
 
 #include "core/Angles.h"
 
+#include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -43,6 +45,7 @@ enum class TokKind {
   LParen,
   RParen,
   Comma,
+  String, // "..." or '...': only a lookup's table, key or column
   End
 };
 
@@ -51,7 +54,7 @@ struct Token {
   size_t offset = 0;
   size_t length = 0;
   double number = 0.0; // Number only
-  std::string text;    // Ident only
+  std::string text;    // Ident / String (the String's content, unquoted)
 };
 
 // Tokenizes the whole string. Returns false and fills outError on an
@@ -121,6 +124,20 @@ bool Tokenize(const std::string& src, std::vector<Token>& out,
       i = j;
       continue;
     }
+    if (c == '"' || c == '\'') {
+      const size_t close = src.find(c, i + 1);
+      if (close == std::string::npos) {
+        if (outError != nullptr)
+          *outError = {
+              std::string("unterminated quoted name — close it with ") + c, i,
+              n - i};
+        return false;
+      }
+      out.push_back({TokKind::String, i, close + 1 - i, 0.0,
+                     src.substr(i + 1, close - i - 1)});
+      i = close + 1;
+      continue;
+    }
     TokKind kind = TokKind::End;
     switch (c) {
     case '+':
@@ -163,13 +180,13 @@ bool Tokenize(const std::string& src, std::vector<Token>& out,
 // ---------------------------------------------------------------------- AST
 
 struct Node {
-  enum class Kind { Number, Ident, Unary, Binary, Call };
+  enum class Kind { Number, Ident, String, Unary, Binary, Call };
 
   Kind kind = Kind::Number;
   size_t offset = 0; // span in the source text, for evaluation errors
   size_t length = 0;
   double number = 0.0;                     // Number
-  std::string name;                        // Ident / Call
+  std::string name;                        // Ident / Call / String
   char op = 0;                             // Unary ('-') / Binary
   std::vector<std::unique_ptr<Node>> args; // Unary/Binary operands, Call args
 };
@@ -182,9 +199,10 @@ struct FuncSig {
 };
 const std::unordered_map<std::string, FuncSig>& Functions() {
   static const std::unordered_map<std::string, FuncSig> f = {
-      {"sin", {1, 1}},  {"cos", {1, 1}},        {"tan", {1, 1}},
-      {"sqrt", {1, 1}}, {"abs", {1, 1}},        {"floor", {1, 1}},
-      {"ceil", {1, 1}}, {"min", {2, SIZE_MAX}}, {"max", {2, SIZE_MAX}},
+      {"sin", {1, 1}},    {"cos", {1, 1}},        {"tan", {1, 1}},
+      {"sqrt", {1, 1}},   {"abs", {1, 1}},        {"floor", {1, 1}},
+      {"ceil", {1, 1}},   {"min", {2, SIZE_MAX}}, {"max", {2, SIZE_MAX}},
+      {"lookup", {3, 3}},
   };
   return f;
 }
@@ -218,6 +236,8 @@ public:
       Fail(Peek(), "unexpected trailing input");
       return nullptr;
     }
+    if (!CheckStrings(*node, false))
+      return nullptr;
     return node;
   }
 
@@ -235,6 +255,34 @@ private:
     if (m_error != nullptr) {
       *m_error = {message, at.offset, at.length != 0 ? at.length : 1};
     }
+  }
+
+  // A quoted name means something only as a lookup's argument; anywhere else
+  // it would have to be read as a number, and is refused. A lookup's table
+  // and column must BE quoted names: a bare identifier there is a variable.
+  bool CheckStrings(const Node& node, bool inLookup) {
+    if (node.kind == Node::Kind::String && !inLookup) {
+      FailNode(node, "a quoted name is only a lookup's table, key or column "
+                     "— lookup(\"bearings\", 6002, \"D\")");
+      return false;
+    }
+    const bool lookup = node.kind == Node::Kind::Call && node.name == "lookup";
+    for (size_t i = 0; i < node.args.size(); i++) {
+      const Node& arg = *node.args[i];
+      if (lookup && i != 1 && arg.kind != Node::Kind::String) {
+        FailNode(arg, std::string("lookup's ") + (i == 0 ? "table" : "column") +
+                          " is a quoted name: lookup(\"bearings\", 6002, "
+                          "\"D\")");
+        return false;
+      }
+      if (!CheckStrings(arg, lookup && arg.kind == Node::Kind::String))
+        return false;
+    }
+    return true;
+  }
+  void FailNode(const Node& at, const std::string& message) {
+    if (m_error != nullptr)
+      *m_error = {message, at.offset, at.length != 0 ? at.length : 1};
   }
 
   static std::unique_ptr<Node> Make(Node::Kind kind, size_t offset,
@@ -343,6 +391,12 @@ private:
       node->name = tok.text;
       return node;
     }
+    case TokKind::String: {
+      Take();
+      auto node = Make(Node::Kind::String, tok.offset, tok.length);
+      node->name = tok.text;
+      return node;
+    }
     case TokKind::LParen: {
       Take();
       auto inner = ParseAdditive();
@@ -418,6 +472,93 @@ private:
 
 bool EvalCall(const Node& node, const std::vector<double>& args, double& out,
               ExprError* outError);
+bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
+              ExprError* outError);
+
+// "a, b and c", sorted, numbers by value when every one is a number.
+std::string NameList(std::vector<std::string> names, size_t max = 24) {
+  const auto number = [](const std::string& s, double& v) {
+    const auto r = std::from_chars(s.data(), s.data() + s.size(), v);
+    return r.ec == std::errc() && r.ptr == s.data() + s.size();
+  };
+  double a = 0.0, b = 0.0;
+  const bool numeric = std::all_of(names.begin(), names.end(),
+                                   [&](auto& n) { return number(n, a); });
+  std::sort(names.begin(), names.end(), [&](const auto& x, const auto& y) {
+    if (numeric && number(x, a) && number(y, b))
+      return a < b;
+    return x < y;
+  });
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  std::string out;
+  const size_t shown = std::min(names.size(), max);
+  for (size_t i = 0; i < shown; i++) {
+    if (i != 0)
+      out += i + 1 == shown && shown == names.size() ? " and " : ", ";
+    out += names[i];
+  }
+  if (shown < names.size())
+    out += ", ... (" + std::to_string(names.size()) + " in all)";
+  return out;
+}
+
+// lookup("table", key, "column"): the cell the project's table holds
+// (docs/variables/README.md#tables). The cells arrive as symbols
+// (lookuptable::CellSymbol) seeded into the scope, so a lookup evaluates
+// wherever a variable does; a miss is refused naming what exists.
+bool EvalLookup(const Node& node, const SymbolTable& symbols, double& out,
+                ExprError* outError) {
+  const auto fail = [&](const std::string& message) {
+    if (outError != nullptr)
+      *outError = {message, node.offset, node.length};
+    return false;
+  };
+  const std::string& table = node.args[0]->name;
+  const std::string& column = node.args[2]->name;
+  std::string key;
+  if (node.args[1]->kind == Node::Kind::String) {
+    key = node.args[1]->name;
+  } else {
+    double k = 0.0;
+    if (!EvalNode(*node.args[1], symbols, k, outError))
+      return false;
+    key = lookuptable::NumericKey(k);
+  }
+  const auto it = symbols.find(lookuptable::CellSymbol(table, key, column));
+  if (it != symbols.end()) {
+    out = it->second;
+    return true;
+  }
+  // A miss: say which part of the address does not exist, and what does.
+  std::vector<std::string> tables, keys, columns;
+  bool haveKey = false;
+  for (const auto& [name, value] : symbols) {
+    (void)value;
+    std::string t, k, c;
+    if (!lookuptable::SplitCellSymbol(name, t, k, c))
+      continue;
+    tables.push_back(t);
+    if (t != table)
+      continue;
+    keys.push_back(k);
+    if (k == key) {
+      haveKey = true;
+      columns.push_back(c);
+    }
+  }
+  if (tables.empty())
+    return fail("unknown table '" + table +
+                "' — this project has no tables (set_table, or the Tables "
+                "section of the Variables panel)");
+  if (keys.empty())
+    return fail("unknown table '" + table + "' — the tables are " +
+                NameList(tables));
+  if (!haveKey)
+    return fail("table '" + table + "' has no row '" + key +
+                "' — its keys are " + NameList(keys));
+  return fail("table '" + table + "' has no column '" + column +
+              "' — its columns are " + NameList(columns));
+}
 
 bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
               ExprError* outError) {
@@ -432,6 +573,8 @@ bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
   case Node::Kind::Number:
     out = node.number;
     return true;
+  case Node::Kind::String: // CheckStrings keeps these inside a lookup
+    return fail("a quoted name has no value");
   case Node::Kind::Ident: {
     if (node.name == "pi") {
       out = angles::kPi;
@@ -484,6 +627,11 @@ bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
     break;
   }
   case Node::Kind::Call: {
+    if (node.name == "lookup") {
+      if (!EvalLookup(node, symbols, out, outError))
+        return false;
+      break;
+    }
     std::vector<double> args(node.args.size());
     for (size_t i = 0; i < node.args.size(); ++i) {
       if (!EvalNode(*node.args[i], symbols, args[i], outError)) {
@@ -572,6 +720,56 @@ private:
 } // namespace
 
 // ----------------------------------------------------------------- Engines
+
+namespace lookuptable {
+
+// A cell's symbol: three fields after a unit-separator lead, none of which
+// can hold one (keys are refused with control characters), so no identifier
+// can ever spell one and no cell can be confused with another.
+constexpr char kSep = '\x1f';
+
+std::string CellSymbol(const std::string& table, const std::string& key,
+                       const std::string& column) {
+  std::string s;
+  s.reserve(table.size() + key.size() + column.size() + 3);
+  s += kSep;
+  s += table;
+  s += kSep;
+  s += key;
+  s += kSep;
+  s += column;
+  return s;
+}
+
+bool IsCellSymbol(const std::string& name) {
+  return !name.empty() && name[0] == kSep;
+}
+
+bool SplitCellSymbol(const std::string& name, std::string& table,
+                     std::string& key, std::string& column) {
+  if (!IsCellSymbol(name))
+    return false;
+  const size_t a = name.find(kSep, 1);
+  if (a == std::string::npos)
+    return false;
+  const size_t b = name.find(kSep, a + 1);
+  if (b == std::string::npos)
+    return false;
+  table = name.substr(1, a - 1);
+  key = name.substr(a + 1, b - a - 1);
+  column = name.substr(b + 1);
+  return true;
+}
+
+std::string NumericKey(double value) {
+  if (value == 0.0)
+    value = 0.0; // -0 and 0 are one key
+  char buf[64];
+  const auto r = std::to_chars(buf, buf + sizeof(buf), value);
+  return std::string(buf, r.ptr);
+}
+
+} // namespace lookuptable
 
 std::expected<double, ExprError>
 ExpressionEngine::EvaluateText(const std::string& text,

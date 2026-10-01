@@ -164,6 +164,29 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"list_variables", "Project variables and the active part's local ones.",
      "", remote::NoFlags,
      "variables[]{name,expression,value,scope,comment?,error?}"},
+    {"set_table",
+     "Add or replace a PROJECT table {name, columns: [names], rows, "
+     "comment?} (docs/variables/README.md#tables), read in any expression "
+     "as lookup(\"name\", key, \"column\") - so bearing and screw sizes "
+     "live in the model. A row is {key, values: [one per column]} or {key, "
+     "<column>: value, ...}; a key is a number or a string, and a numeric "
+     "key matches a numeric expression (lookup(\"bearings\", 6002, "
+     "\"D\")). Cells are numbers in base units (mm, deg), like a "
+     "variable. Names and columns are identifiers. Undoable with the "
+     "project variables; every part re-evaluates. A malformed table is "
+     "refused saying what is wrong, never stored as a different one.",
+     "columns, comment, name, rows", remote::Deferrable,
+     "table{name,comment?,columns,rows[]{key,values}}, regen?"},
+    {"list_tables",
+     "The project's tables {name?}: every one, or the one named (refused "
+     "naming the tables there are).",
+     "name", remote::NoFlags,
+     "tables[]{name,comment?,columns,rows[]{key,values}}"},
+    {"delete_table",
+     "Delete a project table {name}; refused while any expression reads it "
+     "(naming them), or when there is no such table (naming the ones "
+     "there are).",
+     "name", remote::Deferrable},
     {"set_units",
      "The units the ACTIVE document is READ in {length?: mm|cm|m|in, mass?: "
      "g|kg|lb, angle?: deg|rad}. Display only — storage is always mm/g/deg, "
@@ -940,6 +963,104 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           "'. Either the source does not exist, the new name is not a "
           "valid identifier, or it is already taken — list_variables "
           "shows what exists in each scope");
+    json out = json::object();
+    AttachRegen(out, state.document.get());
+    return out;
+  }
+  if (m == "set_table") {
+    // A project table (docs/variables/README.md#tables). Rows come as
+    // {key, values} or {key, <column>: value}; anything else is refused.
+    lookuptable::Table t;
+    t.name = p.at("name").get<std::string>();
+    t.comment = p.value("comment", std::string{});
+    if (!p.contains("columns") || !p.at("columns").is_array())
+      throw std::runtime_error(
+          "set_table: `columns` is the list of column names, e.g. [\"d\", "
+          "\"D\", \"B\"]");
+    for (const json& c : p.at("columns")) {
+      if (!c.is_string())
+        throw std::runtime_error("set_table: a column name is a string, not " +
+                                 c.dump());
+      t.columns.push_back(c.get<std::string>());
+    }
+    for (const json& rj : p.value("rows", json::array())) {
+      if (!rj.is_object() || !rj.contains("key"))
+        throw std::runtime_error(
+            "set_table: a row is {key, values: [...]} or {key, <column>: "
+            "value, ...}, not " +
+            rj.dump());
+      std::string why;
+      const auto key = lookuptable::KeyFromJson(rj.at("key"), &why);
+      if (!key)
+        throw std::runtime_error("set_table: " + why);
+      lookuptable::Row row;
+      row.key = *key;
+      const auto number = [&](const json& v, const std::string& where) {
+        if (!v.is_number())
+          throw std::runtime_error("set_table: row '" + row.key + "', " +
+                                   where + " is not a number: " + v.dump());
+        return v.get<double>();
+      };
+      if (rj.contains("values")) {
+        if (rj.size() != 2 || !rj.at("values").is_array())
+          throw std::runtime_error(
+              "set_table: row '" + row.key +
+              "' gives `values` as a list, and nothing else beside its key");
+        for (const json& v : rj.at("values"))
+          row.values.push_back(number(v, "a value"));
+      } else {
+        for (const auto& [k, v] : rj.items()) {
+          if (k == "key")
+            continue;
+          if (std::find(t.columns.begin(), t.columns.end(), k) ==
+              t.columns.end()) {
+            std::string cols;
+            for (const std::string& c : t.columns)
+              cols += (cols.empty() ? "" : ", ") + c;
+            throw std::runtime_error("set_table: row '" + row.key +
+                                     "' names column '" + k +
+                                     "', and the columns are " + cols);
+          }
+        }
+        for (const std::string& c : t.columns) {
+          if (!rj.contains(c))
+            throw std::runtime_error("set_table: row '" + row.key +
+                                     "' has no value for column '" + c + "'");
+          row.values.push_back(number(rj.at(c), "column '" + c + "'"));
+        }
+      }
+      t.rows.push_back(std::move(row));
+    }
+    if (const std::string why = ui::SetProjectTable(state, t); !why.empty())
+      throw std::runtime_error("set_table: " + why);
+    json out = {{"table", lookuptable::ToJson(t)}};
+    if (doc != nullptr)
+      out["regen"] = RegenSummaryJson(*doc);
+    return out;
+  }
+  if (m == "list_tables") {
+    if (p.contains("name")) {
+      const std::string name = p.at("name").get<std::string>();
+      const lookuptable::Table* t =
+          lookuptable::Find(state.projectTables, name);
+      if (t == nullptr) {
+        std::string names;
+        for (const lookuptable::Table& x : state.projectTables)
+          names += (names.empty() ? "" : ", ") + x.name;
+        throw std::runtime_error(
+            "no table '" + name + "' - " +
+            (names.empty() ? std::string("this project has no tables")
+                           : "the tables are " + names));
+      }
+      return json{{"tables", json::array({lookuptable::ToJson(*t)})}};
+    }
+    return json{{"tables", lookuptable::ToJson(state.projectTables)}};
+  }
+  if (m == "delete_table") {
+    if (const std::string why =
+            ui::RemoveProjectTable(state, p.at("name").get<std::string>());
+        !why.empty())
+      throw std::runtime_error("delete_table: " + why);
     json out = json::object();
     AttachRegen(out, state.document.get());
     return out;

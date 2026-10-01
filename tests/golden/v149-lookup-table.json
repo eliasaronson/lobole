@@ -1,0 +1,31 @@
+{
+  "format": "designer-document",
+  "version": 149,
+  "tables": [
+    {"name": "bearings", "comment": "ISO 15, 60 and 62 series",
+     "columns": ["d", "D", "B"],
+     "rows": [
+       {"key": 6000, "values": [10, 26, 8]},
+       {"key": 6002, "values": [15, 32, 9]},
+       {"key": "608", "values": [8, 22, 7]}
+     ]}
+  ],
+  "parameters": [
+    {"name": "size", "expression": "6002"},
+    {"name": "depth", "expression": "lookup(\"bearings\", size, \"B\")",
+     "comment": "as thick as the bearing"}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 1.0, "distance_expr": "depth", "mode": "new_body"}
+  ]
+}

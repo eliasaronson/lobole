@@ -189,7 +189,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     auto catalogBackup = state.document->TakeCatalogs();
     state.document->SetCatalogsRaw(state.catalogs);
     state.document->SetParametersRaw(state.projectParameters);
+    state.document->SetTablesRaw(state.projectTables);
     auto r = DocumentIO::Save(*state.document, path);
+    state.document->SetTablesRaw({});
     state.document->SetParametersRaw(std::move(localBackup));
     state.document->SetCatalogsRaw(catalogBackup);
     if (!r && error)
@@ -225,6 +227,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     index["active"] = state.activePart;
     if (!state.catalogs.empty())
       index["catalogs"] = catalog::Serialize(state.catalogs);
+    // Project tables: additive, like the parameters (read by lookup()).
+    if (!state.projectTables.empty())
+      index["tables"] = lookuptable::ToJson(state.projectTables);
     // Phase V: project-scope variables live in the project envelope, beside
     // active/documents. Per-part index.json `parameters` are that part's LOCAL
     // scope (usually empty now that set_variable defaults to project).
@@ -460,7 +465,18 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
                                0.0,
                                {}});
     SymbolTable projectSymbols;
-    EvaluateParameterTable(projectParams, projectSymbols, nullptr, {});
+    {
+      // The tables first, for a variable that reads one. A malformed table
+      // fails the open where the envelope is read for keeps.
+      SymbolTable cells;
+      try {
+        lookuptable::AddCellSymbols(lookuptable::ListFromJson(out.index.value(
+                                        "tables", nlohmann::json())),
+                                    cells);
+      } catch (const std::exception&) {
+      }
+      EvaluateParameterTable(projectParams, projectSymbols, &cells, {});
+    }
     const DocumentIO::ProjectScope scope{&projectSymbols, &projectParams};
 
     // Every document is independent of the others until the adopt wires the
@@ -544,6 +560,10 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     const nlohmann::json& index = loaded.index;
     const auto loadedCatalogs =
         catalog::Deserialize(index.value("catalogs", nlohmann::json::array()));
+    // Refused, not dropped: expressions read these, and a project that lost
+    // one would load with every lookup in it broken.
+    auto loadedTables =
+        lookuptable::ListFromJson(index.value("tables", nlohmann::json()));
 
     // This branch never goes through ReplaceDocument, so it releases the
     // per-part render cache itself — same id-reuse hazard.
@@ -608,6 +628,7 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.catalogs = loadedCatalogs;
     state.catalogHistory = {};
     state.projectParameters.clear();
+    state.projectTables = std::move(loadedTables);
     state.projectVarHistory = {};
     for (const auto& pj : index.value("parameters", nlohmann::json::array()))
       state.projectParameters.push_back({pj.at("name").get<std::string>(),

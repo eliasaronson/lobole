@@ -89,7 +89,7 @@ void ExprCompleteRefresh(AppState& state, ImGuiID fieldId, const char* buf) {
   const Document& doc = *state.document;
   const SymbolTable* project = doc.ProjectSymbols();
   for (const auto& [name, value] : doc.Symbols()) {
-    if (!StartsWithNoCase(name, prefix))
+    if (lookuptable::IsCellSymbol(name) || !StartsWithNoCase(name, prefix))
       continue;
     char hint[64];
     const bool isProject = project != nullptr && project->count(name) != 0;

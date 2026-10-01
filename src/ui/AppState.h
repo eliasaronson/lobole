@@ -785,6 +785,9 @@ struct CatalogHistory {
 
 struct ProjectVarSnapshot {
   std::vector<Parameter> params; // the project table to restore when applied
+  // The project tables, restored with the variables: a table edit is a
+  // project-scope edit like a variable's, on the same cross-tab undo.
+  std::vector<lookuptable::Table> tables;
   uint64_t stamp = 0;
   // When set, applying this entry first rewrites `docRefFrom` -> `docRefTo` in
   // every part's feature/parameter expressions (a project-var rename's ref
@@ -1025,6 +1028,10 @@ struct AppState {
   nlohmann::json catalogs = nlohmann::json::array();
   CatalogHistory catalogHistory;
   std::vector<Parameter> projectParameters;
+  // Project tables (docs/variables/README.md#tables): saved in project.json
+  // (or a lone part's envelope), read by lookup() in every part; their cells
+  // are seeded into projectSymbols by SyncProjectScope.
+  std::vector<lookuptable::Table> projectTables;
   SymbolTable projectSymbols;
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 

@@ -146,11 +146,16 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.catalogs = state.document->TakeCatalogs();
   state.catalogHistory = {};
   state.projectParameters = state.document->TakeParameters();
+  state.projectTables = state.document->TakeTables();
   state.projectVarHistory = {};
   state.document->SetProjectSymbols(&state.projectSymbols);
   state.document->SetProjectParameters(&state.projectParameters);
-  EvaluateParameterTable(state.projectParameters, state.projectSymbols, nullptr,
-                         {});
+  {
+    SymbolTable cells;
+    lookuptable::AddCellSymbols(state.projectTables, cells);
+    EvaluateParameterTable(state.projectParameters, state.projectSymbols,
+                           &cells, {});
+  }
   state.document->Regenerate();
   state.selection.Clear();
   state.pendingFeatureId = 0;

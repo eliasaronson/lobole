@@ -106,7 +106,12 @@ void SyncProjectScope(AppState& state) {
   // shared topo-sort orders them), then regenerate every part against it. A
   // changed project value bakes into each part's feature JSON, so dependent
   // features across all tabs invalidate through the regen cache naturally.
-  EvaluateParameterTable(state.projectParameters, state.projectSymbols, nullptr,
+  // The tables' cells are the outermost scope: a variable may read one
+  // (bore = lookup("bearings", 6002, "d")), and a part reads them through
+  // the project symbols.
+  SymbolTable cells;
+  lookuptable::AddCellSymbols(state.projectTables, cells);
+  EvaluateParameterTable(state.projectParameters, state.projectSymbols, &cells,
                          {});
   for (size_t i = 0; i < state.parts.size(); i++) {
     if (Document* d = SlotDoc(state, i)) {
@@ -162,6 +167,7 @@ void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
         d->RewriteProjectVarRefs(s.docRefFrom, s.docRefTo);
   }
   state.projectParameters = s.params;
+  state.projectTables = s.tables;
   SyncProjectScope(state);
 }
 // Pushes a project-var undo entry capturing the PRE-edit table (restored on
@@ -171,6 +177,7 @@ void PushProjectVarUndo(AppState& state, std::vector<Parameter> preEdit,
                         std::string undoRefFrom, std::string undoRefTo) {
   ProjectVarSnapshot s;
   s.params = std::move(preEdit);
+  s.tables = state.projectTables;
   s.stamp = NextActionStamp();
   s.docRefFrom = std::move(undoRefFrom);
   s.docRefTo = std::move(undoRefTo);
@@ -242,6 +249,95 @@ bool RenameProjectVariable(AppState& state, const std::string& oldName,
   return true;
 }
 
+std::string SetProjectTable(AppState& state, lookuptable::Table table) {
+  if (std::string why = lookuptable::Validate(table); !why.empty())
+    return why;
+  PushProjectVarUndo(state, state.projectParameters, {}, {});
+  auto it = std::find_if(
+      state.projectTables.begin(), state.projectTables.end(),
+      [&](const lookuptable::Table& t) { return t.name == table.name; });
+  if (it != state.projectTables.end())
+    *it = std::move(table);
+  else
+    state.projectTables.push_back(std::move(table));
+  SyncProjectScope(state);
+  return {};
+}
+
+std::vector<std::string> ProjectTableReferences(AppState& state,
+                                                const std::string& name) {
+  // A reference is a lookup whose table is this one, by its quoted name:
+  // the text holds "name" or 'name' right after lookup( -- the parser's
+  // own rule for a table, read without compiling every expression.
+  const auto references = [&](const std::string& text) {
+    for (size_t at = text.find("lookup"); at != std::string::npos;
+         at = text.find("lookup", at + 1)) {
+      size_t i = at + 6;
+      while (i < text.size() &&
+             std::isspace(static_cast<unsigned char>(text[i])))
+        i++;
+      if (i >= text.size() || text[i] != '(')
+        continue;
+      i++;
+      while (i < text.size() &&
+             std::isspace(static_cast<unsigned char>(text[i])))
+        i++;
+      if (i < text.size() && (text[i] == '"' || text[i] == '\'') &&
+          text.compare(i + 1, name.size(), name) == 0 &&
+          i + 1 + name.size() < text.size() &&
+          text[i + 1 + name.size()] == text[i])
+        return true;
+    }
+    return false;
+  };
+  std::vector<std::string> refs;
+  for (const Parameter& p : state.projectParameters)
+    if (references(p.expression))
+      refs.push_back("project variable '" + p.name + "'");
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    Document* d = SlotDoc(state, i);
+    if (d == nullptr)
+      continue;
+    for (const Parameter& p : d->GetParameters())
+      if (references(p.expression))
+        refs.push_back(state.parts[i].name + ": variable '" + p.name + "'");
+    for (const auto& f : d->GetFeatures()) {
+      bool hit = false;
+      f->VisitExprs(
+          [&](std::string& text, double&) { hit = hit || references(text); });
+      if (hit)
+        refs.push_back(state.parts[i].name + ": feature '" + f->GetName() +
+                       "'");
+    }
+  }
+  return refs;
+}
+
+std::string RemoveProjectTable(AppState& state, const std::string& name) {
+  const auto it =
+      std::find_if(state.projectTables.begin(), state.projectTables.end(),
+                   [&](const lookuptable::Table& t) { return t.name == name; });
+  if (it == state.projectTables.end()) {
+    std::string names;
+    for (const lookuptable::Table& t : state.projectTables)
+      names += (names.empty() ? "" : ", ") + t.name;
+    return "no table '" + name + "' -- " +
+           (names.empty() ? std::string("this project has no tables")
+                          : "the tables are " + names);
+  }
+  if (std::vector<std::string> refs = ProjectTableReferences(state, name);
+      !refs.empty()) {
+    std::string list;
+    for (const std::string& r : refs)
+      list += (list.empty() ? "" : "; ") + r;
+    return "table '" + name + "' is read by " + list + " -- change those first";
+  }
+  PushProjectVarUndo(state, state.projectParameters, {}, {});
+  state.projectTables.erase(it);
+  SyncProjectScope(state);
+  return {};
+}
+
 bool UndoProjectVars(AppState& state) {
   if (state.projectVarHistory.undo.empty())
     return false;
@@ -251,6 +347,7 @@ bool UndoProjectVars(AppState& state) {
   // its ref rewrite is the inverse of the undo entry's.
   ProjectVarSnapshot redoEntry;
   redoEntry.params = state.projectParameters;
+  redoEntry.tables = state.projectTables;
   redoEntry.stamp = entry.stamp;
   redoEntry.docRefFrom = entry.docRefTo;
   redoEntry.docRefTo = entry.docRefFrom;
@@ -266,6 +363,7 @@ bool RedoProjectVars(AppState& state) {
   state.projectVarHistory.redo.pop_back();
   ProjectVarSnapshot undoEntry;
   undoEntry.params = state.projectParameters;
+  undoEntry.tables = state.projectTables;
   undoEntry.stamp = entry.stamp;
   undoEntry.docRefFrom = entry.docRefTo;
   undoEntry.docRefTo = entry.docRefFrom;

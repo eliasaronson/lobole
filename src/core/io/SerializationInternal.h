@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    148; // v148: a topology result's `input_hash` ("0x" + 16 hex digits):
+    149; // v149: project tables -- `tables` [{name, comment?, columns,
+         //      rows [{key, values}]}] in a single-part file's envelope and
+         //      in project.json, read by lookup("table", key, "column")
+         //      (docs/variables/README.md#tables). A cylinder's or cone's
+         //      connector frame takes the surface's seam as X
+         //      (docs/assemblies/solver.md#connector-frames), so a stored
+         //      mate `rotation` on a round face counts from there.
+         // v148: a topology result's `input_hash` ("0x" + 16 hex digits):
          //      what produced it, so a reopened project reuses it for the
          //      same inputs and reads it stale otherwise
          //      (docs/simulation/README.md#studies-as-jobs).

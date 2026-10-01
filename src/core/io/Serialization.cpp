@@ -242,6 +242,10 @@ json DocumentEnvelope(const Document& doc) {
     j["generator"] = doc.Generator();
   if (!doc.GetCatalogs().empty())
     j["catalogs"] = catalog::Serialize(doc.GetCatalogs());
+  // v149: project tables a single-part file carries (the project's, folded
+  // in for the write like its variables).
+  if (!doc.GetTables().empty())
+    j["tables"] = lookuptable::ToJson(doc.GetTables());
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
@@ -815,6 +819,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetProjectParameters(scope.parameters);
     doc->SetCommitGeometry(index.value("commit_geometry", true));
     doc->SetCatalogsRaw(index.value("catalogs", json::array()));
+    doc->SetTablesRaw(lookuptable::ListFromJson(index.value("tables", json())));
     doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
@@ -1514,6 +1519,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     doc->SetProjectParameters(scope.parameters);
     doc->SetCommitGeometry(j.value("commit_geometry", true));
     doc->SetCatalogsRaw(j.value("catalogs", json::array()));
+    doc->SetTablesRaw(lookuptable::ListFromJson(j.value("tables", json())));
     doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.

@@ -1,6 +1,7 @@
 #include "ui/VariablesPanel.h"
 #include "ui/CatalogActions.h"
 #include "ui/SheetMetalActions.h"
+#include "ui/TablesPanel.h"
 #include "ui/ToleranceActions.h"
 #include "ui/Widgets.h"
 
@@ -127,6 +128,7 @@ void DrawVariablesPanel(AppState& state) {
   DrawTolerancesSection(state);
   DrawPrintProcessSection(state);
   DrawCatalogSection(state);
+  DrawTablesSection(state);
   // NOT `if (!state.document) return`, which is what this did until
   // 2026-09-01 — the same defect that made File > Save a silent no-op
   // everywhere but a part tab. `state.document` is NULL on an assembly or a

@@ -104,6 +104,7 @@ add_executable(designer_tests
     test_reorder.cpp
     test_remove_features.cpp
     test_expression.cpp
+    test_lookup_table.cpp
     test_variables.cpp
     test_datum.cpp
     test_frame.cpp
@@ -588,6 +589,14 @@ add_test(NAME tolerances_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tolerances_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(tolerances_smoke PROPERTIES TIMEOUT 120)
+
+# Project tables and lookup() over RPC: both row forms, a variable and a
+# feature reading one, the refusals naming what exists, undo, and the tables
+# surviving both project forms (flat file, project.json). Headless.
+add_test(NAME tables_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tables_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(tables_smoke PROPERTIES TIMEOUT 120)
 
 # The printing process allowance (docs/tolerances/README.md#printed-parts):
 # check_fit, check_fits, print_allowance and a Thread's answer on a printed

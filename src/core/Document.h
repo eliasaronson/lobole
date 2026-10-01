@@ -5,6 +5,7 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/LookupTable.h"
 #include "core/PrintAllowance.h"
 #include "core/SheetMetal.h"
 #include "core/Units.h"
@@ -187,6 +188,19 @@ public:
   }
   catalog::Json TakeCatalogs() {
     return std::exchange(m_catalogs, catalog::Json::array());
+  }
+
+  // Project tables (docs/variables/README.md#tables) riding this document:
+  // a single-part file is the whole project, so the project's tables are
+  // written into it and taken back out on load (TakeTables), exactly like
+  // the project variables. A document that keeps them (a core test, a file
+  // read without an app) evaluates its own lookups against them.
+  const std::vector<lookuptable::Table>& GetTables() const { return m_tables; }
+  void SetTablesRaw(std::vector<lookuptable::Table> tables) {
+    m_tables = std::move(tables);
+  }
+  std::vector<lookuptable::Table> TakeTables() {
+    return std::exchange(m_tables, {});
   }
 
   // ---- Parameters (variables) -------------------------------------------
@@ -694,6 +708,7 @@ private:
   std::vector<Body> m_bodies;
   catalog::Json m_generator = nullptr;
   catalog::Json m_catalogs = catalog::Json::array();
+  std::vector<lookuptable::Table> m_tables;
   std::vector<Parameter> m_parameters;
   std::vector<Tolerance> m_tolerances;
   std::vector<fem::Study> m_studies;
