@@ -3,6 +3,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 using Catch::Approx;
 
 namespace {
@@ -191,4 +193,67 @@ TEST_CASE("A band is a band, wherever it sits", "[fits]") {
   auto hole = Band(20.0, "H7");
   CHECK(hole.Min(20.0) == Approx(20.0));
   CHECK(hole.Max(20.0) == Approx(20.021));
+}
+
+// J and j, cell for cell off ISO 286-2:2010 Tables 8 (holes) and 24
+// (shafts) at the sizes a bearing seat lives at, plus the edges of what the
+// standard defines. Each grade has its own deviation, so every grade is
+// pinned.
+TEST_CASE("ISO 286 J and j bands match the published tables", "[fits]") {
+  const auto check = [](double size, const char* cls, int upper, int lower) {
+    INFO(cls << " at " << size);
+    const fits::Band b = Band(size, cls);
+    CHECK(b.upper == Approx(upper * um).margin(1e-9));
+    CHECK(b.lower == Approx(lower * um).margin(1e-9));
+  };
+  check(2.0, "J6", 2, -4);
+  check(2.0, "J7", 4, -6);
+  check(2.0, "J8", 6, -8);
+  check(5.0, "J7", 6, -6); // printed +-6, "identical with JS7"
+  check(20.0, "J6", 8, -5);
+  check(20.0, "J7", 12, -9);
+  check(20.0, "J8", 20, -13);
+  check(32.0, "J7", 14, -11); // a 6002's outside
+  check(50.0, "J7", 14, -11); // 50 is the top of 30..50
+  check(62.0, "J7", 18, -12);
+  check(450.0, "J8", 66, -31);
+
+  check(2.0, "j5", 2, -2); // printed +-2
+  check(2.0, "j6", 4, -2);
+  check(2.0, "j7", 6, -4);
+  check(2.0, "j8", 8, -6);
+  check(15.0, "j5", 5, -3); // a 6002's bore
+  check(15.0, "j6", 8, -3);
+  check(20.0, "j6", 9, -4);
+  check(20.0, "j7", 13, -8);
+  check(50.0, "j6", 11, -5);
+  check(300.0, "j6", 16, -16); // printed +-16
+  check(300.0, "j7", 26, -26); // printed +-26
+  check(450.0, "j7", 31, -32);
+
+  // J7/h6 on a 6002's Ø32 outside is a transition fit.
+  std::string why;
+  const auto pair = fits::Fit(32.0, "J7", "h6", &why);
+  REQUIRE(pair.has_value());
+  CHECK(pair->kind == fits::FitKind::Transition);
+  CHECK(pair->minClearance == Approx(-11 * um));
+  CHECK(pair->maxClearance == Approx(30 * um));
+}
+
+TEST_CASE("J and j refuse the grades and sizes the standard leaves blank",
+          "[fits]") {
+  std::string why;
+  CHECK_FALSE(fits::Limits(20.0, "j8", &why).has_value());
+  CHECK(why.find("j8 exists only up to 3 mm") != std::string::npos);
+  CHECK(why.find("js8") != std::string::npos);
+  CHECK_FALSE(fits::Limits(20.0, "j9", &why).has_value());
+  CHECK(why.find("j5, j6 and j7") != std::string::npos);
+  CHECK_FALSE(fits::Limits(20.0, "J9", &why).has_value());
+  CHECK(why.find("JS9") != std::string::npos);
+  CHECK_FALSE(fits::Limits(20.0, "J5", &why).has_value());
+  CHECK(why.find("J6, J7 and J8") != std::string::npos);
+  const auto holes = fits::HoleLetters();
+  CHECK(std::find(holes.begin(), holes.end(), "J") != holes.end());
+  const auto shafts = fits::ShaftLetters();
+  CHECK(std::find(shafts.begin(), shafts.end(), "j") != shafts.end());
 }

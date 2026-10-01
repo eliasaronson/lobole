@@ -61,6 +61,34 @@ constexpr Letter kLetters[] = {
     {"p", false, {6, 12, 15, 18, 22, 26, 32, 37, 43, 50, 56, 62, 68}},
 };
 
+// j and J: the near-symmetric classes, neither a fundamental deviation
+// applied at every grade nor symmetric. Each grade has its OWN tabulated
+// deviation, so they are rows per grade, and a grade the standard leaves
+// blank is refused rather than borrowed from a neighbour.
+//
+// Shaft j: ei, the LOWER deviation (negative), es = ei + IT. ISO 286-1:2010
+// Table 2 (column j: "IT5 and IT6", "IT7", "IT8"); checked against every
+// cell of ISO 286-2:2010 Table 24, where a "+-x" cell is the same band
+// (j6 over 250 mm, j7 at 250..315). j8 is defined only up to 3 mm.
+constexpr int kJShaftEi56[kSteps] = {-2, -2,  -2,  -3,  -4,  -5, -7,
+                                     -9, -11, -13, -16, -18, -20};
+constexpr int kJShaftEi7[kSteps] = {-4,  -4,  -5,  -6,  -8,  -10, -12,
+                                    -15, -18, -21, -26, -28, -32};
+constexpr int kJShaftEi8UpTo3 = -6; // j8: the first size step only
+// Hole J: ES, the UPPER deviation (positive), EI = ES - IT. ISO 286-1:2010
+// Table 3 (column J: IT6, IT7, IT8), checked against ISO 286-2:2010 Table 8
+// (J7 at 3..6 is printed +-6, "identical with JS7"; the same band). J9 and
+// up are not J at all: the standard's footnote makes them symmetric, JS9.
+// EI = ES - IT is 286-2's own Figure 1 rule. One cell of the copy of
+// Table 8 checked here reads otherwise: J6 at 250..315 as +25/-5, a band of
+// 30 where IT6 is 32. The rule gives -7, which is what is carried.
+constexpr int kJHoleEs[3][kSteps] = {
+    /* J6 */ {2, 5, 5, 6, 8, 10, 13, 16, 18, 22, 25, 29, 33},
+    /* J7 */ {4, 6, 8, 10, 12, 14, 18, 22, 26, 30, 36, 39, 43},
+    /* J8 */ {6, 10, 12, 15, 20, 24, 28, 34, 41, 47, 55, 60, 66},
+};
+constexpr const char* kNearSymmetric = "j";
+
 // js/JS is not a fundamental deviation at all — it is "symmetric about
 // nominal", so it carries no row and is handled where the band is built.
 constexpr const char* kSymmetric = "js";
@@ -182,6 +210,7 @@ std::vector<std::string> ShaftLetters() {
   for (const Letter& l : kLetters)
     out.emplace_back(l.name);
   out.emplace_back(kSymmetric);
+  out.emplace_back(kNearSymmetric);
   std::sort(out.begin(), out.end());
   return out;
 }
@@ -228,6 +257,51 @@ std::optional<Band> Limits(double nominalMm, const std::string& cls,
   if (parsed->letter == kSymmetric) {
     band.upper = *it / 2000.0;
     band.lower = -band.upper;
+    return band;
+  }
+
+  if (parsed->letter == kNearSymmetric) {
+    const std::string sizes = step == 0 ? "up to 3 mm" : "over 3 mm";
+    if (!parsed->hole) {
+      int ei = 0;
+      if (parsed->grade == 5 || parsed->grade == 6)
+        ei = kJShaftEi56[step];
+      else if (parsed->grade == 7)
+        ei = kJShaftEi7[step];
+      else if (parsed->grade == 8 && step == 0)
+        ei = kJShaftEi8UpTo3;
+      else {
+        Fail(error,
+             "shaft class " + cls + " is not defined by ISO 286 " +
+                 (parsed->grade == 8
+                      ? std::string("at ") + sizes +
+                            " — j8 exists only up to 3 mm. "
+                      : std::string("— j is defined for j5, j6 and j7 at "
+                                    "every size to 500 mm, and j8 up to 3 "
+                                    "mm. ")) +
+                 "For a symmetric band use js" + std::to_string(parsed->grade));
+        return std::nullopt;
+      }
+      band.lower = ei / 1000.0;
+      band.upper = (ei + *it) / 1000.0;
+      return band;
+    }
+    if (parsed->grade < 6 || parsed->grade > 8) {
+      Fail(error,
+           "hole class " + cls +
+               " is not defined by ISO 286 — J is defined for J6, J7 and J8 "
+               "at every size to 500 mm" +
+               (parsed->grade > 8
+                    ? std::string("; from IT9 the standard makes J "
+                                  "symmetric, which is JS") +
+                          std::to_string(parsed->grade)
+                    : std::string(". Use JS") + std::to_string(parsed->grade) +
+                          " for a symmetric band"));
+      return std::nullopt;
+    }
+    const int es = kJHoleEs[parsed->grade - 6][step];
+    band.upper = es / 1000.0;
+    band.lower = (es - *it) / 1000.0;
     return band;
   }
 
