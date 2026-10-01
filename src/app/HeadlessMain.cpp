@@ -112,7 +112,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   LOG_INFO("Headless: stop requested, shutting down");
   server.Stop();
   // Clean exit with nothing unsaved: drop the sidecar. Dirty exits keep it.
-  if (state.document && state.document->Version() == state.lastSavedVersion) {
+  if (state.document && !ui::ProjectDirty(state)) {
     Autosaver::Clear(state.projectPath);
   }
   return 0;

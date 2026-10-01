@@ -500,7 +500,7 @@ const fem::Study* Document::FindStudy(uint64_t id) const {
   return nullptr;
 }
 
-fem::Study* Document::FindStudy(uint64_t id) {
+fem::Study* Document::StudyForRun(uint64_t id) {
   for (fem::Study& s : m_studies) {
     if (s.id == id)
       return &s;
@@ -535,6 +535,7 @@ const Tolerance* Document::ToleranceForSubject(const ElementRef& ref,
 }
 
 const Tolerance& Document::SetTolerance(Tolerance t) {
+  MarkEdited();
   if (t.id == 0)
     t.id = m_nextId++;
   else
@@ -557,6 +558,7 @@ bool Document::RemoveTolerance(uint64_t id) {
   for (auto it = m_tolerances.begin(); it != m_tolerances.end(); ++it) {
     if (it->id == id) {
       m_tolerances.erase(it);
+      MarkEdited();
       return true;
     }
   }
@@ -566,6 +568,7 @@ bool Document::RemoveTolerance(uint64_t id) {
 void Document::RestoreTolerance(Tolerance t) {
   EnsureNextIdAtLeast(t.id + 1);
   m_tolerances.push_back(std::move(t));
+  MarkEdited();
 }
 
 fem::Study& Document::AddStudy(const std::string& name) {
@@ -574,6 +577,7 @@ fem::Study& Document::AddStudy(const std::string& name) {
   study.name =
       name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
   m_studies.push_back(std::move(study));
+  MarkEdited();
   return m_studies.back();
 }
 
@@ -582,6 +586,7 @@ bool Document::RemoveStudy(uint64_t id) {
     if (it->id == id) {
       m_studies.erase(it);
       m_studyRuntime.erase(id); // drop derived mesh/results too
+      MarkEdited();
       return true;
     }
   }
@@ -593,6 +598,7 @@ void Document::RestoreStudy(fem::Study study) {
   for (const fem::Load& l : study.loads)
     EnsureNextIdAtLeast(l.id + 1);
   m_studies.push_back(std::move(study));
+  MarkEdited();
 }
 
 bool Document::ReplaceStudy(fem::Study study) {
@@ -601,6 +607,7 @@ bool Document::ReplaceStudy(fem::Study study) {
       for (const fem::Load& l : study.loads)
         EnsureNextIdAtLeast(l.id + 1);
       s = std::move(study);
+      MarkEdited();
       return true;
     }
   }
@@ -616,13 +623,6 @@ const Configuration* Document::FindConfiguration(uint64_t id) const {
   return nullptr;
 }
 
-Configuration* Document::FindConfiguration(uint64_t id) {
-  for (Configuration& c : m_configurations)
-    if (c.id == id)
-      return &c;
-  return nullptr;
-}
-
 Configuration& Document::AddConfiguration(const std::string& name) {
   Configuration cfg;
   cfg.id = m_nextId++;
@@ -632,6 +632,7 @@ Configuration& Document::AddConfiguration(const std::string& name) {
           : name;
   m_configurations.push_back(std::move(cfg));
   m_configurationsRevision++;
+  MarkEdited();
   return m_configurations.back();
 }
 
@@ -640,6 +641,7 @@ bool Document::RemoveConfiguration(uint64_t id) {
     if (it->id == id) {
       m_configurations.erase(it);
       m_configurationsRevision++;
+      MarkEdited();
       if (m_activeConfiguration == id) {
         m_activeConfiguration = 0; // fall back to base
         Regenerate();
@@ -654,6 +656,7 @@ void Document::RestoreConfiguration(Configuration cfg) {
   EnsureNextIdAtLeast(cfg.id + 1);
   m_configurations.push_back(std::move(cfg));
   m_configurationsRevision++;
+  MarkEdited();
 }
 
 bool Document::ReplaceConfiguration(Configuration cfg) {
@@ -662,6 +665,7 @@ bool Document::ReplaceConfiguration(Configuration cfg) {
       const bool active = m_activeConfiguration == cfg.id;
       c = std::move(cfg);
       m_configurationsRevision++;
+      MarkEdited();
       if (active)
         Regenerate(); // its overrides changed the applied model
       return true;

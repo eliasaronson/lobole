@@ -332,8 +332,12 @@ void DrawDims(ImDrawList* dl, AppState& state) {
             state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
         dim.labelOffset.x += io.MouseDelta.x / s;
         dim.labelOffset.y -= io.MouseDelta.y / s; // screen +Y is sheet -Y
-        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
           state.dimDrag = 0;
+          // The offset is saved with the drawing: without the bump the drag
+          // was an undo step and never an unsaved change.
+          state.drawing->BumpVersion();
+        }
       }
     }
   }

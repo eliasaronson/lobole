@@ -75,7 +75,15 @@ public:
   uint64_t Version() const { return m_version; }
   void BumpVersion() { m_version++; }
 
+  // Whether the job has changed since it was saved (Document::SaveStamp for
+  // a job). Version() is only a cache key here — most edits move no body and
+  // do not bump it — so an edit counts through MarkEdited, which
+  // ui::MarkJobEdited and every JobUndoGuard that records a step call.
+  uint64_t SaveStamp() const { return m_version + m_edits; }
+  void MarkEdited() { ++m_edits; }
+
 private:
+  uint64_t m_edits = 0;
   std::vector<JobPart> m_parts;
   std::vector<Setup> m_setups;
   uint64_t m_nextId = 1;

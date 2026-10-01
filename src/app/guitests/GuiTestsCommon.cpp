@@ -321,7 +321,7 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   ctx->MouseClick(ImGuiMouseButton_Left);
   ctx->Yield(2);
 
-  fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+  const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
   IM_CHECK_SILENT(st != nullptr);
   IM_CHECK_EQ(st->loads.size(), (size_t)2);
   // The default direction is into the picked face: -Y, from the top.

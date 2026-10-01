@@ -455,7 +455,10 @@ public:
   // invariant as Document::Units (core/Units.h). The BOM's masses are the
   // reason an assembly needs its own: it is where they are shown.
   const units::System& Units() const { return m_units; }
-  void SetUnits(const units::System& u) { m_units = u; }
+  void SetUnits(const units::System& u) {
+    m_units = u;
+    MarkEdited();
+  }
 
   const std::vector<Occurrence>& GetOccurrences() const {
     return m_occurrences;
@@ -629,7 +632,16 @@ public:
   uint64_t Version() const { return m_version; }
   void BumpVersion() { m_version++; }
 
+  // Whether the assembly has changed since it was saved — Document::SaveStamp
+  // for an assembly: the version plus the saved-state edits that must not
+  // look like a change to the model (the units; a verdict verify_assertions
+  // records), which MarkEdited counts. Dirty tracking and autosave compare
+  // this, never Version().
+  uint64_t SaveStamp() const { return m_version + m_edits; }
+  void MarkEdited() { ++m_edits; }
+
 private:
+  uint64_t m_edits = 0;
   std::vector<Occurrence> m_occurrences;
   units::System m_units;
   std::vector<Mate> m_mates;

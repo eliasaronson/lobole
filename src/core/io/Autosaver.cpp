@@ -89,10 +89,10 @@ bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,
                           std::string* error) {
   if (m_interval <= 0.0)
     return false;
-  if (doc.Version() == savedVersion)
+  if (doc.SaveStamp() == savedVersion)
     return false; // not dirty
   if (doc.InstanceId() == m_lastSavedDocInstance &&
-      doc.Version() == m_lastSavedDocVersion)
+      doc.SaveStamp() == m_lastSavedDocVersion)
     return false; // unchanged since the last autosave
   if (now - m_lastSaveTime < m_interval)
     return false;
@@ -119,7 +119,7 @@ bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,
 
   m_lastSaveTime = now;
   m_lastSavedDocInstance = doc.InstanceId();
-  m_lastSavedDocVersion = doc.Version();
+  m_lastSavedDocVersion = doc.SaveStamp();
   LOG_INFO("Autosaved to {}", target.string());
   return true;
 }

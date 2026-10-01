@@ -10,6 +10,7 @@
 #include "ui/FeatureTreePanel.h"
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
+#include "ui/ProjectActions.h" // ProjectDirty
 #include "ui/VariableActions.h"
 
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -2208,6 +2209,11 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(Doc()->GetTolerances().empty());
     IM_CHECK(!s_App->toleranceMsg.empty());
 
+    // Pretend the project was just saved, so the dirty check below means
+    // something (docs/versioning/README.md#unsaved-changes).
+    s_App->lastSavedVersion = Doc()->SaveStamp();
+    IM_CHECK(!ui::ProjectDirty(*s_App));
+
     // ComboClick resolves relative to the current ref, not from the root.
     ctx->SetRef("//###ToolWindow");
     ctx->ComboClick("###tol_letter/H  bore");
@@ -2218,6 +2224,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     IM_CHECK_EQ(Doc()->GetTolerances().size(), (size_t)1);
+    // Saved with the part and regenerating nothing — and still an unsaved
+    // change, or closing the project would drop it without asking.
+    IM_CHECK(ui::ProjectDirty(*s_App));
     IM_CHECK_STR_EQ(Doc()->GetTolerances()[0].isoClass.c_str(), "H7");
     IM_CHECK_STR_EQ(Doc()->GetTolerances()[0].ref.name.c_str(), round.c_str());
     IM_CHECK(!Doc()->GetTolerances()[0].IsDistance());
@@ -2341,6 +2350,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick("//###Variables/Print process");
       ctx->Yield(2);
     }
+    // As if just saved: the edit below must make the project unsaved.
+    s_App->lastSavedVersion = Doc()->SaveStamp();
+    IM_CHECK(!ui::ProjectDirty(*s_App));
     // ComboClick resolves relative to the current ref, not from the root.
     ctx->SetRef("//###Variables");
     ctx->ComboClick("###print_process/###print_fdm_petg");
@@ -2348,6 +2360,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(Doc()->PrintProcess().has_value());
     IM_CHECK_EQ(Doc()->PrintProcess()->material, std::string("petg"));
     IM_CHECK_EQ(Doc()->Version(), version); // drives no geometry
+    IM_CHECK(ui::ProjectDirty(*s_App));     // ...and is saved all the same
 
     ctx->ComboClick("###print_process/###print_none");
     ctx->Yield(2);

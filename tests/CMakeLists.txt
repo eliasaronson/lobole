@@ -82,6 +82,7 @@ add_executable(designer_tests
     test_hole.cpp
     test_draft.cpp
     test_autosaver.cpp
+    test_save_stamp.cpp
     test_frame_timer.cpp
     test_terminal.cpp
     test_cam.cpp
@@ -619,6 +620,14 @@ add_test(NAME regen_honesty_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/regen_honesty_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
+
+# An edit that is saved but regenerates nothing (a tolerance, the units, a
+# study, a configuration that is not active) reads unsaved in `ping.dirty`,
+# the question the close prompt and autosave ask. Headless.
+add_test(NAME unsaved_edits_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/unsaved_edits_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(unsaved_edits_smoke PROPERTIES TIMEOUT 120)
 
 # V4 compare_geometry: boolean-diff metrics, golden-file compare, diff-solid
 # export, occurrence compare. Headless.

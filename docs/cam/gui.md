@@ -318,14 +318,17 @@ operation, tool and fixture editors once drew under no guard, and a changed
 depth, cutter or clamp could not be taken back (`cam/an_editor_field_undoes`).
 
 **"Edited" is a counter, not the job's content.** Every job edit calls
-`ui::MarkJobEdited` (it bumps `AppState::jobEdits` and marks the project
-unsaved), and the guard compares the counter. It compared the job serialized
+`ui::MarkJobEdited` (it bumps `AppState::jobEdits` and the job's save stamp,
+which is what makes the project unsaved and the job autosave —
+[versioning](../versioning/README.md#unsaved-changes)), and the guard
+compares the counter. It compared the job serialized
 to JSON before and after every frame -- 8% of an idle frame, for an answer
 that was almost always "no". Nothing a frame reads moves the counter
 (`tests/test_actions.cpp`, "a job edit bumps the edit counter and a draw does
 not"). The RPC guard compares the content (`compareContent`): it runs once
 per call, not per frame, and wraps a hundred handlers, none of which then has
-to say it changed something.
+to say it changed something: a guard that records a step marks the job
+edited itself.
 
 **The GUI suite audits the rule.** Under `--gui-tests` every guard also
 compares the content (`ui::SetJobEditAudit`), and a test in which the job

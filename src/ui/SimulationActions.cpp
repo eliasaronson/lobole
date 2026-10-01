@@ -72,7 +72,7 @@ void AppendStudyMarker(const AppState& state,
   }
 }
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
-  fem::Study* s = doc.FindStudy(studyId);
+  fem::Study* s = doc.StudyForRun(studyId);
   if (!s) {
     if (error)
       *error = "no such study";
@@ -145,7 +145,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
       *error = "a study run is already in progress";
     return false;
   }
-  fem::Study* s = doc.FindStudy(studyId);
+  fem::Study* s = doc.StudyForRun(studyId);
   if (!s) {
     if (error)
       *error = "no such study";
@@ -235,7 +235,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                               " failed: " + j.result->solverFallback + ")";
         rt.solveSeconds = Elapsed(j.started);
         target->StoreStudyResults(j.studyId, std::move(rt));
-      } else if (fem::Study* st = target->FindStudy(j.studyId)) {
+      } else if (fem::Study* st = target->StudyForRun(j.studyId)) {
         st->error = "body '" + j.input.bodyName + "': " + j.error;
       }
     }
@@ -258,7 +258,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   if (BackgroundJobRunning(state, "topo") ||
       BackgroundJobRunning(state, "study"))
     return fail("a study run is already in progress");
-  fem::Study* s = doc.FindStudy(studyId);
+  fem::Study* s = doc.StudyForRun(studyId);
   if (!s)
     return fail("no such study");
   if (s->type == fem::AnalysisType::Topology)
@@ -297,7 +297,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
         j.runtime.solver = fem::CpuSolverName(j.input.type);
         j.runtime.solveSeconds = Elapsed(j.started);
         target->StoreStudyResults(j.studyId, std::move(j.runtime));
-      } else if (fem::Study* st = target->FindStudy(j.studyId)) {
+      } else if (fem::Study* st = target->StudyForRun(j.studyId)) {
         st->error = j.error;
       }
     }
@@ -319,7 +319,7 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
   };
   if (BackgroundJobRunning(state, "mesh"))
     return fail("a mesh run is already in progress");
-  fem::Study* s = doc.FindStudy(studyId);
+  fem::Study* s = doc.StudyForRun(studyId);
   if (!s)
     return fail("no such study");
   auto job = std::make_shared<MeshJob>();
@@ -354,7 +354,7 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
     s.meshReports[{j.partSlotId, j.studyId}] = std::move(report);
     if (!j.error.empty())
       if (Document* target = PartDocById(s, j.partSlotId))
-        if (fem::Study* st = target->FindStudy(j.studyId))
+        if (fem::Study* st = target->StudyForRun(j.studyId))
           st->error = j.error;
     if (s.meshJob == job)
       s.meshJob.reset();

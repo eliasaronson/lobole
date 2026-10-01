@@ -107,7 +107,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
 
     // A force on a known face, pushing -Y.
@@ -180,14 +180,14 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->simulation.loadDrag.active);
     ctx->MouseUp(ImGuiMouseButton_Left);
     ctx->Yield(2);
-    study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr && !study->loads.empty());
     IM_CHECK(study->loads[0].magnitude > 100.0); // pulling grew it
     // ONE undo restores the grab-time magnitude — not a step per frame.
     IM_CHECK(s_App->commands->CanUndo());
     s_App->commands->Undo(*Doc());
     ctx->Yield();
-    study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr && !study->loads.empty());
     IM_CHECK(std::abs(study->loads[0].magnitude - 100.0) < 1e-6);
     ui::ExitSimulation(*s_App);
@@ -204,7 +204,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
 
     const Body& body = Doc()->GetBodies()[0];
@@ -407,7 +407,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     }
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(!body.elementMap.names.empty());
@@ -488,7 +488,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     const Body& body = Doc()->GetBodies()[0];
     IM_CHECK(body.elementMap.names.size() >= 2);
@@ -553,7 +553,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
-    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    fem::Study* study = Doc()->StudyForRun(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
     study->gravity = conv::kGravity;
     ctx->Yield(2);

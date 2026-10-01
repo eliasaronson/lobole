@@ -29,11 +29,17 @@ struct StudyHost {
     return part != nullptr || asmDoc != nullptr;
   }
   bool IsAssembly() const { return asmDoc != nullptr; }
-  std::vector<fem::Study>& Studies() const {
+  // Read-only: an edit is ModifyStudy, which a part records as a command
+  // (and so as a saved change, Document::SaveStamp).
+  const std::vector<fem::Study>& Studies() const {
     return part ? part->GetStudies() : asmDoc->GetStudies();
   }
-  fem::Study* Find(uint64_t id) const {
+  const fem::Study* Find(uint64_t id) const {
     return part ? part->FindStudy(id) : asmDoc->FindStudy(id);
+  }
+  // A run's (and a load drag's preview's) write access — Document::StudyForRun.
+  fem::Study* FindForRun(uint64_t id) const {
+    return part ? part->StudyForRun(id) : asmDoc->FindStudy(id);
   }
   const fem::StudyRuntime* Results(uint64_t id) const {
     return part ? part->StudyResults(id) : asmDoc->StudyResults(id);

@@ -182,7 +182,10 @@ private:
 // Execute so redo reuses it.
 class AddStudyCommand : public Command {
 public:
-  explicit AddStudyCommand(std::string name = "");
+  // `type` is part of the add, so a redo brings back the study that was
+  // added rather than a static one with its id.
+  explicit AddStudyCommand(std::string name = "",
+                           fem::AnalysisType type = fem::AnalysisType::Static);
 
   std::string Description() const override;
   bool Execute(Document& doc) override;
@@ -192,6 +195,7 @@ public:
 
 private:
   std::string m_name;
+  fem::AnalysisType m_type = fem::AnalysisType::Static;
   uint64_t m_id = 0;
 };
 

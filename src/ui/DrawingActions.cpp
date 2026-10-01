@@ -870,6 +870,9 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   // at this scale first and then each standard scale down, until it fits.
   // Every view of the sheet is moved (and, if needed, rescaled together —
   // one scale per sheet is the drafting rule the block above already keeps).
+  // The snapshot goes first: the re-lay moves views already on the sheet,
+  // and an undo of this add has to put them back too.
+  SnapshotDrawing(state);
   if (measured) {
     const SheetChrome chrome = ChromeOf(dwg.GetSheet());
     const glm::dvec2 newMin = pos + v.scale * sv.bboxMin;
@@ -917,7 +920,6 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
     }
   }
 
-  SnapshotDrawing(state);
   const uint64_t id = dwg.AddView(v);
   UpdateDrawingRenders(state);
   // The probe above is the projection that DID the work; the re-projection

@@ -65,11 +65,14 @@ struct Host {
   AssemblyDocument* asmDoc = nullptr;
 
   bool IsAssembly() const { return asmDoc != nullptr; }
-  std::vector<fem::Study>& Studies() {
+  const std::vector<fem::Study>& Studies() const {
     return part ? part->GetStudies() : asmDoc->GetStudies();
   }
+  // A RUN's access (Document::StudyForRun): meshing and solving write the
+  // study's transient fields. An edit is Modify, below, which a part records
+  // as a command and so as a saved change.
   fem::Study* Find(uint64_t id) {
-    return part ? part->FindStudy(id) : asmDoc->FindStudy(id);
+    return part ? part->StudyForRun(id) : asmDoc->FindStudy(id);
   }
   fem::Study& Require(uint64_t id) {
     fem::Study* s = Find(id);
@@ -90,15 +93,17 @@ struct Host {
   const SymbolTable& Symbols() const {
     return part ? part->Symbols() : state.projectSymbols;
   }
-  fem::Study& Add(const std::string& name) {
+  const fem::Study& Add(const std::string& name, fem::AnalysisType type) {
     if (part) {
-      auto cmd = std::make_unique<AddStudyCommand>(name);
+      auto cmd = std::make_unique<AddStudyCommand>(name, type);
       AddStudyCommand* raw = cmd.get();
       state.commands->Execute(std::move(cmd), *part);
       return *part->FindStudy(raw->StudyId());
     }
     ui::SnapshotAssembly(state);
-    return asmDoc->AddStudy(name);
+    fem::Study& s = asmDoc->AddStudy(name);
+    s.type = type;
+    return s;
   }
   void Remove(uint64_t id) {
     Require(id);
@@ -357,9 +362,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error("study type must be static, modal, or topology");
     if (hasKind && type == fem::AnalysisType::Topology)
       topoOnly();
-    fem::Study* s = &host.Add(p.value("name", std::string{}));
-    if (hasKind)
-      s->type = type;
+    const fem::Study* s = &host.Add(p.value("name", std::string{}), type);
     return json{{"id", s->id},
                 {"name", s->name},
                 {"type", fem::AnalysisTypeToString(s->type)}};

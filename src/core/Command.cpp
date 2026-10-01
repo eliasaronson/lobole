@@ -305,7 +305,8 @@ void ClearToleranceCommand::Undo(Document& doc) {
     doc.SetTolerance(m_removed);
 }
 
-AddStudyCommand::AddStudyCommand(std::string name) : m_name(std::move(name)) {}
+AddStudyCommand::AddStudyCommand(std::string name, fem::AnalysisType type)
+    : m_name(std::move(name)), m_type(type) {}
 
 std::string AddStudyCommand::Description() const {
   return m_name.empty() ? "Add study" : "Add study '" + m_name + "'";
@@ -314,6 +315,7 @@ std::string AddStudyCommand::Description() const {
 bool AddStudyCommand::Execute(Document& doc) {
   if (m_id == 0) {
     fem::Study& s = doc.AddStudy(m_name);
+    s.type = m_type; // AddStudy stamped; the type is part of the same edit
     m_id = s.id;
     m_name = s.name; // capture the auto-generated name for redo/description
   } else {
@@ -322,6 +324,7 @@ bool AddStudyCommand::Execute(Document& doc) {
     fem::Study s;
     s.id = m_id;
     s.name = m_name;
+    s.type = m_type;
     doc.RestoreStudy(std::move(s));
   }
   return true;
@@ -448,6 +451,7 @@ bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   if (!command->Execute(doc)) {
     return false;
   }
+  doc.MarkEdited(); // Document::SaveStamp: every step is an unsaved change
   command->SetStamp(NextActionStamp());
   m_undo.push_back(std::move(command));
   m_redo.clear();
@@ -465,6 +469,7 @@ void CommandStack::Undo(Document& doc) {
     return;
   }
   m_undo.back()->Undo(doc);
+  doc.MarkEdited();
   m_redo.push_back(std::move(m_undo.back()));
   m_undo.pop_back();
 }
@@ -474,6 +479,7 @@ void CommandStack::Redo(Document& doc) {
     return;
   }
   m_redo.back()->Execute(doc);
+  doc.MarkEdited();
   m_undo.push_back(std::move(m_redo.back()));
   m_redo.pop_back();
 }
@@ -535,5 +541,6 @@ size_t CommandStack::RollbackSince(size_t depth, Document& doc) {
       undone++;
     }
   }
+  doc.MarkEdited();
   return undone;
 }

@@ -752,6 +752,149 @@ TEST_CASE("every feature reference is reported by VisitFeatureRefs",
   CHECK(problems.empty());
 }
 
+namespace {
+std::string ReadSource(const char* rel) {
+  const fs::path p = fs::path(TestSourceDir()) / rel;
+  REQUIRE(fs::exists(p));
+  std::ifstream f(p);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+// The text from the '{' at or after `from` to its matching '}'; empty when a
+// ';' comes first (a declaration, not a definition).
+std::string BodyFrom(const std::string& text, size_t from) {
+  const size_t open = text.find_first_of("{;", from);
+  if (open == std::string::npos || text[open] == ';')
+    return {};
+  int depth = 0;
+  for (size_t i = open; i < text.size(); i++) {
+    if (text[i] == '{')
+      depth++;
+    else if (text[i] == '}' && --depth == 0)
+      return text.substr(open, i - open + 1);
+  }
+  return {};
+}
+} // namespace
+
+TEST_CASE("every Document mutator of saved state moves the save stamp",
+          "[convention]") {
+  // Dirty tracking and autosave compare Document::SaveStamp() against the
+  // stamp the last save took. It moves on a regeneration and on MarkEdited;
+  // a mutator that does neither changes the file without the project ever
+  // reading unsaved, and closing it drops the change without a prompt. That
+  // was a tolerance, the units, the tube and print process, every study and
+  // every configuration that was not the active one — each added as a
+  // "document-level object outside the regen chain" and each silently
+  // outside the dirty check too.
+  //
+  // So every public mutator (named Set/Add/Remove/Replace/Restore/Rename/
+  // Move/Insert/Take/Rewrite) must regenerate, mark the edit, delegate to one
+  // that does — or be listed below with the reason it is not a saved edit.
+  const std::map<std::string, std::string> exempt = {
+      {"SetProjectSymbols", "a borrowed pointer, never saved"},
+      {"SetProjectParameters", "a borrowed pointer, never saved"},
+      {"SetParametersRaw", "save scaffolding: swapped in and back out"},
+      {"TakeParameters", "save/promote scaffolding, restored by the caller"},
+      {"SetCatalogsRaw", "save scaffolding: swapped in and back out"},
+      {"TakeCatalogs", "save/promote scaffolding, restored by the caller"},
+      {"SetActiveConfigurationRaw",
+       "a loader's (baseline taken after) or a throwaway copy's"},
+      {"RewriteProjectVarRefs", "the caller regenerates every document"},
+  };
+  const std::string header = ReadSource("src/core/Document.h");
+  const std::string impl = ReadSource("src/core/Document.cpp");
+
+  // The public section of class Document: its members sit at two spaces.
+  const size_t begin = header.find("\nclass Document {");
+  REQUIRE(begin != std::string::npos);
+  const size_t end = header.find("\nprivate:", begin);
+  REQUIRE(end != std::string::npos);
+  const std::regex decl(
+      R"(^  (?=\S)(?:\[\[nodiscard\]\]\s*)?[\w:<>,&*\s]*?[\s&*]((?:Set|Add|Remove|Replace|Restore|Rename|Move|Insert|Take|Rewrite)\w*)\s*\()");
+
+  std::map<std::string, std::string> bodies; // name -> every body, joined
+  size_t pos = begin;
+  while (pos < end) {
+    const size_t eol = header.find('\n', pos + 1);
+    const std::string line = header.substr(pos + 1, eol - pos - 1);
+    std::smatch m;
+    if (std::regex_search(line, m, decl)) {
+      const std::string name = m[1];
+      std::string body = BodyFrom(header, pos + 1);
+      if (body.empty()) { // defined in Document.cpp
+        const std::string def = "Document::" + name + "(";
+        for (size_t at = impl.find(def); at != std::string::npos;
+             at = impl.find(def, at + 1))
+          body += BodyFrom(impl, at);
+      }
+      bodies[name] += body;
+    }
+    pos = eol;
+  }
+  REQUIRE(bodies.count("SetTolerance")); // the scan found the mutators
+  REQUIRE(bodies.count("SetUnits"));
+
+  std::vector<std::string> silent;
+  for (const auto& [name, body] : bodies) {
+    if (exempt.count(name))
+      continue;
+    bool stamps = body.find("MarkEdited()") != std::string::npos ||
+                  body.find("Regenerate()") != std::string::npos ||
+                  body.find("SetMarker(") != std::string::npos;
+    for (const auto& [other, unused] : bodies)
+      if (other != name && body.find(other + "(") != std::string::npos &&
+          !exempt.count(other))
+        stamps = true;
+    if (!stamps)
+      silent.push_back(name + (body.empty() ? " (no body found)" : ""));
+  }
+  INFO("Document mutators that neither regenerate nor MarkEdited() — an edit "
+       "through one never reads unsaved "
+       "(docs/versioning/README.md#unsaved-changes):\n"
+       << [&] {
+            std::string s;
+            for (const std::string& n : silent)
+              s += "  " + n + "\n";
+            return s;
+          }());
+  CHECK(silent.empty());
+
+  // And no mutable door around them: a non-const reference or pointer into
+  // saved state lets an edit skip every mutator above. These are the ones
+  // there are, each for a stated reason (Document.h); a new one is a
+  // decision, not a convenience.
+  const std::set<std::string> doors = {
+      "GetFeature",      // features: every edit regenerates
+      "FindFeatureById", // (same)
+      "StudyForRun",     // a run's transient fields
+      "AddStudy",        // the stamp moved with the add
+      "AddConfiguration" // (same)
+  };
+  const std::regex mutableReturn(
+      R"(^  (?=\S)(?:\[\[nodiscard\]\]\s*)?(?!const\b)[\w:<>, ]*[\w>]\s*[&*]\s*(\w+)\s*\()");
+  std::vector<std::string> extra;
+  pos = begin;
+  while (pos < end) {
+    const size_t eol = header.find('\n', pos + 1);
+    const std::string line = header.substr(pos + 1, eol - pos - 1);
+    std::smatch m;
+    if (std::regex_search(line, m, mutableReturn) && !doors.count(m[1]))
+      extra.push_back(m[1]);
+    pos = eol;
+  }
+  INFO("new mutable accessors on Document:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& n : extra)
+              s += "  " + n + "\n";
+            return s;
+          }());
+  CHECK(extra.empty());
+}
+
 TEST_CASE("CADShape replaces its shape only through SetShape", "[convention]") {
   // GetBoundingBox memoizes on the shape, so whatever replaces `m_shape` has
   // to forget the boxes. SetShape is that one place. A bare `m_shape = `
