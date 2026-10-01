@@ -145,6 +145,7 @@ add_executable(designer_tests
     test_drawing_hlr.cpp
     test_drawing.cpp
     test_drawing_sheet.cpp
+    test_drawing_frames.cpp
     test_configuration.cpp
 )
 # designer_app brings the ui/ actions layer in so it can be exercised
@@ -399,6 +400,14 @@ add_test(NAME drawing_sheet_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_sheet_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(drawing_sheet_smoke PROPERTIES TIMEOUT 120)
+
+# Drawings v151: feature control frames on datum features, a detail view,
+# values along their lines, balloons laid out by the app, an ASME B18.3
+# screw and a material grade on the sheets. Headless.
+add_test(NAME drawing_frames_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_frames_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_frames_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A2 project container: parts + assembly + occurrences, round-trip.
 add_test(NAME assembly_smoke

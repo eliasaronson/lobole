@@ -104,6 +104,21 @@ struct SectionSpec {
   std::string label;     // "A" -> "SECTION A-A"
 };
 
+// A detail view (v151, docs/drawings/README.md#detail-views): a circle on a
+// PARENT view, drawn again at the detail's own scale. The detail projects
+// what its parent projects -- source, orientation, rotation, section, hidden
+// occurrences, configuration -- and keeps what lies inside the circle. The
+// circle is a world point (the source's frame, like a section's point) and a
+// radius in model mm, so it stays on its feature when the parent moves or is
+// rescaled.
+struct DetailSpec {
+  bool on = false;
+  uint64_t parentViewId = 0;
+  glm::dvec3 center{0.0}; // world mm
+  double radius = 0.0;    // model mm
+  std::string label;      // "B" -> "DETAIL B"
+};
+
 // A view on the sheet: a base view of a source document in a named
 // orientation, or an orthographically-folded child kept aligned to its base.
 struct DrawingView {
@@ -145,6 +160,9 @@ struct DrawingView {
   double rotationDeg = 0.0;
   // A section view: cut by a plane square to its view direction (v147).
   SectionSpec section;
+  // A detail view of another view (v151); its own position is where the
+  // circle's centre lands on the sheet.
+  DetailSpec detail;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured
@@ -178,7 +196,44 @@ enum class NoteTable { None, Bends, Bom };
 // of that assembly (else the view's own), so the two cannot disagree. A datum
 // is a datum feature symbol: the letter in a box, the leader ending in a filled
 // triangle on the feature.
-enum class NoteStyle { Text, Balloon, Datum };
+//
+// Fcf (v151) is a feature control frame (ISO 1101): the tolerance symbol,
+// the zone and the datums it is measured from, drawn as the ruled frame with
+// a leader to the feature -- or stacked under a dimension's value when
+// `attachDim` names one, which is how a size's position tolerance is given.
+enum class NoteStyle { Text, Balloon, Datum, Fcf };
+
+// The ISO 1101 geometric characteristics (ASME Y14.5 draws the same
+// symbols). Which take a datum, a Ø zone or a material modifier is
+// GeoSymbolRules' answer.
+enum class GeoSymbol {
+  Straightness,
+  Flatness,
+  Circularity,
+  Cylindricity,
+  ProfileLine,
+  ProfileSurface,
+  Parallelism,
+  Perpendicularity,
+  Angularity,
+  Position,
+  Coaxiality,
+  Symmetry,
+  CircularRunout,
+  TotalRunout
+};
+
+// A material condition on the tolerance: maximum (M) or least (L).
+enum class MaterialModifier { None, Mmc, Lmc };
+
+struct FeatureControlFrame {
+  GeoSymbol symbol = GeoSymbol::Position;
+  double tolerance = 0.0;    // model mm, the zone's width or diameter
+  bool diameterZone = false; // Ø: a cylindrical zone
+  MaterialModifier modifier = MaterialModifier::None;
+  // Datum letters, primary first; each names a `datum` note on the sheet.
+  std::vector<std::string> datums;
+};
 
 struct DrawingNote {
   uint64_t id = 0;
@@ -188,6 +243,10 @@ struct DrawingNote {
   ProjRef leader;      // unset = no leader line
   NoteTable table = NoteTable::None;
   NoteStyle style = NoteStyle::Text;
+  FeatureControlFrame fcf; // style Fcf only (v151)
+  // A frame stacked under this dimension's value instead of standing at
+  // `pos` with a leader (v151). 0 = not attached.
+  uint64_t attachDim = 0;
 };
 
 // The document. Views and dims share one never-reused id counter (the
@@ -290,6 +349,30 @@ const char* NoteTableToString(NoteTable t);
 const char* NoteStyleToString(NoteStyle s);
 [[nodiscard]] bool NoteStyleFromString(const std::string& s, NoteStyle& out);
 [[nodiscard]] std::string UnknownNoteStyle(const std::string& given);
+const char* GeoSymbolToString(GeoSymbol s);
+[[nodiscard]] bool GeoSymbolFromString(const std::string& s, GeoSymbol& out);
+[[nodiscard]] std::string UnknownGeoSymbol(const std::string& given);
+const char* MaterialModifierToString(MaterialModifier m);
+[[nodiscard]] bool MaterialModifierFromString(const std::string& s,
+                                              MaterialModifier& out);
+[[nodiscard]] std::string UnknownMaterialModifier(const std::string& given);
+// What a frame may carry, by its symbol (ISO 1101): whether a datum is
+// required, allowed or refused, and whether a Ø zone or a material modifier
+// means anything for it.
+struct GeoSymbolRule {
+  enum class Datums { None, Optional, Required } datums = Datums::Optional;
+  bool diameterZone = false;
+  bool modifier = false;
+};
+[[nodiscard]] GeoSymbolRule GeoSymbolRules(GeoSymbol s);
+// Empty when `fcf` is a frame ISO 1101 can write; else why not, naming
+// what the symbol does take. Datum letters are checked for shape here
+// (one capital, not I, O or Q); whether the sheet HAS them is the
+// drawing's question.
+[[nodiscard]] std::string ValidateFcf(const FeatureControlFrame& fcf);
+// Empty when `letter` can name a datum feature: one capital letter, not I,
+// O or Q (ISO 5459 leaves those out: they read as 1, 0 and 0).
+[[nodiscard]] std::string ValidateDatumLetter(const std::string& letter);
 const char* DrawingDimKindToString(DrawingDimKind k);
 [[nodiscard]] bool DrawingDimKindFromString(const std::string& s,
                                             DrawingDimKind& out);

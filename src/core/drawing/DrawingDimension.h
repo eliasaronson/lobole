@@ -8,6 +8,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <functional>
 #include <string>
 
@@ -36,6 +37,13 @@ struct ResolvedDim {
   double value = 0.0; // millimetres, or radians for Angle
   std::string text;   // formatted label (Ø.. / R.. / .. / ..°)
   glm::dvec2 labelPos{0.0};
+  // A linear value is written along its dimension line, above it, readable
+  // from the bottom or the right of the sheet (ISO 129-1, method 1; v151):
+  // `labelPos` is then the text's centre, clear of the line, and
+  // `textAngle` (radians, in (-90°, 90°]) its turn. A leader's value stays
+  // horizontal at the leader's end.
+  bool aligned = false;
+  double textAngle = 0.0;
 
   // Linear dimensions (distance / distance-X / distance-Y):
   glm::dvec2 ext1{0.0}, ext2{0.0}; // the measured points (extension-line feet)
@@ -94,7 +102,38 @@ struct ResolvedNote {
   bool hasLeader = false;
   glm::dvec2 anchor{0.0};
   NoteStyle style = NoteStyle::Text; // v147
+  // A feature control frame (v151): the frame, and its tolerance as the
+  // sheet writes it ("0.02", in the source's units). `pos` is the frame's
+  // centre.
+  FeatureControlFrame fcf;
+  std::string fcfTolerance;
 };
+
+// The point a ref names on a view, as a dimension or a leader resolves it:
+// an end, an extreme, a circle's centre or a curve's midpoint. False when
+// it names nothing the view drew.
+[[nodiscard]] bool RefPointOf(const SheetView& view, const ProjRef& ref,
+                              glm::dvec2& out);
+
+// A feature control frame's size on the sheet, mm: as tall as two lines of
+// 3.5 mm text, as wide as its compartments.
+[[nodiscard]] glm::dvec2 FcfSize(const FeatureControlFrame& fcf,
+                                 const std::string& tolerance);
+
+// Where an aligned value stands for a dimension line from `a` to `b`: its
+// centre (above the line) and its turn. Shared by resolution and by the
+// placement probes, so what placement avoids is what is drawn.
+void AlignedLabel(const glm::dvec2& a, const glm::dvec2& b, glm::dvec2& centre,
+                  double& angle);
+
+// A resolved dimension's value: the four corners of the white box its text
+// is knocked out of (turned with an aligned value), counter-clockwise.
+[[nodiscard]] std::array<glm::dvec2, 4> DimTextQuad(const ResolvedDim& d);
+
+// The axis-aligned box a resolved dimension's value occupies: what
+// auto-placement avoids and check_drawing flags overlaps against -- the
+// turned text's box for an aligned value, LabelBox otherwise.
+void DimLabelBox(const ResolvedDim& d, glm::dvec2& mn, glm::dvec2& mx);
 
 // A table note's text: rows split by '\n', cells by '\t'; a row with no tab
 // spans the table (a caption). Drawn ruled, its bottom-right corner at the
@@ -115,7 +154,8 @@ void NoteBox(const ResolvedNote& note, glm::dvec2& mn, glm::dvec2& mx);
 // free note; a leader that no longer matches degrades to text-only rather
 // than dropping the note — the words still carry their meaning).
 ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
-                         const SymbolTable& symbols = {});
+                         const SymbolTable& symbols = {},
+                         const units::System& units = {});
 
 // The rows of a bend table (a note with `table` Bends): one line per bend of
 // `doc`'s own bodies, numbered in body order. Derived ghosts are skipped —

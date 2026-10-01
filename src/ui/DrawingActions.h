@@ -127,4 +127,31 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim);
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error);
 
+// A balloon on every row of the parts list, laid out round the views that
+// draw them (docs/drawings/README.md#balloon-layout): each row on the view
+// in `viewIds` that draws the most of it, its leader on a visible edge of
+// the part, the balloons on a ring round that view clear of the rest of the
+// sheet, and no two leaders crossing. The balloons already on those views
+// are replaced, so it can be run again after the model moves. One undo
+// step. False with `error` when the views are not of one assembly or a
+// view has no room.
+struct BalloonLayoutReport {
+  struct Placed {
+    uint64_t note = 0, view = 0, occurrence = 0;
+    int item = 0;
+    std::string part;
+    glm::dvec2 position{0.0};
+  };
+  std::vector<Placed> placed;
+  std::vector<std::string> unplaced; // rows nothing on these views draws
+  int crossings = 0;
+};
+bool LayoutDrawingBalloons(AppState& state,
+                           const std::vector<uint64_t>& viewIds,
+                           BalloonLayoutReport& report, std::string* error);
+
+// The next free letter for a section or detail view on the active sheet
+// (A, B, ... skipping I, O and Q, and those its sections and details use).
+std::string NextViewLetter(AppState& state);
+
 } // namespace ui

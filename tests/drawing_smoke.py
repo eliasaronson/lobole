@@ -109,9 +109,11 @@ def main():
         def pick(g):
             key = "sil_face" if g["kind"] == "silhouette" else "edge"
             return {key: g["ref"], "occurrence": g["source_id"]}
+        # The value stands ABOVE its line (ISO 129-1), so the line goes a
+        # value's height lower than a label centred on it would need.
         wd = d.call("add_drawing_dim", view=front_id, kind="distance_x",
                     refs=[pick(vlines[0]), pick(vlines[-1])],
-                    offset=[0, -14])
+                    offset=[0, -18])
         # The box is 40 mm wide; the shaft sits to its right, so the overall
         # width between outermost vertical edges is the model span.
         expect(wd["resolved"], f"width dim resolves: {wd}")

@@ -25,6 +25,7 @@
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/ThreadStandards.h"
+#include "core/drawing/DrawingBalloons.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -329,10 +330,39 @@ void ThreadDecorations(AppState& state, const DrawingView& view,
                        const std::vector<SourceBody>& bodies,
                        drawing::SheetView& sheet);
 
-drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
+void ClipToDetail(const DrawingView& view, drawing::SheetView& sheet);
+void DetailCircles(AppState& state, const DrawingView& view,
+                   drawing::SheetView& sheet);
+
+drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& asked,
                                       std::function<bool()> cancelled) {
   drawing::SheetView result;
-  result.viewId = view.id;
+  result.viewId = asked.id;
+  // A detail draws what its parent draws, at its own scale and place: the
+  // parent's source, orientation, turn, section, hidden occurrences and
+  // configuration, read NOW, so an edit to the parent carries over.
+  DrawingView view = asked;
+  if (asked.detail.on) {
+    const DrawingView* parent =
+        state.drawing ? state.drawing->FindView(asked.detail.parentViewId)
+                      : nullptr;
+    if (parent == nullptr) {
+      result.error = "the view this detail is of is gone";
+      return result;
+    }
+    if (parent->detail.on) {
+      result.error = "a detail is of a view, not of another detail";
+      return result;
+    }
+    view = *parent;
+    view.id = asked.id;
+    view.name = asked.name;
+    view.scale = asked.scale;
+    view.scaleExpr.clear();
+    view.position = asked.position;
+    view.baseViewId = 0;
+    view.detail = asked.detail;
+  }
 
   std::vector<SourceBody> bodies;
   std::string error;
@@ -380,6 +410,10 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
   sheet.sectioned = view.section.on;
   SectionDecorations(state, view, bodies, sheet);
   ThreadDecorations(state, view, bodies, sheet);
+  if (view.detail.on)
+    ClipToDetail(view, sheet);
+  else
+    DetailCircles(state, view, sheet);
   return sheet;
 }
 
@@ -557,11 +591,13 @@ void SectionDecorations(AppState& state, const DrawingView& view,
         view.section.label.empty()
             ? std::string("SECTION")
             : "SECTION " + view.section.label + "-" + view.section.label;
-    g.texts.push_back(
-        {{0.5 * (sheet.bboxMin.x + sheet.bboxMax.x), sheet.bboxMin.y - 9.0},
-         label,
-         true,
-         5.0});
+    // A detail of a section is captioned as the detail it is.
+    if (!view.detail.on)
+      g.texts.push_back(
+          {{0.5 * (sheet.bboxMin.x + sheet.bboxMax.x), sheet.bboxMin.y - 9.0},
+           label,
+           true,
+           5.0});
   }
 
   for (const DrawingView& other : state.drawing->GetViews()) {
@@ -728,6 +764,152 @@ void ThreadDecorations(AppState& state, const DrawingView& view,
   }
 }
 
+// The parts of a polyline inside a circle, each as its own run of points.
+std::vector<std::vector<glm::dvec2>>
+ClipPolyline(const std::vector<glm::dvec2>& pts, const glm::dvec2& c,
+             double R) {
+  std::vector<std::vector<glm::dvec2>> out;
+  std::vector<glm::dvec2> run;
+  const auto inside = [&](const glm::dvec2& p) {
+    return glm::length(p - c) <= R;
+  };
+  const auto flush = [&] {
+    if (run.size() >= 2)
+      out.push_back(run);
+    run.clear();
+  };
+  for (size_t i = 0; i + 1 < pts.size(); ++i) {
+    const glm::dvec2 a = pts[i], b = pts[i + 1];
+    // Where the segment meets the circle: |a + t(b - a) - c| = R.
+    const glm::dvec2 d = b - a, f = a - c;
+    const double A = glm::dot(d, d), B = 2.0 * glm::dot(f, d),
+                 C = glm::dot(f, f) - R * R;
+    double t0 = 0.0, t1 = 1.0;
+    if (A < 1e-18) {
+      if (!inside(a))
+        flush();
+      continue;
+    }
+    const double disc = B * B - 4.0 * A * C;
+    if (disc <= 0.0) { // misses the circle (or grazes it)
+      flush();
+      continue;
+    }
+    const double sq = std::sqrt(disc);
+    t0 = std::max(0.0, (-B - sq) / (2.0 * A));
+    t1 = std::min(1.0, (-B + sq) / (2.0 * A));
+    if (t0 >= t1) {
+      flush();
+      continue;
+    }
+    const glm::dvec2 p0 = a + d * t0, p1 = a + d * t1;
+    if (run.empty() || glm::length(run.back() - p0) > 1e-9) {
+      flush();
+      run.push_back(p0);
+    }
+    run.push_back(p1);
+    if (t1 < 1.0)
+      flush(); // it left the circle
+  }
+  flush();
+  return out;
+}
+
+// A detail keeps what lies inside its circle, draws the circle, and is
+// captioned DETAIL B (5:1) under it (docs/drawings/README.md#detail-views).
+void ClipToDetail(const DrawingView& view, drawing::SheetView& sheet) {
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 c = view.position; // where the circle's centre lands
+  const double R = s * view.detail.radius;
+  std::vector<drawing::SheetCurve> kept;
+  for (drawing::SheetCurve& curve : sheet.curves) {
+    bool whole = true;
+    for (const glm::dvec2& p : curve.points)
+      whole = whole && glm::length(p - c) <= R;
+    if (whole) {
+      kept.push_back(std::move(curve));
+      continue;
+    }
+    for (auto& piece : ClipPolyline(curve.points, c, R)) {
+      drawing::SheetCurve part = curve;
+      part.points = std::move(piece);
+      part.closed = false; // an arc of what the parent drew whole
+      kept.push_back(std::move(part));
+    }
+  }
+  sheet.curves = std::move(kept);
+  drawing::SheetGraphics g;
+  for (const auto& l : sheet.extras.lines)
+    for (const auto& piece : ClipPolyline({l.a, l.b}, c, R)) {
+      auto line = l;
+      line.a = piece.front();
+      line.b = piece.back();
+      g.lines.push_back(line);
+    }
+  for (const auto& f : sheet.extras.fills) {
+    bool in = true;
+    for (const glm::dvec2& p : f)
+      in = in && glm::length(p - c) <= R;
+    if (in)
+      g.fills.push_back(f);
+  }
+  for (const auto& t : sheet.extras.texts)
+    if (glm::length(t.pos - c) <= R)
+      g.texts.push_back(t);
+  // The boundary, thin, and the caption under it.
+  constexpr int kSteps = 96;
+  constexpr double kPi = 3.14159265358979323846;
+  for (int i = 0; i < kSteps; ++i) {
+    const double a0 = 2.0 * kPi * i / kSteps, a1 = 2.0 * kPi * (i + 1) / kSteps;
+    g.lines.push_back({c + R * glm::dvec2(std::cos(a0), std::sin(a0)),
+                       c + R * glm::dvec2(std::cos(a1), std::sin(a1)), 0.25});
+  }
+  char ratio[32];
+  if (s >= 1.0)
+    std::snprintf(ratio, sizeof ratio, "%.3g:1", s);
+  else
+    std::snprintf(ratio, sizeof ratio, "1:%.3g", 1.0 / s);
+  g.texts.push_back(
+      {{c.x, c.y - R - 9.0},
+       "DETAIL " + view.detail.label + " (" + std::string(ratio) + ")",
+       true,
+       5.0});
+  sheet.extras = std::move(g);
+  sheet.hasGeometry = !sheet.curves.empty();
+  sheet.bboxMin = c - glm::dvec2(R);
+  sheet.bboxMax = c + glm::dvec2(R);
+}
+
+// On a view that has details: each detail's circle, thin, lettered outside
+// its upper right.
+void DetailCircles(AppState& state, const DrawingView& view,
+                   drawing::SheetView& sheet) {
+  if (!state.drawing || !sheet.hasGeometry)
+    return;
+  glm::dvec3 viewDir, up;
+  ViewAxes(view, viewDir, up);
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 pos = DrawingFoldedPosition(state, view).pos;
+  constexpr int kSteps = 72;
+  constexpr double kPi = 3.14159265358979323846;
+  for (const DrawingView& d : state.drawing->GetViews()) {
+    if (!d.detail.on || d.detail.parentViewId != view.id)
+      continue;
+    const glm::dvec2 c =
+        pos + s * drawing::ProjectPoint(d.detail.center, viewDir, up);
+    const double R = s * d.detail.radius;
+    for (int i = 0; i < kSteps; ++i) {
+      const double a0 = 2.0 * kPi * i / kSteps,
+                   a1 = 2.0 * kPi * (i + 1) / kSteps;
+      sheet.extras.lines.push_back(
+          {c + R * glm::dvec2(std::cos(a0), std::sin(a0)),
+           c + R * glm::dvec2(std::cos(a1), std::sin(a1)), 0.35});
+    }
+    sheet.extras.texts.push_back({c + (R + 3.5) * glm::dvec2(0.7071, 0.7071),
+                                  d.detail.label, true, 5.0});
+  }
+}
+
 } // namespace
 
 FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view) {
@@ -737,6 +919,19 @@ FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view) {
   // their `up` vectors match; the shared coordinate locks to the base's,
   // leaving the fold axis free. Iso shares neither -> placed freely.
   FoldedPosition out{view.position, false, false};
+  if (view.detail.on) {
+    // A detail is placed by where its circle's centre lands: the model
+    // maps so that centre is at `position`. Its axes are its parent's.
+    const DrawingView* parent =
+        state.drawing ? state.drawing->FindView(view.detail.parentViewId)
+                      : nullptr;
+    glm::dvec3 vd, up;
+    ViewAxes(parent ? *parent : view, vd, up);
+    const double s = view.scale != 0.0 ? view.scale : 1.0;
+    out.pos =
+        view.position - s * drawing::ProjectPoint(view.detail.center, vd, up);
+    return out;
+  }
   if (!view.baseViewId || !state.drawing)
     return out;
   const DrawingView* base = state.drawing->FindView(view.baseViewId);
@@ -820,7 +1015,7 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
     if (!rd.resolved)
       continue;
     glm::dvec2 mn(0.0), mx(0.0);
-    drawing::LabelBox(rd.labelPos, rd.text, mn, mx);
+    drawing::DimLabelBox(rd, mn, mx);
     ctx.avoid.push_back({mn, mx});
   }
   for (const auto& note : state.drawing->GetNotes()) {
@@ -883,12 +1078,6 @@ std::optional<BomTable> ViewBom(AppState& state, const DrawingView& view,
   return cache[key] = ComputeBomOf(state, shown);
 }
 
-std::string Upper(std::string s) {
-  for (char& c : s)
-    c = c == '_' ? ' ' : static_cast<char>(std::toupper(c));
-  return s;
-}
-
 // The parts list as a table note's text (drawing::IsTableText): a caption
 // row if there is one, the header, then one row per BOM line, numbered as
 // the balloons number them.
@@ -917,8 +1106,8 @@ std::string BomTableText(AppState& state, const BomTable& bom,
     if (r.massKnown)
       std::snprintf(mass, sizeof mass, "%.1f", r.unitMassG);
     out += "\n" + std::to_string(i + 1) + "\t" + std::to_string(r.quantity) +
-           "\t" + r.partName + "\t" + kind + "\t" + Upper(r.material) + "\t" +
-           mass;
+           "\t" + r.partName + "\t" + kind + "\t" +
+           CADMaterials::MaterialLibrary::GradeOf(r.material) + "\t" + mass;
   }
   return out;
 }
@@ -1040,6 +1229,47 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
     }
     return drawing::ResolveNote(table, sheetView, symbols);
   }
+  if (note.style == NoteStyle::Fcf) {
+    // Every datum the frame names is a datum feature on this sheet: a
+    // letter nothing carries would be a reference to nothing.
+    std::vector<std::string> have;
+    for (const DrawingNote& other : state.drawing->GetNotes())
+      if (other.style == NoteStyle::Datum)
+        have.push_back(other.text);
+    drawing::ResolvedNote rn = drawing::ResolveNote(note, sheetView, symbols,
+                                                    ActiveDrawingUnits(state));
+    for (const std::string& d : note.fcf.datums)
+      if (std::find(have.begin(), have.end(), d) == have.end()) {
+        std::string list;
+        for (const std::string& h : have)
+          list += (list.empty() ? "" : ", ") + h;
+        rn.resolved = false;
+        rn.error = "datum " + d + " is not on this sheet (its datums: " +
+                   (list.empty() ? std::string("none") : list) +
+                   ") -- add it as a `datum` note on its feature";
+        return rn;
+      }
+    if (note.attachDim != 0) {
+      // Stacked under the dimension's value, no leader: the frame then
+      // applies to the feature that dimension sizes.
+      const DrawingDim* dim = state.drawing->FindDim(note.attachDim);
+      const drawing::ResolvedDim rd =
+          dim ? ResolveDrawingDim(state, *dim) : drawing::ResolvedDim{};
+      if (!dim || !rd.resolved) {
+        rn.resolved = false;
+        rn.error = dim ? "the dimension this frame stands under no longer "
+                         "resolves"
+                       : "the dimension this frame stands under is gone";
+        return rn;
+      }
+      glm::dvec2 mn, mx;
+      drawing::DimLabelBox(rd, mn, mx);
+      const glm::dvec2 size = drawing::FcfSize(rn.fcf, rn.fcfTolerance);
+      rn.pos = {0.5 * (mn.x + mx.x), mn.y - 0.8 - 0.5 * size.y};
+      rn.hasLeader = false;
+    }
+    return rn;
+  }
   return drawing::ResolveNote(note, sheetView, symbols);
 }
 
@@ -1071,14 +1301,6 @@ std::string ScaleRatio(double s) {
   else
     std::snprintf(buf, sizeof buf, "1:%.3g", 1.0 / s);
   return buf;
-}
-
-// A material slug as a title block writes it: "plastic_black" ->
-// "PLASTIC BLACK".
-std::string MaterialWords(std::string slug) {
-  for (char& c : slug)
-    c = c == '_' ? ' ' : static_cast<char>(std::toupper(c));
-  return slug;
 }
 
 } // namespace
@@ -1113,7 +1335,11 @@ Sheet DrawingSheetForOutput(AppState& state) {
         }
         slug = body.material;
       }
-      sheet.titleBlock.material = MaterialWords(slug);
+      // The grade the library carries for it (6082-T6), or the generic
+      // material's name, which says no grade was chosen.
+      sheet.titleBlock.material =
+          slug == "mixed" ? std::string("MIXED")
+                          : CADMaterials::MaterialLibrary::GradeOf(slug);
     }
   return sheet;
 }
@@ -1544,6 +1770,314 @@ void UpdateDrawingRenders(AppState& state, double budgetSeconds) {
   }
   state.drawingRenders = std::move(fresh);
   state.drawingRendersVersion = drawingVersion;
+}
+
+std::string NextViewLetter(AppState& state) {
+  std::set<std::string> used;
+  if (state.drawing)
+    for (const DrawingView& v : state.drawing->GetViews()) {
+      if (v.section.on)
+        used.insert(v.section.label);
+      if (v.detail.on)
+        used.insert(v.detail.label);
+    }
+  for (char c = 'A'; c <= 'Z'; ++c) {
+    if (c == 'I' || c == 'O' || c == 'Q')
+      continue;
+    if (!used.contains(std::string(1, c)))
+      return std::string(1, c);
+  }
+  return "Z";
+}
+
+namespace {
+
+double PolylineLength(const std::vector<glm::dvec2>& pts) {
+  double L = 0.0;
+  for (size_t i = 1; i < pts.size(); ++i)
+    L += glm::length(pts[i] - pts[i - 1]);
+  return L;
+}
+
+double PointToPolyline(const glm::dvec2& p,
+                       const std::vector<glm::dvec2>& pts) {
+  double best = 1e300;
+  for (size_t i = 1; i < pts.size(); ++i) {
+    const glm::dvec2 a = pts[i - 1], ab = pts[i] - a;
+    const double L2 = glm::dot(ab, ab);
+    const double t =
+        L2 < 1e-18 ? 0.0 : std::clamp(glm::dot(p - a, ab) / L2, 0.0, 1.0);
+    best = std::min(best, glm::length(p - (a + ab * t)));
+  }
+  if (pts.size() == 1)
+    best = glm::length(p - pts[0]);
+  return best;
+}
+
+// Where a balloon's leader may end on one occurrence of a view: points its
+// refs resolve to (a line's middle, a curve's ends, its extremes) that lie
+// on a VISIBLE piece of that edge and clear of every other part's lines --
+// a dot where two parts meet says neither.
+struct AnchorRef {
+  ProjRef ref;
+  glm::dvec2 at{0.0};
+  double cost = 0.0;
+};
+
+std::vector<AnchorRef> BalloonAnchors(const drawing::SheetView& sv,
+                                      uint64_t viewId, uint64_t occurrence) {
+  std::vector<AnchorRef> out;
+  std::vector<const drawing::SheetCurve*> others;
+  for (const drawing::SheetCurve& c : sv.curves)
+    if (c.visible && c.sourceId != occurrence)
+      others.push_back(&c);
+  std::set<std::string> seen;
+  for (const drawing::SheetCurve& c : sv.curves) {
+    if (c.sourceId != occurrence || !c.visible || c.points.size() < 2)
+      continue;
+    const bool isEdge = c.edge.IsSet();
+    const ElementRef& er = isEdge ? c.edge : c.silFace;
+    if (!er.IsSet())
+      continue;
+    const std::string key =
+        (isEdge ? "e|" : "s|") + std::to_string(er.featureId) + "|" + er.name;
+    if (!seen.insert(key).second)
+      continue;
+    // The visible pieces of this ref, which a point must lie on.
+    std::vector<const drawing::SheetCurve*> pieces;
+    for (const drawing::SheetCurve& o : sv.curves)
+      if (o.sourceId == occurrence && o.visible &&
+          (isEdge ? o.edge : o.silFace).featureId == er.featureId &&
+          (isEdge ? o.edge : o.silFace).name == er.name)
+        pieces.push_back(&o);
+    double shown = 0.0;
+    for (const auto* q : pieces)
+      shown += PolylineLength(q->points);
+    if (shown < 1.0)
+      continue; // a speck: a dot on it would be a dot on its neighbour
+    ProjRef base;
+    base.viewId = viewId;
+    base.occurrenceId = occurrence;
+    (isEdge ? base.edge : base.silFace) = er;
+    struct Variant {
+      int end;
+      const char* extreme;
+      double cost;
+    };
+    static const Variant kVariants[] = {
+        {0, "", 0.0},      {1, "", 3.0},    {2, "", 3.0},      {0, "left", 1.5},
+        {0, "right", 1.5}, {0, "top", 1.5}, {0, "bottom", 1.5}};
+    for (const Variant& v : kVariants) {
+      if (v.end == 0 && v.extreme[0] == '\0' && c.conicRadius > 0.0)
+        continue; // a circle's "whole" is its centre: not on the part
+      ProjRef r = base;
+      r.end = v.end;
+      r.extreme = v.extreme;
+      glm::dvec2 at;
+      if (!drawing::RefPointOf(sv, r, at))
+        continue;
+      bool onVisible = false;
+      for (const auto* q : pieces)
+        onVisible = onVisible || PointToPolyline(at, q->points) < 0.05;
+      if (!onVisible)
+        continue;
+      bool clear = true;
+      for (const auto* o : others)
+        if (PointToPolyline(at, o->points) < 0.8) {
+          clear = false;
+          break;
+        }
+      if (!clear)
+        continue;
+      bool dup = false;
+      for (const AnchorRef& a : out)
+        dup = dup || glm::length(a.at - at) < 0.5;
+      if (!dup)
+        out.push_back({r, at, v.cost});
+    }
+  }
+  return out;
+}
+
+double ShownLength(const drawing::SheetView& sv, uint64_t occurrence) {
+  double L = 0.0;
+  for (const drawing::SheetCurve& c : sv.curves)
+    if (c.sourceId == occurrence && c.visible)
+      L += PolylineLength(c.points);
+  return L;
+}
+
+} // namespace
+
+bool LayoutDrawingBalloons(AppState& state,
+                           const std::vector<uint64_t>& viewIds,
+                           BalloonLayoutReport& report, std::string* error) {
+  const auto fail = [&](std::string why) {
+    if (error)
+      *error = std::move(why);
+    return false;
+  };
+  if (!state.drawing)
+    return fail("the active document is not a drawing");
+  if (viewIds.empty())
+    return fail("name the views the balloons go round (`views`)");
+  uint64_t source = 0;
+  for (uint64_t id : viewIds) {
+    const DrawingView* v = state.drawing->FindView(id);
+    if (!v)
+      return fail("no view " + std::to_string(id) + " on this sheet");
+    if (!AssemblyDocById(state, v->sourceDocId))
+      return fail("view '" + v->name +
+                  "' draws a part; balloons number an assembly's parts");
+    if (source != 0 && v->sourceDocId != source)
+      return fail("the views are of different assemblies; balloons number "
+                  "one parts list");
+    source = v->sourceDocId;
+  }
+  UpdateDrawingRenders(state);
+  for (uint64_t id : viewIds)
+    if (!state.drawingRenders.contains(id) ||
+        !state.drawingRenders.at(id).hasGeometry)
+      return fail("view " + std::to_string(id) + " has no projection: " +
+                  (state.drawingRenders.contains(id)
+                       ? state.drawingRenders.at(id).error
+                       : std::string("update the drawing")));
+  // Numbered by the sheet's parts list of this assembly, as a balloon
+  // resolves its number (else by the first view's own).
+  const DrawingView* listed = state.drawing->FindView(viewIds.front());
+  for (const DrawingNote& n : state.drawing->GetNotes())
+    if (n.table == NoteTable::Bom)
+      if (const DrawingView* v = state.drawing->FindView(n.viewId);
+          v && v->sourceDocId == source) {
+        listed = v;
+        break;
+      }
+  std::string why;
+  const auto bom = ViewBom(state, *listed, &why);
+  if (!bom)
+    return fail(why);
+
+  SnapshotDrawing(state);
+  // The balloons already round these views go: this lays them out again.
+  {
+    auto& notes = state.drawing->GetNotes();
+    notes.erase(std::remove_if(notes.begin(), notes.end(),
+                               [&](const DrawingNote& n) {
+                                 return n.style == NoteStyle::Balloon &&
+                                        n.text.empty() &&
+                                        std::find(viewIds.begin(),
+                                                  viewIds.end(),
+                                                  n.viewId) != viewIds.end();
+                               }),
+                notes.end());
+    state.drawing->BumpVersion();
+  }
+
+  // Each row on the view that draws the most of it.
+  struct Item {
+    int row = 0;
+    uint64_t occurrence = 0;
+    std::vector<AnchorRef> anchors;
+  };
+  std::map<uint64_t, std::vector<Item>> byView;
+  for (size_t r = 0; r < bom->rows.size(); ++r) {
+    double best = 0.0;
+    uint64_t bestView = 0, bestOcc = 0;
+    std::vector<AnchorRef> bestAnchors;
+    for (uint64_t v : viewIds) {
+      const drawing::SheetView& sv = state.drawingRenders.at(v);
+      for (uint64_t occ : bom->rows[r].rootOccurrences) {
+        const double L = ShownLength(sv, occ);
+        if (L <= best)
+          continue;
+        auto anchors = BalloonAnchors(sv, v, occ);
+        if (anchors.empty())
+          continue;
+        best = L;
+        bestView = v;
+        bestOcc = occ;
+        bestAnchors = std::move(anchors);
+      }
+    }
+    if (bestView == 0) {
+      report.unplaced.push_back(
+          "item " + std::to_string(r + 1) + " (" + bom->rows[r].partName +
+          "): none of these views shows an edge of it clear of its "
+          "neighbours");
+      continue;
+    }
+    byView[bestView].push_back(
+        {static_cast<int>(r + 1), bestOcc, std::move(bestAnchors)});
+  }
+
+  // What the balloons must stay clear of, gathered once and grown as each
+  // view's balloons land.
+  const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+  std::vector<std::pair<glm::dvec2, glm::dvec2>> taken;
+  taken.push_back({chrome.titleBlockMin, chrome.titleBlockMax});
+  for (const DrawingDim& dm : state.drawing->GetDims()) {
+    const drawing::ResolvedDim rd = ResolveDrawingDim(state, dm);
+    if (!rd.resolved)
+      continue;
+    glm::dvec2 mn, mx;
+    drawing::DimLabelBox(rd, mn, mx);
+    taken.push_back({mn, mx});
+  }
+  for (const DrawingNote& n : state.drawing->GetNotes()) {
+    const auto rn = ResolveDrawingNote(state, n);
+    glm::dvec2 mn, mx;
+    drawing::NoteBox(rn, mn, mx);
+    taken.push_back({mn, mx});
+  }
+  for (uint64_t v : viewIds) {
+    auto it = byView.find(v);
+    if (it == byView.end())
+      continue;
+    const drawing::SheetView& sv = state.drawingRenders.at(v);
+    drawing::BalloonLayoutInput in;
+    in.viewMin = sv.bboxMin;
+    in.viewMax = sv.bboxMax;
+    in.borderMin = chrome.borderMin;
+    in.borderMax = chrome.borderMax;
+    in.avoid = taken;
+    for (const auto& [id, other] : state.drawingRenders)
+      if (id != v && other.hasGeometry)
+        in.avoid.push_back({other.bboxMin, other.bboxMax});
+    for (const Item& item : it->second) {
+      drawing::BalloonItem bi;
+      drawing::ResolvedNote probe;
+      probe.style = NoteStyle::Balloon;
+      probe.text = std::to_string(item.row);
+      glm::dvec2 mn, mx;
+      drawing::NoteBox(probe, mn, mx);
+      bi.radius = 0.5 * (mx.x - mn.x);
+      for (const AnchorRef& a : item.anchors)
+        bi.anchors.push_back({a.at, a.cost});
+      in.items.push_back(std::move(bi));
+    }
+    const drawing::BalloonLayout layout = drawing::LayoutBalloons(in);
+    if (!layout.error.empty()) {
+      const DrawingView* dv = state.drawing->FindView(v);
+      return fail("view '" + (dv ? dv->name : std::to_string(v)) +
+                  "': " + layout.error);
+    }
+    report.crossings += layout.crossings;
+    for (size_t i = 0; i < it->second.size(); ++i) {
+      const Item& item = it->second[i];
+      const drawing::BalloonPlacement& pl = layout.placements[i];
+      DrawingNote n;
+      n.style = NoteStyle::Balloon;
+      n.viewId = v;
+      n.leader = item.anchors[pl.anchor].ref;
+      n.pos = pl.centre;
+      const uint64_t id = state.drawing->AddNote(n);
+      const double r = in.items[i].radius;
+      taken.push_back({pl.centre - glm::dvec2(r), pl.centre + glm::dvec2(r)});
+      report.placed.push_back({id, v, item.occurrence, item.row,
+                               bom->rows[item.row - 1].partName, pl.centre});
+    }
+  }
+  return true;
 }
 
 } // namespace ui

@@ -112,6 +112,10 @@ struct SheetText {
   std::string text;
   bool center = true;    // centred on pos.x; false = starts at pos.x
   double heightMM = 3.5; // cap-height-ish: the font size
+  // Turned counter-clockwise about `pos` (v151): an aligned dimension's
+  // value reads along its line. `center` then centres along the turned
+  // baseline.
+  double angleRad = 0.0;
 };
 struct SheetGraphics {
   struct Line {
@@ -122,13 +126,17 @@ struct SheetGraphics {
   };
   std::vector<Line> lines;
   std::vector<std::vector<glm::dvec2>> fills; // filled convex polygons
+  // Filled white, under everything else here: a frame's or a value's
+  // background, knocked out of whatever it stands on.
+  std::vector<std::vector<glm::dvec2>> knockouts;
   std::vector<SheetText> texts;
   [[nodiscard]] bool empty() const {
-    return lines.empty() && fills.empty() && texts.empty();
+    return lines.empty() && fills.empty() && texts.empty() && knockouts.empty();
   }
   void Append(const SheetGraphics& o) {
     lines.insert(lines.end(), o.lines.begin(), o.lines.end());
     fills.insert(fills.end(), o.fills.begin(), o.fills.end());
+    knockouts.insert(knockouts.end(), o.knockouts.begin(), o.knockouts.end());
     texts.insert(texts.end(), o.texts.begin(), o.texts.end());
   }
 };

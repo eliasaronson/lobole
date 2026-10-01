@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    150; // v150: project tables -- `tables` [{name, comment?, columns,
+    151; // v151: drawings -- a view's `detail` {view, center [x, y, z],
+         //      radius_mm, label} (docs/drawings/README.md#detail-views); a
+         //      note's `style: "fcf"` with its frame in `fcf` {symbol,
+         //      tolerance_mm, diameter?, modifier?, datums} and `dim`, the
+         //      dimension a frame stands under
+         //      (docs/drawings/README.md#feature-control-frames). Material
+         //      slugs `aluminum_6061_t6` and `aluminum_6082_t6`.
+         // v150: project tables -- `tables` [{name, comment?, columns,
          //      rows [{key, values}]}] in a single-part file's envelope and
          //      in project.json, read by lookup("table", key, "column")
          //      (docs/variables/README.md#tables). A cylinder's or cone's

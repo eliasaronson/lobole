@@ -72,8 +72,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "SECTION A-A, and drawn as a lettered cutting-plane line on every other "
      "view of the source that sees the plane edge-on; `section: null` makes "
      "it a plain view again. An edge the plane made is named by the face it "
-     "was cut from (list_drawing_geometry's sil_face ref). ",
-     "base_view, configuration, hidden, id, name, position, quality, "
+     "was cut from (list_drawing_geometry's sil_face ref). A detail view "
+     "takes `detail: {view?, center?, radius_mm?, label?}`, keeping what it "
+     "does not name.",
+     "base_view, configuration, detail, hidden, id, name, position, quality, "
      "rotation_deg, scale, section, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
@@ -112,9 +114,17 @@ static constexpr MethodDoc DrawingMethods[] = {
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
      "still draw exactly. `section: {point: [x, y, z] world mm, label?}` "
-     "makes it a section view (see set_drawing_view).",
-     "base_view, configuration, drawing, hidden, name, orientation, position, "
-     "quality, rotation_deg, scale, section, source"},
+     "makes it a section view (see set_drawing_view). "
+     "`detail: {view, center: [x, y, z] world mm, radius_mm, label?}` makes "
+     "it a DETAIL of another view: that view's projection (its source, "
+     "orientation, turn, section and hidden occurrences, followed when they "
+     "change) inside the circle, at this view's `scale` (required) with the "
+     "circle's centre at `position` (required); the parent draws the circle "
+     "lettered and the detail is captioned DETAIL B (5:1). `source` and the "
+     "projection's own parameters are then the parent's and are refused "
+     "here; `label` defaults to the sheet's next free view letter.",
+     "base_view, configuration, detail, drawing, hidden, name, orientation, "
+     "position, quality, rotation_deg, scale, section, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views",
      "List views with placement and scale, each with what its projection "
@@ -181,16 +191,45 @@ static constexpr MethodDoc DrawingMethods[] = {
      "row per bend (direction, angle, radius, K, allowance), regenerated "
      "from the part every time, with `text` as its optional caption. "
      "`table: \"bom\"` makes it the parts list of `view`'s assembly: item, "
-     "quantity, part, kind (made, printed, bought), material and unit mass "
-     "of every part the view draws (its `hidden` occurrences left out), "
+     "quantity, part, kind (made, printed, bought), material grade and unit "
+     "mass of every part the view draws (its `hidden` occurrences left out), "
      "numbered as its balloons are, ruled, its bottom-right corner at "
-     "`position`.",
-     "position, ref, style, table, text, view"},
-    {"remove_drawing_note", "Remove a note by id.", "id"},
+     "`position`. A datum's text is its letter: one capital, not I, O or Q, "
+     "once per sheet. `style: \"fcf\"` is a feature control frame (ISO 1101): "
+     "`fcf: {symbol, tolerance_mm, diameter?: bool (a Ø zone), modifier?: "
+     "\"mmc\" | \"lmc\", datums?: [\"A\", \"B\"] primary first}`, symbol one "
+     "of straightness, flatness, circularity, cylindricity, profile_line, "
+     "profile_surface, parallelism, perpendicularity, angularity, position, "
+     "coaxiality, symmetry, circular_runout, total_runout. A form tolerance "
+     "takes no datum; orientation, coaxiality, symmetry and runout need one; "
+     "a Ø or modifier the symbol cannot carry is refused. Each datum it names "
+     "must be a `datum` note on this sheet. It stands at `position` with a "
+     "leader to `ref`, or with `dim` (a dimension id) under that "
+     "dimension's value with no leader and `position` ignored.",
+     "dim, fcf, position, ref, style, table, text, view"},
+    {"layout_balloons",
+     "Balloon every row of the sheet's parts list round the given views "
+     "{views: [ids]} (docs/drawings/README.md#balloon-layout): each row on "
+     "the view that draws the most of it, its leader ending on a visible "
+     "edge of the part clear of its neighbours' lines, the balloons on a "
+     "ring round that view clear of the other views, the title block, "
+     "tables, labels and each other, matched to their parts in the order "
+     "they go round the view and untangled so no two leaders cross. The "
+     "balloons already on those views are replaced, so run it again after "
+     "the model moves. One undo step. Needs an assembly view (a parts list "
+     "note numbers them when there is one).",
+     "views", remote::NoFlags,
+     "placed[]{note,item,part,view,occurrence,position}, unplaced[], "
+     "crossings"},
+    {"remove_drawing_note",
+     "Remove a note by id. A datum a feature control frame names is refused, "
+     "naming the frame: remove or change the frame first.",
+     "id"},
     {"list_drawing_notes", "List notes with leader state and table kind.", "",
      remote::NoFlags,
      "notes[]{id,text,resolved_text,resolved,error,pos,view,table,style,"
-     "leader_resolved}"},
+     "leader_resolved,fcf?{symbol,tolerance_mm,diameter,modifier,datums},"
+     "dim?}"},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 
@@ -305,6 +344,84 @@ SectionSpec ParseSection(const json& sj) {
              point->at(2).get<double>()};
   s.label = sj.value("label", std::string{});
   return s;
+}
+
+// A view's `detail`: {view, center: [x, y, z] world mm, radius_mm, label?}.
+DetailSpec ParseDetail(ui::AppState& state, const json& dj) {
+  const auto shape = [] {
+    return std::runtime_error(
+        "detail is {view: the id of the view it details, center: [x, y, z] "
+        "(world mm, the source's frame), radius_mm: the circle's radius in "
+        "model mm, label?: \"B\"}");
+  };
+  if (!dj.is_object() || !dj.contains("view") || !dj.contains("center") ||
+      !dj.contains("radius_mm"))
+    throw shape();
+  const json& c = dj.at("center");
+  if (!c.is_array() || c.size() != 3 || !c.at(0).is_number() ||
+      !c.at(1).is_number() || !c.at(2).is_number() ||
+      !dj.at("radius_mm").is_number() || !dj.at("view").is_number_unsigned())
+    throw shape();
+  DetailSpec d;
+  d.on = true;
+  d.parentViewId = dj.at("view").get<uint64_t>();
+  d.center = {c.at(0).get<double>(), c.at(1).get<double>(),
+              c.at(2).get<double>()};
+  d.radius = dj.at("radius_mm").get<double>();
+  d.label = dj.value("label", std::string{});
+  const DrawingView* parent = state.drawing->FindView(d.parentViewId);
+  if (parent == nullptr)
+    throw std::runtime_error("detail.view: no view " +
+                             std::to_string(d.parentViewId) + " on this sheet");
+  if (parent->detail.on)
+    throw std::runtime_error(
+        "detail.view names a detail; a detail is of a view (detail its "
+        "parent at a larger scale instead)");
+  if (!(d.radius > 0.0))
+    throw std::runtime_error("detail.radius_mm is the circle's radius in "
+                             "model mm, above 0");
+  if (d.label.empty())
+    d.label = ui::NextViewLetter(state);
+  if (const std::string why = ValidateDatumLetter(d.label); !why.empty())
+    throw std::runtime_error("detail.label: " + why);
+  return d;
+}
+
+// A note's `fcf`: {symbol, tolerance_mm, diameter?, modifier?, datums?}.
+FeatureControlFrame ParseFcf(const json& fj) {
+  if (!fj.is_object() || !fj.contains("symbol") || !fj.contains("tolerance_mm"))
+    throw std::runtime_error(
+        "fcf is {symbol, tolerance_mm, diameter?: bool, modifier?: \"mmc\" | "
+        "\"lmc\", datums?: [\"A\", ...]}");
+  FeatureControlFrame f;
+  const std::string symbol = fj.at("symbol").get<std::string>();
+  if (!GeoSymbolFromString(symbol, f.symbol))
+    throw std::runtime_error(UnknownGeoSymbol(symbol));
+  if (!fj.at("tolerance_mm").is_number())
+    throw std::runtime_error("fcf.tolerance_mm is the zone in model mm");
+  f.tolerance = fj.at("tolerance_mm").get<double>();
+  f.diameterZone = fj.value("diameter", false);
+  const std::string modifier = fj.value("modifier", std::string("none"));
+  if (!MaterialModifierFromString(modifier, f.modifier))
+    throw std::runtime_error(UnknownMaterialModifier(modifier));
+  if (fj.contains("datums")) {
+    if (!fj.at("datums").is_array())
+      throw std::runtime_error("fcf.datums is an array of letters, primary "
+                               "first: [\"A\", \"B\"]");
+    for (const json& d : fj.at("datums"))
+      f.datums.push_back(d.get<std::string>());
+  }
+  if (const std::string why = ValidateFcf(f); !why.empty())
+    throw std::runtime_error(why);
+  return f;
+}
+
+json FcfJson(const FeatureControlFrame& f) {
+  return {{"symbol", GeoSymbolToString(f.symbol)},
+          {"tolerance_mm", f.tolerance},
+          {"diameter", f.diameterZone},
+          {"modifier", MaterialModifierToString(f.modifier)},
+          {"datums", f.datums}};
 }
 
 // The layout report shared by check_drawing and export_drawing: resolve
@@ -614,6 +731,43 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       SelectDrawing(state, p);
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
+    if (p.contains("detail")) {
+      // A detail projects what its parent does, so what the parent decides
+      // is not this call's to say: refused rather than silently ignored.
+      for (const char* key :
+           {"source", "orientation", "base_view", "section", "hidden",
+            "configuration", "rotation_deg", "quality"})
+        if (p.contains(key))
+          throw std::runtime_error(
+              std::string("a detail draws its parent's projection, so `") +
+              key + "` is the parent view's; drop it here");
+      if (!p.contains("scale") || !p.contains("position"))
+        throw std::runtime_error(
+            "a detail takes its `scale` (larger than its parent's, usually) "
+            "and its `position`: where the circle's centre lands on the "
+            "sheet");
+      DrawingView v;
+      v.detail = ParseDetail(state, p.at("detail"));
+      const DrawingView* parent =
+          state.drawing->FindView(v.detail.parentViewId);
+      v.sourceDocId = parent->sourceDocId;
+      v.orientation = parent->orientation;
+      v.rotationDeg = parent->rotationDeg;
+      v.configuration = parent->configuration;
+      v.showHidden = parent->showHidden;
+      v.scale = p.at("scale").get<double>();
+      if (!(v.scale > 0.0))
+        throw std::runtime_error("scale must be positive");
+      const json& pos = p.at("position");
+      v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+      v.name = p.value("name", "detail " + v.detail.label);
+      ui::SnapshotDrawing(state);
+      const uint64_t id = state.drawing->AddView(v);
+      return json{{"id", id},
+                  {"source_id", v.sourceDocId},
+                  {"label", v.detail.label},
+                  {"needs_update", true}};
+    }
     // `source` = the source document's NAME (a part or an assembly), resolved
     // to its stable id.
     const std::string sourceName = p.at("source").get<std::string>();
@@ -747,8 +901,31 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
             : view->configuration;
     const SectionSpec section =
         p.contains("section") ? ParseSection(p.at("section")) : view->section;
+    DetailSpec detail = view->detail;
+    if (p.contains("detail")) {
+      if (!view->detail.on)
+        throw std::runtime_error("this view is not a detail; add a detail "
+                                 "view with add_drawing_view {detail}");
+      json dj = p.at("detail");
+      if (!dj.is_object())
+        throw std::runtime_error("detail is {view, center, radius_mm, label?}");
+      // An edit keeps what it does not name.
+      if (!dj.contains("view"))
+        dj["view"] = view->detail.parentViewId;
+      if (!dj.contains("center"))
+        dj["center"] = {view->detail.center.x, view->detail.center.y,
+                        view->detail.center.z};
+      if (!dj.contains("radius_mm"))
+        dj["radius_mm"] = view->detail.radius;
+      if (!dj.contains("label"))
+        dj["label"] = view->detail.label;
+      detail = ParseDetail(state, dj);
+      if (detail.parentViewId == view->id)
+        throw std::runtime_error("a detail cannot be of itself");
+    }
     ui::SnapshotDrawing(state);
     view->section = section;
+    view->detail = detail;
     view->configuration = configuration;
     if (p.contains("position")) {
       const json& pos = p.at("position");
@@ -899,6 +1076,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                           {view.section.point.x, view.section.point.y,
                            view.section.point.z}},
                          {"label", view.section.label}};
+      if (view.detail.on)
+        vj["detail"] = {{"view", view.detail.parentViewId},
+                        {"center",
+                         {view.detail.center.x, view.detail.center.y,
+                          view.detail.center.z}},
+                        {"radius_mm", view.detail.radius},
+                        {"label", view.detail.label}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
@@ -964,8 +1148,47 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(UnknownNoteStyle(name));
     }
     const std::string text = p.value("text", std::string{});
-    if (text.empty() && table == NoteTable::None && style != NoteStyle::Balloon)
+    if (style != NoteStyle::Fcf && (p.contains("fcf") || p.contains("dim")))
+      throw std::runtime_error("`fcf` and `dim` belong to a feature control "
+                               "frame: give it style \"fcf\"");
+    if (text.empty() && table == NoteTable::None &&
+        style != NoteStyle::Balloon && style != NoteStyle::Fcf)
       throw std::runtime_error("text must be non-empty");
+    if (style == NoteStyle::Datum) {
+      // A datum feature is named once per sheet, by a letter that cannot be
+      // read as a digit: two datum A's would make every frame naming A
+      // ambiguous.
+      if (const std::string why = ValidateDatumLetter(text); !why.empty())
+        throw std::runtime_error(why);
+      for (const DrawingNote& other : state.drawing->GetNotes())
+        if (other.style == NoteStyle::Datum && other.text == text)
+          throw std::runtime_error("datum " + text +
+                                   " is already on this sheet (note " +
+                                   std::to_string(other.id) + ")");
+    }
+    FeatureControlFrame fcf;
+    uint64_t attachDim = 0;
+    if (style == NoteStyle::Fcf) {
+      if (!p.contains("fcf"))
+        throw std::runtime_error(
+            "a feature control frame carries `fcf: {symbol, tolerance_mm, "
+            "diameter?, modifier?, datums?}`");
+      fcf = ParseFcf(p.at("fcf"));
+      if (p.contains("dim")) {
+        attachDim = p.at("dim").get<uint64_t>();
+        if (!state.drawing->FindDim(attachDim))
+          throw std::runtime_error("no dimension " + std::to_string(attachDim) +
+                                   " on this sheet for the frame to stand "
+                                   "under");
+        if (p.contains("ref"))
+          throw std::runtime_error("a frame under a dimension has no leader; "
+                                   "drop `ref` (or `dim`)");
+      } else if (!p.contains("ref")) {
+        throw std::runtime_error(
+            "a feature control frame points at its feature: give it `view` "
+            "and `ref`, or stand it under a dimension with `dim`");
+      }
+    }
     if (table == NoteTable::Bends && !p.contains("view"))
       throw std::runtime_error(
           "a bend table needs `view` — its rows are that view's part's bends");
@@ -976,11 +1199,14 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("a table has no leader; drop `ref`");
     if (table != NoteTable::None && style != NoteStyle::Text)
       throw std::runtime_error("a table is drawn as a table; drop `style`");
-    if (style != NoteStyle::Text && !p.contains("ref"))
+    if (style != NoteStyle::Text && style != NoteStyle::Fcf &&
+        !p.contains("ref"))
       throw std::runtime_error(std::string("a ") + NoteStyleToString(style) +
                                " points at geometry: give it `view` and "
                                "`ref`");
-    const json& pos = p.at("position");
+    const json pos = p.contains("position") || attachDim == 0
+                         ? p.at("position")
+                         : json::array({0.0, 0.0});
     if (!pos.is_array() || pos.size() != 2 || !pos.at(0).is_number() ||
         !pos.at(1).is_number())
       throw std::runtime_error("position is [x, y] in sheet mm");
@@ -988,6 +1214,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     n.text = text;
     n.table = table;
     n.style = style;
+    n.fcf = fcf;
+    n.attachDim = attachDim;
     n.pos = {pos.at(0).get<double>(), pos.at(1).get<double>()};
     if (p.contains("view")) {
       n.viewId = p.at("view").get<uint64_t>();
@@ -1018,6 +1246,18 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "remove_drawing_note") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
+    const uint64_t id = p.at("id").get<uint64_t>();
+    for (const DrawingNote& n : state.drawing->GetNotes()) {
+      if (n.id != id || n.style != NoteStyle::Datum)
+        continue;
+      for (const DrawingNote& frame : state.drawing->GetNotes())
+        if (frame.style == NoteStyle::Fcf &&
+            std::find(frame.fcf.datums.begin(), frame.fcf.datums.end(),
+                      n.text) != frame.fcf.datums.end())
+          throw std::runtime_error(
+              "datum " + n.text + " is named by feature control frame " +
+              std::to_string(frame.id) + "; remove or change the frame first");
+    }
     ui::SnapshotDrawing(state);
     if (!state.drawing->RemoveNote(p.at("id").get<uint64_t>()))
       throw std::runtime_error("no note with that id");
@@ -1039,8 +1279,39 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                      {"table", NoteTableToString(n.table)},
                      {"style", NoteStyleToString(n.style)},
                      {"leader_resolved", rn.hasLeader}});
+      if (n.style == NoteStyle::Fcf) {
+        arr.back()["fcf"] = FcfJson(n.fcf);
+        if (n.attachDim != 0)
+          arr.back()["dim"] = n.attachDim;
+        arr.back()["pos"] = {rn.pos.x, rn.pos.y}; // where it stands
+      }
     }
     return json{{"notes", arr}};
+  }
+  if (m == "layout_balloons") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    if (!p.contains("views") || !p.at("views").is_array())
+      throw std::runtime_error("views is an array of view ids, the views the "
+                               "balloons go round");
+    std::vector<uint64_t> views;
+    for (const json& v : p.at("views"))
+      views.push_back(v.get<uint64_t>());
+    ui::BalloonLayoutReport report;
+    std::string err;
+    if (!ui::LayoutDrawingBalloons(state, views, report, &err))
+      throw std::runtime_error(err);
+    json placed = json::array();
+    for (const auto& b : report.placed)
+      placed.push_back({{"note", b.note},
+                        {"item", b.item},
+                        {"part", b.part},
+                        {"view", b.view},
+                        {"occurrence", b.occurrence},
+                        {"position", {b.position.x, b.position.y}}});
+    return json{{"placed", placed},
+                {"unplaced", report.unplaced},
+                {"crossings", report.crossings}};
   }
   if (m == "export_drawing") {
     if (!state.drawing)

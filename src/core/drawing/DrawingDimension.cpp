@@ -237,6 +237,67 @@ std::optional<std::array<glm::dvec2, 4>> RefLinePair(const SheetView& v,
 
 } // namespace
 
+bool RefPointOf(const SheetView& view, const ProjRef& ref, glm::dvec2& out) {
+  return RefPoint(view, ref, out);
+}
+
+namespace {
+// An aligned value's text stands this far above its line (centre to line):
+// its knockout's lower edge then clears the line by half a millimetre.
+constexpr double kAlignedBelowMM = 1.7;  // centre to the knockout's bottom
+constexpr double kAlignedAboveMM = 1.85; // centre to the knockout's top
+constexpr double kAlignedLiftMM = kAlignedBelowMM + 0.5;
+constexpr double kKnockoutPadMM = 0.6;
+} // namespace
+
+void AlignedLabel(const glm::dvec2& a, const glm::dvec2& b, glm::dvec2& centre,
+                  double& angle) {
+  glm::dvec2 u = b - a;
+  const double L = glm::length(u);
+  u = L > 1e-12 ? u / L : glm::dvec2(1.0, 0.0);
+  // Readable from the bottom or the right: the turn lies in (-90, 90].
+  double t = std::atan2(u.y, u.x);
+  constexpr double kHalfPi = 1.5707963267948966, kPi = 3.141592653589793;
+  if (t > kHalfPi + 1e-9)
+    t -= kPi;
+  else if (t <= -kHalfPi + 1e-9)
+    t += kPi;
+  angle = t;
+  // "Above" the text is its own up: the line's normal turned with it.
+  const glm::dvec2 up(-std::sin(t), std::cos(t));
+  centre = 0.5 * (a + b) + up * kAlignedLiftMM;
+}
+
+std::array<glm::dvec2, 4> DimTextQuad(const ResolvedDim& d) {
+  if (!d.aligned) {
+    glm::dvec2 mn, mx;
+    TextKnockout(d.labelPos, d.text, mn, mx);
+    return {glm::dvec2(mn.x, mn.y), glm::dvec2(mx.x, mn.y),
+            glm::dvec2(mx.x, mx.y), glm::dvec2(mn.x, mx.y)};
+  }
+  const double half = 0.5 * TextWidthMM(d.text) + kKnockoutPadMM;
+  const glm::dvec2 along(std::cos(d.textAngle), std::sin(d.textAngle));
+  const glm::dvec2 up(-along.y, along.x);
+  const glm::dvec2 c = d.labelPos;
+  return {c - along * half - up * kAlignedBelowMM,
+          c + along * half - up * kAlignedBelowMM,
+          c + along * half + up * kAlignedAboveMM,
+          c - along * half + up * kAlignedAboveMM};
+}
+
+void DimLabelBox(const ResolvedDim& d, glm::dvec2& mn, glm::dvec2& mx) {
+  if (!d.aligned) {
+    LabelBox(d.labelPos, d.text, mn, mx);
+    return;
+  }
+  mn = glm::dvec2(1e300);
+  mx = glm::dvec2(-1e300);
+  for (const glm::dvec2& p : DimTextQuad(d)) {
+    mn = glm::min(mn, p);
+    mx = glm::max(mx, p);
+  }
+}
+
 ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
                        const DimContext& ctx) {
   ResolvedDim rd;
@@ -299,7 +360,8 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
       rd.dim2 = b + off;
     }
     rd.text = core::FormatLength(rd.value, ctx.units);
-    rd.labelPos = 0.5 * (rd.dim1 + rd.dim2);
+    rd.aligned = true;
+    AlignedLabel(rd.dim1, rd.dim2, rd.labelPos, rd.textAngle);
     rd.resolved = true;
     break;
   }
@@ -344,7 +406,11 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
           if (const Tolerance* tol = FindToleranceForRef(
                   *ctx.sourceDoc, refName, 0.5 * width / vs))
             rd.text += FormatToleranceSuffix(*tol, ctx.units, rd.value);
-        rd.labelPos = 0.5 * (rd.dim1 + rd.dim2) + n * glm::dot(off, n);
+        // Written along the line, slid along it by the offset's component
+        // across the walls.
+        rd.aligned = true;
+        AlignedLabel(rd.dim1, rd.dim2, rd.labelPos, rd.textAngle);
+        rd.labelPos += n * glm::dot(off, n);
         rd.resolved = true;
         break;
       }
@@ -574,9 +640,30 @@ std::string BendTableText(const Document& doc, const std::string& caption,
 }
 
 ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
-                         const SymbolTable& symbols) {
+                         const SymbolTable& symbols,
+                         const units::System& units) {
   ResolvedNote rn;
   rn.id = note.id;
+  if (note.style == NoteStyle::Fcf) {
+    // The frame says what it is; a list reads it back as a line.
+    rn.fcf = note.fcf;
+    rn.fcfTolerance = core::FormatDeviation(note.fcf.tolerance, units);
+    std::string line = GeoSymbolToString(note.fcf.symbol);
+    line += std::string(" ") + (note.fcf.diameterZone ? "\xC3\x98" : "") +
+            rn.fcfTolerance;
+    if (note.fcf.modifier != MaterialModifier::None)
+      line += note.fcf.modifier == MaterialModifier::Mmc ? " (M)" : " (L)";
+    for (const std::string& d : note.fcf.datums)
+      line += " | " + d;
+    DrawingNote frame = note;
+    frame.text = line;
+    frame.style = NoteStyle::Text; // resolved below as plain words...
+    ResolvedNote out = ResolveNote(frame, view, symbols, units);
+    out.style = NoteStyle::Fcf; // ...and drawn as the frame
+    out.fcf = rn.fcf;
+    out.fcfTolerance = rn.fcfTolerance;
+    return out;
+  }
   size_t cursor = 0;
   while (cursor < note.text.size()) {
     const auto begin = note.text.find("{{", cursor);
@@ -749,6 +836,139 @@ double BalloonRadius(const std::string& text) {
 
 } // namespace
 
+namespace {
+
+// A feature control frame's compartments, sheet mm (ISO 1101 / ISO 7083:
+// frame height twice the 3.5 mm lettering).
+constexpr double kFcfHeightMM = 7.0;
+constexpr double kFcfPadMM = 1.2;
+constexpr double kFcfModifierR = 1.6;
+
+struct FcfLayout {
+  double symbolW = kFcfHeightMM;
+  double toleranceW = 0.0;
+  std::vector<double> datumW;
+  double width = 0.0;
+};
+
+FcfLayout LayoutFcf(const FeatureControlFrame& f, const std::string& tol) {
+  FcfLayout l;
+  std::string value = (f.diameterZone ? "\xC3\x98" : "") + tol;
+  l.toleranceW = TextWidthMM(value) + 2.0 * kFcfPadMM;
+  if (f.modifier != MaterialModifier::None)
+    l.toleranceW += 2.0 * kFcfModifierR + 0.6;
+  for (const std::string& d : f.datums)
+    l.datumW.push_back(
+        std::max(kFcfHeightMM, TextWidthMM(d) + 2.0 * kFcfPadMM));
+  l.width = l.symbolW + l.toleranceW;
+  for (double w : l.datumW)
+    l.width += w;
+  return l;
+}
+
+void Polyline(SheetGraphics& g, std::initializer_list<glm::dvec2> pts, double w,
+              bool closed = false) {
+  const std::vector<glm::dvec2> v(pts);
+  for (size_t i = 1; i < v.size(); ++i)
+    g.lines.push_back({v[i - 1], v[i], w});
+  if (closed && v.size() > 2)
+    g.lines.push_back({v.back(), v.front(), w});
+}
+
+void Arc(SheetGraphics& g, glm::dvec2 c, double r, double a0, double a1,
+         double w) {
+  constexpr int kSteps = 32;
+  glm::dvec2 prev = c + r * glm::dvec2(std::cos(a0), std::sin(a0));
+  for (int i = 1; i <= kSteps; ++i) {
+    const double t = a0 + (a1 - a0) * i / kSteps;
+    const glm::dvec2 q = c + r * glm::dvec2(std::cos(t), std::sin(t));
+    g.lines.push_back({prev, q, w});
+    prev = q;
+  }
+}
+
+// A slanted arrow for the runout symbols: shaft from `tail` to `tip`, a
+// filled head at the tip.
+void SymbolArrow(SheetGraphics& g, glm::dvec2 tail, glm::dvec2 tip, double w) {
+  const glm::dvec2 d = glm::normalize(tip - tail);
+  const glm::dvec2 n(-d.y, d.x);
+  const glm::dvec2 base = tip - d * 1.4;
+  g.lines.push_back({tail, base, w});
+  g.fills.push_back({tip, base + n * 0.55, base - n * 0.55});
+}
+
+// The ISO 1101 symbol as line work, centred on `c`, about 4 mm across: drawn
+// rather than set in a font, because the PDF's Helvetica has none of them.
+void DrawGeoSymbol(SheetGraphics& g, GeoSymbol s, glm::dvec2 c) {
+  constexpr double a = 2.0, w = 0.3, kPi = 3.141592653589793;
+  const auto P = [&](double x, double y) { return c + glm::dvec2(x, y); };
+  switch (s) {
+  case GeoSymbol::Straightness:
+    Polyline(g, {P(-a, 0), P(a, 0)}, w);
+    break;
+  case GeoSymbol::Flatness:
+    Polyline(g,
+             {P(-a, -0.6 * a), P(0.5 * a, -0.6 * a), P(a, 0.6 * a),
+              P(-0.5 * a, 0.6 * a)},
+             w, true);
+    break;
+  case GeoSymbol::Circularity:
+    Arc(g, c, 0.9 * a, 0.0, 2.0 * kPi, w);
+    break;
+  case GeoSymbol::Cylindricity:
+    Arc(g, c, 0.7 * a, 0.0, 2.0 * kPi, w);
+    Polyline(g, {P(-1.15 * a, -a), P(-0.25 * a, a)}, w);
+    Polyline(g, {P(0.25 * a, -a), P(1.15 * a, a)}, w);
+    break;
+  case GeoSymbol::ProfileLine:
+    Arc(g, P(0, -0.5 * a), a, 0.0, kPi, w);
+    break;
+  case GeoSymbol::ProfileSurface:
+    Arc(g, P(0, -0.5 * a), a, 0.0, kPi, w);
+    Polyline(g, {P(-a, -0.5 * a), P(a, -0.5 * a)}, w);
+    break;
+  case GeoSymbol::Parallelism:
+    Polyline(g, {P(-0.9 * a, -a), P(-0.1 * a, a)}, w);
+    Polyline(g, {P(0.1 * a, -a), P(0.9 * a, a)}, w);
+    break;
+  case GeoSymbol::Perpendicularity:
+    Polyline(g, {P(-a, -a), P(a, -a)}, w);
+    Polyline(g, {P(0, -a), P(0, a)}, w);
+    break;
+  case GeoSymbol::Angularity:
+    Polyline(g, {P(a, -a), P(-a, -a), P(a, -a + 2.0 * a * 0.577)}, w);
+    break;
+  case GeoSymbol::Position:
+    Arc(g, c, 0.6 * a, 0.0, 2.0 * kPi, w);
+    Polyline(g, {P(-a, 0), P(a, 0)}, w);
+    Polyline(g, {P(0, -a), P(0, a)}, w);
+    break;
+  case GeoSymbol::Coaxiality:
+    Arc(g, c, 0.45 * a, 0.0, 2.0 * kPi, w);
+    Arc(g, c, 0.95 * a, 0.0, 2.0 * kPi, w);
+    break;
+  case GeoSymbol::Symmetry:
+    Polyline(g, {P(-a, 0), P(a, 0)}, w);
+    Polyline(g, {P(-0.6 * a, 0.55 * a), P(0.6 * a, 0.55 * a)}, w);
+    Polyline(g, {P(-0.6 * a, -0.55 * a), P(0.6 * a, -0.55 * a)}, w);
+    break;
+  case GeoSymbol::CircularRunout:
+    SymbolArrow(g, P(-0.6 * a, -a), P(0.6 * a, a), w);
+    break;
+  case GeoSymbol::TotalRunout:
+    SymbolArrow(g, P(-a, -0.8 * a), P(-0.1 * a, a), w);
+    SymbolArrow(g, P(0.1 * a, -0.8 * a), P(a, a), w);
+    Polyline(g, {P(-a, -0.8 * a), P(0.1 * a, -0.8 * a)}, w);
+    break;
+  }
+}
+
+} // namespace
+
+glm::dvec2 FcfSize(const FeatureControlFrame& fcf, const std::string& tol) {
+  return {LayoutFcf(fcf, tol).width, kFcfHeightMM};
+}
+
 bool IsTableText(const std::string& text) {
   return text.find('\t') != std::string::npos;
 }
@@ -803,6 +1023,62 @@ SheetGraphics NoteGraphics(const ResolvedNote& n) {
     }
     return g;
   }
+  if (n.style == NoteStyle::Fcf) {
+    const FcfLayout l = LayoutFcf(n.fcf, n.fcfTolerance);
+    const double h = kFcfHeightMM;
+    const double x0 = n.pos.x - 0.5 * l.width, x1 = n.pos.x + 0.5 * l.width;
+    const double y0 = n.pos.y - 0.5 * h, y1 = n.pos.y + 0.5 * h;
+    g.knockouts.push_back({{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}});
+    Polyline(g, {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}}, 0.35, true);
+    double x = x0;
+    DrawGeoSymbol(g, n.fcf.symbol, {x + 0.5 * l.symbolW, n.pos.y});
+    x += l.symbolW;
+    g.lines.push_back({{x, y0}, {x, y1}, 0.25});
+    const std::string value =
+        (n.fcf.diameterZone ? "\xC3\x98" : "") + n.fcfTolerance;
+    g.texts.push_back(
+        {{x + kFcfPadMM, n.pos.y - kCentreToBaseline}, value, false, 3.5});
+    if (n.fcf.modifier != MaterialModifier::None) {
+      const glm::dvec2 mc(
+          x + kFcfPadMM + TextWidthMM(value) + 0.6 + kFcfModifierR, n.pos.y);
+      const auto ring = Circle(mc, kFcfModifierR, 32);
+      for (size_t i = 0; i < ring.size(); ++i)
+        g.lines.push_back({ring[i], ring[(i + 1) % ring.size()], 0.25});
+      g.texts.push_back({{mc.x, mc.y - 0.85},
+                         n.fcf.modifier == MaterialModifier::Mmc ? "M" : "L",
+                         true,
+                         2.4});
+    }
+    x += l.toleranceW;
+    for (size_t i = 0; i < n.fcf.datums.size(); ++i) {
+      g.lines.push_back({{x, y0}, {x, y1}, 0.25});
+      g.texts.push_back({{x + 0.5 * l.datumW[i], n.pos.y - kCentreToBaseline},
+                         n.fcf.datums[i],
+                         true,
+                         3.5});
+      x += l.datumW[i];
+    }
+    if (n.hasLeader) {
+      // From the end of the frame nearer the feature, square off it, then
+      // to the feature with an arrow on it (ISO 1101 8.1).
+      const bool right = n.anchor.x > n.pos.x;
+      const glm::dvec2 start(right ? x1 : x0, n.pos.y);
+      const glm::dvec2 elbow = start + glm::dvec2(right ? 3.0 : -3.0, 0.0);
+      const bool straight =
+          right ? n.anchor.x <= elbow.x : n.anchor.x >= elbow.x;
+      const glm::dvec2 from = straight ? start : elbow;
+      if (!straight)
+        g.lines.push_back({start, elbow, 0.25});
+      if (glm::length(n.anchor - from) > 1e-6) {
+        const glm::dvec2 d = glm::normalize(n.anchor - from);
+        const glm::dvec2 across(-d.y, d.x);
+        const glm::dvec2 base = n.anchor - d * 2.2;
+        g.lines.push_back({from, base, 0.25});
+        g.fills.push_back({n.anchor, base + across * 0.8, base - across * 0.8});
+      }
+    }
+    return g;
+  }
   if (n.style == NoteStyle::Datum) {
     const double h = kDatumBoxHalfMM;
     const glm::dvec2 lo = n.pos - glm::dvec2(h), hi = n.pos + glm::dvec2(h);
@@ -845,6 +1121,12 @@ void NoteBox(const ResolvedNote& n, glm::dvec2& mn, glm::dvec2& mx) {
   if (n.style == NoteStyle::Datum) {
     mn = n.pos - glm::dvec2(kDatumBoxHalfMM);
     mx = n.pos + glm::dvec2(kDatumBoxHalfMM);
+    return;
+  }
+  if (n.style == NoteStyle::Fcf) {
+    const glm::dvec2 half = 0.5 * FcfSize(n.fcf, n.fcfTolerance);
+    mn = n.pos - half;
+    mx = n.pos + half;
     return;
   }
   LabelBox(n.pos, n.text, mn, mx);
@@ -909,10 +1191,64 @@ glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
       rd.text.empty() ? std::string("00000") : rd.text; // width estimate
   const auto clearAt = [&](const glm::dvec2& off) {
     glm::dvec2 mn, mx;
-    LabelBox(LabelPosFor(dim.kind, rd, off), text, mn, mx);
+    if (rd.aligned) {
+      // An aligned value turns with its line, so its box is the turned
+      // text's at that offset: resolved again rather than replayed. The
+      // text is the caller's (a tolerance suffix widens it).
+      DrawingDim at = dim;
+      at.labelOffset = off;
+      ResolvedDim moved = ResolveDim(at, view);
+      if (!moved.resolved)
+        return false;
+      moved.text = text;
+      DimLabelBox(moved, mn, mx);
+    } else {
+      LabelBox(LabelPosFor(dim.kind, rd, off), text, mn, mx);
+    }
     return BoxClear(mn, mx, ctx);
   };
   constexpr double kLane = 7.0;
+  if (dim.kind == DrawingDimKind::Diameter && !rd.radial) {
+    // A Ø across two lines -- a shaft's sides, a bore's walls in section --
+    // is a linear dimension whose line runs ACROSS the walls; it goes
+    // beyond the view along them, on the side their ends are nearer, in
+    // lanes outward. Its offset moves the line along the walls from their
+    // common midpoint.
+    const glm::dvec2 across = rd.dim2 - rd.dim1;
+    if (glm::length(across) > 1e-9) {
+      const glm::dvec2 n = glm::normalize(across);
+      const glm::dvec2 u(-n.y, n.x); // along the walls
+      const double level = glm::dot(0.5 * (rd.dim1 + rd.dim2), u);
+      double lo = 1e300, hi = -1e300;
+      for (const glm::dvec2& c : {view.bboxMin, view.bboxMax,
+                                  glm::dvec2(view.bboxMin.x, view.bboxMax.y),
+                                  glm::dvec2(view.bboxMax.x, view.bboxMin.y)}) {
+        lo = std::min(lo, glm::dot(c, u));
+        hi = std::max(hi, glm::dot(c, u));
+      }
+      // How far the walls themselves reach: both ends of both lines.
+      double wallStart = glm::dot(rd.ext1, u), wallEnd = wallStart;
+      if (const auto pair = RefLinePair(view, dim.refs[0]))
+        for (const glm::dvec2& q : *pair) {
+          wallStart = std::min(wallStart, glm::dot(q, u));
+          wallEnd = std::max(wallEnd, glm::dot(q, u));
+        }
+      // The side the walls reach nearer to the view's edge goes first.
+      const bool upFirst = hi - wallEnd <= wallStart - lo;
+      for (int pass = 0; pass < 2; ++pass) {
+        const bool up = (pass == 0) == upFirst;
+        for (int lane = 0; lane < 8; ++lane) {
+          const double target = up ? hi + kDimOffsetGapMM + kLane * lane
+                                   : lo - kDimOffsetGapMM - kLane * lane;
+          const glm::dvec2 off = u * (target - level);
+          if (clearAt(off))
+            return off;
+        }
+      }
+      return u *
+             ((upFirst ? hi + kDimOffsetGapMM : lo - kDimOffsetGapMM) - level);
+    }
+  }
   switch (dim.kind) {
   case DrawingDimKind::Radius:
   case DrawingDimKind::Diameter:

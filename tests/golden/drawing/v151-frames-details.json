@@ -1,0 +1,193 @@
+{
+  "format": "designer-document",
+  "version": 151,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Pan/tilt head",
+      "document": "Base plate",
+      "author": "generators/pantilt",
+      "date": "2026-10-01",
+      "notes": "General tolerances ISO 2768-mK"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "top",
+      "source": 3,
+      "orientation": "top",
+      "scale": 2.0,
+      "position": [
+        150.0,
+        200.0
+      ],
+      "show_hidden": true,
+      "quality": "exact",
+      "hidden": []
+    },
+    {
+      "id": 2,
+      "name": "A-A",
+      "source": 3,
+      "orientation": "front",
+      "scale": 2.0,
+      "position": [
+        150.0,
+        66.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "base_view": 1,
+      "section": {
+        "point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "label": "A"
+      }
+    },
+    {
+      "id": 3,
+      "name": "detail B",
+      "source": 3,
+      "orientation": "front",
+      "scale": 5.0,
+      "position": [
+        330.0,
+        110.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "detail": {
+        "view": 2,
+        "center": [
+          16.0,
+          0.0,
+          24.7
+        ],
+        "radius_mm": 6.0,
+        "label": "B"
+      }
+    }
+  ],
+  "dims": [
+    {
+      "id": 7,
+      "kind": "pattern_callout",
+      "view": 1,
+      "refs": [
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.0"
+          }
+        },
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.1"
+          }
+        }
+      ],
+      "label_offset": [
+        -40.0,
+        30.0
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "id": 4,
+      "text": "A",
+      "pos": [
+        70.0,
+        54.0
+      ],
+      "view": 2,
+      "leader": {
+        "view": 2,
+        "end": 0,
+        "sil_face": {
+          "feature_id": 1,
+          "element": "1/face2;M7;M11"
+        },
+        "extreme": "left"
+      },
+      "style": "datum"
+    },
+    {
+      "id": 5,
+      "text": "B",
+      "pos": [
+        100.0,
+        100.0
+      ],
+      "view": 2,
+      "leader": {
+        "view": 2,
+        "end": 1,
+        "sil_face": {
+          "feature_id": 1,
+          "element": "1/face9;M3"
+        }
+      },
+      "style": "datum"
+    },
+    {
+      "id": 6,
+      "text": "",
+      "pos": [
+        240.0,
+        110.0
+      ],
+      "view": 2,
+      "leader": {
+        "view": 2,
+        "end": 2,
+        "sil_face": {
+          "feature_id": 1,
+          "element": "1/face9;M3"
+        }
+      },
+      "style": "fcf",
+      "fcf": {
+        "symbol": "perpendicularity",
+        "tolerance_mm": 0.02,
+        "diameter": true,
+        "datums": [
+          "A"
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "text": "",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "style": "fcf",
+      "fcf": {
+        "symbol": "position",
+        "tolerance_mm": 0.2,
+        "diameter": true,
+        "modifier": "mmc",
+        "datums": [
+          "A",
+          "B"
+        ]
+      },
+      "dim": 7
+    }
+  ]
+}

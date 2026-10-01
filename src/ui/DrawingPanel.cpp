@@ -249,11 +249,37 @@ void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
                         SheetToScreen(state, base - n * w), col);
 }
 
+// Text turned counter-clockwise on the SHEET by `angle` about `pivot` (a
+// screen point): set flat, then its vertices turned. ImGui sets no turned
+// text of its own, and the sheet's turn is clockwise on a Y-down screen.
+void AddTurnedText(ImDrawList* dl, ImFont* font, float px, ImVec2 topLeft,
+                   ImVec2 pivot, double angle, ImU32 col, const char* text) {
+  const int first = dl->VtxBuffer.Size;
+  dl->AddText(font, px, topLeft, col, text);
+  if (angle == 0.0)
+    return;
+  const float c = static_cast<float>(std::cos(-angle));
+  const float s = static_cast<float>(std::sin(-angle));
+  for (int i = first; i < dl->VtxBuffer.Size; ++i) {
+    ImVec2& v = dl->VtxBuffer[i].pos;
+    const float dx = v.x - pivot.x, dy = v.y - pivot.y;
+    v = ImVec2(pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c);
+  }
+}
+
 // Sheet furniture (drawing::SheetGraphics) on screen: the primitives the
 // exporters draw, so a balloon or a hatch looks here as it prints.
 void DrawSheetGraphics(ImDrawList* dl, AppState& state,
                        const drawing::SheetGraphics& g, ImU32 col) {
   const float pxPerMM = static_cast<float>(state.sheetView.scale);
+  for (const auto& f : g.knockouts) {
+    std::vector<ImVec2> pts;
+    for (const glm::dvec2& p : f)
+      pts.push_back(SheetToScreen(state, p));
+    if (pts.size() >= 3)
+      dl->AddConvexPolyFilled(pts.data(), static_cast<int>(pts.size()),
+                              IM_COL32(250, 250, 250, 255));
+  }
   for (const auto& l : g.lines) {
     const float px = std::max(1.0f, static_cast<float>(l.widthMM) * pxPerMM);
     if (l.chain)
@@ -279,11 +305,12 @@ void DrawSheetGraphics(ImDrawList* dl, AppState& state,
     const ImVec2 size =
         font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, t.text.c_str());
     // pos is the baseline; ImGui places text by its top edge.
-    ImVec2 at = SheetToScreen(state, t.pos);
+    const ImVec2 pivot = SheetToScreen(state, t.pos);
+    ImVec2 at = pivot;
     at.y -= size.y * 0.8f;
     if (t.center)
       at.x -= size.x * 0.5f;
-    dl->AddText(font, fontPx, at, col, t.text.c_str());
+    AddTurnedText(dl, font, fontPx, at, pivot, t.angleRad, col, t.text.c_str());
   }
 }
 
@@ -353,10 +380,26 @@ void DrawDims(ImDrawList* dl, AppState& state) {
     // Value text with a white backing box; the box is a drag handle that moves
     // the label (dim.labelOffset), the sketch labelOffset pattern.
     const ImVec2 tp = SheetToScreen(state, d.labelPos);
-    const ImVec2 tsz = font->CalcTextSizeA(fontPx >= 4.0f ? fontPx : 11.0f,
-                                           FLT_MAX, 0.0f, d.text.c_str());
-    const ImVec2 org(tp.x - tsz.x * 0.5f, tp.y - tsz.y * 0.5f);
-    if (fontPx >= 4.0f) {
+    ImVec2 tsz = font->CalcTextSizeA(fontPx >= 4.0f ? fontPx : 11.0f, FLT_MAX,
+                                     0.0f, d.text.c_str());
+    ImVec2 org(tp.x - tsz.x * 0.5f, tp.y - tsz.y * 0.5f);
+    if (d.aligned) {
+      // Written along its line, as it prints: the exporters' description
+      // of it, and its turned box as the drag handle.
+      drawing::SheetGraphics g;
+      const auto q = drawing::DimTextQuad(d);
+      g.knockouts.push_back({q.begin(), q.end()});
+      const glm::dvec2 up(-std::sin(d.textAngle), std::cos(d.textAngle));
+      g.texts.push_back(
+          {d.labelPos - up * 1.25, d.text, true, 3.5, d.textAngle});
+      if (fontPx >= 4.0f)
+        DrawSheetGraphics(dl, state, g, ink);
+      glm::dvec2 mn, mx;
+      drawing::DimLabelBox(d, mn, mx);
+      const ImVec2 a = SheetToScreen(state, mn), b = SheetToScreen(state, mx);
+      org = ImVec2(std::min(a.x, b.x) + 2.0f, std::min(a.y, b.y) + 1.0f);
+      tsz = ImVec2(std::abs(b.x - a.x) - 4.0f, std::abs(b.y - a.y) - 2.0f);
+    } else if (fontPx >= 4.0f) {
       dl->AddRectFilled(ImVec2(org.x - 2, org.y - 1),
                         ImVec2(org.x + tsz.x + 2, org.y + tsz.y + 1),
                         IM_COL32(250, 250, 250, 230), 2.0f);

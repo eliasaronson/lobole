@@ -55,11 +55,26 @@ its setup (sheet, views, dimensions, notes).
   captioned SECTION A-A, and the view it folds from draws the lettered
   cutting-plane line. Dimension a bore in section with a `diameter` across
   its two walls (one `sil_face` ref: the walls are the bore's face).
+- **Detail view**: a circle on another view drawn again at a larger scale,
+  lettered on its parent and captioned DETAIL B (5:1) under it. It draws
+  whatever its parent draws (a section too), and follows the parent.
 - **Parts list and balloons**: a `table: "bom"` note on an assembly view lists
-  the parts that view draws (leave the load out with `hidden`); a `balloon`
-  note with no text, its leader on an occurrence, shows that part's item
-  number from the list.
-- **Datum**: a `datum` note — the letter in a box, a triangle on the feature.
+  the parts that view draws (leave the load out with `hidden`), each with
+  its material's grade (6082-T6); a `balloon` note with no text, its leader
+  on an occurrence, shows that part's item number from the list.
+  `layout_balloons` puts one on every row for you, round the views you name,
+  with no two leaders crossing.
+- **Datum**: a `datum` note — the letter in a box, a triangle on the
+  feature. It is a datum FEATURE: a feature control frame names it by its
+  letter, so each letter is used once on a sheet (and never I, O or Q).
+- **Feature control frame**: a `style: "fcf"` note — the ISO 1101 symbol,
+  the tolerance zone (Ø for a cylindrical one, Ⓜ/Ⓛ for a material
+  condition) and the datums it is measured from, with a leader to the
+  feature or stacked under a dimension's value. What the symbol cannot
+  carry (a datum on a flatness, no datum on a perpendicularity) is refused.
+- **Aligned values**: a length is written along its dimension line, above
+  it, readable from the bottom or the right of the sheet; a vertical one is
+  turned to read upward.
 - **Thread**: a cosmetic or tapped thread draws in thin line by ISO 6410
   (three quarters of a circle end-on, two lines from the side), and a tapped
   hole's callout names the thread, its class, depth and drill.
@@ -109,6 +124,8 @@ set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
                   configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names],
                   rotation_deg?, section?: {point: [x, y, z], label?}}
+add_drawing_view {detail: {view, center: [x, y, z], radius_mm, label?},
+                  scale, position, name?}   # a detail of another view
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
                   base_view?, configuration?, hidden?, rotation_deg?, section?}
 update_drawing {budget_s?}     # re-project; per-view curve counts and errors
@@ -119,7 +136,10 @@ add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},
 list_drawing_dims / remove_drawing_dim {id}
 add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element}
                   | {edge | sil_face: {...}, occurrence?, end? | extreme?},
-                  style?: "text"|"balloon"|"datum", table?: "bends"|"bom"}
+                  style?: "text"|"balloon"|"datum"|"fcf", table?: "bends"|"bom",
+                  fcf?: {symbol, tolerance_mm, diameter?, modifier?: "mmc"|"lmc",
+                         datums?: ["A", "B"]}, dim?}
+layout_balloons {views: [ids]} # a balloon on every parts-list row, none crossing
 list_drawing_notes / remove_drawing_note {id}
 check_drawing {drawing?}       # stale views, dangling refs, overlapping labels
 export_drawing {path}          # .svg or .pdf
@@ -131,6 +151,21 @@ projected, and the response carries its cost. `offset` on a dimension is in
 sheet millimetres and optional; left out, the label is placed clear of the
 views, the title block and existing labels. `check_drawing` reports anything
 left overlapping.
+
+A frame on a bearing seat, perpendicular to datum A, and the holes'
+position under their callout:
+
+```python
+add_drawing_note(view=section, style="datum", text="A", position=[60, 50],
+                 ref={"sil_face": bottom_face, "extreme": "left"})
+add_drawing_note(view=section, style="fcf", position=[230, 120],
+                 ref={"sil_face": seat_wall, "end": 1},
+                 fcf={"symbol": "perpendicularity", "tolerance_mm": 0.02,
+                      "diameter": True, "datums": ["A"]})
+add_drawing_note(style="fcf", dim=pattern_callout_id,
+                 fcf={"symbol": "position", "tolerance_mm": 0.2,
+                      "diameter": True, "datums": ["A", "B"]})
+```
 
 `list_drawing_geometry` returns, for each projected edge or circle, its `ref`
 (`{feature_id, element}`) and `source_id` (pass as `occurrence`) to hand

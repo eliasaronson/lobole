@@ -1,5 +1,7 @@
 #include "core/drawing/DrawingExport.h"
 
+#include "core/Angles.h"
+#include "core/drawing/DrawingDimension.h"
 #include "core/io/Format.h"
 
 #include <cmath>
@@ -101,6 +103,12 @@ constexpr double kTextDrop = 1.25;
 void SvgGraphics(std::ostringstream& out, const drawing::SheetGraphics& g,
                  double H) {
   const auto fy = [H](double y) { return H - y; };
+  for (const auto& f : g.knockouts) {
+    out << "    <polygon points=\"";
+    for (size_t i = 0; i < f.size(); ++i)
+      out << (i ? " " : "") << Num(f[i].x) << ',' << Num(fy(f[i].y));
+    out << "\" fill=\"white\"/>\n";
+  }
   for (const auto& l : g.lines) {
     out << "    <line x1=\"" << Num(l.a.x) << "\" y1=\"" << Num(fy(l.a.y))
         << "\" x2=\"" << Num(l.b.x) << "\" y2=\"" << Num(fy(l.b.y))
@@ -122,12 +130,30 @@ void SvgGraphics(std::ostringstream& out, const drawing::SheetGraphics& g,
       out << (i ? " " : "") << Num(f[i].x) << ',' << Num(fy(f[i].y));
     out << "\" fill=\"#141418\"/>\n";
   }
-  for (const auto& t : g.texts)
+  for (const auto& t : g.texts) {
     out << "    <text x=\"" << Num(t.pos.x) << "\" y=\"" << Num(fy(t.pos.y))
         << "\" font-family=\"Helvetica, sans-serif\" font-size=\""
         << Num(t.heightMM) << "\" fill=\"#141418\" text-anchor=\""
-        << (t.center ? "middle" : "start") << "\">" << Esc(t.text)
-        << "</text>\n";
+        << (t.center ? "middle" : "start") << '"';
+    // SVG turns clockwise in its Y-down space: the sheet's turn negated.
+    if (t.angleRad != 0.0)
+      out << " transform=\"rotate(" << Num(-angles::ToDegrees(t.angleRad))
+          << ' ' << Num(t.pos.x) << ' ' << Num(fy(t.pos.y)) << ")\"";
+    out << '>' << Esc(t.text) << "</text>\n";
+  }
+}
+
+// A resolved dimension's value as sheet furniture: its knockout and its
+// text, turned with the line for an aligned value. One description, so the
+// viewport and both exporters set a value the same way.
+drawing::SheetGraphics AlignedValue(const drawing::ResolvedDim& d) {
+  drawing::SheetGraphics g;
+  const auto q = drawing::DimTextQuad(d);
+  g.knockouts.push_back({q.begin(), q.end()});
+  const glm::dvec2 up(-std::sin(d.textAngle), std::cos(d.textAngle));
+  g.texts.push_back(
+      {d.labelPos - up * kTextDrop, d.text, true, 3.5, d.textAngle});
+  return g;
 }
 
 } // namespace
@@ -291,7 +317,10 @@ bool SaveSVG(const DrawingDocument& doc,
           }
         }
         // A small white gap behind the text keeps it legible over the line.
-        label(d.labelPos, d.text);
+        if (d.aligned)
+          SvgGraphics(out, AlignedValue(d), H);
+        else
+          label(d.labelPos, d.text);
       }
       for (const drawing::ResolvedNote& n : notes) {
         const drawing::SheetGraphics g = drawing::NoteGraphics(n);
@@ -408,7 +437,19 @@ bool SavePDF(const DrawingDocument& doc,
          << " l " << P(p2.x) << ' ' << P(p2.y) << " l f\n";
     };
     const auto text = [&](glm::dvec2 at, double sizeMm, const std::string& s,
-                          double gray, bool center) {
+                          double gray, bool center, double angle = 0.0) {
+      if (angle != 0.0) {
+        // A turned line: the text matrix carries the turn, and centring
+        // moves the start back along the turned baseline.
+        const glm::dvec2 along(std::cos(angle), std::sin(angle));
+        const glm::dvec2 start =
+            center ? at - along * (0.5 * drawing::TextWidthMM(s, sizeMm)) : at;
+        cs << gray << ' ' << gray << ' ' << gray << " rg BT /F1 " << P(sizeMm)
+           << " Tf " << Num(along.x) << ' ' << Num(along.y) << ' '
+           << Num(-along.y) << ' ' << Num(along.x) << ' ' << P(start.x) << ' '
+           << P(start.y) << " Tm (" << PdfText(s) << ") Tj ET\n0 0 0 rg\n";
+        return;
+      }
       // One line at a time: a PDF text object does not break on newlines
       // either, and a note is allowed to have them.
       double y = at.y;
@@ -434,6 +475,14 @@ bool SavePDF(const DrawingDocument& doc,
     // Sheet furniture (drawing::SheetGraphics): the same primitives the SVG
     // and the viewport draw.
     const auto graphics = [&](const drawing::SheetGraphics& g) {
+      for (const auto& f : g.knockouts) {
+        if (f.size() < 3)
+          continue;
+        cs << "1 1 1 rg " << P(f[0].x) << ' ' << P(f[0].y) << " m ";
+        for (size_t i = 1; i < f.size(); ++i)
+          cs << P(f[i].x) << ' ' << P(f[i].y) << " l ";
+        cs << "f 0 0 0 rg\n";
+      }
       for (const auto& l : g.lines) {
         if (l.chain)
           poly({l.a, l.b}, drawing::LineStyle{drawing::kBendDashMM, l.widthMM});
@@ -452,7 +501,7 @@ bool SavePDF(const DrawingDocument& doc,
         cs << "f\n";
       }
       for (const auto& t : g.texts)
-        text(t.pos, t.heightMM, t.text, 0.08, t.center);
+        text(t.pos, t.heightMM, t.text, 0.08, t.center, t.angleRad);
     };
 
     for (const drawing::SheetView& v : views) {
@@ -503,7 +552,10 @@ bool SavePDF(const DrawingDocument& doc,
           arrow(d.dim2, -u);
         }
       }
-      label(d.labelPos, d.text);
+      if (d.aligned)
+        graphics(AlignedValue(d));
+      else
+        label(d.labelPos, d.text);
     }
     for (const drawing::ResolvedNote& n : notes) {
       const drawing::SheetGraphics g = drawing::NoteGraphics(n);

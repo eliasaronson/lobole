@@ -1820,6 +1820,13 @@ json DrawingViewToJson(const DrawingView& v) {
     const glm::dvec3& p = v.section.point;
     j["section"] = {{"point", {p.x, p.y, p.z}}, {"label", v.section.label}};
   }
+  if (v.detail.on) { // v151
+    const glm::dvec3& c = v.detail.center;
+    j["detail"] = {{"view", v.detail.parentViewId},
+                   {"center", {c.x, c.y, c.z}},
+                   {"radius_mm", v.detail.radius},
+                   {"label", v.detail.label}};
+  }
   return j;
 }
 
@@ -1854,6 +1861,21 @@ DrawingView DrawingViewFromJson(const json& j) {
                        p[2].get<double>()};
     v.section.label = sj.value("label", std::string{});
   }
+  if (j.contains("detail")) { // v151
+    const json& dj = j.at("detail");
+    const json c = dj.value("center", json::array());
+    if (!c.is_array() || c.size() != 3)
+      throw std::runtime_error("a detail view's center is [x, y, z]");
+    v.detail.on = true;
+    v.detail.parentViewId = dj.value("view", uint64_t{0});
+    v.detail.center = {c[0].get<double>(), c[1].get<double>(),
+                       c[2].get<double>()};
+    v.detail.radius = dj.value("radius_mm", 0.0);
+    v.detail.label = dj.value("label", std::string{});
+    if (v.detail.parentViewId == 0 || !(v.detail.radius > 0.0))
+      throw std::runtime_error(
+          "a detail view names its parent `view` and a `radius_mm` above 0");
+  }
   return v;
 }
 
@@ -1869,6 +1891,18 @@ json DrawingNoteToJson(const DrawingNote& n) {
     j["table"] = NoteTableToString(n.table);
   if (n.style != NoteStyle::Text) // v147
     j["style"] = NoteStyleToString(n.style);
+  if (n.style == NoteStyle::Fcf) { // v151
+    json f = {{"symbol", GeoSymbolToString(n.fcf.symbol)},
+              {"tolerance_mm", n.fcf.tolerance},
+              {"datums", n.fcf.datums}};
+    if (n.fcf.diameterZone)
+      f["diameter"] = true;
+    if (n.fcf.modifier != MaterialModifier::None)
+      f["modifier"] = MaterialModifierToString(n.fcf.modifier);
+    j["fcf"] = std::move(f);
+  }
+  if (n.attachDim != 0) // v151
+    j["dim"] = n.attachDim;
   return j;
 }
 
@@ -1887,6 +1921,23 @@ DrawingNote DrawingNoteFromJson(const json& j) {
   const std::string style = j.value("style", std::string("text"));
   if (!NoteStyleFromString(style, n.style))
     throw std::runtime_error(UnknownNoteStyle(style));
+  if (n.style == NoteStyle::Fcf) { // v151
+    if (!j.contains("fcf") || !j.at("fcf").is_object())
+      throw std::runtime_error("an fcf note carries its frame in `fcf`");
+    const json& f = j.at("fcf");
+    const std::string symbol = f.value("symbol", std::string{});
+    if (!GeoSymbolFromString(symbol, n.fcf.symbol))
+      throw std::runtime_error(UnknownGeoSymbol(symbol));
+    n.fcf.tolerance = f.value("tolerance_mm", 0.0);
+    n.fcf.diameterZone = f.value("diameter", false);
+    const std::string modifier = f.value("modifier", std::string("none"));
+    if (!MaterialModifierFromString(modifier, n.fcf.modifier))
+      throw std::runtime_error(UnknownMaterialModifier(modifier));
+    n.fcf.datums = f.value("datums", std::vector<std::string>{});
+    if (const std::string why = ValidateFcf(n.fcf); !why.empty())
+      throw std::runtime_error(why);
+  }
+  n.attachDim = j.value("dim", uint64_t{0});
   return n;
 }
 

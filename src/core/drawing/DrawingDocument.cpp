@@ -274,6 +274,8 @@ const char* NoteStyleToString(NoteStyle s) {
     return "balloon";
   case NoteStyle::Datum:
     return "datum";
+  case NoteStyle::Fcf:
+    return "fcf";
   }
   return "text";
 }
@@ -285,6 +287,8 @@ bool NoteStyleFromString(const std::string& s, NoteStyle& out) {
     out = NoteStyle::Balloon;
   else if (s == "datum")
     out = NoteStyle::Datum;
+  else if (s == "fcf")
+    out = NoteStyle::Fcf;
   else
     return false;
   return true;
@@ -292,7 +296,147 @@ bool NoteStyleFromString(const std::string& s, NoteStyle& out) {
 
 std::string UnknownNoteStyle(const std::string& given) {
   return "unknown note style '" + given +
-         "' (expected one of: text, balloon, datum)";
+         "' (expected one of: text, balloon, datum, fcf)";
+}
+
+namespace {
+
+// One table: the name on the wire, the symbol, and what it may carry
+// (ISO 1101 Table 2 and its clauses on datums and zones). Form tolerances
+// take no datum; orientation, coaxiality, symmetry and runout need one;
+// position and profile may stand alone. A Ø zone is meaningful where the
+// toleranced feature can be an axis; a material modifier where it can be a
+// feature of size.
+struct SymbolRow {
+  const char* name;
+  GeoSymbol symbol;
+  GeoSymbolRule rule;
+};
+using D = GeoSymbolRule::Datums;
+constexpr SymbolRow kSymbols[] = {
+    {"straightness", GeoSymbol::Straightness, {D::None, true, true}},
+    {"flatness", GeoSymbol::Flatness, {D::None, false, false}},
+    {"circularity", GeoSymbol::Circularity, {D::None, false, false}},
+    {"cylindricity", GeoSymbol::Cylindricity, {D::None, false, false}},
+    {"profile_line", GeoSymbol::ProfileLine, {D::Optional, false, false}},
+    {"profile_surface", GeoSymbol::ProfileSurface, {D::Optional, false, false}},
+    {"parallelism", GeoSymbol::Parallelism, {D::Required, true, true}},
+    {"perpendicularity",
+     GeoSymbol::Perpendicularity,
+     {D::Required, true, true}},
+    {"angularity", GeoSymbol::Angularity, {D::Required, true, true}},
+    {"position", GeoSymbol::Position, {D::Optional, true, true}},
+    {"coaxiality", GeoSymbol::Coaxiality, {D::Required, true, true}},
+    {"symmetry", GeoSymbol::Symmetry, {D::Required, false, true}},
+    {"circular_runout", GeoSymbol::CircularRunout, {D::Required, false, false}},
+    {"total_runout", GeoSymbol::TotalRunout, {D::Required, false, false}},
+};
+
+std::string SymbolNames() {
+  std::string out;
+  for (const SymbolRow& r : kSymbols)
+    out += (out.empty() ? "" : ", ") + std::string(r.name);
+  return out;
+}
+
+} // namespace
+
+const char* GeoSymbolToString(GeoSymbol s) {
+  for (const SymbolRow& r : kSymbols)
+    if (r.symbol == s)
+      return r.name;
+  return "position";
+}
+
+bool GeoSymbolFromString(const std::string& s, GeoSymbol& out) {
+  for (const SymbolRow& r : kSymbols)
+    if (s == r.name) {
+      out = r.symbol;
+      return true;
+    }
+  return false;
+}
+
+std::string UnknownGeoSymbol(const std::string& given) {
+  return "unknown tolerance symbol '" + given +
+         "' (expected one of: " + SymbolNames() + ")";
+}
+
+GeoSymbolRule GeoSymbolRules(GeoSymbol s) {
+  for (const SymbolRow& r : kSymbols)
+    if (r.symbol == s)
+      return r.rule;
+  return {};
+}
+
+const char* MaterialModifierToString(MaterialModifier m) {
+  switch (m) {
+  case MaterialModifier::None:
+    return "none";
+  case MaterialModifier::Mmc:
+    return "mmc";
+  case MaterialModifier::Lmc:
+    return "lmc";
+  }
+  return "none";
+}
+
+bool MaterialModifierFromString(const std::string& s, MaterialModifier& out) {
+  if (s == "none" || s.empty())
+    out = MaterialModifier::None;
+  else if (s == "mmc" || s == "M")
+    out = MaterialModifier::Mmc;
+  else if (s == "lmc" || s == "L")
+    out = MaterialModifier::Lmc;
+  else
+    return false;
+  return true;
+}
+
+std::string UnknownMaterialModifier(const std::string& given) {
+  return "unknown material modifier '" + given +
+         "' (expected one of: none, mmc (M), lmc (L))";
+}
+
+std::string ValidateDatumLetter(const std::string& letter) {
+  if (letter.size() != 1 || letter[0] < 'A' || letter[0] > 'Z')
+    return "a datum is named by one capital letter, A to Z; got '" + letter +
+           "'";
+  if (letter == "I" || letter == "O" || letter == "Q")
+    return "datum letters leave out I, O and Q (ISO 5459: they read as 1, 0 "
+           "and 0); got '" +
+           letter + "'";
+  return {};
+}
+
+std::string ValidateFcf(const FeatureControlFrame& f) {
+  const GeoSymbolRule rule = GeoSymbolRules(f.symbol);
+  const std::string name = GeoSymbolToString(f.symbol);
+  if (!(f.tolerance > 0.0))
+    return "a " + name + " tolerance is a zone wider than zero";
+  if (f.datums.size() > 3)
+    return "a frame names at most three datums (primary, secondary, "
+           "tertiary); got " +
+           std::to_string(f.datums.size());
+  if (rule.datums == GeoSymbolRule::Datums::None && !f.datums.empty())
+    return name +
+           " is a form tolerance: it is measured against its own feature "
+           "and takes no datum";
+  if (rule.datums == GeoSymbolRule::Datums::Required && f.datums.empty())
+    return name + " is measured from a datum: name one in `datums`";
+  for (size_t i = 0; i < f.datums.size(); ++i) {
+    if (const std::string why = ValidateDatumLetter(f.datums[i]); !why.empty())
+      return why;
+    for (size_t j = 0; j < i; ++j)
+      if (f.datums[j] == f.datums[i])
+        return "datum " + f.datums[i] + " is named twice in one frame";
+  }
+  if (f.diameterZone && !rule.diameterZone)
+    return name + " has no cylindrical zone, so no Ø";
+  if (f.modifier != MaterialModifier::None && !rule.modifier)
+    return name + " takes no material modifier (M or L): its feature is not "
+                  "a size";
+  return {};
 }
 
 const char* DrawingDimKindToString(DrawingDimKind k) {

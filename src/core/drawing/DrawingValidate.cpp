@@ -1,5 +1,7 @@
 #include "core/drawing/DrawingValidate.h"
 
+#include "core/drawing/DrawingBalloons.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -215,7 +217,7 @@ ValidateDrawing(const DrawingDocument& doc,
     if (!d.resolved)
       continue;
     glm::dvec2 mn(0.0), mx(0.0);
-    LabelBox(d.labelPos, d.text, mn, mx);
+    DimLabelBox(d, mn, mx);
     if (RectsOverlap(mn, mx, chrome.titleBlockMin, chrome.titleBlockMax))
       issues.push_back({"dim_over_title_block", 0, 0, d.id,
                         "dim " + std::to_string(d.id) + " ('" + d.text +
@@ -276,6 +278,32 @@ ValidateDrawing(const DrawingDocument& doc,
                "text overlaps note " + std::to_string(other.id));
     noteBoxes.push_back({note.id, note.text, mn, mx});
   }
+
+  // Balloon leaders that cross each other: two parts' leaders crossing is
+  // how a reader follows one to the other's part
+  // (docs/drawings/README.md#balloon-layout).
+  std::vector<std::pair<const ResolvedNote*, std::pair<glm::dvec2, glm::dvec2>>>
+      leaders;
+  for (const auto& note : notes) {
+    if (note.style != NoteStyle::Balloon || !note.hasLeader)
+      continue;
+    glm::dvec2 mn, mx;
+    NoteBox(note, mn, mx);
+    leaders.push_back(
+        {&note, BalloonLeader(note.pos, 0.5 * (mx.x - mn.x), note.anchor)});
+  }
+  for (size_t i = 0; i < leaders.size(); ++i)
+    for (size_t j = i + 1; j < leaders.size(); ++j) {
+      const auto& [a, b] = leaders[i].second;
+      const auto& [c, d] = leaders[j].second;
+      if (SegmentsCross(a, b, c, d))
+        issues.push_back({"balloon_leaders_cross", 0, 0, 0,
+                          "balloons " + leaders[i].first->text + " and " +
+                              leaders[j].first->text +
+                              ": their leaders cross (layout_balloons lays "
+                              "them out so that none do)",
+                          leaders[i].first->id});
+    }
 
   return issues;
 }
