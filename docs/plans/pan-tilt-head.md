@@ -79,7 +79,8 @@ The numbers that matter:
   73 g, each worm 23 g); with the 1.5 kg camera, 3.01 kg.
 - **Motion.** Pan 360° (40 worm turns) and tilt ±90° (±40 turns), driven
   from the worm shafts, 48 samples each, every pair checked exactly: both
-  clean, no unsolved sample. They cost 715 s and 360 s.
+  clean, no unsolved sample. They cost 715 s and 360 s (measured before
+  the wheel's teeth were cut by one replicated sector).
 - **Clearances.** The camera clears the yoke by 4.8 mm at −90° (the designed
   `cam_clear`), 10.2 mm at 0 and +90°; the cradle runs 1.2 mm off the arms.
   The standing exact sweep is clean.
