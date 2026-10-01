@@ -108,7 +108,10 @@ AdaptiveResult ClearImpl(double safeZ, double rapidFeed, const Operation& op,
     ~Restore() { std::cout.rdbuf(buf); }
   } restore{saved};
   try {
-    outputs = engine.Execute(outers, outers, AdaptivePath::DPaths{},
+    // A loop marked `hole` is area already clear -- air beyond the stock
+    // round a part being cleared round (docs/cam/operations.md#clear-round):
+    // told as cleared, it is not cut.
+    outputs = engine.Execute(outers, outers, ToAdaptive(region, /*holes=*/true),
                              [](AdaptivePath::TPaths) { return false; });
   } catch (const std::exception& e) {
     result.error = std::string("adaptive clearing failed: ") + e.what();

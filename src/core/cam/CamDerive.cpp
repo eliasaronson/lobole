@@ -272,9 +272,30 @@ DerivedOp DeriveOperation(const Setup& setup,
   case OpType::Adaptive: // the strategy, derived exactly like the verb it is
   case OpType::Pocket: {
     if (IsWallFace(bodies, target.ref, target.jobPartId)) {
-      out.why = "click the pocket's FLOOR — a wall says where to go round, "
-                "not how deep to go. Cut it out follows a wall.";
-      return out;
+      const WallContour wall =
+          PickedWallContour(bodies, target.ref, 0.02, target.jobPartId);
+      if (!wall.ok) {
+        out.why = wall.why;
+        return out;
+      }
+      // An opening's wall says where to go round, not how deep: its floor
+      // does. The part's OUTSIDE wall is the other case -- clear the stock
+      // round the part, down the wall (docs/cam/operations.md#clear-round),
+      // and through the stock with it when the wall reaches the part's
+      // bottom, as a cut-out goes.
+      if (wall.opening) {
+        out.why = "click the pocket's FLOOR — an opening's wall says where to "
+                  "go round, not how deep to go. Cut it out follows a wall.";
+        return out;
+      }
+      op.name = "Clear round";
+      op.targets = {target};
+      op.side = Side::Outside;
+      op.topZ = hi.z;
+      op.bottomZ = wall.bottomZ > modelBottom + kThrough ? wall.bottomZ : lo.z;
+      if (AdaptiveAvailable() && op.topZ - op.bottomZ > tool.diameter)
+        op.type = OpType::Adaptive;
+      break;
     }
     const FaceRegion region =
         PickedFaceRegion(bodies, target.ref, 0.02, target.jobPartId);

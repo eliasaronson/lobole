@@ -107,6 +107,80 @@ std::vector<Loop> FaceOpenings(const std::vector<Body>& bodies,
   return out;
 }
 
+// Clearing ROUND a part (docs/cam/operations.md#clear-round): a clearing
+// operation whose target is the part's own outside wall, not a floor. A
+// vise-held part cut from a blank has its waste round it, and with no floor
+// to pick nothing but a profile could take it -- which leaves the frame
+// standing for the operator to saw off.
+// How far past the stock's edge a clear-round region reaches, in cutters:
+// the radius, so the cutter's centre can stand on the edge, and a tenth more.
+constexpr double kRoundGrow = 0.55;
+
+bool ClearsRound(const Operation& op, const std::vector<Body>& bodies) {
+  if (op.targets.empty())
+    return false;
+  const Target& t = op.targets.front();
+  if (!IsWallFace(bodies, t.ref, t.jobPartId))
+    return false;
+  const WallContour wall = PickedWallContour(bodies, t.ref, 0.02, t.jobPartId);
+  return wall.ok && !wall.opening;
+}
+
+// The region a clear-round pass clears at each of `passes`: the stock,
+// grown by the cutter's radius and a tenth more so its edges are cut clean
+// (they are open: nothing stands beyond them), less everything of the part
+// at or above the pass -- the projection from the operation's top, with its
+// openings filled, so an overhang above a pass is not undercut and the
+// cutter never goes into the part's own pockets.
+std::vector<Clipper2Lib::Paths64>
+ClearRoundRegions(const Setup& setup, const Operation& op, const Tool& tool,
+                  const std::vector<Body>& bodies,
+                  const std::vector<double>& passes) {
+  std::vector<Clipper2Lib::Paths64> out(passes.size());
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBoundsFramed(setup, bodies, lo, hi))
+    return out;
+  const double g = kRoundGrow * tool.diameter;
+  const Clipper2Lib::Path64 stock =
+      ToClipper(std::vector<glm::dvec2>{{lo.x - g, lo.y - g},
+                                        {hi.x + g, lo.y - g},
+                                        {hi.x + g, hi.y + g},
+                                        {lo.x - g, hi.y + g}});
+  const std::vector<std::vector<Loop>> projected =
+      ProjectedOutlines(bodies, op.topZ, passes);
+  for (size_t i = 0; i < passes.size() && i < projected.size(); i++) {
+    Clipper2Lib::Paths64 part;
+    for (const Loop& l : projected[i])
+      if (!l.hole)
+        part.push_back(ToClipper(l.pts));
+    out[i] = Clipper2Lib::Difference(
+        Clipper2Lib::Paths64{stock},
+        Clipper2Lib::Union(part, Clipper2Lib::FillRule::NonZero),
+        Clipper2Lib::FillRule::NonZero);
+  }
+  return out;
+}
+
+// The air a clear-round region reaches into: its grown edge less the stock
+// and a quarter cutter round it. That quarter is cut as if it were stock:
+// told the stock's own edge was clear, the pass left a 0.6 mm sliver along it.
+Clipper2Lib::Paths64 ClearRoundAir(const Setup& setup, const Tool& tool,
+                                   const std::vector<Body>& bodies) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBoundsFramed(setup, bodies, lo, hi))
+    return {};
+  const auto rect = [&](double g) {
+    return ToClipper(std::vector<glm::dvec2>{{lo.x - g, lo.y - g},
+                                             {hi.x + g, lo.y - g},
+                                             {hi.x + g, hi.y + g},
+                                             {lo.x - g, hi.y + g}});
+  };
+  return Clipper2Lib::Difference(
+      Clipper2Lib::Paths64{rect(kRoundGrow * tool.diameter)},
+      Clipper2Lib::Paths64{rect(0.25 * tool.diameter)},
+      Clipper2Lib::FillRule::NonZero);
+}
+
 // `openEdges` false leaves the floor as it is drawn, for measuring it: see
 // FloorWidthRefusal below.
 Clipper2Lib::Paths64 TargetPaths(const Operation& op,
@@ -684,8 +758,16 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
   // wire is the pocket wall and its inner wires are islands
   // (docs/cam/operations.md#pocket-and-adaptive).
   std::string why;
+  // Round the part, the region is the stock less the part, per pass.
+  const bool round = ClearsRound(op, bodies);
+  const std::vector<double> passes = DepthPasses(op);
+  const std::vector<Clipper2Lib::Paths64> roundRegions =
+      round ? ClearRoundRegions(setup, op, tool, bodies, passes)
+            : std::vector<Clipper2Lib::Paths64>{};
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5, why);
+      round ? Clipper2Lib::Paths64{}
+            : TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5,
+                          why);
   if (!why.empty()) {
     tp.error = why;
     return;
@@ -696,8 +778,11 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
   // depth and closes up at the next is doing the right thing, and a message
   // about that would be noise.
   std::string tooTight;
-  for (const double z : DepthPasses(op)) {
-    Clipper2Lib::Paths64 region = picked;
+  for (size_t pass = 0; pass < passes.size(); pass++) {
+    const double z = passes[pass];
+    Clipper2Lib::Paths64 region = round ? roundRegions[pass] : picked;
+    if (round && region.empty())
+      continue;
     if (region.empty()) {
       const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
       if (loops.empty())
@@ -934,8 +1019,24 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
   std::string why;
+  // Round the part, the region is the stock less the part, per pass, and it
+  // is cleared from INSIDE that region: Adaptive2d's own outside clearing
+  // wants the stock as a second boundary, which this bridge does not hand
+  // it.
+  const bool round = ClearsRound(op, bodies);
+  const std::vector<double> passes = DepthPasses(op);
+  const std::vector<Clipper2Lib::Paths64> roundRegions =
+      round ? ClearRoundRegions(setup, op, tool, bodies, passes)
+            : std::vector<Clipper2Lib::Paths64>{};
+  const Clipper2Lib::Paths64 roundAir =
+      round ? ClearRoundAir(setup, tool, bodies) : Clipper2Lib::Paths64{};
+  Operation clearing = op;
+  if (round)
+    clearing.side = Side::Inside;
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5, why);
+      round ? Clipper2Lib::Paths64{}
+            : TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5,
+                          why);
   if (!why.empty()) {
     tp.error = why;
     return;
@@ -948,8 +1049,11 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
   // queued in one go, in depth order — and nothing below the queueing is
   // allowed to run on a partial result.
   bool deferred = false;
-  for (const double z : DepthPasses(op)) {
-    Clipper2Lib::Paths64 region = picked;
+  for (size_t pass = 0; pass < passes.size(); pass++) {
+    const double z = passes[pass];
+    Clipper2Lib::Paths64 region = round ? roundRegions[pass] : picked;
+    if (round && region.empty())
+      continue;
     if (region.empty()) {
       const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
       Clipper2Lib::Paths64 holes;
@@ -970,14 +1074,22 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       l.hole = false;
       asLoops.push_back(std::move(l));
     }
+    // Round a part, the ring between the stock and the region's grown edge
+    // is air: handed over as already clear, so the pass does not cut it.
+    for (const Clipper2Lib::Path64& path : roundAir) {
+      Loop l;
+      l.pts = FromClipper(path);
+      l.hole = true;
+      asLoops.push_back(std::move(l));
+    }
     // The pass: from the cache, from a worker later, or right here.
     const bool cached = ctx != nullptr && ctx->cache != nullptr;
     const uint64_t key =
-        cached ? AdaptiveKey(setup, op, tool, asLoops, z, entryZ) : 0;
+        cached ? AdaptiveKey(setup, clearing, tool, asLoops, z, entryZ) : 0;
     const AdaptiveResult* hit = cached ? ctx->cache->Find(key) : nullptr;
     if (hit == nullptr && cached && ctx->defer) {
       ctx->pending.push_back(
-          MakeAdaptiveRequest(setup, op, tool, asLoops, z, entryZ));
+          MakeAdaptiveRequest(setup, clearing, tool, asLoops, z, entryZ));
       deferred = true;
       entryZ = z;
       continue;
@@ -988,13 +1100,13 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     }
     AdaptiveResult computed;
     if (hit == nullptr) {
-      computed = AdaptiveClear(setup, op, tool, asLoops, z, entryZ);
+      computed = AdaptiveClear(setup, clearing, tool, asLoops, z, entryZ);
       if (cached)
         ctx->cache->Put(key, computed);
     }
     const AdaptiveResult& cleared = hit != nullptr ? *hit : computed;
     if (cleared.error.empty() && cleared.moves.empty() &&
-        op.side == Side::Outside) {
+        clearing.side == Side::Outside) {
       // Adaptive is the one clearing strategy that reads `side`, and outside
       // a region whose own boundary is the stock there is nothing to clear —
       // it returns silence rather than a complaint. The concentric pocket

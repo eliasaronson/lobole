@@ -53,6 +53,7 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | verb | pick | derives |
 |---|---|---|
 | Clear a pocket | the pocket's floor (`PickedFaceRegion`) | boundary = the face's outer wire, islands = its inner wires; bottom = the face's Z; top = the stock top as the earlier setups left it (below). A pocket deeper than one tool diameter comes back as `adaptive` when libarea is built |
+| Clear round the part | the part's OUTSIDE wall, as a pocket or adaptive | the stock between its edge and the part, from the stock top down the wall; through the stock's bottom when the wall reaches the part's bottom, as a cut-out does ([Clear round](#clear-round)). An opening's wall is refused: its floor says how deep |
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
@@ -274,6 +275,31 @@ is scrap.
   nowhere to start emits nothing: its start point is unset, and entering
   there anyway made moves that kept the fall-back from running.
 - Both refuse cones (`NeedsFlatFloor`).
+
+### Clear round
+
+A part cut from a blank in a vise has its waste ROUND it, and no floor to
+pick: before this, only a profile could take it, which leaves a frame for the
+operator to saw off (or, cut through, to fall into the cutter as it frees).
+A pocket or adaptive whose target is the part's OUTSIDE wall clears round
+the part (`ClearsRound`, `ClearRoundRegions` in `CamStrategies.cpp`):
+
+- **The region**, per depth pass: the stock, grown by 0.55 of the cutter
+  (its edges are open, so the cutter's centre may stand on them), less the
+  part's projection from the operation's top down to the pass with its
+  openings filled -- an overhang above a pass is not undercut, and the
+  cutter never goes into the part's own pockets.
+- **Adaptive** clears that region from inside, and is told the ring beyond
+  the stock is already clear (a loop marked `hole` in an adaptive region,
+  `CamAdaptive.cpp`), so it does not cut the air there. It still enters on
+  its own helix, in the stock's corner. The ring starts a quarter cutter out
+  from the stock: told the stock's own edge was clear, it left a 0.6 mm
+  sliver along it. Told nothing, it cleared the air too: the base plate's
+  two setups cut 77 m and took 13 minutes to plan, against 62 m and 2.
+- **Depths** derive from the wall: from the stock top down to the wall's
+  bottom, or through the stock's bottom when the wall reaches the part's.
+  A vise-held part stops above the jaws with `bottom_z` and takes the rest
+  from the other side (the pan/tilt base plate, `generators/pantilt/cam.py`).
 
 ### Face
 

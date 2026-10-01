@@ -1647,6 +1647,76 @@ TEST_CASE("cam: a hole that opens downward is refused, not drilled through "
   CHECK_THAT(flipped.op.bottomZ, WithinAbs(-12.0, 1e-6));
 }
 
+TEST_CASE("cam: clearing round a part takes the stock down its outside wall",
+          "[cam][slow]") {
+  // A Ø20 boss 15 tall: no floor to pick, the waste all round it. A clearing
+  // op on its OUTSIDE wall clears from the stock's edge to the wall
+  // (docs/cam/operations.md#clear-round); a wall that reaches the part's
+  // bottom goes through the stock's bottom with it, as a cut-out does.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 10.0, 15.0));
+  cam::Setup s = BasicSetup();
+  s.stock.margin = glm::dvec3(6.0, 6.0, 1.0);
+  s.stock.bottomMargin = 1.0;
+  s.safeZ = cam::DeriveSafeZ(s, doc->GetBodies());
+  const ElementRef wall = HoleWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, wall});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK(d.op.side == cam::Side::Outside);
+  CHECK(d.op.name == "Clear round");
+  CHECK_THAT(d.op.topZ, WithinAbs(16.0, 1e-6));
+  CHECK_THAT(d.op.bottomZ, WithinAbs(-1.0, 1e-6));
+  // An opening's wall is still a pocket's to refuse: its floor says how deep.
+  {
+    auto slotted = SlottedDoc();
+    const cam::DerivedOp opening = cam::DeriveOperation(
+        BasicSetup(), slotted->GetBodies(), cam::OpType::Pocket,
+        cam::Target{0, WallNear(*slotted, 14.0, 15.0)});
+    REQUIRE_FALSE(opening.ok);
+    CHECK(opening.why.find("FLOOR") != std::string::npos);
+  }
+  for (const cam::OpType type : {cam::OpType::Pocket, cam::OpType::Adaptive}) {
+    if (type == cam::OpType::Adaptive && !cam::AdaptiveAvailable())
+      continue;
+    cam::Setup job = s;
+    cam::Operation op = d.op;
+    op.type = type;
+    op.id = 1;
+    op.stepover = 0.3;
+    job.operations.push_back(op);
+    const cam::Toolpath tp = cam::GenerateAll(job, doc->GetBodies())[0];
+    INFO(tp.error);
+    REQUIRE(tp.error.empty());
+    REQUIRE_FALSE(tp.moves.empty());
+    // Never into the boss, and out to the stock's edge (the stock is 32 mm
+    // square: the cutter's centre reaches its edge, 16 mm out).
+    double reach = 0.0;
+    for (const cam::Move& m : tp.moves) {
+      if (m.kind == cam::Move::Kind::Rapid)
+        continue;
+      const double r = glm::length(glm::dvec2(m.to));
+      INFO("cut at " << m.to.x << "," << m.to.y << "," << m.to.z);
+      CHECK(r >= 10.0 + 3.0 - 0.05);
+      reach = std::max(reach, std::max(std::abs(m.to.x), std::abs(m.to.y)));
+    }
+    CHECK(reach >= 16.0 - 0.05);
+    // And the posted program leaves the boss and nothing else.
+    std::string gcode, why;
+    REQUIRE(cam::PostProcess("mach3", job, {tp}, {}, gcode, &why));
+    const cam::Verdict v = cam::VerifyGcode(gcode, job, doc->GetBodies(), 0.25);
+    INFO((type == cam::OpType::Pocket ? "pocket" : "adaptive")
+         << " leftover " << v.maxLeftover << " at " << v.leftoverAt.x << ","
+         << v.leftoverAt.y << " area " << v.leftoverArea << " gouge "
+         << v.maxGouge);
+    CHECK(v.Safe(0.375));
+    CHECK(v.Complete(0.375));
+  }
+}
+
 TEST_CASE("cam verify: a sloped move cuts as low as it goes over each cell",
           "[cam]") {
   // Carved at the tool's height at the closest approach, a cell a descending
