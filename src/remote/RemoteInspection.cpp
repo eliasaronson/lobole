@@ -2813,8 +2813,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (const std::string why = printfit::Validate(*next); !why.empty())
         throw std::runtime_error("set_print_process: " + why);
     }
-    CommandsFor(state, part)
-        .Execute(std::make_unique<SetPrintProcessCommand>(next), part);
+    // The same process again is no edit: no undo step, and no version
+    // moved under a study solved on this part (a generator that re-declares
+    // its print before reading a result read it stale).
+    const auto& have = part.PrintProcess();
+    const bool same = have.has_value() == next.has_value() &&
+                      (!have || (have->process == next->process &&
+                                 have->material == next->material));
+    if (!same)
+      CommandsFor(state, part)
+          .Execute(std::make_unique<SetPrintProcessCommand>(next), part);
     return json{{"print", ProcessJson(part.PrintProcess())},
                 {"threads", PrintedThreadsJson(part)}};
   }
