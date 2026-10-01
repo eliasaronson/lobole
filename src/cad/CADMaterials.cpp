@@ -1,4 +1,5 @@
 #include "cad/CADMaterials.h"
+#include <cctype>
 #include <stdexcept>
 
 namespace CADMaterials {
@@ -89,6 +90,12 @@ void MaterialLibrary::InitializeMaterials() {
       0.75f,                          // Good specular
       0.04f,                          // Standard metal reflectance
       "Titanium"};
+
+  // Grades look like the generic row: one appearance, three alloys.
+  materials[MaterialType::ALUMINUM_6061_T6] = materials[MaterialType::ALUMINUM];
+  materials[MaterialType::ALUMINUM_6061_T6].name = "Aluminium 6061-T6";
+  materials[MaterialType::ALUMINUM_6082_T6] = materials[MaterialType::ALUMINUM];
+  materials[MaterialType::ALUMINUM_6082_T6].name = "Aluminium 6082-T6";
 
   // Non-metals - Low metallic, varied roughness
   materials[MaterialType::PLASTIC_WHITE] = {
@@ -240,6 +247,8 @@ void MaterialLibrary::InitializeMaterials() {
   // DEFAULT copy above so DEFAULT keeps density 0 = unknown: an unassigned
   // body reports no mass instead of a silently-guessed aluminum one.
   materials[MaterialType::ALUMINUM].density = 2700.0f;
+  materials[MaterialType::ALUMINUM_6061_T6].density = 2700.0f;
+  materials[MaterialType::ALUMINUM_6082_T6].density = 2700.0f;
   materials[MaterialType::STEEL].density = 7850.0f;
   materials[MaterialType::STAINLESS_STEEL].density = 8000.0f;
   materials[MaterialType::BRASS].density = 8530.0f;
@@ -283,6 +292,13 @@ void MaterialLibrary::InitializeMaterials() {
     materials[t].yieldMPa = yield;
   };
   elastic(MaterialType::ALUMINUM, 69.0f, 0.33f, 95.0f);
+  // A grade's yield is its specification's MINIMUM for plate, which is what
+  // a design may count on (a datasheet's typical 276 MPa for 6061-T6 is not):
+  // ASTM B209 6061-T6/T651 plate 6.3-100 mm, 35 ksi (240 MPa); EN 485-2
+  // 6082-T6/T651 plate 12.5-100 mm, Rp0.2 240 MPa (260 below 6 mm).
+  // Moduli: the Aluminum Association's 68.9 GPa, EN 755-2's 70 GPa.
+  elastic(MaterialType::ALUMINUM_6061_T6, 68.9f, 0.33f, 240.0f);
+  elastic(MaterialType::ALUMINUM_6082_T6, 70.0f, 0.33f, 240.0f);
   elastic(MaterialType::STEEL, 200.0f, 0.30f, 250.0f);
   elastic(MaterialType::STAINLESS_STEEL, 193.0f, 0.30f, 215.0f);
   elastic(MaterialType::BRASS, 100.0f, 0.34f, 200.0f);
@@ -347,6 +363,17 @@ void MaterialLibrary::InitializeMaterials() {
 
   // RUBBER and DEFAULT intentionally left at 0 (near-incompressible /
   // unassigned): a linear-static study on them errors rather than guessing.
+
+  // What a drawing writes: a grade row its grade, a generic row its name
+  // in capitals (which says that no grade was chosen).
+  for (auto& [type, m] : materials) {
+    m.grade = m.name;
+    for (char& c : m.grade)
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  materials[MaterialType::ALUMINUM_6061_T6].grade = "6061-T6";
+  materials[MaterialType::ALUMINUM_6082_T6].grade = "6082-T6";
+  materials[MaterialType::DEFAULT].grade.clear();
 }
 
 const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {
@@ -383,6 +410,8 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::GOLD, "gold"},
       {MaterialType::SILVER, "silver"},
       {MaterialType::TITANIUM, "titanium"},
+      {MaterialType::ALUMINUM_6061_T6, "aluminum_6061_t6"},
+      {MaterialType::ALUMINUM_6082_T6, "aluminum_6082_t6"},
       {MaterialType::PLASTIC_WHITE, "plastic_white"},
       {MaterialType::PLASTIC_BLACK, "plastic_black"},
       {MaterialType::PETG, "petg"},
@@ -446,6 +475,25 @@ MaterialLibrary::GetMaterialOrDefault(const std::string& slug) {
   MaterialType t = MaterialType::DEFAULT;
   (void)TryMaterialTypeFromString(slug, t); // unresolved stays DEFAULT
   return GetMaterial(t);
+}
+
+std::string MaterialLibrary::FamilySlug(const std::string& slug) {
+  if (slug == "aluminum_6061_t6" || slug == "aluminum_6082_t6")
+    return "aluminum";
+  return slug;
+}
+
+std::string MaterialLibrary::GradeOf(const std::string& slug) {
+  if (slug.empty())
+    return {};
+  MaterialType t{};
+  if (!TryMaterialTypeFromString(slug, t)) {
+    std::string out = slug;
+    for (char& c : out)
+      c = c == '_' ? ' ' : static_cast<char>(std::toupper(c));
+    return out;
+  }
+  return GetMaterial(t).grade;
 }
 
 const std::string& MaterialLibrary::SlugList() {

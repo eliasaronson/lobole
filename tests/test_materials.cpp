@@ -225,3 +225,27 @@ TEST_CASE("Glass, and only glass, transmits light", "[materials]") {
     }
   }
 }
+
+TEST_CASE("A grade is its own row and prints as the grade",
+          "[materials][drawing]") {
+  // What a drawing orders: the parts list and the title block print the
+  // grade, and a generic row its name, which says no grade was chosen.
+  CHECK(MaterialLibrary::GradeOf("aluminum_6061_t6") == "6061-T6");
+  CHECK(MaterialLibrary::GradeOf("aluminum_6082_t6") == "6082-T6");
+  CHECK(MaterialLibrary::GradeOf("aluminum") == "ALUMINUM");
+  CHECK(MaterialLibrary::GradeOf("petg") == "PETG");
+  CHECK(MaterialLibrary::GradeOf("").empty());
+  // A grade carries its specification's minimum yield, not the generic
+  // row's, and its family's density and look.
+  const MaterialProperties& g6082 =
+      MaterialLibrary::GetMaterial(MaterialType::ALUMINUM_6082_T6);
+  const MaterialProperties& generic =
+      MaterialLibrary::GetMaterial(MaterialType::ALUMINUM);
+  CHECK(g6082.yieldMPa == 240.0);
+  CHECK(g6082.density == generic.density);
+  CHECK(g6082.baseColor == generic.baseColor);
+  // A consumer that knows only families (CAM's chiploads) reads it as
+  // aluminium; every other slug is its own family.
+  CHECK(MaterialLibrary::FamilySlug("aluminum_6061_t6") == "aluminum");
+  CHECK(MaterialLibrary::FamilySlug("petg") == "petg");
+}

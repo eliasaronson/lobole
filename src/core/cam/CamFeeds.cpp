@@ -1,5 +1,6 @@
 #include "core/cam/CamFeeds.h"
 
+#include "cad/CADMaterials.h"
 #include "core/cam/CamNames.h"
 
 #include <algorithm>
@@ -70,7 +71,8 @@ CutClass CutClassOf(const std::string& slug) {
       {"stainless", CutClass::Steel},
       {"iron", CutClass::Steel},
   };
-  const auto it = kMap.find(slug);
+  // A grade cuts as its family: 6082-T6 is aluminium to a chipload table.
+  const auto it = kMap.find(CADMaterials::MaterialLibrary::FamilySlug(slug));
   return it == kMap.end() ? CutClass::Unknown : it->second;
 }
 

@@ -19,6 +19,13 @@ enum class MaterialType {
   GOLD,
   SILVER,
   TITANIUM,
+  // Aluminium alloys by grade (EN 573 / AA designation and temper): their
+  // own rows because a grade is what a drawing orders and what a study's
+  // yield is -- 6061-T6's 276 MPa is nearly three times the generic row's
+  // 95. One appearance with ALUMINUM; CAM cuts them as aluminium
+  // (FamilySlug).
+  ALUMINUM_6061_T6,
+  ALUMINUM_6082_T6,
 
   // Non-metals
   PLASTIC_WHITE,
@@ -133,6 +140,12 @@ struct MaterialProperties {
   // see-through at ViewportAlpha. docs/rendering/materials.md#glass.
   float transmission = 0.0f;
   float ior = 0.0f; // index of refraction; meaningful only with transmission
+
+  // What a drawing's parts list and title block write for it (v151): the
+  // grade a shop orders ("6061-T6", "PETG"), or the material's name in
+  // capitals for a generic row ("ALUMINUM") -- which then says, truthfully,
+  // that no grade was chosen.
+  std::string grade;
 };
 
 // How opaque the viewport draws a body (1 = opaque). A transmissive one goes
@@ -180,6 +193,16 @@ public:
   // AllSlugs() joined with ", ", for refusal messages (cf.
   // cam::OpTypeNameList()).
   static const std::string& SlugList();
+  // The generic material a grade row is one of ("aluminum_6061_t6" ->
+  // "aluminum"), and any other slug itself: what a consumer that knows
+  // materials only by family (CAM's cutting data) looks up. Not used where
+  // the alloy decides the answer -- sheet metal's bend radii and a tube's
+  // rules are for one alloy, and refuse a grade they do not carry.
+  static std::string FamilySlug(const std::string& slug);
+  // The grade a drawing writes for a slug (MaterialProperties::grade);
+  // empty for the empty slug, the slug itself in capitals for one this
+  // build does not know.
+  static std::string GradeOf(const std::string& slug);
 
 private:
   static std::unordered_map<MaterialType, MaterialProperties> materials;

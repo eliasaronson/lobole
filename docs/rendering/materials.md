@@ -19,6 +19,25 @@ filament datasheet's modulus, where generic plastic would read a printed part
 a fifth light; how a printed part is modelled to fit is its print process,
 not its material ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 
+### Grades
+
+A shop orders an alloy and a temper, not "aluminium", so a grade is a row
+of its own: `aluminum_6061_t6` and `aluminum_6082_t6`. Each carries its
+specification's MINIMUM yield for plate (240 MPa: ASTM B209 for 6061-T6/T651
+at 6.3-100 mm, EN 485-2 for 6082-T6/T651 at 12.5-100 mm), which is what a
+design may count on, against the generic row's 95; its modulus (68.9 and
+70 GPa); and the generic row's density and look. Every row has a `grade`,
+what a drawing's parts list and title block print: a grade row its grade
+(`6082-T6`), a generic row its name in capitals (`ALUMINUM`), which says
+that no grade was chosen (`MaterialLibrary::GradeOf`,
+[../drawings/README.md](../drawings/README.md#parts-lists-and-balloons)).
+
+`MaterialLibrary::FamilySlug` reads a grade as its family (`aluminum`) for
+a consumer that knows materials only that way: CAM's chipload classes
+(`cam::CutClassOf`). Sheet metal's bend data and the tube rules are for one
+alloy each, and refuse a grade they do not carry rather than bend 6061-T6
+with a 5052 sheet's radii.
+
 The viewport shades metallic-roughness PBR in `mesh.frag`; the path tracer
 reads the same values through `RTMaterial` (`RayTracingRenderer.h`), so the
 two agree.
