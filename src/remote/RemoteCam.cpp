@@ -455,8 +455,9 @@ constexpr MethodDoc kCamMethods[] = {
      "arc, in `passes` radial passes of equal area (0 derives them: the "
      "first takes at most half the cutter's profile depth), climb by "
      "default, entering and leaving on semicircles (lead_arcs); a through "
-     "thread runs a pitch past its last full turn, a blind one stops the "
-     "head's tip on the floor. top_z/bottom_z are the thread's and are "
+     "thread runs a pitch past its last full turn, a blind one stops where "
+     "the thread does (a tapped Hole's thread_depth) or the head's tip on "
+     "the floor. top_z/bottom_z are the thread's and are "
      "refused. Refused: a face with no thread, a cutter that with twice the "
      "thread's depth does not fit the tap-drill bore, a flat wider than the "
      "thread's root (P/8: too fine a thread), a profile shallower than the "
@@ -537,6 +538,16 @@ constexpr MethodDoc kCamMethods[] = {
      "Simulate the POSTED G-code for a setup {setup, resolution?: the height "
      "map's cell size in mm, echoed as resolution_mm} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
+     "fits (each toleranced round wall the program aimed at: class, "
+     "nominal_mm, band_mm, aim_mm, cut_mm -- the diameter the file cuts -- "
+     "in_band, scrap; past the band on the scrap side counts against ok, "
+     "short of it against complete), cut_free (pieces through cuts part "
+     "from everything holding them -- no tab, not the stock's edge -- with "
+     "at, area_mm2, part: they would fly; a finding, not a failure), "
+     "offcut_area_mm2 (material cut free of the part, never leftover), "
+     "uncut (every hole and thread of the job's parts the job does not "
+     "cut: kind hole|thread, feature, face, what, at in model mm -- a "
+     "finding, not a failure), "
      "leftover_area_mm2, leftover_regions, rapids_through_stock "
      "(with worst_rapid_depth_mm/_at/_line: a graze and a crash are the "
      "same COUNT and different numbers), "
@@ -621,15 +632,13 @@ constexpr MethodDoc kCamMethods[] = {
      "wider than its cutter driven into a wall; `complete` "
      "= nothing left standing. A TAB is not left standing by accident -- the "
      "toolpath says where it put each one and they are excused, up to their "
-     "own height, so a tabbed job can now be complete. A dropping "
-     "slug will NOT satisfy. "
+     "own height, and a piece through cuts part from the part (a slug, the "
+     "frame) is offcut, not leftover, so a tabbed job can be complete. "
      "Runs on the file, not the toolpath, so it catches post and modal-state "
      "bugs too. `says` is the verdict in the same sentences the panel shows. "
      "Leftover in several tiny regions is the inside corners a round cutter "
      "cannot reach and is CORRECT; one large region is a missing operation. "
-     "`leftover_biggest` lists where, largest first — a height map cannot "
-     "watch a slug fall out or know a tab was asked for, so those show up "
-     "here too and are for you to recognise.",
+     "`leftover_biggest` lists where, largest first.",
      "job, resolution, setup"},
     {"cam_simulate",
      "Play the POSTED file through a block of stock and report what has come "
@@ -1340,9 +1349,9 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       {"narrow_grooves", v.narrowGrooves},
       // Two questions. `ok` is the one that is never in doubt:
       // nothing here scraps the part or breaks the tool. `complete`
-      // is softer — a height map cannot watch a slug fall out of a
-      // through cut, so a correct job can still report material
-      // left over. Tabs no longer count against it.
+      // is softer — a height map sees material, not what holds it.
+      // Tabs and offcuts do not count against it
+      // (docs/cam/simulation.md#tabs-and-offcuts).
       {"ok", v.Safe(tol)},
       {"complete", v.Complete(tol)},
       {"cuts_nothing", v.CutsNothing()}};
@@ -1447,10 +1456,10 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
   {
     // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
     // so PREDICTED (core/Receipt.h). Anything narrower than a cell is
-    // invisible to it, and `complete` is soft by construction because a
-    // height map cannot watch a slug fall out of a through cut. The receipt
-    // can therefore never read better than provisional, which is the honest
-    // standing for a number that comes from a discretisation.
+    // invisible to it, and `complete` is soft by construction: offcuts are
+    // read from where through cuts part the stock, not watched falling. The
+    // receipt can therefore never read better than provisional, which is the
+    // honest standing for a number that comes from a discretisation.
     receipt::Receipt receipt;
     const receipt::Oracle oracle{"designer/cam-stocksim", "1"};
     const std::string note = "height-map simulation at " + std::to_string(res) +

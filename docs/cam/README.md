@@ -171,7 +171,7 @@ as `belowStock` / `below_stock_mm`, not as a gouge.
 | sketch curves | `CamSketchCurves.cpp` (`SketchEntityCurves`, the one resolver from a sketch entity to curves in model space, and the engraving's groove, frame, surface probe and stroke order; built with CAM off too), `ui::JobSketchCurves` in `JobActions.cpp` |
 | layout, order, travel | `CamTravel.cpp` (`CheckPlacements`, `PlacementRefusal`, `CuttingOrder`, `MachineWarning`, `ClipToMachine`, `GenerateAll`) |
 | post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}` |
-| parse and verify | `CamGcode.{h,cpp}` (parser), `CamVerify.{h,cpp}` (height map, verdict, `Explain`, `MachineLines`), `CamRotary.{h,cpp}` (radius map), `CamFeeds.{h,cpp}` (chip load, reach) |
+| parse and verify | `CamGcode.{h,cpp}` (parser), `CamVerify.{h,cpp}` (height map, verdict, `Explain`, `MachineLines`), `CamFindings.cpp` (bands judged, holes and threads uncut), `CamRotary.{h,cpp}` (radius map), `CamFeeds.{h,cpp}` (chip load, reach) |
 | simulation | `CamSim.{h,cpp}` (`Timeline`, `StockSim`, `RotaryStockSim`), `CamStockMesh.{h,cpp}` (stock and tool meshes), `src/render/StockRenderer.{h,cpp}` |
 | serialization | `src/core/io/SerializeCam.cpp`, the job section of `Serialization.cpp` |
 | RPC | `src/remote/RemoteCam.cpp` |
@@ -319,7 +319,8 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   (`test_cam_workholding.cpp`), engraving and its grooves in the verifier
   (`test_cam_engrave.cpp`), thread milling -- FreeCAD's numbers, the posted
   helix, the refusals and the verifier's thread report
-  (`test_cam_thread.cpp`), and the capability table enforced
+  (`test_cam_thread.cpp`), tolerance bands, offcuts, drill points and what
+  a job does not cut (`test_cam_honest.cpp`), and the capability table enforced
   (`test_cam_capability.cpp`: every field a type does not declare is poked,
   and the moves must not change; every field round-trips through save and
   load).
@@ -375,3 +376,6 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
   stock remesh.
 - **A setup sheet.**
+- **Distance tolerances.** A band is read off a round face's size only
+  ([tolerance bands](operations.md#tolerance-bands)); a slot width or a
+  shoulder-to-seat length is cut as modelled.

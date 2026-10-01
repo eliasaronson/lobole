@@ -105,6 +105,14 @@ I/O, mirroring `ThreadStandards`:
 
 Worst case only: no statistical stack-up, no form or position tolerances.
 
+## CAM
+
+A CAM job cuts a toleranced round face to the middle of its band and
+judges the posted cut against the band, not nominal; the program's header
+states what it aimed at ([../cam/operations.md](../cam/operations.md#tolerance-bands)).
+The job reads the part's size tolerances as it assembles its bodies, so a
+tolerance edit regenerates its toolpaths and still rebuilds no feature.
+
 ## Printed parts
 
 An FDM printer makes a hole smaller than its model and a shaft larger, so a

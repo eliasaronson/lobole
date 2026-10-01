@@ -37,7 +37,11 @@ dialect needs canned cycles translated. The post id is the machine's
   at each change (the shape, because `T2 D6` is the same line for an end mill
   and a ball), `(op <id>)` before each operation (which is how the simulation
   attributes moves), `(SKIPPED op N: why)` for an operation that produced
-  nothing and `(SKIPPED on op N: …)` for a target it could not follow. Text a
+  nothing and `(SKIPPED on op N: …)` for a target it could not follow, and
+  in the header `(fit op N: bore D32 K7 31.982-32.007, aimed at
+  31.9945)` for each toleranced wall the program aims at, so the machinist
+  gauges against the band ([tolerance bands](operations.md#tolerance-bands)).
+  Text a
   person typed is sanitised: G-code comments do not nest, so a parenthesis in a
   tool's name would be a file the controller refuses to load; brackets stand
   in, and newlines go.

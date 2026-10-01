@@ -908,8 +908,8 @@ class Feature:
     def faces(self, role=None, entity=None):
         """The faces this feature made, in `role` if given: start_cap,
         end_cap (floor), side (walls; `entity=` the sketch line), generated,
-        bore, bottom, counterbore, counterbore_floor, countersink,
-        outside, inner_side, outer_side, shield (a bearing's), positional,
+        bore, bottom, counterbore, counterbore_floor, countersink, point
+        (a blind hole's drill point), outside, inner_side, outer_side, shield (a bearing's), positional,
         boundary."""
         return self._ask(role, entity, edges=False)
 
@@ -945,8 +945,13 @@ class Feature:
         return self.faces(role="bore")
 
     def bottoms(self):
-        """Every blind hole's bottom."""
+        """Every flat-floored blind hole's bottom. A hole drilled with a
+        point (a fit's, by default) ends in a cone instead: points()."""
         return self.faces(role="bottom")
+
+    def points(self):
+        """Every blind hole's drill point: the cone its floor is."""
+        return self.faces(role="point")
 
 
 class Frame:

@@ -442,8 +442,8 @@ struct Verdict {
   double leftoverArea = 0.0; // mm^2 above the designed surface
   int leftoverRegions = 0;   // separate places it sits in
   // The biggest of those places, largest first. "341 mm2 in 12 places" is a
-  // number to worry about; "the slot's slug, two bores and four tabs" is a
-  // job to sign off. Capped, so a fine grid cannot flood a report.
+  // number to worry about; "four inside corners a round cutter cannot reach"
+  // is a job to sign off. Capped, so a fine grid cannot flood a report.
   struct Region {
     glm::dvec2 at{0.0}; // centroid
     double area = 0.0;  // mm^2
@@ -477,15 +477,14 @@ struct Verdict {
                         [](const FitVerdict& f) { return f.Scrap(); });
   }
   // Complete: nothing is left standing that the model says should be gone.
-  // This one is SOFTER, because a height map cannot watch a slug fall out of
-  // a through cut — so a correct job can still report material left over, and
-  // the two used to be one flag that no real job could ever set
-  // (docs/cam/simulation.md#verdict). Tabs no longer count against it: they are
-  // asked for, and the toolpath now says where it left them, so every job
-  // that used one reported `complete: false` for a reason the flag could not
-  // express. Read it with leftoverArea and `biggest`: several small places
-  // are the corners a round cutter cannot reach, one large one is an
-  // operation nobody added.
+  // This one is SOFTER: a corner a round cutter cannot reach is material
+  // left too, and the two used to be one flag that no real job could ever
+  // set (docs/cam/simulation.md#verdict). Tabs and offcuts do not count
+  // against it: a tab is asked for and the toolpath says where it left it,
+  // and a piece through cuts part from the part is not the part
+  // (docs/cam/simulation.md#tabs-and-offcuts). Read it with leftoverArea and
+  // `biggest`: several small places are the corners a round cutter cannot
+  // reach, one large one is an operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
     return maxLeftover <= tolerance && grooveShallow <= tolerance &&
            !CutsNothing() &&

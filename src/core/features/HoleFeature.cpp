@@ -451,8 +451,9 @@ void HoleFeature::RecordHoles(std::vector<Body>& bodies) const {
 //
 // Every bore this feature cut, by its own name prefix and its radius — a
 // counterbore or a countersink on the same hole is a different radius and is
-// not a thread. The region carries no length, so it is the whole bore, and
-// no minimum engagement, so the standard's pitch stands.
+// not a thread. The region runs the thread's depth from the mouth
+// (ThreadDepthUsed; 0, the whole bore, when through), and carries no
+// minimum engagement, so the standard's pitch stands.
 void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
   // What the tap cuts, for whatever reads the bodies (the CAM thread mill):
   // the table's thread at the fit's pitch, right-handed, no class stated.

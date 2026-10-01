@@ -75,11 +75,12 @@ TOOLS = [
      "shank_diameter": 10.0, "overall_length": 35.0,
      "collar_diameter": ER20_NUT, "feed_cut": 1350.0, "feed_plunge": 300.0,
      "spindle_rpm": 15000.0, "chipload_min": 0.02, "chipload_max": 0.05},
-    # M4 tap holes: 3.3 mm flat-bottom carbide drill (a 180 deg point, as
-    # the model's flat floors are), pecked. 12000 rpm (124 m/min), 0.05
-    # mm/rev = 600 mm/min down.
-    {"number": 3, "name": "3.3 mm flat-bottom drill", "diameter": 3.3,
-     "tool_type": "flat", "flutes": 2, "flute_length": 14.0,
+    # M4 tap holes: 3.3 mm carbide jobber drill, 118 deg -- the point the
+    # model's tapped holes are drilled with (a Hole's derived drill point),
+    # pecked. 12000 rpm (124 m/min), 0.05 mm/rev = 600 mm/min down.
+    {"number": 3, "name": "3.3 mm 118 deg drill", "diameter": 3.3,
+     "tool_type": "drill", "tip_angle": 118.0, "flutes": 2,
+     "flute_length": 14.0,
      "shank_diameter": 4.0, "overall_length": 25.0,
      "collar_diameter": ER20_NUT, "feed_cut": 600.0, "feed_plunge": 600.0,
      "spindle_rpm": 12000.0, "chipload_min": 0.015, "chipload_max": 0.04},
@@ -126,6 +127,8 @@ CHAMFER = 0.5           # every edge break (the model's edge_break)
 # The check's grid. Its tolerance is a cell and a half, so at the default
 # 0.25 a 0.2 mm gouge on the bearing seat's shoulder passed as clean.
 VERIFY_RES = 0.1
+# The thread the job leaves to a hand tap: the wheel screws' M4.
+SCREW_THREAD = "M4"
 
 VERIFY_KEYS = ("ok", "complete", "cuts_nothing", "max_gouge_mm", "gouge_at",
                "max_leftover_mm", "leftover_at", "leftover_area_mm2",
@@ -200,6 +203,13 @@ class Job:
                     "pitch_measured_mm", "hand_measured", "passes",
                     "short_mm", "bore_standing_mm", "neck_clearance_mm")
                     if k in th})
+            for f in v.get("fits", []):
+                print("  fit:", {k: f.get(k) for k in (
+                    "class", "nominal_mm", "band_mm", "aim_mm", "cut_mm",
+                    "in_band", "judged", "why") if k in f})
+            for u in v.get("uncut", []):
+                print("  uncut:", u.get("kind"), u.get("what"),
+                      u.get("feature"))
             for reg in v.get("leftover_biggest", [])[:6]:
                 print(f"  leftover: {reg}")
             for s in v.get("says", []):
@@ -294,7 +304,11 @@ def main():
     faces = {f.ref["element"]: f for f in plate.faces()}
 
     def ref(prefix):
-        f = next(f for e, f in faces.items() if e.startswith(prefix))
+        # The face itself, not a chamfer's face generated from its edge
+        # (";G<chamfer>"), which carries the same prefix.
+        matches = sorted((e for e in faces if e.startswith(prefix)),
+                         key=lambda e: (";G" in e, len(e)))
+        f = faces[matches[0]]
         return {"feature_id": f.ref["feature_id"], "element": f.ref["element"]}
 
     # -- Top: the model's own frame, the blank's underside at -B["under"] --
@@ -377,6 +391,16 @@ def main():
             if not (th.get("judged") and th.get("in_band")):
                 problems.append(f"{sname}: thread {th.get('designation')} "
                                 "not judged in band")
+        for f in v.get("fits", []):
+            if not f.get("in_band"):
+                problems.append(f"{sname}: {f.get('class')} wall not cut in "
+                                "its band")
+        # The job leaves the M4 threads to a hand tap, and nothing else: any
+        # other hole or thread it does not cut is a missing operation.
+        for u in v.get("uncut", []):
+            if not (u.get("kind") == "thread" and
+                    u.get("what", "").startswith(SCREW_THREAD)):
+                problems.append(f"{sname}: not cut: {u.get('what')}")
         if "refused" in s.get("post", {}):
             problems.append(f"{sname}: post refused")
         total += s.get("post", {}).get("cutting_minutes", 0.0)

@@ -42,6 +42,34 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
   the body (a `ThreadMark`: the table's thread at the fit's pitch,
   right-handed, no class), which is what a CAM thread mill reads
   ([thread mill](../cam/operations.md#thread-mill)).
+- **A drill's point** (`drill_point_deg`, the included angle). A blind
+  hole's floor is modelled as the drill that makes it leaves it: a cone
+  under the full-diameter `depth`, its face named `<id>/p<entity>/point`
+  (role `point`). Absent, it is derived from what makes the hole: a hole
+  with a fit is drilled to a drill table's size, and those tables are ISO
+  235 jobber drills, whose point is 118 degrees; a plain diameter says
+  nothing about how it is made and keeps a flat floor. 180 states a flat
+  floor (a hole bored with an end mill), and anything outside 30 to 180 is
+  refused. A through hole has no floor, and neither has a hole drilled on
+  into a pocket or out of the far side: no cone is cut where the floor is
+  in air, which would only rename the faces it touches.
+- **Thread depth** (`thread_depth`, + `_expr`, mm from the mouth; a tapped
+  fit only, refused on any other hole and deeper than the hole). A tap's
+  lead cuts no full thread, so a blind tapped hole is threaded short of its
+  floor: absent, the depth less three pitches, the lead of the blind-hole
+  tap (ISO 8830 / DIN 2197 form C, 2-3 threads) -- an M6 drilled 12 deep is
+  threaded 9; a through hole is threaded through. A hole too shallow to
+  leave a pitch of full thread above that is threaded to its floor and
+  warns. The Hole's `ThreadRegion` and `ThreadMark` carry the length, so a
+  screw that runs past the thread clashes, the callout states the thread's
+  depth before the drill's, and a thread mill stops there.
+- **On the body.** Every bore a Hole cut is written on its body as a
+  `HoleMark` (the bore, the Hole's id and name, diameter, depth, through,
+  the point it has, a tapped fit's thread), transient like a `ThreadMark`
+  and carried in the baked geometry: what a CAM drill reads of the floor
+  ([drill](../cam/operations.md#drill)) and what the job's list of holes it
+  does not cut is made from
+  ([simulation](../cam/simulation.md#what-the-job-does-not-cut)).
 - **Empty-space warning.** A hole checks, per centre, whether its axis passes
   through a non-reference body anywhere down the bore (clipped to the bodies'
   bounding box). The axis is split where it crosses each body's faces and the
@@ -197,7 +225,7 @@ only need the callout.
   the groove runs out through it. An end against material — a boss's
   shoulder, a blind hole's floor — or a `length` that stops mid-face is cut
   square: the tool is clipped there by a cylinder. There is no runout. A
-  square end on a shoulder (or a blind hole's floor) has the tool's end
+  square end on a shoulder (or a blind hole's flat floor) has the tool's end
   lying on that face, so the cut draws the groove's footprint there: arcs
   that split the plane into coplanar pieces and bound no volume. The cut
   merges them away (`MergeFootprint`): a `ShapeUpgrade_UnifySameDomain`
@@ -285,7 +313,8 @@ collision is geometric only and applies no relief.
 ## Tests
 
 `tests/test_hole.cpp` (kinds, a bolt pattern from one sketch, the
-empty-space warning), `tests/test_thread.cpp` (metric and unified table
+empty-space warning, a blind tapped hole's point and thread depth by volume
+and on its body, stated values saved and loaded, the refusals), `tests/test_thread.cpp` (metric and unified table
 lookups and their refusals, cosmetic volume unchanged, bad faces, engagement
 relief, a tapped hole is threaded and takes a unified thread, modelled
 threads: an M8 in either hand by the Pappus volume and by following the
@@ -297,4 +326,4 @@ that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 and a tapped hole's thread on its body),
 `tests/test_derived.cpp` (a hole on a projected derived hole edge),
 `tests/test_drawing.cpp` (hole callouts), goldens `v36-thread-rib` and
-`v71-hole-fit` and `v140-modeled-thread`.
+`v71-hole-fit`, `v140-modeled-thread` and `v148-hole-point`.

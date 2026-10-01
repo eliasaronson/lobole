@@ -18,41 +18,17 @@ inputs run again answer `reused` in under 0.05 s.
 
 ## B. CAM honest about tolerance and threads
 
-**Problem.** CAM trusts the model where the model is silent, which risks a
-wrong part:
-
-- part tolerances are ignored: the K7 seat is cut at nominal;
-- a profile with tabs never verifies complete;
-- a Hole has no drill point, and a Thread has no length short of its bore, so
-  a blind tapped hole is threaded to the bottom of a flat drill;
-- a hole or thread the job does not cut is ignored silently;
-- adaptive clearing at its default stepover is slow.
-
-**Fix.**
-
-- **Tolerance bands.** A finish pass aims at the middle of the face's
-  tolerance band. The verifier judges the cut against the band, not nominal.
-  The posted program states the band it aimed at.
-- **Tabs.** Material left only as tabs, or as an offcut cut free, is not
-  "leftover".
-- **Drill point and thread length.** The Hole feature gains a drill point
-  angle (default 118°, derived per the defaults rule) and a thread length
-  short of the drilled depth. The ThreadMill and the verifier honour both.
-- **Uncut features.** A job's verdict lists every hole and thread of the part
-  that no operation cuts, as a finding rather than silence.
-- **Adaptive.** Measure where adaptive spends its time on the base plate,
-  and fix what the profile shows.
-
-**Files.** `src/core/cam/*`, `src/core/features/HoleFeature.*`,
-`ThreadFeature.*`, and the docs in `docs/cam/`.
-
-**Verified by:** the pan/tilt base plate job, re-run:
-
-- the seat aimed into K7;
-- the M4s listed as uncut;
-- a blind tapped-hole test coupon with a drill point;
-- a profile-with-tabs part that verifies complete;
-- adaptive timed before and after.
+Built: see [tolerance bands](../cam/operations.md#tolerance-bands) and
+[their check](../cam/simulation.md#tolerance-bands),
+[tabs and offcuts](../cam/simulation.md#tabs-and-offcuts),
+[a drill's point](../cam/operations.md#drill) and
+[a Hole's point and thread depth](../modeling/holes-and-threads.md#hole),
+[what the job does not cut](../cam/simulation.md#what-the-job-does-not-cut),
+and libarea patch 0002 (`deps/libarea/README.md`). The pan/tilt base plate
+re-run: the K7 seat aimed at 31.9945 and cut 31.9946 by the check, in
+31.982-32.007; the four M4 threads listed as not cut; both setups ok and
+complete at 0.1 mm. Adaptive on its Top setup: the same 78036 moves in
+26-28 s against 34-40 s, A/B on one build.
 
 ## C. Fits, modelling, tooling
 

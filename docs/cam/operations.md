@@ -57,13 +57,13 @@ everywhere: a 3-axis contour round a turned part means nothing.
 | Cut it out | a wall (`PickedWallContour`) | the contour the wall belongs to; depths = the wall's own extent; inside for an opening, outside for the part's perimeter |
 | Cut it out, on a level face with `side: inside` | a face | every opening in that face in one operation; a boss is not an opening; one too narrow for the cutter is `skipped`; `drilled_bores` leaves round openings up to that diameter to the drill |
 | Cut out the whole part | none | the part's outline, through the stock, with tabs |
-| Drill a hole | inside the hole (a cylindrical face) | refused when the hole opens away from the spindle (metal over its top: tapped up from the underside); top = stock top; bottom = the bore's bottom, or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out -- and a hole that comes out of the part's bottom starts that from the STOCK's bottom, as a cut-out does, so the bottom margin is drilled through too; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
+| Drill a hole | inside the hole (a cylindrical face) | refused when the hole opens away from the spindle (metal over its top: tapped up from the underside); top = stock top; bottom = the bore's bottom (lower by the drill's own point when the floor is one, [below](#drill)), or, for a through hole, the bore's bottom minus the point's own height (`TipHeight`) so a cone breaks out -- and a hole that comes out of the part's bottom starts that from the STOCK's bottom, as a cut-out does, so the bottom margin is drilled through too; peck = one diameter when deeper than three. Through is where the hole comes out: nothing solid just below its bottom at its centre (a section there), not the part's lowest point, which on a turned part is the grip |
 | Break an edge | the wall whose top edge to break | the break the model has there (top = its top edge, `edge_size` = a chamfer's width or a round's height), else on a sharp edge the biggest the tool can make within the wall; a flat mill is refused |
 | Face the top | none | the stock above the part, top = stock top, bottom = part top |
 | Finish a surface / Finish walls | a face of any orientation | its XY silhouette as the region |
 | Rough a surface | none | the whole-part raster finish, then stepdown half the cutter and a skin of `DefaultFinishStock(tool)` |
 | Clean up what's left | none | the setup's last surface finish, re-made with the verb's smaller tool and `restFromTool` = the finish's tool |
-| Mill a thread (Add operation › Mill a thread; `add_cam_op` type `thread_mill`) | the threaded face (a Thread's, or a tapped Hole's bore) | everything from the thread: the helix aimed at the middle of its class's pitch-diameter band, passes from the cutter, a pitch of overtravel past an open end, the tip on a blind floor ([Thread mill](#thread-mill)) |
+| Mill a thread (Add operation › Mill a thread; `add_cam_op` type `thread_mill`) | the threaded face (a Thread's, or a tapped Hole's bore) | everything from the thread: the helix aimed at the middle of its class's pitch-diameter band, passes from the cutter, a pitch of overtravel past an open end, a blind one stopped where the thread does or the tip on the floor ([Thread mill](#thread-mill)) |
 | Engrave (`job.engrave`; `add_cam_op` type `engrave`) | a sketch entity, `{feature_id: <sketch>, element: "g<entity id>"}` | top = the sketch's plane in the setup; a V-bit's `width_mm` a quarter of the cutter (a text label's: its cap height / 8), a flat's or ball's `depth_mm` a quarter of the cutter; bottom = top minus the depth ([Engrave](#engrave)) |
 
 **The stock top is what the earlier setups left.** `DeriveOperation` takes
@@ -187,7 +187,8 @@ is scrap.
   split the segments they cross; the ramp and lap are one function of arc length, so a tab is a pillar
   from the bottom of the cut to its stated height and nothing crosses it. Each
   toolpath records its tabs (`Toolpath::tabs`: point, pillar radius, top
-  height) so the verifier excuses them, up to their height. `tabWidth` is
+  height) so the verifier excuses them, up to their height, and reads the
+  piece they hold as held ([tabs and offcuts](simulation.md#tabs-and-offcuts)). `tabWidth` is
   measured along the tool's centre line, where the tool lifts and drops, so
   the material left at the middle of the kerf is `tabWidth` minus the
   cutter's diameter: 8 mm on a 6 mm cutter is a 2 mm tab.
@@ -271,7 +272,10 @@ is scrap.
   `strategy` says why — never an error beside moves, because a program the
   op posts has to be what it reports. It flags trouble on output it still
   fills (a lead it could not plan: a 3.2 mm slot and a 3 mm cutter), and
-  keeping both posted a program for an op that said it failed. Finding
+  keeping both posted a program for an op that said it failed. Its lead
+  paths read only the cleared area within their reach (libarea patch 0002,
+  `deps/libarea/README.md`): the same moves, in about three quarters of the
+  time on the pan/tilt base plate's clearing at a tenth of the cutter. Finding
   nowhere to start emits nothing: its start point is unset, and entering
   there anyway made moves that kept the fall-back from running.
 - Both refuse cones (`NeedsFlatFloor`).
@@ -339,6 +343,18 @@ once went through the wall of a hole not yet cut to size. A pointed tool in a
 blind hole whose floor the model has flat is said at derivation
 (`DerivedOp::notes`, in the RPC's `warnings`): the point leaves a cone of its
 own height, which the verifier would otherwise first report as leftover.
+
+**A floor that is a drill's point.** A Hole models a blind floor as the
+point it is drilled with
+([holes and threads](../modeling/holes-and-threads.md#hole)), and says so
+on its bodies (`HoleMark`). A drill of the hole's size then goes on down by
+its own point's height (`TipHeight`), so its full diameter reaches the
+bore's bottom and its point cuts the modelled cone; the hole reads as blind
+however far the cone's air reaches below it (through-ness is probed under the
+apex), and opening downward is probed over it. A flat tool stops at the
+bore's bottom and leaves the cone, a smaller tool boring the hole cuts no
+cone, and a point of another angle gouges the cone or leaves a ring of it:
+each said in the notes.
 
 ### Edge break
 
@@ -496,7 +512,9 @@ output for a 3/8-16 UNC.
   a pitch above. Metal where the face ends (a blind hole): the head's tip
   stops on the floor, and the last half pitch and half a V above it are not
   full thread, said in the derivation's notes. Metal where the thread stops
-  short of the face (`length`): the V stops at the thread's end. `top_z`
+  short of the face (a Thread's `length`, or a tapped Hole's
+  `thread_depth`, which by default stops three pitches short of a blind
+  floor): the V stops at the thread's end. `top_z`
   and `bottom_z` are the tool TIP's range over the helix, derived and not
   settable (the RPC refuses them); with several targets each is cut over its
   own thread's span.
@@ -561,6 +579,40 @@ its own bottom and an edge break sizes itself from its depth, so theirs is
 left alone (lowered, a bore was roughed 0.2 mm under its floor). One operation with two tools rather than two operations that must agree
 about a boundary; tool ordering groups the two toolpaths. The panel's
 operation settings offer "finish with T<n>".
+
+## Tolerance bands
+
+A toleranced round wall is cut to the MIDDLE of its band, not to nominal:
+the Ø32 K7 seat (31.982 to 32.007) is cut at 31.9945.
+
+- **What is read.** A part's size tolerances on round faces
+  ([tolerances](../tolerances/README.md#the-stored-tolerance)), an ISO class
+  read at the face's measured size or a deviation pair, are stamped on the
+  job's bodies as it assembles them (`Body::bands`, `cam::StampBands`,
+  called by `ui::JobBodies`). They live outside the part's regeneration, so
+  the job's body key mixes them in (`JobSourceVersion`): a tolerance edit
+  regenerates the toolpaths. A distance tolerance is not read, and a face
+  without a band is cut as modelled.
+- **How a path aims.** Per generate, each band whose cylinder stands
+  vertical in the setup is resolved to a circle in setup space
+  (`FitScope`, `CamStrategies.cpp`). The circle the material ends on moves
+  radially by a quarter of the summed deviations before the tool is offset
+  from it -- outward when the band's middle is a bigger diameter, for a bore
+  and a boss alike. Every strategy that follows that circle aims with no
+  code of its own: a drill's bore (its rings, the wall's last), a profile
+  (a contour all of whose vertices lie on the circle), a pocket's and an
+  adaptive's region (a round outline or a round island), and each half of a
+  rough-then-finish operation. A plunge (the tool is the hole), a face, an
+  edge break, a thread, an engraving and a surface pass do not aim.
+- **Said.** Each toolpath that aimed declares it (`Toolpath::Fit`: centre,
+  side, nominal, band, aim, the wall's Z span); the post writes it in the
+  header ([post.md](post.md#what-the-file-says)) and the verifier judges
+  the cut against the band ([simulation.md](simulation.md#tolerance-bands)).
+- **What a router holds.** The program aims; the machine's runout, the
+  cutter's deflection and its reversals push a bore over. A profile
+  follows the circle's chords (0.02 mm), whose offset corners stand a few
+  microns inside it: a K7 spring pass measures 31.988 for a 31.9945 aim. A
+  bore's helix is exact.
 
 ## 3-axis surfacing
 
