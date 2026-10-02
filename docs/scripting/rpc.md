@@ -43,7 +43,7 @@ One row per method (`src/remote/RemoteHelpers.h`):
 |---|---|
 | `name` | the method literal |
 | `doc` | prose: what it does, the units, the traps |
-| `params` | accepted top-level keys, comma-separated; `""` for none; `"*"` for a free-form spec the handler reads opaquely (then the strict-key check is off) |
+| `params` | accepted top-level keys, comma-separated; `""` for none; `"*"` for a free-form spec the handler reads opaquely. The dispatcher refuses any other key before the handler runs; under `"*"` the handler checks its own |
 | `flags` | what the dispatcher needs to know (below) |
 | `returns` | the response's top-level keys with nesting shown (`bodies[]{name,volume}`, `total{mass_g}`), required for every `list_*`, `get_*` and `check_*` method |
 
@@ -90,12 +90,21 @@ worse than a missing row, because an agent trusts it instead of guessing.
 
 ## Parameters
 
-- **Strict keys.** A key the handler never read is refused, with a
-  "did you mean" from an edit distance over the keys it does read. For a
-  single call the check runs after the handler (a method's vocabulary is
-  learned by which keys it reads), so a call carrying an extra junk key still
-  applies its recognised keys before the error; a misspelled required key
-  fails before any mutation. Inside `batch` the refusal rolls the batch back.
+- **Strict keys, before anything runs.** `ProcessPending` checks every
+  request's top-level keys against the method's row — before parking, before
+  the part gate, before the handler, before a UI action or a capture — and
+  refuses a key the row does not list with a "did you mean" from an edit
+  distance over the row (`UndeclaredParamsError`). `params` that are not an
+  object are refused there too. `batch` checks every call's keys the same
+  way before the first call runs. The row can carry this because
+  `rpc_params_gate` holds it equal to the keys the handler reads; a `"*"`
+  row (a free-form spec) is the handler's to check, and `set_settings`
+  checks all of its keys before applying any. A method with an inspection
+  contract refuses through that first, for its structured diagnostic.
+  What remains for the handler is a key the row lists that THIS call's path
+  did not read (`target` on an op whose depths were typed): `RpcParams`
+  still records the keys read, and such a call is refused after the handler
+  — and rolled back, below.
 - **Strict feature JSON.** `add_feature` / `modify_feature` build the
   feature, serialize it back, and refuse any request key not in the round
   trip or the type's documented fields ("unknown field 'mode' for Fillet"). A
@@ -197,6 +206,53 @@ Helpers: `remote::KnownList` (capped candidate list), `remote::IndexError`
 instead of terminating the process. `papercuts_smoke` pins the shape of
 representative refusals; when you improve one, pin it there.
 
+### A refused call changes nothing
+
+An error means nothing happened. A caller told "refused" fixes the call and
+sends it again; if the first one wrote its file, switched the tab or edited
+the job, the second does it twice — `cam_post {setup, path, _timeout}` wrote
+its G-code and then answered "unknown parameter '_timeout'". So:
+
+- **Keys are refused by the dispatcher**, against the row, before the
+  handler runs (above).
+- **A handler reads and checks every parameter before its first side
+  effect.** Values are read into locals, ranges and enums checked, the
+  files a call will write planned whole — and only then is anything
+  written, created, started or switched. `export_members` plans every
+  member's file (two members with one name, a file already there) before
+  making the directory; `compare_geometry` reads both diff paths before
+  writing either; `set_reference_image` edits a copy of the image.
+- **An edit that refuses is rolled back.** While a semantic handler runs,
+  `ProcessPending` holds marks on the active tab's histories (`EditMarks`:
+  the part's command stack, the assembly's, drawing's and job's snapshot
+  stacks). If the handler throws — a type error on its fifth key, a check
+  after the edit it guards — or a key it was sent went unread, everything
+  pushed since the marks is undone, dropped from redo, and the project's
+  saved state is put back; the refusal says so ("The call was rolled back
+  (1 edit(s) undone), so the document is as it was."). `batch` uses the
+  same marks. It covers what goes through those histories: an edit made
+  outside them (a field set directly on a feature) is the handler's to make
+  only after its checks.
+- **`NotInBatch` methods are not rolled back** — they reach outside the
+  document (a file, a tab, the settings, the machine store, git), which no
+  undo stack holds. They are the ones that must check first, and the flag
+  is how a method says it is one of them: `export_brep`, `delete_part`,
+  `set_keybinding`, `save_machine` and `delete_machine` carry it too. A key
+  such a method left unread is still refused, with "The call had already
+  run" in place of a rollback, because that is the truth. A failure after
+  the effect undoes it where it can: `split_for_printing` and
+  `topo_to_body` delete the tabs they made.
+
+`refused_calls_smoke` holds the rule from outside: every method with an
+unknown key (the refusal must name it, on an assembly tab — so not
+"missing required parameter" or "switch to a part tab", which would mean
+something ran first); every method with every key of the wrong type on a
+part, assembly, drawing and job tab; and the calls that write files or move
+tabs from a valid baseline with each key made wrong in turn. After every
+refusal the world must be as it was: the saved project, the tabs, undo and
+redo, the files under the app's dirs and its cwd, the settings, the machine
+store, the background jobs.
+
 ## `batch`
 
 `batch {calls: [{method, params}, ...], stop_on_error: true}` runs the calls
@@ -210,8 +266,10 @@ as one transaction:
 - **One undo step.** The calls' commands are coalesced into one ("Batch of N
   calls"); on an assembly tab, one snapshot.
 - **Rollback.** With `stop_on_error` (default), a call that throws rolls the
-  whole batch back and the refusal names the call, the reason, how many edits
-  were undone and how many later calls did not run. With `false`, errors are
+  whole batch back — the part's commands and the assembly's, drawing's and
+  job's snapshots, through the same `EditMarks` a single call uses
+  ([above](#a-refused-call-changes-nothing)) — and the refusal names the
+  call, the reason, what was undone and how many later calls did not run. With `false`, errors are
   reported in place and the rest run. A feature that fails to *build* is not
   a failed call; it is reported in the final `regen`, as on its own.
 - **`$ref`.** `{"$ref": n}` anywhere in a call's params is the result of the
@@ -225,13 +283,13 @@ as one transaction:
   rebuilt. Geometry is answered once, by the batch's `regen`.
 - **Refused inside a batch:** another `batch`, any `NotInBatch` method
   (screenshots, exports, project and git verbs, `undo`/`redo`), UI actions,
-  and unknown methods — each checked before anything runs, so the document is
-  unchanged.
+  unknown methods, and a key outside a call's row — each checked before
+  anything runs, so the document is unchanged.
 
 The gain is largest for edits early in a long history, where each separate
 call would rebuild everything after it; appends are already incremental.
 `batch_smoke` gates the regeneration count, the single undo step, rollback on
-a failed call and on a rejected key, `stop_on_error: false`, `$ref` and its
+a failed call, a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
 refusals, a mid-batch query seeing current geometry, and an assembly batch.
 
 ## Typed inspection contracts

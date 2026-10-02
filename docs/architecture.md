@@ -267,13 +267,17 @@ RPC handlers keep their own poll so they answer from a finished result.
   batch may defer the regeneration past it), `UiAction` (runs on the ImGui
   queue). An unknown method has no row and no flags, so a typo is answered
   "unknown method" rather than "switch to a part tab".
-- `RpcParams` refuses unknown request keys.
+- An unknown request key is refused by the dispatcher against the row's
+  `params`, before the handler runs; `RpcParams` catches the remainder (a
+  listed key this call's path did not read), and a refused call's edits are
+  rolled back ([rpc.md](scripting/rpc.md#a-refused-call-changes-nothing)).
 - Gates over the tables: `tests/rpc_params_gate.py` (the `params` column
   against what each handler reads, both directions, via
   `tools/rpc_params_scan.py`), `tests/rpc_units_gate.py` (units, see
   [conventions.md](conventions.md#units-and-angles)),
-  `tests/rpc_returns_gate.py`, `tests/rpc_names_gate.py` and
-  `tests/rpc_gate_smoke.py`; the shared row parser is
+  `tests/rpc_returns_gate.py`, `tests/rpc_names_gate.py`,
+  `tests/rpc_gate_smoke.py` and `tests/refused_calls_smoke.py`; the shared
+  row parser is
   `tools/method_doc_scan.py`.
 - Changing a method's name, a refusal message, a `describe` row or `help()`
   text changes what `benchmarks/` measures (see CLAUDE.md).

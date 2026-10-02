@@ -346,7 +346,10 @@ docs/architecture.md#the-ui-actions-layer describes how the code is organised.
   class). Add new RPCs to the domain module — and a row in its `MethodDoc`
   table, whose `flags` column is what gates it (NeedsPart / NotInBatch /
   Deferrable / UiAction). There is no separate gate list to remember.
-  A parameter naming a physical quantity must carry a unit suffix (`angle_deg`,
+  **A refused call changes nothing**: read and check every parameter before
+  the first file, tab or job, and flag what reaches outside the document
+  `NotInBatch` (docs/scripting/rpc.md#a-refused-call-changes-nothing,
+  `refused_calls_smoke`). A parameter naming a physical quantity must carry a unit suffix (`angle_deg`,
   `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
   fails otherwise, because a wrong unit is invisible in the answer
   (docs/conventions.md#units-and-angles).
