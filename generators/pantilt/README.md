@@ -11,14 +11,15 @@ standard parts ([bearings](../../docs/parts/README.md#bearings)), printed
 clearances ([printed parts](../../docs/tolerances/README.md#printed-parts)),
 thread milling ([thread mill](../../docs/cam/operations.md#thread-mill)) and
 section views, parts lists and balloons
-([drawings](../../docs/drawings/README.md#section-views)); what it taught is
-[the last section](#what-the-round-taught).
+([drawings](../../docs/drawings/README.md#section-views)), and then paid for
+a friction round of its own; what both taught is
+[the last section](#what-the-rounds-taught).
 
     tools/headless-preview.sh --start PORT        # a scratch instance
-    generators/pantilt/run_all.sh PORT            # everything, ~45 min
-                                                  # (the yoke's statics, 25;
-                                                  # the motion studies, 9;
-                                                  # the CAM job, 1.5; the
+    generators/pantilt/run_all.sh PORT            # everything, ~13 min
+                                                  # (the yoke's studies, 9;
+                                                  # the motion studies, 2;
+                                                  # the CAM job, 1; the
                                                   # drawings and renders, 1)
     generators/pantilt/run_all.sh PORT --from yoke_topo  # its studies only
     python3 generators/pantilt/build_yoke_topo.py --port PORT --fresh-topology
@@ -31,23 +32,31 @@ section views, parts lists and balloons
                                                   # stage reads either; what
                                                   # the generator_pantilt
                                                   # test runs
-    PANTILT_SAMPLES=6 generators/pantilt/run_all.sh PORT --from assembly  # ~4 min
+    PANTILT_SAMPLES=6 generators/pantilt/run_all.sh PORT --from assembly
+    PANTILT_PAN_BEARING=tilt generators/pantilt/run_all.sh PORT
+                                                  # the pan journal sized as
+                                                  # the head was first built
+                                                  # (below: the pan bearing)
 
 Each stage opens the project the one before saved; all of it lands in
 `scratch/pantilt/` (projects, renders, `assembly_report.json`, the BOM,
 `drawings/`, `renders/`, one log per stage, and `run_all.log`, which ends in
-`done` or `failed`):
+`done` or `failed`). A study whose inputs a previous run already solved is
+answered from its result, not run again
+([studies as jobs](../../docs/simulation/README.md#studies-as-jobs)), so a
+second run against the same instance spends seconds where the first spent
+minutes.
 
 | script | makes | saves |
 |---|---|---|
-| `build_base.py` | the project variables (`spec.py`), the base plate (aluminium: the lower pan bearing's pocket, the tapped 3/8-16 tripod hole with its Thread, four M4 tapped holes, 0.5 mm chamfers on the rims the 6090 breaks) and the pan wheel (PETG, 40 teeth, hobbed; the upper pan bearing's counterbore, four counterbored screw holes) | `base.dsgn` |
+| `build_base.py` | the project variables (`spec.py`), the base plate (6082-T6 aluminium, `aluminum_6082_t6`: the lower pan bearing's pocket, the tapped 3/8-16 tripod hole with its Thread, four M4 tapped holes, 0.5 mm chamfers on the rims the 6090 breaks) and the pan wheel (PETG, 40 teeth, hobbed; the upper pan bearing's counterbore, four counterbored screw holes) | `base.dsgn` |
 | `build_worms.py` | the worm (one part for both axes: ZA, one start, 0.25 mm backlash, spacer collars and journals), the bearing block (one part for all four bearings) and the knob | `worms.dsgn` |
-| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot), the camera (the load: a box and a lens of 1.5 kg) and the 1/4-20 camera screw (a plain part with a cosmetic thread) | `tilt.dsgn` |
+| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load: a box and a lens of 1.5 kg) | `tilt.dsgn` |
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
-| `build_assembly.py` | the assembly: mates, bearings by `fit_bearing` and `check_seat`, screws by `fit_fastener`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
-| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`); the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
-| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
-| `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
+| `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing` and both rings of each by `check_seat`, screws by `fit_fastener`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
+| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
+| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with no toolpath warning and the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
+| `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed, and the stage stops on a sheet that is not clean. It only draws: what the sheets order by is the model's | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
 `spec.py` holds the derivation; `common.py` the connection, the print
@@ -76,10 +85,22 @@ Every size is a project variable, most of them expressions over the load:
   At m 2 the 3 g bending stress is a quarter of PETG's layer strength, a
   tooth is seven perimeters thick at the pitch line, and the worm drives
   with about 0.12 N m.
-- **The shafts and bearings.** A PETG shaft carrying the 3 g moment needs
-  14.4 mm, so the main bearings are the first 60-series row over it,
-  6002, asked of the app (`list_bearings`). The worm journal (the tooth
-  force's couple and the separating force) needs 8.5 mm: 609.
+- **The tilt shaft and its bearings.** A PETG shaft carrying the 3 g tilt
+  torque needs 14.4 mm, so the arms' bearings are the first 60-series row
+  over it, 6002, asked of the app (`list_bearings`). The worm journal (the
+  tooth force's couple and the separating force) needs 8.5 mm: 609.
+- **The pan journal and its bearings.** The yoke's journal is a cantilever
+  from its collar under the head's overturning moment: the load at 3 g
+  sideways, its CoM at its highest 275.5 mm over the collar (`pan_lever`:
+  the yoke's base over the pan blocks, the camera's 160 mm swing and its
+  clearance under the tilt axis, and the CoM's 89.4 mm lever over it), is
+  12.2 N m, three times the tilt torque. A PETG journal carrying it at a
+  third of the layer strength needs 21.0 mm (`pan_shaft_d_min`), so the pan
+  pair is 6005 (Ø25 x Ø47 x 12). The camera's sizes are declared in
+  `spec.py` for this, in the first stage, and `build_yoke.py` checks that
+  the layout it builds stands the load where `pan_lever` says. The head was
+  first built with the pan pair the tilt shaft's 6002: below,
+  [the pan bearing](#the-pan-bearing).
 - **The arms** are as tall as the camera reaches below the tilt axis in
   +-90 degrees of tilt (`cam_swing`, 160 mm, computed from the camera's and
   cradle's variables) plus a clearance; their spacing is the camera's width
@@ -87,8 +108,8 @@ Every size is a project variable, most of them expressions over the load:
 - **The blocks** stand as far out along the worm as the wheel's tip needs
   to clear them, which is why the worm carries spacer collars.
 - **Printed fits** come from the print allowance table, asked of the app
-  (`print_allowance`), never typed: a Ø32 bearing bore is modelled Ø32.3,
-  a Ø15 journal Ø14.9. `fit_bearing` and `check_seat` read a printed seat
+  (`print_allowance`), never typed: a Ø47 bearing bore is modelled Ø47.3,
+  a Ø25 journal Ø24.9. `fit_bearing` and `check_seat` read a printed seat
   at what it prints.
 - The knob is sized so an 8 N fingertip pull holds the load at 1 g.
 
@@ -96,7 +117,7 @@ Every size is a project variable, most of them expressions over the load:
 
 World Z up, the base plate's underside at z = 0, the pan axis on Z, the
 camera looking +X at zero pan, the tilt axis along Y. The pan wheel is
-screwed to the plate and does not turn: the yoke turns on the two 6002s
+screwed to the plate and does not turn: the yoke turns on the two 6005s
 (one in the plate, one in the wheel) and carries the pan worm, which walks
 round the wheel. The tilt wheel and its shaft turn in the arms' 6002s; the
 tilt worm stands under it on a ledge off the +Y arm.
@@ -104,59 +125,77 @@ tilt worm stands under it on a ledge off the +Y arm.
 A worm pair meshes at zero turn when the worm's blank X points at the
 wheel and the wheel's at the worm, mid-span on mid-face
 (docs/modeling/worm-gears.md#phase); every frame here is explicit for that
-reason (a frame built from a cylindrical face does not carry the blank's X).
+reason (a frame built from a cylindrical face takes the face's seam as X:
+[connector frames](../../docs/assemblies/solver.md#connector-frames)).
 
 ## The head, assembled
 
 `build_assembly.py`; the numbers are `assembly_report.json`'s.
 
-- **Masses.** Without the camera 2.0 kg (the base plate 260 g of
-  aluminium, the re-modelled yoke 1051 g, the tilt wheel and shaft 126 g,
-  the cradle 92 g, the pan wheel 73 g, each worm 23 g, the bearings 182 g);
-  with the 1.5 kg camera 3.5 kg (the parts list in `pantilt_bom.csv`).
+- **Masses.** Without the camera 2.09 kg (the base plate 268 g of
+  aluminium, the re-modelled yoke 1062 g, the tilt wheel and shaft 126 g,
+  the cradle 92 g, the pan wheel 57 g, each worm 23 g, the bearings 283 g:
+  two 6005s 163, two 6002s 61, four 609s 59); with the 1.5 kg camera
+  3.59 kg (the parts list in `pantilt_bom.csv`).
 - **Motion.** Pan 360 degrees (40 worm turns) and tilt +-90 (+-40 turns),
-  driven from the worm shafts, 48 samples each, every pair checked exactly:
-  both clean, no sample unsolved. The exact checks are the time: the pan
-  study is 12 to 18 minutes of the run.
+  driven from the worm shafts, 48 samples each, every pair checked exactly
+  (1352 and 1030 pair checks): both clean, no sample unsolved, 53 s each.
 - **Clearances.** The camera clears the yoke by 4.8 mm at -90 degrees (the
   designed `cam_clear`) and passes the A-frames 1.2 mm off (the running
   gap); the cradle runs 1.2 mm off the arms. The standing exact sweep is
-  clean.
+  clean (162 pairs).
 - **Fits.** The eight bearing seats are transition fits: K7 in the
   aluminium pocket, +-0.15 on the printed bores (modelled 0.3 over and read
-  at what they print). `check_seat` passes every outer ring; the inner
-  rings are unverified (below).
-- **Bought parts.** 4 x 6002, 4 x 609, 4 x ISO 4762 M4x16 into the plate,
-  8 x M4x25 with ISO 4032 nuts and ISO 7089 washers through the worm blocks,
-  4 x M4x30/M4x40 through the yoke's foot flanges, and the 1/4-20 camera
-  screw (modelled: imperial screws are not standard parts).
+  at what they print).
+- **Both rings of every bearing** are checked on the seat each sits on
+  (`check_seat`): the outer ring on the housing its `Bearing seat` mate
+  names, the inner on the journal read through the coaxial cylinder under
+  it ([both rings](../../docs/parts/README.md#both-rings); not `mate_other`,
+  which would close a second joint through each bearing beside the yoke's
+  and the shaft's own). Every ring's diameter passes; every ring that sits
+  on a shoulder is seated on it with a fillet under r_s min. What stays
+  unverified, ring by ring in the report with its reason: every shoulder's
+  diameter (how far a shoulder may reach is a supplier's abutment
+  dimension, not ISO 15's, and no supplier catalog is installed), and two
+  inner rings no shoulder locates -- the lower 6005's on the yoke's journal
+  and the -Y 6002's on the tilt shaft (below, Known). A ring with no seat,
+  or a check that fails, stops the stage.
+- **Bought parts.** 2 x 6005, 2 x 6002, 4 x 609; 4 x ISO 4762 M4x14 into
+  the plate; 8 x M4x25 with ISO 4032 nuts and ISO 7089 washers through the
+  worm blocks; 2 x M4x30 and 2 x M4x40 through the yoke's foot flanges; and
+  the camera screw, an ASME B18.3 1/4-20 x 3/8 socket head cap screw (the
+  longest stocked length short of the cradle's plate plus the engagement).
 
 ## The base plate on the 6090
 
-`cam.py`, phase 7. The machine is the chess set's 6090 profile
+`cam.py`. The machine is the chess set's 6090 profile
 (`generators/chess/cam.py`), 3-axis here.
 
-- **The blank:** saw-cut 90 x 90 from 30 mm 6082/6061-T6 plate. 30 is the
-  thinnest EN 485 plate that faces both sides of the 24.7 mm part by a
+- **The blank:** saw-cut 90 x 90 from 35 mm 6082/6061-T6 plate. 35 is the
+  thinnest EN 485 plate that faces both sides of the 28.7 mm part by a
   millimetre; 90 is the Ø73.6 disc plus the 10 mm clearing cutter and 2 mm
-  either side, to the next 5 mm. Margins: 8.2 mm round, 3.3 on top, 2.0
+  either side, to the next 5 mm. Margins: 8.2 mm round, 4.3 on top, 2.0
   under.
 - **Top** (as modelled; the vise grips the blank's lower 8 mm on
-  parallels): face (2 x 1.65), clear the waste round the disc down to 2 mm
-  over the jaws (adaptive, 1 mm engagement, 10 mm deep), the 6002's seat
-  (bored with the 10 mm leaving 0.2, finished with a fresh 6 mm in one
+  parallels): face (two passes), clear the waste round the disc as deep as
+  the 10 mm cutter's 22 mm of flute reaches from the blank's top, a
+  millimetre short (adaptive, 1 mm engagement, 10 mm deep), the 6005's
+  seat (bored with the 10 mm leaving 0.2, finished with a fresh 6 mm in one
   full-depth pass, then a spring pass: the same lap again), the relief, the
   four M4 tap holes (3.3 mm 118 degree drill, pecked, to the point the
-  model has; tap them M4 by hand, 5.9 deep), the
-  seat-mouth and rim chamfers. 20.1 min.
+  model has; tap them M4 by hand, 5.9 deep), the seat-mouth and rim
+  chamfers. 31.6 min.
 - **Underside** (flipped; the vise on the finished disc's top 10 mm): face
-  to 24.7, clear the rest of the waste 0.5 mm into what Top cleared, the
+  to 28.7, clear the rest of the waste 0.5 mm into what Top cleared, the
   5/16 tap bore (helical, 6 mm), the 3/8-16 UNC-2B thread (3 passes, pitch
   diameter 8.569 in 2B's 8.494-8.645, judged by the check), the tripod-mouth
-  and rim chamfers. 17.7 min.
-- **37.8 min** of program at the stated feeds and the 1500 mm/min traverse,
+  and rim chamfers. 17.8 min.
+- **49.4 min** of program at the stated feeds and the 1500 mm/min traverse,
   plus six manual tool changes, each with a Z touch-off (the post stops on
-  `M0`), and the flip. Both setups verify ok and complete at 0.1 mm.
+  `M0`), and the flip. Both setups verify ok and complete at 0.1 mm, with
+  no toolpath warning: when the plate grew to 35 mm stock the Top clearing
+  reached 25 mm down on 22 mm of flute, the feeds check said so, and the
+  depth Top cannot reach is now the Underside's.
 - **Tools and feeds** (`TOOLS` in `cam.py`, each with its arithmetic): chip
   loads about half of Harvey Tool's and Helical Solutions' 6061 charts for a
   VMC, every feed under the 1500 mm/min the machine states. 10 mm 3-flute at
@@ -167,11 +206,11 @@ reason (a frame built from a cylindrical face does not carry the blank's X).
   ER20 holders, 35 mm nuts, each tool's stickout stated so the holder check
   runs.
 
-**The K7 seat.** Ø32 K7 is +7/-18 µm: 31.982 to 32.007, 25 µm wide. The
+**The K7 seat.** Ø47 K7 is +7/-18 µm: 46.982 to 47.007, 25 µm wide. The
 program aims the finisher's rim, and the spring pass's, at the band's
-middle, 31.9945, and says so in its header (`(fit op 7: bore D32 K7
-31.982-32.007, aimed at 31.9945)`); the check reads the posted bore at
-31.9946, in its band. A
+middle, 46.9945, and says so in its header; the check reads the posted
+bore at 46.9946, in its band
+([tolerance bands](../../docs/cam/operations.md#tolerance-bands)). A
 router does not hold 25 µm unaided: spindle runout (an ER20 collet, 10-20
 µm), the finisher's deflection and the steppers' reversal at the quadrants
 each take a part of it, and all push the bore over size, which is the loose
@@ -186,17 +225,19 @@ on a slip fit is the honest fallback, not a pressed K7.
 **Not measured -- measure these at the machine** (`UNMEASURED` in `cam.py`):
 the traverse rate and the travel (the chess job's numbers); the spindle's
 power, usable speed range and runout; the vise's jaw height and width; the
-parallels' height under the blank (22 mm proud of the jaws for the 8 mm
+parallels' height under the blank (27 mm proud of the jaws for the 8 mm
 grip); the ER20 nuts' diameter and each tool's stickout; and the machine's
 real bore size error, which is the K7 question above.
 
 ## Known
 
-- Bearing inner rings are not mated (one solid bearing cannot be fastened to
-  both rings in a mechanism), so `check_seat` verifies each outer ring and
-  reports the inner ring unverified.
-- Nothing retains the yoke against lifting off (gravity holds it) or the
-  tilt shaft axially at the -Y arm; a nut or circlip is not modelled.
+- Two inner rings are not located axially: the lower 6005's (nothing
+  retains the yoke against lifting off; gravity holds it) and the -Y
+  6002's (the tilt shaft ends flush with the arm). `check_seat` says so for
+  each; a nut, a circlip or a printed cap is not modelled.
+- No bearing's shoulder diameter is judged: that is a supplier's abutment
+  dimension, and judging it needs that supplier's catalog installed
+  ([catalogs](../../docs/parts/catalogs.md)).
 - The M4 threads are tapped by hand: an M4 thread mill would be a 2.4 mm
   head on a router. The check lists them as not cut by the job, and
   `cam.py` stops on anything else it lists.
@@ -205,6 +246,9 @@ real bore size error, which is the K7 question above.
   undercut. The check reads it from Top's program and is right.
 - The yoke prints as three pieces bolted together (below); the studies
   model it as one solid, so the joint is taken as bonded.
+- The yoke's statics fix its journal and collar, so they are of the yoke on
+  a rigid journal; the journal's own bend is a beam estimate beside them
+  (below), not a study.
 - The M4 holes are drilled 8 deep with a 118 degree point and threaded
   5.9, three pitches short of it (a Hole's derived drill point and thread
   depth). The tripod hole is bored flat with the 6 mm end mill and states
@@ -228,133 +272,178 @@ and the ledge did (`probe_study`): the shaft's line through the bores, its
 turn from the wheel's teeth following the worm, the lens 160 mm in front of
 and 80 above the axis.
 
-| 3 g | solid yoke, 591 g | the head's yoke, 1051 g |
+**The journal.** A study fixes the journal's face and the collar's, so it
+cannot see the journal bend. `yoke_loads.journal` estimates it by beam: the
+moment of the loads on the yoke about the collar (less its pan component,
+which the worm holds), carried by the journal from the collar to the upper
+bearing's centre and dying out to the lower one, the two `wheel_face`
+apart; the yoke turns with the journal's end and the lens with it.
+
+| 3 g | solid yoke, 606 g | the head's yoke, 1062 g |
 |---|---|---|
-| level: lens / camera pitch | 5.5 mm / 92' | 1.8 mm / 29' |
-| tilted 63 deg: lens / pitch | 10.3 mm / 210' | 3.2 mm / 65' |
-| sideways: lens | 13.1 mm | 4.2 mm |
-| largest von Mises (sideways) | 18.3 MPa | 21.2 MPa |
-| factor of safety, PETG yield 50 / across layers 40 | 2.7 / 2.2 | 2.4 / 1.9 |
+| level: lens / camera pitch | 4.7 mm / 81' | 1.50 mm / 25' |
+| tilted 63 deg: lens / pitch | 9.4 mm / 183' | 2.88 mm / 56' |
+| sideways: lens | 10.6 mm | 3.17 mm |
+| largest von Mises (sideways) | 12.3 MPa | 7.7 MPa |
+| factor of safety, PETG yield 50 / across layers 40 | 4.1 / 3.3 | 6.5 / 5.2 |
+| the Ø25 journal, by beam: lens more, level / tilted / sideways | 0.18 / 0.21 / 0.81 mm | the same |
+| the journal's bending stress, sideways | 7.7 MPa | the same |
 
 The solid yoke is phase 5's with the pan journal fixed (below). Mesh
-arm_t / 3, about 54k and 112k tet10s. Each yoke is one study with the three
-cases in it (one factorisation): 76 s and 407 s, where three studies were
-264 s and 1380 s, the same numbers to the third decimal.
+arm_t / 3, about 61k and 91k tet10s. Each yoke is one study with the three
+cases in it (one factorisation): 100 s and 260 s.
 
 **The topology study** is of `yoke_envelope`: the base out to the pan
 blocks' far edge on both sides, a hub under it down to the wheel, and each
 arm a whole plate across that width up to the tilt axis. The worms' blocks
 are keep-outs, boxes from their own sizes and frames with the running gap
 round them (`keep_outs`): the tilt blocks standing in the +Y arm's slab
-above the ledge took 667 and 684 tets, their nuts' room under it 1227 and
-1208, the pan blocks none (they hang under the base, which they touch). The
-first envelope stepped the +Y arm in by hand around them, and the run
-before that overlapped them, found only in the result. The seats,
-shoulders, reliefs and the pan blocks' screw holes are kept; the tilt
-blocks' screws, under a keep-out, are not. All three cases at once, each
-weighted by the inverse of its compliance on the uniform start (5.1, 1.1
-and 0.5: at equal weights the sideways case is nearly the whole objective
-and the level one, the working pose, is left what the others leave). 30
-iterations at arm_t / 2 (6.4 mm), 44k tets: 80 s on the GPU for the three.
+above the ledge took 593 and 614 tets, their nuts' room under it 1408 and
+1415, the pan blocks none (they hang under the base, which they touch).
+The seats, shoulders, reliefs and the pan blocks' screw holes are kept; the
+tilt blocks' screws, under a keep-out, are not. All three cases at once,
+each weighted by the inverse of its compliance on the uniform start (4.9,
+1.1 and 0.5: at equal weights the sideways case is nearly the whole
+objective and the level one, the working pose, is left what the others
+leave). 30 iterations at arm_t / 2 (6.1 mm), 38k tets: 78 s on the GPU for
+the three, at the head's yoke's mass (0.79 of the domain, 1062 g).
 
 At the solid yoke's volume (0.45 of the domain) the check
-(`check_topology`, a static of the shape before modelling from it) says the
-result cannot be built as it stands: the -Y arm is one strut a tet or two
-wide, the volume-matched level reaches the -Y seat only through tet edges,
-and at the highest level that carries it (0.475 against 0.485) the lens
-moves 18.7 / 13.7 / 6.9 mm, worse than the solid yoke's 5.5 / 10.3 / 13.1
-in two cases. At 8 mm it was worse (the strut broke); the old one-case
-study's single strut was the same finding unchecked.
+(`check_topology`, a static of the shape before modelling from it) said
+the result cannot be built as it stands: the -Y arm is one strut a tet or
+two wide, the volume-matched level reaches the -Y seat only through tet
+edges, and at the highest level that carries it the lens moved 18.7 / 13.7
+/ 6.9 mm, worse than the solid yoke in two cases (measured with the Ø15
+journal; the study runs at the head's yoke's mass since). The shape checked
+case by case, the same seats carried the same way (`yoke_loads.lens`):
 
-So the study now runs at the head's yoke's volume (0.79 of the domain,
-1051 g), and the shape is checked against it case by case. Lens at 3 g,
-the same seats carried the same way (`yoke_loads.lens`):
-
-| 3 g, lens / max von Mises | topology shape, 1051 g | the hand re-model, 1051 g | the solid domain, 1326 g |
+| 3 g, lens / max von Mises | topology shape, 1062 g | the hand re-model, 1062 g | the solid domain, 1336 g |
 |---|---|---|---|
-| level | 1.50 mm / 5.3 MPa | 1.79 mm / 5.2 MPa | 1.50 mm |
-| tilted 63 deg | 2.64 mm / 11.6 MPa | 3.17 mm / 11.5 MPa | 2.59 mm |
-| sideways | 4.53 mm / 20.7 MPa | 4.22 mm / 20.5 MPa | 4.48 mm |
+| level | 1.19 mm / 2.2 MPa | 1.50 mm / 2.3 MPa | 1.18 mm |
+| tilted 63 deg | 2.31 mm / 4.6 MPa | 2.88 mm / 5.7 MPa | 2.25 mm |
+| sideways | 3.47 mm / 6.7 MPa | 3.17 mm / 7.7 MPa | 3.41 mm |
 
-The hand re-model at the shape's mesh size (arm_t / 2) reads 1.77 / 3.13 /
-4.16, so the comparison is not the mesh's. The shape is 16 % stiffer
-than the re-model level and tilted and 7 % softer sideways, and within 2 %
-of the whole domain at 79 % of its mass. Read critically
-(`yoke_topo_{density,shape}_*.png`): the -Y arm is an A-frame with a cross
-strut, the re-model's arm; the +Y arm stays a whole plate with the blocks'
-and nuts' pockets cut through it, ragged at the tets' size; the base stays
-whole. The pockets' staircase edges and the plate are what a re-model
-would square off; the shape's figures are tets, not the smoothed STL. No
-loose pieces were left to remove at this fraction.
+The shape's lens moves 20 % less than the re-model's level and tilted and
+9 % more sideways, and within 3 % of the whole domain's at 79 % of its
+mass.
+Read critically (`yoke_topo_{density,shape}_*.png`): the -Y arm is an
+A-frame with a cross strut, the re-model's arm; the +Y arm stays a whole
+plate with the blocks' and nuts' pockets cut through it; the base stays
+whole. The envelope has no room for the re-model's web under the tilt worm
+or its keels under the base, so the shape cannot have either.
+
+**Re-modelling closer to it was tried and not adopted.** Each variant of
+the re-model studied as the head's yoke is (`build_yoke.lighten`, the same
+three cases and mesh):
+
+| re-model | mass | lens level / tilted / sideways |
+|---|---|---|
+| as built: +Y arm windowed below the ledge, web, keels | 1062 g | 1.50 / 2.88 / 3.17 mm |
+| the +Y arm a whole plate, as the shape keeps it | 1123 g | 1.30 / 2.49 / 3.03 mm |
+| the same, without the web (the shape's +Y side) | 1048 g | 1.44 / 2.77 / 4.44 mm |
+| the same, without the keels | 1015 g | 1.73 / 3.39 / 4.09 mm |
+
+The whole +Y plate is stiffer in every case, but 61 g heavier; paid for by
+dropping the web it loses 40 % sideways, by dropping the keels it loses in
+every case. No variant that can be built beats the current yoke at its
+mass in all three cases, so the yoke stays as it is; the topology study's
+level and tilted gain lives in the +Y plate, and its sideways loss in the
+web the envelope cannot hold.
 
 **The re-model** (`build_yoke.lighten`): A-frame arms with windows, the +Y
 arm solid above the ledge; a web under the tilt worm, from the base to the
 ledge, which with the arm closes a box (the worm's thrust 24 mm outboard of
 a 12 mm plate twisted it); a windowed base on a keel grillage down to the
 wheel; foot flanges, two ISO 4762 M4 each side through the base with ISO
-4032 nuts. Held at its underside instead of its journal, the re-modelled
-yoke's lens moves 0.46 mm at 3 g level: three quarters of the 1.8 mm is the
-Ø15 PETG journal and the base around it -- the pan bearing pair, sized for
-strength, is what limits the stiffness, and topology cannot reach it.
+4032 nuts.
 
 **Printing.** On a 256 mm cube (it also fits a 250 x 210 x 220 bed) as
 three pieces, `split_for_printing` with one cut at the base's top (the
 arms above it are two solids, so two pieces), `yoke_print_*.stl`: the base
-(564 g, 159 x 206 x 43), the +Y arm with the web and the ledge (339 g, 159
+(575 g, 159 x 206 x 46), the +Y arm with the web and the ledge (339 g, 159
 x 60 x 187) and the -Y arm (148 g, 159 x 24 x 187), each a Derived copy of
-the yoke cut by a box, in PETG. Whole, the yoke fits the
-volume but has no orientation without supports under a 220 mm U.
+the yoke cut by a box, in PETG. Whole, the yoke fits the volume but has no
+orientation without supports under a 220 mm U.
 
-The assembly re-runs with it: the standing sweep and both motion studies
-are clean; the camera now passes the A-frames 1.2 mm off at full tilt (the
-designed running gap), where it passed empty space beside the old arms.
+## The pan bearing
+
+Phase 6 found that held at its underside instead of its journal, the
+re-modelled yoke's lens moved a quarter of what it did on the journal: the
+Ø15 PETG pan journal and the base round it, the pan pair sized like the
+tilt shaft, were most of the deflection. Sized for the moment it carries
+instead ([sizes](#sizes)), the pan pair is a 6005. Both are built by the
+generator (`PANTILT_PAN_BEARING=moment`, the default, and `tilt`), on one
+build, studied the same way:
+
+| 3 g | 6002 pan pair (Ø15 journal) | 6005 pan pair (Ø25 journal) |
+|---|---|---|
+| level: lens, study | 1.79 mm | 1.50 mm |
+| tilted 63 deg: lens, study | 3.17 mm | 2.88 mm |
+| sideways: lens, study | 4.22 mm | 3.17 mm |
+| largest von Mises in the yoke (sideways) | 20.8 MPa | 7.7 MPa |
+| the journal, by beam: lens more, level / tilted / sideways | 1.18 / 1.39 / 5.37 mm | 0.18 / 0.21 / 0.81 mm |
+| the journal's bending stress (sideways); against 40 across the layers | 35.5 MPa (1.1) | 7.7 MPa (5.2) |
+| the yoke | 1051 g | 1062 g |
+| the head without its camera | 1987 g | 2090 g |
+
+"Clearly better" was set before the numbers: lower in every case by more
+than the 2 % the mesh alone moves them (phase 6's same-mesh comparison), no
+stress worse, for a mass the head can carry. The 6005 is 16, 9 and 25 %
+lower in the study, the yoke's largest stress falls by two thirds, and the
+6002's journal -- which the study cannot see -- would have bent at 3 g at
+35 MPa against PETG's 40 across the layers it is printed in, adding more
+to the lens sideways than the whole yoke does. It costs 104 g (5 % of the
+head, 3 % with its camera: the bearings 102 g of it) and a thicker plate
+(28.7 against 24.7 mm, cut from 35 mm stock: 11.6 min more on the 6090).
+Adopted; `PANTILT_PAN_BEARING=tilt` builds the 6002 head.
 
 ## Drawings and renders
 
 `build_drawings.py` and `build_renders.py`; the sheets are in
 `scratch/pantilt/drawings/` (PDF and SVG), the stills in
-`scratch/pantilt/renders/`. Every sheet is `check_drawing`ed clean, and its
-dimensions are measured off the projection and its callouts are the model's
-own text, so a change upstream re-draws rather than going stale.
+`scratch/pantilt/renders/`. Every sheet is `check_drawing`ed clean (the
+stage stops otherwise), and its dimensions are measured off the projection
+and its callouts are the model's own text, so a change upstream re-draws
+rather than going stale -- the pan bearing went from a 6002 to a 6005 and
+every sheet followed.
 
-- **`base_plate`** (A3, 2:1): the top (the disc Ø73.6, the relief Ø23.5
+- **`base_plate`** (A3, 2:1): the top (the disc Ø73.6, the relief Ø36
   seen through the seat, `4× M4 DEEP 5.9, DRILL Ø3.3 DEEP 8` and their
-  37.34 spacing), SECTION A-A folded under it through the seat and the
-  tripod hole (24.7 thick, the seat `Ø32 K7 (+0.007/-0.018)` 9 deep, the
-  relief 10.2, the drill 12.7, the 3/8-16 thread drawn to ISO 6410 in the
+  42.64 spacing), SECTION A-A folded under it through the seat and the
+  tripod hole (28.7 thick, the seat `Ø47 K7 (+0.007/-0.018)` 12 deep, the
+  relief 13.2, the drill 12.7, the 3/8-16 thread drawn to ISO 6410 in the
   section, the seat's Ø placed by the app above the section), DETAIL C of
-  the seat's shoulder at 5:1 (its width 4.25 and the 1.2 step down to the
+  the seat's shoulder at 5:1 (its width 5.5 and the 1.2 step down to the
   relief), the underside at 1:1 (`3/8-16 UNC-2B DEEP 12.7, DRILL Ø7.94
   DEEP 12.7`, the chamfers), datum features A (the face it stands on) and
-  B (the seat) and the feature control frames that name them: the seat
-  perpendicular to A within Ø0.02 over its Ø, its shoulder's circular
-  runout 0.03 to B in the detail, the M4s' position Ø0.2 to A and B under
-  their callout; the notes the frames cannot carry (the stock, tapping the
-  M4s by hand, gauging the seat), and the title block's grade (6082-T6,
-  the plate's material) and general tolerance (ISO 2768-mK). The shoulder's
-  runout reads the old note's "runout of B to A" as the face the bearing's
-  outer ring is squared by. Geometry is picked by what it is (a circle of the seat's
-  diameter, the face at z = 0 in the section), from the project's
-  variables, never by toponame strings.
+  B (the seat) and the feature control frames that name them
+  ([feature control frames](../../docs/drawings/README.md#feature-control-frames)):
+  the seat perpendicular to A within Ø0.02 over its Ø, its shoulder's
+  circular runout 0.03 to B in the detail, the M4s' position Ø0.2 to A and
+  B under their callout; the notes the frames cannot carry (the stock, the
+  CAM job's blank; tapping the M4s by hand; gauging the seat), and the
+  title block's grade (6082-T6, the plate's material,
+  [grades](../../docs/rendering/materials.md#grades)) and general tolerance
+  (ISO 2768-mK). The shoulder's runout reads the old note's "runout of B
+  to A" as the face the bearing's outer ring is squared by. Geometry is
+  picked by what it is (a circle of the seat's diameter, the face at z = 0
+  in the section), from the project's variables, never by toponame
+  strings; the section stands under the top view by the plate's height.
 - **`assembly`** (A3, 1:2.5): the head from the front without its camera,
   SECTION C-C through the pan worm's axis (the worm in its 609s, the wheel's
   teeth, the screws that hold the wheel down) and SECTION B-B on both axes
-  (the pan journal in its 6002s, the tilt shaft in its pair, the yoke in
-  section), a balloon on every one of the 17 parts-list rows laid out by
-  the app (`layout_balloons`: each on the view that draws the most of it,
-  round that view, no two leaders crossing); the parts list on the title
-  block (item, quantity, part, made/printed/bought, material grade, unit
-  mass), the camera screw in it as `ASME B18.3 1/4-20 x 3/8`, BOUGHT.
-
-Before the sheets the stage gives the model what they order by: the plate's
-grade (`aluminum_6082_t6`) and the 1/4-20 camera screw as the ASME B18.3
-part it is bought as (the longest stocked length short of the plain part's
-shank, fastened to the cradle where it stood). Both belong in build_base.py
-and build_tilt.py/build_assembly.py; they are made here so the stage runs
-on its own from cam.dsgn.
+  (the pan journal in its 6005s, the tilt shaft in its 6002s, the yoke in
+  section), a balloon on every one of the 18 parts-list rows laid out by
+  the app ([balloon layout](../../docs/drawings/README.md#balloon-layout):
+  each on the view that draws the most of it, round that view, no two
+  leaders crossing); the parts list on the title block (item, quantity,
+  part, made/printed/bought, material grade, unit mass), the camera screw
+  in it as `ASME B18.3 1/4-20 x 3/8`, BOUGHT
+  ([inch screws](../../docs/parts/README.md#inch-screws-asme-b183)).
 - **`print`**: the PETG parts, how each goes on the bed and why, an iso of
   each, and the printed-fit allowances the model was built with, asked of
-  `print_allowance` (hole +0.3 at Ø32 and Ø24, shaft -0.1, counterbore +0.2).
+  `print_allowance` for each bearing's seat, relief and journal (hole +0.3,
+  shaft -0.1, counterbore +0.2).
 
 The stills are path-traced with the parts' materials (the plate aluminium,
 the printed parts PETG, the bearings and screws steel): `hero` (the head
@@ -362,14 +451,17 @@ carrying its camera), `tilted` (35 degrees up, posed by turning the tilt
 worm 35 x 40 turns' worth: the worm relation turns the wheel), `low` (from
 under the pan worm) and `exploded` (along the head's own axes: the pan stack
 down the pan axis, the tilt shaft out along its own, each worm out of its
-blocks, screws out of their holes and their nuts the other way; the app's
-`auto_explode` pushes parts radially from the centre, which scatters an
-axial stack, so the steps are written out).
+blocks, screws out of their holes and their nuts the other way, each
+bearing told by where it stands; the app's `auto_explode` pushes parts
+radially from the centre, which scatters an axial stack, so the steps are
+written out).
 
 **At the machine** (the user): cut the plate, gauge the seat before the
 setup is broken, print the head, assemble it on a tripod with a camera.
 
-## What the round taught
+## What the rounds taught
+
+### The head's round
 
 From the commits' times: the round ran from the plan (30 September, 22:00)
 to these drawings (1 October, about 18:00), some 20 hours of wall clock with
@@ -389,11 +481,9 @@ found by the head.
 the round for most of a day. The precision of the model (no study could run
 on the solid yoke until the sketch planes, and then the placements, were
 double); the topology study's price on the CPU, paid twice because a
-verification rebuilt from nothing; and the topology result itself, which is
+verification rebuilt from nothing; and the topology result itself, which was
 a picture and an STL, so the re-model was read off screenshots and only
-known to meet its target once built. The yoke stage now reuses its saved
-study while the envelope is the same (`--fresh-topology` to run it again),
-and `run_all.sh --from STAGE` runs what changed.
+known to meet its target once built.
 
 **Defects phase 8 found and fixed** (the drawing of a 25 mm plate): lengths
 printed to three significant figures (37.34 read 37.3; 1051 would read
@@ -408,68 +498,105 @@ resolve (an export past a minute); section cuts thrashing a 64-entry cache
 (146 s for the assembly sheet, 27 s now); the title block's notes field
 saved and never printed; "the active document is not a part, not a part".
 
-### The friction list, by what it costs the user
+### The friction list, and what the friction round made of it
 
-1. **Studies are not jobs.** An exact motion study is minutes (pan 12 to 18 min)
-   and `leave_at` runs the whole study again to pose the end; a study keeps
-   running after its client dies (stop it by pid); nothing keys a result to
-   its inputs, so a rebuild re-runs it (the second 2 h topology run). Hours.
-2. **A topology result is a picture.** One load case per study (the layout
-   follows that case: a single strut in an arm), no keep-out bodies (the
+The head's round ranked what had cost the user most; the friction round
+that followed fixed it, two workstreams at a time, each with tests that
+failed before the fix. Measured on this head:
+
+1. **Studies were not jobs.** An exact motion study was minutes (pan 12 to
+   18 min) and `leave_at` ran the whole study again to pose the end; a
+   study kept running after its client died; nothing keyed a result to its
+   inputs, so a rebuild re-ran it (the second 2 h topology run). Now a
+   study is a job with a handle, cancelled and stopped by id, its result
+   kept and reused by an input hash and saved with the project
+   ([studies as jobs](../../docs/simulation/README.md#studies-as-jobs),
+   [motion studies](../../docs/assemblies/README.md#motion-studies)). The
+   exact pan study's checks run every sample's pairs in one batch on all
+   the cores
+   ([what a check costs](../../docs/assemblies/README.md#clash-sweeps-what-a-check-costs)):
+   48 samples, 1294 pair checks, 144 s before and 54 s after; the same
+   inputs again answer in under 0.05 s.
+2. **A topology result was a picture.** One load case per study (the layout
+   followed that case: a single strut in an arm), no keep-out bodies (the
    first envelope overlapped the tilt worm's blocks, found only in the
-   result), islands kept where a keep face freezes unconnected tets, no
-   static study on the optimised shape, no snapping a re-model to it, no
-   split-into-printable-parts verb. About 4 h of re-modelling by hand.
-   (Fixed since, in the friction round: load cases, keep-outs, the
+   result), islands kept where a keep face froze unconnected tets, no
+   static study of the optimised shape, no split into printable parts:
+   about 4 h of re-modelling by hand. Now load cases, keep-outs, the
    connectivity filter, `check_topology`, `split_for_printing` and
-   `topo_to_body`; see
-   [topology you can build from](../../docs/topopt/README.md#topology-you-can-build-from).
-   Snapping to the shape guide is not built.)
-3. **CAM trusts the model where the model is silent.** It ignores part
-   tolerances (the K7 seat is cut at nominal; a band the router cannot hold
-   unaided is the machinist's problem); a profile with tabs never verifies
-   complete; a Hole has no drill point and a Thread no length short of its
-   bore, so blind tapped holes are threaded to the bottom of a flat drill;
-   a thread the job does not cut (the M4s) is ignored silently; adaptive
-   clearing is slow. Risks a wrong part. (Fixed since, in the friction
-   round: the seat is aimed into K7 and judged against it, tabs and
-   offcuts verify, a Hole has a drill point and a thread depth, the M4s are
-   listed as uncut, and adaptive's lead paths are cheaper.)
-4. **Fits stop at one ring.** `check_seat`/`fit_bearing` verify the outer
-   ring only (a one-solid bearing mates to one seat in a mechanism); ISO
-   286's J classes are missing (J7); a Hole's clearance fit ignores the
-   print allowance; `set_tolerance` reaches only the active part.
-5. **Drawings, after this round.** No feature control frames (the datums'
-   meaning is written as notes), no rotated dimension text, no detail
-   views, no auto-layout of balloons or auto-placement of a linear Ø (the
-   generator places them), no material grade in the material library
-   ("ALUMINUM" in the parts list), a 1/4-20 camera screw that cannot be a
-   standard part. (Fixed since, in the friction round: see
+   `topo_to_body`
+   ([topology you can build from](../../docs/topopt/README.md#topology-you-can-build-from)):
+   the yoke's envelope with all three cases at once and the blocks as
+   keep-outs in 80 s on the GPU, its shape checked before anything is
+   modelled from it, the yoke split for the bed by one call. Snapping a
+   re-model to the shape is not built.
+3. **CAM trusted the model where the model was silent.** It ignored part
+   tolerances, a profile with tabs never verified complete, a Hole had no
+   drill point and a Thread no length short of its bore, a thread the job
+   did not cut was ignored silently, and adaptive clearing was slow. Now
+   the seat is aimed into its K7 band and judged against it
+   ([tolerance bands](../../docs/cam/operations.md#tolerance-bands),
+   [their check](../../docs/cam/simulation.md#tolerance-bands)), tabs and
+   offcuts verify ([tabs and offcuts](../../docs/cam/simulation.md#tabs-and-offcuts)),
+   a Hole has a drill point and a thread depth
+   ([drill](../../docs/cam/operations.md#drill),
+   [Hole](../../docs/modeling/holes-and-threads.md#hole)), the M4s are
+   listed as uncut
+   ([what the job does not cut](../../docs/cam/simulation.md#what-the-job-does-not-cut)),
+   and adaptive's lead paths are cheaper (libarea patch 0002,
+   `deps/libarea/README.md`): on the plate's Top setup the same 78036 moves
+   in 26-28 s against 34-40 s.
+4. **Fits stopped at one ring.** `check_seat`/`fit_bearing` verified the
+   outer ring only; ISO 286's J classes were missing; a Hole's clearance fit
+   ignored the print allowance; `set_tolerance` reached only the active
+   part. Now both rings
+   ([both rings](../../docs/parts/README.md#both-rings)), J and js
+   ([limits and fits](../../docs/tolerances/README.md#iso-286-limits-and-fits)),
+   the printed [Hole fit](../../docs/modeling/holes-and-threads.md#hole)
+   and `set_tolerance {part}`
+   ([tolerance RPCs](../../docs/tolerances/README.md#rpcs)).
+5. **Drawings.** No feature control frames, no rotated dimension text, no
+   detail views, no auto-layout of balloons or auto-placement of a linear
+   Ø, no material grade ("ALUMINUM" in the parts list), a 1/4-20 camera
+   screw that could not be a standard part. Now
    [feature control frames](../../docs/drawings/README.md#feature-control-frames),
+   aligned values and a placed Ø
+   ([dimensions and annotation](../../docs/drawings/README.md#dimensions-and-annotation)),
    [detail views](../../docs/drawings/README.md#detail-views),
    [balloon layout](../../docs/drawings/README.md#balloon-layout),
    [inch screws](../../docs/parts/README.md#inch-screws-asme-b183) and
-   [grades](../../docs/rendering/materials.md#grades).)
-6. **Modelling.** A frame built from a cylindrical face has an arbitrary X
-   (every worm frame is written out); the expression language has no table
-   lookup (bearing and screw sizes are chosen in Python).
-7. **Tooling.** `headless-preview.sh --stop` finds the instance only under
+   [grades](../../docs/rendering/materials.md#grades).
+6. **Modelling.** A frame built from a cylindrical face had an arbitrary X,
+   and the expression language had no table lookup. Now a round face's X is
+   its seam ([connector frames](../../docs/assemblies/solver.md#connector-frames))
+   and a project has [tables](../../docs/variables/README.md#tables).
+7. **Tooling.** `headless-preview.sh --stop` found the instance only under
    the `XDG_STATE_HOME` it was started with; a fresh worktree's submodules
-   clone from the network, which stalled once for minutes.
+   cloned from the network. Both fixed ([scripting](../../docs/scripting/README.md)).
 
-### The next friction round
+And the big generators, this one included, became tests
+([the big generators as tests](../README.md#the-big-generators-as-tests)).
 
-1. Studies as jobs: a handle, cancel and stop by id, results kept and
-   reused by an input hash (motion, static, topology), `leave_at` from the
-   recorded samples, the exact motion check cached between samples.
-2. Topology you can build from: several load cases, keep-out bodies, a
-   connectivity filter, a static study on the optimised mesh, a split for
-   the printer.
-3. CAM honest about tolerance and threads -- built: see
-   [tolerance bands](../../docs/cam/operations.md#tolerance-bands) and
-   [what the job does not cut](../../docs/cam/simulation.md#what-the-job-does-not-cut).
-4. Fits: J/js classes, both rings of a bearing checked, the print allowance
-   in a Hole's clearance fit, `set_tolerance` on any part.
-5. Drawings: feature control frames on datums, rotated text, balloon
-   auto-layout, imperial screws as standard parts, a material grade --
-   built: see [the drawings](#drawings-and-renders).
+### Closing the round
+
+Regenerated from nothing on the round's last build, the head found what the
+round had not:
+
+- **The pan journal was under-sized.** Sized like the tilt shaft, by the
+  tilt torque, it carried three times that as a bending moment; the yoke's
+  statics could not see it, since they fix the journal. Sized for the
+  moment, the pan pair is a 6005 ([the pan bearing](#the-pan-bearing)).
+- **Bigger parts move drawings and programs.** The 6005's thicker plate
+  pushed the base plate's section into its top view (the section now stands
+  under it by the plate's height) and its stock to 35 mm, where the Top
+  clearing reached past its cutter's flutes -- a warning the job's report
+  carried and `cam.py` did not stop on (it does now, as the drawing stage
+  stops on a sheet that is not clean); the sheet's notes named the old
+  stock and seat (they are the CAM job's blank and the model's seat now).
+- **What the sheets order by is the model's.** The plate's grade and the
+  ASME B18.3 camera screw were patched in by the drawing stage; they are
+  made where the parts are, and the drawing stage only draws.
+- **`check_seat` read "unverified" for every bearing**, which looked like
+  the inner rings going unread. They were read; what stayed unverified was
+  the shoulders' diameters, which need a supplier's catalog, and two inner
+  rings nothing locates. The report now gives each ring's seat and checks.

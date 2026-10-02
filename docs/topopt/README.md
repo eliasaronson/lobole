@@ -109,7 +109,7 @@ floating material, is checked by a static study of its own shape before
 anything is re-modelled, and the part made from it is cut for the printer
 by a verb. The pan/tilt yoke's re-model took about four hours read off
 screenshots, and was known to meet its target only once built
-(`generators/pantilt/README.md`, "What the round taught").
+(`generators/pantilt/README.md#what-the-rounds-taught`).
 
 ### Load cases
 
@@ -238,13 +238,15 @@ which the app answers as usual; synchronous, it answered nothing else. In
 the panel it is **Check shape**, which makes both and runs the shape's off
 the frame.
 
-On the pan/tilt yoke (`generators/pantilt/README.md`, "The yoke under
-load") the check is what showed that the result at the solid yoke's mass
-cannot be built as it stands: its -Y arm is one strut a tet or two wide,
-the volume-matched level reaches the -Y bearing seat only through edges,
-and at the highest level that carries it the lens moves 18.7 mm at 3 g
-level, three times the solid yoke's. At the hand re-model's mass the same
-study's shape is stiffer than the re-model in two cases of three.
+On the pan/tilt yoke (`generators/pantilt/README.md#the-yoke-under-load`)
+the check is what showed that the result at the solid yoke's mass cannot be
+built as it stands: its -Y arm is one strut a tet or two wide, the
+volume-matched level reaches the -Y bearing seat only through edges, and at
+the highest level that carries it the lens moved 18.7 mm at 3 g level,
+three times the solid yoke's. At the hand re-model's mass the same study's
+shape is stiffer than the re-model in two cases of three; re-models built
+closer to it, each checked the same way, were stiffer only where they were
+heavier, so the check is also what kept the yoke as it was.
 
 ### Split for printing
 

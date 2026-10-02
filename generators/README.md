@@ -106,8 +106,9 @@ plain `ctest` -- the headless suite, CI, the nix sandbox -- never runs them,
 and labelled `generators` and `slow`. `tools/merge-branch.sh --full` runs
 them after the headless suite, two at a time.
 
-Not covered: the pan/tilt yoke's statics and topology (`yoke_topo`, 25
-minutes, and a topology result kept in a 25 MB project), and the chess set's
+Not covered: the pan/tilt yoke's statics and topology (`yoke_topo`, 9
+minutes, its two projects 160 and 240 MB with every study's result saved
+in them), and the chess set's
 other CAM jobs (six more minutes). A run from nothing resolves every name
 by this binary, so it catches a generator that picks by a name the app no
 longer makes; it cannot catch an OLD document whose stored names no longer
