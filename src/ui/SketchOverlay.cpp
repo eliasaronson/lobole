@@ -148,12 +148,20 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityDots(const sketch::Entity& e) {
     return {{0, a->center},
             {1, sketch::ArcPointUV(*a, 1)},
             {2, sketch::ArcPointUV(*a, 2)}};
-  if (auto* el = std::get_if<sketch::Ellipse>(&e))
-    return {{0, el->center}};
-  if (auto* ea = std::get_if<sketch::EllipseArc>(&e))
-    return {{0, ea->center},
-            {1, sketch::EllipseArcPointUV(*ea, 1)},
-            {2, sketch::EllipseArcPointUV(*ea, 2)}};
+  if (std::holds_alternative<sketch::Ellipse>(e) ||
+      std::holds_alternative<sketch::EllipseArc>(e)) {
+    // The centre, an arc's ends, and the axis ends (handles: drag one to
+    // resize and turn the ellipse).
+    std::vector<std::pair<uint8_t, glm::vec2>> dots = {
+        {0, sketch::EntityPointUV(e, 0)}};
+    if (std::holds_alternative<sketch::EllipseArc>(e))
+      for (uint8_t w : {uint8_t{1}, uint8_t{2}})
+        dots.push_back({w, sketch::EntityPointUV(e, w)});
+    for (uint8_t w = sketch::kEllipseMajorPos; w <= sketch::kEllipseMinorNeg;
+         w++)
+      dots.push_back({w, sketch::EntityPointUV(e, w)});
+    return dots;
+  }
   if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
     std::vector<std::pair<uint8_t, glm::vec2>> dots;
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);

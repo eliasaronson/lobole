@@ -147,6 +147,19 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   auto isCurve = [&](const sketch::PointRef& r) { // circle or arc: has a radius
     return isCircle(r) || isArc(r);
   };
+  auto isEllipse = [&](const sketch::PointRef& r) { // or an elliptical arc
+    const auto* e = entityOf(r);
+    return e && (std::holds_alternative<sketch::Ellipse>(*e) ||
+                 std::holds_alternative<sketch::EllipseArc>(*e));
+  };
+  auto isSpline = [&](const sketch::PointRef& r) {
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::BSpline>(*e);
+  };
+  // Anything a point can lie on, or a curve can be tangent to.
+  auto isAnyCurve = [&](const sketch::PointRef& r) {
+    return isLine(r) || isCurve(r) || isEllipse(r) || isSpline(r);
+  };
   auto isPoint = [&](const sketch::PointRef& r) {
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Point>(*e);
@@ -164,7 +177,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     break;
   case K::Horizontal:
   case K::Vertical:
-    if (sel.empty() || !isLine(sel[0]))
+    // A line, or an ellipse (its major axis).
+    if (sel.empty() || !(isLine(sel[0]) || isEllipse(sel[0])))
       return false;
     c.a = {sel[0].entity, 0};
     break;
@@ -178,7 +192,9 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     break;
   case K::Radius:
   case K::Diameter:
-    if (sel.empty() || !isCurve(sel[0]))
+    // An ellipse goes through to the solver, whose refusal names the
+    // distance-to-an-axis-end form.
+    if (sel.empty() || !(isCurve(sel[0]) || isEllipse(sel[0])))
       return false;
     c.a = {sel[0].entity, 0};
     break;
@@ -212,43 +228,45 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     break;
   }
   case K::Tangent: {
-    // One line + one circle/arc, either order; normalize to a=line, b=curve.
-    if (sel.size() < 2)
+    // Two curves, either order; a line first when there is one. Which pairs
+    // the solver can hold (and where) is its call: an unsupported pair is
+    // refused below with its reason.
+    if (sel.size() < 2 || !isAnyCurve(sel[0]) || !isAnyCurve(sel[1]) ||
+        sel[0].entity == sel[1].entity)
       return false;
-    if (isLine(sel[0]) && isCurve(sel[1])) {
-      c.a = {sel[0].entity, 0};
-      c.b = {sel[1].entity, 0};
-    } else if (isCurve(sel[0]) && isLine(sel[1])) {
-      c.a = {sel[1].entity, 0};
-      c.b = {sel[0].entity, 0};
-    } else {
-      return false;
-    }
+    const bool swap = !isLine(sel[0]) && isLine(sel[1]);
+    c.a = {sel[swap ? 1 : 0].entity, 0};
+    c.b = {sel[swap ? 0 : 1].entity, 0};
     break;
   }
   case K::PointOnLine: {
-    // One point + one line, in either order. The point is stored verbatim
-    // (its `which` selects the endpoint); the line entity goes in b.
+    // One point + one curve (line, circle, arc, ellipse, elliptical arc,
+    // spline), in either order. The point is stored verbatim (its `which`
+    // selects the endpoint); the curve entity goes in b.
     if (sel.size() < 2)
       return false;
     const sketch::PointRef* pt = nullptr;
     const sketch::PointRef* line = nullptr;
-    if (isPoint(sel[0]) && isLine(sel[1])) {
+    if (isPoint(sel[0]) && isAnyCurve(sel[1])) {
       pt = &sel[0];
       line = &sel[1];
-    } else if (isLine(sel[0]) && isPoint(sel[1])) {
+    } else if (isAnyCurve(sel[0]) && isPoint(sel[1])) {
       pt = &sel[1];
       line = &sel[0];
-    } else if (isLine(sel[0]) && isLine(sel[1])) {
-      // A line endpoint onto another line; first selection is the point.
-      pt = &sel[0];
-      line = &sel[1];
+    } else if (isAnyCurve(sel[0]) && isAnyCurve(sel[1])) {
+      // A curve's point (an end, a centre) onto another curve: the one
+      // picked as a point is the point; with neither, the first.
+      const bool firstWhole = sel[0].which == sketch::kWholeEntity;
+      const bool secondWhole = sel[1].which == sketch::kWholeEntity;
+      pt = firstWhole && !secondWhole ? &sel[1] : &sel[0];
+      line = pt == &sel[0] ? &sel[1] : &sel[0];
     } else {
       return false;
     }
-    if (pt->entity == line->entity)
-      return false; // point is on its own line
-    c.a = *pt;
+    // A Point entity selected whole (a box select) is its one point.
+    c.a = isPoint(*pt) ? sketch::PointRef{pt->entity, 0} : *pt;
+    if (pt->entity == line->entity || c.a.which == sketch::kWholeEntity)
+      return false; // a point on its own curve, or no point picked
     c.b = {line->entity, 0};
     break;
   }
@@ -290,7 +308,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.a = sel[0]; // pin this point in place
     break;
   case K::Concentric:
-    if (sel.size() < 2 || !isCurve(sel[0]) || !isCurve(sel[1]))
+    if (sel.size() < 2 || !(isCurve(sel[0]) || isEllipse(sel[0])) ||
+        !(isCurve(sel[1]) || isEllipse(sel[1])))
       return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
@@ -309,9 +328,17 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
         labelOffset != nullptr ? *labelOffset : SeedLabelOffset(*sketch, c);
   sketch->constraints.push_back(c);
 
-  // Solve and write the result back into the sketch.
+  // Solve and write the result back into the sketch -- unless the solver
+  // cannot hold this constraint, which it says, and nothing is added
+  // (docs/sketching/README.md#refusals).
   sketch::Solver solver;
   solver.Load(*sketch);
+  for (const auto& bad : solver.UnsupportedConstraints())
+    if (bad.index + 1 == sketch->constraints.size()) {
+      sketch->constraints.pop_back();
+      state.sketchEdit.actionMsg = "Not added: " + bad.reason;
+      return false;
+    }
   sketch::SolveResult r = solver.Solve();
   if (r.ok)
     solver.WriteBack(sketch->entities);

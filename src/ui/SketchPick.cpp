@@ -74,10 +74,17 @@ EntityPoints(const sketch::Entity& e) {
            {2, sketch::ArcPointUV(*a, 2)}};
   } else if (auto* el = std::get_if<sketch::Ellipse>(&e)) {
     pts = {{0, el->center}};
+    // The axis ends: dragging one resizes and turns the ellipse.
+    for (uint8_t w = sketch::kEllipseMajorPos; w <= sketch::kEllipseMinorNeg;
+         w++)
+      pts.push_back({w, sketch::EntityPointUV(e, w)});
   } else if (auto* ea = std::get_if<sketch::EllipseArc>(&e)) {
     pts = {{0, ea->center},
            {1, sketch::EllipseArcPointUV(*ea, 1)},
            {2, sketch::EllipseArcPointUV(*ea, 2)}};
+    for (uint8_t w = sketch::kEllipseMajorPos; w <= sketch::kEllipseMinorNeg;
+         w++)
+      pts.push_back({w, sketch::EllipseArcPointUV(*ea, w)});
   } else if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
     for (size_t k = 0; k < nPoles; k++)
@@ -152,9 +159,14 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
                                        c->center + glm::dvec2(c->radius, 0.0));
       float rPx = glm::length(rim - center);
       d = std::abs(glm::length(mousePos - center) - rPx);
-    } else if (std::holds_alternative<sketch::Arc>(e)) {
-      // Distance to the tessellated arc polyline — respects the sweep (only
-      // the drawn span is hit) and works under any projection.
+    } else if (std::holds_alternative<sketch::Arc>(e) ||
+               std::holds_alternative<sketch::Ellipse>(e) ||
+               std::holds_alternative<sketch::EllipseArc>(e) ||
+               std::holds_alternative<sketch::BSpline>(e)) {
+      // Distance to the tessellated curve — respects an arc's sweep (only
+      // the drawn span is hit) and works under any projection. (Ellipses
+      // and splines had no body pick at all: they could be box-selected but
+      // not clicked, so no constraint could name one from the canvas.)
       std::vector<glm::dvec2> uv = sketch::TessellateEntity(e);
       for (size_t k = 0; k + 1 < uv.size(); k++)
         d = std::min(

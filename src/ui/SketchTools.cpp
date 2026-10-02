@@ -176,13 +176,32 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
       drag.initialPos = {l.a, l.b};
     }
     ok = drag.solver->BeginDrag(drag.points);
+  } else if (pick.body && (std::holds_alternative<sketch::Ellipse>(e) ||
+                           std::holds_alternative<sketch::EllipseArc>(e))) {
+    // An ellipse by its body moves by its centre: the solver holds its
+    // size, shape, turn and an arc's ends softly, so it translates whole
+    // (docs/sketching/README.md#ellipses-and-splines). Its handles -- the
+    // axis and arc ends -- reshape it.
+    drag.mode = SketchDragSession::Mode::Point;
+    drag.points = {{pick.ref.entity, 0}};
+    drag.initialPos = {sketch::EntityPointUV(e, 0)};
+    ok = drag.solver->BeginDrag(drag.points);
+  } else if (pick.body && std::holds_alternative<sketch::BSpline>(e)) {
+    // A spline by its body moves whole: every pole follows the cursor by the
+    // same delta, instead of one pulled pole reshaping it.
+    drag.mode = SketchDragSession::Mode::LineBody;
+    for (const auto& [which, uv] : EntityPoints(e)) {
+      drag.points.push_back({pick.ref.entity, which});
+      drag.initialPos.push_back(uv);
+    }
+    ok = drag.solver->BeginDrag(drag.points);
   } else {
     drag.mode = SketchDragSession::Mode::Point;
+    // From the point itself, not the cursor: the pick tolerance is pixels,
+    // and a handle that jumped to the cursor would move before the drag did.
     glm::dvec2 pos = cursorUV;
-    if (auto* p = std::get_if<sketch::Point>(&e))
-      pos = p->p;
-    else if (auto* l = std::get_if<sketch::Line>(&e))
-      pos = pick.ref.which ? l->b : l->a;
+    if (!pick.body && pick.ref.which != sketch::kWholeEntity)
+      pos = sketch::EntityPointUV(e, pick.ref.which);
     else if (auto* c = std::get_if<sketch::Circle>(&e))
       pos = c->center;
     drag.points = {pick.ref};

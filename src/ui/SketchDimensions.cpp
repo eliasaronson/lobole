@@ -261,6 +261,19 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
                             {pick.ref.entity, 0}, {}, r);
     return;
   }
+  // An ellipse body: its MAJOR radius, as the distance from the centre to
+  // the major-axis end (an ellipse has two radii; the minor one is the
+  // centre and a minor-axis end, both pickable dots).
+  if (pick.body && e != nullptr &&
+      (std::holds_alternative<sketch::Ellipse>(*e) ||
+       std::holds_alternative<sketch::EllipseArc>(*e))) {
+    edit.selected.clear();
+    edit.dimPickBody.clear();
+    StartDimensionPlacement(state, /*pair=*/true, K::Distance,
+                            {pick.ref.entity, 0},
+                            {pick.ref.entity, sketch::kEllipseMajorPos}, 0.0);
+    return;
+  }
 
   const bool lineTarget =
       pick.body &&

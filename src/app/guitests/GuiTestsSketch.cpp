@@ -890,6 +890,93 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo()); // one undoable edit
   };
 
+  // An ellipse by direct manipulation
+  // (docs/sketching/README.md#ellipses-and-splines): its major-axis end is a
+  // handle that resizes it in place,
+  // its body drags it whole, and the Dimension tool on its body places the
+  // major radius as a distance from the centre to that end.
+  t = IM_REGISTER_TEST(engine, "drag", "ellipse_handles");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t el = sk->AddEntity(sketch::Ellipse{{0, 0}, 2.0, 1.0, 0.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f * LensScale()));
+    ctx->Yield(2);
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    const auto ellipse = [&]() {
+      auto* s = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      return std::get<sketch::Ellipse>(s->entities[s->IndexOfEntity(el)]);
+    };
+    const auto dragUV = [&](glm::vec2 from, glm::vec2 to) {
+      auto* s = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const glm::vec2 a = ui::SketchUVToScreen(*s_App, s->plane, from);
+      const glm::vec2 b = ui::SketchUVToScreen(*s_App, s->plane, to);
+      ctx->MouseMoveToPos(ImVec2(a.x, a.y));
+      ctx->MouseDown(ImGuiMouseButton_Left);
+      ctx->MouseMoveToPos(ImVec2(0.5f * (a.x + b.x), 0.5f * (a.y + b.y)));
+      ctx->MouseMoveToPos(ImVec2(b.x, b.y));
+      ctx->MouseUp(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+
+    // The major end (2, 0) pulled to (3, 0): longer, same centre and minor.
+    dragUV({2, 0}, {3, 0});
+    IM_CHECK_LE(std::abs(ellipse().rMajor - 3.0), 2e-2);
+    IM_CHECK_LE(std::abs(ellipse().rMinor - 1.0), 2e-2);
+    IM_CHECK_LE(glm::length(ellipse().center), 2e-2);
+    IM_CHECK(s_App->commands->CanUndo());
+
+    // The body (a point on the curve, away from the handles) moves it whole.
+    const glm::vec2 onCurve(3.0f * std::cos(0.8f), std::sin(0.8f));
+    dragUV(onCurve, onCurve + glm::vec2(0.0f, 1.0f));
+    IM_CHECK_LE(std::abs(ellipse().center.y - 1.0), 2e-2);
+    IM_CHECK_LE(std::abs(ellipse().center.x), 2e-2);
+    IM_CHECK_LE(std::abs(ellipse().rMajor - 3.0), 2e-2);
+    IM_CHECK_LE(std::abs(ellipse().rMinor - 1.0), 2e-2);
+
+    // Dimension tool on the body: the major radius, centre to major end.
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    auto clickUV = [&](glm::vec2 uv) {
+      auto* s = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const glm::vec2 p = ui::SketchUVToScreen(*s_App, s->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    clickUV(onCurve + glm::vec2(0.0f, 1.0f));
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({1.5f, 2.8f}); // place the label above the span
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    const sketch::Constraint& dim = sk->constraints[0];
+    IM_CHECK(dim.kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_EQ(dim.a.entity, el);
+    IM_CHECK_EQ((int)dim.a.which, 0);
+    IM_CHECK_EQ((int)dim.b.which, (int)sketch::kEllipseMajorPos);
+    IM_CHECK_LE(std::abs(dim.value - 3.0), 2e-2);
+    ctx->KeyPress(ImGuiKey_Escape); // the inline editor
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Escape); // the tool
+    ctx->Yield();
+    ctx->KeyPress(ImGuiKey_Escape); // the sketch
+    ctx->Yield();
+  };
+
   // 3D fillet via edge picking (M7/T5): create a box, start a fillet, click a
   // visible B-Rep edge, accept — the body loses volume along that edge.
   t = IM_REGISTER_TEST(engine, "sketch", "selection_seeds_extrude_regions");
