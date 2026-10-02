@@ -435,8 +435,34 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
 // rather than at a sample. Refused when it names the wrong unit for the
 // driver, falls outside the range the run walked, or comes with `leave_at`
 // as well — two answers to one question, and neither would be the other.
+//
+// The checks need only the study, so the handler makes them BEFORE the run
+// (CheckLeaveAtValue) as well as here: the run is the expensive half, and a
+// refusal of the pose it should end on used to arrive after it.
+void CheckLeaveAtValue(const MotionStudy& s, const RpcParams& p);
+
 json LeaveAtValue(ui::AppState& state, const MotionStudy& s,
                   const motion::Result& r, const RpcParams& p) {
+  CheckLeaveAtValue(s, p);
+  const bool rot = s.driverDof == MateDof::Rotation;
+  const char* want = rot ? "leave_at_deg" : "leave_at_mm";
+  const double wire = p.at(want).get<double>();
+  const double value = RotAwareAngle(wire, rot);
+  const int n = static_cast<int>(r.samples.size());
+  if (n < 2)
+    throw std::runtime_error(std::string(want) +
+                             ": the run has fewer than two samples");
+  const double t = (value - s.from) / (s.to - s.from);
+  const int nearest =
+      std::clamp(static_cast<int>(std::lround(t * (n - 1))), 0, n - 1);
+  std::string err;
+  if (!ui::ApplyMotionSample(state, s.id, r, static_cast<size_t>(nearest),
+                             &value, &err))
+    throw std::runtime_error(err);
+  return json{{"left_at", nearest}, {"left_at_value", wire}};
+}
+
+void CheckLeaveAtValue(const MotionStudy& s, const RpcParams& p) {
   const bool rot = s.driverDof == MateDof::Rotation;
   const char* want = rot ? "leave_at_deg" : "leave_at_mm";
   const char* other = rot ? "leave_at_mm" : "leave_at_deg";
@@ -466,18 +492,6 @@ json LeaveAtValue(ui::AppState& state, const MotionStudy& s,
                              " — the run never walked there, so it has no "
                              "branch to keep; widen the study's from/to");
   }
-  const int n = static_cast<int>(r.samples.size());
-  if (n < 2)
-    throw std::runtime_error(std::string(want) +
-                             ": the run has fewer than two samples");
-  const double t = (value - s.from) / (s.to - s.from);
-  const int nearest =
-      std::clamp(static_cast<int>(std::lround(t * (n - 1))), 0, n - 1);
-  std::string err;
-  if (!ui::ApplyMotionSample(state, s.id, r, static_cast<size_t>(nearest),
-                             &value, &err))
-    throw std::runtime_error(err);
-  return json{{"left_at", nearest}, {"left_at_value", wire}};
 }
 
 AssemblyDocument& NeedAssembly(ui::AppState& state) {
@@ -682,6 +696,21 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     ui::JobStart start;
     start.recompute = p.value("recompute", false);
     start.owner = p.value("outlive_client", false) ? 0 : state.rpcConnection;
+    // `leave_at`'s shape is checked BEFORE the run, not after it: the run is
+    // the expensive half, and a typo in the pose to leave it at used to be
+    // refused only once it had finished. (The index's range needs the run's
+    // sample count, so that one is still checked after.)
+    if (atValue) {
+      CheckLeaveAtValue(s, p);
+    } else if (p.contains("leave_at")) {
+      const json& at = p.at("leave_at");
+      const bool word = at.is_string() && (at.get<std::string>() == "last" ||
+                                           at.get<std::string>() == "start");
+      if (!word && !(at.is_number_integer() && at.get<int64_t>() >= 0))
+        throw std::runtime_error(
+            "leave_at: \"start\", \"last\", or a sample index from 0 — got " +
+            at.dump());
+    }
     if (p.value("async", false)) {
       if (p.contains("leave_at") || atValue)
         throw std::runtime_error(
@@ -842,6 +871,9 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("frames must be at least 2");
     }
     req.quality = p.value("quality", std::string{});
+    // Read before the job starts: a mistyped `async` refused AFTER it would
+    // leave a video rendering behind an error.
+    const bool async = p.value("async", false);
     ui::MotionVideoPlan plan;
     std::string err;
     if (!ui::StartMotionVideo(state, req, &err, &plan))
@@ -856,7 +888,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
           {"fps", pl.fps},
           {"quality", pl.format == "png" ? json(nullptr) : json(pl.quality)}};
     };
-    if (p.value("async", false)) {
+    if (async) {
       json out = planJson(plan);
       out["started"] = true;
       out["job"] = "motion-video";

@@ -80,8 +80,11 @@ def handler_bodies():
                     if depth == 0:
                         end = j
                         break
+            # Every block that names the method, not the last one: a shared
+            # handler with a small branch of its own for one method
+            # (export_stl's tolerance) is still that method's handler.
             for m in methods:
-                out[m] = src[start:end]
+                out[m] = out.get(m, "") + src[start:end]
     return out
 
 

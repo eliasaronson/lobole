@@ -356,10 +356,17 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
     const Document& subject = SubjectPart(state, doc, p);
     const std::string dir = p.at("dir").get<std::string>();
     const bool overwrite = p.value("overwrite", false);
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
 
-    json files = json::array();
+    // Planned whole, then written: every refusal -- two members with one
+    // name, a file already there, nothing to export -- comes before the
+    // directory is made or the first file lands. Checked one member at a
+    // time between the writes, a refusal left exactly the directory "half
+    // from one run and half from another" the overwrite rule exists to stop.
+    struct Planned {
+      const Body* body;
+      std::string safe, path;
+    };
+    std::vector<Planned> plan;
     std::set<std::string> used;
     for (size_t i = 0; i < subject.GetBodies().size(); i++) {
       const Body& body = subject.GetBodies()[i];
@@ -391,22 +398,29 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
             "directory half from one run and half from another is an order "
             "nobody can check");
       }
+      plan.push_back({&body, safe, path});
+    }
+    if (plan.empty()) {
+      throw std::runtime_error(
+          "this part has no tube members to export - a member is a Pipe "
+          "swept along a Curve3D of kind bent_path");
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    json files = json::array();
+    for (const Planned& one : plan) {
       // The product inside is named after the member too, so the file still
       // says what it is once it has been renamed or opened in another system.
       CADKernel::StepExportModel model;
       model.parts.push_back(
-          {body.name, {{body.shape, body.name, std::nullopt}}});
+          {one.body->name, {{one.body->shape, one.body->name, std::nullopt}}});
       std::string why;
-      if (!CADKernel::Instance().SaveSTEPModel(path, model, &why))
-        throw std::runtime_error("could not write '" + path + "': " + why);
-      files.push_back({{"member", body.name},
-                       {"file", safe + ".step"},
-                       {"volume_mm3", body.shape.Volume()}});
-    }
-    if (files.empty()) {
-      throw std::runtime_error(
-          "this part has no tube members to export - a member is a Pipe "
-          "swept along a Curve3D of kind bent_path");
+      if (!CADKernel::Instance().SaveSTEPModel(one.path, model, &why))
+        throw std::runtime_error("could not write '" + one.path + "': " + why);
+      files.push_back({{"member", one.body->name},
+                       {"file", one.safe + ".step"},
+                       {"volume_mm3", one.body->shape.Volume()}});
     }
     const int count = static_cast<int>(files.size());
     out = {{"dir", dir}, {"files", std::move(files)}, {"count", count}};
@@ -428,6 +442,12 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
     std::string csv;
     json out_extra = json::object();
     if (m == "export_cut_list") {
+      // Refused here, before the file is written: unread, it used to be
+      // refused as unknown only after the CSV had landed.
+      if (p.contains("kerf_mm") && !p.contains("stock_length_mm"))
+        throw std::runtime_error(
+            "kerf_mm is the saw cut between pieces packed into "
+            "stock_length_mm; it means nothing without the stock length");
       csv = "member,quantity,material,size,cut_length_mm,bends,bodies\n";
       for (const tube::MemberRow& r : rows) {
         // The size is the MEMBER's, off its own Pipe: a frame is several

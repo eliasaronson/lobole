@@ -144,8 +144,11 @@ def main():
         expect(all(f["name"] != "Keep1" for f in now),
                "nothing from the failed batch survives")
 
-        # A typo'd KEY is the same: rejected, and nothing is left behind.
-        refused(d, "batch", ["rolled back"], calls=[
+        # A typo'd KEY is refused before ANY call runs: every call's keys are
+        # checked against its row up front, so nothing is applied to roll
+        # back (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+        refused(d, "batch", ["batch call 2", "unknown parameter 'wibble'",
+                             "unchanged"], calls=[
             {"method": "add_feature", "params": {"feature": {
                 "type": "Sketch", "name": "T1", "plane": plane(),
                 "entities": []}}},
@@ -154,7 +157,7 @@ def main():
                             "width": 1, "depth": 1, "height": 1},
                 "wibble": 3}}])
         expect(len(d.call("get_state")["features"]) == len(before),
-               "a rejected key rolls the batch back like any other failure")
+               "a rejected key leaves the document as it was")
 
         # ---- stop_on_error false runs on and reports each error ---------
         r = d.call("batch", stop_on_error=False, calls=[

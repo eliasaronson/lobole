@@ -13,6 +13,7 @@
 
 #include <glm/glm.hpp>
 
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,6 +33,44 @@ bool BinaryReplaced();
 std::string UnknownParamError(const std::string& method,
                               const std::vector<std::string>& unknown,
                               const std::set<std::string>& accepted);
+
+// The refusal for params `method`'s describe row does not take -- a key it
+// does not list, or params that are not an object -- or nullopt when they are
+// fine (or the method is unknown, or takes a free-form spec). Checked BEFORE
+// the handler runs, for every way a request arrives: a refusal that comes
+// after the handler has written a file is a refusal of something already
+// done (docs/scripting/rpc.md#parameters).
+std::optional<std::string> UndeclaredParamsError(const std::string& method,
+                                                 const nlohmann::json& params);
+
+// Where each of the active tab's undo histories stood before a call, so a
+// refused call can be taken back whole: the part's command stack, and the
+// snapshot histories of an assembly, a drawing and a CAM job. A refusal
+// leaves the document as it was; without this, a handler that checked one
+// thing after changing another left the change behind under an error.
+struct EditMarks {
+  const void* document = nullptr;
+  const void* commands = nullptr;
+  size_t commandDepth = 0;
+  const void* assembly = nullptr;
+  size_t assemblyUndo = 0;
+  const void* drawing = nullptr;
+  size_t drawingUndo = 0;
+  const void* job = nullptr;
+  size_t jobUndo = 0;
+  // Whether the active tab was saved as it stood: a rollback restores the
+  // content, and a restore moves the version on (so no cache serves the
+  // state it replaced) -- which would read as an unsaved edit nobody made.
+  int activePart = -1;
+  uint64_t activeStamp = 0;
+  uint64_t lastSaved = 0;
+};
+EditMarks MarkEdits(const ui::AppState& state);
+
+// Undo everything pushed since `marks` on the tab that is still the one
+// marked, and drop it from redo. Returns what was taken back, in words ("2
+// edit(s) undone and the job restored"), or "" when nothing had changed.
+std::string RollBackEdits(ui::AppState& state, const EditMarks& marks);
 
 // A parameter of the wrong TYPE, said the way a refusal says things: which
 // method, what each key it was handed actually is, and where to read what

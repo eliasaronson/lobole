@@ -799,38 +799,59 @@ json SplitForPrinting(ui::AppState& state, Document& active,
                                "': " + added->GetError());
     return added->GetId();
   };
-  for (size_t i = 0; i < planned.size(); ++i) {
-    const printsplit::Piece& pc = planned[i];
-    const size_t slot = ui::AddPart(state, partNames[i]);
-    out["pieces"][i]["part"] = partNames[i];
-    out["pieces"][i]["part_id"] = state.parts[slot].id;
-    const uint64_t derived = add({{"type", "Derived"},
-                                  {"name", bodyName},
-                                  {"source_part", srcId},
-                                  {"body_names", {bodyName}},
-                                  {"reference", false}});
-    const glm::dvec3 size = pc.cellMax - pc.cellMin;
-    const uint64_t box = add({{"type", "Box"},
-                              {"name", "Piece cell"},
-                              {"position", vec(pc.cellMin)},
-                              {"width", size.x},
-                              {"height", size.y},
-                              {"depth", size.z}});
-    json boolean = {{"type", "Boolean"},
-                    {"name", "Piece " + std::to_string(i + 1)},
-                    {"op", "intersect"},
-                    {"target_id", derived},
-                    {"tool_id", box}};
-    if (!material.empty())
-      boolean["material"] = material;
-    add(boolean);
-  }
-  // Back to the tab that was active.
-  for (size_t i = 0; i < state.parts.size(); ++i)
-    if (state.parts[i].id == wasActive) {
-      ui::SetActivePart(state, i);
-      break;
+  // A piece whose feature fails to build refuses the call -- and a refused
+  // call leaves nothing behind, so the tabs made before it go again and the
+  // caller is put back on the tab they were on
+  // (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+  std::vector<uint64_t> made;
+  const auto backToWhereItWas = [&] {
+    for (size_t i = 0; i < state.parts.size(); ++i)
+      if (state.parts[i].id == wasActive) {
+        ui::SetActivePart(state, i);
+        break;
+      }
+  };
+  try {
+    for (size_t i = 0; i < planned.size(); ++i) {
+      const printsplit::Piece& pc = planned[i];
+      const size_t slot = ui::AddPart(state, partNames[i]);
+      made.push_back(state.parts[slot].id);
+      out["pieces"][i]["part"] = partNames[i];
+      out["pieces"][i]["part_id"] = state.parts[slot].id;
+      const uint64_t derived = add({{"type", "Derived"},
+                                    {"name", bodyName},
+                                    {"source_part", srcId},
+                                    {"body_names", {bodyName}},
+                                    {"reference", false}});
+      const glm::dvec3 size = pc.cellMax - pc.cellMin;
+      const uint64_t box = add({{"type", "Box"},
+                                {"name", "Piece cell"},
+                                {"position", vec(pc.cellMin)},
+                                {"width", size.x},
+                                {"height", size.y},
+                                {"depth", size.z}});
+      json boolean = {{"type", "Boolean"},
+                      {"name", "Piece " + std::to_string(i + 1)},
+                      {"op", "intersect"},
+                      {"target_id", derived},
+                      {"tool_id", box}};
+      if (!material.empty())
+        boolean["material"] = material;
+      add(boolean);
     }
+  } catch (...) {
+    backToWhereItWas();
+    for (const uint64_t id : made)
+      for (size_t s = 0; s < state.parts.size(); ++s)
+        if (state.parts[s].id == id) {
+          std::string why;
+          (void)ui::DeletePart(state, s, &why);
+          break;
+        }
+    backToWhereItWas();
+    throw;
+  }
+  backToWhereItWas();
   return out;
 }
 
@@ -1612,9 +1633,33 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           " (ids come from add_feature results / get_state)");
     json before = DocumentIO::FeatureToJson(*sk);
     json result = json::object();
+    // The sketch is edited IN PLACE below and committed as one command at
+    // the end, so every parameter is read and checked before the first
+    // edit: a type error on the last key used to leave the earlier ones
+    // applied to the sketch with no undo step behind them
+    // (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+    const auto uv = [&p](const char* key) {
+      const json& a = p.at(key);
+      if (!a.is_array() || a.size() != 2 || !a[0].is_number() ||
+          !a[1].is_number())
+        throw std::runtime_error(std::string(key) +
+                                 " is a point on the sketch plane, [u, v]; "
+                                 "got " +
+                                 a.dump());
+      return glm::dvec2(a[0].get<double>(), a[1].get<double>());
+    };
 
     if (m == "add_reference_image") {
       const std::string path = p.at("path").get<std::string>();
+      const std::optional<double> unitsPerPixel =
+          p.contains("units_per_pixel")
+              ? std::optional<double>(p.at("units_per_pixel").get<double>())
+              : std::nullopt;
+      const double opacity = p.value("opacity", 0.5);
+      // Centre the image on the requested point (default plane origin).
+      const glm::dvec2 center =
+          p.contains("at") ? uv("at") : glm::dvec2(0.0, 0.0);
+      // rpc-params: at
       std::ifstream in(path, std::ios::binary);
       if (!in)
         throw std::runtime_error("cannot open image: " + path);
@@ -1633,8 +1678,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       }
       // Default scale: make the image ~4 plane units wide so it lands visible,
       // unless the caller pins one. (Recalibrated to a real dimension next.)
-      img.unitsPerPixel = p.value("units_per_pixel", w > 0 ? 4.0 / w : 0.01);
-      img.opacity = p.value("opacity", 0.5);
+      img.unitsPerPixel = unitsPerPixel.value_or(w > 0 ? 4.0 / w : 0.01);
+      img.opacity = opacity;
       const uint32_t id = sk->AddImage(img);
       sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
       // Stable asset name carrying the source extension, keyed in the doc
@@ -1643,12 +1688,6 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (ext.empty())
         ext = ".png";
       ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
-      // Centre the image on the requested point (default plane origin).
-      glm::dvec2 center(0.0, 0.0);
-      if (p.contains("at")) {
-        const auto& a = p.at("at");
-        center = {a[0].get<double>(), a[1].get<double>()};
-      }
       ri.origin =
           center - 0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
       doc->SetAsset(ri.asset, std::move(bytes));
@@ -1657,14 +1696,21 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                 {"height_px", ri.heightPx},
                 {"asset", ri.asset}};
     } else if (m == "calibrate_reference_image") {
-      const auto& a = p.at("p1");
-      const auto& b = p.at("p2");
+      // The points reach RpcParams through uv()'s argument.
+      // rpc-params: p1, p2
+      const glm::dvec2 a = uv("p1");
+      const glm::dvec2 b = uv("p2");
       const std::string al = p.value("align", std::string("none"));
+      // Refused, not read as "none": a typo'd "vertcal" calibrated the
+      // image without the rotation the caller asked for.
+      if (al != "none" && al != "horizontal" && al != "vertical")
+        throw std::runtime_error("unknown align '" + al +
+                                 "' (expected one of: none, horizontal, "
+                                 "vertical)");
       const int align = al == "horizontal" ? 0 : al == "vertical" ? 1 : -1;
-      if (!sk->CalibrateImage(p.at("image_id").get<uint32_t>(),
-                              {a[0].get<double>(), a[1].get<double>()},
-                              {b[0].get<double>(), b[1].get<double>()},
-                              p.at("distance").get<double>(), align))
+      const uint32_t imageId = p.at("image_id").get<uint32_t>();
+      const double distance = p.at("distance").get<double>();
+      if (!sk->CalibrateImage(imageId, a, b, distance, align))
         throw std::runtime_error(
             "calibration failed (unknown image or coincident points)");
       result["ok"] = true;
@@ -1672,7 +1718,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const size_t ii = sk->IndexOfImage(p.at("image_id").get<uint32_t>());
       if (ii == std::numeric_limits<size_t>::max())
         throw std::runtime_error("no such image");
-      sketch::ReferenceImage& ri = sk->images[ii];
+      // Onto a copy, put in place only once every key has been read.
+      sketch::ReferenceImage ri = sk->images[ii];
       if (p.contains("opacity"))
         ri.opacity = p.at("opacity").get<double>();
       if (p.contains("hidden"))
@@ -1684,10 +1731,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                        "rotation", "rotation_deg", ri.rotation);
       if (p.contains("units_per_pixel"))
         ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
-      if (p.contains("origin")) {
-        const auto& o = p.at("origin");
-        ri.origin = {o[0].get<double>(), o[1].get<double>()};
-      }
+      if (p.contains("origin"))
+        ri.origin = uv("origin"); // rpc-params: origin
+      sk->images[ii] = ri;
       result["ok"] = true;
     } else if (m == "delete_reference_image") {
       // Orphaned pixel bytes stay in the doc store; save-time pruning drops

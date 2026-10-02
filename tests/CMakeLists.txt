@@ -379,6 +379,15 @@ add_test(NAME rpc_gate_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(rpc_gate_smoke PROPERTIES TIMEOUT 120)
 
+# A refused call changes nothing: every method refuses an unknown key before
+# its handler runs, every wrong-typed key leaves the world as it was, and the
+# calls that write files or move tabs are tried from a valid baseline with
+# each key made wrong (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+add_test(NAME refused_calls_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/refused_calls_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(refused_calls_smoke PROPERTIES TIMEOUT 180)
+
 # Two people, one shared project, NO NETWORK (F9): a bare repository in a temp
 # directory is a real remote as far as git is concerned, so two clones of it
 # are a real two-person scenario that runs anywhere, CI included. Two headless

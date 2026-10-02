@@ -3,10 +3,12 @@
 
 The vocabulary a method accepts is not written down anywhere a program can
 read: `RpcParams` records it at RUNTIME, in `SeenKeys()`, but only by running
-the handler — the unknown-key check is deliberately post-execution
-(RemoteServer.cpp, "we learn a method's vocabulary by which keys it reads").
-So a schema for `describe` cannot be harvested; it has to be declared and then
-KEPT true. This module is the "kept true" half: it reads the handlers and says
+the handler, and a check that runs after the handler refuses a call it has
+already carried out (cam_post wrote its G-code, then refused `_timeout`).
+So the vocabulary is declared -- the MethodDoc row, which `describe` hands
+out AND the dispatcher refuses unknown keys against before the handler runs
+(docs/scripting/rpc.md#a-refused-call-changes-nothing) -- and then KEPT
+true. This module is the "kept true" half: it reads the handlers and says
 what keys each branch actually looks up, and tests/rpc_params_gate.py diffs
 that against the MethodDoc tables.
 
@@ -41,9 +43,9 @@ RAW_RE = re.compile(r'\b(?:p|params)\s*\.\s*raw\s*\(\s*\)')
 # Method names in a condition: `m == "x"`, and the `||` chains that group
 # them. `request.method` is the second spelling: `screenshot` and
 # `render_sheet` are staged asynchronously BEFORE the RpcParams path exists,
-# so they match on the raw request and read `request.params` directly. That
-# also means the unknown-key rejection does not cover those two — worth
-# knowing, and a reason to have their vocabulary written down.
+# so they match on the raw request and read `request.params` directly.
+# RpcParams never sees their keys, so their written-down vocabulary is the
+# only check they get -- the dispatcher's, against the row.
 COND_RE = re.compile(r'\b(?:m|request\.method)\s*==\s*"([A-Za-z0-9_]+)"')
 # Two escape hatches, both greppable so the exceptions stay a visible list:
 #   // rpc-params: opaque        — the vocabulary is genuinely free-form

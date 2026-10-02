@@ -928,6 +928,29 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
     }
     activity++;
 
+    // Every key against the method's describe row, BEFORE anything runs --
+    // parking, a handler, a UI action, a screenshot. A key no path of the
+    // handler reads is refused while refusing still means "nothing
+    // happened": cam_post {_timeout} used to write its G-code and only then
+    // say the call was wrong (docs/scripting/rpc.md#parameters).
+    if (!request.resumed) {
+      // A method with an inspection contract refuses through it first: its
+      // refusals carry a machine-readable diagnostic the plain one has not.
+      try {
+        remote::ValidateInspectionRequest(request.method, request.params);
+      } catch (const remote::ContractError& e) {
+        Send(request.client, {{"id", request.id},
+                              {"error", e.what()},
+                              {"diagnostic", e.diagnostic}});
+        continue;
+      }
+      if (auto refusal =
+              UndeclaredParamsError(request.method, request.params)) {
+        RespondError(request.client, request.id, *refusal);
+        continue;
+      }
+    }
+
     // A CAM request that would compute on the frame waits instead
     // (remote/RemoteCam.h). A `batch` never parks -- its calls run inside
     // HandleSemantic, one transaction -- and neither does a request coming
@@ -955,6 +978,32 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
     // Outside the try: the catch below reports which keys the handler read,
     // which is half of what makes a type error fixable from the message.
     remote::RpcParams params{request.params};
+    // Where the active tab's histories stood while a semantic handler runs:
+    // a call it refuses -- a type error on its fifth key, a range check after
+    // the edit it guards -- is taken back whole, so an error means nothing
+    // happened (docs/scripting/rpc.md#a-refused-call-changes-nothing). Not
+    // for a method that reaches outside the document (NotInBatch: a file, a
+    // tab, the git tree), which has nothing here to roll back and may have
+    // moved the tab the marks were taken on; and not for `batch`, which
+    // takes its own.
+    std::optional<EditMarks> marks;
+    const auto rolledBack = [&]() -> std::string {
+      if (!marks)
+        return {};
+      const EditMarks taken = *marks;
+      marks.reset();
+      std::string undone;
+      try {
+        undone = RollBackEdits(state, taken);
+      } catch (const std::exception& e) {
+        return std::string(" Rolling the call back failed too: ") + e.what();
+      } catch (const Standard_Failure&) {
+        return " Rolling the call back failed too (OpenCASCADE).";
+      }
+      return undone.empty() ? std::string()
+                            : " The call was rolled back (" + undone +
+                                  "), so the document is as it was.";
+    };
     try {
       bool handled = false;
       // Named on the watchdog's stall line if it takes that long.
@@ -972,22 +1021,34 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       state.rpcCallerGone = [this, connection = request.connection] {
         return !ConnectionOpen(connection);
       };
+      if (request.method != "batch" &&
+          !(remote::MethodFlagsOf(request.method) &
+            (remote::NotInBatch | remote::UiAction)))
+        marks = MarkEdits(state);
       json result = HandleSemantic(request, state, handled, params);
+      if (!handled)
+        marks.reset(); // nothing ran: what follows is a capture or the GUI
       if (handled) {
-        // Strict params: a recognized method that ran without touching a key
-        // the caller sent means that key was a typo, silently ignored under
-        // the old path (the `named` vs `name` trap). Reject loudly instead.
-        // The check is post-execution (we learn a method's vocabulary by which
-        // keys it reads), so a mutating call carrying an *extra* junk key still
-        // applies before erroring — the caller sees the mistake and the change
-        // used only recognized keys; a *misspelled required* key instead throws
-        // "key not found" before any mutation.
+        // A key the row lists but THIS path never read: a key that means
+        // nothing in the mode the call asked for (`target` on an op whose
+        // depths were typed). A key outside the row never gets here -- it was
+        // refused before the handler ran -- so this is the narrow remainder,
+        // and the edit is rolled back with the refusal. A method that reaches
+        // outside the document has nothing to roll back, so it says that it
+        // ran rather than let the error read as "nothing happened".
         if (auto unknown = params.UnknownKeys(); !unknown.empty()) {
-          RespondError(
-              request.client, request.id,
-              UnknownParamError(request.method, unknown, params.SeenKeys()));
+          const bool undoable = marks.has_value();
+          std::string message =
+              UnknownParamError(request.method, unknown, params.SeenKeys());
+          message += undoable
+                         ? rolledBack()
+                         : " The call had already run: '" + request.method +
+                               "' reaches outside the document, so it "
+                               "cannot be rolled back.";
+          RespondError(request.client, request.id, message);
           continue;
         }
+        marks.reset();
         // Session recording (S4): successful semantic requests only — a
         // throwing call mutates nothing, so replay equivalence holds without
         // it (UI actions/screenshots are also skipped: not
@@ -1156,7 +1217,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                    "unknown method: " + request.method);
     } catch (const remote::ContractError& e) {
       Send(request.client, {{"id", request.id},
-                            {"error", e.what()},
+                            {"error", e.what() + rolledBack()},
                             {"diagnostic", e.diagnostic}});
     } catch (const json::exception& e) {
       // A parameter of the wrong TYPE used to come back as nlohmann's own
@@ -1168,9 +1229,10 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       // the vocabulary is.
       RespondError(request.client, request.id,
                    TypeErrorMessage(request.method, request.params,
-                                    params.SeenKeys(), e.what()));
+                                    params.SeenKeys(), e.what()) +
+                       rolledBack());
     } catch (const std::exception& e) {
-      RespondError(request.client, request.id, e.what());
+      RespondError(request.client, request.id, e.what() + rolledBack());
     } catch (const Standard_Failure& e) {
       // The last line of defence. OCC reports failure by throwing
       // Standard_Failure, which does NOT derive from std::exception, so a
@@ -1181,7 +1243,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       RespondError(request.client, request.id,
                    std::string("OpenCASCADE error: ") +
                        (e.GetMessageString() ? e.GetMessageString()
-                                             : "unspecified failure"));
+                                             : "unspecified failure") +
+                       rolledBack());
     }
   }
 }

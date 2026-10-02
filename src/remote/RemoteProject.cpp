@@ -104,18 +104,17 @@ static constexpr MethodDoc ProjectMethods[] = {
      "millimetres. {body} "
      "exports one body of a part. Replies {bodies} (part) or {shapes} "
      "(assembly) — placed body shapes — plus {products} and {instances}. "
-     "`deflection` is ignored: STEP is exact.",
-     "body, deflection, part, path", remote::NotInBatch},
+     "No `deflection`: STEP is exact, so it is refused.",
+     "body, part, path", remote::NotInBatch},
     {"export_stl",
      "Export to STL {path, deflection?}. `deflection` is the tessellation "
      "chord tolerance in MILLIMETRES (smaller = finer, more triangles); STEP "
-     "and BREP are exact solids and ignore it.",
+     "and BREP are exact solids and refuse it.",
      "body, deflection, path", remote::NeedsPart | remote::NotInBatch},
     {"export_brep",
-     "Export to BREP {path}. `deflection` is the tessellation chord tolerance "
-     "in MILLIMETRES (smaller = finer, more triangles); STEP and BREP are "
-     "exact solids and ignore it.",
-     "body, deflection, path", remote::NeedsPart},
+     "Export to BREP {path}: the exact solid, so no `deflection` (that is "
+     "export_stl's tessellation tolerance).",
+     "body, path", remote::NeedsPart | remote::NotInBatch},
     {"export_visual",
      "Export a visual-quality mesh (glTF/OBJ by extension) of "
      "the part or whole assembly. glTF is written in METRES and Y-up, as "
@@ -639,11 +638,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // saves over a project that changed on disk (F8), which an agent that
     // just did the changing may legitimately want.
     const std::string path = p.at("path").get<std::string>();
+    // Every key read before the file is written: a `message` of the wrong
+    // type used to be refused after the save had landed.
+    const bool force = p.value("force", false);
+    const std::string message = p.value("message", std::string("save"));
     std::string error;
-    if (!ui::SaveProject(state, path, &error, p.value("force", false)))
+    if (!ui::SaveProject(state, path, &error, force))
       throw std::runtime_error(error);
     // Also clears the autosave sidecar and commits git-backed projects.
-    ui::MarkProjectSaved(state, path, p.value("message", "save"));
+    ui::MarkProjectSaved(state, path, message);
     return json::object();
   }
   if (m == "open_project") {
@@ -905,6 +908,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         doc != nullptr && doc->FindParameter(name) != nullptr;
     const std::string scope =
         p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    // Refused, not read as "project": a typo would delete the other one.
+    if (scope != "project" && scope != "part")
+      throw std::runtime_error("scope must be \"project\" or \"part\", not \"" +
+                               scope + "\"");
     if (scope == "part") {
       if (!haveLocal)
         throw std::runtime_error("no such variable: " + name);
@@ -945,6 +952,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         doc != nullptr && doc->FindParameter(name) != nullptr;
     const std::string scope =
         p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    if (scope != "project" && scope != "part")
+      throw std::runtime_error("scope must be \"project\" or \"part\", not \"" +
+                               scope + "\"");
     if (scope == "part") {
       if (!state.commands->Execute(
               std::make_unique<RenameVariableCommand>(name, newName), *doc))
@@ -1365,6 +1375,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
+    // STL's alone: a tessellation tolerance means nothing to a format that
+    // carries the exact geometry. Read in a scope of its own so that only
+    // export_stl's row lists it, and the dispatcher refuses it on STEP and
+    // BREP before anything is written -- it used to be refused as unread
+    // AFTER the file had landed.
+    double deflection = 0.1;
+    if (m == "export_stl") {
+      deflection = p.value("deflection", 0.1);
+    }
 
     auto& kernel = CADKernel::Instance();
     bool ok = false;
@@ -1379,9 +1398,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         for (size_t i = 1; i < bodies.size(); i++)
           shape = shape.Union(bodies[i].shape);
       }
-      ok = m == "export_stl"
-               ? kernel.SaveSTL(path, shape, p.value("deflection", 0.1))
-               : kernel.SaveBREP(path, shape);
+      ok = m == "export_stl" ? kernel.SaveSTL(path, shape, deflection)
+                             : kernel.SaveBREP(path, shape);
       if (ok && m == "export_stl") {
         // Watertightness report on the SOURCE B-Rep (not the mesh): a
         // non-watertight input still exports — the report tells the caller

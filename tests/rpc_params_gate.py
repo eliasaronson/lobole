@@ -2,15 +2,17 @@
 """Gate: every RPC method's `describe` parameter list matches its handler.
 
 The vocabulary a method accepts is decided by which keys its handler READS —
-that is literally how `RpcParams` defines it, and how the dispatcher's
-unknown-key rejection works (RemoteServer.cpp: "we learn a method's vocabulary
-by which keys it reads"). But that knowledge only exists at runtime, after the
-handler has run, so `describe` cannot harvest it; the MethodDoc `params` field
-has to be written down.
+that is literally how `RpcParams` defines it. But that knowledge only exists
+at runtime, after the handler has run, so it is written down: the MethodDoc
+`params` field, which `describe` hands an agent and the dispatcher refuses
+unknown keys against BEFORE the handler runs
+(docs/scripting/rpc.md#a-refused-call-changes-nothing).
 
 This gate makes the written-down copy honest, in BOTH directions:
 
-  - a key the handler reads with no row  -> an agent cannot discover it
+  - a key the handler reads with no row  -> the dispatcher REFUSES a key the
+                                            handler takes, and an agent
+                                            cannot discover it either
   - a key in the row nobody reads        -> an agent sends it and the strict
                                             unknown-key check REJECTS the call
   - a branch that hands its params to a HELPER with no annotation -> the row

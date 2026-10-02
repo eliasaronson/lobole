@@ -62,6 +62,10 @@ struct MethodDoc {
   // (`p.raw()`). This is what `describe` hands an agent so it does not have
   // to guess a key name, and it is the half `RpcParams` cannot supply:
   // SeenKeys() knows the exact vocabulary but only by RUNNING the handler.
+  // So it is also what the dispatcher refuses an unknown key against,
+  // BEFORE the handler runs (UndeclaredParamsError,
+  // docs/scripting/rpc.md#a-refused-call-changes-nothing): a key it does not
+  // list is refused while refusing still means nothing happened.
   //
   // Kept true by `tests/rpc_params_gate.py`, which reads the handlers with
   // tools/rpc_params_scan.py and fails when a row and its branch disagree in

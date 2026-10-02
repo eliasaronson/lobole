@@ -107,8 +107,9 @@ constexpr MethodDoc kCamMethods[] = {
      "would share a file with a different name. Open jobs are not changed: a "
      "setup keeps the copy it was set up on, and list_cam_setups reports "
      "`machine_match` so a script can see that it now differs.",
-     "machine"},
-    {"delete_machine", "Remove a machine from the store {name}.", "name"},
+     "machine", remote::NotInBatch},
+    {"delete_machine", "Remove a machine from the store {name}.", "name",
+     remote::NotInBatch},
     {"machine_part",
      "Make a JOB for a part and switch to it {part?: id or name (default: the "
      "open part), name?, configuration?: which of the part's configurations "

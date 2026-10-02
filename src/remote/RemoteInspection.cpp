@@ -2066,6 +2066,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const bool materialize = p.value("materialize", false);
     const bool wantMissing = p.contains("missing_path") || materialize;
     const bool wantExtra = p.contains("extra_path") || materialize;
+    // Every refusal before the first file is written. The overlay is drawn
+    // in the ACTIVE PART's coordinate space, so it needs a part tab to be
+    // drawn on (refusing beats an overlay floating somewhere plausible and
+    // wrong); and both paths are read here rather than each between the
+    // writes, so a bad second path cannot leave the first file behind a
+    // refused call.
+    if (materialize && doc == nullptr)
+      throw std::runtime_error(
+          "materialize needs a part tab — the delta is drawn in the active "
+          "part's coordinate space");
+    std::optional<std::string> missingPath, extraPath;
+    if (p.contains("missing_path"))
+      missingPath = p.at("missing_path").get<std::string>();
+    if (p.contains("extra_path"))
+      extraPath = p.at("extra_path").get<std::string>();
     // `align`: put the candidate's centre of mass on the reference's before
     // the boolean, and answer about the SHAPE rather than about where it
     // happens to be. Without it a re-drawn port tube whose volume matched
@@ -2257,28 +2272,19 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
       AttachReceipt(out, receipt);
     }
-    if (p.contains("missing_path")) {
-      const std::string path = p.at("missing_path").get<std::string>();
-      if (!CADKernel::Instance().SaveBREP(path, missingShape))
-        throw std::runtime_error("cannot write " + path +
+    if (missingPath) {
+      if (!CADKernel::Instance().SaveBREP(*missingPath, missingShape))
+        throw std::runtime_error("cannot write " + *missingPath +
                                  " — does the parent directory exist?");
-      out["missing_path"] = path;
+      out["missing_path"] = *missingPath;
     }
-    if (p.contains("extra_path")) {
-      const std::string path = p.at("extra_path").get<std::string>();
-      if (!CADKernel::Instance().SaveBREP(path, extraShape))
-        throw std::runtime_error("cannot write " + path +
+    if (extraPath) {
+      if (!CADKernel::Instance().SaveBREP(*extraPath, extraShape))
+        throw std::runtime_error("cannot write " + *extraPath +
                                  " — does the parent directory exist?");
-      out["extra_path"] = path;
+      out["extra_path"] = *extraPath;
     }
     if (materialize) {
-      // The overlay is drawn in the ACTIVE PART's coordinate space, so it
-      // needs a part tab to be drawn on. Refusing beats an overlay floating
-      // somewhere plausible-looking and wrong.
-      if (doc == nullptr)
-        throw std::runtime_error(
-            "materialize needs a part tab — the delta is drawn in the active "
-            "part's coordinate space");
       snprintf(buf, sizeof buf,
                "iou %.3f — %.0f mm³ missing (red), %.0f mm³ extra (green)", iou,
                c->missing, c->extra);

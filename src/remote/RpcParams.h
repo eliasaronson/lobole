@@ -10,10 +10,13 @@
 namespace remote {
 
 // A read-through view over an RPC request's `params` that RECORDS which
-// top-level keys a handler actually consumed. The dispatcher then rejects a
-// request carrying a key no handler read — a typo'd optional parameter (the
-// `named` vs `name` class) that the old `params.value(...)` path silently
-// ignored, so a mistake looked like a successful call that did nothing.
+// top-level keys a handler actually consumed. A key outside the method's
+// describe row never gets this far -- the dispatcher refuses it before the
+// handler runs (UndeclaredParamsError) -- so what this catches is the
+// remainder: a key the row lists that THIS call's path did not read, a
+// mistake that would otherwise look like a successful call that ignored it.
+// That refusal comes after the handler, so the dispatcher rolls the call's
+// edits back with it (docs/scripting/rpc.md#a-refused-call-changes-nothing).
 //
 // The API is exactly the nlohmann::json subset the handlers use — at / value /
 // contains — so every call site compiles unchanged; only the parameter TYPE

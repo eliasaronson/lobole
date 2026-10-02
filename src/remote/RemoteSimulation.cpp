@@ -1389,6 +1389,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                     {"outlives_client", start.owner == 0}};
       };
       if (s->type == fem::AnalysisType::Topology) {
+        // Read before the job starts, like every key: unread, it was refused
+        // as unknown AFTER the optimisation had been set running.
+        if (p.contains("async") && !p.at("async").get<bool>())
+          throw std::runtime_error(
+              "a topology study always runs off the frame (async); poll "
+              "study_status for it, or leave `async` out");
         std::string err;
         topoOnly();
         if (!ui::StartTopologyRun(state, *doc, id, &err, &start))
@@ -1825,8 +1831,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const size_t slot = ui::AddPart(state, name);
     const uint64_t partId = state.parts[slot].id;
     if (!ui::ImportAsFeature(state, path, nullptr, &err,
-                             units::Length::Millimetre, /*keepOrigin=*/true))
+                             units::Length::Millimetre, /*keepOrigin=*/true)) {
+      // A refused call leaves no empty tab behind, and puts the caller back
+      // where they were
+      // (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+      for (size_t i = 0; i < state.parts.size(); ++i)
+        if (state.parts[i].id == wasActive) {
+          ui::SetActivePart(state, i);
+          break;
+        }
+      for (size_t i = 0; i < state.parts.size(); ++i)
+        if (state.parts[i].id == partId) {
+          std::string why;
+          (void)ui::DeletePart(state, i, &why);
+          break;
+        }
       throw std::runtime_error("topo_to_body: " + err);
+    }
     Document* made = state.document.get();
     if (!material.empty() && made->FeatureCount() > 0) {
       Feature* imp = made->GetFeature(made->FeatureCount() - 1);
@@ -1861,12 +1882,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     // Enter the FEM simulation workspace (the GUI mode), optionally selecting a
     // study. The LLM drives the same mode a human enters from the toolbar.
     // params: {study?}
-    ui::EnterSimulation(state);
+    // The study is checked BEFORE the mode is entered: entering makes a
+    // default study on a part that has none, and a refused call used to
+    // leave both the mode and that study behind.
+    std::optional<uint64_t> study;
     if (p.contains("study")) {
-      const uint64_t id = p.at("study").get<uint64_t>();
-      host.Require(id);
-      state.simulation.activeStudyId = id;
+      study = p.at("study").get<uint64_t>();
+      host.Require(*study);
     }
+    ui::EnterSimulation(state);
+    if (study)
+      state.simulation.activeStudyId = *study;
     return json{{"active", state.simulation.active},
                 {"study", state.simulation.activeStudyId}};
   }
@@ -1880,44 +1906,62 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     //          "none", deform_scale?, mode?, threshold?}
     // shape/density are topology views; threshold (0..1, 0=auto) sets the
     // iso-surface level for the "shape" view.
-    ui::EnterSimulation(state);
+    //
+    // Every key is read and checked before anything is set -- the mode
+    // entered (which makes a default study on a part with none) or a single
+    // display field: a bad `threshold` used to be refused with the field,
+    // the scale and the mode already changed.
+    std::optional<uint64_t> study;
     if (p.contains("study")) {
-      const uint64_t id = p.at("study").get<uint64_t>();
-      host.Require(id);
-      state.simulation.activeStudyId = id;
+      study = p.at("study").get<uint64_t>();
+      host.Require(*study);
     }
     // An unknown field is refused, not drawn as von Mises: a misspelled
     // "displacment" would otherwise show a plausible stress plot.
     const std::string f = p.value("field", std::string("von_mises"));
+    ui::SimulationState::Field field = ui::SimulationState::Field::VonMises;
     if (f == "von_mises")
-      state.simulation.field = ui::SimulationState::Field::VonMises;
+      field = ui::SimulationState::Field::VonMises;
     else if (f == "displacement")
-      state.simulation.field = ui::SimulationState::Field::Displacement;
+      field = ui::SimulationState::Field::Displacement;
     else if (f == "shape")
-      state.simulation.field = ui::SimulationState::Field::Shape;
+      field = ui::SimulationState::Field::Shape;
     else if (f == "density")
-      state.simulation.field = ui::SimulationState::Field::Density;
+      field = ui::SimulationState::Field::Density;
     else if (f == "none")
-      state.simulation.field = ui::SimulationState::Field::None;
+      field = ui::SimulationState::Field::None;
     else
       throw std::runtime_error("unknown field: " + f +
                                "; fields: von_mises, displacement, shape, "
                                "density, none");
+    std::optional<float> deformScale, threshold;
+    std::optional<int> mode, caseIndex;
     if (p.contains("deform_scale"))
-      state.simulation.deformScale =
-          static_cast<float>(p.at("deform_scale").get<double>());
+      deformScale = static_cast<float>(p.at("deform_scale").get<double>());
     if (p.contains("mode")) // modal: which mode shape to display (0-based)
-      state.simulation.activeMode = p.at("mode").get<int>();
+      mode = p.at("mode").get<int>();
     if (p.contains("case")) {
       const fem::StudyRuntime* rt =
-          host.Results(state.simulation.activeStudyId);
+          host.Results(study.value_or(state.simulation.activeStudyId));
       if (!rt)
         throw std::runtime_error("`case`: the study has not been run");
-      state.simulation.activeCase = CaseIndex(rt->caseNames, p.at("case"));
+      caseIndex = CaseIndex(rt->caseNames, p.at("case"));
     }
     if (p.contains("threshold")) // topology iso-surface level (0..1, 0=auto)
-      state.simulation.topoThreshold =
-          static_cast<float>(p.at("threshold").get<double>());
+      threshold = static_cast<float>(p.at("threshold").get<double>());
+
+    ui::EnterSimulation(state);
+    if (study)
+      state.simulation.activeStudyId = *study;
+    state.simulation.field = field;
+    if (deformScale)
+      state.simulation.deformScale = *deformScale;
+    if (mode)
+      state.simulation.activeMode = *mode;
+    if (caseIndex)
+      state.simulation.activeCase = *caseIndex;
+    if (threshold)
+      state.simulation.topoThreshold = *threshold;
     return json{{"field", f},
                 {"deform_scale", state.simulation.deformScale},
                 {"mode", state.simulation.activeMode},

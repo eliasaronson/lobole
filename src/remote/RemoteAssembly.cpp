@@ -52,7 +52,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"delete_part",
      "Delete a part/assembly/drawing tab {part: name|id|index} (legacy: "
      "index); refused while any assembly places it.",
-     "index, part"},
+     "index, part", remote::NotInBatch},
     {"add_occurrence",
      "Place a part OR another assembly in the active assembly {part: name or "
      "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
@@ -2905,7 +2905,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // {part: name|id|index} through the ONE resolver rename_part uses —
     // three sibling RPCs once took three different keys, and the
     // missing-param error named only 'index', hiding that names worked.
-    // Legacy {name}/{index} stay accepted.
+    // Legacy {name}/{index} stay accepted -- one of them: a second used to go
+    // unread and be refused as unknown AFTER the tab had switched.
+    if (int(p.contains("part")) + int(p.contains("name")) +
+            int(p.contains("index")) >
+        1)
+      throw std::runtime_error(
+          "name the tab once: {part} (or legacy {name} or {index}), not "
+          "several");
     size_t slot;
     if (p.contains("part")) {
       slot = remote::ResolveSlotIndex(state, p.at("part"));
@@ -2936,6 +2943,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"occurrence", state.inContext.occurrenceId}};
   }
   if (m == "delete_part") {
+    // One way of naming the tab: a second went unread and was refused as
+    // unknown only once the tab had been deleted.
+    if (p.contains("part") && p.contains("index"))
+      throw std::runtime_error(
+          "name the tab once: {part} (or legacy {index}), not both");
     size_t slot;
     if (p.contains("part")) {
       slot = remote::ResolveSlotIndex(state, p.at("part"));

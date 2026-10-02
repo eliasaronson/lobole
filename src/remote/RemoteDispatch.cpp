@@ -449,7 +449,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Rebind one command: {command: \"part.fillet\", chord: \"Shift+B\"}. "
      "An empty chord unbinds it; {reset: true} restores the default. "
      "Persists. Escape/Enter/Delete/arrows are fixed and have no command.",
-     "chord, command, reset"},
+     "chord, command, reset", remote::NotInBatch},
     {"reset_layout", "Reset the dock layout.", "", remote::NotInBatch},
     {"add_part", "Add a new empty part tab.", "name"},
     {"add_assembly", "Add an assembly tab.", "name"},
@@ -682,14 +682,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                  ": no method '" + sub +
                                  "' (see describe). The document is "
                                  "unchanged.");
+      // Every call's keys against its row before ANY call runs: a $ref
+      // replaces a value, never a key, so this is already the final shape.
+      if (calls[i].contains("params"))
+        if (auto refusal = UndeclaredParamsError(sub, calls[i].at("params")))
+          throw std::runtime_error("batch call " + std::to_string(i + 1) +
+                                   ": " + *refusal +
+                                   " The document is unchanged.");
     }
 
     // The marks a rollback rewinds to. Both are taken before anything runs:
     // a part batch unwinds its commands, an assembly batch restores the
     // snapshot its first mutation pushed.
-    const size_t undoMark =
-        state.commands ? state.commands->UndoDepth() : size_t{0};
-    const size_t asmMark = state.assemblyHistory.undo.size();
+    const EditMarks marks = MarkEdits(state);
+    const size_t undoMark = marks.commandDepth;
+    const size_t asmMark = marks.assemblyUndo;
 
     json results = json::array();
     json failures = json::array();
@@ -824,22 +831,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!fatal.empty()) {
       // Roll the whole thing back: the commands this batch pushed, and the
       // assembly state its first mutation snapshotted.
-      size_t undone = 0;
-      if (state.commands && state.document)
-        undone = state.commands->RollbackSince(undoMark, *state.document);
-      bool asmRestored = false;
-      if (state.assembly && state.assemblyHistory.undo.size() > asmMark) {
-        *state.assembly = state.assemblyHistory.undo[asmMark];
-        state.assemblyHistory.undo.resize(asmMark);
-        state.assemblyHistory.undoStamps.resize(asmMark);
-        state.syncedDocumentVersion = UINT64_MAX;
-        asmRestored = true;
-        ui::SolveActiveAssembly(state);
-      }
+      // ...and the drawing's and the job's: every snapshot history the
+      // calls pushed onto.
+      const std::string undone = RollBackEdits(state, marks);
       const std::string message =
-          fatal + ". The batch was rolled back: " + std::to_string(undone) +
-          " edit(s) undone" +
-          (asmRestored ? " and the assembly restored" : "") +
+          fatal + ". The batch was rolled back: " +
+          (undone.empty() ? std::string("nothing had changed") : undone) +
           ", so the document is as it was before the batch. " +
           std::to_string(calls.size() - results.size() - 1) +
           " later call(s) did not run.";
@@ -1480,11 +1477,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // is the only way a script can frame correctly, because the still
     // projects at width/height while `fit_view` alone solves for the
     // viewport, which offscreen is whatever the framebuffer happens to be
-    // (docs/rendering/still-render.md#framing).
-    if (p.value("fit", false))
-      ui::FitCameraToDocument(state, height > 0 ? static_cast<float>(width) /
-                                                      static_cast<float>(height)
-                                                : 0.0f);
+    // (docs/rendering/still-render.md#framing). Read here, applied once the
+    // keys below have all passed: a refused render leaves the camera alone.
+    const bool fit = p.value("fit", false);
     // Edges over the traced image. On by default because the viewport draws
     // them and their absence is what made butted boards render as one slab;
     // false renders the bare path-traced image.
@@ -1496,6 +1491,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       throw std::runtime_error("unknown backdrop: " + backdrop +
                                "; backdrops: studio, environment");
     }
+    if (fit)
+      ui::FitCameraToDocument(state, height > 0 ? static_cast<float>(width) /
+                                                      static_cast<float>(height)
+                                                : 0.0f);
     // As rt_build: the still is built from the raster tessellation cache when
     // there is one, and a lazy projection has not filled it yet.
     ui::SyncRenderersToDocument(state);
@@ -1815,15 +1814,20 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   if (m == "set_settings") {
     // Validates first: a rejected value leaves nothing half-applied.
+    const settings::Settings before = state.settings;
     std::string error;
     if (!settings::ApplyJson(state.settings, p.raw(), &error))
       throw std::runtime_error(error);
-    ui::ApplySettings(state);
     // Persist NOW rather than arming the window's debounce: that debounce is
     // pumped by the GUI main loop, which a --headless instance does not run,
-    // so a scripted change would apply and then never reach the file.
-    if (!settings::Save(state.settings, state.settingsSaved, &error))
+    // so a scripted change would apply and then never reach the file. And
+    // BEFORE applying: a save that fails is refused, and a refused call
+    // leaves the preferences as they were, not changed for this session only.
+    if (!settings::Save(state.settings, state.settingsSaved, &error)) {
+      state.settings = before;
       throw std::runtime_error("could not save settings: " + error);
+    }
+    ui::ApplySettings(state);
     state.settingsSaved = state.settings;
     state.settingsDirtyAt = -1.0;
     return settings::ToJson(state.settings);
@@ -1878,7 +1882,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           " (get_keymap lists them; Escape/Enter/Delete are fixed verbs, not "
           "commands)");
     keymap::Keymap& keys = state.settings.keys;
-    if (p.contains("reset") && p.at("reset").get<bool>()) {
+    const keymap::Keymap before = keys;
+    const bool reset = p.contains("reset") && p.at("reset").get<bool>();
+    // Two answers to one question, refused before either is applied -- the
+    // chord used to go unread, and was refused as unknown after the reset
+    // had been saved.
+    if (reset && p.contains("chord"))
+      throw std::runtime_error(
+          "set_keybinding: {reset: true} restores the default chord; a "
+          "`chord` as well says something else -- pass one of them");
+    if (reset) {
       keys.Reset(command);
     } else {
       // An absent `chord` is not the same as an empty one: empty UNBINDS on
@@ -1892,9 +1905,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     // Persist NOW rather than arming the window's debounce, for the same
     // reason set_settings does: a --headless instance runs no GUI main loop.
+    // A save that fails takes the binding back with it.
     std::string error;
-    if (!settings::Save(state.settings, state.settingsSaved, &error))
+    if (!settings::Save(state.settings, state.settingsSaved, &error)) {
+      keys = before;
       throw std::runtime_error("could not save settings: " + error);
+    }
     state.settingsSaved = state.settings;
     return json{{"command", command},
                 {"chord", keys.Text(command)},
@@ -2094,3 +2110,135 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 namespace remote {
 uint8_t MethodFlagsOf(const std::string& method) { return MethodFlags(method); }
 } // namespace remote
+
+// The refusal for a request whose params the method's row does not take,
+// BEFORE any handler runs (docs/scripting/rpc.md#parameters). The row is the
+// vocabulary: rpc_params_gate holds it equal to the keys the handler reads,
+// in both directions, so a key outside it is one no path of the handler
+// reads. Learning that by running the handler -- which is how this used to
+// work -- refused `cam_post {_timeout}` after it had written the G-code.
+std::optional<std::string> UndeclaredParamsError(const std::string& method,
+                                                 const json& params) {
+  const remote::MethodDoc* d = FindMethod(method);
+  if (d == nullptr)
+    return std::nullopt; // "unknown method" is the dispatcher's to say
+  if (params.is_null())
+    return std::nullopt;
+  if (!params.is_object())
+    return "'" + method + "' takes its params as an object {key: value}; got " +
+           std::string(JsonTypeName(params));
+  const std::string ps = d->params ? d->params : "";
+  if (ps == "*")
+    return std::nullopt; // a free-form spec, read opaquely
+  std::set<std::string> accepted;
+  for (size_t i = 0, j = 0; i <= ps.size(); i++) {
+    if (i == ps.size() || ps[i] == ',') {
+      const std::string k = ps.substr(j, i - j);
+      const size_t b = k.find_first_not_of(' ');
+      const size_t e = k.find_last_not_of(' ');
+      if (b != std::string::npos)
+        accepted.insert(k.substr(b, e - b + 1));
+      j = i + 1;
+    }
+  }
+  std::vector<std::string> unknown;
+  for (auto it = params.begin(); it != params.end(); ++it)
+    if (accepted.count(it.key()) == 0)
+      unknown.push_back(it.key());
+  if (unknown.empty())
+    return std::nullopt;
+  return UnknownParamError(method, unknown, accepted);
+}
+
+// The active tab's save stamp, whichever kind of document it holds (the
+// value ProjectDirty compares against state.lastSavedVersion).
+static uint64_t ActiveSaveStamp(const ui::AppState& state) {
+  if (state.document)
+    return state.document->SaveStamp();
+  if (state.assembly)
+    return state.assembly->SaveStamp();
+  if (state.drawing)
+    return state.drawing->Version();
+  if (state.job)
+    return state.job->SaveStamp();
+  return 0;
+}
+
+EditMarks MarkEdits(const ui::AppState& state) {
+  EditMarks marks;
+  marks.activePart = state.activePart;
+  marks.activeStamp = ActiveSaveStamp(state);
+  marks.lastSaved = state.lastSavedVersion;
+  marks.document = state.document.get();
+  marks.commands = state.commands.get();
+  marks.commandDepth = state.commands ? state.commands->UndoDepth() : 0;
+  marks.assembly = state.assembly.get();
+  marks.assemblyUndo = state.assemblyHistory.undo.size();
+  marks.drawing = state.drawing.get();
+  marks.drawingUndo = state.drawingHistory.undo.size();
+  marks.job = state.job.get();
+  marks.jobUndo = state.jobHistory.undo.size();
+  return marks;
+}
+
+std::string RollBackEdits(ui::AppState& state, const EditMarks& marks) {
+  std::vector<std::string> what;
+  // Each history only where the tab is still the one marked: a call that
+  // switched tabs moved the histories with them, and the marks say nothing
+  // about the tab that is active now.
+  if (state.document && state.commands &&
+      state.document.get() == marks.document &&
+      state.commands.get() == marks.commands) {
+    const size_t undone =
+        state.commands->RollbackSince(marks.commandDepth, *state.document);
+    if (undone > 0)
+      what.push_back(std::to_string(undone) + " edit(s) undone");
+  }
+  // The snapshot histories: every edit pushed its pre-edit copy, so undoing
+  // back to the mark and dropping the redo entries that made restores
+  // exactly the state before the call.
+  if (state.assembly && state.assembly.get() == marks.assembly &&
+      state.assemblyHistory.undo.size() > marks.assemblyUndo) {
+    size_t n = 0;
+    while (state.assemblyHistory.undo.size() > marks.assemblyUndo &&
+           ui::UndoAssembly(state))
+      n++;
+    auto& h = state.assemblyHistory;
+    h.redo.resize(h.redo.size() - std::min(n, h.redo.size()));
+    h.redoStamps.resize(h.redoStamps.size() - std::min(n, h.redoStamps.size()));
+    ui::SolveActiveAssembly(state);
+    what.push_back("the assembly restored");
+  }
+  if (state.drawing && state.drawing.get() == marks.drawing &&
+      state.drawingHistory.undo.size() > marks.drawingUndo) {
+    size_t n = 0;
+    while (state.drawingHistory.undo.size() > marks.drawingUndo &&
+           ui::UndoDrawing(state))
+      n++;
+    auto& h = state.drawingHistory;
+    h.redo.resize(h.redo.size() - std::min(n, h.redo.size()));
+    h.redoStamps.resize(h.redoStamps.size() - std::min(n, h.redoStamps.size()));
+    what.push_back("the drawing restored");
+  }
+  if (state.job && state.job.get() == marks.job &&
+      state.jobHistory.undo.size() > marks.jobUndo) {
+    size_t n = 0;
+    while (state.jobHistory.undo.size() > marks.jobUndo && ui::UndoJob(state))
+      n++;
+    auto& h = state.jobHistory;
+    h.redo.resize(h.redo.size() - std::min(n, h.redo.size()));
+    h.redoStamps.resize(h.redoStamps.size() - std::min(n, h.redoStamps.size()));
+    what.push_back("the job restored");
+  }
+  // Saved before the call and restored now: saved still. The restore moved
+  // the stamp on, and without this a refused call would leave the project
+  // reading as edited.
+  if (!what.empty() && state.activePart == marks.activePart &&
+      marks.activeStamp == marks.lastSaved &&
+      state.lastSavedVersion == marks.lastSaved)
+    state.lastSavedVersion = ActiveSaveStamp(state);
+  std::string out;
+  for (size_t i = 0; i < what.size(); i++)
+    out += (i == 0 ? "" : i + 1 == what.size() ? " and " : ", ") + what[i];
+  return out;
+}
